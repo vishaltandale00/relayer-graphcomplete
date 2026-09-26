@@ -10,6 +10,10 @@ import {
   classifyDesktopCaptureText,
   sha256File,
 } from "../scripts/lib/desktop-capture-evidence.mjs";
+import {
+  validateTerminalFrameCoverage,
+  validateVisibleBoundaryHold,
+} from "../scripts/lib/interaction-context-capture-proof.mjs";
 
 describe("desktop capture content acceptance", () => {
   it("recognizes the saved-thread follow-up and empty New Thread from captured text", () => {
@@ -110,5 +114,73 @@ describe("retained capture file receipts", () => {
     } finally {
       await rm(directory, { recursive: true, force: true });
     }
+  });
+});
+
+describe("interaction-context recording proof", () => {
+  it("requires painted screen text at both captured endpoints of the requested visible hold", () => {
+    const startFrame = {
+      frameNumber: 10,
+      elapsedMs: 1000,
+      recognizedText: "Two-worker pool Drafts will be omitted",
+    };
+    const endFrame = {
+      frameNumber: 26,
+      elapsedMs: 2800,
+      maximumCaptureGapMs: 140,
+      recognizedText: "Two-worker pool Drafts will be omitted",
+    };
+
+    expect(validateVisibleBoundaryHold({
+      startFrame,
+      endFrame,
+      expectedText: ["Two-worker pool", "Drafts will be omitted"],
+      minimumHoldMs: 1800,
+      maximumCaptureGapMs: 500,
+    })).toBe(1800);
+    expect(() => validateVisibleBoundaryHold({
+      startFrame,
+      endFrame: { ...endFrame, recognizedText: "Two-worker pool" },
+      expectedText: ["Two-worker pool", "Drafts will be omitted"],
+      minimumHoldMs: 1800,
+      maximumCaptureGapMs: 500,
+    })).toThrow(/did not match at both ends/);
+    expect(() => validateVisibleBoundaryHold({
+      startFrame,
+      endFrame: { ...endFrame, elapsedMs: 2799 },
+      expectedText: ["Two-worker pool", "Drafts will be omitted"],
+      minimumHoldMs: 1800,
+      maximumCaptureGapMs: 500,
+    })).toThrow(/shorter than 1800ms/);
+    expect(() => validateVisibleBoundaryHold({
+      startFrame,
+      endFrame: { ...endFrame, maximumCaptureGapMs: 501 },
+      expectedText: ["Two-worker pool", "Drafts will be omitted"],
+      minimumHoldMs: 1800,
+      maximumCaptureGapMs: 500,
+    })).toThrow(/capture gap/);
+  });
+
+  it("rejects a container that clips its encoded terminal frame despite matching earlier timestamps", () => {
+    const capturedPresentationMs = [0, 100, 200];
+    const encodedPresentationMs = [0, 100, 200, 400, 600];
+    expect(validateTerminalFrameCoverage({
+      capturedPresentationMs,
+      encodedPresentationMs,
+      containerDurationMs: 601,
+      terminalFrameHoldMs: 200,
+    })).toMatchObject({ terminalFramePresentationMs: 600, requiredContainerDurationMs: 601 });
+    expect(() => validateTerminalFrameCoverage({
+      capturedPresentationMs,
+      encodedPresentationMs,
+      containerDurationMs: 600,
+      terminalFrameHoldMs: 200,
+    })).toThrow(/container ends before its terminal frame/);
+    expect(() => validateTerminalFrameCoverage({
+      capturedPresentationMs,
+      encodedPresentationMs: [0, 100, 200, 390, 600],
+      containerDurationMs: 601,
+      terminalFrameHoldMs: 200,
+    })).toThrow(/Repeated terminal frames/);
   });
 });

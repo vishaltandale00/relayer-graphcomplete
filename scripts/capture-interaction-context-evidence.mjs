@@ -1,8 +1,9 @@
 import { app, BrowserWindow, ipcMain } from "electron";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { mkdirSync, mkdtempSync } from "node:fs";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { createInterface } from "node:readline";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { isDeepStrictEqual } from "node:util";
@@ -14,6 +15,7 @@ import { GraphCompleteRuntimeService } from "../desktop/main/services/graphcompl
 import { RelayerAppServerService } from "../desktop/main/services/relayer-app-server.mjs";
 import { createWindowFactory } from "../desktop/main/window.mjs";
 import { createElectronWorkspaceDriver } from "./electron-workspace-driver.mjs";
+import { validateTerminalFrameCoverage, validateVisibleBoundaryHold } from "./lib/interaction-context-capture-proof.mjs";
 
 const OPT_IN = "RELAYER_CAPTURE_INTERACTION_CONTEXT_EVIDENCE";
 const repositoryRoot = resolve(import.meta.dirname, "..");
@@ -28,6 +30,8 @@ const outputDirectory = join(
 const historicalMontageFile = join(outputDirectory, "interaction-context-still-montage-historical.mp4");
 const beforeRestartVideoFile = join(outputDirectory, "interaction-context-before-restart.mp4");
 const afterRestartVideoFile = join(outputDirectory, "interaction-context-after-restart.mp4");
+const beforeTerminalScreenshotFile = join(outputDirectory, "interaction-context-before-restart-terminal.png");
+const afterTerminalScreenshotFile = join(outputDirectory, "interaction-context-after-restart-terminal.png");
 const composerScreenshotFile = join(outputDirectory, "grouped-composer.png");
 const restartedScreenshotFile = join(outputDirectory, "restarted-context.png");
 const twoDraftsScreenshotFile = join(outputDirectory, "two-drafts-restored.png");
@@ -43,6 +47,8 @@ const continuousFrameIntervalMs = 100;
 const maximumContinuousFrameGapMs = 500;
 const defaultBoundaryHoldMs = 1_400;
 const criticalBoundaryHoldMs = 1_800;
+const terminalFrameHoldMs = 200;
+const textRecognizerPath = join(repositoryRoot, "scripts", "recognize-desktop-capture-frame.swift");
 const configurationPath = join(repositoryRoot, "harnesses", "fixture-task-system.yaml");
 const graphServerBinary = join(repositoryRoot, "target", "debug", "relayer-graph-server");
 const appServerBinary = join(repositoryRoot, "target", "debug", "relayer-app-server");
@@ -57,6 +63,7 @@ let productSession;
 let mainWindow;
 let keepaliveWindow;
 let composerDraftState = { pendingNewThread: null, threadFollowups: {} };
+let captureTextRecognizer;
 
 const {
   click,
@@ -86,7 +93,14 @@ const sourceProofFiles = [
   "scripts/test-interaction-context-lifecycle.mjs",
   "scripts/test-desktop-context-draft-warning.mjs",
   "scripts/capture-interaction-context-evidence.mjs",
+  "scripts/lib/interaction-context-capture-proof.mjs",
+  "scripts/recognize-desktop-capture-frame.swift",
+  "scripts/electron-workspace-driver.mjs",
 ];
+const sourceTree = execFileSync("git", ["rev-parse", "HEAD^{tree}"], {
+  cwd: repositoryRoot,
+  encoding: "utf8",
+}).trim();
 async function sourceFingerprints() {
   return Promise.all(sourceProofFiles.map(async (file) => ({
     file,
@@ -204,6 +218,80 @@ function interactionIds(thread) {
   return thread.interactions.map((interaction) => interaction.id);
 }
 
+function createCaptureTextRecognizer() {
+  const worker = spawn("swift", [textRecognizerPath], { stdio: ["pipe", "pipe", "inherit"] });
+  const responses = new Map();
+  const lines = createInterface({ input: worker.stdout });
+  let nextId = 0;
+  let exited = false;
+  let readyResolve;
+  let readyReject;
+  const ready = new Promise((resolveReady, rejectReady) => {
+    readyResolve = resolveReady;
+    readyReject = rejectReady;
+  });
+  const fail = (error) => {
+    if (exited) return;
+    exited = true;
+    readyReject(error);
+    for (const pending of responses.values()) pending.reject(error);
+    responses.clear();
+  };
+  lines.on("line", (line) => {
+    let response;
+    try {
+      response = JSON.parse(line);
+    } catch (error) {
+      fail(new Error(`Capture frame text recognizer returned invalid JSON: ${error.message}`));
+      return;
+    }
+    if (response.ready === true) {
+      readyResolve();
+      return;
+    }
+    const pending = responses.get(response.id);
+    if (!pending) return;
+    responses.delete(response.id);
+    if (response.error) pending.reject(new Error(`Capture frame text recognition failed: ${response.error}`));
+    else pending.resolve(response.text || "");
+  });
+  worker.once("error", fail);
+  worker.once("exit", (code, signal) => {
+    if (!exited && code !== 0) fail(new Error(`Capture frame text recognizer exited (${code ?? signal ?? "unknown"}).`));
+    exited = true;
+  });
+  return {
+    ready,
+    async recognize(file) {
+      await ready;
+      if (exited) throw new Error("Capture frame text recognizer is no longer running.");
+      const id = ++nextId;
+      const result = new Promise((resolveResult, rejectResult) => {
+        responses.set(id, { resolve: resolveResult, reject: rejectResult });
+      });
+      worker.stdin.write(`${JSON.stringify({ id, file })}\n`);
+      return result;
+    },
+    async close() {
+      if (exited) return;
+      worker.stdin.end();
+      await new Promise((resolveExit, rejectExit) => {
+        worker.once("exit", (code) => code === 0
+          ? resolveExit()
+          : rejectExit(new Error(`Capture frame text recognizer exited with ${code}.`)));
+        worker.once("error", rejectExit);
+      });
+      exited = true;
+    },
+  };
+}
+
+async function recognizeRecordingFrame(recorder, frame) {
+  if (!captureTextRecognizer) throw new Error("The captured-frame recognizer has not started.");
+  const file = join(recorder.directory, `frame-${String(frame.frameNumber).padStart(5, "0")}.png`);
+  return { ...frame, recognizedText: await captureTextRecognizer.recognize(file) };
+}
+
 async function startContinuousRecording(name) {
   if (activeRecordingSegment) throw new Error("A continuous interaction-context segment is already active.");
   const directory = join(continuousFramesDirectory, name);
@@ -275,8 +363,31 @@ async function startContinuousRecording(name) {
       recorder.capturing = false;
     }
   })();
-  recorder.captureBoundary = async (eventName, holdMs = defaultBoundaryHoldMs) => {
+  recorder.captureBoundary = async (eventName, expectedVisibleText, holdMs = defaultBoundaryHoldMs) => {
+    if (!Array.isArray(expectedVisibleText) || expectedVisibleText.length === 0) {
+      throw new Error(`Visual boundary ${eventName} has no required captured-screen content.`);
+    }
+    mainWindow.webContents.invalidate();
+    await waitForPaint();
     const frame = await captureFrame();
+    const startFrame = await recognizeRecordingFrame(recorder, frame);
+    await sleep(holdMs);
+    mainWindow.webContents.invalidate();
+    await waitForPaint();
+    const endFrame = await captureFrame();
+    const endFrameWithText = await recognizeRecordingFrame(recorder, endFrame);
+    const holdFrames = recorder.frameTimestamps.slice(frame.frameNumber, endFrame.frameNumber + 1);
+    const holdFrameGaps = holdFrames.slice(1).map((captured, index) => (
+      captured.elapsedMs - holdFrames[index].elapsedMs
+    ));
+    const maximumHoldCaptureGapMs = holdFrameGaps.length ? Math.max(...holdFrameGaps) : 0;
+    const observedHoldMs = validateVisibleBoundaryHold({
+      startFrame,
+      endFrame: { ...endFrameWithText, maximumCaptureGapMs: maximumHoldCaptureGapMs },
+      expectedText: expectedVisibleText,
+      minimumHoldMs: Math.max(defaultBoundaryHoldMs, holdMs),
+      maximumCaptureGapMs: maximumContinuousFrameGapMs,
+    });
     const event = {
       name: eventName,
       recordedAtUtc: new Date().toISOString(),
@@ -286,10 +397,19 @@ async function startContinuousRecording(name) {
       capturedFramePresentationMs: frame.elapsedMs - recorder.frameTimestamps[0].elapsedMs,
       capturedFrameAtUtc: frame.capturedAtUtc,
       capturedFrameSha256: frame.sha256,
-      visibleHoldMs: holdMs,
+      paintSynchronized: "webContents.invalidate followed by two renderer animation frames before capture",
+      expectedVisibleText,
+      visibleContentAccepted: true,
+      recognizedTextAtStart: startFrame.recognizedText,
+      holdEndFrameNumber: endFrame.frameNumber,
+      holdEndFrameAtUtc: endFrame.capturedAtUtc,
+      holdEndFrameSha256: endFrame.sha256,
+      recognizedTextAtHoldEnd: endFrameWithText.recognizedText,
+      requestedHoldMs: holdMs,
+      observedHoldMs,
+      maximumHoldCaptureGapMs,
     };
     recorder.events.push(event);
-    await sleep(holdMs);
     return event;
   };
   activeRecordingSegment = recorder;
@@ -297,8 +417,8 @@ async function startContinuousRecording(name) {
   return recorder;
 }
 
-async function captureRecordingBoundary(recorder, name, holdMs = defaultBoundaryHoldMs) {
-  return recorder.captureBoundary(name, holdMs);
+async function captureRecordingBoundary(recorder, name, expectedVisibleText, holdMs = defaultBoundaryHoldMs) {
+  return recorder.captureBoundary(name, expectedVisibleText, holdMs);
 }
 
 async function stopContinuousRecording(recorder) {
@@ -328,15 +448,24 @@ async function stopContinuousRecording(recorder) {
     const next = recorder.frameTimestamps[index + 1];
     if (next) {
       frameList.push(`duration ${((next.elapsedMs - frame.elapsedMs) / 1000).toFixed(6)}`);
+    } else {
+      frameList.push(`duration ${(terminalFrameHoldMs / 1000).toFixed(6)}`);
     }
   }
+  const finalFrame = recorder.frameTimestamps.at(-1);
+  const finalFramePath = join(recorder.directory, `frame-${String(finalFrame.frameNumber).padStart(5, "0")}.png`);
+  frameList.push(`file '${finalFramePath.replaceAll("'", "'\\''")}'`);
+  frameList.push("option framerate 1000");
+  frameList.push(`duration ${(terminalFrameHoldMs / 1000).toFixed(6)}`);
+  frameList.push(`file '${finalFramePath.replaceAll("'", "'\\''")}'`);
+  frameList.push("option framerate 1000");
   await writeFile(frameListFile, `${frameList.join("\n")}\n`);
   execFileSync("ffmpeg", [
     "-hide_banner", "-loglevel", "error", "-y",
     "-f", "concat", "-safe", "0", "-i", frameListFile,
     "-fps_mode", "vfr", "-enc_time_base", "1:1000",
     "-vf", "format=yuv420p",
-    "-an", "-c:v", "libx264", "-preset", "veryfast", "-crf", "18",
+    "-an", "-c:v", "libx264", "-bf", "0", "-preset", "veryfast", "-crf", "18",
     "-video_track_timescale", "1000", "-movflags", "+faststart", recorder.outputFile,
   ], { cwd: repositoryRoot, stdio: "inherit" });
   const probe = JSON.parse(execFileSync("ffprobe", [
@@ -346,40 +475,80 @@ async function stopContinuousRecording(recorder) {
     "-of", "json",
     recorder.outputFile,
   ], { cwd: repositoryRoot, encoding: "utf8" }));
-  execFileSync("ffmpeg", [
-    "-hide_banner", "-loglevel", "error", "-i", recorder.outputFile, "-f", "null", "-",
-  ], { cwd: repositoryRoot, stdio: "inherit" });
+  const decodeValidation = spawn("ffmpeg", [
+    "-hide_banner", "-loglevel", "warning", "-i", recorder.outputFile, "-f", "null", "-",
+  ], { cwd: repositoryRoot, stdio: ["ignore", "ignore", "pipe"] });
+  let decoderDiagnostics = "";
+  decodeValidation.stderr.setEncoding("utf8");
+  decodeValidation.stderr.on("data", (chunk) => { decoderDiagnostics += chunk; });
+  const decodeExit = await new Promise((resolveDecode, rejectDecode) => {
+    decodeValidation.once("error", rejectDecode);
+    decodeValidation.once("close", (code, signal) => resolveDecode({ code, signal }));
+  });
+  if (decodeExit.code !== 0) {
+    throw new Error(`VFR decode-to-null failed (${decodeExit.code ?? decodeExit.signal}): ${decoderDiagnostics}`);
+  }
   const encodedFrameTimestampsMs = (probe.frames || []).map((frame) => (
     Math.round(Number(frame.best_effort_timestamp_time) * 1000)
   ));
-  if (encodedFrameTimestampsMs.length !== recorder.frameTimestamps.length) {
-    throw new Error(`${recorder.name} VFR video encoded ${encodedFrameTimestampsMs.length} frames from ${recorder.frameTimestamps.length} captured frames.`);
-  }
   const expectedFrameTimestampsMs = recorder.frameTimestamps.map((frame) => (
     frame.elapsedMs - recorder.frameTimestamps[0].elapsedMs
   ));
-  const maximumPresentationTimingErrorMs = Math.max(...encodedFrameTimestampsMs.map((timestamp, index) => (
-    Math.abs(timestamp - expectedFrameTimestampsMs[index])
+  const maximumPresentationTimingErrorMs = Math.max(...expectedFrameTimestampsMs.map((timestamp, index) => (
+    Math.abs(encodedFrameTimestampsMs[index] - timestamp)
   )));
   if (maximumPresentationTimingErrorMs > 5) {
     throw new Error(`${recorder.name} playback timing differs from renderer capture by up to ${maximumPresentationTimingErrorMs}ms.`);
   }
+  const terminalFrameCoverage = validateTerminalFrameCoverage({
+    capturedPresentationMs: expectedFrameTimestampsMs,
+    encodedPresentationMs: encodedFrameTimestampsMs,
+    containerDurationMs: Number(probe.format.duration) * 1000,
+    terminalFrameHoldMs,
+  });
   const capturedSpanMs = recorder.frameTimestamps.at(-1).elapsedMs - recorder.frameTimestamps[0].elapsedMs;
   const encodedDurationMs = Number(probe.format.duration) * 1000;
-  const videoDurationErrorMs = Math.abs(encodedDurationMs - capturedSpanMs);
-  if (videoDurationErrorMs > maximumFrameGapMs + 50) {
-    throw new Error(`${recorder.name} encoded duration differs from captured playback span by ${Math.round(videoDurationErrorMs)}ms.`);
+  const encodedTerminalPtsMs = encodedFrameTimestampsMs.at(-1);
+  const encodedSpanMs = encodedTerminalPtsMs - encodedFrameTimestampsMs[0];
+  const terminalScreenshotFile = recorder.name === "before-restart"
+    ? beforeTerminalScreenshotFile
+    : afterTerminalScreenshotFile;
+  execFileSync("ffmpeg", [
+    "-hide_banner", "-loglevel", "error", "-y", "-i", recorder.outputFile,
+    "-vf", `select=eq(n\\,${encodedFrameTimestampsMs.length - 1})`,
+    "-fps_mode", "passthrough", "-frames:v", "1", terminalScreenshotFile,
+  ], { cwd: repositoryRoot, stdio: "inherit" });
+  const terminalFrameText = await captureTextRecognizer.recognize(terminalScreenshotFile);
+  const terminalExpectedText = recorder.events.at(-1)?.expectedVisibleText || [];
+  const normalizeText = (value) => String(value).toLocaleLowerCase("en-US")
+    .replace(/[^a-z0-9]+/g, " ").trim().replace(/\s+/g, " ");
+  if (terminalExpectedText.some((text) => !normalizeText(terminalFrameText).includes(normalizeText(text)))) {
+    throw new Error(`${recorder.name} terminal frame did not show its expected state: ${JSON.stringify({ terminalExpectedText, terminalFrameText })}`);
   }
+  if (decoderDiagnostics.trim()) process.stderr.write(decoderDiagnostics);
   const segment = {
     file: recorder.outputFile.split("/").at(-1),
     sha256: createHash("sha256").update(await readFile(recorder.outputFile)).digest("hex"),
-    capture: "Continuous sampled frames directly from the real Electron BrowserWindow; no generated or interpolated frames.",
-    frameTiming: "variable frame rate; frame durations follow actual next-frame capture timestamps",
+    capture: "Continuous sampled frames directly from the real Electron BrowserWindow; the final captured renderer frame is repeated to encode its measured terminal hold.",
+    frameTiming: `variable frame rate from renderer timestamps with two repeated terminal samples ${terminalFrameHoldMs}ms apart; B-frame reordering is disabled so the MP4 container covers the final PTS`,
     frameCount: recorder.frameTimestamps.length,
+    encodedFrameCount: encodedFrameTimestampsMs.length,
     maximumFrameGapMs,
     maximumPresentationTimingErrorMs,
     capturedSpanMs,
-    videoDurationErrorMs: Number(videoDurationErrorMs.toFixed(1)),
+    encodedSpanMs,
+    encodedDurationMs,
+    terminalFrameCoverage,
+    terminalScreenshot: {
+      file: terminalScreenshotFile.split("/").at(-1),
+      sha256: createHash("sha256").update(await readFile(terminalScreenshotFile)).digest("hex"),
+      recognizedText: terminalFrameText,
+    },
+    decodeValidation: {
+      decodeToNullExitCode: decodeExit.code,
+      diagnostics: decoderDiagnostics.trim(),
+      terminalFrameExtractedAndRecognized: true,
+    },
     startedAtUtc: new Date(recorder.recordingStartedAtMs).toISOString(),
     endedAtUtc: new Date(recordingEndedAtMs).toISOString(),
     wallClockDurationMs: recordingEndedAtMs - recorder.recordingStartedAtMs,
@@ -388,7 +557,7 @@ async function stopContinuousRecording(recorder) {
     events: recorder.events,
     stream: probe.streams[0],
     encodedDurationSeconds: Number(Number(probe.format.duration).toFixed(3)),
-    playbackDecoded: true,
+    decodeToNullSucceeded: true,
   };
   recorder.receipt = segment;
   return segment;
@@ -525,14 +694,19 @@ async function restartStack(threadId) {
 
 async function run() {
   process.stdout.write("Starting real-Electron zero-inference interaction-context capture.\n");
+  if (workingTreeDirty) throw new Error("Interaction-context evidence capture requires a clean committed source snapshot.");
   await mkdir(outputDirectory, { recursive: true });
   await Promise.all([
     beforeRestartVideoFile,
     afterRestartVideoFile,
+    beforeTerminalScreenshotFile,
+    afterTerminalScreenshotFile,
     composerScreenshotFile,
     restartedScreenshotFile,
     manifestFile,
   ].map((path) => rm(path, { force: true })));
+  captureTextRecognizer = createCaptureTextRecognizer();
+  await captureTextRecognizer.ready;
   registerIpc();
   keepaliveWindow = new BrowserWindow({ width: 1, height: 1, show: false });
   await startServices();
@@ -934,32 +1108,32 @@ async function run() {
     document.querySelector('#inspector')?.classList.contains('hidden')
   `));
   const beforeRestartRecording = await startContinuousRecording("before-restart");
-  await captureRecordingBoundary(beforeRestartRecording, "journey recording started with the graph ready and Node Details closed");
+  await captureRecordingBoundary(beforeRestartRecording, "journey recording started with the graph ready and Node Details closed", ["Incoming queue"]);
   await clickNode("Incoming queue");
   await waitFor("recorded Incoming queue Node Details open", () => evaluate(`
     document.querySelector('#detailTitle')?.textContent === 'Incoming queue'
       && !document.querySelector('#inspector')?.classList.contains('hidden')
   `));
-  await captureRecordingBoundary(beforeRestartRecording, "opened Incoming queue Node Details for draft A");
+  await captureRecordingBoundary(beforeRestartRecording, "opened Incoming queue Node Details for draft A", ["Incoming queue"]);
   await click("#attachNodeContext");
   await waitFor("recorded first draft editor open", () => evaluate(`Boolean(document.querySelector('#contextAnnotationEditor'))`));
-  await captureRecordingBoundary(beforeRestartRecording, "opened the draft A editor");
+  await captureRecordingBoundary(beforeRestartRecording, "opened the draft A editor", ["Incoming queue", "Add an annotation"]);
   await setValue("#contextAnnotationEditor", restartDraftA);
   const restartDraftRecordA = await waitFor("first restart draft saved", async () => {
     const response = await productRequest(`/api/threads/${thread.id}/context-drafts`);
     return response.drafts?.find((draft) => draft.text === restartDraftA) || false;
   });
-  await captureRecordingBoundary(beforeRestartRecording, "typed and durably saved draft A on Incoming queue");
+  await captureRecordingBoundary(beforeRestartRecording, "typed and durably saved draft A on Incoming queue", [restartDraftA]);
   await clickNode("Two-worker pool");
   await waitFor("recorded switch to Two-worker pool", () => evaluate(`
     document.querySelector('#detailTitle')?.textContent === 'Two-worker pool'
       && !document.querySelector('#contextAnnotationEditor')
   `));
-  await captureRecordingBoundary(beforeRestartRecording, "switched from Incoming queue to Two-worker pool");
+  await captureRecordingBoundary(beforeRestartRecording, "switched from Incoming queue to Two-worker pool", ["Two-worker pool"]);
   await click("#attachNodeContext");
   const restartDraftB = "Keep both workers available for queued tasks.";
   await waitFor("second draft editor open in continuous recording", () => evaluate(`Boolean(document.querySelector('#contextAnnotationEditor'))`));
-  await captureRecordingBoundary(beforeRestartRecording, "opened the draft B editor");
+  await captureRecordingBoundary(beforeRestartRecording, "opened the draft B editor", ["Two-worker pool", "Add an annotation"]);
   await setValue("#contextAnnotationEditor", restartDraftB);
   const bothRestartDrafts = await waitFor("two occurrence-bound drafts saved", async () => {
     const response = await productRequest(`/api/threads/${thread.id}/context-drafts`);
@@ -976,28 +1150,28 @@ async function run() {
   );
   const restartDraftRecordB = bothRestartDrafts.find((draft) => draft.text === restartDraftB);
   if (!restartDraftRecordB) throw new Error("The durable B draft record was absent after save.");
-  await captureRecordingBoundary(beforeRestartRecording, "typed and durably saved draft B on Two-worker pool");
+  await captureRecordingBoundary(beforeRestartRecording, "typed and durably saved draft B on Two-worker pool", [restartDraftB]);
   await clickNode("Incoming queue");
   await waitFor("draft A restored before restart", () => evaluate(`
     document.querySelector('#contextAnnotationEditor')?.value === ${JSON.stringify(restartDraftA)}
   `));
-  await captureRecordingBoundary(beforeRestartRecording, "restored draft A after saving B");
+  await captureRecordingBoundary(beforeRestartRecording, "restored draft A after saving B", [restartDraftA]);
   await clickNode("Two-worker pool");
   await waitFor("draft B restored before restart", () => evaluate(`
     document.querySelector('#contextAnnotationEditor')?.value === ${JSON.stringify(restartDraftB)}
   `));
-  await captureRecordingBoundary(beforeRestartRecording, "restored draft B after saving and restoring A");
+  await captureRecordingBoundary(beforeRestartRecording, "restored draft B after saving and restoring A", [restartDraftB]);
   await clickNode("Incoming queue");
   await waitFor("draft A left visible before restart", () => evaluate(`
     document.querySelector('#contextAnnotationEditor')?.value === ${JSON.stringify(restartDraftA)}
   `));
-  await captureRecordingBoundary(beforeRestartRecording, "both complete durable drafts are present before service/window restart");
+  await captureRecordingBoundary(beforeRestartRecording, "both complete durable drafts are present before service/window restart", [restartDraftA]);
   await stopContinuousRecording(beforeRestartRecording);
   const restartOperationStartedAtUtc = new Date().toISOString();
   await restartStack(thread.id);
   const restartOperationEndedAtUtc = new Date().toISOString();
   const afterRestartRecording = await startContinuousRecording("after-restart");
-  await captureRecordingBoundary(afterRestartRecording, "Electron BrowserWindow and app services reopened after explicit recording discontinuity");
+  await captureRecordingBoundary(afterRestartRecording, "Electron BrowserWindow and app services reopened after explicit recording discontinuity", ["Incoming queue"]);
   await waitForAcceptedInteractions(thread.id, 3);
   const reopenedDrafts = await productRequest(`/api/threads/${thread.id}/context-drafts`);
   assertDeepEqual(reopenedDrafts.drafts, bothRestartDrafts, "Full service and window restart changed either complete draft record");
@@ -1005,7 +1179,7 @@ async function run() {
   await waitFor("first draft restored after restart", () => evaluate(`
     document.querySelector('#contextAnnotationEditor')?.value === ${JSON.stringify(restartDraftA)}
   `));
-  await captureRecordingBoundary(afterRestartRecording, "restored draft A after full service/window restart");
+  await captureRecordingBoundary(afterRestartRecording, "restored draft A after full service/window restart", [restartDraftA]);
   await writeFile(twoDraftsScreenshotFile, await capturePagePng("two drafts restored after restart"));
   await captureStep(
     "21. After a full service and window restart, the first exact unconfirmed draft restores on its node",
@@ -1015,7 +1189,7 @@ async function run() {
   await waitFor("second draft restored after restart", () => evaluate(`
     document.querySelector('#contextAnnotationEditor')?.value === ${JSON.stringify(restartDraftB)}
   `));
-  await captureRecordingBoundary(afterRestartRecording, "restored draft B after full service/window restart");
+  await captureRecordingBoundary(afterRestartRecording, "restored draft B after full service/window restart", [restartDraftB]);
   await captureStep(
     "22. Selecting the other node restores its separate exact unconfirmed draft after restart",
     "#nodeContextDock",
@@ -1040,7 +1214,7 @@ async function run() {
     throw new Error(`Confirmation A resolved to the wrong draft: ${JSON.stringify(confirmedARecord)}`);
   }
   assertDeepEqual(confirmedARecord.target, restartDraftRecordA.target, "Confirmed A used a different occurrence than its draft");
-  await captureRecordingBoundary(afterRestartRecording, "confirmed A while the full B record remained unchanged");
+  await captureRecordingBoundary(afterRestartRecording, "confirmed A while the full B record remained unchanged", ["Incoming queue"]);
   await writeFile(confirmedDraftScreenshotFile, await capturePagePng("confirmed draft and remaining draft"));
   await captureStep(
     "23. Confirming the first draft leaves the other occurrence's durable draft unchanged",
@@ -1051,7 +1225,7 @@ async function run() {
     document.querySelector('#contextAnnotationEditor')?.value === ${JSON.stringify(restartDraftB)}
       && document.querySelector('[aria-label="Discard annotation draft for Two-worker pool"]')
   `));
-  await captureRecordingBoundary(afterRestartRecording, "restored B editor before discard");
+  await captureRecordingBoundary(afterRestartRecording, "restored B editor before discard", [restartDraftB]);
   await click("[aria-label='Discard annotation draft for Two-worker pool']");
   const discardedState = await waitFor("second draft discarded without changing confirmation", async () => {
     const response = await productRequest(`/api/threads/${thread.id}/context-drafts`);
@@ -1070,12 +1244,13 @@ async function run() {
   await captureRecordingBoundary(
     afterRestartRecording,
     "discarded B leaves its historical node visible with no draft editor",
+    ["Two-worker pool"],
     criticalBoundaryHoldMs,
   );
   await click("#attachNodeContext");
   const freshDraftB = "Review worker availability before sending.";
   await waitFor("fresh B editor reopened after discard", () => evaluate(`Boolean(document.querySelector('#contextAnnotationEditor'))`));
-  await captureRecordingBoundary(afterRestartRecording, "recreated a fresh empty B editor after discard");
+  await captureRecordingBoundary(afterRestartRecording, "recreated a fresh empty B editor after discard", ["Two-worker pool", "Add an annotation"]);
   await setValue("#contextAnnotationEditor", freshDraftB);
   const freshDraftRecord = await waitFor("fresh unconfirmed second draft saved", async () => {
     const response = await productRequest(`/api/threads/${thread.id}/context-drafts`);
@@ -1084,7 +1259,7 @@ async function run() {
       : false;
   });
   const freshDraftSnapshot = structuredClone(freshDraftRecord);
-  await captureRecordingBoundary(afterRestartRecording, "created fresh B after discarding the original B");
+  await captureRecordingBoundary(afterRestartRecording, "created fresh B after discarding the original B", [freshDraftB]);
   await click("#closeInspector");
   await waitFor("fresh draft editor closes before ordinary Send", () => evaluate(`
     document.querySelector('#inspector')?.classList.contains('hidden')
@@ -1107,7 +1282,7 @@ async function run() {
       ? { x: bounds.x, y: bounds.y, width: bounds.width, height: bounds.height }
       : false;
   })()`));
-  await captureRecordingBoundary(afterRestartRecording, "first omission warning opened with fresh B named");
+  await captureRecordingBoundary(afterRestartRecording, "first omission warning opened with fresh B named", ["Drafts will be omitted", "Two-worker pool"]);
   assertDeepEqual(
     (await productRequest(`/api/threads/${thread.id}/context-drafts`)).drafts,
     [freshDraftSnapshot],
@@ -1138,7 +1313,7 @@ async function run() {
     interactionIdsBeforeWarning,
     "Go back created or removed an interaction",
   );
-  await captureRecordingBoundary(afterRestartRecording, "Go back restored composition without changing B or interactions");
+  await captureRecordingBoundary(afterRestartRecording, "Go back restored composition without changing B or interactions", ["Use the confirmed queue note for this follow-up."]);
   await captureStep(
     "25. Go back restores the editable message and leaves the exact draft intact",
     "#composerContextTray",
@@ -1170,6 +1345,7 @@ async function run() {
   await captureRecordingBoundary(
     afterRestartRecording,
     "second omission warning visibly reopened before explicit override",
+    ["Drafts will be omitted", "Two-worker pool"],
     criticalBoundaryHoldMs,
   );
   await click("#confirmContextDraftSend");
@@ -1185,7 +1361,7 @@ async function run() {
     [...interactionIdsBeforeWarning, overrideInteraction.id],
     "Override did not append exactly one interaction after the warning journey",
   );
-  await captureRecordingBoundary(afterRestartRecording, "explicit override submitted exactly A and no other context");
+  await captureRecordingBoundary(afterRestartRecording, "explicit override submitted exactly A and no other context", ["Use the confirmed queue note for this follow-up."]);
   const durableAfterOverride = await productRequest(`/api/threads/${thread.id}/context-drafts`);
   assertDeepEqual(durableAfterOverride.drafts, [freshDraftSnapshot], "Override changed the complete durable B record");
   const freshDraftTurnIndex = overrideDetail.interactions.findIndex((interaction) => (
@@ -1209,7 +1385,7 @@ async function run() {
   `));
   const restoredAfterHistoryDraftState = await productRequest(`/api/threads/${thread.id}/context-drafts`);
   assertDeepEqual(restoredAfterHistoryDraftState.drafts, [freshDraftSnapshot], "Historical restoration changed the complete fresh B record");
-  await captureRecordingBoundary(afterRestartRecording, "restored fresh B on its exact historical occurrence after override");
+  await captureRecordingBoundary(afterRestartRecording, "restored fresh B on its exact historical occurrence after override", [freshDraftB]);
   await writeFile(overrideScreenshotFile, await capturePagePng("draft restored after override"));
   await captureStep(
     "26. The accepted follow-up clears the composer; the omitted draft remains on its original historical node occurrence",
@@ -1269,12 +1445,16 @@ async function run() {
       if (!frame
         || frame.capturedAtUtc !== event.capturedFrameAtUtc
         || frame.sha256 !== event.capturedFrameSha256
-        || event.visibleHoldMs < defaultBoundaryHoldMs) {
-        throw new Error(`Visual boundary ${event.name} is not tied to a captured frame and readable hold.`);
+        || event.paintSynchronized !== "webContents.invalidate followed by two renderer animation frames before capture"
+        || event.visibleContentAccepted !== true
+        || event.observedHoldMs < defaultBoundaryHoldMs
+        || event.holdEndFrameNumber <= event.capturedFrameNumber
+        || event.maximumHoldCaptureGapMs > maximumContinuousFrameGapMs) {
+        throw new Error(`Visual boundary ${event.name} is not tied to painted, text-verified endpoint frames and a continuous measured hold.`);
       }
       if ((event.name.includes("discarded B leaves")
         || event.name.includes("second omission warning"))
-        && event.visibleHoldMs < criticalBoundaryHoldMs) {
+        && event.observedHoldMs < criticalBoundaryHoldMs) {
         throw new Error(`Critical visual boundary ${event.name} was held for less than ${criticalBoundaryHoldMs}ms.`);
       }
     }
@@ -1288,14 +1468,28 @@ async function run() {
   const overrideBytes = await readFile(overrideScreenshotFile);
   const historicalMontageBytes = await readFile(historicalMontageFile);
   const sourceHashesAfterCapture = await sourceFingerprints();
+  const sourceCommitAfterCapture = execFileSync("git", ["rev-parse", "HEAD"], {
+    cwd: repositoryRoot,
+    encoding: "utf8",
+  }).trim();
+  const sourceTreeAfterCapture = execFileSync("git", ["rev-parse", "HEAD^{tree}"], {
+    cwd: repositoryRoot,
+    encoding: "utf8",
+  }).trim();
   if (JSON.stringify(sourceHashesBeforeCapture) !== JSON.stringify(sourceHashesAfterCapture)) {
     throw new Error(`Source proof files changed during capture: ${JSON.stringify({ sourceHashesBeforeCapture, sourceHashesAfterCapture })}`);
+  }
+  if (sourceCommitAfterCapture !== sourceCommit || sourceTreeAfterCapture !== sourceTree) {
+    throw new Error(`The committed source snapshot changed during capture: ${JSON.stringify({ sourceCommit, sourceCommitAfterCapture, sourceTree, sourceTreeAfterCapture })}`);
   }
   const manifest = {
     schemaVersion: 1,
     passed: true,
     capturedAt: new Date().toISOString(),
     sourceCommit,
+    sourceTree,
+    sourceCommitAfterCapture,
+    sourceTreeAfterCapture,
     sourceHashesBeforeCapture,
     sourceHashesAfterCapture,
     workingTreeDirty,
@@ -1343,6 +1537,7 @@ async function run() {
     warningPresentation,
     secondWarningPresentation,
     assertions: {
+      allRecordedBoundariesHavePaintedTextAndMeasuredHold: true,
       nodeDetailsOpened: true,
       nodeSwitchSavedAndRestoredDraft: true,
       closeWaitedForDraftSave: true,
@@ -1368,7 +1563,7 @@ async function run() {
       warningAndGoBackCreateNoInteraction: true,
       explicitOverrideSubmitsConfirmedContextOnly: true,
       explicitOverrideAddsExactlyOneInteraction: true,
-      omittedDraftRestoresInNextComposer: true,
+      historicalDraftRestoredOnOwningOccurrenceAfterOverride: true,
     },
     screenshots: [
       {
@@ -1386,7 +1581,7 @@ async function run() {
       { file: "draft-after-override.png", sha256: createHash("sha256").update(overrideBytes).digest("hex") },
     ],
     recording: {
-      mode: "two continuous direct-renderer recordings with a captured frame at every required visible boundary, timestamp-derived variable frame durations, and an explicit full-restart discontinuity; no screenshot interpolation or injected captions",
+      mode: "two continuous direct-renderer recordings; each boundary waits for paint and OCR-matches its exact required text at both ends of a continuously sampled visible hold; timestamps define VFR durations with an explicit terminal-frame hold and full-restart discontinuity",
       segments: recordingSegments.map((segment) => segment.receipt),
       discontinuity: restartDiscontinuity,
       eventCheckpoints: frames.map(({ caption, capturedAtUtc, selector }) => ({ caption, capturedAtUtc, selector })),
@@ -1406,6 +1601,7 @@ async function stop() {
   if (mainWindow && !mainWindow.isDestroyed()) mainWindow.destroy();
   if (keepaliveWindow && !keepaliveWindow.isDestroyed()) keepaliveWindow.destroy();
   await stopServices();
+  if (captureTextRecognizer) await captureTextRecognizer.close().catch(() => undefined);
   unregisterIpc();
   await rm(dataDirectory, { recursive: true, force: true });
 }
