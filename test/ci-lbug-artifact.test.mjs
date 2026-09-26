@@ -2,6 +2,7 @@ import { execFileSync } from "node:child_process";
 import {
   appendFileSync,
   cpSync,
+  copyFileSync,
   existsSync,
   mkdirSync,
   readFileSync,
@@ -12,6 +13,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, test } from "vitest";
+import { assertResolvedLbugNativeSource } from "../scripts/ci/lbug-native-source-contract.mjs";
 
 const repositoryRoot = dirname(dirname(fileURLToPath(import.meta.url)));
 const script = join(repositoryRoot, "scripts", "ci", "lbug-artifact.mjs");
@@ -21,23 +23,25 @@ const sourceCommit = execFileSync("git", ["rev-parse", "HEAD"], {
 }).trim();
 const identity = ["--platform", "Linux-X64", "--rustc-release", "1.94.0"];
 
-function run(args, cwd = repositoryRoot) {
+function run(args, cwd = repositoryRoot, env = process.env) {
   return execFileSync(process.execPath, [script, ...args], {
     cwd,
     encoding: "utf8",
+    env,
   });
 }
 
 describe("prebuilt Ladybug artifact", () => {
   let fixture;
   let bundle;
+  let targetDirectory;
 
   beforeAll(() => {
     fixture = join(
       tmpdir(),
       `relayer-lbug-artifact-${Date.now()}-${Math.random().toString(16).slice(2)}`,
     );
-    const targetDirectory = join(fixture, "target");
+    targetDirectory = join(fixture, "target");
     const lbugSource = join(fixture, "lbug-source");
     const buildSource = join(
       targetDirectory,
@@ -80,6 +84,88 @@ describe("prebuilt Ladybug artifact", () => {
     return copy;
   }
 
+  function replaceProducerFeatures(artifactDirectory, features) {
+    const manifestPath = join(artifactDirectory, "manifest.json");
+    const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+    manifest.lbugFeatures = features;
+    writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+  }
+
+  function addProducerFeatureDrift(artifactDirectory) {
+    const manifest = JSON.parse(
+      readFileSync(join(artifactDirectory, "manifest.json"), "utf8"),
+    );
+    const features = manifest.lbugFeatures.includes("extension_tests")
+      ? manifest.lbugFeatures.filter((feature) => feature !== "extension_tests")
+      : [...manifest.lbugFeatures, "extension_tests"].sort();
+    replaceProducerFeatures(artifactDirectory, features);
+    return features;
+  }
+
+  function repositoryWithDriftedNativeContract(name) {
+    const repository = join(fixture, name);
+    mkdirSync(join(repository, "vendor", "ladybug"), { recursive: true });
+    copyFileSync(join(repositoryRoot, "Cargo.toml"), join(repository, "Cargo.toml"));
+    copyFileSync(join(repositoryRoot, "Cargo.lock"), join(repository, "Cargo.lock"));
+    copyFileSync(
+      join(repositoryRoot, "vendor/ladybug/source-build-manifest.json"),
+      join(repository, "vendor/ladybug/source-build-manifest.json"),
+    );
+    cpSync(join(repositoryRoot, "crates"), join(repository, "crates"), { recursive: true });
+    cpSync(join(repositoryRoot, ".cargo"), join(repository, ".cargo"), { recursive: true });
+
+    const manifestPath = join(repository, "vendor/ladybug/source-build-manifest.json");
+    const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+    manifest.rustBinding.nativeSourceTreeSha256 = "0".repeat(64);
+    writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+    return repository;
+  }
+
+  test("Cargo resolves the independently reviewed lbug pin and complete native source tree", () => {
+    const metadata = JSON.parse(
+      execFileSync("cargo", ["metadata", "--locked", "--format-version", "1"], {
+        cwd: repositoryRoot,
+        encoding: "utf8",
+        maxBuffer: 128 * 1024 * 1024,
+        env: { ...process.env, CARGO_NET_OFFLINE: "true" },
+      }),
+    );
+    const packageMetadata = metadata.packages.find((candidate) => candidate.name === "lbug");
+    expect(packageMetadata).toBeDefined();
+    const contract = JSON.parse(
+      readFileSync(join(repositoryRoot, "vendor/ladybug/source-build-manifest.json"), "utf8"),
+    );
+    const cargoLockText = readFileSync(join(repositoryRoot, "Cargo.lock"), "utf8");
+
+    expect(assertResolvedLbugNativeSource({ packageMetadata, cargoLockText, contract }))
+      .toMatchObject({
+        sourceTreeSha256: contract.rustBinding.nativeSourceTreeSha256,
+        checksum: contract.rustBinding.sha256,
+      });
+
+    const mutatedSource = join(fixture, "mutated-resolved-lbug-source");
+    cpSync(dirname(packageMetadata.manifest_path), mutatedSource, { recursive: true });
+    appendFileSync(join(mutatedSource, "lbug-src", "CMakeLists.txt"), "\n# isolated mutation\n");
+    expect(() => assertResolvedLbugNativeSource({
+      packageMetadata: {
+        ...packageMetadata,
+        manifest_path: join(mutatedSource, "Cargo.toml"),
+      },
+      cargoLockText,
+      contract,
+    })).toThrow(/source tree changed/u);
+
+    const driftedVersion = structuredClone(contract);
+    driftedVersion.rustBinding.version = "0.18.1";
+    expect(() => assertResolvedLbugNativeSource({ packageMetadata, cargoLockText, contract: driftedVersion }))
+      .toThrow(/package identity changed/u);
+
+    const driftedPin = structuredClone(contract);
+    driftedPin.rustBinding.sha256 = "0".repeat(64);
+    expect(() => assertResolvedLbugNativeSource({ packageMetadata, cargoLockText, contract: driftedPin }))
+      .toThrow(/pin\/checksum changed/u);
+  });
+
   test("packages the library, the include tree, and a flat umbrella layout", () => {
     const manifest = JSON.parse(readFileSync(join(bundle, "manifest.json"), "utf8"));
     expect(manifest.kind).toBe("lbug-prebuilt");
@@ -111,8 +197,67 @@ describe("prebuilt Ladybug artifact", () => {
     expect(exported).toContain(`LBUG_INCLUDE_DIR=${join(bundle, "include")}`);
   });
 
-  test("verify rejects a tampered library before any environment is exported", () => {
+  test("create and verify reject native contract drift before writing or exporting paths", () => {
+    const repository = repositoryWithDriftedNativeContract("drifted-native-contract-repository");
+    const createdBundle = join(fixture, "bundle-from-drifted-contract");
+    const offlineCargoEnv = { ...process.env, CARGO_NET_OFFLINE: "true" };
+    const createArguments = [
+      "create",
+      "--repository", repository,
+      "--target-dir", targetDirectory,
+      "--artifact-dir", createdBundle,
+      "--source-commit", sourceCommit,
+      ...identity,
+    ];
+    let createError;
+    try {
+      run(createArguments, repositoryRoot, offlineCargoEnv);
+    } catch (error) {
+      createError = error;
+    }
+    expect(existsSync(createdBundle)).toBe(false);
+    expect(createError?.message).toMatch(/source tree changed/u);
+
+    const envFile = join(fixture, "github-env-drifted-contract");
+    const verifyArguments = [
+      "verify",
+      "--repository", repository,
+      "--artifact-dir", bundle,
+      "--github-env", envFile,
+      ...identity,
+    ];
+    let verifyError;
+    try {
+      run(verifyArguments, repositoryRoot, offlineCargoEnv);
+    } catch (error) {
+      verifyError = error;
+    }
+    expect(existsSync(envFile)).toBe(false);
+    expect(verifyError?.message).toMatch(/source tree changed/u);
+  });
+
+  test("verify accepts feature-only producer drift and exports both link paths", () => {
+    const copy = tamperedCopy("different-producer-features");
+    const producerFeatures = addProducerFeatureDrift(copy);
+    const envFile = join(fixture, "github-env-feature-drift");
+    run([
+      "verify",
+      "--repository", repositoryRoot,
+      "--artifact-dir", copy,
+      "--github-env", envFile,
+      ...identity,
+    ]);
+
+    const manifest = JSON.parse(readFileSync(join(copy, "manifest.json"), "utf8"));
+    expect(manifest.lbugFeatures).toEqual(producerFeatures);
+    const exported = readFileSync(envFile, "utf8");
+    expect(exported).toContain(`LBUG_LIBRARY_DIR=${join(copy, "lib")}`);
+    expect(exported).toContain(`LBUG_INCLUDE_DIR=${join(copy, "include")}`);
+  });
+
+  test("verify rejects a tampered library during feature drift before export", () => {
     const copy = tamperedCopy("tampered-lib");
+    addProducerFeatureDrift(copy);
     appendFileSync(join(copy, "lib", "liblbug.a"), "tampered");
     const envFile = join(fixture, "github-env-tampered-lib");
     expect(() =>

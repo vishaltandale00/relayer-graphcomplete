@@ -1,4 +1,4 @@
-import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { cp, mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { c as createTar } from "tar";
@@ -14,6 +14,7 @@ import {
   verifyLadybugSourceCache,
 } from "../scripts/prepare-ladybug-source.mjs";
 import { DESKTOP_RELEASE } from "../desktop/release/contract.mjs";
+import { digestCargoResolvedLbugTree } from "../scripts/ci/lbug-native-source-contract.mjs";
 
 const temporaryDirectories = [];
 
@@ -70,6 +71,7 @@ describe("pinned Ladybug source build", () => {
         crate: "lbug",
         version: "0.18.0",
         sha256: "f52ee74966e323212747aa22fa8c01f73f1cbbb996187c3b08cbf96ff9f67562",
+        nativeSourceTreeSha256: "b241edc449b149db1ace2982ece97d3f48a9544939f6f28d87724d551a6128ea",
       },
       openssl: {
         version: "3.5.8",
@@ -154,16 +156,25 @@ describe("pinned Ladybug source build", () => {
     const bindingRoot = join(fixtureDirectory, "lbug-0.18.0");
     const opensslRoot = join(fixtureDirectory, "openssl-3.5.8");
     await mkdir(join(bindingRoot, "lbug-src", "src"), { recursive: true });
+    await mkdir(join(bindingRoot, "lbug-src", "cmake"), { recursive: true });
     await mkdir(opensslRoot, { recursive: true });
     await mkdir(cacheDirectory);
+    await writeFile(join(bindingRoot, "Cargo.toml"), '[package]\nname = "lbug"\nversion = "0.18.0"\n');
     await writeFile(join(bindingRoot, "build.rs"), "fn main() {}\n");
     await writeFile(join(bindingRoot, "lbug-src", "CMakeLists.txt"), "project(lbug)\n");
+    await writeFile(join(bindingRoot, "lbug-src", "cmake", "native.cmake"), "set(NATIVE_INPUT 1)\n");
     await writeFile(join(bindingRoot, "lbug-src", "src", "core.cpp"), "// core\n");
     await writeFile(join(opensslRoot, "Configure"), "#!/usr/bin/env perl\n");
 
     const manifest = structuredClone(await loadLadybugSourceManifest());
     manifest.core.embeddedTreeSha256 = await digestLadybugSourceTree(join(bindingRoot, "lbug-src"));
     manifest.rustBinding.buildScriptSha256 = await sha256File(join(bindingRoot, "build.rs"));
+    manifest.rustBinding.nativeSourceTreeSha256 = await digestLadybugSourceTree(bindingRoot);
+    const cargoResolvedCopy = join(root, "cargo-resolved-copy");
+    await cp(bindingRoot, cargoResolvedCopy, { recursive: true });
+    await writeFile(join(cargoResolvedCopy, ".cargo-ok"), "registry extraction marker\n");
+    expect(digestCargoResolvedLbugTree(cargoResolvedCopy))
+      .toBe(manifest.rustBinding.nativeSourceTreeSha256);
     await createTar({
       cwd: fixtureDirectory,
       file: join(cacheDirectory, manifest.rustBinding.archive),
@@ -180,7 +191,12 @@ describe("pinned Ladybug source build", () => {
     const staged = await stageLadybugSources({ cacheDirectory, outputDirectory, manifest });
     expect(staged.receipt).toMatchObject({
       core: { version: "0.18.0", embeddedTreeSha256: manifest.core.embeddedTreeSha256 },
-      rustBinding: { crate: "lbug", version: "0.18.0", patched: false },
+      rustBinding: {
+        crate: "lbug",
+        version: "0.18.0",
+        nativeSourceTreeSha256: manifest.rustBinding.nativeSourceTreeSha256,
+        patched: false,
+      },
       openssl: { version: "3.5.8", sha256: manifest.openssl.sha256 },
       extensions: [],
       nativeMode: "fully-static-ladybug-and-openssl",
@@ -189,6 +205,14 @@ describe("pinned Ladybug source build", () => {
     expect(await readFile(join(staged.bindingDirectory, "build.rs"), "utf8")).toBe("fn main() {}\n");
     expect(JSON.parse(await readFile(join(outputDirectory, "source-receipt.json"), "utf8")))
       .toEqual(staged.receipt);
+
+    const driftedManifest = structuredClone(manifest);
+    driftedManifest.rustBinding.nativeSourceTreeSha256 = "0".repeat(64);
+    await expect(stageLadybugSources({
+      cacheDirectory,
+      outputDirectory: join(root, "output-drifted-contract"),
+      manifest: driftedManifest,
+    })).rejects.toThrow(/complete crate tree/u);
   });
 
   it("rejects a binding patch, a core patch, extensions, or an online Cargo mode", async () => {

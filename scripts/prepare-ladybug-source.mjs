@@ -92,6 +92,7 @@ export function validateLadybugSourceManifest(manifest) {
     [manifest.core.embeddedTreeSha256, "embedded Ladybug core tree"],
     [manifest.rustBinding.sha256, "lbug crate"],
     [manifest.rustBinding.buildScriptSha256, "lbug build script"],
+    [manifest.rustBinding.nativeSourceTreeSha256, "complete lbug native source tree"],
     [manifest.openssl.sha256, "OpenSSL source"],
   ]) assertHexDigest(value, label);
   for (const source of [manifest.rustBinding, manifest.openssl]) {
@@ -244,6 +245,10 @@ export async function stageLadybugSources({ cacheDirectory, outputDirectory, man
   if (embeddedTreeSha256 !== manifest.core.embeddedTreeSha256) {
     throw new Error("staged embedded Ladybug core differs from the reviewed 0.18.0 tree");
   }
+  const nativeSourceTreeSha256 = await digestLadybugSourceTree(bindingDirectory);
+  if (nativeSourceTreeSha256 !== manifest.rustBinding.nativeSourceTreeSha256) {
+    throw new Error("staged lbug native source differs from the reviewed complete crate tree");
+  }
 
   const receipt = {
     schemaVersion: 1,
@@ -257,6 +262,7 @@ export async function stageLadybugSources({ cacheDirectory, outputDirectory, man
       crate: manifest.rustBinding.crate,
       version: manifest.rustBinding.version,
       buildScriptSha256,
+      nativeSourceTreeSha256,
       patched: false,
     },
     openssl: { version: manifest.openssl.version, sha256: manifest.openssl.sha256 },

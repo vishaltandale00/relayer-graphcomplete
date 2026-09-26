@@ -15,6 +15,7 @@
     "url": "https://static.crates.io/crates/lbug/lbug-0.18.0.crate",
     "sha256": "f52ee74966e323212747aa22fa8c01f73f1cbbb996187c3b08cbf96ff9f67562",
     "buildScriptSha256": "e315b80ae287c6679609dbf44bbe67bfe3b864f90c0be279380edba3ac936064",
+    "nativeSourceTreeSha256": "b241edc449b149db1ace2982ece97d3f48a9544939f6f28d87724d551a6128ea",
     "sourceBasisCommit": "ea283cd1bf5473cd5c233944e3b281eb0d758a45",
     "sourceBasisDirty": true
   },

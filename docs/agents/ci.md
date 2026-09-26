@@ -113,10 +113,21 @@ lbug version, and the library SHA-256 before exporting
 `LBUG_LIBRARY_DIR`/`LBUG_INCLUDE_DIR`. A missing or rejected bundle fails
 open to the in-lane source build, and the lanes keep running on their own
 source builds even if the producing job fails: their gates re-derive from
-the plan results, never from the acceleration job. The bundle
-records the commit that built it for provenance, but equality keys on the
-pinned source, the resolved lbug feature set, and the toolchain, because the
-bundled source cannot change without a `Cargo.lock` change. The manifest also
+the plan results, never from the acceleration job. The bundle records the
+commit and resolved lbug feature set that built it for provenance. Its cache
+key binds platform, rustc release, and `Cargo.lock` digest; verification also
+checks the pinned lbug version and packaged bytes. For pinned lbug 0.18.0,
+features affect Rust/FFI compilation separately from the cached native CMake
+library and headers, so a feature-only change does not invalidate that bundle.
+This is the bundle verifier's acceptance rule, not proof of native equivalence:
+its feature-metadata fixture only checks that producer feature provenance does
+not reject an otherwise intact bundle. The production Cargo-resolved source
+path is separately checked against the reviewed lbug version, crates.io
+checksum, and canonical full-package tree digest. The source-preparation path
+checks the same complete package tree after extracting the checksum-pinned
+crate; its only resolved-tree exclusion is Cargo's generated root `.cargo-ok`
+registry marker, which is absent from the crate archive. Re-review this native
+source contract before changing the lbug pin or any package source bytes. The manifest also
 carries a digest over every packaged file plus the library size, so a
 truncated include tree or a failed debug strip is rejected before any lane
 links. One accepted cost: while the bundle cache keeps hitting, the lanes no
