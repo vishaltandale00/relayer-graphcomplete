@@ -3,6 +3,7 @@ import { Window } from "happy-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { mountCompiledNodeDetail } from "../desktop/renderer/src/product-workspace/node-detail-runtime.js";
+import { interactionForThread, workspaceTurns } from "../desktop/renderer/src/product-workspace/model.js";
 import { createProductWorkspace, renderProductNodeDetail } from "../desktop/renderer/src/product-workspace/workspace.js";
 
 function canonicalJson(value) {
@@ -785,10 +786,32 @@ describe("compiled Node Detail product runtime", () => {
     expect(onNavigateLayer).toHaveBeenCalledWith(91, expect.objectContaining({ action: actions[0], sourceNode: node }));
 
     const send = window.document.querySelector("#sendInteraction");
+    const graphNode = window.document.querySelector('[data-node="7"]');
+    expect(graphNode).not.toBeNull();
+    graphNode.click();
+    await vi.waitFor(() => expect(selection.selectedNodeId).toBe("7"));
+    const unhandledReselectionRejections = [];
+    const captureUnhandledReselection = (reason) => unhandledReselectionRejections.push(reason);
+    process.on("unhandledRejection", captureUnhandledReselection);
     thread = undefined;
-    expect(() => workspace.render()).not.toThrow();
-    expect(showEmpty).toHaveBeenCalled();
-    expect(send.disabled).toBe(true);
+    try {
+      expect(() => workspace.render()).not.toThrow();
+      expect(showEmpty).toHaveBeenCalled();
+      expect(send.disabled).toBe(true);
+      expect(selection.selectedNodeId).toBe("7");
+      expect(state.currentInteractionId).toBe(5);
+      expect(state.interactions[0]).toMatchObject({ id: 5, threadId: 3, graphNodeId: 50 });
+      expect(state.nodes.map(({ id }) => id)).toEqual([7]);
+      expect(workspaceTurns(state, undefined)).toEqual([]);
+      expect(interactionForThread(state, undefined)).toBeUndefined();
+      await Promise.resolve();
+      await window.happyDOM.waitUntilComplete();
+      await new Promise((resolveTurn) => setImmediate(resolveTurn));
+      await Promise.resolve();
+    } finally {
+      process.off("unhandledRejection", captureUnhandledReselection);
+    }
+    expect(unhandledReselectionRejections).toEqual([]);
     expect(inputDraftApi.get).not.toHaveBeenCalledWith(undefined);
     expect(inputDraftApi.commit).toHaveBeenCalledTimes(1);
 
