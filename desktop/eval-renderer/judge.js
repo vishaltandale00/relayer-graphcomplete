@@ -311,8 +311,11 @@ dialog.onclick = (event) => { if (event.target === dialog) dialog.close(); };
 async function boot() {
   if (!api?.getRun || !api?.loadJudgeScreenshot) throw new Error("Judge review APIs are unavailable.");
   const params = new URLSearchParams(location.search);
-  const runId = params.get("runId");
+  let runId = params.get("runId");
   const executionId = params.get("executionId");
+  if (!runId && executionId) {
+    runId = (await api.listRuns()).find((run) => run.executions?.some((item) => item.id === executionId))?.id;
+  }
   if (!runId || !executionId) throw new Error("Judge review requires runId and executionId.");
   state.analysis = buildJudgeAnalysis(await api.getRun(runId), executionId);
   const firstTurnWithLayers = state.analysis.turns.find((turn) => turn.layers.length) ?? state.analysis.turns[0];

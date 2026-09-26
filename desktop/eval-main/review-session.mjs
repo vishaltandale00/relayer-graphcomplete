@@ -103,6 +103,7 @@ export class ReviewSession {
     executionId,
     readOnly,
     webContents,
+    transport,
     artifactDirectory,
     ipc,
     loadInputDraftRevision,
@@ -110,11 +111,12 @@ export class ReviewSession {
   }) {
     if (!executionId) throw new Error("ReviewSession requires an execution ID.");
     if (readOnly !== true) throw new Error("ReviewSession requires server-enforced read-only authority.");
-    if (!webContents?.send || !webContents?.capturePage || !webContents?.getURL) {
+    if (!transport && (!webContents?.send || !webContents?.capturePage || !webContents?.getURL)) {
       throw new Error("ReviewSession requires Electron WebContents.");
     }
     if (!artifactDirectory) throw new Error("ReviewSession requires a local artifact directory.");
-    if (!ipc?.on || !ipc?.removeListener) throw new Error("ReviewSession requires Electron ipcMain.");
+    if (!transport && (!ipc?.on || !ipc?.removeListener)) throw new Error("ReviewSession requires Electron ipcMain.");
+    this.transport = transport;
     this.executionId = executionId;
     this.webContents = webContents;
     this.artifactDirectory = artifactDirectory;
@@ -127,7 +129,7 @@ export class ReviewSession {
   }
 
   async open() {
-    const location = new URL(this.webContents.getURL());
+    const location = new URL(this.transport ? this.transport.url() : this.webContents.getURL());
     if (
       location.protocol !== "http:"
       || location.hostname !== "127.0.0.1"
@@ -161,10 +163,11 @@ export class ReviewSession {
         const prepared = target.kind === "viewport"
           ? { index: tile.index, clip: plan.clip }
           : await this.#rendererCommand("prepareCaptureTile", tile);
-        const image = await this.webContents.capturePage(prepared.clip);
-        const bytes = image.toPNG();
+        const capture = this.transport ? await this.transport.capture(prepared.clip) : null;
+        const image = capture ? null : await this.webContents.capturePage(prepared.clip);
+        const bytes = capture ? capture.bytes : image.toPNG();
         if (!bytes.length) throw new Error(`Review screenshot tile ${tile.index} is empty.`);
-        const size = image.getSize();
+        const size = capture || image.getSize();
         tileArtifacts.push({
           index: tile.index,
           row: tile.row,
@@ -335,7 +338,7 @@ export class ReviewSession {
 
   #assertOpen() {
     if (!this.opened) throw new Error("ReviewSession must be opened before using tools.");
-    if (this.webContents.isDestroyed?.()) throw new Error("The production review window is closed.");
+    if ((this.transport ? this.transport.isClosed() : this.webContents.isDestroyed?.())) throw new Error("The production review window is closed.");
   }
 
   async #snapshot() {
@@ -357,7 +360,14 @@ export class ReviewSession {
   }
 
   #rendererCommand(command, payload) {
-    if (this.webContents.isDestroyed?.()) return Promise.reject(new Error("The production review window is closed."));
+    if (this.transport) {
+      let timer;
+      return Promise.race([
+        this.transport.command(command, payload),
+        new Promise((_, reject) => { timer = setTimeout(() => reject(new Error(`Production review command timed out: ${command}`)), this.commandTimeoutMs); }),
+      ]).finally(() => clearTimeout(timer));
+    }
+    if ((this.transport ? this.transport.isClosed() : this.webContents.isDestroyed?.())) return Promise.reject(new Error("The production review window is closed."));
     const responseChannel = `relayer-eval:review-response:${randomUUID()}`;
     return new Promise((resolve, reject) => {
       const cleanup = () => {

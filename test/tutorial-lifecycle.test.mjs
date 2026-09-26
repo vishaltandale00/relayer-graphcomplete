@@ -39,7 +39,9 @@ describe("desktop tutorial lifecycle", () => {
     expect(productPreload).toContain('ipcRenderer.invoke("relayer:tutorial-dismiss")');
     expect(productPreload).toContain('ipcRenderer.invoke("relayer:tutorial-complete")');
 
-    for (const name of ["eval-dashboard.cjs", "eval-review.cjs", "eval-judge.cjs", "eval-trace.cjs"]) {
+    const webBridge = await readFile(new URL("../desktop/eval-renderer/web-bridge.js", import.meta.url), "utf8");
+    expect(webBridge).not.toContain("tutorial");
+    for (const name of ["eval-review.cjs"]) {
       const evalPreload = await readFile(new URL(`../desktop/preload/${name}`, import.meta.url), "utf8");
       expect(evalPreload).not.toContain("relayer:tutorial");
     }

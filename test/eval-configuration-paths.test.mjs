@@ -64,7 +64,7 @@ describe("Eval harness configuration availability", () => {
 
   it("records the package.json product version on unpackaged Eval exports", async () => {
     const evalMain = await readFile(new URL("../desktop/eval-main/index.mjs", import.meta.url), "utf8");
-    expect(evalMain).toContain("const desktopVersion = app.isPackaged ? app.getVersion() : (metadata.version || app.getVersion());");
+    expect(evalMain).toContain("const desktopVersion = metadata.version;");
     expect(evalMain).toContain("desktopVersion,");
     expect(evalMain).not.toContain("desktopVersion: app.getVersion()");
   });
@@ -221,7 +221,7 @@ describe("Eval harness configuration availability", () => {
   });
 
   it("keeps the layered Codex harness product-facing and the high variant internal", async () => {
-    const evalPackaging = await readFile(new URL("../desktop/packaging/eval-electron-builder.mjs", import.meta.url), "utf8");
+
     const productPackaging = await readFile(new URL("../desktop/packaging/electron-builder.mjs", import.meta.url), "utf8");
     const codexBasic = await loadHarnessConfigurations([
       resolve(repositoryRoot, "harnesses/codex-basic.yaml"),
@@ -237,14 +237,6 @@ describe("Eval harness configuration availability", () => {
       "openrouter",
       "vercel-ai-router",
     ]);
-    expect(evalPackaging).toContain('{ from: resolve(repositoryRoot, "harnesses"), to: "harnesses", filter: ["*.yaml"] }');
-    expect(evalPackaging).toContain('"main/managed-runtimes/**/*"');
-    expect(evalPackaging).toContain('"main/credentials/**/*"');
-    expect(evalPackaging).toContain('"main/models/**/*"');
-    expect(evalPackaging).toContain('"renderer/src/model-picker-model.js"');
-    expect(evalPackaging).toContain('"shared/codex-runtime-environment.mjs"');
-    expect(evalPackaging).toContain('"shared/managed-runtime-requirements.mjs"');
-    expect(evalPackaging).toContain('"shared/target.mjs"');
     expect(productPackaging).toContain('{ from: resolve(repositoryRoot, "harnesses/codex-basic.yaml"), to: "harnesses/codex-basic.yaml" }');
     expect(productPackaging).toContain('{ from: resolve(repositoryRoot, "harnesses/claude-basic.yaml"), to: "harnesses/claude-basic.yaml" }');
     expect(productPackaging).not.toContain("codex-basic-high.yaml");

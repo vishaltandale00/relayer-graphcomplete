@@ -380,7 +380,7 @@ async function run() {
     height: 860,
     show: false,
     backgroundColor: "#0b0c0d",
-    webPreferences: { preload: join(repositoryRoot, "desktop", "preload", "eval-dashboard.cjs"), contextIsolation: true, nodeIntegration: false, sandbox: true },
+    webPreferences: { preload: join(repositoryRoot, "scripts", "lib", "eval-dashboard-preload.cjs"), contextIsolation: true, nodeIntegration: false, sandbox: true },
   });
   await dashboardWindow.loadFile(join(repositoryRoot, "desktop", "eval-renderer", "index.html"));
   dashboardWindow.show();
@@ -479,7 +479,7 @@ async function run() {
     height: 860,
     show: false,
     backgroundColor: "#0b0c0d",
-    webPreferences: { preload: join(repositoryRoot, "desktop", "preload", "eval-dashboard.cjs"), contextIsolation: true, nodeIntegration: false, sandbox: true },
+    webPreferences: { preload: join(repositoryRoot, "scripts", "lib", "eval-dashboard-preload.cjs"), contextIsolation: true, nodeIntegration: false, sandbox: true },
   });
   await dashboardWindow.loadFile(join(repositoryRoot, "desktop", "eval-renderer", "index.html"));
   dashboardWindow.show();

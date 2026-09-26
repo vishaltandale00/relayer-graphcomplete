@@ -1,3 +1,4 @@
+// Legacy Electron product-evidence driver only. The supported Eval host uses web-bridge.js.
 const { contextBridge, ipcRenderer } = require("electron");
 
 function subscribe(channel, callback) {

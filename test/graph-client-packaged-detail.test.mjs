@@ -1182,7 +1182,7 @@ describe("packaged graph-client authored detail boundary", () => {
       ]);
       const exactDynamicPath = 'pathToFileURL(join(process.resourcesPath, "graph-client", "index.js")).href';
       expect(desktopMain).toContain(exactDynamicPath);
-      expect(evalMain).toContain(exactDynamicPath);
+      expect(evalMain).not.toContain("process.resourcesPath");
     } finally {
       await rm(directory, { recursive: true, force: true });
     }

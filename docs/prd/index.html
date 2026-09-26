@@ -2320,7 +2320,7 @@ settings:
 <li>Markup and CSS selectors, pseudos, functions, properties, sizes, and traversal all use deterministic fail-closed rules.</li>
 <li>Every emitted stable identity is trimmed, NUL-free, and at most 128 UTF-8 bytes.</li>
 <li>Packages allow 64 components, 128 mounts, 32 assets, 64 asset references, and at most 524,288 canonical UTF-8 bytes.</li>
-<li>The packaged Product and Eval client is one self-contained resource entry module containing its pinned parser closure; no compiler or host-bridge sibling is copied.</li>
+<li>The packaged Product client is one self-contained resource entry module containing its pinned parser closure; no compiler or host-bridge sibling is copied.</li>
 <li><code>submitNode</code> attaches the client-owned compiled package before transport. Later authoring rejects, while a failed request retries without re-resolution or recompilation drift.</li>
 <li>This foundation does not claim accepted-package durability or Product rendering. Those remain #365 and #366 work.</li>
 </ul>
@@ -2333,7 +2333,7 @@ settings:
 <tr><td>Authenticated logical assets</td><td>Public tests prove pre-transport bounds, hostile-response rejection, deduplicated resolution, private authority, and stable repeated-placement mounts.</td></tr>
 <tr><td>Draft lifecycle and retry identity</td><td><code>packages/graph-client/test/objects.test.ts</code> and <code>test/graph-client-packaged-detail.test.mjs</code> prove snapshots, repair, response state, pre-work registration, same-client joining, cross-client rejection and retry, resolver cancellation and repair, and transport-failure locking and retry.</td></tr>
 <tr><td>Private submit authority</td><td><code>test/graph-client-packaged-detail.test.mjs</code> rejects both compiler and host-bridge sibling imports and proves public forged output cannot enter submission.</td></tr>
-<tr><td>Packaged parser runtime</td><td><code>test/graph-client-packaged-detail.test.mjs</code> imports the isolated sole Product and Eval resource entry and performs real HTML/CSS compilation and submission without parent dependencies.</td></tr>
+<tr><td>Packaged parser runtime</td><td><code>test/graph-client-packaged-detail.test.mjs</code> imports the isolated sole Product resource entry and performs real HTML/CSS compilation and submission without parent dependencies.</td></tr>
 <tr><td>Canonical package limits</td><td><code>packages/graph-client/test/detail.test.ts</code> covers stable identities, counts, canonical bytes, source locations, element limits, and depth limits.</td></tr>
 </tbody>
 </table>
@@ -2386,7 +2386,7 @@ settings:
 <p>The first evaluation is one fixed two-interaction case. Its name is <code>empty-project.task-system.two-turn</code>. It proves the smallest real conversation path through all runtime components. These components include the graph engine, client, harness host, Codex session, Complete boundary, evaluator, judge, and renderer.</p>
 <p>The second interaction receives a new canonical interaction node and capability token. It reuses the same harness object and provider thread. The case has no existing codebase, grounding requirement, graph search, or subagent dependency.</p>
 <h3>15D.1 Initial state and exact input</h3>
-<p>Relayer Eval creates an isolated empty project and an ordinary product thread through the Relayer app server. The case defines two user messages and does not name or select a harness. The desktop Eval service supplies the selected harness configuration for each execution. The standalone runtime runner is retired. The exact messages are:</p>
+<p>Relayer Eval creates an isolated empty project and an ordinary product thread through the Relayer app server. The case defines two user messages and does not name or select a harness. The Eval service supplies the selected harness configuration for each execution. The standalone runtime runner is retired. The exact messages are:</p>
 <blockquote>“A task system has an incoming queue, two workers, and a results store. Explain how a task moves through the system and what happens when both workers are busy.”</blockquote>
 <blockquote>“Follow up in the same thread: explain the task flow again, emphasizing what happens while both workers are busy and immediately after one worker finishes.”</blockquote>
 <p>The case declares the expected answer facts. Harness code does not hide these facts.</p>
@@ -2431,7 +2431,7 @@ settings:
 <p><code>packages/harness-host/test/host.test.ts</code> verifies distinct scopes without rebuilding the harness. Tests in <code>crates/relayer-app-server/src/runtime.rs</code> verify capability revocation after completion and session-registration failure. These lifecycle probes are test coverage, not per-execution Eval scores.</p>
 <p>Local keys used by Codex while constructing one layer are temporary builder references, not persisted semantic identities and not an evaluation requirement.</p>
 <h3>15D.4 Quality-judge gate</h3>
-<p>Relayer Eval uses the selected desktop judge and its versioned evidence contract. The former standalone six-fact structured judge is retired. Its saved runs are historical evidence, not proof for the current desktop judge.</p>
+<p>Relayer Eval uses the selected Eval judge and its versioned evidence contract. The former standalone six-fact structured judge is retired. Its saved runs are historical evidence, not proof for the current desktop judge.</p>
 <h3>15D.5 Required saved visual proof</h3>
 <p>A passing JSON result is insufficient. Relayer Eval opens accepted product threads in the production workspace with server-enforced read-only authority. The inspector, turn navigation, breadcrumbs, layer navigation, and screenshots use the same renderer as Relayer Desktop. The standalone HTML viewer is retired.</p>
 <h3>15D.6 Prior-accepted graph-memory case</h3>
@@ -2466,7 +2466,7 @@ settings:
 <tr><td>Persistent Node harness host</td><td><span class="delivery-status partial">Partial</span></td><td>The host caches one harness object for each thread. It serializes construction and Complete calls. Each call receives an isolated graph scope. The host stores only copied configuration and opaque provider resume state. A full process-restart recovery evaluation remains open.</td></tr>
 <tr><td><code>prime.agent</code> IPython graph harness</td><td><span class="delivery-status partial">Partial</span></td><td>The adapter, stable <code>relayer.graph.current</code> handler, run-context wiring, Python <code>GraphSession.current()</code>, resume state, cancellation, and inference-free tests exist. The forked Prime Agent package still needs a consumable release before the live harness can run from a clean install.</td></tr>
 <tr><td><code>codex.basic</code> graph-tool harness</td><td><span class="delivery-status partial">Partial</span></td><td>The earlier optional live case proved graph authoring through the bundled TypeScript client. The packaged client exposes <code>graph.search()</code>, while the shipped <code>codex-basic</code> baseline receives neither search authority nor search guidance. Relayer Eval now pairs that baseline with a named <code>query-v1</code> treatment. Fresh opt-in live search evidence remains outstanding; deterministic fixture or catalog evidence does not satisfy it.</td></tr>
-<tr><td>Inference-free correctness-boundary eval</td><td><span class="delivery-status verified">Verified</span></td><td>Desktop Eval integration coverage in <code>test/eval-app-integration.test.mjs</code> exercises two accepted product turns and prior-layer graph search with typed-reference reuse. Retained case checks live in <code>packages/eval-runner/src/cases/graph-checks.ts</code>. The standalone commands and HTML artifacts are retired; old receipts remain historical evidence.</td></tr>
+<tr><td>Inference-free correctness-boundary eval</td><td><span class="delivery-status verified">Verified</span></td><td>Eval integration coverage in <code>test/eval-app-integration.test.mjs</code> exercises two accepted product turns and prior-layer graph search with typed-reference reuse. Retained case checks live in <code>packages/eval-runner/src/cases/graph-checks.ts</code>. The standalone commands and HTML artifacts are retired; old receipts remain historical evidence.</td></tr>
 <tr><td>Electron product Complete path</td><td><span class="delivery-status verified">Verified</span></td><td>The zero-inference Electron smoke creates a thread, renders its accepted graph, exercises four turns, restores history, and opens read-only Eval review.</td></tr>
 <tr><td>Live independent judge</td><td><span class="delivery-status verified">Verified</span></td><td>The retired standalone live runner passed its deterministic gate and structured judge using the exact saved visible layer. This is historical evidence only.</td></tr>
 <tr><td>Immutable promotion bundle</td><td><span class="delivery-status partial">Partial</span></td><td>Eval persists product thread references, judge evidence, screenshots, configuration snapshots, digests, and portable candidate traces. A complete content-addressed promotion and retention contract remains.</td></tr>
@@ -2519,7 +2519,7 @@ settings:
 <p>Each thread may contain multiple turns. An analytical follow-up may ask the harness to inspect more deeply, challenge its prior answer, or refine an accepted graph. A mutating follow-up that requires another commit must introduce a meaningful additional requirement. It must not reward an empty or cosmetic commit merely to satisfy turn count. The execution records each turn, repository state, commit boundary, and accepted graph independently. Earlier accepted turn displays remain immutable.</p>
 <p>The catalog verifies every object digest before use and garbage-collects only unreferenced materializations and runs according to an explicit retention policy. Checked-in case/config/judge JSON stays small enough to review normally in pull requests.</p>
 <h3>13.3 Runner execution</h3>
-<p><code>npm run eval-app:dev</code> opens Relayer Eval. Its dashboard selects cases, named harness configurations, and a judge configuration; model settings belong inside the selected harness configuration. <code>npm run eval-app:pack</code> builds the internal desktop application. There is no separate standalone CLI execution or HTML review path.</p>
+<p><code>npm run eval-app:dev</code> starts Relayer Eval and prints its authenticated localhost URL. Its dashboard selects cases, named harness configurations, and a judge configuration; model settings belong inside the selected harness configuration. Eval has no desktop package, installer, or updater. There is no separate standalone CLI execution or HTML review path.</p>
 <p>For each case the runner:</p>
 <ol>
 <li>resolves cases, harness configurations, graph schema, client builds, and judge configuration at the runner boundary;</li>
@@ -2824,7 +2824,7 @@ submitReview({ turnId, rootLayerResult, evidence, criterionJudgments, summary, f
 <p><strong>Acceptance:</strong> Promotion requires deterministic task checks, screenshot-grounded simulated-user review, and human visual review.</p>
 </section>
 <h3>9.1 Relayer Eval application</h3>
-<p>Relayer Eval is a separate internal Electron application and local profile. It owns cases, harness configurations, judges, execution state, scores, and aggregate results.</p>
+<p>Relayer Eval is a developer-only local web application launched from a checkout, with a separate local profile. It owns cases, harness configurations, judges, execution state, scores, and aggregate results.</p>
 <p>Each case and harness execution creates ordinary product projects, threads, interactions, and accepted graph output through the Relayer app server.</p>
 <p>Each completed execution exposes three actions:</p>
 <ul>
@@ -2832,6 +2832,9 @@ submitReview({ turnId, rootLayerResult, evidence, criterionJudgments, summary, f
 <li><strong>Judge review</strong> opens the saved simulated-user evidence.</li>
 <li><strong>Candidate trace</strong> opens the portable harness trace for available turns.</li>
 </ul>
+<p>The terminal owns Eval service lifetime. Closing a tab leaves evaluations running. Ctrl-C stops owned services. Startup locks the selected profile to prevent concurrent hosts. The dashboard and human review pages use separate origins and scoped capabilities. Rust credentials stay in the backend. Prime development credentials are loaded from the selected profile on each launch and kept in memory.</p>
+<p>Automated judges use isolated contexts in the pinned Chromium browser. They receive read-only authority and no human annotation credential. A commissioned input operator keeps its separate write authority in the backend. Browser Eval verifies the shared production workspace; Electron-specific behavior still requires desktop proof.</p>
+<p>Deterministic host authority checks run in <code>test/eval-web-host.test.mjs</code>. The inference-free browser and process proof is <code>npm run test:eval-web</code>, after <code>npm run build</code> and <code>npx playwright install chromium</code>. It covers real product execution, review, capture, and restart. Paid judges remain opt-in.</p>
 <h3>9.2 Production-workspace review</h3>
 <p>Product workspace opens the production renderer with server-enforced read-only authority. It does not translate the graph into a second evaluation view.</p>
 <p>The review workspace uses normal product behavior:</p>

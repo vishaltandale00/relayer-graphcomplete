@@ -1,9 +1,7 @@
 import { readFile } from "node:fs/promises";
-import { join } from "node:path";
 import { createManagedRuntimeInstaller } from "../main/managed-runtimes/installer.mjs";
 import { createManagedRuntimeResolver } from "../main/managed-runtimes/resolver.mjs";
 import { createProviderComposition } from "../main/providers/provider-composition.mjs";
-import { createEncryptedCredentialStore } from "../main/providers/provider-definition-store.mjs";
 import { productionProviderAdapterRegistry, productionHarnessRuntimeDescriptor, productionProviderRuntimeDependencies } from "../main/providers/provider-adapter-registry.mjs";
 import { assemblePrimeManagedRuntime, checkPrimeManagedRuntime, createPrimeReviewedTreeCopier } from "../main/services/prime-managed-runtime.mjs";
 import { PRIME_AGENT_ASSET_SHA256, selectPrimeAgentDependencyClosureSha256 } from "../main/services/prime-agent-runtime.mjs";
@@ -11,7 +9,7 @@ import { createHarnessReadinessCoordinator } from "../main/services/harness-read
 import { HARNESS_MANAGED_RUNTIME_REQUIREMENTS, managedRuntimeRequirementForHarness } from "../shared/managed-runtime-requirements.mjs";
 
 // Explicit development opt-in. Credentials never become part of an Eval selection
-// or run record; the existing product provider service owns their encrypted store.
+// or run record; the Eval host retains them in memory until shutdown.
 export async function loadEvalPrimeProfile({ isPackaged, environment = process.env }) {
   const path = environment.RELAYER_EVAL_PRIME_PROFILE_FILE;
   if (!path) return null;
@@ -60,7 +58,7 @@ export function createEvalManagedPrimeRuntime({ root, appRoot, pythonClientRoot,
 }
 
 export function createEvalPrimeProvider({ userDataDirectory, productServer, productSession,
-  runtimeSession, graphRuntime, managedPrimeRuntime, managedCodexRuntime, safeStorage,
+  runtimeSession, graphRuntime, managedPrimeRuntime, managedCodexRuntime,
   fetchImpl = fetch, createComposition = createProviderComposition }) {
   const request = async (path, { method = "GET", body } = {}) => {
     const response = await fetchImpl(new URL(path, productSession.origin), {
@@ -85,17 +83,13 @@ export function createEvalPrimeProvider({ userDataDirectory, productServer, prod
       await graphRuntime.recordHarnessReadiness(updates);
     },
   });
-  const credentialStore = createEncryptedCredentialStore({
-      path: join(userDataDirectory, "provider-credentials.json"),
-      encrypt: async (value) => {
-        if (!safeStorage.isEncryptionAvailable()) throw new Error("Credential encryption is unavailable.");
-        return safeStorage.encryptString(value).toString("base64");
-      },
-      decrypt: async (value) => {
-        if (!safeStorage.isEncryptionAvailable()) throw new Error("Credential encryption is unavailable.");
-        return safeStorage.decryptString(Buffer.from(value, "base64"));
-      },
-    });
+  const entries = new Map();
+  const credentialStore = {
+    set: async (reference, value) => { entries.set(reference, structuredClone(value)); },
+    get: async (reference) => entries.has(reference) ? structuredClone(entries.get(reference)) : null,
+    delete: async (reference) => entries.delete(reference),
+    listReferences: async () => [...entries.keys()],
+  };
   const composition = createComposition({
     registry: productionProviderAdapterRegistry,
     definitionStore: productServer.providerDefinitionStore(),
@@ -127,6 +121,17 @@ export function createEvalPrimeProvider({ userDataDirectory, productServer, prod
   return {
     async start(profile) {
       try {
+        {
+          const definitions = await productServer.providerDefinitionStore().load();
+          const existing = definitions.find(({ id }) => id === "eval-openrouter");
+          if (existing) {
+            if (existing.adapterId !== "openrouter" || existing.lifecycleState !== "active"
+              || existing.endpoint !== (profile.endpoint ?? "https://openrouter.ai/api/v1")) {
+              throw new Error("Existing Eval provider does not match the requested provider.");
+            }
+            await credentialStore.set(existing.credentialReference, { "api-key": profile.apiKey });
+          }
+        }
         await composition.start();
         const existing = (await composition.providerDefinitions.list()).find(({ id }) => id === "eval-openrouter");
         if (existing) {
@@ -192,7 +197,7 @@ export function createEvalPrimeProvider({ userDataDirectory, productServer, prod
       }
     },
     acquireExecution: (id) => composition.providerDefinitions.acquireExecution(id),
-    close: () => composition.close(),
+    close: async () => { try { await composition.close(); } finally { entries.clear(); } },
   };
   async function refreshSelections() {
     selections.clear();
