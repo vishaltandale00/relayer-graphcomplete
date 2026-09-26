@@ -1,0 +1,70 @@
+[
+  {
+    "interaction_id": 1,
+    "outcome": "accepted",
+    "admitted_plan_digest": "sha256:cf807a13be6f744cbecbdb90c2dd7a386f6f5a7d56ff2b5300aadcff90a2a3e1",
+    "admitted_plan": {
+      "familyId": 3,
+      "familyRevision": 1,
+      "orchestrator": {
+        "providerId": "eval-openrouter",
+        "adapterId": "openrouter",
+        "accessContract": "secret@1",
+        "modelId": "openai/gpt-6-luna",
+        "adapterImplementationVersion": "2"
+      },
+      "roster": [
+        {
+          "providerId": "eval-openrouter",
+          "adapterId": "openrouter",
+          "accessContract": "secret@1",
+          "modelId": "openai/gpt-6-luna",
+          "adapterImplementationVersion": "2"
+        },
+        {
+          "providerId": "eval-openrouter",
+          "adapterId": "openrouter",
+          "accessContract": "secret@1",
+          "modelId": "qwen/qwen3.8-flash",
+          "adapterImplementationVersion": "2"
+        }
+      ],
+      "harnessPolicyDigest": "sha256:63b5604521fa174b8163dd7c6422e98089761be374ce31e12678b5f3956f464d",
+      "digest": "sha256:cf807a13be6f744cbecbdb90c2dd7a386f6f5a7d56ff2b5300aadcff90a2a3e1"
+    }
+  },
+  {
+    "interaction_id": 2,
+    "outcome": "accepted",
+    "admitted_plan_digest": "sha256:cf807a13be6f744cbecbdb90c2dd7a386f6f5a7d56ff2b5300aadcff90a2a3e1",
+    "admitted_plan": {
+      "familyId": 3,
+      "familyRevision": 1,
+      "orchestrator": {
+        "providerId": "eval-openrouter",
+        "adapterId": "openrouter",
+        "accessContract": "secret@1",
+        "modelId": "openai/gpt-6-luna",
+        "adapterImplementationVersion": "2"
+      },
+      "roster": [
+        {
+          "providerId": "eval-openrouter",
+          "adapterId": "openrouter",
+          "accessContract": "secret@1",
+          "modelId": "openai/gpt-6-luna",
+          "adapterImplementationVersion": "2"
+        },
+        {
+          "providerId": "eval-openrouter",
+          "adapterId": "openrouter",
+          "accessContract": "secret@1",
+          "modelId": "qwen/qwen3.8-flash",
+          "adapterImplementationVersion": "2"
+        }
+      ],
+      "harnessPolicyDigest": "sha256:63b5604521fa174b8163dd7c6422e98089761be374ce31e12678b5f3956f464d",
+      "digest": "sha256:cf807a13be6f744cbecbdb90c2dd7a386f6f5a7d56ff2b5300aadcff90a2a3e1"
+    }
+  }
+]

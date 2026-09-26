@@ -1,0 +1,37 @@
+{
+  "sourceCommit": "c3f4358b9f2a1e3d71fb35b2f8d720ca1ba147ed",
+  "basePR480Commit": "34b629ca48de11150faa02451e1780aa48f1a8bd",
+  "runId": "run-2026-09-25T19-06-11-759Z-c654c155",
+  "checksPassed": 21,
+  "checksTotal": 21,
+  "restartRetention": "Observed in actual Electron after quit and relaunch with same persistent profile; result and graph screenshots attached.",
+  "cost": {
+    "keyUsageDeltaUSD": 0.00725945,
+    "scope": "Account-key usage delta, not isolated per-request billing"
+  },
+  "observedModels": [
+    "openai/gpt-6-luna"
+  ],
+  "optionalHelper": "qwen/qwen3.8-flash admitted; not invoked",
+  "presentationJudge": "unjudged; manually inspected",
+  "limitations": [
+    "Development macOS Electron only; no packaged/release or Claude proof",
+    "No native helper delegation occurred",
+    "Unavailable-state screenshot was not captured",
+    "Trace excerpts omit message streams; original complete trace hashes are in desktop-run.json",
+    "Sampled navigation video uses five captured UI frames; not continuous recording"
+  ],
+  "initialFailures": "First full check failed due to missing nested workspace dependencies in local cache clone; preserved log. After restoring dependencies, full check/build passed. Live first turn also recovered from 422 graph validation rejections before accepted submission; audit retained.",
+  "managedRuntime": {
+    "schemaVersion": 2,
+    "runtimeId": "prime",
+    "recipeId": "prime@0.8.1",
+    "recipeDigest": "1386de54589d64956a9f569144752c441d84c45ff0906c3fd7b9e596f1fe72bd",
+    "assembler": "prime-managed-kernel-v1",
+    "readinessContractVersion": 1,
+    "runtimeVersion": "0.8.1",
+    "target": "macos-arm64",
+    "installation": "89a1d8dc-68a4-434c-b2cb-e89cd754ec14",
+    "activeReceiptSHA256": "3247ad405d69f647e814c22cc0044c79461ab09d865090cf01a5f554c1653c1c"
+  }
+}

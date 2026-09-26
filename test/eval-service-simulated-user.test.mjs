@@ -631,6 +631,37 @@ describe("EvalService simulated-user result persistence", () => {
     });
   });
 
+  it("disables Prime without a provider and pins the exact admitted model on both product turns", async () => {
+    const { stateFile } = await testPaths();
+    const configurationPaths = [join(repositoryRoot, "harnesses", "prime-agent-basic.yaml")];
+    const selection = { testCaseIds: ["empty-project.task-system.two-turn"],
+      harnessConfigurationNames: ["prime-agent-basic"], judgeConfigurationName: "deterministic-graph-contract" };
+    const unavailable = await new EvalService({ stateFile, productSession: productSession(), configurationPaths, targetKey: "macos-arm64" }).open();
+    expect(unavailable.catalog().harnessConfigurations[0]).toMatchObject({ available: false });
+    await expect(unavailable.createRun(selection)).rejects.toThrow("requires a connected provider");
+    const product = fakeAcceptedProduct();
+    globalThis.fetch = product;
+    const pinned = { familyId: 42, providerId: "eval-openrouter", modelId: "openai/gpt-6-luna" };
+    const selectPrimeModel = vi.fn(async () => pinned);
+    let routeAvailable = true;
+    const service = await new EvalService({ stateFile, productSession: productSession(), configurationPaths,
+      selectPrimeModel, primeModelAvailability: () => ({ available: routeAvailable, unavailableReason: routeAvailable ? null : "Runtime unavailable" }),
+      targetKey: "macos-arm64" }).open();
+    expect(service.catalog().harnessConfigurations[0].available).toBe(true);
+    routeAvailable = false;
+    expect(service.catalog().harnessConfigurations[0]).toMatchObject({ available: false, unavailableReason: "Runtime unavailable" });
+    await expect(service.createRun(selection)).rejects.toThrow("requires a connected provider");
+    routeAvailable = true;
+    const created = await service.createRun(selection);
+    await waitForCompletedRun(service, created.id);
+    const bodies = product.mock.calls.filter(([url, options]) => options?.method === "POST"
+      && /^\/api\/threads(?:\/[^/]+\/interactions)?$/.test(new URL(url).pathname))
+      .map(([, options]) => JSON.parse(options.body));
+    expect(bodies).toHaveLength(2);
+    expect(bodies.map(({ modelSelection }) => modelSelection)).toEqual([pinned, pinned]);
+    expect(selectPrimeModel).toHaveBeenCalledTimes(2);
+  });
+
   it("preserves Prime's requested bounded profile while retaining the explicit sole-Full exception", { timeout: 30_000 }, async () => {
     const { stateFile } = await testPaths();
     const product = fakeAcceptedProduct();
@@ -639,6 +670,7 @@ describe("EvalService simulated-user result persistence", () => {
       stateFile,
       productSession: productSession(),
       configurationPaths: [join(repositoryRoot, "harnesses", "prime-agent-basic.yaml")],
+      selectPrimeModel: async () => ({ familyId: 7, providerId: "eval-openrouter", modelId: "openai/gpt-6-luna" }),
       platform: "darwin",
       targetKey: "macos-arm64",
     }).open();

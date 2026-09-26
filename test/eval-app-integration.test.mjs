@@ -14,6 +14,10 @@ import {
   H3_SEEDED_TREE,
   H3_UPSTREAM_COMMIT,
   H3_UPSTREAM_TREE,
+  checkGraphMemoryFirstTurn,
+  checkGraphMemorySecondTurn,
+  graphMemorySearchRequestMode,
+  graphMemorySearchTitle,
   graphMemoryEvalCaseId,
   graphMemoryEvalPrompts,
   graphMemoryFixtureFactory,
@@ -192,6 +196,7 @@ describe("Relayer Eval application service", () => {
         sourceActionId: 2,
         interactionId: 3,
         graphNodeId: 4,
+        status: "accepted",
         acceptedNodes: [{ id: 5, title: "Plain child", detail: "Plain" }],
         projectionObservations: [],
       }],
@@ -284,6 +289,7 @@ describe("Relayer Eval application service", () => {
         sourceActionId: 2,
         interactionId: 3,
         graphNodeId: 4,
+        status: "accepted",
         acceptedNodes: [{ id: 5, title: "Plain child", detail: "Plain" }],
         projectionObservations: [],
       }],
@@ -291,6 +297,68 @@ describe("Relayer Eval application service", () => {
     expect(checks.find(({ name }) => (
       name === "agent-authored-complete:child-3:visual-node-detail:authored-output"
     ))?.passed).toBe(false);
+  });
+
+  it("checks stopped semantic children for terminal acceptance without diagnosing authored output", () => {
+    const results = [];
+    for (const personalPresentationVersion of [
+      "personal-presentation-v2",
+      "personal-presentation-v3",
+    ]) {
+      const checks = recursiveCompleteChecks({
+        harnessConfiguration: {
+          name: "stopped-child-fixture",
+          implementation: "fixture.task-system",
+          complete: { agentAuthored: true },
+          settings: { personalPresentationVersion },
+        },
+        harnessConfigurationDigest: "sha256:config",
+        turns: [{ candidateTrace: { completionBrokerAvailable: true } }],
+        semanticChildren: [{
+          sourceInteractionId: 11,
+          sourceActionId: 12,
+          interactionId: 13,
+          graphNodeId: 14,
+          status: "stopped",
+          resultCompletionStatus: "stopped",
+          rootLayerId: null,
+          acceptedNodes: [],
+          projectionObservations: [
+            { sequence: 1, revision: 0, previousRevision: null, lifecycle: "active", currentLayerId: null },
+            { sequence: 2, revision: 1, previousRevision: 0, lifecycle: "stopped", currentLayerId: null },
+          ],
+          execution: {
+            interactionId: 13,
+            graphCompletionId: 14,
+            harnessConfigurationName: "stopped-child-fixture",
+            harnessConfigurationDigest: "sha256:config",
+            modelExecutionDigest: "sha256:model-execution",
+            phase: "settled",
+            attached: true,
+            attachmentSchemaVersion: 1,
+            attachmentProvider: "fixture",
+            settled: true,
+            safeReason: null,
+            settlementNodeId: 14,
+            settlementRootLayerId: null,
+          },
+          candidateTrace: { status: "complete", completionBrokerAvailable: true },
+        }],
+      });
+      const terminal = checks.find(({ name }) => name === "agent-authored-complete:child-terminal");
+      const authoredOutputChecks = checks.filter(({ name }) => name.includes(":visual-node-detail:authored-output"));
+      results.push({ personalPresentationVersion, terminalPassed: terminal?.passed, authoredOutputCheckCount: authoredOutputChecks.length, overallPassed: checks.every(({ passed }) => passed) });
+      expect(terminal?.passed).toBe(false);
+      expect(authoredOutputChecks).toEqual([]);
+      expect(checks.filter(({ passed }) => !passed).map(({ name }) => name)).toEqual([
+        "agent-authored-complete:child-terminal",
+      ]);
+      expect(checks.some(({ passed }) => !passed)).toBe(true);
+    }
+    expect(results).toEqual([
+      { personalPresentationVersion: "personal-presentation-v2", terminalPassed: false, authoredOutputCheckCount: 0, overallPassed: false },
+      { personalPresentationVersion: "personal-presentation-v3", terminalPassed: false, authoredOutputCheckCount: 0, overallPassed: false },
+    ]);
   });
 
   it("renders the complete V3 Node Detail recipe without losing executable guidance", () => {
@@ -947,6 +1015,220 @@ describe("Relayer Eval application service", () => {
     const detail = await productRequest(productSession, `/api/threads/${execution.threadIds[0]}`);
     expect(detail.interactions).toHaveLength(2);
     expect(detail.interactions.every((interaction) => interaction.completionStatus === "accepted")).toBe(true);
+    // Exercise the retained case graders with evidence from the production Eval path.
+    const [firstOutput, secondOutput] = detail.interactions.map((interaction) => interaction.completionOutput);
+    const evidence = execution.turns[1].caseEvidence;
+    const searchTarget = firstOutput.rootLayer.nodes.filter((node) => node.title === graphMemorySearchTitle);
+    expect(searchTarget).toHaveLength(1);
+    const launderedChecks = checkGraphMemorySecondTurn(
+      secondOutput,
+      firstOutput,
+      {
+        ...evidence,
+        searchRequest: {
+          ...evidence.searchRequest,
+          query: "MATCH (l:Layer) RETURN l AS layer ORDER BY layer ASC",
+        },
+      },
+      secondOutput.nodeId,
+      { requireDraftDecoy: true, searchRequestMode: "exact" },
+    );
+    expect(launderedChecks).toEqual(expect.arrayContaining([
+      expect.objectContaining({ name: "search-returned-prior-root", passed: true }),
+      expect.objectContaining({ name: "search-request-contract", passed: false }),
+    ]));
+    const machineMarkerAsParameterChecks = checkGraphMemorySecondTurn(
+      secondOutput,
+      firstOutput,
+      {
+        ...evidence,
+        searchRequest: {
+          ...evidence.searchRequest,
+          parameters: {
+            topic: { type: "string", value: "GRAPH_MEMORY_ANCHOR:forbidden" },
+          },
+        },
+      },
+      secondOutput.nodeId,
+      { requireDraftDecoy: true, searchRequestMode: "exact" },
+    );
+    expect(machineMarkerAsParameterChecks).toEqual(expect.arrayContaining([
+      expect.objectContaining({ name: "search-returned-prior-root", passed: true }),
+      expect.objectContaining({ name: "search-request-contract", passed: false }),
+    ]));
+    const selectedTargetChecks = checkGraphMemorySecondTurn(
+      secondOutput,
+      firstOutput,
+      {
+        ...evidence,
+        searchRequest: {
+          ...evidence.searchRequest,
+          target: { scope: "project", id: 41 },
+        },
+      },
+      secondOutput.nodeId,
+      { requireDraftDecoy: true, searchRequestMode: "exact" },
+    );
+    expect(selectedTargetChecks).toEqual(expect.arrayContaining([
+      expect.objectContaining({ name: "search-request-contract", passed: false }),
+    ]));
+    const naturallyFormulatedChecks = checkGraphMemorySecondTurn(
+      secondOutput,
+      firstOutput,
+      {
+        ...evidence,
+        searchRequest: {
+          queryContractVersion: 1,
+          query: "MATCH (content:Content)<-[:CONTAINS]-(layer:Layer) WHERE content.title = $title RETURN layer AS layer LIMIT 1",
+          parameters: { title: { type: "string", value: graphMemorySearchTitle } },
+          budget: graphMemorySearchBudget,
+        },
+      },
+      secondOutput.nodeId,
+      { requireDraftDecoy: true, searchRequestMode: "natural" },
+    );
+    expect(naturallyFormulatedChecks).toEqual(expect.arrayContaining([
+      expect.objectContaining({ name: "search-returned-prior-root", passed: true }),
+      expect.objectContaining({ name: "search-request-contract", passed: true }),
+    ]));
+    const admittedNaturalVariants = [
+      {
+        query: "MATCH (layer:Layer)-[membership:CONTAINS]->(content:Content) WHERE content.title = $title RETURN DISTINCT layer LIMIT 1",
+        budget: graphMemorySearchBudget,
+      },
+      {
+        query: "MATCH path = (layer:Layer)-[:CONTAINS { order: 0 }]->(content:Content) WHERE $title = content.title RETURN layer ORDER BY content.title ASC LIMIT 1",
+        budget: graphMemorySearchBudget,
+      },
+      {
+        query: "MATCH (layer:Layer)-[:CONTAINS]->(content:Content) WHERE content.title = $title RETURN layer ORDER BY layer ASC",
+        budget: {},
+      },
+      {
+        query: "MATCH (layer:Layer)-[:CONTAINS]->(content:Content) WHERE content.title = $title RETURN layer ORDER BY layer ASC",
+        budget: undefined,
+      },
+      {
+        query: "MATCH (layer:Layer)-[:CONTAINS]->(content:Content) WHERE content.title = $title RETURN layer LIMIT 1;  ",
+        budget: graphMemorySearchBudget,
+      },
+    ];
+    for (const { query, budget } of admittedNaturalVariants) {
+      expect(checkGraphMemorySecondTurn(
+        secondOutput,
+        firstOutput,
+        {
+          ...evidence,
+          searchRequest: {
+            queryContractVersion: 1,
+            query,
+            parameters: { title: { type: "string", value: graphMemorySearchTitle } },
+            budget,
+          },
+        },
+        secondOutput.nodeId,
+        { requireDraftDecoy: true, searchRequestMode: "natural" },
+      )).toEqual(expect.arrayContaining([
+        expect.objectContaining({ name: "search-request-contract", passed: true }),
+      ]));
+    }
+    expect(graphMemorySearchRequestMode("fixture.graph-memory")).toBe("exact");
+    expect(graphMemorySearchRequestMode("codex.basic")).toBe("natural");
+    expect(graphMemorySearchRequestMode("claude.basic")).toBe("natural");
+    expect(graphMemorySearchRequestMode("prime.agent")).toBe("natural");
+    const nonFinalSemicolonChecks = checkGraphMemorySecondTurn(
+      secondOutput,
+      firstOutput,
+      {
+        ...evidence,
+        searchRequest: {
+          queryContractVersion: 1,
+          query: "MATCH (layer:Layer)-[:CONTAINS]->(content:Content) WHERE content.title = $title RETURN layer; LIMIT 1",
+          parameters: { title: { type: "string", value: graphMemorySearchTitle } },
+          budget: graphMemorySearchBudget,
+        },
+      },
+      secondOutput.nodeId,
+      { requireDraftDecoy: true, searchRequestMode: "natural" },
+    );
+    expect(nonFinalSemicolonChecks).toEqual(expect.arrayContaining([
+      expect.objectContaining({ name: "search-request-contract", passed: false }),
+    ]));
+    const tautologicalQueryChecks = checkGraphMemorySecondTurn(
+      secondOutput,
+      firstOutput,
+      {
+        ...evidence,
+        searchRequest: {
+          queryContractVersion: 1,
+          query: "MATCH (layer:Layer) WHERE $title = $title RETURN layer AS layer LIMIT 1",
+          parameters: { title: { type: "string", value: graphMemorySearchTitle } },
+          budget: graphMemorySearchBudget,
+        },
+      },
+      secondOutput.nodeId,
+      { requireDraftDecoy: true, searchRequestMode: "natural" },
+    );
+    expect(tautologicalQueryChecks).toEqual(expect.arrayContaining([
+      expect.objectContaining({ name: "search-returned-prior-root", passed: true }),
+      expect.objectContaining({ name: "search-request-contract", passed: false }),
+    ]));
+    const truncatedEvidence = {
+      ...evidence,
+      auditEvents: evidence.auditEvents.map((event) => (
+        event.path === "/api/graph/search" && event.sequence > evidence.secondTurnStartSequence
+          ? { ...event, resultTruncated: true }
+          : event
+      )),
+    };
+    expect(checkGraphMemorySecondTurn(
+      secondOutput,
+      firstOutput,
+      truncatedEvidence,
+      secondOutput.nodeId,
+      { requireDraftDecoy: true, searchRequestMode: "exact" },
+    )).toEqual(expect.arrayContaining([
+      expect.objectContaining({ name: "search-returned-prior-root", passed: false }),
+      expect.objectContaining({ name: "draft-decoy-hidden", passed: false }),
+    ]));
+
+    const searchTargetId = searchTarget[0].id;
+    const duplicateNaturalTarget = {
+      ...firstOutput,
+      rootLayer: {
+        ...firstOutput.rootLayer,
+        nodes: firstOutput.rootLayer.nodes.map((node) => node.id === searchTargetId
+          ? node
+          : { ...node, title: graphMemorySearchTitle }),
+      },
+    };
+    const machineMarkerTitle = {
+      ...firstOutput,
+      rootLayer: {
+        ...firstOutput.rootLayer,
+        nodes: firstOutput.rootLayer.nodes.map((node) => node.id === searchTargetId
+          ? node
+          : { ...node, title: "GRAPH_MEMORY_ANCHOR:forbidden" }),
+      },
+    };
+    const machineMarkerDetail = {
+      ...firstOutput,
+      rootLayer: {
+        ...firstOutput.rootLayer,
+        nodes: firstOutput.rootLayer.nodes.map((node) => node.id === searchTargetId
+          ? node
+          : { ...node, detail: `${node.detail}\n\nGRAPH_MEMORY_ANCHOR:forbidden` }),
+      },
+    };
+    for (const invalidOutput of [duplicateNaturalTarget, machineMarkerTitle, machineMarkerDetail]) {
+      expect(checkGraphMemoryFirstTurn(
+        invalidOutput,
+        invalidOutput.nodeId,
+      )).toEqual(expect.arrayContaining([
+        expect.objectContaining({ name: "natural-memory-search-target", passed: false }),
+      ]));
+    }
+
     const secondLayer = await productRequest(
       productSession,
       `/api/threads/${execution.threadIds[0]}/interactions/${detail.interactions[1].id}/layers/${secondRoot}`,

@@ -1,0 +1,69 @@
+
+> relayer-graphcomplete@0.0.0 eval:graph-memory
+> npm run build && node packages/eval-runner/dist/runtime-basic-cli.js --case graph-memory.prior-accepted-reference --judge-configuration none
+
+
+> relayer-graphcomplete@0.0.0 prebuild
+> npm run prepare:renderer
+
+
+> relayer-graphcomplete@0.0.0 prepare:renderer
+> node scripts/prepare-renderer-vendor.mjs
+
+
+> relayer-graphcomplete@0.0.0 build
+> node scripts/clean-dist.mjs && cargo build -p relayer-app-server -p relayer-graph-server && tsc -p tsconfig.build.json && npm run build:packages
+
+warning: field `layout` is never read
+  --> crates/relayer-graph-server/src/search_index.rs:61:5
+   |
+59 | struct LadybugRuntime {
+   |        -------------- field in this struct
+60 |     store: StdRwLock<Arc<LadybugStore>>,
+61 |     layout: StoreLayout,
+   |     ^^^^^^
+   |
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: method `root` is never used
+  --> crates/relayer-graph-server/src/search_index/store.rs:49:12
+   |
+40 | impl StoreLayout {
+   | ---------------- method in this implementation
+...
+49 |     pub fn root(&self) -> &Path {
+   |            ^^^^
+
+warning: function `rows` is never used
+   --> crates/relayer-graph-server/src/search_index/store.rs:645:8
+    |
+645 | pub fn rows(connection: &Connection<'_>, query: &str) -> Result<Vec<Vec<Value>>> {
+    |        ^^^^
+
+warning: `relayer-graph-server` (lib) generated 3 warnings
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.56s
+
+> relayer-graphcomplete@0.0.0 build:packages
+> npm run build -w @relayer/graph-client && npm run build -w @relayer/visual-assets && npm run build -w @relayer/harness-host && npm run build -w @relayer/eval-runner
+
+
+> @relayer/graph-client@0.0.0 prebuild
+> node scripts/clean-dist.mjs
+
+
+> @relayer/graph-client@0.0.0 build
+> node scripts/generate-query-errors.mjs --check && tsc -p tsconfig.build.json && node scripts/package-runtime-deps.mjs
+
+
+> @relayer/visual-assets@0.0.0 build
+> tsc -p tsconfig.build.json
+
+
+> @relayer/harness-host@0.0.0 build
+> tsc -p tsconfig.build.json
+
+
+> @relayer/eval-runner@0.0.0 build
+> tsc -p tsconfig.build.json
+
+{"testRunId":"05f39375-7a89-4ed8-9e94-cdeeba7a7774","executions":[{"testRunId":"05f39375-7a89-4ed8-9e94-cdeeba7a7774","testCaseId":"graph-memory.prior-accepted-reference","harnessConfigurationName":"fixture-graph-memory","harnessConfigurationDigest":"sha256:cf2bfb2d39389213b8a264d76f763621d6f387b988d2366613a3d42fdc4459cf","passed":true,"viewer":"/Volumes/2T-SSD/worktrees/factory-355/.relayer/evals/runtime/05f39375-7a89-4ed8-9e94-cdeeba7a7774/graph-memory.prior-accepted-reference/fixture-graph-memory/index.html"}],"passed":true}

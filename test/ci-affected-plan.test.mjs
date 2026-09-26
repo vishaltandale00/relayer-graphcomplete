@@ -515,6 +515,18 @@ describe("affected-module plan v1", { timeout: 30_000 }, () => {
     }
   });
 
+  test.each([
+    "scripts/run-context-draft-warning-test.mjs",
+    "scripts/test-desktop-context-draft-warning.mjs",
+  ])("routes capture proof entry point %s through the full portfolio", (changedFile) => {
+    const result = plan(changedFile);
+
+    expect(result.mode).toBe("full");
+    expect(Object.values(result.chapters).every(Boolean)).toBe(true);
+    expect(result.vitestFiles).toEqual([]);
+    expect(result.reasons).toContain(`${changedFile}: full-portfolio input`);
+  });
+
   test("keeps .gitattributes on every checkpoint that reads it", () => {
     const result = plan(".gitattributes");
 

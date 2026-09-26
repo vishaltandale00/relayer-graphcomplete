@@ -3,6 +3,7 @@ import { Window } from "happy-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { mountCompiledNodeDetail } from "../desktop/renderer/src/product-workspace/node-detail-runtime.js";
+import { interactionForThread, workspaceTurns } from "../desktop/renderer/src/product-workspace/model.js";
 import { createProductWorkspace, renderProductNodeDetail } from "../desktop/renderer/src/product-workspace/workspace.js";
 
 function canonicalJson(value) {
@@ -647,7 +648,7 @@ describe("compiled Node Detail product runtime", () => {
       edges: [],
       actions,
     };
-    const thread = { id: 3, rootInteractionId: 5, title: "Thread", harnessId: "fixture" };
+    let thread = { id: 3, rootInteractionId: 5, title: "Thread", harnessId: "fixture" };
     const state = {
       status: "accepted",
       currentInteractionId: 5,
@@ -687,13 +688,14 @@ describe("compiled Node Detail product runtime", () => {
       })),
       detach: vi.fn(),
     };
+    const showEmpty = vi.fn();
     const workspace = createProductWorkspace({
       root: window.document,
       getState: () => state,
       getThread: () => thread,
       selection,
       showThread: () => {},
-      showEmpty: () => {},
+      showEmpty,
       onNavigateLayer,
       onInvokeAction,
       inputDraftApi,
@@ -782,6 +784,147 @@ describe("compiled Node Detail product runtime", () => {
     window.document.querySelector("#detailActions [data-action-id='11']").click();
     await window.happyDOM.waitUntilComplete();
     expect(onNavigateLayer).toHaveBeenCalledWith(91, expect.objectContaining({ action: actions[0], sourceNode: node }));
+
+    const send = window.document.querySelector("#sendInteraction");
+    const graphNode = window.document.querySelector('[data-node="7"]');
+    expect(graphNode).not.toBeNull();
+    graphNode.click();
+    await vi.waitFor(() => expect(selection.selectedNodeId).toBe("7"));
+    const unhandledReselectionRejections = [];
+    const captureUnhandledReselection = (reason) => unhandledReselectionRejections.push(reason);
+    process.on("unhandledRejection", captureUnhandledReselection);
+    thread = undefined;
+    try {
+      expect(() => workspace.render()).not.toThrow();
+      expect(showEmpty).toHaveBeenCalled();
+      expect(send.disabled).toBe(true);
+      expect(selection.selectedNodeId).toBe("7");
+      expect(state.currentInteractionId).toBe(5);
+      expect(state.interactions[0]).toMatchObject({ id: 5, threadId: 3, graphNodeId: 50 });
+      expect(state.nodes.map(({ id }) => id)).toEqual([7]);
+      expect(workspaceTurns(state, undefined)).toEqual([]);
+      expect(interactionForThread(state, undefined)).toBeUndefined();
+      await Promise.resolve();
+      await window.happyDOM.waitUntilComplete();
+      await new Promise((resolveTurn) => setImmediate(resolveTurn));
+      await Promise.resolve();
+    } finally {
+      process.off("unhandledRejection", captureUnhandledReselection);
+    }
+    expect(unhandledReselectionRejections).toEqual([]);
+    expect(inputDraftApi.get).not.toHaveBeenCalledWith(undefined);
+    expect(inputDraftApi.commit).toHaveBeenCalledTimes(1);
+
+    thread = { id: 3, rootInteractionId: 5, title: "Thread", harnessId: "fixture" };
+    expect(() => workspace.render()).not.toThrow();
+    expect(send.disabled).toBe(false);
     workspace.dispose();
+
+    const delayedDraft = deferred();
+    let delayedThread = { id: 3, rootInteractionId: 5, title: "Thread", harnessId: "fixture" };
+    const delayedOccurrence = { presentingInteractionNodeId: 50, presentingLayerId: 99, actionId: 13 };
+    const restoredInputDraft = {
+      threadId: 3,
+      revision: 5,
+      attachments: [{
+        occurrence: delayedOccurrence,
+        sourceNodeId: 7,
+        action: { control: "text", prompt: "Draft answer" },
+        value: { text: "saved answer" },
+        draftRevision: 4,
+        committedAt: "2026-09-01T00:00:02Z",
+      }],
+      updatedAt: "2026-09-01T00:00:02Z",
+    };
+    const delayedInputDraftApi = {
+      get: vi.fn(() => delayedDraft.promise),
+      commit: vi.fn(),
+      detach: vi.fn(async () => ({
+        threadId: 3,
+        revision: 6,
+        attachments: [],
+        updatedAt: "2026-09-01T00:00:03Z",
+      })),
+    };
+    const delayedSubmitInteraction = vi.fn();
+    const delayedWorkspace = createProductWorkspace({
+      root: window.document,
+      getState: () => state,
+      getThread: () => delayedThread,
+      selection: { ...selection },
+      showThread: () => {},
+      showEmpty: vi.fn(),
+      onNavigateLayer,
+      onInvokeAction,
+      onSubmitInteraction: delayedSubmitInteraction,
+      inputDraftApi: delayedInputDraftApi,
+    });
+    delayedWorkspace.render();
+    await vi.waitFor(() => expect(delayedInputDraftApi.get).toHaveBeenCalledWith(3));
+    delayedThread = undefined;
+    expect(() => delayedWorkspace.render()).not.toThrow();
+    const composerTray = window.document.querySelector("#composerContextTray");
+    const delayedSend = window.document.querySelector("#sendInteraction");
+    expect(composerTray.children).toHaveLength(0);
+    expect(composerTray.classList.contains("hidden")).toBe(true);
+    expect(delayedSend.disabled).toBe(true);
+    delayedDraft.resolve(restoredInputDraft);
+    await window.happyDOM.waitUntilComplete();
+    expect(composerTray.children).toHaveLength(0);
+    expect(composerTray.classList.contains("hidden")).toBe(true);
+    expect(delayedSend.disabled).toBe(true);
+    delayedSend.click();
+    await window.happyDOM.waitUntilComplete();
+    expect(delayedSubmitInteraction).not.toHaveBeenCalled();
+    expect(delayedInputDraftApi.commit).not.toHaveBeenCalled();
+    expect(delayedInputDraftApi.detach).not.toHaveBeenCalled();
+    expect(delayedInputDraftApi.get).not.toHaveBeenCalledWith(undefined);
+    await expect(delayedInputDraftApi.get.mock.results[0].value).resolves.toEqual(restoredInputDraft);
+    delayedThread = { id: 3, rootInteractionId: 5, title: "Thread", harnessId: "fixture" };
+    expect(() => delayedWorkspace.render()).not.toThrow();
+    await window.happyDOM.waitUntilComplete();
+    expect(delayedInputDraftApi.get).toHaveBeenCalledTimes(1);
+    const inputPill = window.document.querySelector(".composer-input-pill");
+    expect(inputPill.getAttribute("aria-label")).toBe("Inspect Draft answer");
+    expect(inputPill.textContent).toContain("saved answer");
+    inputPill.click();
+    expect(window.document.querySelector(".composer-input-preview").textContent).toContain("saved answer");
+    const restoredPrompt = window.document.querySelector("#threadPrompt");
+    restoredPrompt.value = "Continue with the restored input.";
+    restoredPrompt.dispatchEvent(new window.Event("input", { bubbles: true }));
+    delayedSend.click();
+    await window.happyDOM.waitUntilComplete();
+    expect(delayedSubmitInteraction).toHaveBeenCalledTimes(1);
+    expect(delayedSubmitInteraction.mock.calls[0][0]).toBe("Continue with the restored input.");
+    expect(delayedSubmitInteraction.mock.calls[0][4]).toBe(restoredInputDraft.revision);
+    expect(delayedSubmitInteraction.mock.calls[0][5]).toBe(restoredInputDraft.revision);
+    await vi.waitFor(() => expect(delayedSend.disabled).toBe(false));
+    expect(delayedInputDraftApi.get).toHaveBeenNthCalledWith(2, 3);
+    await expect(delayedInputDraftApi.get.mock.results[1].value).resolves.toEqual(restoredInputDraft);
+    delayedThread = undefined;
+    expect(() => delayedWorkspace.dispose()).not.toThrow();
+
+    const noThreadInputDraftApi = {
+      get: vi.fn(),
+      commit: vi.fn(),
+      detach: vi.fn(),
+    };
+    let noThreadWorkspace;
+    expect(() => {
+      noThreadWorkspace = createProductWorkspace({
+        root: window.document,
+        getState: () => state,
+        getThread: () => undefined,
+        selection: { ...selection },
+        showThread: () => {},
+        showEmpty: vi.fn(),
+        onNavigateLayer,
+        onInvokeAction,
+        inputDraftApi: noThreadInputDraftApi,
+      });
+    }).not.toThrow();
+    expect(() => noThreadWorkspace.render()).not.toThrow();
+    expect(() => noThreadWorkspace.dispose()).not.toThrow();
+    expect(noThreadInputDraftApi.get).not.toHaveBeenCalled();
   });
 });

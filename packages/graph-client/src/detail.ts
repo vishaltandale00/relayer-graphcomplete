@@ -366,7 +366,7 @@ export class NodeDetailAuthoring {
 
   setComponent(id: string, markup: DetailTemplate, styles: DetailTemplate = emptyCssTemplate()): this {
     const state = authoringState(this);
-    if (state.frozen) throw new Error("Node Detail authoring is finalized and cannot be mutated");
+    assertNodeDetailAuthoringMutable(state);
     const existing = state.components.get(id);
     state.components.set(id, { markup, styles, order: existing?.order ?? state.components.size });
     state.cleared = false;
@@ -380,7 +380,7 @@ export class NodeDetailAuthoring {
    */
   clear(): this {
     const state = authoringState(this);
-    if (state.frozen) throw new Error("Node Detail authoring is finalized and cannot be mutated");
+    assertNodeDetailAuthoringMutable(state);
     state.components.clear();
     state.cleared = true;
     return this;
@@ -666,7 +666,7 @@ export function isNodeDetailAuthoringCleared(authoring: NodeDetailAuthoring): bo
 /** @internal */
 export function beginNodeDetailAuthoringFinalization(authoring: NodeDetailAuthoring): symbol {
   const state = authoringState(authoring);
-  if (state.frozen) throw new Error("Node Detail authoring is finalized and cannot be mutated");
+  assertNodeDetailAuthoringMutable(state);
   const finalization = Symbol("node-detail-finalization");
   state.frozen = true;
   state.finalization = finalization;
@@ -688,6 +688,22 @@ function authoringState(authoring: NodeDetailAuthoring): AuthoringState {
   const state = AUTHORING_STATE.get(authoring);
   if (state === undefined) throw new TypeError("Unknown Node Detail authoring object");
   return state;
+}
+
+function assertNodeDetailAuthoringMutable(state: AuthoringState): void {
+  if (state.finalization !== undefined) {
+    throw authoringStateError(
+      "detail_finalization_in_progress",
+      "Node Detail authoring finalization is in progress; retry after it settles",
+    );
+  }
+  if (state.frozen) {
+    throw authoringStateError("detail_finalized", "Node Detail authoring is finalized and cannot be mutated");
+  }
+}
+
+function authoringStateError(code: string, message: string): Error & { code: string } {
+  return Object.assign(new Error(message), { code });
 }
 
 function compileAuthoring(

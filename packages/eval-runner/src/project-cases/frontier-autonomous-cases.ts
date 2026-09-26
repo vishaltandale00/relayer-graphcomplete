@@ -5,7 +5,7 @@ import { spawn } from "node:child_process";
 
 import { bindAutonomousCaseSnapshot } from "../cases/catalog.js";
 import { createAutonomousCaseSnapshot } from "../cases/contracts.js";
-import type { EvalCheck } from "../runtime-basic.js";
+import type { EvalCheck } from "../cases/graph-checks.js";
 import type { CommandResult, CommandRunner, ProjectEvalCaseDefinition, ProjectEvalThreadDefinition } from "./h3.js";
 
 export const OFETCH_RETRY_METHODS_CASE_ID = "autonomous.ofetch.retry-methods";
