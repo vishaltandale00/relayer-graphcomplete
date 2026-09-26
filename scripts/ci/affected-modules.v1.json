@@ -161,7 +161,7 @@
   ],
   "scriptOwners": [
     { "prefix": "scripts/lint-ladybug-", "chapters": ["receipts", "vitest"], "vitestFiles": ["test/ladybug-native-receipts.test.mjs"] },
-    { "prefix": "scripts/verify-ladybug-", "chapters": ["receipts", "vitest"], "vitestFiles": ["test/ladybug-native-receipts.test.mjs"] },
+    { "prefix": "scripts/verify-ladybug-", "chapters": ["packaging", "receipts", "vitest"], "vitestFiles": ["test/ladybug-native-receipts.test.mjs", "test/ladybug-packaged-lifecycle.test.mjs"] },
     { "exact": "scripts/prepare-renderer-vendor.mjs", "chapters": ["typescript", "vitest", "packaging"], "rootTypeScript": true, "vitestFiles": ["test/desktop-shell.test.mjs"] },
     { "exact": "scripts/ask-profile-evidence-model.mjs", "chapters": ["vitest"], "vitestFiles": ["test/ask-profile-evidence-model.test.mjs", "test/evidence-capture-integrity.test.mjs"] },
     { "exact": "scripts/capture-ask-profile-evidence.mjs", "chapters": ["vitest"], "vitestFiles": ["test/evidence-capture-integrity.test.mjs"] },

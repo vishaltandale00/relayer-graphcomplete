@@ -428,6 +428,21 @@ describe("affected-module plan v1", { timeout: 30_000 }, () => {
     );
   });
 
+  test("maps Ladybug native receipt verification through packaging and lifecycle owners", () => {
+    const result = plan("scripts/verify-ladybug-native-receipts.mjs");
+
+    expect(result.mode).toBe("affected");
+    expect(result.chapters.packaging).toBe(true);
+    expect(result.chapters.receipts).toBe(true);
+    expect(result.chapters.vitest).toBe(true);
+    expect(result.vitestFiles).toEqual(
+      expect.arrayContaining([
+        "test/ladybug-native-receipts.test.mjs",
+        "test/ladybug-packaged-lifecycle.test.mjs",
+      ]),
+    );
+  });
+
   test("guards every exempted path declaration against drift", () => {
     const config = JSON.parse(readFileSync(configPath, "utf8"));
     const exempted = [...config.chapterOwners, ...config.scriptOwners].filter(
