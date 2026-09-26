@@ -63,9 +63,10 @@ export function resolveRunProfile(document, name, { implementation, path = "live
     name,
     harness: required("harness", profile.harness),
     implementation,
-    // The Codex harness declares compatibility with the built-in `codex` provider, so the
-    // definition keeps that id while its adapter varies.
-    providerId: String(profile.providerId ?? "codex").trim(),
+    // The Codex harness declares compatibility with the built-in `codex` provider, so a
+    // Codex run keeps that id while its adapter varies. Any other harness routes a
+    // key-based provider of its own; the built-in `codex` provider is managed-runtime@1.
+    providerId: String(profile.providerId ?? (codex ? "codex" : `live-run-${auth.adapterId}`)).trim(),
     modelId: required("modelId", profile.modelId),
     ...(codex
       ? {
