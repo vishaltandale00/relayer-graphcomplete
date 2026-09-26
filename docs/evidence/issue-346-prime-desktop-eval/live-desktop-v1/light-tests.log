@@ -1,0 +1,9 @@
+
+ RUN  v4.1.10 /Volumes/2T-SSD/worktrees/eval-prime-openrouter/relayer-graphcomplete
+
+
+ Test Files  4 passed (4)
+      Tests  49 passed (49)
+   Start at  14:56:13
+   Duration  7.34s (transform 669ms, setup 0ms, import 1.24s, tests 5.39s, environment 1ms)
+

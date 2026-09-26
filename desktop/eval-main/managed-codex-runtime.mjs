@@ -130,7 +130,8 @@ export function createEvalCodexCatalogProvisioner({
         try {
           await internalProductRequest(fetchImpl, productSession, "/api/internal/provider-definitions", {
             method: "PUT",
-            body: [{
+            body: [...(await internalProductRequest(fetchImpl, productSession, "/api/internal/provider-definitions") ?? [])
+              .filter(({ id }) => id !== "codex"), {
               id: "codex",
               adapterId: "codex-subscription",
               label: "Codex",
