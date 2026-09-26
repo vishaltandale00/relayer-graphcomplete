@@ -931,6 +931,13 @@ impl crate::GraphDatabase {
                 ));
             }
         }
+        // Accepted associations now own the verified content. Reclaim only this
+        // import's staging copy in the same transaction, so failures retain all
+        // staged bytes for retry while graph_imports keeps its ownership record.
+        sqlx::query("DELETE FROM graph_import_asset_contents WHERE import_id=?1")
+            .bind(import_id)
+            .execute(&mut *tx)
+            .await?;
         // An import is an accept path like any other, so its closures reach the
         // search store before SQLite commits. The whole conversation goes in as
         // one search transaction carrying one revision: the turns were authored

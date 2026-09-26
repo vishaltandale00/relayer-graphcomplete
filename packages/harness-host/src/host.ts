@@ -213,7 +213,7 @@ export class HarnessHost {
   private persistTail: Promise<void> = Promise.resolve();
   private initialized = false;
   private readonly pendingExecutionAccess = new Map<string, PendingExecutionAccess>();
-  private readonly visualAssetAuthorities = new Map<number, { state: "active" | "paused" | "revoked"; generation: number; barrierId?: string }>();
+  private readonly visualAssetAuthorities = new Map<number, { state: "active" | "paused" | "revoked"; generation: number; barrierId?: string; completionEpoch?: number }>();
   private closed = false;
   private closeAbandoned = false;
   private initializePromise: Promise<void> | undefined;
@@ -233,9 +233,28 @@ export class HarnessHost {
     if (request.authority.kind === "lifecycle") {
       const id = request.authority.interactionNodeId;
       const current = this.visualAssetAuthorities.get(id) ?? { state: "active" as const, generation: 1 };
+      if (request.operation.kind === "activate") {
+        const epoch = request.operation.completionEpoch as number;
+        const previousEpoch = current.completionEpoch ?? 0;
+        if (epoch < previousEpoch || (epoch === previousEpoch && current.state !== "active")) {
+          throw new VisualAssetsError("visual_assets_generation_stale", "Visual asset activation epoch is stale");
+        }
+        const activated = epoch === previousEpoch ? current : {
+          state: "active" as const,
+          generation: this.visualAssetAuthorities.has(id) ? current.generation + 1 : 1,
+          completionEpoch: epoch,
+        };
+        this.visualAssetAuthorities.set(id, activated);
+        // Fence old in-flight work before graph control publishes the new token.
+        await bridge.library.settleMutations();
+        if (this.visualAssetAuthorities.get(id) !== activated) {
+          throw new VisualAssetsError("visual_assets_generation_stale", "Visual asset activation was superseded");
+        }
+        return { activated: true, assetGeneration: activated.generation };
+      }
       if (request.operation.kind === "pause") {
         if (current.state === "revoked") {
-          const revoked = { state: "revoked" as const, generation: current.generation, barrierId: request.operation.barrierId as string };
+          const revoked = { ...current, state: "revoked" as const, generation: current.generation, barrierId: request.operation.barrierId as string };
           this.visualAssetAuthorities.set(id, revoked);
           await bridge.library.settleMutations();
           return { paused: true, assetGeneration: revoked.generation };
@@ -252,7 +271,7 @@ export class HarnessHost {
           return { paused: true, assetGeneration: paused.generation };
         }
         if (current.state !== "active" || current.generation !== request.operation.expectedGeneration) throw new VisualAssetsError("visual_assets_generation_stale", "Visual asset authority generation is stale");
-        const paused = { state: "paused" as const, generation: current.generation + 1, barrierId: request.operation.barrierId as string };
+        const paused = { ...current, state: "paused" as const, generation: current.generation + 1, barrierId: request.operation.barrierId as string };
         this.visualAssetAuthorities.set(id, paused);
         await bridge.library.settleMutations();
         return { paused: true, assetGeneration: paused.generation };
@@ -260,11 +279,11 @@ export class HarnessHost {
       if (current.barrierId !== request.operation.barrierId || current.generation !== request.operation.assetGeneration) throw new VisualAssetsError("visual_assets_barrier_stale", "Visual asset authority barrier is stale");
       if (request.operation.kind === "resume") {
         if (current.state === "revoked") throw new VisualAssetsError("completion_inactive", "Visual asset authority is revoked");
-        this.visualAssetAuthorities.set(id, { state: "active", generation: current.generation, ...(current.barrierId === undefined ? {} : { barrierId: current.barrierId }) });
+        this.visualAssetAuthorities.set(id, { ...current, state: "active", generation: current.generation, ...(current.barrierId === undefined ? {} : { barrierId: current.barrierId }) });
         return { resumed: true, assetGeneration: current.generation };
       }
       if (current.state === "active") throw new VisualAssetsError("visual_assets_barrier_stale", "Active visual asset authority cannot be revoked by this barrier");
-      this.visualAssetAuthorities.set(id, { state: "revoked", generation: current.generation, ...(current.barrierId === undefined ? {} : { barrierId: current.barrierId }) });
+      this.visualAssetAuthorities.set(id, { ...current, state: "revoked", generation: current.generation, ...(current.barrierId === undefined ? {} : { barrierId: current.barrierId }) });
       await bridge.library.settleMutations();
       return { revoked: true, assetGeneration: current.generation };
     }
@@ -1669,11 +1688,21 @@ function readVisualAssetRequest(value: unknown, generation: number): VisualBridg
     throw new VisualAssetsError("visual_assets_request_invalid", "Visual asset bridge request is invalid");
   }
   if (value.authority.kind === "lifecycle") {
-    if (!["pause", "resume", "finalize-revoke"].includes(value.operation.kind)
+    if (!["activate", "pause", "resume", "finalize-revoke"].includes(value.operation.kind)
       || !Number.isSafeInteger(value.authority.interactionNodeId)
       || (value.authority.interactionNodeId as number) < 1
       || Object.keys(value.authority).sort().join(",") !== "interactionNodeId,kind") {
       throw new VisualAssetsError("visual_assets_authority_invalid", "Visual asset revocation authority is invalid");
+    }
+    if (value.operation.kind === "activate") {
+      if (!Number.isSafeInteger(value.operation.completionEpoch) || (value.operation.completionEpoch as number) < 1
+        || Object.keys(value.operation).sort().join(",") !== "completionEpoch,kind") {
+        throw new VisualAssetsError("visual_assets_authority_invalid", "Visual asset activation epoch is invalid");
+      }
+      return {
+        authority: { kind: "lifecycle", interactionNodeId: value.authority.interactionNodeId as number },
+        operation: value.operation as VisualBridgeOperation,
+      };
     }
     const barrierId = value.operation.barrierId;
     const operationGeneration = value.operation.kind === "pause" ? value.operation.expectedGeneration : value.operation.assetGeneration;

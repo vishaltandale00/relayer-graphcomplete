@@ -1,0 +1,222 @@
+
+> relayer-graphcomplete@0.0.0 test:desktop:visual-node-details
+> npm run build && node scripts/run-desktop-visual-node-details-test.mjs
+
+
+> relayer-graphcomplete@0.0.0 prebuild
+> npm run prepare:renderer
+
+
+> relayer-graphcomplete@0.0.0 prepare:renderer
+> node scripts/prepare-renderer-vendor.mjs
+
+
+> relayer-graphcomplete@0.0.0 build
+> node scripts/clean-dist.mjs && cargo build -p relayer-app-server -p relayer-graph-server && tsc -p tsconfig.build.json && npm run build:packages
+
+warning: field `layout` is never read
+  --> crates/relayer-graph-server/src/search_index.rs:61:5
+   |
+59 | struct LadybugRuntime {
+   |        -------------- field in this struct
+60 |     store: StdRwLock<Arc<LadybugStore>>,
+61 |     layout: StoreLayout,
+   |     ^^^^^^
+   |
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: method `root` is never used
+  --> crates/relayer-graph-server/src/search_index/store.rs:49:12
+   |
+40 | impl StoreLayout {
+   | ---------------- method in this implementation
+...
+49 |     pub fn root(&self) -> &Path {
+   |            ^^^^
+
+warning: function `rows` is never used
+   --> crates/relayer-graph-server/src/search_index/store.rs:645:8
+    |
+645 | pub fn rows(connection: &Connection<'_>, query: &str) -> Result<Vec<Vec<Value>>> {
+    |        ^^^^
+
+warning: `relayer-graph-server` (lib) generated 3 warnings
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.12s
+
+> relayer-graphcomplete@0.0.0 build:packages
+> npm run build -w @relayer/graph-client && npm run build -w @relayer/visual-assets && npm run build -w @relayer/harness-host && npm run build -w @relayer/eval-runner
+
+
+> @relayer/graph-client@0.0.0 prebuild
+> node scripts/clean-dist.mjs
+
+
+> @relayer/graph-client@0.0.0 build
+> node scripts/generate-query-errors.mjs --check && tsc -p tsconfig.build.json && node scripts/package-runtime-deps.mjs
+
+
+> @relayer/visual-assets@0.0.0 build
+> tsc -p tsconfig.build.json
+
+
+> @relayer/harness-host@0.0.0 build
+> tsc -p tsconfig.build.json
+
+
+> @relayer/eval-runner@0.0.0 build
+> tsc -p tsconfig.build.json
+
+{
+  "schemaVersion": 1,
+  "paidInferenceCalls": 0,
+  "runId": "run-2026-09-26T21-54-04-681Z-40aad430",
+  "executionId": "888a6d37-59dc-4546-a734-dc9d69861ce6",
+  "threadId": 1,
+  "turnId": 1,
+  "acceptedPackageIntegrity": "495b42a9e82e824fa3801504c2d6df6cff45c586e2a1a5121385c8f701d05c9c",
+  "screenshot": {
+    "schemaVersion": 1,
+    "screenshotId": "shot-cba668ac-5fc5-425c-b07f-3a6794fd6e0d",
+    "label": "Accepted visual Node Detail in read-only Product workspace",
+    "executionId": "888a6d37-59dc-4546-a734-dc9d69861ce6",
+    "threadId": "1",
+    "threadRevision": "thread:1:updated:1790459644689:input-draft:0:interactions:1:1:accepted:server-input-draft:0",
+    "turnId": "1",
+    "layerId": "7",
+    "selectedNodeId": "18",
+    "activatedActionId": null,
+    "navigationPath": [
+      {
+        "layerId": "7",
+        "viaActionId": null
+      }
+    ],
+    "viewport": {
+      "width": 1480,
+      "height": 888,
+      "deviceScaleFactor": 2
+    },
+    "captureTarget": {
+      "kind": "element",
+      "elementRef": "node-detail"
+    },
+    "mode": "full",
+    "tileCount": 2,
+    "tiles": [
+      {
+        "index": 0,
+        "width": 604,
+        "height": 912,
+        "contentDigest": "sha256:24684b9336fe4ddcf3306084e7c28941e1af2efdb57b4b446aab699fabb9a398"
+      },
+      {
+        "index": 1,
+        "width": 604,
+        "height": 912,
+        "contentDigest": "sha256:bebdfb38784ffb54bc5164d4b6c8ec1b03c5a4569261912138c5d6234472b254"
+      }
+    ],
+    "contentDigest": "sha256:10a0dfba248e457706c396c868fabe83caab7f3de171f292edc035bc885530e0"
+  },
+  "screenshotDirectory": "/Users/vishaltandale/.codex/worktrees/05b1/relayer-graphcomplete/.relayer/evidence/visual-node-details/run-2026-09-26T21-54-00.278Z-5e1f0e61/shot-cba668ac-5fc5-425c-b07f-3a6794fd6e0d",
+  "assertions": {
+    "ordinaryEvalProductState": true,
+    "authoredLayoutMounted": true,
+    "controlsDiscovered": [
+      "Open implementation notes",
+      "Open referenced evidence",
+      "Open fixture documentation",
+      "Investigate follow-up",
+      "Review note"
+    ],
+    "expandAndReferenceNavigation": true,
+    "historyRestoration": true,
+    "invokeAndInputDisabled": true,
+    "serverMutationRejected": {
+      "status": 403,
+      "code": "read_only_session"
+    },
+    "reopened": true,
+    "visualAsset": {
+      "id": "asset_00353b5e-24b4-4489-9b78-3e7000d50921",
+      "digestSha256": "0499cefdad4591290c673fa233821e8101512ee67ad8aec4c78f12d5df81e2f4",
+      "renderedAsset": {
+        "alt": "Accepted detail status illustration",
+        "assetState": "available",
+        "sourceProtocol": "blob:",
+        "complete": true,
+        "naturalWidth": 300
+      }
+    },
+    "visualAssetReopened": {
+      "alt": "Accepted detail status illustration",
+      "assetState": "available",
+      "sourceProtocol": "blob:",
+      "complete": true,
+      "naturalWidth": 300
+    },
+    "visualAssetExportImport": {
+      "exportPath": "/Users/vishaltandale/.codex/worktrees/05b1/relayer-graphcomplete/.relayer/evidence/visual-node-details/run-2026-09-26T21-54-00.278Z-5e1f0e61/conversation.jsonl",
+      "importedRunId": "import-6c1b2bee-eb70-4f32-9b04-15016ef4e0be",
+      "importedExecutionId": "execution-6c1b2bee-eb70-4f32-9b04-15016ef4e0be",
+      "importedThreadId": 2,
+      "pinPreserved": true,
+      "renderedAsset": {
+        "alt": "Accepted detail status illustration",
+        "assetState": "available",
+        "sourceProtocol": "blob:",
+        "complete": true,
+        "naturalWidth": 300
+      },
+      "portabilityPending": false,
+      "screenshot": {
+        "schemaVersion": 1,
+        "screenshotId": "shot-52a692a1-69e8-4f5d-a36f-9c1b86765f7d",
+        "label": "Imported accepted visual Node Detail with portable image bytes",
+        "executionId": "execution-6c1b2bee-eb70-4f32-9b04-15016ef4e0be",
+        "threadId": "2",
+        "threadRevision": "thread:2:updated:1790459644689:input-draft:none:interactions:2:1:accepted:server-input-draft:none",
+        "turnId": "2",
+        "layerId": "8",
+        "selectedNodeId": "21",
+        "activatedActionId": null,
+        "navigationPath": [
+          {
+            "layerId": "8",
+            "viaActionId": null
+          }
+        ],
+        "viewport": {
+          "width": 1480,
+          "height": 888,
+          "deviceScaleFactor": 2
+        },
+        "captureTarget": {
+          "kind": "element",
+          "elementRef": "node-detail"
+        },
+        "mode": "full",
+        "tileCount": 2,
+        "tiles": [
+          {
+            "index": 0,
+            "width": 604,
+            "height": 912,
+            "contentDigest": "sha256:24684b9336fe4ddcf3306084e7c28941e1af2efdb57b4b446aab699fabb9a398"
+          },
+          {
+            "index": 1,
+            "width": 604,
+            "height": 912,
+            "contentDigest": "sha256:bebdfb38784ffb54bc5164d4b6c8ec1b03c5a4569261912138c5d6234472b254"
+          }
+        ],
+        "contentDigest": "sha256:b58b6d39251742c11ecbc3f9a425a46296db2bdd5d8955b352bb0cdcf01cc39d"
+      },
+      "screenshotDirectory": "/Users/vishaltandale/.codex/worktrees/05b1/relayer-graphcomplete/.relayer/evidence/visual-node-details/run-2026-09-26T21-54-00.278Z-5e1f0e61/shot-52a692a1-69e8-4f5d-a36f-9c1b86765f7d"
+    }
+  },
+  "manifestSha256": "416e199c1e0ac3008b51fc8c797200fbb2b8e2f8eefb4369bd11b08b43a71a3f",
+  "manifestPath": "/Users/vishaltandale/.codex/worktrees/05b1/relayer-graphcomplete/.relayer/evidence/visual-node-details/run-2026-09-26T21-54-00.278Z-5e1f0e61/manifest.json"
+}
+Visual Node Detail Electron proof passed: /Users/vishaltandale/.codex/worktrees/05b1/relayer-graphcomplete/.relayer/evidence/visual-node-details/run-2026-09-26T21-54-00.278Z-5e1f0e61/manifest.json

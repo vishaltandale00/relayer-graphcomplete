@@ -1,0 +1,14 @@
+{
+  "base": "c70d527a918a72a99fda1588a53095404386dbe3",
+  "files": {
+    "crates/relayer-graph-core/src/graph/import.rs": "3d8e0054256e0918fcfa3cb19317508178b5ecb1139cdc89d5fbf28dd7a1c3ad",
+    "crates/relayer-graph-server/src/lib.rs": "f021a756169cb2a2399e93b679950c690e8540613608216c1c55c4116753bdf2",
+    "crates/relayer-graph-server/tests/import_visual_asset_transport.rs": "b74970a80f067fe1f9f61d57905fac61dd583c388a0fda48a9c6c4e8348d9f6e",
+    "desktop/renderer/src/product-workspace/node-detail-runtime.js": "9abb98a375c170cc9d8bfe0fb77c479591eb31ab8b797228bf19f0b444f05386",
+    "packages/harness-host/src/host.ts": "c34dc5e34185215b83a20fe085b377ebeb63b3d43962b46701f4e7b6e5f7a725",
+    "packages/harness-host/test/visual-assets-bridge.test.ts": "741ff5f28052483b0729bdffa82380221d0139a8904f70054a34239878a082f4",
+    "packages/visual-assets/src/index.ts": "be8404517d2b73420712dd97c4b94cf7ab9c017d4564ac072bdc4f5e836b7c07",
+    "packages/visual-assets/test/visual-assets.test.ts": "6c28ca9a28513993907392f3986106f1b29e93cef28b19aa4ffd49a0820c8665",
+    "test/node-detail-runtime.test.mjs": "9dfb640031efd434efd0160d290cef61dd3f450f760249e38dbc0e85168f7d02"
+  }
+}

@@ -1739,12 +1739,26 @@ async fn mint_capability_with_profile(
             return Ok(graph_token);
         }
     }
+    let gate = completion_asset_gate(state, node_id)?;
+    let mut asset_generation = gate.lock().await;
     let epoch = state.graph.activate_completion_authority(node_id).await?;
+    // The epoch already invalidated prior tokens even if activation acknowledgment
+    // is lost. Never let a requested old token replay a now-stale session entry.
+    state
+        .sessions
+        .lock()
+        .map_err(|_| ApiError::internal("session lock poisoned"))?
+        .retain(|_, active| active.node_id != node_id);
+    *asset_generation = visual_assets_lifecycle(
+        state,
+        node_id,
+        json!({"kind":"activate","completionEpoch":epoch}),
+    )
+    .await?;
     let mut sessions = state
         .sessions
         .lock()
         .map_err(|_| ApiError::internal("session lock poisoned"))?;
-    sessions.retain(|_, active| active.node_id != node_id);
     sessions.insert(
         graph_token.clone(),
         RuntimeAuthority {
@@ -2582,6 +2596,205 @@ mod tests {
     use tower::ServiceExt;
 
     #[tokio::test]
+    async fn reminted_capability_reactivates_assets_without_reviving_old_generation() {
+        let host_state = Arc::new(Mutex::new((0_u64, 1_u64, true)));
+        let observed = host_state.clone();
+        let lose_activation_ack = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let fail_activation = lose_activation_ack.clone();
+        let fake = Router::new().route(
+            "/visual-assets/operations",
+            post(move |Json(body): Json<Value>| {
+                let observed = observed.clone();
+                let fail_activation = fail_activation.clone();
+                async move {
+                    let mut host = observed.lock().unwrap();
+                    let operation = &body["operation"];
+                    match operation["kind"].as_str().unwrap() {
+                        "activate" => {
+                            let epoch = operation["completionEpoch"].as_u64().unwrap();
+                            assert!(epoch > host.0);
+                            if host.0 != 0 {
+                                host.1 += 1;
+                            }
+                            host.0 = epoch;
+                            host.2 = true;
+                            if fail_activation.swap(false, std::sync::atomic::Ordering::SeqCst) {
+                                return (
+                                    StatusCode::SERVICE_UNAVAILABLE,
+                                    Json(json!({"error":"lost activation acknowledgment"})),
+                                );
+                            }
+                        }
+                        "pause" => {
+                            host.1 += 1;
+                            host.2 = false;
+                        }
+                        "finalize-revoke" => {
+                            host.2 = false;
+                        }
+                        "list-assets" => {
+                            let status = if host.2 && body["assetGeneration"] == host.1 {
+                                StatusCode::OK
+                            } else {
+                                StatusCode::FORBIDDEN
+                            };
+                            return (status, Json(json!({"result":{"items":[]}})));
+                        }
+                        _ => panic!("unexpected bridge operation"),
+                    }
+                    (
+                        StatusCode::OK,
+                        Json(json!({"result":{"assetGeneration":host.1}})),
+                    )
+                }
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let task = tokio::spawn(async move {
+            axum::serve(listener, fake).await.unwrap();
+        });
+        let graph = GraphDatabase::in_memory().await.unwrap();
+        let node = graph
+            .create_interaction(None, ThreadId::new(1).unwrap(), "Retry")
+            .await
+            .unwrap();
+        let state = ServerState::new(graph, "control");
+        let app = router(state.clone());
+        let request = |method: &str, path: &str, token: &str, body: Value| {
+            Request::builder()
+                .method(method)
+                .uri(path)
+                .header("authorization", format!("Bearer {token}"))
+                .header("content-type", "application/json")
+                .body(Body::from(body.to_string()))
+                .unwrap()
+        };
+        assert_eq!(
+            app.clone()
+                .oneshot(request(
+                    "PUT",
+                    "/api/control/visual-assets/bridge",
+                    "control",
+                    json!({"url":format!("http://{address}"),"token":"x".repeat(32),"generation":1})
+                ))
+                .await
+                .unwrap()
+                .status(),
+            StatusCode::OK
+        );
+        let mut old_token: Option<String> = None;
+        for _ in 0..2 {
+            let response = app
+                .clone()
+                .oneshot(request(
+                    "POST",
+                    "/api/control/capabilities",
+                    "control",
+                    json!({"nodeId":node.id}),
+                ))
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::OK);
+            let body: Value =
+                serde_json::from_slice(&to_bytes(response.into_body(), usize::MAX).await.unwrap())
+                    .unwrap();
+            let token = body["graphToken"].as_str().unwrap().to_owned();
+            let list =
+                json!({"operation":{"kind":"list-assets","scope":{"kind":"thread","threadId":1}}});
+            assert_eq!(
+                app.clone()
+                    .oneshot(request(
+                        "POST",
+                        "/api/graph/visual-assets/operations",
+                        &token,
+                        list.clone()
+                    ))
+                    .await
+                    .unwrap()
+                    .status(),
+                StatusCode::OK,
+                "retry must receive active host authority at the generation used by graph requests"
+            );
+            if let Some(old) = old_token {
+                assert!(
+                    !app.clone()
+                        .oneshot(request(
+                            "POST",
+                            "/api/graph/visual-assets/operations",
+                            &old,
+                            list
+                        ))
+                        .await
+                        .unwrap()
+                        .status()
+                        .is_success()
+                );
+            }
+            assert_eq!(
+                app.clone()
+                    .oneshot(request(
+                        "DELETE",
+                        "/api/control/capabilities",
+                        "control",
+                        json!({"graphToken":token})
+                    ))
+                    .await
+                    .unwrap()
+                    .status(),
+                StatusCode::OK
+            );
+            old_token = Some(token);
+        }
+        let active_token = mint_capability(&state, node.id, None).await.ok().unwrap();
+        lose_activation_ack.store(true, std::sync::atomic::Ordering::SeqCst);
+        let failed = app
+            .clone()
+            .oneshot(request(
+                "POST",
+                "/api/control/capabilities",
+                "control",
+                json!({"nodeId":node.id,"graphToken":"unacknowledged-token"}),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(failed.status(), StatusCode::SERVICE_UNAVAILABLE);
+        assert!(
+            state.sessions.lock().unwrap().is_empty(),
+            "failed activation must neither expose the pending token nor retain stale replay entries"
+        );
+        let acknowledged_later_epoch = host_state.lock().unwrap().0;
+        let recovered = app
+            .clone()
+            .oneshot(request(
+                "POST",
+                "/api/control/capabilities",
+                "control",
+                json!({"nodeId":node.id,"graphToken":active_token}),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(recovered.status(), StatusCode::OK);
+        assert!(
+            host_state.lock().unwrap().0 > acknowledged_later_epoch,
+            "requested old token must reactivate at a newer epoch, not replay its stale session"
+        );
+        assert_eq!(
+            app.oneshot(request(
+                "POST",
+                "/api/graph/visual-assets/operations",
+                &active_token,
+                json!({"operation":{"kind":"list-assets","scope":{"kind":"thread","threadId":1}}})
+            ))
+            .await
+            .unwrap()
+            .status(),
+            StatusCode::OK
+        );
+        task.abort();
+    }
+
+    #[tokio::test]
     async fn rejected_terminal_submit_resumes_asset_authority_at_the_advanced_generation() {
         let observed = Arc::new(Mutex::new(Vec::<Value>::new()));
         let observed_handler = observed.clone();
@@ -2983,14 +3196,14 @@ mod tests {
             .header("authorization", "Bearer control").header("content-type", "application/json")
             .body(Body::from(json!({"url":"http://127.0.0.1:43117","token":"x".repeat(32),"generation":generation}).to_string())).unwrap()
         };
-        assert_eq!(
-            app.clone().oneshot(register(1)).await.unwrap().status(),
-            StatusCode::OK
-        );
         let token = mint_capability(&state, interaction.id, None)
             .await
             .ok()
             .unwrap();
+        assert_eq!(
+            app.clone().oneshot(register(1)).await.unwrap().status(),
+            StatusCode::OK
+        );
         let authority = state.sessions.lock().unwrap().get(&token).copied().unwrap();
         let writer = graph
             .writer_for_completion_authority(authority.node_id, authority.epoch)
@@ -3033,6 +3246,12 @@ mod tests {
                     let pauses = pauses.clone();
                     let resume_failed = resume_failed.clone();
                     async move {
+                        if body["operation"]["kind"] == "activate" {
+                            return (
+                                StatusCode::OK,
+                                Json(json!({"result":{"assetGeneration":1}})),
+                            );
+                        }
                         let id = body["authority"]["interactionNodeId"].as_i64().unwrap();
                         let operation = &body["operation"];
                         let mut states = observed.lock().unwrap();
@@ -3228,6 +3447,12 @@ mod tests {
                 let calls = calls.clone();
                 let resumes = counted_resumes.clone();
                 async move {
+                    if body["operation"]["kind"] == "activate" {
+                        return (
+                            StatusCode::OK,
+                            Json(json!({"result":{"assetGeneration":1}})),
+                        );
+                    }
                     if body["operation"]["kind"] == "resume" {
                         resumes.fetch_add(1, Ordering::SeqCst);
                     }

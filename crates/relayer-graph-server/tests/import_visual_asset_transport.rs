@@ -116,7 +116,85 @@ async fn shared_large_content_crosses_real_import_routes_once_without_relaxing_b
         .await
         .unwrap();
     let counts: (i64,i64,i64) = sqlx::query_as("SELECT (SELECT COUNT(*) FROM graph_import_asset_contents),(SELECT COUNT(*) FROM authored_detail_asset_contents),(SELECT COUNT(*) FROM authored_detail_assets)").fetch_one(&pool).await.unwrap();
-    assert_eq!(counts, (1, 1, 3));
+    assert_eq!(counts, (0, 1, 3));
+    let imports: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM graph_imports")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(imports, 1, "accepted imports retain ownership metadata");
+    pool.close().await;
+}
+
+#[tokio::test]
+async fn staging_cleanup_failure_rolls_back_materialization_and_can_retry() {
+    let file = tempfile::NamedTempFile::new().unwrap();
+    let database = GraphDatabase::open(file.path()).await.unwrap();
+    let app = router(ServerState::new(database.clone(), "control"));
+    let blob = content(b"retry-safe-content");
+    let prefix = "/api/control/conversation-import-stages/retry";
+    assert_eq!(
+        post(
+            &app,
+            "/api/control/conversation-import-stages",
+            &stage("retry", 111)
+        )
+        .await
+        .0,
+        StatusCode::OK
+    );
+    assert_eq!(
+        post(&app, &format!("{prefix}/visual-asset-contents"), &blob)
+            .await
+            .0,
+        StatusCode::OK
+    );
+    assert_eq!(
+        post(&app, &format!("{prefix}/turns"), &turn(&blob)).await.0,
+        StatusCode::OK
+    );
+    let pool = sqlx::SqlitePool::connect(&format!("sqlite://{}", file.path().display()))
+        .await
+        .unwrap();
+    sqlx::query("CREATE TRIGGER fail_stage_cleanup BEFORE DELETE ON graph_import_asset_contents BEGIN SELECT RAISE(ABORT, 'injected cleanup failure'); END").execute(&pool).await.unwrap();
+    let (status, _) = post(&app, &format!("{prefix}/finalize"), &json!({})).await;
+    assert_ne!(status, StatusCode::OK);
+    let counts: (i64, i64, i64) = sqlx::query_as("SELECT (SELECT COUNT(*) FROM graph_import_asset_contents),(SELECT COUNT(*) FROM authored_detail_asset_contents),(SELECT COUNT(*) FROM nodes WHERE thread_id=111)").fetch_one(&pool).await.unwrap();
+    assert_eq!(
+        counts,
+        (1, 0, 0),
+        "failed cleanup must roll back accepted content and preserve staged bytes"
+    );
+    sqlx::query("DROP TRIGGER fail_stage_cleanup")
+        .execute(&pool)
+        .await
+        .unwrap();
+    let (status, response) = post(&app, &format!("{prefix}/finalize"), &json!({})).await;
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "{}",
+        String::from_utf8_lossy(&response)
+    );
+    let receipt: Value = serde_json::from_slice(&response).unwrap();
+    let node = NodeId::new(
+        receipt["turns"][0]["output"]["rootLayer"]["nodes"][0]["id"]
+            .as_i64()
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        database
+            .accepted_detail_asset(node, "visual")
+            .await
+            .unwrap()
+            .content,
+        b"retry-safe-content"
+    );
+    let staged: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM graph_import_asset_contents")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(staged, 0);
     pool.close().await;
 }
 

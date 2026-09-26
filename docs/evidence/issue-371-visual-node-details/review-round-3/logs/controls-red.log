@@ -1,0 +1,38 @@
+
+ RUN  v4.1.10 /Users/vishaltandale/.codex/worktrees/05b1/relayer-graphcomplete
+
+ ❯ |isolated| test/node-detail-runtime.test.mjs (42 tests | 1 failed | 41 skipped) 16ms
+     × mounts authored layout in isolation and composes an ordinary external link with an independent visual asset 15ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  |isolated| test/node-detail-runtime.test.mjs > compiled Node Detail product runtime > mounts authored layout in isolation and composes an ordinary external link with an independent visual asset
+AssertionError: expected [] to deeply equal [ { kind: 'link', …(1) } ]
+
+- Expected
++ Received
+
+- [
+-   {
+-     "kind": "link",
+-     "text": "Documentation",
+-   },
+- ]
++ []
+
+ ❯ test/node-detail-runtime.test.mjs:98:10
+     96|     try {
+     97|       expect(compiledNodeDetailReviewControls(window.document).map(({ …
+     98|         .toEqual([{ kind: "link", text: "Documentation" }]);
+       |          ^
+     99|     } finally {
+    100|       assetResponse.resolve(resolvedAsset);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 41 skipped (42)
+   Start at  17:43:33
+   Duration  441ms (transform 105ms, setup 0ms, import 354ms, tests 16ms, environment 0ms)
+

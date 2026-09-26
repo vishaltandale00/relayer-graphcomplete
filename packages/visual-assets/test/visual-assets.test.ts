@@ -129,7 +129,7 @@ describe("visual_assets deterministic library interface", () => {
         scope: { kind: "library" }, name: "Second", tagIds: [],
       });
       const stored = JSON.parse(await readFile(storagePath, "utf8")) as { version: number; assets: unknown[] };
-      expect(stored.version).toBe(2);
+      expect(stored.version).toBe(3);
       expect(stored.assets).toHaveLength(2);
       expect(JSON.stringify(stored)).not.toContain("contentBase64");
       const contentFiles = await readdir(`${storagePath}.content`);
@@ -190,7 +190,7 @@ describe("visual_assets deterministic library interface", () => {
       expect((await library.inspect(asset.id)).asset).toEqual(asset);
       expect(await (await library.download(asset.id)).read()).toEqual(bytes);
       const migrated = JSON.parse(await readFile(storagePath, "utf8")) as { version: number; revision: number };
-      expect(migrated).toMatchObject({ version: 2, revision: 7 });
+      expect(migrated).toMatchObject({ version: 3, revision: 7 });
       expect(await readdir(`${storagePath}.content`)).toHaveLength(1);
     } finally {
       await rm(directory, { recursive: true, force: true });
@@ -245,6 +245,122 @@ describe("visual_assets deterministic library interface", () => {
       expect((await tag).scope).toEqual({ kind: "project", projectId: 7 });
       expect((await association).scopes).toContainEqual({ kind: "project", projectId: 7 });
       expect((await association).scopes).not.toContainEqual({ kind: "project", projectId: 8 });
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps recorded user-added relationships mutable across publication and reopen but preserves ambiguous v2 defaults", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "relayer-visual-assets-relationship-defaults-"));
+    try {
+      const storagePath = join(directory, "visual-assets.json");
+      const registry = {
+        id: "curated-user", name: "Curated user", source: "user" as const,
+        contentAuthority: "user" as const, defaultRelationshipAuthority: "read-only" as const,
+      };
+      const library = await createFileVisualAssetsLibrary({ registries: [registry] }, storagePath);
+      const tag = await library.createTag({ scope: { kind: "library" }, name: "Mutable" });
+      const asset = await library.add({
+        file: memoryHarnessFile("mutable.svg", "image/svg+xml", validSvg),
+        scope: { kind: "library" }, name: "Mutable", registryId: registry.id, tagIds: [tag.id],
+      });
+      expect((await library.organize({ assetId: asset.id, addTagIds: [], removeTagIds: [tag.id] })).tagIds).toEqual([]);
+      await library.organize({ assetId: asset.id, addTagIds: [tag.id], removeTagIds: [] });
+
+      const reopened = await createFileVisualAssetsLibrary({}, storagePath);
+      expect((await reopened.organize({ assetId: asset.id, addTagIds: [], removeTagIds: [tag.id] })).tagIds).toEqual([]);
+      await reopened.organize({ assetId: asset.id, addTagIds: [tag.id], removeTagIds: [] });
+
+      const v3 = JSON.parse(await readFile(storagePath, "utf8")) as {
+        version: number;
+        assets: { asset: unknown; defaultTagIds: string[] }[];
+      };
+      await writeFile(storagePath, `${JSON.stringify({
+        ...v3,
+        version: 2,
+        assets: v3.assets.map(({ asset: logicalAsset }) => logicalAsset),
+      })}\n`);
+      const migrated = await createFileVisualAssetsLibrary({}, storagePath);
+      await expect(migrated.organize({
+        assetId: asset.id, addTagIds: [], removeTagIds: [tag.id],
+      })).rejects.toMatchObject({ code: "tag_relationship_read_only" });
+      expect((JSON.parse(await readFile(storagePath, "utf8")) as { version: number }).version).toBe(3);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("preserves writable bootstrap defaults and user-provenance legacy defaults across reopen", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "relayer-visual-assets-writable-defaults-"));
+    try {
+      const storagePath = join(directory, "visual-assets.json");
+      const registry = {
+        id: "writable-defaults", name: "Writable defaults", source: "relayer" as const,
+        contentAuthority: "read-only" as const, defaultRelationshipAuthority: "user" as const,
+      };
+      const tag = {
+        id: "tag_default", scope: { kind: "library" as const }, name: "Default", parentTagId: null,
+        authority: "system" as const,
+      };
+      const library = await createFileVisualAssetsLibrary({
+        registries: [registry],
+        initialTags: [tag],
+        initialAssets: [{
+          id: "asset_default", registryId: registry.id, name: "Default", fileName: "default.svg",
+          mediaType: "image/svg+xml", content: validSvg, scopes: [{ kind: "library" }], tagIds: [tag.id],
+          provenance: { source: "user", fileName: "default.svg" },
+        }],
+      }, storagePath);
+      expect((await library.organize({ assetId: "asset_default", addTagIds: [], removeTagIds: [tag.id] })).tagIds).toEqual([]);
+      await library.organize({ assetId: "asset_default", addTagIds: [tag.id], removeTagIds: [] });
+      const reopened = await createFileVisualAssetsLibrary({}, storagePath);
+      expect((await reopened.organize({ assetId: "asset_default", addTagIds: [], removeTagIds: [tag.id] })).tagIds).toEqual([]);
+      await reopened.organize({ assetId: "asset_default", addTagIds: [tag.id], removeTagIds: [] });
+
+      const stored = JSON.parse(await readFile(storagePath, "utf8")) as {
+        version: number;
+        assets: { asset: Record<string, unknown>; defaultTagIds: string[] }[];
+      };
+      const legacyAsset = { ...stored.assets[0]!.asset };
+      legacyAsset.provenance = { fileName: "default.svg" };
+      await writeFile(storagePath, `${JSON.stringify({
+        ...stored,
+        version: 2,
+        registries: [{ ...registry, defaultRelationshipAuthority: "read-only" }],
+        assets: [legacyAsset],
+      })}\n`);
+      const migrated = await createFileVisualAssetsLibrary({}, storagePath);
+      await expect(migrated.organize({
+        assetId: "asset_default", addTagIds: [], removeTagIds: [tag.id],
+      })).rejects.toMatchObject({ code: "tag_relationship_read_only" });
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("snapshots bootstrap default relationships before asynchronous file-library creation", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "relayer-visual-assets-bootstrap-default-snapshot-"));
+    try {
+      const defaults = ["tag_default"];
+      const creating = createFileVisualAssetsLibrary({
+        registries: [{
+          id: "readonly-defaults", name: "Read-only defaults", source: "relayer",
+          contentAuthority: "read-only", defaultRelationshipAuthority: "read-only",
+        }],
+        initialTags: [{
+          id: "tag_default", scope: { kind: "library" }, name: "Default", parentTagId: null, authority: "system",
+        }],
+        initialAssets: [{
+          id: "asset_default", registryId: "readonly-defaults", name: "Default", fileName: "default.svg",
+          mediaType: "image/svg+xml", content: validSvg, scopes: [{ kind: "library" }],
+          tagIds: ["tag_default"], defaultTagIds: defaults,
+        }],
+      }, join(directory, "visual-assets.json"));
+      defaults.splice(0);
+      const library = await creating;
+      await expect(library.organize({
+        assetId: "asset_default", addTagIds: [], removeTagIds: ["tag_default"],
+      })).rejects.toMatchObject({ code: "tag_relationship_read_only" });
     } finally {
       await rm(directory, { recursive: true, force: true });
     }

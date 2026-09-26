@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { Window } from "happy-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { mountCompiledNodeDetail } from "../desktop/renderer/src/product-workspace/node-detail-runtime.js";
+import { compiledNodeDetailReviewControls, mountCompiledNodeDetail } from "../desktop/renderer/src/product-workspace/node-detail-runtime.js";
 import { createReviewPresentationAdapter } from "../desktop/renderer/src/review-tools.js";
 import { interactionForThread, workspaceTurns } from "../desktop/renderer/src/product-workspace/model.js";
 import { createProductWorkspace, renderProductNodeDetail } from "../desktop/renderer/src/product-workspace/workspace.js";
@@ -77,15 +77,29 @@ describe("compiled Node Detail product runtime", () => {
         representation: "image",
       }],
     });
+    window.document.body.append(host);
+    const assetRequested = deferred();
+    const assetResponse = deferred();
     const release = vi.fn();
-    const resolveAsset = vi.fn(async () => ({
+    const resolvedAsset = {
       digestSha256: "a".repeat(64),
       mediaType: "image/svg+xml",
       url: "blob:http://127.0.0.1:3000/external-link-visual",
       release,
-    }));
-
-    const runtime = await mountCompiledNodeDetail({ host, detail, resolveAsset });
+    };
+    const resolveAsset = vi.fn(() => {
+      assetRequested.resolve();
+      return assetResponse.promise;
+    });
+    const mounting = mountCompiledNodeDetail({ host, detail, resolveAsset });
+    await assetRequested.promise;
+    try {
+      expect(compiledNodeDetailReviewControls(window.document).map(({ kind, element }) => ({ kind, text: element.textContent })))
+        .toEqual([{ kind: "link", text: "Documentation" }]);
+    } finally {
+      assetResponse.resolve(resolvedAsset);
+    }
+    const runtime = await mounting;
 
     expect(runtime.status).toBe("mounted");
     expect(host.shadowRoot).not.toBeNull();

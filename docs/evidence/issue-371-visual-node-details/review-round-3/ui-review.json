@@ -1,0 +1,11 @@
+{
+  "reviewer": "/root/merge_494_review",
+  "scope": "Trusted review registration before asset resolution and held-resolver regression",
+  "verdict": "clean",
+  "findings": [],
+  "focusedTests": "42/42 node-detail-runtime",
+  "files": {
+    "desktop/renderer/src/product-workspace/node-detail-runtime.js": "9abb98a375c170cc9d8bfe0fb77c479591eb31ab8b797228bf19f0b444f05386",
+    "test/node-detail-runtime.test.mjs": "9dfb640031efd434efd0160d290cef61dd3f450f760249e38dbc0e85168f7d02"
+  }
+}

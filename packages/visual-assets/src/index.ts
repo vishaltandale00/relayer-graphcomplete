@@ -135,6 +135,8 @@ export interface VisualAssetsLibraryOptions {
     readonly byteLength?: number;
     readonly scopes: readonly VisualAssetScope[];
     readonly tagIds: readonly string[];
+    /** Internal durable-catalog defaults; omitted bootstrap assets default to all initial tags. */
+    readonly defaultTagIds?: readonly string[];
     readonly archived?: boolean;
     readonly provenance?: VisualAsset["provenance"];
   }[];
@@ -758,6 +760,7 @@ export function createMemoryVisualAssetsLibrary(options: VisualAssetsLibraryOpti
     content: typeof initial.content === "string" ? initial.content : initial.content.slice(),
     scopes: Object.freeze(initial.scopes.map(canonicalScope)),
     tagIds: Object.freeze([...initial.tagIds]),
+    defaultTagIds: initial.defaultTagIds === undefined ? undefined : Object.freeze([...initial.defaultTagIds]),
     provenance: initial.provenance === undefined
       ? undefined
       : Object.freeze({ ...initial.provenance }),
@@ -797,6 +800,10 @@ export function createMemoryVisualAssetsLibrary(options: VisualAssetsLibraryOpti
           throw new VisualAssetsError("tag_scope_mismatch", "Initial asset is not associated with the tag scope");
         }
       }
+      if (initial.defaultTagIds !== undefined
+        && new Set(initial.defaultTagIds).size !== initial.defaultTagIds.length) {
+        throw new VisualAssetsError("tag_relationship_malformed", "Default visual asset relationships must be unique");
+      }
       prepared.push({
         bytes,
         asset: immutableAsset({
@@ -816,7 +823,8 @@ export function createMemoryVisualAssetsLibrary(options: VisualAssetsLibraryOpti
     for (const entry of prepared) {
       content.index(entry.bytes);
       assets.set(entry.asset.id, entry.asset);
-      defaultTagIdsByAsset.set(entry.asset.id, new Set(entry.asset.tagIds));
+      const initial = initialAssetInputs.find((candidate) => candidate.id === entry.asset.id)!;
+      defaultTagIdsByAsset.set(entry.asset.id, new Set(initial.defaultTagIds ?? entry.asset.tagIds));
     }
   }
 
@@ -1357,12 +1365,15 @@ export function createMemoryVisualDetailPersistence(
 }
 
 interface DurableVisualAssetCatalog {
-  readonly version: 2;
+  readonly version: 3;
   readonly revision: number;
   readonly authority: VisualAssetAuthority;
   readonly registries: readonly VisualAssetRegistry[];
   readonly tags: readonly VisualAssetTag[];
-  readonly assets: readonly VisualAsset[];
+  readonly assets: readonly {
+    readonly asset: VisualAsset;
+    readonly defaultTagIds: readonly string[];
+  }[];
   readonly contents: readonly {
     readonly digest: string;
     readonly contentBase64: string;
@@ -1405,14 +1416,18 @@ export async function createFileVisualAssetsLibrary(
     contentBase64: Buffer.from(typeof asset.content === "string"
       ? new TextEncoder().encode(asset.content)
       : asset.content).toString("base64"),
+    defaultTagIds: [...(asset.defaultTagIds ?? asset.tagIds)],
   })));
-  const initialAssets = initialEntries.map(({ asset }) => asset);
+  const initialAssets = initialEntries.map(({ asset, defaultTagIds }) => ({
+    asset,
+    defaultTagIds,
+  }));
   const initialContents = [...new Map(initialEntries.map((entry) => [entry.asset.digest, {
     digest: entry.asset.digest,
     contentBase64: entry.contentBase64,
   }])).values()];
   let catalog: DurableVisualAssetCatalog = deepFreeze({
-    version: 2 as const,
+    version: 3 as const,
     revision: 0,
     authority: initialAuthority,
     registries: [...initialRegistries],
@@ -1448,7 +1463,7 @@ export async function createFileVisualAssetsLibrary(
       authority: value.authority,
       registries: value.registries,
       initialTags: value.tags,
-      initialAssets: value.assets.map((asset) => ({
+      initialAssets: value.assets.map(({ asset, defaultTagIds }) => ({
         id: asset.id,
         registryId: asset.registryId,
         name: asset.name,
@@ -1459,6 +1474,7 @@ export async function createFileVisualAssetsLibrary(
         byteLength: asset.byteLength,
         scopes: asset.scopes,
         tagIds: asset.tagIds,
+        defaultTagIds,
         archived: asset.archived,
         provenance: asset.provenance,
       })),
@@ -1485,9 +1501,10 @@ export async function createFileVisualAssetsLibrary(
     if (publication.durabilityError !== undefined) throw publication.durabilityError;
   }
   function replaceAssetState(asset: VisualAsset, contentBase64?: string): DurableVisualAssetCatalog {
-    const assets = catalog.assets.filter((entry) => entry.id !== asset.id);
-    assets.push(asset);
-    assets.sort((left, right) => compareCodeUnits(left.id, right.id));
+    const previous = catalog.assets.find((entry) => entry.asset.id === asset.id);
+    const assets = catalog.assets.filter((entry) => entry.asset.id !== asset.id);
+    assets.push({ asset, defaultTagIds: previous?.defaultTagIds ?? [] });
+    assets.sort((left, right) => compareCodeUnits(left.asset.id, right.asset.id));
     const contents = contentBase64 === undefined || catalog.contents.some((entry) => entry.digest === asset.digest)
       ? catalog.contents
       : [...catalog.contents, { digest: asset.digest, contentBase64 }].sort((left, right) => compareCodeUnits(left.digest, right.digest));
@@ -1556,7 +1573,7 @@ export async function createFileVisualAssetsLibrary(
         try {
           await publish(replaceAssetState(asset, Buffer.from(bytes).toString("base64")), isCurrent);
         } catch (error) {
-          if (content.created && !catalog.assets.some((entry) => entry.id === asset.id)) {
+          if (content.created && !catalog.assets.some((entry) => entry.asset.id === asset.id)) {
             try { await unlink(content.path); } catch { /* preserve the primary catalog-publication failure */ }
             try { await rmdir(dirname(content.path)); } catch { /* retain shared or concurrently populated content stores */ }
           }
@@ -1593,7 +1610,7 @@ export async function createFileVisualAssetsLibrary(
       return serialize(async () => {
         const candidate = libraryFor(catalog);
         const asset = await candidate.associate(prepared);
-        const previous = catalog.assets.find((entry) => entry.id === asset.id);
+        const previous = catalog.assets.find((entry) => entry.asset.id === asset.id)?.asset;
         if (previous !== undefined && JSON.stringify(previous) === JSON.stringify(asset)) return asset;
         await publish(replaceAssetState(asset), isCurrent);
         return asset;
@@ -1604,7 +1621,7 @@ export async function createFileVisualAssetsLibrary(
       return serialize(async () => {
         const candidate = libraryFor(catalog);
         const asset = await candidate.organize(prepared);
-        const previous = catalog.assets.find((entry) => entry.id === asset.id);
+        const previous = catalog.assets.find((entry) => entry.asset.id === asset.id)?.asset;
         if (previous !== undefined && JSON.stringify(previous) === JSON.stringify(asset)) return asset;
         await publish(replaceAssetState(asset), isCurrent);
         return asset;
@@ -1614,7 +1631,7 @@ export async function createFileVisualAssetsLibrary(
       return serialize(async () => {
         const candidate = libraryFor(catalog);
         const asset = await candidate.archive(assetId);
-        const previous = catalog.assets.find((entry) => entry.id === asset.id);
+        const previous = catalog.assets.find((entry) => entry.asset.id === asset.id)?.asset;
         if (previous !== undefined && JSON.stringify(previous) === JSON.stringify(asset)) return asset;
         await publish(replaceAssetState(asset), isCurrent);
         return asset;
@@ -1651,22 +1668,30 @@ async function loadDurableVisualAssetCatalog(
   value: unknown,
   storagePath: string,
 ): Promise<{ readonly catalog: DurableVisualAssetCatalog; readonly migrate: boolean }> {
-  if (!plainRecord(value) || (value.version !== 1 && value.version !== 2)
+  if (!plainRecord(value) || (value.version !== 1 && value.version !== 2 && value.version !== 3)
     || Object.keys(value).sort().join(",") !== "assets,authority,registries,revision,tags,version"
     || !Array.isArray(value.registries) || !Array.isArray(value.tags) || !Array.isArray(value.assets)
     || !plainRecord(value.authority) || !Number.isSafeInteger(value.revision) || (value.revision as number) < 0) {
     throw new VisualAssetsError("catalog_store_corrupt", "Durable visual-assets catalog is invalid");
   }
-  const legacy = value.version === 1;
-  const assets: VisualAsset[] = [];
+  const legacyContent = value.version === 1;
+  const assets: { asset: VisualAsset; defaultTagIds: readonly string[] }[] = [];
   const contentByDigest = new Map<string, string>();
   for (const [index, entry] of value.assets.entries()) {
-    const assetValue = legacy && plainRecord(entry) ? entry.asset : entry;
+    const assetValue = value.version === 1 || value.version === 3
+      ? plainRecord(entry) ? entry.asset : undefined
+      : entry;
     if (!plainRecord(assetValue)) throw new VisualAssetsError("catalog_store_corrupt", `Durable visual asset ${index} is invalid`);
     const asset = assetValue as unknown as VisualAsset;
     if (!/^sha256:[0-9a-f]{64}$/.test(asset.digest)) throw new VisualAssetsError("catalog_store_corrupt", `Durable visual asset ${index} is invalid`);
+    const defaultTagIds = value.version === 3 && plainRecord(entry) ? entry.defaultTagIds : undefined;
+    if (value.version === 3
+      && (!Array.isArray(defaultTagIds) || defaultTagIds.some((tagId) => typeof tagId !== "string")
+        || new Set(defaultTagIds).size !== defaultTagIds.length)) {
+      throw new VisualAssetsError("catalog_store_corrupt", `Durable visual asset ${index} defaults are invalid`);
+    }
     let bytes: Uint8Array;
-    if (legacy) {
+    if (legacyContent) {
       if (!plainRecord(entry) || Object.keys(entry).sort().join(",") !== "asset,contentBase64" || typeof entry.contentBase64 !== "string") {
         throw new VisualAssetsError("catalog_store_corrupt", `Durable visual asset ${index} is invalid`);
       }
@@ -1684,17 +1709,22 @@ async function loadDurableVisualAssetCatalog(
       throw new VisualAssetsError("catalog_store_corrupt", `Durable visual asset ${index} content conflicts`);
     }
     contentByDigest.set(asset.digest, encoded);
-    assets.push(asset);
+    assets.push({
+      asset,
+      defaultTagIds: value.version === 3
+        ? [...defaultTagIds as string[]]
+        : [...asset.tagIds],
+    });
   }
   return { catalog: deepFreeze({
-    version: 2 as const,
+    version: 3 as const,
     revision: value.revision as number,
     authority: value.authority as unknown as VisualAssetAuthority,
     registries: value.registries as unknown as readonly VisualAssetRegistry[],
     tags: value.tags as unknown as readonly VisualAssetTag[],
     assets,
     contents: [...contentByDigest].map(([digest, contentBase64]) => ({ digest, contentBase64 })),
-  }), migrate: legacy };
+  }), migrate: value.version !== 3 };
 }
 
 function durableVisualAssetContentPath(storagePath: string, digest: string): string {
@@ -1715,7 +1745,7 @@ async function migrateDurableVisualAssetCatalog(storagePath: string, catalog: Du
     const stored: { version?: unknown } = await readFile(storagePath, "utf8")
       .then((text) => JSON.parse(text) as { version?: unknown })
       .catch(() => ({}));
-    if (stored.version !== 2) await Promise.all(created.map((path) => unlink(path).catch(() => undefined)));
+    if (stored.version !== 3) await Promise.all(created.map((path) => unlink(path).catch(() => undefined)));
     throw error;
   }
 }

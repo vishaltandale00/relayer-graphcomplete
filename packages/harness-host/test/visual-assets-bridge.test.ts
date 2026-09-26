@@ -178,31 +178,66 @@ describe("visual asset host bridge", () => {
       authority: { kind: "lifecycle", interactionNodeId: 9 },
       operation: { kind: "resume", assetGeneration: 4, barrierId: "explicit-revoke-after-finalize-loss" },
     })).resolves.toEqual({ resumed: true, assetGeneration: 4 });
+    // Retrying graph execution for this same node must reactivate assets with a
+    // fresh generation, never revive requests issued by the earlier capability.
+    await host.visualAssetOperation({ version: 1, generation: 7,
+      authority: { kind: "lifecycle", interactionNodeId: 9 },
+      operation: { kind: "pause", expectedGeneration: 4, barrierId: "retry-revoke" },
+    });
+    await host.visualAssetOperation({ version: 1, generation: 7,
+      authority: { kind: "lifecycle", interactionNodeId: 9 },
+      operation: { kind: "finalize-revoke", assetGeneration: 5, barrierId: "retry-revoke" },
+    });
+    const activate = (completionEpoch: number) => host.visualAssetOperation({ version: 1, generation: 7,
+      authority: { kind: "lifecycle", interactionNodeId: 9 },
+      operation: { kind: "activate", completionEpoch },
+    });
+    await expect(activate(10)).resolves.toEqual({ activated: true, assetGeneration: 6 });
+    await expect(activate(10)).resolves.toEqual({ activated: true, assetGeneration: 6 });
+    await expect(activate(9)).rejects.toMatchObject({ code: "visual_assets_generation_stale" });
+    const listWithGeneration = (assetGeneration: number) => host.visualAssetOperation({ version: 1, generation: 7, assetGeneration,
+      authority: { kind: "completion", interactionNodeId: 9, scope: { kind: "project", projectId: 1, threadId: 1 } },
+      operation: { kind: "list-assets", scope: { kind: "project", projectId: 1 } },
+    });
+    await expect(listWithGeneration(4)).rejects.toMatchObject({ code: "visual_assets_generation_stale" });
+    await expect(listWithGeneration(6)).resolves.toMatchObject({ items: [{ id: "allowed" }] });
+    await host.visualAssetOperation({ version: 1, generation: 7,
+      authority: { kind: "lifecycle", interactionNodeId: 9 },
+      operation: { kind: "pause", expectedGeneration: 6, barrierId: "retry-revoke-again" },
+    });
+    await host.visualAssetOperation({ version: 1, generation: 7,
+      authority: { kind: "lifecycle", interactionNodeId: 9 },
+      operation: { kind: "finalize-revoke", assetGeneration: 7, barrierId: "retry-revoke-again" },
+    });
+    await expect(activate(10)).rejects.toMatchObject({ code: "visual_assets_generation_stale" });
+    await expect(activate(11)).resolves.toEqual({ activated: true, assetGeneration: 8 });
+    await expect(listWithGeneration(6)).rejects.toMatchObject({ code: "visual_assets_generation_stale" });
+    await expect(listWithGeneration(8)).resolves.toMatchObject({ items: [{ id: "allowed" }] });
     release();
     await completing.catch(() => undefined);
     await expect(host.visualAssetOperation({
       version: 1,
       generation: 7,
-      assetGeneration: 4,
+      assetGeneration: 8,
       authority: { kind: "completion", interactionNodeId: 9, scope: { kind: "project", projectId: 1, threadId: 1 } },
       operation: { kind: "list-assets", scope: { kind: "project", projectId: 1 } },
     })).rejects.toMatchObject({ code: "completion_inactive" });
     await host.visualAssetOperation({ version: 1, generation: 7,
       authority: { kind: "lifecycle", interactionNodeId: 9 },
-      operation: { kind: "pause", expectedGeneration: 4, barrierId: "terminal-1" },
+      operation: { kind: "pause", expectedGeneration: 8, barrierId: "terminal-1" },
     });
     await host.visualAssetOperation({ version: 1, generation: 7,
       authority: { kind: "lifecycle", interactionNodeId: 9 },
-      operation: { kind: "finalize-revoke", assetGeneration: 5, barrierId: "terminal-1" },
+      operation: { kind: "finalize-revoke", assetGeneration: 9, barrierId: "terminal-1" },
     });
     await expect(host.visualAssetOperation({ version: 1, generation: 7,
       authority: { kind: "lifecycle", interactionNodeId: 9 },
-      operation: { kind: "pause", expectedGeneration: 5, barrierId: "cleanup-1" },
-    })).resolves.toEqual({ paused: true, assetGeneration: 5 });
+      operation: { kind: "pause", expectedGeneration: 9, barrierId: "cleanup-1" },
+    })).resolves.toEqual({ paused: true, assetGeneration: 9 });
     await expect(host.visualAssetOperation({ version: 1, generation: 7,
       authority: { kind: "lifecycle", interactionNodeId: 9 },
-      operation: { kind: "finalize-revoke", assetGeneration: 5, barrierId: "cleanup-1" },
-    })).resolves.toEqual({ revoked: true, assetGeneration: 5 });
+      operation: { kind: "finalize-revoke", assetGeneration: 9, barrierId: "cleanup-1" },
+    })).resolves.toEqual({ revoked: true, assetGeneration: 9 });
     await host.close();
   });
 

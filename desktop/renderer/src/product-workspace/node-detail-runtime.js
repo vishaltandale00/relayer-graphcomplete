@@ -610,8 +610,8 @@ img{max-inline-size:100%}
         }));
       }
     }
-    await Promise.all(assetWork.map((work) => work()));
     reviewSurfaces.set(host, reviewControls);
+    await Promise.all(assetWork.map((work) => work()));
     return Object.freeze({
       status: "mounted",
       shadowRoot: shadow,
@@ -664,6 +664,7 @@ img{max-inline-size:100%}
       },
     });
   } catch (error) {
+    if (reviewSurfaces.get(host) === reviewControls) reviewSurfaces.delete(host);
     for (const release of assetReleases.splice(0)) {
       try { release(); } catch { /* Preserve the deterministic renderer fallback. */ }
     }
