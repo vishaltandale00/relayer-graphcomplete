@@ -32,14 +32,10 @@ async function setup({ missingModel = false, rejectValidation = false, connectio
   };
   const provider = createEvalPrimeProvider({
     userDataDirectory: directory,
-    productServer: { providerDefinitionStore: () => ({}), providerStatuses: async () => new Map() },
+    productServer: { providerDefinitionStore: () => ({ load: async () => [] }), providerStatuses: async () => new Map() },
     productSession: { origin: "http://localhost:1234", cookie: { name: "session", value: "write-token" } },
     runtimeSession: { configurations: new Map(mixedReadiness ? [["prime-agent-deep", { implementation: "prime.agent" }]] : []), digestConfiguration: () => "digest" },
     graphRuntime: {}, managedPrimeRuntime: {}, managedCodexRuntime: {},
-    safeStorage: { isEncryptionAvailable: () => true,
-      encryptString: (value) => Buffer.from(value).map((byte) => byte ^ 0x77),
-      decryptString: (value) => Buffer.from(value).map((byte) => byte ^ 0x77).toString(),
-    },
     createComposition: (options) => { dependencies = options; return composition; },
     fetchImpl: async (url, options) => {
       const path = new URL(url).pathname;
@@ -54,10 +50,10 @@ async function setup({ missingModel = false, rejectValidation = false, connectio
       throw new Error(`Unexpected request ${path}`);
     },
   });
-  return { provider, composition, requests, directory, lease, families, unavailableHarnesses };
+  return { provider, composition, requests, directory, lease, families, unavailableHarnesses, credentials: () => dependencies.credentialStore };
 }
 
-it("pins the explicit roster through product validation and stores only encrypted provider credentials", async () => {
+it("pins the explicit roster through product validation without persisting provider credentials", async () => {
   const { provider, composition, requests, directory, lease } = await setup();
   await provider.start(profile);
   const selected = await provider.select("prime-agent-basic");
@@ -65,7 +61,7 @@ it("pins the explicit roster through product validation and stores only encrypte
   expect(requests.find(({ path }) => path === "/api/model-families").body.members).toEqual(models.map((modelId) => ({ providerId: "eval-openrouter", modelId })));
   expect(requests.filter(({ path }) => path === "/api/model-selection/validate").map(({ body }) => body.modelId)).toEqual([...models, ...models]);
   expect(JSON.stringify(requests)).not.toContain(profile.apiKey);
-  expect(await readFile(join(directory, "provider-credentials.json"), "utf8")).not.toContain(profile.apiKey);
+  await expect(readFile(join(directory, "provider-credentials.json"))).rejects.toMatchObject({ code: "ENOENT" });
   expect(await provider.acquireExecution("eval-openrouter")).toBe(lease);
   await lease.release();
   await provider.close();
@@ -109,7 +105,7 @@ it("rejects family drift instead of silently widening the native helper roster",
   await provider.close();
 });
 
-it.each([false, true])("uses production provider composition and refuses failed managed readiness (failure=%s)", async (failRuntime) => {
+it.each([false, true])("uses production provider composition and credential reopen (failure=%s)", async (failRuntime) => {
   const directory = await mkdtemp(join(tmpdir(), "eval-prime-composition-")); directories.push(directory);
   let definitions = [];
   let readiness = true;
@@ -140,10 +136,6 @@ it.each([false, true])("uses production provider composition and refuses failed 
     productSession: { origin: "http://localhost:1234", cookie: { name: "session", value: "write-token" } },
     runtimeSession: { configurations, digestConfiguration: digestHarnessConfiguration },
     graphRuntime: { recordHarnessReadiness: async () => {} }, managedPrimeRuntime: { prepare }, managedCodexRuntime: {},
-    safeStorage: { isEncryptionAvailable: () => true,
-      encryptString: (value) => Buffer.from(value).map((byte) => byte ^ 0x77),
-      decryptString: (value) => Buffer.from(value).map((byte) => byte ^ 0x77).toString(),
-    },
     fetchImpl: async (url, options) => {
       const path = new URL(url).pathname;
       const body = options.body ? JSON.parse(options.body) : undefined;
@@ -171,7 +163,11 @@ it.each([false, true])("uses production provider composition and refuses failed 
     expect(providerRequests.every((url) => /\/(key|models)$/.test(url))).toBe(true);
     await provider.close();
     provider = makeProvider();
-    await expect(provider.start({ ...profile, apiKey: "different-key" })).rejects.toThrow("no Prime run was admitted");
+    await provider.start(profile);
+    const reopened = await provider.acquireExecution("eval-openrouter");
+    expect(await reopened.runtime.executionAccess()).toMatchObject({ kind: "secret", fields: { "api-key": profile.apiKey } });
+    await reopened.release();
+    await expect(readFile(join(directory, "provider-credentials.json"))).rejects.toMatchObject({ code: "ENOENT" });
   } finally {
     await provider.close();
     globalThis.fetch = originalFetch;
@@ -190,4 +186,13 @@ it("projects mixed route readiness and removes routes when admission changes", a
   await provider.refreshAvailability();
   expect(provider.availability("prime-agent-basic").available).toBe(true);
   await provider.close();
+});
+
+it("keeps web-host Prime credentials in memory and clears them on shutdown", async () => {
+  const { provider, directory, credentials } = await setup();
+  await provider.start(profile);
+  expect(await credentials().get("provider:eval-openrouter")).toEqual({ "api-key": profile.apiKey });
+  await expect(readFile(join(directory, "provider-credentials.json"))).rejects.toMatchObject({ code: "ENOENT" });
+  await provider.close();
+  expect(await credentials().listReferences()).toEqual([]);
 });

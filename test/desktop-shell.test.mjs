@@ -392,11 +392,11 @@ describe("desktop skeleton", () => {
 
   it("keeps the Eval shell separate while reusing the production product workspace", async () => {
     const productPackaging = await readFile(new URL("../desktop/packaging/electron-builder.mjs", import.meta.url), "utf8");
-    const evalPackaging = await readFile(new URL("../desktop/packaging/eval-electron-builder.mjs", import.meta.url), "utf8");
+    const webHost = await readFile(new URL("../desktop/eval-main/web-host.mjs", import.meta.url), "utf8");
     const evalMain = await readFile(new URL("../desktop/eval-main/index.mjs", import.meta.url), "utf8");
     const evalDashboard = await readFile(new URL("../desktop/eval-renderer/index.html", import.meta.url), "utf8");
     const evalDashboardMain = await readFile(new URL("../desktop/eval-renderer/main.js", import.meta.url), "utf8");
-    const evalPreload = await readFile(new URL("../desktop/preload/eval-dashboard.cjs", import.meta.url), "utf8");
+    const evalPreload = await readFile(new URL("../desktop/eval-renderer/web-bridge.js", import.meta.url), "utf8");
     const graphAdapter = await readFile(new URL("../desktop/renderer/src/graph.js", import.meta.url), "utf8");
     const modelPicker = await readFile(new URL("../desktop/renderer/src/model-picker.js", import.meta.url), "utf8");
     const productWorkspace = await readFile(new URL("../desktop/renderer/src/product-workspace/workspace.js", import.meta.url), "utf8");
@@ -405,21 +405,14 @@ describe("desktop skeleton", () => {
     expect(productPackaging).toContain('"!eval-main/**/*"');
     expect(productPackaging).toContain('"!eval-renderer/**/*"');
     expect(productPackaging).toContain('"!preload/eval-*.cjs"');
-    expect(evalPackaging).toContain('appId: "ai.relayer.eval"');
-    expect(evalPackaging).toContain('main: "eval-main/index.mjs"');
-    expect(evalPackaging).toContain('target: [{ target: "dir", arch: [target.architecture] }]');
-    expect(evalPackaging).toContain('"main/single-instance.mjs"');
-    expect(evalPackaging).toContain('{ from: resolve(desktopRoot, "renderer"), to: "renderer" }');
-    expect(evalPackaging).toContain('ladybugNoticesExtraResource(repositoryRoot)');
-    expect(evalPackaging).toContain('"packages/graph-client/agent-resource"');
     expect(evalMain).toContain("GraphCompleteRuntimeService");
     expect(evalMain).toContain("RelayerAppServerService");
     expect(evalMain).toContain("allowHarnessOverride: true");
     expect(evalMain).toContain("enableReadOnlySession: true");
-    expect(evalMain).toContain("productSession.readOnlyCookie");
-    expect(evalMain).toContain("claimPrimaryDesktopInstance");
-    expect(evalMain).toContain("createReviewWindow(executionId)");
-    expect(evalMain).toContain("evalRuntimeTarget({ isPackaged: app.isPackaged, environment: process.env })");
+    expect(webHost).toContain("productSession.readOnlyCookie");
+    expect(evalMain).toContain("createEvalDashboard");
+    expect(evalMain).toContain("createReview(executionId)");
+    expect(evalMain).toContain("evalRuntimeTarget({ isPackaged: false, environment: process.env })");
     expect(evalMain).toContain("targetKey: evalTarget.key");
     expect(evalMain).toContain("process.env.PYTHONPATH");
     expect(evalDashboard).toContain("Test cases");
@@ -436,7 +429,7 @@ describe("desktop skeleton", () => {
     expect(evalPreload).toContain("openJudgeReview");
     expect(evalPreload).toContain("loadJudgeScreenshot");
     expect(evalPreload).not.toContain("conversation-export");
-    expect(evalMain).toContain('join(evalRendererDirectory, "judge.html")');
+    expect(evalPreload).toContain('open("/judge.html"');
     expect(productWorkspaceMode({ thread: { imported: true } })).toBe("review");
     expect(graphAdapter).toContain("mode: nextMode");
     expect(graphAdapter).toContain("productWorkspace.dispose()");

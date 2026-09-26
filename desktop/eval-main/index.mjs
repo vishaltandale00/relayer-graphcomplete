@@ -1,12 +1,13 @@
-import { app, BrowserWindow, dialog, ipcMain, safeStorage } from "electron";
+import { homedir } from "node:os";
+import { createEvalDashboard, openHumanReview } from "./web-host.mjs";
+import { createJudgeBrowser, openBrowserReview } from "./browser-review.mjs";
 import { randomBytes } from "node:crypto";
 import { readFileSync } from "node:fs";
-import { readFile } from "node:fs/promises";
+import { readFile, mkdir, open, unlink } from "node:fs/promises";
 import { userInfo } from "node:os";
 import { delimiter, join, resolve } from "node:path";
 import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { pathToFileURL } from "node:url";
 import { nativeBinaryName } from "../shared/target.mjs";
 
 import {
@@ -21,8 +22,6 @@ import { evalHarnessConfigurationPaths, evalRuntimeTarget } from "./configuratio
 import { EvalService } from "./eval-service.mjs";
 import { loadAtomicAnnotationSnapshots } from "./annotation-snapshot-loader.mjs";
 import { loadJudgeScreenshotArtifact } from "./judge-screenshot-loader.mjs";
-import { ReviewSession } from "./review-session.mjs";
-import { loadReadyReviewWorkspace } from "./review-workspace-readiness.mjs";
 import {
   LOCAL_SIMULATED_USER_JUDGE_CONFIGURATION as LOCAL_INPUT_GROUNDING_JUDGE_CONFIGURATION,
   buildInputGroundingTopology,
@@ -42,8 +41,6 @@ import {
 } from "../main/services/graphcomplete-runtime.mjs";
 import { inspectCodexBrowserMcpRuntime } from "../main/services/codex-browser-mcp-runtime.mjs";
 import { RelayerAppServerService } from "../main/services/relayer-app-server.mjs";
-import { claimPrimaryDesktopInstance } from "../main/single-instance.mjs";
-import { confirmManagedRuntimeQuit } from "../main/managed-runtimes/quit-guard.mjs";
 import {
   createEvalCodexExecutionLease,
   createEvalCodexCatalogProvisioner,
@@ -54,88 +51,40 @@ import { createEvalManagedPrimeRuntime, createEvalPrimeProvider, loadEvalPrimePr
 
 const desktopDirectory = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const repositoryRoot = resolve(desktopDirectory, "..");
-if (process.env.RELAYER_EVAL_USER_DATA_DIR) {
-  app.setPath("userData", resolve(process.env.RELAYER_EVAL_USER_DATA_DIR));
-}
-app.setName("Relayer Eval");
-
-const metadataPath = app.isPackaged ? join(app.getAppPath(), "package.json") : join(repositoryRoot, "package.json");
-const metadata = JSON.parse(readFileSync(metadataPath, "utf8"));
-// Match Relayer Dev: Electron's unsigned Linux app.getVersion() is "0.0".
-const desktopVersion = app.isPackaged ? app.getVersion() : (metadata.version || app.getVersion());
-
-const userDataDirectory = app.getPath("userData");
-const graphServerBinary = app.isPackaged
-  ? join(process.resourcesPath, "bin", nativeBinaryName("relayer-graph-server"))
-  : resolve(process.env.RELAYER_GRAPH_SERVER_BIN || join(repositoryRoot, "target", "debug", "relayer-graph-server"));
-const appServerBinary = app.isPackaged
-  ? join(process.resourcesPath, "bin", nativeBinaryName("relayer-app-server"))
-  : resolve(process.env.RELAYER_APP_SERVER_BINARY || join(repositoryRoot, "target", "debug", "relayer-app-server"));
-const harnessDirectory = app.isPackaged ? join(process.resourcesPath, "harnesses") : join(repositoryRoot, "harnesses");
-const evalTarget = evalRuntimeTarget({ isPackaged: app.isPackaged, environment: process.env });
-const permissionCatalogPath = app.isPackaged
-  ? join(process.resourcesPath, "permissions", "desktop.json")
-  : join(repositoryRoot, "permissions", "desktop.json");
-const productRendererDirectory = app.isPackaged ? join(process.resourcesPath, "renderer") : join(desktopDirectory, "renderer");
-const evalRendererDirectory = app.isPackaged ? join(process.resourcesPath, "eval-renderer") : join(desktopDirectory, "eval-renderer");
-const configurationPaths = evalHarnessConfigurationPaths({
-  harnessDirectory,
-  isPackaged: app.isPackaged,
-  targetKey: evalTarget.key,
-});
-if (!app.isPackaged) {
-  const pythonClientPath = join(repositoryRoot, "python", "relayer-graph", "src");
-  process.env.PYTHONPATH = [pythonClientPath, process.env.PYTHONPATH].filter(Boolean).join(delimiter);
-}
-const graphClientModuleUrl = app.isPackaged
-  ? pathToFileURL(join(process.resourcesPath, "graph-client", "index.js")).href
-  : undefined;
-const codexBrowserMcpInspection = await inspectCodexBrowserMcpRuntime({
-  executable: process.execPath,
-  packageRoot: app.isPackaged
-    ? join(process.resourcesPath, "app.asar.unpacked", "node_modules", "chrome-devtools-mcp")
-    : join(repositoryRoot, "node_modules", "chrome-devtools-mcp"),
-});
-if (!codexBrowserMcpInspection.available) {
-  console.error("Codex browser helper unavailable", {
-    code: codexBrowserMcpInspection.code,
-    message: codexBrowserMcpInspection.message,
-    diagnostics: codexBrowserMcpInspection.diagnostics,
-  });
-}
-const developmentCodexBinary = !app.isPackaged && process.env.RELAYER_CODEX_BINARY
-  ? resolve(process.env.RELAYER_CODEX_BINARY)
-  : undefined;
+const metadata = JSON.parse(readFileSync(join(repositoryRoot, "package.json"), "utf8"));
+const desktopVersion = metadata.version;
+const userDataDirectory = resolve(process.env.RELAYER_EVAL_USER_DATA_DIR || join(homedir(), ".relayer", "eval-web"));
+const targetDirectory = resolve(process.env.CARGO_TARGET_DIR || join(repositoryRoot, "target"));
+const graphServerBinary = resolve(process.env.RELAYER_GRAPH_SERVER_BIN || join(targetDirectory, "debug", nativeBinaryName("relayer-graph-server")));
+const appServerBinary = resolve(process.env.RELAYER_APP_SERVER_BINARY || join(targetDirectory, "debug", nativeBinaryName("relayer-app-server")));
+const harnessDirectory = join(repositoryRoot, "harnesses");
+const evalTarget = evalRuntimeTarget({ isPackaged: false, environment: process.env });
+const permissionCatalogPath = join(repositoryRoot, "permissions", "desktop.json");
+const productRendererDirectory = join(desktopDirectory, "renderer");
+const evalRendererDirectory = join(desktopDirectory, "eval-renderer");
+const configurationPaths = evalHarnessConfigurationPaths({ harnessDirectory, isPackaged: false, targetKey: evalTarget.key });
+process.env.PYTHONPATH = [join(repositoryRoot, "python", "relayer-graph", "src"), process.env.PYTHONPATH].filter(Boolean).join(delimiter);
+const codexBrowserMcpInspection = await inspectCodexBrowserMcpRuntime({ executable: process.execPath, packageRoot: join(repositoryRoot, "node_modules", "chrome-devtools-mcp") });
 const managedCodexRuntime = createEvalManagedCodexRuntime({
   root: join(userDataDirectory, "managed-runtimes"),
-  developmentExecutable: developmentCodexBinary,
-  enableMaintenance: app.isPackaged,
+  developmentExecutable: process.env.RELAYER_CODEX_BINARY ? resolve(process.env.RELAYER_CODEX_BINARY) : undefined,
+  enableMaintenance: false,
 });
 const acquireEvalProviderExecution = createEvalCodexExecutionLease(
   () => managedCodexRuntime.resolve(),
 );
 
-const primeProfile = await loadEvalPrimeProfile({ isPackaged: app.isPackaged });
-const primePythonClientRoot = app.isPackaged
-  ? join(process.resourcesPath, "python", "relayer-graph", "src")
-  : join(repositoryRoot, "python", "relayer-graph", "src");
+const primeProfile = await loadEvalPrimeProfile({ isPackaged: false });
+const primePythonClientRoot = join(repositoryRoot, "python", "relayer-graph", "src");
 process.env.RELAYER_PRIME_PYTHON_CLIENT_ROOT = primePythonClientRoot;
 const managedPrimeRuntime = createEvalManagedPrimeRuntime({
-  root: join(userDataDirectory, "managed-runtimes"),
-  appRoot: app.isPackaged ? app.getAppPath() : repositoryRoot,
-  pythonClientRoot: primePythonClientRoot,
-  isPackaged: app.isPackaged,
+  root: join(userDataDirectory, "managed-runtimes"), appRoot: repositoryRoot,
+  pythonClientRoot: primePythonClientRoot, isPackaged: false,
 });
 let primeProvider;
-let dashboardWindow;
-const primaryInstance = claimPrimaryDesktopInstance({ app, getWindow: () => dashboardWindow });
-
-const reviewWindows = new Set();
-const reviewSessions = new Map();
-const manualReviewWindows = new Map();
-const automatedReviewWindows = new Map();
-const judgeWindows = new Map();
-const traceWindows = new Map();
+let dashboard;
+const reviewSurfaces = new Set();
+const judgeBrowser = createJudgeBrowser();
 const evalStateFile = join(userDataDirectory, "eval-data", "test-runs.json");
 const graphRuntime = new GraphCompleteRuntimeService({
   userDataDirectory,
@@ -145,7 +94,6 @@ const graphRuntime = new GraphCompleteRuntimeService({
     "fixture.task-system": taskSystemFixtureFactory,
     "fixture.graph-memory": graphMemoryFixtureFactory,
   },
-  codexBasicClientModuleUrl: graphClientModuleUrl,
   ...(codexBrowserMcpInspection.available ? { codexBrowserMcpRuntime: codexBrowserMcpInspection } : {}),
   resolveCodexRuntime: () => managedCodexRuntime.resolve(),
   resolvePrimeRuntime: () => managedPrimeRuntime.resolve(),
@@ -168,361 +116,53 @@ const graphRuntime = new GraphCompleteRuntimeService({
       maxEventsPerTurn: 50_000,
     },
   },
-  onUnexpectedStop: () => app.quit(),
+  onUnexpectedStop: () => shutdown(1),
 });
 let productServer;
 let evalService;
-let stopping = false;
 let stopPromise;
-let quitFlowPromise;
+let stopping = false;
+function requireRunning() { if (stopping) throw new Error("Eval is stopping."); }
+let ownsProfileLock = false;
+const profileLock = join(userDataDirectory, "eval-web.lock");
 let localAutorunStarted = false;
 
-function windowSecurity(window, trustedOrigin = null) {
-  const blockUntrusted = (event, target) => {
-    if (trustedOrigin) {
-      try { if (new URL(target).origin === trustedOrigin) return; } catch {}
-    }
-    if (!trustedOrigin && target.startsWith("file:")) return;
-    event.preventDefault();
-  };
-  window.webContents.on("will-navigate", blockUntrusted);
-  window.webContents.on("will-redirect", blockUntrusted);
-  window.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
-}
-
-async function createDashboardWindow() {
-  const window = new BrowserWindow({
-    width: 1320,
-    height: 860,
-    minWidth: 980,
-    minHeight: 640,
-    titleBarStyle: "hiddenInset",
-    backgroundColor: "#0b0c0d",
-    webPreferences: {
-      preload: join(desktopDirectory, "preload", "eval-dashboard.cjs"),
-      contextIsolation: true,
-      nodeIntegration: false,
-      sandbox: true,
-    },
-  });
-  windowSecurity(window);
-  await window.loadFile(join(evalRendererDirectory, "index.html"));
-  window.on("closed", () => { if (dashboardWindow === window) dashboardWindow = undefined; });
-  return window;
-}
-
-async function createReviewWindow(executionId) {
-  const existing = manualReviewWindows.get(executionId);
-  if (existing && !existing.isDestroyed()) {
-    existing.show();
-    existing.focus();
-    return existing;
-  }
-  const context = evalService.reviewContext(executionId);
-  const selected = context.cases.find((item) => item.executionId === executionId);
-  const threadId = selected?.threadIds?.[0];
-  if (!threadId) throw new Error("This case × harness execution has no product thread to review.");
-  const { window, productOrigin } = await createReadOnlyReviewWindow(executionId, { annotations: true });
-  manualReviewWindows.set(executionId, window);
-  let reviewSession;
-  window.on("closed", () => {
-    if (manualReviewWindows.get(executionId) === window) manualReviewWindows.delete(executionId);
-    if (reviewSessions.get(executionId) === reviewSession) reviewSessions.delete(executionId);
-  });
-  const navigationToken = randomBytes(16).toString("hex");
-  await loadReadyReviewWorkspace({
-    window,
-    ipc: ipcMain,
-    url: `${productOrigin}/?threadId=${encodeURIComponent(threadId)}`
-      + `&review=1&reviewSession=${encodeURIComponent(navigationToken)}`,
-    expected: {
-      executionId,
-      threadId,
-      navigationToken,
-    },
-  });
-  reviewSession = new ReviewSession({
+async function createReview(executionId) {
+  const pending = openHumanReview({
     executionId,
-    readOnly: context.readOnly,
-    webContents: window.webContents,
-    artifactDirectory: join(userDataDirectory, "eval-data", "review-sessions", executionId),
-    ipc: ipcMain,
-  });
-  await reviewSession.open();
-  reviewSessions.set(executionId, reviewSession);
-  return window;
-}
-
-async function createJudgeWindow(executionId) {
-  const existing = judgeWindows.get(executionId);
-  if (existing && !existing.isDestroyed()) {
-    existing.show();
-    existing.focus();
-    return existing;
-  }
-  const context = evalService.reviewContext(executionId);
-  const window = new BrowserWindow({
-    width: 1520,
-    height: 940,
-    minWidth: 1040,
-    minHeight: 680,
-    titleBarStyle: "hiddenInset",
-    backgroundColor: "#0b0c0d",
-    webPreferences: {
-      preload: join(desktopDirectory, "preload", "eval-judge.cjs"),
-      contextIsolation: true,
-      nodeIntegration: false,
-      sandbox: true,
-    },
-  });
-  judgeWindows.set(executionId, window);
-  window.on("closed", () => {
-    if (judgeWindows.get(executionId) === window) judgeWindows.delete(executionId);
-  });
-  windowSecurity(window);
-  try {
-    await window.loadFile(join(evalRendererDirectory, "judge.html"), {
-      query: { runId: String(context.runId), executionId: String(executionId) },
-    });
-  } catch (error) {
-    if (!window.isDestroyed()) window.close();
-    throw error;
-  }
-  return window;
-}
-
-async function createTraceWindow(executionId, interactionId) {
-  const key = `${executionId}:${interactionId || "first"}`;
-  const existing = traceWindows.get(key);
-  if (existing && !existing.isDestroyed()) {
-    existing.show();
-    existing.focus();
-    return existing;
-  }
-  const window = new BrowserWindow({
-    width: 1480,
-    height: 920,
-    minWidth: 980,
-    minHeight: 640,
-    titleBarStyle: "hiddenInset",
-    backgroundColor: "#0b0c0d",
-    webPreferences: {
-      preload: join(desktopDirectory, "preload", "eval-trace.cjs"),
-      contextIsolation: true,
-      nodeIntegration: false,
-      sandbox: true,
-    },
-  });
-  traceWindows.set(key, window);
-  window.on("closed", () => {
-    if (traceWindows.get(key) === window) traceWindows.delete(key);
-  });
-  windowSecurity(window);
-  await window.loadFile(join(evalRendererDirectory, "trace.html"), {
-    query: {
-      executionId: String(executionId),
-      ...(interactionId === undefined ? {} : { interactionId: String(interactionId) }),
-    },
-  });
-  return window;
-}
-
-async function createReadOnlyReviewWindow(executionId, { annotations = false } = {}) {
-  const productSession = await productServer.start();
-  if (!productSession.readOnlyCookie) throw new Error("Relayer Eval review session is unavailable.");
-  const productOrigin = new URL(productSession.origin).origin;
-  const window = new BrowserWindow({
-    width: 1480,
-    height: 920,
-    minWidth: 980,
-    minHeight: 640,
-    titleBarStyle: "hiddenInset",
-    backgroundColor: "#0b0c0d",
-    webPreferences: {
-      preload: join(desktopDirectory, "preload", "eval-review.cjs"),
-      additionalArguments: [`--relayer-eval-execution=${executionId}`],
-      // Cookies are capabilities. A unique in-memory partition prevents a
-      // manual annotation cookie from becoming visible to automated or other
-      // review windows that happen to share the same app process.
-      partition: `relayer-eval-review-${randomBytes(16).toString("hex")}`,
-      contextIsolation: true,
-      nodeIntegration: false,
-      sandbox: true,
-    },
-  });
-  reviewWindows.add(window);
-  window.on("closed", () => reviewWindows.delete(window));
-  try {
-    windowSecurity(window, productOrigin);
-    await window.webContents.session.cookies.set({
-      url: productSession.origin,
-      name: productSession.readOnlyCookie.name,
-      value: productSession.readOnlyCookie.value,
-      httpOnly: true,
-      sameSite: "strict",
-      secure: false,
-    });
-    if (annotations) {
-      const annotationSessionToken = randomBytes(32).toString("hex");
-      const context = evalService.reviewContext(executionId);
-      const annotationThreadIds = [...new Set(
-        context.cases.flatMap((item) => item.threadIds || []),
-      )];
-      const displayName = String(process.env.RELAYER_EVAL_ANNOTATOR_NAME || userInfo().username).trim();
-      const response = await fetch(new URL("/api/internal/annotation-sessions", productSession.origin), {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Cookie: `${productSession.cookie.name}=${productSession.cookie.value}`,
-        },
-        body: JSON.stringify({
-          token: annotationSessionToken,
-          threadIds: annotationThreadIds,
-          authorId: `local:${userInfo().username}`,
-          authorDisplayName: displayName,
-        }),
-      });
-      if (!response.ok) {
-        const value = await response.json().catch(() => ({}));
-        throw new Error(value?.error || `Annotation session registration failed (${response.status}).`);
-      }
-      await window.webContents.session.cookies.set({
-        url: productSession.origin,
-        name: "relayer_annotation",
-        value: annotationSessionToken,
-        httpOnly: true,
-        sameSite: "strict",
-        secure: false,
-      });
-    }
-    return {
-      window,
-      productOrigin,
-      loadInputDraftRevision: async (selectedThreadId) => {
-        const state = await productRequest(
-          productSession,
-          `/api/state?threadId=${encodeURIComponent(selectedThreadId)}`,
-        );
-        return state.inputDraftRevision;
+    reviewContext: (id) => evalService.reviewContext(id),
+    productSession: () => productServer.start(),
+    assertRunning: requireRunning,
+    registerAnnotations: (session, scope) => controlProductRequest(session, "/api/internal/annotation-sessions", {
+      method: "POST", body: {
+        ...scope,
+        authorId: `local:${userInfo().username}`,
+        authorDisplayName: String(process.env.RELAYER_EVAL_ANNOTATOR_NAME || userInfo().username).trim(),
       },
-    };
-  } catch (error) {
-    reviewWindows.delete(window);
-    if (!window.isDestroyed()) window.destroy();
-    throw error;
-  }
+    }),
+  });
+  reviewSurfaces.add(pending);
+  pending.catch(() => reviewSurfaces.delete(pending));
+  return (await pending).url;
 }
 
-async function openAutomatedReviewSession({
-  executionId,
-  threadId,
-  turnId,
-  rootLayerId,
-  artifactDirectory,
-  inputOperatorAvailable = false,
-}) {
-  const context = evalService.reviewContext(executionId);
-  const executionCase = context.cases.find((item) => item.executionId === executionId);
-  if (!executionCase?.threadIds?.some((candidate) => String(candidate) === String(threadId))) {
-    throw new Error("The simulated-user review thread does not belong to its execution.");
-  }
-  let entry = automatedReviewWindows.get(executionId);
-  if (!entry || entry.window.isDestroyed()) {
-    entry = await createReadOnlyReviewWindow(executionId);
-    automatedReviewWindows.set(executionId, entry);
-    entry.window.on("closed", () => {
-      if (automatedReviewWindows.get(executionId)?.window === entry.window) {
-        automatedReviewWindows.delete(executionId);
-      }
-    });
-  }
-  const navigationToken = randomBytes(16).toString("hex");
-  await loadReadyReviewWorkspace({
-    window: entry.window,
-    ipc: ipcMain,
-    url: `${entry.productOrigin}/?threadId=${encodeURIComponent(threadId)}`
-      + `&interactionId=${encodeURIComponent(turnId)}&review=1`
-      + `${inputOperatorAvailable ? "&inputOperator=1" : ""}`
-      + `&reviewSession=${encodeURIComponent(navigationToken)}`,
-    expected: {
-      executionId,
-      threadId,
-      turnId,
-      navigationToken,
-    },
-  });
-  const session = new ReviewSession({
-    executionId,
-    readOnly: context.readOnly,
-    webContents: entry.window.webContents,
-    artifactDirectory,
-    ipc: ipcMain,
-    loadInputDraftRevision: entry.loadInputDraftRevision,
-  });
-  const state = await session.open();
-  if (String(state.layerId) !== String(rootLayerId)) {
-    throw new Error("The simulated-user review window did not open the accepted root layer.");
-  }
-  let released = false;
-  return {
-    session,
-    state,
-    release: async ({ close }) => {
-      if (released) return;
-      released = true;
-      if (close && !entry.window.isDestroyed()) entry.window.close();
-    },
-  };
-}
-
-function registerEvalIpc() {
-  ipcMain.handle("relayer-eval:catalog", async () => {
-    await primeProvider?.refreshAvailability();
-    return evalService.catalog();
-  });
-  ipcMain.handle("relayer-eval:list-runs", () => evalService.listRuns());
-  ipcMain.handle("relayer-eval:get-run", (_event, runId) => evalService.getRun(runId));
-  ipcMain.handle("relayer-eval:create-run", (_event, selection) => evalService.createRun(selection));
-  ipcMain.handle("relayer-eval:import-conversation", async () => {
-    const selection = await dialog.showOpenDialog(dashboardWindow, {
-      title: "Import conversation",
-      properties: ["openFile"],
-      filters: [{ name: "Relayer conversation", extensions: ["jsonl"] }],
-    });
-    if (selection.canceled || selection.filePaths.length !== 1) return null;
-    return evalService.importConversation(selection.filePaths[0]);
-  });
-  ipcMain.handle("relayer-eval:judge-imported-conversation", (_event, executionId, judgeConfigurationName) => (
-    evalService.judgeImportedConversation(executionId, judgeConfigurationName)
-  ));
-  ipcMain.handle("relayer-eval:rejudge-execution", (_event, executionId, judgeConfigurationName) => (
-    evalService.rejudgeExecution(executionId, judgeConfigurationName)
-  ));
-  ipcMain.handle("relayer-eval:open-review", async (_event, executionId) => {
-    await createReviewWindow(executionId);
-    return true;
-  });
-  ipcMain.handle("relayer-eval:export-annotations", (_event, executionId) => (
-    evalService.exportAnnotatedExecution(executionId)
-  ));
-  ipcMain.handle("relayer-eval:open-judge-review", async (_event, executionId) => {
-    await createJudgeWindow(executionId);
-    return true;
-  });
-  ipcMain.handle("relayer-eval:open-candidate-trace", async (_event, executionId, interactionId) => {
-    await createTraceWindow(executionId, interactionId);
-    return true;
-  });
-  ipcMain.handle("relayer-eval:load-candidate-trace", (_event, executionId, interactionId) => (
-    evalService.candidateTraceContext(executionId, interactionId)
-  ));
-  ipcMain.handle("relayer-eval:load-judge-screenshot", (_event, input) => (
-    loadJudgeScreenshotArtifact({ ...input, stateFile: evalStateFile })
-  ));
-  ipcMain.handle("relayer-eval:review-context", (_event, executionId) => evalService.reviewContext(executionId));
+async function openAutomatedReviewSession(input) {
+  return openBrowserReview({ ...input, productSession: await productServer.start(),
+    context: evalService.reviewContext(input.executionId), browser: await judgeBrowser.get() });
 }
 
 async function start() {
+  await mkdir(userDataDirectory, { recursive: true, mode: 0o700 });
+  requireRunning();
+  let lock;
+  try { lock = await open(profileLock, "wx", 0o600); }
+  catch (error) {
+    if (error.code === "EEXIST") throw new Error(`Eval profile is locked. Stop its owning process first. After an unclean exit, verify no Eval process uses this profile before removing ${profileLock}.`);
+    throw error;
+  }
+  ownsProfileLock = true;
+  if (stopping) { await lock.close(); await unlink(profileLock); ownsProfileLock = false; requireRunning(); }
+  try { await lock.writeFile(String(process.pid)); } finally { await lock.close(); }
   const pruning = await managedCodexRuntime.pruneInactiveInstallations();
   if (pruning.failures.length) {
     console.error("Retired managed runtime cleanup failed:", new AggregateError(
@@ -530,7 +170,9 @@ async function start() {
       "One or more retired managed runtimes could not be removed.",
     ));
   }
+  requireRunning();
   const runtimeSession = await graphRuntime.start();
+  requireRunning();
   // Prime has an explicit readiness path; fixture and existing Codex startup stay
   // unchanged. Publish the initial unavailable state before the product opens.
   await graphRuntime.recordHarnessReadiness([...runtimeSession.configurations.values()]
@@ -543,6 +185,7 @@ async function start() {
       unavailableReason: { code: "harness_readiness_pending", message: "Prime Eval runtime is not ready." },
     })));
 
+  requireRunning();
   productServer = new RelayerAppServerService({
     userDataDirectory,
     binaryPath: appServerBinary,
@@ -559,17 +202,19 @@ async function start() {
       platform: process.platform,
       architecture: process.arch,
     },
-    onUnexpectedStop: () => app.quit(),
+    onUnexpectedStop: () => shutdown(1),
   });
   const productSession = await productServer.start();
+  requireRunning();
   if (primeProfile) {
     primeProvider = createEvalPrimeProvider({
       userDataDirectory, productServer, productSession, runtimeSession, graphRuntime,
-      managedPrimeRuntime, managedCodexRuntime, safeStorage,
+      managedPrimeRuntime, managedCodexRuntime,
     });
     try { await primeProvider.start(primeProfile); }
     finally { primeProfile.apiKey = undefined; }
   }
+  requireRunning();
   const ensureEvalCodexCatalog = createEvalCodexCatalogProvisioner({
     productSession,
     resolveRuntime: () => managedCodexRuntime.resolve(),
@@ -603,13 +248,18 @@ async function start() {
     conversationImportEnabled: true,
     annotationSnapshotLoader: (threadIds) => loadAnnotationSnapshots(productSession, threadIds),
     targetKey: evalTarget.key,
-    onChanged: (runs) => dashboardWindow?.webContents.send("relayer-eval:runs-changed", runs),
+
   }).open();
-  registerEvalIpc();
-  dashboardWindow = await createDashboardWindow();
-  primaryInstance.presentPendingWindow();
+  requireRunning();
+  dashboard = await createEvalDashboard({
+    service: evalService, rendererDirectory: evalRendererDirectory,
+    refreshCatalog: () => primeProvider?.refreshAvailability(), openReview: createReview,
+    loadScreenshot: (input) => loadJudgeScreenshotArtifact({ ...input, stateFile: evalStateFile }),
+  });
+  if (stopping) { await dashboard.close(); requireRunning(); }
+  console.log(`Relayer Eval: ${dashboard.url}\nKeep this terminal open. Ctrl-C stops Eval; closing a tab does not.`);
   const localAutorun = resolveLocalSimulatedUserAutorun({
-    packaged: app.isPackaged,
+    packaged: false,
     availableHarnessConfigurationNames: evalService.catalog().harnessConfigurations
       .map((configuration) => configuration.name),
   });
@@ -923,57 +573,29 @@ async function loadAnnotationSnapshots(session, threadIds) {
 function stop() {
   stopPromise ??= (async () => {
     const errors = [];
-    for (const window of [...reviewWindows]) {
-      try { if (!window.isDestroyed()) window.close(); } catch (error) { errors.push(error); }
+    const attempt = async (operation) => { try { await operation(); } catch (error) { errors.push(error); } };
+    const cancellation = Promise.all([attempt(() => managedCodexRuntime.cancelAll()), attempt(() => managedPrimeRuntime.installer.cancelAll())]);
+    await attempt(() => dashboard?.close());
+    await attempt(() => productServer?.close());
+    for (const pending of reviewSurfaces) {
+      const surface = await pending.catch(() => null);
+      if (surface) await attempt(() => surface.close());
     }
-    reviewSessions.clear();
-    manualReviewWindows.clear();
-    automatedReviewWindows.clear();
-    for (const window of judgeWindows.values()) {
-      try { if (!window.isDestroyed()) window.close(); } catch (error) { errors.push(error); }
-    }
-    judgeWindows.clear();
-    for (const window of traceWindows.values()) {
-      try { if (!window.isDestroyed()) window.close(); } catch (error) { errors.push(error); }
-    }
-    traceWindows.clear();
-    if (productServer) {
-      try { await productServer.close(); } catch (error) { errors.push(error); }
-    }
-    try { await graphRuntime.close(); } catch (error) { errors.push(error); }
-    try { await primeProvider?.close(); } catch (error) { errors.push(error); }
-    try { await managedPrimeRuntime.installer.cancelAll(); } catch (error) { errors.push(error); }
+    await attempt(() => judgeBrowser.close());
+    await cancellation;
+    await attempt(() => graphRuntime.close());
+    await attempt(() => primeProvider?.close());
+    if (ownsProfileLock) await attempt(() => unlink(profileLock));
     if (errors.length) throw new AggregateError(errors, "Relayer Eval services did not stop cleanly.");
   })();
   return stopPromise;
 }
-
-if (primaryInstance) {
-  app.whenReady().then(start).catch((error) => {
-    console.error("Relayer Eval startup failed:", error);
-    dialog.showErrorBox("Relayer Eval could not start", error.message);
-    app.quit();
-  });
-  app.on("activate", async () => {
-    if (BrowserWindow.getAllWindows().length === 0) {
-      if (evalService) dashboardWindow = await createDashboardWindow();
-    } else {
-      primaryInstance.presentPrimaryWindow();
-    }
-  });
-  app.on("window-all-closed", () => { if (process.platform !== "darwin") app.quit(); });
-  app.on("before-quit", (event) => {
-    if (stopping) return;
-    event.preventDefault();
-    if (quitFlowPromise) return;
-    quitFlowPromise = (async () => {
-      if (!await confirmManagedRuntimeQuit({ installer: managedCodexRuntime, dialog, parent: dashboardWindow })) return;
-      if (!await confirmManagedRuntimeQuit({ installer: managedPrimeRuntime.installer, dialog, parent: dashboardWindow })) return;
-      stopping = true;
-      await stop().catch((error) => console.error("Relayer Eval shutdown failed:", error));
-      app.quit();
-    })().finally(() => {
-      if (!stopping) quitFlowPromise = undefined;
-    });
-  });
+async function shutdown(code = 0) {
+  stopping = true;
+  try { await stop(); } catch (error) { console.error(error); code = 1; }
+  process.exit(code);
 }
+process.once("SIGINT", () => shutdown());
+process.once("SIGTERM", () => shutdown());
+const startup = start();
+startup.catch(async (error) => { if (!stopping) { console.error("Relayer Eval startup failed:", error); await shutdown(1); } });

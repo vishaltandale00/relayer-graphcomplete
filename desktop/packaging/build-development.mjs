@@ -20,7 +20,6 @@ function run(command, args, options) {
 }
 
 export async function buildDevelopmentDesktop({
-  evalApplication = false,
   environment = process.env,
   execute = run,
   repositoryRoot = resolve(import.meta.dirname, "../.."),
@@ -38,9 +37,7 @@ export async function buildDevelopmentDesktop({
     "--target", target.rustTarget,
     ...cargoIntegrityArguments,
   ], { cwd: repositoryRoot, env: buildEnvironment }));
-  const configuration = evalApplication
-    ? "desktop/packaging/eval-electron-builder.mjs"
-    : "desktop/packaging/electron-builder.mjs";
+  const configuration = "desktop/packaging/electron-builder.mjs";
   const platform = target.platform === "darwin" ? "--mac" : "--win";
   await execute(process.execPath, [
     resolve(dependencyRoot, "node_modules", "electron-builder", "out", "cli", "cli.js"),
@@ -52,5 +49,6 @@ export async function buildDevelopmentDesktop({
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  await buildDevelopmentDesktop({ evalApplication: process.argv.includes("--eval") });
+  if (process.argv.includes("--eval")) throw new Error("Eval runs from the checkout with npm run eval-app:dev.");
+  await buildDevelopmentDesktop();
 }

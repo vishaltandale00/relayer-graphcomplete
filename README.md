@@ -22,7 +22,7 @@ Pre-alpha product and executable runtime. The repository now includes:
 - a persistent Node harness host that loads named file-backed configurations, caches one harness object per thread, persists opaque provider resume state without graph credentials, and supports cancellation and deterministic disposal;
 - graph-tool `codex.basic` and `claude.basic` harnesses using Relayer's Codex app-server bridge and the Claude Agent SDK respectively;
 - a `prime.agent` harness that passes the current graph scope through Prime Agent's run-scoped IPython host context;
-- a separate internal Relayer Eval desktop application that runs test-case × harness matrices through the product app server and opens their threads in the production graph/chat workspace;
+- a developer-only local Relayer Eval web application that runs test-case × harness matrices through the product app server and opens their threads in the production graph/chat workspace;
 - one Rust-owned product permission contract with Ask for approval (`ask`), Approve for me (`auto`), and Full access (`full`), translated by each harness configuration;
 - Rust, TypeScript, Python, and process-level integration tests.
 
@@ -46,7 +46,7 @@ The implemented basic loop is:
 5. `graph.submit(interactionNode)` recursively validates typed `expand` and `reference` navigation, exact source-layer provenance, layer size, and complete authored layouts, then atomically returns the current authored closure. Temporal `advance` uses the same validation and acceptance boundary while preserving the exact prior current through graph-native navigation. Flat answers remain valid. See [ADR 0005](docs/decisions/0005-layered-navigation-contract.md) and [ADR 0008](docs/decisions/0008-temporal-current-and-completion-brokers.md).
 6. Complete returns the resolved root layer for immediate display; later navigation reads the persisted layer.
 
-`NodeObject` also creates and owns a typed `detailAuthoring` builder while the node remains a client-side draft. Graph-action mounts derive source-node provenance from that owner, and their draft source layer must contain that exact node; authored capability calls cannot provide another node. Authors may checkpoint stable HTML/CSS components through `RelayerGraphClient.checkpointNodeDetail` before `submitNode`; there is no author-controlled finalize operation. Checkpoint and first-submit finalization snapshot the complete authored component program from ordinary own data descriptors, so later builder, template, capability, action, or layer mutation cannot alter that in-flight package. The first submit is single-flight per client and node: it registers shared submission and detail-finalization promises before executing envelope, compiler, or transport work, compiles only from that snapshot, freezes the builder, and sends one transport request. The immutable compiled package is retained by the builder so a replacement client can retry the same object after transport failure without recompilation. Successful node envelopes and every node field are snapshotted once from exact ordinary own data descriptors before validation. The same snapshot creates one frozen accepted value in code-owned private state, exposed through a non-configurable read-only `ref` projection and cached for concurrent calls and retries. Resolution or compilation failure removes the matching pending placeholders and leaves an unfrozen builder repairable. Agent-facing visual asset interpolation remains deferred until its authenticated resolver is connected; every development and packaged agent resource exposes the same HTML, CSS, and capability surface. Public compiler calls cannot seed the client's private finalization map. Product and Eval copy one self-contained `resources/graph-client/index.js`, with no compiler or host-bridge sibling modules. Rust integrity-checks and persists the canonical package beside the legacy fallback, conversation export/import carries that same package without a renderer-only shape, and Product mounts it through the constrained Node Detail runtime. Resubmitting a draft without mentioning `authoredDetail` retains its checkpointed package; `detailAuthoring.clear()` is the explicit way to drop it, and conversation export records `authoredDetailOmitted` when a private project path forces it to leave a package out.
+`NodeObject` also creates and owns a typed `detailAuthoring` builder while the node remains a client-side draft. Graph-action mounts derive source-node provenance from that owner, and their draft source layer must contain that exact node; authored capability calls cannot provide another node. Authors may checkpoint stable HTML/CSS components through `RelayerGraphClient.checkpointNodeDetail` before `submitNode`; there is no author-controlled finalize operation. Checkpoint and first-submit finalization snapshot the complete authored component program from ordinary own data descriptors, so later builder, template, capability, action, or layer mutation cannot alter that in-flight package. The first submit is single-flight per client and node: it registers shared submission and detail-finalization promises before executing envelope, compiler, or transport work, compiles only from that snapshot, freezes the builder, and sends one transport request. The immutable compiled package is retained by the builder so a replacement client can retry the same object after transport failure without recompilation. Successful node envelopes and every node field are snapshotted once from exact ordinary own data descriptors before validation. The same snapshot creates one frozen accepted value in code-owned private state, exposed through a non-configurable read-only `ref` projection and cached for concurrent calls and retries. Resolution or compilation failure removes the matching pending placeholders and leaves an unfrozen builder repairable. Agent-facing visual asset interpolation remains deferred until its authenticated resolver is connected; every development and packaged agent resource exposes the same HTML, CSS, and capability surface. Public compiler calls cannot seed the client's private finalization map. Product packages one self-contained `resources/graph-client/index.js`, with no compiler or host-bridge sibling modules. Eval uses the checkout’s built graph client. Rust integrity-checks and persists the canonical package beside the legacy fallback, conversation export/import carries that same package without a renderer-only shape, and Product mounts it through the constrained Node Detail runtime. Resubmitting a draft without mentioning `authoredDetail` retains its checkpointed package; `detailAuthoring.clear()` is the explicit way to drop it, and conversation export records `authoredDetailOmitted` when a private project path forces it to leave a package out.
 
 Independent self-assessment will later add an optional review gate to this same loop.
 
@@ -236,7 +236,7 @@ Relayer Eval is a separate internal application and profile. Its dashboard confi
 npm run eval-app:dev
 ```
 
-The default `fixture-task-system` harness is the safe deterministic path: it exercises the real Rust app server, Node harness host, graph client, product workspace, and Eval UI without credentials or inference. `npm run eval-app:dev` still needs the native Rust/Ladybug build prerequisites below because the application is built before Electron starts. `codex-basic`, `codex-basic-high`, and the other provider-backed configurations are paid live-Eval paths; selecting one and approving a run is explicit, and live runs are excluded from `npm run check`. Development Eval exposes Prime configurations when the checked-in runtime passes preflight and supplies the trusted Python graph client to their IPython kernels. Packaged Eval builds still omit those internal options. Build the unsigned internal application with `npm run eval-app:pack`.
+The default `fixture-task-system` harness is the safe deterministic path: it exercises the real Rust app server, Node harness host, graph client, product workspace, and Eval UI without credentials or inference. `npm run eval-app:dev` still needs the native Rust/Ladybug build prerequisites below because the backend is built before the Node host starts. `codex-basic`, `codex-basic-high`, and the other provider-backed configurations are paid live-Eval paths; selecting one and approving a run is explicit, and live runs are excluded from `npm run check`. Development Eval exposes Prime configurations when the checked-in runtime passes preflight and supplies the trusted Python graph client to their IPython kernels. Eval runs from the checkout and has no desktop package. Run `npm run test:eval-web` after building for inference-free browser proof.
 
 The dashboard also exposes the non-default **Visual Node Details · recursive
 baseline** case and its required Codex pair:
@@ -318,7 +318,7 @@ npm run build
 
 ### Running the desktop apps on Linux (development only)
 
-The unsigned `Relayer Dev` and `Relayer Eval` builds also run on `linux-x64` for
+The unsigned `Relayer Dev` build and local Eval host also run on `linux-x64` for
 development. `npm run desktop:dev` and `npm run eval-app:dev` resolve the managed
 Codex/Claude runtimes for the Linux host (Codex ships an `x86_64-unknown-linux-musl`
 build; Claude installs `@anthropic-ai/claude-agent-sdk-linux-x64`). Prime Agent stays
@@ -345,3 +345,22 @@ dbus-run-session -- bash -lc '
 ## License
 
 Apache-2.0
+
+### Running Eval from a checkout
+
+Run `npm ci`, then `npx playwright install chromium` for the screenshot judge
+browser. Start Eval with `npm run eval-app:dev` and open the authenticated URL
+printed in the terminal. Keep that terminal running; Ctrl-C stops the services,
+while closing a tab leaves evaluations running. The default profile is
+`~/.relayer/eval-web`; `RELAYER_EVAL_USER_DATA_DIR` selects another profile.
+Concurrent hosts cannot use the same profile. After an unclean exit, verify its
+owning process has stopped before manually removing `eval-web.lock` from that
+profile. Old Electron profiles are not migrated automatically.
+
+The dashboard, product workspace, judge evidence, and traces use browser pages.
+Eval has no desktop packaging command. Native Rust and provider runtimes still
+run locally. Prime reads its explicit development profile on each launch and
+keeps the supplied credential in memory. Human review annotations stay scoped
+to the selected run's threads, and automated judges get separate read-only
+browser contexts. Run `npm run test:eval-web` after building for the deterministic
+browser/process proof; it uses fixtures and spends no inference.
