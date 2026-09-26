@@ -174,7 +174,15 @@ against the temporary ENOENT-only helper failed as expected with exit 1 and an
 `ENOTDIR` stack from `statSync`; the restored implementation passed the full
 57-test planner file; the targeted symlink-loop test passed and its captured
 CLI diagnostic shows `ELOOP` with status 1. These are contemporaneous command
-outputs, not reconstructed summaries.
+outputs, not reconstructed summaries. Their SHA-256 digests are:
+
+- `logs/enotdir-red-vitest.log`: `79e5cdc93b97f29740735eb798bb2f40b8754482c7cf00505e65291db46e3352`
+- `logs/focused-green-vitest.log`: `89a6d73ede6a74680a12d2999601ba2111d33200ea2d7703ac4b8f25f7e3b79f`
+- `logs/symlink-loop-vitest.log`: `ce55425d5c57dc6e3935b4c17bd722caa93bef73031d917acc5418f186f75f9c`
+
+Each log is byte-for-byte identical to the original command output in the
+worker-pilot evidence archive; the corresponding exit files are checked in
+beside them.
 
 The updated planner/test executable diff against base
 `55287631dd090a59f1e9fea19a2fe3e5c3634fb0` has SHA-256
