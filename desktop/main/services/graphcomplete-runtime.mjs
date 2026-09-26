@@ -274,6 +274,7 @@ export class GraphCompleteRuntimeService {
     acquireProviderExecution,
     temporalFeatures = {},
     spawnProcess = spawn,
+    fetchRequest = fetch,
     startupTimeoutMs = 10_000,
     shutdownTimeoutMs = 2_000,
     onUnexpectedStop = () => {},
@@ -306,6 +307,7 @@ export class GraphCompleteRuntimeService {
       providerRecursion: temporalFeatures.providerRecursion === true,
     });
     this.spawnProcess = spawnProcess;
+    this.fetchRequest = fetchRequest;
     this.startupTimeoutMs = startupTimeoutMs;
     this.shutdownTimeoutMs = shutdownTimeoutMs;
     this.onUnexpectedStop = onUnexpectedStop;
@@ -352,10 +354,17 @@ export class GraphCompleteRuntimeService {
         productHarnessImplementations,
         startHarnessHost,
       } = await this.#awaitStartupOperation(import(this.harnessHostModuleUrl ?? "@relayer/harness-host"));
+      const { createFileVisualAssetsLibrary } = await this.#awaitStartupOperation(import("@relayer/visual-assets"));
       const runtimeDirectory = join(this.userDataDirectory, "graphcomplete-runtime");
       await this.#awaitStartupOperation(mkdir(runtimeDirectory, { recursive: true }));
       await this.#awaitStartupOperation(chmod(runtimeDirectory, 0o700));
       const configurations = await this.#awaitStartupOperation(loadHarnessConfigurations(this.configurationPaths));
+      const visualAssetsToken = randomBytes(32).toString("hex");
+      const visualAssetsGeneration = Number.parseInt(randomBytes(6).toString("hex"), 16);
+      const visualAssetsLibrary = await this.#awaitStartupOperation(createFileVisualAssetsLibrary(
+        { authority: { projects: [], standaloneThreadIds: [] } },
+        join(runtimeDirectory, "visual-assets", "catalog.json"),
+      ));
       const unavailableConfigurations = this.unavailableConfigurations
         .filter((unavailable) => !configurations.has(unavailable.name))
         .map((unavailable) => ({
@@ -475,6 +484,11 @@ export class GraphCompleteRuntimeService {
         }),
         stateFile: join(runtimeDirectory, "harness-sessions.json"),
         controlToken: harnessControlToken,
+        visualAssets: {
+          token: visualAssetsToken,
+          generation: visualAssetsGeneration,
+          library: visualAssetsLibrary,
+        },
         ...(this.candidateTrace ? { trace: this.candidateTrace } : {}),
         ...(this.acquireProviderExecution ? {
           accessBroker: createProviderExecutionAccessBroker(this.acquireProviderExecution),
@@ -484,6 +498,25 @@ export class GraphCompleteRuntimeService {
         }, (lateHarnessHost) => lateHarnessHost.forceClose());
       } catch (error) { throw error; }
       this.harnessHost = harnessHost;
+      const visualBridgeResponse = await this.#awaitStartupOperation(this.fetchRequest(
+        new URL("/api/control/visual-assets/bridge", graphUrl),
+        {
+          method: "PUT",
+          headers: {
+            Authorization: `Bearer ${graphControlToken}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            url: harnessHost.url,
+            token: visualAssetsToken,
+            generation: visualAssetsGeneration,
+          }),
+        },
+      ));
+      if (!visualBridgeResponse.ok) {
+        const failure = await visualBridgeResponse.json().catch(() => ({}));
+        throw new Error(failure?.error?.message || failure?.error || `Visual asset bridge registration failed (${visualBridgeResponse.status}).`);
+      }
       this.session = Object.freeze({
         graphUrl: graphOperationRecorder?.url ?? graphUrl,
         harnessUrl: harnessHost.url,

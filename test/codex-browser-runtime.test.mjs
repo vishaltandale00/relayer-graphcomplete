@@ -105,7 +105,15 @@ describe("Codex browser MCP runtime", () => {
     const productConfig = createDesktopBuilderConfig(contract, { argv: ["--dir"] });
 
     expect(desktopManifest.dependencies[CODEX_BROWSER_MCP_PACKAGE]).toBe(CODEX_BROWSER_MCP_VERSION);
-    expect(productConfig.asarUnpack).toEqual(["node_modules/chrome-devtools-mcp/**/*"]);
-    expect(evalBuilderConfig.asarUnpack).toEqual(["node_modules/chrome-devtools-mcp/**/*"]);
+    expect(productConfig.asarUnpack).toEqual([
+      "node_modules/chrome-devtools-mcp/**/*",
+      "node_modules/sharp/**/*",
+      "node_modules/@img/**/*",
+    ]);
+    expect(evalBuilderConfig.asarUnpack).toEqual([
+      "node_modules/chrome-devtools-mcp/**/*",
+      "node_modules/sharp/**/*",
+      "node_modules/@img/**/*",
+    ]);
   });
 });

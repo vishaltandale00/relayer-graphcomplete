@@ -3,6 +3,7 @@ export {
   DETAIL_AUTHORING_LIMITS,
   DetailCompilationError,
   NodeDetailAuthoring,
+  assetRef,
   css,
   detailCapability,
   html,
@@ -24,3 +25,4 @@ export * from "./icons.js";
 export * from "./objects.js";
 export * from "./query.js";
 export * from "./types.js";
+export * from "./visual-assets.js";

@@ -319,6 +319,24 @@ impl RuntimeClient {
         Ok(())
     }
 
+    pub(crate) async fn stage_imported_visual_asset_content(
+        &self,
+        import_id: &str,
+        input: &relayer_graph_core::ImportedVisualAssetContent,
+    ) -> Result<(), RuntimeError> {
+        let response = self
+            .client
+            .post(self.graph_url.join(&format!(
+                "api/control/conversation-import-stages/{import_id}/visual-asset-contents"
+            ))?)
+            .bearer_auth(&self.graph_control_token)
+            .json(input)
+            .send()
+            .await?;
+        response_json(response, StatusCode::OK).await?;
+        Ok(())
+    }
+
     pub(crate) async fn stage_imported_turn(
         &self,
         import_id: &str,
@@ -1458,6 +1476,41 @@ impl RuntimeClient {
             "api/control/interactions/{interaction_node_id}/layers/{layer_id}"
         ))
         .await
+    }
+
+    pub(crate) async fn get_detail_asset(
+        &self,
+        node_id: i64,
+        asset_id: &str,
+    ) -> Result<Value, RuntimeError> {
+        // Append an opaque path segment rather than interpreting catalog IDs as paths.
+        let mut url = self
+            .graph_url
+            .join(&format!("api/control/nodes/{node_id}/detail-assets/"))?;
+        url.path_segments_mut()
+            .expect("graph URL supports paths")
+            .pop_if_empty()
+            .push(asset_id);
+        self.control_get(url.as_str()).await
+    }
+
+    pub(crate) async fn validate_visual_asset_import_content(
+        &self,
+        thread_id: i64,
+        content: &Value,
+    ) -> Result<(), RuntimeError> {
+        let response = self
+            .client
+            .post(
+                self.graph_url
+                    .join("api/control/visual-assets/imports/validate")?,
+            )
+            .bearer_auth(&self.graph_control_token)
+            .json(&serde_json::json!({"projectId":null,"threadId":thread_id,"content":content}))
+            .send()
+            .await?;
+        response_json(response, StatusCode::OK).await?;
+        Ok(())
     }
 
     pub(crate) async fn get_layer_owner(

@@ -932,6 +932,53 @@ pub(super) async fn get_layer(
     Ok(Json(runtime.get_layer(graph_node_id, layer_id).await?))
 }
 
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(super) struct DetailAssetQuery {
+    layer_id: i64,
+}
+
+pub(super) async fn get_detail_asset(
+    State(state): State<ApiState>,
+    headers: HeaderMap,
+    Path((thread_id, interaction_id, node_id, asset_id)): Path<(i64, i64, i64, String)>,
+    Query(query): Query<DetailAssetQuery>,
+) -> Result<Json<Value>, ApiError> {
+    authorize_read(&state, &headers)?;
+    let thread_id = ThreadId::try_from(thread_id)?;
+    let interaction_id = InteractionId::try_from(interaction_id)?;
+    let interaction = state.product.get_interaction(interaction_id).await?;
+    if interaction.thread_id != thread_id {
+        return Err(ApiError::invalid(
+            "interaction does not belong to this thread",
+        ));
+    }
+    let graph_node_id = interaction
+        .graph_node_id
+        .ok_or_else(|| ApiError::invalid("interaction has no accepted graph"))?;
+    let runtime = state
+        .runtime
+        .as_ref()
+        .ok_or_else(|| ApiError::invalid("GraphComplete runtime is unavailable"))?;
+    let layer: relayer_graph_core::ResolvedLayer =
+        serde_json::from_value(runtime.get_layer(graph_node_id, query.layer_id).await?)
+            .map_err(|_| ApiError::internal("GraphComplete returned an invalid layer"))?;
+    let node_id = relayer_graph_core::NodeId::new(node_id)
+        .ok_or_else(|| ApiError::invalid("invalid graph node id"))?;
+    if layer.layer.id.value() != query.layer_id
+        || !layer.nodes.iter().any(|node| {
+            node.id == node_id && node.state == relayer_graph_core::RecordState::Accepted
+        })
+    {
+        return Err(ApiError::forbidden(
+            "accepted node does not belong to this layer",
+        ));
+    }
+    Ok(Json(
+        runtime.get_detail_asset(node_id.value(), &asset_id).await?,
+    ))
+}
+
 pub(super) async fn get_input_children(
     State(state): State<ApiState>,
     headers: HeaderMap,

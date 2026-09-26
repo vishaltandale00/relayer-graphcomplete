@@ -1,0 +1,37 @@
+{
+  "sourceDigestSha256": "f1ea70ae445a1239de018fd48b6c6ad0184f891d363c8da3ea7155f4ff67e66a",
+  "baseCommit": "a89658262f700ffbea8d65d67fa9db84d7cc3b63",
+  "commands": [
+    {
+      "command": "npm run check",
+      "exitCode": 0,
+      "result": "Passed formatting, all-feature Clippy, Rust workspace/default and crash reconciliation tests, package/TypeScript checks, Vitest, secret-boundary process tests, Python tests, receipt validation and PRD readability.",
+      "log": "check.log"
+    },
+    {
+      "command": "npm run test:desktop:visual-node-details",
+      "exitCode": 0,
+      "includesRequiredBuild": "npm run build",
+      "result": "Passed rebuilt production/Eval ReviewSession proof: original/reopened/imported images; navigation/history; disabled invoke/input; server read-only rejection.",
+      "log": "desktop.log"
+    }
+  ],
+  "logs": {
+    "check": {
+      "sha256": "0cd5687485c7361ea6437eaceec31c759a8e5f5018bfcec3d6e53e3a57c17c46",
+      "localPath": "/tmp/issue-371-final-check-complete.log"
+    },
+    "desktop": {
+      "sha256": "3a71f4d9022acb10733550bbe2f9a34d98913c5feda89880b7fdb64ee5e92ea2",
+      "localPath": "/tmp/issue-371-final-electron.log"
+    }
+  },
+  "desktopManifest": "desktop/manifest.json",
+  "paidInferenceCalls": 0,
+  "visualInspection": "Original and imported detail and controls tiles inspected; illustration and controls visible, corresponding pixel hashes identical.",
+  "limits": [
+    "No paid V2/V3 model comparison.",
+    "No signed/package release certification or deployment.",
+    "Deferred #367 geometry/system-browser proof remains separate."
+  ]
+}

@@ -1,4 +1,5 @@
 pub(crate) mod actions;
+pub(crate) mod authored_detail_assets;
 pub(crate) mod completions;
 pub(crate) mod contexts;
 pub(crate) mod currents;

@@ -1,3 +1,17 @@
+import { actionReviewKind } from "../action-invocation-state.js";
+
+// Only the trusted runtime can publish controls inside its isolated authored page.
+// Authored attributes and arbitrary shadow roots never grant review authority.
+const reviewSurfaces = new WeakMap();
+
+export function compiledNodeDetailReviewControls(root) {
+  return [root, ...root.querySelectorAll("*")].flatMap((host) => (
+    (reviewSurfaces.get(host) ?? []).filter(({ element }) => (
+      element.isConnected && element.getRootNode() === host.shadowRoot
+    ))
+  ));
+}
+
 const SAFE_ASSET_MEDIA_TYPES = new Set([
   "image/jpeg",
   "image/png",
@@ -455,6 +469,8 @@ export async function mountCompiledNodeDetail({
   capabilityState = {},
 }) {
   const assetReleases = [];
+  const reviewControls = [];
+  reviewSurfaces.delete(host);
   try {
     if (!host?.ownerDocument || typeof host.attachShadow !== "function") {
       throw new Error("Node Detail runtime requires a browser host.");
@@ -542,6 +558,11 @@ img{max-inline-size:100%}
           }
         });
       }
+      reviewControls.push({
+        element,
+        kind: actionReviewKind(action),
+        actionId: String(action.id),
+      });
       configuredCapabilities.add(id);
       const state = capabilityStates.get(id) ?? initialCapabilityState(capabilityState, id);
       capabilityStates.set(id, state);
@@ -558,6 +579,7 @@ img{max-inline-size:100%}
         const capability = mount.capability;
         if (capability.kind === "link") {
           applyLink(element, capability);
+          reviewControls.push({ element, kind: "link", actionId: null });
           capabilityHosts.set(id, element);
           continue;
         }
@@ -589,6 +611,7 @@ img{max-inline-size:100%}
       }
     }
     await Promise.all(assetWork.map((work) => work()));
+    reviewSurfaces.set(host, reviewControls);
     return Object.freeze({
       status: "mounted",
       shadowRoot: shadow,
@@ -611,11 +634,16 @@ img{max-inline-size:100%}
       async updateAdapters(next) {
         Object.assign(adapters, next);
         for (const [id, record] of capabilityRecords) {
-          if (configuredCapabilities.has(id)) continue;
           const action = await record.resolveCurrentAction();
           try {
             assertResolvedAction(record.capability, action);
           } catch {
+            continue;
+          }
+          if (configuredCapabilities.has(id)) {
+            const reviewControl = reviewControls.find(({ element }) => element === record.element);
+            reviewControl.kind = actionReviewKind(action);
+            reviewControl.actionId = String(action.id);
             continue;
           }
           capabilityStates.set(id, {
@@ -628,6 +656,7 @@ img{max-inline-size:100%}
         }
       },
       dispose() {
+        if (reviewSurfaces.get(host) === reviewControls) reviewSurfaces.delete(host);
         for (const release of assetReleases.splice(0)) {
           try { release(); } catch { /* The resolver owns release diagnostics. */ }
         }

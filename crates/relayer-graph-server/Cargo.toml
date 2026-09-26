@@ -15,10 +15,12 @@ crash-test-support = ["relayer-graph-core/crash-test-support"]
 [dependencies]
 anyhow.workspace = true
 axum.workspace = true
+base64 = "0.22"
 clap.workspace = true
 lbug = { version = "=0.18.0", default-features = false, optional = true }
 relayer-graph-core = { path = "../relayer-graph-core" }
 relayer-telemetry-capability = { path = "../relayer-telemetry-capability" }
+reqwest.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 tokio.workspace = true

@@ -2298,14 +2298,14 @@ settings:
 <li>Each draft <code>NodeObject</code> owns one typed detail builder alongside its backward-compatible string detail.</li>
 <li>Graph-action mounts derive source-node provenance from the owning node. Capability calls supply only the action; its exact draft source layer must contain that owner.</li>
 <li>Authors checkpoint stable HTML and CSS components through <code>checkpointNodeDetail</code> before submission. Checkpoint errors retain component and source locations; there is no public author-controlled finalize operation.</li>
-<li><code>gc=${capability}</code> binds typed actions to compatible native hosts. V1 does not export <code>assetRef</code> through either development or packaged agent resources; agent-facing visual asset interpolation remains deferred until the authenticated graph resolver is connected.</li>
+<li><code>gc=${capability}</code> binds typed actions to compatible native hosts. Both development and packaged agent resources export <code>assetRef</code>. Logical IDs resolve through the authenticated graph capability and the private host bridge; authored code cannot supply a resolver.</li>
 <li>Runtime capability values use the exact graph-client grammar. Capability, action, option, presentation, and draft provenance inputs are snapshotted once from ordinary own data.</li>
 <li>Validation and compilation share that frozen snapshot. Accessors, prototype data, symbols, traps, unknown fields, malformed actions, and invalid presentations fail at their authored source.</li>
 <li>Source-layer membership requires the exact owning <code>NodeObject</code> identity, not an equal client key.</li>
 <li>Author code cannot provide asset authority, availability, digest, sanitization, or a resolver.</li>
 <li>Before authenticated resolution, checkpoint and first-submit finalization snapshot the ordered component program from exact ordinary own data descriptors.</li>
 <li>The snapshot contains HTML/CSS arrays, bindings, actions, provenance, navigate targets, and assets. Resolution-time mutation cannot alter the in-flight package.</li>
-<li>The compiler retains the bounded logical-asset grammar for trusted fixtures and future resolver integration, but the V1 public agent surface cannot construct those bindings.</li>
+<li>The compiler resolves bounded logical-asset bindings through the authenticated graph boundary. The graph server derives scope from the active completion and independently prepares the exact package before accepting pinned bytes.</li>
 <li>The first submit registers shared submission and detail-finalization promises in private client maps keyed by the exact <code>NodeObject</code>. Registration happens before envelope, compiler, resolver, or transport work begins. Synchronous re-entry and ordinary concurrency join those same promises.</li>
 <li>While finalization is in progress, authoring mutations and another client's submit reject with <code>detail_finalization_in_progress</code>; submissions from the same client and node join the existing work. Resolution or compilation failure cancels the temporary lock and leaves the builder editable. Successful compilation freezes authoring before transport, and later mutations reject with <code>detail_finalized</code>, including after transport failure; retry reuses the compiled package.</li>
 <li><code>NodeObject.ref</code> is a non-configurable read-only projection of private response state.</li>
@@ -2380,6 +2380,25 @@ settings:
 <tr><td>Single digest and deterministic reconnection</td><td><code>packages/visual-assets/test/visual-assets.test.ts</code> proves two logical assets sharing bytes export one content digest and reconnect to their authored IDs on import.</td></tr>
 <tr><td>Fail-closed portable import</td><td><code>packages/visual-assets/test/visual-assets.test.ts</code> rejects missing, corrupt, unsupported, unreachable, duplicate, and unauthorized content before publishing accepted state.</td></tr>
 <tr><td>Conversation portability and compatibility</td><td><code>crates/relayer-app-server/tests/conversation_export_contract.rs</code> and <code>crates/relayer-app-server/tests/product_persistence_flow.rs</code> prove package preservation through export/import while the schema migration test proves legacy nodes reopen without a package.</td></tr>
+</tbody>
+</table>
+<h3>6.5 Visual Node Details in Eval review</h3>
+<p>Issue #371 uses ordinary accepted product state and the shared production workspace. The deterministic case <code>empty-project.visual-node-detail.single-turn</code> runs alone with <code>fixture-node-detail</code>. It is not selected by default and uses no model inference. The existing V2/V3 provider comparison remains a separate live evaluation.</p>
+<p>Review tools discover authored controls through trusted runtime registration. Authored markup cannot supply review action identity or authority. Expand and reference retain their accepted action identity and navigation history. Invoke and input remain disabled in read-only review, and the app server rejects mutation independently of the visible controls.</p>
+<p>Asset integration is included in this work under #451. Successful image evidence must use authorized asset discovery and file-backed addition, pinned accepted content, and verified conversation export/import. A synthetic resolver or standalone archive test does not prove Product and Eval parity.</p>
+<h4>#371 deterministic checkpoint map</h4>
+<table>
+<thead><tr><th>Checkpoint</th><th>Public deterministic proof</th></tr></thead>
+<tbody>
+<tr><td>Ordinary accepted Eval state</td><td><code>test/eval-app-integration.test.mjs</code> executes the fixture through real graph and product servers and inspects the canonical package, actions, and read-only review context.</td></tr>
+<tr><td>Trusted authored-control discovery</td><td><code>test/node-detail-runtime.test.mjs</code> drives the review presentation adapter against the real constrained runtime, preserving action identity and rejecting disabled or stale controls and unrelated shadow roots.</td></tr>
+<tr><td>Rendered review and capture</td><td><code>npm run test:desktop:visual-node-details</code> opens the production review window with a read-only session, navigates authored controls, captures the selected detail through ReviewSession, and reopens accepted state. Its receipt must report image coverage separately until the asset path is proved.</td></tr>
+<tr><td>Asset authority and portability</td><td><code>packages/harness-host/test/visual-assets-bridge.test.ts</code> checks scope and authority. <code>packages/visual-assets/test/visual-assets.test.ts</code> checks catalog persistence and atomic failure. <code>test/node-detail-assets.test.mjs</code> checks response integrity. <code>test/eval-app-integration.test.mjs</code> checks delivery. <code>test/conversation-export-eval-e2e.test.mjs</code> checks portability. Full #371 acceptance is withheld until graph pinning, import integrity, archive independence, and shared rendered image evidence pass.</td></tr>
+<tr><td>Terminal and generation fencing</td><td>Lifecycle tests in <code>crates/relayer-graph-server/src/lib.rs</code> exercise rejected-submit repair, lost acknowledgments, explicit-revoke retries, and bridge replacement. Host bridge tests reject delayed work from older generations and barriers.</td></tr>
+<tr><td>Accepted current image authority</td><td><code>test/eval-app-integration.test.mjs</code> reads pinned image bytes after Advance and before Return, while rejecting draft nodes and unrelated layers.</td></tr>
+<tr><td>Typed and packaged authoring</td><td><code>packages/graph-client/test/visual-assets.test.ts</code> checks file-handle round trips and immutable request snapshots. <code>test/graph-client-packaged-detail.test.mjs</code> checks the packaged authoring exports.</td></tr>
+<tr><td>Desktop asset startup and packaging</td><td><code>test/desktop-shell.test.mjs</code> and <code>test/codex-browser-runtime.test.mjs</code> check the bridge startup contract and native image-processing dependency packaging.</td></tr>
+<tr><td>Bounded portable transport</td><td><code>crates/relayer-graph-server/tests/import_visual_asset_transport.rs</code> checks separate digest staging, repeated large-image references, import isolation, and atomic failure under the existing request limit.</td></tr>
 </tbody>
 </table>
 <h2 data-prd-layer="Evidence" data-prd-order="15.4">15D. Basic Complete evaluation evidence</h2>

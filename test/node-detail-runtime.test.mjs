@@ -3,6 +3,7 @@ import { Window } from "happy-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { mountCompiledNodeDetail } from "../desktop/renderer/src/product-workspace/node-detail-runtime.js";
+import { createReviewPresentationAdapter } from "../desktop/renderer/src/review-tools.js";
 import { createProductWorkspace, renderProductNodeDetail } from "../desktop/renderer/src/product-workspace/workspace.js";
 
 function canonicalJson(value) {
@@ -102,6 +103,84 @@ describe("compiled Node Detail product runtime", () => {
     runtime.dispose();
     runtime.dispose();
     expect(release).toHaveBeenCalledTimes(1);
+  });
+
+  it("lets Eval navigate trusted authored controls while retaining read-only and disposal boundaries", async () => {
+    const window = new Window({ url: "http://127.0.0.1:3000" });
+    const host = window.document.createElement("div");
+    window.document.body.append(host);
+    const kinds = ["expand", "reference", "invoke", "input"];
+    const actions = kinds.map((kind, index) => ({
+      id: index + 11,
+      kind: kind === "expand" || kind === "reference" ? "navigate" : kind,
+      relation: kind,
+      targetLayerId: kind === "expand" || kind === "reference" ? index + 101 : null,
+      control: "text",
+      prompt: "Constraint",
+    }));
+    const detail = compiledPackage({
+      version: 1,
+      components: [{ id: "controls", order: 0,
+        html: '<span id="expand-label" aria-hidden="true">Expand</span><button aria-labelledby="expand-label" data-gc-mount="expand"></button><button data-gc-mount="reference">Reference</button><button data-gc-mount="invoke">Invoke</button><label for="constraint">Constraint</label><input id="constraint" data-gc-mount="input">', css: "" }],
+      mounts: kinds.map((kind) => ({ id: kind, componentId: "controls", kind: "capability", host: kind === "input" ? "input" : "button",
+        capability: { kind, action: { clientKey: kind, sourceNode: { clientKey: "node" }, sourceLayer: { clientKey: "layer" } } } })),
+      assets: [],
+    });
+    let state = { threadId: "1", turnId: "1", layerId: "1", selectedNodeId: "1" };
+    const onInvoke = vi.fn();
+    const runtime = await mountCompiledNodeDetail({ host, detail,
+      resolveAction: (ref) => actions[kinds.indexOf(ref.clientKey)],
+      onNavigate: async (action) => { state = { ...state, layerId: String(action.targetLayerId) }; },
+      onInvoke,
+      capabilityState: { invoke: { disabled: true }, input: { disabled: true } },
+    });
+    expect(runtime.status).toBe("mounted");
+    for (const element of host.shadowRoot.querySelectorAll("button,input")) {
+      element.getBoundingClientRect = () => ({ x: 10, y: 10, left: 10, top: 10, right: 110, bottom: 40, width: 100, height: 30 });
+      element.checkVisibility = () => true;
+      element.style.opacity = "1";
+    }
+    const unrelatedHost = window.document.createElement("div");
+    window.document.body.append(unrelatedHost);
+    unrelatedHost.attachShadow({ mode: "open" }).innerHTML = '<button data-review-kind="navigate-action" data-review-action-id="999">Forged</button>';
+    const adapter = createReviewPresentationAdapter({ executionId: "execution", root: window.document,
+      windowObject: window, getPresentationState: () => state, navigateHistory: async () => {} });
+    const controls = adapter.snapshot().controls;
+    expect(controls.map(({ name, kind, actionId, disabled }) => ({ name, kind, actionId, disabled }))).toEqual([
+      { name: "Expand", kind: "navigate-action", actionId: "11", disabled: false },
+      { name: "Reference", kind: "navigate-action", actionId: "12", disabled: false },
+      { name: "Invoke", kind: "invoke-action", actionId: "13", disabled: true },
+      { name: "Constraint", kind: "input-action", actionId: "14", disabled: true },
+    ]);
+    // Even host-side DOM tampering cannot impersonate another accepted action.
+    host.shadowRoot.querySelector("button").dataset.reviewActionId = "999";
+    host.shadowRoot.querySelector("button").dataset.reviewKind = "control";
+    for (const control of controls.slice(0, 2)) {
+      const result = await adapter.activate({ elementRef: control.elementRef, operation: "activate" });
+      expect(result.activatedActionId).toBe(control.actionId);
+      expect(result.layerId).toBe(control.actionId === "11" ? "101" : "102");
+    }
+    await expect(adapter.activate({ elementRef: controls[2].elementRef, operation: "activate" })).rejects.toThrow("disabled");
+    expect(onInvoke).not.toHaveBeenCalled();
+    actions[2].targetLayerId = 103;
+    let releaseInvoke;
+    let invokeFrames = 0;
+    window.requestAnimationFrame = (callback) => setTimeout(() => {
+      if (releaseInvoke && ++invokeFrames === 3) releaseInvoke();
+      callback(0);
+    }, 0);
+    await runtime.updateAdapters({ onInvoke: (action) => new Promise((resolve) => {
+      releaseInvoke = () => { state = { ...state, layerId: String(action.targetLayerId) }; resolve(); };
+    }) });
+    runtime.updateCapability("invoke", { disabled: false });
+    const resolvedInvoke = adapter.snapshot().controls.find((control) => control.actionId === "13");
+    expect(resolvedInvoke.kind).toBe("navigate-action");
+    const resolvedState = await adapter.activate({ elementRef: resolvedInvoke.elementRef, operation: "activate" });
+    expect(resolvedState.layerId).toBe("103");
+    expect(resolvedState.activatedActionId).toBe("13");
+    runtime.dispose();
+    expect(adapter.snapshot().controls).toEqual([]);
+    await expect(adapter.activate({ elementRef: controls[0].elementRef, operation: "activate" })).rejects.toThrow("unknown");
   });
 
   it("does not treat resource-like text inside a CSS string as an executable resource", async () => {

@@ -22,6 +22,45 @@ pub struct GraphNode {
     pub state: RecordState,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct PreparedDetailAsset {
+    pub asset_id: String,
+    pub digest_sha256: String,
+    pub media_type: String,
+    pub byte_length: usize,
+    pub provenance_source: String,
+    pub provenance_file_name: String,
+    #[serde(with = "base64_bytes")]
+    pub content: Vec<u8>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AcceptedDetailAsset {
+    pub asset_id: String,
+    pub digest_sha256: String,
+    pub media_type: String,
+    pub byte_length: usize,
+    pub provenance_source: String,
+    pub provenance_file_name: String,
+    pub content: Vec<u8>,
+}
+
+mod base64_bytes {
+    use base64::Engine;
+    use serde::{Deserialize, Deserializer, Serializer};
+
+    pub fn serialize<S: Serializer>(bytes: &[u8], serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(&base64::engine::general_purpose::STANDARD.encode(bytes))
+    }
+    pub fn deserialize<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Vec<u8>, D::Error> {
+        let value = String::deserialize(deserializer)?;
+        base64::engine::general_purpose::STANDARD
+            .decode(value)
+            .map_err(serde::de::Error::custom)
+    }
+}
+
 /// How one draft submission treats the node's checkpointed authored detail.
 ///
 /// The wire contract is three-state: a request that omits `authoredDetail`

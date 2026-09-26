@@ -1,14 +1,16 @@
 import { describe, expect, it } from "vitest";
 import sharp from "sharp";
 import { createHash } from "node:crypto";
-import { mkdir, mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  createFileVisualAssetsLibrary,
   createFileVisualDetailPersistence,
   createMemoryVisualAssetsLibrary,
   createMemoryVisualDetailPersistence,
   memoryHarnessFile,
+  validateVisualAssetImportContent,
 } from "../src/index.js";
 
 function base64Bytes(value: string): Uint8Array {
@@ -51,6 +53,192 @@ function packageFor(assetIds: readonly string[]) {
 }
 
 describe("visual_assets deterministic library interface", () => {
+  it("validates one imported content record through the library media seam", async () => {
+    const library = createMemoryVisualAssetsLibrary({ authority: { projects: [], standaloneThreadIds: [1] } });
+    createMemoryVisualDetailPersistence(library);
+    const scope = { kind: "thread" as const, threadId: 1 };
+    for (const svg of [
+      "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 1 1'><rect width='1' height='1'/></svg>",
+      '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1 1"><defs><linearGradient id="g"><stop offset="0" stop-color="#000"/><stop offset="1" stop-color="#fff"/></linearGradient></defs><rect width="1" height="1" fill="url(#g)"/></svg>',
+    ]) {
+      const bytes = Buffer.from(svg);
+      await expect(validateVisualAssetImportContent({
+        library,
+        scope,
+        content: {
+          digestSha256: createHash("sha256").update(bytes).digest("hex"),
+          mediaType: "image/svg+xml",
+          byteLength: bytes.length,
+          contentBase64: bytes.toString("base64"),
+        },
+      })).resolves.toBeUndefined();
+    }
+    const invalidPng = Buffer.from("not a PNG");
+    await expect(validateVisualAssetImportContent({
+      library,
+      scope,
+      content: {
+        digestSha256: createHash("sha256").update(invalidPng).digest("hex"),
+        mediaType: "image/png",
+        byteLength: invalidPng.length,
+        contentBase64: invalidPng.toString("base64"),
+      },
+    })).rejects.toMatchObject({ code: "media_content_malformed" });
+  });
+
+  it("reopens durable scope authority, tags, relationships, bytes, and archival state", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "relayer-visual-assets-catalog-"));
+    try {
+      const storagePath = join(directory, "visual-assets.json");
+      const first = await createFileVisualAssetsLibrary({}, storagePath);
+      await first.authorizeScope({ kind: "project", projectId: 7, threadId: 70 });
+      await first.authorizeScope({ kind: "thread", threadId: 90 });
+      const projectTag = await first.createTag({ scope: { kind: "thread", threadId: 70 }, name: "Project" });
+      const standaloneTag = await first.createTag({ scope: { kind: "thread", threadId: 90 }, name: "Standalone" });
+      const added = await first.add({
+        file: memoryHarnessFile("durable.svg", "image/svg+xml", validSvg),
+        scope: { kind: "project", projectId: 7 }, name: "Durable", tagIds: [projectTag.id],
+      });
+      await first.associate({ assetId: added.id, scope: { kind: "thread", threadId: 90 } });
+      const organized = await first.organize({ assetId: added.id, addTagIds: [standaloneTag.id], removeTagIds: [] });
+      const archived = await first.archive(organized.id);
+
+      const reopened = await createFileVisualAssetsLibrary({}, storagePath);
+      expect((await reopened.inspect(archived.id)).asset).toEqual(archived);
+      expect((await reopened.listTags({ scope: { kind: "thread", threadId: 70 } })).items).toEqual([projectTag]);
+      expect((await reopened.listTags({ scope: { kind: "thread", threadId: 90 } })).items).toEqual([standaloneTag]);
+      expect((await reopened.listAssets({ scope: { kind: "project", projectId: 7 } })).items).toEqual([]);
+      expect(await (await reopened.download(archived.id)).read()).toEqual(new TextEncoder().encode(validSvg));
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("does not publish a candidate asset when its durable catalog write fails", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "relayer-visual-assets-write-failure-"));
+    try {
+      const storagePath = join(directory, "visual-assets.json");
+      const library = await createFileVisualAssetsLibrary({}, storagePath);
+      await mkdir(storagePath);
+      await expect(library.add({
+        file: memoryHarnessFile("unpublished.svg", "image/svg+xml", validSvg),
+        scope: { kind: "library" }, name: "Unpublished", tagIds: [],
+      })).rejects.toBeDefined();
+      expect((await library.listAssets({ scope: { kind: "library" } })).items).toEqual([]);
+      expect((await readdir(directory)).filter((name) => name.endsWith(".tmp"))).toEqual([]);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("rechecks completion authority immediately before the atomic catalog rename", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "relayer-visual-assets-revoked-write-"));
+    try {
+      const storagePath = join(directory, "visual-assets.json");
+      const library = await createFileVisualAssetsLibrary({}, storagePath);
+      let checks = 0;
+      await expect(library.add({
+        file: memoryHarnessFile("revoked.svg", "image/svg+xml", validSvg),
+        scope: { kind: "library" }, name: "Revoked", tagIds: [],
+      }, () => ++checks < 2)).rejects.toMatchObject({ code: "completion_inactive" });
+      expect(checks).toBe(2);
+      expect((await library.listAssets({ scope: { kind: "library" } })).items).toEqual([]);
+      expect(await readdir(directory)).toEqual([]);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("invalidates a durable cursor after a same-count catalog mutation", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "relayer-visual-assets-stale-cursor-"));
+    try {
+      const library = await createFileVisualAssetsLibrary({}, join(directory, "visual-assets.json"));
+      const tag = await library.createTag({ scope: { kind: "library" }, name: "Later" });
+      const first = await library.add({
+        file: memoryHarnessFile("first.svg", "image/svg+xml", validSvg),
+        scope: { kind: "library" }, name: "First", tagIds: [],
+      });
+      await library.add({
+        file: memoryHarnessFile("second.svg", "image/svg+xml", validSvg),
+        scope: { kind: "library" }, name: "Second", tagIds: [],
+      });
+      const page = await library.listAssets({ scope: { kind: "library" }, limit: 1 });
+      await library.organize({ assetId: first.id, addTagIds: [tag.id], removeTagIds: [] });
+      await expect(library.listAssets({
+        scope: { kind: "library" }, limit: 1, cursor: page.nextCursor!,
+      })).rejects.toMatchObject({ code: "page_snapshot_stale" });
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("snapshots mutable queued add inputs synchronously", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "relayer-visual-assets-add-snapshot-"));
+    try {
+      const library = await createFileVisualAssetsLibrary({}, join(directory, "visual-assets.json"));
+      let releaseFirst!: () => void;
+      const firstGate = new Promise<void>((resolve) => { releaseFirst = resolve; });
+      const first = library.add({
+        file: { name: "first.svg", mediaType: "image/svg+xml", async read() { await firstGate; return new TextEncoder().encode(validSvg); } },
+        scope: { kind: "library" }, name: "First", tagIds: [],
+      });
+      const file = {
+        name: "queued.svg",
+        mediaType: "image/svg+xml",
+        expectedDigest: `sha256:${createHash("sha256").update(validSvg).digest("hex")}`,
+        async read() { return new TextEncoder().encode(validSvg); },
+      };
+      const scope: { kind: "library" | "project"; projectId?: number } = { kind: "library" };
+      const input = { file, scope, name: "Queued", tagIds: [] as string[] };
+      const queued = library.add(input as Parameters<typeof library.add>[0]);
+      file.name = "mutated.txt";
+      file.mediaType = "text/plain";
+      file.expectedDigest = "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff";
+      file.read = async () => { throw new Error("mutated"); };
+      scope.kind = "project";
+      scope.projectId = 999;
+      input.name = "";
+      input.tagIds.push("mutated-tag");
+      releaseFirst();
+
+      await first;
+      const added = await queued;
+      expect(added).toMatchObject({
+        name: "Queued", mediaType: "image/svg+xml", scopes: [{ kind: "library" }],
+        provenance: { fileName: "queued.svg" },
+      });
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("preserves a queued file expectedDigest instead of dropping the integrity check", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "relayer-visual-assets-expected-digest-"));
+    try {
+      const library = await createFileVisualAssetsLibrary({}, join(directory, "visual-assets.json"));
+      let releaseFirst!: () => void;
+      const firstGate = new Promise<void>((resolve) => { releaseFirst = resolve; });
+      const first = library.add({
+        file: { name: "first.svg", mediaType: "image/svg+xml", async read() { await firstGate; return new TextEncoder().encode(validSvg); } },
+        scope: { kind: "library" }, name: "First", tagIds: [],
+      });
+      const file = {
+        name: "wrong.svg", mediaType: "image/svg+xml",
+        expectedDigest: "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        async read() { return new TextEncoder().encode(validSvg); },
+      };
+      const queued = library.add({ file, scope: { kind: "library" }, name: "Wrong", tagIds: [] });
+      file.expectedDigest = `sha256:${createHash("sha256").update(validSvg).digest("hex")}`;
+      releaseFirst();
+
+      await first;
+      await expect(queued).rejects.toMatchObject({ code: "digest_mismatch" });
+      expect((await library.listAssets({ scope: { kind: "library" } })).items.map(({ name }) => name)).toEqual(["First"]);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
   it("rejects forged handles, cross-scope reads, and partial failed acceptance", async () => {
     const initial = (id: string, scopes: readonly ({ kind: "project"; projectId: number })[]) => ({
       id,

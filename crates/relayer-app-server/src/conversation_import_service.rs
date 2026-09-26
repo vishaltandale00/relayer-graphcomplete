@@ -98,6 +98,26 @@ impl ConversationImportStager {
         Ok(())
     }
 
+    pub(crate) async fn push_visual_asset_content(
+        &mut self,
+        content: &crate::conversation_export::ExportVisualAssetContent,
+        product: &ProductService,
+    ) -> Result<(), ConversationImportError> {
+        self.validator
+            .as_mut()
+            .expect("unfinished import validator")
+            .push_visual_asset_content(content)
+            .map_err(crate::conversation_export::ExportReadError::from)?;
+        product
+            .append_conversation_import_visual_asset_content(&self.staged.id, content)
+            .await?;
+        self.staged
+            .header
+            .visual_asset_contents
+            .push(content.clone());
+        Ok(())
+    }
+
     pub(crate) async fn finish(
         &mut self,
         source_sha256: String,
@@ -136,6 +156,39 @@ pub(crate) async fn materialize_conversation(
     runtime: &RuntimeClient,
 ) -> Result<ConversationImportReceipt, ConversationImportError> {
     let staged = product.staged_conversation_import(import_id).await?;
+    let mut portable_asset_details = std::collections::BTreeMap::new();
+    for summary in &staged.turns {
+        let turn = product
+            .staged_conversation_turn(import_id, &summary.source_turn_id)
+            .await?;
+        if let Some(view) = turn.accepted_view {
+            for node in view.layers.into_iter().flat_map(|layer| layer.nodes) {
+                if let Some(package) = node.authored_detail
+                    && !node.authored_detail_assets.is_empty()
+                {
+                    portable_asset_details.insert(
+                        node.id,
+                        serde_json::json!({"package":package,"assets":node.authored_detail_assets}),
+                    );
+                }
+            }
+        }
+    }
+    if !portable_asset_details.is_empty() {
+        for content in &staged.header.visual_asset_contents {
+            runtime
+                .validate_visual_asset_import_content(
+                    staged.thread_id.value(),
+                    &serde_json::json!({
+                        "digestSha256": content.digest_sha256,
+                        "mediaType": content.media_type,
+                        "byteLength": content.byte_length,
+                        "contentBase64": content.content_base64,
+                    }),
+                )
+                .await?;
+        }
+    }
     let graph_stage = ImportedConversationStage {
         import_id: import_id.to_owned(),
         source_sha256: staged.source_sha256.clone(),
@@ -147,6 +200,26 @@ pub(crate) async fn materialize_conversation(
     if let Err(operation) = runtime.begin_imported_conversation(&graph_stage).await {
         return cleanup_failed_materialization(import_id, operation.to_string(), product, runtime)
             .await;
+    }
+    for content in &staged.header.visual_asset_contents {
+        let content = relayer_graph_core::ImportedVisualAssetContent {
+            digest_sha256: content.digest_sha256.clone(),
+            media_type: content.media_type.clone(),
+            byte_length: content.byte_length,
+            content_base64: content.content_base64.clone(),
+        };
+        if let Err(operation) = runtime
+            .stage_imported_visual_asset_content(import_id, &content)
+            .await
+        {
+            return cleanup_failed_materialization(
+                import_id,
+                operation.to_string(),
+                product,
+                runtime,
+            )
+            .await;
+        }
     }
     for summary in &staged.turns {
         let turn = match product
@@ -426,6 +499,7 @@ fn import_turn(turn: ConversationExportTurn) -> ImportedTurn {
                     detail: context.target.detail,
                     authored_detail: None,
                     authored_detail_omitted: false,
+                    authored_detail_assets: Vec::new(),
                 },
                 source_interaction_node_id: context.source.interaction_node_id,
                 source_layer_id: context.source.layer_id,
@@ -504,6 +578,18 @@ fn import_turn(turn: ConversationExportTurn) -> ImportedTurn {
                             detail: node.detail,
                             authored_detail: node.authored_detail,
                             authored_detail_omitted: node.authored_detail_omitted.is_some(),
+                            authored_detail_assets: node
+                                .authored_detail_assets
+                                .into_iter()
+                                .map(|asset| relayer_graph_core::ImportedDetailAsset {
+                                    asset_id: asset.asset_id,
+                                    digest_sha256: asset.digest_sha256.clone(),
+                                    media_type: asset.media_type,
+                                    byte_length: asset.byte_length,
+                                    provenance_source: asset.provenance.source,
+                                    provenance_file_name: asset.provenance.file_name,
+                                })
+                                .collect(),
                         })
                         .collect(),
                     edges: resolved
@@ -638,6 +724,7 @@ mod tests {
                 id: "turn:1".into(),
                 sequence: 1,
             }],
+            visual_asset_contents: Vec::new(),
         }
     }
 

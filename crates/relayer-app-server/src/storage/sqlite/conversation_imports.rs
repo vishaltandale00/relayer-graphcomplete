@@ -111,6 +111,33 @@ impl SqliteProductStore {
         })
     }
 
+    pub(crate) async fn append_conversation_import_visual_asset_content(
+        &self,
+        import_id: &str,
+        content: &crate::conversation_export::ExportVisualAssetContent,
+    ) -> Result<(), StorageError> {
+        let mut tx = self.pool.begin_with("BEGIN IMMEDIATE").await?;
+        let header_json: String = sqlx::query_scalar(
+            "SELECT header_json FROM conversation_imports WHERE id=?1 AND state='staging'",
+        )
+        .bind(import_id)
+        .fetch_one(&mut *tx)
+        .await?;
+        let mut header: ConversationExportHeader =
+            serde_json::from_str(&header_json).map_err(serialization)?;
+        header.visual_asset_contents.push(content.clone());
+        let result = sqlx::query(
+            "UPDATE conversation_imports SET header_json=?1 WHERE id=?2 AND state='staging'",
+        )
+        .bind(serde_json::to_string(&header).map_err(serialization)?)
+        .bind(import_id)
+        .execute(&mut *tx)
+        .await?;
+        require_one(result.rows_affected(), "conversation import is not staged")?;
+        tx.commit().await?;
+        Ok(())
+    }
+
     pub(crate) async fn finalize_conversation_import_digest(
         &self,
         import_id: &str,
@@ -242,13 +269,14 @@ impl SqliteProductStore {
                 .bind(&id).fetch_all(&self.pool).await?.into_iter()
                 .map(|turn| Ok((turn.try_get(0)?, InteractionId::from_database(turn.try_get(1)?), turn.try_get(2)?, turn.try_get(3)?)))
                 .collect::<Result<Vec<_>, sqlx::Error>>()?;
+            let mut header =
+                serde_json::from_str::<ConversationExportHeader>(&row.try_get::<String, _>(2)?)
+                    .map_err(serialization)?;
+            header.visual_asset_contents.clear();
             records.push(ConversationImportRecord {
                 id,
                 source_sha256: row.try_get(1)?,
-                header: serde_json::from_str::<ConversationExportHeader>(
-                    &row.try_get::<String, _>(2)?,
-                )
-                .map_err(serialization)?,
+                header,
                 thread_id: ThreadId::from_database(row.try_get(3)?),
                 turns,
             });
@@ -354,6 +382,7 @@ mod tests {
                 id: "turn:1".into(),
                 sequence: 1,
             }],
+            visual_asset_contents: Vec::new(),
         };
         let turn = ConversationExportTurn {
             id: "turn:1".into(),

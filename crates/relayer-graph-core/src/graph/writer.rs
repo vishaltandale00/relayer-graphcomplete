@@ -2,7 +2,8 @@ use crate::{
     ActionDraft, ActionId, CompletionOutput, CompletionState, CurrentTransition,
     CurrentTransitionReceipt, EdgeDraft, GraphAction, GraphDatabase, GraphEdge, GraphError,
     GraphLayer, GraphNode, InteractionInput, InteractionInputChild, InteractionInvocation,
-    LayerDraft, LayerId, NavigateRelation, NodeDraft, NodeId, RecordState, ResolvedLayer,
+    LayerDraft, LayerId, NavigateRelation, NodeDraft, NodeId, PreparedDetailAsset, ProjectId,
+    RecordState, ResolvedLayer, ThreadId,
     graph::{
         InteractionScope, completion,
         database::initialize_completion,
@@ -11,7 +12,8 @@ use crate::{
     storage::{
         GraphConnection,
         sqlite::{
-            actions::ActionTable, contexts::ContextTable, currents::CurrentTable, edges::EdgeTable,
+            actions::ActionTable, authored_detail_assets::AuthoredDetailAssetTable,
+            contexts::ContextTable, currents::CurrentTable, edges::EdgeTable,
             input_children::InputChildTable, layers, layers::LayerTable, nodes::NodeTable,
         },
     },
@@ -29,6 +31,22 @@ impl GraphWriter {
 
     pub fn node_id(&self) -> NodeId {
         self.scope.root_node_id
+    }
+
+    pub fn authority_scope(&self) -> (Option<ProjectId>, ThreadId) {
+        (self.scope.project_id, self.scope.thread_id)
+    }
+
+    /// Revalidates the completion generation after an awaited trusted-host
+    /// operation. Callers must do this immediately before committing any
+    /// result derived outside graph core.
+    pub async fn require_active_authority(&self) -> Result<(), GraphError> {
+        let mut transaction = self.database.storage.begin_read().await?;
+        self.scope
+            .require_active_authority(&mut transaction)
+            .await?;
+        transaction.commit().await?;
+        Ok(())
     }
 
     pub async fn prepare_recursive_completion(
@@ -124,8 +142,41 @@ impl GraphWriter {
         draft: &NodeDraft,
         authored_detail: AuthoredDetailUpdate<'_>,
     ) -> Result<GraphNode, GraphError> {
+        self.submit_node_with_prepared_detail_assets(draft, authored_detail, None)
+            .await
+    }
+
+    pub async fn submit_node_with_prepared_detail_assets(
+        &self,
+        draft: &NodeDraft,
+        authored_detail: AuthoredDetailUpdate<'_>,
+        prepared_assets: Option<&[PreparedDetailAsset]>,
+    ) -> Result<GraphNode, GraphError> {
         if let AuthoredDetailUpdate::Replace(package) = authored_detail {
             validate_authored_detail(package)?;
+            let package_assets = package["assets"]
+                .as_array()
+                .expect("validated package assets");
+            if let Some(prepared) = prepared_assets
+                && (package_assets.len() != prepared.len()
+                    || package_assets.iter().zip(prepared).any(|(pin, asset)| {
+                        pin["id"].as_str() != Some(asset.asset_id.as_str())
+                            || pin["digestSha256"].as_str() != Some(asset.digest_sha256.as_str())
+                            || pin["mediaType"].as_str() != Some(asset.media_type.as_str())
+                    }))
+            {
+                return Err(GraphError::validation(
+                    "authored_detail_asset_snapshot_mismatch",
+                    "authoredDetail.assets",
+                    "Prepared visual assets do not exactly match the canonical package.",
+                ));
+            }
+        } else if prepared_assets.is_some_and(|assets| !assets.is_empty()) {
+            return Err(GraphError::validation(
+                "authored_detail_asset_snapshot_unexpected",
+                "authoredDetail.assets",
+                "Visual asset snapshots require a replacement package.",
+            ));
         }
         let canonical_icon = draft.validate()?;
         let normalized_draft = NodeDraft {
@@ -167,8 +218,34 @@ impl GraphWriter {
                     .await?
             }
         };
+        match authored_detail {
+            AuthoredDetailUpdate::Replace(_) => {
+                AuthoredDetailAssetTable::new(&mut transaction)
+                    .replace(node.id, prepared_assets.unwrap_or_default())
+                    .await?;
+            }
+            AuthoredDetailUpdate::Clear => {
+                AuthoredDetailAssetTable::new(&mut transaction)
+                    .replace(node.id, &[])
+                    .await?;
+            }
+            AuthoredDetailUpdate::Retain => {}
+        }
         transaction.commit().await?;
         Ok(node)
+    }
+
+    pub async fn accepted_detail_asset(
+        &self,
+        node_id: NodeId,
+        asset_id: &str,
+    ) -> Result<crate::AcceptedDetailAsset, GraphError> {
+        let mut transaction = self.database.storage.begin_read().await?;
+        let asset = AuthoredDetailAssetTable::new(&mut transaction)
+            .read(node_id, asset_id)
+            .await?;
+        transaction.commit().await?;
+        Ok(asset)
     }
 
     pub async fn create_edge(&self, draft: &EdgeDraft) -> Result<GraphEdge, GraphError> {

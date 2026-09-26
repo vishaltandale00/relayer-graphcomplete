@@ -1227,6 +1227,7 @@ fn imported_conversation() -> ImportedConversation {
                         detail: "A queue".into(),
                         authored_detail: None,
                         authored_detail_omitted: false,
+                        authored_detail_assets: Vec::new(),
                     }],
                     edges: vec![],
                     actions: vec![],

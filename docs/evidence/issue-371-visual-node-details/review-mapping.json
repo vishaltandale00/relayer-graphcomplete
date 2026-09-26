@@ -1,0 +1,83 @@
+{
+  "kind": "adversarial-review",
+  "reviewer": "GPT-6-Astra /root/astra_spec",
+  "reviewedAt": "2026-09-26T15:13:47.557360+00:00",
+  "headCommit": "a89658262f700ffbea8d65d67fa9db84d7cc3b63",
+  "scope": "SPEC and verification checkpoint mapping for #371/#451: PRD 6.2-6.5 and evidence README against changed Desktop Eval fixture, authoring/client, lifecycle/bridge/API, shared renderer/review, asset delivery/portability, packaging/startup, and declared heavy evidence entry points. Mapping review only, not a new whole-implementation review.",
+  "verdict": "clean",
+  "unresolvedFindings": [],
+  "resolvedFindings": [
+    "Explicit mapping now includes terminal/revocation/generation fencing and acknowledgment recovery.",
+    "Accepted-current image delivery and draft/unrelated-layer rejection are mapped to real Product/Eval integration.",
+    "Typed file-handle transport and packaged authoring exports are mapped.",
+    "Desktop bridge startup and native Sharp packaging are mapped.",
+    "Bounded public content records and private import content staging are mapped."
+  ],
+  "sha256ByFile": {
+    "crates/relayer-app-server/tests/conversation_export_contract.rs": "1bdf911ae09da0e14b793f66ff149ce859c16eb21744acc42fcc96b7ac8a3458",
+    "crates/relayer-graph-server/src/lib.rs": "44d77a71c18c871641c9cf98312bb20b805429a5c1d6a638bd70b1bef05ee008",
+    "crates/relayer-graph-server/tests/import_visual_asset_transport.rs": "a8400ec6f7cb6cc6fdfb9c0ef6eff4326ce779ef681d63744132482ec402d208",
+    "desktop/eval-main/eval-service.mjs": "64d5f60aa53e1842d6da7e57a1f97b47d6d2aaff2ce0e019d420e2a82747c3a7",
+    "desktop/main/services/graphcomplete-runtime.mjs": "accfa66045769a7d097936905720b9cc37a5217a625dd832759d4fee537f0ef4",
+    "desktop/packaging/electron-builder.mjs": "67af02b90cd1519b40915e963d63da7ba05c96862e6178e05eaba600c7615669",
+    "desktop/packaging/eval-electron-builder.mjs": "1bcbabfb435e0d42a3b1ba3c4aef40c3b46a014b25f08c746492aa9fc0b668d4",
+    "desktop/packaging/verify-bundled-app-server.mjs": "5163abcd4e8ad690581d4e01803fd2c0a1709a34e3053c03c2bdf32b1de876ab",
+    "docs/prd/index.html": "2e3efb7758548b2c7e784c9279bc1c4081c6708cb10faeb78b22ef9482f8d29c",
+    "package.json": "35a844f0d0908f923e8726eacd67ccacf02a57bc2da7f698e9f4c902bd5cd273",
+    "packages/eval-runner/src/fixtures/node-detail.ts": "425c5a0ce7768a1484080d16f4cc4a584f25abc36824eff6a1ff691385bfadf5",
+    "packages/eval-runner/src/index.ts": "37913072e8392d512fa0e3bd6b46006cdc7de41283b8d8c2b21cc8606c3dd8fe",
+    "packages/graph-client/test/visual-assets.test.ts": "a705962e7048a07cc580ee834322eaa4f5cd4403be75cae90537b67a55812c04",
+    "packages/harness-host/test/visual-assets-bridge.test.ts": "ddeb8ede53e7286051123cb2eb2f6a4d69582c5eca4950f5a3ec8c48a808f379",
+    "packages/visual-assets/test/visual-assets.test.ts": "3a1fc1a2c77d2755182601136215670a9626c911912b6d951ee2e9f97bd21669",
+    "scripts/run-desktop-visual-node-details-test.mjs": "59ba7fa429bfbd75e22bc9209afba1b0eb473d253027c077877d04efe60a2da0",
+    "scripts/test-desktop-visual-node-details.mjs": "7eb8eca4dd15d6c67002346a84d1d3493afd9045b1ef0a0eb5ff5891f1318fd4",
+    "test/codex-browser-runtime.test.mjs": "3c702bd5533902936713cd78d11d458ab0ed3b872263bfa42d465387fcd34e34",
+    "test/conversation-export-eval-e2e.test.mjs": "9707d01f079e8bcb6402abc05814de1938b4c193234352aac9e5d2690c5b3695",
+    "test/desktop-error-domain-adapters.test.mjs": "822d665045f11dacd4129714cd7ef85462474ef521878a11c4a7bfc525a59a76",
+    "test/desktop-rust-error-capabilities.test.mjs": "2d6e697bc2315f7ddca7fc1e138240883b937861ed475cdb74b6fcc2de88daa7",
+    "test/desktop-shell.test.mjs": "de0468cae7b01c7a32b5005ec58db08a6b750cc1bbacdc97eeb46d28f2cfed71",
+    "test/eval-app-integration.test.mjs": "8315593efce27e151afa2543fe3781bcc4e03045b97b93e717ea7469831156df",
+    "test/graph-client-packaged-detail.test.mjs": "491f1561549cc073ffb98579ec9a7df202dbe56f3b6c900c98e05144a9545d4a",
+    "test/node-detail-assets.test.mjs": "253b87f03b26211af8b89f639c5147f00abb7272c12dae2beb503dc9761c1d31",
+    "test/node-detail-runtime.test.mjs": "30cf830cb4dc0978a7b2ddedb712ea22336aeadb24a2f7a586d79a9c510f24af"
+  },
+  "scopeManifestSha256": "6125b3671c6c1db4b0c35a6d3f1c6d30d479c8c574746272ac47571b9bb795aa",
+  "verifiedAbsentPaths": [
+    "packages/eval-runner/src/runtime-basic.ts",
+    "packages/eval-runner/src/runtime-basic-cli.ts",
+    "packages/eval-runner/test/runtime-basic.test.ts"
+  ],
+  "upstreamIntegration": "Standalone Eval runner remains retired after a8965826 integration; verification uses Desktop Eval rather than restoring the deleted CLI path.",
+  "requiredFinalEvidence": [
+    "npm run check",
+    "npm run build",
+    "npm run test:desktop:visual-node-details with strict original/reopen/import image assertions and retained ReviewSession screenshots"
+  ],
+  "limits": [
+    "No tests or heavy evidence rerun in this mapping audit. Planned/running tests and intermediate Electron output are not final-source pass claims.",
+    "Paid V2/V3 runs, release proof, and explicitly deferred #367 geometry/system-browser checkpoints remain outside this change.",
+    "Reviewer implemented bounded import staging earlier and does not self-certify it here. That implementation has separate independent review-import-staging.json; this review checks its checkpoint mapping only.",
+    "Changes to hashed files or the hashed README required-plan prefix invalidate this assertion. Updates confined to README actual-results/environment sections do not alter the reviewed checkpoint mapping."
+  ],
+  "sha256BySection": {
+    "docs/evidence/issue-371-visual-node-details/README.md#required-verification-plan-prefix": {
+      "sha256": "32bc7a9be85da35673f0fbeb1a593ac00ae0d2d53baa8f3f7b9f37624d0022fd",
+      "selection": "Exact UTF-8 file prefix before the first ## Verification environment heading; includes title and Required verification plan."
+    }
+  },
+  "testRepairReview": {
+    "verdict": "clean",
+    "scope": [
+      "test/desktop-error-domain-adapters.test.mjs",
+      "test/desktop-rust-error-capabilities.test.mjs",
+      "test/eval-app-integration.test.mjs graph-memory configurationPaths restoration"
+    ],
+    "findings": [],
+    "observations": [
+      "Three existing telemetry/error-capability tests now inject a successful private bridge-registration fetch alongside their mocked graph processes. Existing error-domain and capability assertions are unchanged; actual bridge registration remains covered separately in desktop-shell tests.",
+      "Graph-memory EvalService setup restores configurationPaths: [configurationPath], matching HEAD and the fixture configuration in that scenario.",
+      "No previously hashed production source changed during this repair review."
+    ],
+    "execution": "Reviewer did not rerun tests; parent reports 14/14 telemetry-focused tests and graph-memory focused run passed."
+  }
+}

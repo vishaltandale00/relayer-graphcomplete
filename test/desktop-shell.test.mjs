@@ -882,6 +882,7 @@ describe("desktop skeleton", () => {
     let suppliedToken = "";
     const unexpectedStops = [];
     const invocations = [];
+    const fetchRequest = vi.fn(async () => new Response(null, { status: 204 }));
     const child = Object.assign(new EventEmitter(), {
       stdin: new Writable({ write(chunk, _encoding, callback) { suppliedToken += String(chunk); callback(); } }),
       stdout: new PassThrough(),
@@ -891,6 +892,7 @@ describe("desktop skeleton", () => {
       kill: vi.fn(),
     });
     const service = new GraphCompleteRuntimeService({
+      fetchRequest,
       userDataDirectory: directory,
       graphServerBinary: "/test/bin/relayer-graph-server",
       configurationPaths: [configurationPath],
@@ -923,6 +925,16 @@ describe("desktop skeleton", () => {
       expect(session.harnessControlToken).toMatch(/^[a-f0-9]{64}$/);
       expect(session.harnessControlToken).not.toBe(session.graphControlToken);
       expect(session.graphUrl).toBe("http://127.0.0.1:43125");
+      expect(fetchRequest).toHaveBeenCalledOnce();
+      const [bridgeUrl, bridgeRequest] = fetchRequest.mock.calls[0];
+      expect(String(bridgeUrl)).toBe("http://127.0.0.1:43125/api/control/visual-assets/bridge");
+      expect(bridgeRequest.headers.Authorization).toBe(`Bearer ${session.graphControlToken}`);
+      const bridge = JSON.parse(bridgeRequest.body);
+      expect(bridge).toMatchObject({ url: session.harnessUrl });
+      expect(bridge.token).toMatch(/^[a-f0-9]{64}$/);
+      expect(bridge.token).not.toBe(session.graphControlToken);
+      expect(bridge.generation).toBeGreaterThan(0);
+      expect(session).not.toHaveProperty("visualAssetsToken");
       expect(service.graphOperationRecorder).toBeNull();
       expect(session.configurationNames).toEqual(["codex-basic"]);
       const catalog = JSON.parse(await readFile(session.catalogPath, "utf8"));
@@ -1010,6 +1022,7 @@ describe("desktop skeleton", () => {
       kill: vi.fn(function kill() { this.exitCode = 0; this.emit("exit", 0, null); }),
     });
     const service = new GraphCompleteRuntimeService({
+      fetchRequest: async () => new Response(null, { status: 204 }),
       userDataDirectory: directory,
       graphServerBinary: "/test/bin/relayer-graph-server",
       configurationPaths: [configurationPath],
@@ -1063,6 +1076,7 @@ describe("desktop skeleton", () => {
         kill: vi.fn(function kill() { this.exitCode = 0; this.emit("exit", 0, null); }),
       });
       const service = new GraphCompleteRuntimeService({
+      fetchRequest: async () => new Response(null, { status: 204 }),
         userDataDirectory: directory,
         graphServerBinary: "/test/bin/relayer-graph-server",
         configurationPaths: [configurationPath],
@@ -1131,6 +1145,7 @@ describe("desktop skeleton", () => {
       export const startHarnessHost = async () => { throw new Error("must not start"); };
     `)}`;
     const service = new GraphCompleteRuntimeService({
+      fetchRequest: async () => new Response(null, { status: 204 }),
       userDataDirectory: directory,
       graphServerBinary: "/test/bin/relayer-graph-server",
       configurationPaths: [],
@@ -1193,6 +1208,7 @@ describe("desktop skeleton", () => {
       export const startHarnessHost = async () => { throw new Error("must not start"); };
     `)}`;
     const service = new GraphCompleteRuntimeService({
+      fetchRequest: async () => new Response(null, { status: 204 }),
       userDataDirectory: directory,
       graphServerBinary: "/test/bin/relayer-graph-server",
       configurationPaths: [],
@@ -1264,6 +1280,7 @@ describe("desktop skeleton", () => {
       }),
     });
     const service = new GraphCompleteRuntimeService({
+      fetchRequest: async () => new Response(null, { status: 204 }),
       userDataDirectory: directory,
       graphServerBinary: "/test/bin/relayer-graph-server",
       configurationPaths: [],
@@ -1370,6 +1387,7 @@ describe("desktop skeleton", () => {
       }),
     });
     const service = new GraphCompleteRuntimeService({
+      fetchRequest: async () => new Response(null, { status: 204 }),
       userDataDirectory: directory,
       graphServerBinary: "/test/bin/relayer-graph-server",
       configurationPaths: [],
@@ -1449,6 +1467,7 @@ describe("desktop skeleton", () => {
       }),
     });
     const service = new GraphCompleteRuntimeService({
+      fetchRequest: async () => new Response(null, { status: 204 }),
       userDataDirectory: directory,
       graphServerBinary: "/test/bin/relayer-graph-server",
       configurationPaths: [],
@@ -1535,6 +1554,7 @@ describe("desktop skeleton", () => {
       }),
     });
     const service = new GraphCompleteRuntimeService({
+      fetchRequest: async () => new Response(null, { status: 204 }),
       userDataDirectory: directory,
       graphServerBinary: "/test/bin/relayer-graph-server",
       configurationPaths: [],
@@ -1618,6 +1638,7 @@ describe("desktop skeleton", () => {
       kill: vi.fn(() => true),
     });
     const service = new GraphCompleteRuntimeService({
+      fetchRequest: async () => new Response(null, { status: 204 }),
       userDataDirectory: directory,
       graphServerBinary: "/test/bin/relayer-graph-server",
       configurationPaths: [],
@@ -2880,6 +2901,12 @@ describe("desktop skeleton", () => {
         "node_modules/chrome-devtools-mcp/build/src/bin/chrome-devtools-mcp.js",
         "node_modules/@relayer/graph-client/dist/index.js",
         "node_modules/@relayer/harness-host/dist/index.js",
+        "node_modules/@relayer/visual-assets/dist/index.js",
+        "node_modules/sharp/lib/sharp.js",
+        "node_modules/@img/sharp-darwin-arm64/lib/sharp-darwin-arm64-0.35.4.node",
+        "node_modules/@img/sharp-darwin-x64/lib/sharp-darwin-x64-0.35.4.node",
+        "node_modules/@img/sharp-win32-x64/lib/sharp-win32-x64-0.35.4.node",
+        "node_modules/@img/sharp-win32-arm64/lib/sharp-win32-arm64-0.35.4.node",
         "node_modules/@relayer/harness-host/dist/implementations/claude-basic-browser.js",
         "node_modules/@relayer/eval-runner/dist/index.js",
       ];
