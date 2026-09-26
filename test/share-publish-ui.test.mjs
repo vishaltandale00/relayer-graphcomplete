@@ -141,6 +141,30 @@ describe("share publish renderer boundary", () => {
     expect(dialog.querySelector('[data-share-action="retry"]')).not.toBeNull();
   });
 
+  it("re-runs preflight instead of retrying a nonexistent attempt after a preflight failure", async () => {
+    const test = fixture({ preflightResult: {
+      status: "failed",
+      code: "share_service_failed",
+      retryable: true,
+      attemptReferenceId: "SHR-PREFLIGHT",
+    } });
+    test.share.preflight
+      .mockResolvedValueOnce({
+        status: "failed",
+        code: "share_service_failed",
+        retryable: true,
+        attemptReferenceId: "SHR-PREFLIGHT",
+      })
+      .mockResolvedValueOnce({ status: "ready" });
+
+    await test.window.document.querySelector("#shareConversation").onclick();
+    await test.window.document.querySelector('[data-share-action="retry"]').onclick();
+
+    expect(test.share.preflight).toHaveBeenCalledTimes(2);
+    expect(test.share.retry).not.toHaveBeenCalled();
+    expect(test.window.document.querySelector("#shareTitle")).not.toBeNull();
+  });
+
   it("formats quota reset in local time without offering retry", async () => {
     const test = fixture({ preflightResult: {
       status: "failed",
@@ -157,5 +181,28 @@ describe("share publish renderer boundary", () => {
     expect(dialog.querySelector('[data-share-action="retry"]')).toBeNull();
     expect(dialog.querySelector("#shareTitle")).toBeNull();
     expect(test.share.create).not.toHaveBeenCalled();
+  });
+
+  it("clears owner-bound results and ignores stale publication completion after an account transition", async () => {
+    let resolveCreate;
+    const test = fixture();
+    test.share.create.mockImplementation(() => new Promise((resolve) => { resolveCreate = resolve; }));
+    await test.window.document.querySelector("#shareConversation").onclick();
+    const title = test.window.document.querySelector("#shareTitle");
+    title.value = "Owner A title";
+    title.oninput();
+    const pending = test.window.document.querySelector('[data-share-action="create"]').onclick();
+
+    test.changed({ status: "signed-out", channel: "stable" });
+    expect(test.window.document.querySelector("#shareDialog").textContent).toContain("Sign in to share");
+    expect(test.window.document.querySelector('[aria-label="Share link"]')).toBeNull();
+    resolveCreate({
+      status: "created",
+      attemptReferenceId: "SHR-OWNER-A",
+      url: "https://share.example.test/t/owner-a",
+    });
+    await pending;
+    expect(test.window.document.querySelector('[aria-label="Share link"]')).toBeNull();
+    expect(test.window.document.querySelector("#shareDialog").textContent).toContain("Sign in to share");
   });
 });

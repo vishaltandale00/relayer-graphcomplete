@@ -70,8 +70,9 @@ Sentry submission, or promotion of prototype code.
   owner identity server-side. Proof: handler tests with valid, invalid, expired,
   wrong-audience, wrong-issuer, and foreign-owner fake JWKS cases.
 - [x] `SHR-464-2` Reserve/upload/finalize exact v1 bytes using 128-bit IDs,
-  versioned object keys, bounded size/line/JSON validation, and exact staged
-  object identity. Proof: handlers with fake S3/DynamoDB adapters.
+  versioned object keys, an atomic active-reservation bound, bounded
+  size/line/JSON validation, and exact staged object identity. Proof: handlers
+  with fake S3/DynamoDB adapters, including concurrent reservation admission.
 - [x] `SHR-464-3` Make owner-scoped attempt retries and concurrent finalization
   return one immutable URL and one quota charge. Proof: deterministic concurrent
   attempt test including lost-response replay.
@@ -112,7 +113,7 @@ Sentry submission, or promotion of prototype code.
 - Coherent journey: `test/conversation-export-eval-e2e.test.mjs` drives real
   Rust graph/app servers, Electron-main coordination, fake service storage, a
   lost-response retry, and the production public viewer handler.
-- Focused checkpoints: 64 integrated share/service/viewer/telemetry/template
+- Focused checkpoints: 109 integrated share/service/viewer/telemetry/template
   tests, Rust share redaction tests, and the persisted-product export seam passed.
 - Declared evidence: telemetry 99/99, `npm run build`, PRD readability,
   CloudFormation lint, and the full `npm run check` portfolio passed locally.

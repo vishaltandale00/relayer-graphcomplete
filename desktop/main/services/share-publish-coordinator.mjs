@@ -5,7 +5,12 @@ const MAXIMUM_PREFLIGHT_TITLE = "😀".repeat(120);
 const NON_REPORTED_CODES = new Set([
   "share_cancelled",
   "share_sign_in_required",
+  "share_imported_conversation",
+  "share_no_accepted_completion",
+  "share_title_required",
+  "share_title_too_long",
   "daily_quota_exhausted",
+  "share_attempt_unavailable",
 ]);
 const CLOSED_FAILURE_CODES = new Set([
   "share_cancelled",

@@ -185,6 +185,7 @@ function isSafeRendererPath(pathname) {
 }
 
 async function startFixtureServer(page) {
+  const servedFiles = new Set();
   const server = createServer(async (request, response) => {
     try {
       const pathname = new URL(request.url || "/", "http://127.0.0.1").pathname;
@@ -200,6 +201,7 @@ async function startFixtureServer(page) {
       }
       const file = resolve(rendererRoot, `.${decodeURIComponent(pathname)}`);
       const body = await readFile(file);
+      servedFiles.add(relative(repositoryRoot, file));
       const contentType = pathname.endsWith(".css")
         ? "text/css"
         : pathname.endsWith(".js")
@@ -217,7 +219,7 @@ async function startFixtureServer(page) {
   await new Promise((resolveServer) => server.listen(0, "127.0.0.1", resolveServer));
   const address = server.address();
   const origin = `http://127.0.0.1:${address.port}`;
-  return { server, origin, url: `${origin}${routePath}` };
+  return { server, origin, url: `${origin}${routePath}`, servedFiles };
 }
 
 async function waitFor(window, label, expression, timeoutMs = 15_000) {
@@ -298,8 +300,44 @@ async function revealNodeDetails(viewer) {
 
 async function navigateWithoutChangingUrl(viewer) {
   const { window, originalUrl } = viewer;
-  await window.webContents.executeJavaScript("document.querySelector('#detailActions .action-control')?.click(); true");
+  await waitFor(window, "nested navigation action", "Boolean(document.querySelector('#detailActions .action-control'))");
+  await window.webContents.executeJavaScript("document.querySelector('#detailActions .action-control').click(); true");
+  await waitFor(window, "nested destination layer", "document.querySelector('.graph-node .copy b')?.textContent?.trim() === 'Node Details evidence'");
   await waitFor(window, "unchanged URL after navigation", `location.href === ${JSON.stringify(originalUrl)}`);
+  viewer.assertions.nestedNavigationChangedLayer = true;
+}
+
+async function selectNextTurn(viewer) {
+  const { window, originalUrl } = viewer;
+  await window.webContents.executeJavaScript("document.querySelector('#nextTurn').click(); true");
+  await waitFor(window, "second accepted turn", "document.querySelector('#turnPickerButton')?.textContent?.trim() === 'Turn 2 of 5' && document.querySelector('.graph-node .copy b')?.textContent?.trim() === 'Accepted turn 2'");
+  await waitFor(window, "unchanged URL after turn selection", `location.href === ${JSON.stringify(originalUrl)}`);
+  viewer.assertions.turnNavigationChangedTurn = true;
+}
+
+async function exerciseMobilePan(viewer) {
+  const moved = await viewer.window.webContents.executeJavaScript(`(() => {
+    const stage = document.querySelector('#graphStage');
+    const node = document.querySelector('.graph-node');
+    if (!stage || !node) return false;
+    const before = node.getBoundingClientRect();
+    stage.setPointerCapture = () => {};
+    stage.onpointerdown({ button: 0, target: stage, pointerType: 'mouse', pointerId: 99, clientX: 40, clientY: 240 });
+    stage.onpointermove({ target: stage, pointerType: 'mouse', pointerId: 99, clientX: 88, clientY: 276 });
+    stage.onpointerup({ pointerId: 99 });
+    const after = node.getBoundingClientRect();
+    return Math.abs(after.left - before.left) >= 40 && Math.abs(after.top - before.top) >= 28;
+  })()`);
+  if (!moved) throw new Error("Mobile pan did not displace the rendered graph.");
+  viewer.assertions.mobilePanChangedViewport = true;
+}
+
+async function reloadToFirstTurn(viewer) {
+  const { window, originalUrl } = viewer;
+  await window.webContents.reload();
+  await waitFor(window, "first accepted turn after reload", "document.querySelector('#turnPickerButton')?.textContent?.trim() === 'Turn 1 of 5' && document.querySelector('.graph-node .copy b')?.textContent?.trim() === 'Evidence-ready result'");
+  await waitFor(window, "unchanged URL after reload", `location.href === ${JSON.stringify(originalUrl)}`);
+  viewer.assertions.reloadResetFirstTurn = true;
 }
 
 async function capture(window, file, viewport) {
@@ -313,9 +351,9 @@ async function capture(window, file, viewport) {
   return { width: viewport.width, height: viewport.height, sourcePixelSize: size, sha256: sha256(bytes) };
 }
 
-async function sourceManifest() {
+async function sourceManifest(filesToHash) {
   const files = {};
-  for (const file of sourceFiles) {
+  for (const file of [...filesToHash].sort()) {
     const bytes = await readFile(resolve(repositoryRoot, file));
     files[file] = { bytes: bytes.byteLength, sha256: sha256(bytes) };
   }
@@ -358,6 +396,9 @@ async function main() {
         });
       }
       await navigateWithoutChangingUrl(viewer);
+      await selectNextTurn(viewer);
+      if (viewport.width < 760) await exerciseMobilePan(viewer);
+      await reloadToFirstTurn(viewer);
     }
     const networkRequests = opened.flatMap(({ networkRequests: requests }) => requests);
     const unchanged = (await Promise.all(opened.map(({ window, originalUrl }) => (
@@ -372,7 +413,7 @@ async function main() {
       source: {
         commit: execFileSync("git", ["rev-parse", "HEAD"], { cwd: repositoryRoot, encoding: "utf8" }).trim(),
         dirty: Boolean(execFileSync("git", ["status", "--porcelain"], { cwd: repositoryRoot, encoding: "utf8" }).trim()),
-        sourceFiles: await sourceManifest(),
+        sourceFiles: await sourceManifest(new Set([...sourceFiles, ...fixture.servedFiles])),
       },
       browser: {
         electron: process.versions.electron,
@@ -396,8 +437,7 @@ async function main() {
   }
 }
 
-app.whenReady().then(main).catch((error) => {
+app.whenReady().then(main).then(() => app.quit()).catch((error) => {
   console.error(error);
-  app.quit();
-  process.exitCode = 1;
+  app.exit(1);
 });

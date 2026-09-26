@@ -104,7 +104,6 @@ export function createShareServiceClient({
   fetchImpl = globalThis.fetch,
   uploadFetchImpl = fetchImpl,
   timeoutMs = DEFAULT_TIMEOUT_MS,
-  now = Date.now,
 } = {}) {
   const origin = exactUrl(endpoint ?? baseUrl, "Share service endpoint");
   if (typeof fetchImpl !== "function" || typeof uploadFetchImpl !== "function") throw new TypeError("Share service fetch implementations are required.");
@@ -201,22 +200,16 @@ export function createShareServiceClient({
 
   async function preflight({ authorization, assertAuthority = async () => {}, signal } = {}) {
     await assertAuthority();
-    const items = await list({ authorization, signal });
+    const quota = await request("/shares/quota", { authorization, signal });
     await assertAuthority();
-    const current = new Date(now());
-    const day = current.toISOString().slice(0, 10);
-    const used = items.filter((item) => (
-      typeof item?.createdAt === "string" && item.createdAt.slice(0, 10) === day
-    )).length;
-    if (used >= 20) {
-      const reset = new Date(Date.UTC(
-        current.getUTCFullYear(),
-        current.getUTCMonth(),
-        current.getUTCDate() + 1,
-      )).toISOString();
+    if (!quota || !Number.isSafeInteger(quota.used) || !Number.isSafeInteger(quota.limit)
+      || typeof quota.resetAt !== "string") {
+      throw new ShareServiceClientError("share_service_failed", { failureStage: "service" });
+    }
+    if (quota.used >= quota.limit) {
       throw new ShareServiceClientError("daily_quota_exhausted", {
         status: 429,
-        data: { resetAt: reset, used, limit: 20 },
+        data: { resetAt: quota.resetAt, used: quota.used, limit: quota.limit },
       });
     }
     return Object.freeze({ status: "ready" });

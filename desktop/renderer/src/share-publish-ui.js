@@ -58,6 +58,9 @@ export function createSharePublishController({
   let phase = "closed";
   let title = "";
   let result = null;
+  let failureOrigin = null;
+  let accountSubject = null;
+  let operationVersion = 0;
   let returnFocus = null;
   let disposed = false;
 
@@ -70,8 +73,10 @@ export function createSharePublishController({
   const focus = (selector) => queueMicrotask(() => host.querySelector(selector)?.focus());
 
   function close() {
+    operationVersion += 1;
     phase = "closed";
     result = null;
+    failureOrigin = null;
     title = "";
     renderDialog();
   }
@@ -116,11 +121,15 @@ export function createSharePublishController({
       </section>`;
       host.querySelector('[data-share-action="cancel"]').onclick = close;
       host.querySelector('[data-share-action="sign-in"]').onclick = async () => {
+        const operation = ++operationVersion;
         phase = "signing-in";
         renderDialog();
         const next = await account.login().catch(() => ({ status: "signed-out" }));
-        if (disposed || phase === "closed") return;
-        if (normalizedAccount(next) === "signed-in") return runPreflight();
+        if (disposed || phase === "closed" || operation !== operationVersion) return;
+        if (normalizedAccount(next) === "signed-in") {
+          accountSubject = typeof next?.subject === "string" ? next.subject : accountSubject;
+          return runPreflight();
+        }
         else if (normalizedAccount(next) !== "signing-in") phase = "signin";
         renderDialog();
       };
@@ -157,6 +166,7 @@ export function createSharePublishController({
       host.querySelector('[data-share-action="cancel"]').onclick = close;
       createButton.onclick = async () => {
         if (!title.trim()) return;
+        const operation = ++operationVersion;
         const threadId = getThread()?.id;
         phase = "creating";
         renderDialog();
@@ -166,8 +176,9 @@ export function createSharePublishController({
           retryable: false,
           attemptReferenceId: "SHR-UNAVAILABLE",
         }));
-        if (disposed || phase === "closed") return;
+        if (disposed || phase === "closed" || operation !== operationVersion) return;
         result = next;
+        failureOrigin = next?.status === "created" ? null : "attempt";
         if (next?.status === "created") phase = "ready";
         else if (next?.code === "share_cancelled") return close();
         else if (next?.code === "share_sign_in_required") phase = "signin";
@@ -216,12 +227,14 @@ export function createSharePublishController({
     if (retry) retry.onclick = async () => {
       phase = "creating";
       renderDialog();
+      if (failureOrigin === "preflight") return runPreflight();
+      const operation = ++operationVersion;
       const next = await share.retry(result.attemptReferenceId).catch(() => ({
         ...result,
         status: "failed",
         code: "share_service_failed",
       }));
-      if (disposed || phase === "closed") return;
+      if (disposed || phase === "closed" || operation !== operationVersion) return;
       result = next;
       phase = next?.status === "created" ? "ready" : "error";
       renderDialog();
@@ -230,6 +243,7 @@ export function createSharePublishController({
   }
 
   async function open(event) {
+    const operation = ++operationVersion;
     const eligibility = shareEligibility({ thread: getThread(), interactions: getInteractions() });
     returnFocus = event?.currentTarget ?? root.activeElement;
     title = "";
@@ -239,12 +253,18 @@ export function createSharePublishController({
       renderDialog();
       return;
     }
-    if (normalizedAccount(await account.read().catch(() => null)) === "signed-in") return runPreflight();
+    const currentAccount = await account.read().catch(() => null);
+    if (disposed || operation !== operationVersion) return;
+    if (normalizedAccount(currentAccount) === "signed-in") {
+      accountSubject = typeof currentAccount?.subject === "string" ? currentAccount.subject : null;
+      return runPreflight();
+    }
     phase = "signin";
     renderDialog();
   }
 
   async function runPreflight() {
+    const operation = ++operationVersion;
     phase = "preflighting";
     renderDialog();
     const next = await share.preflight(getThread()?.id).catch(() => ({
@@ -253,8 +273,9 @@ export function createSharePublishController({
       retryable: true,
       attemptReferenceId: "SHR-UNAVAILABLE",
     }));
-    if (disposed || phase === "closed") return;
+    if (disposed || phase === "closed" || operation !== operationVersion) return;
     result = next?.status === "ready" ? null : next;
+    failureOrigin = next?.status === "ready" ? null : "preflight";
     phase = next?.status === "ready" ? "title"
       : next?.code === "share_sign_in_required" ? "signin"
         : "error";
@@ -265,12 +286,27 @@ export function createSharePublishController({
   menuButton.onclick = open;
   const unsubscribe = account.onChanged?.((value) => {
     if (disposed || phase === "closed") return;
+    if (phase === "blocked") return;
     const status = normalizedAccount(value);
-    if (status === "signed-in" && (phase === "signin" || phase === "signing-in")) {
+    const nextSubject = typeof value?.subject === "string" ? value.subject : null;
+    const replaced = status === "signed-in" && accountSubject !== null && nextSubject !== accountSubject;
+    if (status === "signed-in" && (phase === "signin" || phase === "signing-in" || replaced)) {
+      operationVersion += 1;
+      title = "";
+      result = null;
+      failureOrigin = null;
+      accountSubject = nextSubject;
       void runPreflight();
       return;
     }
-    else if (status !== "signed-in" && phase === "title") phase = "signin";
+    else if (status !== "signed-in") {
+      operationVersion += 1;
+      title = "";
+      result = null;
+      failureOrigin = null;
+      accountSubject = null;
+      phase = "signin";
+    }
     renderDialog();
   });
 
@@ -285,6 +321,7 @@ export function createSharePublishController({
     },
     dispose() {
       disposed = true;
+      operationVersion += 1;
       unsubscribe?.();
       setBackgroundInert(false);
       host.replaceChildren();

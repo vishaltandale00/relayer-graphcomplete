@@ -109,6 +109,29 @@ describe("share publication coordinator", () => {
     expect(JSON.stringify(report.mock.calls)).not.toContain("Bearer secret");
   });
 
+  it("does not report expected eligibility and validation failures", async () => {
+    const report = vi.fn();
+    const coordinator = createSharePublishCoordinator({
+      exportSnapshot: async () => {
+        throw Object.assign(new Error("expected eligibility failure"), {
+          code: "share_no_accepted_completion",
+          failureStage: "export",
+        });
+      },
+      accountSession: async () => ({ ownerKey: "owner-a", authorization: "Bearer secret", generation: 1 }),
+      sourceThreadIdentity: async (threadId) => `installation:test:thread:${threadId}`,
+      publish: vi.fn(),
+      issueHandledShareFailureReporter: () => ({ report }),
+      createReferenceId: () => "SHR-EXPECTED",
+    });
+
+    await expect(coordinator.preflight({ threadId: 42 })).resolves.toMatchObject({
+      code: "share_no_accepted_completion",
+      retryable: false,
+    });
+    expect(report).not.toHaveBeenCalled();
+  });
+
   it("revalidates account authority after export and closes arbitrary dependency codes", async () => {
     let currentAccount = { ownerKey: "owner-a", authorization: "Bearer old", generation: 1 };
     let releaseExport;

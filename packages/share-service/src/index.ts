@@ -11,6 +11,7 @@ export const MAX_SNAPSHOT_BYTES = 16 * 1024 * 1024;
 export const MAX_JSONL_LINE_BYTES = 16 * 1024 * 1024;
 export const MAX_JSONL_LINES = 10_001;
 export const MAX_SHARES_PER_UTC_DAY = 20;
+export const MAX_ACTIVE_RESERVATIONS_PER_OWNER = 32;
 export const DEFAULT_STAGING_TTL_MS = 24 * 60 * 60 * 1_000;
 const PUBLIC_VIEWER_CSP = "default-src 'none'; base-uri 'none'; frame-ancestors 'none'; object-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'none'; form-action 'none'";
 const REQUIRED_VIEWER_ASSETS = Object.freeze([
@@ -111,8 +112,8 @@ export interface ShareRepository {
   readonly findShare: (shareId: string) => Promise<ShareRecord | null>;
   /** Strongly consistent owner/attempt lookup used for idempotent retries. */
   readonly findAttempt: (ownerHash: string, attemptId: string) => Promise<ShareRecord | null>;
-  /** Must atomically claim both shareId and (ownerHash, attemptId). */
-  readonly putIfAbsent: (record: ShareRecord) => Promise<boolean>;
+  /** Must atomically claim both identities while bounding active owner reservations. */
+  readonly reserveIfEligible: (record: ShareRecord) => Promise<"created" | "conflict" | "limit-exhausted">;
   /** Must atomically transition a reservation and charge the UTC-day quota. */
   readonly publishIfEligible: (input: {
     readonly ownerHash: string;
@@ -130,6 +131,8 @@ export interface ShareRepository {
   readonly incrementPageRequest: (shareId: string) => Promise<void>;
   readonly incrementInstallClick: (shareId: string) => Promise<void>;
   readonly listPublished: (ownerHash: string) => Promise<readonly ShareRecord[]>;
+  /** Includes durable quota charges even when the corresponding share was deleted. */
+  readonly quotaUsage: (ownerHash: string, publishedDay: string) => Promise<number>;
 }
 
 export type PublishDecision =
@@ -192,6 +195,12 @@ export interface ShareListItem {
   readonly createdAt: string;
 }
 
+export interface ShareQuotaStatus {
+  readonly used: number;
+  readonly limit: number;
+  readonly resetAt: string;
+}
+
 export interface PublicPageResult {
   readonly shareId: string;
   readonly title: string;
@@ -242,6 +251,7 @@ export interface ShareService {
   readonly reserve: (identity: VerifiedShareIdentity, input: ShareAttemptInput) => Promise<ReserveResult>;
   readonly finalize: (identity: VerifiedShareIdentity, shareId: string) => Promise<FinalizeResult>;
   readonly list: (identity: VerifiedShareIdentity) => Promise<readonly ShareListItem[]>;
+  readonly quota: (identity: VerifiedShareIdentity) => Promise<ShareQuotaStatus>;
   readonly publicPage: (shareId: string) => Promise<PublicPageResult>;
   readonly install: (shareId: string) => Promise<InstallResult>;
   /** Used by the future owner-delete handler; it does not mutate share state. */
@@ -580,13 +590,19 @@ export class InMemoryShareRepository implements ShareRepository {
     });
   }
 
-  async putIfAbsent(record: ShareRecord): Promise<boolean> {
+  async reserveIfEligible(record: ShareRecord): Promise<"created" | "conflict" | "limit-exhausted"> {
     return this.mutex.run(() => {
       const attemptKey = `${record.ownerHash}:${record.attemptId}`;
-      if (this.records.has(record.shareId) || this.attempts.has(attemptKey)) return false;
+      if (this.records.has(record.shareId) || this.attempts.has(attemptKey)) return "conflict";
+      const activeReservations = [...this.records.values()].filter((candidate) => (
+        candidate.ownerHash === record.ownerHash
+          && candidate.status === "reserved"
+          && Date.parse(candidate.uploadPolicy.expiresAt) > Date.parse(record.createdAt)
+      )).length;
+      if (activeReservations >= MAX_ACTIVE_RESERVATIONS_PER_OWNER) return "limit-exhausted";
       this.records.set(record.shareId, cloneRecord(record));
       this.attempts.set(attemptKey, record.shareId);
-      return true;
+      return "created";
     });
   }
 
@@ -657,6 +673,10 @@ export class InMemoryShareRepository implements ShareRepository {
       .filter((record) => record.ownerHash === ownerHash && record.status === "published")
       .sort((left, right) => right.createdAt.localeCompare(left.createdAt))
       .map(cloneRecord));
+  }
+
+  async quotaUsage(ownerHash: string, publishedDay: string): Promise<number> {
+    return this.mutex.run(() => this.quotaUse.get(`${ownerHash}:${publishedDay}`) ?? 0);
   }
 
   async markDeleted(shareId: string): Promise<void> {
@@ -981,7 +1001,11 @@ export function createShareService(options: ShareServiceOptions): ShareService {
       const record: ShareRecord = input.projectName === undefined
         ? recordBase
         : { ...recordBase, projectName: input.projectName };
-      if (await options.repository.putIfAbsent(record)) return toReserveResult(record, origin);
+      const admission = await options.repository.reserveIfEligible(record);
+      if (admission === "created") return toReserveResult(record, origin);
+      if (admission === "limit-exhausted") {
+        throw new ShareServiceError(429, "reservation_limit_exhausted");
+      }
       const raced = await options.repository.findAttempt(identity.ownerHash, input.attemptId);
       if (raced) {
         if (raced.status === "deleted") throw new ShareServiceError(409, "attempt_closed");
@@ -1083,7 +1107,11 @@ export function createShareService(options: ShareServiceOptions): ShareService {
         return notFound();
       }
       if (decision.kind === "quota-exhausted") {
-        await options.objectStore.delete(current.finalKey).catch(() => undefined);
+        // Keep the immutable copy. Another stateless service instance can win a
+        // later eligible publish for this reservation before this response is
+        // observed; deleting by key here would then erase that published
+        // instance's exact object. Retention also lets an exact retry reuse the
+        // copy without weakening the quota transaction.
         throw new ShareServiceError(429, "daily_quota_exhausted", { resetAt: decision.resetAt, used: decision.used, limit: decision.limit });
       }
       await options.objectStore.delete(current.stagingKey).catch(() => undefined);
@@ -1094,6 +1122,16 @@ export function createShareService(options: ShareServiceOptions): ShareService {
   async function list(identity: VerifiedShareIdentity): Promise<readonly ShareListItem[]> {
     validateOwnerHash(identity.ownerHash);
     return (await options.repository.listPublished(identity.ownerHash)).map((record) => toListItem(record, origin));
+  }
+
+  async function quota(identity: VerifiedShareIdentity): Promise<ShareQuotaStatus> {
+    validateOwnerHash(identity.ownerHash);
+    const currentTime = now();
+    return Object.freeze({
+      used: await options.repository.quotaUsage(identity.ownerHash, utcDay(currentTime)),
+      limit: MAX_SHARES_PER_UTC_DAY,
+      resetAt: nextUtcMidnight(currentTime),
+    });
   }
 
   async function publicPage(shareId: string): Promise<PublicPageResult> {
@@ -1165,6 +1203,10 @@ export function createShareService(options: ShareServiceOptions): ShareService {
         const identity = await authenticate(request);
         return jsonResponse(200, { items: await list(identity) });
       }
+      if (request.method === "GET" && parts.length === 2 && parts[0] === "shares" && parts[1] === "quota") {
+        const identity = await authenticate(request);
+        return jsonResponse(200, await quota(identity));
+      }
       if (request.method === "GET" && parts.length === 2 && parts[0] === "shares") {
         const identity = await authenticate(request);
         const record = await options.repository.findShare(parts[1]!);
@@ -1204,5 +1246,5 @@ export function createShareService(options: ShareServiceOptions): ShareService {
     }
   }
 
-  return Object.freeze({ reserve, finalize, list, publicPage, install, invalidatePage, handle });
+  return Object.freeze({ reserve, finalize, list, quota, publicPage, install, invalidatePage, handle });
 }

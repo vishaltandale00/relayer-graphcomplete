@@ -24,14 +24,16 @@ function response(body, status = 200) {
 
 describe("main-only share service client", () => {
   it("reports an already exhausted UTC-day quota before title collection", async () => {
-    const items = Array.from({ length: 20 }, (_, index) => ({
-      shareId: String(index).padStart(32, "0"),
-      createdAt: `2026-09-26T${String(index).padStart(2, "0")}:00:00.000Z`,
-    }));
     const client = createShareServiceClient({
       endpoint: "https://share.example.test",
-      now: () => Date.parse("2026-09-26T23:30:00.000Z"),
-      fetchImpl: async () => response({ items }),
+      fetchImpl: async (url) => {
+        expect(url).toBe("https://share.example.test/shares/quota");
+        return response({
+          used: 20,
+          limit: 20,
+          resetAt: "2026-09-27T00:00:00.000Z",
+        });
+      },
     });
 
     await expect(client.preflight({ authorization: "Bearer verified-id-token" }))

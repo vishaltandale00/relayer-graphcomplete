@@ -10,6 +10,7 @@ import {
   InMemoryShareObjectStore,
   InMemorySharePageCache,
   InMemoryShareRepository,
+  MAX_ACTIVE_RESERVATIONS_PER_OWNER,
   MAX_SNAPSHOT_BYTES,
   ObjectStoreError,
   SnapshotValidationError,
@@ -177,6 +178,29 @@ describe("share-service reservation and publication", () => {
     expect(upload.fields["x-share-version"]).toBe("v1");
     await expect(reserve(current, identity, { ...input, title: "different" }))
       .rejects.toMatchObject({ status: 409, code: "attempt_conflict" });
+  });
+
+  it("atomically bounds active reservations per owner while preserving exact retries", async () => {
+    const current = fixture();
+    const identity = await identityFor(current.authenticator, "auth0|reservation-bound");
+    let first: ReserveResult | undefined;
+    const outcomes = await Promise.allSettled(Array.from(
+      { length: MAX_ACTIVE_RESERVATIONS_PER_OWNER + 8 },
+      async (_, index) => {
+        const reserved = await reserve(current, identity, snapshotInput(`bounded-${index}`));
+        if (index === 0) first = reserved;
+        return reserved;
+      },
+    ));
+    const successes = outcomes.filter((outcome) => outcome.status === "fulfilled");
+    const failures = outcomes.filter((outcome): outcome is PromiseRejectedResult => outcome.status === "rejected");
+    expect(successes).toHaveLength(MAX_ACTIVE_RESERVATIONS_PER_OWNER);
+    expect(failures).toHaveLength(8);
+    expect(failures.every((failure) => (
+      failure.reason instanceof Error
+        && (failure.reason as ShareServiceError).code === "reservation_limit_exhausted"
+    ))).toBe(true);
+    await expect(reserve(current, identity, snapshotInput("bounded-0"))).resolves.toEqual(first);
   });
 
   it("freezes validated bytes, binds copy to the staged object identity, and makes lost-response retries idempotent", async () => {
@@ -370,6 +394,77 @@ describe("share-service reservation and publication", () => {
     expect(failures[0]!.reason).toMatchObject({ status: 429, code: "daily_quota_exhausted" });
     expect((failures[0]!.reason as ShareServiceError).data.resetAt).toBe(new Date(Date.UTC(2030, 2, 18)).toISOString());
     expect(await current.repository.listPublished(identity.ownerHash)).toHaveLength(20);
+    await expect(current.service.quota(identity)).resolves.toEqual({
+      used: 20,
+      limit: 20,
+      resetAt: new Date(Date.UTC(2030, 2, 18)).toISOString(),
+    });
+    await expect(current.service.handle({
+      method: "GET",
+      path: "/shares/quota",
+      headers: { authorization: `Bearer ${token("auth0|quota")}` },
+    })).resolves.toMatchObject({
+      status: 200,
+      body: { used: 20, limit: 20 },
+    });
+  });
+
+  it("never lets a quota loser delete an immutable object published by another service instance", async () => {
+    const current = fixture();
+    const identity = await identityFor(current.authenticator, "auth0|cross-instance-quota");
+    for (let index = 0; index < 20; index += 1) {
+      await publishFixture(current, identity, snapshotInput(`filled-${index}`, `Filled ${index}`));
+    }
+    const target = await reserve(current, identity, snapshotInput("cross-instance-target"));
+    await current.objectStore.putStaging(target.upload!.key, SNAPSHOT);
+
+    let currentTime = NOW;
+    let quotaDecisionReached!: () => void;
+    const quotaDecision = new Promise<void>((resolve) => { quotaDecisionReached = resolve; });
+    let releaseQuotaLoser!: () => void;
+    const quotaLoserReleased = new Promise<void>((resolve) => { releaseQuotaLoser = resolve; });
+    const pausedRepository = new Proxy(current.repository, {
+      get(targetRepository, property, receiver) {
+        if (property === "publishIfEligible") {
+          return async (input: Parameters<ShareRepository["publishIfEligible"]>[0]) => {
+            const decision = await targetRepository.publishIfEligible(input);
+            if (decision.kind === "quota-exhausted") {
+              quotaDecisionReached();
+              await quotaLoserReleased;
+            }
+            return decision;
+          };
+        }
+        const value = Reflect.get(targetRepository, property, receiver);
+        return typeof value === "function" ? value.bind(targetRepository) : value;
+      },
+    });
+    const serviceOptions = {
+      authenticator: current.authenticator,
+      objectStore: current.objectStore,
+      publicOrigin: "https://share.example.test",
+      installRedirectUrl: INSTALL_URL,
+      assetManifest: ASSET_MANIFEST,
+      now: () => currentTime,
+    };
+    const quotaLoser = createShareService({ ...serviceOptions, repository: pausedRepository });
+    const nextDayWinner = createShareService({ ...serviceOptions, repository: current.repository });
+
+    const losingFinalize = quotaLoser.finalize(identity, target.shareId);
+    await quotaDecision;
+    const currentDate = new Date(NOW);
+    currentTime = Date.UTC(
+      currentDate.getUTCFullYear(),
+      currentDate.getUTCMonth(),
+      currentDate.getUTCDate() + 1,
+    ) + 1;
+    await expect(nextDayWinner.finalize(identity, target.shareId)).resolves.toMatchObject({ status: "created" });
+    releaseQuotaLoser();
+    await expect(losingFinalize).rejects.toMatchObject({ status: 429, code: "daily_quota_exhausted" });
+    await expect(nextDayWinner.publicPage(target.shareId)).resolves.toMatchObject({
+      shareId: target.shareId,
+      snapshotBytes: SNAPSHOT,
+    });
   });
 });
 

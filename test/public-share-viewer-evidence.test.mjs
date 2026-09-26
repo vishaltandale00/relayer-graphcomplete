@@ -51,6 +51,11 @@ describe("public share viewer evidence seam", () => {
     expect(captureSource).toContain("downloadCardInsideWorkspace");
     expect(captureSource).toContain("environmentPanelAbsent");
     expect(captureSource).toContain("mutationControlsInert");
+    expect(captureSource).toContain("nestedNavigationChangedLayer");
+    expect(captureSource).toContain("turnNavigationChangedTurn");
+    expect(captureSource).toContain("mobilePanChangedViewport");
+    expect(captureSource).toContain("reloadResetFirstTurn");
+    expect(captureSource).toContain("fixture.servedFiles");
     expect(captureSource).toContain("paidInferenceCalls: 0");
   });
 
