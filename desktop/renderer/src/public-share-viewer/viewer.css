@@ -192,6 +192,20 @@ html[data-theme="light"] .public-share-error {
   background: #fff;
 }
 
+@media (min-width: 1101px) {
+  .public-share-shell .workspace-layout {
+    position: relative;
+  }
+
+  .public-share-download-card {
+    position: absolute;
+    z-index: 4;
+    top: 0;
+    right: 0;
+    width: var(--inspector);
+  }
+}
+
 @media (max-width: 1100px) {
   .public-share-shell .workspace-layout {
     grid-template-columns: minmax(0, 1fr);

@@ -63,6 +63,23 @@ export function fitPublicTurnPopover(host, windowRef) {
   popover.style.maxHeight = `${visibleRows * rowHeight + borderHeight}px`;
 }
 
+export function fitPublicRightRail(host, documentRef, windowRef) {
+  const environment = host.querySelector(".environment-panel");
+  const downloadCard = documentRef.querySelector(".public-share-download-card");
+  if (!environment || !downloadCard) return;
+  if (!Number.isFinite(windowRef?.innerWidth) || windowRef.innerWidth <= 1100) {
+    environment.style.marginTop = "";
+    return;
+  }
+  environment.style.marginTop = "";
+  const environmentRowTop = environment.getBoundingClientRect().top;
+  const clearance = Math.max(
+    0,
+    downloadCard.getBoundingClientRect().bottom + 12 - environmentRowTop,
+  );
+  environment.style.marginTop = `${clearance}px`;
+}
+
 /**
  * Mount the production public viewer into the server-rendered shell. This is
  * exported for the deterministic fixture harness; the browser entry point
@@ -99,6 +116,7 @@ export function bootPublicViewer({
     const render = () => {
       workspace.render();
       securePublicLinks(host);
+      fitPublicRightRail(host, documentRef, windowRef);
       fitPublicTurnPopover(host, windowRef);
     };
     workspace = createProductWorkspace({
@@ -147,7 +165,10 @@ export function bootPublicViewer({
       throw new Error("Public viewer download card host is missing.");
     }
     workspaceLayout.append(downloadCard);
-    onResize = () => fitPublicTurnPopover(host, windowRef);
+    onResize = () => {
+      fitPublicRightRail(host, documentRef, windowRef);
+      fitPublicTurnPopover(host, windowRef);
+    };
     windowRef?.addEventListener?.("resize", onResize);
     render();
     return Object.freeze({
