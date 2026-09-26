@@ -1,0 +1,17 @@
+{
+  "reviewer": "GPT-6-Astra /root/astra_standards",
+  "verdict": "Clean bounded import staging and temporal fixture source review",
+  "scope": "Control-authenticated bounded digest staging, import-scoped ownership, atomic pin/content publication, cleanup, gated Advance test and ordinary compatibility fixture",
+  "files": {
+    "crates/relayer-graph-core/src/graph/import.rs": "aebb40c63ce1cd6bd29f5efbd6d63fef15ef4b684e593974277172469e105a30",
+    "crates/relayer-graph-core/src/storage/sqlite/migrations/0019_imported_visual_asset_content.sql": "89f18e9a95a34ff5fc1e2385aa6df1e2e917f4d1c246081baf04fa211ff54635",
+    "crates/relayer-app-server/src/conversation_import_service.rs": "0d4b18414b85fd8f77b9a1b28add267ab0adfa246e99d6102b624580f17c031f",
+    "crates/relayer-graph-server/tests/import_visual_asset_transport.rs": "a8400ec6f7cb6cc6fdfb9c0ef6eff4326ce779ef681d63744132482ec402d208",
+    "packages/eval-runner/src/fixtures/node-detail.ts": "425c5a0ce7768a1484080d16f4cc4a584f25abc36824eff6a1ff691385bfadf5",
+    "test/eval-app-integration.test.mjs": "8315593efce27e151afa2543fe3781bcc4e03045b97b93e717ea7469831156df",
+    "crates/relayer-graph-core/src/storage/sqlite/imports.rs": "d13f1d54ac9b83a28080101b450e75f07982d6554a6a7574b3bd2c16808df83c"
+  },
+  "additionalScope": "Graph-server import-content route and handler; app runtime staging method. Whole mixed-purpose files excluded.",
+  "limits": "Tests inspected, not rerun. Authority lifecycle excluded. Non-certifying until recorded in PR. Source changes invalidate assertion.",
+  "integrationReview": "Re-reviewed after integrating a8965826 and d25c6f88. SQLite import-removal extraction retains transaction ownership and FK cascades for staged content and accepted node associations. Temporal fixture and real Eval integration checks remain present; upstream standalone test deletion is retained. No new findings; no tests rerun by reviewer. Verified the later graph-memory fixture repair restores configurationPaths: [configurationPath]; the Node Detail temporal scenario is unchanged. Other recorded file hashes remain unchanged."
+}

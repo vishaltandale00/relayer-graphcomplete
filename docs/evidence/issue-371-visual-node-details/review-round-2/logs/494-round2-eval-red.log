@@ -1,0 +1,148 @@
+
+ RUN  v4.1.10 /Users/vishaltandale/.codex/worktrees/05b1/relayer-graphcomplete
+
+ ❯ |isolated| test/eval-app-integration.test.mjs (18 tests | 1 failed | 17 skipped) 2475ms
+     × runs case × harness executions through the product server and preserves reviewable threads 2474ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  |isolated| test/eval-app-integration.test.mjs > Relayer Eval application service > runs case × harness executions through the product server and preserves reviewable threads
+AssertionError: promise resolved "{ schemaVersion: 1, …(12) }" instead of rejecting
+
+- Expected
++ Received
+
+- Error {
+-   "message": "rejected promise",
++ {
++   "bundleRef": null,
++   "comparison": null,
++   "completedAt": null,
++   "createdAt": "2026-09-26T20:08:54.802Z",
++   "executions": [
++     {
++       "candidateTraceCaptures": {},
++       "caseSnapshot": null,
++       "caseSnapshotDigest": null,
++       "checks": [],
++       "currentProjectionEvidence": {
++         "cursor": 0,
++         "observations": [],
++       },
++       "error": null,
++       "harnessConfiguration": {
++         "executionAccessContracts": [
++           "managed-runtime@1",
++         ],
++         "graphCapabilityProfile": {
++           "search": "disabled",
++         },
++         "implementation": "fixture.node-detail",
++         "implementationVersion": 1,
++         "modelCompatibility": [
++           {
++             "providerId": "codex",
++           },
++         ],
++         "name": "fixture-node-detail",
++         "permissionBindings": {
++           "ask": {},
++           "auto": {},
++           "full": {},
++         },
++         "schemaVersion": 1,
++         "settings": {},
++       },
++       "harnessConfigurationDigest": "sha256:03d4b36812ee4338a7c2797700b15385bba2ba75612ee4c43fbe08114d64ed8d",
++       "harnessConfigurationName": "fixture-node-detail",
++       "id": "ce17c28d-ebca-4644-a969-9c4361b4dd7f",
++       "judgeConfiguration": {
++         "name": "deterministic-graph-contract",
++       },
++       "lifecycle": {
++         "completedAt": null,
++         "durationMs": null,
++         "startedAt": null,
++         "status": "queued",
++       },
++       "outcomeGrade": {
++         "criteria": [],
++         "kind": "task_outcome_grade",
++         "mandatoryGates": [],
++         "qualified": null,
++         "schemaVersion": 1,
++         "score": null,
++         "status": "pending",
++       },
++       "passed": null,
++       "presentationGrade": {
++         "aggregation": [],
++         "aggregationMethod": "legacy_depth_weighted",
++         "comprehensionScore": null,
++         "depthDecay": 0.5,
++         "hasMateriallyMisleadingLayer": false,
++         "kind": "graph_presentation_grade",
++         "layers": [],
++         "rawScore": null,
++         "renderedScore": null,
++         "schemaVersion": 1,
++         "score": null,
++         "scoreCeiling": null,
++         "scoreScaleMaximum": 4,
++         "status": "pending",
++         "worstLayer": null,
++       },
++       "promotable": true,
++       "semanticChildren": [],
++       "status": "queued",
++       "testCaseId": "empty-project.task-system.single-turn",
++       "testRunId": "run-2026-09-26T20-08-54-802Z-99bee175",
++       "threadIds": [],
++       "turns": [],
++     },
++   ],
++   "harnessConfigurationNames": [
++     "fixture-node-detail",
++   ],
++   "id": "run-2026-09-26T20-08-54-802Z-99bee175",
++   "judgeConfigurationName": "deterministic-graph-contract",
++   "liveAuthorization": null,
++   "schemaVersion": 1,
++   "status": "running",
++   "summary": {
++     "byHarness": [
++       {
++         "completed": 0,
++         "finished": 0,
++         "name": "fixture-node-detail",
++         "outcomeJudged": 0,
++         "outcomeQualified": 0,
++         "passed": 0,
++         "presentationJudged": 0,
++         "total": 1,
++       },
++     ],
++     "passed": 0,
++     "total": 1,
++   },
++   "testCaseIds": [
++     "empty-project.task-system.single-turn",
++   ],
+  }
+
+ ❯ test/eval-app-integration.test.mjs:1589:10
+    1587|         ...selection,
+    1588|         judgeConfigurationName: "deterministic-graph-contract",
+    1589|       })).rejects.toThrow("must run alone with fixture-node-detail");
+       |          ^
+    1590|     }
+    1591|     const nodeDetailCreated = await evalService.createRun({
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 17 skipped (18)
+   Start at  16:08:51
+   Duration  3.25s (transform 341ms, setup 0ms, import 693ms, tests 2.47s, environment 0ms)
+

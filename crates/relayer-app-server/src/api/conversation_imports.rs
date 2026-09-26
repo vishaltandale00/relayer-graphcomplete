@@ -137,9 +137,16 @@ async fn process_line(
         (None, ConversationExportRecord::Turn(_)) => {
             Err("the first JSONL record must be the single header".into())
         }
+        (None, ConversationExportRecord::VisualAssetContent(_)) => {
+            Err("the first JSONL record must be the single header".into())
+        }
         (Some(_), ConversationExportRecord::Header(_)) => {
             Err("only the first JSONL record may be a header".into())
         }
+        (Some(stager), ConversationExportRecord::VisualAssetContent(content)) => stager
+            .push_visual_asset_content(&content, product)
+            .await
+            .map_err(|error| error.to_string()),
         (Some(stager), ConversationExportRecord::Turn(turn)) => stager
             .push_turn(&turn, product)
             .await
@@ -290,6 +297,7 @@ mod tests {
                     id: "turn:1".into(),
                     sequence: 1,
                 }],
+                visual_asset_contents: Vec::new(),
             })),
             ConversationExportRecord::Turn(Box::new(ConversationExportTurn {
                 id: "turn:1".into(),
@@ -419,6 +427,7 @@ mod tests {
                 detail: format!("Accepted detail for {title}"),
                 authored_detail: None,
                 authored_detail_omitted: None,
+                authored_detail_assets: Vec::new(),
                 state: ExportRecordState::Accepted,
             }],
             edges: vec![],
@@ -464,6 +473,7 @@ mod tests {
                         sequence: 2,
                     },
                 ],
+                visual_asset_contents: Vec::new(),
             })),
             ConversationExportRecord::Turn(Box::new(ConversationExportTurn {
                 id: "turn:1".into(),

@@ -1,0 +1,36 @@
+
+ RUN  v4.1.10 /Users/vishaltandale/.codex/worktrees/05b1/relayer-graphcomplete
+
+ ❯ |isolated| packages/harness-host/test/visual-assets-bridge.test.ts (4 tests | 1 failed) 213ms
+     × prepares a library-only icon without incidentally associating it to the completion scope 86ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  |isolated| packages/harness-host/test/visual-assets-bridge.test.ts > visual asset host bridge > prepares a library-only icon without incidentally associating it to the completion scope
+AssertionError: expected VisualAssetsError: Unknown visual asset: … { code: '…' } to match object { code: 'asset_not_authorized' }
+(1 matching property omitted from actual)
+
+- Expected
++ Received
+
+- {
+-   "code": "asset_not_authorized",
++ VisualAssetsError {
++   "code": "asset_not_found",
+  }
+
+ ❯ packages/harness-host/test/visual-assets-bridge.test.ts:304:42
+    302|       for (const operation of [
+    303|         { kind: "inspect", assetId }, { kind: "download", assetId }, {…
+    304|       ]) await expect(perform(operation)).rejects.toMatchObject({ code…
+       |                                          ^
+    305|     }
+    306|     const scans = vi.spyOn(library, "listAssets");
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 3 passed (4)
+   Start at  18:09:10
+   Duration  634ms (transform 199ms, setup 0ms, import 351ms, tests 213ms, environment 0ms)

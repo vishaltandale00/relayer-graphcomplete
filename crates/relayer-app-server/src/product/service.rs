@@ -1780,6 +1780,28 @@ impl ProductService {
             .map_err(Into::into)
     }
 
+    pub(crate) async fn append_conversation_import_visual_asset_content(
+        &self,
+        import_id: &str,
+        content: &crate::conversation_export::ExportVisualAssetContent,
+    ) -> Result<(), ProductError> {
+        self.storage
+            .append_conversation_import_visual_asset_content(import_id, content)
+            .await
+            .map_err(Into::into)
+    }
+
+    pub(crate) async fn next_conversation_import_visual_asset_content(
+        &self,
+        import_id: &str,
+        after_digest: &str,
+    ) -> Result<Option<crate::conversation_export::ExportVisualAssetContent>, ProductError> {
+        self.storage
+            .next_conversation_import_visual_asset_content(import_id, after_digest)
+            .await
+            .map_err(Into::into)
+    }
+
     pub(crate) async fn finalize_conversation_import_digest(
         &self,
         import_id: &str,

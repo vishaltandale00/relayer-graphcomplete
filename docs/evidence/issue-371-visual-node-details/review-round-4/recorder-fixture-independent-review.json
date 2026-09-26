@@ -1,0 +1,27 @@
+{
+  "kind": "independent-review",
+  "reviewer": "build_366 (GPT-5.6-Sol)",
+  "scope": "Graph-operation recorder visual-asset bounds and deterministic Node Detail fixture grading",
+  "files": {
+    "desktop/main/services/graph-operation-recorder.mjs": "a43e03b362bae8aa419d0f632c9b9183ee7347d8b6a8387986578fecc0bf8b2f",
+    "test/graph-operation-recorder.test.mjs": "2f48de0639223b5b3857a8573be662be896340d2e242e12dccb497d38189965e",
+    "packages/eval-runner/src/fixtures/node-detail.ts": "b996ad0f3473c7186c0de2461ad3fa818c3b5472d7192c77c994f16b98a16aed",
+    "packages/eval-runner/test/node-detail-grading.test.ts": "c0321a7627af2d3814ba40541ccf1950c3f3ab869e4d14cd501b229fa28343b7",
+    "packages/eval-runner/package.json": "0030995fcc8d53574899c758d800cad63dfee90080156f2eb1f18ca20fffac5d",
+    "package-lock.json": "89a48c1c2770eac3279f7e51491c9d6ded74f320a1133da2825a0653a028d90f",
+    "test/eval-app-integration.test.mjs": "b8eb8d74f441dc249e6a25e316b66a4638c3e3c5c2c2c40b8af4e44fcb3556ff"
+  },
+  "verdict": "clean",
+  "assertions": [
+    "Recorder limits widen only the exact graph asset, accepted-asset read, and bounded import-validation routes; ordinary graph operations retain the 4 MiB cap and oversized responses are rejected while streaming.",
+    "Recorder receipts remain bounded and omit transported asset bytes and bearer credentials.",
+    "EvalService invokes the registered gradeExecution hook and the integration assertion observes all three fixture-specific checks.",
+    "The grader rejects absent or integrity-invalid authored detail, unsupported media, missing image or capability evidence, missing accepted actions, and integrity-consistent mount/HTML host mismatches using parsed fragments.",
+    "The grader intentionally does not claim accepted-byte delivery or pixel rendering; those remain covered by separate Product evidence."
+  ],
+  "review_activity": {
+    "performed": ["Exact SHA-256 verification", "source and wiring inspection", "focused test subsumption inspection", "diff whitespace validation"],
+    "not_independently_rerun": ["19-test focused command", "Eval integration", "full check and build"]
+  },
+  "unresolved_findings": []
+}

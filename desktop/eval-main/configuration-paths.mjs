@@ -33,6 +33,7 @@ export function evalHarnessConfigurationPaths({
   const graphSearchQualified = targetKey === GRAPH_SEARCH_EVAL_TARGET;
   const paths = [
     join(harnessDirectory, "fixture-task-system.yaml"),
+    join(harnessDirectory, "fixture-node-detail.yaml"),
     ...(graphSearchQualified ? [join(harnessDirectory, "fixture-graph-memory.yaml")] : []),
     join(harnessDirectory, "codex-basic.yaml"),
     join(harnessDirectory, "codex-basic-high.yaml"),

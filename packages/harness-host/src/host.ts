@@ -5,6 +5,15 @@ import type { Socket } from "node:net";
 import { dirname, resolve } from "node:path";
 import { GraphApiError, RelayerGraphClient, type GraphCapability, type GraphId } from "@relayer/graph-client";
 import {
+  VisualAssetsError,
+  createMemoryVisualDetailPersistence,
+  validateVisualAssetImportContent,
+  type CanonicalNodeDetailPackage,
+  type FileVisualAssetsLibrary,
+  type VisualAsset,
+  type VisualAssetScope,
+} from "@relayer/visual-assets";
+import {
   HarnessApprovalCoordinator,
   HarnessApprovalCoordinatorError,
   type HarnessApprovalChannel,
@@ -181,6 +190,11 @@ export interface HarnessHostOptions {
   readonly port?: number;
   readonly trace?: HarnessTraceStoreOptions;
   readonly accessBroker?: HarnessExecutionAccessBroker;
+  readonly visualAssets?: {
+    readonly token: string;
+    readonly generation: number;
+    readonly library: FileVisualAssetsLibrary;
+  };
 }
 
 export interface RunningHarnessHost {
@@ -199,6 +213,7 @@ export class HarnessHost {
   private persistTail: Promise<void> = Promise.resolve();
   private initialized = false;
   private readonly pendingExecutionAccess = new Map<string, PendingExecutionAccess>();
+  private readonly visualAssetAuthorities = new Map<number, { state: "active" | "paused" | "revoked"; generation: number; barrierId?: string; completionEpoch?: number }>();
   private closed = false;
   private closeAbandoned = false;
   private initializePromise: Promise<void> | undefined;
@@ -208,6 +223,102 @@ export class HarnessHost {
 
   constructor(private readonly options: HarnessHostOptions) {
     this.traceStore = options.trace === undefined ? undefined : new HarnessTraceStore(options.trace);
+  }
+
+  async visualAssetOperation(input: unknown): Promise<unknown> {
+    const bridge = this.options.visualAssets;
+    if (bridge === undefined) throw new VisualAssetsError("visual_assets_unavailable", "Visual assets are unavailable");
+    if (this.closed) throw new VisualAssetsError("completion_inactive", "Visual asset authority is no longer active");
+    const request = readVisualAssetRequest(input, bridge.generation);
+    if (request.authority.kind === "lifecycle") {
+      const id = request.authority.interactionNodeId;
+      const current = this.visualAssetAuthorities.get(id) ?? { state: "active" as const, generation: 1 };
+      if (request.operation.kind === "activate") {
+        const epoch = request.operation.completionEpoch as number;
+        const previousEpoch = current.completionEpoch ?? 0;
+        if (epoch < previousEpoch || (epoch === previousEpoch && current.state !== "active")) {
+          throw new VisualAssetsError("visual_assets_generation_stale", "Visual asset activation epoch is stale");
+        }
+        const activated = epoch === previousEpoch ? current : {
+          state: "active" as const,
+          generation: this.visualAssetAuthorities.has(id) ? current.generation + 1 : 1,
+          completionEpoch: epoch,
+        };
+        this.visualAssetAuthorities.set(id, activated);
+        // Fence old in-flight work before graph control publishes the new token.
+        await bridge.library.settleMutations();
+        if (this.visualAssetAuthorities.get(id) !== activated) {
+          throw new VisualAssetsError("visual_assets_generation_stale", "Visual asset activation was superseded");
+        }
+        return { activated: true, assetGeneration: activated.generation };
+      }
+      if (request.operation.kind === "pause") {
+        if (current.state === "revoked") {
+          const revoked = { ...current, state: "revoked" as const, generation: current.generation, barrierId: request.operation.barrierId as string };
+          this.visualAssetAuthorities.set(id, revoked);
+          await bridge.library.settleMutations();
+          return { paused: true, assetGeneration: revoked.generation };
+        }
+        if (current.state === "paused") {
+          const sameBarrier = current.barrierId === request.operation.barrierId;
+          const expectedGeneration = request.operation.expectedGeneration as number;
+          const revocationTakeover = request.operation.revocationTakeover === true
+            && (current.generation === expectedGeneration || current.generation === expectedGeneration + 1);
+          if (!sameBarrier && !revocationTakeover) throw new VisualAssetsError("visual_assets_generation_stale", "Visual asset authority generation is stale");
+          const paused = sameBarrier ? current : { ...current, barrierId: request.operation.barrierId as string };
+          this.visualAssetAuthorities.set(id, paused);
+          await bridge.library.settleMutations();
+          return { paused: true, assetGeneration: paused.generation };
+        }
+        if (current.state !== "active" || current.generation !== request.operation.expectedGeneration) throw new VisualAssetsError("visual_assets_generation_stale", "Visual asset authority generation is stale");
+        const paused = { ...current, state: "paused" as const, generation: current.generation + 1, barrierId: request.operation.barrierId as string };
+        this.visualAssetAuthorities.set(id, paused);
+        await bridge.library.settleMutations();
+        return { paused: true, assetGeneration: paused.generation };
+      }
+      if (current.barrierId !== request.operation.barrierId || current.generation !== request.operation.assetGeneration) throw new VisualAssetsError("visual_assets_barrier_stale", "Visual asset authority barrier is stale");
+      if (request.operation.kind === "resume") {
+        if (current.state === "revoked") throw new VisualAssetsError("completion_inactive", "Visual asset authority is revoked");
+        this.visualAssetAuthorities.set(id, { ...current, state: "active", generation: current.generation, ...(current.barrierId === undefined ? {} : { barrierId: current.barrierId }) });
+        return { resumed: true, assetGeneration: current.generation };
+      }
+      if (current.state === "active") throw new VisualAssetsError("visual_assets_barrier_stale", "Active visual asset authority cannot be revoked by this barrier");
+      this.visualAssetAuthorities.set(id, { ...current, state: "revoked", generation: current.generation, ...(current.barrierId === undefined ? {} : { barrierId: current.barrierId }) });
+      await bridge.library.settleMutations();
+      return { revoked: true, assetGeneration: current.generation };
+    }
+    let isCurrent: (() => boolean) | undefined;
+    if (request.authority.kind === "completion") {
+      const interactionNodeId = request.authority.interactionNodeId;
+      const threadId = request.authority.scope.threadId;
+      const session = this.sessions.get(threadId);
+      const active = session?.activeCompletions.get(interactionNodeId);
+      const assetAuthority = this.visualAssetAuthorities.get(interactionNodeId) ?? { state: "active" as const, generation: 1 };
+      const capturedAssetGeneration = request.assetGeneration;
+      if (request.assetGeneration !== assetAuthority.generation || assetAuthority.state !== "active") throw new VisualAssetsError("visual_assets_generation_stale", "Visual asset authority generation is stale");
+      isCurrent = () => !this.closed
+        && this.sessions.get(threadId) === session
+        && session?.activeCompletions.get(interactionNodeId) === active
+        && active !== undefined
+        && (this.visualAssetAuthorities.get(interactionNodeId)?.generation ?? 1) === capturedAssetGeneration
+        && this.visualAssetAuthorities.get(interactionNodeId)?.state !== "paused"
+        && this.visualAssetAuthorities.get(interactionNodeId)?.state !== "revoked"
+        && !active.controller.signal.aborted;
+      if (!isCurrent()) throw new VisualAssetsError("completion_inactive", "Visual asset completion authority is no longer active");
+    } else if (request.operation.kind !== "validate-import" && request.operation.kind !== "validate-import-content") {
+      throw new VisualAssetsError("visual_assets_control_operation_invalid", "Control authority may validate imports only");
+    }
+    await bridge.library.authorizeScope(request.authority.scope, isCurrent);
+    if (isCurrent !== undefined && !isCurrent()) {
+      throw new VisualAssetsError("completion_inactive", "Visual asset completion authority is no longer active");
+    }
+    const scope = operationScope(request);
+    const visibleScopes = completionVisibleScopes(request.authority.scope);
+    const result = await executeVisualAssetOperation(bridge.library, scope, request.operation, isCurrent, visibleScopes);
+    if (isCurrent !== undefined && !isCurrent()) {
+      throw new VisualAssetsError("completion_inactive", "Visual asset completion authority is no longer active");
+    }
+    return result;
   }
 
   initialize(): Promise<void> {
@@ -1347,7 +1458,7 @@ class EffectObservingTraceSink implements HarnessTraceSink {
 export async function startHarnessHost(options: HarnessHostOptions): Promise<RunningHarnessHost> {
   const host = new HarnessHost(options);
   await host.initialize();
-  const server = createServer((request, response) => void route(host, options.controlToken, request, response));
+  const server = createServer((request, response) => void route(host, options, request, response));
   const sockets = new Set<Socket>();
   server.on("connection", (socket) => {
     sockets.add(socket);
@@ -1385,10 +1496,23 @@ export async function startHarnessHost(options: HarnessHostOptions): Promise<Run
   };
 }
 
-async function route(host: HarnessHost, token: string, request: IncomingMessage, response: ServerResponse): Promise<void> {
+async function route(host: HarnessHost, options: HarnessHostOptions, request: IncomingMessage, response: ServerResponse): Promise<void> {
   try {
-    if (request.headers.authorization !== `Bearer ${token}`) return reply(response, 401, { error: "unauthorized" });
     const url = new URL(request.url ?? "/", "http://127.0.0.1");
+    if (request.method === "POST" && url.pathname === "/visual-assets/operations") {
+      if (options.visualAssets === undefined
+        || request.headers.authorization !== `Bearer ${options.visualAssets.token}`) {
+        return reply(response, 401, { error: { code: "unauthorized", message: "Visual asset bridge authorization failed" } });
+      }
+      try {
+        return reply(response, 200, { result: await host.visualAssetOperation(await body(request)) });
+      } catch (error) {
+        const code = error instanceof VisualAssetsError ? error.code : "visual_assets_operation_failed";
+        const status = code === "completion_inactive" ? 409 : 400;
+        return reply(response, status, { error: { code, message: errorMessage(error) } });
+      }
+    }
+    if (request.headers.authorization !== `Bearer ${options.controlToken}`) return reply(response, 401, { error: "unauthorized" });
     if (request.method === "POST" && url.pathname === "/sessions") {
       await host.createSession(await body(request) as HarnessSessionRegistration);
       return reply(response, 201, { ok: true });
@@ -1545,6 +1669,333 @@ async function body(request: IncomingMessage): Promise<unknown> {
 function reply(response: ServerResponse, status: number, value: unknown): void { const data = JSON.stringify(value); response.writeHead(status, { "content-type": "application/json", "content-length": Buffer.byteLength(data) }); response.end(data); }
 function listen(server: Server, port: number, host: string): Promise<void> { return new Promise((resolveListen, reject) => { server.once("error", reject); server.listen(port, host, () => { server.off("error", reject); resolveListen(); }); }); }
 function close(server: Server): Promise<void> { return new Promise((resolveClose, reject) => server.close((error) => error === undefined ? resolveClose() : reject(error))); }
+
+type VisualBridgeScope =
+  | { readonly kind: "project"; readonly projectId: number; readonly threadId: number }
+  | { readonly kind: "thread"; readonly threadId: number };
+type VisualBridgeOperation = Record<string, unknown> & { readonly kind: string };
+type VisualBridgeRequest = {
+  readonly authority: { readonly kind: "completion"; readonly interactionNodeId: number; readonly scope: VisualBridgeScope }
+    | { readonly kind: "control"; readonly scope: VisualBridgeScope }
+    | { readonly kind: "lifecycle"; readonly interactionNodeId: number };
+  readonly assetGeneration?: number;
+  readonly operation: VisualBridgeOperation;
+};
+
+function readVisualAssetRequest(value: unknown, generation: number): VisualBridgeRequest {
+  if (!isRecord(value) || value.version !== 1 || value.generation !== generation
+    || !isRecord(value.authority) || !isRecord(value.operation) || typeof value.operation.kind !== "string") {
+    throw new VisualAssetsError("visual_assets_request_invalid", "Visual asset bridge request is invalid");
+  }
+  if (value.authority.kind === "lifecycle") {
+    if (!["activate", "pause", "resume", "finalize-revoke"].includes(value.operation.kind)
+      || !Number.isSafeInteger(value.authority.interactionNodeId)
+      || (value.authority.interactionNodeId as number) < 1
+      || Object.keys(value.authority).sort().join(",") !== "interactionNodeId,kind") {
+      throw new VisualAssetsError("visual_assets_authority_invalid", "Visual asset revocation authority is invalid");
+    }
+    if (value.operation.kind === "activate") {
+      if (!Number.isSafeInteger(value.operation.completionEpoch) || (value.operation.completionEpoch as number) < 1
+        || Object.keys(value.operation).sort().join(",") !== "completionEpoch,kind") {
+        throw new VisualAssetsError("visual_assets_authority_invalid", "Visual asset activation epoch is invalid");
+      }
+      return {
+        authority: { kind: "lifecycle", interactionNodeId: value.authority.interactionNodeId as number },
+        operation: value.operation as VisualBridgeOperation,
+      };
+    }
+    const barrierId = value.operation.barrierId;
+    const operationGeneration = value.operation.kind === "pause" ? value.operation.expectedGeneration : value.operation.assetGeneration;
+    if (typeof barrierId !== "string" || barrierId.length < 8
+      || !Number.isSafeInteger(operationGeneration) || (operationGeneration as number) < 1
+      || (value.operation.revocationTakeover !== undefined && (value.operation.kind !== "pause" || typeof value.operation.revocationTakeover !== "boolean"))) {
+      throw new VisualAssetsError("visual_assets_authority_invalid", "Visual asset lifecycle barrier is invalid");
+    }
+    return {
+      authority: { kind: "lifecycle", interactionNodeId: value.authority.interactionNodeId as number },
+      operation: value.operation as VisualBridgeOperation,
+    };
+  }
+  const scope = readVisualBridgeScope(value.authority.scope);
+  if (value.authority.kind === "completion") {
+    if (!Number.isSafeInteger(value.authority.interactionNodeId) || (value.authority.interactionNodeId as number) < 1
+      || !Number.isSafeInteger(value.assetGeneration) || (value.assetGeneration as number) < 1) {
+      throw new VisualAssetsError("visual_assets_authority_invalid", "Visual asset completion authority is invalid");
+    }
+    return {
+      authority: { kind: "completion", interactionNodeId: value.authority.interactionNodeId as number, scope },
+      assetGeneration: value.assetGeneration as number,
+      operation: value.operation as VisualBridgeOperation,
+    };
+  }
+  if (value.authority.kind === "control") {
+    return { authority: { kind: "control", scope }, operation: value.operation as VisualBridgeOperation };
+  }
+  throw new VisualAssetsError("visual_assets_authority_invalid", "Visual asset bridge authority is invalid");
+}
+
+function readVisualBridgeScope(value: unknown): VisualBridgeScope {
+  if (!isRecord(value) || !Number.isSafeInteger(value.threadId) || (value.threadId as number) < 1) {
+    throw new VisualAssetsError("scope_invalid", "Visual asset scope is invalid");
+  }
+  if (value.kind === "thread" && Object.keys(value).sort().join(",") === "kind,threadId") {
+    return { kind: "thread", threadId: value.threadId as number };
+  }
+  if (value.kind === "project" && Object.keys(value).sort().join(",") === "kind,projectId,threadId"
+    && Number.isSafeInteger(value.projectId) && (value.projectId as number) > 0) {
+    return { kind: "project", projectId: value.projectId as number, threadId: value.threadId as number };
+  }
+  throw new VisualAssetsError("scope_invalid", "Visual asset scope is invalid");
+}
+
+function libraryScope(scope: VisualBridgeScope): VisualAssetScope {
+  return scope.kind === "project"
+    ? { kind: "project", projectId: scope.projectId }
+    : { kind: "thread", threadId: scope.threadId };
+}
+
+const READ_ONLY_VISUAL_OPERATIONS = new Set([
+  "list-registries", "list-tags", "list-assets", "find", "inspect", "download", "resolve",
+]);
+const MUTATING_VISUAL_OPERATIONS = new Set([
+  "add", "create-tag", "move-tag", "associate", "organize", "archive",
+]);
+
+function requestedVisualScope(value: unknown): VisualAssetScope {
+  if (!isRecord(value)) throw new VisualAssetsError("scope_invalid", "Visual asset operation scope is invalid");
+  if (value.kind === "library" && Object.keys(value).join(",") === "kind") return { kind: "library" };
+  if (value.kind === "project" && Object.keys(value).sort().join(",") === "kind,projectId"
+    && Number.isSafeInteger(value.projectId) && (value.projectId as number) > 0) {
+    return { kind: "project", projectId: value.projectId as number };
+  }
+  if (value.kind === "thread" && Object.keys(value).sort().join(",") === "kind,threadId"
+    && Number.isSafeInteger(value.threadId) && (value.threadId as number) > 0) {
+    return { kind: "thread", threadId: value.threadId as number };
+  }
+  throw new VisualAssetsError("scope_invalid", "Visual asset operation scope is invalid");
+}
+
+function operationScope(request: VisualBridgeRequest): VisualAssetScope {
+  if (request.authority.kind === "lifecycle") {
+    throw new VisualAssetsError("visual_assets_authority_invalid", "Revocation is not a visual asset operation");
+  }
+  if (request.authority.kind === "control") return libraryScope(request.authority.scope);
+  if (request.operation.kind === "resolve" && request.operation.scope === undefined) {
+    return libraryScope(request.authority.scope);
+  }
+  const scope = requestedVisualScope(request.operation.scope);
+  const derived = request.authority.scope;
+  const allowed = scope.kind === "library"
+    || (scope.kind === "thread" && scope.threadId === derived.threadId)
+    || (scope.kind === "project" && derived.kind === "project" && scope.projectId === derived.projectId);
+  if (!allowed) throw new VisualAssetsError("scope_not_authorized", "Visual asset operation scope is not authorized");
+  if (scope.kind === "library" && !READ_ONLY_VISUAL_OPERATIONS.has(request.operation.kind)) {
+    throw new VisualAssetsError("scope_read_only", "The visual asset library scope is read-only");
+  }
+  if (!READ_ONLY_VISUAL_OPERATIONS.has(request.operation.kind)
+    && !MUTATING_VISUAL_OPERATIONS.has(request.operation.kind)
+    && request.operation.kind !== "prepare-detail") {
+    throw new VisualAssetsError("visual_assets_operation_unsupported", `Unsupported visual asset operation: ${request.operation.kind}`);
+  }
+  return scope;
+}
+
+function completionVisibleScopes(scope: VisualBridgeScope): readonly VisualAssetScope[] {
+  return [
+    { kind: "library" },
+    ...(scope.kind === "project" ? [{ kind: "project" as const, projectId: scope.projectId }] : []),
+    { kind: "thread", threadId: scope.threadId },
+  ];
+}
+
+function stringField(operation: VisualBridgeOperation, field: string): string {
+  const value = operation[field];
+  if (typeof value !== "string" || value.length === 0) {
+    throw new VisualAssetsError("visual_assets_request_invalid", `Visual asset operation requires ${field}`);
+  }
+  return value;
+}
+
+function stringArrayField(operation: VisualBridgeOperation, field: string): readonly string[] {
+  const value = operation[field];
+  if (!Array.isArray(value) || value.some((entry) => typeof entry !== "string")) {
+    throw new VisualAssetsError("visual_assets_request_invalid", `Visual asset operation requires ${field}`);
+  }
+  return value as string[];
+}
+
+function pageFields(operation: VisualBridgeOperation): { readonly limit?: number; readonly cursor?: string } {
+  return {
+    ...(operation.limit === undefined ? {} : { limit: operation.limit as number }),
+    ...(operation.cursor === undefined ? {} : { cursor: operation.cursor as string }),
+  };
+}
+
+async function visibleAsset(library: FileVisualAssetsLibrary, scope: VisualAssetScope, assetId: string, includeArchived = false): Promise<VisualAsset> {
+  if (includeArchived) {
+    try { return await library.lookupAsset({ scope, assetId }); } catch (error) {
+      if (!(error instanceof VisualAssetsError) || !["asset_not_found", "asset_not_authorized"].includes(error.code)) throw error;
+      throw new VisualAssetsError("asset_not_authorized", "Visual asset is not authorized in this scope");
+    }
+  }
+  let cursor: string | undefined;
+  do {
+    const page = await library.listAssets({ scope, limit: 100, ...(cursor === undefined ? {} : { cursor }) });
+    const asset = page.items.find((candidate) => candidate.id === assetId);
+    if (asset !== undefined) return asset;
+    cursor = page.nextCursor ?? undefined;
+  } while (cursor !== undefined);
+  throw new VisualAssetsError("asset_not_authorized", "Visual asset is not authorized in this scope");
+}
+
+async function visibleAssetAcross(
+  library: FileVisualAssetsLibrary,
+  scopes: readonly VisualAssetScope[],
+  assetId: string,
+  includeArchived = false,
+): Promise<VisualAsset> {
+  for (const scope of scopes) {
+    try { return await visibleAsset(library, scope, assetId, includeArchived); } catch (error) {
+      if (!(error instanceof VisualAssetsError) || error.code !== "asset_not_authorized") throw error;
+    }
+  }
+  throw new VisualAssetsError("asset_not_authorized", "Visual asset is not authorized in the completion scope");
+}
+
+async function visibleTag(library: FileVisualAssetsLibrary, scope: VisualAssetScope, tagId: string): Promise<void> {
+  await library.find({ scope, tagId, limit: 1 });
+}
+
+async function serializedFile(file: { readonly name: string; readonly mediaType: string; readonly expectedDigest?: string; read(): Promise<Uint8Array> }): Promise<unknown> {
+  const bytes = await file.read();
+  return {
+    name: file.name,
+    mediaType: file.mediaType,
+    ...(file.expectedDigest === undefined ? {} : { expectedDigest: file.expectedDigest }),
+    contentBase64: Buffer.from(bytes).toString("base64"),
+  };
+}
+
+async function executeVisualAssetOperation(
+  library: FileVisualAssetsLibrary,
+  scope: VisualAssetScope,
+  operation: VisualBridgeOperation,
+  isCurrent?: () => boolean,
+  visibleScopes: readonly VisualAssetScope[] = [scope],
+): Promise<unknown> {
+  const page = pageFields(operation);
+  switch (operation.kind) {
+    case "list-registries": return library.listRegistries({ scope, ...page });
+    case "list-tags": return library.listTags({ scope, ...page, ...(operation.parentTagId === undefined ? {} : { parentTagId: operation.parentTagId as string | null }) });
+    case "list-assets": return library.listAssets({ scope, ...page });
+    case "find": return library.find({ scope, tagId: stringField(operation, "tagId"), ...page });
+    case "inspect": {
+      const assetId = stringField(operation, "assetId");
+      await visibleAsset(library, scope, assetId, true);
+      const inspected = await library.inspect(assetId);
+      return { asset: inspected.asset, preview: await serializedFile(inspected.preview) };
+    }
+    case "add": {
+      if (!isRecord(operation.file) || typeof operation.file.name !== "string"
+        || typeof operation.file.mediaType !== "string" || typeof operation.file.contentBase64 !== "string") {
+        throw new VisualAssetsError("visual_assets_request_invalid", "Visual asset add requires a file");
+      }
+      const bytes = new Uint8Array(Buffer.from(operation.file.contentBase64, "base64"));
+      if (Buffer.from(bytes).toString("base64") !== operation.file.contentBase64) {
+        throw new VisualAssetsError("visual_assets_request_invalid", "Visual asset file base64 is invalid");
+      }
+      const tagIds = stringArrayField(operation, "tagIds");
+      await Promise.all(tagIds.map((tagId) => visibleTag(library, scope, tagId)));
+      const expectedDigest = operation.file.expectedDigest;
+      if (expectedDigest !== undefined && typeof expectedDigest !== "string") {
+        throw new VisualAssetsError("visual_assets_request_invalid", "Visual asset expected digest must be a string");
+      }
+      return library.add({
+        scope,
+        name: stringField(operation, "name"),
+        tagIds,
+        ...(operation.registryId === undefined ? {} : { registryId: String(operation.registryId) }),
+        file: Object.freeze({
+          name: operation.file.name,
+          mediaType: operation.file.mediaType,
+          ...(expectedDigest === undefined ? {} : { expectedDigest }),
+          async read() { return bytes.slice(); },
+        }),
+      }, isCurrent);
+    }
+    case "create-tag": return library.createTag({ scope, name: stringField(operation, "name"), ...(operation.parentTagId === undefined ? {} : { parentTagId: String(operation.parentTagId) }) }, isCurrent);
+    case "move-tag": {
+      const tagId = stringField(operation, "tagId");
+      const parentTagId = operation.parentTagId === null ? null : stringField(operation, "parentTagId");
+      await visibleTag(library, scope, tagId);
+      if (parentTagId !== null) await visibleTag(library, scope, parentTagId);
+      return library.moveTag({ tagId, parentTagId }, isCurrent);
+    }
+    case "associate": {
+      const assetId = stringField(operation, "assetId");
+      await visibleAssetAcross(library, [{ kind: "library" }, scope], assetId);
+      return library.associate({ assetId, scope }, isCurrent);
+    }
+    case "organize": {
+      const assetId = stringField(operation, "assetId");
+      const addTagIds = stringArrayField(operation, "addTagIds");
+      const removeTagIds = stringArrayField(operation, "removeTagIds");
+      await visibleAsset(library, scope, assetId);
+      await Promise.all([...addTagIds, ...removeTagIds].map((tagId) => visibleTag(library, scope, tagId)));
+      return library.organize({ assetId, addTagIds, removeTagIds }, isCurrent);
+    }
+    case "archive": {
+      const assetId = stringField(operation, "assetId");
+      await visibleAsset(library, scope, assetId);
+      return library.archive(assetId, isCurrent);
+    }
+    case "download": {
+      const assetId = stringField(operation, "assetId");
+      await visibleAsset(library, scope, assetId, true);
+      return serializedFile(await library.download(assetId));
+    }
+    case "resolve": {
+      const logicalIds = stringArrayField(operation, "logicalIds");
+      const assets = await Promise.all(logicalIds.map(async (logicalId) => {
+        const asset = await visibleAssetAcross(library, visibleScopes, logicalId, true);
+        return {
+          logicalId,
+          authority: "current",
+          availability: asset.archived ? "unavailable" : "available",
+          digestSha256: asset.digest.replace(/^sha256:/u, ""),
+          mediaType: asset.mediaType,
+          representation: { kind: "image", sanitized: true },
+        };
+      }));
+      return { assets };
+    }
+    case "prepare-detail": {
+      const package_ = operation.package as CanonicalNodeDetailPackage;
+      // Persistence validates the complete canonical package and all count bounds
+      // before its scoped asset lookups; a separate discovery scan only duplicates
+      // authority checks and permits unbounded pre-validation work.
+      const candidate = createMemoryVisualDetailPersistence(library, { visibleScopes });
+      const detail = await candidate.accept({ package: package_, scope }).catch((error: unknown) => {
+        if (error instanceof VisualAssetsError && ["asset_not_found", "asset_not_authorized"].includes(error.code)) {
+          throw new VisualAssetsError("asset_not_authorized", "Visual asset is not authorized in the completion scope");
+        }
+        throw error;
+      });
+      const archive = await candidate.exportArchive({ details: [detail], scope });
+      return { detail, contents: archive.contents };
+    }
+    case "validate-import": {
+      const candidate = createMemoryVisualDetailPersistence(library);
+      const details = await candidate.importArchive({ archive: operation.archive as never, scope });
+      return { details };
+    }
+    case "validate-import-content": {
+      await validateVisualAssetImportContent({ library, scope, content: operation.content });
+      return { valid: true };
+    }
+    default: throw new VisualAssetsError("visual_assets_operation_unsupported", `Unsupported visual asset operation: ${operation.kind}`);
+  }
+}
 
 function persistedDescriptor(descriptor: HarnessSessionDescriptor): PersistedHarnessSessionDescriptor {
   return {

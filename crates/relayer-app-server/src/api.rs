@@ -300,6 +300,10 @@ pub(crate) fn router(
             get(threads::get_layer),
         )
         .route(
+            "/api/threads/{thread_id}/interactions/{interaction_id}/nodes/{node_id}/detail-assets/{asset_id}",
+            get(threads::get_detail_asset),
+        )
+        .route(
             "/api/threads/{thread_id}/interactions/{interaction_id}/input-children",
             get(threads::get_input_children),
         )

@@ -1,0 +1,20 @@
+{
+  "reviewer": "GPT-6-Astra /root/astra_standards",
+  "scope": "Bridge replacement compensation, lost acknowledgments, completion gate/admission lock ordering, prior lifecycle ownership, and partial epoch cutover recovery",
+  "sourceSha256": {
+    "crates/relayer-graph-server/src/lib.rs": "8f16b7f1ab2a45bfc961da7df9b9132f81c6b52d0b4e99733863bd41d73de477"
+  },
+  "verdict": "changes requested",
+  "findings": [
+    {
+      "priority": "P2",
+      "boundary": "Partial cutover followed by retry pause failure",
+      "description": "The first partial cutover leaves committed epochs and paused handoff barriers, but no irreversible phase survives the request. On a subsequent same-registration retry, a pause failure invokes restore_visual_assets_handoff and resumes earlier same-barrier nodes even though the prior attempt already committed cutovers. Preserve or detect irreversible cutover state across retries and test partial cutover followed by pause failure before successful recovery."
+    }
+  ],
+  "limits": [
+    "Source/test review only; reported 35/35 tests not independently rerun.",
+    "Existing graph epoch checks still reject stale capability dispatch; no demonstrated stale-token mutation is claimed.",
+    "Prior preexisting terminal-barrier takeover finding is fixed by reversible pause without revocationTakeover."
+  ]
+}

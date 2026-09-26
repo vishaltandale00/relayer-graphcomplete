@@ -3,6 +3,7 @@
   "rustCrashPackages": ["relayer-graph-core", "relayer-graph-server"],
   "vitestPrerequisiteWorkspaces": [
     "@relayer/graph-client",
+    "@relayer/visual-assets",
     "@relayer/harness-host",
     "@relayer/eval-runner"
   ],
@@ -91,6 +92,7 @@
   ],
   "npmOwners": [
     { "prefix": "packages/eval-runner/", "package": "@relayer/eval-runner", "vitestFiles": ["packages/eval-runner/test", "test/eval-app-integration.test.mjs"] },
+    { "prefix": "packages/visual-assets/", "package": "@relayer/visual-assets", "vitestFiles": ["packages/visual-assets/test"] },
     {
       "prefix": "packages/graph-client/",
       "package": "@relayer/graph-client",
@@ -196,6 +198,9 @@
     { "exact": "scripts/record-onboarding-tutorial.mjs", "chapters": [] },
     { "exact": "scripts/run-interaction-context-lifecycle-test.mjs", "chapters": [] },
     { "exact": "scripts/run-node-input-actions-test.mjs", "chapters": [] },
+    { "exact": "scripts/evidence-service-cleanup.mjs", "chapters": ["vitest"], "vitestFiles": ["test/desktop-shell.test.mjs"] },
+    { "exact": "scripts/run-desktop-visual-node-details-test.mjs", "chapters": ["vitest"], "vitestFiles": ["test/desktop-shell.test.mjs"] },
+    { "exact": "scripts/test-desktop-visual-node-details.mjs", "chapters": [] },
     { "exact": "scripts/run-prime-desktop.mjs", "chapters": [] },
     { "exact": "scripts/run-project-new-thread-test.mjs", "chapters": [] },
     { "exact": "scripts/run-recursive-live-run.mjs", "chapters": ["vitest"], "vitestFiles": ["test/recursive-live-run-model.test.mjs"] },

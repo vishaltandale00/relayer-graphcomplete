@@ -1,4 +1,5 @@
 import { mkdtemp, mkdir, readFile, realpath, rm, writeFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
@@ -9,6 +10,8 @@ import {
   NodeObject,
   NodePlacementObject,
   RelayerGraphClient,
+  assetRef,
+  html,
 } from "@relayer/graph-client";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -21,6 +24,7 @@ import { restoreLayerPath } from "../desktop/renderer/src/product-workspace/mode
 const repositoryRoot = resolve(import.meta.dirname, "..");
 const services = [];
 const directories = [];
+const PORTABLE_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><rect width="32" height="32" rx="6" fill="#2563eb"/></svg>`;
 
 afterEach(async () => {
   vi.restoreAllMocks();
@@ -158,16 +162,26 @@ describe("conversation export to Eval end to end", () => {
     expect(dialog.showSaveDialog).toHaveBeenCalledOnce();
     const exactExportBytes = await readFile(exportPath);
     const records = exactExportBytes.toString("utf8").trimEnd().split("\n").map(JSON.parse);
-    expect(records.map(({ recordType }) => recordType)).toEqual(["header", "turn", "turn", "turn", "turn"]);
-    expect(records[0].turns).toEqual(records.slice(1).map(({ id, sequence }) => ({ id, sequence })));
-    expect(records.slice(1).map((turn) => turn.completion.status)).toEqual([
+    const contentRecords = records.filter(({ recordType }) => recordType === "visualAssetContent");
+    const turnRecords = records.filter(({ recordType }) => recordType === "turn");
+    expect(records.map(({ recordType }) => recordType)).toEqual(["header", "visualAssetContent", "turn", "turn", "turn", "turn"]);
+    expect(records[0].turns).toEqual(turnRecords.map(({ id, sequence }) => ({ id, sequence })));
+    expect(turnRecords.map((turn) => turn.completion.status)).toEqual([
       "accepted", "accepted", "failed", "running",
     ]);
-    expect(records[1].acceptedView.layers.map((layer) => layer.layer.id)).toHaveLength(5);
-    expect(records[1].acceptedView.layers.flatMap((layer) => layer.actions).filter((action) => action.relation === "reference")).toHaveLength(4);
-    const exportedRoot = records[1].acceptedView.layers.find(
-      (layer) => layer.layer.id === records[1].acceptedView.rootLayerId,
+    expect(turnRecords[0].acceptedView.layers.map((layer) => layer.layer.id)).toHaveLength(5);
+    expect(turnRecords[0].acceptedView.layers.flatMap((layer) => layer.actions).filter((action) => action.relation === "reference")).toHaveLength(4);
+    const exportedRoot = turnRecords[0].acceptedView.layers.find(
+      (layer) => layer.layer.id === turnRecords[0].acceptedView.rootLayerId,
     );
+    expect(contentRecords).toHaveLength(1);
+    const exportedAssetNode = exportedRoot.nodes.find((node) => node.clientKey === "root");
+    expect(exportedAssetNode.authoredDetailAssets).toHaveLength(1);
+    expect(exportedAssetNode.authoredDetailAssets[0]).toMatchObject({
+      digestSha256: contentRecords[0].digestSha256,
+      mediaType: "image/svg+xml",
+      byteLength: Buffer.from(contentRecords[0].contentBase64, "base64").length,
+    });
     expect(exportedRoot.layer.layout).toMatchObject({ version: 1 });
     expect(exportedRoot.layer.layout.placements.map(({ x, y }) => [x, y])).toEqual([
       [0.2, 0.35],
@@ -194,6 +208,19 @@ describe("conversation export to Eval end to end", () => {
     expect(importedExecution.turns.map((turn) => turn.status)).toEqual(["accepted", "accepted", "failed", "running"]);
     expect(await readFile(join(dataDirectory, "eval-data", imported.sourceRef))).toEqual(exactExportBytes);
 
+    const legacyRecords = structuredClone(records).filter(({ recordType }) => recordType !== "visualAssetContent");
+    for (const node of legacyRecords.slice(1).flatMap((turn) => turn.acceptedView?.layers ?? []).flatMap((layer) => layer.nodes)) {
+      delete node.authoredDetailAssets;
+    }
+    const legacyPath = join(dataDirectory, "legacy-metadata-only-export.jsonl");
+    await writeFile(legacyPath, `${legacyRecords.map((record) => JSON.stringify(record)).join("\n")}\n`);
+    const legacyImport = await evalService.importConversation(legacyPath);
+    const legacyReexportBytes = await product.exportConversation(legacyImport.executions[0].threadIds[0]);
+    const legacyReexport = Buffer.from(legacyReexportBytes).toString("utf8").trimEnd().split("\n").map(JSON.parse);
+    expect(legacyReexport.some(({ recordType }) => recordType === "visualAssetContent")).toBe(false);
+    expect(legacyReexport.slice(1).flatMap((turn) => turn.acceptedView?.layers ?? []).flatMap((layer) => layer.nodes)
+      .every((node) => node.authoredDetailAssets === undefined)).toBe(true);
+
     const importedDetail = await productRequest(productSession, `/api/threads/${importedExecution.threadIds[0]}`);
     expect(importedDetail.thread).toMatchObject({ imported: true });
     expect(importedDetail.interactions.map((turn) => turn.completionStatus)).toEqual([
@@ -203,7 +230,7 @@ describe("conversation export to Eval end to end", () => {
     const importedFirst = importedDetail.interactions[0];
     expect(importedDetail.interactions.every((turn) => Number.isSafeInteger(turn.id))).toBe(true);
     expect(importedDetail.interactions.filter((turn) => turn.completionStatus === "accepted").every((turn) => Number.isSafeInteger(turn.graphNodeId))).toBe(true);
-    expect(records.slice(1).every((turn) => /^turn:\d+$/.test(turn.id))).toBe(true);
+    expect(turnRecords.every((turn) => /^turn:\d+$/.test(turn.id))).toBe(true);
     expect(records.filter((record) => record.recordType === "turn" && record.acceptedView).every((turn) => (
       /^node:\d+$/.test(turn.acceptedView.interactionNodeId)
       && /^action:\d+$/.test(turn.acceptedView.rootAction.id)
@@ -214,6 +241,16 @@ describe("conversation export to Eval end to end", () => {
       ))
     ))).toBe(true);
     const rootLayer = importedFirst.completionOutput.rootLayer;
+    const importedAssetNode = rootLayer.nodes.find((node) => node.clientKey === "root");
+    const importedAsset = importedAssetNode.authoredDetail.assets[0];
+    const importedAssetResponse = await productRequest(
+      productSession,
+      `/api/threads/${importedDetail.thread.id}/interactions/${importedFirst.id}/nodes/${importedAssetNode.id}/detail-assets/${importedAsset.id}?layerId=${rootLayer.layer.id}`,
+    );
+    expect(importedAssetResponse).toMatchObject({
+      digestSha256: contentRecords[0].digestSha256,
+      contentBase64: contentRecords[0].contentBase64,
+    });
     expect(rootLayer.layer.layout).toMatchObject({ version: 1 });
     expect(rootLayer.layer.layout.placements.map(({ x, y }) => [x, y])).toEqual([
       [0.2, 0.35],
@@ -309,12 +346,18 @@ describe("conversation export to Eval end to end", () => {
       rootReference.targetLayerId,
     );
     expect(replayLayer.nodes[0].title).toBe("Shared reference");
+    const replayAsset = await productRequest(
+      productSession,
+      `/api/threads/${importedDetail.thread.id}/interactions/${importedFirst.id}/nodes/${importedAssetNode.id}/detail-assets/${importedAsset.id}?layerId=${rootLayer.layer.id}`,
+    );
+    expect(replayAsset.contentBase64).toBe(contentRecords[0].contentBase64);
 
     const foreignRecords = structuredClone(records);
+    const foreignFirstTurn = foreignRecords.find(({ recordType }) => recordType === "turn");
     const foreignPath = "/foreign-host/private/workspace/credentials.txt";
     foreignRecords[0].conversation.title = `Foreign visible text ${foreignPath}`;
-    foreignRecords[1].text = `Explain visible source text ${foreignPath}`;
-    foreignRecords[1].acceptedView.layers[0].nodes[0].detail = `Untrusted source text ${foreignPath}`;
+    foreignFirstTurn.text = `Explain visible source text ${foreignPath}`;
+    foreignFirstTurn.acceptedView.layers[0].nodes[0].detail = `Untrusted source text ${foreignPath}`;
     const foreignSource = join(dataDirectory, "foreign-visible-content.jsonl");
     const foreignBytes = Buffer.from(`${foreignRecords.map((record) => JSON.stringify(record)).join("\n")}\n`);
     await writeFile(foreignSource, foreignBytes);
@@ -368,6 +411,20 @@ function complexConversationFactory(projectPath) {
         return;
       }
       const rootNode = new NodeObject("info", "Root answer", `Portable detail replaces ${projectPath}.`, "concept", "root");
+      const assetScope = await graph.visualAssets.scope();
+      const asset = await graph.visualAssets.add({
+        scope: assetScope,
+        name: "Portable status illustration",
+        file: {
+          name: "portable-status.svg",
+          mediaType: "image/svg+xml",
+          async read() { return new TextEncoder().encode(PORTABLE_SVG); },
+        },
+      });
+      rootNode.detailAuthoring.setComponent(
+        "portable-visual",
+        html`<figure><img alt="Portable status illustration" asset=${assetRef(asset.id)}></figure>`,
+      );
       const rootEvidenceNode = new NodeObject("link", "Root evidence", "Portable layout keeps this evidence offset from the answer.", "evidence", "root-evidence");
       const expandedNode = new NodeObject("info", "Expanded detail", "First expansion.", "detail", "expanded");
       const nestedNode = new NodeObject("info", "Nested expansion", "Second expansion.", "detail", "nested");
@@ -470,6 +527,51 @@ async function expectHostileImports({ evalService, exportPath, exactExportBytes,
   await hostile("truncated", exactExportBytes.subarray(0, exactExportBytes.length - 8), /JSON|truncated|line/i);
   const newer = exactExportBytes.toString("utf8").replace('"exportVersion":1', '"exportVersion":999');
   await hostile("newer", Buffer.from(newer), /version|unsupported/i);
+  const maliciousRecords = exactExportBytes.toString("utf8").trimEnd().split("\n").map(JSON.parse);
+  const invalidPng = Buffer.from("this is not a PNG");
+  const maliciousDigest = createHash("sha256").update(invalidPng).digest("hex");
+  const maliciousContent = maliciousRecords.find(({ recordType }) => recordType === "visualAssetContent");
+  const originalDigest = maliciousContent.digestSha256;
+  Object.assign(maliciousContent, {
+    digestSha256: maliciousDigest,
+    mediaType: "image/png",
+    byteLength: invalidPng.length,
+    contentBase64: invalidPng.toString("base64"),
+  });
+  for (const node of maliciousRecords.slice(1).flatMap((turn) => turn.acceptedView?.layers ?? []).flatMap((layer) => layer.nodes)) {
+    for (const association of node.authoredDetailAssets ?? []) {
+      if (association.digestSha256 !== originalDigest) continue;
+      association.digestSha256 = maliciousDigest;
+      association.mediaType = "image/png";
+      association.byteLength = invalidPng.length;
+    }
+    for (const pin of node.authoredDetail?.assets ?? []) {
+      if (pin.digestSha256 !== originalDigest) continue;
+      pin.digestSha256 = maliciousDigest;
+      pin.mediaType = "image/png";
+    }
+    if (node.authoredDetail?.assets?.some((pin) => pin.digestSha256 === maliciousDigest)) {
+      node.authoredDetail.integritySha256 = createHash("sha256").update(canonicalJson({
+        version: node.authoredDetail.version,
+        components: node.authoredDetail.components,
+        mounts: node.authoredDetail.mounts,
+        assets: node.authoredDetail.assets,
+      })).digest("hex");
+    }
+  }
+  const importsBeforeInvalidMedia = await productRequest(
+    evalService.productSession,
+    "/api/internal/conversation-imports",
+  );
+  await hostile(
+    "malicious-media",
+    Buffer.from(`${maliciousRecords.map((record) => JSON.stringify(record)).join("\n")}\n`),
+    /png|media|malformed|signature/i,
+  );
+  expect(await productRequest(
+    evalService.productSession,
+    "/api/internal/conversation-imports",
+  )).toEqual(importsBeforeInvalidMedia);
   const oversizedService = await new EvalService({
     stateFile: join(dataDirectory, "eval-data", "oversized-state.json"),
     productSession: evalService.productSession,
@@ -478,4 +580,10 @@ async function expectHostileImports({ evalService, exportPath, exactExportBytes,
     conversationImportMaxBytes: exactExportBytes.length - 1,
   }).open();
   await expect(oversizedService.importConversation(exportPath)).rejects.toThrow(/exceeds/i);
+}
+
+function canonicalJson(value) {
+  if (value === null || typeof value !== "object") return JSON.stringify(value);
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
+  return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${canonicalJson(value[key])}`).join(",")}}`;
 }

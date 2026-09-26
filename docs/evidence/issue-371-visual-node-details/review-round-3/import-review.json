@@ -1,0 +1,11 @@
+{
+  "reviewer": "/root",
+  "scope": "Import finalization staging cleanup and rollback checkpoint",
+  "verdict": "clean",
+  "findings": [],
+  "assertion": "Cleanup is restricted to the current import after associations materialize and remains inside the existing transaction before search publication and commit. Ownership metadata is retained. Failure-trigger regression tests rollback and successful retry, and accepted-content reads remain covered.",
+  "files": {
+    "crates/relayer-graph-core/src/graph/import.rs": "3d8e0054256e0918fcfa3cb19317508178b5ecb1139cdc89d5fbf28dd7a1c3ad",
+    "crates/relayer-graph-server/tests/import_visual_asset_transport.rs": "b74970a80f067fe1f9f61d57905fac61dd583c388a0fda48a9c6c4e8348d9f6e"
+  }
+}

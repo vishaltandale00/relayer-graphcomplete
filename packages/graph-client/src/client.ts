@@ -8,9 +8,11 @@ import { EdgeObject, LayerObject, NodeObject, actionId, edgeId, layerId, nodeId,
 import { GRAPH_QUERY_CONTRACT_VERSION } from "./query-errors.generated.js";
 import { GraphQueryError, isGraphQueryErrorBody, type GraphQueryErrorBody, type GraphSearchOptions, type GraphSearchRequest, type GraphSearchResult } from "./query.js";
 import { GraphApiError, type CompletionInputGraph, type CompletionOutput, type CompletionState, type CurrentTransitionReceipt, type GraphAction, type GraphApiErrorBody, type GraphCapability, type GraphEdge, type GraphId, type GraphLayer, type GraphNode, type InteractionInput, type ResolvedLayer, type ResolvedPersonalPresentation, type StopReason } from "./types.js";
+import { GraphVisualAssets } from "./visual-assets.js";
 
 export class RelayerGraphClient {
   readonly capability: GraphCapability;
+  readonly visualAssets: GraphVisualAssets;
   readonly #submittedDetails = new WeakMap<NodeObject, Promise<CompiledNodeDetail>>();
   readonly #acceptedDetails = new WeakMap<NodeObject, Promise<CompiledNodeDetail>>();
   readonly #submissionEnvelopes = new WeakMap<NodeObject, NodeSubmissionEnvelope>();
@@ -18,6 +20,7 @@ export class RelayerGraphClient {
 
   constructor(capability: GraphCapability) {
     this.capability = { ...capability, url: capability.url.replace(/\/$/, "") };
+    this.visualAssets = new GraphVisualAssets((path, init) => this.request<unknown>(path, init));
   }
 
   static fromEnv(environment: NodeJS.ProcessEnv = process.env): RelayerGraphClient {

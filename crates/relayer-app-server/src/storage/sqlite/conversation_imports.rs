@@ -111,6 +111,29 @@ impl SqliteProductStore {
         })
     }
 
+    pub(crate) async fn append_conversation_import_visual_asset_content(
+        &self,
+        import_id: &str,
+        content: &crate::conversation_export::ExportVisualAssetContent,
+    ) -> Result<(), StorageError> {
+        let result = sqlx::query("INSERT INTO conversation_import_asset_contents(conversation_import_id,digest_sha256,content_json) SELECT id,?2,?3 FROM conversation_imports WHERE id=?1 AND state='staging'")
+            .bind(import_id).bind(&content.digest_sha256)
+            .bind(serde_json::to_string(content).map_err(serialization)?)
+            .execute(&self.pool).await?;
+        require_one(result.rows_affected(), "conversation import is not staged")
+    }
+
+    pub(crate) async fn next_conversation_import_visual_asset_content(
+        &self,
+        import_id: &str,
+        after_digest: &str,
+    ) -> Result<Option<crate::conversation_export::ExportVisualAssetContent>, StorageError> {
+        let json: Option<String> = sqlx::query_scalar("SELECT content_json FROM conversation_import_asset_contents content JOIN conversation_imports ci ON ci.id=content.conversation_import_id WHERE ci.id=?1 AND ci.state='staging' AND content.digest_sha256>?2 ORDER BY content.digest_sha256 LIMIT 1")
+            .bind(import_id).bind(after_digest).fetch_optional(&self.pool).await?;
+        json.map(|json| serde_json::from_str(&json).map_err(serialization))
+            .transpose()
+    }
+
     pub(crate) async fn finalize_conversation_import_digest(
         &self,
         import_id: &str,
@@ -201,12 +224,21 @@ impl SqliteProductStore {
         import_id: &str,
         published_at: &str,
     ) -> Result<(), StorageError> {
+        let mut tx = self.pool.begin_with("BEGIN IMMEDIATE").await?;
         let result = sqlx::query("UPDATE conversation_imports SET state='published',published_at=?1 WHERE id=?2 AND state='staging' AND source_sha256 LIKE 'sha256:%' AND NOT EXISTS(SELECT 1 FROM imported_turns it JOIN interactions i ON i.id=it.product_interaction_id WHERE it.conversation_import_id=?2 AND i.completion_status='accepted' AND (i.graph_node_id IS NULL OR i.completion_output_json IS NULL))")
-            .bind(published_at).bind(import_id).execute(&self.pool).await?;
+            .bind(published_at).bind(import_id).execute(&mut *tx).await?;
         require_one(
             result.rows_affected(),
             "conversation import is incomplete or not staged",
+        )?;
+        sqlx::query(
+            "DELETE FROM conversation_import_asset_contents WHERE conversation_import_id=?1",
         )
+        .bind(import_id)
+        .execute(&mut *tx)
+        .await?;
+        tx.commit().await?;
+        Ok(())
     }
 
     pub(crate) async fn remove_conversation_import(
@@ -242,13 +274,14 @@ impl SqliteProductStore {
                 .bind(&id).fetch_all(&self.pool).await?.into_iter()
                 .map(|turn| Ok((turn.try_get(0)?, InteractionId::from_database(turn.try_get(1)?), turn.try_get(2)?, turn.try_get(3)?)))
                 .collect::<Result<Vec<_>, sqlx::Error>>()?;
+            let mut header =
+                serde_json::from_str::<ConversationExportHeader>(&row.try_get::<String, _>(2)?)
+                    .map_err(serialization)?;
+            header.visual_asset_contents.clear();
             records.push(ConversationImportRecord {
                 id,
                 source_sha256: row.try_get(1)?,
-                header: serde_json::from_str::<ConversationExportHeader>(
-                    &row.try_get::<String, _>(2)?,
-                )
-                .map_err(serialization)?,
+                header,
                 thread_id: ThreadId::from_database(row.try_get(3)?),
                 turns,
             });
@@ -354,6 +387,7 @@ mod tests {
                 id: "turn:1".into(),
                 sequence: 1,
             }],
+            visual_asset_contents: Vec::new(),
         };
         let turn = ConversationExportTurn {
             id: "turn:1".into(),

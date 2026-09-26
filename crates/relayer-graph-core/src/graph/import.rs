@@ -1,13 +1,16 @@
 use std::collections::{HashMap, HashSet};
 
+use base64::Engine as _;
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 
 use crate::{
     ActionId, ActionKind, GraphError, InputAction, LayerId, NodeId,
     PERSONAL_PRESENTATION_PROFILE_THREAD_ID, PresentingInputOccurrence, ProjectId,
     SubmittedInputValue, ThreadId, graph::InteractionScope, graph::completion,
-    storage::sqlite::actions::ActionTable, storage::sqlite::imports::ImportTable,
-    storage::sqlite::input_children::validate_value,
+    storage::sqlite::actions::ActionTable,
+    storage::sqlite::authored_detail_assets::AuthoredDetailAssetTable,
+    storage::sqlite::imports::ImportTable, storage::sqlite::input_children::validate_value,
 };
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -29,6 +32,27 @@ pub struct ImportedConversationStage {
     pub project_id: Option<ProjectId>,
     pub thread_id: ThreadId,
     pub created_at: String,
+}
+
+/// One digest-addressed blob staged once, independently of turn/node references.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ImportedVisualAssetContent {
+    pub digest_sha256: String,
+    pub media_type: String,
+    pub byte_length: usize,
+    pub content_base64: String,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ImportedDetailAsset {
+    pub asset_id: String,
+    pub digest_sha256: String,
+    pub media_type: String,
+    pub byte_length: usize,
+    pub provenance_source: String,
+    pub provenance_file_name: String,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -148,6 +172,8 @@ pub struct ImportedNode {
     /// Import keeps the Markdown fallback and notes the omission inside it.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub authored_detail_omitted: bool,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub authored_detail_assets: Vec<ImportedDetailAsset>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -241,6 +267,46 @@ impl crate::GraphDatabase {
         sqlx::query("INSERT INTO graph_imports(import_id,source_sha256,project_id,thread_id,created_at) VALUES (?1,?2,?3,?4,?5)")
             .bind(&input.import_id).bind(&input.source_sha256).bind(input.project_id.map(ProjectId::value))
             .bind(input.thread_id.value()).bind(&input.created_at).execute(&mut *tx).await?;
+        tx.commit().await?;
+        Ok(())
+    }
+
+    pub async fn stage_imported_visual_asset_content(
+        &self,
+        import_id: &str,
+        input: &ImportedVisualAssetContent,
+    ) -> Result<(), GraphError> {
+        let content = base64::engine::general_purpose::STANDARD
+            .decode(&input.content_base64)
+            .map_err(|_| {
+                GraphError::validation(
+                    "import_asset_content_invalid",
+                    "contentBase64",
+                    "Imported content must be canonical base64.",
+                )
+            })?;
+        if content.is_empty()
+            || content.len() > 8 * 1024 * 1024
+            || content.len() != input.byte_length
+            || base64::engine::general_purpose::STANDARD.encode(&content) != input.content_base64
+            || format!("{:x}", Sha256::digest(&content)) != input.digest_sha256
+            || !matches!(
+                input.media_type.as_str(),
+                "image/png" | "image/jpeg" | "image/svg+xml"
+            )
+        {
+            return Err(GraphError::validation(
+                "import_asset_content_invalid",
+                "content",
+                "Imported content must match its bounded supported-media digest and length.",
+            ));
+        }
+        let mut tx = self.storage.begin_write().await?;
+        // The foreign key confines staged content to this import and removes it
+        // on abort. It is never visible through accepted-node asset reads.
+        sqlx::query("INSERT INTO graph_import_asset_contents(import_id,digest_sha256,media_type,byte_length,content) VALUES (?1,?2,?3,?4,?5)")
+            .bind(import_id).bind(&input.digest_sha256).bind(&input.media_type)
+            .bind(input.byte_length as i64).bind(content).execute(&mut *tx).await?;
         tx.commit().await?;
         Ok(())
     }
@@ -359,6 +425,9 @@ impl crate::GraphDatabase {
                 register_imported_node(&mut node_definitions, context.target)?;
             }
         }
+        // Only metadata is retained: each staged digest is fetched, hashed and
+        // materialized once across the whole import transaction.
+        let mut materialized_contents = HashMap::<String, (String, usize)>::new();
         for (portable_id, node) in node_definitions {
             if node_ids.contains_key(&portable_id) {
                 return Err(GraphError::Internal(
@@ -368,6 +437,40 @@ impl crate::GraphDatabase {
             let owner = node_owners[&portable_id];
             if let Some(authored_detail) = node.authored_detail.as_ref() {
                 crate::graph::model::validate_authored_detail(authored_detail)?;
+            }
+            for asset in &node.authored_detail_assets {
+                if !materialized_contents.contains_key(&asset.digest_sha256) {
+                    let metadata = AuthoredDetailAssetTable::new(&mut tx)
+                        .materialize_import_content(import_id, &asset.digest_sha256)
+                        .await?;
+                    materialized_contents.insert(asset.digest_sha256.clone(), metadata);
+                }
+                let (media_type, byte_length) = &materialized_contents[&asset.digest_sha256];
+                if media_type != &asset.media_type || *byte_length != asset.byte_length {
+                    return Err(GraphError::validation(
+                        "import_asset_content_mismatch",
+                        "authoredDetailAssets",
+                        "Imported visual asset reference does not match staged content.",
+                    ));
+                }
+                let pin = node
+                    .authored_detail
+                    .as_ref()
+                    .and_then(|package| package["assets"].as_array())
+                    .and_then(|pins| {
+                        pins.iter()
+                            .find(|pin| pin["id"].as_str() == Some(asset.asset_id.as_str()))
+                    });
+                if pin.is_none_or(|pin| {
+                    pin["digestSha256"].as_str() != Some(asset.digest_sha256.as_str())
+                        || pin["mediaType"].as_str() != Some(asset.media_type.as_str())
+                }) {
+                    return Err(GraphError::validation(
+                        "import_asset_pin_mismatch",
+                        "authoredDetailAssets",
+                        "Imported visual asset reference does not match its canonical package.",
+                    ));
+                }
             }
             let authored_detail = node
                 .authored_detail
@@ -384,7 +487,14 @@ impl crate::GraphDatabase {
                 .bind(metadata.project_id.map(ProjectId::value)).bind(metadata.thread_id.value()).bind(node.kind).bind(node.icon)
                 .bind(node.title).bind(detail).bind(authored_detail).bind(owner)
                 .bind(node.client_key.as_deref().unwrap_or(&portable_id)).execute(&mut *tx).await?;
-            node_ids.insert(portable_id, result.last_insert_rowid());
+            let node_id =
+                NodeId::new(result.last_insert_rowid()).expect("inserted node ID is positive");
+            for asset in &node.authored_detail_assets {
+                AuthoredDetailAssetTable::new(&mut tx)
+                    .insert_import_reference(node_id, asset)
+                    .await?;
+            }
+            node_ids.insert(portable_id, node_id.value());
         }
 
         let mut edge_ids = HashMap::<String, i64>::new();
@@ -817,6 +927,13 @@ impl crate::GraphDatabase {
                 ));
             }
         }
+        // Accepted associations now own the verified content. Reclaim only this
+        // import's staging copy in the same transaction, so failures retain all
+        // staged bytes for retry while graph_imports keeps its ownership record.
+        sqlx::query("DELETE FROM graph_import_asset_contents WHERE import_id=?1")
+            .bind(import_id)
+            .execute(&mut *tx)
+            .await?;
         // An import is an accept path like any other, so its closures reach the
         // search store before SQLite commits. The whole conversation goes in as
         // one search transaction carrying one revision: the turns were authored
@@ -1069,12 +1186,17 @@ fn register_imported_node(
     if let Some(existing) = definitions.get_mut(&node.id) {
         let incoming_authored_detail = node.authored_detail.take();
         let existing_authored_detail = existing.authored_detail.take();
+        let incoming_assets = std::mem::take(&mut node.authored_detail_assets);
+        let existing_assets = std::mem::take(&mut existing.authored_detail_assets);
         // Context snapshots of a node carry neither its package nor the marker
         // that export omitted one; only the accepted-view copy does. Compare the
         // remaining identity fields, then merge both package-related fields.
         let incoming_omitted = std::mem::take(&mut node.authored_detail_omitted);
         let existing_omitted = std::mem::take(&mut existing.authored_detail_omitted);
         if existing != &node
+            || (!existing_assets.is_empty()
+                && !incoming_assets.is_empty()
+                && existing_assets != incoming_assets)
             || matches!(
                 (&existing_authored_detail, &incoming_authored_detail),
                 (Some(left), Some(right)) if left != right
@@ -1082,11 +1204,17 @@ fn register_imported_node(
         {
             existing.authored_detail = existing_authored_detail;
             existing.authored_detail_omitted = existing_omitted;
+            existing.authored_detail_assets = existing_assets;
             return Err(GraphError::Internal(
                 "imported node snapshot changed for one portable ID".into(),
             ));
         }
         existing.authored_detail = existing_authored_detail.or(incoming_authored_detail);
+        existing.authored_detail_assets = if existing_assets.is_empty() {
+            incoming_assets
+        } else {
+            existing_assets
+        };
         existing.authored_detail_omitted =
             (existing_omitted || incoming_omitted) && existing.authored_detail.is_none();
         return Ok(());

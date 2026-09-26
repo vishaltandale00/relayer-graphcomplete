@@ -1,3 +1,4 @@
+import { compiledNodeDetailReviewControls } from "./product-workspace/node-detail-runtime.js";
 import { controlActivationCompletionFor } from "./control-activation.js";
 
 const CONTROL_SELECTOR = [
@@ -38,12 +39,29 @@ export function isVisibleElement(element, windowObject = window) {
     && rect.top < windowObject.innerHeight;
 }
 
+function contentAlternative(element, includeHidden = false) {
+  if (element?.nodeType === 3) return element.textContent || "";
+  if (!includeHidden && element?.getAttribute?.("aria-hidden") === "true") return "";
+  if (element?.localName === "img") return element.getAttribute("alt") || "";
+  if (element?.childNodes?.length) return [...element.childNodes].map((child) => contentAlternative(child, includeHidden)).join(" ");
+  return element?.textContent || "";
+}
+
 export function accessibleControlName(element) {
-  return element.getAttribute("aria-label")?.trim()
+  const root = element.getRootNode?.();
+  const labelledBy = (element.getAttribute("aria-labelledby") || "").trim().split(/\s+/)
+    .filter(Boolean).map((id) => root?.getElementById?.(id))
+    .filter(Boolean).map((label) => (label.getAttribute("aria-label")?.trim()
+      || label.getAttribute("title")?.trim()
+      || contentAlternative(label, true))).join(" ").trim();
+  const labels = [...(element.labels || [])].map((label) => contentAlternative(label)).join(" ").trim();
+  return (labelledBy
+    || element.getAttribute("aria-label")?.trim()
+    || labels
+    || contentAlternative(element).trim()
     || element.getAttribute("title")?.trim()
-    || element.textContent?.trim().replace(/\s+/g, " ")
     || element.getAttribute("placeholder")?.trim()
-    || "";
+    || "").replace(/\s+/g, " ");
 }
 
 export function isAccessibleControl(element, windowObject = window) {
@@ -127,12 +145,13 @@ export function createReviewPresentationAdapter({
   let automaticReference = 0;
   const automaticReferences = new WeakMap();
   const referencedElements = new Map();
+  const authoredControlMetadata = new WeakMap();
   let capture = null;
   let activatedActionId = null;
   let navigationPath = [];
 
   function referenceFor(element) {
-    const explicit = element.dataset.reviewRef;
+    const explicit = authoredControlMetadata.has(element) ? null : element.dataset.reviewRef;
     if (explicit) return explicit;
     let reference = automaticReferences.get(element);
     if (!reference) {
@@ -144,7 +163,11 @@ export function createReviewPresentationAdapter({
 
   function controls() {
     referencedElements.clear();
-    return [...root.querySelectorAll(CONTROL_SELECTOR)]
+    const authored = compiledNodeDetailReviewControls(root);
+    for (const { element, kind, actionId } of authored) {
+      authoredControlMetadata.set(element, { kind, actionId });
+    }
+    return [...root.querySelectorAll(CONTROL_SELECTOR), ...authored.map(({ element }) => element)]
       .filter((element) => isAccessibleControl(element, windowObject))
       .map((element) => {
         const elementRef = referenceFor(element);
@@ -153,9 +176,10 @@ export function createReviewPresentationAdapter({
           elementRef,
           name: accessibleControlName(element),
           role: element.getAttribute("role") || element.localName,
-          disabled: Boolean(element.disabled || element.getAttribute("aria-disabled") === "true"),
-          kind: element.dataset.reviewKind || "control",
-          actionId: element.dataset.reviewActionId || null,
+          disabled: Boolean(authoredControlMetadata.get(element)?.kind === "link" || element.disabled || element.getAttribute("aria-disabled") === "true"),
+          kind: authoredControlMetadata.get(element)?.kind ?? element.dataset.reviewKind ?? "control",
+          actionId: authoredControlMetadata.has(element)
+            ? authoredControlMetadata.get(element).actionId : element.dataset.reviewActionId || null,
         };
       });
   }
@@ -279,12 +303,14 @@ export function createReviewPresentationAdapter({
     if (!element || !isAccessibleControl(element, windowObject)) {
       throw new Error(`Review control is unknown, inaccessible, or no longer visible: ${elementRef}`);
     }
-    if (element.disabled || element.getAttribute("aria-disabled") === "true") {
+    // Review windows cannot acknowledge external navigation; links are inspect-only.
+    if (authoredControlMetadata.get(element)?.kind === "link" || element.disabled || element.getAttribute("aria-disabled") === "true") {
       throw new Error(`Review control is disabled: ${elementRef}`);
     }
-    const kind = element.dataset.reviewKind || "control";
+    const kind = authoredControlMetadata.get(element)?.kind ?? element.dataset.reviewKind ?? "control";
     const before = getPresentationState();
-    const actionId = element.dataset.reviewActionId || null;
+    const actionId = authoredControlMetadata.has(element)
+      ? authoredControlMetadata.get(element).actionId : element.dataset.reviewActionId || null;
     const breadcrumbPathIndex = Number(element.dataset.reviewPathIndex);
     element.click();
     if (kind === "history") {

@@ -10,10 +10,11 @@ use tokio::sync::{
     Mutex as AsyncMutex, OwnedMutexGuard, OwnedRwLockReadGuard, OwnedRwLockWriteGuard, RwLock,
 };
 
+use crate::storage::sqlite::authored_detail_assets::AuthoredDetailAssetTable;
 use crate::{
-    AcceptedGraphClosure, AcceptedGraphPublication, CompletionState, CurrentProjectionEvent,
-    CurrentProjectionPage, CurrentTransitionReceipt, GraphError, GraphNode, GraphWriter,
-    InteractionContextAction, InteractionContextDraft, InteractionContextTarget,
+    AcceptedDetailAsset, AcceptedGraphClosure, AcceptedGraphPublication, CompletionState,
+    CurrentProjectionEvent, CurrentProjectionPage, CurrentTransitionReceipt, GraphError, GraphNode,
+    GraphWriter, InteractionContextAction, InteractionContextDraft, InteractionContextTarget,
     InteractionInputChild, InteractionInputNode, InteractionInputPreparation,
     InteractionInvocation, NoSearchIndex, NodeId, PERSONAL_PRESENTATION_PROFILE_THREAD_ID,
     PresentingInputOccurrence, ProjectId, SearchIndex, SearchIndexComponent,
@@ -770,6 +771,19 @@ impl GraphDatabase {
         node_id: NodeId,
     ) -> Result<Option<AcceptedGraphClosure>, GraphError> {
         crate::graph::completion::read_accepted_closure(self, node_id).await
+    }
+
+    pub async fn accepted_detail_asset(
+        &self,
+        node_id: NodeId,
+        asset_id: &str,
+    ) -> Result<AcceptedDetailAsset, GraphError> {
+        let mut transaction = self.storage.begin_read().await?;
+        let asset = AuthoredDetailAssetTable::new(&mut transaction)
+            .read(node_id, asset_id)
+            .await?;
+        transaction.commit().await?;
+        Ok(asset)
     }
 
     pub async fn current_completion(&self, node_id: NodeId) -> Result<CompletionState, GraphError> {

@@ -1,0 +1,151 @@
+{
+  "schemaVersion": 1,
+  "paidInferenceCalls": 0,
+  "runId": "run-2026-09-26T20-34-46-188Z-50375d75",
+  "executionId": "796954c4-c867-4f31-b516-028a2070b27e",
+  "threadId": 1,
+  "turnId": 1,
+  "acceptedPackageIntegrity": "bfbd4f94bca7e8570e40c534d3749f6b9c02a8e14389badf471378377cd50920",
+  "screenshot": {
+    "schemaVersion": 1,
+    "screenshotId": "shot-c651fe10-dc04-447c-8b78-1c0b4448af02",
+    "label": "Accepted visual Node Detail in read-only Product workspace",
+    "executionId": "796954c4-c867-4f31-b516-028a2070b27e",
+    "threadId": "1",
+    "threadRevision": "thread:1:updated:1790454886195:input-draft:0:interactions:1:1:accepted:server-input-draft:0",
+    "turnId": "1",
+    "layerId": "7",
+    "selectedNodeId": "18",
+    "activatedActionId": null,
+    "navigationPath": [
+      {
+        "layerId": "7",
+        "viaActionId": null
+      }
+    ],
+    "viewport": {
+      "width": 1480,
+      "height": 888,
+      "deviceScaleFactor": 2
+    },
+    "captureTarget": {
+      "kind": "element",
+      "elementRef": "node-detail"
+    },
+    "mode": "full",
+    "tileCount": 2,
+    "tiles": [
+      {
+        "index": 0,
+        "width": 604,
+        "height": 912,
+        "contentDigest": "sha256:24684b9336fe4ddcf3306084e7c28941e1af2efdb57b4b446aab699fabb9a398"
+      },
+      {
+        "index": 1,
+        "width": 604,
+        "height": 912,
+        "contentDigest": "sha256:bebdfb38784ffb54bc5164d4b6c8ec1b03c5a4569261912138c5d6234472b254"
+      }
+    ],
+    "contentDigest": "sha256:ea23512359edb53bd7cb7d7bb27f545134cb3fb693c1e0d8ce86e86f3bc6a5dd"
+  },
+  "screenshotDirectory": "/Users/vishaltandale/.codex/worktrees/05b1/relayer-graphcomplete/.relayer/evidence/visual-node-details/run-2026-09-26T20-34-42.278Z-63122a1a/shot-c651fe10-dc04-447c-8b78-1c0b4448af02",
+  "assertions": {
+    "ordinaryEvalProductState": true,
+    "authoredLayoutMounted": true,
+    "controlsDiscovered": [
+      "Open implementation notes",
+      "Open referenced evidence",
+      "Open fixture documentation",
+      "Investigate follow-up",
+      "Review note"
+    ],
+    "expandAndReferenceNavigation": true,
+    "historyRestoration": true,
+    "invokeAndInputDisabled": true,
+    "serverMutationRejected": {
+      "status": 403,
+      "code": "read_only_session"
+    },
+    "reopened": true,
+    "visualAsset": {
+      "id": "asset_6825ea29-7255-4812-b8e2-e3c9da97fb68",
+      "digestSha256": "0499cefdad4591290c673fa233821e8101512ee67ad8aec4c78f12d5df81e2f4",
+      "renderedAsset": {
+        "alt": "Accepted detail status illustration",
+        "assetState": "available",
+        "sourceProtocol": "blob:",
+        "complete": true,
+        "naturalWidth": 300
+      }
+    },
+    "visualAssetReopened": {
+      "alt": "Accepted detail status illustration",
+      "assetState": "available",
+      "sourceProtocol": "blob:",
+      "complete": true,
+      "naturalWidth": 300
+    },
+    "visualAssetExportImport": {
+      "exportPath": "/Users/vishaltandale/.codex/worktrees/05b1/relayer-graphcomplete/.relayer/evidence/visual-node-details/run-2026-09-26T20-34-42.278Z-63122a1a/conversation.jsonl",
+      "importedRunId": "import-f7107557-5c20-41a5-ae88-548735346fc5",
+      "importedExecutionId": "execution-f7107557-5c20-41a5-ae88-548735346fc5",
+      "importedThreadId": 2,
+      "pinPreserved": true,
+      "renderedAsset": {
+        "alt": "Accepted detail status illustration",
+        "assetState": "available",
+        "sourceProtocol": "blob:",
+        "complete": true,
+        "naturalWidth": 300
+      },
+      "portabilityPending": false,
+      "screenshot": {
+        "schemaVersion": 1,
+        "screenshotId": "shot-0681c98c-8152-40e0-976a-ffb952e6bedc",
+        "label": "Imported accepted visual Node Detail with portable image bytes",
+        "executionId": "execution-f7107557-5c20-41a5-ae88-548735346fc5",
+        "threadId": "2",
+        "threadRevision": "thread:2:updated:1790454886195:input-draft:none:interactions:2:1:accepted:server-input-draft:none",
+        "turnId": "2",
+        "layerId": "8",
+        "selectedNodeId": "20",
+        "activatedActionId": null,
+        "navigationPath": [
+          {
+            "layerId": "8",
+            "viaActionId": null
+          }
+        ],
+        "viewport": {
+          "width": 1480,
+          "height": 888,
+          "deviceScaleFactor": 2
+        },
+        "captureTarget": {
+          "kind": "element",
+          "elementRef": "node-detail"
+        },
+        "mode": "full",
+        "tileCount": 2,
+        "tiles": [
+          {
+            "index": 0,
+            "width": 604,
+            "height": 912,
+            "contentDigest": "sha256:24684b9336fe4ddcf3306084e7c28941e1af2efdb57b4b446aab699fabb9a398"
+          },
+          {
+            "index": 1,
+            "width": 604,
+            "height": 912,
+            "contentDigest": "sha256:bebdfb38784ffb54bc5164d4b6c8ec1b03c5a4569261912138c5d6234472b254"
+          }
+        ],
+        "contentDigest": "sha256:3ae8665c64e6437c12ce9bd82ecb16dd33049b09dcb278b45419e5c495ce32f7"
+      },
+      "screenshotDirectory": "/Users/vishaltandale/.codex/worktrees/05b1/relayer-graphcomplete/.relayer/evidence/visual-node-details/run-2026-09-26T20-34-42.278Z-63122a1a/shot-0681c98c-8152-40e0-976a-ffb952e6bedc"
+    }
+  }
+}

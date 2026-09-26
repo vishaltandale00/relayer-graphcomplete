@@ -1,0 +1,10 @@
+{
+  "symptom": "Electron exited zero after rendering but before cleanup and result output; wrapper correctly failed missing result",
+  "minimalRepro": "electron electron-cleanup-repro.cjs with CLEANUP_RESULT pointing to an unused temporary file",
+  "red": "no window-all-closed handler: result absent",
+  "green": "KEEP_CLEANUP_ALIVE=1: result contains cleanup complete",
+  "cause": "Electron default last-window shutdown raced asynchronous cleanup",
+  "repair": "suppress automatic window-all-closed exit; retain explicit app.exit after cleanup/result",
+  "realRunner": "node scripts/run-desktop-visual-node-details-test.mjs passed after repair",
+  "limits": "No test claim from exit zero alone; final heavy proof and full suite recorded separately"
+}

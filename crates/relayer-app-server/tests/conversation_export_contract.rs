@@ -1,4 +1,6 @@
+use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64_STANDARD};
 use relayer_app_server::conversation_export::*;
+use sha2::{Digest, Sha256};
 
 fn action(
     id: &str,
@@ -109,6 +111,7 @@ fn layer(id: &str, node_id: &str, actions: Vec<ExportAction>) -> ExportResolvedL
                 "integritySha256": "49b27b37e787326e0cc4bd1c62a67f65daf3a9184e1c7f792d8ec091b50456ad"
             })),
             authored_detail_omitted: None,
+            authored_detail_assets: vec![],
             state: ExportRecordState::Accepted,
         }],
         edges: vec![],
@@ -222,6 +225,7 @@ fn records() -> Vec<ConversationExportRecord> {
                 id: "turn:1".into(),
                 sequence: 1,
             }],
+            visual_asset_contents: vec![],
         })),
         ConversationExportRecord::Turn(Box::new(ConversationExportTurn {
             id: "turn:1".into(),
@@ -236,6 +240,333 @@ fn records() -> Vec<ConversationExportRecord> {
             accepted_view: Some(accepted_view()),
         })),
     ]
+}
+
+fn records_with_visual_assets(bytes: &[u8], asset_ids: &[&str]) -> Vec<ConversationExportRecord> {
+    let mut fixture = records();
+    let digest = format!("{:x}", Sha256::digest(bytes));
+    let content = ExportVisualAssetContent {
+        digest_sha256: digest.clone(),
+        media_type: "image/svg+xml".into(),
+        byte_length: bytes.len(),
+        content_base64: BASE64_STANDARD.encode(bytes),
+    };
+    let ConversationExportRecord::Turn(turn) = &mut fixture[1] else {
+        unreachable!()
+    };
+    let node = &mut turn.accepted_view.as_mut().unwrap().layers[0].nodes[0];
+    node.authored_detail.as_mut().unwrap()["assets"] = serde_json::Value::Array(
+        asset_ids
+            .iter()
+            .map(|asset_id| {
+                serde_json::json!({
+                    "id": asset_id,
+                    "digestSha256": digest,
+                    "mediaType": "image/svg+xml",
+                    "representation": "image",
+                })
+            })
+            .collect(),
+    );
+    node.authored_detail_assets = asset_ids
+        .iter()
+        .map(|asset_id| ExportVisualAssetAssociation {
+            asset_id: (*asset_id).into(),
+            digest_sha256: digest.clone(),
+            media_type: "image/svg+xml".into(),
+            byte_length: bytes.len(),
+            provenance: ExportVisualAssetProvenance {
+                source: "user".into(),
+                file_name: format!("{asset_id}.svg"),
+            },
+        })
+        .collect();
+    fixture.insert(
+        1,
+        ConversationExportRecord::VisualAssetContent(Box::new(content)),
+    );
+    fixture
+}
+
+#[test]
+fn upload_asset_content_bounds_match_materialization() {
+    for size in [0, 8 * 1024 * 1024 + 1] {
+        let fixture = records_with_visual_assets(&vec![7; size], &["asset-a"]);
+        assert_rejected_with_parity(&fixture, "visual_asset_content_size_invalid");
+        let jsonl = fixture
+            .iter()
+            .map(|record| serde_json::to_string(record).unwrap())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            decode_export_jsonl(jsonl.as_bytes())
+                .unwrap_err()
+                .to_string()
+                .contains("visual_asset_content_size_invalid")
+        );
+    }
+    validate_incrementally(&records_with_visual_assets(
+        &vec![7; 8 * 1024 * 1024],
+        &["asset-a"],
+    ))
+    .unwrap();
+}
+
+#[test]
+fn upload_asset_provenance_matches_materialization() {
+    for source in ["user", "system", "provider"] {
+        let mut fixture = records_with_visual_assets(SAFE_SVG, &["asset-a"]);
+        let ConversationExportRecord::Turn(turn) = &mut fixture[2] else {
+            unreachable!()
+        };
+        turn.accepted_view.as_mut().unwrap().layers[0].nodes[0].authored_detail_assets[0]
+            .provenance
+            .source = source.into();
+        if source == "provider" {
+            assert_rejected_with_parity(&fixture, "visual_asset_provenance_invalid");
+        } else {
+            validate_incrementally(&fixture).unwrap();
+        }
+    }
+}
+
+#[test]
+fn upload_reused_asset_nodes_preserve_association_identity() {
+    for mutation in ["unchanged", "order", "provenance", "context-only"] {
+        let visual = records_with_visual_assets(SAFE_SVG, &["asset-a", "asset-b"]);
+        let ConversationExportRecord::Turn(visual_turn) = &visual[2] else {
+            unreachable!()
+        };
+        let visual_node = &visual_turn.accepted_view.as_ref().unwrap().layers[0].nodes[0];
+        let mut fixture = two_turn_records();
+        for record in &mut fixture[1..] {
+            let ConversationExportRecord::Turn(turn) = record else {
+                unreachable!()
+            };
+            let node = &mut turn.accepted_view.as_mut().unwrap().layers[0].nodes[0];
+            node.authored_detail = visual_node.authored_detail.clone();
+            node.authored_detail_assets = visual_node.authored_detail_assets.clone();
+        }
+        let ConversationExportRecord::Turn(turn) = &mut fixture[2] else {
+            unreachable!()
+        };
+        let node = &mut turn.accepted_view.as_mut().unwrap().layers[0].nodes[0];
+        match mutation {
+            "order" => node.authored_detail_assets.reverse(),
+            "provenance" => {
+                node.authored_detail_assets[0].provenance.file_name = "different.svg".into()
+            }
+            "context-only" => {
+                node.authored_detail_assets.clear();
+                node.authored_detail = None;
+            }
+            _ => {}
+        }
+        fixture.insert(1, visual[1].clone());
+        if matches!(mutation, "order" | "provenance") {
+            assert_rejected_with_parity(&fixture, "node_identity_conflict");
+        } else {
+            validate_incrementally(&fixture).unwrap();
+        }
+    }
+}
+
+const SAFE_SVG: &[u8] =
+    br#"<svg xmlns="http://www.w3.org/2000/svg"><rect width="1" height="1"/></svg>"#;
+
+#[test]
+fn visual_asset_archive_is_optional_and_globally_deduplicated() {
+    let legacy_json = serde_json::to_value(records()).unwrap();
+    assert!(legacy_json[0].get("visualAssetContents").is_none());
+    assert!(
+        legacy_json[1]["acceptedView"]["layers"][0]["nodes"][0]
+            .get("authoredDetailAssets")
+            .is_none()
+    );
+    let legacy: Vec<ConversationExportRecord> = serde_json::from_value(legacy_json).unwrap();
+    validate_export_records(&legacy).unwrap();
+
+    let fixture = records_with_visual_assets(SAFE_SVG, &["asset-a", "asset-b"]);
+    let ConversationExportRecord::VisualAssetContent(content) = &fixture[1] else {
+        unreachable!()
+    };
+    assert_eq!(content.digest_sha256.len(), 64);
+    validate_export_records(&fixture).unwrap();
+
+    let mut legacy_pinned = fixture.clone();
+    legacy_pinned.remove(1);
+    let ConversationExportRecord::Turn(turn) = &mut legacy_pinned[1] else {
+        unreachable!()
+    };
+    turn.accepted_view.as_mut().unwrap().layers[0].nodes[0]
+        .authored_detail_assets
+        .clear();
+    validate_export_records(&legacy_pinned).unwrap();
+}
+
+#[test]
+fn private_authored_detail_omission_cannot_retain_asset_bytes_or_associations() {
+    let mut fixture = records();
+    let ConversationExportRecord::Turn(turn) = &mut fixture[1] else {
+        unreachable!()
+    };
+    let node = &mut turn.accepted_view.as_mut().unwrap().layers[0].nodes[0];
+    node.authored_detail = None;
+    node.authored_detail_omitted = Some(ExportAuthoredDetailOmission::PrivatePath);
+    validate_export_records(&fixture).unwrap();
+
+    let mut leaked = records_with_visual_assets(SAFE_SVG, &["private-asset"]);
+    let ConversationExportRecord::Turn(turn) = &mut leaked[2] else {
+        unreachable!()
+    };
+    let node = &mut turn.accepted_view.as_mut().unwrap().layers[0].nodes[0];
+    node.authored_detail = None;
+    node.authored_detail_omitted = Some(ExportAuthoredDetailOmission::PrivatePath);
+    assert_eq!(
+        validate_export_records(&leaked).unwrap_err().code,
+        "authored_detail_asset_without_detail"
+    );
+}
+
+#[test]
+fn visual_asset_archive_rejects_corrupt_or_unbound_content_before_import() {
+    let valid = records_with_visual_assets(SAFE_SVG, &["asset-a"]);
+
+    let mut malformed_digest = valid.clone();
+    let ConversationExportRecord::VisualAssetContent(content) = &mut malformed_digest[1] else {
+        unreachable!()
+    };
+    content.digest_sha256 = "A".repeat(64);
+    assert_eq!(
+        validate_export_records(&malformed_digest).unwrap_err().code,
+        "visual_asset_digest_invalid"
+    );
+
+    let mut malformed_base64 = valid.clone();
+    let ConversationExportRecord::VisualAssetContent(content) = &mut malformed_base64[1] else {
+        unreachable!()
+    };
+    content.content_base64 = "%%%".into();
+    assert_eq!(
+        validate_export_records(&malformed_base64).unwrap_err().code,
+        "visual_asset_base64_invalid"
+    );
+
+    let mut wrong_length = valid.clone();
+    let ConversationExportRecord::VisualAssetContent(content) = &mut wrong_length[1] else {
+        unreachable!()
+    };
+    content.byte_length += 1;
+    assert_eq!(
+        validate_export_records(&wrong_length).unwrap_err().code,
+        "visual_asset_content_corrupt"
+    );
+
+    let mut duplicate = valid.clone();
+    duplicate.insert(2, duplicate[1].clone());
+    assert_eq!(
+        validate_export_records(&duplicate).unwrap_err().code,
+        "visual_asset_content_duplicate"
+    );
+
+    let mut pin_mismatch = valid.clone();
+    let ConversationExportRecord::Turn(turn) = &mut pin_mismatch[2] else {
+        unreachable!()
+    };
+    turn.accepted_view.as_mut().unwrap().layers[0].nodes[0].authored_detail_assets[0].asset_id =
+        "different".into();
+    assert_eq!(
+        validate_export_records(&pin_mismatch).unwrap_err().code,
+        "authored_detail_asset_pin_mismatch"
+    );
+
+    let mut partial_inventory = records_with_visual_assets(SAFE_SVG, &["asset-a", "asset-b"]);
+    let ConversationExportRecord::Turn(turn) = &mut partial_inventory[2] else {
+        unreachable!()
+    };
+    turn.accepted_view.as_mut().unwrap().layers[0].nodes[0]
+        .authored_detail_assets
+        .pop();
+    assert_eq!(
+        validate_export_records(&partial_inventory)
+            .unwrap_err()
+            .code,
+        "authored_detail_asset_inventory_mismatch"
+    );
+
+    let mut unreachable = valid.clone();
+    let ConversationExportRecord::Turn(turn) = &mut unreachable[2] else {
+        unreachable!()
+    };
+    let node = &mut turn.accepted_view.as_mut().unwrap().layers[0].nodes[0];
+    node.authored_detail.as_mut().unwrap()["assets"] = serde_json::json!([]);
+    node.authored_detail_assets.clear();
+    assert_eq!(
+        validate_export_records(&unreachable).unwrap_err().code,
+        "visual_asset_content_unreachable"
+    );
+
+    for valid_svg in [
+        br#"<svg xmlns='http://www.w3.org/2000/svg'><rect width='1' height='1'/></svg>"#.as_slice(),
+        br##"<svg xmlns="http://www.w3.org/2000/svg"><defs><linearGradient id="g"/></defs><rect fill="url(#g)"/></svg>"##.as_slice(),
+    ] {
+        validate_export_records(&records_with_visual_assets(valid_svg, &["asset-a"])).unwrap();
+    }
+}
+
+#[test]
+fn separate_content_records_keep_two_legal_seven_mib_assets_below_the_line_limit() {
+    let payloads = [vec![1_u8; 7 * 1024 * 1024], vec![2_u8; 7 * 1024 * 1024]];
+    let mut fixture = records();
+    let ConversationExportRecord::Turn(turn) = &mut fixture[1] else {
+        unreachable!()
+    };
+    let node = &mut turn.accepted_view.as_mut().unwrap().layers[0].nodes[0];
+    let pins = payloads
+        .iter()
+        .enumerate()
+        .map(|(index, bytes)| {
+            let digest = format!("{:x}", Sha256::digest(bytes));
+            serde_json::json!({
+                "id": format!("asset-{index}"),
+                "digestSha256": digest,
+                "mediaType": "image/png",
+                "representation": "image",
+            })
+        })
+        .collect::<Vec<_>>();
+    node.authored_detail.as_mut().unwrap()["assets"] = serde_json::Value::Array(pins.clone());
+    node.authored_detail_assets = pins
+        .iter()
+        .enumerate()
+        .map(|(index, pin)| ExportVisualAssetAssociation {
+            asset_id: format!("asset-{index}"),
+            digest_sha256: pin["digestSha256"].as_str().unwrap().into(),
+            media_type: "image/png".into(),
+            byte_length: payloads[index].len(),
+            provenance: ExportVisualAssetProvenance {
+                source: "user".into(),
+                file_name: format!("asset-{index}.png"),
+            },
+        })
+        .collect();
+    for (index, bytes) in payloads.iter().enumerate().rev() {
+        fixture.insert(
+            1,
+            ConversationExportRecord::VisualAssetContent(Box::new(ExportVisualAssetContent {
+                digest_sha256: pins[index]["digestSha256"].as_str().unwrap().into(),
+                media_type: "image/png".into(),
+                byte_length: bytes.len(),
+                content_base64: BASE64_STANDARD.encode(bytes),
+            })),
+        );
+    }
+    assert!(
+        fixture[1..3]
+            .iter()
+            .all(|record| { serde_json::to_vec(record).unwrap().len() < MAX_JSONL_LINE_BYTES })
+    );
+    validate_export_records(&fixture).unwrap();
 }
 
 fn two_turn_records() -> Vec<ConversationExportRecord> {
@@ -290,10 +621,13 @@ fn validate_incrementally(
     };
     let mut validator = ConversationExportValidator::new(header)?;
     for record in &records[1..] {
-        let ConversationExportRecord::Turn(turn) = record else {
-            panic!("parity fixture must contain only turns after its header")
-        };
-        validator.push_turn(turn)?;
+        match record {
+            ConversationExportRecord::VisualAssetContent(content) => {
+                validator.push_visual_asset_content(content)?
+            }
+            ConversationExportRecord::Turn(turn) => validator.push_turn(turn)?,
+            ConversationExportRecord::Header(_) => panic!("parity fixture has duplicate header"),
+        }
     }
     validator.finish()
 }

@@ -39,6 +39,8 @@ import {
   graphMemoryEvalPrompts,
   materializeFrontierProjectFixture,
   materializeH3ProjectFixture,
+  nodeDetailEvalCase,
+  NODE_DETAIL_EVAL_CASE_ID,
   projectDeterministicChecksToOutcome,
   recursiveCompleteEvalCase,
   RECURSIVE_COMPLETE_EVAL_CASE_ID,
@@ -86,6 +88,7 @@ export const evalCases = Object.freeze([
     ]),
     requiredChecks: Object.freeze(["node-navigation"]),
   }),
+  nodeDetailEvalCase,
   recursiveCompleteEvalCase,
   Object.freeze({
     id: "empty-project.node-input-roundtrip.single-turn",
@@ -1213,6 +1216,13 @@ export class EvalService {
     if (selectsGraphSearch && this.targetKey !== GRAPH_SEARCH_EVAL_TARGET) {
       throw new Error("Graph-search Eval treatments are qualified only for macOS Apple Silicon.");
     }
+    if ((testCaseIds.includes(NODE_DETAIL_EVAL_CASE_ID)
+      || (Array.isArray(harnessConfigurationNames)
+        && harnessConfigurationNames.some((name) => nodeDetailEvalCase.requiredHarnessConfigurationNames.includes(name))))
+      && (!sameJson(testCaseIds, [NODE_DETAIL_EVAL_CASE_ID])
+        || !sameJson(harnessConfigurationNames, nodeDetailEvalCase.requiredHarnessConfigurationNames))) {
+      throw new Error(`The deterministic visual Node Detail fixture must run alone with ${nodeDetailEvalCase.requiredHarnessConfigurationNames.join(", ")}.`);
+    }
     if (testCaseIds.includes(RECURSIVE_COMPLETE_EVAL_CASE_ID)) {
       const comparison = evalCases.find((item) => item.id === RECURSIVE_COMPLETE_EVAL_CASE_ID);
       if (!sameJson(testCaseIds, [RECURSIVE_COMPLETE_EVAL_CASE_ID])
@@ -1406,7 +1416,7 @@ export class EvalService {
         duplex: "half",
       });
       receipt = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(receipt?.error || `Conversation import failed (${response.status}).`);
+      if (!response.ok) throw new Error(receipt?.error?.message || receipt?.error || `Conversation import failed (${response.status}).`);
     } catch (error) {
       await rm(stagedSource, { force: true });
       throw error;
@@ -1472,7 +1482,7 @@ export class EvalService {
       const detail = await publish.json().catch(() => ({}));
       await this.#removeStagedImport(receipt.importId).catch(() => undefined);
       await rm(dirname(sourceFile), { recursive: true, force: true });
-      throw new Error(detail?.error || `Conversation publication failed (${publish.status}).`);
+      throw new Error(detail?.error?.message || detail?.error || `Conversation publication failed (${publish.status}).`);
     }
     await rm(pendingMarker, { force: true });
     this.runs.unshift(run);

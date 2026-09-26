@@ -1,0 +1,60 @@
+{
+  "reviews": [
+    {
+      "scope": "Library input ownership and no-op persistence",
+      "reviewer": "GPT-6-Astra /root/astra_standards",
+      "verdict": "clean",
+      "unresolvedFindings": [],
+      "files": {
+        "packages/visual-assets/src/index.ts": "ae9104be06ebf7e1c7c1a51836bebf7e52a44d87f38db3425071f7be7d0bf4a8",
+        "packages/visual-assets/test/visual-assets.test.ts": "954d17a83683a6c0b13b16e435402da19c25459b68d942ff08aeb1dfc507fdb6"
+      }
+    },
+    {
+      "scope": "Import media bridge generation admission",
+      "reviewer": "GPT-6-Astra /root/astra_spec",
+      "verdict": "clean",
+      "unresolvedFindings": [],
+      "files": {
+        "crates/relayer-graph-server/src/lib.rs": "ddcb3afa4376724ae7e7906f49979c20fd6fcee47c2f7a2b9364d16bb71a2fdd"
+      }
+    },
+    {
+      "scope": "CI dependency build ordering and actual Sharp entry points",
+      "reviewer": "GPT-6-Astra /root/astra_standards",
+      "verdict": "clean",
+      "unresolvedFindings": [],
+      "files": {
+        "scripts/ci/run-chapter.mjs": "98bbfd92672b844e75f853e748261b9a37d65075eac77f6b2909d74075c83df0",
+        "scripts/ci/plan-affected.mjs": "48b5259f3be6d69971298e99aa52c59fc9d9f225ada6677b91247e13e0755b55",
+        "scripts/ci/affected-modules.v1.json": "1eb830ee004dad2bd2bcb2e43a1eec3d8ea8902871ba701682b81d444a1c9c8c",
+        "desktop/packaging/verify-bundled-app-server.mjs": "e5591144a6daf9663c78a6e3f4fd21b4b9a32e34c826613b5bc5a9be1505234d",
+        "test/desktop-shell.test.mjs": "eba2e96dcf70f718c64ca8ed8fba6e99f27b795cf7eeae7a9147da24cc87fd72"
+      }
+    },
+    {
+      "scope": "Transactional content reclamation, deduplicated export fetch, streamed durable import staging/migration/cleanup, and mechanical migration version assertion",
+      "reviewer": "GPT-6-Astra /root/astra_standards",
+      "verdict": "clean",
+      "unresolvedFindings": [],
+      "files": {
+        "crates/relayer-app-server/src/conversation_export_service.rs": "cdd7c68617eb15999cec2ea2dee7f6baf8273d80951b9baf6bbb6a4cfba1698c",
+        "crates/relayer-app-server/src/conversation_import_service.rs": "c476a429ae93662cdf05200c4f59602074f9023508663ca553484d5c6cda2cad",
+        "crates/relayer-app-server/src/product/service.rs": "48009de01e8e68f6921a2ff7f72ebec4422d718af5e467362d13ca7854cd27f6",
+        "crates/relayer-app-server/src/storage/sqlite/conversation_imports.rs": "d9b66ee2eaee69f5ca47d32e56b6f9b9396eefc69b65d7bd0b919e915f7ec351",
+        "crates/relayer-app-server/src/storage/sqlite/migrations/0031_staged_visual_asset_contents.sql": "5de8459e1bc3549534395665a6377068adcce043e31869bbbd385b770976f762",
+        "crates/relayer-graph-core/src/storage/sqlite/migrations/0020_reclaim_detail_asset_content.sql": "1bf9bbba091262455799ac0e2436fb49f9920e84a7ef3e9dc4f137e95e927425",
+        "crates/relayer-graph-server/tests/import_visual_asset_transport.rs": "1b587fbb510883bf47a5a4557f44fc23b5b5b212b51fcfd1547365febc6ad645",
+        "crates/relayer-app-server/src/storage/sqlite/migrations.rs": "fa170f5741199c1bd617e33b1c82fab33740335acd828c12371aed90c0a04760"
+      }
+    }
+  ],
+  "limits": "Source reviews; tests are recorded separately. Source changes invalidate corresponding assertions. Record in PR before certification.",
+  "mapping": {
+    "reviewer": "GPT-6-Astra /root/astra_standards",
+    "verdict": "clean",
+    "prdSha256": "2222fdec40076c35f25b5a6d7629fab04ecb3e99a7301adee18a3a749c9151a7",
+    "readmePrefixSha256": "08a6ff8276bc7563d7ab5f1383e327cd932dd2964f127eb4621068ae2d4877e9",
+    "selection": "README prefix before ## Reproductions and decisions; final results excluded."
+  }
+}

@@ -68,6 +68,7 @@ describe("desktop Rust authenticated-error capabilities", () => {
       configurationPaths: [],
       harnessHostModuleUrl: harnessModule(),
       issueErrorCapability: () => nextCapability,
+      fetchRequest: async () => new Response(null, { status: 204 }),
       spawnProcess: () => child,
     });
 
@@ -105,6 +106,7 @@ describe("desktop Rust authenticated-error capabilities", () => {
       configurationPaths: [],
       harnessHostModuleUrl: harnessModule(),
       issueErrorCapability,
+      fetchRequest: async () => new Response(null, { status: 204 }),
       spawnProcess: (command, args, options) => {
         spawnCall = { command, args, options };
         return child;

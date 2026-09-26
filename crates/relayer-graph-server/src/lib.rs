@@ -33,10 +33,40 @@ pub struct ServerState {
     sessions: Arc<Mutex<HashMap<String, RuntimeAuthority>>>,
     control_token: Arc<str>,
     temporal_features: TemporalFeatureConfig,
+    visual_assets_bridge: Arc<Mutex<Option<VisualAssetsBridge>>>,
+    visual_assets_admission: Arc<tokio::sync::Mutex<VisualAssetsHandoffPhase>>,
+    visual_assets_gate: Arc<Mutex<HashMap<NodeId, Arc<tokio::sync::Mutex<u64>>>>>,
+    http_client: reqwest::Client,
     #[cfg(feature = "ladybug")]
     search_index: Option<Arc<search_index::LadybugSearchIndex>>,
     #[cfg(all(feature = "ladybug", feature = "crash-test-support"))]
     search_cancellations: Arc<Mutex<VecDeque<search_index::QueryCancellation>>>,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum VisualAssetsHandoffPhase {
+    Reversible,
+    CutoverPending,
+}
+
+#[derive(Debug, Clone)]
+struct VisualAssetsBridge {
+    url: String,
+    token: String,
+    generation: u64,
+}
+
+fn completion_asset_gate(
+    state: &ServerState,
+    node_id: NodeId,
+) -> Result<Arc<tokio::sync::Mutex<u64>>, ApiError> {
+    Ok(state
+        .visual_assets_gate
+        .lock()
+        .map_err(|_| ApiError::internal("visual-assets gate lock poisoned"))?
+        .entry(node_id)
+        .or_insert_with(|| Arc::new(tokio::sync::Mutex::new(1)))
+        .clone())
 }
 
 #[derive(Debug, Clone, Copy, Default, Deserialize, Serialize, PartialEq, Eq)]
@@ -67,6 +97,15 @@ impl ServerState {
             sessions: Arc::new(Mutex::new(HashMap::new())),
             control_token: Arc::from(control_token.into()),
             temporal_features: TemporalFeatureConfig::default(),
+            visual_assets_bridge: Arc::new(Mutex::new(None)),
+            visual_assets_admission: Arc::new(tokio::sync::Mutex::new(
+                VisualAssetsHandoffPhase::Reversible,
+            )),
+            visual_assets_gate: Arc::new(Mutex::new(HashMap::new())),
+            http_client: reqwest::Client::builder()
+                .timeout(std::time::Duration::from_secs(10))
+                .build()
+                .expect("visual-assets HTTP client configuration is valid"),
             #[cfg(feature = "ladybug")]
             search_index: None,
             #[cfg(all(feature = "ladybug", feature = "crash-test-support"))]
@@ -123,6 +162,10 @@ pub fn router(state: ServerState) -> Router {
         .route(
             "/api/control/temporal-features",
             get(control_temporal_features),
+        )
+        .route(
+            "/api/control/visual-assets/bridge",
+            axum::routing::put(register_visual_assets_bridge),
         )
         .route("/api/control/interactions", post(create_interaction))
         .route("/api/control/interactions/{id}", get(interaction_metadata))
@@ -193,6 +236,11 @@ pub fn router(state: ServerState) -> Router {
             post(begin_imported_conversation),
         )
         .route(
+            "/api/control/conversation-import-stages/{import_id}/visual-asset-contents",
+            post(stage_imported_visual_asset_content)
+                .layer(DefaultBodyLimit::max(17 * 1024 * 1024)),
+        )
+        .route(
             "/api/control/conversation-import-stages/{import_id}/turns",
             post(stage_imported_turn).layer(DefaultBodyLimit::max(17 * 1024 * 1024)),
         )
@@ -205,6 +253,14 @@ pub fn router(state: ServerState) -> Router {
             get(accepted_closure),
         )
         .route(
+            "/api/control/nodes/{node_id}/detail-assets/{asset_id}",
+            get(control_detail_asset),
+        )
+        .route(
+            "/api/control/visual-assets/imports/validate",
+            post(validate_visual_asset_import).layer(DefaultBodyLimit::max(17 * 1024 * 1024)),
+        )
+        .route(
             "/api/control/capabilities",
             post(remint_capability).delete(revoke_capability),
         )
@@ -213,6 +269,15 @@ pub fn router(state: ServerState) -> Router {
             post(prepare_recursive_completion),
         )
         .route("/api/graph/nodes", post(submit_node))
+        .route(
+            "/api/graph/detail-assets/resolve",
+            post(resolve_detail_assets),
+        )
+        .route("/api/graph/visual-assets/scope", get(visual_assets_scope))
+        .route(
+            "/api/graph/visual-assets/operations",
+            post(visual_assets_operation).layer(DefaultBodyLimit::max(12 * 1024 * 1024)),
+        )
         .route("/api/graph/nodes/{id}", get(get_node))
         .route("/api/graph/nodes/{id}/neighbors", get(neighbors))
         .route("/api/graph/input", get(interaction_input))
@@ -236,6 +301,422 @@ pub fn router(state: ServerState) -> Router {
         .route("/api/graph/search", post(search))
         .route("/api/graph/nodes/{id}/output", get(completion_output))
         .with_state(state)
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct VisualAssetsBridgeRegistration {
+    url: String,
+    token: String,
+    generation: u64,
+}
+
+async fn register_visual_assets_bridge(
+    State(state): State<ServerState>,
+    headers: HeaderMap,
+    Json(input): Json<VisualAssetsBridgeRegistration>,
+) -> Result<Json<Value>, ApiError> {
+    require_bearer(&headers, &state.control_token)?;
+    let mut handoff_phase = state.visual_assets_admission.lock().await;
+    let url = reqwest::Url::parse(&input.url)
+        .map_err(|_| ApiError::invalid("visual-assets bridge URL is invalid"))?;
+    if input.generation == 0
+        || input.token.len() < 32
+        || url.scheme() != "http"
+        || !url
+            .host_str()
+            .is_some_and(|host| host == "127.0.0.1" || host == "::1")
+    {
+        return Err(ApiError::invalid(
+            "visual-assets bridge registration is invalid",
+        ));
+    }
+    let existing = {
+        let bridge = state
+            .visual_assets_bridge
+            .lock()
+            .expect("visual-assets bridge mutex poisoned");
+        if bridge
+            .as_ref()
+            .is_some_and(|current| input.generation <= current.generation)
+        {
+            return Err(ApiError::conflict(
+                "visual_assets_bridge_generation_stale",
+                "Visual-assets bridge generation must advance.",
+            ));
+        }
+        bridge.clone()
+    };
+    if existing.is_some() {
+        let active_nodes: HashSet<NodeId> = state
+            .sessions
+            .lock()
+            .map_err(|_| ApiError::internal("session lock poisoned"))?
+            .values()
+            .map(|authority| authority.node_id)
+            .collect();
+        // Keep every completion gate until the swap or compensation finishes.
+        // A concurrent terminal operation must not replace a rollback barrier.
+        let mut pauses = Vec::with_capacity(active_nodes.len());
+        for node_id in &active_nodes {
+            pauses.push(VisualAssetsHandoffPause {
+                node_id: *node_id,
+                generation: completion_asset_gate(&state, *node_id)?.lock_owned().await,
+                barrier: format!("bridge-{}-{}", input.generation, node_id.value()),
+                acknowledged: false,
+            });
+        }
+        for index in 0..pauses.len() {
+            let pause = &mut pauses[index];
+            match visual_assets_lifecycle(&state, pause.node_id, pause.operation()).await {
+                Ok(generation) => {
+                    *pause.generation = generation;
+                    pause.acknowledged = true;
+                }
+                Err(error) => {
+                    if *handoff_phase == VisualAssetsHandoffPhase::CutoverPending
+                        || !restore_visual_assets_handoff(&state, &mut pauses[..=index]).await
+                    {
+                        return Err(visual_assets_handoff_recovery_required());
+                    }
+                    return Err(error);
+                }
+            }
+        }
+        // Retain the irreversible phase across failed registration attempts.
+        // A later pause failure must not resume authority cut over by an earlier try.
+        *handoff_phase = VisualAssetsHandoffPhase::CutoverPending;
+        for node_id in &active_nodes {
+            if state
+                .graph
+                .cutover_completion_authority(*node_id)
+                .await
+                .is_err()
+            {
+                // Some epochs may already be committed. Keep every barrier in
+                // place and let registration retry finish the irreversible cutover.
+                return Err(visual_assets_handoff_recovery_required());
+            }
+        }
+        state
+            .sessions
+            .lock()
+            .map_err(|_| ApiError::internal("session lock poisoned"))?
+            .retain(|_, authority| !active_nodes.contains(&authority.node_id));
+        state
+            .visual_assets_gate
+            .lock()
+            .map_err(|_| ApiError::internal("visual-assets gate lock poisoned"))?
+            .retain(|node_id, _| !active_nodes.contains(node_id));
+    }
+    {
+        let mut bridge = state
+            .visual_assets_bridge
+            .lock()
+            .expect("visual-assets bridge mutex poisoned");
+        if bridge
+            .as_ref()
+            .is_some_and(|current| input.generation <= current.generation)
+        {
+            return Err(ApiError::conflict(
+                "visual_assets_bridge_generation_stale",
+                "Visual-assets bridge generation must advance.",
+            ));
+        }
+        *bridge = Some(VisualAssetsBridge {
+            url: input.url.trim_end_matches('/').to_owned(),
+            token: input.token,
+            generation: input.generation,
+        });
+    }
+    *handoff_phase = VisualAssetsHandoffPhase::Reversible;
+    Ok(Json(json!({"generation": input.generation})))
+}
+
+fn visual_assets_handoff_recovery_required() -> ApiError {
+    ApiError(
+        StatusCode::SERVICE_UNAVAILABLE,
+        json!({"error": {
+            "code": "visual_assets_bridge_recovery_required",
+            "message": "Bridge replacement did not complete. The old bridge remains registered. Finish any pending terminal or revoke operation, then retry this registration to recover the handoff."
+        }}),
+    )
+}
+
+struct VisualAssetsHandoffPause {
+    node_id: NodeId,
+    generation: tokio::sync::OwnedMutexGuard<u64>,
+    barrier: String,
+    acknowledged: bool,
+}
+
+impl VisualAssetsHandoffPause {
+    fn operation(&self) -> Value {
+        // This pause is reversible; it must never take ownership of an unrelated
+        // terminal/revoke barrier that compensation could accidentally resume.
+        json!({"kind":"pause","expectedGeneration":*self.generation,"barrierId":self.barrier})
+    }
+}
+
+async fn restore_visual_assets_handoff(
+    state: &ServerState,
+    pauses: &mut [VisualAssetsHandoffPause],
+) -> bool {
+    let mut restored = true;
+    for pause in pauses.iter_mut().rev() {
+        if !pause.acknowledged {
+            // The failed request may have paused the host before losing its
+            // acknowledgment. Replaying the exact barrier learns that generation.
+            match visual_assets_lifecycle(state, pause.node_id, pause.operation()).await {
+                Ok(generation) => {
+                    *pause.generation = generation;
+                    pause.acknowledged = true;
+                }
+                Err(_) => {
+                    restored = false;
+                    continue;
+                }
+            }
+        }
+        match visual_assets_lifecycle(
+            state,
+            pause.node_id,
+            json!({"kind":"resume","assetGeneration":*pause.generation,"barrierId":pause.barrier}),
+        )
+        .await
+        {
+            Ok(generation) => *pause.generation = generation,
+            Err(_) => restored = false,
+        }
+    }
+    restored
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct ResolveDetailAssetsRequest {
+    logical_ids: Vec<String>,
+}
+
+async fn visual_assets_scope(
+    State(state): State<ServerState>,
+    headers: HeaderMap,
+) -> Result<Json<Value>, ApiError> {
+    let authority = session(&state, &headers)?;
+    let writer = state
+        .graph
+        .writer_for_completion_authority(authority.node_id, authority.epoch)
+        .await?;
+    writer.require_active_authority().await?;
+    let (project_id, thread_id) = writer.authority_scope();
+    Ok(Json(json!({"scope": project_id.map_or_else(
+        || json!({"kind":"thread","threadId":thread_id.value()}),
+        |project_id| json!({"kind":"project","projectId":project_id.value()}),
+    )})))
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct VisualAssetsOperationRequest {
+    operation: Value,
+}
+
+async fn visual_assets_operation(
+    State(state): State<ServerState>,
+    headers: HeaderMap,
+    Json(input): Json<VisualAssetsOperationRequest>,
+) -> Result<Json<Value>, ApiError> {
+    let authority = session(&state, &headers)?;
+    let asset_gate = completion_asset_gate(&state, authority.node_id)?;
+    let asset_generation_guard = asset_gate.lock().await;
+    let asset_generation = *asset_generation_guard;
+    let writer = state
+        .graph
+        .writer_for_completion_authority(authority.node_id, authority.epoch)
+        .await?;
+    writer.require_active_authority().await?;
+    let operation = input
+        .operation
+        .as_object()
+        .ok_or_else(|| ApiError::invalid("visual-assets operation must be an object"))?;
+    let kind = operation
+        .get("kind")
+        .and_then(Value::as_str)
+        .ok_or_else(|| ApiError::invalid("visual-assets operation kind is required"))?;
+    let read_only = matches!(
+        kind,
+        "list-registries"
+            | "list-tags"
+            | "list-assets"
+            | "find"
+            | "inspect"
+            | "download"
+            | "resolve"
+    );
+    if !read_only
+        && !matches!(
+            kind,
+            "add" | "create-tag" | "move-tag" | "associate" | "organize" | "archive"
+        )
+    {
+        return Err(ApiError::invalid("visual-assets operation kind is invalid"));
+    }
+    let scope = operation
+        .get("scope")
+        .and_then(Value::as_object)
+        .ok_or_else(|| ApiError::invalid("visual-assets operation scope is required"))?;
+    let scope_kind = scope
+        .get("kind")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    let (project_id, thread_id) = writer.authority_scope();
+    let scope_allowed = match scope_kind {
+        "library" => read_only && scope.len() == 1,
+        "project" => {
+            project_id.is_some_and(|id| {
+                scope.get("projectId").and_then(Value::as_i64) == Some(id.value())
+            }) && scope.len() == 2
+        }
+        "thread" => {
+            scope.get("threadId").and_then(Value::as_i64) == Some(thread_id.value())
+                && scope.len() == 2
+        }
+        _ => false,
+    };
+    if !scope_allowed {
+        return Err(ApiError::capability_not_granted());
+    }
+    let bridge = state
+        .visual_assets_bridge
+        .lock()
+        .expect("visual-assets bridge mutex poisoned")
+        .clone()
+        .ok_or_else(ApiError::visual_assets_unavailable)?;
+    let authority_scope = project_id.map_or_else(
+        || json!({"kind":"thread","threadId":thread_id.value()}),
+        |project_id| json!({"kind":"project","projectId":project_id.value(),"threadId":thread_id.value()}),
+    );
+    let response = state.http_client.post(format!("{}/visual-assets/operations", bridge.url)).bearer_auth(&bridge.token).json(&json!({
+        "version":1, "generation":bridge.generation, "assetGeneration":asset_generation,
+        "authority":{"kind":"completion","interactionNodeId":authority.node_id.value(),"scope":authority_scope},
+        "operation": input.operation,
+    })).send().await.map_err(|_| ApiError::visual_assets_unavailable())?;
+    let status = response.status();
+    let body: Value = response
+        .json()
+        .await
+        .map_err(|_| ApiError::visual_assets_unavailable())?;
+    writer.require_active_authority().await?;
+    if state
+        .visual_assets_bridge
+        .lock()
+        .expect("visual-assets bridge mutex poisoned")
+        .as_ref()
+        .map(|current| current.generation)
+        != Some(bridge.generation)
+    {
+        return Err(ApiError::conflict(
+            "visual_assets_bridge_restarted",
+            "Visual-assets authority changed during the operation.",
+        ));
+    }
+    if !status.is_success() {
+        return Err(ApiError(status, body));
+    }
+    Ok(Json(
+        body.get("result")
+            .cloned()
+            .ok_or_else(ApiError::visual_assets_unavailable)?,
+    ))
+}
+
+async fn resolve_detail_assets(
+    State(state): State<ServerState>,
+    headers: HeaderMap,
+    Json(input): Json<ResolveDetailAssetsRequest>,
+) -> Result<Json<Value>, ApiError> {
+    let authority = session(&state, &headers)?;
+    let asset_gate = completion_asset_gate(&state, authority.node_id)?;
+    let asset_generation_guard = asset_gate.lock().await;
+    let asset_generation = *asset_generation_guard;
+    if input.logical_ids.len() > 32
+        || input
+            .logical_ids
+            .iter()
+            .any(|id| id.is_empty() || id.trim() != id || id.contains('\0') || id.len() > 128)
+    {
+        return Err(ApiError::invalid("visual asset identities are invalid"));
+    }
+    let writer = state
+        .graph
+        .writer_for_completion_authority(authority.node_id, authority.epoch)
+        .await?;
+    writer.require_active_authority().await?;
+    let bridge = state
+        .visual_assets_bridge
+        .lock()
+        .expect("visual-assets bridge mutex poisoned")
+        .clone()
+        .ok_or_else(ApiError::visual_assets_unavailable)?;
+    let (project_id, thread_id) = writer.authority_scope();
+    let scope = project_id.map_or_else(
+        || json!({"kind":"thread","threadId":thread_id.value()}),
+        |project_id| {
+            json!({
+                "kind":"project",
+                "projectId":project_id.value(),
+                "threadId":thread_id.value(),
+            })
+        },
+    );
+    let requested_scope = project_id.map_or_else(
+        || json!({"kind":"thread","threadId":thread_id.value()}),
+        |project_id| json!({"kind":"project","projectId":project_id.value()}),
+    );
+    let response = state
+        .http_client
+        .post(format!("{}/visual-assets/operations", bridge.url))
+        .bearer_auth(&bridge.token)
+        .json(&json!({
+            "version": 1,
+            "generation": bridge.generation,
+            "assetGeneration": asset_generation,
+            "authority": {
+                "kind": "completion",
+                "interactionNodeId": authority.node_id.value(),
+                "scope": scope,
+            },
+            "operation": {"kind":"resolve","scope":requested_scope,"logicalIds":input.logical_ids},
+        }))
+        .send()
+        .await
+        .map_err(|_| ApiError::visual_assets_unavailable())?;
+    let status = response.status();
+    let body: Value = response
+        .json()
+        .await
+        .map_err(|_| ApiError::visual_assets_unavailable())?;
+    writer.require_active_authority().await?;
+    let current_generation = state
+        .visual_assets_bridge
+        .lock()
+        .expect("visual-assets bridge mutex poisoned")
+        .as_ref()
+        .map(|current| current.generation);
+    if current_generation != Some(bridge.generation) {
+        return Err(ApiError::conflict(
+            "visual_assets_bridge_restarted",
+            "Visual-assets authority changed while resolving assets.",
+        ));
+    }
+    if !status.is_success() {
+        return Err(ApiError(status, body));
+    }
+    let result = body
+        .get("result")
+        .cloned()
+        .ok_or_else(ApiError::visual_assets_unavailable)?;
+    Ok(Json(result))
 }
 
 #[cfg(feature = "ladybug")]
@@ -330,6 +811,20 @@ async fn begin_imported_conversation(
     Ok(Json(json!({"staged": true})))
 }
 
+async fn stage_imported_visual_asset_content(
+    State(state): State<ServerState>,
+    Path(import_id): Path<String>,
+    headers: HeaderMap,
+    Json(input): Json<relayer_graph_core::ImportedVisualAssetContent>,
+) -> Result<Json<Value>, ApiError> {
+    require_bearer(&headers, &state.control_token)?;
+    state
+        .graph
+        .stage_imported_visual_asset_content(&import_id, &input)
+        .await?;
+    Ok(Json(json!({"staged": true})))
+}
+
 async fn stage_imported_turn(
     State(state): State<ServerState>,
     Path(import_id): Path<String>,
@@ -387,6 +882,97 @@ async fn accepted_closure(
         )
     })?;
     Ok(Json(closure))
+}
+
+async fn control_detail_asset(
+    State(state): State<ServerState>,
+    Path((node_id, asset_id)): Path<(NodeId, String)>,
+    headers: HeaderMap,
+) -> Result<Json<Value>, ApiError> {
+    use base64::Engine as _;
+    require_bearer(&headers, &state.control_token)?;
+    let asset = state
+        .graph
+        .accepted_detail_asset(node_id, &asset_id)
+        .await?;
+    Ok(Json(json!({
+        "assetId": asset.asset_id,
+        "digestSha256": asset.digest_sha256,
+        "mediaType": asset.media_type,
+        "byteLength": asset.byte_length,
+        "provenance": {
+            "source": asset.provenance_source,
+            "fileName": asset.provenance_file_name,
+        },
+        "contentBase64": base64::engine::general_purpose::STANDARD.encode(asset.content),
+    })))
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct ValidateVisualAssetImportRequest {
+    project_id: Option<ProjectId>,
+    thread_id: ThreadId,
+    content: Value,
+}
+
+async fn validate_visual_asset_import(
+    State(state): State<ServerState>,
+    headers: HeaderMap,
+    Json(input): Json<ValidateVisualAssetImportRequest>,
+) -> Result<Json<Value>, ApiError> {
+    require_bearer(&headers, &state.control_token)?;
+    let bridge = state
+        .visual_assets_bridge
+        .lock()
+        .expect("visual-assets bridge mutex poisoned")
+        .clone()
+        .ok_or_else(ApiError::visual_assets_unavailable)?;
+    let scope = input.project_id.map_or_else(
+        || json!({"kind":"thread","threadId":input.thread_id.value()}),
+        |project_id| json!({"kind":"project","projectId":project_id.value(),"threadId":input.thread_id.value()}),
+    );
+    let response = state
+        .http_client
+        .post(format!("{}/visual-assets/operations", bridge.url))
+        .bearer_auth(&bridge.token)
+        .json(&json!({
+            "version":1,"generation":bridge.generation,"authority":{"kind":"control","scope":scope},
+            "operation":{"kind":"validate-import-content","content":input.content},
+        }))
+        .send()
+        .await
+        .map_err(|_| ApiError::visual_assets_unavailable())?;
+    let status = response.status();
+    let body: Value = response
+        .json()
+        .await
+        .map_err(|_| ApiError::visual_assets_unavailable())?;
+    // Do not admit a validation receipt while replacement is still fencing the
+    // old bridge. Acquire admission only after the RPC, preserving the existing
+    // admission-before-completion-gate ordering used by replacement and minting.
+    let _admission = state.visual_assets_admission.lock().await;
+    if state
+        .visual_assets_bridge
+        .lock()
+        .expect("visual-assets bridge mutex poisoned")
+        .as_ref()
+        .map(|current| current.generation)
+        != Some(bridge.generation)
+    {
+        return Err(ApiError::conflict(
+            "visual_assets_bridge_restarted",
+            "Visual-assets authority changed while validating imported content.",
+        ));
+    }
+    if !status.is_success() {
+        return Err(ApiError(status, body));
+    }
+    Ok(Json(
+        body.get("result")
+            .cloned()
+            .ok_or_else(ApiError::visual_assets_unavailable)?,
+    ))
 }
 
 #[derive(Debug, Deserialize)]
@@ -898,18 +1484,45 @@ async fn control_transition_current(
             "trusted control may only stop or fail a completion",
         ));
     }
-    Ok(Json(
-        state
-            .graph
-            .writer_for_subgraph(id)
-            .await?
-            .transition_current(
-                input.expected_revision,
-                &input.operation_key,
-                input.transition,
+    let gate = completion_asset_gate(&state, id)?;
+    let mut generation = gate.lock().await;
+    let barrier = format!("control-transition-{}-{}", id.value(), input.operation_key);
+    *generation = visual_assets_lifecycle(
+        &state,
+        id,
+        json!({"kind":"pause","expectedGeneration":*generation,"barrierId":barrier}),
+    )
+    .await?;
+    let outcome = state
+        .graph
+        .writer_for_subgraph(id)
+        .await?
+        .transition_current(
+            input.expected_revision,
+            &input.operation_key,
+            input.transition,
+        )
+        .await;
+    match outcome {
+        Ok(receipt) => {
+            *generation = visual_assets_lifecycle(
+                &state,
+                id,
+                json!({"kind":"finalize-revoke","assetGeneration":*generation,"barrierId":barrier}),
             )
-            .await?,
-    ))
+            .await?;
+            Ok(Json(receipt))
+        }
+        Err(error) => {
+            *generation = visual_assets_lifecycle(
+                &state,
+                id,
+                json!({"kind":"resume","assetGeneration":*generation,"barrierId":barrier}),
+            )
+            .await?;
+            Err(error.into())
+        }
+    }
 }
 
 async fn control_current_receipt(
@@ -1103,6 +1716,10 @@ async fn mint_capability_with_profile(
     requested_token: Option<String>,
     profile: GraphCapabilityProfile,
 ) -> Result<String, ApiError> {
+    let handoff_phase = state.visual_assets_admission.lock().await;
+    if *handoff_phase == VisualAssetsHandoffPhase::CutoverPending {
+        return Err(visual_assets_handoff_recovery_required());
+    }
     let graph_token = requested_token.unwrap_or_else(|| Uuid::new_v4().to_string());
     if graph_token.is_empty() {
         return Err(ApiError::invalid("graphToken must be non-empty"));
@@ -1122,12 +1739,26 @@ async fn mint_capability_with_profile(
             return Ok(graph_token);
         }
     }
+    let gate = completion_asset_gate(state, node_id)?;
+    let mut asset_generation = gate.lock().await;
     let epoch = state.graph.activate_completion_authority(node_id).await?;
+    // The epoch already invalidated prior tokens even if activation acknowledgment
+    // is lost. Never let a requested old token replay a now-stale session entry.
+    state
+        .sessions
+        .lock()
+        .map_err(|_| ApiError::internal("session lock poisoned"))?
+        .retain(|_, active| active.node_id != node_id);
+    *asset_generation = visual_assets_lifecycle(
+        state,
+        node_id,
+        json!({"kind":"activate","completionEpoch":epoch}),
+    )
+    .await?;
     let mut sessions = state
         .sessions
         .lock()
         .map_err(|_| ApiError::internal("session lock poisoned"))?;
-    sessions.retain(|_, active| active.node_id != node_id);
     sessions.insert(
         graph_token.clone(),
         RuntimeAuthority {
@@ -1154,21 +1785,19 @@ async fn revoke_capability(
     Json(input): Json<RevokeCapabilityRequest>,
 ) -> Result<Json<Value>, ApiError> {
     require_bearer(&headers, &state.control_token)?;
-    let (revoked, revoked_node) = {
-        let mut sessions = state
+    let target_node = {
+        let sessions = state
             .sessions
             .lock()
             .map_err(|_| ApiError::internal("session lock poisoned"))?;
-        match (input.graph_token, input.node_id) {
-            (Some(graph_token), None) => match sessions.remove(&graph_token) {
-                Some(authority) => (1, Some(authority.node_id)),
-                None => (0, None),
-            },
-            (None, Some(node_id)) => {
-                let before = sessions.len();
-                sessions.retain(|_, active| active.node_id != node_id);
-                (before - sessions.len(), Some(node_id))
+        match (&input.graph_token, input.node_id) {
+            (Some(graph_token), None) => {
+                sessions.get(graph_token).map(|authority| authority.node_id)
             }
+            (None, Some(node_id)) => sessions
+                .values()
+                .any(|active| active.node_id == node_id)
+                .then_some(node_id),
             _ => {
                 return Err(ApiError::invalid(
                     "provide exactly one of graphToken or nodeId",
@@ -1176,15 +1805,78 @@ async fn revoke_capability(
             }
         }
     };
-    if revoked > 0 {
-        state
-            .graph
-            .cutover_completion_authority(revoked_node.expect("revocation has a node"))
-            .await?;
+    let mut revoked = 0;
+    if let Some(node_id) = target_node {
+        let gate = completion_asset_gate(&state, node_id)?;
+        let mut generation = gate.lock().await;
+        let barrier = format!("explicit-revoke-{}", node_id.value());
+        *generation = visual_assets_lifecycle(
+            &state,
+            node_id,
+            json!({"kind":"pause","expectedGeneration":*generation,"barrierId":barrier,"revocationTakeover":true}),
+        )
+        .await?;
+        state.graph.cutover_completion_authority(node_id).await?;
+        *generation = visual_assets_lifecycle(
+            &state,
+            node_id,
+            json!({"kind":"finalize-revoke","assetGeneration":*generation,"barrierId":barrier}),
+        )
+        .await?;
+        revoked = {
+            let mut sessions = state
+                .sessions
+                .lock()
+                .map_err(|_| ApiError::internal("session lock poisoned"))?;
+            let before = sessions.len();
+            sessions.retain(|_, active| active.node_id != node_id);
+            before - sessions.len()
+        };
     }
     Ok(Json(
         json!({"revoked": revoked > 0, "revokedCount": revoked}),
     ))
+}
+
+async fn visual_assets_lifecycle(
+    state: &ServerState,
+    node_id: NodeId,
+    operation: Value,
+) -> Result<u64, ApiError> {
+    let Some(bridge) = state
+        .visual_assets_bridge
+        .lock()
+        .expect("visual-assets bridge mutex poisoned")
+        .clone()
+    else {
+        return Ok(operation
+            .get("expectedGeneration")
+            .or_else(|| operation.get("assetGeneration"))
+            .and_then(Value::as_u64)
+            .unwrap_or(1));
+    };
+    let response = state
+        .http_client
+        .post(format!("{}/visual-assets/operations", bridge.url))
+        .bearer_auth(&bridge.token)
+        .json(&json!({
+            "version":1,"generation":bridge.generation,
+            "authority":{"kind":"lifecycle","interactionNodeId":node_id.value()},
+            "operation":operation,
+        }))
+        .send()
+        .await
+        .map_err(|_| ApiError::visual_assets_unavailable())?;
+    if !response.status().is_success() {
+        return Err(ApiError::visual_assets_unavailable());
+    }
+    let body: Value = response
+        .json()
+        .await
+        .map_err(|_| ApiError::visual_assets_unavailable())?;
+    body.pointer("/result/assetGeneration")
+        .and_then(Value::as_u64)
+        .ok_or_else(ApiError::visual_assets_unavailable)
 }
 
 #[derive(Deserialize)]
@@ -1223,13 +1915,125 @@ async fn submit_node(
     Json(input): Json<SubmitNodeRequest>,
 ) -> Result<Json<Value>, ApiError> {
     let authority = session(&state, &headers)?;
-    let node = state
+    let asset_gate = completion_asset_gate(&state, authority.node_id)?;
+    let asset_generation_guard = asset_gate.lock().await;
+    let asset_generation = *asset_generation_guard;
+    let writer = state
         .graph
         .writer_for_completion_authority(authority.node_id, authority.epoch)
-        .await?
-        .submit_node_with_authored_detail_update(&input.draft, input.authored_detail_update())
+        .await?;
+    let mut prepared_assets = None;
+    if let Some(Some(package)) = &input.authored_detail
+        && package
+            .get("assets")
+            .and_then(Value::as_array)
+            .is_some_and(|assets| !assets.is_empty())
+    {
+        prepared_assets = Some(
+            prepare_detail_assets(&state, &writer, authority, asset_generation, package).await?,
+        );
+    }
+    let node = writer
+        .submit_node_with_prepared_detail_assets(
+            &input.draft,
+            input.authored_detail_update(),
+            prepared_assets.as_deref(),
+        )
         .await?;
     Ok(Json(json!({"node": node})))
+}
+
+async fn prepare_detail_assets(
+    state: &ServerState,
+    writer: &GraphWriter,
+    authority: RuntimeAuthority,
+    asset_generation: u64,
+    package: &Value,
+) -> Result<Vec<relayer_graph_core::PreparedDetailAsset>, ApiError> {
+    writer.require_active_authority().await?;
+    let bridge = state
+        .visual_assets_bridge
+        .lock()
+        .expect("visual-assets bridge mutex poisoned")
+        .clone()
+        .ok_or_else(ApiError::visual_assets_unavailable)?;
+    let (project_id, thread_id) = writer.authority_scope();
+    let scope = project_id.map_or_else(
+        || json!({"kind":"thread","threadId":thread_id.value()}),
+        |project_id| json!({"kind":"project","projectId":project_id.value(),"threadId":thread_id.value()}),
+    );
+    let requested_scope = project_id.map_or_else(
+        || json!({"kind":"thread","threadId":thread_id.value()}),
+        |project_id| json!({"kind":"project","projectId":project_id.value()}),
+    );
+    let response = state.http_client
+        .post(format!("{}/visual-assets/operations", bridge.url))
+        .bearer_auth(&bridge.token)
+        .json(&json!({
+            "version":1,
+            "generation":bridge.generation,
+            "assetGeneration":asset_generation,
+            "authority":{"kind":"completion","interactionNodeId":authority.node_id.value(),"scope":scope},
+            "operation":{"kind":"prepare-detail","scope":requested_scope,"package":package},
+        }))
+        .send().await.map_err(|_| ApiError::visual_assets_unavailable())?;
+    let status = response.status();
+    let body: Value = response
+        .json()
+        .await
+        .map_err(|_| ApiError::visual_assets_unavailable())?;
+    writer.require_active_authority().await?;
+    if state
+        .visual_assets_bridge
+        .lock()
+        .expect("visual-assets bridge mutex poisoned")
+        .as_ref()
+        .map(|current| current.generation)
+        != Some(bridge.generation)
+    {
+        return Err(ApiError::conflict(
+            "visual_assets_bridge_restarted",
+            "Visual-assets authority changed while preparing assets.",
+        ));
+    }
+    if !status.is_success() {
+        return Err(ApiError(status, body));
+    }
+    let result = body
+        .get("result")
+        .ok_or_else(ApiError::visual_assets_unavailable)?;
+    let detail_assets = result
+        .pointer("/detail/assets")
+        .and_then(Value::as_array)
+        .ok_or_else(ApiError::visual_assets_unavailable)?;
+    let contents = result
+        .get("contents")
+        .and_then(Value::as_array)
+        .ok_or_else(ApiError::visual_assets_unavailable)?;
+    let mut prepared = Vec::with_capacity(detail_assets.len());
+    for asset in detail_assets {
+        let digest = asset
+            .get("digestSha256")
+            .and_then(Value::as_str)
+            .ok_or_else(ApiError::visual_assets_unavailable)?;
+        let content = contents
+            .iter()
+            .find(|content| content.get("digestSha256").and_then(Value::as_str) == Some(digest))
+            .ok_or_else(ApiError::visual_assets_unavailable)?;
+        prepared.push(
+            serde_json::from_value(json!({
+                "assetId": asset.get("assetId"),
+                "digestSha256": digest,
+                "mediaType": asset.get("mediaType"),
+                "byteLength": asset.get("byteLength"),
+                "provenanceSource": asset.pointer("/provenance/source"),
+                "provenanceFileName": asset.pointer("/provenance/fileName"),
+                "content": content.get("contentBase64"),
+            }))
+            .map_err(|_| ApiError::visual_assets_unavailable())?,
+        );
+    }
+    Ok(prepared)
 }
 async fn get_node(
     State(state): State<ServerState>,
@@ -1484,12 +2288,41 @@ async fn submit_completion(
     Json(input): Json<CompleteRequest>,
 ) -> Result<Json<CompletionOutput>, ApiError> {
     let authority = session(&state, &headers)?;
-    let output = state
+    let gate = completion_asset_gate(&state, authority.node_id)?;
+    let mut generation = gate.lock().await;
+    let barrier = format!("complete-{}", authority.node_id.value());
+    *generation = visual_assets_lifecycle(
+        &state,
+        authority.node_id,
+        json!({"kind":"pause","expectedGeneration":*generation,"barrierId":barrier}),
+    )
+    .await?;
+    let outcome = state
         .graph
         .writer_for_completion_authority(authority.node_id, authority.epoch)
         .await?
         .complete(input.node_id)
-        .await?;
+        .await;
+    let output = match outcome {
+        Ok(output) => {
+            *generation = visual_assets_lifecycle(
+                &state,
+                authority.node_id,
+                json!({"kind":"finalize-revoke","assetGeneration":*generation,"barrierId":barrier}),
+            )
+            .await?;
+            output
+        }
+        Err(error) => {
+            *generation = visual_assets_lifecycle(
+                &state,
+                authority.node_id,
+                json!({"kind":"resume","assetGeneration":*generation,"barrierId":barrier}),
+            )
+            .await?;
+            return Err(error.into());
+        }
+    };
     Ok(Json(output))
 }
 
@@ -1538,6 +2371,46 @@ async fn transition_current(
         current.temporal_features.root_current_write,
         "completion-root-current-write",
     )?;
+    if !matches!(&input.transition, CurrentTransition::Advance { .. }) {
+        let gate = completion_asset_gate(&state, authority.node_id)?;
+        let barrier = format!(
+            "transition-{}-{}",
+            authority.node_id.value(),
+            input.operation_key
+        );
+        let mut generation = gate.lock().await;
+        *generation = visual_assets_lifecycle(
+            &state,
+            authority.node_id,
+            json!({"kind":"pause","expectedGeneration":*generation,"barrierId":barrier}),
+        )
+        .await?;
+        let outcome = state
+            .graph
+            .writer_for_completion_authority(authority.node_id, authority.epoch)
+            .await?
+            .transition_current(
+                input.expected_revision,
+                &input.operation_key,
+                input.transition,
+            )
+            .await;
+        match outcome {
+            Ok(receipt) => {
+                *generation = visual_assets_lifecycle(&state, authority.node_id, json!({"kind":"finalize-revoke","assetGeneration":*generation,"barrierId":barrier})).await?;
+                return Ok(Json(receipt));
+            }
+            Err(error) => {
+                *generation = visual_assets_lifecycle(
+                    &state,
+                    authority.node_id,
+                    json!({"kind":"resume","assetGeneration":*generation,"barrierId":barrier}),
+                )
+                .await?;
+                return Err(error.into());
+            }
+        }
+    }
     Ok(Json(
         state
             .graph
@@ -1624,6 +2497,12 @@ fn session_for_token(state: &ServerState, token: &str) -> Result<RuntimeAuthorit
 
 pub struct ApiError(StatusCode, Value);
 impl ApiError {
+    fn visual_assets_unavailable() -> Self {
+        Self(
+            StatusCode::SERVICE_UNAVAILABLE,
+            json!({"error":{"code":"visual_assets_unavailable","message":"Visual assets are temporarily unavailable."}}),
+        )
+    }
     fn invalid(message: &str) -> Self {
         Self(
             StatusCode::UNPROCESSABLE_ENTITY,
@@ -1715,6 +2594,1128 @@ mod tests {
         http::Request,
     };
     use tower::ServiceExt;
+
+    #[tokio::test]
+    async fn reminted_capability_reactivates_assets_without_reviving_old_generation() {
+        let host_state = Arc::new(Mutex::new((0_u64, 1_u64, true)));
+        let observed = host_state.clone();
+        let lose_activation_ack = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let fail_activation = lose_activation_ack.clone();
+        let fake = Router::new().route(
+            "/visual-assets/operations",
+            post(move |Json(body): Json<Value>| {
+                let observed = observed.clone();
+                let fail_activation = fail_activation.clone();
+                async move {
+                    let mut host = observed.lock().unwrap();
+                    let operation = &body["operation"];
+                    match operation["kind"].as_str().unwrap() {
+                        "activate" => {
+                            let epoch = operation["completionEpoch"].as_u64().unwrap();
+                            assert!(epoch > host.0);
+                            if host.0 != 0 {
+                                host.1 += 1;
+                            }
+                            host.0 = epoch;
+                            host.2 = true;
+                            if fail_activation.swap(false, std::sync::atomic::Ordering::SeqCst) {
+                                return (
+                                    StatusCode::SERVICE_UNAVAILABLE,
+                                    Json(json!({"error":"lost activation acknowledgment"})),
+                                );
+                            }
+                        }
+                        "pause" => {
+                            host.1 += 1;
+                            host.2 = false;
+                        }
+                        "finalize-revoke" => {
+                            host.2 = false;
+                        }
+                        "list-assets" => {
+                            let status = if host.2 && body["assetGeneration"] == host.1 {
+                                StatusCode::OK
+                            } else {
+                                StatusCode::FORBIDDEN
+                            };
+                            return (status, Json(json!({"result":{"items":[]}})));
+                        }
+                        _ => panic!("unexpected bridge operation"),
+                    }
+                    (
+                        StatusCode::OK,
+                        Json(json!({"result":{"assetGeneration":host.1}})),
+                    )
+                }
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let task = tokio::spawn(async move {
+            axum::serve(listener, fake).await.unwrap();
+        });
+        let graph = GraphDatabase::in_memory().await.unwrap();
+        let node = graph
+            .create_interaction(None, ThreadId::new(1).unwrap(), "Retry")
+            .await
+            .unwrap();
+        let state = ServerState::new(graph, "control");
+        let app = router(state.clone());
+        let request = |method: &str, path: &str, token: &str, body: Value| {
+            Request::builder()
+                .method(method)
+                .uri(path)
+                .header("authorization", format!("Bearer {token}"))
+                .header("content-type", "application/json")
+                .body(Body::from(body.to_string()))
+                .unwrap()
+        };
+        assert_eq!(
+            app.clone()
+                .oneshot(request(
+                    "PUT",
+                    "/api/control/visual-assets/bridge",
+                    "control",
+                    json!({"url":format!("http://{address}"),"token":"x".repeat(32),"generation":1})
+                ))
+                .await
+                .unwrap()
+                .status(),
+            StatusCode::OK
+        );
+        let mut old_token: Option<String> = None;
+        for _ in 0..2 {
+            let response = app
+                .clone()
+                .oneshot(request(
+                    "POST",
+                    "/api/control/capabilities",
+                    "control",
+                    json!({"nodeId":node.id}),
+                ))
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::OK);
+            let body: Value =
+                serde_json::from_slice(&to_bytes(response.into_body(), usize::MAX).await.unwrap())
+                    .unwrap();
+            let token = body["graphToken"].as_str().unwrap().to_owned();
+            let list =
+                json!({"operation":{"kind":"list-assets","scope":{"kind":"thread","threadId":1}}});
+            assert_eq!(
+                app.clone()
+                    .oneshot(request(
+                        "POST",
+                        "/api/graph/visual-assets/operations",
+                        &token,
+                        list.clone()
+                    ))
+                    .await
+                    .unwrap()
+                    .status(),
+                StatusCode::OK,
+                "retry must receive active host authority at the generation used by graph requests"
+            );
+            if let Some(old) = old_token {
+                assert!(
+                    !app.clone()
+                        .oneshot(request(
+                            "POST",
+                            "/api/graph/visual-assets/operations",
+                            &old,
+                            list
+                        ))
+                        .await
+                        .unwrap()
+                        .status()
+                        .is_success()
+                );
+            }
+            assert_eq!(
+                app.clone()
+                    .oneshot(request(
+                        "DELETE",
+                        "/api/control/capabilities",
+                        "control",
+                        json!({"graphToken":token})
+                    ))
+                    .await
+                    .unwrap()
+                    .status(),
+                StatusCode::OK
+            );
+            old_token = Some(token);
+        }
+        let active_token = mint_capability(&state, node.id, None).await.ok().unwrap();
+        lose_activation_ack.store(true, std::sync::atomic::Ordering::SeqCst);
+        let failed = app
+            .clone()
+            .oneshot(request(
+                "POST",
+                "/api/control/capabilities",
+                "control",
+                json!({"nodeId":node.id,"graphToken":"unacknowledged-token"}),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(failed.status(), StatusCode::SERVICE_UNAVAILABLE);
+        assert!(
+            state.sessions.lock().unwrap().is_empty(),
+            "failed activation must neither expose the pending token nor retain stale replay entries"
+        );
+        let acknowledged_later_epoch = host_state.lock().unwrap().0;
+        let recovered = app
+            .clone()
+            .oneshot(request(
+                "POST",
+                "/api/control/capabilities",
+                "control",
+                json!({"nodeId":node.id,"graphToken":active_token}),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(recovered.status(), StatusCode::OK);
+        assert!(
+            host_state.lock().unwrap().0 > acknowledged_later_epoch,
+            "requested old token must reactivate at a newer epoch, not replay its stale session"
+        );
+        assert_eq!(
+            app.oneshot(request(
+                "POST",
+                "/api/graph/visual-assets/operations",
+                &active_token,
+                json!({"operation":{"kind":"list-assets","scope":{"kind":"thread","threadId":1}}})
+            ))
+            .await
+            .unwrap()
+            .status(),
+            StatusCode::OK
+        );
+        task.abort();
+    }
+
+    #[tokio::test]
+    async fn rejected_terminal_submit_resumes_asset_authority_at_the_advanced_generation() {
+        let observed = Arc::new(Mutex::new(Vec::<Value>::new()));
+        let observed_handler = observed.clone();
+        let pause_started = Arc::new(tokio::sync::Notify::new());
+        let release_pause = Arc::new(tokio::sync::Notify::new());
+        let pause_started_handler = pause_started.clone();
+        let release_pause_handler = release_pause.clone();
+        let fake = axum::Router::new().route("/visual-assets/operations", post(move |Json(body): Json<Value>| {
+            let observed = observed_handler.clone();
+            let pause_started = pause_started_handler.clone();
+            let release_pause = release_pause_handler.clone();
+            async move {
+                observed.lock().unwrap().push(body.clone());
+                let kind = body.pointer("/operation/kind").and_then(Value::as_str).unwrap_or_default();
+                if kind == "pause" { pause_started.notify_one(); release_pause.notified().await; }
+                let generation = if kind == "pause" { 2 } else { body.pointer("/operation/assetGeneration").and_then(Value::as_u64).unwrap_or(2) };
+                Json(json!({"result": if kind == "list-assets" { json!({"items":[],"nextCursor":null}) } else { json!({"assetGeneration":generation}) }}))
+            }
+        }));
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            axum::serve(listener, fake).await.unwrap();
+        });
+
+        let graph = GraphDatabase::in_memory().await.unwrap();
+        let interaction = graph
+            .create_interaction(ProjectId::new(1), ThreadId::new(2).unwrap(), "Question")
+            .await
+            .unwrap();
+        let state = ServerState::new(graph.clone(), "control");
+        let token = mint_capability(&state, interaction.id, None)
+            .await
+            .ok()
+            .unwrap();
+        let authority = state.sessions.lock().unwrap().get(&token).copied().unwrap();
+        let app = router(state);
+        let registration = Request::builder()
+            .method("PUT")
+            .uri("/api/control/visual-assets/bridge")
+            .header("authorization", "Bearer control")
+            .header("content-type", "application/json")
+            .body(Body::from(
+                json!({"url":format!("http://{address}"),"token":"x".repeat(32),"generation":1})
+                    .to_string(),
+            ))
+            .unwrap();
+        assert_eq!(
+            app.clone().oneshot(registration).await.unwrap().status(),
+            StatusCode::OK
+        );
+        let rejected = Request::builder()
+            .method("POST")
+            .uri("/api/graph/submit")
+            .header("authorization", format!("Bearer {token}"))
+            .header("content-type", "application/json")
+            .body(Body::from(json!({"nodeId":999999}).to_string()))
+            .unwrap();
+        let pending = tokio::spawn(app.clone().oneshot(rejected));
+        pause_started.notified().await;
+        graph
+            .writer_for_completion_authority(authority.node_id, authority.epoch)
+            .await
+            .unwrap()
+            .require_active_authority()
+            .await
+            .unwrap();
+        release_pause.notify_one();
+        assert!(!pending.await.unwrap().unwrap().status().is_success());
+        let repair = Request::builder().method("POST").uri("/api/graph/visual-assets/operations")
+            .header("authorization", format!("Bearer {token}")).header("content-type", "application/json")
+            .body(Body::from(json!({"operation":{"kind":"list-assets","scope":{"kind":"project","projectId":1}}}).to_string())).unwrap();
+        assert_eq!(app.oneshot(repair).await.unwrap().status(), StatusCode::OK);
+        let requests = observed.lock().unwrap();
+        assert_eq!(
+            requests[0]
+                .pointer("/operation/kind")
+                .and_then(Value::as_str),
+            Some("pause")
+        );
+        assert_eq!(
+            requests[1]
+                .pointer("/operation/kind")
+                .and_then(Value::as_str),
+            Some("resume")
+        );
+        assert_eq!(
+            requests[2].get("assetGeneration").and_then(Value::as_u64),
+            Some(2)
+        );
+    }
+
+    #[tokio::test]
+    async fn lost_finalize_ack_retries_the_same_terminal_receipt_without_restoring_authority() {
+        let observed = Arc::new(Mutex::new(Vec::<Value>::new()));
+        let observed_handler = observed.clone();
+        let finalize_attempts = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let finalize_attempts_handler = finalize_attempts.clone();
+        let fake = axum::Router::new().route(
+            "/visual-assets/operations",
+            post(move |Json(body): Json<Value>| {
+                let observed = observed_handler.clone();
+                let finalize_attempts = finalize_attempts_handler.clone();
+                async move {
+                    observed.lock().unwrap().push(body.clone());
+                    let kind = body
+                        .pointer("/operation/kind")
+                        .and_then(Value::as_str)
+                        .unwrap_or_default();
+                    if kind == "finalize-revoke"
+                        && finalize_attempts.fetch_add(1, std::sync::atomic::Ordering::SeqCst)
+                            == 0
+                    {
+                        return (
+                            StatusCode::SERVICE_UNAVAILABLE,
+                            Json(json!({"error":{"code":"ack_lost","message":"finalize committed but its acknowledgement was lost"}})),
+                        );
+                    }
+                    let generation = if kind == "pause" {
+                        2
+                    } else {
+                        body.pointer("/operation/assetGeneration")
+                            .and_then(Value::as_u64)
+                            .unwrap_or(2)
+                    };
+                    (
+                        StatusCode::OK,
+                        Json(json!({"result":{"assetGeneration":generation}})),
+                    )
+                }
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            axum::serve(listener, fake).await.unwrap();
+        });
+
+        let state = ServerState::new(GraphDatabase::in_memory().await.unwrap(), "control")
+            .with_temporal_features(TemporalFeatureConfig {
+                schema_read: true,
+                root_current_write: true,
+                projection_ui: true,
+                ..TemporalFeatureConfig::default()
+            });
+        state
+            .graph
+            .set_temporal_features(state.temporal_features)
+            .await
+            .unwrap();
+        let interaction = state
+            .graph
+            .create_interaction(ProjectId::new(1), ThreadId::new(2).unwrap(), "Question")
+            .await
+            .unwrap();
+        let graph = state.graph.clone();
+        let app = router(state);
+        let registration = Request::builder()
+            .method("PUT")
+            .uri("/api/control/visual-assets/bridge")
+            .header("authorization", "Bearer control")
+            .header("content-type", "application/json")
+            .body(Body::from(
+                json!({"url":format!("http://{address}"),"token":"x".repeat(32),"generation":1})
+                    .to_string(),
+            ))
+            .unwrap();
+        assert_eq!(
+            app.clone().oneshot(registration).await.unwrap().status(),
+            StatusCode::OK
+        );
+        let transition = || {
+            Request::builder()
+                .method("POST")
+                .uri(format!(
+                    "/api/control/interactions/{}/current/transitions",
+                    interaction.id.value()
+                ))
+                .header("authorization", "Bearer control")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    r#"{"expectedRevision":0,"operationKey":"control-stop","transition":{"kind":"stop","reason":"cancelled_by_user"}}"#,
+                ))
+                .unwrap()
+        };
+
+        assert_eq!(
+            app.clone().oneshot(transition()).await.unwrap().status(),
+            StatusCode::SERVICE_UNAVAILABLE
+        );
+        let committed = graph
+            .current_transition_receipt(interaction.id, "control-stop")
+            .await
+            .unwrap()
+            .expect(
+                "the graph terminal transition commits before the lost finalize acknowledgement",
+            );
+        let retried = app.clone().oneshot(transition()).await.unwrap();
+        assert_eq!(retried.status(), StatusCode::OK);
+        let retried: CurrentTransitionReceipt =
+            serde_json::from_slice(&to_bytes(retried.into_body(), usize::MAX).await.unwrap())
+                .unwrap();
+        assert_eq!(retried, committed);
+
+        let requests = observed.lock().unwrap();
+        assert_eq!(
+            requests
+                .iter()
+                .map(|request| request
+                    .pointer("/operation/kind")
+                    .and_then(Value::as_str)
+                    .unwrap())
+                .collect::<Vec<_>>(),
+            vec!["pause", "finalize-revoke", "pause", "finalize-revoke"]
+        );
+        let barriers = requests
+            .iter()
+            .map(|request| {
+                request
+                    .pointer("/operation/barrierId")
+                    .and_then(Value::as_str)
+                    .unwrap()
+            })
+            .collect::<Vec<_>>();
+        assert!(barriers.iter().all(|barrier| *barrier == barriers[0]));
+    }
+
+    #[tokio::test]
+    async fn explicit_revoke_keeps_its_retry_target_until_finalize_is_acknowledged() {
+        let finalize_attempts = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let attempts = finalize_attempts.clone();
+        let fake = axum::Router::new().route(
+            "/visual-assets/operations",
+            post(move |Json(body): Json<Value>| {
+                let attempts = attempts.clone();
+                async move {
+                    let kind = body
+                        .pointer("/operation/kind")
+                        .and_then(Value::as_str)
+                        .unwrap_or_default();
+                    if kind == "finalize-revoke"
+                        && attempts.fetch_add(1, std::sync::atomic::Ordering::SeqCst) == 0
+                    {
+                        return (
+                            StatusCode::SERVICE_UNAVAILABLE,
+                            Json(json!({"error":{"code":"ack_lost","message":"finalize acknowledgement lost"}})),
+                        );
+                    }
+                    let generation = if kind == "pause" {
+                        2
+                    } else {
+                        body.pointer("/operation/assetGeneration")
+                            .and_then(Value::as_u64)
+                            .unwrap_or(2)
+                    };
+                    (
+                        StatusCode::OK,
+                        Json(json!({"result":{"assetGeneration":generation}})),
+                    )
+                }
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            axum::serve(listener, fake).await.unwrap();
+        });
+        let graph = GraphDatabase::in_memory().await.unwrap();
+        let interaction = graph
+            .create_interaction(ProjectId::new(1), ThreadId::new(2).unwrap(), "Question")
+            .await
+            .unwrap();
+        let state = ServerState::new(graph, "control");
+        let app = router(state.clone());
+        let registration = Request::builder()
+            .method("PUT")
+            .uri("/api/control/visual-assets/bridge")
+            .header("authorization", "Bearer control")
+            .header("content-type", "application/json")
+            .body(Body::from(
+                json!({"url":format!("http://{address}"),"token":"x".repeat(32),"generation":1})
+                    .to_string(),
+            ))
+            .unwrap();
+        assert_eq!(
+            app.clone().oneshot(registration).await.unwrap().status(),
+            StatusCode::OK
+        );
+        let token = mint_capability(&state, interaction.id, None)
+            .await
+            .ok()
+            .unwrap();
+        let revoke = || {
+            Request::builder()
+                .method("DELETE")
+                .uri("/api/control/capabilities")
+                .header("authorization", "Bearer control")
+                .header("content-type", "application/json")
+                .body(Body::from(json!({"graphToken":token}).to_string()))
+                .unwrap()
+        };
+
+        assert_eq!(
+            app.clone().oneshot(revoke()).await.unwrap().status(),
+            StatusCode::SERVICE_UNAVAILABLE
+        );
+        assert!(state.sessions.lock().unwrap().contains_key(&token));
+        let retried = app.oneshot(revoke()).await.unwrap();
+        assert_eq!(retried.status(), StatusCode::OK);
+        let result: Value =
+            serde_json::from_slice(&to_bytes(retried.into_body(), usize::MAX).await.unwrap())
+                .unwrap();
+        assert_eq!(result, json!({"revoked":true,"revokedCount":1}));
+        assert!(!state.sessions.lock().unwrap().contains_key(&token));
+    }
+
+    #[tokio::test]
+    async fn explicit_revoke_takes_over_an_unacknowledged_pause_barrier() {
+        let pause_attempts = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let attempts = pause_attempts.clone();
+        let fake = axum::Router::new().route(
+            "/visual-assets/operations",
+            post(move |Json(body): Json<Value>| {
+                let attempts = attempts.clone();
+                async move {
+                    let kind = body.pointer("/operation/kind").and_then(Value::as_str).unwrap_or_default();
+                    if kind == "pause" && attempts.fetch_add(1, std::sync::atomic::Ordering::SeqCst) == 0 {
+                        return (StatusCode::SERVICE_UNAVAILABLE, Json(json!({"error":{"code":"ack_lost","message":"pause committed but acknowledgement was lost"}})));
+                    }
+                    let generation = if kind == "pause" { 2 } else { body.pointer("/operation/assetGeneration").and_then(Value::as_u64).unwrap_or(2) };
+                    (StatusCode::OK, Json(json!({"result":{"assetGeneration":generation}})))
+                }
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            axum::serve(listener, fake).await.unwrap();
+        });
+        let graph = GraphDatabase::in_memory().await.unwrap();
+        let interaction = graph
+            .create_interaction(ProjectId::new(1), ThreadId::new(2).unwrap(), "Question")
+            .await
+            .unwrap();
+        let state = ServerState::new(graph, "control");
+        let app = router(state.clone());
+        let registration = Request::builder()
+            .method("PUT")
+            .uri("/api/control/visual-assets/bridge")
+            .header("authorization", "Bearer control")
+            .header("content-type", "application/json")
+            .body(Body::from(
+                json!({"url":format!("http://{address}"),"token":"x".repeat(32),"generation":1})
+                    .to_string(),
+            ))
+            .unwrap();
+        assert_eq!(
+            app.clone().oneshot(registration).await.unwrap().status(),
+            StatusCode::OK
+        );
+        let token = mint_capability(&state, interaction.id, None)
+            .await
+            .ok()
+            .unwrap();
+        let rejected = Request::builder()
+            .method("POST")
+            .uri("/api/graph/submit")
+            .header("authorization", format!("Bearer {token}"))
+            .header("content-type", "application/json")
+            .body(Body::from(json!({"nodeId":999999}).to_string()))
+            .unwrap();
+        assert_eq!(
+            app.clone().oneshot(rejected).await.unwrap().status(),
+            StatusCode::SERVICE_UNAVAILABLE
+        );
+        let revoke = Request::builder()
+            .method("DELETE")
+            .uri("/api/control/capabilities")
+            .header("authorization", "Bearer control")
+            .header("content-type", "application/json")
+            .body(Body::from(json!({"graphToken":token}).to_string()))
+            .unwrap();
+        assert_eq!(app.oneshot(revoke).await.unwrap().status(), StatusCode::OK);
+        assert!(!state.sessions.lock().unwrap().contains_key(&token));
+    }
+
+    #[tokio::test]
+    async fn failed_bridge_generation_handoff_preserves_the_retryable_completion_epoch() {
+        let graph = GraphDatabase::in_memory().await.unwrap();
+        let interaction = graph
+            .create_interaction(ProjectId::new(1), ThreadId::new(2).unwrap(), "Question")
+            .await
+            .unwrap();
+        let state = ServerState::new(graph.clone(), "control");
+        let app = router(state.clone());
+        let register = |generation| {
+            Request::builder().method("PUT")
+            .uri("/api/control/visual-assets/bridge")
+            .header("authorization", "Bearer control").header("content-type", "application/json")
+            .body(Body::from(json!({"url":"http://127.0.0.1:43117","token":"x".repeat(32),"generation":generation}).to_string())).unwrap()
+        };
+        let token = mint_capability(&state, interaction.id, None)
+            .await
+            .ok()
+            .unwrap();
+        assert_eq!(
+            app.clone().oneshot(register(1)).await.unwrap().status(),
+            StatusCode::OK
+        );
+        let authority = state.sessions.lock().unwrap().get(&token).copied().unwrap();
+        let writer = graph
+            .writer_for_completion_authority(authority.node_id, authority.epoch)
+            .await
+            .unwrap();
+        writer.require_active_authority().await.unwrap();
+
+        assert_eq!(
+            app.oneshot(register(2)).await.unwrap().status(),
+            StatusCode::SERVICE_UNAVAILABLE
+        );
+        writer.require_active_authority().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn failed_multi_completion_bridge_handoff_recovers_pauses_and_retryable_rollback() {
+        use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+        for (
+            lost_pause_ack,
+            fail_resume,
+            lost_resume_ack,
+            preexisting_pause,
+            preexisting_revoked,
+        ) in [
+            (false, false, false, false, false),
+            (true, false, false, false, false),
+            (true, true, false, false, false),
+            (true, true, true, false, false),
+            (false, false, false, true, false),
+            (false, false, false, false, true),
+        ] {
+            let authorities = Arc::new(Mutex::new(HashMap::<i64, (u64, bool, String)>::new()));
+            let observed = authorities.clone();
+            let pauses = Arc::new(AtomicUsize::new(0));
+            let resume_failed = Arc::new(AtomicBool::new(false));
+            let fake = Router::new().route(
+                "/visual-assets/operations",
+                post(move |Json(body): Json<Value>| {
+                    let observed = observed.clone();
+                    let pauses = pauses.clone();
+                    let resume_failed = resume_failed.clone();
+                    async move {
+                        if body["operation"]["kind"] == "activate" {
+                            return (
+                                StatusCode::OK,
+                                Json(json!({"result":{"assetGeneration":1}})),
+                            );
+                        }
+                        let id = body["authority"]["interactionNodeId"].as_i64().unwrap();
+                        let operation = &body["operation"];
+                        let mut states = observed.lock().unwrap();
+                        let (generation, paused, barrier) = states.entry(id).or_insert(
+                            if preexisting_pause || preexisting_revoked {
+                                (2, true, "terminal-or-revoke-owner".into())
+                            } else {
+                                (1, false, String::new())
+                            },
+                        );
+                        let unavailable = || {
+                            (
+                                StatusCode::SERVICE_UNAVAILABLE,
+                                Json(json!({"error":"injected"})),
+                            )
+                        };
+                        match operation["kind"].as_str().unwrap() {
+                            "pause" => {
+                                let fail = pauses.fetch_add(1, Ordering::SeqCst) == 1;
+                                if fail && !lost_pause_ack {
+                                    return unavailable();
+                                }
+                                if preexisting_revoked {
+                                    *barrier = operation["barrierId"].as_str().unwrap().into();
+                                } else if *paused {
+                                    if operation["barrierId"] != *barrier {
+                                        let expected =
+                                            operation["expectedGeneration"].as_u64().unwrap();
+                                        if operation["revocationTakeover"] != true
+                                            || (*generation != expected
+                                                && *generation != expected + 1)
+                                        {
+                                            return unavailable();
+                                        }
+                                        *barrier = operation["barrierId"].as_str().unwrap().into();
+                                    }
+                                } else {
+                                    assert_eq!(operation["expectedGeneration"], *generation);
+                                    *generation += 1;
+                                    *paused = true;
+                                    *barrier = operation["barrierId"].as_str().unwrap().into();
+                                }
+                                if fail {
+                                    return unavailable();
+                                }
+                            }
+                            "resume" => {
+                                assert_eq!(operation["assetGeneration"], *generation);
+                                assert_eq!(operation["barrierId"], *barrier);
+                                if preexisting_revoked {
+                                    return unavailable();
+                                }
+                                if fail_resume && !resume_failed.swap(true, Ordering::SeqCst) {
+                                    if lost_resume_ack {
+                                        *paused = false;
+                                    }
+                                    return unavailable();
+                                }
+                                *paused = false;
+                            }
+                            "list-assets" => {
+                                if *paused || body["assetGeneration"] != *generation {
+                                    return unavailable();
+                                }
+                                return (
+                                    StatusCode::OK,
+                                    Json(json!({"result":{"items":[],"nextCursor":null}})),
+                                );
+                            }
+                            other => panic!("unexpected operation {other}"),
+                        }
+                        (
+                            StatusCode::OK,
+                            Json(json!({"result":{"assetGeneration":generation}})),
+                        )
+                    }
+                }),
+            );
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let address = listener.local_addr().unwrap();
+            let server = tokio::spawn(async move {
+                axum::serve(listener, fake).await.unwrap();
+            });
+            let graph = GraphDatabase::in_memory().await.unwrap();
+            let first = graph
+                .create_interaction(None, ThreadId::new(1).unwrap(), "First")
+                .await
+                .unwrap();
+            let second = graph
+                .create_interaction(None, ThreadId::new(2).unwrap(), "Second")
+                .await
+                .unwrap();
+            let state = ServerState::new(graph.clone(), "control");
+            let app = router(state.clone());
+            let registration = |generation| {
+                Request::builder().method("PUT")
+                .uri("/api/control/visual-assets/bridge").header("authorization", "Bearer control")
+                .header("content-type", "application/json")
+                .body(Body::from(json!({"url":format!("http://{address}"),"token":"x".repeat(32),"generation":generation}).to_string())).unwrap()
+            };
+            assert_eq!(
+                app.clone().oneshot(registration(1)).await.unwrap().status(),
+                StatusCode::OK
+            );
+            let mut tokens = Vec::new();
+            for node in [first.id, second.id] {
+                tokens.push(mint_capability(&state, node, None).await.ok().unwrap());
+            }
+            let response = app.clone().oneshot(registration(2)).await.unwrap();
+            assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+            assert_eq!(
+                state
+                    .visual_assets_bridge
+                    .lock()
+                    .unwrap()
+                    .as_ref()
+                    .unwrap()
+                    .generation,
+                1
+            );
+            for token in &tokens {
+                let authority = state.sessions.lock().unwrap()[token];
+                graph
+                    .writer_for_completion_authority(authority.node_id, authority.epoch)
+                    .await
+                    .unwrap()
+                    .require_active_authority()
+                    .await
+                    .unwrap();
+            }
+            if preexisting_pause {
+                assert!(
+                    authorities.lock().unwrap().values().all(
+                        |(_, paused, barrier)| *paused && barrier == "terminal-or-revoke-owner"
+                    ),
+                    "handoff compensation must never resume or replace another lifecycle owner's barrier"
+                );
+            }
+            if preexisting_revoked {
+                assert!(
+                    authorities
+                        .lock()
+                        .unwrap()
+                        .values()
+                        .all(|(_, paused, _)| *paused),
+                    "compensation cannot revive revoked authority"
+                );
+            }
+            if fail_resume || preexisting_pause || preexisting_revoked {
+                let body: Value = serde_json::from_slice(
+                    &to_bytes(response.into_body(), usize::MAX).await.unwrap(),
+                )
+                .unwrap();
+                assert_eq!(
+                    body["error"]["code"],
+                    "visual_assets_bridge_recovery_required"
+                );
+            } else {
+                for (token, thread_id) in tokens.iter().zip([1, 2]) {
+                    let request = Request::builder().method("POST").uri("/api/graph/visual-assets/operations")
+                        .header("authorization", format!("Bearer {token}")).header("content-type", "application/json")
+                        .body(Body::from(json!({"operation":{"kind":"list-assets","scope":{"kind":"thread","threadId":thread_id}}}).to_string())).unwrap();
+                    assert_eq!(
+                        app.clone().oneshot(request).await.unwrap().status(),
+                        StatusCode::OK,
+                        "a failed later pause must not strand either completion against the old bridge"
+                    );
+                }
+            }
+            if preexisting_pause {
+                server.abort();
+                continue;
+            }
+            assert_eq!(
+                app.oneshot(registration(2)).await.unwrap().status(),
+                StatusCode::OK,
+                "retry of the same handoff must recover any unacknowledged compensation"
+            );
+            assert!(state.sessions.lock().unwrap().is_empty());
+            server.abort();
+        }
+    }
+
+    #[tokio::test]
+    async fn partial_bridge_epoch_cutover_stays_paused_until_registration_retry() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let calls = Arc::new(AtomicUsize::new(0));
+        let resumes = Arc::new(AtomicUsize::new(0));
+        let counted_resumes = resumes.clone();
+        let fake = Router::new().route(
+            "/visual-assets/operations",
+            post(move |Json(body): Json<Value>| {
+                let calls = calls.clone();
+                let resumes = counted_resumes.clone();
+                async move {
+                    if body["operation"]["kind"] == "activate" {
+                        return (
+                            StatusCode::OK,
+                            Json(json!({"result":{"assetGeneration":1}})),
+                        );
+                    }
+                    if body["operation"]["kind"] == "resume" {
+                        resumes.fetch_add(1, Ordering::SeqCst);
+                    }
+                    // First attempt pauses twice. The second attempt loses its
+                    // second pause response after one old epoch already committed.
+                    if calls.fetch_add(1, Ordering::SeqCst) == 3 {
+                        return (
+                            StatusCode::SERVICE_UNAVAILABLE,
+                            Json(json!({"error":"injected retry pause failure"})),
+                        );
+                    }
+                    (
+                        StatusCode::OK,
+                        Json(json!({"result":{"assetGeneration":2}})),
+                    )
+                }
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            axum::serve(listener, fake).await.unwrap();
+        });
+        let file = tempfile::NamedTempFile::new().unwrap();
+        let graph = GraphDatabase::open(file.path()).await.unwrap();
+        let state = ServerState::new(graph.clone(), "control");
+        let app = router(state.clone());
+        let registration = |generation| {
+            Request::builder().method("PUT")
+            .uri("/api/control/visual-assets/bridge").header("authorization", "Bearer control")
+            .header("content-type", "application/json")
+            .body(Body::from(json!({"url":format!("http://{address}"),"token":"x".repeat(32),"generation":generation}).to_string())).unwrap()
+        };
+        assert_eq!(
+            app.clone().oneshot(registration(1)).await.unwrap().status(),
+            StatusCode::OK
+        );
+        let mut authorities = Vec::new();
+        for thread in [1, 2] {
+            let interaction = graph
+                .create_interaction(None, ThreadId::new(thread).unwrap(), "Question")
+                .await
+                .unwrap();
+            let token = mint_capability(&state, interaction.id, None)
+                .await
+                .ok()
+                .unwrap();
+            authorities.push(state.sessions.lock().unwrap()[&token]);
+        }
+        let pool = sqlx::SqlitePool::connect(&format!("sqlite://{}", file.path().display()))
+            .await
+            .unwrap();
+        // Abort the second real cutover transaction regardless of HashSet order.
+        sqlx::raw_sql("CREATE TABLE test_original_epochs AS SELECT interaction_node_id,authority_epoch FROM completion_authorities;
+            CREATE TRIGGER test_fail_second_cutover BEFORE UPDATE ON completion_authorities
+            WHEN EXISTS(SELECT 1 FROM completion_authorities current JOIN test_original_epochs original USING(interaction_node_id) WHERE current.authority_epoch>original.authority_epoch)
+            BEGIN SELECT RAISE(ABORT,'injected second cutover failure'); END;")
+            .execute(&pool).await.unwrap();
+        let response = app.clone().oneshot(registration(2)).await.unwrap();
+        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+        let body: Value =
+            serde_json::from_slice(&to_bytes(response.into_body(), usize::MAX).await.unwrap())
+                .unwrap();
+        assert_eq!(
+            body["error"]["code"],
+            "visual_assets_bridge_recovery_required"
+        );
+        assert_eq!(
+            state
+                .visual_assets_bridge
+                .lock()
+                .unwrap()
+                .as_ref()
+                .unwrap()
+                .generation,
+            1
+        );
+        let mut active = 0;
+        for authority in &authorities {
+            active += usize::from(
+                graph
+                    .writer_for_completion_authority(authority.node_id, authority.epoch)
+                    .await
+                    .unwrap()
+                    .require_active_authority()
+                    .await
+                    .is_ok(),
+            );
+        }
+        assert_eq!(
+            active, 1,
+            "fixture must fail after exactly one committed epoch cutover"
+        );
+        sqlx::query("DROP TRIGGER test_fail_second_cutover")
+            .execute(&pool)
+            .await
+            .unwrap();
+        let retry = app.clone().oneshot(registration(2)).await.unwrap();
+        assert_eq!(retry.status(), StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(
+            resumes.load(Ordering::SeqCst),
+            0,
+            "a later failed retry must not compensate a previously irreversible handoff"
+        );
+        assert!(
+            mint_capability(&state, authorities[0].node_id, None)
+                .await
+                .is_err(),
+            "unresolved cutover must not admit fresh authority"
+        );
+        assert_eq!(
+            app.oneshot(registration(2)).await.unwrap().status(),
+            StatusCode::OK
+        );
+        assert!(state.sessions.lock().unwrap().is_empty());
+        for authority in authorities {
+            assert!(
+                graph
+                    .writer_for_completion_authority(authority.node_id, authority.epoch)
+                    .await
+                    .unwrap()
+                    .require_active_authority()
+                    .await
+                    .is_err()
+            );
+        }
+        pool.close().await;
+        server.abort();
+    }
+
+    #[tokio::test]
+    async fn bridge_replacement_fences_new_completion_admission_until_the_swap_finishes() {
+        let pause_started = Arc::new(tokio::sync::Notify::new());
+        let release_pause = Arc::new(tokio::sync::Notify::new());
+        let started = pause_started.clone();
+        let release = release_pause.clone();
+        let fake = axum::Router::new().route(
+            "/visual-assets/operations",
+            post(move |Json(body): Json<Value>| {
+                let started = started.clone();
+                let release = release.clone();
+                async move {
+                    if body.pointer("/operation/kind").and_then(Value::as_str) == Some("pause") {
+                        started.notify_one();
+                        release.notified().await;
+                    }
+                    Json(json!({"result":{"assetGeneration":2}}))
+                }
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            axum::serve(listener, fake).await.unwrap();
+        });
+        let graph = GraphDatabase::in_memory().await.unwrap();
+        let first = graph
+            .create_interaction(ProjectId::new(1), ThreadId::new(2).unwrap(), "First")
+            .await
+            .unwrap();
+        let second = graph
+            .create_interaction(ProjectId::new(1), ThreadId::new(2).unwrap(), "Second")
+            .await
+            .unwrap();
+        let state = ServerState::new(graph, "control");
+        let app = router(state.clone());
+        let registration = |generation| {
+            Request::builder().method("PUT")
+            .uri("/api/control/visual-assets/bridge").header("authorization", "Bearer control")
+            .header("content-type", "application/json")
+            .body(Body::from(json!({"url":format!("http://{address}"),"token":"x".repeat(32),"generation":generation}).to_string())).unwrap()
+        };
+        assert_eq!(
+            app.clone().oneshot(registration(1)).await.unwrap().status(),
+            StatusCode::OK
+        );
+        mint_capability(&state, first.id, None).await.ok().unwrap();
+
+        let replacement = tokio::spawn(app.clone().oneshot(registration(2)));
+        pause_started.notified().await;
+        let mint_state = state.clone();
+        let admission =
+            tokio::spawn(async move { mint_capability(&mint_state, second.id, None).await });
+        tokio::task::yield_now().await;
+        assert!(!admission.is_finished());
+        release_pause.notify_one();
+        assert_eq!(replacement.await.unwrap().unwrap().status(), StatusCode::OK);
+        let second_token = admission.await.unwrap().ok().unwrap();
+        assert_eq!(state.sessions.lock().unwrap().len(), 1);
+        assert_eq!(
+            state.sessions.lock().unwrap()[&second_token].node_id,
+            second.id
+        );
+    }
+
+    #[tokio::test]
+    async fn import_content_validation_rejects_a_replaced_bridge_response() {
+        let validation_started = Arc::new(tokio::sync::Notify::new());
+        let release_validation = Arc::new(tokio::sync::Notify::new());
+        let started = validation_started.clone();
+        let release = release_validation.clone();
+        let fake = axum::Router::new().route(
+            "/visual-assets/operations",
+            post(move |Json(body): Json<Value>| {
+                let started = started.clone();
+                let release = release.clone();
+                async move {
+                    assert_eq!(body["operation"]["kind"], "validate-import-content");
+                    if body["generation"] == 1 {
+                        started.notify_one();
+                        release.notified().await;
+                    }
+                    Json(json!({"result":{"validated":true}}))
+                }
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move { axum::serve(listener, fake).await.unwrap() });
+        let app = router(ServerState::new(
+            GraphDatabase::in_memory().await.unwrap(),
+            "control",
+        ));
+        let registration = |generation| {
+            Request::builder().method("PUT")
+                .uri("/api/control/visual-assets/bridge")
+                .header("authorization", "Bearer control").header("content-type", "application/json")
+                .body(Body::from(json!({"url":format!("http://{address}"),"token":"x".repeat(32),"generation":generation}).to_string())).unwrap()
+        };
+        let validation = || {
+            Request::builder()
+                .method("POST")
+                .uri("/api/control/visual-assets/imports/validate")
+                .header("authorization", "Bearer control")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    json!({"projectId":null,"threadId":1,"content":{}}).to_string(),
+                ))
+                .unwrap()
+        };
+        assert_eq!(
+            app.clone().oneshot(registration(1)).await.unwrap().status(),
+            StatusCode::OK
+        );
+        let pending = tokio::spawn(app.clone().oneshot(validation()));
+        validation_started.notified().await;
+        assert_eq!(
+            app.clone().oneshot(registration(2)).await.unwrap().status(),
+            StatusCode::OK
+        );
+        release_validation.notify_one();
+        let response = pending.await.unwrap().unwrap();
+        assert_eq!(response.status(), StatusCode::CONFLICT);
+        let body: Value =
+            serde_json::from_slice(&to_bytes(response.into_body(), usize::MAX).await.unwrap())
+                .unwrap();
+        assert_eq!(body["error"]["code"], "visual_assets_bridge_restarted");
+        assert_eq!(
+            app.oneshot(validation()).await.unwrap().status(),
+            StatusCode::OK
+        );
+        server.abort();
+    }
 
     #[tokio::test]
     async fn node_api_round_trips_and_preserves_the_canonical_authored_detail_package() {

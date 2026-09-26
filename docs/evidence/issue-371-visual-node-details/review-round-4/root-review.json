@@ -1,0 +1,29 @@
+{
+  "reviewer": "/root/merge_494_review",
+  "verdict": "clean",
+  "findings": [],
+  "scope": "Review-only external links; repeated image resolution ownership; cleanup aggregation and success gating; cancellation propagation; CI checkpoint mapping; PRD alignment; export upload provenance, content bounds and repeated-node association integrity; Electron last-window shutdown suppression until explicit proof exit",
+  "files": {
+    "desktop/renderer/src/review-tools.js": "5b546245f5605c962002f70422332096a1ae580c687b0870cf22b85426bf6e89",
+    "desktop/renderer/src/product-workspace/node-detail-runtime.js": "2da54b36d95a75821a41316d6fd9982d8b17bac1a41bb80507830942aa310e89",
+    "test/node-detail-runtime.test.mjs": "b17adb20278ff6713438ccae09a84238c629ddf11c1e3da2935b0c84d3556c41",
+    "scripts/evidence-service-cleanup.mjs": "332c3478e41faa2d3018cd54b82f1804d3419677993dd6b14f993afc163fffc3",
+    "scripts/run-desktop-visual-node-details-test.mjs": "3a7cdfa9ea8c83b0a495892e5237d38420303d259047ccfc87680f6c3ca61cc6",
+    "scripts/test-desktop-visual-node-details.mjs": "5a8a6634a271beaa6a3f0b434e478a7450a1ed0865ff106b70f9ff549d2e3843",
+    "test/desktop-shell.test.mjs": "27e9bd27f280ccc789c78d3a1fca226cc2ecd51c8ac53e268ccb7a1ba69a2f6e",
+    "scripts/ci/affected-modules.v1.json": "15b654e6243bbc993958de68f8c5a1df1ca26ba58eb22bed093e569df9d1512d",
+    "docs/prd/index.html": "f8ce8b72f1ba934e33199f6cc44d8ef20e28e69713054fdd44e3697ca0143871",
+    "crates/relayer-app-server/src/conversation_export.rs": "1ec807f0a9061bee9331e66a3143ec488df41d7d2ff44f7afbc912698362b165",
+    "crates/relayer-app-server/tests/conversation_export_contract.rs": "2bce84451b41b168d17d310dbc9ca75d17700369014f3c15b7453dcbefdbee98"
+  },
+  "verification": {
+    "command": "npx vitest run test/node-detail-runtime.test.mjs test/desktop-shell.test.mjs -t 'compiled Node Detail|proof cancellation|evidence cleanup'",
+    "result": "45 passed, 43 skipped; 1.23 seconds",
+    "limits": "Independent source review; Rust tests not rerun. Cleanup helper CI mapping independently inspected after earlier mapping snapshot.",
+    "electronShutdownReview": {
+      "verdict": "clean",
+      "reason": "window-all-closed listener is installed before app readiness and prevents automatic quit while stop awaits service cleanup and result publication. Explicit exit(0) follows successful cleanup and result write; failure path exits(1). No cleanup or wrapper success gate weakened.",
+      "limits": "Independent source review of final three-line fix; prior focused test result predates it. Real Electron proof rerun owned by root and recorded separately."
+    }
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "reviewer": "/root/merge_494_review",
+  "verdict": "clean",
+  "findings": [],
+  "scope": "Scoped archived inspect/download/resolve; missing and foreign asset error normalization; bounded canonical validation before prepare-detail asset lookup; prepare-detail existence-oracle fix",
+  "files": {
+    "packages/harness-host/src/host.ts": "ffecff3944068381dc2974a5e698d1b52fa64b5a1b94168be53578ef2c9420e0",
+    "packages/harness-host/test/visual-assets-bridge.test.ts": "f38622775b2003300cd652864881477ff653ef07f2ebc7ef4d08fc20f832cf91"
+  },
+  "verification": {
+    "result": "Independent source review clean. prepare-detail normalizes asset_not_found and asset_not_authorized after canonical validation.",
+    "limits": "Builder test and type-check results recorded separately; reviewer did not rerun them."
+  }
+}

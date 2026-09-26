@@ -1,0 +1,13 @@
+{
+  "reviewer": "GPT-6-Astra /root/astra_standards",
+  "verdict": "Clean scoped authority lifecycle source review",
+  "scope": "Completion admission, generations, publication fencing, terminal pause/drain/commit ordering, rejected submission repair, explicit revoke retry, bridge replacement and lost request/acknowledgment recovery",
+  "unresolvedFindings": [],
+  "files": {
+    "crates/relayer-graph-server/src/lib.rs": "44d77a71c18c871641c9cf98312bb20b805429a5c1d6a638bd70b1bef05ee008",
+    "packages/harness-host/src/host.ts": "db4e6711c4b039d4e8c05308be9df6f491663b1fe060ea286e2aeafa512451fd",
+    "packages/harness-host/test/visual-assets-bridge.test.ts": "ddeb8ede53e7286051123cb2eb2f6a4d69582c5eca4950f5a3ec8c48a808f379",
+    "packages/visual-assets/src/index.ts": "546beeb9afbd079c77a7fcac8b4e08ec7d6cecfca47cfd3b8ab5580f286b886e"
+  },
+  "limits": "Source review only; tests not independently rerun. Import excluded. Source changes invalidate assertion. Non-certifying until recorded in PR."
+}

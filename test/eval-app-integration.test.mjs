@@ -24,6 +24,7 @@ import {
   graphMemorySearchBudget,
   graphMemorySearchParameters,
   graphMemorySearchQuery,
+  nodeDetailFixtureFactoryWithTemporalGate,
   taskSystemFixtureFactory,
 } from "@relayer/eval-runner";
 import { css, html, NodeObject } from "@relayer/graph-client";
@@ -1368,12 +1369,21 @@ describe("Relayer Eval application service", () => {
   it("runs case × harness executions through the product server and preserves reviewable threads", async () => {
     const dataDirectory = await mkdtemp(join(tmpdir(), "relayer-eval-app-test-"));
     directories.push(dataDirectory);
-    const configurationPath = join(repositoryRoot, "harnesses", "fixture-task-system.yaml");
+    const nodeDetailGate = join(dataDirectory, "node-detail-temporal-gate.json");
+    await writeFile(nodeDetailGate, "hold", "utf8");
+    const configurationPaths = [
+      join(repositoryRoot, "harnesses", "fixture-task-system.yaml"),
+      join(repositoryRoot, "harnesses", "fixture-node-detail.yaml"),
+    ];
     const runtime = new GraphCompleteRuntimeService({
       userDataDirectory: dataDirectory,
       graphServerBinary: join(repositoryRoot, "target", "debug", "relayer-graph-server"),
-      configurationPaths: [configurationPath],
-      additionalImplementations: { "fixture.task-system": taskSystemFixtureFactory },
+      configurationPaths,
+      additionalImplementations: {
+        "fixture.task-system": taskSystemFixtureFactory,
+        "fixture.node-detail": nodeDetailFixtureFactoryWithTemporalGate(nodeDetailGate),
+      },
+      temporalFeatures: RECURSIVE_TEMPORAL_FEATURES,
       candidateTrace: {
         directory: join(dataDirectory, "eval-data", "candidate-trace-spool"),
         policy: {
@@ -1404,7 +1414,7 @@ describe("Relayer Eval application service", () => {
     const evalService = await new EvalService({
       stateFile: join(dataDirectory, "eval-data", "test-runs.json"),
       productSession,
-      configurationPaths: [configurationPath],
+      configurationPaths,
       candidateTraceExporter: (interactionId, targetDirectory, correlation) => runtime.exportCandidateTrace(interactionId, targetDirectory, correlation),
       candidateTraceRequired: true,
       conversationImportEnabled: true,
@@ -1561,6 +1571,215 @@ describe("Relayer Eval application service", () => {
     );
     expect(childLayer.nodes.map((node) => node.title)).toEqual(["Waiting tasks", "Next claim"]);
 
+    await expect(
+      evalService.createRun({
+        testCaseIds: ["empty-project.visual-node-detail.single-turn"],
+        harnessConfigurationNames: ["fixture-task-system"],
+        judgeConfigurationName: "deterministic-graph-contract",
+      }),
+    ).rejects.toThrow("must run alone with fixture-node-detail");
+    for (const selection of [
+      { testCaseIds: ["empty-project.task-system.single-turn"], harnessConfigurationNames: ["fixture-node-detail"] },
+      { testCaseIds: ["empty-project.visual-node-detail.single-turn", "empty-project.task-system.single-turn"], harnessConfigurationNames: ["fixture-node-detail"] },
+      { testCaseIds: ["empty-project.visual-node-detail.single-turn"], harnessConfigurationNames: ["fixture-node-detail", "fixture-task-system"] },
+    ]) {
+      await expect(evalService.createRun({
+        ...selection,
+        judgeConfigurationName: "deterministic-graph-contract",
+      })).rejects.toThrow("must run alone with fixture-node-detail");
+    }
+    const nodeDetailCreated = await evalService.createRun({
+      testCaseIds: ["empty-project.visual-node-detail.single-turn"],
+      harnessConfigurationNames: ["fixture-node-detail"],
+      judgeConfigurationName: "deterministic-graph-contract",
+    });
+    let temporalEvidence;
+    let runningNodeDetail;
+    let lastTemporalGateValue = "";
+    const temporalDeadline = Date.now() + 30_000;
+    while (Date.now() < temporalDeadline) {
+      const candidate = await readFile(nodeDetailGate, "utf8").catch(() => "");
+      lastTemporalGateValue = candidate;
+      if (candidate.startsWith("{") && JSON.parse(candidate).stage === "failed") {
+        throw new Error(JSON.parse(candidate).error);
+      }
+      if (candidate.startsWith("{") && JSON.parse(candidate).stage === "advanced") {
+        temporalEvidence = JSON.parse(candidate);
+        runningNodeDetail = evalService.getRun(nodeDetailCreated.id);
+        if (runningNodeDetail.executions[0]?.threadIds?.[0]) break;
+      }
+      await new Promise((resolveWait) => setTimeout(resolveWait, 20));
+    }
+    expect(temporalEvidence, `${lastTemporalGateValue}\n${JSON.stringify(evalService.getRun(nodeDetailCreated.id))}`).toBeDefined();
+    const temporalExecution = runningNodeDetail.executions[0];
+    const temporalThread = await productRequest(
+      productSession,
+      `/api/threads/${temporalExecution.threadIds[0]}`,
+    );
+    const temporalInteraction = temporalThread.interactions[0];
+    const temporalAssetPath = `/api/threads/${temporalExecution.threadIds[0]}/interactions/${temporalInteraction.id}/nodes/${temporalEvidence.nodeId}/detail-assets/${temporalEvidence.assetId}?layerId=${temporalEvidence.layerId}`;
+    expect(
+      (await productRequest(productSession, temporalAssetPath)).assetId,
+    ).toBe(temporalEvidence.assetId);
+    expect(
+      await fetch(
+        new URL(
+          `/api/threads/${temporalExecution.threadIds[0]}/interactions/${temporalInteraction.id}/nodes/${temporalEvidence.draftNodeId}/detail-assets/${temporalEvidence.assetId}?layerId=${temporalEvidence.layerId}`,
+          productSession.origin,
+        ),
+        {
+          headers: {
+            Cookie: `${productSession.cookie.name}=${productSession.cookie.value}`,
+          },
+        },
+      ).then((response) => response.status),
+    ).toBe(403);
+    await writeFile(nodeDetailGate, "release", "utf8");
+    const nodeDetailCompleted = await waitForCompletedRun(
+      evalService,
+      nodeDetailCreated.id,
+    );
+    expect(nodeDetailCompleted.executions).toHaveLength(1);
+    const nodeDetailExecution = nodeDetailCompleted.executions[0];
+    expect(nodeDetailExecution.threadIds).toHaveLength(1);
+    const nodeDetailThread = await productRequest(
+      productSession,
+      `/api/threads/${nodeDetailExecution.threadIds[0]}`,
+    );
+    expect(
+      nodeDetailCompleted.status,
+      JSON.stringify({
+        error: nodeDetailExecution.error,
+        checks: nodeDetailExecution.checks,
+        turns: nodeDetailExecution.turns,
+        interactions: nodeDetailThread.interactions,
+      }),
+    ).toBe("passed");
+    expect(nodeDetailExecution.checks).toEqual(expect.arrayContaining([
+      expect.objectContaining({ name: "turn-1:visual-fixture:compiled-package", passed: true }),
+      expect.objectContaining({ name: "turn-1:visual-fixture:pinned-image", passed: true }),
+      expect.objectContaining({ name: "turn-1:visual-fixture:capabilities", passed: true }),
+    ]));
+    expect(evalService.reviewContext(nodeDetailExecution.id)).toMatchObject({
+      harnessConfigurationName: "fixture-node-detail",
+      selectedCaseId: "empty-project.visual-node-detail.single-turn",
+      readOnly: true,
+    });
+    expect(nodeDetailThread.interactions).toHaveLength(1);
+    expect(nodeDetailThread.interactions[0].completionStatus).toBe("accepted");
+    const nodeDetailOutput = nodeDetailThread.interactions[0].completionOutput;
+    const authoredNode = nodeDetailOutput.rootLayer.nodes[0];
+    expect(authoredNode.authoredDetail).toMatchObject({
+      version: 1,
+      assets: [
+        expect.objectContaining({
+          mediaType: "image/svg+xml",
+          representation: "image",
+        }),
+      ],
+    });
+    expect(authoredNode.authoredDetail.assets[0].digestSha256).toMatch(
+      /^[0-9a-f]{64}$/,
+    );
+    expect(authoredNode.authoredDetail.components.map(({ id }) => id)).toEqual([
+      "primary",
+      "status",
+      "facts",
+      "visual",
+      "navigation",
+      "actions",
+    ]);
+    expect(
+      authoredNode.authoredDetail.mounts
+        .filter(({ kind }) => kind === "capability")
+        .map(({ capability }) => capability.kind),
+    ).toEqual(["expand", "reference", "link", "invoke", "input"]);
+    expect(authoredNode.authoredDetail.mounts).toContainEqual(
+      expect.objectContaining({
+        kind: "asset",
+        host: "img",
+        assetId: authoredNode.authoredDetail.assets[0].id,
+      }),
+    );
+    expect(nodeDetailOutput.rootLayer.actions).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          kind: "navigate",
+          relation: "expand",
+          sourceNodeId: authoredNode.id,
+        }),
+        expect.objectContaining({
+          kind: "navigate",
+          relation: "reference",
+          sourceNodeId: authoredNode.id,
+        }),
+        expect.objectContaining({
+          kind: "invoke",
+          sourceNodeId: authoredNode.id,
+        }),
+        expect.objectContaining({
+          kind: "input",
+          control: "text",
+          sourceNodeId: authoredNode.id,
+        }),
+      ]),
+    );
+    const nodeDetailInteraction = nodeDetailThread.interactions[0];
+    const acceptedAsset = authoredNode.authoredDetail.assets[0];
+    const assetPath = `/api/threads/${nodeDetailExecution.threadIds[0]}/interactions/${nodeDetailInteraction.id}/nodes/${authoredNode.id}/detail-assets/${acceptedAsset.id}?layerId=${nodeDetailOutput.rootLayer.layer.id}`;
+    const resolvedAsset = await productRequest(productSession, assetPath);
+    expect(resolvedAsset).toMatchObject({
+      assetId: acceptedAsset.id,
+      digestSha256: acceptedAsset.digestSha256,
+      mediaType: "image/svg+xml",
+      provenance: { source: "user", fileName: "accepted-detail-status.svg" },
+    });
+    expect(
+      Buffer.from(resolvedAsset.contentBase64, "base64").toString("utf8"),
+    ).toContain("<svg");
+
+    const assetRequestStatus = async (path) =>
+      (
+        await fetch(new URL(path, productSession.origin), {
+          headers: {
+            Cookie: `${productSession.cookie.name}=${productSession.cookie.value}`,
+          },
+        })
+      ).status;
+    expect(
+      await assetRequestStatus(
+        `/api/threads/${selected.threadIds[0]}/interactions/${nodeDetailInteraction.id}/nodes/${authoredNode.id}/detail-assets/${acceptedAsset.id}?layerId=${nodeDetailOutput.rootLayer.layer.id}`,
+      ),
+    ).toBe(422);
+    expect(
+      await assetRequestStatus(
+        `/api/threads/${nodeDetailExecution.threadIds[0]}/interactions/999999/nodes/${authoredNode.id}/detail-assets/${acceptedAsset.id}?layerId=${nodeDetailOutput.rootLayer.layer.id}`,
+      ),
+    ).toBe(404);
+    expect(
+      await assetRequestStatus(
+        `/api/threads/${nodeDetailExecution.threadIds[0]}/interactions/${nodeDetailInteraction.id}/nodes/999999/detail-assets/${acceptedAsset.id}?layerId=${nodeDetailOutput.rootLayer.layer.id}`,
+      ),
+    ).toBe(403);
+    const expandAction = nodeDetailOutput.rootLayer.actions.find(
+      ({ kind, relation }) => kind === "navigate" && relation === "expand",
+    );
+    const expandedDetailLayer = await productRequest(
+      productSession,
+      `/api/threads/${nodeDetailExecution.threadIds[0]}/interactions/${nodeDetailInteraction.id}/layers/${expandAction.targetLayerId}`,
+    );
+    expect(
+      await assetRequestStatus(
+        `/api/threads/${nodeDetailExecution.threadIds[0]}/interactions/${nodeDetailInteraction.id}/nodes/${expandedDetailLayer.nodes[0].id}/detail-assets/${acceptedAsset.id}?layerId=${expandAction.targetLayerId}`,
+      ),
+    ).toBe(404);
+    expect(
+      await assetRequestStatus(
+        `/api/threads/${nodeDetailExecution.threadIds[0]}/interactions/${nodeDetailInteraction.id}/nodes/${authoredNode.id}/detail-assets/${acceptedAsset.id}?layerId=${expandAction.targetLayerId}`,
+      ),
+    ).toBe(403);
+
+
     const h3Created = await evalService.createRun({
       testCaseIds: [H3_PROJECT_CASE_ID],
       harnessConfigurationNames: ["fixture-task-system"],
@@ -1626,7 +1845,7 @@ describe("Relayer Eval application service", () => {
       ["read-only-workspace", "independent-reproduction"],
     ]);
     expect(autonomousCompleted.executions.every((execution) => execution.presentationGrade.status === "unjudged")).toBe(true);
-  }, 20_000);
+  }, 45_000);
 });
 
 async function waitForCompletedRun(evalService, runId, timeoutMs = 10_000) {

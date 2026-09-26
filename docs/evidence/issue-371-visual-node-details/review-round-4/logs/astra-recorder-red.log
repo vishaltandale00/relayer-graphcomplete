@@ -1,0 +1,32 @@
+
+ RUN  v4.1.10 /Users/vishaltandale/.codex/worktrees/05b1/relayer-graphcomplete
+
+ ❯ |isolated| test/graph-operation-recorder.test.mjs (11 tests | 1 failed) 6240ms
+   × preserves bounded asset request/response parity without widening ordinary graph operations 42ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  |isolated| test/graph-operation-recorder.test.mjs > preserves bounded asset request/response parity without widening ordinary graph operations
+AssertionError: expected 502 to be 200 // Object.is equality
+
+- Expected
++ Received
+
+- 200
++ 502
+
+ ❯ test/graph-operation-recorder.test.mjs:606:25
+    604|     method: "POST", body: { operation: "add", file: { bytesBase64 } },
+    605|   });
+    606|   expect(result.status).toBe(200);
+       |                         ^
+    607|   expect(result.body.file.bytesBase64).toBe(bytesBase64);
+    608|   await expect(jsonRequest(`${recorder.url}/api/graph/nodes`, {
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 10 passed (11)
+   Start at  18:15:42
+   Duration  6.36s (transform 34ms, setup 0ms, import 55ms, tests 6.24s, environment 0ms)

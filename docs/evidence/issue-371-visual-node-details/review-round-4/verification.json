@@ -1,0 +1,36 @@
+{
+  "sourceSnapshot": "source-snapshot.json",
+  "sourceSnapshotSha256": "d90e09e6ac1a4e162fe5c105725c909c104cb6df2817abd2f10fe9cc6e6c80e3",
+  "npmRunCheck": {
+    "passed": true,
+    "vitestPassed": 2347,
+    "vitestSkipped": 3,
+    "secretBoundaryPassed": 2,
+    "includes": [
+      "Rust workspace and crash reconciliation",
+      "Clippy",
+      "TypeScript",
+      "Python",
+      "receipt checks",
+      "PRD readability"
+    ],
+    "log": "logs/full-check.log"
+  },
+  "desktop": {
+    "command": "npm run test:desktop:visual-node-details",
+    "passed": true,
+    "includesBuild": true,
+    "cleanupCompleted": true,
+    "manifest": "desktop/manifest.json",
+    "manifestSha256": "3ec1d0efb2c7988ddab5720237e27ebdda0f934217518601c6645352d851ec69",
+    "visualInspection": "Original first tile and imported second tile inspected; authored layout, image and control presentation visible",
+    "log": "logs/desktop-proof.log"
+  },
+  "paidInferenceCalls": 0,
+  "limits": [
+    "No production default activation",
+    "No paid model comparison",
+    "No release proof"
+  ],
+  "priorFailure": "cleanup-diagnosis.json preserves premature Electron exit and its repair"
+}

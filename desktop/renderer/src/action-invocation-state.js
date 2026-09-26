@@ -70,3 +70,11 @@ export function visibleLayerAfterRefresh(
   }
   return refreshedRoot;
 }
+
+export function actionReviewKind(action) {
+  if (action?.kind === "input") return "input-action";
+  return (
+    action?.kind === "navigate"
+    || (action?.kind === "invoke" && action.targetLayerId != null)
+  ) ? "navigate-action" : "invoke-action";
+}

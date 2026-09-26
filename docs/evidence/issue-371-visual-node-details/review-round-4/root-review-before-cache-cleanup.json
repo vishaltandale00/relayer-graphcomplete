@@ -1,0 +1,15 @@
+{
+  "reviewer": "/root/merge_494_review",
+  "verdict": "clean",
+  "findings": [],
+  "scope": "Review-only external links, cancellation propagation, CI checkpoint mapping and PRD alignment",
+  "files": {
+    "desktop/renderer/src/review-tools.js": "5b546245f5605c962002f70422332096a1ae580c687b0870cf22b85426bf6e89",
+    "test/node-detail-runtime.test.mjs": "d4db7e85ac8c99880481c68feaeab7d1c4cc544db48befd45fa349ba5f5a3c91",
+    "scripts/run-desktop-visual-node-details-test.mjs": "802b1e5e6a7ac52f42c71a71f21333c47f1e1c9fc1a9949e5573979522b2a3eb",
+    "test/desktop-shell.test.mjs": "8e29658ae06dfef85212e2bfc92a7a70c0afaa547272d89fe4db7ef95f8adaad",
+    "scripts/ci/affected-modules.v1.json": "423f76db00b7b0e661ef7fa6cbda6605016dc4cfa88978c221142f6aa1a25fa5",
+    "scripts/test-desktop-visual-node-details.mjs": "d860697991e32e8b7e97025198c4bd8a3f816c306617419fd78bc87b8e72a4aa",
+    "docs/prd/index.html": "f8ce8b72f1ba934e33199f6cc44d8ef20e28e69713054fdd44e3697ca0143871"
+  }
+}

@@ -141,6 +141,7 @@ describe("desktop failure-domain adapters", () => {
       configurationPaths: [],
       harnessHostModuleUrl: fixtureHarnessModule(),
       issueErrorReporter,
+      fetchRequest: async () => new Response(null, { status: 204 }),
       spawnProcess: () => child,
     });
 

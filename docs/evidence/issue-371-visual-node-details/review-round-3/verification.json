@@ -1,0 +1,15 @@
+{
+  "check": {
+    "command": "npm run check",
+    "exitCode": 0,
+    "log": "logs/check-final.log"
+  },
+  "desktop": {
+    "command": "npm run test:desktop:visual-node-details",
+    "includes": "npm run build",
+    "exitCode": 0,
+    "manifest": "desktop/manifest.json",
+    "manifestSha256": "416e199c1e0ac3008b51fc8c797200fbb2b8e2f8eefb4369bd11b08b43a71a3f"
+  },
+  "paidInferenceCalls": 0
+}

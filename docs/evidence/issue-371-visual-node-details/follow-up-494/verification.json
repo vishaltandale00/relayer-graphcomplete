@@ -1,0 +1,38 @@
+{
+  "sourceDigestSha256": "de10802a8d43abf5ece3a26c90665c54f3c09c647cfc3c7d53bc461c1be38d99",
+  "baseCommit": "283d03d98896ecb754584caa37a40a6910629677",
+  "commands": [
+    {
+      "command": "npm run check",
+      "exitCode": 0,
+      "details": "176 Vitest files, 2293 tests passed; 3 skipped. Rust/default/crash, Clippy, type checks, secret-boundary2/2, Python29/29, receipts/readability passed."
+    },
+    {
+      "command": "npm run test:desktop:visual-node-details",
+      "exitCode": 0,
+      "includesRequiredBuild": "npm run build",
+      "details": "Original/reopened/imported image rendering, navigation/history, disabled mutation and read-only server denial passed."
+    },
+    {
+      "command": "node scripts/ci/run-chapter.mjs typescript (full plan; prior visual-assets/dist isolated)",
+      "exitCode": 0,
+      "details": "Fresh visual-assets package built before host, then all selected type checks passed."
+    }
+  ],
+  "logs": {
+    "check": {
+      "path": "check.log",
+      "sha256": "eda46d5074dcc9f3915f03c103f28128aa27ba49055ea343d66a9d0e3d4d76ae"
+    },
+    "desktop": {
+      "path": "desktop.log",
+      "sha256": "02933a87fce21185faacda6836880cd412e6afa4862216f083deaaa57cccf3bc"
+    },
+    "regressions-red": {
+      "path": "regressions-red.log",
+      "sha256": "a47afe9a6ab34e3b9415808785ffe4e3553b3369466cc691c22037f720c8624e"
+    }
+  },
+  "paidInferenceCalls": 0,
+  "githubCI": "Pending updated PR run; actual macOS packaging remains required."
+}

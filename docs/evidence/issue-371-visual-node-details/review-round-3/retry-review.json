@@ -1,0 +1,13 @@
+{
+  "reviewer": "/root/merge_494_review",
+  "verdict": "clean",
+  "findings": [],
+  "scope": "Activation epochs, stale generations, graph token issuance, lost acknowledgment recovery, lifecycle lock ordering and bridge replacement",
+  "assertion": "Admission and completion gates retain consistent ordering. Graph epoch and stale-session removal precede host activation; token publication follows successful acknowledgement. Host monotone epochs and fresh generations fence previous work. Pause/resume/revoke preserve epoch identity.",
+  "files": {
+    "crates/relayer-graph-server/src/lib.rs": "f021a756169cb2a2399e93b679950c690e8540613608216c1c55c4116753bdf2",
+    "packages/harness-host/src/host.ts": "c34dc5e34185215b83a20fe085b377ebeb63b3d43962b46701f4e7b6e5f7a725",
+    "packages/harness-host/test/visual-assets-bridge.test.ts": "741ff5f28052483b0729bdffa82380221d0139a8904f70054a34239878a082f4"
+  },
+  "verification": "Source review only; separate implementation logs record 36 graph-server unit tests and 4 host bridge tests passing."
+}

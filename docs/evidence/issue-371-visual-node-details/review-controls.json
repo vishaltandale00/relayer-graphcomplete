@@ -1,0 +1,28 @@
+{
+  "reviewer": "GPT-6-Astra /root/astra_standards",
+  "base": "bf6de11ad24e8895a620c8af29839782f5e3b30f",
+  "scope": "Control discovery and authority, accepted layer image delivery, immutable file transport, strict screenshot evidence runner",
+  "verdict": "Clean scoped source review",
+  "unresolvedFindings": [],
+  "combinedSha256": "7b4e2bec118fc51b2c63f18891fda36eb5cbdcfddfb586dd1361f09e7afea28e",
+  "digestAlgorithm": "SHA-256 of each ordered path, NUL, exact file bytes, NUL",
+  "files": [
+    "desktop/renderer/src/node-detail-assets.js",
+    "desktop/renderer/src/graph.js",
+    "desktop/renderer/src/review-tools.js",
+    "desktop/renderer/src/action-invocation-state.js",
+    "desktop/renderer/src/product-workspace/node-detail-runtime.js",
+    "desktop/renderer/src/product-workspace/workspace.js",
+    "packages/graph-client/src/visual-assets.ts",
+    "packages/graph-client/test/visual-assets.test.ts",
+    "test/node-detail-assets.test.mjs",
+    "test/node-detail-runtime.test.mjs",
+    "scripts/test-desktop-visual-node-details.mjs",
+    "scripts/run-desktop-visual-node-details-test.mjs"
+  ],
+  "appServerRegions": {
+    "crates/relayer-app-server/src/api/threads.rs:DetailAssetQuery-through-get_detail_asset": "290dc5d83ccaffe39c572462b9ac1e6cf6c62ebc5c624e9d9f33ccb3835637fd",
+    "crates/relayer-app-server/src/runtime.rs:get_detail_asset": "ce4e08331ffc36c6fc953ca021dc35b212214f220112ff4db584cbce6bf23f31"
+  },
+  "limits": "Source review only; asset protocol and export schema excluded. Non-certifying until recorded in PR. Source changes invalidate assertion."
+}

@@ -1,0 +1,14 @@
+schemaVersion: 1
+name: fixture-node-detail
+implementation: fixture.node-detail
+implementationVersion: 1
+graphCapabilityProfile:
+  search: disabled
+permissionBindings:
+  ask: {}
+  auto: {}
+  full: {}
+modelCompatibility:
+  - providerId: codex
+executionAccessContracts: [managed-runtime@1]
+settings: {}

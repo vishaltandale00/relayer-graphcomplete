@@ -1,0 +1,12 @@
+{
+  "reviewer": "/root/merge_494_review",
+  "verdict": "changes requested",
+  "findings": [
+    "Legacy user provenance cannot establish that old tags were nondefault; preserve all legacy current tags as protected defaults.",
+    "Snapshot new defaultTagIds authority before first await; do not reread caller options after asynchronous bootstrap validation."
+  ],
+  "files": {
+    "packages/visual-assets/src/index.ts": "077c4d11a5ba937a1077dfce571d1690acd4b3301bc7be2e26446e9055a88a20",
+    "packages/visual-assets/test/visual-assets.test.ts": "702a62b275fa3f6621baca7a9b6e8d4935ccfb732b5506961e55fe98c7ec2966"
+  }
+}

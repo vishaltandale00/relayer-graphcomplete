@@ -98,6 +98,22 @@ impl ConversationImportStager {
         Ok(())
     }
 
+    pub(crate) async fn push_visual_asset_content(
+        &mut self,
+        content: &crate::conversation_export::ExportVisualAssetContent,
+        product: &ProductService,
+    ) -> Result<(), ConversationImportError> {
+        self.validator
+            .as_mut()
+            .expect("unfinished import validator")
+            .push_visual_asset_content(content)
+            .map_err(crate::conversation_export::ExportReadError::from)?;
+        product
+            .append_conversation_import_visual_asset_content(&self.staged.id, content)
+            .await?;
+        Ok(())
+    }
+
     pub(crate) async fn finish(
         &mut self,
         source_sha256: String,
@@ -147,6 +163,51 @@ pub(crate) async fn materialize_conversation(
     if let Err(operation) = runtime.begin_imported_conversation(&graph_stage).await {
         return cleanup_failed_materialization(import_id, operation.to_string(), product, runtime)
             .await;
+    }
+    let mut after_digest = String::new();
+    loop {
+        let content = match product
+            .next_conversation_import_visual_asset_content(import_id, &after_digest)
+            .await
+        {
+            Ok(Some(content)) => content,
+            Ok(None) => break,
+            Err(operation) => {
+                return cleanup_failed_materialization(
+                    import_id,
+                    operation.to_string(),
+                    product,
+                    runtime,
+                )
+                .await;
+            }
+        };
+        if let Err(operation) = runtime.validate_visual_asset_import_content(
+            staged.thread_id.value(),
+            &serde_json::json!({"digestSha256": content.digest_sha256, "mediaType": content.media_type,
+                "byteLength": content.byte_length, "contentBase64": content.content_base64}),
+        ).await {
+            return cleanup_failed_materialization(import_id, operation.to_string(), product, runtime).await;
+        }
+        after_digest.clone_from(&content.digest_sha256);
+        let content = relayer_graph_core::ImportedVisualAssetContent {
+            digest_sha256: content.digest_sha256.clone(),
+            media_type: content.media_type.clone(),
+            byte_length: content.byte_length,
+            content_base64: content.content_base64.clone(),
+        };
+        if let Err(operation) = runtime
+            .stage_imported_visual_asset_content(import_id, &content)
+            .await
+        {
+            return cleanup_failed_materialization(
+                import_id,
+                operation.to_string(),
+                product,
+                runtime,
+            )
+            .await;
+        }
     }
     for summary in &staged.turns {
         let turn = match product
@@ -426,6 +487,7 @@ fn import_turn(turn: ConversationExportTurn) -> ImportedTurn {
                     detail: context.target.detail,
                     authored_detail: None,
                     authored_detail_omitted: false,
+                    authored_detail_assets: Vec::new(),
                 },
                 source_interaction_node_id: context.source.interaction_node_id,
                 source_layer_id: context.source.layer_id,
@@ -504,6 +566,18 @@ fn import_turn(turn: ConversationExportTurn) -> ImportedTurn {
                             detail: node.detail,
                             authored_detail: node.authored_detail,
                             authored_detail_omitted: node.authored_detail_omitted.is_some(),
+                            authored_detail_assets: node
+                                .authored_detail_assets
+                                .into_iter()
+                                .map(|asset| relayer_graph_core::ImportedDetailAsset {
+                                    asset_id: asset.asset_id,
+                                    digest_sha256: asset.digest_sha256.clone(),
+                                    media_type: asset.media_type,
+                                    byte_length: asset.byte_length,
+                                    provenance_source: asset.provenance.source,
+                                    provenance_file_name: asset.provenance.file_name,
+                                })
+                                .collect(),
                         })
                         .collect(),
                     edges: resolved
@@ -638,6 +712,7 @@ mod tests {
                 id: "turn:1".into(),
                 sequence: 1,
             }],
+            visual_asset_contents: Vec::new(),
         }
     }
 
@@ -824,6 +899,159 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn streamed_asset_staging_keeps_header_small_across_reopen() {
+        let directory = tempfile::tempdir().unwrap();
+        let database = directory.path().join("product.sqlite");
+        let product = product(&database).await;
+        let import_id = stage(&product).await;
+        for digit in ["a", "b"] {
+            product
+                .append_conversation_import_visual_asset_content(
+                    &import_id,
+                    &crate::conversation_export::ExportVisualAssetContent {
+                        digest_sha256: digit.repeat(64),
+                        media_type: "image/png".into(),
+                        byte_length: 1024,
+                        content_base64: "A".repeat(1368),
+                    },
+                )
+                .await
+                .unwrap();
+        }
+        drop(product);
+        let reopened = SqliteProductStore::open(&database).await.unwrap();
+        let staged = reopened
+            .staged_conversation_import(&import_id)
+            .await
+            .unwrap();
+        assert!(
+            staged.header.visual_asset_contents.is_empty(),
+            "streamed bytes must not accumulate in header_json"
+        );
+        let first = reopened
+            .next_conversation_import_visual_asset_content(&import_id, "")
+            .await
+            .unwrap()
+            .unwrap();
+        let second = reopened
+            .next_conversation_import_visual_asset_content(&import_id, &first.digest_sha256)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(first.digest_sha256, "a".repeat(64));
+        assert_eq!(second.digest_sha256, "b".repeat(64));
+        assert_eq!(second.content_base64.len(), 1368);
+        assert!(
+            reopened
+                .next_conversation_import_visual_asset_content(&import_id, &second.digest_sha256)
+                .await
+                .unwrap()
+                .is_none()
+        );
+        reopened
+            .remove_conversation_import(&import_id)
+            .await
+            .unwrap();
+        assert!(
+            reopened
+                .next_conversation_import_visual_asset_content(&import_id, "")
+                .await
+                .unwrap()
+                .is_none()
+        );
+    }
+
+    #[tokio::test]
+    async fn legacy_staged_asset_header_migrates_without_losing_content() {
+        let directory = tempfile::tempdir().unwrap();
+        let database = directory.path().join("product.sqlite");
+        let product = product(&database).await;
+        let import_id = stage(&product).await;
+        drop(product);
+        let pool = sqlx::SqlitePool::connect(&format!("sqlite://{}", database.display()))
+            .await
+            .unwrap();
+        let content = serde_json::json!({"digestSha256":"a".repeat(64),"mediaType":"image/png","byteLength":1,"contentBase64":"YQ=="});
+        sqlx::query("UPDATE conversation_imports SET header_json=json_set(header_json,'$.visualAssetContents',json(?1)) WHERE id=?2")
+            .bind(serde_json::json!([content]).to_string()).bind(&import_id).execute(&pool).await.unwrap();
+        sqlx::query("DROP TABLE conversation_import_asset_contents")
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query("DELETE FROM _sqlx_migrations WHERE version=31")
+            .execute(&pool)
+            .await
+            .unwrap();
+        pool.close().await;
+        let reopened = SqliteProductStore::open(&database).await.unwrap();
+        assert!(
+            reopened
+                .staged_conversation_import(&import_id)
+                .await
+                .unwrap()
+                .header
+                .visual_asset_contents
+                .is_empty()
+        );
+        let migrated = reopened
+            .next_conversation_import_visual_asset_content(&import_id, "")
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(serde_json::to_value(migrated).unwrap(), content);
+    }
+
+    #[tokio::test]
+    async fn unavailable_asset_validator_cleans_private_graph_and_product_stages() {
+        let directory = tempfile::tempdir().unwrap();
+        let product_path = directory.path().join("product.sqlite");
+        let graph_path = directory.path().join("graph.sqlite");
+        let product = product(&product_path).await;
+        let import_id = stage(&product).await;
+        product
+            .append_conversation_import_visual_asset_content(
+                &import_id,
+                &crate::conversation_export::ExportVisualAssetContent {
+                    digest_sha256: "a".repeat(64),
+                    media_type: "image/png".into(),
+                    byte_length: 1,
+                    content_base64: "YQ==".into(),
+                },
+            )
+            .await
+            .unwrap();
+        let graph = GraphDatabase::open(&graph_path).await.unwrap();
+        let (runtime, task) = runtime(graph, directory.path()).await;
+        assert!(
+            materialize_conversation(&import_id, &product, &runtime)
+                .await
+                .is_err()
+        );
+        assert!(
+            product
+                .staged_conversation_import(&import_id)
+                .await
+                .is_err()
+        );
+        let pool = sqlx::SqlitePool::connect(&format!("sqlite://{}", graph_path.display()))
+            .await
+            .unwrap();
+        let counts: (i64, i64) = sqlx::query_as(
+            "SELECT (SELECT COUNT(*) FROM graph_imports),(SELECT COUNT(*) FROM nodes)",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(
+            counts,
+            (0, 0),
+            "failed host validation must leave no graph stage or published nodes"
+        );
+        pool.close().await;
+        task.abort();
+    }
+
+    #[tokio::test]
     async fn staged_product_cleanup_is_foreign_key_safe_and_durable() {
         let directory = tempfile::tempdir().unwrap();
         let database = directory.path().join("product.sqlite");
@@ -869,6 +1097,81 @@ mod tests {
             .await
             .unwrap();
         graph_task.abort();
+    }
+
+    #[tokio::test]
+    async fn publication_reclaims_product_staging_bytes_atomically() {
+        let directory = tempfile::tempdir().unwrap();
+        let database = directory.path().join("product.sqlite");
+        let product = product(&database).await;
+        let import_id = stage(&product).await;
+        product
+            .append_conversation_import_visual_asset_content(
+                &import_id,
+                &crate::conversation_export::ExportVisualAssetContent {
+                    digest_sha256: "a".repeat(64),
+                    media_type: "image/png".into(),
+                    byte_length: 1,
+                    content_base64: "YQ==".into(),
+                },
+            )
+            .await
+            .unwrap();
+        let pool = sqlx::SqlitePool::connect(&format!("sqlite://{}", database.display()))
+            .await
+            .unwrap();
+        sqlx::query("CREATE TRIGGER fail_staging_cleanup BEFORE DELETE ON conversation_import_asset_contents BEGIN SELECT RAISE(ABORT,'injected cleanup failure'); END")
+            .execute(&pool).await.unwrap();
+        assert!(
+            super::publish_conversation(&import_id, &product)
+                .await
+                .is_err(),
+            "cleanup failure must reject publication"
+        );
+        let state: String =
+            sqlx::query_scalar("SELECT state FROM conversation_imports WHERE id=?1")
+                .bind(&import_id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(
+            state, "staging",
+            "cleanup failure must roll back publication"
+        );
+        assert!(
+            product
+                .next_conversation_import_visual_asset_content(&import_id, "")
+                .await
+                .unwrap()
+                .is_some()
+        );
+        sqlx::query("DROP TRIGGER fail_staging_cleanup")
+            .execute(&pool)
+            .await
+            .unwrap();
+        super::publish_conversation(&import_id, &product)
+            .await
+            .unwrap();
+        pool.close().await;
+        drop(product);
+        let reopened = SqliteProductStore::open(&database).await.unwrap();
+        assert!(
+            reopened
+                .staged_conversation_import_ids()
+                .await
+                .unwrap()
+                .is_empty()
+        );
+        let pool = sqlx::SqlitePool::connect(&format!("sqlite://{}", database.display()))
+            .await
+            .unwrap();
+        let counts: (i64,i64) = sqlx::query_as("SELECT (SELECT COUNT(*) FROM conversation_imports WHERE state='published'),(SELECT COUNT(*) FROM conversation_import_asset_contents)").fetch_one(&pool).await.unwrap();
+        assert_eq!(
+            counts,
+            (1, 0),
+            "publication retains ownership metadata without staged bytes"
+        );
+        pool.close().await;
     }
 
     #[tokio::test]

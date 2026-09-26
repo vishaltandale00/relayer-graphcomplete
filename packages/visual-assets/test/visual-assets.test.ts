@@ -1,14 +1,16 @@
 import { describe, expect, it } from "vitest";
 import sharp from "sharp";
 import { createHash } from "node:crypto";
-import { mkdir, mkdtemp, rm } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  createFileVisualAssetsLibrary,
   createFileVisualDetailPersistence,
   createMemoryVisualAssetsLibrary,
   createMemoryVisualDetailPersistence,
   memoryHarnessFile,
+  validateVisualAssetImportContent,
 } from "../src/index.js";
 
 function base64Bytes(value: string): Uint8Array {
@@ -51,6 +53,710 @@ function packageFor(assetIds: readonly string[]) {
 }
 
 describe("visual_assets deterministic library interface", () => {
+  it("validates one imported content record through the library media seam", async () => {
+    const library = createMemoryVisualAssetsLibrary({ authority: { projects: [], standaloneThreadIds: [1] } });
+    createMemoryVisualDetailPersistence(library);
+    const scope = { kind: "thread" as const, threadId: 1 };
+    for (const svg of [
+      "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 1 1'><rect width='1' height='1'/></svg>",
+      '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1 1"><defs><linearGradient id="g"><stop offset="0" stop-color="#000"/><stop offset="1" stop-color="#fff"/></linearGradient></defs><rect width="1" height="1" fill="url(#g)"/></svg>',
+    ]) {
+      const bytes = Buffer.from(svg);
+      await expect(validateVisualAssetImportContent({
+        library,
+        scope,
+        content: {
+          digestSha256: createHash("sha256").update(bytes).digest("hex"),
+          mediaType: "image/svg+xml",
+          byteLength: bytes.length,
+          contentBase64: bytes.toString("base64"),
+        },
+      })).resolves.toBeUndefined();
+    }
+    const invalidPng = Buffer.from("not a PNG");
+    await expect(validateVisualAssetImportContent({
+      library,
+      scope,
+      content: {
+        digestSha256: createHash("sha256").update(invalidPng).digest("hex"),
+        mediaType: "image/png",
+        byteLength: invalidPng.length,
+        contentBase64: invalidPng.toString("base64"),
+      },
+    })).rejects.toMatchObject({ code: "media_content_malformed" });
+  });
+
+  it("reopens durable scope authority, tags, relationships, bytes, and archival state", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "relayer-visual-assets-catalog-"));
+    try {
+      const storagePath = join(directory, "visual-assets.json");
+      const first = await createFileVisualAssetsLibrary({}, storagePath);
+      await first.authorizeScope({ kind: "project", projectId: 7, threadId: 70 });
+      await first.authorizeScope({ kind: "thread", threadId: 90 });
+      const projectTag = await first.createTag({ scope: { kind: "thread", threadId: 70 }, name: "Project" });
+      const standaloneTag = await first.createTag({ scope: { kind: "thread", threadId: 90 }, name: "Standalone" });
+      const added = await first.add({
+        file: memoryHarnessFile("durable.svg", "image/svg+xml", validSvg),
+        scope: { kind: "project", projectId: 7 }, name: "Durable", tagIds: [projectTag.id],
+      });
+      await first.associate({ assetId: added.id, scope: { kind: "thread", threadId: 90 } });
+      const organized = await first.organize({ assetId: added.id, addTagIds: [standaloneTag.id], removeTagIds: [] });
+      const archived = await first.archive(organized.id);
+
+      const reopened = await createFileVisualAssetsLibrary({}, storagePath);
+      expect((await reopened.inspect(archived.id)).asset).toEqual(archived);
+      expect((await reopened.listTags({ scope: { kind: "thread", threadId: 70 } })).items).toEqual([projectTag]);
+      expect((await reopened.listTags({ scope: { kind: "thread", threadId: 90 } })).items).toEqual([standaloneTag]);
+      expect((await reopened.listAssets({ scope: { kind: "project", projectId: 7 } })).items).toEqual([]);
+      expect(await (await reopened.download(archived.id)).read()).toEqual(new TextEncoder().encode(validSvg));
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("stores shared bytes once by digest and leaves them untouched during metadata mutations", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "relayer-visual-assets-content-store-"));
+    try {
+      const storagePath = join(directory, "visual-assets.json");
+      const library = await createFileVisualAssetsLibrary({}, storagePath);
+      const tag = await library.createTag({ scope: { kind: "library" }, name: "Shared" });
+      const first = await library.add({
+        file: memoryHarnessFile("first.svg", "image/svg+xml", validSvg),
+        scope: { kind: "library" }, name: "First", tagIds: [],
+      });
+      await library.add({
+        file: memoryHarnessFile("second.svg", "image/svg+xml", validSvg),
+        scope: { kind: "library" }, name: "Second", tagIds: [],
+      });
+      const stored = JSON.parse(await readFile(storagePath, "utf8")) as { version: number; assets: unknown[] };
+      expect(stored.version).toBe(3);
+      expect(stored.assets).toHaveLength(2);
+      expect(JSON.stringify(stored)).not.toContain("contentBase64");
+      const contentFiles = await readdir(`${storagePath}.content`);
+      expect(contentFiles).toHaveLength(1);
+      const contentPath = join(`${storagePath}.content`, contentFiles[0]!);
+      const before = await stat(contentPath, { bigint: true });
+
+      await library.organize({ assetId: first.id, addTagIds: [tag.id], removeTagIds: [] });
+      const after = await stat(contentPath, { bigint: true });
+      expect(after.ino).toBe(before.ino);
+      expect(after.mtimeNs).toBe(before.mtimeNs);
+      const reopened = await createFileVisualAssetsLibrary({}, storagePath);
+      expect(await (await reopened.download(first.id)).read()).toEqual(new TextEncoder().encode(validSvg));
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("persists bootstrap asset content before the first metadata-only publication", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "relayer-visual-assets-bootstrap-content-"));
+    try {
+      const storagePath = join(directory, "visual-assets.json");
+      const library = await createFileVisualAssetsLibrary({
+        registries: [{
+          id: "system", name: "System", source: "relayer", contentAuthority: "read-only",
+          defaultRelationshipAuthority: "read-only",
+        }],
+        initialAssets: [{
+          id: "asset_bootstrap", registryId: "system", name: "Bootstrap", fileName: "bootstrap.svg",
+          mediaType: "image/svg+xml", content: validSvg, scopes: [{ kind: "library" }], tagIds: [],
+        }],
+      }, storagePath);
+      await library.createTag({ scope: { kind: "library" }, name: "Metadata only" });
+      const reopened = await createFileVisualAssetsLibrary({}, storagePath);
+      expect(await (await reopened.download("asset_bootstrap")).read()).toEqual(new TextEncoder().encode(validSvg));
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects a noncanonical bootstrap digest before deriving or writing a content path", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "relayer-visual-assets-bootstrap-digest-"));
+    try {
+      const storagePath = join(directory, "visual-assets.json");
+      const outsidePath = join(directory, "victim");
+      await expect(createFileVisualAssetsLibrary({
+        initialAssets: [{
+          id: "asset_escape", registryId: "user", name: "Escape", fileName: "escape.svg",
+          mediaType: "image/svg+xml", content: validSvg, digest: "sha256:../../victim",
+          scopes: [{ kind: "library" }], tagIds: [],
+        }],
+      }, storagePath)).rejects.toMatchObject({ code: "digest_invalid" });
+      await expect(stat(outsidePath)).rejects.toMatchObject({ code: "ENOENT" });
+      await expect(stat(`${storagePath}.content`)).rejects.toMatchObject({ code: "ENOENT" });
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("validates loaded v1 and v2 logical catalogs before migration writes", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "relayer-visual-assets-pre-migration-validation-"));
+    try {
+      const bytes = new TextEncoder().encode(validSvg);
+      const digest = `sha256:${createHash("sha256").update(bytes).digest("hex")}`;
+      const baseAsset = {
+        id: "asset_invalid", registryId: "user", name: "Invalid", mediaType: "image/svg+xml",
+        byteLength: bytes.byteLength, digest, scopes: [{ kind: "library" }], tagIds: [], archived: false,
+        provenance: { source: "user", fileName: "invalid.svg" },
+      };
+
+      const v1Path = join(directory, "v1.json");
+      const v1 = `${JSON.stringify({
+        version: 1, revision: 0, authority: { projects: [], standaloneThreadIds: [] },
+        registries: [], tags: [], assets: [{
+          asset: { ...baseAsset, mediaType: "image/gif" },
+          contentBase64: Buffer.from(bytes).toString("base64"),
+        }],
+      })}\n`;
+      await writeFile(v1Path, v1);
+      await expect(createFileVisualAssetsLibrary({}, v1Path))
+        .rejects.toMatchObject({ code: "media_type_unsupported" });
+      expect(await readFile(v1Path, "utf8")).toBe(v1);
+      await expect(stat(`${v1Path}.content`)).rejects.toMatchObject({ code: "ENOENT" });
+
+      const v2Path = join(directory, "v2.json");
+      const v2 = `${JSON.stringify({
+        version: 2, revision: 0,
+        authority: { projects: [{ projectId: 7, threadIds: [] }], standaloneThreadIds: [] },
+        registries: [], tags: [], assets: [{ ...baseAsset, scopes: [{ kind: "project", projectId: 8 }] }],
+      })}\n`;
+      await mkdir(`${v2Path}.content`, { recursive: true });
+      await writeFile(join(`${v2Path}.content`, digest.slice("sha256:".length)), bytes);
+      await writeFile(v2Path, v2);
+      await expect(createFileVisualAssetsLibrary({}, v2Path))
+        .rejects.toMatchObject({ code: "scope_not_authorized" });
+      expect(await readFile(v2Path, "utf8")).toBe(v2);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("migrates the embedded v1 catalog into digest-addressed content without changing logical assets", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "relayer-visual-assets-v1-migration-"));
+    try {
+      const storagePath = join(directory, "visual-assets.json");
+      const bytes = new TextEncoder().encode(validSvg);
+      const digest = `sha256:${createHash("sha256").update(bytes).digest("hex")}`;
+      const asset = {
+        id: "asset_legacy", registryId: "user", name: "Legacy", mediaType: "image/svg+xml",
+        byteLength: bytes.byteLength, digest, scopes: [{ kind: "library" }], tagIds: [], archived: false,
+        provenance: { source: "user", fileName: "legacy.svg" },
+      };
+      await writeFile(storagePath, `${JSON.stringify({
+        version: 1, revision: 7, authority: { projects: [], standaloneThreadIds: [] },
+        registries: [], tags: [], assets: [{ asset, contentBase64: Buffer.from(bytes).toString("base64") }],
+      })}\n`);
+
+      const library = await createFileVisualAssetsLibrary({}, storagePath);
+      expect((await library.inspect(asset.id)).asset).toEqual(asset);
+      expect(await (await library.download(asset.id)).read()).toEqual(bytes);
+      const migrated = JSON.parse(await readFile(storagePath, "utf8")) as { version: number; revision: number };
+      expect(migrated).toMatchObject({ version: 3, revision: 7 });
+      expect(await readdir(`${storagePath}.content`)).toHaveLength(1);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("fails closed when digest-addressed catalog content is missing or corrupt on reopen", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "relayer-visual-assets-corrupt-content-"));
+    try {
+      const storagePath = join(directory, "visual-assets.json");
+      const library = await createFileVisualAssetsLibrary({}, storagePath);
+      await library.add({
+        file: memoryHarnessFile("corrupt.svg", "image/svg+xml", validSvg),
+        scope: { kind: "library" }, name: "Corrupt", tagIds: [],
+      });
+      const [contentFile] = await readdir(`${storagePath}.content`);
+      await writeFile(join(`${storagePath}.content`, contentFile!), "corrupt");
+      await expect(createFileVisualAssetsLibrary({}, storagePath))
+        .rejects.toMatchObject({ code: "catalog_store_corrupt" });
+      await rm(join(`${storagePath}.content`, contentFile!));
+      await expect(createFileVisualAssetsLibrary({}, storagePath))
+        .rejects.toMatchObject({ code: "catalog_store_corrupt" });
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("snapshots nested create-tag and association scopes before queued mutation work", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "relayer-visual-assets-scope-snapshot-"));
+    try {
+      const library = await createFileVisualAssetsLibrary({}, join(directory, "visual-assets.json"));
+      await library.authorizeScope({ kind: "project", projectId: 7, threadId: 70 });
+      await library.authorizeScope({ kind: "project", projectId: 8, threadId: 80 });
+      const asset = await library.add({
+        file: memoryHarnessFile("asset.svg", "image/svg+xml", validSvg),
+        scope: { kind: "project", projectId: 7 }, name: "Asset", tagIds: [],
+      });
+      let release!: () => void;
+      const gate = new Promise<void>((resolve) => { release = resolve; });
+      const blocker = library.add({
+        file: { name: "blocker.svg", mediaType: "image/svg+xml", async read() { await gate; return new TextEncoder().encode(validSvg); } },
+        scope: { kind: "library" }, name: "Blocker", tagIds: [],
+      });
+      const tagScope: { kind: "project"; projectId: number } = { kind: "project", projectId: 7 };
+      const associationScope: { kind: "project"; projectId: number } = { kind: "project", projectId: 7 };
+      const tag = library.createTag({ scope: tagScope, name: "Queued" });
+      const association = library.associate({ assetId: asset.id, scope: associationScope });
+      tagScope.projectId = 8;
+      associationScope.projectId = 8;
+      release();
+      await blocker;
+      expect((await tag).scope).toEqual({ kind: "project", projectId: 7 });
+      expect((await association).scopes).toContainEqual({ kind: "project", projectId: 7 });
+      expect((await association).scopes).not.toContainEqual({ kind: "project", projectId: 8 });
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps recorded user-added relationships mutable across publication and reopen but preserves ambiguous v2 defaults", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "relayer-visual-assets-relationship-defaults-"));
+    try {
+      const storagePath = join(directory, "visual-assets.json");
+      const registry = {
+        id: "curated-user", name: "Curated user", source: "user" as const,
+        contentAuthority: "user" as const, defaultRelationshipAuthority: "read-only" as const,
+      };
+      const library = await createFileVisualAssetsLibrary({ registries: [registry] }, storagePath);
+      const tag = await library.createTag({ scope: { kind: "library" }, name: "Mutable" });
+      const asset = await library.add({
+        file: memoryHarnessFile("mutable.svg", "image/svg+xml", validSvg),
+        scope: { kind: "library" }, name: "Mutable", registryId: registry.id, tagIds: [tag.id],
+      });
+      expect((await library.organize({ assetId: asset.id, addTagIds: [], removeTagIds: [tag.id] })).tagIds).toEqual([]);
+      await library.organize({ assetId: asset.id, addTagIds: [tag.id], removeTagIds: [] });
+
+      const reopened = await createFileVisualAssetsLibrary({}, storagePath);
+      expect((await reopened.organize({ assetId: asset.id, addTagIds: [], removeTagIds: [tag.id] })).tagIds).toEqual([]);
+      await reopened.organize({ assetId: asset.id, addTagIds: [tag.id], removeTagIds: [] });
+
+      const v3 = JSON.parse(await readFile(storagePath, "utf8")) as {
+        version: number;
+        assets: { asset: unknown; defaultTagIds: string[] }[];
+      };
+      await writeFile(storagePath, `${JSON.stringify({
+        ...v3,
+        version: 2,
+        assets: v3.assets.map(({ asset: logicalAsset }) => logicalAsset),
+      })}\n`);
+      const migrated = await createFileVisualAssetsLibrary({}, storagePath);
+      await expect(migrated.organize({
+        assetId: asset.id, addTagIds: [], removeTagIds: [tag.id],
+      })).rejects.toMatchObject({ code: "tag_relationship_read_only" });
+      expect((JSON.parse(await readFile(storagePath, "utf8")) as { version: number }).version).toBe(3);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("preserves writable bootstrap defaults and user-provenance legacy defaults across reopen", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "relayer-visual-assets-writable-defaults-"));
+    try {
+      const storagePath = join(directory, "visual-assets.json");
+      const registry = {
+        id: "writable-defaults", name: "Writable defaults", source: "relayer" as const,
+        contentAuthority: "read-only" as const, defaultRelationshipAuthority: "user" as const,
+      };
+      const tag = {
+        id: "tag_default", scope: { kind: "library" as const }, name: "Default", parentTagId: null,
+        authority: "system" as const,
+      };
+      const library = await createFileVisualAssetsLibrary({
+        registries: [registry],
+        initialTags: [tag],
+        initialAssets: [{
+          id: "asset_default", registryId: registry.id, name: "Default", fileName: "default.svg",
+          mediaType: "image/svg+xml", content: validSvg, scopes: [{ kind: "library" }], tagIds: [tag.id],
+          provenance: { source: "user", fileName: "default.svg" },
+        }],
+      }, storagePath);
+      expect((await library.organize({ assetId: "asset_default", addTagIds: [], removeTagIds: [tag.id] })).tagIds).toEqual([]);
+      await library.organize({ assetId: "asset_default", addTagIds: [tag.id], removeTagIds: [] });
+      const reopened = await createFileVisualAssetsLibrary({}, storagePath);
+      expect((await reopened.organize({ assetId: "asset_default", addTagIds: [], removeTagIds: [tag.id] })).tagIds).toEqual([]);
+      await reopened.organize({ assetId: "asset_default", addTagIds: [tag.id], removeTagIds: [] });
+
+      const stored = JSON.parse(await readFile(storagePath, "utf8")) as {
+        version: number;
+        assets: { asset: Record<string, unknown>; defaultTagIds: string[] }[];
+      };
+      const legacyAsset = { ...stored.assets[0]!.asset };
+      legacyAsset.provenance = { fileName: "default.svg" };
+      await writeFile(storagePath, `${JSON.stringify({
+        ...stored,
+        version: 2,
+        registries: [{ ...registry, defaultRelationshipAuthority: "read-only" }],
+        assets: [legacyAsset],
+      })}\n`);
+      const migrated = await createFileVisualAssetsLibrary({}, storagePath);
+      await expect(migrated.organize({
+        assetId: "asset_default", addTagIds: [], removeTagIds: [tag.id],
+      })).rejects.toMatchObject({ code: "tag_relationship_read_only" });
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("snapshots bootstrap default relationships before asynchronous file-library creation", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "relayer-visual-assets-bootstrap-default-snapshot-"));
+    try {
+      const defaults = ["tag_default"];
+      const creating = createFileVisualAssetsLibrary({
+        registries: [{
+          id: "readonly-defaults", name: "Read-only defaults", source: "relayer",
+          contentAuthority: "read-only", defaultRelationshipAuthority: "read-only",
+        }],
+        initialTags: [{
+          id: "tag_default", scope: { kind: "library" }, name: "Default", parentTagId: null, authority: "system",
+        }],
+        initialAssets: [{
+          id: "asset_default", registryId: "readonly-defaults", name: "Default", fileName: "default.svg",
+          mediaType: "image/svg+xml", content: validSvg, scopes: [{ kind: "library" }],
+          tagIds: ["tag_default"], defaultTagIds: defaults,
+        }],
+      }, join(directory, "visual-assets.json"));
+      defaults.splice(0);
+      const library = await creating;
+      await expect(library.organize({
+        assetId: "asset_default", addTagIds: [], removeTagIds: ["tag_default"],
+      })).rejects.toMatchObject({ code: "tag_relationship_read_only" });
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("owns the complete durable bootstrap graph before the first filesystem await", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "relayer-visual-assets-bootstrap-snapshot-"));
+    try {
+      const authority = { projects: [{ projectId: 7, threadIds: [70] }], standaloneThreadIds: [90] };
+      const registry = {
+        id: "system", name: "System", source: "relayer",
+        contentAuthority: "read-only" as "read-only" | "user", defaultRelationshipAuthority: "read-only" as const,
+      };
+      const tagScope = { kind: "project" as const, projectId: 7 };
+      const tag = { id: "tag_initial", name: "Initial", scope: tagScope, parentTagId: null, authority: "system" as const };
+      const assetScope = { kind: "project" as const, projectId: 7 };
+      const tagIds = [tag.id];
+      const content = new TextEncoder().encode(validSvg);
+      const provenance = { source: "system" as const, fileName: "initial.svg" };
+      const options = {
+        authority,
+        registries: [registry],
+        initialTags: [tag],
+        initialAssets: [{
+          id: "asset_initial", registryId: registry.id, name: "Initial", fileName: "initial.svg",
+          mediaType: "image/svg+xml", content, scopes: [assetScope], tagIds, provenance,
+        }],
+      };
+      const creating = createFileVisualAssetsLibrary(options, join(directory, "visual-assets.json"));
+      authority.projects[0]!.projectId = 8;
+      authority.projects[0]!.threadIds[0] = 80;
+      registry.contentAuthority = "user";
+      tagScope.projectId = 8;
+      tag.name = "Mutated";
+      assetScope.projectId = 8;
+      tagIds.splice(0);
+      content.fill(0);
+      provenance.fileName = "mutated.svg";
+      expect(Object.isFrozen(authority)).toBe(false);
+      expect(Object.isFrozen(registry)).toBe(false);
+      expect(Object.isFrozen(tag)).toBe(false);
+
+      const library = await creating;
+      expect((await library.listAssets({ scope: { kind: "project", projectId: 7 } })).items)
+        .toEqual([expect.objectContaining({ id: "asset_initial", tagIds: ["tag_initial"], provenance: { source: "system", fileName: "initial.svg" } })]);
+      await expect(library.listAssets({ scope: { kind: "project", projectId: 8 } }))
+        .rejects.toMatchObject({ code: "scope_not_authorized" });
+      await expect(library.archive("asset_initial")).rejects.toMatchObject({ code: "asset_content_read_only" });
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("shares the two-raster validation limit across durable catalog generations", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "relayer-visual-assets-shared-raster-limit-"));
+    try {
+      const library = await createFileVisualAssetsLibrary({
+        initialAssets: [{
+          id: "asset_raster", registryId: "user", name: "Raster", fileName: "raster.jpg",
+          mediaType: "image/jpeg", content: jpegBytes, scopes: [{ kind: "library" }], tagIds: [],
+        }],
+      }, join(directory, "visual-assets.json"));
+      await library.listAssets({ scope: { kind: "library" } });
+      const concurrent = await Promise.allSettled([
+        library.inspect("asset_raster"),
+        library.inspect("asset_raster"),
+        library.createTag({ scope: { kind: "library" }, name: "Concurrent generation" }),
+      ]);
+      expect(concurrent.filter((result) => result.status === "fulfilled")).toHaveLength(2);
+      expect(concurrent.filter((result) => result.status === "rejected").map((result) => result.reason))
+        .toEqual([expect.objectContaining({ code: "media_validation_concurrency_limit" })]);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("authorizes archived assets for trusted direct lookup without restoring discovery", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "relayer-visual-assets-archived-lookup-"));
+    try {
+      const library = await createFileVisualAssetsLibrary({}, join(directory, "visual-assets.json"));
+      const asset = await library.add({
+        file: memoryHarnessFile("archived.svg", "image/svg+xml", validSvg),
+        scope: { kind: "library" }, name: "Archived", tagIds: [],
+      });
+      await library.archive(asset.id);
+      expect((await library.listAssets({ scope: { kind: "library" } })).items).toEqual([]);
+      await expect(library.lookupAsset({ scope: { kind: "library" }, assetId: asset.id }))
+        .resolves.toMatchObject({ id: asset.id, archived: true });
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("reconciles memory with a catalog rename when parent-directory syncing fails afterward", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "relayer-visual-assets-post-rename-sync-"));
+    try {
+      const storagePath = join(directory, "visual-assets.json");
+      const library = await createFileVisualAssetsLibrary({}, storagePath);
+      await chmod(directory, 0o300);
+      const adding = library.add({
+        file: memoryHarnessFile("committed.svg", "image/svg+xml", validSvg),
+        scope: { kind: "library" }, name: "Committed", tagIds: [],
+      });
+      await expect(adding).rejects.toBeDefined();
+      expect((await library.listAssets({ scope: { kind: "library" } })).items.map(({ name }) => name)).toEqual(["Committed"]);
+      await chmod(directory, 0o700);
+      const reopened = await createFileVisualAssetsLibrary({}, storagePath);
+      expect((await reopened.listAssets({ scope: { kind: "library" } })).items.map(({ name }) => name)).toEqual(["Committed"]);
+    } finally {
+      await chmod(directory, 0o700).catch(() => undefined);
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("does not publish a candidate asset when its durable catalog write fails", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "relayer-visual-assets-write-failure-"));
+    try {
+      const storagePath = join(directory, "visual-assets.json");
+      const library = await createFileVisualAssetsLibrary({}, storagePath);
+      await mkdir(storagePath);
+      await expect(library.add({
+        file: memoryHarnessFile("unpublished.svg", "image/svg+xml", validSvg),
+        scope: { kind: "library" }, name: "Unpublished", tagIds: [],
+      })).rejects.toBeDefined();
+      expect((await library.listAssets({ scope: { kind: "library" } })).items).toEqual([]);
+      expect((await readdir(directory)).filter((name) => name.endsWith(".tmp"))).toEqual([]);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("rechecks completion authority immediately before the atomic catalog rename", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "relayer-visual-assets-revoked-write-"));
+    try {
+      const storagePath = join(directory, "visual-assets.json");
+      const library = await createFileVisualAssetsLibrary({}, storagePath);
+      let checks = 0;
+      await expect(library.add({
+        file: memoryHarnessFile("revoked.svg", "image/svg+xml", validSvg),
+        scope: { kind: "library" }, name: "Revoked", tagIds: [],
+      }, () => ++checks < 2)).rejects.toMatchObject({ code: "completion_inactive" });
+      expect(checks).toBe(2);
+      expect((await library.listAssets({ scope: { kind: "library" } })).items).toEqual([]);
+      expect(await readdir(directory)).toEqual([]);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("invalidates a durable cursor after a same-count catalog mutation", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "relayer-visual-assets-stale-cursor-"));
+    try {
+      const library = await createFileVisualAssetsLibrary({}, join(directory, "visual-assets.json"));
+      const tag = await library.createTag({ scope: { kind: "library" }, name: "Later" });
+      const first = await library.add({
+        file: memoryHarnessFile("first.svg", "image/svg+xml", validSvg),
+        scope: { kind: "library" }, name: "First", tagIds: [],
+      });
+      await library.add({
+        file: memoryHarnessFile("second.svg", "image/svg+xml", validSvg),
+        scope: { kind: "library" }, name: "Second", tagIds: [],
+      });
+      const page = await library.listAssets({ scope: { kind: "library" }, limit: 1 });
+      await library.organize({ assetId: first.id, addTagIds: [tag.id], removeTagIds: [] });
+      await expect(library.listAssets({
+        scope: { kind: "library" }, limit: 1, cursor: page.nextCursor!,
+      })).rejects.toMatchObject({ code: "page_snapshot_stale" });
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("snapshots mutable queued add inputs synchronously", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "relayer-visual-assets-add-snapshot-"));
+    try {
+      const library = await createFileVisualAssetsLibrary({}, join(directory, "visual-assets.json"));
+      let releaseFirst!: () => void;
+      const firstGate = new Promise<void>((resolve) => { releaseFirst = resolve; });
+      const first = library.add({
+        file: { name: "first.svg", mediaType: "image/svg+xml", async read() { await firstGate; return new TextEncoder().encode(validSvg); } },
+        scope: { kind: "library" }, name: "First", tagIds: [],
+      });
+      let input!: {
+        file: { name: string; mediaType: string; expectedDigest: string; read(): Promise<Uint8Array> };
+        scope: { kind: "library" | "project"; projectId?: number };
+        name: string;
+        tagIds: string[];
+        registryId?: string;
+      };
+      const file = {
+        name: "queued.svg",
+        mediaType: "image/svg+xml",
+        expectedDigest: `sha256:${createHash("sha256").update(validSvg).digest("hex")}`,
+        async read() {
+          input.name = "Reentered";
+          input.tagIds.push("reentered-tag");
+          input.registryId = "reentered-registry";
+          return new TextEncoder().encode(fileContent);
+        },
+      };
+      let fileContent = validSvg;
+      const scope: { kind: "library" | "project"; projectId?: number } = { kind: "library" };
+      input = { file, scope, name: "Queued", tagIds: [] as string[] };
+      const queued = library.add(input as Parameters<typeof library.add>[0]);
+      fileContent = "<svg><script/></svg>";
+      file.name = "mutated.txt";
+      file.mediaType = "text/plain";
+      file.expectedDigest = "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff";
+      file.read = async () => { throw new Error("mutated"); };
+      scope.kind = "project";
+      scope.projectId = 999;
+      input.name = "";
+      input.tagIds.push("mutated-tag");
+      releaseFirst();
+
+      await first;
+      const added = await queued;
+      expect(added).toMatchObject({
+        name: "Queued", mediaType: "image/svg+xml", scopes: [{ kind: "library" }],
+        provenance: { fileName: "queued.svg" },
+      });
+      expect(new TextDecoder().decode(await (await library.download(added.id)).read())).toBe(validSvg);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps durable cursors valid across observable no-op mutations", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "relayer-visual-assets-durable-no-op-"));
+    try {
+      const library = await createFileVisualAssetsLibrary({}, join(directory, "visual-assets.json"));
+      const root = await library.createTag({ scope: { kind: "library" }, name: "Root" });
+      const other = await library.createTag({ scope: { kind: "library" }, name: "Other" });
+      const first = await library.add({
+        file: memoryHarnessFile("first.svg", "image/svg+xml", validSvg),
+        scope: { kind: "library" }, name: "First", tagIds: [root.id],
+      });
+      await library.add({
+        file: memoryHarnessFile("second.svg", "image/svg+xml", validSvg),
+        scope: { kind: "library" }, name: "Second", tagIds: [],
+      });
+      const archived = await library.add({
+        file: memoryHarnessFile("archived.svg", "image/svg+xml", validSvg),
+        scope: { kind: "library" }, name: "Archived", tagIds: [],
+      });
+      await library.archive(archived.id);
+
+      async function assetCursorSurvives(operation: () => Promise<unknown>): Promise<void> {
+        const page = await library.listAssets({ scope: { kind: "library" }, limit: 1 });
+        await operation();
+        await expect(library.listAssets({
+          scope: { kind: "library" }, limit: 1, cursor: page.nextCursor!,
+        })).resolves.toBeDefined();
+      }
+      await assetCursorSurvives(() => library.associate({ assetId: first.id, scope: { kind: "library" } }));
+      await assetCursorSurvives(() => library.organize({
+        assetId: first.id, addTagIds: [root.id], removeTagIds: [other.id],
+      }));
+      await assetCursorSurvives(() => library.archive(archived.id));
+
+      const tagPage = await library.listTags({ scope: { kind: "library" }, limit: 1 });
+      await library.moveTag({ tagId: root.id, parentTagId: null });
+      await expect(library.listTags({
+        scope: { kind: "library" }, limit: 1, cursor: tagPage.nextCursor!,
+      })).resolves.toBeDefined();
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("preserves a queued file expectedDigest instead of dropping the integrity check", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "relayer-visual-assets-expected-digest-"));
+    try {
+      const library = await createFileVisualAssetsLibrary({}, join(directory, "visual-assets.json"));
+      let releaseFirst!: () => void;
+      const firstGate = new Promise<void>((resolve) => { releaseFirst = resolve; });
+      const first = library.add({
+        file: { name: "first.svg", mediaType: "image/svg+xml", async read() { await firstGate; return new TextEncoder().encode(validSvg); } },
+        scope: { kind: "library" }, name: "First", tagIds: [],
+      });
+      const file = {
+        name: "wrong.svg", mediaType: "image/svg+xml",
+        expectedDigest: "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        async read() { return new TextEncoder().encode(validSvg); },
+      };
+      const queued = library.add({ file, scope: { kind: "library" }, name: "Wrong", tagIds: [] });
+      file.expectedDigest = `sha256:${createHash("sha256").update(validSvg).digest("hex")}`;
+      releaseFirst();
+
+      await first;
+      await expect(queued).rejects.toMatchObject({ code: "digest_mismatch" });
+      expect((await library.listAssets({ scope: { kind: "library" } })).items.map(({ name }) => name)).toEqual(["First"]);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("handles an eager queued read rejection until its mutation turn without swallowing it", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "relayer-visual-assets-queued-read-failure-"));
+    const unhandled: unknown[] = [];
+    const recordUnhandled = (error: unknown) => { unhandled.push(error); };
+    process.on("unhandledRejection", recordUnhandled);
+    try {
+      const library = await createFileVisualAssetsLibrary({}, join(directory, "visual-assets.json"));
+      let releaseFirst!: () => void;
+      const firstGate = new Promise<void>((resolve) => { releaseFirst = resolve; });
+      const first = library.add({
+        file: { name: "first.svg", mediaType: "image/svg+xml", async read() { await firstGate; return new TextEncoder().encode(validSvg); } },
+        scope: { kind: "library" }, name: "First", tagIds: [],
+      });
+      const readFailure = new Error("queued read failed");
+      const queued = library.add({
+        file: { name: "failed.svg", mediaType: "image/svg+xml", async read() { throw readFailure; } },
+        scope: { kind: "library" }, name: "Failed", tagIds: [],
+      });
+      const observed = queued.catch((error: unknown) => error);
+      const detached = new Uint8Array([1]);
+      structuredClone(detached.buffer, { transfer: [detached.buffer] });
+      const detachedRead = library.add({
+        file: { name: "detached.svg", mediaType: "image/svg+xml", async read() { return detached; } },
+        scope: { kind: "library" }, name: "Detached", tagIds: [],
+      }).catch((error: unknown) => error);
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(unhandled).toEqual([]);
+      releaseFirst();
+      await first;
+      await expect(observed).resolves.toBe(readFailure);
+      await expect(detachedRead).resolves.toBeInstanceOf(TypeError);
+      expect((await library.listAssets({ scope: { kind: "library" } })).items.map(({ name }) => name)).toEqual(["First"]);
+    } finally {
+      process.off("unhandledRejection", recordUnhandled);
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
   it("rejects forged handles, cross-scope reads, and partial failed acceptance", async () => {
     const initial = (id: string, scopes: readonly ({ kind: "project"; projectId: number })[]) => ({
       id,

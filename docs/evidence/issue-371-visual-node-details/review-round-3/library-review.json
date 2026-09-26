@@ -1,0 +1,10 @@
+{
+  "reviewer": "/root/merge_494_review",
+  "verdict": "clean",
+  "findings": [],
+  "assertion": "Legacy migration conservatively preserves all ambiguous existing tags as defaults. Bootstrap snapshots defaultTagIds before first await. V3 preserves exact default/user distinction across reconstruction, mutation and reopen. Both previous findings are fixed.",
+  "files": {
+    "packages/visual-assets/src/index.ts": "be8404517d2b73420712dd97c4b94cf7ab9c017d4564ac072bdc4f5e836b7c07",
+    "packages/visual-assets/test/visual-assets.test.ts": "6c28ca9a28513993907392f3986106f1b29e93cef28b19aa4ffd49a0820c8665"
+  }
+}

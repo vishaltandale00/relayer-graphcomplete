@@ -1,0 +1,61 @@
+{
+  "kind": "implementation-evidence-not-independent-review",
+  "implementer": "GPT-6-Astra /root/astra_spec",
+  "baseCommit": "283d03d98896ecb754584caa37a40a6910629677",
+  "scopeSha256": "31f2fa925099a363b7ff88004ae32a4ffb50f72da8e9ee90b7706ac47c7b5ca1",
+  "fileSha256": {
+    "crates/relayer-app-server/src/conversation_export_service.rs": "cdd7c68617eb15999cec2ea2dee7f6baf8273d80951b9baf6bbb6a4cfba1698c",
+    "crates/relayer-app-server/src/conversation_import_service.rs": "c476a429ae93662cdf05200c4f59602074f9023508663ca553484d5c6cda2cad",
+    "crates/relayer-app-server/src/product/service.rs": "48009de01e8e68f6921a2ff7f72ebec4422d718af5e467362d13ca7854cd27f6",
+    "crates/relayer-app-server/src/storage/sqlite/conversation_imports.rs": "d9b66ee2eaee69f5ca47d32e56b6f9b9396eefc69b65d7bd0b919e915f7ec351",
+    "crates/relayer-app-server/src/storage/sqlite/migrations/0031_staged_visual_asset_contents.sql": "5de8459e1bc3549534395665a6377068adcce043e31869bbbd385b770976f762",
+    "crates/relayer-graph-core/src/storage/sqlite/migrations/0020_reclaim_detail_asset_content.sql": "1bf9bbba091262455799ac0e2436fb49f9920e84a7ef3e9dc4f137e95e927425",
+    "crates/relayer-graph-server/tests/import_visual_asset_transport.rs": "e5bb70501493fed72e540ba18f1d0c738f1acf47f1ffd8282f6aae9c6fb02242"
+  },
+  "redEvidence": [
+    {
+      "test": "removing_imports_reclaims_only_unreferenced_accepted_content",
+      "observed": "failed remaining content count1 expected0 before migration20"
+    },
+    {
+      "test": "streamed_asset_staging_keeps_header_small_across_reopen",
+      "observed": "failed because header.visual_asset_contents was nonempty before migration31"
+    },
+    {
+      "test": "export_fetches_each_repeated_node_asset_only_once",
+      "observed": "failed HTTP request count2 expected1 before visited-node dedup"
+    }
+  ],
+  "tests": [
+    {
+      "command": "cargo test -p relayer-graph-server --test import_visual_asset_transport -- --nocapture",
+      "passed": 4,
+      "failed": 0
+    },
+    {
+      "command": "cargo test -p relayer-app-server --lib conversation_import_service::tests -- --nocapture",
+      "passed": 10,
+      "failed": 0
+    },
+    {
+      "command": "cargo test -p relayer-app-server --lib export_fetches_each_repeated -- --nocapture",
+      "passed": 1,
+      "failed": 0
+    },
+    {
+      "command": "cargo test -p relayer-app-server --test conversation_export_contract",
+      "passed": 19,
+      "failed": 0
+    },
+    {
+      "command": "git diff --check",
+      "exitCode": 0
+    }
+  ],
+  "limits": [
+    "No limit changes:16MiB JSONL line,256MiB archive,17MiB graph transport.",
+    "Independent review and full check/build owned by root; no commit or push.",
+    "Heavy host-mediated hostile asset and Electron proofs require rerun for final workspace.",
+    "This change removes cumulative disk rewrites and streams materialization; the existing ingestion validator still retains validated contents in memory."
+  ]
+}

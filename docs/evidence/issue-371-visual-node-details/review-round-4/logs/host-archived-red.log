@@ -1,0 +1,33 @@
+
+ RUN  v4.1.10 /Users/vishaltandale/.codex/worktrees/05b1/relayer-graphcomplete
+
+ ❯ |isolated| packages/harness-host/test/visual-assets-bridge.test.ts (4 tests | 1 failed) 195ms
+     × prepares a library-only icon without incidentally associating it to the completion scope 77ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  |isolated| packages/harness-host/test/visual-assets-bridge.test.ts > visual asset host bridge > prepares a library-only icon without incidentally associating it to the completion scope
+AssertionError: promise rejected "VisualAssetsError: Visual asset is not au… { code: '…' }" instead of resolving
+ ❯ packages/harness-host/test/visual-assets-bridge.test.ts:298:65
+    296|     await perform({ kind: "archive", assetId: "owned" });
+    297|     await expect(perform({ kind: "list-assets" })).resolves.toMatchObj…
+    298|     await expect(perform({ kind: "inspect", assetId: "owned" })).resol…
+       |                                                                 ^
+    299|     await expect(perform({ kind: "download", assetId: "owned" })).reso…
+    300|     await expect(perform({ kind: "resolve", logicalIds: ["owned"] })).…
+
+Caused by: VisualAssetsError: Visual asset is not authorized in this scope
+ ❯ visibleAsset packages/harness-host/src/host.ts:1842:9
+ ❯ executeVisualAssetOperation packages/harness-host/src/host.ts:1887:7
+ ❯ HarnessHost.visualAssetOperation packages/harness-host/src/host.ts:317:20
+ ❯ packages/harness-host/test/visual-assets-bridge.test.ts:298:5
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { code: 'asset_not_authorized' }
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 3 passed (4)
+   Start at  18:07:04
+   Duration  662ms (transform 212ms, setup 0ms, import 385ms, tests 195ms, environment 0ms)

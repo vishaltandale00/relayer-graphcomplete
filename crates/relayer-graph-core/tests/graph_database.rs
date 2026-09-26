@@ -198,6 +198,7 @@ fn imported_conversation(interaction_node_id: &str) -> ImportedConversation {
                         detail: "A queue".into(),
                         authored_detail: None,
                         authored_detail_omitted: false,
+                        authored_detail_assets: Vec::new(),
                     }],
                     edges: vec![],
                     actions: vec![],
@@ -250,6 +251,7 @@ fn imported_invoke_conversation() -> ImportedConversation {
                     detail: "Invoke this path".into(),
                     authored_detail: None,
                     authored_detail_omitted: false,
+                    authored_detail_assets: Vec::new(),
                 }],
                 edges: vec![],
                 actions: vec![ImportedAction {
@@ -315,6 +317,7 @@ fn imported_invoke_conversation() -> ImportedConversation {
                     detail: "Imported result".into(),
                     authored_detail: None,
                     authored_detail_omitted: false,
+                    authored_detail_assets: Vec::new(),
                 }],
                 edges: vec![],
                 actions: vec![],
@@ -471,6 +474,7 @@ async fn imported_conversation_notes_an_authored_detail_the_export_omitted() {
         id: "context-action".into(),
         target: ImportedNode {
             authored_detail_omitted: false,
+            authored_detail_assets: Vec::new(),
             ..accepted_node
         },
         source_interaction_node_id: "source-interaction".into(),
@@ -501,6 +505,7 @@ async fn imported_context_snapshots_deduplicate_and_remain_inert_on_nonaccepted_
         detail: "A queue".into(),
         authored_detail: None,
         authored_detail_omitted: false,
+        authored_detail_assets: Vec::new(),
     };
     input.turns[0].interaction_node_id = Some("interaction-1".into());
     input.turns[0].contexts = vec![ImportedInteractionContext {
@@ -749,6 +754,7 @@ async fn imported_submitted_input_provenance_must_be_one_exact_accepted_occurren
         detail: "A worker".into(),
         authored_detail: None,
         authored_detail_omitted: false,
+        authored_detail_assets: Vec::new(),
     });
     // Two input actions, both genuinely authored by node-1.
     for id in ["input-action-1", "input-action-2"] {

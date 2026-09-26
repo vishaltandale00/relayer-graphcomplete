@@ -38,6 +38,11 @@ const CONVERSATION_IMPORT_COLUMNS: &[(&str, &str, bool, i64)] = &[
     ("created_at", "TEXT", true, 0),
     ("published_at", "TEXT", false, 0),
 ];
+const CONVERSATION_IMPORT_ASSET_CONTENT_COLUMNS: &[(&str, &str, bool, i64)] = &[
+    ("conversation_import_id", "TEXT", true, 1),
+    ("digest_sha256", "TEXT", true, 2),
+    ("content_json", "TEXT", true, 0),
+];
 const IMPORTED_TURN_COLUMNS: &[(&str, &str, bool, i64)] = &[
     ("conversation_import_id", "TEXT", true, 1),
     ("source_turn_id", "TEXT", true, 2),
@@ -450,6 +455,12 @@ pub(super) async fn validate(pool: &SqlitePool) -> Result<(), StorageError> {
     )
     .await?;
     validate_columns(pool, "conversation_imports", CONVERSATION_IMPORT_COLUMNS).await?;
+    validate_columns(
+        pool,
+        "conversation_import_asset_contents",
+        CONVERSATION_IMPORT_ASSET_CONTENT_COLUMNS,
+    )
+    .await?;
     validate_columns(pool, "imported_turns", IMPORTED_TURN_COLUMNS).await?;
     validate_columns(pool, "action_invocations", ACTION_INVOCATION_COLUMNS).await?;
     validate_columns(pool, "completion_executions", COMPLETION_EXECUTION_COLUMNS).await?;
@@ -686,6 +697,15 @@ pub(super) async fn validate(pool: &SqlitePool) -> Result<(), StorageError> {
         "conversation_imports",
         "id",
         "NO ACTION",
+    )
+    .await?;
+    validate_foreign_key(
+        pool,
+        "conversation_import_asset_contents",
+        "conversation_import_id",
+        "conversation_imports",
+        "id",
+        "CASCADE",
     )
     .await?;
     validate_foreign_key(
@@ -1255,6 +1275,73 @@ fn incompatible(message: &str) -> StorageError {
 #[cfg(test)]
 mod tests {
     use super::super::SqliteProductStore;
+
+    #[tokio::test]
+    async fn malformed_import_asset_contents_fails_current_schema_open() {
+        for (label, replacement) in [
+            ("missing", None),
+            (
+                "missing-column",
+                Some(
+                    "CREATE TABLE conversation_import_asset_contents (conversation_import_id TEXT NOT NULL REFERENCES conversation_imports(id) ON DELETE CASCADE, digest_sha256 TEXT NOT NULL, PRIMARY KEY(conversation_import_id,digest_sha256))",
+                ),
+            ),
+            (
+                "wrong-primary-key",
+                Some(
+                    "CREATE TABLE conversation_import_asset_contents (conversation_import_id TEXT NOT NULL REFERENCES conversation_imports(id) ON DELETE CASCADE, digest_sha256 TEXT NOT NULL PRIMARY KEY, content_json TEXT NOT NULL)",
+                ),
+            ),
+            (
+                "missing-foreign-key",
+                Some(
+                    "CREATE TABLE conversation_import_asset_contents (conversation_import_id TEXT NOT NULL, digest_sha256 TEXT NOT NULL, content_json TEXT NOT NULL, PRIMARY KEY(conversation_import_id,digest_sha256))",
+                ),
+            ),
+            (
+                "wrong-delete-action",
+                Some(
+                    "CREATE TABLE conversation_import_asset_contents (conversation_import_id TEXT NOT NULL REFERENCES conversation_imports(id), digest_sha256 TEXT NOT NULL, content_json TEXT NOT NULL, PRIMARY KEY(conversation_import_id,digest_sha256))",
+                ),
+            ),
+        ] {
+            let directory = tempfile::tempdir().unwrap();
+            let path = directory.path().join("product.sqlite");
+            let store = SqliteProductStore::open(&path).await.unwrap();
+            let migrated: bool = sqlx::query_scalar(
+                "SELECT EXISTS(SELECT 1 FROM _sqlx_migrations WHERE version=31 AND success=1)",
+            )
+            .fetch_one(&store.pool)
+            .await
+            .unwrap();
+            assert!(migrated);
+            sqlx::query("DROP TABLE conversation_import_asset_contents")
+                .execute(&store.pool)
+                .await
+                .unwrap();
+            if let Some(sql) = replacement {
+                sqlx::query(sql).execute(&store.pool).await.unwrap();
+            }
+            store.pool.close().await;
+            let error = match SqliteProductStore::open(&path).await {
+                Ok(store) => {
+                    store.pool.close().await;
+                    panic!("{label}: malformed migrated table was accepted");
+                }
+                Err(error) => error,
+            };
+            assert!(
+                matches!(error, crate::storage::StorageError::IncompatibleSchema(_)),
+                "{label}: {error}"
+            );
+            assert!(
+                error
+                    .to_string()
+                    .contains("conversation_import_asset_contents"),
+                "{label}: {error}"
+            );
+        }
+    }
 
     #[tokio::test]
     async fn missing_action_input_detach_receipt_foreign_key_fails_current_schema_open() {

@@ -1,0 +1,58 @@
+
+ RUN  v4.1.10 /Users/vishaltandale/.codex/worktrees/05b1/relayer-graphcomplete
+
+x·················stderr | test/desktop-shell.test.mjs > desktop skeleton > starts and stops the Rust product server with an isolated profile and private session
+Relayer app server stopped (2).
+
+··stderr | test/desktop-shell.test.mjs > desktop skeleton > keeps graph authority off argv and reports a graph server that stops after readiness
+Relayer graph server stopped (9).
+
+·····················x·········
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  |process-bound| test/desktop-shell.test.mjs > desktop skeleton > enforces one signed desktop release contract and seals its candidate artifacts
+AssertionError: promise rejected "Error: Bundled Relayer runtime is missing…" instead of resolving
+ ❯ test/desktop-shell.test.mjs:2927:10
+    2925|         verifyPrimeAgent,
+    2926|         verifyNotices,
+    2927|       })).resolves.toEqual({ binaryPath: bundledBinary, architecture: …
+       |          ^
+    2928|       await expect(verifyBundledAppServer(appPath, {
+    2929|         execute: async () => ({ stdout: "x86_64\n", stderr: "" }),
+
+Caused by: Error: Bundled Relayer runtime is missing node_modules/sharp/lib/sharp.js.
+ ❯ Module.verifyBundledAppServer desktop/packaging/verify-bundled-app-server.mjs:80:44
+ ❯ test/desktop-shell.test.mjs:2920:7
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  |isolated| test/ci-chapter-runner.test.mjs > CI chapter runner > builds visual assets before the host in both clean TypeScript entry points
+AssertionError: expected [ …(3) ] to deeply equal [ …(4) ]
+
+- Expected
++ Received
+
+  [
+    "npm:run build -w @relayer/graph-client",
+-   "npm:run build -w @relayer/visual-assets",
+    "npm:run build -w @relayer/harness-host",
+    "npm:run build -w @relayer/eval-runner",
+  ]
+
+ ❯ test/ci-chapter-runner.test.mjs:67:21
+     65|       writeFileSync(trace, "");
+     66|       const calls = run(chapter, { npmBuildWorkspaces: workspaces, npm…
+     67|       expect(calls).toEqual(workspaces.map((workspace) => `npm:run bui…
+       |                     ^
+     68|     }
+     69|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  2 failed (2)
+      Tests  2 failed | 49 passed (51)
+   Start at  13:14:32
+   Duration  4.05s (transform 530ms, setup 0ms, import 461ms, tests 3.46s, environment 0ms)
+

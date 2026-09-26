@@ -25,6 +25,7 @@ export const APPROVED_TELEMETRY_MODULES = Object.freeze({
     "desktop/renderer/src/navigation-model.js",
     "desktop/renderer/src/navigation.js",
     "desktop/renderer/src/node-context-drafts.js",
+    "desktop/renderer/src/node-detail-assets.js",
     "desktop/renderer/src/node-input-controls.js",
     "desktop/renderer/src/node-input-drafts.js",
     "desktop/renderer/src/onboarding-tutorial-state.js",

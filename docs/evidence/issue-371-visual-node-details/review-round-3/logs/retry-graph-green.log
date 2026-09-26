@@ -1,0 +1,71 @@
+   Compiling relayer-graph-server v0.0.0 (/Users/vishaltandale/.codex/worktrees/05b1/relayer-graphcomplete/crates/relayer-graph-server)
+warning: field `layout` is never read
+  --> crates/relayer-graph-server/src/search_index.rs:61:5
+   |
+59 | struct LadybugRuntime {
+   |        -------------- field in this struct
+60 |     store: StdRwLock<Arc<LadybugStore>>,
+61 |     layout: StoreLayout,
+   |     ^^^^^^
+   |
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: method `root` is never used
+  --> crates/relayer-graph-server/src/search_index/store.rs:49:12
+   |
+40 | impl StoreLayout {
+   | ---------------- method in this implementation
+...
+49 |     pub fn root(&self) -> &Path {
+   |            ^^^^
+
+warning: function `rows` is never used
+   --> crates/relayer-graph-server/src/search_index/store.rs:645:8
+    |
+645 | pub fn rows(connection: &Connection<'_>, query: &str) -> Result<Vec<Vec<Value>>> {
+    |        ^^^^
+
+warning: `relayer-graph-server` (lib test) generated 3 warnings
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 6.04s
+     Running unittests src/lib.rs (target/debug/deps/relayer_graph_server-06617258a95e9fad)
+
+running 36 tests
+test search_index::query::tests::malformed_hidden_identity_has_a_stable_safe_error ... ok
+test search_index::query::tests::composite_values_use_recursive_typed_order_instead_of_json_text ... ok
+test search_index::query::tests::row_cap_does_not_inspect_the_next_candidate_for_oversize ... ok
+test search_index::query::tests::frozen_default_hard_and_zero_row_caps_are_exact ... ok
+test search_index::query::tests::any_oversized_candidate_within_the_row_cap_fails_the_whole_result ... ok
+test search_index::query::tests::equal_visible_rows_use_hidden_matched_identity_as_the_final_tie_break ... ok
+test search_index::query::tests::frozen_complete_envelope_byte_recipes_are_exact ... ok
+test tests::bridge_replacement_fences_new_completion_admission_until_the_swap_finishes ... ok
+test tests::external_interaction_requires_control_token_and_mints_scoped_graph_token ... ok
+test tests::control_authority_can_remint_a_capability_after_server_restart ... ok
+test tests::control_authority_can_revoke_a_graph_capability ... ok
+test tests::failed_bridge_generation_handoff_preserves_the_retryable_completion_epoch ... ok
+test tests::explicit_revoke_keeps_its_retry_target_until_finalize_is_acknowledged ... ok
+test tests::explicit_revoke_takes_over_an_unacknowledged_pause_barrier ... ok
+test tests::action_api_returns_repairable_error_for_a_second_root_key ... ok
+test tests::action_api_defaults_older_authors_and_returns_repairable_variant_errors ... ok
+test tests::action_read_is_scoped_to_the_source_interactions_accepted_closure ... ok
+test tests::control_prepares_context_and_capability_reads_normalized_input_only ... ok
+test tests::control_materializes_submitted_input_and_capability_reads_only_semantics ... ok
+test tests::control_issues_and_replays_typed_invocation_leases_with_derived_neighbors ... ok
+test tests::invalid_interaction_can_be_retried_with_the_same_external_ids ... ok
+test tests::import_content_validation_rejects_a_replaced_bridge_response ... ok
+test tests::lost_finalize_ack_retries_the_same_terminal_receipt_without_restoring_authority ... ok
+test tests::graph_capability_can_discard_an_owned_orphan_layer ... ok
+test tests::node_api_round_trips_and_preserves_the_canonical_authored_detail_package ... ok
+test tests::parent_capability_prepares_one_recursive_child_without_caller_scope ... ok
+test tests::product_identifiers_must_be_positive_and_project_is_optional ... ok
+test tests::rejected_terminal_submit_resumes_asset_authority_at_the_advanced_generation ... ok
+test tests::product_can_bind_before_mint_and_invalidate_a_crash_surviving_node_token ... ok
+test tests::layer_api_returns_typed_layout_repairs_and_round_trips_valid_layout ... ok
+test tests::personal_presentation_attachment_requires_control_authority_and_resolves_graph ... ok
+test tests::reminted_capability_reactivates_assets_without_reviving_old_generation ... ok
+test tests::partial_bridge_epoch_cutover_stays_paused_until_registration_retry ... ok
+test tests::staged_import_endpoints_require_control_authority_and_finalize_in_order ... ok
+test tests::temporal_current_routes_enforce_control_and_terminal_broker_boundaries ... ok
+test tests::failed_multi_completion_bridge_handoff_recovers_pauses_and_retryable_rollback ... ok
+
+test result: ok. 36 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.81s
+

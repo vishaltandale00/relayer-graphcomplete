@@ -1,0 +1,11295 @@
+
+ RUN  v4.1.10 /Users/vishaltandale/.codex/worktrees/05b1/relayer-graphcomplete
+
+ ❯ |isolated| packages/harness-host/test/visual-assets-bridge.test.ts (4 tests | 1 failed) 202ms
+     × prepares a library-only icon without incidentally associating it to the completion scope 88ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  |isolated| packages/harness-host/test/visual-assets-bridge.test.ts > visual asset host bridge > prepares a library-only icon without incidentally associating it to the completion scope
+AssertionError: expected "listAssets" to not be called at all, but actually been called 1024 times
+
+Received:
+
+  1st listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  2nd listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  3rd listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  4th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  5th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  6th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  7th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  8th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  9th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  10th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  11th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  12th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  13th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  14th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  15th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  16th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  17th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  18th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  19th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  20th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  21st listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  22nd listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  23rd listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  24th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  25th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  26th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  27th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  28th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  29th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  30th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  31st listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  32nd listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  33rd listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  34th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  35th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  36th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  37th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  38th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  39th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  40th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  41st listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  42nd listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  43rd listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  44th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  45th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  46th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  47th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  48th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  49th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  50th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  51st listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  52nd listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  53rd listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  54th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  55th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  56th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  57th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  58th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  59th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  60th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  61st listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  62nd listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  63rd listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  64th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  65th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  66th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  67th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  68th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  69th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  70th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  71st listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  72nd listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  73rd listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  74th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  75th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  76th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  77th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  78th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  79th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  80th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  81st listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  82nd listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  83rd listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  84th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  85th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  86th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  87th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  88th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  89th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  90th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  91st listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  92nd listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  93rd listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  94th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  95th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  96th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  97th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  98th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  99th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  100th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  101st listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  102nd listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  103rd listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  104th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  105th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  106th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  107th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  108th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  109th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  110th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  111th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  112th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  113th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  114th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  115th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  116th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  117th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  118th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  119th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  120th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  121st listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  122nd listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  123rd listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  124th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  125th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  126th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  127th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  128th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  129th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  130th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  131st listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  132nd listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  133rd listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  134th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  135th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  136th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  137th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  138th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  139th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  140th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  141st listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  142nd listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  143rd listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  144th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  145th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  146th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  147th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  148th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  149th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  150th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  151st listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  152nd listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  153rd listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  154th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  155th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  156th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  157th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  158th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  159th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  160th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  161st listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  162nd listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  163rd listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  164th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  165th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  166th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  167th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  168th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  169th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  170th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  171st listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  172nd listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  173rd listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  174th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  175th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  176th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  177th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  178th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  179th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  180th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  181st listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  182nd listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  183rd listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  184th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  185th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  186th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  187th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  188th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  189th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  190th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  191st listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  192nd listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  193rd listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  194th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  195th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  196th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  197th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  198th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  199th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  200th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  201st listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  202nd listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  203rd listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  204th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  205th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  206th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  207th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  208th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  209th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  210th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  211th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  212th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  213th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  214th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  215th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  216th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  217th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  218th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  219th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  220th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  221st listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  222nd listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  223rd listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  224th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  225th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  226th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  227th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  228th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  229th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  230th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  231st listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  232nd listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  233rd listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  234th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  235th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  236th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  237th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  238th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  239th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  240th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  241st listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  242nd listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  243rd listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  244th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  245th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  246th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  247th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  248th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  249th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  250th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  251st listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  252nd listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  253rd listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  254th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  255th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  256th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  257th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  258th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  259th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  260th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  261st listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  262nd listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  263rd listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  264th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  265th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  266th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  267th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  268th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  269th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  270th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  271st listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  272nd listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  273rd listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  274th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  275th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  276th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  277th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  278th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  279th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  280th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  281st listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  282nd listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  283rd listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  284th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  285th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  286th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  287th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  288th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  289th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  290th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  291st listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  292nd listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  293rd listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  294th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  295th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  296th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  297th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  298th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  299th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  300th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  301st listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  302nd listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  303rd listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  304th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  305th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  306th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  307th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  308th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  309th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  310th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  311th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  312th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  313th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  314th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  315th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  316th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  317th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  318th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  319th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  320th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  321st listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  322nd listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  323rd listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  324th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  325th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  326th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  327th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  328th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  329th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  330th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  331st listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  332nd listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  333rd listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  334th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  335th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  336th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  337th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  338th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  339th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  340th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  341st listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  342nd listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  343rd listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  344th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  345th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  346th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  347th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  348th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  349th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  350th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  351st listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  352nd listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  353rd listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  354th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  355th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  356th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  357th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  358th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  359th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  360th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  361st listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  362nd listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  363rd listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  364th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  365th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  366th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  367th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  368th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  369th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  370th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  371st listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  372nd listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  373rd listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  374th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  375th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  376th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  377th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  378th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  379th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  380th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  381st listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  382nd listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  383rd listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  384th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  385th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  386th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  387th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  388th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  389th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  390th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  391st listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  392nd listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  393rd listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  394th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  395th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  396th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  397th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  398th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  399th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  400th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  401st listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  402nd listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  403rd listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  404th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  405th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  406th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  407th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  408th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  409th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  410th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  411th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  412th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  413th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  414th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  415th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  416th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  417th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  418th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  419th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  420th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  421st listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  422nd listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  423rd listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  424th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  425th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  426th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  427th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  428th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  429th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  430th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  431st listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  432nd listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  433rd listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  434th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  435th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  436th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  437th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  438th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  439th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  440th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  441st listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  442nd listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  443rd listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  444th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  445th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  446th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  447th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  448th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  449th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  450th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  451st listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  452nd listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  453rd listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  454th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  455th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  456th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  457th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  458th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  459th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  460th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  461st listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  462nd listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  463rd listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  464th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  465th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  466th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  467th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  468th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  469th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  470th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  471st listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  472nd listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  473rd listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  474th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  475th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  476th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  477th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  478th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  479th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  480th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  481st listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  482nd listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  483rd listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  484th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  485th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  486th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  487th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  488th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  489th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  490th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  491st listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  492nd listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  493rd listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  494th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  495th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  496th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  497th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  498th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  499th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  500th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  501st listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  502nd listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  503rd listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  504th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  505th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  506th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  507th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  508th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  509th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  510th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  511th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  512th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  513th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  514th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  515th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  516th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  517th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  518th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  519th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  520th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  521st listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  522nd listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  523rd listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  524th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  525th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  526th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  527th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  528th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  529th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  530th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  531st listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  532nd listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  533rd listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  534th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  535th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  536th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  537th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  538th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  539th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  540th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  541st listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  542nd listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  543rd listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  544th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  545th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  546th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  547th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  548th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  549th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  550th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  551st listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  552nd listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  553rd listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  554th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  555th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  556th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  557th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  558th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  559th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  560th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  561st listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  562nd listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  563rd listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  564th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  565th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  566th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  567th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  568th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  569th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  570th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  571st listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  572nd listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  573rd listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  574th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  575th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  576th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  577th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  578th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  579th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  580th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  581st listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  582nd listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  583rd listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  584th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  585th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  586th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  587th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  588th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  589th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  590th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  591st listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  592nd listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  593rd listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  594th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  595th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  596th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  597th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  598th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  599th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  600th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  601st listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  602nd listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  603rd listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  604th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  605th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  606th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  607th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  608th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  609th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  610th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  611th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  612th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  613th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  614th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  615th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  616th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  617th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  618th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  619th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  620th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  621st listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  622nd listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  623rd listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  624th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  625th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  626th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  627th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  628th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  629th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  630th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  631st listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  632nd listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  633rd listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  634th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  635th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  636th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  637th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  638th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  639th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  640th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  641st listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  642nd listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  643rd listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  644th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  645th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  646th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  647th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  648th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  649th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  650th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  651st listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  652nd listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  653rd listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  654th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  655th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  656th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  657th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  658th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  659th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  660th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  661st listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  662nd listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  663rd listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  664th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  665th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  666th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  667th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  668th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  669th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  670th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  671st listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  672nd listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  673rd listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  674th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  675th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  676th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  677th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  678th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  679th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  680th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  681st listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  682nd listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  683rd listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  684th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  685th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  686th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  687th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  688th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  689th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  690th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  691st listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  692nd listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  693rd listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  694th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  695th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  696th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  697th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  698th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  699th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  700th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  701st listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  702nd listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  703rd listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  704th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  705th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  706th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  707th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  708th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  709th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  710th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  711th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  712th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  713th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  714th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  715th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  716th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  717th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  718th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  719th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  720th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  721st listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  722nd listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  723rd listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  724th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  725th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  726th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  727th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  728th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  729th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  730th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  731st listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  732nd listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  733rd listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  734th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  735th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  736th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  737th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  738th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  739th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  740th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  741st listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  742nd listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  743rd listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  744th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  745th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  746th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  747th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  748th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  749th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  750th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  751st listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  752nd listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  753rd listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  754th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  755th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  756th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  757th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  758th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  759th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  760th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  761st listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  762nd listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  763rd listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  764th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  765th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  766th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  767th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  768th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  769th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  770th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  771st listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  772nd listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  773rd listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  774th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  775th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  776th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  777th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  778th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  779th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  780th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  781st listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  782nd listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  783rd listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  784th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  785th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  786th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  787th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  788th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  789th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  790th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  791st listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  792nd listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  793rd listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  794th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  795th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  796th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  797th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  798th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  799th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  800th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  801st listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  802nd listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  803rd listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  804th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  805th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  806th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  807th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  808th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  809th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  810th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  811th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  812th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  813th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  814th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  815th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  816th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  817th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  818th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  819th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  820th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  821st listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  822nd listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  823rd listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  824th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  825th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  826th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  827th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  828th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  829th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  830th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  831st listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  832nd listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  833rd listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  834th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  835th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  836th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  837th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  838th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  839th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  840th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  841st listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  842nd listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  843rd listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  844th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  845th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  846th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  847th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  848th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  849th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  850th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  851st listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  852nd listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  853rd listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  854th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  855th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  856th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  857th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  858th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  859th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  860th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  861st listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  862nd listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  863rd listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  864th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  865th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  866th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  867th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  868th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  869th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  870th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  871st listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  872nd listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  873rd listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  874th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  875th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  876th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  877th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  878th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  879th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  880th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  881st listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  882nd listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  883rd listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  884th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  885th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  886th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  887th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  888th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  889th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  890th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  891st listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  892nd listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  893rd listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  894th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  895th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  896th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  897th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  898th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  899th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  900th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  901st listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  902nd listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  903rd listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  904th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  905th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  906th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  907th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  908th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  909th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  910th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  911th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  912th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  913th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  914th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  915th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  916th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  917th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  918th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  919th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  920th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  921st listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  922nd listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  923rd listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  924th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  925th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  926th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  927th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  928th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  929th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  930th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  931st listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  932nd listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  933rd listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  934th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  935th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  936th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  937th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  938th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  939th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  940th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  941st listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  942nd listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  943rd listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  944th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  945th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  946th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  947th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  948th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  949th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  950th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  951st listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  952nd listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  953rd listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  954th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  955th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  956th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  957th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  958th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  959th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  960th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  961st listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  962nd listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  963rd listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  964th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  965th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  966th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  967th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  968th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  969th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  970th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  971st listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  972nd listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  973rd listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  974th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  975th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  976th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  977th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  978th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  979th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  980th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  981st listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  982nd listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  983rd listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  984th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  985th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  986th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  987th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  988th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  989th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  990th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  991st listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  992nd listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  993rd listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  994th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  995th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  996th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  997th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  998th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  999th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  1000th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  1001st listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  1002nd listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  1003rd listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  1004th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  1005th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  1006th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  1007th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  1008th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  1009th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  1010th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  1011th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  1012th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  1013th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  1014th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  1015th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  1016th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  1017th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  1018th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  1019th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  1020th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  1021st listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  1022nd listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  1023rd listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+  1024th listAssets call:
+
+    Array [
+      Object {
+        "limit": 100,
+        "scope": Object {
+          "kind": "library",
+        },
+      },
+    ]
+
+
+Number of calls: 1024
+
+ ❯ packages/harness-host/test/visual-assets-bridge.test.ts:312:25
+    310|       scans.mockClear();
+    311|       await expect(perform({ kind: "prepare-detail", package: invalid …
+    312|       expect(scans).not.toHaveBeenCalled();
+       |                         ^
+    313|     }
+    314|     scans.mockRestore();
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 3 passed (4)
+   Start at  18:07:42
+   Duration  654ms (transform 204ms, setup 0ms, import 373ms, tests 202ms, environment 0ms)

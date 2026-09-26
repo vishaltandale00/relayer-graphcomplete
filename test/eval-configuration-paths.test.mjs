@@ -79,6 +79,7 @@ describe("Eval harness configuration availability", () => {
       targetKey: "macos-arm64",
     }))).toEqual([
       "fixture-task-system.yaml",
+      "fixture-node-detail.yaml",
       "fixture-graph-memory.yaml",
       "codex-basic.yaml",
       "codex-basic-high.yaml",
@@ -109,6 +110,7 @@ describe("Eval harness configuration availability", () => {
       targetKey: "macos-arm64",
     }))).toEqual([
       "fixture-task-system.yaml",
+      "fixture-node-detail.yaml",
       "fixture-graph-memory.yaml",
       "codex-basic.yaml",
       "codex-basic-high.yaml",
@@ -137,6 +139,7 @@ describe("Eval harness configuration availability", () => {
       targetKey: "macos-arm64",
     }))).toEqual([
       "fixture-task-system.yaml",
+      "fixture-node-detail.yaml",
       "fixture-graph-memory.yaml",
       "codex-basic.yaml",
       "codex-basic-high.yaml",
@@ -166,6 +169,7 @@ describe("Eval harness configuration availability", () => {
       }));
       expect(available).toEqual(expect.arrayContaining([
         "fixture-task-system.yaml",
+        "fixture-node-detail.yaml",
         "codex-basic.yaml",
         "claude-basic.yaml",
         "prime-agent-basic.yaml",

@@ -72,10 +72,19 @@ export async function verifyBundledAppServer(
     "node_modules/chrome-devtools-mcp/build/src/bin/chrome-devtools-mcp.js",
     "node_modules/@relayer/graph-client/dist/index.js",
     "node_modules/@relayer/harness-host/dist/index.js",
+    "node_modules/@relayer/visual-assets/dist/index.js",
+    "node_modules/sharp/dist/index.cjs",
+    "node_modules/sharp/dist/index.mjs",
     "node_modules/@relayer/harness-host/dist/implementations/claude-basic-browser.js",
     "node_modules/@relayer/eval-runner/dist/index.js",
   ]) {
     if (!packagedEntries.has(entry)) throw new Error(`Bundled Relayer runtime is missing ${entry}.`);
+  }
+  const sharpPlatform = platform === "win32" ? "win32" : platform;
+  const sharpArchitecture = expectedArchitecture === "x86_64" ? "x64" : expectedArchitecture;
+  const sharpNativePrefix = `node_modules/@img/sharp-${sharpPlatform}-${sharpArchitecture}/lib/sharp-${sharpPlatform}-${sharpArchitecture}-`;
+  if (![...packagedEntries].some((entry) => entry.startsWith(sharpNativePrefix) && entry.endsWith(".node"))) {
+    throw new Error(`Bundled Relayer runtime is missing the Sharp native module for ${sharpPlatform}-${sharpArchitecture}.`);
   }
   await verifyPackagedCodexBrowserMcp(resourcesPath);
   await verifyPrimeAgent(resourcesPath, packagedEntries, {

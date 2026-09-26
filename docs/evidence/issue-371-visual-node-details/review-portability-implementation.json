@@ -1,0 +1,44 @@
+{
+  "kind": "implementation-evidence",
+  "author": "GPT-6-Astra /root/astra_spec",
+  "capturedAt": "2026-09-26T15:02:23.525023+00:00",
+  "baseCommit": "bf6de11ad24e8895a620c8af29839782f5e3b30f",
+  "scope": "Separate import-scoped digest content staging and metadata-only turn references; preserve 17 MiB private request limit. Shared files include concurrent work outside this implementation scope.",
+  "sha256ByFile": {
+    "crates/relayer-app-server/src/conversation_import_service.rs": "0d4b18414b85fd8f77b9a1b28add267ab0adfa246e99d6102b624580f17c031f",
+    "crates/relayer-app-server/src/runtime.rs": "2920fd56ffdb306e21af7426edbe4cf5e462b1213f8ac337b4af84e0f6ec919c",
+    "crates/relayer-graph-core/src/graph.rs": "b0d3aeefb907e07d7c2103b0807bf6fe8ec7345effbc73b59f137092c5aa938b",
+    "crates/relayer-graph-core/src/graph/import.rs": "ed15059b07ae2843bcd2f433acdd40a186f556d59b42b833125c0c2231b914e9",
+    "crates/relayer-graph-core/src/lib.rs": "394f47ec8bc0a74bfccafbf84c9bbfdac2950d60d6d2be72931a4e9968acaeda",
+    "crates/relayer-graph-core/src/storage/sqlite/migrations/0019_imported_visual_asset_content.sql": "89f18e9a95a34ff5fc1e2385aa6df1e2e917f4d1c246081baf04fa211ff54635",
+    "crates/relayer-graph-server/src/lib.rs": "182f40df418df3717951662eb4522efe363b235fbdb64806deaf3509a6576c9d",
+    "crates/relayer-graph-server/tests/import_visual_asset_transport.rs": "a8400ec6f7cb6cc6fdfb9c0ef6eff4326ce779ef681d63744132482ec402d208"
+  },
+  "scopeManifestSha256": "fb620b98709d9133459eda3722c1ea44e74a8ab4bb897fb90fdc7c0bdd27dfa6",
+  "commands": [
+    {
+      "command": "cargo test -p relayer-graph-server --no-default-features --test import_visual_asset_transport -- --nocapture",
+      "result": "PASS: 2 passed, 0 failed; 3.18s tests",
+      "observations": [
+        "Three references sharing 7 MiB trusted content: old inline request rejected 413; one content stage plus metadata-only turn publishes correctly.",
+        "Database has one staged digest, one accepted digest, three accepted references.",
+        "Cross-import missing content rejects finalization with no published nodes/content; deleting source import removes staged blob."
+      ],
+      "limits": "Opaque bytes deliberately isolate trusted control transport; actual media validation is separate host/Product E2E coverage."
+    },
+    {
+      "command": "cargo test -p relayer-app-server --no-default-features --test conversation_export_contract -- --nocapture",
+      "result": "PASS: 19 passed, 0 failed; 1.79s tests",
+      "limits": "Three existing graph-server dead-code warnings printed during dependency compilation."
+    },
+    {
+      "command": "cargo fmt --all",
+      "result": "PASS"
+    },
+    {
+      "command": "git diff --check",
+      "result": "PASS"
+    }
+  ],
+  "certification": "Implementation evidence only. Not an independent review assertion. Full check/build and Product/Eval end-to-end run remain root-owned pending stable authority sources."
+}

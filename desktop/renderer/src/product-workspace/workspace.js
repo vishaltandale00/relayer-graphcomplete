@@ -1,5 +1,5 @@
 import { escapeHtml, toast } from "../ui.js";
-import { actionCanRetry, actionWasInvoked } from "../action-invocation-state.js";
+import { actionCanRetry, actionWasInvoked, actionReviewKind } from "../action-invocation-state.js";
 import { setControlActivationCompletion } from "../control-activation.js";
 import {
   createModelPicker,
@@ -1295,13 +1295,6 @@ export async function navigateWorkspaceAction({
   await onNavigateLayer(action.targetLayerId, { action, sourceNode });
 }
 
-export function actionReviewKind(action) {
-  if (action?.kind === "input") return "input-action";
-  return (
-    action?.kind === "navigate"
-    || (action?.kind === "invoke" && action.targetLayerId != null)
-  ) ? "navigate-action" : "invoke-action";
-}
 
 export function resolveCompiledNodeDetailAction(actions, reference, node) {
   if (!reference?.clientKey
@@ -4758,7 +4751,8 @@ export function createProductWorkspace({
   } = {}) {
     if (contextEditor?.resolving) return false;
     const requestSequence = ++nodeSelectionSequence;
-    const sourceThreadId = String(getThread()?.id);
+    const sourceThread = getThread();
+    const sourceThreadId = String(sourceThread?.id);
     const node = resolveInteractionContextNode(
       id,
       state.nodes,
@@ -4769,7 +4763,7 @@ export function createProductWorkspace({
     const nextSelectedContextTarget = contextTarget !== undefined
       ? contextTarget || null
       : (notify ? null : selectedContextTarget);
-    const interaction = currentInteraction(state, getThread());
+    const interaction = currentInteraction(state, sourceThread);
     const nextTarget = interactionContextTargetForEditor({
       nodeId: node.id,
       selectedContextTarget: nextSelectedContextTarget,
@@ -4908,7 +4902,7 @@ export function createProductWorkspace({
       mountKey: authoredDetailMountKey,
       existing: mountedAuthoredDetail,
       compatibilityIssue: authoredDetailCompatibilityIssue,
-      resolveAsset: (asset) => resolveNodeDetailAsset(asset, { node, state, thread: getThread() }),
+      resolveAsset: (asset) => resolveNodeDetailAsset(asset, { node, state, thread: sourceThread, interaction, layerId: visibleLayer?.layer?.id }),
       resolveAction: resolveAuthoredAction,
       capabilityState: authoredCapabilityState,
       onNavigate: async (action) => {
@@ -5165,3 +5159,5 @@ export function createProductWorkspace({
     dispose,
   });
 }
+
+export { actionReviewKind } from "../action-invocation-state.js";

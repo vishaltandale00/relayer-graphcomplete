@@ -5,6 +5,7 @@ import {
   productWorkspaceNeedsRecreation,
 } from "./product-workspace/model.js";
 import { activeThread, appState, desktop, evalReview, query, viewState } from "./state.js";
+import { resolveAcceptedNodeDetailAsset } from "./node-detail-assets.js";
 import { toast } from "./ui.js";
 import { onboardingTutorialController } from "./onboarding-tutorial.js";
 import { createAnnotationApi } from "./annotation-api.js";
@@ -39,6 +40,12 @@ function workspace() {
     getState: () => appState,
     getThread: activeThread,
     selection: viewState,
+    resolveNodeDetailAsset: (asset, { node, thread, interaction, layerId }) => resolveAcceptedNodeDetailAsset(asset, {
+      threadId: thread?.id,
+      interactionId: interaction?.id,
+      nodeId: node.id,
+      layerId,
+    }),
     showThread: () => setMainView("thread"),
     showEmpty: () => setMainView("new"),
     getNavigationHistory,
