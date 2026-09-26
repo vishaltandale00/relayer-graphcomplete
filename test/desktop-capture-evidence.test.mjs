@@ -161,6 +161,62 @@ describe("interaction-context recording proof", () => {
     })).toThrow(/capture gap/);
   });
 
+  it("rejects title-only stale frames when the boundary requires Node Details or a closed editor", () => {
+    const titleOnlyStaleFrame = {
+      frameNumber: 3,
+      elapsedMs: 0,
+      recognizedText: "Incoming queue Two-worker pool",
+    };
+    const titleOnlyStaleEnd = {
+      ...titleOnlyStaleFrame,
+      frameNumber: 20,
+      elapsedMs: 1500,
+      maximumCaptureGapMs: 100,
+    };
+
+    expect(() => validateVisibleBoundaryHold({
+      startFrame: titleOnlyStaleFrame,
+      endFrame: titleOnlyStaleEnd,
+      expectedText: ["NODE DETAILS", "Incoming queue"],
+      minimumHoldMs: 1400,
+      maximumCaptureGapMs: 500,
+    })).toThrow(/missingStart.*NODE DETAILS/);
+
+    const staleEditorFrame = {
+      ...titleOnlyStaleFrame,
+      recognizedText: "NODE DETAILS Two-worker pool Add an annotation Keep both workers available for queued tasks.",
+    };
+    const staleEditorEnd = {
+      ...staleEditorFrame,
+      frameNumber: 20,
+      elapsedMs: 1500,
+      maximumCaptureGapMs: 100,
+    };
+    expect(() => validateVisibleBoundaryHold({
+      startFrame: staleEditorFrame,
+      endFrame: staleEditorEnd,
+      expectedText: ["Two-worker pool"],
+      expectedAbsentText: ["Add an annotation", "Keep both workers available for queued tasks."],
+      minimumHoldMs: 1400,
+      maximumCaptureGapMs: 500,
+    })).toThrow(/unexpectedStart/);
+
+    expect(validateVisibleBoundaryHold({
+      startFrame: {
+        ...titleOnlyStaleFrame,
+        recognizedText: "Incoming queue Two-worker pool Scroll or pinch to zoom",
+      },
+      endFrame: {
+        ...titleOnlyStaleEnd,
+        recognizedText: "Incoming queue Two-worker pool Scroll or pinch to zoom",
+      },
+      expectedText: ["Incoming queue"],
+      expectedAbsentText: ["NODE DETAILS", "Add an annotation"],
+      minimumHoldMs: 1400,
+      maximumCaptureGapMs: 500,
+    })).toBe(1500);
+  });
+
   it("rejects a container that clips its encoded terminal frame despite matching earlier timestamps", () => {
     const capturedPresentationMs = [0, 100, 200];
     const encodedPresentationMs = [0, 100, 200, 400, 600];

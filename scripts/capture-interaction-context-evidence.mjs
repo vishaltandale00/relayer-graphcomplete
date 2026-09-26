@@ -363,7 +363,12 @@ async function startContinuousRecording(name) {
       recorder.capturing = false;
     }
   })();
-  recorder.captureBoundary = async (eventName, expectedVisibleText, holdMs = defaultBoundaryHoldMs) => {
+  recorder.captureBoundary = async (
+    eventName,
+    expectedVisibleText,
+    holdMs = defaultBoundaryHoldMs,
+    expectedAbsentText = [],
+  ) => {
     if (!Array.isArray(expectedVisibleText) || expectedVisibleText.length === 0) {
       throw new Error(`Visual boundary ${eventName} has no required captured-screen content.`);
     }
@@ -385,6 +390,7 @@ async function startContinuousRecording(name) {
       startFrame,
       endFrame: { ...endFrameWithText, maximumCaptureGapMs: maximumHoldCaptureGapMs },
       expectedText: expectedVisibleText,
+      expectedAbsentText,
       minimumHoldMs: Math.max(defaultBoundaryHoldMs, holdMs),
       maximumCaptureGapMs: maximumContinuousFrameGapMs,
     });
@@ -399,6 +405,7 @@ async function startContinuousRecording(name) {
       capturedFrameSha256: frame.sha256,
       paintSynchronized: "webContents.invalidate followed by two renderer animation frames before capture",
       expectedVisibleText,
+      expectedAbsentText,
       visibleContentAccepted: true,
       recognizedTextAtStart: startFrame.recognizedText,
       holdEndFrameNumber: endFrame.frameNumber,
@@ -417,8 +424,14 @@ async function startContinuousRecording(name) {
   return recorder;
 }
 
-async function captureRecordingBoundary(recorder, name, expectedVisibleText, holdMs = defaultBoundaryHoldMs) {
-  return recorder.captureBoundary(name, expectedVisibleText, holdMs);
+async function captureRecordingBoundary(
+  recorder,
+  name,
+  expectedVisibleText,
+  holdMs = defaultBoundaryHoldMs,
+  expectedAbsentText = [],
+) {
+  return recorder.captureBoundary(name, expectedVisibleText, holdMs, expectedAbsentText);
 }
 
 async function stopContinuousRecording(recorder) {
@@ -1108,16 +1121,22 @@ async function run() {
     document.querySelector('#inspector')?.classList.contains('hidden')
   `));
   const beforeRestartRecording = await startContinuousRecording("before-restart");
-  await captureRecordingBoundary(beforeRestartRecording, "journey recording started with the graph ready and Node Details closed", ["Incoming queue"]);
+  await captureRecordingBoundary(
+    beforeRestartRecording,
+    "journey recording started with the graph ready and Node Details closed",
+    ["Incoming queue"],
+    defaultBoundaryHoldMs,
+    ["NODE DETAILS", "Add an annotation"],
+  );
   await clickNode("Incoming queue");
   await waitFor("recorded Incoming queue Node Details open", () => evaluate(`
     document.querySelector('#detailTitle')?.textContent === 'Incoming queue'
       && !document.querySelector('#inspector')?.classList.contains('hidden')
   `));
-  await captureRecordingBoundary(beforeRestartRecording, "opened Incoming queue Node Details for draft A", ["Incoming queue"]);
+  await captureRecordingBoundary(beforeRestartRecording, "opened Incoming queue Node Details for draft A", ["NODE DETAILS", "Incoming queue"]);
   await click("#attachNodeContext");
   await waitFor("recorded first draft editor open", () => evaluate(`Boolean(document.querySelector('#contextAnnotationEditor'))`));
-  await captureRecordingBoundary(beforeRestartRecording, "opened the draft A editor", ["Incoming queue", "Add an annotation"]);
+  await captureRecordingBoundary(beforeRestartRecording, "opened the draft A editor", ["NODE DETAILS", "Incoming queue", "Add an annotation"]);
   await setValue("#contextAnnotationEditor", restartDraftA);
   const restartDraftRecordA = await waitFor("first restart draft saved", async () => {
     const response = await productRequest(`/api/threads/${thread.id}/context-drafts`);
@@ -1129,11 +1148,17 @@ async function run() {
     document.querySelector('#detailTitle')?.textContent === 'Two-worker pool'
       && !document.querySelector('#contextAnnotationEditor')
   `));
-  await captureRecordingBoundary(beforeRestartRecording, "switched from Incoming queue to Two-worker pool", ["Two-worker pool"]);
+  await captureRecordingBoundary(
+    beforeRestartRecording,
+    "switched from Incoming queue to Two-worker pool with no annotation editor",
+    ["NODE DETAILS", "Two-worker pool"],
+    defaultBoundaryHoldMs,
+    ["Add an annotation", restartDraftA],
+  );
   await click("#attachNodeContext");
   const restartDraftB = "Keep both workers available for queued tasks.";
   await waitFor("second draft editor open in continuous recording", () => evaluate(`Boolean(document.querySelector('#contextAnnotationEditor'))`));
-  await captureRecordingBoundary(beforeRestartRecording, "opened the draft B editor", ["Two-worker pool", "Add an annotation"]);
+  await captureRecordingBoundary(beforeRestartRecording, "opened the draft B editor", ["NODE DETAILS", "Two-worker pool", "Add an annotation"]);
   await setValue("#contextAnnotationEditor", restartDraftB);
   const bothRestartDrafts = await waitFor("two occurrence-bound drafts saved", async () => {
     const response = await productRequest(`/api/threads/${thread.id}/context-drafts`);
@@ -1171,7 +1196,13 @@ async function run() {
   await restartStack(thread.id);
   const restartOperationEndedAtUtc = new Date().toISOString();
   const afterRestartRecording = await startContinuousRecording("after-restart");
-  await captureRecordingBoundary(afterRestartRecording, "Electron BrowserWindow and app services reopened after explicit recording discontinuity", ["Incoming queue"]);
+  await captureRecordingBoundary(
+    afterRestartRecording,
+    "Electron BrowserWindow and app services reopened after explicit recording discontinuity with Node Details closed",
+    ["Incoming queue"],
+    defaultBoundaryHoldMs,
+    ["NODE DETAILS", "Add an annotation"],
+  );
   await waitForAcceptedInteractions(thread.id, 3);
   const reopenedDrafts = await productRequest(`/api/threads/${thread.id}/context-drafts`);
   assertDeepEqual(reopenedDrafts.drafts, bothRestartDrafts, "Full service and window restart changed either complete draft record");
@@ -1244,13 +1275,14 @@ async function run() {
   await captureRecordingBoundary(
     afterRestartRecording,
     "discarded B leaves its historical node visible with no draft editor",
-    ["Two-worker pool"],
+    ["NODE DETAILS", "Two-worker pool"],
     criticalBoundaryHoldMs,
+    ["Add an annotation", restartDraftB],
   );
   await click("#attachNodeContext");
   const freshDraftB = "Review worker availability before sending.";
   await waitFor("fresh B editor reopened after discard", () => evaluate(`Boolean(document.querySelector('#contextAnnotationEditor'))`));
-  await captureRecordingBoundary(afterRestartRecording, "recreated a fresh empty B editor after discard", ["Two-worker pool", "Add an annotation"]);
+  await captureRecordingBoundary(afterRestartRecording, "recreated a fresh empty B editor after discard", ["NODE DETAILS", "Two-worker pool", "Add an annotation"]);
   await setValue("#contextAnnotationEditor", freshDraftB);
   const freshDraftRecord = await waitFor("fresh unconfirmed second draft saved", async () => {
     const response = await productRequest(`/api/threads/${thread.id}/context-drafts`);
@@ -1417,7 +1449,7 @@ async function run() {
     "opened Incoming queue Node Details for draft A",
     "opened the draft A editor",
     "typed and durably saved draft A on Incoming queue",
-    "switched from Incoming queue to Two-worker pool",
+    "switched from Incoming queue to Two-worker pool with no annotation editor",
     "opened the draft B editor",
     "typed and durably saved draft B on Two-worker pool",
     "restored draft A after saving B",
@@ -1581,10 +1613,15 @@ async function run() {
       { file: "draft-after-override.png", sha256: createHash("sha256").update(overrideBytes).digest("hex") },
     ],
     recording: {
-      mode: "two continuous direct-renderer recordings; each boundary waits for paint and OCR-matches its exact required text at both ends of a continuously sampled visible hold; timestamps define VFR durations with an explicit terminal-frame hold and full-restart discontinuity",
+      mode: "two continuous direct-renderer recordings; the named boundary events wait for paint and OCR-check required and forbidden text at start and hold end; timestamps define VFR durations with an explicit terminal-frame hold and full-restart discontinuity",
       segments: recordingSegments.map((segment) => segment.receipt),
       discontinuity: restartDiscontinuity,
-      eventCheckpoints: frames.map(({ caption, capturedAtUtc, selector }) => ({ caption, capturedAtUtc, selector })),
+      boundaryAcceptance: {
+        eventCount: recordingSegments.reduce((total, segment) => total + segment.events.length, 0),
+        observations: "OCR checks only each named event's captured start frame and captured hold-end frame; intervening continuous-recording frames are not individually classified.",
+        distinction: "Node Details acceptance requires its visible NODE DETAILS marker; graph-only acceptance requires the selected graph title and absence of NODE DETAILS and Add an annotation. Editor absence checks also forbid the prior draft text where applicable.",
+      },
+      screenshotCaptionCheckpoints: frames.map(({ caption, capturedAtUtc, selector }) => ({ caption, capturedAtUtc, selector })),
       historicalStillMontage: {
         file: historicalMontageFile.split("/").at(-1),
         sha256: createHash("sha256").update(historicalMontageBytes).digest("hex"),

@@ -10,6 +10,7 @@ export function validateVisibleBoundaryHold({
   startFrame,
   endFrame,
   expectedText,
+  expectedAbsentText = [],
   minimumHoldMs,
   maximumCaptureGapMs,
 }) {
@@ -30,8 +31,15 @@ export function validateVisibleBoundaryHold({
   const normalizedEnd = normalizeVisibleText(endFrame.recognizedText);
   const missingStart = expectedText.filter((needle) => !normalizedStart.includes(normalizeVisibleText(needle)));
   const missingEnd = expectedText.filter((needle) => !normalizedEnd.includes(normalizeVisibleText(needle)));
-  if (missingStart.length || missingEnd.length) {
-    throw new Error(`Captured boundary text did not match at both ends: ${JSON.stringify({ missingStart, missingEnd })}`);
+  const unexpectedStart = expectedAbsentText.filter((needle) => normalizedStart.includes(normalizeVisibleText(needle)));
+  const unexpectedEnd = expectedAbsentText.filter((needle) => normalizedEnd.includes(normalizeVisibleText(needle)));
+  if (missingStart.length || missingEnd.length || unexpectedStart.length || unexpectedEnd.length) {
+    throw new Error(`Captured boundary text did not match at both ends: ${JSON.stringify({
+      missingStart,
+      missingEnd,
+      unexpectedStart,
+      unexpectedEnd,
+    })}`);
   }
   return endFrame.elapsedMs - startFrame.elapsedMs;
 }
