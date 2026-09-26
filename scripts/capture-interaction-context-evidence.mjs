@@ -5,7 +5,7 @@ import { mkdirSync, mkdtempSync } from "node:fs";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { createInterface } from "node:readline";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { join, relative, resolve } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 
 import { taskSystemFixtureFactory } from "@relayer/eval-runner";
@@ -15,7 +15,12 @@ import { GraphCompleteRuntimeService } from "../desktop/main/services/graphcompl
 import { RelayerAppServerService } from "../desktop/main/services/relayer-app-server.mjs";
 import { createWindowFactory } from "../desktop/main/window.mjs";
 import { createElectronWorkspaceDriver } from "./electron-workspace-driver.mjs";
-import { validateTerminalFrameCoverage, validateVisibleBoundaryHold } from "./lib/interaction-context-capture-proof.mjs";
+import {
+  assertTrackedWorkspaceUnchanged,
+  captureTrackedWorkspaceSnapshot,
+  validateTerminalFrameCoverage,
+  validateVisibleBoundaryHold,
+} from "./lib/interaction-context-capture-proof.mjs";
 
 const OPT_IN = "RELAYER_CAPTURE_INTERACTION_CONTEXT_EVIDENCE";
 const repositoryRoot = resolve(import.meta.dirname, "..");
@@ -40,6 +45,20 @@ const confirmedDraftScreenshotFile = join(outputDirectory, "confirmed-draft-with
 const warningScreenshotFile = join(outputDirectory, "draft-omission-warning.png");
 const overrideScreenshotFile = join(outputDirectory, "draft-after-override.png");
 const manifestFile = join(outputDirectory, "manifest.json");
+const captureOutputPaths = [
+  beforeRestartVideoFile,
+  afterRestartVideoFile,
+  beforeTerminalScreenshotFile,
+  afterTerminalScreenshotFile,
+  composerScreenshotFile,
+  restartedScreenshotFile,
+  twoDraftsScreenshotFile,
+  secondDraftScreenshotFile,
+  confirmedDraftScreenshotFile,
+  warningScreenshotFile,
+  overrideScreenshotFile,
+  manifestFile,
+].map((path) => relative(repositoryRoot, path).replaceAll("\\", "/"));
 const dataDirectory = mkdtempSync(join(tmpdir(), "relayer-interaction-context-evidence-"));
 const framesDirectory = join(dataDirectory, "checkpoints");
 const continuousFramesDirectory = join(dataDirectory, "continuous-frames");
@@ -112,6 +131,8 @@ const workingTreeDirty = Boolean(execFileSync("git", ["status", "--porcelain"], 
   cwd: repositoryRoot,
   encoding: "utf8",
 }).trim());
+if (workingTreeDirty) throw new Error("Interaction-context evidence capture requires a clean committed source snapshot.");
+const trackedWorkspaceBeforeCapture = await captureTrackedWorkspaceSnapshot(repositoryRoot, captureOutputPaths);
 
 app.setName("Relayer Interaction Context Evidence");
 const electronProfileDirectory = join(dataDirectory, "electron-profile");
@@ -1393,7 +1414,13 @@ async function run() {
     [...interactionIdsBeforeWarning, overrideInteraction.id],
     "Override did not append exactly one interaction after the warning journey",
   );
-  await captureRecordingBoundary(afterRestartRecording, "explicit override submitted exactly A and no other context", ["Use the confirmed queue note for this follow-up."]);
+  await captureRecordingBoundary(
+    afterRestartRecording,
+    "explicit override submitted exactly A and no other context",
+    ["Turn 4 of 4", "Use the confirmed queue note for this follow-up."],
+    defaultBoundaryHoldMs,
+    ["Drafts will be omitted"],
+  );
   const durableAfterOverride = await productRequest(`/api/threads/${thread.id}/context-drafts`);
   assertDeepEqual(durableAfterOverride.drafts, [freshDraftSnapshot], "Override changed the complete durable B record");
   const freshDraftTurnIndex = overrideDetail.interactions.findIndex((interaction) => (
@@ -1508,6 +1535,8 @@ async function run() {
     cwd: repositoryRoot,
     encoding: "utf8",
   }).trim();
+  const trackedWorkspaceAfterCapture = await captureTrackedWorkspaceSnapshot(repositoryRoot, captureOutputPaths);
+  assertTrackedWorkspaceUnchanged(trackedWorkspaceBeforeCapture, trackedWorkspaceAfterCapture);
   if (JSON.stringify(sourceHashesBeforeCapture) !== JSON.stringify(sourceHashesAfterCapture)) {
     throw new Error(`Source proof files changed during capture: ${JSON.stringify({ sourceHashesBeforeCapture, sourceHashesAfterCapture })}`);
   }
@@ -1524,8 +1553,16 @@ async function run() {
     sourceTreeAfterCapture,
     sourceHashesBeforeCapture,
     sourceHashesAfterCapture,
+    trackedWorkspaceBeforeCapture,
+    trackedWorkspaceAfterCapture,
     workingTreeDirty,
-    command: `npm run build && ${OPT_IN}=1 electron scripts/capture-interaction-context-evidence.mjs`,
+    command: {
+      executable: process.execPath,
+      argv: process.argv,
+      invocationArgs: process.argv[0] === process.execPath ? process.argv.slice(1) : process.argv,
+      workingDirectory: repositoryRoot,
+      environment: { [OPT_IN]: process.env[OPT_IN] },
+    },
     paidInferenceCalls: 0,
     runtime: "real Electron BrowserWindow + production renderer + Rust app/graph servers + SQLite",
     harness: "fixture-task-system (deterministic zero-inference implementation)",

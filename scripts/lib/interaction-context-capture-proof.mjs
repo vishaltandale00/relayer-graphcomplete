@@ -1,9 +1,65 @@
+import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
+import { lstat, readFile, readlink } from "node:fs/promises";
+import { join } from "node:path";
+
 function normalizeVisibleText(value) {
   return String(value ?? "")
     .toLocaleLowerCase("en-US")
     .replace(/[^a-z0-9]+/g, " ")
     .trim()
     .replace(/\s+/g, " ");
+}
+
+export async function captureTrackedWorkspaceSnapshot(root, excludedPaths = []) {
+  const excluded = new Set(excludedPaths.map((path) => path.replaceAll("\\", "/")));
+  const trackedPaths = execFileSync("git", ["ls-files", "-z"], {
+    cwd: root,
+    encoding: "utf8",
+  }).split("\0").filter(Boolean).sort();
+  const untrackedPaths = execFileSync("git", ["ls-files", "--others", "--exclude-standard", "-z"], {
+    cwd: root,
+    encoding: "utf8",
+  }).split("\0").filter(Boolean)
+    .map((path) => path.replaceAll("\\", "/"))
+    .filter((path) => !excluded.has(path))
+    .sort();
+  const digest = createHash("sha256");
+  let trackedFileCount = 0;
+
+  for (const path of trackedPaths) {
+    const normalizedPath = path.replaceAll("\\", "/");
+    if (excluded.has(normalizedPath)) continue;
+    const absolutePath = join(root, path);
+    let metadata;
+    try {
+      metadata = await lstat(absolutePath);
+    } catch (error) {
+      throw new Error(`Tracked workspace file is missing after capture: ${path}`, { cause: error });
+    }
+    digest.update(`${normalizedPath}\0${metadata.mode & 0o777}\0`);
+    if (metadata.isSymbolicLink()) digest.update(await readlink(absolutePath));
+    else if (metadata.isFile()) digest.update(await readFile(absolutePath));
+    else throw new Error(`Tracked workspace entry is not a regular file or symlink: ${path}`);
+    digest.update("\0");
+    trackedFileCount += 1;
+  }
+
+  return {
+    sha256: digest.digest("hex"),
+    trackedFileCount,
+    untrackedPaths,
+    excludedPaths: [...excluded].sort(),
+  };
+}
+
+export function assertTrackedWorkspaceUnchanged(before, after) {
+  if (!before || !after
+    || before.sha256 !== after.sha256
+    || before.trackedFileCount !== after.trackedFileCount
+    || JSON.stringify(before.untrackedPaths) !== JSON.stringify(after.untrackedPaths)) {
+    throw new Error(`Tracked production workspace changed during capture: ${JSON.stringify({ before, after })}`);
+  }
 }
 
 export function validateVisibleBoundaryHold({

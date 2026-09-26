@@ -1,4 +1,5 @@
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { execFileSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -11,6 +12,8 @@ import {
   sha256File,
 } from "../scripts/lib/desktop-capture-evidence.mjs";
 import {
+  assertTrackedWorkspaceUnchanged,
+  captureTrackedWorkspaceSnapshot,
   validateTerminalFrameCoverage,
   validateVisibleBoundaryHold,
 } from "../scripts/lib/interaction-context-capture-proof.mjs";
@@ -161,6 +164,46 @@ describe("interaction-context recording proof", () => {
     })).toThrow(/capture gap/);
   });
 
+  it("rejects a stale omission-warning frame as the post-override screen", () => {
+    const warningFrame = {
+      frameNumber: 10,
+      elapsedMs: 1000,
+      recognizedText: "Turn 3 of 3 DRAFTS WILL BE OMITTED Use the confirmed queue note for this follow-up.",
+    };
+    const warningHoldEnd = {
+      ...warningFrame,
+      frameNumber: 27,
+      elapsedMs: 2800,
+      maximumCaptureGapMs: 180,
+    };
+    expect(() => validateVisibleBoundaryHold({
+      startFrame: warningFrame,
+      endFrame: warningHoldEnd,
+      expectedText: ["Turn 4 of 4", "Use the confirmed queue note for this follow-up."],
+      expectedAbsentText: ["Drafts will be omitted"],
+      minimumHoldMs: 1400,
+      maximumCaptureGapMs: 500,
+    })).toThrow(/missingStart.*Turn 4 of 4.*unexpectedStart.*Drafts will be omitted/);
+
+    const postOverrideFrame = {
+      ...warningFrame,
+      recognizedText: "Turn 4 of 4 Use the confirmed queue note for this follow-up.",
+    };
+    expect(validateVisibleBoundaryHold({
+      startFrame: postOverrideFrame,
+      endFrame: {
+        ...postOverrideFrame,
+        frameNumber: 27,
+        elapsedMs: 2800,
+        maximumCaptureGapMs: 180,
+      },
+      expectedText: ["Turn 4 of 4", "Use the confirmed queue note for this follow-up."],
+      expectedAbsentText: ["Drafts will be omitted"],
+      minimumHoldMs: 1400,
+      maximumCaptureGapMs: 500,
+    })).toBe(1800);
+  });
+
   it("rejects title-only stale frames when the boundary requires Node Details or a closed editor", () => {
     const titleOnlyStaleFrame = {
       frameNumber: 3,
@@ -238,5 +281,47 @@ describe("interaction-context recording proof", () => {
       containerDurationMs: 601,
       terminalFrameHoldMs: 200,
     })).toThrow(/Repeated terminal frames/);
+  });
+});
+
+describe("post-capture production workspace guard", () => {
+  it("accepts changes to declared capture outputs and rejects another tracked production file edit", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "interaction-workspace-snapshot-"));
+    const excludedOutput = "docs/prd/assets/evidence/interaction-context/manifest.json";
+    try {
+      execFileSync("git", ["init", "--quiet"], { cwd: directory });
+      await writeFile(join(directory, "scripts-renderer.js"), "export const version = 1;\n");
+      await mkdir(join(directory, "docs/prd/assets/evidence/interaction-context"), { recursive: true });
+      await writeFile(join(directory, excludedOutput), "{\"version\":1}\n");
+      execFileSync("git", ["add", "scripts-renderer.js", excludedOutput], { cwd: directory });
+
+      const before = await captureTrackedWorkspaceSnapshot(directory, [excludedOutput]);
+      await writeFile(join(directory, excludedOutput), "{\"version\":2}\n");
+      const captureOnlyChange = await captureTrackedWorkspaceSnapshot(directory, [excludedOutput]);
+      expect(() => assertTrackedWorkspaceUnchanged(before, captureOnlyChange)).not.toThrow();
+
+      await writeFile(join(directory, "scripts-renderer.js"), "export const version = 2;\n");
+      const productionEdit = await captureTrackedWorkspaceSnapshot(directory, [excludedOutput]);
+      expect(() => assertTrackedWorkspaceUnchanged(before, productionEdit))
+        .toThrow(/Tracked production workspace changed during capture/);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects a newly created untracked production file", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "interaction-workspace-untracked-"));
+    try {
+      execFileSync("git", ["init", "--quiet"], { cwd: directory });
+      await writeFile(join(directory, "tracked.js"), "export const stable = true;\n");
+      execFileSync("git", ["add", "tracked.js"], { cwd: directory });
+      const before = await captureTrackedWorkspaceSnapshot(directory);
+      await writeFile(join(directory, "new-production-file.js"), "export const changed = true;\n");
+      const after = await captureTrackedWorkspaceSnapshot(directory);
+      expect(() => assertTrackedWorkspaceUnchanged(before, after))
+        .toThrow(/Tracked production workspace changed during capture/);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
   });
 });
