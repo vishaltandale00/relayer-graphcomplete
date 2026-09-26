@@ -81,8 +81,38 @@ let product;
 let productSession;
 let mainWindow;
 let keepaliveWindow;
+let captureWindowSequence = 0;
+let activeCaptureWindow;
+let activeCaptureWebContents;
+let activeCaptureWindowUrl;
+let activeCaptureWindowTitle;
 let composerDraftState = { pendingNewThread: null, threadFollowups: {} };
 let captureTextRecognizer;
+
+const captureDiagnosticStartedAt = process.hrtime.bigint();
+function recordCaptureDiagnostic(event, details = {}) {
+  process.stdout.write(`${JSON.stringify({
+    diagnostic: "interaction-context-capture-lifecycle",
+    event,
+    recordedAtUtc: new Date().toISOString(),
+    elapsedMs: Number(process.hrtime.bigint() - captureDiagnosticStartedAt) / 1_000_000,
+    ...details,
+  })}\n`);
+}
+
+function captureWindowDiagnosticState() {
+  return {
+    windowId: captureWindowSequence,
+    windowDestroyed: activeCaptureWindow?.isDestroyed() ?? true,
+    webContentsDestroyed: activeCaptureWebContents?.isDestroyed() ?? true,
+    lastKnownUrl: activeCaptureWindowUrl ?? null,
+    lastKnownTitle: activeCaptureWindowTitle ?? null,
+  };
+}
+
+app.on("before-quit", () => recordCaptureDiagnostic("app-before-quit"));
+app.on("will-quit", () => recordCaptureDiagnostic("app-will-quit"));
+process.on("exit", (exitCode) => recordCaptureDiagnostic("process-exit", { exitCode }));
 
 const {
   click,
@@ -700,6 +730,34 @@ async function openThreadWindow(threadId) {
     openExternal: async () => {},
   });
   mainWindow = await createWindow(productSession);
+  const windowId = ++captureWindowSequence;
+  const capturedWindow = mainWindow;
+  const capturedWebContents = mainWindow.webContents;
+  const webContentsId = capturedWebContents.id;
+  activeCaptureWindow = capturedWindow;
+  activeCaptureWebContents = capturedWebContents;
+  activeCaptureWindowUrl = capturedWebContents.getURL();
+  activeCaptureWindowTitle = capturedWindow.getTitle();
+  const recordWindowEvent = (event, details = {}) => recordCaptureDiagnostic(event, {
+    windowId,
+    webContentsId,
+    windowDestroyed: capturedWindow.isDestroyed(),
+    webContentsDestroyed: capturedWebContents.isDestroyed(),
+    lastKnownUrl: activeCaptureWindowUrl,
+    lastKnownTitle: activeCaptureWindowTitle,
+    ...details,
+  });
+  capturedWindow.on("close", () => recordWindowEvent("window-close"));
+  capturedWindow.on("closed", () => recordWindowEvent("window-closed"));
+  capturedWindow.on("unresponsive", () => recordWindowEvent("window-unresponsive"));
+  capturedWindow.on("responsive", () => recordWindowEvent("window-responsive"));
+  capturedWebContents.on("destroyed", () => recordWindowEvent("webcontents-destroyed"));
+  capturedWebContents.on("did-navigate", (_event, url) => { activeCaptureWindowUrl = url; });
+  capturedWebContents.on("page-title-updated", (_event, title) => { activeCaptureWindowTitle = title; });
+  capturedWebContents.on("render-process-gone", (_event, details) => (
+    recordWindowEvent("render-process-gone", { reason: details?.reason, exitCode: details?.exitCode })
+  ));
+  recordWindowEvent("window-created");
   mainWindow.setSize(1480, 920);
   await mainWindow.loadURL(`${productSession.origin}/?threadId=${encodeURIComponent(threadId)}`);
   mainWindow.show();
@@ -1038,14 +1096,33 @@ async function run() {
     "#composerContextTray",
   );
   await click("[aria-label='Close Incoming queue annotations']");
+  recordCaptureDiagnostic("second-turn-send-click-started", {
+    ...captureWindowDiagnosticState(),
+  });
   await click("#sendInteraction");
+  recordCaptureDiagnostic("second-turn-send-click-returned", captureWindowDiagnosticState());
   const secondDetail = await waitForAcceptedInteractions(thread.id, 2);
-  await waitFor("second turn context pill", () => evaluate(`
-    document.querySelector('#turnPickerButton')?.textContent === 'Turn 2 of 2'
-      && !document.querySelector('#interactionContextPill')?.classList.contains('hidden')
-      && document.querySelector('#interactionContextCount')?.textContent === '1'
-      && document.querySelector('#threadPrompt')?.disabled === false
-  `));
+  recordCaptureDiagnostic("second-turn-accepted", {
+    interactionId: secondDetail.interactions[1]?.id,
+    completionStatus: secondDetail.interactions[1]?.completionStatus,
+    ...captureWindowDiagnosticState(),
+  });
+  recordCaptureDiagnostic("second-turn-ui-check-started", { windowId: captureWindowSequence });
+  try {
+    await waitFor("second turn context pill", () => evaluate(`
+      document.querySelector('#turnPickerButton')?.textContent === 'Turn 2 of 2'
+        && !document.querySelector('#interactionContextPill')?.classList.contains('hidden')
+        && document.querySelector('#interactionContextCount')?.textContent === '1'
+        && document.querySelector('#threadPrompt')?.disabled === false
+    `));
+    recordCaptureDiagnostic("second-turn-ui-check-passed", { windowId: captureWindowSequence });
+  } catch (error) {
+    recordCaptureDiagnostic("second-turn-ui-check-failed", {
+      ...captureWindowDiagnosticState(),
+      message: error instanceof Error ? error.message : String(error),
+    });
+    throw error;
+  }
   const secondContext = secondDetail.interactions[1].contexts?.[0];
   if (JSON.stringify(secondContext?.annotations) !== JSON.stringify([
     "Queue order controls which task is claimed next.",
