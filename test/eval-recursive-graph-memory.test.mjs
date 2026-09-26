@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { gradeRecursiveGraphMemoryExecution } from "../desktop/eval-main/eval-service.mjs";
+import { gradeRecursiveGraphMemoryExecution } from "../packages/eval-runner/src/cases/recursive-graph-memory-grading.js";
 
 function output(nodeId, layerId, actions = []) {
   return {
@@ -118,11 +118,10 @@ async function gradeFixture(mutate = () => {}) {
     }],
   };
   mutate({ outputs, interactions, events, execution });
-  const turnIndex = new Map(execution.turns.map((turn, index) => [turn, index]));
   return gradeRecursiveGraphMemoryExecution({
     execution,
-    interactions,
-    loadGraphOperations: (turn) => events[turnIndex.get(turn)],
+    interactions: interactions.map(({ interaction }) => interaction),
+    graphOperationsByTurn: events,
   });
 }
 
