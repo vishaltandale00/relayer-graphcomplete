@@ -91,7 +91,7 @@
     { "exact": "docs/graph-query-v1.md", "package": "relayer-graph-core" }
   ],
   "npmOwners": [
-    { "prefix": "packages/eval-runner/", "package": "@relayer/eval-runner", "vitestFiles": ["packages/eval-runner/test"] },
+    { "prefix": "packages/eval-runner/", "package": "@relayer/eval-runner", "vitestFiles": ["packages/eval-runner/test", "test/eval-app-integration.test.mjs"] },
     { "prefix": "packages/visual-assets/", "package": "@relayer/visual-assets", "vitestFiles": ["packages/visual-assets/test"] },
     {
       "prefix": "packages/graph-client/",
@@ -109,6 +109,7 @@
         "test/composer-provider-lifecycle.test.mjs",
         "test/desktop-release-main-ci-check.test.mjs",
         "test/desktop-shell.test.mjs",
+        "test/eval-app-integration.test.mjs",
         "test/first-message-composer-integration.test.mjs",
         "test/settings-navigation.test.mjs",
         "test/window-factory.test.mjs",
