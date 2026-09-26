@@ -836,7 +836,7 @@ from relayer_graph import GraphSession
 graph = await GraphSession.current()
 
 ${currentWorkspaceMechanicsPython()}
-${graphSearchGuidancePython(this.context.configuration.graphCapabilityProfile?.search === "query-v1")}
+${semanticChildGuidancePython(context)}${graphSearchGuidancePython(this.context.configuration.graphCapabilityProfile?.search === "query-v1")}
 
 The graph scope is supplied by the host for this complete() execution and is inherited by your RLM children. Do not read graph credentials from environment variables or files. Give every persisted NodeObject, EdgeObject, LayerObject, navigate action, and invoke action an explicit descriptive client_key that is unique within this interaction and stable across edits and reruns. Never rely on generated client keys in authored code.
 
@@ -868,7 +868,7 @@ from relayer_graph import GraphSession
 graph = await GraphSession.current()
 
 ${currentWorkspaceMechanicsPython()}
-${graphSearchGuidancePython(this.context.configuration.graphCapabilityProfile?.search === "query-v1")}
+${semanticChildGuidancePython(context)}${graphSearchGuidancePython(this.context.configuration.graphCapabilityProfile?.search === "query-v1")}
 
 The graph scope is supplied by the host for this complete() execution and is inherited by your RLM children. Do not read graph credentials from environment variables or files. Give every persisted NodeObject, EdgeObject, LayerObject, navigate action, and invoke action an explicit descriptive client_key that is unique within this interaction and stable across edits and reruns. For example, use NodeObject("info", "Summary", "...", client_key="summary-node"), EdgeObject((summary_node, detail_node), client_key="summary-detail-edge"), and LayerObject(nodes, edges, layout, client_key="response-layer"). Never rely on generated client keys in authored code. Author in whatever order fits the task, while submitting each referenced object before using it. The final graph call must be await graph.submit(${interaction.id}); call it only after the full response has been authored.
 
@@ -919,6 +919,13 @@ function primeSessionAttachment(session: PrimeAgentSession): JsonObject {
 
 function currentWorkspaceMechanicsPython(): string {
   return `Read current with current = await graph.get_current(). After submitting a layer, you may update the pointer with await graph.advance_current(layer, expected_revision=current["headRevision"], operation_key="a-stable-operation-key").`;
+}
+
+// Present only when the product granted this completion a broker, as in codex.basic.
+function semanticChildGuidancePython(context: HarnessRunContext): string {
+  if (context.completionBroker === undefined) return "";
+  return `For explicit semantic child work, first author and submit the invoke action in its layer and advance that layer as current. Only after that succeeds, call input_graph = await graph.prepare_complete(invoke_action). Import complete with from relayer_graph import complete and call child = complete(input_graph). That returns immediately with child.completion_id, await child.current.snapshot(), and await child.result; launch multiple children before awaiting them when the work is independent. Prime RLM children and subagents remain inside this completion and do not create semantic children by themselves.
+`;
 }
 
 function graphSearchGuidancePython(enabled: boolean): string {

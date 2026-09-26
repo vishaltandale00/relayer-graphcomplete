@@ -506,8 +506,11 @@ describe("PrimeAgentHarness", () => {
     expect(prompts[0]!.text).toContain("await graph.get_current()");
     expect(prompts[0]!.text).toContain("await graph.advance_current(");
     expect(prompts[0]!.text).toContain("Advancing current does not complete the interaction");
-    expect(prompts[0]!.text).not.toContain("prepare_complete");
-    expect(prompts[0]!.text).not.toContain("from relayer_graph import complete");
+    // Only the run the product granted a broker is taught explicit semantic child work.
+    expect(prompts[0]!.text).toContain("For explicit semantic child work");
+    expect(prompts[0]!.text).toContain("input_graph = await graph.prepare_complete(invoke_action)");
+    expect(prompts[0]!.text).toContain("from relayer_graph import complete");
+    expect(prompts[0]!.text).toContain("do not create semantic children by themselves");
     expect(prompts[1]!.text).not.toContain("prepare_complete");
     expect(prompts[1]!.text).not.toContain("from relayer_graph import complete");
     expect(prompts[0]!.text).toContain("exactly one NodePlacementObject(node, x, y) per member node");
@@ -1061,6 +1064,10 @@ describe("PrimeAgentHarness", () => {
     const trace = recordingTrace();
     await harness.complete({
       ...context,
+      completionBroker: {
+        url: "http://127.0.0.1:43125/api/completions",
+        token: "12345678901234567890123456789012",
+      },
       trace: trace.sink,
       personalPresentation: {
         attachment: { interactionNodeId: 11, versionInteractionNodeId: 90, rootLayerId: 91 },
@@ -1088,6 +1095,7 @@ describe("PrimeAgentHarness", () => {
     expect(prompt).toContain("await graph.get_neighbors(11)");
     expect(prompt).toContain("ordinary graph.submit(11) automatically fulfills any lease");
     expect(prompt).toContain("There is no separate resolve_action call");
+    expect(prompt).toContain("input_graph = await graph.prepare_complete(invoke_action)");
     expect(prompt).toContain("Never mention or expose the size justification");
     expect(prompt).toContain("Every new root, expansion, and reference layer requires a version-1 LayerLayoutObject");
     expect(prompt).toContain("align comparisons deliberately");
