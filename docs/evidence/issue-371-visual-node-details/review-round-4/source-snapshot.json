@@ -1,0 +1,32 @@
+{
+  "base": "703eef85be8082328de10f7ed63a60d664d18c81",
+  "files": {
+    "crates/relayer-app-server/src/conversation_export.rs": "1ec807f0a9061bee9331e66a3143ec488df41d7d2ff44f7afbc912698362b165",
+    "crates/relayer-app-server/src/conversation_import_service.rs": "869dd324f0f297aabe7e600c9db4d5cb10c897c65822d9e36508d0249b89abb7",
+    "crates/relayer-app-server/src/storage/sqlite/conversation_imports.rs": "2b5ee6751e39dbc29d48190d497123e14555b18ab25fb72c0c2f5e8857064f87",
+    "crates/relayer-app-server/tests/conversation_export_contract.rs": "2bce84451b41b168d17d310dbc9ca75d17700369014f3c15b7453dcbefdbee98",
+    "crates/relayer-graph-core/src/graph/import.rs": "bd37050d966476dd3da7d9a5ca05cd293f70d452d70c1aca093de909666ec7dc",
+    "crates/relayer-graph-core/src/storage/sqlite/authored_detail_assets.rs": "cb38aa156a080c09a0d52d0891f254d7d5f14c7472544ec18a440df3e2da238d",
+    "crates/relayer-graph-server/tests/import_visual_asset_transport.rs": "2343e334043f35b09f9c0b6632d87619c2c8087e19fb680c78e58c85db5a3039",
+    "desktop/main/services/graph-operation-recorder.mjs": "a43e03b362bae8aa419d0f632c9b9183ee7347d8b6a8387986578fecc0bf8b2f",
+    "desktop/renderer/src/product-workspace/node-detail-runtime.js": "2da54b36d95a75821a41316d6fd9982d8b17bac1a41bb80507830942aa310e89",
+    "desktop/renderer/src/review-tools.js": "5b546245f5605c962002f70422332096a1ae580c687b0870cf22b85426bf6e89",
+    "docs/prd/index.html": "f8ce8b72f1ba934e33199f6cc44d8ef20e28e69713054fdd44e3697ca0143871",
+    "package-lock.json": "89a48c1c2770eac3279f7e51491c9d6ded74f320a1133da2825a0653a028d90f",
+    "packages/eval-runner/package.json": "0030995fcc8d53574899c758d800cad63dfee90080156f2eb1f18ca20fffac5d",
+    "packages/eval-runner/src/fixtures/node-detail.ts": "b996ad0f3473c7186c0de2461ad3fa818c3b5472d7192c77c994f16b98a16aed",
+    "packages/eval-runner/test/node-detail-grading.test.ts": "c0321a7627af2d3814ba40541ccf1950c3f3ab869e4d14cd501b229fa28343b7",
+    "packages/harness-host/src/host.ts": "ffecff3944068381dc2974a5e698d1b52fa64b5a1b94168be53578ef2c9420e0",
+    "packages/harness-host/test/visual-assets-bridge.test.ts": "f38622775b2003300cd652864881477ff653ef07f2ebc7ef4d08fc20f832cf91",
+    "packages/visual-assets/src/index.ts": "882294142f2b50bc5c9ab68dda938ff8feeddbd958cee5e6c520c73f0357e0e6",
+    "packages/visual-assets/test/visual-assets.test.ts": "9277523b0a32f6cc9b423b5ce06d6a2cafd5873f528ab0180de8615847aaadaf",
+    "scripts/ci/affected-modules.v1.json": "15b654e6243bbc993958de68f8c5a1df1ca26ba58eb22bed093e569df9d1512d",
+    "scripts/evidence-service-cleanup.mjs": "332c3478e41faa2d3018cd54b82f1804d3419677993dd6b14f993afc163fffc3",
+    "scripts/run-desktop-visual-node-details-test.mjs": "3a7cdfa9ea8c83b0a495892e5237d38420303d259047ccfc87680f6c3ca61cc6",
+    "scripts/test-desktop-visual-node-details.mjs": "5a8a6634a271beaa6a3f0b434e478a7450a1ed0865ff106b70f9ff549d2e3843",
+    "test/desktop-shell.test.mjs": "27e9bd27f280ccc789c78d3a1fca226cc2ecd51c8ac53e268ccb7a1ba69a2f6e",
+    "test/eval-app-integration.test.mjs": "b8eb8d74f441dc249e6a25e316b66a4638c3e3c5c2c2c40b8af4e44fcb3556ff",
+    "test/graph-operation-recorder.test.mjs": "2f48de0639223b5b3857a8573be662be896340d2e242e12dccb497d38189965e",
+    "test/node-detail-runtime.test.mjs": "b17adb20278ff6713438ccae09a84238c629ddf11c1e3da2935b0c84d3556c41"
+  }
+}

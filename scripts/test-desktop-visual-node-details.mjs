@@ -1,3 +1,4 @@
+import { runEvidenceCleanup } from "./evidence-service-cleanup.mjs";
 import { app, BrowserWindow, ipcMain } from "electron";
 import { createHash, randomBytes } from "node:crypto";
 import { mkdtempSync } from "node:fs";
@@ -35,6 +36,9 @@ let keepaliveWindow;
 app.setName("Relayer Visual Node Detail Evidence");
 app.setPath("userData", join(dataDirectory, "electron-profile"));
 app.commandLine.appendSwitch("disable-gpu");
+// The final window closes before asynchronous service cleanup and result output.
+// Keep the process alive until the explicit success/failure exit below.
+app.on("window-all-closed", () => {});
 
 function invariant(condition, message) {
   if (!condition) throw new Error(message);
@@ -237,7 +241,7 @@ async function run() {
   const expectedControls = [
     ["Open implementation notes", "navigate-action", false],
     ["Open referenced evidence", "navigate-action", false],
-    ["Open fixture documentation", "link", false],
+    ["Open fixture documentation", "link", true],
     ["Investigate follow-up", "invoke-action", true],
     ["Review note", "input-action", true],
   ];
@@ -376,16 +380,18 @@ async function run() {
 }
 
 async function stop() {
-  ipcMain.removeHandler("relayer-eval:review-context");
-  if (reviewWindow && !reviewWindow.isDestroyed()) reviewWindow.destroy();
-  if (keepaliveWindow && !keepaliveWindow.isDestroyed()) keepaliveWindow.destroy();
-  for (const service of services.reverse()) await service.close().catch(() => undefined);
-  await rm(dataDirectory, { recursive: true, force: true });
+  await runEvidenceCleanup([
+    () => ipcMain.removeHandler("relayer-eval:review-context"),
+    () => { if (reviewWindow && !reviewWindow.isDestroyed()) reviewWindow.destroy(); },
+    () => { if (keepaliveWindow && !keepaliveWindow.isDestroyed()) keepaliveWindow.destroy(); },
+    ...services.splice(0).reverse().map((service) => () => service.close()),
+    () => rm(dataDirectory, { recursive: true, force: true }),
+  ]);
 }
 
 app.whenReady().then(run).then(async (result) => {
-  if (resultFile) await writeFile(resultFile, `${JSON.stringify(result, null, 2)}\n`, { mode: 0o600 });
   await stop();
+  if (resultFile) await writeFile(resultFile, `${JSON.stringify({ ...result, cleanupCompleted: true }, null, 2)}\n`, { mode: 0o600 });
   app.exit(0);
 }).catch(async (error) => {
   console.error(error);
@@ -394,6 +400,6 @@ app.whenReady().then(run).then(async (result) => {
     await writeFile(resultFile, `${JSON.stringify({ passed: false, error: error?.stack || String(error) }, null, 2)}\n`, { mode: 0o600 })
       .catch(() => undefined);
   }
-  await stop();
+  await stop().catch((cleanupError) => console.error(cleanupError));
   app.exit(1);
 });

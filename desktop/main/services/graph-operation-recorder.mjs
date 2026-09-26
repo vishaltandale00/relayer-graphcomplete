@@ -203,13 +203,26 @@ function sanitizeReceipt(method, path, status, request, response, knownSecrets) 
   return codes.length === 0 ? withRequest : { ...withRequest, errorCodes: codes };
 }
 
-async function readBoundedBody(stream) {
+// Only routes that transport one supported 8 MiB asset receive the graph
+// server's 12 MiB JSON envelope allowance. Trace receipt budgets stay unchanged.
+function proxyBodyLimit(method, pathname) {
+  if (method === "POST" && (pathname === "/api/control/visual-assets/imports/validate"
+    || /^\/api\/control\/conversation-import-stages\/[^/]+\/visual-asset-contents$/.test(pathname))) {
+    return 17 * 1024 * 1024;
+  }
+  return (method === "POST" && pathname === "/api/graph/visual-assets/operations")
+    || (method === "GET" && /^\/api\/control\/nodes\/[1-9][0-9]*\/detail-assets\/[^/]+$/.test(pathname))
+    ? 12 * 1024 * 1024
+    : MAX_PROXY_BODY_BYTES;
+}
+
+async function readBoundedBody(stream, limit) {
   const chunks = [];
   let byteLength = 0;
   for await (const chunk of stream) {
     const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
     byteLength += bytes.byteLength;
-    if (byteLength > MAX_PROXY_BODY_BYTES) throw new Error("Graph operation proxy body exceeded its limit.");
+    if (byteLength > limit) throw new Error("Graph operation proxy body exceeded its limit.");
     chunks.push(bytes);
   }
   return Buffer.concat(chunks);
@@ -308,7 +321,8 @@ export async function startGraphOperationRecorder({
       if (requestUrl.origin !== upstream.origin) {
         throw new InvalidGraphOperationTargetError("Graph operation recorder request target escaped its upstream origin.");
       }
-      const requestBody = await readBoundedBody(request);
+      const bodyLimit = proxyBodyLimit(method, requestUrl.pathname);
+      const requestBody = await readBoundedBody(request, bodyLimit);
       const requestValue = parseJsonObject(requestBody);
       const requestToken = bearerToken(request.headers.authorization);
       if (requestToken !== undefined) knownSecrets.add(requestToken);
@@ -334,8 +348,9 @@ export async function startGraphOperationRecorder({
         signal: controller.signal,
         ...(requestBody.byteLength === 0 || method === "GET" || method === "HEAD" ? {} : { body: requestBody }),
       });
-      const responseBytes = Buffer.from(await upstreamResponse.arrayBuffer());
-      if (responseBytes.byteLength > MAX_PROXY_BODY_BYTES) throw new Error("Graph operation proxy response exceeded its limit.");
+      const responseBytes = upstreamResponse.body === null
+        ? Buffer.alloc(0)
+        : await readBoundedBody(upstreamResponse.body, bodyLimit);
       const contentType = upstreamResponse.headers.get("content-type");
       response.writeHead(upstreamResponse.status, contentType === null ? {} : { "content-type": contentType });
       response.end(responseBytes);

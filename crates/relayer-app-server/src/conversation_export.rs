@@ -895,10 +895,13 @@ impl ConversationExportValidator {
         for (index, association) in node.authored_detail_assets.iter().enumerate() {
             let association_path = format!("{path}.authoredDetailAssets[{index}]");
             require_string(&association.asset_id, format!("{association_path}.assetId"))?;
-            require_string(
-                &association.provenance.source,
-                format!("{association_path}.provenance.source"),
-            )?;
+            if !matches!(association.provenance.source.as_str(), "user" | "system") {
+                return Err(ExportValidationError::new(
+                    "visual_asset_provenance_invalid",
+                    format!("{association_path}.provenance.source"),
+                    "Visual asset provenance must be user or system.",
+                ));
+            }
             require_string(
                 &association.provenance.file_name,
                 format!("{association_path}.provenance.fileName"),
@@ -1009,6 +1012,7 @@ fn register_immutable_view_records(
 struct NodeDefinitionDigest {
     base: [u8; 32],
     authored_detail: Option<[u8; 32]>,
+    authored_detail_assets: Option<[u8; 32]>,
 }
 
 fn register_node_definition(
@@ -1042,8 +1046,27 @@ fn register_node_definition(
         .map_err(|error| {
             ExportValidationError::new(code, path, format!("Could not fingerprint {id}: {error}."))
         })?;
+    let authored_detail_assets = if value.authored_detail_assets.is_empty() {
+        None
+    } else {
+        Some(
+            Sha256::digest(
+                serde_json::to_vec(&value.authored_detail_assets).map_err(|error| {
+                    ExportValidationError::new(
+                        code,
+                        path,
+                        format!("Could not fingerprint {id}: {error}."),
+                    )
+                })?,
+            )
+            .into(),
+        )
+    };
     if let Some(existing) = definitions.get_mut(id) {
         if existing.base != base
+            || existing.authored_detail_assets.is_some()
+                && authored_detail_assets.is_some()
+                && existing.authored_detail_assets != authored_detail_assets
             || existing.authored_detail.is_some()
                 && authored_detail.is_some()
                 && existing.authored_detail != authored_detail
@@ -1057,12 +1080,16 @@ fn register_node_definition(
         if existing.authored_detail.is_none() {
             existing.authored_detail = authored_detail;
         }
+        if existing.authored_detail_assets.is_none() {
+            existing.authored_detail_assets = authored_detail_assets;
+        }
     } else {
         definitions.insert(
             id.to_owned(),
             NodeDefinitionDigest {
                 base,
                 authored_detail,
+                authored_detail_assets,
             },
         );
     }
@@ -1210,6 +1237,13 @@ fn validate_visual_asset_content(
             "visual_asset_base64_invalid",
             format!("{path}.contentBase64"),
             "Visual asset content must use canonical base64.",
+        ));
+    }
+    if bytes.is_empty() || bytes.len() > 8 * 1024 * 1024 {
+        return Err(ExportValidationError::new(
+            "visual_asset_content_size_invalid",
+            format!("{path}.byteLength"),
+            "Visual asset content must be nonempty and at most 8 MiB.",
         ));
     }
     if bytes.len() != content.byte_length

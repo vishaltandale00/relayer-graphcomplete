@@ -1,0 +1,3 @@
+
+> @relayer/eval-runner@0.0.0 build
+> tsc -p tsconfig.build.json

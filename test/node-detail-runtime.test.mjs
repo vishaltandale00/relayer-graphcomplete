@@ -51,7 +51,7 @@ describe("compiled Node Detail product runtime", () => {
       components: [{
         id: "documentation",
         order: 0,
-        html: '<a class="documentation-link" data-gc-mount="link-mount"><span class="documentation-link__icon" aria-hidden="true" data-asset-mount="asset-mount"></span>Documentation</a>',
+        html: '<a class="documentation-link" data-gc-mount="link-mount"><span class="documentation-link__icon" aria-hidden="true" data-asset-mount="asset-mount"></span>Documentation</a><span aria-hidden="true" data-asset-mount="asset-mount-copy"></span>',
         css: ".documentation-link{display:grid;grid-template-columns:auto 1fr;gap:0.5rem}",
       }],
       mounts: [
@@ -69,6 +69,7 @@ describe("compiled Node Detail product runtime", () => {
           host: "span",
           assetId: "external-link-visual",
         },
+        { id: "asset-mount-copy", componentId: "documentation", kind: "asset", host: "span", assetId: "external-link-visual" },
       ],
       assets: [{
         id: "external-link-visual",
@@ -111,9 +112,19 @@ describe("compiled Node Detail product runtime", () => {
     expect(link.getAttribute("href")).toBe("https://docs.example.com/guide");
     expect(link.getAttribute("target")).toBe("_blank");
     expect(link.getAttribute("rel")).toBe("noreferrer noopener");
+    link.getBoundingClientRect = () => ({ x: 10, y: 10, left: 10, top: 10, right: 110, bottom: 40, width: 100, height: 30 });
+    link.checkVisibility = () => true;
+    link.style.opacity = "1";
+    const adapter = createReviewPresentationAdapter({ executionId: "execution", root: window.document,
+      windowObject: window, getPresentationState: () => ({ threadId: "1", selectedNodeId: "1" }), navigateHistory: async () => {} });
+    const reviewLink = adapter.snapshot().controls.find(({ name }) => name === "Documentation");
+    const click = vi.spyOn(link, "click");
+    expect(reviewLink).toMatchObject({ kind: "link", disabled: true });
+    await expect(adapter.activate({ elementRef: reviewLink.elementRef, operation: "activate" })).rejects.toThrow("disabled");
+    expect(click).not.toHaveBeenCalled();
     const visual = host.shadowRoot.querySelector("[data-asset-mount='asset-mount']");
     expect(visual.style.backgroundImage).toContain("external-link-visual");
-    expect(resolveAsset).toHaveBeenCalledWith(detail.assets[0]);
+    expect(resolveAsset).toHaveBeenCalledExactlyOnceWith(detail.assets[0]);
     expect(host.querySelector(".documentation-link")).toBeNull();
     runtime.dispose();
     runtime.dispose();

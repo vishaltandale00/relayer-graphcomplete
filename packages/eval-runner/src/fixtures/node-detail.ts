@@ -9,6 +9,7 @@ import {
   html,
   css,
   type GraphNode,
+  type CompletionOutput,
   type GraphCapability,
 } from "@relayer/graph-client";
 import {
@@ -19,6 +20,10 @@ import {
   type HarnessRunContext,
 } from "@relayer/harness-host";
 import { readFile, writeFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { parseFragment, type DefaultTreeAdapterMap } from "parse5";
+import { canonicalJson } from "../cases/catalog.js";
+import { checkBasicOutput, type EvalCheck } from "../cases/graph-checks.js";
 
 export const nodeDetailHarnessConfiguration: HarnessConfiguration = {
   schemaVersion: 1,
@@ -42,6 +47,7 @@ export const nodeDetailEvalCase = Object.freeze({
   description:
     "Loads a deterministic accepted package with authored layout and every currently supported Node Detail capability in the production review workspace.",
   defaultSelected: false,
+  gradeExecution: gradeNodeDetailExecution,
   requiredHarnessConfigurationNames: Object.freeze([
     nodeDetailHarnessConfiguration.name,
   ]),
@@ -49,6 +55,65 @@ export const nodeDetailEvalCase = Object.freeze({
     "Create the deterministic accepted visual Node Detail fixture for product and Eval review.",
   ]),
 });
+
+/** Grade accepted Product output, independently of the paid presentation experiment. */
+export function gradeNodeDetailExecution(input: {
+  readonly interactions: readonly { readonly interaction: {
+    readonly graphNodeId: number;
+    readonly completionOutput?: CompletionOutput;
+  } }[];
+}): { readonly turns: readonly { readonly checks: readonly EvalCheck[] }[] } {
+  if (input.interactions.length !== 1) throw new Error("Visual Node Detail fixture requires exactly one product turn.");
+  const { completionOutput: output, graphNodeId } = input.interactions[0]!.interaction;
+  if (!output) throw new Error("Visual Node Detail fixture requires an accepted graph output.");
+  const node = output.rootLayer.nodes.find((item) => item.clientKey === "fixture-node-detail.accepted");
+  const detail = node?.authoredDetail;
+  const content = detail && { version: detail.version, components: detail.components, mounts: detail.mounts, assets: detail.assets };
+  const compiled = detail?.version === 1 && detail.components.length > 0
+    && detail.components.every((component) => component.id !== "" && component.html !== "" && typeof component.css === "string")
+    && createHash("sha256").update(canonicalJson(content)).digest("hex") === detail.integritySha256;
+  const fragments = new Map(detail?.components.map((component) => [component.id, parseFragment(component.html)]));
+  const mounted = (componentId: string, attribute: string, id: string, host: string) => {
+    const fragment = fragments.get(componentId);
+    const matches: DefaultTreeAdapterMap["element"][] = [];
+    const visit = (element: DefaultTreeAdapterMap["childNode"]) => {
+      if (!("tagName" in element)) return;
+      if (element.attrs.some((attr) => attr.name === attribute && attr.value === id)) matches.push(element);
+      for (const child of element.childNodes) visit(child);
+    };
+    fragment?.childNodes.forEach(visit);
+    return matches.length === 1 && matches[0]!.tagName === host;
+  };
+  const image = detail?.mounts.some((mount) => mount.kind === "asset" && mount.host === "img"
+    && mounted(mount.componentId, "data-asset-mount", mount.id, "img")
+    && detail.assets.some((asset) => asset.id === mount.assetId && asset.representation === "image"
+      && ["image/svg+xml", "image/png", "image/jpeg"].includes(asset.mediaType)
+      && /^[a-f0-9]{64}$/.test(asset.digestSha256))) === true;
+  const capabilities = ["expand", "reference", "invoke", "input", "link"].every((kind) =>
+    detail?.mounts.some((mount) => {
+      if (mount.kind !== "capability" || mount.capability.kind !== kind
+        || !mounted(mount.componentId, "data-gc-mount", mount.id, mount.host)) return false;
+      if (kind === "input" ? mount.host !== "input"
+        : kind === "link" ? mount.host !== "a"
+          : mount.host !== "button" && mount.host !== "a") return false;
+      const capability = mount.capability;
+      if (capability.kind === "link") return mount.host === "a" && capability.href === "https://example.com/relayer-node-detail";
+      return capability.action.sourceNode.clientKey === node?.clientKey
+        && capability.action.sourceLayer.clientKey === output.rootLayer.layer.clientKey
+        && output.rootLayer.actions.some((action) => action.state === "accepted"
+          && action.sourceNodeId === node?.id && action.sourceLayerId === output.rootLayer.layer.id
+          && action.clientKey === capability.action.clientKey
+          && (kind === "expand" || kind === "reference"
+            ? action.kind === "navigate" && action.relation === kind && Number.isInteger(action.targetLayerId)
+            : action.kind === kind));
+    }) === true);
+  return { turns: [{ checks: [
+    ...checkBasicOutput(output, graphNodeId),
+    { name: "visual-fixture:compiled-package", passed: compiled === true, detail: "The accepted fixture node retains a compiled package with matching canonical integrity." },
+    { name: "visual-fixture:pinned-image", passed: image, detail: "An authored image mount references a pinned supported image in the accepted package; byte delivery and rendering require separate Product evidence." },
+    { name: "visual-fixture:capabilities", passed: capabilities, detail: "Expand, reference, invoke, input, and external link mounts remain bound to the accepted fixture actions and source layer." },
+  ] }] };
+}
 
 class NodeDetailHarness implements Harness {
   constructor(private readonly temporalEvidenceGatePath?: string) {}

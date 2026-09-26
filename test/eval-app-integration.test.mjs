@@ -1655,6 +1655,11 @@ describe("Relayer Eval application service", () => {
         interactions: nodeDetailThread.interactions,
       }),
     ).toBe("passed");
+    expect(nodeDetailExecution.checks).toEqual(expect.arrayContaining([
+      expect.objectContaining({ name: "turn-1:visual-fixture:compiled-package", passed: true }),
+      expect.objectContaining({ name: "turn-1:visual-fixture:pinned-image", passed: true }),
+      expect.objectContaining({ name: "turn-1:visual-fixture:capabilities", passed: true }),
+    ]));
     expect(evalService.reviewContext(nodeDetailExecution.id)).toMatchObject({
       harnessConfigurationName: "fixture-node-detail",
       selectedCaseId: "empty-project.visual-node-detail.single-turn",

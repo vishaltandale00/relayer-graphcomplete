@@ -1831,7 +1831,13 @@ function pageFields(operation: VisualBridgeOperation): { readonly limit?: number
   };
 }
 
-async function visibleAsset(library: FileVisualAssetsLibrary, scope: VisualAssetScope, assetId: string): Promise<VisualAsset> {
+async function visibleAsset(library: FileVisualAssetsLibrary, scope: VisualAssetScope, assetId: string, includeArchived = false): Promise<VisualAsset> {
+  if (includeArchived) {
+    try { return await library.lookupAsset({ scope, assetId }); } catch (error) {
+      if (!(error instanceof VisualAssetsError) || !["asset_not_found", "asset_not_authorized"].includes(error.code)) throw error;
+      throw new VisualAssetsError("asset_not_authorized", "Visual asset is not authorized in this scope");
+    }
+  }
   let cursor: string | undefined;
   do {
     const page = await library.listAssets({ scope, limit: 100, ...(cursor === undefined ? {} : { cursor }) });
@@ -1846,9 +1852,10 @@ async function visibleAssetAcross(
   library: FileVisualAssetsLibrary,
   scopes: readonly VisualAssetScope[],
   assetId: string,
+  includeArchived = false,
 ): Promise<VisualAsset> {
   for (const scope of scopes) {
-    try { return await visibleAsset(library, scope, assetId); } catch (error) {
+    try { return await visibleAsset(library, scope, assetId, includeArchived); } catch (error) {
       if (!(error instanceof VisualAssetsError) || error.code !== "asset_not_authorized") throw error;
     }
   }
@@ -1884,7 +1891,7 @@ async function executeVisualAssetOperation(
     case "find": return library.find({ scope, tagId: stringField(operation, "tagId"), ...page });
     case "inspect": {
       const assetId = stringField(operation, "assetId");
-      await visibleAsset(library, scope, assetId);
+      await visibleAsset(library, scope, assetId, true);
       const inspected = await library.inspect(assetId);
       return { asset: inspected.asset, preview: await serializedFile(inspected.preview) };
     }
@@ -1944,13 +1951,13 @@ async function executeVisualAssetOperation(
     }
     case "download": {
       const assetId = stringField(operation, "assetId");
-      await visibleAsset(library, scope, assetId);
+      await visibleAsset(library, scope, assetId, true);
       return serializedFile(await library.download(assetId));
     }
     case "resolve": {
       const logicalIds = stringArrayField(operation, "logicalIds");
       const assets = await Promise.all(logicalIds.map(async (logicalId) => {
-        const asset = await visibleAssetAcross(library, visibleScopes, logicalId);
+        const asset = await visibleAssetAcross(library, visibleScopes, logicalId, true);
         return {
           logicalId,
           authority: "current",
@@ -1964,15 +1971,16 @@ async function executeVisualAssetOperation(
     }
     case "prepare-detail": {
       const package_ = operation.package as CanonicalNodeDetailPackage;
-      const assetIds = isRecord(package_) && Array.isArray(package_.assets)
-        ? package_.assets.map((asset) => isRecord(asset) ? asset.id : undefined)
-        : [];
-      if (assetIds.some((assetId) => typeof assetId !== "string")) {
-        throw new VisualAssetsError("accepted_detail_invalid", "Visual Detail package asset inventory is invalid");
-      }
-      await Promise.all(assetIds.map((assetId) => visibleAssetAcross(library, visibleScopes, assetId as string)));
+      // Persistence validates the complete canonical package and all count bounds
+      // before its scoped asset lookups; a separate discovery scan only duplicates
+      // authority checks and permits unbounded pre-validation work.
       const candidate = createMemoryVisualDetailPersistence(library, { visibleScopes });
-      const detail = await candidate.accept({ package: package_, scope });
+      const detail = await candidate.accept({ package: package_, scope }).catch((error: unknown) => {
+        if (error instanceof VisualAssetsError && ["asset_not_found", "asset_not_authorized"].includes(error.code)) {
+          throw new VisualAssetsError("asset_not_authorized", "Visual asset is not authorized in the completion scope");
+        }
+        throw error;
+      });
       const archive = await candidate.exportArchive({ details: [detail], scope });
       return { detail, contents: archive.contents };
     }

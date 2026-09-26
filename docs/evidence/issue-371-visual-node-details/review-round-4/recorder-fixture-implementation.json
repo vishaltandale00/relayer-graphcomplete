@@ -1,0 +1,43 @@
+{
+  "kind": "implementation-evidence-not-independent-review",
+  "scope": "PR494 recorder asset parity and visual fixture execution grading",
+  "files": {
+    "desktop/main/services/graph-operation-recorder.mjs": "a43e03b362bae8aa419d0f632c9b9183ee7347d8b6a8387986578fecc0bf8b2f",
+    "test/graph-operation-recorder.test.mjs": "2f48de0639223b5b3857a8573be662be896340d2e242e12dccb497d38189965e",
+    "packages/eval-runner/src/fixtures/node-detail.ts": "b996ad0f3473c7186c0de2461ad3fa818c3b5472d7192c77c994f16b98a16aed",
+    "packages/eval-runner/test/node-detail-grading.test.ts": "c0321a7627af2d3814ba40541ccf1950c3f3ab869e4d14cd501b229fa28343b7",
+    "test/eval-app-integration.test.mjs": "b8eb8d74f441dc249e6a25e316b66a4638c3e3c5c2c2c40b8af4e44fcb3556ff",
+    "packages/eval-runner/package.json": "0030995fcc8d53574899c758d800cad63dfee90080156f2eb1f18ca20fffac5d",
+    "package-lock.json": "89a48c1c2770eac3279f7e51491c9d6ded74f320a1133da2825a0653a028d90f"
+  },
+  "checkpoints": [
+    "8 MiB base64 asset POST and accepted asset GET survive recorder; ordinary 4 MiB, asset 12 MiB bounds enforced; oversized upstream asset response rejected while streaming",
+    "17 MiB declared import content/validation routes preserve 8 MiB content envelopes; trace receipts omit asset bytes and bearer",
+    "Registered fixture gradeExecution rejects plain accepted nodes, altered integrity, missing image, missing capability and missing accepted action; no presentationVersion dependency; integrity-consistent unsupported WebP rejected; parse5 verifies exact actual mount element tag and allowed fixture host, wrong-element package with recomputed integrity rejected",
+    "Real Eval integration now asserts three fixture-specific checks; execution pending parent full check"
+  ],
+  "ran": [
+    {
+      "command": "npx vitest run test/graph-operation-recorder.test.mjs packages/eval-runner/test/node-detail-grading.test.ts",
+      "result": "19 passed; 2 files; see final log for duration"
+    },
+    {
+      "command": "npm run check --workspace @relayer/eval-runner",
+      "result": "passed"
+    },
+    {
+      "command": "git diff --check",
+      "result": "passed"
+    },
+    {
+      "command": "npm install --offline --ignore-scripts --workspace @relayer/eval-runner",
+      "result": "added1 cached parse5 package; lock records updated; no scripts"
+    },
+    {
+      "command": "npm run build --workspace @relayer/eval-runner",
+      "result": "passed"
+    }
+  ],
+  "red": "Original recorder rejected valid 8 MiB transfer with 502; original fixture lacked gradeExecution (logs retained)",
+  "limits": "No claim of pixel rendering or asset-byte verification from grader. Full check/build and real Eval integration pending parent; independent review pending."
+}

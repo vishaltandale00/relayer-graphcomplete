@@ -1,0 +1,42 @@
+{
+  "kind": "implementation-evidence-not-independent-review",
+  "implementer": "GPT-6-Astra /root/astra_standards",
+  "scope": "Archive upload validation agrees with graph materialization on decoded content bounds, provenance values, and reused-node association identity",
+  "fileSha256": {
+    "crates/relayer-app-server/src/conversation_export.rs": "1ec807f0a9061bee9331e66a3143ec488df41d7d2ff44f7afbc912698362b165",
+    "crates/relayer-app-server/tests/conversation_export_contract.rs": "2bce84451b41b168d17d310dbc9ca75d17700369014f3c15b7453dcbefdbee98"
+  },
+  "redEvidence": [
+    "Empty content accepted before new bound",
+    "Unsupported provider provenance accepted before enum check",
+    "Cross-turn reordered nonempty asset associations accepted before identity fingerprint"
+  ],
+  "checkpoints": [
+    {
+      "prd": "6.4 integrity and atomic portable import",
+      "tests": [
+        "upload_asset_content_bounds_match_materialization",
+        "upload_asset_provenance_matches_materialization",
+        "upload_reused_asset_nodes_preserve_association_identity"
+      ],
+      "seams": "Production JSONL decode, batch and incremental upload validator; compares association vectors in their original order, retains sparse-copy merging consistent with graph finalization.",
+      "cases": [
+        "empty and8MiB+1 rejected;8MiB accepted",
+        "user/system accepted;provider rejected",
+        "reused association order/provenance mismatch rejected; identical and sparse copies accepted"
+      ]
+    }
+  ],
+  "greenEvidence": {
+    "command": "cargo test -p relayer-app-server --test conversation_export_contract -- --nocapture",
+    "passed": 22,
+    "failed": 0,
+    "seconds": 1.77,
+    "log": "logs/rust-export-contract.log"
+  },
+  "limits": [
+    "Focused deterministic validation tests; no new HTTP-server or host media-validation proof is claimed.",
+    "Prior five-file implementation scope unchanged.",
+    "Independent review and root full verification pending; no commit/push."
+  ]
+}

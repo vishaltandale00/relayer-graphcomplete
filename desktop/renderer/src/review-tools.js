@@ -176,7 +176,7 @@ export function createReviewPresentationAdapter({
           elementRef,
           name: accessibleControlName(element),
           role: element.getAttribute("role") || element.localName,
-          disabled: Boolean(element.disabled || element.getAttribute("aria-disabled") === "true"),
+          disabled: Boolean(authoredControlMetadata.get(element)?.kind === "link" || element.disabled || element.getAttribute("aria-disabled") === "true"),
           kind: authoredControlMetadata.get(element)?.kind ?? element.dataset.reviewKind ?? "control",
           actionId: authoredControlMetadata.has(element)
             ? authoredControlMetadata.get(element).actionId : element.dataset.reviewActionId || null,
@@ -303,7 +303,8 @@ export function createReviewPresentationAdapter({
     if (!element || !isAccessibleControl(element, windowObject)) {
       throw new Error(`Review control is unknown, inaccessible, or no longer visible: ${elementRef}`);
     }
-    if (element.disabled || element.getAttribute("aria-disabled") === "true") {
+    // Review windows cannot acknowledge external navigation; links are inspect-only.
+    if (authoredControlMetadata.get(element)?.kind === "link" || element.disabled || element.getAttribute("aria-disabled") === "true") {
       throw new Error(`Review control is disabled: ${elementRef}`);
     }
     const kind = authoredControlMetadata.get(element)?.kind ?? element.dataset.reviewKind ?? "control";

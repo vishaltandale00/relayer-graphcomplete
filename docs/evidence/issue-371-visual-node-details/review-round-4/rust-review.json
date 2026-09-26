@@ -1,0 +1,14 @@
+{
+  "reviewer": "/root",
+  "verdict": "clean",
+  "findings": [],
+  "scope": "Product staging transactional publication, graph import digest deduplication, rollback and actual content insertion checkpoints",
+  "assertion": "Product update and staging delete share BEGIN IMMEDIATE transaction. Graph digest metadata cache lives within one import transaction; scoped staged fetch, digest validation and content equality run once, while every logical association retains package/media/length checks. Failed finalization rolls back content and keeps retry data. Normal replace retains existing validation through extracted helper.",
+  "files": {
+    "crates/relayer-app-server/src/storage/sqlite/conversation_imports.rs": "2b5ee6751e39dbc29d48190d497123e14555b18ab25fb72c0c2f5e8857064f87",
+    "crates/relayer-app-server/src/conversation_import_service.rs": "869dd324f0f297aabe7e600c9db4d5cb10c897c65822d9e36508d0249b89abb7",
+    "crates/relayer-graph-core/src/graph/import.rs": "bd37050d966476dd3da7d9a5ca05cd293f70d452d70c1aca093de909666ec7dc",
+    "crates/relayer-graph-core/src/storage/sqlite/authored_detail_assets.rs": "cb38aa156a080c09a0d52d0891f254d7d5f14c7472544ec18a440df3e2da238d",
+    "crates/relayer-graph-server/tests/import_visual_asset_transport.rs": "2343e334043f35b09f9c0b6632d87619c2c8087e19fb680c78e58c85db5a3039"
+  }
+}

@@ -94,6 +94,11 @@ async fn shared_large_content_crosses_real_import_routes_once_without_relaxing_b
         post(&app, &format!("{prefix}/turns"), &turn).await.0,
         StatusCode::OK
     );
+    let audit = sqlx::SqlitePool::connect(&format!("sqlite://{}", file.path().display()))
+        .await
+        .unwrap();
+    sqlx::raw_sql("CREATE TABLE content_insert_audit(attempt INTEGER); CREATE TRIGGER audit_content_insert BEFORE INSERT ON authored_detail_asset_contents BEGIN INSERT INTO content_insert_audit VALUES (1); END;")
+        .execute(&audit).await.unwrap();
     let (status, response) = post(&app, &format!("{prefix}/finalize"), &json!({})).await;
     assert_eq!(
         status,
@@ -101,6 +106,15 @@ async fn shared_large_content_crosses_real_import_routes_once_without_relaxing_b
         "{}",
         String::from_utf8_lossy(&response)
     );
+    let insert_attempts: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM content_insert_audit")
+        .fetch_one(&audit)
+        .await
+        .unwrap();
+    assert_eq!(
+        insert_attempts, 1,
+        "shared content must be materialized once across logical nodes"
+    );
+    audit.close().await;
     let receipt: Value = serde_json::from_slice(&response).unwrap();
     for node in receipt["turns"][0]["output"]["rootLayer"]["nodes"]
         .as_array()

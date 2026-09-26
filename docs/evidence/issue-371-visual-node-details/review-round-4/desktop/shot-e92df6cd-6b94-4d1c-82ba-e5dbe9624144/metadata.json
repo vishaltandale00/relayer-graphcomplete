@@ -1,0 +1,44 @@
+{
+  "schemaVersion": 1,
+  "screenshotId": "shot-e92df6cd-6b94-4d1c-82ba-e5dbe9624144",
+  "label": "Imported accepted visual Node Detail with portable image bytes",
+  "executionId": "execution-bd63b568-1923-4923-b717-81dc2008d4c8",
+  "threadId": "2",
+  "threadRevision": "thread:2:updated:1790461920979:input-draft:none:interactions:2:1:accepted:server-input-draft:none",
+  "turnId": "2",
+  "layerId": "8",
+  "selectedNodeId": "20",
+  "activatedActionId": null,
+  "navigationPath": [
+    {
+      "layerId": "8",
+      "viaActionId": null
+    }
+  ],
+  "viewport": {
+    "width": 1480,
+    "height": 888,
+    "deviceScaleFactor": 2
+  },
+  "captureTarget": {
+    "kind": "element",
+    "elementRef": "node-detail"
+  },
+  "mode": "full",
+  "tileCount": 2,
+  "tiles": [
+    {
+      "index": 0,
+      "width": 604,
+      "height": 912,
+      "contentDigest": "sha256:24684b9336fe4ddcf3306084e7c28941e1af2efdb57b4b446aab699fabb9a398"
+    },
+    {
+      "index": 1,
+      "width": 604,
+      "height": 912,
+      "contentDigest": "sha256:bebdfb38784ffb54bc5164d4b6c8ec1b03c5a4569261912138c5d6234472b254"
+    }
+  ],
+  "contentDigest": "sha256:237c7c5c91e0da186565bdfe77be7a3062bf5fc7d3c9c2e000623d3fe308ba8f"
+}

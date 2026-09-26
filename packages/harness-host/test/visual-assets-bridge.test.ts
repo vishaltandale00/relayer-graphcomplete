@@ -246,10 +246,16 @@ describe("visual asset host bridge", () => {
     directories.push(directory);
     const digest = createHash("sha256").update(svg).digest("hex");
     const library = await createFileVisualAssetsLibrary({
-      authority: { projects: [{ projectId: 1, threadIds: [1] }], standaloneThreadIds: [] },
+      authority: { projects: [{ projectId: 1, threadIds: [1] }, { projectId: 2, threadIds: [2] }], standaloneThreadIds: [] },
       initialAssets: [{
         id: "library-icon", registryId: "user", name: "Library icon", fileName: "icon.svg",
         mediaType: "image/svg+xml", content: svg, scopes: [{ kind: "library" }], tagIds: [],
+      }, {
+        id: "owned", registryId: "user", name: "Owned", fileName: "owned.svg", mediaType: "image/svg+xml",
+        content: svg, scopes: [{ kind: "project", projectId: 1 }], tagIds: [],
+      }, {
+        id: "foreign", registryId: "user", name: "Foreign", fileName: "foreign.svg", mediaType: "image/svg+xml",
+        content: svg, scopes: [{ kind: "project", projectId: 2 }], tagIds: [], archived: true,
       }],
     }, join(directory, "catalog.json"));
     let release!: () => void;
@@ -282,6 +288,45 @@ describe("visual asset host bridge", () => {
       })).resolves.toMatchObject({ detail: { assets: [{ assetId: "library-icon", digestSha256: digest }] } });
     });
     expect((await library.inspect("library-icon")).asset.scopes).toEqual([{ kind: "library" }]);
+    const perform = (operation: Record<string, unknown>) => host.visualAssetOperation({
+      version: 1, generation: 13, assetGeneration: 1,
+      authority: { kind: "completion", interactionNodeId: 9, scope: { kind: "project", projectId: 1, threadId: 1 } },
+      operation: { scope: { kind: "project", projectId: 1 }, ...operation },
+    });
+    await perform({ kind: "archive", assetId: "owned" });
+    await expect(perform({ kind: "list-assets" })).resolves.toMatchObject({ items: [] });
+    await expect(perform({ kind: "inspect", assetId: "owned" })).resolves.toMatchObject({ asset: { id: "owned", archived: true } });
+    await expect(perform({ kind: "download", assetId: "owned" })).resolves.toMatchObject({ contentBase64: Buffer.from(svg).toString("base64") });
+    await expect(perform({ kind: "resolve", logicalIds: ["owned"] })).resolves.toMatchObject({ assets: [{ logicalId: "owned", availability: "unavailable" }] });
+    for (const assetId of ["foreign", "missing"]) {
+      for (const operation of [
+        { kind: "inspect", assetId }, { kind: "download", assetId }, { kind: "resolve", logicalIds: [assetId] },
+      ]) await expect(perform(operation)).rejects.toMatchObject({
+        code: "asset_not_authorized",
+        message: operation.kind === "resolve" ? "Visual asset is not authorized in the completion scope" : "Visual asset is not authorized in this scope",
+      });
+    }
+    const scans = vi.spyOn(library, "listAssets");
+    for (const [invalid, code] of [
+      [{ ...package_, assets: Array.from({ length: 1024 }, () => content.assets[0]) }, "detail_package_invalid"],
+      [{ ...package_, assets: [content.assets[0], content.assets[0]] }, "detail_package_invalid"],
+      [{ ...package_, integritySha256: "0".repeat(64) }, "detail_package_integrity_mismatch"],
+    ]) {
+      scans.mockClear();
+      await expect(perform({ kind: "prepare-detail", package: invalid })).rejects.toMatchObject({ code });
+      expect(scans).not.toHaveBeenCalled();
+    }
+    scans.mockRestore();
+    for (const [id, code] of [["foreign", "asset_not_authorized"], ["missing", "asset_not_authorized"], ["owned", "asset_unavailable"]]) {
+      const content_ = { ...content, assets: [{ ...content.assets[0], id }] };
+      const pinned = { ...content_, integritySha256: createHash("sha256").update(canonicalJson(content_)).digest("hex") };
+      await expect(perform({ kind: "prepare-detail", package: pinned })).rejects.toMatchObject({
+        code,
+        ...(code === "asset_not_authorized" ? { message: "Visual asset is not authorized in the completion scope" } : {}),
+      });
+    }
+
+
     release();
     await completing.catch(() => undefined);
     await host.close();

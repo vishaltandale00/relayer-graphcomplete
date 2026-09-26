@@ -1,0 +1,44 @@
+{
+  "schemaVersion": 1,
+  "screenshotId": "shot-7b9adda0-c928-4408-a96d-f2dd4f72b3f2",
+  "label": "Accepted visual Node Detail in read-only Product workspace",
+  "executionId": "cb946908-78db-4efd-a538-2fb408213fb0",
+  "threadId": "1",
+  "threadRevision": "thread:1:updated:1790461920979:input-draft:0:interactions:1:1:accepted:server-input-draft:0",
+  "turnId": "1",
+  "layerId": "7",
+  "selectedNodeId": "18",
+  "activatedActionId": null,
+  "navigationPath": [
+    {
+      "layerId": "7",
+      "viaActionId": null
+    }
+  ],
+  "viewport": {
+    "width": 1480,
+    "height": 888,
+    "deviceScaleFactor": 2
+  },
+  "captureTarget": {
+    "kind": "element",
+    "elementRef": "node-detail"
+  },
+  "mode": "full",
+  "tileCount": 2,
+  "tiles": [
+    {
+      "index": 0,
+      "width": 604,
+      "height": 912,
+      "contentDigest": "sha256:24684b9336fe4ddcf3306084e7c28941e1af2efdb57b4b446aab699fabb9a398"
+    },
+    {
+      "index": 1,
+      "width": 604,
+      "height": 912,
+      "contentDigest": "sha256:bebdfb38784ffb54bc5164d4b6c8ec1b03c5a4569261912138c5d6234472b254"
+    }
+  ],
+  "contentDigest": "sha256:a15bdc824f6f01daef0353d201b0521c5f628c1e67d45bbbc22289adc19e628f"
+}

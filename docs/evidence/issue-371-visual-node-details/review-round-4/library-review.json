@@ -1,0 +1,14 @@
+{
+  "reviewer": "/root/merge_494_review",
+  "verdict": "clean",
+  "findings": [],
+  "scope": "Owned bootstrap snapshots; shared raster validation guard; trusted scoped archived lookup; conservative legacy relationship defaults; eager bootstrap and loaded catalog validation before content publication or migration",
+  "files": {
+    "packages/visual-assets/src/index.ts": "882294142f2b50bc5c9ab68dda938ff8feeddbd958cee5e6c520c73f0357e0e6",
+    "packages/visual-assets/test/visual-assets.test.ts": "9277523b0a32f6cc9b423b5ce06d6a2cafd5873f528ab0180de8615847aaadaf"
+  },
+  "verification": {
+    "result": "Independent source review clean. Test-only contentAuthority union annotation inspected; no runtime behavior changed. Prior findings resolved.",
+    "limits": "Builder test and package build results recorded separately; reviewer did not rerun them."
+  }
+}

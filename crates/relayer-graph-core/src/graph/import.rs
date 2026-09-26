@@ -425,6 +425,9 @@ impl crate::GraphDatabase {
                 register_imported_node(&mut node_definitions, context.target)?;
             }
         }
+        // Only metadata is retained: each staged digest is fetched, hashed and
+        // materialized once across the whole import transaction.
+        let mut materialized_contents = HashMap::<String, (String, usize)>::new();
         for (portable_id, node) in node_definitions {
             if node_ids.contains_key(&portable_id) {
                 return Err(GraphError::Internal(
@@ -435,15 +438,15 @@ impl crate::GraphDatabase {
             if let Some(authored_detail) = node.authored_detail.as_ref() {
                 crate::graph::model::validate_authored_detail(authored_detail)?;
             }
-            let mut prepared_assets = Vec::with_capacity(node.authored_detail_assets.len());
-            for asset in node.authored_detail_assets {
-                let (media_type, byte_length, content): (String, i64, Vec<u8>) = sqlx::query_as(
-                    "SELECT media_type,byte_length,content FROM graph_import_asset_contents WHERE import_id=?1 AND digest_sha256=?2",
-                ).bind(import_id).bind(&asset.digest_sha256).fetch_optional(&mut *tx).await?
-                    .ok_or_else(|| GraphError::validation("import_asset_content_missing", "authoredDetailAssets", "Imported visual asset content was not staged for this import."))?;
-                if media_type != asset.media_type
-                    || usize::try_from(byte_length).ok() != Some(asset.byte_length)
-                {
+            for asset in &node.authored_detail_assets {
+                if !materialized_contents.contains_key(&asset.digest_sha256) {
+                    let metadata = AuthoredDetailAssetTable::new(&mut tx)
+                        .materialize_import_content(import_id, &asset.digest_sha256)
+                        .await?;
+                    materialized_contents.insert(asset.digest_sha256.clone(), metadata);
+                }
+                let (media_type, byte_length) = &materialized_contents[&asset.digest_sha256];
+                if media_type != &asset.media_type || *byte_length != asset.byte_length {
                     return Err(GraphError::validation(
                         "import_asset_content_mismatch",
                         "authoredDetailAssets",
@@ -468,15 +471,6 @@ impl crate::GraphDatabase {
                         "Imported visual asset reference does not match its canonical package.",
                     ));
                 }
-                prepared_assets.push(crate::PreparedDetailAsset {
-                    asset_id: asset.asset_id,
-                    digest_sha256: asset.digest_sha256,
-                    media_type: asset.media_type,
-                    byte_length: asset.byte_length,
-                    provenance_source: asset.provenance_source,
-                    provenance_file_name: asset.provenance_file_name,
-                    content,
-                });
             }
             let authored_detail = node
                 .authored_detail
@@ -495,9 +489,11 @@ impl crate::GraphDatabase {
                 .bind(node.client_key.as_deref().unwrap_or(&portable_id)).execute(&mut *tx).await?;
             let node_id =
                 NodeId::new(result.last_insert_rowid()).expect("inserted node ID is positive");
-            AuthoredDetailAssetTable::new(&mut tx)
-                .replace(node_id, &prepared_assets)
-                .await?;
+            for asset in &node.authored_detail_assets {
+                AuthoredDetailAssetTable::new(&mut tx)
+                    .insert_import_reference(node_id, asset)
+                    .await?;
+            }
             node_ids.insert(portable_id, node_id.value());
         }
 

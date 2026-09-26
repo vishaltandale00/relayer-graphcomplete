@@ -1,3 +1,4 @@
+import { runEvidenceCleanup } from "../scripts/evidence-service-cleanup.mjs";
 import { EventEmitter } from "node:events";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
@@ -4060,5 +4061,45 @@ describe("desktop skeleton", () => {
     expect(isSafeMarkdownLink("http://127.0.0.1:3000/help")).toBe(true);
     expect(isSafeMarkdownLink("javascript:alert(1)")).toBe(false);
     expect(isSafeMarkdownLink("data:text/html,bad")).toBe(false);
+  });
+});
+
+describe("visual Node Detail proof cancellation", () => {
+  it.each(["SIGINT", "SIGTERM"])("preserves forwarded %s instead of reporting a failed proof", (signal) => {
+    const preload = `
+      import childProcess from 'node:child_process';
+      import { EventEmitter } from 'node:events';
+      import { syncBuiltinESMExports } from 'node:module';
+      childProcess.spawn = () => {
+        const child = new EventEmitter();
+        const alive = setInterval(() => {}, 100);
+        child.kill = (signal) => { clearInterval(alive); queueMicrotask(() => child.emit('exit', null, signal)); return true; };
+        setTimeout(() => process.kill(process.pid, ${JSON.stringify(signal)}), 20);
+        return child;
+      };
+      syncBuiltinESMExports();
+    `;
+    const result = spawnSync(process.execPath, [
+      "--import", `data:text/javascript;base64,${Buffer.from(preload).toString("base64")}`,
+      fileURLToPath(new URL("../scripts/run-desktop-visual-node-details-test.mjs", import.meta.url)),
+    ], { encoding: "utf8", timeout: 5000 });
+    expect(result.error).toBeUndefined();
+    expect({ status: result.status, signal: result.signal, stderr: result.stderr }).toMatchObject({ signal });
+    expect(result.stderr).not.toContain("Electron proof failed");
+  });
+});
+
+describe("evidence cleanup", () => {
+  it("attempts every shutdown and reset and preserves each failure", async () => {
+    const calls = [];
+    const first = new Error("product close failed");
+    const second = new Error("graph close failed");
+    const cleanup = runEvidenceCleanup([
+      () => { calls.push("product"); throw first; },
+      async () => { calls.push("graph"); throw second; },
+      () => { calls.push("reset"); },
+    ]);
+    await expect(cleanup).rejects.toMatchObject({ errors: [first, second] });
+    expect(calls).toEqual(["product", "graph", "reset"]);
   });
 });

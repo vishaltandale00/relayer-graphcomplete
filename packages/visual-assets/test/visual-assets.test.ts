@@ -170,6 +170,67 @@ describe("visual_assets deterministic library interface", () => {
     }
   });
 
+  it("rejects a noncanonical bootstrap digest before deriving or writing a content path", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "relayer-visual-assets-bootstrap-digest-"));
+    try {
+      const storagePath = join(directory, "visual-assets.json");
+      const outsidePath = join(directory, "victim");
+      await expect(createFileVisualAssetsLibrary({
+        initialAssets: [{
+          id: "asset_escape", registryId: "user", name: "Escape", fileName: "escape.svg",
+          mediaType: "image/svg+xml", content: validSvg, digest: "sha256:../../victim",
+          scopes: [{ kind: "library" }], tagIds: [],
+        }],
+      }, storagePath)).rejects.toMatchObject({ code: "digest_invalid" });
+      await expect(stat(outsidePath)).rejects.toMatchObject({ code: "ENOENT" });
+      await expect(stat(`${storagePath}.content`)).rejects.toMatchObject({ code: "ENOENT" });
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("validates loaded v1 and v2 logical catalogs before migration writes", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "relayer-visual-assets-pre-migration-validation-"));
+    try {
+      const bytes = new TextEncoder().encode(validSvg);
+      const digest = `sha256:${createHash("sha256").update(bytes).digest("hex")}`;
+      const baseAsset = {
+        id: "asset_invalid", registryId: "user", name: "Invalid", mediaType: "image/svg+xml",
+        byteLength: bytes.byteLength, digest, scopes: [{ kind: "library" }], tagIds: [], archived: false,
+        provenance: { source: "user", fileName: "invalid.svg" },
+      };
+
+      const v1Path = join(directory, "v1.json");
+      const v1 = `${JSON.stringify({
+        version: 1, revision: 0, authority: { projects: [], standaloneThreadIds: [] },
+        registries: [], tags: [], assets: [{
+          asset: { ...baseAsset, mediaType: "image/gif" },
+          contentBase64: Buffer.from(bytes).toString("base64"),
+        }],
+      })}\n`;
+      await writeFile(v1Path, v1);
+      await expect(createFileVisualAssetsLibrary({}, v1Path))
+        .rejects.toMatchObject({ code: "media_type_unsupported" });
+      expect(await readFile(v1Path, "utf8")).toBe(v1);
+      await expect(stat(`${v1Path}.content`)).rejects.toMatchObject({ code: "ENOENT" });
+
+      const v2Path = join(directory, "v2.json");
+      const v2 = `${JSON.stringify({
+        version: 2, revision: 0,
+        authority: { projects: [{ projectId: 7, threadIds: [] }], standaloneThreadIds: [] },
+        registries: [], tags: [], assets: [{ ...baseAsset, scopes: [{ kind: "project", projectId: 8 }] }],
+      })}\n`;
+      await mkdir(`${v2Path}.content`, { recursive: true });
+      await writeFile(join(`${v2Path}.content`, digest.slice("sha256:".length)), bytes);
+      await writeFile(v2Path, v2);
+      await expect(createFileVisualAssetsLibrary({}, v2Path))
+        .rejects.toMatchObject({ code: "scope_not_authorized" });
+      expect(await readFile(v2Path, "utf8")).toBe(v2);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
   it("migrates the embedded v1 catalog into digest-addressed content without changing logical assets", async () => {
     const directory = await mkdtemp(join(tmpdir(), "relayer-visual-assets-v1-migration-"));
     try {
@@ -361,6 +422,94 @@ describe("visual_assets deterministic library interface", () => {
       await expect(library.organize({
         assetId: "asset_default", addTagIds: [], removeTagIds: ["tag_default"],
       })).rejects.toMatchObject({ code: "tag_relationship_read_only" });
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("owns the complete durable bootstrap graph before the first filesystem await", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "relayer-visual-assets-bootstrap-snapshot-"));
+    try {
+      const authority = { projects: [{ projectId: 7, threadIds: [70] }], standaloneThreadIds: [90] };
+      const registry = {
+        id: "system", name: "System", source: "relayer",
+        contentAuthority: "read-only" as "read-only" | "user", defaultRelationshipAuthority: "read-only" as const,
+      };
+      const tagScope = { kind: "project" as const, projectId: 7 };
+      const tag = { id: "tag_initial", name: "Initial", scope: tagScope, parentTagId: null, authority: "system" as const };
+      const assetScope = { kind: "project" as const, projectId: 7 };
+      const tagIds = [tag.id];
+      const content = new TextEncoder().encode(validSvg);
+      const provenance = { source: "system" as const, fileName: "initial.svg" };
+      const options = {
+        authority,
+        registries: [registry],
+        initialTags: [tag],
+        initialAssets: [{
+          id: "asset_initial", registryId: registry.id, name: "Initial", fileName: "initial.svg",
+          mediaType: "image/svg+xml", content, scopes: [assetScope], tagIds, provenance,
+        }],
+      };
+      const creating = createFileVisualAssetsLibrary(options, join(directory, "visual-assets.json"));
+      authority.projects[0]!.projectId = 8;
+      authority.projects[0]!.threadIds[0] = 80;
+      registry.contentAuthority = "user";
+      tagScope.projectId = 8;
+      tag.name = "Mutated";
+      assetScope.projectId = 8;
+      tagIds.splice(0);
+      content.fill(0);
+      provenance.fileName = "mutated.svg";
+      expect(Object.isFrozen(authority)).toBe(false);
+      expect(Object.isFrozen(registry)).toBe(false);
+      expect(Object.isFrozen(tag)).toBe(false);
+
+      const library = await creating;
+      expect((await library.listAssets({ scope: { kind: "project", projectId: 7 } })).items)
+        .toEqual([expect.objectContaining({ id: "asset_initial", tagIds: ["tag_initial"], provenance: { source: "system", fileName: "initial.svg" } })]);
+      await expect(library.listAssets({ scope: { kind: "project", projectId: 8 } }))
+        .rejects.toMatchObject({ code: "scope_not_authorized" });
+      await expect(library.archive("asset_initial")).rejects.toMatchObject({ code: "asset_content_read_only" });
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("shares the two-raster validation limit across durable catalog generations", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "relayer-visual-assets-shared-raster-limit-"));
+    try {
+      const library = await createFileVisualAssetsLibrary({
+        initialAssets: [{
+          id: "asset_raster", registryId: "user", name: "Raster", fileName: "raster.jpg",
+          mediaType: "image/jpeg", content: jpegBytes, scopes: [{ kind: "library" }], tagIds: [],
+        }],
+      }, join(directory, "visual-assets.json"));
+      await library.listAssets({ scope: { kind: "library" } });
+      const concurrent = await Promise.allSettled([
+        library.inspect("asset_raster"),
+        library.inspect("asset_raster"),
+        library.createTag({ scope: { kind: "library" }, name: "Concurrent generation" }),
+      ]);
+      expect(concurrent.filter((result) => result.status === "fulfilled")).toHaveLength(2);
+      expect(concurrent.filter((result) => result.status === "rejected").map((result) => result.reason))
+        .toEqual([expect.objectContaining({ code: "media_validation_concurrency_limit" })]);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("authorizes archived assets for trusted direct lookup without restoring discovery", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "relayer-visual-assets-archived-lookup-"));
+    try {
+      const library = await createFileVisualAssetsLibrary({}, join(directory, "visual-assets.json"));
+      const asset = await library.add({
+        file: memoryHarnessFile("archived.svg", "image/svg+xml", validSvg),
+        scope: { kind: "library" }, name: "Archived", tagIds: [],
+      });
+      await library.archive(asset.id);
+      expect((await library.listAssets({ scope: { kind: "library" } })).items).toEqual([]);
+      await expect(library.lookupAsset({ scope: { kind: "library" }, assetId: asset.id }))
+        .resolves.toMatchObject({ id: asset.id, archived: true });
     } finally {
       await rm(directory, { recursive: true, force: true });
     }

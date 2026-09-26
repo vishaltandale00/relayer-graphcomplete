@@ -224,12 +224,21 @@ impl SqliteProductStore {
         import_id: &str,
         published_at: &str,
     ) -> Result<(), StorageError> {
+        let mut tx = self.pool.begin_with("BEGIN IMMEDIATE").await?;
         let result = sqlx::query("UPDATE conversation_imports SET state='published',published_at=?1 WHERE id=?2 AND state='staging' AND source_sha256 LIKE 'sha256:%' AND NOT EXISTS(SELECT 1 FROM imported_turns it JOIN interactions i ON i.id=it.product_interaction_id WHERE it.conversation_import_id=?2 AND i.completion_status='accepted' AND (i.graph_node_id IS NULL OR i.completion_output_json IS NULL))")
-            .bind(published_at).bind(import_id).execute(&self.pool).await?;
+            .bind(published_at).bind(import_id).execute(&mut *tx).await?;
         require_one(
             result.rows_affected(),
             "conversation import is incomplete or not staged",
+        )?;
+        sqlx::query(
+            "DELETE FROM conversation_import_asset_contents WHERE conversation_import_id=?1",
         )
+        .bind(import_id)
+        .execute(&mut *tx)
+        .await?;
+        tx.commit().await?;
+        Ok(())
     }
 
     pub(crate) async fn remove_conversation_import(

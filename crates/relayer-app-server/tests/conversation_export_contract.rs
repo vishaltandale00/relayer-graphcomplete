@@ -288,6 +288,89 @@ fn records_with_visual_assets(bytes: &[u8], asset_ids: &[&str]) -> Vec<Conversat
     fixture
 }
 
+#[test]
+fn upload_asset_content_bounds_match_materialization() {
+    for size in [0, 8 * 1024 * 1024 + 1] {
+        let fixture = records_with_visual_assets(&vec![7; size], &["asset-a"]);
+        assert_rejected_with_parity(&fixture, "visual_asset_content_size_invalid");
+        let jsonl = fixture
+            .iter()
+            .map(|record| serde_json::to_string(record).unwrap())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            decode_export_jsonl(jsonl.as_bytes())
+                .unwrap_err()
+                .to_string()
+                .contains("visual_asset_content_size_invalid")
+        );
+    }
+    validate_incrementally(&records_with_visual_assets(
+        &vec![7; 8 * 1024 * 1024],
+        &["asset-a"],
+    ))
+    .unwrap();
+}
+
+#[test]
+fn upload_asset_provenance_matches_materialization() {
+    for source in ["user", "system", "provider"] {
+        let mut fixture = records_with_visual_assets(SAFE_SVG, &["asset-a"]);
+        let ConversationExportRecord::Turn(turn) = &mut fixture[2] else {
+            unreachable!()
+        };
+        turn.accepted_view.as_mut().unwrap().layers[0].nodes[0].authored_detail_assets[0]
+            .provenance
+            .source = source.into();
+        if source == "provider" {
+            assert_rejected_with_parity(&fixture, "visual_asset_provenance_invalid");
+        } else {
+            validate_incrementally(&fixture).unwrap();
+        }
+    }
+}
+
+#[test]
+fn upload_reused_asset_nodes_preserve_association_identity() {
+    for mutation in ["unchanged", "order", "provenance", "context-only"] {
+        let visual = records_with_visual_assets(SAFE_SVG, &["asset-a", "asset-b"]);
+        let ConversationExportRecord::Turn(visual_turn) = &visual[2] else {
+            unreachable!()
+        };
+        let visual_node = &visual_turn.accepted_view.as_ref().unwrap().layers[0].nodes[0];
+        let mut fixture = two_turn_records();
+        for record in &mut fixture[1..] {
+            let ConversationExportRecord::Turn(turn) = record else {
+                unreachable!()
+            };
+            let node = &mut turn.accepted_view.as_mut().unwrap().layers[0].nodes[0];
+            node.authored_detail = visual_node.authored_detail.clone();
+            node.authored_detail_assets = visual_node.authored_detail_assets.clone();
+        }
+        let ConversationExportRecord::Turn(turn) = &mut fixture[2] else {
+            unreachable!()
+        };
+        let node = &mut turn.accepted_view.as_mut().unwrap().layers[0].nodes[0];
+        match mutation {
+            "order" => node.authored_detail_assets.reverse(),
+            "provenance" => {
+                node.authored_detail_assets[0].provenance.file_name = "different.svg".into()
+            }
+            "context-only" => {
+                node.authored_detail_assets.clear();
+                node.authored_detail = None;
+            }
+            _ => {}
+        }
+        fixture.insert(1, visual[1].clone());
+        if matches!(mutation, "order" | "provenance") {
+            assert_rejected_with_parity(&fixture, "node_identity_conflict");
+        } else {
+            validate_incrementally(&fixture).unwrap();
+        }
+    }
+}
+
 const SAFE_SVG: &[u8] =
     br#"<svg xmlns="http://www.w3.org/2000/svg"><rect width="1" height="1"/></svg>"#;
 

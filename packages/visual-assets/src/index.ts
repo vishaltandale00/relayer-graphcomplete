@@ -145,6 +145,8 @@ export interface VisualAssetsLibraryOptions {
 }
 
 export interface FileVisualAssetsLibrary extends VisualAssetsLibrary {
+  /** Trusted host lookup for direct scoped access, including archived logical records. */
+  lookupAsset(input: { readonly scope: VisualAssetScope; readonly assetId: string }): Promise<VisualAsset>;
   /** Trusted host hook; never exported through the agent resource surface. */
   authorizeScope(scope: { readonly kind: "project"; readonly projectId: number; readonly threadId: number }
     | { readonly kind: "thread"; readonly threadId: number }, isCurrent?: () => boolean): Promise<void>;
@@ -532,26 +534,36 @@ export function memoryHarnessFile(
   });
 }
 
+interface RasterValidationGuard {
+  active: number;
+}
+
 export function createMemoryVisualAssetsLibrary(options: VisualAssetsLibraryOptions = {}): VisualAssetsLibrary {
+  return createMemoryVisualAssetsLibraryWithGuard(options, { active: 0 });
+}
+
+function createMemoryVisualAssetsLibraryWithGuard(
+  options: VisualAssetsLibraryOptions,
+  rasterValidation: RasterValidationGuard,
+): VisualAssetsLibrary {
   function assertSupportedMediaType(mediaType: string): asserts mediaType is VisualAssetMediaType {
     if (mediaType !== "image/jpeg" && mediaType !== "image/png" && mediaType !== "image/svg+xml") {
       throw new VisualAssetsError("media_type_unsupported", `Unsupported visual asset media type: ${mediaType}`);
     }
   }
-  let activeRasterValidations = 0;
   async function validateBytes(mediaType: VisualAssetMediaType, bytes: Uint8Array): Promise<void> {
     if (mediaType === "image/svg+xml") return validateVisualBytes(mediaType, bytes);
-    if (activeRasterValidations >= 2) {
+    if (rasterValidation.active >= 2) {
       throw new VisualAssetsError(
         "media_validation_concurrency_limit",
         "At most two raster representations may be validated concurrently per visual-assets library",
       );
     }
-    activeRasterValidations += 1;
+    rasterValidation.active += 1;
     try {
       await validateVisualBytes(mediaType, bytes);
     } finally {
-      activeRasterValidations -= 1;
+      rasterValidation.active -= 1;
     }
   }
   const assets = new Map<string, VisualAsset>();
@@ -1393,10 +1405,27 @@ export async function createFileVisualAssetsLibrary(
   if (typeof storagePath !== "string" || storagePath.length === 0) {
     throw new VisualAssetsError("catalog_path_invalid", "Visual-assets catalog path is required");
   }
-  const initialAuthority = options.authority ?? { projects: [], standaloneThreadIds: [] };
-  const initialRegistries = options.registries ?? [];
-  const initialTags = options.initialTags ?? [];
-  const initialEntries = await Promise.all((options.initialAssets ?? []).map(async (asset) => ({
+  // Own every nested bootstrap value before the first filesystem suspension.
+  const initialAuthority: VisualAssetAuthority = options.authority === undefined
+    ? { projects: [], standaloneThreadIds: [] }
+    : {
+        projects: options.authority.projects.map((project) => ({
+          projectId: project.projectId,
+          threadIds: [...project.threadIds],
+        })),
+        standaloneThreadIds: [...options.authority.standaloneThreadIds],
+      };
+  const initialRegistries = (options.registries ?? []).map((registry) => ({ ...registry }));
+  const initialTags = (options.initialTags ?? []).map((tag) => ({ ...tag, scope: { ...tag.scope } }));
+  const initialAssetInputs = (options.initialAssets ?? []).map((asset) => ({
+    ...asset,
+    content: typeof asset.content === "string" ? asset.content : asset.content.slice(),
+    scopes: asset.scopes.map((scope) => ({ ...scope })),
+    tagIds: [...asset.tagIds],
+    defaultTagIds: asset.defaultTagIds === undefined ? undefined : [...asset.defaultTagIds],
+    provenance: asset.provenance === undefined ? undefined : { ...asset.provenance },
+  }));
+  const initialEntries = initialAssetInputs.map((asset) => ({
     asset: {
       id: asset.id,
       registryId: asset.registryId,
@@ -1417,7 +1446,7 @@ export async function createFileVisualAssetsLibrary(
       ? new TextEncoder().encode(asset.content)
       : asset.content).toString("base64"),
     defaultTagIds: [...(asset.defaultTagIds ?? asset.tagIds)],
-  })));
+  }));
   const initialAssets = initialEntries.map(({ asset, defaultTagIds }) => ({
     asset,
     defaultTagIds,
@@ -1435,31 +1464,9 @@ export async function createFileVisualAssetsLibrary(
     assets: initialAssets,
     contents: initialContents,
   });
-  let loadedStoredCatalog = false;
-  try {
-    const loaded = await loadDurableVisualAssetCatalog(JSON.parse(await readFile(storagePath, "utf8")), storagePath);
-    catalog = loaded.catalog;
-    loadedStoredCatalog = true;
-    if (loaded.migrate) await migrateDurableVisualAssetCatalog(storagePath, catalog);
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
-      if (error instanceof VisualAssetsError) throw error;
-      throw new VisualAssetsError("catalog_store_corrupt", "Durable visual-assets catalog could not be read");
-    }
-  }
-  if (!loadedStoredCatalog) {
-    for (const content of catalog.contents) {
-      const publication = await persistDurableVisualAssetContent(
-        storagePath,
-        content.digest,
-        new Uint8Array(Buffer.from(content.contentBase64, "base64")),
-      );
-      if (publication.durabilityError !== undefined) throw publication.durabilityError;
-    }
-  }
-
+  const rasterValidation: RasterValidationGuard = { active: 0 };
   function libraryFor(value: DurableVisualAssetCatalog): VisualAssetsLibrary {
-    return createMemoryVisualAssetsLibrary({
+    return createMemoryVisualAssetsLibraryWithGuard({
       authority: value.authority,
       registries: value.registries,
       initialTags: value.tags,
@@ -1479,9 +1486,38 @@ export async function createFileVisualAssetsLibrary(
         provenance: asset.provenance,
       })),
       initialRevision: value.revision,
-    });
+    }, rasterValidation);
   }
-  let current = libraryFor(catalog);
+  let loadedStoredCatalog = false;
+  let validatedCurrent: VisualAssetsLibrary | undefined;
+  try {
+    const loaded = await loadDurableVisualAssetCatalog(JSON.parse(await readFile(storagePath, "utf8")), storagePath);
+    const candidate = libraryFor(loaded.catalog);
+    await candidate.listRegistries({ scope: { kind: "library" }, limit: 1 });
+    catalog = loaded.catalog;
+    validatedCurrent = candidate;
+    loadedStoredCatalog = true;
+    if (loaded.migrate) await migrateDurableVisualAssetCatalog(storagePath, catalog);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+      if (error instanceof VisualAssetsError) throw error;
+      throw new VisualAssetsError("catalog_store_corrupt", "Durable visual-assets catalog could not be read");
+    }
+  }
+  if (!loadedStoredCatalog) {
+    const candidate = libraryFor(catalog);
+    await candidate.listRegistries({ scope: { kind: "library" }, limit: 1 });
+    validatedCurrent = candidate;
+    for (const content of catalog.contents) {
+      const publication = await persistDurableVisualAssetContent(
+        storagePath,
+        content.digest,
+        new Uint8Array(Buffer.from(content.contentBase64, "base64")),
+      );
+      if (publication.durabilityError !== undefined) throw publication.durabilityError;
+    }
+  }
+  let current = validatedCurrent!;
   let tail: Promise<void> = Promise.resolve();
   function serialize<T>(work: () => Promise<T>): Promise<T> {
     const result = tail.then(work, work);
@@ -1641,6 +1677,18 @@ export async function createFileVisualAssetsLibrary(
     listRegistries: (input) => current.listRegistries(input),
     listAssets: (input) => current.listAssets(input),
     listTags: (input) => current.listTags(input),
+    async lookupAsset(input) {
+      const scope = Object.freeze({ ...input.scope }) as VisualAssetScope;
+      const assetId = input.assetId;
+      const bridge = currentBridge();
+      bridge.assertScope(scope);
+      await bridge.ready();
+      const asset = bridge.assetById(assetId);
+      if (!bridge.visibleIn(asset, scope)) {
+        throw new VisualAssetsError("asset_not_authorized", `Visual asset is not authorized in this scope: ${assetId}`);
+      }
+      return asset;
+    },
     settleMutations: () => serialize(async () => undefined),
   };
   function currentBridge(): VisualAssetsPersistenceBridge {

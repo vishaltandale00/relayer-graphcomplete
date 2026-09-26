@@ -1,0 +1,53 @@
+{
+  "kind": "implementation-evidence-not-independent-review",
+  "implementer": "GPT-6-Astra /root/astra_standards",
+  "scope": "Transactional Product staged-byte cleanup on publication and graph import content processing once per digest across finalization",
+  "fileSha256": {
+    "crates/relayer-app-server/src/conversation_import_service.rs": "869dd324f0f297aabe7e600c9db4d5cb10c897c65822d9e36508d0249b89abb7",
+    "crates/relayer-app-server/src/storage/sqlite/conversation_imports.rs": "2b5ee6751e39dbc29d48190d497123e14555b18ab25fb72c0c2f5e8857064f87",
+    "crates/relayer-graph-core/src/graph/import.rs": "bd37050d966476dd3da7d9a5ca05cd293f70d452d70c1aca093de909666ec7dc",
+    "crates/relayer-graph-core/src/storage/sqlite/authored_detail_assets.rs": "cb38aa156a080c09a0d52d0891f254d7d5f14c7472544ec18a440df3e2da238d",
+    "crates/relayer-graph-server/tests/import_visual_asset_transport.rs": "2343e334043f35b09f9c0b6632d87619c2c8087e19fb680c78e58c85db5a3039"
+  },
+  "checkpoints": [
+    {
+      "promise": "PRD6.4 accepted visual detail portability and integrity",
+      "test": "publication_reclaims_product_staging_bytes_atomically",
+      "observes": "Real Product publication fails and rolls back when DELETE trigger aborts, retries successfully, and reopened DB retains published ownership metadata with zero staged content rows."
+    },
+    {
+      "promise": "PRD6.4 single digest and bounded portable content processing",
+      "test": "shared_large_content_crosses_real_import_routes_once_without_relaxing_body_limit",
+      "observes": "Real route finalization of three nodes sharing7MiB bytes performs one BEFORE INSERT attempt on accepted content; all logical associations still read pinned bytes. Existing scope/isolation/rollback tests remain."
+    }
+  ],
+  "redEvidence": [
+    {
+      "test": "publication_reclaims_product_staging_bytes_atomically",
+      "result": "failed cleanup failure must reject publication before transactional delete added"
+    },
+    {
+      "test": "shared_large_content_crosses_real_import_routes_once_without_relaxing_body_limit",
+      "result": "failed content insertion attempts actual3 expected1 before digest-level materialization"
+    }
+  ],
+  "greenEvidence": [
+    {
+      "command": "cargo test -p relayer-graph-server --test import_visual_asset_transport -- --nocapture",
+      "passed": 5,
+      "failed": 0,
+      "log": "logs/rust-import-transport.log"
+    },
+    {
+      "command": "cargo test -p relayer-app-server --lib conversation_import_service::tests -- --nocapture",
+      "passed": 11,
+      "failed": 0,
+      "log": "logs/rust-product-import.log"
+    }
+  ],
+  "limits": [
+    "No full check/build or heavy runtime proof run by this implementer; root owns final verification.",
+    "Independent review required; this is implementation evidence.",
+    "No commit or push."
+  ]
+}

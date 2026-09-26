@@ -28,6 +28,19 @@ async function startUpstream({ holdNodeResponse = false } = {}) {
     const chunks = [];
     for await (const chunk of request) chunks.push(Buffer.from(chunk));
     const body = chunks.length === 0 ? {} : JSON.parse(Buffer.concat(chunks).toString("utf8"));
+    if ((request.url === "/api/graph/visual-assets/operations"
+      || request.url === "/api/control/visual-assets/imports/validate"
+      || request.url === "/api/control/conversation-import-stages/test/visual-asset-contents") && request.method === "POST") {
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(JSON.stringify(body));
+      return;
+    }
+    if (request.url.startsWith("/api/control/nodes/2/detail-assets/asset-1") && request.method === "GET") {
+      response.writeHead(200, { "content-type": "application/json" });
+      const size = request.url.includes("oversized") ? 13 * 1024 * 1024 : 8 * 1024 * 1024;
+      response.end(JSON.stringify({ contentBase64: Buffer.alloc(size, 7).toString("base64") }));
+      return;
+    }
     if (request.url === "/api/control/capabilities" && request.method === "POST") {
       response.writeHead(200, { "content-type": "application/json" });
       response.end(JSON.stringify({ graphToken: body.graphToken }));
@@ -588,4 +601,39 @@ describe("desktop graph-operation recorder", () => {
     expect(manifest.artifacts.events.sha256).toBe("sha256:provider-events");
     expect(manifest.artifacts.graphOperations.sha256).toBe(exported.graphOperations.sha256);
   });
+});
+
+it("preserves bounded asset request/response parity without widening ordinary graph operations", async () => {
+  const upstream = await startUpstream();
+  const recorder = await startGraphOperationRecorder({ upstreamUrl: upstream.url });
+  resources.push(recorder);
+  const token = "asset-recorder-token";
+  await bindCapability(recorder.url, token);
+  const bytesBase64 = Buffer.alloc(8 * 1024 * 1024, 7).toString("base64");
+  const result = await jsonRequest(`${recorder.url}/api/graph/visual-assets/operations`, {
+    method: "POST", token, body: { kind: "add", file: { contentBase64: bytesBase64 } },
+  });
+  expect(result.status).toBe(200);
+  expect(result.body.file.contentBase64).toBe(bytesBase64);
+  const downloaded = await jsonRequest(`${recorder.url}/api/control/nodes/2/detail-assets/asset-1`);
+  expect(downloaded.status).toBe(200);
+  expect(downloaded.body.contentBase64).toBe(bytesBase64);
+  expect((await jsonRequest(`${recorder.url}/api/control/nodes/2/detail-assets/asset-1?oversized`)).status).toBe(502);
+  const target = await createCandidateTraceDirectory();
+  const trace = await recorder.exportInteraction(17, target);
+  expect(trace.eventCount).toBe(1);
+  const receipts = await readFile(join(target, "graph-operations.jsonl"), "utf8");
+  expect(receipts).not.toContain(bytesBase64.slice(0, 80));
+  expect(receipts).not.toContain(token);
+  for (const path of ["/api/control/visual-assets/imports/validate", "/api/control/conversation-import-stages/test/visual-asset-contents"]) {
+    expect((await jsonRequest(`${recorder.url}${path}`, {
+      method: "POST", body: { contentBase64: bytesBase64 },
+    })).status).toBe(200);
+  }
+  await expect(jsonRequest(`${recorder.url}/api/graph/nodes`, {
+    method: "POST", body: { bytesBase64 },
+  })).resolves.toMatchObject({ status: 502 });
+  await expect(jsonRequest(`${recorder.url}/api/graph/visual-assets/operations`, {
+    method: "POST", body: { bytesBase64: "x".repeat(12 * 1024 * 1024) },
+  })).resolves.toMatchObject({ status: 502 });
 });

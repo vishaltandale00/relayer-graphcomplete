@@ -1100,6 +1100,81 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn publication_reclaims_product_staging_bytes_atomically() {
+        let directory = tempfile::tempdir().unwrap();
+        let database = directory.path().join("product.sqlite");
+        let product = product(&database).await;
+        let import_id = stage(&product).await;
+        product
+            .append_conversation_import_visual_asset_content(
+                &import_id,
+                &crate::conversation_export::ExportVisualAssetContent {
+                    digest_sha256: "a".repeat(64),
+                    media_type: "image/png".into(),
+                    byte_length: 1,
+                    content_base64: "YQ==".into(),
+                },
+            )
+            .await
+            .unwrap();
+        let pool = sqlx::SqlitePool::connect(&format!("sqlite://{}", database.display()))
+            .await
+            .unwrap();
+        sqlx::query("CREATE TRIGGER fail_staging_cleanup BEFORE DELETE ON conversation_import_asset_contents BEGIN SELECT RAISE(ABORT,'injected cleanup failure'); END")
+            .execute(&pool).await.unwrap();
+        assert!(
+            super::publish_conversation(&import_id, &product)
+                .await
+                .is_err(),
+            "cleanup failure must reject publication"
+        );
+        let state: String =
+            sqlx::query_scalar("SELECT state FROM conversation_imports WHERE id=?1")
+                .bind(&import_id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(
+            state, "staging",
+            "cleanup failure must roll back publication"
+        );
+        assert!(
+            product
+                .next_conversation_import_visual_asset_content(&import_id, "")
+                .await
+                .unwrap()
+                .is_some()
+        );
+        sqlx::query("DROP TRIGGER fail_staging_cleanup")
+            .execute(&pool)
+            .await
+            .unwrap();
+        super::publish_conversation(&import_id, &product)
+            .await
+            .unwrap();
+        pool.close().await;
+        drop(product);
+        let reopened = SqliteProductStore::open(&database).await.unwrap();
+        assert!(
+            reopened
+                .staged_conversation_import_ids()
+                .await
+                .unwrap()
+                .is_empty()
+        );
+        let pool = sqlx::SqlitePool::connect(&format!("sqlite://{}", database.display()))
+            .await
+            .unwrap();
+        let counts: (i64,i64) = sqlx::query_as("SELECT (SELECT COUNT(*) FROM conversation_imports WHERE state='published'),(SELECT COUNT(*) FROM conversation_import_asset_contents)").fetch_one(&pool).await.unwrap();
+        assert_eq!(
+            counts,
+            (1, 0),
+            "publication retains ownership metadata without staged bytes"
+        );
+        pool.close().await;
+    }
+
+    #[tokio::test]
     async fn graph_commit_before_product_publish_reconciles_after_restart() {
         let directory = tempfile::tempdir().unwrap();
         let database = directory.path().join("product.sqlite");

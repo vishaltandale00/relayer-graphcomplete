@@ -510,6 +510,18 @@ img{max-inline-size:100%}
 
     const assetById = new Map(detail.assets.map((asset) => [asset.id, asset]));
     const assetWork = [];
+    // The mounted package owns one resolution and release per pinned asset,
+    // independent of how many authored elements place that asset.
+    const assetResolutions = new Map();
+    const resolvePinnedAsset = (asset) => {
+      if (!assetResolutions.has(asset.id)) {
+        assetResolutions.set(asset.id, Promise.resolve().then(() => resolveAsset(asset)).then((resolved) => {
+          if (typeof resolved?.release === "function") assetReleases.push(resolved.release);
+          return resolved;
+        }));
+      }
+      return assetResolutions.get(asset.id);
+    };
     const capabilityHosts = new Map();
     const capabilityStates = new Map();
     const inputDrafts = new Set();
@@ -603,11 +615,7 @@ img{max-inline-size:100%}
       } else {
         const asset = assetById.get(mount.assetId);
         assertImageMount(element, asset);
-        assetWork.push(() => applyImage(element, asset, async (requestedAsset) => {
-          const resolved = await resolveAsset(requestedAsset);
-          if (typeof resolved?.release === "function") assetReleases.push(resolved.release);
-          return resolved;
-        }));
+        assetWork.push(() => applyImage(element, asset, resolvePinnedAsset));
       }
     }
     reviewSurfaces.set(host, reviewControls);

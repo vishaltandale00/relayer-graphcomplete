@@ -43,6 +43,7 @@ try {
       else resolve({ code, signal });
     });
   });
+  if (forwardedSignal) throw new Error("Visual Node Detail proof cancelled");
   const result = JSON.parse(await readFile(resultFile, "utf8").catch(() => "null"));
   const manifest = result?.manifestPath
     ? JSON.parse(await readFile(result.manifestPath, "utf8").catch(() => "null"))
@@ -50,6 +51,7 @@ try {
   const valid = exit.code === 0
     && !exit.signal
     && result?.passed === true
+    && result.cleanupCompleted === true
     && result.paidInferenceCalls === 0
     && manifest?.schemaVersion === 1
     && manifest?.paidInferenceCalls === 0
@@ -67,6 +69,8 @@ try {
     throw new Error(`Visual Node Detail Electron proof failed: ${JSON.stringify({ exit, result, manifest })}`);
   }
   process.stdout.write(`Visual Node Detail Electron proof passed: ${result.manifestPath}\n`);
+} catch (error) {
+  if (!forwardedSignal) throw error;
 } finally {
   for (const signal of ["SIGINT", "SIGTERM"]) process.removeListener(signal, forwardSignal);
   await rm(resultDirectory, { recursive: true, force: true });

@@ -1,0 +1,48 @@
+
+ RUN  v4.1.10 /Users/vishaltandale/.codex/worktrees/05b1/relayer-graphcomplete
+
+ ❯ |isolated| packages/eval-runner/test/node-detail-grading.test.ts (6 tests | 6 failed) 4ms
+     × requires visual evidence without any presentation-version setting 2ms
+     × fails accepted output with missing plain evidence 0ms
+     × fails accepted output with missing integrity evidence 0ms
+     × fails accepted output with missing image evidence 0ms
+     × fails accepted output with missing capability evidence 0ms
+     × fails accepted output with missing action evidence 0ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 6 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  |isolated| packages/eval-runner/test/node-detail-grading.test.ts > visual fixture's registered execution grader > requires visual evidence without any presentation-version setting
+TypeError: nodeDetailEvalCase.gradeExecution is not a function
+ ❯ grade packages/eval-runner/test/node-detail-grading.test.ts:41:29
+     39|
+     40| function grade(output: CompletionOutput) {
+     41|   return nodeDetailEvalCase.gradeExecution({ interactions: [{ interact…
+       |                             ^
+     42| }
+     43|
+ ❯ packages/eval-runner/test/node-detail-grading.test.ts:46:12
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/6]⎯
+
+ FAIL  |isolated| packages/eval-runner/test/node-detail-grading.test.ts > visual fixture's registered execution grader > fails accepted output with missing plain evidence
+ FAIL  |isolated| packages/eval-runner/test/node-detail-grading.test.ts > visual fixture's registered execution grader > fails accepted output with missing integrity evidence
+ FAIL  |isolated| packages/eval-runner/test/node-detail-grading.test.ts > visual fixture's registered execution grader > fails accepted output with missing image evidence
+ FAIL  |isolated| packages/eval-runner/test/node-detail-grading.test.ts > visual fixture's registered execution grader > fails accepted output with missing capability evidence
+ FAIL  |isolated| packages/eval-runner/test/node-detail-grading.test.ts > visual fixture's registered execution grader > fails accepted output with missing action evidence
+TypeError: nodeDetailEvalCase.gradeExecution is not a function
+ ❯ grade packages/eval-runner/test/node-detail-grading.test.ts:41:29
+     39|
+     40| function grade(output: CompletionOutput) {
+     41|   return nodeDetailEvalCase.gradeExecution({ interactions: [{ interact…
+       |                             ^
+     42| }
+     43|
+ ❯ packages/eval-runner/test/node-detail-grading.test.ts:62:12
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/6]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  6 failed (6)
+   Start at  18:16:59
+   Duration  374ms (transform 174ms, setup 0ms, import 298ms, tests 4ms, environment 0ms)
