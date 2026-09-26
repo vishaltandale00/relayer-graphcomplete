@@ -5,7 +5,6 @@ import { readFileSync } from "node:fs";
 import { createPublicViewerAdapter } from "../desktop/renderer/src/public-share-viewer/adapter.js";
 import {
   bootPublicViewer,
-  fitPublicRightRail,
   fitPublicTurnPopover,
 } from "../desktop/renderer/src/public-share-viewer/main.js";
 import {
@@ -234,31 +233,6 @@ describe("public share HTML boundary", () => {
     }
   });
 
-  it("keeps the download card from opening a gap below the desktop thread header", async () => {
-    const windowRef = new Window({ url: "https://share.example.test" });
-    windowRef.document.body.innerHTML = `
-      <div class="public-share-download-card"></div>
-      <div id="host">
-        <div class="interaction-banner"></div>
-        <div class="environment-panel"></div>
-      </div>`;
-    const host = windowRef.document.querySelector("#host");
-    const card = windowRef.document.querySelector(".public-share-download-card");
-    const environment = host.querySelector(".environment-panel");
-    card.getBoundingClientRect = () => ({ bottom: 70 });
-    environment.getBoundingClientRect = () => ({ top: 44 });
-    Object.defineProperty(windowRef, "innerWidth", { configurable: true, value: 1440 });
-    try {
-      fitPublicRightRail(host, windowRef.document, windowRef);
-      expect(host.querySelector(".environment-panel").style.marginTop).toBe("38px");
-      Object.defineProperty(windowRef, "innerWidth", { configurable: true, value: 800 });
-      fitPublicRightRail(host, windowRef.document, windowRef);
-      expect(host.querySelector(".environment-panel").style.marginTop).toBe("");
-    } finally {
-      await windowRef.close();
-    }
-  });
-
   it("keeps the install destination fixed and rejects unsafe asset bases", () => {
     expect(() => renderPublicViewerTemplate({ snapshot: fixtureJsonl(), assetBase: "https://evil.example" })).toThrow();
     expect(() => renderPublicViewerTemplate({ snapshot: fixtureJsonl(), installUrl: "javascript:alert(1)" })).toThrow();
@@ -332,7 +306,7 @@ describe("public share HTML boundary", () => {
       expect(downloadCard?.parentElement?.classList.contains("workspace-layout")).toBe(true);
       expect(downloadCard?.textContent).toContain("Relayer for Mac");
       expect(downloadCard?.textContent).toContain("Download");
-      expect(windowRef.document.body.textContent).toContain("Environment");
+      expect(windowRef.document.querySelector("#environmentPanel")).toBeNull();
       windowRef.document.querySelector(".graph-node")?.click();
       await vi.waitFor(() => expect(windowRef.document.querySelector('a[href="https://example.test/docs"]')).toMatchObject({
         target: "_blank",

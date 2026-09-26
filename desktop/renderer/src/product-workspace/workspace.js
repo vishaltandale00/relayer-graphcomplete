@@ -4050,8 +4050,9 @@ export function createProductWorkspace({
   }
 
   function renderEnvironment(environment, project) {
-    const presentation = environmentPresentation(environment, project);
     const body = $("#environmentBody");
+    if (!body) return;
+    const presentation = environmentPresentation(environment, project);
     const loading = $("#environmentLoading");
     const facts = $("#environmentFacts");
     const message = $("#environmentMessage");

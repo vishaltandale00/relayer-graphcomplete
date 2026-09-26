@@ -1,5 +1,5 @@
-/* Public shell additions. ProductWorkspace graph, inspector, and environment
-   styling remains in the production desktop stylesheet. */
+/* Public shell additions. ProductWorkspace graph and inspector styling remains
+   in the production desktop stylesheet. */
 .public-share-shell {
   min-height: 100%;
   height: 100%;
@@ -138,6 +138,8 @@
 .public-share-shell .interaction-banner {
   position: relative;
   margin-left: 0;
+  min-height: 52px;
+  padding-block: 7px;
 }
 
 .public-share-shell .turn-picker {
@@ -153,8 +155,7 @@
 }
 
 .public-share-shell .environment-panel {
-  grid-column: 2;
-  grid-row: 2;
+  display: none !important;
 }
 
 .public-share-error {
@@ -214,7 +215,7 @@ html[data-theme="light"] .public-share-error {
 @media (max-width: 1100px) {
   .public-share-shell .workspace-layout {
     grid-template-columns: minmax(0, 1fr);
-    grid-template-rows: 36px auto auto auto minmax(520px, 1fr);
+    grid-template-rows: 36px auto auto minmax(520px, 1fr);
     gap: 0;
     min-width: 0;
     padding: 12px;
@@ -238,14 +239,8 @@ html[data-theme="light"] .public-share-error {
     margin: 0 0 12px;
   }
 
-  .public-share-shell .environment-panel {
-    grid-column: 1;
-    grid-row: 4;
-    margin: 0 0 12px;
-  }
-
   .public-share-shell .thread-workspace {
     grid-column: 1;
-    grid-row: 5;
+    grid-row: 4;
   }
 }
