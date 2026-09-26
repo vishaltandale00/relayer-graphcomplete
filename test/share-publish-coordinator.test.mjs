@@ -132,6 +132,29 @@ describe("share publication coordinator", () => {
     expect(report).not.toHaveBeenCalled();
   });
 
+  it("keeps the active-reservation capacity boundary typed and out of telemetry", async () => {
+    const report = vi.fn();
+    const coordinator = createSharePublishCoordinator({
+      exportSnapshot: async () => snapshot,
+      accountSession: async () => ({ ownerKey: "owner-a", authorization: "Bearer secret", generation: 1 }),
+      sourceThreadIdentity: async (threadId) => `installation:test:thread:${threadId}`,
+      publish: async () => {
+        throw Object.assign(new Error("expected reservation capacity"), {
+          code: "reservation_limit_exhausted",
+          failureStage: "service",
+        });
+      },
+      issueHandledShareFailureReporter: () => ({ report }),
+      createReferenceId: () => "SHR-CAPACITY",
+    });
+
+    await expect(coordinator.create({ threadId: 42, title: "Public title" })).resolves.toMatchObject({
+      code: "reservation_limit_exhausted",
+      retryable: false,
+    });
+    expect(report).not.toHaveBeenCalled();
+  });
+
   it("revalidates account authority after export and closes arbitrary dependency codes", async () => {
     let currentAccount = { ownerKey: "owner-a", authorization: "Bearer old", generation: 1 };
     let releaseExport;

@@ -149,4 +149,21 @@ describe("main-only share service client", () => {
       return true;
     });
   });
+
+  it("preserves the expected active-reservation capacity code", async () => {
+    const client = createShareServiceClient({
+      endpoint: "https://share.example.test",
+      fetchImpl: async () => response({ error: "reservation_limit_exhausted" }, 429),
+    });
+
+    await expect(client.publish({
+      authorization: "Bearer verified-id-token",
+      assertAuthority: async () => {},
+      attempt,
+      snapshotBytes: snapshot,
+    })).rejects.toMatchObject({
+      code: "reservation_limit_exhausted",
+      failureStage: "service",
+    });
+  });
 });

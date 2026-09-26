@@ -9,6 +9,7 @@ const DEFAULT_TIMEOUT_MS = 15_000;
 
 const KNOWN_SERVICE_CODES = new Set([
   "daily_quota_exhausted",
+  "reservation_limit_exhausted",
   "snapshot_too_large",
   "reservation_expired",
   "staged_snapshot_missing",

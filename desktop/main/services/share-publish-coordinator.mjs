@@ -10,6 +10,7 @@ const NON_REPORTED_CODES = new Set([
   "share_title_required",
   "share_title_too_long",
   "daily_quota_exhausted",
+  "reservation_limit_exhausted",
   "share_attempt_unavailable",
 ]);
 const CLOSED_FAILURE_CODES = new Set([
@@ -24,6 +25,7 @@ const CLOSED_FAILURE_CODES = new Set([
   "share_upload_failed",
   "share_service_failed",
   "daily_quota_exhausted",
+  "reservation_limit_exhausted",
   "share_attempt_unavailable",
 ]);
 
@@ -81,6 +83,7 @@ function closedFailure(error, reference) {
       "share_snapshot_too_large",
       "share_export_failed",
       "daily_quota_exhausted",
+      "reservation_limit_exhausted",
       "share_sign_in_required",
     ].includes(code),
   };
