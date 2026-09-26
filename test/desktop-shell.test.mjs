@@ -2895,6 +2895,15 @@ describe("desktop skeleton", () => {
         writeFile(join(bundledCodexBrowserRoot, "package.json"), `${JSON.stringify({ name: "chrome-devtools-mcp", version: "1.8.0" })}\n`),
         writeFile(bundledCodexBrowserScript, "helper-fixture"),
       ]);
+      // Exercise the pinned package's actual layout, not an obsolete Sharp fixture.
+      const sharpManifest = JSON.parse(await readFile(new URL("../node_modules/sharp/package.json", import.meta.url), "utf8"));
+      expect(sharpManifest.main).toBe("./dist/index.cjs");
+      expect(sharpManifest.module).toBe("./dist/index.mjs");
+      for (const entry of [sharpManifest.main, sharpManifest.module]) {
+        expect((await stat(new URL(`../node_modules/sharp/${entry}`, import.meta.url))).isFile()).toBe(true);
+      }
+      const nativeFiles = await readdir(new URL(`../node_modules/@img/sharp-${process.platform}-${process.arch}/lib/`, import.meta.url));
+      expect(nativeFiles).toContain(`sharp-${process.platform}-${process.arch}-${sharpManifest.version}.node`);
       const packagedRuntimeEntries = () => [
         "main/single-instance.mjs",
         "main/services/codex-browser-mcp-runtime.mjs",
@@ -2902,7 +2911,8 @@ describe("desktop skeleton", () => {
         "node_modules/@relayer/graph-client/dist/index.js",
         "node_modules/@relayer/harness-host/dist/index.js",
         "node_modules/@relayer/visual-assets/dist/index.js",
-        "node_modules/sharp/lib/sharp.js",
+        "node_modules/sharp/dist/index.cjs",
+        "node_modules/sharp/dist/index.mjs",
         "node_modules/@img/sharp-darwin-arm64/lib/sharp-darwin-arm64-0.35.4.node",
         "node_modules/@img/sharp-darwin-x64/lib/sharp-darwin-x64-0.35.4.node",
         "node_modules/@img/sharp-win32-x64/lib/sharp-win32-x64-0.35.4.node",

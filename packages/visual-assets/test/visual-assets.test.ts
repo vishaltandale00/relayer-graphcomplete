@@ -182,15 +182,29 @@ describe("visual_assets deterministic library interface", () => {
         file: { name: "first.svg", mediaType: "image/svg+xml", async read() { await firstGate; return new TextEncoder().encode(validSvg); } },
         scope: { kind: "library" }, name: "First", tagIds: [],
       });
+      let input!: {
+        file: { name: string; mediaType: string; expectedDigest: string; read(): Promise<Uint8Array> };
+        scope: { kind: "library" | "project"; projectId?: number };
+        name: string;
+        tagIds: string[];
+        registryId?: string;
+      };
       const file = {
         name: "queued.svg",
         mediaType: "image/svg+xml",
         expectedDigest: `sha256:${createHash("sha256").update(validSvg).digest("hex")}`,
-        async read() { return new TextEncoder().encode(validSvg); },
+        async read() {
+          input.name = "Reentered";
+          input.tagIds.push("reentered-tag");
+          input.registryId = "reentered-registry";
+          return new TextEncoder().encode(fileContent);
+        },
       };
+      let fileContent = validSvg;
       const scope: { kind: "library" | "project"; projectId?: number } = { kind: "library" };
-      const input = { file, scope, name: "Queued", tagIds: [] as string[] };
+      input = { file, scope, name: "Queued", tagIds: [] as string[] };
       const queued = library.add(input as Parameters<typeof library.add>[0]);
+      fileContent = "<svg><script/></svg>";
       file.name = "mutated.txt";
       file.mediaType = "text/plain";
       file.expectedDigest = "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff";
@@ -207,6 +221,50 @@ describe("visual_assets deterministic library interface", () => {
         name: "Queued", mediaType: "image/svg+xml", scopes: [{ kind: "library" }],
         provenance: { fileName: "queued.svg" },
       });
+      expect(new TextDecoder().decode(await (await library.download(added.id)).read())).toBe(validSvg);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps durable cursors valid across observable no-op mutations", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "relayer-visual-assets-durable-no-op-"));
+    try {
+      const library = await createFileVisualAssetsLibrary({}, join(directory, "visual-assets.json"));
+      const root = await library.createTag({ scope: { kind: "library" }, name: "Root" });
+      const other = await library.createTag({ scope: { kind: "library" }, name: "Other" });
+      const first = await library.add({
+        file: memoryHarnessFile("first.svg", "image/svg+xml", validSvg),
+        scope: { kind: "library" }, name: "First", tagIds: [root.id],
+      });
+      await library.add({
+        file: memoryHarnessFile("second.svg", "image/svg+xml", validSvg),
+        scope: { kind: "library" }, name: "Second", tagIds: [],
+      });
+      const archived = await library.add({
+        file: memoryHarnessFile("archived.svg", "image/svg+xml", validSvg),
+        scope: { kind: "library" }, name: "Archived", tagIds: [],
+      });
+      await library.archive(archived.id);
+
+      async function assetCursorSurvives(operation: () => Promise<unknown>): Promise<void> {
+        const page = await library.listAssets({ scope: { kind: "library" }, limit: 1 });
+        await operation();
+        await expect(library.listAssets({
+          scope: { kind: "library" }, limit: 1, cursor: page.nextCursor!,
+        })).resolves.toBeDefined();
+      }
+      await assetCursorSurvives(() => library.associate({ assetId: first.id, scope: { kind: "library" } }));
+      await assetCursorSurvives(() => library.organize({
+        assetId: first.id, addTagIds: [root.id], removeTagIds: [other.id],
+      }));
+      await assetCursorSurvives(() => library.archive(archived.id));
+
+      const tagPage = await library.listTags({ scope: { kind: "library" }, limit: 1 });
+      await library.moveTag({ tagId: root.id, parentTagId: null });
+      await expect(library.listTags({
+        scope: { kind: "library" }, limit: 1, cursor: tagPage.nextCursor!,
+      })).resolves.toBeDefined();
     } finally {
       await rm(directory, { recursive: true, force: true });
     }
@@ -235,6 +293,44 @@ describe("visual_assets deterministic library interface", () => {
       await expect(queued).rejects.toMatchObject({ code: "digest_mismatch" });
       expect((await library.listAssets({ scope: { kind: "library" } })).items.map(({ name }) => name)).toEqual(["First"]);
     } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("handles an eager queued read rejection until its mutation turn without swallowing it", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "relayer-visual-assets-queued-read-failure-"));
+    const unhandled: unknown[] = [];
+    const recordUnhandled = (error: unknown) => { unhandled.push(error); };
+    process.on("unhandledRejection", recordUnhandled);
+    try {
+      const library = await createFileVisualAssetsLibrary({}, join(directory, "visual-assets.json"));
+      let releaseFirst!: () => void;
+      const firstGate = new Promise<void>((resolve) => { releaseFirst = resolve; });
+      const first = library.add({
+        file: { name: "first.svg", mediaType: "image/svg+xml", async read() { await firstGate; return new TextEncoder().encode(validSvg); } },
+        scope: { kind: "library" }, name: "First", tagIds: [],
+      });
+      const readFailure = new Error("queued read failed");
+      const queued = library.add({
+        file: { name: "failed.svg", mediaType: "image/svg+xml", async read() { throw readFailure; } },
+        scope: { kind: "library" }, name: "Failed", tagIds: [],
+      });
+      const observed = queued.catch((error: unknown) => error);
+      const detached = new Uint8Array([1]);
+      structuredClone(detached.buffer, { transfer: [detached.buffer] });
+      const detachedRead = library.add({
+        file: { name: "detached.svg", mediaType: "image/svg+xml", async read() { return detached; } },
+        scope: { kind: "library" }, name: "Detached", tagIds: [],
+      }).catch((error: unknown) => error);
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(unhandled).toEqual([]);
+      releaseFirst();
+      await first;
+      await expect(observed).resolves.toBe(readFailure);
+      await expect(detachedRead).resolves.toBeInstanceOf(TypeError);
+      expect((await library.listAssets({ scope: { kind: "library" } })).items.map(({ name }) => name)).toEqual(["First"]);
+    } finally {
+      process.off("unhandledRejection", recordUnhandled);
       await rm(directory, { recursive: true, force: true });
     }
   });

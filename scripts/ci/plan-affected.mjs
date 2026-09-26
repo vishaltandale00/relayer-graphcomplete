@@ -123,7 +123,7 @@ function localNpmGraph(repository) {
   const manifestPaths = ["desktop/package.json"];
   for (const workspacePattern of rootManifest.workspaces ?? []) {
     if (workspacePattern === "packages/*") {
-      for (const name of ["eval-runner", "graph-client", "harness-host"]) {
+      for (const name of ["eval-runner", "graph-client", "visual-assets", "harness-host"]) {
         manifestPaths.push(`packages/${name}/package.json`);
       }
     }

@@ -73,7 +73,8 @@ export async function verifyBundledAppServer(
     "node_modules/@relayer/graph-client/dist/index.js",
     "node_modules/@relayer/harness-host/dist/index.js",
     "node_modules/@relayer/visual-assets/dist/index.js",
-    "node_modules/sharp/lib/sharp.js",
+    "node_modules/sharp/dist/index.cjs",
+    "node_modules/sharp/dist/index.mjs",
     "node_modules/@relayer/harness-host/dist/implementations/claude-basic-browser.js",
     "node_modules/@relayer/eval-runner/dist/index.js",
   ]) {

@@ -1510,8 +1510,17 @@ export async function createFileVisualAssetsLibrary(
         tagIds: Object.freeze([...input.tagIds]),
         ...(input.registryId === undefined ? {} : { registryId: input.registryId }),
       });
+      const bytesAtCall = (async () => {
+        try {
+          return { ok: true as const, bytes: (await read()).slice() };
+        } catch (error) {
+          return { ok: false as const, error };
+        }
+      })();
       return serialize(async () => {
-        const bytes = (await read()).slice();
+        const settledRead = await bytesAtCall;
+        if (!settledRead.ok) throw settledRead.error;
+        const bytes = settledRead.bytes;
         const candidate = libraryFor(catalog);
         const file = Object.freeze({
           name: fileName,
@@ -1539,6 +1548,8 @@ export async function createFileVisualAssetsLibrary(
       return serialize(async () => {
         const candidate = libraryFor(catalog);
         const tag = await candidate.moveTag(prepared);
+        const previous = catalog.tags.find((entry) => entry.id === tag.id);
+        if (previous !== undefined && JSON.stringify(previous) === JSON.stringify(tag)) return tag;
         await publish(deepFreeze({ ...catalog, tags: catalog.tags.map((entry) => entry.id === tag.id ? tag : entry) }), isCurrent);
         return tag;
       });
@@ -1549,6 +1560,8 @@ export async function createFileVisualAssetsLibrary(
       return serialize(async () => {
         const candidate = libraryFor(catalog);
         const asset = await candidate.associate(prepared);
+        const previous = catalog.assets.find((entry) => entry.asset.id === asset.id)?.asset;
+        if (previous !== undefined && JSON.stringify(previous) === JSON.stringify(asset)) return asset;
         await publish(replaceAssetState(asset), isCurrent);
         return asset;
       });
@@ -1558,6 +1571,8 @@ export async function createFileVisualAssetsLibrary(
       return serialize(async () => {
         const candidate = libraryFor(catalog);
         const asset = await candidate.organize(prepared);
+        const previous = catalog.assets.find((entry) => entry.asset.id === asset.id)?.asset;
+        if (previous !== undefined && JSON.stringify(previous) === JSON.stringify(asset)) return asset;
         await publish(replaceAssetState(asset), isCurrent);
         return asset;
       });
@@ -1566,6 +1581,8 @@ export async function createFileVisualAssetsLibrary(
       return serialize(async () => {
         const candidate = libraryFor(catalog);
         const asset = await candidate.archive(assetId);
+        const previous = catalog.assets.find((entry) => entry.asset.id === asset.id)?.asset;
+        if (previous !== undefined && JSON.stringify(previous) === JSON.stringify(asset)) return asset;
         await publish(replaceAssetState(asset), isCurrent);
         return asset;
       });

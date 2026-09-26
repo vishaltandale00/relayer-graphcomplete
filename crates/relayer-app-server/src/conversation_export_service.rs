@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 use relayer_graph_core::{
     AcceptedGraphClosure, ActionKind, ActionVariant, GraphAction, GraphEdge, GraphNode,
@@ -283,6 +283,7 @@ async fn collect_visual_assets(
     ConversationExportBuildError,
 > {
     let mut associations = HashMap::new();
+    let mut visited_nodes = HashSet::new();
     let mut contents = BTreeMap::<String, ExportVisualAssetContent>::new();
     for node in closures
         .iter()
@@ -290,6 +291,9 @@ async fn collect_visual_assets(
         .flat_map(|closure| &closure.layers)
         .flat_map(|layer| &layer.nodes)
     {
+        if !visited_nodes.insert(node.id) {
+            continue;
+        }
         let Some(detail) = node.authored_detail.as_ref() else {
             continue;
         };
@@ -1962,6 +1966,58 @@ mod tests {
         InteractionInput, InteractionInputNode, LayerId, NodeId, PresentingInputOccurrence,
         RecordState, SubmittedInputValue,
     };
+
+    #[tokio::test]
+    async fn export_fetches_each_repeated_node_asset_only_once() {
+        use serde_json::json;
+        use std::sync::{
+            Arc,
+            atomic::{AtomicUsize, Ordering},
+        };
+        let requests = Arc::new(AtomicUsize::new(0));
+        let counted = requests.clone();
+        let app = axum::Router::new().route("/api/control/temporal-features", axum::routing::get(|| async { axum::Json(json!({"configVersion":1,"schemaRead":true,"rootCurrentWrite":true,"projectionUi":true,"invokeResolution":true,"providerRecursion":true})) })).fallback(move || {
+            let counted = counted.clone();
+            async move {
+                counted.fetch_add(1, Ordering::SeqCst);
+                axum::Json(json!({"digestSha256":"a".repeat(64),"mediaType":"image/png","byteLength":1,"contentBase64":"YQ==","provenance":{"source":"user","fileName":"a.png"}}))
+            }
+        });
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+        let directory = tempfile::tempdir().unwrap();
+        let catalog = directory.path().join("catalog.json");
+        std::fs::write(&catalog, json!({"schemaVersion":1,"configurations":[{"configuration":{"schemaVersion":1,"name":"test","implementation":"test","implementationVersion":1,"permissionBindings":{"auto":{}},"settings":{}},"digest":"sha256:test"}]}).to_string()).unwrap();
+        let runtime = crate::runtime::RuntimeClient::open(
+            &format!("http://{address}/"),
+            "http://127.0.0.1:9/",
+            "control".into(),
+            "harness".into(),
+            &catalog,
+        )
+        .await
+        .unwrap();
+        let node = json!({"id":2,"kind":"concept","icon":"box","title":"Image","detail":"Fallback","state":"accepted","authoredDetail":{"version":1,"components":[],"mounts":[],"assets":[{"id":"image","digestSha256":"a".repeat(64),"mediaType":"image/png","representation":"image"}],"integritySha256":"b".repeat(64)}});
+        let closure: relayer_graph_core::AcceptedGraphClosure = serde_json::from_value(json!({"nodeId":1,"interaction":{"id":1,"kind":"user-interaction","icon":"user","title":"Show","detail":"Show","state":"accepted"},"rootAction":{"id":1,"sourceNodeId":1,"kind":"navigate","relation":"expand","label":"Response","variant":"pill","targetLayerId":1,"state":"accepted"},"rootLayerId":1,"layers":[{"layer":{"id":1,"nodes":[2],"edges":[],"state":"accepted"},"nodes":[node],"edges":[],"actions":[]}]})).unwrap();
+        let (associations, content) = super::collect_visual_assets(
+            &runtime,
+            &[Some(closure.clone()), Some(closure)],
+            &ProjectPathRedactor::new(None),
+        )
+        .await
+        .unwrap();
+        server.abort();
+        assert_eq!(associations.len(), 1);
+        assert_eq!(content.len(), 1);
+        assert_eq!(
+            requests.load(Ordering::SeqCst),
+            1,
+            "shared accepted nodes must be deduplicated before fetching bytes"
+        );
+    }
 
     #[test]
     fn exports_approval_lifecycle_completion_statuses() {

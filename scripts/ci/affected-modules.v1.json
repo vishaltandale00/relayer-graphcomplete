@@ -3,6 +3,7 @@
   "rustCrashPackages": ["relayer-graph-core", "relayer-graph-server"],
   "vitestPrerequisiteWorkspaces": [
     "@relayer/graph-client",
+    "@relayer/visual-assets",
     "@relayer/harness-host",
     "@relayer/eval-runner"
   ],

@@ -2399,6 +2399,9 @@ settings:
 <tr><td>Typed and packaged authoring</td><td><code>packages/graph-client/test/visual-assets.test.ts</code> checks file-handle round trips and immutable request snapshots. <code>test/graph-client-packaged-detail.test.mjs</code> checks the packaged authoring exports.</td></tr>
 <tr><td>Desktop asset startup and packaging</td><td><code>test/desktop-shell.test.mjs</code> and <code>test/codex-browser-runtime.test.mjs</code> check the bridge startup contract and native image-processing dependency packaging.</td></tr>
 <tr><td>Bounded portable transport</td><td><code>crates/relayer-graph-server/tests/import_visual_asset_transport.rs</code> checks separate digest staging, repeated large-image references, import isolation, and atomic failure under the existing request limit.</td></tr>
+<tr><td>Durable input and cursor semantics</td><td><code>packages/visual-assets/test/visual-assets.test.ts</code> checks immediate byte ownership, handled read/copy failures, and cursor stability for observable durable no-ops.</td></tr>
+<tr><td>Asset reclamation and bounded staging</td><td>Graph import transport tests check shared-content lifetime and rollback. App export and import storage tests check deduplicated fetches and separate digest staging rows.</td></tr>
+<tr><td>Clean dependency and packaging verification</td><td>CI planner and chapter-runner tests include visual-assets before harness-host. Desktop packaging tests check entry points against the installed Sharp package.</td></tr>
 </tbody>
 </table>
 <h2 data-prd-layer="Evidence" data-prd-order="15.4">15D. Basic Complete evaluation evidence</h2>

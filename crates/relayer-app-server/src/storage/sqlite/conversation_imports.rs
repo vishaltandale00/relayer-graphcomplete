@@ -116,26 +116,22 @@ impl SqliteProductStore {
         import_id: &str,
         content: &crate::conversation_export::ExportVisualAssetContent,
     ) -> Result<(), StorageError> {
-        let mut tx = self.pool.begin_with("BEGIN IMMEDIATE").await?;
-        let header_json: String = sqlx::query_scalar(
-            "SELECT header_json FROM conversation_imports WHERE id=?1 AND state='staging'",
-        )
-        .bind(import_id)
-        .fetch_one(&mut *tx)
-        .await?;
-        let mut header: ConversationExportHeader =
-            serde_json::from_str(&header_json).map_err(serialization)?;
-        header.visual_asset_contents.push(content.clone());
-        let result = sqlx::query(
-            "UPDATE conversation_imports SET header_json=?1 WHERE id=?2 AND state='staging'",
-        )
-        .bind(serde_json::to_string(&header).map_err(serialization)?)
-        .bind(import_id)
-        .execute(&mut *tx)
-        .await?;
-        require_one(result.rows_affected(), "conversation import is not staged")?;
-        tx.commit().await?;
-        Ok(())
+        let result = sqlx::query("INSERT INTO conversation_import_asset_contents(conversation_import_id,digest_sha256,content_json) SELECT id,?2,?3 FROM conversation_imports WHERE id=?1 AND state='staging'")
+            .bind(import_id).bind(&content.digest_sha256)
+            .bind(serde_json::to_string(content).map_err(serialization)?)
+            .execute(&self.pool).await?;
+        require_one(result.rows_affected(), "conversation import is not staged")
+    }
+
+    pub(crate) async fn next_conversation_import_visual_asset_content(
+        &self,
+        import_id: &str,
+        after_digest: &str,
+    ) -> Result<Option<crate::conversation_export::ExportVisualAssetContent>, StorageError> {
+        let json: Option<String> = sqlx::query_scalar("SELECT content_json FROM conversation_import_asset_contents content JOIN conversation_imports ci ON ci.id=content.conversation_import_id WHERE ci.id=?1 AND ci.state='staging' AND content.digest_sha256>?2 ORDER BY content.digest_sha256 LIMIT 1")
+            .bind(import_id).bind(after_digest).fetch_optional(&self.pool).await?;
+        json.map(|json| serde_json::from_str(&json).map_err(serialization))
+            .transpose()
     }
 
     pub(crate) async fn finalize_conversation_import_digest(

@@ -154,6 +154,7 @@ describe("affected-module plan v1", { timeout: 30_000 }, () => {
       "@relayer/eval-runner",
       "@relayer/graph-client",
       "@relayer/harness-host",
+      "@relayer/visual-assets",
       "relayer-desktop",
     ]);
     expect(result.chapters.typescript).toBe(true);
@@ -173,6 +174,7 @@ describe("affected-module plan v1", { timeout: 30_000 }, () => {
       "relayer-desktop",
     ]);
     expect(result.npmBuildWorkspaces).toContain("@relayer/graph-client");
+    expect(result.npmBuildWorkspaces).toContain("@relayer/visual-assets");
   });
 
   test("selects packaging only for owned desktop packaging inputs", () => {

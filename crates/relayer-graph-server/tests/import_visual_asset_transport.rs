@@ -182,3 +182,157 @@ async fn staged_content_is_import_scoped_and_missing_pins_roll_back_publication(
     assert_eq!(staged, 0);
     pool.close().await;
 }
+
+#[tokio::test]
+async fn removing_imports_reclaims_only_unreferenced_accepted_content() {
+    let file = tempfile::NamedTempFile::new().unwrap();
+    let database = GraphDatabase::open(file.path()).await.unwrap();
+    let app = router(ServerState::new(database.clone(), "control"));
+    let blob = content(b"shared-validated-content");
+    let mut survivor = None;
+    for (id, thread) in [("first", 91), ("second", 92)] {
+        let prefix = format!("/api/control/conversation-import-stages/{id}");
+        assert_eq!(
+            post(
+                &app,
+                "/api/control/conversation-import-stages",
+                &stage(id, thread)
+            )
+            .await
+            .0,
+            StatusCode::OK
+        );
+        assert_eq!(
+            post(&app, &format!("{prefix}/visual-asset-contents"), &blob)
+                .await
+                .0,
+            StatusCode::OK
+        );
+        assert_eq!(
+            post(&app, &format!("{prefix}/turns"), &turn(&blob)).await.0,
+            StatusCode::OK
+        );
+        let (status, response) = post(&app, &format!("{prefix}/finalize"), &json!({})).await;
+        assert_eq!(status, StatusCode::OK);
+        let receipt: Value = serde_json::from_slice(&response).unwrap();
+        survivor = NodeId::new(
+            receipt["turns"][0]["output"]["rootLayer"]["nodes"][0]["id"]
+                .as_i64()
+                .unwrap(),
+        );
+    }
+    database
+        .remove_imported_conversation("first")
+        .await
+        .unwrap();
+    assert_eq!(
+        database
+            .accepted_detail_asset(survivor.unwrap(), "visual")
+            .await
+            .unwrap()
+            .content,
+        b"shared-validated-content"
+    );
+    database
+        .remove_imported_conversation("second")
+        .await
+        .unwrap();
+    let pool = sqlx::SqlitePool::connect(&format!("sqlite://{}", file.path().display()))
+        .await
+        .unwrap();
+    let remaining: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM authored_detail_asset_contents")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(
+        remaining, 0,
+        "removed conversations must not retain unreferenced asset bytes"
+    );
+    pool.close().await;
+}
+
+#[tokio::test]
+async fn draft_asset_replace_clear_and_failed_replace_reclaim_transactionally() {
+    use relayer_graph_core::{AuthoredDetailUpdate, NodeDraft, PreparedDetailAsset, ThreadId};
+    let file = tempfile::NamedTempFile::new().unwrap();
+    let database = GraphDatabase::open(file.path()).await.unwrap();
+    let interaction = database
+        .create_interaction(None, ThreadId::new(101).unwrap(), "Visual")
+        .await
+        .unwrap();
+    let writer = database.writer_for_subgraph(interaction.id).await.unwrap();
+    let draft = NodeDraft {
+        client_key: "visual".into(),
+        kind: "concept".into(),
+        icon: "box".into(),
+        title: "Visual".into(),
+        detail: "Fallback".into(),
+    };
+    let pool = sqlx::SqlitePool::connect(&format!("sqlite://{}", file.path().display()))
+        .await
+        .unwrap();
+    for bytes in [b"first".as_slice(), b"second".as_slice()] {
+        let blob = content(bytes);
+        let fixture = turn(&blob);
+        let package = &fixture["acceptedView"]["layers"][0]["nodes"][0]["authoredDetail"];
+        let asset = PreparedDetailAsset {
+            asset_id: "visual".into(),
+            digest_sha256: blob["digestSha256"].as_str().unwrap().into(),
+            media_type: "image/png".into(),
+            byte_length: bytes.len(),
+            provenance_source: "user".into(),
+            provenance_file_name: "image.png".into(),
+            content: bytes.to_vec(),
+        };
+        writer
+            .submit_node_with_prepared_detail_assets(
+                &draft,
+                AuthoredDetailUpdate::Replace(package),
+                Some(std::slice::from_ref(&asset)),
+            )
+            .await
+            .unwrap();
+        let stored: Vec<Vec<u8>> =
+            sqlx::query_scalar("SELECT content FROM authored_detail_asset_contents")
+                .fetch_all(&pool)
+                .await
+                .unwrap();
+        assert_eq!(
+            stored,
+            vec![bytes.to_vec()],
+            "replacement must reclaim prior bytes"
+        );
+        let mut invalid = asset;
+        invalid.content = b"corrupt".to_vec();
+        assert!(
+            writer
+                .submit_node_with_prepared_detail_assets(
+                    &draft,
+                    AuthoredDetailUpdate::Replace(package),
+                    Some(&[invalid])
+                )
+                .await
+                .is_err()
+        );
+        let stored: Vec<Vec<u8>> =
+            sqlx::query_scalar("SELECT content FROM authored_detail_asset_contents")
+                .fetch_all(&pool)
+                .await
+                .unwrap();
+        assert_eq!(
+            stored,
+            vec![bytes.to_vec()],
+            "failed replacement must roll back content reclamation"
+        );
+    }
+    writer
+        .submit_node_with_prepared_detail_assets(&draft, AuthoredDetailUpdate::Clear, None)
+        .await
+        .unwrap();
+    let remaining: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM authored_detail_asset_contents")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(remaining, 0);
+    pool.close().await;
+}

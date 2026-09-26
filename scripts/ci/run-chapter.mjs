@@ -104,6 +104,7 @@ function packageArguments(packages) {
 
 const npmBuildOrder = [
   "@relayer/graph-client",
+  "@relayer/visual-assets",
   "@relayer/harness-host",
   "@relayer/eval-runner",
 ];

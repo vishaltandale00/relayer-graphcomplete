@@ -851,6 +851,23 @@ async fn validate_visual_asset_import(
         .json()
         .await
         .map_err(|_| ApiError::visual_assets_unavailable())?;
+    // Do not admit a validation receipt while replacement is still fencing the
+    // old bridge. Acquire admission only after the RPC, preserving the existing
+    // admission-before-completion-gate ordering used by replacement and minting.
+    let _admission = state.visual_assets_admission.lock().await;
+    if state
+        .visual_assets_bridge
+        .lock()
+        .expect("visual-assets bridge mutex poisoned")
+        .as_ref()
+        .map(|current| current.generation)
+        != Some(bridge.generation)
+    {
+        return Err(ApiError::conflict(
+            "visual_assets_bridge_restarted",
+            "Visual-assets authority changed while validating imported content.",
+        ));
+    }
     if !status.is_success() {
         return Err(ApiError(status, body));
     }
@@ -2951,6 +2968,75 @@ mod tests {
             state.sessions.lock().unwrap()[&second_token].node_id,
             second.id
         );
+    }
+
+    #[tokio::test]
+    async fn import_content_validation_rejects_a_replaced_bridge_response() {
+        let validation_started = Arc::new(tokio::sync::Notify::new());
+        let release_validation = Arc::new(tokio::sync::Notify::new());
+        let started = validation_started.clone();
+        let release = release_validation.clone();
+        let fake = axum::Router::new().route(
+            "/visual-assets/operations",
+            post(move |Json(body): Json<Value>| {
+                let started = started.clone();
+                let release = release.clone();
+                async move {
+                    assert_eq!(body["operation"]["kind"], "validate-import-content");
+                    if body["generation"] == 1 {
+                        started.notify_one();
+                        release.notified().await;
+                    }
+                    Json(json!({"result":{"validated":true}}))
+                }
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move { axum::serve(listener, fake).await.unwrap() });
+        let app = router(ServerState::new(
+            GraphDatabase::in_memory().await.unwrap(),
+            "control",
+        ));
+        let registration = |generation| {
+            Request::builder().method("PUT")
+                .uri("/api/control/visual-assets/bridge")
+                .header("authorization", "Bearer control").header("content-type", "application/json")
+                .body(Body::from(json!({"url":format!("http://{address}"),"token":"x".repeat(32),"generation":generation}).to_string())).unwrap()
+        };
+        let validation = || {
+            Request::builder()
+                .method("POST")
+                .uri("/api/control/visual-assets/imports/validate")
+                .header("authorization", "Bearer control")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    json!({"projectId":null,"threadId":1,"content":{}}).to_string(),
+                ))
+                .unwrap()
+        };
+        assert_eq!(
+            app.clone().oneshot(registration(1)).await.unwrap().status(),
+            StatusCode::OK
+        );
+        let pending = tokio::spawn(app.clone().oneshot(validation()));
+        validation_started.notified().await;
+        assert_eq!(
+            app.clone().oneshot(registration(2)).await.unwrap().status(),
+            StatusCode::OK
+        );
+        release_validation.notify_one();
+        let response = pending.await.unwrap().unwrap();
+        assert_eq!(response.status(), StatusCode::CONFLICT);
+        let body: Value =
+            serde_json::from_slice(&to_bytes(response.into_body(), usize::MAX).await.unwrap())
+                .unwrap();
+        assert_eq!(body["error"]["code"], "visual_assets_bridge_restarted");
+        assert_eq!(
+            app.oneshot(validation()).await.unwrap().status(),
+            StatusCode::OK
+        );
+        server.abort();
     }
 
     #[tokio::test]

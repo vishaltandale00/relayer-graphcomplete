@@ -59,6 +59,15 @@ describe("CI chapter runner", () => {
     return readFileSync(trace, "utf8").trim().split("\n");
   }
 
+  test("builds visual assets before the host in both clean TypeScript entry points", () => {
+    const workspaces = ["@relayer/graph-client", "@relayer/visual-assets", "@relayer/harness-host", "@relayer/eval-runner"];
+    for (const chapter of ["typescript", "vitest-prerequisites"]) {
+      writeFileSync(trace, "");
+      const calls = run(chapter, { npmBuildWorkspaces: workspaces, npmWorkspaces: [], rootTypeScript: false });
+      expect(calls).toEqual(workspaces.map((workspace) => `npm:run build -w ${workspace}`));
+    }
+  });
+
   test("executes Clippy and default tests as separate fresh Cargo invocations", () => {
     const plan = {
       rustPackages: ["relayer-graph-core", "relayer-graph-server"],
