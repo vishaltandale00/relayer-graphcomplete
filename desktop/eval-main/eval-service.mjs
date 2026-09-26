@@ -47,7 +47,7 @@ import {
   recursiveGraphMemoryEvalCase,
   RECURSIVE_GRAPH_MEMORY_CASE_ID,
   RECURSIVE_GRAPH_MEMORY_HARNESS_QUARTET,
-  selectStandalonePermissionProfile,
+  selectEvalPermissionProfile,
 } from "@relayer/eval-runner";
 import { loadHarnessConfigurations } from "@relayer/harness-host";
 import { firstAvailableSelection, harnessUsesConfigurationModel } from "../renderer/src/model-picker-model.js";
@@ -2436,7 +2436,7 @@ export class EvalService {
       execution,
       title: definition.name,
       prompts: resolveEvalCasePrompts(definition, execution.testRunId),
-      permissionProfileId: selectStandalonePermissionProfile(execution.harnessConfiguration),
+      permissionProfileId: selectEvalPermissionProfile(execution.harnessConfiguration),
     });
     return { ...executed, threadDefinition: null, workspaceChecks: new Map() };
   }
@@ -3243,7 +3243,7 @@ function candidateModel(configuration) {
 
 function validateEvalPermissionProfiles(execution) {
   if (!projectCaseIds.has(execution.testCaseId)) {
-    selectStandalonePermissionProfile(execution.harnessConfiguration);
+    selectEvalPermissionProfile(execution.harnessConfiguration);
     return;
   }
   const definition = evalCases.find((candidate) => candidate.id === execution.testCaseId);
