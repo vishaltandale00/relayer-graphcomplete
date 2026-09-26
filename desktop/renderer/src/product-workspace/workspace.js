@@ -18,6 +18,7 @@ import { graphLayoutSignature, projectLayerNodePositions } from "./graph-layout.
 import { renderMarkdown } from "./markdown.js";
 import { mountCompiledNodeDetail } from "./node-detail-runtime.js";
 import { productWorkspaceMarkup } from "./view.js";
+
 import {
   confirmationRestorationKey,
   restoredDraftForInteraction,
@@ -149,6 +150,29 @@ export async function renderProductNodeDetail({
     return Object.freeze({ authored: false, mountKey, host, ...runtime });
   }
   return Object.freeze({ authored: true, mountKey, host, ...runtime });
+}
+
+export function observeAutomaticGraphFitOnResize({
+  graphStage,
+  graphWindow,
+  getCameraRevision,
+  getGraphNodes,
+  hasActiveGesture,
+  refit,
+}) {
+  const Observer = graphWindow?.ResizeObserver;
+  if (!Observer) return () => {};
+  const initialRect = graphStage.getBoundingClientRect();
+  let previousSize = { width: initialRect.width, height: initialRect.height };
+  const observer = new Observer(() => {
+    const { width, height } = graphStage.getBoundingClientRect();
+    const changed = previousSize !== null
+      && (Math.abs(width - previousSize.width) > 0.5 || Math.abs(height - previousSize.height) > 0.5);
+    previousSize = { width, height };
+    if (changed && getGraphNodes().length > 0 && getCameraRevision() === 0 && !hasActiveGesture()) refit();
+  });
+  observer.observe(graphStage);
+  return () => observer.disconnect();
 }
 
 const GRAPH_NODE_HALF_WIDTH = 82;
@@ -1334,6 +1358,30 @@ export function compiledNodeDetailCoversActions(detail, actions, node) {
   return (actions ?? []).every((action) => boundActionIds.has(String(action.id)));
 }
 
+export function graphCameraForView({
+  cachedView,
+  cachedLayoutMatches,
+  enteringView,
+  nodes,
+  bounds,
+  currentCamera,
+  currentCameraRevision,
+}) {
+  if (cachedView && cachedLayoutMatches) {
+    if (cachedView.cameraRevision === 0) {
+      return { camera: fitGraphCamera(nodes, bounds), cameraRevision: 0 };
+    }
+    return {
+      camera: { ...cachedView.camera },
+      cameraRevision: cachedView.cameraRevision,
+    };
+  }
+  if (enteringView || !cachedLayoutMatches) {
+    return { camera: fitGraphCamera(nodes, bounds), cameraRevision: 0 };
+  }
+  return { camera: currentCamera, cameraRevision: currentCameraRevision };
+}
+
 export function captureGraphViewState(
   nodes,
   camera,
@@ -2298,6 +2346,15 @@ export function createProductWorkspace({
     }
     drawGraph();
   }
+
+  const disconnectAutomaticGraphFit = observeAutomaticGraphFitOnResize({
+    graphStage,
+    graphWindow,
+    getCameraRevision: () => cameraRevision,
+    getGraphNodes: () => graphNodes,
+    hasActiveGesture: () => Boolean(dragging || panning || pinching),
+    refit: () => updateCamera(fitGraphCamera(graphNodes, graphStage.getBoundingClientRect()), false),
+  });
 
   function zoomAt(zoom, anchor = {
     x: graphStage.getBoundingClientRect().width / 2,
@@ -4366,12 +4423,17 @@ export function createProductWorkspace({
       selection.selectedNodeId = null;
       $("#inspector").classList.add("hidden");
     }
-    if (cachedView && cachedLayoutMatches) {
-      camera = { ...cachedView.camera };
-      cameraRevision = cachedView.cameraRevision;
-    } else if (enteringView || !cachedLayoutMatches) {
-      camera = fitGraphCamera(graphNodes, graphStage.getBoundingClientRect());
-    }
+    const restoredCamera = graphCameraForView({
+      cachedView,
+      cachedLayoutMatches,
+      enteringView,
+      nodes: graphNodes,
+      bounds: graphStage.getBoundingClientRect(),
+      currentCamera: camera,
+      currentCameraRevision: cameraRevision,
+    });
+    camera = restoredCamera.camera;
+    cameraRevision = restoredCamera.cameraRevision;
     drawGraph();
   }
 
@@ -5110,6 +5172,7 @@ export function createProductWorkspace({
     contextDraftLoadRetryAttempts.clear();
     inputDraftLoadRetries?.dispose();
     graphDocument.defaultView.removeEventListener("resize", repositionContextDraftSendWarning);
+    disconnectAutomaticGraphFit();
     cancelInspectorFit();
     graphDocument.removeEventListener("pointerdown", blurGraphFromOutsidePointer, true);
     graphDocument.removeEventListener("pointerdown", closeTurnPopoverFromOutside, true);

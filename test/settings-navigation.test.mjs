@@ -40,6 +40,7 @@ function tab(name) {
 
 describe("Settings navigation", () => {
   it("swaps the sidebar, switches panels, and returns to the prior app view", async () => {
+    let narrow = false;
     const elements = new Map([
       ["#newThreadView", { classList: classList() }],
       ["#threadView", { classList: classList("hidden") }],
@@ -48,6 +49,8 @@ describe("Settings navigation", () => {
       ["#appSidebarContent", { classList: classList() }],
       ["#settingsSidebarContent", { classList: classList("hidden") }],
       ["#settingsTitle", { textContent: "Settings" }],
+      ["#settingsCompactSelect", { value: "appearance", focusCount: 0, focus() { this.focusCount += 1; } }],
+      ["#collapseSidebar", { classList: classList(), focusCount: 0, focus() { this.focusCount += 1; } }],
     ]);
     const tabs = [tab("models"), tab("appearance"), tab("codex"), tab("updates")];
     const panels = ["models", "appearance", "codex", "updates"].map((name) => ({
@@ -57,8 +60,9 @@ describe("Settings navigation", () => {
 
     Object.assign(globalThis, {
       location: new URL("http://127.0.0.1:43123/"),
-      window: { relayerDesktop: undefined, relayerEvalReview: undefined },
+      window: { relayerDesktop: undefined, relayerEvalReview: undefined, matchMedia: () => ({ matches: narrow }) },
       document: {
+        body: { classList: classList() },
         querySelector: (selector) => {
           const settingsTab = selector.match(/^\[data-settings-tab="(.+)"\]$/)?.[1];
           return elements.get(selector) || tabs.find((item) => item.dataset.settingsTab === settingsTab) || null;
@@ -103,5 +107,11 @@ describe("Settings navigation", () => {
     await navigation.returnFromSettings(async (threadId) => refreshedThreadIds.push(threadId));
     expect(viewState.mainView).toBe("thread");
     expect(refreshedThreadIds).toEqual(["42"]);
+
+    narrow = true;
+    navigation.setMainView("settings", { moveFocus: true });
+    expect(elements.get("#settingsCompactSelect").focusCount).toBe(1);
+    await navigation.returnFromSettings();
+    expect(elements.get("#collapseSidebar").focusCount).toBe(1);
   });
 });

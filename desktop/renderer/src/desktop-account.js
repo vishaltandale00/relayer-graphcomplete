@@ -158,13 +158,14 @@ export function createDesktopAccountController({ api, elements, storage, openSet
   function bind() {
     if (bound) return;
     bound = true;
-    elements.accountButton.onclick = () => {
+    const activateAccount = () => {
       if (current.status === "signed-out" || current.status === "error") {
         void signIn();
       } else {
         openSettings();
       }
     };
+    elements.accountButton.onclick = activateAccount;
     elements.onboardingNotNow.onclick = () => {
       rememberOnboardingPreference("dismissed");
       finishOnboarding();

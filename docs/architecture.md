@@ -295,9 +295,15 @@ effort remote revocation, without signing the browser out. See
 
 After provider setup, the optional account decision is a dedicated full-screen
 onboarding step. The desktop workspace is not revealed until the user signs in or
-explicitly continues without an account. Once resolved, a sidebar-footer control
-beside Settings starts sign-in directly while signed out and opens Account
-settings for an existing account. The Account panel contains only concise status
+explicitly continues without an account. Once resolved, Account stays in the sidebar footer beside Settings. At widths
+up to 760px, the existing sidebar starts as a collapsed icon rail. Its existing
+toggle expands the same sidebar in normal flow, leaving the workspace to fit
+the remaining width; an explicit expansion stays open until the viewport leaves
+the narrow breakpoint. The footer shows icons while collapsed and labels while
+expanded. Both actions remain in the single footer controller: signed out or
+error starts sign-in directly, while an existing or uncertain account opens
+Account settings. There is no dropdown or floating Account overlay. The
+Account panel contains only concise status
 and the applicable sign-in or logout action. Stable or Preview is not part of the
 account UX; callback-pool diagnostics remain main-owned.
 

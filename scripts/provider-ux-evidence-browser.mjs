@@ -1,6 +1,5 @@
 const scene = new URLSearchParams(location.search).get("scene") ?? "onboarding";
 const caption = new URLSearchParams(location.search).get("caption") ?? "Provider and model setup";
-
 const adapters = [
   ["codex-subscription", "Codex subscription", "existing-runtime-auth", null],
   ["claude-subscription", "Claude subscription", "managed-login", null],
@@ -81,7 +80,9 @@ const noopSubscription = (callback) => {
 window.relayerDesktop = {
   platform: "darwin",
   account: {
-    read: async () => ({ status: "signed-out", channel: "stable" }),
+    read: async () => scene.startsWith("sidebar-")
+      ? { status: "signed-in", channel: "stable", subject: "auth0|evidence-account" }
+      : { status: "signed-out", channel: "stable" },
     login: async () => {
       accountLoginCalls += 1;
       return { status: "signing-in", channel: "stable" };
@@ -137,7 +138,7 @@ window.relayerDesktop = {
     onChanged: noopSubscription,
   },
   appearance: {
-    read: async () => ({ appearance: scene === "light" ? "light" : "dark" }),
+    read: async () => ({ appearance: scene.includes("light") ? "light" : "dark" }),
     set: async (appearance) => ({ appearance }),
   },
   updater: {
@@ -186,6 +187,37 @@ async function prepareScene() {
   label.className = "evidence-caption";
   label.textContent = caption;
   document.body.append(label);
+  if (scene.startsWith("sidebar-")) {
+    await waitFor("#appShell:not(.hidden)");
+    const onboarding = document.querySelector("#desktopAccountOnboarding");
+    if (onboarding && !onboarding.classList.contains("hidden")) {
+      document.querySelector("#desktopAccountOnboardingNotNow").click();
+    }
+    await waitForCondition(() => {
+      const button = document.querySelector("#desktopAccountButton");
+      return button && !button.classList.contains("hidden")
+        && !document.body.classList.contains("desktop-account-pending");
+    }, "production signed-in account state in sidebar capture");
+    if (scene.startsWith("sidebar-thread-")) await waitFor("#threadView:not(.hidden)");
+    if (scene.endsWith("light-expanded")) document.documentElement.dataset.theme = "light";
+    if (scene.includes("-expanded")) {
+      document.querySelector("#collapseSidebar").click();
+      if (scene.startsWith("sidebar-thread-")) {
+        await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+      }
+    }
+    if (scene.endsWith("-menu")) {
+      const menu = scene.includes("-permission-menu")
+        ? ["#permissionButton", "#permissionMenu:not(.hidden)"]
+        : scene.includes("-model-menu")
+          ? ['#newModelControl [data-model-picker-trigger]', '.model-picker-popover:not(.hidden)']
+          : ["#scopeButton", "#scopeMenu:not(.hidden)"];
+      document.querySelector(menu[0]).click();
+      await waitFor(menu[1]);
+    }
+    document.body.dataset.evidenceReady = "true";
+    return;
+  }
   if (scene === "flow") {
     await waitFor('[data-provider-adapter="openai-api"]');
     document.body.dataset.evidenceReady = "true";

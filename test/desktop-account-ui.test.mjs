@@ -5,6 +5,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   ACCOUNT_ONBOARDING_PREFERENCE_KEY,
   createDesktopAccountController,
+  initializeDesktopAccountUi,
   normalizeDesktopAccountState,
   revealDesktopWorkspace,
 } from "../desktop/renderer/src/desktop-account.js";
@@ -40,7 +41,7 @@ function element() {
 
 function fixture() {
   const elements = {
-    accountButton: element(),
+    accountButton: { ...element(), classList: classList("hidden") },
     accountLabel: element(),
     onboarding: { ...element(), classList: classList("hidden") },
     onboardingChannel: element(),
@@ -108,6 +109,47 @@ describe("desktop update indicator naming", () => {
 });
 
 describe("desktop account presentation", () => {
+  it("hides the sidebar Account control when the desktop account API is absent", async () => {
+    const originalDocument = Object.getOwnPropertyDescriptor(globalThis, "document");
+    const footerAccount = element();
+    const elements = new Map([["desktopAccountButton", footerAccount]]);
+    Object.defineProperty(globalThis, "document", {
+      configurable: true,
+      value: { getElementById: (id) => elements.get(id) ?? null },
+    });
+    const showWorkspace = vi.fn();
+    try {
+      await initializeDesktopAccountUi({ desktop: {}, showWorkspace });
+      expect(footerAccount.classList.contains("hidden")).toBe(true);
+      expect(showWorkspace).toHaveBeenCalledOnce();
+    } finally {
+      if (originalDocument) Object.defineProperty(globalThis, "document", originalDocument);
+      else delete globalThis.document;
+    }
+  });
+
+  it("keeps the sidebar Account control on the direct sign-in and settings paths", async () => {
+    const { controller, elements, api, openSettings, changed } = fixture();
+    let finishLogin;
+    api.login = vi.fn(() => new Promise((resolve) => { finishLogin = resolve; }));
+    await controller.start({ offerOnboarding: true });
+    elements.onboardingNotNow.onclick();
+
+    elements.accountButton.onclick();
+    expect(api.login).toHaveBeenCalledOnce();
+    expect(elements.accountLabel.textContent).toBe("Signing in…");
+    expect(elements.accountButton.disabled).toBe(true);
+
+    changed({ status: "signed-in", channel: "stable", subject: "auth0|pseudonymous-123" });
+    expect(elements.accountLabel.textContent).toBe("Account");
+    elements.accountButton.onclick();
+    expect(openSettings).toHaveBeenCalledOnce();
+
+    finishLogin({ status: "signed-in", channel: "stable", subject: "auth0|pseudonymous-123" });
+    await Promise.resolve();
+    expect(elements.accountButton.disabled).toBe(false);
+  });
+
   it("releases the startup visibility gate before showing the workspace during recovery", () => {
     const body = { classList: classList("desktop-account-pending") };
     const showApplication = vi.fn();
@@ -306,10 +348,7 @@ describe("desktop account presentation", () => {
     expect(css).toContain("body.sidebar-collapsed .footer-button span");
     // Two controls do not fit the 58px collapsed rail side by side.
     expect(css).toContain("body.sidebar-collapsed .sidebar-footer{flex-direction:column");
-    // Nor do Settings, Account and the update indicator fit the 210px rail the
-    // 980px breakpoint switches to, so the footer drops its labels there and
-    // the circular indicator keeps its diameter instead of being squashed.
-    expect(css).toContain("@media(max-width:980px){.sidebar-footer .footer-button span:not([aria-hidden]){display:none}");
+    // Expanded sidebars retain footer labels at narrow widths.
     expect(css).toContain(".update-button{margin-left:auto;flex:none");
     // A busy label must not wrap inside a 34px control. Whether it actually
     // does is layout, which jsdom cannot answer: capture-provider-ux-video.mjs
