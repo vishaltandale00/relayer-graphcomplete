@@ -1,6 +1,6 @@
 # Shared-thread Gate B implementation Kanban
 
-Source baseline: `origin/main` at `61ce7b0cc50ee819eb54568cb8fc7165bf6c1e01`.
+Source baseline: `origin/main` at `8dc9220fd3dbc403c3a3c75df72eb6e75550473c`.
 UX reference only: `prototype/share-slice-1` at
 `b7449a1a246abc2e87ecc175a0c56d7c2bd14062`.
 
@@ -112,10 +112,14 @@ Sentry submission, or promotion of prototype code.
 - Coherent journey: `test/conversation-export-eval-e2e.test.mjs` drives real
   Rust graph/app servers, Electron-main coordination, fake service storage, a
   lost-response retry, and the production public viewer handler.
-- Focused checkpoints: 55 integrated share/service/viewer/telemetry/template
+- Focused checkpoints: 64 integrated share/service/viewer/telemetry/template
   tests, Rust share redaction tests, and the persisted-product export seam passed.
-- Declared evidence: telemetry 99/99, `npm run build`, `npm run check`, PRD
-  readability, and CloudFormation lint passed locally.
+- Declared evidence: telemetry 99/99, `npm run build`, PRD readability,
+  CloudFormation lint, and the full `npm run check` portfolio passed locally.
+  The final check ran with host-only `OPENAI_API_KEY` and `OPENAI_BASE_URL`
+  removed so its isolated secret-boundary process began in the declared clean
+  environment; the earlier inherited-environment failure remains in the
+  handoff record.
 - `SHR-463-5` is backed by the opt-in production Electron capture and its
   source/viewport/image hashes; the fixture is synthetic and makes no network
   or live-infrastructure claim.
