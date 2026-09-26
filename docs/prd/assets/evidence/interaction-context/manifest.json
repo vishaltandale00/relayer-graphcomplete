@@ -1,10 +1,116 @@
 {
   "schemaVersion": 1,
   "passed": true,
-  "capturedAt": "2026-08-28T16:36:23.518Z",
-  "sourceCommit": "edaa442fb01c65756072ee2944b6131dd4949e7c",
+  "capturedAt": "2026-09-26T16:32:49.782Z",
+  "sourceCommit": "5da8e7dcaec8dd1c2ce6dff4135de36bd10f531a",
+  "sourceTree": "34c458ede1da2b905732248b2f6a238524ff0647",
+  "sourceCommitAfterCapture": "5da8e7dcaec8dd1c2ce6dff4135de36bd10f531a",
+  "sourceTreeAfterCapture": "34c458ede1da2b905732248b2f6a238524ff0647",
+  "sourceHashesBeforeCapture": [
+    {
+      "file": "scripts/test-interaction-context-lifecycle.mjs",
+      "sha256": "744a9763f96ab29f88f94c8c4dd115a02fe63e7f9cedfec3c79dc8680f28a6ec"
+    },
+    {
+      "file": "scripts/test-desktop-context-draft-warning.mjs",
+      "sha256": "a417758ad33077d2ff904116fe4aaa0dce9cfdbcad237c02d5c0b28781f25042"
+    },
+    {
+      "file": "scripts/capture-interaction-context-evidence.mjs",
+      "sha256": "51dae306cf8aeff6b88eb715f1a63425222bd071de05f0e19d0182f0c540d145"
+    },
+    {
+      "file": "scripts/lib/interaction-context-capture-proof.mjs",
+      "sha256": "783e05d14da7fef0f5e68d50b56033fb1a1c915d3fc1300baf307fd2e4067452"
+    },
+    {
+      "file": "scripts/recognize-desktop-capture-frame.swift",
+      "sha256": "323f2b3915b3199efd57d81eea2cd0cdabfdc65390524a2bdfb83cad4d5e2edc"
+    },
+    {
+      "file": "scripts/electron-workspace-driver.mjs",
+      "sha256": "da317cb02aa4ffa70bbcddad44b2d2c92667acb431f653643aa41060bac9546f"
+    }
+  ],
+  "sourceHashesAfterCapture": [
+    {
+      "file": "scripts/test-interaction-context-lifecycle.mjs",
+      "sha256": "744a9763f96ab29f88f94c8c4dd115a02fe63e7f9cedfec3c79dc8680f28a6ec"
+    },
+    {
+      "file": "scripts/test-desktop-context-draft-warning.mjs",
+      "sha256": "a417758ad33077d2ff904116fe4aaa0dce9cfdbcad237c02d5c0b28781f25042"
+    },
+    {
+      "file": "scripts/capture-interaction-context-evidence.mjs",
+      "sha256": "51dae306cf8aeff6b88eb715f1a63425222bd071de05f0e19d0182f0c540d145"
+    },
+    {
+      "file": "scripts/lib/interaction-context-capture-proof.mjs",
+      "sha256": "783e05d14da7fef0f5e68d50b56033fb1a1c915d3fc1300baf307fd2e4067452"
+    },
+    {
+      "file": "scripts/recognize-desktop-capture-frame.swift",
+      "sha256": "323f2b3915b3199efd57d81eea2cd0cdabfdc65390524a2bdfb83cad4d5e2edc"
+    },
+    {
+      "file": "scripts/electron-workspace-driver.mjs",
+      "sha256": "da317cb02aa4ffa70bbcddad44b2d2c92667acb431f653643aa41060bac9546f"
+    }
+  ],
+  "trackedWorkspaceBeforeCapture": {
+    "sha256": "9c1399ef412d15b5f31d1d6fb431d721212c24d40ff87ab9be1ed1da88449a31",
+    "trackedFileCount": 1210,
+    "untrackedPaths": [],
+    "excludedPaths": [
+      "docs/prd/assets/evidence/interaction-context/confirmed-draft-with-other-draft.png",
+      "docs/prd/assets/evidence/interaction-context/draft-after-override.png",
+      "docs/prd/assets/evidence/interaction-context/draft-omission-warning.png",
+      "docs/prd/assets/evidence/interaction-context/grouped-composer.png",
+      "docs/prd/assets/evidence/interaction-context/interaction-context-after-restart-terminal.png",
+      "docs/prd/assets/evidence/interaction-context/interaction-context-after-restart.mp4",
+      "docs/prd/assets/evidence/interaction-context/interaction-context-before-restart-terminal.png",
+      "docs/prd/assets/evidence/interaction-context/interaction-context-before-restart.mp4",
+      "docs/prd/assets/evidence/interaction-context/manifest.json",
+      "docs/prd/assets/evidence/interaction-context/restarted-context.png",
+      "docs/prd/assets/evidence/interaction-context/second-draft-restored.png",
+      "docs/prd/assets/evidence/interaction-context/two-drafts-restored.png"
+    ]
+  },
+  "trackedWorkspaceAfterCapture": {
+    "sha256": "9c1399ef412d15b5f31d1d6fb431d721212c24d40ff87ab9be1ed1da88449a31",
+    "trackedFileCount": 1210,
+    "untrackedPaths": [],
+    "excludedPaths": [
+      "docs/prd/assets/evidence/interaction-context/confirmed-draft-with-other-draft.png",
+      "docs/prd/assets/evidence/interaction-context/draft-after-override.png",
+      "docs/prd/assets/evidence/interaction-context/draft-omission-warning.png",
+      "docs/prd/assets/evidence/interaction-context/grouped-composer.png",
+      "docs/prd/assets/evidence/interaction-context/interaction-context-after-restart-terminal.png",
+      "docs/prd/assets/evidence/interaction-context/interaction-context-after-restart.mp4",
+      "docs/prd/assets/evidence/interaction-context/interaction-context-before-restart-terminal.png",
+      "docs/prd/assets/evidence/interaction-context/interaction-context-before-restart.mp4",
+      "docs/prd/assets/evidence/interaction-context/manifest.json",
+      "docs/prd/assets/evidence/interaction-context/restarted-context.png",
+      "docs/prd/assets/evidence/interaction-context/second-draft-restored.png",
+      "docs/prd/assets/evidence/interaction-context/two-drafts-restored.png"
+    ]
+  },
   "workingTreeDirty": false,
-  "command": "npm run build && RELAYER_CAPTURE_INTERACTION_CONTEXT_EVIDENCE=1 electron scripts/capture-interaction-context-evidence.mjs",
+  "command": {
+    "executable": "/Volumes/2T-SSD/worktrees/factory-207/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron",
+    "argv": [
+      "/Volumes/2T-SSD/worktrees/factory-207/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron",
+      "scripts/capture-interaction-context-evidence.mjs"
+    ],
+    "invocationArgs": [
+      "scripts/capture-interaction-context-evidence.mjs"
+    ],
+    "workingDirectory": "/Volumes/2T-SSD/worktrees/factory-207",
+    "environment": {
+      "RELAYER_CAPTURE_INTERACTION_CONTEXT_EVIDENCE": "1"
+    }
+  },
   "paidInferenceCalls": 0,
   "runtime": "real Electron BrowserWindow + production renderer + Rust app/graph servers + SQLite",
   "harness": "fixture-task-system (deterministic zero-inference implementation)",
@@ -12,20 +118,285 @@
     "width": 1480,
     "height": 920
   },
+  "recordingPixelDimensions": [
+    {
+      "width": 2960,
+      "height": 1840
+    },
+    {
+      "width": 2960,
+      "height": 1840
+    }
+  ],
   "thread": {
     "id": 1,
     "interactionIds": [
       1,
       2,
-      3
+      3,
+      4
     ],
     "statuses": [
+      "accepted",
       "accepted",
       "accepted",
       "accepted"
     ]
   },
+  "draftJourney": {
+    "restoredDrafts": [
+      {
+        "id": "409bc972-f695-4962-ae7e-84810a9521c3",
+        "revision": 2,
+        "text": "Keep queue claims in their original order.",
+        "target": {
+          "nodeId": 28,
+          "sourceInteractionNodeId": 27,
+          "sourceLayerId": 10
+        }
+      },
+      {
+        "id": "0b74c560-110a-4a93-9f8a-71b6f44a7853",
+        "revision": 2,
+        "text": "Keep both workers available for queued tasks.",
+        "target": {
+          "nodeId": 29,
+          "sourceInteractionNodeId": 27,
+          "sourceLayerId": 10
+        }
+      }
+    ],
+    "freshDraftAfterDiscard": {
+      "id": "ab7a64ee-64b3-41ce-b777-1b6dc15084f2",
+      "revision": 2,
+      "text": "Review worker availability before sending.",
+      "target": {
+        "nodeId": 29,
+        "sourceInteractionNodeId": 27,
+        "sourceLayerId": 10
+      }
+    },
+    "confirmedDraftText": "Keep queue claims in their original order.",
+    "owningHistoryTurn": 3,
+    "submittedInteractionId": 4,
+    "submittedContexts": [
+      {
+        "id": 16,
+        "type": "interaction.context",
+        "target": {
+          "nodeId": 28,
+          "sourceInteractionNodeId": 27,
+          "sourceLayerId": 10
+        },
+        "targetNode": {
+          "id": 28,
+          "kind": "concept",
+          "icon": "list",
+          "title": "Incoming queue",
+          "detail": "Every task first enters the incoming queue. The queue preserves extra work while both workers are busy.",
+          "state": "accepted"
+        },
+        "annotations": [
+          "Keep queue claims in their original order."
+        ]
+      }
+    ],
+    "interactionIdsBeforeWarning": [
+      1,
+      2,
+      3
+    ],
+    "interactionIdsAfterOverride": [
+      1,
+      2,
+      3,
+      4
+    ],
+    "completeStateSnapshots": {
+      "draftBBeforeConfirm": {
+        "id": "0b74c560-110a-4a93-9f8a-71b6f44a7853",
+        "threadId": 1,
+        "target": {
+          "nodeId": 29,
+          "sourceInteractionNodeId": 27,
+          "sourceLayerId": 10
+        },
+        "targetNode": {
+          "id": 29,
+          "kind": "concept",
+          "icon": "users",
+          "title": "Two-worker pool",
+          "detail": "An available worker claims the next queued task. At most two tasks run concurrently; additional tasks wait until a worker finishes.",
+          "state": "accepted"
+        },
+        "text": "Keep both workers available for queued tasks.",
+        "revision": 2,
+        "createdAt": "1790440314332",
+        "updatedAt": "1790440316421"
+      },
+      "draftBAfterConfirm": {
+        "id": "0b74c560-110a-4a93-9f8a-71b6f44a7853",
+        "threadId": 1,
+        "target": {
+          "nodeId": 29,
+          "sourceInteractionNodeId": 27,
+          "sourceLayerId": 10
+        },
+        "targetNode": {
+          "id": 29,
+          "kind": "concept",
+          "icon": "users",
+          "title": "Two-worker pool",
+          "detail": "An available worker claims the next queued task. At most two tasks run concurrently; additional tasks wait until a worker finishes.",
+          "state": "accepted"
+        },
+        "text": "Keep both workers available for queued tasks.",
+        "revision": 2,
+        "createdAt": "1790440314332",
+        "updatedAt": "1790440316421"
+      },
+      "confirmedABeforeDiscard": {
+        "draftId": "409bc972-f695-4962-ae7e-84810a9521c3",
+        "threadId": 1,
+        "target": {
+          "nodeId": 28,
+          "sourceInteractionNodeId": 27,
+          "sourceLayerId": 10
+        },
+        "targetNode": {
+          "id": 28,
+          "kind": "concept",
+          "icon": "list",
+          "title": "Incoming queue",
+          "detail": "Every task first enters the incoming queue. The queue preserves extra work while both workers are busy.",
+          "state": "accepted"
+        },
+        "annotation": "Keep queue claims in their original order.",
+        "draftRevision": 2,
+        "confirmationRevision": 1,
+        "confirmedAt": "1790440338263"
+      },
+      "confirmedAAfterDiscard": {
+        "draftId": "409bc972-f695-4962-ae7e-84810a9521c3",
+        "threadId": 1,
+        "target": {
+          "nodeId": 28,
+          "sourceInteractionNodeId": 27,
+          "sourceLayerId": 10
+        },
+        "targetNode": {
+          "id": 28,
+          "kind": "concept",
+          "icon": "list",
+          "title": "Incoming queue",
+          "detail": "Every task first enters the incoming queue. The queue preserves extra work while both workers are busy.",
+          "state": "accepted"
+        },
+        "annotation": "Keep queue claims in their original order.",
+        "draftRevision": 2,
+        "confirmationRevision": 1,
+        "confirmedAt": "1790440338263"
+      },
+      "freshDraftAtWarning": {
+        "id": "ab7a64ee-64b3-41ce-b777-1b6dc15084f2",
+        "threadId": 1,
+        "target": {
+          "nodeId": 29,
+          "sourceInteractionNodeId": 27,
+          "sourceLayerId": 10
+        },
+        "targetNode": {
+          "id": 29,
+          "kind": "concept",
+          "icon": "users",
+          "title": "Two-worker pool",
+          "detail": "An available worker claims the next queued task. At most two tasks run concurrently; additional tasks wait until a worker finishes.",
+          "state": "accepted"
+        },
+        "text": "Review worker availability before sending.",
+        "revision": 2,
+        "createdAt": "1790440346378",
+        "updatedAt": "1790440348579"
+      },
+      "freshDraftAfterGoBack": {
+        "id": "ab7a64ee-64b3-41ce-b777-1b6dc15084f2",
+        "threadId": 1,
+        "target": {
+          "nodeId": 29,
+          "sourceInteractionNodeId": 27,
+          "sourceLayerId": 10
+        },
+        "targetNode": {
+          "id": 29,
+          "kind": "concept",
+          "icon": "users",
+          "title": "Two-worker pool",
+          "detail": "An available worker claims the next queued task. At most two tasks run concurrently; additional tasks wait until a worker finishes.",
+          "state": "accepted"
+        },
+        "text": "Review worker availability before sending.",
+        "revision": 2,
+        "createdAt": "1790440346378",
+        "updatedAt": "1790440348579"
+      },
+      "freshDraftAfterOverride": {
+        "id": "ab7a64ee-64b3-41ce-b777-1b6dc15084f2",
+        "threadId": 1,
+        "target": {
+          "nodeId": 29,
+          "sourceInteractionNodeId": 27,
+          "sourceLayerId": 10
+        },
+        "targetNode": {
+          "id": 29,
+          "kind": "concept",
+          "icon": "users",
+          "title": "Two-worker pool",
+          "detail": "An available worker claims the next queued task. At most two tasks run concurrently; additional tasks wait until a worker finishes.",
+          "state": "accepted"
+        },
+        "text": "Review worker availability before sending.",
+        "revision": 2,
+        "createdAt": "1790440346378",
+        "updatedAt": "1790440348579"
+      },
+      "freshDraftAfterHistoricalRestoration": {
+        "id": "ab7a64ee-64b3-41ce-b777-1b6dc15084f2",
+        "threadId": 1,
+        "target": {
+          "nodeId": 29,
+          "sourceInteractionNodeId": 27,
+          "sourceLayerId": 10
+        },
+        "targetNode": {
+          "id": 29,
+          "kind": "concept",
+          "icon": "users",
+          "title": "Two-worker pool",
+          "detail": "An available worker claims the next queued task. At most two tasks run concurrently; additional tasks wait until a worker finishes.",
+          "state": "accepted"
+        },
+        "text": "Review worker availability before sending.",
+        "revision": 2,
+        "createdAt": "1790440346378",
+        "updatedAt": "1790440348579"
+      }
+    }
+  },
+  "warningPresentation": {
+    "x": 751,
+    "y": 634.75,
+    "width": 352,
+    "height": 221.25
+  },
+  "secondWarningPresentation": {
+    "x": 751,
+    "y": 634.75,
+    "width": 352,
+    "height": 221.25
+  },
   "assertions": {
+    "allRecordedBoundariesHavePaintedTextAndMeasuredHold": true,
     "nodeDetailsOpened": true,
     "nodeSwitchSavedAndRestoredDraft": true,
     "closeWaitedForDraftSave": true,
@@ -42,53 +413,3703 @@
     "annotationOnlyInteractionSent": true,
     "servicesAndWindowRestarted": true,
     "persistedContextVisibleAfterRestart": true,
-    "targetNodeReopenedAfterRestart": true
+    "targetNodeReopenedAfterRestart": true,
+    "twoOccurrenceBoundDraftsSurviveFullRestart": true,
+    "separateDraftRestorationAfterRestart": true,
+    "confirmingOneDraftPreservesTheOther": true,
+    "discardingOneDraftPreservesConfirmedContext": true,
+    "omissionWarningAndGoBackPreserveDraft": true,
+    "warningAndGoBackCreateNoInteraction": true,
+    "explicitOverrideSubmitsConfirmedContextOnly": true,
+    "explicitOverrideAddsExactlyOneInteraction": true,
+    "historicalDraftRestoredOnOwningOccurrenceAfterOverride": true
   },
   "screenshots": [
     {
       "file": "grouped-composer.png",
-      "sha256": "584868ec3bea9323a84860750e3661e680374a9ed672c3e2d30789fdc983e0d2"
+      "sha256": "32c60d0e121b06fa3443468c0b2736c4b4ba0e8f757c0977a7944dfc4d6e0a73"
     },
     {
       "file": "restarted-context.png",
-      "sha256": "cea062009b9b4e195ade602be06c71d850ac0ff3f924bbcd43c3d37baf109a8b"
+      "sha256": "226b1aeb943555a067c35c28e16369e8093daad8facb096f30fb8118baab7465"
+    },
+    {
+      "file": "two-drafts-restored.png",
+      "sha256": "a8c9dc760745e709d967947352f971ffc91cdd44b8a1bec9f2ccf3254cc72128"
+    },
+    {
+      "file": "second-draft-restored.png",
+      "sha256": "15ad9dde4d0966b1911ac52004ecb9c221b1a9e1655897bd372aa6993fd75db6"
+    },
+    {
+      "file": "confirmed-draft-with-other-draft.png",
+      "sha256": "e54baa6712ed949bf9560dd339a3461c23396455357b8a369208608a4d32aadb"
+    },
+    {
+      "file": "draft-omission-warning.png",
+      "sha256": "6649c8b2ec27b16f8822834cdf79ebe47bc46c4352c8bc9e82d4b9f976870a65"
+    },
+    {
+      "file": "draft-after-override.png",
+      "sha256": "77869565f904445570aea743780e31bb3731c4f87ef5205350cc898019629795"
     }
   ],
-  "video": {
-    "file": "interaction-context.mp4",
-    "sha256": "f0d62a99b3fe5ab7f0edb652c069e6834b4675fd87b7439306090e5e50165f56",
-    "durationSeconds": 94.433,
-    "stream": {
-      "codec_name": "h264",
-      "width": 1480,
-      "height": 920,
-      "pix_fmt": "yuv420p",
-      "side_data_list": [
-        {}
-      ]
+  "recording": {
+    "mode": "two continuous direct-renderer recordings; the named boundary events wait for paint and OCR-check required and forbidden text at start and hold end; timestamps define VFR durations with an explicit terminal-frame hold and full-restart discontinuity",
+    "segments": [
+      {
+        "file": "interaction-context-before-restart.mp4",
+        "sha256": "c9e77807d42d31519a202627fca65f99c20b1d8a4bda546381484ba26cdfb749",
+        "capture": "Continuous sampled frames directly from the real Electron BrowserWindow; the final captured renderer frame is repeated to encode its measured terminal hold.",
+        "frameTiming": "variable frame rate from renderer timestamps with two repeated terminal samples 200ms apart; B-frame reordering is disabled so the MP4 container covers the final PTS",
+        "frameCount": 192,
+        "encodedFrameCount": 194,
+        "maximumFrameGapMs": 205,
+        "maximumPresentationTimingErrorMs": 0,
+        "capturedSpanMs": 31927,
+        "encodedSpanMs": 32327,
+        "encodedDurationMs": 32328.000000000004,
+        "terminalFrameCoverage": {
+          "terminalFrameHoldMs": 200,
+          "repeatedTerminalHoldCount": 2,
+          "terminalFramePresentationMs": 32327,
+          "requiredContainerDurationMs": 32328
+        },
+        "terminalScreenshot": {
+          "file": "interaction-context-before-restart-terminal.png",
+          "sha256": "a035df37910107d7017d6b3dda0a273d5cd996bfd3e7c229de5a488b63f70f33",
+          "recognizedText": "Interaction context verification\nRelayer\n+ New thread\nCHATS\n- No chats yet\nPROJECTS\n• factory-207\n• Interaction context verifica...\nIncoming queue\nScroll or pinch to zoom • Drag canvas to pan • Drag nodes for this view\nSettings\n8 Account\nFollow up...\nH 1\nTurn 3 of 3\nTwo-worker pool\nResults store\n'1hon\nFit\n• Fixture models • Fixture mo...\nEnvironment\nLocal snapshot\nWorktiree\nBranch\nChanges\nUntracked\nfactory-207\ncodex/factory-207\n-3627\n0 files\nNODE DETAILS\nconceot\nIncoming queue\nEvery task first enters the incoming queue. The\nqueue preserves extra work while both workers\nare busy.\nSee queue behavior\nKeep queue claims in their original order."
+        },
+        "decodeValidation": {
+          "decodeToNullExitCode": 0,
+          "diagnostics": "[null @ 0x13570f6e0] Application provided invalid, non monotonically increasing dts to muxer in stream 0: 1 >= 1\n[null @ 0x13570f6e0] Application provided invalid, non monotonically increasing dts to muxer in stream 0: 31 >= 31\n[null @ 0x13570f6e0] Application provided invalid, non monotonically increasing dts to muxer in stream 0: 38 >= 38\n[null @ 0x13570f6e0] Application provided invalid, non monotonically increasing dts to muxer in stream 0: 69 >= 69\n[null @ 0x13570f6e0] Application provided invalid, non monotonically increasing dts to muxer in stream 0: 78 >= 78\n[null @ 0x13570f6e0] Application provided invalid, non monotonically increasing dts to muxer in stream 0: 81 >= 81\n[null @ 0x13570f6e0] Application provided invalid, non monotonically increasing dts to muxer in stream 0: 91 >= 91\n[null @ 0x13570f6e0] Application provided invalid, non monotonically increasing dts to muxer in stream 0: 105 >= 105\n[null @ 0x13570f6e0] Application provided invalid, non monotonically increasing dts to muxer in stream 0: 117 >= 117\n[null @ 0x13570f6e0] Application provided invalid, non monotonically increasing dts to muxer in stream 0: 120 >= 120\n[null @ 0x13570f6e0] Application provided invalid, non monotonically increasing dts to muxer in stream 0: 134 >= 134\n[null @ 0x13570f6e0] Application provided invalid, non monotonically increasing dts to muxer in stream 0: 146 >= 146\n[null @ 0x13570f6e0] Application provided invalid, non monotonically increasing dts to muxer in stream 0: 158 >= 158\n[null @ 0x13570f6e0] Application provided invalid, non monotonically increasing dts to muxer in stream 0: 170 >= 170",
+          "terminalFrameExtractedAndRecognized": true
+        },
+        "startedAtUtc": "2026-09-26T16:31:32.926Z",
+        "endedAtUtc": "2026-09-26T16:32:04.975Z",
+        "wallClockDurationMs": 32049,
+        "frameTimestamps": [
+          {
+            "frameNumber": 0,
+            "capturedAtUtc": "2026-09-26T16:31:33.007Z",
+            "elapsedMs": 81,
+            "sha256": "edb25a31e1907d6934112b142ecb353695c0085397112cef411825a47bc8229a"
+          },
+          {
+            "frameNumber": 1,
+            "capturedAtUtc": "2026-09-26T16:31:33.127Z",
+            "elapsedMs": 201,
+            "sha256": "edb25a31e1907d6934112b142ecb353695c0085397112cef411825a47bc8229a"
+          },
+          {
+            "frameNumber": 2,
+            "capturedAtUtc": "2026-09-26T16:31:33.239Z",
+            "elapsedMs": 313,
+            "sha256": "edb25a31e1907d6934112b142ecb353695c0085397112cef411825a47bc8229a"
+          },
+          {
+            "frameNumber": 3,
+            "capturedAtUtc": "2026-09-26T16:31:33.419Z",
+            "elapsedMs": 493,
+            "sha256": "edb25a31e1907d6934112b142ecb353695c0085397112cef411825a47bc8229a"
+          },
+          {
+            "frameNumber": 4,
+            "capturedAtUtc": "2026-09-26T16:31:33.594Z",
+            "elapsedMs": 668,
+            "sha256": "edb25a31e1907d6934112b142ecb353695c0085397112cef411825a47bc8229a"
+          },
+          {
+            "frameNumber": 5,
+            "capturedAtUtc": "2026-09-26T16:31:33.767Z",
+            "elapsedMs": 841,
+            "sha256": "edb25a31e1907d6934112b142ecb353695c0085397112cef411825a47bc8229a"
+          },
+          {
+            "frameNumber": 6,
+            "capturedAtUtc": "2026-09-26T16:31:33.954Z",
+            "elapsedMs": 1028,
+            "sha256": "edb25a31e1907d6934112b142ecb353695c0085397112cef411825a47bc8229a"
+          },
+          {
+            "frameNumber": 7,
+            "capturedAtUtc": "2026-09-26T16:31:34.129Z",
+            "elapsedMs": 1203,
+            "sha256": "edb25a31e1907d6934112b142ecb353695c0085397112cef411825a47bc8229a"
+          },
+          {
+            "frameNumber": 8,
+            "capturedAtUtc": "2026-09-26T16:31:34.307Z",
+            "elapsedMs": 1381,
+            "sha256": "edb25a31e1907d6934112b142ecb353695c0085397112cef411825a47bc8229a"
+          },
+          {
+            "frameNumber": 9,
+            "capturedAtUtc": "2026-09-26T16:31:34.489Z",
+            "elapsedMs": 1563,
+            "sha256": "edb25a31e1907d6934112b142ecb353695c0085397112cef411825a47bc8229a"
+          },
+          {
+            "frameNumber": 10,
+            "capturedAtUtc": "2026-09-26T16:31:34.666Z",
+            "elapsedMs": 1740,
+            "sha256": "edb25a31e1907d6934112b142ecb353695c0085397112cef411825a47bc8229a"
+          },
+          {
+            "frameNumber": 11,
+            "capturedAtUtc": "2026-09-26T16:31:34.839Z",
+            "elapsedMs": 1913,
+            "sha256": "edb25a31e1907d6934112b142ecb353695c0085397112cef411825a47bc8229a"
+          },
+          {
+            "frameNumber": 12,
+            "capturedAtUtc": "2026-09-26T16:31:35.021Z",
+            "elapsedMs": 2095,
+            "sha256": "edb25a31e1907d6934112b142ecb353695c0085397112cef411825a47bc8229a"
+          },
+          {
+            "frameNumber": 13,
+            "capturedAtUtc": "2026-09-26T16:31:35.199Z",
+            "elapsedMs": 2273,
+            "sha256": "edb25a31e1907d6934112b142ecb353695c0085397112cef411825a47bc8229a"
+          },
+          {
+            "frameNumber": 14,
+            "capturedAtUtc": "2026-09-26T16:31:35.376Z",
+            "elapsedMs": 2450,
+            "sha256": "edb25a31e1907d6934112b142ecb353695c0085397112cef411825a47bc8229a"
+          },
+          {
+            "frameNumber": 15,
+            "capturedAtUtc": "2026-09-26T16:31:35.550Z",
+            "elapsedMs": 2624,
+            "sha256": "edb25a31e1907d6934112b142ecb353695c0085397112cef411825a47bc8229a"
+          },
+          {
+            "frameNumber": 16,
+            "capturedAtUtc": "2026-09-26T16:31:35.727Z",
+            "elapsedMs": 2801,
+            "sha256": "edb25a31e1907d6934112b142ecb353695c0085397112cef411825a47bc8229a"
+          },
+          {
+            "frameNumber": 17,
+            "capturedAtUtc": "2026-09-26T16:31:35.901Z",
+            "elapsedMs": 2975,
+            "sha256": "edb25a31e1907d6934112b142ecb353695c0085397112cef411825a47bc8229a"
+          },
+          {
+            "frameNumber": 18,
+            "capturedAtUtc": "2026-09-26T16:31:36.076Z",
+            "elapsedMs": 3150,
+            "sha256": "edb25a31e1907d6934112b142ecb353695c0085397112cef411825a47bc8229a"
+          },
+          {
+            "frameNumber": 19,
+            "capturedAtUtc": "2026-09-26T16:31:36.250Z",
+            "elapsedMs": 3324,
+            "sha256": "edb25a31e1907d6934112b142ecb353695c0085397112cef411825a47bc8229a"
+          },
+          {
+            "frameNumber": 20,
+            "capturedAtUtc": "2026-09-26T16:31:36.434Z",
+            "elapsedMs": 3508,
+            "sha256": "edb25a31e1907d6934112b142ecb353695c0085397112cef411825a47bc8229a"
+          },
+          {
+            "frameNumber": 21,
+            "capturedAtUtc": "2026-09-26T16:31:36.606Z",
+            "elapsedMs": 3680,
+            "sha256": "edb25a31e1907d6934112b142ecb353695c0085397112cef411825a47bc8229a"
+          },
+          {
+            "frameNumber": 22,
+            "capturedAtUtc": "2026-09-26T16:31:36.780Z",
+            "elapsedMs": 3854,
+            "sha256": "edb25a31e1907d6934112b142ecb353695c0085397112cef411825a47bc8229a"
+          },
+          {
+            "frameNumber": 23,
+            "capturedAtUtc": "2026-09-26T16:31:36.955Z",
+            "elapsedMs": 4029,
+            "sha256": "edb25a31e1907d6934112b142ecb353695c0085397112cef411825a47bc8229a"
+          },
+          {
+            "frameNumber": 24,
+            "capturedAtUtc": "2026-09-26T16:31:37.135Z",
+            "elapsedMs": 4209,
+            "sha256": "edb25a31e1907d6934112b142ecb353695c0085397112cef411825a47bc8229a"
+          },
+          {
+            "frameNumber": 25,
+            "capturedAtUtc": "2026-09-26T16:31:37.314Z",
+            "elapsedMs": 4388,
+            "sha256": "edb25a31e1907d6934112b142ecb353695c0085397112cef411825a47bc8229a"
+          },
+          {
+            "frameNumber": 26,
+            "capturedAtUtc": "2026-09-26T16:31:37.490Z",
+            "elapsedMs": 4564,
+            "sha256": "edb25a31e1907d6934112b142ecb353695c0085397112cef411825a47bc8229a"
+          },
+          {
+            "frameNumber": 27,
+            "capturedAtUtc": "2026-09-26T16:31:37.670Z",
+            "elapsedMs": 4744,
+            "sha256": "edb25a31e1907d6934112b142ecb353695c0085397112cef411825a47bc8229a"
+          },
+          {
+            "frameNumber": 28,
+            "capturedAtUtc": "2026-09-26T16:31:37.862Z",
+            "elapsedMs": 4936,
+            "sha256": "edb25a31e1907d6934112b142ecb353695c0085397112cef411825a47bc8229a"
+          },
+          {
+            "frameNumber": 29,
+            "capturedAtUtc": "2026-09-26T16:31:38.039Z",
+            "elapsedMs": 5113,
+            "sha256": "edb25a31e1907d6934112b142ecb353695c0085397112cef411825a47bc8229a"
+          },
+          {
+            "frameNumber": 30,
+            "capturedAtUtc": "2026-09-26T16:31:38.214Z",
+            "elapsedMs": 5288,
+            "sha256": "edb25a31e1907d6934112b142ecb353695c0085397112cef411825a47bc8229a"
+          },
+          {
+            "frameNumber": 31,
+            "capturedAtUtc": "2026-09-26T16:31:38.390Z",
+            "elapsedMs": 5464,
+            "sha256": "edb25a31e1907d6934112b142ecb353695c0085397112cef411825a47bc8229a"
+          },
+          {
+            "frameNumber": 32,
+            "capturedAtUtc": "2026-09-26T16:31:38.564Z",
+            "elapsedMs": 5638,
+            "sha256": "edb25a31e1907d6934112b142ecb353695c0085397112cef411825a47bc8229a"
+          },
+          {
+            "frameNumber": 33,
+            "capturedAtUtc": "2026-09-26T16:31:38.742Z",
+            "elapsedMs": 5816,
+            "sha256": "edb25a31e1907d6934112b142ecb353695c0085397112cef411825a47bc8229a"
+          },
+          {
+            "frameNumber": 34,
+            "capturedAtUtc": "2026-09-26T16:31:38.917Z",
+            "elapsedMs": 5991,
+            "sha256": "edb25a31e1907d6934112b142ecb353695c0085397112cef411825a47bc8229a"
+          },
+          {
+            "frameNumber": 35,
+            "capturedAtUtc": "2026-09-26T16:31:39.093Z",
+            "elapsedMs": 6167,
+            "sha256": "edb25a31e1907d6934112b142ecb353695c0085397112cef411825a47bc8229a"
+          },
+          {
+            "frameNumber": 36,
+            "capturedAtUtc": "2026-09-26T16:31:39.271Z",
+            "elapsedMs": 6345,
+            "sha256": "edb25a31e1907d6934112b142ecb353695c0085397112cef411825a47bc8229a"
+          },
+          {
+            "frameNumber": 37,
+            "capturedAtUtc": "2026-09-26T16:31:39.455Z",
+            "elapsedMs": 6529,
+            "sha256": "edb25a31e1907d6934112b142ecb353695c0085397112cef411825a47bc8229a"
+          },
+          {
+            "frameNumber": 38,
+            "capturedAtUtc": "2026-09-26T16:31:39.628Z",
+            "elapsedMs": 6702,
+            "sha256": "edb25a31e1907d6934112b142ecb353695c0085397112cef411825a47bc8229a"
+          },
+          {
+            "frameNumber": 39,
+            "capturedAtUtc": "2026-09-26T16:31:39.801Z",
+            "elapsedMs": 6875,
+            "sha256": "edb25a31e1907d6934112b142ecb353695c0085397112cef411825a47bc8229a"
+          },
+          {
+            "frameNumber": 40,
+            "capturedAtUtc": "2026-09-26T16:31:39.977Z",
+            "elapsedMs": 7051,
+            "sha256": "edb25a31e1907d6934112b142ecb353695c0085397112cef411825a47bc8229a"
+          },
+          {
+            "frameNumber": 41,
+            "capturedAtUtc": "2026-09-26T16:31:40.150Z",
+            "elapsedMs": 7224,
+            "sha256": "edb25a31e1907d6934112b142ecb353695c0085397112cef411825a47bc8229a"
+          },
+          {
+            "frameNumber": 42,
+            "capturedAtUtc": "2026-09-26T16:31:40.323Z",
+            "elapsedMs": 7397,
+            "sha256": "edb25a31e1907d6934112b142ecb353695c0085397112cef411825a47bc8229a"
+          },
+          {
+            "frameNumber": 43,
+            "capturedAtUtc": "2026-09-26T16:31:40.496Z",
+            "elapsedMs": 7570,
+            "sha256": "edb25a31e1907d6934112b142ecb353695c0085397112cef411825a47bc8229a"
+          },
+          {
+            "frameNumber": 44,
+            "capturedAtUtc": "2026-09-26T16:31:40.669Z",
+            "elapsedMs": 7743,
+            "sha256": "edb25a31e1907d6934112b142ecb353695c0085397112cef411825a47bc8229a"
+          },
+          {
+            "frameNumber": 45,
+            "capturedAtUtc": "2026-09-26T16:31:40.844Z",
+            "elapsedMs": 7918,
+            "sha256": "edb25a31e1907d6934112b142ecb353695c0085397112cef411825a47bc8229a"
+          },
+          {
+            "frameNumber": 46,
+            "capturedAtUtc": "2026-09-26T16:31:41.020Z",
+            "elapsedMs": 8094,
+            "sha256": "edb25a31e1907d6934112b142ecb353695c0085397112cef411825a47bc8229a"
+          },
+          {
+            "frameNumber": 47,
+            "capturedAtUtc": "2026-09-26T16:31:41.196Z",
+            "elapsedMs": 8270,
+            "sha256": "edb25a31e1907d6934112b142ecb353695c0085397112cef411825a47bc8229a"
+          },
+          {
+            "frameNumber": 48,
+            "capturedAtUtc": "2026-09-26T16:31:41.371Z",
+            "elapsedMs": 8445,
+            "sha256": "edb25a31e1907d6934112b142ecb353695c0085397112cef411825a47bc8229a"
+          },
+          {
+            "frameNumber": 49,
+            "capturedAtUtc": "2026-09-26T16:31:41.548Z",
+            "elapsedMs": 8622,
+            "sha256": "edb25a31e1907d6934112b142ecb353695c0085397112cef411825a47bc8229a"
+          },
+          {
+            "frameNumber": 50,
+            "capturedAtUtc": "2026-09-26T16:31:41.722Z",
+            "elapsedMs": 8796,
+            "sha256": "edb25a31e1907d6934112b142ecb353695c0085397112cef411825a47bc8229a"
+          },
+          {
+            "frameNumber": 51,
+            "capturedAtUtc": "2026-09-26T16:31:41.896Z",
+            "elapsedMs": 8970,
+            "sha256": "edb25a31e1907d6934112b142ecb353695c0085397112cef411825a47bc8229a"
+          },
+          {
+            "frameNumber": 52,
+            "capturedAtUtc": "2026-09-26T16:31:42.071Z",
+            "elapsedMs": 9145,
+            "sha256": "edb25a31e1907d6934112b142ecb353695c0085397112cef411825a47bc8229a"
+          },
+          {
+            "frameNumber": 53,
+            "capturedAtUtc": "2026-09-26T16:31:42.245Z",
+            "elapsedMs": 9319,
+            "sha256": "edb25a31e1907d6934112b142ecb353695c0085397112cef411825a47bc8229a"
+          },
+          {
+            "frameNumber": 54,
+            "capturedAtUtc": "2026-09-26T16:31:42.419Z",
+            "elapsedMs": 9493,
+            "sha256": "edb25a31e1907d6934112b142ecb353695c0085397112cef411825a47bc8229a"
+          },
+          {
+            "frameNumber": 55,
+            "capturedAtUtc": "2026-09-26T16:31:42.595Z",
+            "elapsedMs": 9669,
+            "sha256": "edb25a31e1907d6934112b142ecb353695c0085397112cef411825a47bc8229a"
+          },
+          {
+            "frameNumber": 56,
+            "capturedAtUtc": "2026-09-26T16:31:42.776Z",
+            "elapsedMs": 9850,
+            "sha256": "edb25a31e1907d6934112b142ecb353695c0085397112cef411825a47bc8229a"
+          },
+          {
+            "frameNumber": 57,
+            "capturedAtUtc": "2026-09-26T16:31:42.950Z",
+            "elapsedMs": 10024,
+            "sha256": "edb25a31e1907d6934112b142ecb353695c0085397112cef411825a47bc8229a"
+          },
+          {
+            "frameNumber": 58,
+            "capturedAtUtc": "2026-09-26T16:31:43.128Z",
+            "elapsedMs": 10202,
+            "sha256": "edb25a31e1907d6934112b142ecb353695c0085397112cef411825a47bc8229a"
+          },
+          {
+            "frameNumber": 59,
+            "capturedAtUtc": "2026-09-26T16:31:43.304Z",
+            "elapsedMs": 10378,
+            "sha256": "edb25a31e1907d6934112b142ecb353695c0085397112cef411825a47bc8229a"
+          },
+          {
+            "frameNumber": 60,
+            "capturedAtUtc": "2026-09-26T16:31:43.480Z",
+            "elapsedMs": 10554,
+            "sha256": "edb25a31e1907d6934112b142ecb353695c0085397112cef411825a47bc8229a"
+          },
+          {
+            "frameNumber": 61,
+            "capturedAtUtc": "2026-09-26T16:31:43.662Z",
+            "elapsedMs": 10736,
+            "sha256": "edb25a31e1907d6934112b142ecb353695c0085397112cef411825a47bc8229a"
+          },
+          {
+            "frameNumber": 62,
+            "capturedAtUtc": "2026-09-26T16:31:43.835Z",
+            "elapsedMs": 10909,
+            "sha256": "edb25a31e1907d6934112b142ecb353695c0085397112cef411825a47bc8229a"
+          },
+          {
+            "frameNumber": 63,
+            "capturedAtUtc": "2026-09-26T16:31:44.020Z",
+            "elapsedMs": 11094,
+            "sha256": "edb25a31e1907d6934112b142ecb353695c0085397112cef411825a47bc8229a"
+          },
+          {
+            "frameNumber": 64,
+            "capturedAtUtc": "2026-09-26T16:31:44.197Z",
+            "elapsedMs": 11271,
+            "sha256": "edb25a31e1907d6934112b142ecb353695c0085397112cef411825a47bc8229a"
+          },
+          {
+            "frameNumber": 65,
+            "capturedAtUtc": "2026-09-26T16:31:44.369Z",
+            "elapsedMs": 11443,
+            "sha256": "edb25a31e1907d6934112b142ecb353695c0085397112cef411825a47bc8229a"
+          },
+          {
+            "frameNumber": 66,
+            "capturedAtUtc": "2026-09-26T16:31:44.550Z",
+            "elapsedMs": 11624,
+            "sha256": "edb25a31e1907d6934112b142ecb353695c0085397112cef411825a47bc8229a"
+          },
+          {
+            "frameNumber": 67,
+            "capturedAtUtc": "2026-09-26T16:31:44.711Z",
+            "elapsedMs": 11785,
+            "sha256": "edb25a31e1907d6934112b142ecb353695c0085397112cef411825a47bc8229a"
+          },
+          {
+            "frameNumber": 68,
+            "capturedAtUtc": "2026-09-26T16:31:44.818Z",
+            "elapsedMs": 11892,
+            "sha256": "edb25a31e1907d6934112b142ecb353695c0085397112cef411825a47bc8229a"
+          },
+          {
+            "frameNumber": 69,
+            "capturedAtUtc": "2026-09-26T16:31:45.021Z",
+            "elapsedMs": 12095,
+            "sha256": "263b89d3ab2dcc02cba8f2bf1f539e6eaf04ded6d38c6983db5d50a71fc3cfcc"
+          },
+          {
+            "frameNumber": 70,
+            "capturedAtUtc": "2026-09-26T16:31:45.134Z",
+            "elapsedMs": 12208,
+            "sha256": "263b89d3ab2dcc02cba8f2bf1f539e6eaf04ded6d38c6983db5d50a71fc3cfcc"
+          },
+          {
+            "frameNumber": 71,
+            "capturedAtUtc": "2026-09-26T16:31:45.246Z",
+            "elapsedMs": 12320,
+            "sha256": "263b89d3ab2dcc02cba8f2bf1f539e6eaf04ded6d38c6983db5d50a71fc3cfcc"
+          },
+          {
+            "frameNumber": 72,
+            "capturedAtUtc": "2026-09-26T16:31:45.422Z",
+            "elapsedMs": 12496,
+            "sha256": "263b89d3ab2dcc02cba8f2bf1f539e6eaf04ded6d38c6983db5d50a71fc3cfcc"
+          },
+          {
+            "frameNumber": 73,
+            "capturedAtUtc": "2026-09-26T16:31:45.604Z",
+            "elapsedMs": 12678,
+            "sha256": "263b89d3ab2dcc02cba8f2bf1f539e6eaf04ded6d38c6983db5d50a71fc3cfcc"
+          },
+          {
+            "frameNumber": 74,
+            "capturedAtUtc": "2026-09-26T16:31:45.782Z",
+            "elapsedMs": 12856,
+            "sha256": "263b89d3ab2dcc02cba8f2bf1f539e6eaf04ded6d38c6983db5d50a71fc3cfcc"
+          },
+          {
+            "frameNumber": 75,
+            "capturedAtUtc": "2026-09-26T16:31:45.964Z",
+            "elapsedMs": 13038,
+            "sha256": "263b89d3ab2dcc02cba8f2bf1f539e6eaf04ded6d38c6983db5d50a71fc3cfcc"
+          },
+          {
+            "frameNumber": 76,
+            "capturedAtUtc": "2026-09-26T16:31:46.146Z",
+            "elapsedMs": 13220,
+            "sha256": "263b89d3ab2dcc02cba8f2bf1f539e6eaf04ded6d38c6983db5d50a71fc3cfcc"
+          },
+          {
+            "frameNumber": 77,
+            "capturedAtUtc": "2026-09-26T16:31:46.325Z",
+            "elapsedMs": 13399,
+            "sha256": "263b89d3ab2dcc02cba8f2bf1f539e6eaf04ded6d38c6983db5d50a71fc3cfcc"
+          },
+          {
+            "frameNumber": 78,
+            "capturedAtUtc": "2026-09-26T16:31:46.506Z",
+            "elapsedMs": 13580,
+            "sha256": "263b89d3ab2dcc02cba8f2bf1f539e6eaf04ded6d38c6983db5d50a71fc3cfcc"
+          },
+          {
+            "frameNumber": 79,
+            "capturedAtUtc": "2026-09-26T16:31:46.686Z",
+            "elapsedMs": 13760,
+            "sha256": "263b89d3ab2dcc02cba8f2bf1f539e6eaf04ded6d38c6983db5d50a71fc3cfcc"
+          },
+          {
+            "frameNumber": 80,
+            "capturedAtUtc": "2026-09-26T16:31:46.845Z",
+            "elapsedMs": 13919,
+            "sha256": "263b89d3ab2dcc02cba8f2bf1f539e6eaf04ded6d38c6983db5d50a71fc3cfcc"
+          },
+          {
+            "frameNumber": 81,
+            "capturedAtUtc": "2026-09-26T16:31:46.965Z",
+            "elapsedMs": 14039,
+            "sha256": "263b89d3ab2dcc02cba8f2bf1f539e6eaf04ded6d38c6983db5d50a71fc3cfcc"
+          },
+          {
+            "frameNumber": 82,
+            "capturedAtUtc": "2026-09-26T16:31:47.141Z",
+            "elapsedMs": 14215,
+            "sha256": "263b89d3ab2dcc02cba8f2bf1f539e6eaf04ded6d38c6983db5d50a71fc3cfcc"
+          },
+          {
+            "frameNumber": 83,
+            "capturedAtUtc": "2026-09-26T16:31:47.261Z",
+            "elapsedMs": 14335,
+            "sha256": "9ee8b2bfe6eadc99c354af4510eab8de039992e3c4f9afb844312922bb743a6e"
+          },
+          {
+            "frameNumber": 84,
+            "capturedAtUtc": "2026-09-26T16:31:47.379Z",
+            "elapsedMs": 14453,
+            "sha256": "9ee8b2bfe6eadc99c354af4510eab8de039992e3c4f9afb844312922bb743a6e"
+          },
+          {
+            "frameNumber": 85,
+            "capturedAtUtc": "2026-09-26T16:31:47.554Z",
+            "elapsedMs": 14628,
+            "sha256": "9ee8b2bfe6eadc99c354af4510eab8de039992e3c4f9afb844312922bb743a6e"
+          },
+          {
+            "frameNumber": 86,
+            "capturedAtUtc": "2026-09-26T16:31:47.759Z",
+            "elapsedMs": 14833,
+            "sha256": "04c3aff52a6f9dc5d48d3615b1109d7fb5b751eb5e3928ace23f1613d6897093"
+          },
+          {
+            "frameNumber": 87,
+            "capturedAtUtc": "2026-09-26T16:31:47.936Z",
+            "elapsedMs": 15010,
+            "sha256": "04c3aff52a6f9dc5d48d3615b1109d7fb5b751eb5e3928ace23f1613d6897093"
+          },
+          {
+            "frameNumber": 88,
+            "capturedAtUtc": "2026-09-26T16:31:48.114Z",
+            "elapsedMs": 15188,
+            "sha256": "04c3aff52a6f9dc5d48d3615b1109d7fb5b751eb5e3928ace23f1613d6897093"
+          },
+          {
+            "frameNumber": 89,
+            "capturedAtUtc": "2026-09-26T16:31:48.295Z",
+            "elapsedMs": 15369,
+            "sha256": "9ee8b2bfe6eadc99c354af4510eab8de039992e3c4f9afb844312922bb743a6e"
+          },
+          {
+            "frameNumber": 90,
+            "capturedAtUtc": "2026-09-26T16:31:48.476Z",
+            "elapsedMs": 15550,
+            "sha256": "9ee8b2bfe6eadc99c354af4510eab8de039992e3c4f9afb844312922bb743a6e"
+          },
+          {
+            "frameNumber": 91,
+            "capturedAtUtc": "2026-09-26T16:31:48.656Z",
+            "elapsedMs": 15730,
+            "sha256": "04c3aff52a6f9dc5d48d3615b1109d7fb5b751eb5e3928ace23f1613d6897093"
+          },
+          {
+            "frameNumber": 92,
+            "capturedAtUtc": "2026-09-26T16:31:48.832Z",
+            "elapsedMs": 15906,
+            "sha256": "04c3aff52a6f9dc5d48d3615b1109d7fb5b751eb5e3928ace23f1613d6897093"
+          },
+          {
+            "frameNumber": 93,
+            "capturedAtUtc": "2026-09-26T16:31:48.994Z",
+            "elapsedMs": 16068,
+            "sha256": "04c3aff52a6f9dc5d48d3615b1109d7fb5b751eb5e3928ace23f1613d6897093"
+          },
+          {
+            "frameNumber": 94,
+            "capturedAtUtc": "2026-09-26T16:31:49.108Z",
+            "elapsedMs": 16182,
+            "sha256": "04c3aff52a6f9dc5d48d3615b1109d7fb5b751eb5e3928ace23f1613d6897093"
+          },
+          {
+            "frameNumber": 95,
+            "capturedAtUtc": "2026-09-26T16:31:49.292Z",
+            "elapsedMs": 16366,
+            "sha256": "9ee8b2bfe6eadc99c354af4510eab8de039992e3c4f9afb844312922bb743a6e"
+          },
+          {
+            "frameNumber": 96,
+            "capturedAtUtc": "2026-09-26T16:31:49.470Z",
+            "elapsedMs": 16544,
+            "sha256": "6568ab433397accbee19f199f3e3beea93d48881aba4cd28e6a7f57241ef6dfd"
+          },
+          {
+            "frameNumber": 97,
+            "capturedAtUtc": "2026-09-26T16:31:49.647Z",
+            "elapsedMs": 16721,
+            "sha256": "6568ab433397accbee19f199f3e3beea93d48881aba4cd28e6a7f57241ef6dfd"
+          },
+          {
+            "frameNumber": 98,
+            "capturedAtUtc": "2026-09-26T16:31:49.761Z",
+            "elapsedMs": 16835,
+            "sha256": "6568ab433397accbee19f199f3e3beea93d48881aba4cd28e6a7f57241ef6dfd"
+          },
+          {
+            "frameNumber": 99,
+            "capturedAtUtc": "2026-09-26T16:31:49.886Z",
+            "elapsedMs": 16960,
+            "sha256": "d1149c410672f75be7fd985f976bf21b5fcbc121bda60343babea69554e0df1c"
+          },
+          {
+            "frameNumber": 100,
+            "capturedAtUtc": "2026-09-26T16:31:50.063Z",
+            "elapsedMs": 17137,
+            "sha256": "d1149c410672f75be7fd985f976bf21b5fcbc121bda60343babea69554e0df1c"
+          },
+          {
+            "frameNumber": 101,
+            "capturedAtUtc": "2026-09-26T16:31:50.241Z",
+            "elapsedMs": 17315,
+            "sha256": "d1149c410672f75be7fd985f976bf21b5fcbc121bda60343babea69554e0df1c"
+          },
+          {
+            "frameNumber": 102,
+            "capturedAtUtc": "2026-09-26T16:31:50.425Z",
+            "elapsedMs": 17499,
+            "sha256": "6568ab433397accbee19f199f3e3beea93d48881aba4cd28e6a7f57241ef6dfd"
+          },
+          {
+            "frameNumber": 103,
+            "capturedAtUtc": "2026-09-26T16:31:50.600Z",
+            "elapsedMs": 17674,
+            "sha256": "6568ab433397accbee19f199f3e3beea93d48881aba4cd28e6a7f57241ef6dfd"
+          },
+          {
+            "frameNumber": 104,
+            "capturedAtUtc": "2026-09-26T16:31:50.775Z",
+            "elapsedMs": 17849,
+            "sha256": "6568ab433397accbee19f199f3e3beea93d48881aba4cd28e6a7f57241ef6dfd"
+          },
+          {
+            "frameNumber": 105,
+            "capturedAtUtc": "2026-09-26T16:31:50.954Z",
+            "elapsedMs": 18028,
+            "sha256": "d1149c410672f75be7fd985f976bf21b5fcbc121bda60343babea69554e0df1c"
+          },
+          {
+            "frameNumber": 106,
+            "capturedAtUtc": "2026-09-26T16:31:51.131Z",
+            "elapsedMs": 18205,
+            "sha256": "d1149c410672f75be7fd985f976bf21b5fcbc121bda60343babea69554e0df1c"
+          },
+          {
+            "frameNumber": 107,
+            "capturedAtUtc": "2026-09-26T16:31:51.308Z",
+            "elapsedMs": 18382,
+            "sha256": "d1149c410672f75be7fd985f976bf21b5fcbc121bda60343babea69554e0df1c"
+          },
+          {
+            "frameNumber": 108,
+            "capturedAtUtc": "2026-09-26T16:31:51.478Z",
+            "elapsedMs": 18552,
+            "sha256": "6568ab433397accbee19f199f3e3beea93d48881aba4cd28e6a7f57241ef6dfd"
+          },
+          {
+            "frameNumber": 109,
+            "capturedAtUtc": "2026-09-26T16:31:51.592Z",
+            "elapsedMs": 18666,
+            "sha256": "6568ab433397accbee19f199f3e3beea93d48881aba4cd28e6a7f57241ef6dfd"
+          },
+          {
+            "frameNumber": 110,
+            "capturedAtUtc": "2026-09-26T16:31:51.770Z",
+            "elapsedMs": 18844,
+            "sha256": "6568ab433397accbee19f199f3e3beea93d48881aba4cd28e6a7f57241ef6dfd"
+          },
+          {
+            "frameNumber": 111,
+            "capturedAtUtc": "2026-09-26T16:31:51.890Z",
+            "elapsedMs": 18964,
+            "sha256": "73bb07539290e141ab9d63544f8433135ab8b67ce6c349da1786c9e1f3848e79"
+          },
+          {
+            "frameNumber": 112,
+            "capturedAtUtc": "2026-09-26T16:31:52.002Z",
+            "elapsedMs": 19076,
+            "sha256": "73bb07539290e141ab9d63544f8433135ab8b67ce6c349da1786c9e1f3848e79"
+          },
+          {
+            "frameNumber": 113,
+            "capturedAtUtc": "2026-09-26T16:31:52.174Z",
+            "elapsedMs": 19248,
+            "sha256": "73bb07539290e141ab9d63544f8433135ab8b67ce6c349da1786c9e1f3848e79"
+          },
+          {
+            "frameNumber": 114,
+            "capturedAtUtc": "2026-09-26T16:31:52.350Z",
+            "elapsedMs": 19424,
+            "sha256": "73bb07539290e141ab9d63544f8433135ab8b67ce6c349da1786c9e1f3848e79"
+          },
+          {
+            "frameNumber": 115,
+            "capturedAtUtc": "2026-09-26T16:31:52.532Z",
+            "elapsedMs": 19606,
+            "sha256": "73bb07539290e141ab9d63544f8433135ab8b67ce6c349da1786c9e1f3848e79"
+          },
+          {
+            "frameNumber": 116,
+            "capturedAtUtc": "2026-09-26T16:31:52.708Z",
+            "elapsedMs": 19782,
+            "sha256": "73bb07539290e141ab9d63544f8433135ab8b67ce6c349da1786c9e1f3848e79"
+          },
+          {
+            "frameNumber": 117,
+            "capturedAtUtc": "2026-09-26T16:31:52.888Z",
+            "elapsedMs": 19962,
+            "sha256": "73bb07539290e141ab9d63544f8433135ab8b67ce6c349da1786c9e1f3848e79"
+          },
+          {
+            "frameNumber": 118,
+            "capturedAtUtc": "2026-09-26T16:31:53.066Z",
+            "elapsedMs": 20140,
+            "sha256": "73bb07539290e141ab9d63544f8433135ab8b67ce6c349da1786c9e1f3848e79"
+          },
+          {
+            "frameNumber": 119,
+            "capturedAtUtc": "2026-09-26T16:31:53.240Z",
+            "elapsedMs": 20314,
+            "sha256": "73bb07539290e141ab9d63544f8433135ab8b67ce6c349da1786c9e1f3848e79"
+          },
+          {
+            "frameNumber": 120,
+            "capturedAtUtc": "2026-09-26T16:31:53.418Z",
+            "elapsedMs": 20492,
+            "sha256": "73bb07539290e141ab9d63544f8433135ab8b67ce6c349da1786c9e1f3848e79"
+          },
+          {
+            "frameNumber": 121,
+            "capturedAtUtc": "2026-09-26T16:31:53.599Z",
+            "elapsedMs": 20673,
+            "sha256": "73bb07539290e141ab9d63544f8433135ab8b67ce6c349da1786c9e1f3848e79"
+          },
+          {
+            "frameNumber": 122,
+            "capturedAtUtc": "2026-09-26T16:31:53.720Z",
+            "elapsedMs": 20794,
+            "sha256": "73bb07539290e141ab9d63544f8433135ab8b67ce6c349da1786c9e1f3848e79"
+          },
+          {
+            "frameNumber": 123,
+            "capturedAtUtc": "2026-09-26T16:31:53.831Z",
+            "elapsedMs": 20905,
+            "sha256": "73bb07539290e141ab9d63544f8433135ab8b67ce6c349da1786c9e1f3848e79"
+          },
+          {
+            "frameNumber": 124,
+            "capturedAtUtc": "2026-09-26T16:31:54.012Z",
+            "elapsedMs": 21086,
+            "sha256": "73bb07539290e141ab9d63544f8433135ab8b67ce6c349da1786c9e1f3848e79"
+          },
+          {
+            "frameNumber": 125,
+            "capturedAtUtc": "2026-09-26T16:31:54.128Z",
+            "elapsedMs": 21202,
+            "sha256": "bf45ecbae4f80761d481a7d9338ac854aa2638c8a77926430b1a3938724027e5"
+          },
+          {
+            "frameNumber": 126,
+            "capturedAtUtc": "2026-09-26T16:31:54.241Z",
+            "elapsedMs": 21315,
+            "sha256": "bf45ecbae4f80761d481a7d9338ac854aa2638c8a77926430b1a3938724027e5"
+          },
+          {
+            "frameNumber": 127,
+            "capturedAtUtc": "2026-09-26T16:31:54.417Z",
+            "elapsedMs": 21491,
+            "sha256": "bf45ecbae4f80761d481a7d9338ac854aa2638c8a77926430b1a3938724027e5"
+          },
+          {
+            "frameNumber": 128,
+            "capturedAtUtc": "2026-09-26T16:31:54.598Z",
+            "elapsedMs": 21672,
+            "sha256": "a7e0402723c208d4753e3ccbc278002a4ddb102d0b17536322a3a44369437b54"
+          },
+          {
+            "frameNumber": 129,
+            "capturedAtUtc": "2026-09-26T16:31:54.774Z",
+            "elapsedMs": 21848,
+            "sha256": "a7e0402723c208d4753e3ccbc278002a4ddb102d0b17536322a3a44369437b54"
+          },
+          {
+            "frameNumber": 130,
+            "capturedAtUtc": "2026-09-26T16:31:54.951Z",
+            "elapsedMs": 22025,
+            "sha256": "a7e0402723c208d4753e3ccbc278002a4ddb102d0b17536322a3a44369437b54"
+          },
+          {
+            "frameNumber": 131,
+            "capturedAtUtc": "2026-09-26T16:31:55.130Z",
+            "elapsedMs": 22204,
+            "sha256": "bf45ecbae4f80761d481a7d9338ac854aa2638c8a77926430b1a3938724027e5"
+          },
+          {
+            "frameNumber": 132,
+            "capturedAtUtc": "2026-09-26T16:31:55.313Z",
+            "elapsedMs": 22387,
+            "sha256": "bf45ecbae4f80761d481a7d9338ac854aa2638c8a77926430b1a3938724027e5"
+          },
+          {
+            "frameNumber": 133,
+            "capturedAtUtc": "2026-09-26T16:31:55.491Z",
+            "elapsedMs": 22565,
+            "sha256": "bf45ecbae4f80761d481a7d9338ac854aa2638c8a77926430b1a3938724027e5"
+          },
+          {
+            "frameNumber": 134,
+            "capturedAtUtc": "2026-09-26T16:31:55.673Z",
+            "elapsedMs": 22747,
+            "sha256": "a7e0402723c208d4753e3ccbc278002a4ddb102d0b17536322a3a44369437b54"
+          },
+          {
+            "frameNumber": 135,
+            "capturedAtUtc": "2026-09-26T16:31:55.827Z",
+            "elapsedMs": 22901,
+            "sha256": "a7e0402723c208d4753e3ccbc278002a4ddb102d0b17536322a3a44369437b54"
+          },
+          {
+            "frameNumber": 136,
+            "capturedAtUtc": "2026-09-26T16:31:55.941Z",
+            "elapsedMs": 23015,
+            "sha256": "a7e0402723c208d4753e3ccbc278002a4ddb102d0b17536322a3a44369437b54"
+          },
+          {
+            "frameNumber": 137,
+            "capturedAtUtc": "2026-09-26T16:31:56.123Z",
+            "elapsedMs": 23197,
+            "sha256": "bf45ecbae4f80761d481a7d9338ac854aa2638c8a77926430b1a3938724027e5"
+          },
+          {
+            "frameNumber": 138,
+            "capturedAtUtc": "2026-09-26T16:31:56.300Z",
+            "elapsedMs": 23374,
+            "sha256": "fbeb4e7af5e229fb3d326de7fae414031d0eab600e7c0bbd178f1128ea51684d"
+          },
+          {
+            "frameNumber": 139,
+            "capturedAtUtc": "2026-09-26T16:31:56.476Z",
+            "elapsedMs": 23550,
+            "sha256": "fbeb4e7af5e229fb3d326de7fae414031d0eab600e7c0bbd178f1128ea51684d"
+          },
+          {
+            "frameNumber": 140,
+            "capturedAtUtc": "2026-09-26T16:31:56.590Z",
+            "elapsedMs": 23664,
+            "sha256": "fbeb4e7af5e229fb3d326de7fae414031d0eab600e7c0bbd178f1128ea51684d"
+          },
+          {
+            "frameNumber": 141,
+            "capturedAtUtc": "2026-09-26T16:31:56.711Z",
+            "elapsedMs": 23785,
+            "sha256": "c7c99f514fa5441c2260b9d62c353c9cca9e07f6f36fb5f32a1fa680b6c6a94b"
+          },
+          {
+            "frameNumber": 142,
+            "capturedAtUtc": "2026-09-26T16:31:56.886Z",
+            "elapsedMs": 23960,
+            "sha256": "c7c99f514fa5441c2260b9d62c353c9cca9e07f6f36fb5f32a1fa680b6c6a94b"
+          },
+          {
+            "frameNumber": 143,
+            "capturedAtUtc": "2026-09-26T16:31:57.062Z",
+            "elapsedMs": 24136,
+            "sha256": "c7c99f514fa5441c2260b9d62c353c9cca9e07f6f36fb5f32a1fa680b6c6a94b"
+          },
+          {
+            "frameNumber": 144,
+            "capturedAtUtc": "2026-09-26T16:31:57.242Z",
+            "elapsedMs": 24316,
+            "sha256": "fbeb4e7af5e229fb3d326de7fae414031d0eab600e7c0bbd178f1128ea51684d"
+          },
+          {
+            "frameNumber": 145,
+            "capturedAtUtc": "2026-09-26T16:31:57.422Z",
+            "elapsedMs": 24496,
+            "sha256": "fbeb4e7af5e229fb3d326de7fae414031d0eab600e7c0bbd178f1128ea51684d"
+          },
+          {
+            "frameNumber": 146,
+            "capturedAtUtc": "2026-09-26T16:31:57.599Z",
+            "elapsedMs": 24673,
+            "sha256": "fbeb4e7af5e229fb3d326de7fae414031d0eab600e7c0bbd178f1128ea51684d"
+          },
+          {
+            "frameNumber": 147,
+            "capturedAtUtc": "2026-09-26T16:31:57.784Z",
+            "elapsedMs": 24858,
+            "sha256": "69c7de5d4a96f3215774f3c548003c738d8c915171d9da19ee4bb80db7d9231c"
+          },
+          {
+            "frameNumber": 148,
+            "capturedAtUtc": "2026-09-26T16:31:57.958Z",
+            "elapsedMs": 25032,
+            "sha256": "69c7de5d4a96f3215774f3c548003c738d8c915171d9da19ee4bb80db7d9231c"
+          },
+          {
+            "frameNumber": 149,
+            "capturedAtUtc": "2026-09-26T16:31:58.135Z",
+            "elapsedMs": 25209,
+            "sha256": "69c7de5d4a96f3215774f3c548003c738d8c915171d9da19ee4bb80db7d9231c"
+          },
+          {
+            "frameNumber": 150,
+            "capturedAtUtc": "2026-09-26T16:31:58.296Z",
+            "elapsedMs": 25370,
+            "sha256": "4ebf416fd68f4e76b1bec3c2decb96b88e941ec320379a7866131393a99ccd0e"
+          },
+          {
+            "frameNumber": 151,
+            "capturedAtUtc": "2026-09-26T16:31:58.411Z",
+            "elapsedMs": 25485,
+            "sha256": "4ebf416fd68f4e76b1bec3c2decb96b88e941ec320379a7866131393a99ccd0e"
+          },
+          {
+            "frameNumber": 152,
+            "capturedAtUtc": "2026-09-26T16:31:58.587Z",
+            "elapsedMs": 25661,
+            "sha256": "4ebf416fd68f4e76b1bec3c2decb96b88e941ec320379a7866131393a99ccd0e"
+          },
+          {
+            "frameNumber": 153,
+            "capturedAtUtc": "2026-09-26T16:31:58.706Z",
+            "elapsedMs": 25780,
+            "sha256": "a8c9dc760745e709d967947352f971ffc91cdd44b8a1bec9f2ccf3254cc72128"
+          },
+          {
+            "frameNumber": 154,
+            "capturedAtUtc": "2026-09-26T16:31:58.820Z",
+            "elapsedMs": 25894,
+            "sha256": "a8c9dc760745e709d967947352f971ffc91cdd44b8a1bec9f2ccf3254cc72128"
+          },
+          {
+            "frameNumber": 155,
+            "capturedAtUtc": "2026-09-26T16:31:58.996Z",
+            "elapsedMs": 26070,
+            "sha256": "a8c9dc760745e709d967947352f971ffc91cdd44b8a1bec9f2ccf3254cc72128"
+          },
+          {
+            "frameNumber": 156,
+            "capturedAtUtc": "2026-09-26T16:31:59.173Z",
+            "elapsedMs": 26247,
+            "sha256": "a8c9dc760745e709d967947352f971ffc91cdd44b8a1bec9f2ccf3254cc72128"
+          },
+          {
+            "frameNumber": 157,
+            "capturedAtUtc": "2026-09-26T16:31:59.358Z",
+            "elapsedMs": 26432,
+            "sha256": "a8c9dc760745e709d967947352f971ffc91cdd44b8a1bec9f2ccf3254cc72128"
+          },
+          {
+            "frameNumber": 158,
+            "capturedAtUtc": "2026-09-26T16:31:59.535Z",
+            "elapsedMs": 26609,
+            "sha256": "a8c9dc760745e709d967947352f971ffc91cdd44b8a1bec9f2ccf3254cc72128"
+          },
+          {
+            "frameNumber": 159,
+            "capturedAtUtc": "2026-09-26T16:31:59.712Z",
+            "elapsedMs": 26786,
+            "sha256": "a8c9dc760745e709d967947352f971ffc91cdd44b8a1bec9f2ccf3254cc72128"
+          },
+          {
+            "frameNumber": 160,
+            "capturedAtUtc": "2026-09-26T16:31:59.891Z",
+            "elapsedMs": 26965,
+            "sha256": "a8c9dc760745e709d967947352f971ffc91cdd44b8a1bec9f2ccf3254cc72128"
+          },
+          {
+            "frameNumber": 161,
+            "capturedAtUtc": "2026-09-26T16:32:00.071Z",
+            "elapsedMs": 27145,
+            "sha256": "a8c9dc760745e709d967947352f971ffc91cdd44b8a1bec9f2ccf3254cc72128"
+          },
+          {
+            "frameNumber": 162,
+            "capturedAtUtc": "2026-09-26T16:32:00.249Z",
+            "elapsedMs": 27323,
+            "sha256": "a8c9dc760745e709d967947352f971ffc91cdd44b8a1bec9f2ccf3254cc72128"
+          },
+          {
+            "frameNumber": 163,
+            "capturedAtUtc": "2026-09-26T16:32:00.395Z",
+            "elapsedMs": 27469,
+            "sha256": "a8c9dc760745e709d967947352f971ffc91cdd44b8a1bec9f2ccf3254cc72128"
+          },
+          {
+            "frameNumber": 164,
+            "capturedAtUtc": "2026-09-26T16:32:00.512Z",
+            "elapsedMs": 27586,
+            "sha256": "a8c9dc760745e709d967947352f971ffc91cdd44b8a1bec9f2ccf3254cc72128"
+          },
+          {
+            "frameNumber": 165,
+            "capturedAtUtc": "2026-09-26T16:32:00.693Z",
+            "elapsedMs": 27767,
+            "sha256": "a8c9dc760745e709d967947352f971ffc91cdd44b8a1bec9f2ccf3254cc72128"
+          },
+          {
+            "frameNumber": 166,
+            "capturedAtUtc": "2026-09-26T16:32:00.812Z",
+            "elapsedMs": 27886,
+            "sha256": "b4f488c8bc76b1613c1a649c088883ce4d962ad9e491488f633bde93de8eebf9"
+          },
+          {
+            "frameNumber": 167,
+            "capturedAtUtc": "2026-09-26T16:32:00.926Z",
+            "elapsedMs": 28000,
+            "sha256": "b4f488c8bc76b1613c1a649c088883ce4d962ad9e491488f633bde93de8eebf9"
+          },
+          {
+            "frameNumber": 168,
+            "capturedAtUtc": "2026-09-26T16:32:01.104Z",
+            "elapsedMs": 28178,
+            "sha256": "b4f488c8bc76b1613c1a649c088883ce4d962ad9e491488f633bde93de8eebf9"
+          },
+          {
+            "frameNumber": 169,
+            "capturedAtUtc": "2026-09-26T16:32:01.280Z",
+            "elapsedMs": 28354,
+            "sha256": "b4f488c8bc76b1613c1a649c088883ce4d962ad9e491488f633bde93de8eebf9"
+          },
+          {
+            "frameNumber": 170,
+            "capturedAtUtc": "2026-09-26T16:32:01.456Z",
+            "elapsedMs": 28530,
+            "sha256": "b4f488c8bc76b1613c1a649c088883ce4d962ad9e491488f633bde93de8eebf9"
+          },
+          {
+            "frameNumber": 171,
+            "capturedAtUtc": "2026-09-26T16:32:01.629Z",
+            "elapsedMs": 28703,
+            "sha256": "b4f488c8bc76b1613c1a649c088883ce4d962ad9e491488f633bde93de8eebf9"
+          },
+          {
+            "frameNumber": 172,
+            "capturedAtUtc": "2026-09-26T16:32:01.805Z",
+            "elapsedMs": 28879,
+            "sha256": "b4f488c8bc76b1613c1a649c088883ce4d962ad9e491488f633bde93de8eebf9"
+          },
+          {
+            "frameNumber": 173,
+            "capturedAtUtc": "2026-09-26T16:32:01.984Z",
+            "elapsedMs": 29058,
+            "sha256": "b4f488c8bc76b1613c1a649c088883ce4d962ad9e491488f633bde93de8eebf9"
+          },
+          {
+            "frameNumber": 174,
+            "capturedAtUtc": "2026-09-26T16:32:02.163Z",
+            "elapsedMs": 29237,
+            "sha256": "b4f488c8bc76b1613c1a649c088883ce4d962ad9e491488f633bde93de8eebf9"
+          },
+          {
+            "frameNumber": 175,
+            "capturedAtUtc": "2026-09-26T16:32:02.340Z",
+            "elapsedMs": 29414,
+            "sha256": "b4f488c8bc76b1613c1a649c088883ce4d962ad9e491488f633bde93de8eebf9"
+          },
+          {
+            "frameNumber": 176,
+            "capturedAtUtc": "2026-09-26T16:32:02.512Z",
+            "elapsedMs": 29586,
+            "sha256": "b4f488c8bc76b1613c1a649c088883ce4d962ad9e491488f633bde93de8eebf9"
+          },
+          {
+            "frameNumber": 177,
+            "capturedAtUtc": "2026-09-26T16:32:02.628Z",
+            "elapsedMs": 29702,
+            "sha256": "b4f488c8bc76b1613c1a649c088883ce4d962ad9e491488f633bde93de8eebf9"
+          },
+          {
+            "frameNumber": 178,
+            "capturedAtUtc": "2026-09-26T16:32:02.809Z",
+            "elapsedMs": 29883,
+            "sha256": "ff106c397f4300a773dac196c54a73066636817d9cc995a7bcbf5ae6f2b16b74"
+          },
+          {
+            "frameNumber": 179,
+            "capturedAtUtc": "2026-09-26T16:32:02.927Z",
+            "elapsedMs": 30001,
+            "sha256": "a8c9dc760745e709d967947352f971ffc91cdd44b8a1bec9f2ccf3254cc72128"
+          },
+          {
+            "frameNumber": 180,
+            "capturedAtUtc": "2026-09-26T16:32:03.043Z",
+            "elapsedMs": 30117,
+            "sha256": "a8c9dc760745e709d967947352f971ffc91cdd44b8a1bec9f2ccf3254cc72128"
+          },
+          {
+            "frameNumber": 181,
+            "capturedAtUtc": "2026-09-26T16:32:03.221Z",
+            "elapsedMs": 30295,
+            "sha256": "a8c9dc760745e709d967947352f971ffc91cdd44b8a1bec9f2ccf3254cc72128"
+          },
+          {
+            "frameNumber": 182,
+            "capturedAtUtc": "2026-09-26T16:32:03.402Z",
+            "elapsedMs": 30476,
+            "sha256": "a8c9dc760745e709d967947352f971ffc91cdd44b8a1bec9f2ccf3254cc72128"
+          },
+          {
+            "frameNumber": 183,
+            "capturedAtUtc": "2026-09-26T16:32:03.584Z",
+            "elapsedMs": 30658,
+            "sha256": "a8c9dc760745e709d967947352f971ffc91cdd44b8a1bec9f2ccf3254cc72128"
+          },
+          {
+            "frameNumber": 184,
+            "capturedAtUtc": "2026-09-26T16:32:03.761Z",
+            "elapsedMs": 30835,
+            "sha256": "a8c9dc760745e709d967947352f971ffc91cdd44b8a1bec9f2ccf3254cc72128"
+          },
+          {
+            "frameNumber": 185,
+            "capturedAtUtc": "2026-09-26T16:32:03.938Z",
+            "elapsedMs": 31012,
+            "sha256": "a8c9dc760745e709d967947352f971ffc91cdd44b8a1bec9f2ccf3254cc72128"
+          },
+          {
+            "frameNumber": 186,
+            "capturedAtUtc": "2026-09-26T16:32:04.115Z",
+            "elapsedMs": 31189,
+            "sha256": "a8c9dc760745e709d967947352f971ffc91cdd44b8a1bec9f2ccf3254cc72128"
+          },
+          {
+            "frameNumber": 187,
+            "capturedAtUtc": "2026-09-26T16:32:04.294Z",
+            "elapsedMs": 31368,
+            "sha256": "a8c9dc760745e709d967947352f971ffc91cdd44b8a1bec9f2ccf3254cc72128"
+          },
+          {
+            "frameNumber": 188,
+            "capturedAtUtc": "2026-09-26T16:32:04.470Z",
+            "elapsedMs": 31544,
+            "sha256": "a8c9dc760745e709d967947352f971ffc91cdd44b8a1bec9f2ccf3254cc72128"
+          },
+          {
+            "frameNumber": 189,
+            "capturedAtUtc": "2026-09-26T16:32:04.643Z",
+            "elapsedMs": 31717,
+            "sha256": "a8c9dc760745e709d967947352f971ffc91cdd44b8a1bec9f2ccf3254cc72128"
+          },
+          {
+            "frameNumber": 190,
+            "capturedAtUtc": "2026-09-26T16:32:04.758Z",
+            "elapsedMs": 31832,
+            "sha256": "a8c9dc760745e709d967947352f971ffc91cdd44b8a1bec9f2ccf3254cc72128"
+          },
+          {
+            "frameNumber": 191,
+            "capturedAtUtc": "2026-09-26T16:32:04.934Z",
+            "elapsedMs": 32008,
+            "sha256": "a8c9dc760745e709d967947352f971ffc91cdd44b8a1bec9f2ccf3254cc72128"
+          }
+        ],
+        "encodedFrameTimestampsMs": [
+          0,
+          120,
+          232,
+          412,
+          587,
+          760,
+          947,
+          1122,
+          1300,
+          1482,
+          1659,
+          1832,
+          2014,
+          2192,
+          2369,
+          2543,
+          2720,
+          2894,
+          3069,
+          3243,
+          3427,
+          3599,
+          3773,
+          3948,
+          4128,
+          4307,
+          4483,
+          4663,
+          4855,
+          5032,
+          5207,
+          5383,
+          5557,
+          5735,
+          5910,
+          6086,
+          6264,
+          6448,
+          6621,
+          6794,
+          6970,
+          7143,
+          7316,
+          7489,
+          7662,
+          7837,
+          8013,
+          8189,
+          8364,
+          8541,
+          8715,
+          8889,
+          9064,
+          9238,
+          9412,
+          9588,
+          9769,
+          9943,
+          10121,
+          10297,
+          10473,
+          10655,
+          10828,
+          11013,
+          11190,
+          11362,
+          11543,
+          11704,
+          11811,
+          12014,
+          12127,
+          12239,
+          12415,
+          12597,
+          12775,
+          12957,
+          13139,
+          13318,
+          13499,
+          13679,
+          13838,
+          13958,
+          14134,
+          14254,
+          14372,
+          14547,
+          14752,
+          14929,
+          15107,
+          15288,
+          15469,
+          15649,
+          15825,
+          15987,
+          16101,
+          16285,
+          16463,
+          16640,
+          16754,
+          16879,
+          17056,
+          17234,
+          17418,
+          17593,
+          17768,
+          17947,
+          18124,
+          18301,
+          18471,
+          18585,
+          18763,
+          18883,
+          18995,
+          19167,
+          19343,
+          19525,
+          19701,
+          19881,
+          20059,
+          20233,
+          20411,
+          20592,
+          20713,
+          20824,
+          21005,
+          21121,
+          21234,
+          21410,
+          21591,
+          21767,
+          21944,
+          22123,
+          22306,
+          22484,
+          22666,
+          22820,
+          22934,
+          23116,
+          23293,
+          23469,
+          23583,
+          23704,
+          23879,
+          24055,
+          24235,
+          24415,
+          24592,
+          24777,
+          24951,
+          25128,
+          25289,
+          25404,
+          25580,
+          25699,
+          25813,
+          25989,
+          26166,
+          26351,
+          26528,
+          26705,
+          26884,
+          27064,
+          27242,
+          27388,
+          27505,
+          27686,
+          27805,
+          27919,
+          28097,
+          28273,
+          28449,
+          28622,
+          28798,
+          28977,
+          29156,
+          29333,
+          29505,
+          29621,
+          29802,
+          29920,
+          30036,
+          30214,
+          30395,
+          30577,
+          30754,
+          30931,
+          31108,
+          31287,
+          31463,
+          31636,
+          31751,
+          31927,
+          32127,
+          32327
+        ],
+        "events": [
+          {
+            "name": "journey recording started with the graph ready and Node Details closed",
+            "recordedAtUtc": "2026-09-26T16:31:44.898Z",
+            "elapsedMs": 11972,
+            "framesCapturedBeforeEvent": 1,
+            "capturedFrameNumber": 1,
+            "capturedFramePresentationMs": 120,
+            "capturedFrameAtUtc": "2026-09-26T16:31:33.127Z",
+            "capturedFrameSha256": "edb25a31e1907d6934112b142ecb353695c0085397112cef411825a47bc8229a",
+            "paintSynchronized": "webContents.invalidate followed by two renderer animation frames before capture",
+            "expectedVisibleText": [
+              "Incoming queue"
+            ],
+            "expectedAbsentText": [
+              "NODE DETAILS",
+              "Add an annotation"
+            ],
+            "visibleContentAccepted": true,
+            "recognizedTextAtStart": "Interaction context verification\nRelayer\n+ New thread\nCHATS\n- No chats yet\nPROJECTS\n• factory-207\n• Interaction context verifica...\nIncoming queue\nScroll or pinch to zoom • Drag canvas to pan • Drag nodes for this view\nSettings\n8 Account\nFollow up...\nEnvironment\nLocal snaoshot\nH 1\nTurn 3 of 3\nWorktree\nBranch\nChanges\nUntracked\nTactory-40/\ncodex/factory-207\n-3627\n0 files\nỐC\nTwo-worker pool\nResults store\n'Thon\nFit\nFixture models.-Fixture m... •",
+            "holdEndFrameNumber": 67,
+            "holdEndFrameAtUtc": "2026-09-26T16:31:44.711Z",
+            "holdEndFrameSha256": "edb25a31e1907d6934112b142ecb353695c0085397112cef411825a47bc8229a",
+            "recognizedTextAtHoldEnd": "Interaction context verification\nRelayer\n+ New thread\nCHATS\n- No chats yet\nPROJECTS\n• factory-207\n• Interaction context verifica...\nIncoming queue\nScroll or pinch to zoom • Drag canvas to pan • Drag nodes for this view\nSettings\n8 Account\nFollow up...\nEnvironment\nLocal snaoshot\nH 1\nTurn 3 of 3\nWorktree\nBranch\nChanges\nUntracked\nTactory-40/\ncodex/factory-207\n-3627\n0 files\nỐC\nTwo-worker pool\nResults store\n'Thon\nFit\nFixture models.-Fixture m... •",
+            "requestedHoldMs": 1400,
+            "observedHoldMs": 11584,
+            "maximumHoldCaptureGapMs": 192
+          },
+          {
+            "name": "opened Incoming queue Node Details for draft A",
+            "recordedAtUtc": "2026-09-26T16:31:47.051Z",
+            "elapsedMs": 14125,
+            "framesCapturedBeforeEvent": 70,
+            "capturedFrameNumber": 70,
+            "capturedFramePresentationMs": 12127,
+            "capturedFrameAtUtc": "2026-09-26T16:31:45.134Z",
+            "capturedFrameSha256": "263b89d3ab2dcc02cba8f2bf1f539e6eaf04ded6d38c6983db5d50a71fc3cfcc",
+            "paintSynchronized": "webContents.invalidate followed by two renderer animation frames before capture",
+            "expectedVisibleText": [
+              "NODE DETAILS",
+              "Incoming queue"
+            ],
+            "expectedAbsentText": [],
+            "visibleContentAccepted": true,
+            "recognizedTextAtStart": "Interaction context verification\nRelayer\n+\nNew thread\nCHATS\n- No chats yet\nPROJECTS\n• factory-207\n• Interaction context verifica...\nIncoming queue\nScroll or pinch to zoom • Drag canvas to pan • Drag nodes for this view\nSettings\n8 Account\nFollow up...\nH 1\nTurn 3 of 3\nEnvironment\nWorkiiree\nBranch\nChanges\nUntracked\nLocal snapshot\nfactory-207\ncodex/factory-207\n-3627\n0 files\nNODE DETAILS\nconceot\nIncoming queue\nEvery task first enters the incoming queue. The\nqueue preserves extra work while both workers\nare busy.\nSee queue behavior\nỐC\nTwo-worker pool\nResults store\n'Thon\nFit\nFixture models.-Fixture m... •",
+            "holdEndFrameNumber": 80,
+            "holdEndFrameAtUtc": "2026-09-26T16:31:46.845Z",
+            "holdEndFrameSha256": "263b89d3ab2dcc02cba8f2bf1f539e6eaf04ded6d38c6983db5d50a71fc3cfcc",
+            "recognizedTextAtHoldEnd": "Interaction context verification\nRelayer\n+\nNew thread\nCHATS\n- No chats yet\nPROJECTS\n• factory-207\n• Interaction context verifica...\nIncoming queue\nScroll or pinch to zoom • Drag canvas to pan • Drag nodes for this view\nSettings\n8 Account\nFollow up...\nH 1\nTurn 3 of 3\nEnvironment\nWorkiiree\nBranch\nChanges\nUntracked\nLocal snapshot\nfactory-207\ncodex/factory-207\n-3627\n0 files\nNODE DETAILS\nconceot\nIncoming queue\nEvery task first enters the incoming queue. The\nqueue preserves extra work while both workers\nare busy.\nSee queue behavior\nỐC\nTwo-worker pool\nResults store\n'Thon\nFit\nFixture models.-Fixture m... •",
+            "requestedHoldMs": 1400,
+            "observedHoldMs": 1711,
+            "maximumHoldCaptureGapMs": 182
+          },
+          {
+            "name": "opened the draft A editor",
+            "recordedAtUtc": "2026-09-26T16:31:49.227Z",
+            "elapsedMs": 16301,
+            "framesCapturedBeforeEvent": 83,
+            "capturedFrameNumber": 83,
+            "capturedFramePresentationMs": 14254,
+            "capturedFrameAtUtc": "2026-09-26T16:31:47.261Z",
+            "capturedFrameSha256": "9ee8b2bfe6eadc99c354af4510eab8de039992e3c4f9afb844312922bb743a6e",
+            "paintSynchronized": "webContents.invalidate followed by two renderer animation frames before capture",
+            "expectedVisibleText": [
+              "NODE DETAILS",
+              "Incoming queue",
+              "Add an annotation"
+            ],
+            "expectedAbsentText": [],
+            "visibleContentAccepted": true,
+            "recognizedTextAtStart": "Interaction context verification\nRelayer\n+ New thread\nCHATS\n- No chats yet\nPROJECTS\n• factory-207\n• Interaction context verifica...\nIncoming queue\nScroll or pinch to zoom • Drag canvas to pan • Drag nodes for this view\nSettings\n8 Account\nFollow up...\nH 1\nTurn 3 of 3\nTwo-worker pool\nResults store\n1thoa\nFit\n• Fixture models • Fixture mo...\nEnvironment\nWorkiiree\nBranch\nChanges\nUntracked\nLocal snapshot\nfactory-207\ncodex/factory-207\n-3627\n0 files\nNODE DETAILS\nconceot\nIncoming queue\nEvery task first enters the incoming queue. The\nqueue preserves extra work while both workers\nare busy.\nSee queue behavior\nAdd an annotation...",
+            "holdEndFrameNumber": 93,
+            "holdEndFrameAtUtc": "2026-09-26T16:31:48.994Z",
+            "holdEndFrameSha256": "04c3aff52a6f9dc5d48d3615b1109d7fb5b751eb5e3928ace23f1613d6897093",
+            "recognizedTextAtHoldEnd": "Interaction context verification\nRelayer\n+ New thread\nCHATS\n- No chats yet\nPROJECTS\n• factory-207\n• Interaction context verifica...\nIncoming queue\nScroll or pinch to zoom • Drag canvas to pan • Drag nodes for this view\nSettings\n8 Account\nFollow up...\nH 1\nTurn 3 of 3\nTwo-worker pool\nResults store\n1thoa\nFit\n• Fixture models • Fixture mo...\nEnvironment\nWorkiiree\nBranch\nChanges\nUntracked\nLocal snapshot\nfactory-207\ncodex/factory-207\n-3627\n0 files\nNODE DETAILS\nconceot\nIncoming queue\nEvery task first enters the incoming queue. The\nqueue preserves extra work while both workers\nare busy.\nSee queue behavior\nAdd an annotation...",
+            "requestedHoldMs": 1400,
+            "observedHoldMs": 1733,
+            "maximumHoldCaptureGapMs": 205
+          },
+          {
+            "name": "typed and durably saved draft A on Incoming queue",
+            "recordedAtUtc": "2026-09-26T16:31:51.697Z",
+            "elapsedMs": 18771,
+            "framesCapturedBeforeEvent": 98,
+            "capturedFrameNumber": 98,
+            "capturedFramePresentationMs": 16754,
+            "capturedFrameAtUtc": "2026-09-26T16:31:49.761Z",
+            "capturedFrameSha256": "6568ab433397accbee19f199f3e3beea93d48881aba4cd28e6a7f57241ef6dfd",
+            "paintSynchronized": "webContents.invalidate followed by two renderer animation frames before capture",
+            "expectedVisibleText": [
+              "Keep queue claims in their original order."
+            ],
+            "expectedAbsentText": [],
+            "visibleContentAccepted": true,
+            "recognizedTextAtStart": "Interaction context verification\nRelayer\n+ New thread\nCHATS\n- No chats yet\nPROJECTS\n• factory-207\n• Interaction context verifica...\nIncoming queue\nScroll or pinch to zoom • Drag canvas to pan • Drag nodes for this view\nSettings\n8 Account\nFollow up...\nEnvironment\nLocal snapshot\nH 1\nTurn 3 of 3\nWorkiiree\nBranch\nChanges\nUntracked\nfactory-207\ncodex/factory-207\n-3627\n0 files\nNODE DETAILS\nconceot\nIncoming queue\nEvery task first enters the incoming queue. The\nqueue preserves extra work while both workers\nare busy.\nSee queue behavior\nTwo-worker pool\nResults store\nKeep queue claims in their original order.l\n1thoa\nFit\nFixture models- Fixture m... ©",
+            "holdEndFrameNumber": 108,
+            "holdEndFrameAtUtc": "2026-09-26T16:31:51.478Z",
+            "holdEndFrameSha256": "6568ab433397accbee19f199f3e3beea93d48881aba4cd28e6a7f57241ef6dfd",
+            "recognizedTextAtHoldEnd": "Interaction context verification\nRelayer\n+ New thread\nCHATS\n- No chats yet\nPROJECTS\n• factory-207\n• Interaction context verifica...\nIncoming queue\nScroll or pinch to zoom • Drag canvas to pan • Drag nodes for this view\nSettings\n8 Account\nFollow up...\nEnvironment\nLocal snapshot\nH 1\nTurn 3 of 3\nWorkiiree\nBranch\nChanges\nUntracked\nfactory-207\ncodex/factory-207\n-3627\n0 files\nNODE DETAILS\nconceot\nIncoming queue\nEvery task first enters the incoming queue. The\nqueue preserves extra work while both workers\nare busy.\nSee queue behavior\nTwo-worker pool\nResults store\nKeep queue claims in their original order.l\n1thoa\nFit\nFixture models- Fixture m... ©",
+            "requestedHoldMs": 1400,
+            "observedHoldMs": 1717,
+            "maximumHoldCaptureGapMs": 184
+          },
+          {
+            "name": "switched from Incoming queue to Two-worker pool with no annotation editor",
+            "recordedAtUtc": "2026-09-26T16:31:53.970Z",
+            "elapsedMs": 21044,
+            "framesCapturedBeforeEvent": 111,
+            "capturedFrameNumber": 111,
+            "capturedFramePresentationMs": 18883,
+            "capturedFrameAtUtc": "2026-09-26T16:31:51.890Z",
+            "capturedFrameSha256": "73bb07539290e141ab9d63544f8433135ab8b67ce6c349da1786c9e1f3848e79",
+            "paintSynchronized": "webContents.invalidate followed by two renderer animation frames before capture",
+            "expectedVisibleText": [
+              "NODE DETAILS",
+              "Two-worker pool"
+            ],
+            "expectedAbsentText": [
+              "Add an annotation",
+              "Keep queue claims in their original order."
+            ],
+            "visibleContentAccepted": true,
+            "recognizedTextAtStart": "Interaction context verification\nRelayer\n+ New thread\nCHATS\n- No chats yet\nPROJECTS\n• factory-207\n• Interaction context verifica...\nIncoming queue\nScroll or pinch to zoom • Drag canvas to pan • Drag nodes for this view\nSettings\n8 Account\nFollow up...\nH 1\nTurn 3 of 3\nTwo-worker pool\nResults store\n11hoa\nFit\n• Fixture models • Fixture mo...\nEnvironment\nLocal snapshot\nWorkiiree\nBranch\nChanges\nUntracked\nfactory-207\ncodex/factory-207\n-3627\n0 files\nNODE DETAILS\nconceot\nTwo-worker pool\nAn available worker claims the next queued task.\nAt most two tasks run concurrently; additional\ntasks wait until a worker finishes.",
+            "holdEndFrameNumber": 122,
+            "holdEndFrameAtUtc": "2026-09-26T16:31:53.720Z",
+            "holdEndFrameSha256": "73bb07539290e141ab9d63544f8433135ab8b67ce6c349da1786c9e1f3848e79",
+            "recognizedTextAtHoldEnd": "Interaction context verification\nRelayer\n+ New thread\nCHATS\n- No chats yet\nPROJECTS\n• factory-207\n• Interaction context verifica...\nIncoming queue\nScroll or pinch to zoom • Drag canvas to pan • Drag nodes for this view\nSettings\n8 Account\nFollow up...\nH 1\nTurn 3 of 3\nTwo-worker pool\nResults store\n11hoa\nFit\n• Fixture models • Fixture mo...\nEnvironment\nLocal snapshot\nWorkiiree\nBranch\nChanges\nUntracked\nfactory-207\ncodex/factory-207\n-3627\n0 files\nNODE DETAILS\nconceot\nTwo-worker pool\nAn available worker claims the next queued task.\nAt most two tasks run concurrently; additional\ntasks wait until a worker finishes.",
+            "requestedHoldMs": 1400,
+            "observedHoldMs": 1830,
+            "maximumHoldCaptureGapMs": 182
+          },
+          {
+            "name": "opened the draft B editor",
+            "recordedAtUtc": "2026-09-26T16:31:56.061Z",
+            "elapsedMs": 23135,
+            "framesCapturedBeforeEvent": 125,
+            "capturedFrameNumber": 125,
+            "capturedFramePresentationMs": 21121,
+            "capturedFrameAtUtc": "2026-09-26T16:31:54.128Z",
+            "capturedFrameSha256": "bf45ecbae4f80761d481a7d9338ac854aa2638c8a77926430b1a3938724027e5",
+            "paintSynchronized": "webContents.invalidate followed by two renderer animation frames before capture",
+            "expectedVisibleText": [
+              "NODE DETAILS",
+              "Two-worker pool",
+              "Add an annotation"
+            ],
+            "expectedAbsentText": [],
+            "visibleContentAccepted": true,
+            "recognizedTextAtStart": "Interaction context verification\nRelayer\n+ New thread\nCHATS\n- No chats yet\nPROJECTS\n• factory-207\n• Interaction context verifica...\nIncoming queue\nScroll or pinch to zoom • Drag canvas to pan • Drag nodes for this view\nSettings\n8 Account\nFollow up...\nH 1\nTurn 3 of 3\nTwo-worker pool\nResults store\n1thoa\nFit\n• Fixture models • Fixture mo...\nEnvironment\nLocal snapshot\nWorkiiree\nBranch\nChanges\nUntracked\nfactory-207\ncodex/factory-207\n-3627\n0 files\nNODE DETAILS\nconceot\nTwo-worker pool\nAn available worker claims the next queued task.\nAt most two tasks run concurrently; additional\ntasks wait until a worker finishes.\nAdd an annotation...",
+            "holdEndFrameNumber": 135,
+            "holdEndFrameAtUtc": "2026-09-26T16:31:55.827Z",
+            "holdEndFrameSha256": "a7e0402723c208d4753e3ccbc278002a4ddb102d0b17536322a3a44369437b54",
+            "recognizedTextAtHoldEnd": "Interaction context verification\nRelayer\n+ New thread\nCHATS\n- No chats yet\nPROJECTS\n• factory-207\n• Interaction context verifica...\nIncoming queue\nScroll or pinch to zoom • Drag canvas to pan • Drag nodes for this view\nSettings\n8 Account\nFollow up...\nH 1\nTurn 3 of 3\nTwo-worker pool\nResults store\n1thoa\nFit\n• Fixture models • Fixture mo...\nEnvironment\nLocal snapshot\nWorkiiree\nBranch\nChanges\nUntracked\nfactory-207\ncodex/factory-207\n-3627\n0 files\nNODE DETAILS\nconceot\nTwo-worker pool\nAn available worker claims the next queued task.\nAt most two tasks run concurrently; additional\ntasks wait until a worker finishes.\nAdd an annotation...",
+            "requestedHoldMs": 1400,
+            "observedHoldMs": 1699,
+            "maximumHoldCaptureGapMs": 183
+          },
+          {
+            "name": "typed and durably saved draft B on Two-worker pool",
+            "recordedAtUtc": "2026-09-26T16:31:58.531Z",
+            "elapsedMs": 25605,
+            "framesCapturedBeforeEvent": 140,
+            "capturedFrameNumber": 140,
+            "capturedFramePresentationMs": 23583,
+            "capturedFrameAtUtc": "2026-09-26T16:31:56.590Z",
+            "capturedFrameSha256": "fbeb4e7af5e229fb3d326de7fae414031d0eab600e7c0bbd178f1128ea51684d",
+            "paintSynchronized": "webContents.invalidate followed by two renderer animation frames before capture",
+            "expectedVisibleText": [
+              "Keep both workers available for queued tasks."
+            ],
+            "expectedAbsentText": [],
+            "visibleContentAccepted": true,
+            "recognizedTextAtStart": "Interaction context verification\nRelayer\n+ New thread\nCHATS\n- No chats yet\nPROJECTS\n• factory-207\n• Interaction context verifica...\nIncoming queue\nScroll or pinch to zoom • Drag canvas to pan • Drag nodes for this view\nSettings\n8 Account\nFollow up...\nEnvironment\nLocal snapshot\nH 1\nTurn 3 of 3\nWorktiree\nBranch\nChanges\nUntracked\nfactory-207\ncodex/factory-207\n-3627\n0 files\nNODE DETAILS\nconceot\nTwo-worker pool\nAn available worker claims the next queued task.\nAt most two tasks run concurrently; additional\ntasks wait until a worker finishes.\nTwo-worker pool\nResults store\nKeep both workers available for queued tasks.|\n1thoa\nFit\nixture models- Fixture mo...",
+            "holdEndFrameNumber": 150,
+            "holdEndFrameAtUtc": "2026-09-26T16:31:58.296Z",
+            "holdEndFrameSha256": "4ebf416fd68f4e76b1bec3c2decb96b88e941ec320379a7866131393a99ccd0e",
+            "recognizedTextAtHoldEnd": "Interaction context verification\nRelayer\n+ New thread\nCHATS\n- No chats yet\nPROJECTS\n• factory-207\n• Interaction context verifica...\nIncoming queue\nScroll or pinch to zoom • Drag canvas to pan • Drag nodes for this view\nSettings\n8 Account\nFollow up...\nEnvironment\nLocal snapshot\nH 1\nTurn 3 of 3\nWorktiree\nBranch\nChanges\nUntracked\nfactory-207\ncodex/factory-207\n-3627\n0 files\nNODE DETAILS\nconceot\nTwo-worker pool\nAn available worker claims the next queued task.\nAt most two tasks run concurrently; additional\ntasks wait until a worker finishes.\nTwo-worker pool\nResults store\nKeep both workers available for queued tasks.|\n1thoa\nFit\nixture models- Fixture mo...",
+            "requestedHoldMs": 1400,
+            "observedHoldMs": 1706,
+            "maximumHoldCaptureGapMs": 185
+          },
+          {
+            "name": "restored draft A after saving B",
+            "recordedAtUtc": "2026-09-26T16:32:00.625Z",
+            "elapsedMs": 27699,
+            "framesCapturedBeforeEvent": 153,
+            "capturedFrameNumber": 153,
+            "capturedFramePresentationMs": 25699,
+            "capturedFrameAtUtc": "2026-09-26T16:31:58.706Z",
+            "capturedFrameSha256": "a8c9dc760745e709d967947352f971ffc91cdd44b8a1bec9f2ccf3254cc72128",
+            "paintSynchronized": "webContents.invalidate followed by two renderer animation frames before capture",
+            "expectedVisibleText": [
+              "Keep queue claims in their original order."
+            ],
+            "expectedAbsentText": [],
+            "visibleContentAccepted": true,
+            "recognizedTextAtStart": "Interaction context verification\nRelayer\n+ New thread\nCHATS\n- No chats yet\nPROJECTS\n• factory-207\n• Interaction context verifica...\nIncoming queue\nScroll or pinch to zoom • Drag canvas to pan • Drag nodes for this view\nSettings\n8 Account\nFollow up...\nH 1\nTurn 3 of 3\nTwo-worker pool\nResults store\n1thoa\nFit\n• Fixture models • Fixture mo...\nEnvironment\nLocal snapshot\nWorktiree\nBranch\nChanges\nUntracked\nfactory-207\ncodex/factory-207\n-3627\n0 files\nNODE DETAILS\nconceot\nIncoming queue\nEvery task first enters the incoming queue. The\nqueue preserves extra work while both workers\nare busy.\nSee queue behavior\nKeep queue claims in their original order.",
+            "holdEndFrameNumber": 163,
+            "holdEndFrameAtUtc": "2026-09-26T16:32:00.395Z",
+            "holdEndFrameSha256": "a8c9dc760745e709d967947352f971ffc91cdd44b8a1bec9f2ccf3254cc72128",
+            "recognizedTextAtHoldEnd": "Interaction context verification\nRelayer\n+ New thread\nCHATS\n- No chats yet\nPROJECTS\n• factory-207\n• Interaction context verifica...\nIncoming queue\nScroll or pinch to zoom • Drag canvas to pan • Drag nodes for this view\nSettings\n8 Account\nFollow up...\nH 1\nTurn 3 of 3\nTwo-worker pool\nResults store\n1thoa\nFit\n• Fixture models • Fixture mo...\nEnvironment\nLocal snapshot\nWorktiree\nBranch\nChanges\nUntracked\nfactory-207\ncodex/factory-207\n-3627\n0 files\nNODE DETAILS\nconceot\nIncoming queue\nEvery task first enters the incoming queue. The\nqueue preserves extra work while both workers\nare busy.\nSee queue behavior\nKeep queue claims in their original order.",
+            "requestedHoldMs": 1400,
+            "observedHoldMs": 1689,
+            "maximumHoldCaptureGapMs": 185
+          },
+          {
+            "name": "restored draft B after saving and restoring A",
+            "recordedAtUtc": "2026-09-26T16:32:02.747Z",
+            "elapsedMs": 29821,
+            "framesCapturedBeforeEvent": 166,
+            "capturedFrameNumber": 166,
+            "capturedFramePresentationMs": 27805,
+            "capturedFrameAtUtc": "2026-09-26T16:32:00.812Z",
+            "capturedFrameSha256": "b4f488c8bc76b1613c1a649c088883ce4d962ad9e491488f633bde93de8eebf9",
+            "paintSynchronized": "webContents.invalidate followed by two renderer animation frames before capture",
+            "expectedVisibleText": [
+              "Keep both workers available for queued tasks."
+            ],
+            "expectedAbsentText": [],
+            "visibleContentAccepted": true,
+            "recognizedTextAtStart": "Interaction context verification\nRelayer\n+ New thread\nCHATS\n- No chats yet\nPROJECTS\n• factory-207\n• Interaction context verifica...\nIncoming queue\nScroll or pinch to zoom • Drag canvas to pan • Drag nodes for this view\nSettings\n8 Account\nFollow up...\nH 1\nTurn 3 of 3\nTwo-worker pool\nResults store\n1thoa\nFit\n• Fixture models • Fixture mo...\nEnvironment\nLocal snapshot\nWorktree\nBranch\nChanges\nUntracked\nfactory-207\ncodex/factory-207\n-3627\n0 files\nNODE DETAILS\nconceot\nTwo-worker pool\nAn available worker claims the next queued task.\nAt most two tasks run concurrently; additional\ntasks wait until a worker finishes.\nKeep both workers available for queued tasks.",
+            "holdEndFrameNumber": 176,
+            "holdEndFrameAtUtc": "2026-09-26T16:32:02.512Z",
+            "holdEndFrameSha256": "b4f488c8bc76b1613c1a649c088883ce4d962ad9e491488f633bde93de8eebf9",
+            "recognizedTextAtHoldEnd": "Interaction context verification\nRelayer\n+ New thread\nCHATS\n- No chats yet\nPROJECTS\n• factory-207\n• Interaction context verifica...\nIncoming queue\nScroll or pinch to zoom • Drag canvas to pan • Drag nodes for this view\nSettings\n8 Account\nFollow up...\nH 1\nTurn 3 of 3\nTwo-worker pool\nResults store\n1thoa\nFit\n• Fixture models • Fixture mo...\nEnvironment\nLocal snapshot\nWorktree\nBranch\nChanges\nUntracked\nfactory-207\ncodex/factory-207\n-3627\n0 files\nNODE DETAILS\nconceot\nTwo-worker pool\nAn available worker claims the next queued task.\nAt most two tasks run concurrently; additional\ntasks wait until a worker finishes.\nKeep both workers available for queued tasks.",
+            "requestedHoldMs": 1400,
+            "observedHoldMs": 1700,
+            "maximumHoldCaptureGapMs": 179
+          },
+          {
+            "name": "both complete durable drafts are present before service/window restart",
+            "recordedAtUtc": "2026-09-26T16:32:04.871Z",
+            "elapsedMs": 31945,
+            "framesCapturedBeforeEvent": 179,
+            "capturedFrameNumber": 179,
+            "capturedFramePresentationMs": 29920,
+            "capturedFrameAtUtc": "2026-09-26T16:32:02.927Z",
+            "capturedFrameSha256": "a8c9dc760745e709d967947352f971ffc91cdd44b8a1bec9f2ccf3254cc72128",
+            "paintSynchronized": "webContents.invalidate followed by two renderer animation frames before capture",
+            "expectedVisibleText": [
+              "Keep queue claims in their original order."
+            ],
+            "expectedAbsentText": [],
+            "visibleContentAccepted": true,
+            "recognizedTextAtStart": "Interaction context verification\nRelayer\n+ New thread\nCHATS\n- No chats yet\nPROJECTS\n• factory-207\n• Interaction context verifica...\nIncoming queue\nScroll or pinch to zoom • Drag canvas to pan • Drag nodes for this view\nSettings\n8 Account\nFollow up...\nH 1\nTurn 3 of 3\nTwo-worker pool\nResults store\n1thoa\nFit\n• Fixture models • Fixture mo...\nEnvironment\nLocal snapshot\nWorktiree\nBranch\nChanges\nUntracked\nfactory-207\ncodex/factory-207\n-3627\n0 files\nNODE DETAILS\nconceot\nIncoming queue\nEvery task first enters the incoming queue. The\nqueue preserves extra work while both workers\nare busy.\nSee queue behavior\nKeep queue claims in their original order.",
+            "holdEndFrameNumber": 189,
+            "holdEndFrameAtUtc": "2026-09-26T16:32:04.643Z",
+            "holdEndFrameSha256": "a8c9dc760745e709d967947352f971ffc91cdd44b8a1bec9f2ccf3254cc72128",
+            "recognizedTextAtHoldEnd": "Interaction context verification\nRelayer\n+ New thread\nCHATS\n- No chats yet\nPROJECTS\n• factory-207\n• Interaction context verifica...\nIncoming queue\nScroll or pinch to zoom • Drag canvas to pan • Drag nodes for this view\nSettings\n8 Account\nFollow up...\nH 1\nTurn 3 of 3\nTwo-worker pool\nResults store\n1thoa\nFit\n• Fixture models • Fixture mo...\nEnvironment\nLocal snapshot\nWorktiree\nBranch\nChanges\nUntracked\nfactory-207\ncodex/factory-207\n-3627\n0 files\nNODE DETAILS\nconceot\nIncoming queue\nEvery task first enters the incoming queue. The\nqueue preserves extra work while both workers\nare busy.\nSee queue behavior\nKeep queue claims in their original order.",
+            "requestedHoldMs": 1400,
+            "observedHoldMs": 1716,
+            "maximumHoldCaptureGapMs": 182
+          }
+        ],
+        "stream": {
+          "codec_name": "h264",
+          "width": 2960,
+          "height": 1840,
+          "pix_fmt": "yuv420p",
+          "side_data_list": [
+            {}
+          ]
+        },
+        "encodedDurationSeconds": 32.328,
+        "decodeToNullSucceeded": true
+      },
+      {
+        "file": "interaction-context-after-restart.mp4",
+        "sha256": "cd6ffcdb468fda63a632fba550ccc696b08e705f4ed453a1c1a8370e3d6b9ad4",
+        "capture": "Continuous sampled frames directly from the real Electron BrowserWindow; the final captured renderer frame is repeated to encode its measured terminal hold.",
+        "frameTiming": "variable frame rate from renderer timestamps with two repeated terminal samples 200ms apart; B-frame reordering is disabled so the MP4 container covers the final PTS",
+        "frameCount": 205,
+        "encodedFrameCount": 207,
+        "maximumFrameGapMs": 208,
+        "maximumPresentationTimingErrorMs": 0,
+        "capturedSpanMs": 33407,
+        "encodedSpanMs": 33807,
+        "encodedDurationMs": 33808,
+        "terminalFrameCoverage": {
+          "terminalFrameHoldMs": 200,
+          "repeatedTerminalHoldCount": 2,
+          "terminalFramePresentationMs": 33807,
+          "requiredContainerDurationMs": 33808
+        },
+        "terminalScreenshot": {
+          "file": "interaction-context-after-restart-terminal.png",
+          "sha256": "e82b1aa4010775a9c16b2352d463b090155ebb6feb6a86d89091298899779fcb",
+          "recognizedText": "→\nInteraction context verification\nRelayer\n+ New thread\nCHATS\n- No chats yet\nPROJECTS\n• factory-207\n• Interaction context verifica...\nIncoming queue\nScroll or pinch to zoom • Drag canvas to pan • Drag nodes for this view\nSettings\n8 Account\nFollow up...\nH8 1\nTurn 3 of 4\nỐC\nTwo-worker pool\nResults store\n'1hon\nFit\n• Fixture models • Fixture mo...\nEnvironment\nLocal snapshot\nWorktree\nBranch\nChanges\nUntracked\nfactory-207\ncodex/factory-207\n-3627\n0 files\nNODE DETAILS\nconceot\nTwo-worker pool\nAn available worker claims the next queued task.\nAt most two tasks run concurrently; additional\ntasks wait until a worker finishes.\nReview worker availability before sending"
+        },
+        "decodeValidation": {
+          "decodeToNullExitCode": 0,
+          "diagnostics": "[null @ 0x13e704ef0] Application provided invalid, non monotonically increasing dts to muxer in stream 0: 1 >= 1\n[null @ 0x13e704ef0] Application provided invalid, non monotonically increasing dts to muxer in stream 0: 14 >= 14\n[null @ 0x13e704ef0] Application provided invalid, non monotonically increasing dts to muxer in stream 0: 79 >= 79\n[null @ 0x13e704ef0] Application provided invalid, non monotonically increasing dts to muxer in stream 0: 92 >= 92\n[null @ 0x13e704ef0] Application provided invalid, non monotonically increasing dts to muxer in stream 0: 94 >= 94\n[null @ 0x13e704ef0] Application provided invalid, non monotonically increasing dts to muxer in stream 0: 105 >= 105\n[null @ 0x13e704ef0] Application provided invalid, non monotonically increasing dts to muxer in stream 0: 121 >= 121\n[null @ 0x13e704ef0] Application provided invalid, non monotonically increasing dts to muxer in stream 0: 135 >= 135\n[null @ 0x13e704ef0] Application provided invalid, non monotonically increasing dts to muxer in stream 0: 158 >= 158\n[null @ 0x13e704ef0] Application provided invalid, non monotonically increasing dts to muxer in stream 0: 171 >= 171\n[null @ 0x13e704ef0] Application provided invalid, non monotonically increasing dts to muxer in stream 0: 186 >= 186",
+          "terminalFrameExtractedAndRecognized": true
+        },
+        "startedAtUtc": "2026-09-26T16:32:10.691Z",
+        "endedAtUtc": "2026-09-26T16:32:44.225Z",
+        "wallClockDurationMs": 33534,
+        "frameTimestamps": [
+          {
+            "frameNumber": 0,
+            "capturedAtUtc": "2026-09-26T16:32:10.777Z",
+            "elapsedMs": 86,
+            "sha256": "58f411d5fb3fd1023d7dea9128bf1bb8463de9395bd67a8ca76f7faee7faa720"
+          },
+          {
+            "frameNumber": 1,
+            "capturedAtUtc": "2026-09-26T16:32:10.906Z",
+            "elapsedMs": 215,
+            "sha256": "b7528bf081b56bf1eb8f1a3f5ff2db54e924bf74cd9a99d22ac4ed2a491f8fbf"
+          },
+          {
+            "frameNumber": 2,
+            "capturedAtUtc": "2026-09-26T16:32:11.015Z",
+            "elapsedMs": 324,
+            "sha256": "9fe9c4790f42ba1b3d83112f16bba152f69285f446df6e9834898432ea585f35"
+          },
+          {
+            "frameNumber": 3,
+            "capturedAtUtc": "2026-09-26T16:32:11.205Z",
+            "elapsedMs": 514,
+            "sha256": "63b69bb936fb2f01d573d5b1182949a387ef6508891303596e54a922031ff23f"
+          },
+          {
+            "frameNumber": 4,
+            "capturedAtUtc": "2026-09-26T16:32:11.390Z",
+            "elapsedMs": 699,
+            "sha256": "3ca11a31b3485e2c6c7af7521fa9155c285ac7328e4a19bbc0287b2aa2ab8990"
+          },
+          {
+            "frameNumber": 5,
+            "capturedAtUtc": "2026-09-26T16:32:11.574Z",
+            "elapsedMs": 883,
+            "sha256": "2dd31bef042e06f73bc805fbfcd0b5d0f07d59fec4de7b817dadfb0103db85e3"
+          },
+          {
+            "frameNumber": 6,
+            "capturedAtUtc": "2026-09-26T16:32:11.775Z",
+            "elapsedMs": 1084,
+            "sha256": "67f4c9b1f7a8b1b796d5e11547d47cda36cec8b50c737a99a6749769aa451e92"
+          },
+          {
+            "frameNumber": 7,
+            "capturedAtUtc": "2026-09-26T16:32:11.949Z",
+            "elapsedMs": 1258,
+            "sha256": "67f4c9b1f7a8b1b796d5e11547d47cda36cec8b50c737a99a6749769aa451e92"
+          },
+          {
+            "frameNumber": 8,
+            "capturedAtUtc": "2026-09-26T16:32:12.122Z",
+            "elapsedMs": 1431,
+            "sha256": "67f4c9b1f7a8b1b796d5e11547d47cda36cec8b50c737a99a6749769aa451e92"
+          },
+          {
+            "frameNumber": 9,
+            "capturedAtUtc": "2026-09-26T16:32:12.296Z",
+            "elapsedMs": 1605,
+            "sha256": "67f4c9b1f7a8b1b796d5e11547d47cda36cec8b50c737a99a6749769aa451e92"
+          },
+          {
+            "frameNumber": 10,
+            "capturedAtUtc": "2026-09-26T16:32:12.471Z",
+            "elapsedMs": 1780,
+            "sha256": "67f4c9b1f7a8b1b796d5e11547d47cda36cec8b50c737a99a6749769aa451e92"
+          },
+          {
+            "frameNumber": 11,
+            "capturedAtUtc": "2026-09-26T16:32:12.593Z",
+            "elapsedMs": 1902,
+            "sha256": "67f4c9b1f7a8b1b796d5e11547d47cda36cec8b50c737a99a6749769aa451e92"
+          },
+          {
+            "frameNumber": 12,
+            "capturedAtUtc": "2026-09-26T16:32:12.705Z",
+            "elapsedMs": 2014,
+            "sha256": "67f4c9b1f7a8b1b796d5e11547d47cda36cec8b50c737a99a6749769aa451e92"
+          },
+          {
+            "frameNumber": 13,
+            "capturedAtUtc": "2026-09-26T16:32:12.877Z",
+            "elapsedMs": 2186,
+            "sha256": "67f4c9b1f7a8b1b796d5e11547d47cda36cec8b50c737a99a6749769aa451e92"
+          },
+          {
+            "frameNumber": 14,
+            "capturedAtUtc": "2026-09-26T16:32:12.998Z",
+            "elapsedMs": 2307,
+            "sha256": "a8c9dc760745e709d967947352f971ffc91cdd44b8a1bec9f2ccf3254cc72128"
+          },
+          {
+            "frameNumber": 15,
+            "capturedAtUtc": "2026-09-26T16:32:13.125Z",
+            "elapsedMs": 2434,
+            "sha256": "a8c9dc760745e709d967947352f971ffc91cdd44b8a1bec9f2ccf3254cc72128"
+          },
+          {
+            "frameNumber": 16,
+            "capturedAtUtc": "2026-09-26T16:32:13.303Z",
+            "elapsedMs": 2612,
+            "sha256": "a8c9dc760745e709d967947352f971ffc91cdd44b8a1bec9f2ccf3254cc72128"
+          },
+          {
+            "frameNumber": 17,
+            "capturedAtUtc": "2026-09-26T16:32:13.479Z",
+            "elapsedMs": 2788,
+            "sha256": "a8c9dc760745e709d967947352f971ffc91cdd44b8a1bec9f2ccf3254cc72128"
+          },
+          {
+            "frameNumber": 18,
+            "capturedAtUtc": "2026-09-26T16:32:13.655Z",
+            "elapsedMs": 2964,
+            "sha256": "a8c9dc760745e709d967947352f971ffc91cdd44b8a1bec9f2ccf3254cc72128"
+          },
+          {
+            "frameNumber": 19,
+            "capturedAtUtc": "2026-09-26T16:32:13.840Z",
+            "elapsedMs": 3149,
+            "sha256": "a8c9dc760745e709d967947352f971ffc91cdd44b8a1bec9f2ccf3254cc72128"
+          },
+          {
+            "frameNumber": 20,
+            "capturedAtUtc": "2026-09-26T16:32:14.013Z",
+            "elapsedMs": 3322,
+            "sha256": "a8c9dc760745e709d967947352f971ffc91cdd44b8a1bec9f2ccf3254cc72128"
+          },
+          {
+            "frameNumber": 21,
+            "capturedAtUtc": "2026-09-26T16:32:14.193Z",
+            "elapsedMs": 3502,
+            "sha256": "a8c9dc760745e709d967947352f971ffc91cdd44b8a1bec9f2ccf3254cc72128"
+          },
+          {
+            "frameNumber": 22,
+            "capturedAtUtc": "2026-09-26T16:32:14.372Z",
+            "elapsedMs": 3681,
+            "sha256": "a8c9dc760745e709d967947352f971ffc91cdd44b8a1bec9f2ccf3254cc72128"
+          },
+          {
+            "frameNumber": 23,
+            "capturedAtUtc": "2026-09-26T16:32:14.550Z",
+            "elapsedMs": 3859,
+            "sha256": "a8c9dc760745e709d967947352f971ffc91cdd44b8a1bec9f2ccf3254cc72128"
+          },
+          {
+            "frameNumber": 24,
+            "capturedAtUtc": "2026-09-26T16:32:14.712Z",
+            "elapsedMs": 4021,
+            "sha256": "a8c9dc760745e709d967947352f971ffc91cdd44b8a1bec9f2ccf3254cc72128"
+          },
+          {
+            "frameNumber": 25,
+            "capturedAtUtc": "2026-09-26T16:32:14.828Z",
+            "elapsedMs": 4137,
+            "sha256": "a8c9dc760745e709d967947352f971ffc91cdd44b8a1bec9f2ccf3254cc72128"
+          },
+          {
+            "frameNumber": 26,
+            "capturedAtUtc": "2026-09-26T16:32:15.004Z",
+            "elapsedMs": 4313,
+            "sha256": "a8c9dc760745e709d967947352f971ffc91cdd44b8a1bec9f2ccf3254cc72128"
+          },
+          {
+            "frameNumber": 27,
+            "capturedAtUtc": "2026-09-26T16:32:15.189Z",
+            "elapsedMs": 4498,
+            "sha256": "a8c9dc760745e709d967947352f971ffc91cdd44b8a1bec9f2ccf3254cc72128"
+          },
+          {
+            "frameNumber": 28,
+            "capturedAtUtc": "2026-09-26T16:32:15.365Z",
+            "elapsedMs": 4674,
+            "sha256": "a8c9dc760745e709d967947352f971ffc91cdd44b8a1bec9f2ccf3254cc72128"
+          },
+          {
+            "frameNumber": 29,
+            "capturedAtUtc": "2026-09-26T16:32:15.548Z",
+            "elapsedMs": 4857,
+            "sha256": "a8c9dc760745e709d967947352f971ffc91cdd44b8a1bec9f2ccf3254cc72128"
+          },
+          {
+            "frameNumber": 30,
+            "capturedAtUtc": "2026-09-26T16:32:15.667Z",
+            "elapsedMs": 4976,
+            "sha256": "692ad5cec2bd7b145e1c3cd1267cb315cfdfcced2a59c9e6cf724ffed9de4352"
+          },
+          {
+            "frameNumber": 31,
+            "capturedAtUtc": "2026-09-26T16:32:15.781Z",
+            "elapsedMs": 5090,
+            "sha256": "692ad5cec2bd7b145e1c3cd1267cb315cfdfcced2a59c9e6cf724ffed9de4352"
+          },
+          {
+            "frameNumber": 32,
+            "capturedAtUtc": "2026-09-26T16:32:15.955Z",
+            "elapsedMs": 5264,
+            "sha256": "692ad5cec2bd7b145e1c3cd1267cb315cfdfcced2a59c9e6cf724ffed9de4352"
+          },
+          {
+            "frameNumber": 33,
+            "capturedAtUtc": "2026-09-26T16:32:16.130Z",
+            "elapsedMs": 5439,
+            "sha256": "692ad5cec2bd7b145e1c3cd1267cb315cfdfcced2a59c9e6cf724ffed9de4352"
+          },
+          {
+            "frameNumber": 34,
+            "capturedAtUtc": "2026-09-26T16:32:16.306Z",
+            "elapsedMs": 5615,
+            "sha256": "692ad5cec2bd7b145e1c3cd1267cb315cfdfcced2a59c9e6cf724ffed9de4352"
+          },
+          {
+            "frameNumber": 35,
+            "capturedAtUtc": "2026-09-26T16:32:16.480Z",
+            "elapsedMs": 5789,
+            "sha256": "692ad5cec2bd7b145e1c3cd1267cb315cfdfcced2a59c9e6cf724ffed9de4352"
+          },
+          {
+            "frameNumber": 36,
+            "capturedAtUtc": "2026-09-26T16:32:16.657Z",
+            "elapsedMs": 5966,
+            "sha256": "692ad5cec2bd7b145e1c3cd1267cb315cfdfcced2a59c9e6cf724ffed9de4352"
+          },
+          {
+            "frameNumber": 37,
+            "capturedAtUtc": "2026-09-26T16:32:16.839Z",
+            "elapsedMs": 6148,
+            "sha256": "15ad9dde4d0966b1911ac52004ecb9c221b1a9e1655897bd372aa6993fd75db6"
+          },
+          {
+            "frameNumber": 38,
+            "capturedAtUtc": "2026-09-26T16:32:17.014Z",
+            "elapsedMs": 6323,
+            "sha256": "15ad9dde4d0966b1911ac52004ecb9c221b1a9e1655897bd372aa6993fd75db6"
+          },
+          {
+            "frameNumber": 39,
+            "capturedAtUtc": "2026-09-26T16:32:17.194Z",
+            "elapsedMs": 6503,
+            "sha256": "15ad9dde4d0966b1911ac52004ecb9c221b1a9e1655897bd372aa6993fd75db6"
+          },
+          {
+            "frameNumber": 40,
+            "capturedAtUtc": "2026-09-26T16:32:17.368Z",
+            "elapsedMs": 6677,
+            "sha256": "15ad9dde4d0966b1911ac52004ecb9c221b1a9e1655897bd372aa6993fd75db6"
+          },
+          {
+            "frameNumber": 41,
+            "capturedAtUtc": "2026-09-26T16:32:17.484Z",
+            "elapsedMs": 6793,
+            "sha256": "15ad9dde4d0966b1911ac52004ecb9c221b1a9e1655897bd372aa6993fd75db6"
+          },
+          {
+            "frameNumber": 42,
+            "capturedAtUtc": "2026-09-26T16:32:17.600Z",
+            "elapsedMs": 6909,
+            "sha256": "15ad9dde4d0966b1911ac52004ecb9c221b1a9e1655897bd372aa6993fd75db6"
+          },
+          {
+            "frameNumber": 43,
+            "capturedAtUtc": "2026-09-26T16:32:17.777Z",
+            "elapsedMs": 7086,
+            "sha256": "15ad9dde4d0966b1911ac52004ecb9c221b1a9e1655897bd372aa6993fd75db6"
+          },
+          {
+            "frameNumber": 44,
+            "capturedAtUtc": "2026-09-26T16:32:17.952Z",
+            "elapsedMs": 7261,
+            "sha256": "15ad9dde4d0966b1911ac52004ecb9c221b1a9e1655897bd372aa6993fd75db6"
+          },
+          {
+            "frameNumber": 45,
+            "capturedAtUtc": "2026-09-26T16:32:18.132Z",
+            "elapsedMs": 7441,
+            "sha256": "15ad9dde4d0966b1911ac52004ecb9c221b1a9e1655897bd372aa6993fd75db6"
+          },
+          {
+            "frameNumber": 46,
+            "capturedAtUtc": "2026-09-26T16:32:18.320Z",
+            "elapsedMs": 7629,
+            "sha256": "15ad9dde4d0966b1911ac52004ecb9c221b1a9e1655897bd372aa6993fd75db6"
+          },
+          {
+            "frameNumber": 47,
+            "capturedAtUtc": "2026-09-26T16:32:18.437Z",
+            "elapsedMs": 7746,
+            "sha256": "e54baa6712ed949bf9560dd339a3461c23396455357b8a369208608a4d32aadb"
+          },
+          {
+            "frameNumber": 48,
+            "capturedAtUtc": "2026-09-26T16:32:18.551Z",
+            "elapsedMs": 7860,
+            "sha256": "e54baa6712ed949bf9560dd339a3461c23396455357b8a369208608a4d32aadb"
+          },
+          {
+            "frameNumber": 49,
+            "capturedAtUtc": "2026-09-26T16:32:18.724Z",
+            "elapsedMs": 8033,
+            "sha256": "e54baa6712ed949bf9560dd339a3461c23396455357b8a369208608a4d32aadb"
+          },
+          {
+            "frameNumber": 50,
+            "capturedAtUtc": "2026-09-26T16:32:18.898Z",
+            "elapsedMs": 8207,
+            "sha256": "e54baa6712ed949bf9560dd339a3461c23396455357b8a369208608a4d32aadb"
+          },
+          {
+            "frameNumber": 51,
+            "capturedAtUtc": "2026-09-26T16:32:19.074Z",
+            "elapsedMs": 8383,
+            "sha256": "e54baa6712ed949bf9560dd339a3461c23396455357b8a369208608a4d32aadb"
+          },
+          {
+            "frameNumber": 52,
+            "capturedAtUtc": "2026-09-26T16:32:19.252Z",
+            "elapsedMs": 8561,
+            "sha256": "e54baa6712ed949bf9560dd339a3461c23396455357b8a369208608a4d32aadb"
+          },
+          {
+            "frameNumber": 53,
+            "capturedAtUtc": "2026-09-26T16:32:19.426Z",
+            "elapsedMs": 8735,
+            "sha256": "e54baa6712ed949bf9560dd339a3461c23396455357b8a369208608a4d32aadb"
+          },
+          {
+            "frameNumber": 54,
+            "capturedAtUtc": "2026-09-26T16:32:19.603Z",
+            "elapsedMs": 8912,
+            "sha256": "e54baa6712ed949bf9560dd339a3461c23396455357b8a369208608a4d32aadb"
+          },
+          {
+            "frameNumber": 55,
+            "capturedAtUtc": "2026-09-26T16:32:19.780Z",
+            "elapsedMs": 9089,
+            "sha256": "e54baa6712ed949bf9560dd339a3461c23396455357b8a369208608a4d32aadb"
+          },
+          {
+            "frameNumber": 56,
+            "capturedAtUtc": "2026-09-26T16:32:19.954Z",
+            "elapsedMs": 9263,
+            "sha256": "e54baa6712ed949bf9560dd339a3461c23396455357b8a369208608a4d32aadb"
+          },
+          {
+            "frameNumber": 57,
+            "capturedAtUtc": "2026-09-26T16:32:20.130Z",
+            "elapsedMs": 9439,
+            "sha256": "e54baa6712ed949bf9560dd339a3461c23396455357b8a369208608a4d32aadb"
+          },
+          {
+            "frameNumber": 58,
+            "capturedAtUtc": "2026-09-26T16:32:20.245Z",
+            "elapsedMs": 9554,
+            "sha256": "e54baa6712ed949bf9560dd339a3461c23396455357b8a369208608a4d32aadb"
+          },
+          {
+            "frameNumber": 59,
+            "capturedAtUtc": "2026-09-26T16:32:20.358Z",
+            "elapsedMs": 9667,
+            "sha256": "e54baa6712ed949bf9560dd339a3461c23396455357b8a369208608a4d32aadb"
+          },
+          {
+            "frameNumber": 60,
+            "capturedAtUtc": "2026-09-26T16:32:20.542Z",
+            "elapsedMs": 9851,
+            "sha256": "e54baa6712ed949bf9560dd339a3461c23396455357b8a369208608a4d32aadb"
+          },
+          {
+            "frameNumber": 61,
+            "capturedAtUtc": "2026-09-26T16:32:20.726Z",
+            "elapsedMs": 10035,
+            "sha256": "e54baa6712ed949bf9560dd339a3461c23396455357b8a369208608a4d32aadb"
+          },
+          {
+            "frameNumber": 62,
+            "capturedAtUtc": "2026-09-26T16:32:20.898Z",
+            "elapsedMs": 10207,
+            "sha256": "e54baa6712ed949bf9560dd339a3461c23396455357b8a369208608a4d32aadb"
+          },
+          {
+            "frameNumber": 63,
+            "capturedAtUtc": "2026-09-26T16:32:21.075Z",
+            "elapsedMs": 10384,
+            "sha256": "e54baa6712ed949bf9560dd339a3461c23396455357b8a369208608a4d32aadb"
+          },
+          {
+            "frameNumber": 64,
+            "capturedAtUtc": "2026-09-26T16:32:21.256Z",
+            "elapsedMs": 10565,
+            "sha256": "e54baa6712ed949bf9560dd339a3461c23396455357b8a369208608a4d32aadb"
+          },
+          {
+            "frameNumber": 65,
+            "capturedAtUtc": "2026-09-26T16:32:21.378Z",
+            "elapsedMs": 10687,
+            "sha256": "ec877224ed72c566c37004348141af6448ad498846f912b3737632edd76f2754"
+          },
+          {
+            "frameNumber": 66,
+            "capturedAtUtc": "2026-09-26T16:32:21.492Z",
+            "elapsedMs": 10801,
+            "sha256": "ec877224ed72c566c37004348141af6448ad498846f912b3737632edd76f2754"
+          },
+          {
+            "frameNumber": 67,
+            "capturedAtUtc": "2026-09-26T16:32:21.668Z",
+            "elapsedMs": 10977,
+            "sha256": "ec877224ed72c566c37004348141af6448ad498846f912b3737632edd76f2754"
+          },
+          {
+            "frameNumber": 68,
+            "capturedAtUtc": "2026-09-26T16:32:21.847Z",
+            "elapsedMs": 11156,
+            "sha256": "38ad47d80190b94fe4c31467bf03fa317853cf518d2d63d2385727421111e994"
+          },
+          {
+            "frameNumber": 69,
+            "capturedAtUtc": "2026-09-26T16:32:22.022Z",
+            "elapsedMs": 11331,
+            "sha256": "38ad47d80190b94fe4c31467bf03fa317853cf518d2d63d2385727421111e994"
+          },
+          {
+            "frameNumber": 70,
+            "capturedAtUtc": "2026-09-26T16:32:22.200Z",
+            "elapsedMs": 11509,
+            "sha256": "38ad47d80190b94fe4c31467bf03fa317853cf518d2d63d2385727421111e994"
+          },
+          {
+            "frameNumber": 71,
+            "capturedAtUtc": "2026-09-26T16:32:22.376Z",
+            "elapsedMs": 11685,
+            "sha256": "38ad47d80190b94fe4c31467bf03fa317853cf518d2d63d2385727421111e994"
+          },
+          {
+            "frameNumber": 72,
+            "capturedAtUtc": "2026-09-26T16:32:22.552Z",
+            "elapsedMs": 11861,
+            "sha256": "38ad47d80190b94fe4c31467bf03fa317853cf518d2d63d2385727421111e994"
+          },
+          {
+            "frameNumber": 73,
+            "capturedAtUtc": "2026-09-26T16:32:22.729Z",
+            "elapsedMs": 12038,
+            "sha256": "38ad47d80190b94fe4c31467bf03fa317853cf518d2d63d2385727421111e994"
+          },
+          {
+            "frameNumber": 74,
+            "capturedAtUtc": "2026-09-26T16:32:22.906Z",
+            "elapsedMs": 12215,
+            "sha256": "38ad47d80190b94fe4c31467bf03fa317853cf518d2d63d2385727421111e994"
+          },
+          {
+            "frameNumber": 75,
+            "capturedAtUtc": "2026-09-26T16:32:23.080Z",
+            "elapsedMs": 12389,
+            "sha256": "38ad47d80190b94fe4c31467bf03fa317853cf518d2d63d2385727421111e994"
+          },
+          {
+            "frameNumber": 76,
+            "capturedAtUtc": "2026-09-26T16:32:23.197Z",
+            "elapsedMs": 12506,
+            "sha256": "38ad47d80190b94fe4c31467bf03fa317853cf518d2d63d2385727421111e994"
+          },
+          {
+            "frameNumber": 77,
+            "capturedAtUtc": "2026-09-26T16:32:23.311Z",
+            "elapsedMs": 12620,
+            "sha256": "38ad47d80190b94fe4c31467bf03fa317853cf518d2d63d2385727421111e994"
+          },
+          {
+            "frameNumber": 78,
+            "capturedAtUtc": "2026-09-26T16:32:23.487Z",
+            "elapsedMs": 12796,
+            "sha256": "38ad47d80190b94fe4c31467bf03fa317853cf518d2d63d2385727421111e994"
+          },
+          {
+            "frameNumber": 79,
+            "capturedAtUtc": "2026-09-26T16:32:23.606Z",
+            "elapsedMs": 12915,
+            "sha256": "9857713aae3bb5b003d1d6a7239b19b376e37b71d3b851e7cb17d9046709f01d"
+          },
+          {
+            "frameNumber": 80,
+            "capturedAtUtc": "2026-09-26T16:32:23.718Z",
+            "elapsedMs": 13027,
+            "sha256": "9857713aae3bb5b003d1d6a7239b19b376e37b71d3b851e7cb17d9046709f01d"
+          },
+          {
+            "frameNumber": 81,
+            "capturedAtUtc": "2026-09-26T16:32:23.892Z",
+            "elapsedMs": 13201,
+            "sha256": "9857713aae3bb5b003d1d6a7239b19b376e37b71d3b851e7cb17d9046709f01d"
+          },
+          {
+            "frameNumber": 82,
+            "capturedAtUtc": "2026-09-26T16:32:24.067Z",
+            "elapsedMs": 13376,
+            "sha256": "9857713aae3bb5b003d1d6a7239b19b376e37b71d3b851e7cb17d9046709f01d"
+          },
+          {
+            "frameNumber": 83,
+            "capturedAtUtc": "2026-09-26T16:32:24.243Z",
+            "elapsedMs": 13552,
+            "sha256": "9857713aae3bb5b003d1d6a7239b19b376e37b71d3b851e7cb17d9046709f01d"
+          },
+          {
+            "frameNumber": 84,
+            "capturedAtUtc": "2026-09-26T16:32:24.418Z",
+            "elapsedMs": 13727,
+            "sha256": "9857713aae3bb5b003d1d6a7239b19b376e37b71d3b851e7cb17d9046709f01d"
+          },
+          {
+            "frameNumber": 85,
+            "capturedAtUtc": "2026-09-26T16:32:24.592Z",
+            "elapsedMs": 13901,
+            "sha256": "9857713aae3bb5b003d1d6a7239b19b376e37b71d3b851e7cb17d9046709f01d"
+          },
+          {
+            "frameNumber": 86,
+            "capturedAtUtc": "2026-09-26T16:32:24.770Z",
+            "elapsedMs": 14079,
+            "sha256": "9857713aae3bb5b003d1d6a7239b19b376e37b71d3b851e7cb17d9046709f01d"
+          },
+          {
+            "frameNumber": 87,
+            "capturedAtUtc": "2026-09-26T16:32:24.947Z",
+            "elapsedMs": 14256,
+            "sha256": "9857713aae3bb5b003d1d6a7239b19b376e37b71d3b851e7cb17d9046709f01d"
+          },
+          {
+            "frameNumber": 88,
+            "capturedAtUtc": "2026-09-26T16:32:25.124Z",
+            "elapsedMs": 14433,
+            "sha256": "9857713aae3bb5b003d1d6a7239b19b376e37b71d3b851e7cb17d9046709f01d"
+          },
+          {
+            "frameNumber": 89,
+            "capturedAtUtc": "2026-09-26T16:32:25.299Z",
+            "elapsedMs": 14608,
+            "sha256": "9857713aae3bb5b003d1d6a7239b19b376e37b71d3b851e7cb17d9046709f01d"
+          },
+          {
+            "frameNumber": 90,
+            "capturedAtUtc": "2026-09-26T16:32:25.475Z",
+            "elapsedMs": 14784,
+            "sha256": "9857713aae3bb5b003d1d6a7239b19b376e37b71d3b851e7cb17d9046709f01d"
+          },
+          {
+            "frameNumber": 91,
+            "capturedAtUtc": "2026-09-26T16:32:25.660Z",
+            "elapsedMs": 14969,
+            "sha256": "9857713aae3bb5b003d1d6a7239b19b376e37b71d3b851e7cb17d9046709f01d"
+          },
+          {
+            "frameNumber": 92,
+            "capturedAtUtc": "2026-09-26T16:32:25.772Z",
+            "elapsedMs": 15081,
+            "sha256": "9857713aae3bb5b003d1d6a7239b19b376e37b71d3b851e7cb17d9046709f01d"
+          },
+          {
+            "frameNumber": 93,
+            "capturedAtUtc": "2026-09-26T16:32:25.884Z",
+            "elapsedMs": 15193,
+            "sha256": "9857713aae3bb5b003d1d6a7239b19b376e37b71d3b851e7cb17d9046709f01d"
+          },
+          {
+            "frameNumber": 94,
+            "capturedAtUtc": "2026-09-26T16:32:26.058Z",
+            "elapsedMs": 15367,
+            "sha256": "9857713aae3bb5b003d1d6a7239b19b376e37b71d3b851e7cb17d9046709f01d"
+          },
+          {
+            "frameNumber": 95,
+            "capturedAtUtc": "2026-09-26T16:32:26.179Z",
+            "elapsedMs": 15488,
+            "sha256": "a408dbc11b515aab2eab9bf6591b82595c66948d2a0cc919d6445ed61bed4a19"
+          },
+          {
+            "frameNumber": 96,
+            "capturedAtUtc": "2026-09-26T16:32:26.293Z",
+            "elapsedMs": 15602,
+            "sha256": "a408dbc11b515aab2eab9bf6591b82595c66948d2a0cc919d6445ed61bed4a19"
+          },
+          {
+            "frameNumber": 97,
+            "capturedAtUtc": "2026-09-26T16:32:26.469Z",
+            "elapsedMs": 15778,
+            "sha256": "a408dbc11b515aab2eab9bf6591b82595c66948d2a0cc919d6445ed61bed4a19"
+          },
+          {
+            "frameNumber": 98,
+            "capturedAtUtc": "2026-09-26T16:32:26.647Z",
+            "elapsedMs": 15956,
+            "sha256": "f6a227f03c5bb61751ddaac2075e1c5398a66e9541c832c9721956af825d47d4"
+          },
+          {
+            "frameNumber": 99,
+            "capturedAtUtc": "2026-09-26T16:32:26.826Z",
+            "elapsedMs": 16135,
+            "sha256": "5309630c5e06a036bcd0e2e77167bcdacf38d5c5eafdf6405e8dbf7188fe4e3c"
+          },
+          {
+            "frameNumber": 100,
+            "capturedAtUtc": "2026-09-26T16:32:27.000Z",
+            "elapsedMs": 16309,
+            "sha256": "5309630c5e06a036bcd0e2e77167bcdacf38d5c5eafdf6405e8dbf7188fe4e3c"
+          },
+          {
+            "frameNumber": 101,
+            "capturedAtUtc": "2026-09-26T16:32:27.176Z",
+            "elapsedMs": 16485,
+            "sha256": "012c053f1fb795b6aa2fb77ed5df809d5d3fb3c5349834158ead8f356f9c7098"
+          },
+          {
+            "frameNumber": 102,
+            "capturedAtUtc": "2026-09-26T16:32:27.352Z",
+            "elapsedMs": 16661,
+            "sha256": "012c053f1fb795b6aa2fb77ed5df809d5d3fb3c5349834158ead8f356f9c7098"
+          },
+          {
+            "frameNumber": 103,
+            "capturedAtUtc": "2026-09-26T16:32:27.530Z",
+            "elapsedMs": 16839,
+            "sha256": "012c053f1fb795b6aa2fb77ed5df809d5d3fb3c5349834158ead8f356f9c7098"
+          },
+          {
+            "frameNumber": 104,
+            "capturedAtUtc": "2026-09-26T16:32:27.707Z",
+            "elapsedMs": 17016,
+            "sha256": "5309630c5e06a036bcd0e2e77167bcdacf38d5c5eafdf6405e8dbf7188fe4e3c"
+          },
+          {
+            "frameNumber": 105,
+            "capturedAtUtc": "2026-09-26T16:32:27.885Z",
+            "elapsedMs": 17194,
+            "sha256": "5309630c5e06a036bcd0e2e77167bcdacf38d5c5eafdf6405e8dbf7188fe4e3c"
+          },
+          {
+            "frameNumber": 106,
+            "capturedAtUtc": "2026-09-26T16:32:27.998Z",
+            "elapsedMs": 17307,
+            "sha256": "5309630c5e06a036bcd0e2e77167bcdacf38d5c5eafdf6405e8dbf7188fe4e3c"
+          },
+          {
+            "frameNumber": 107,
+            "capturedAtUtc": "2026-09-26T16:32:28.113Z",
+            "elapsedMs": 17422,
+            "sha256": "5309630c5e06a036bcd0e2e77167bcdacf38d5c5eafdf6405e8dbf7188fe4e3c"
+          },
+          {
+            "frameNumber": 108,
+            "capturedAtUtc": "2026-09-26T16:32:28.293Z",
+            "elapsedMs": 17602,
+            "sha256": "012c053f1fb795b6aa2fb77ed5df809d5d3fb3c5349834158ead8f356f9c7098"
+          },
+          {
+            "frameNumber": 109,
+            "capturedAtUtc": "2026-09-26T16:32:28.472Z",
+            "elapsedMs": 17781,
+            "sha256": "9ef419411118f3926080617bd31a3809f1ea672e6de9a2cee4ac6a1d4e9ba4af"
+          },
+          {
+            "frameNumber": 110,
+            "capturedAtUtc": "2026-09-26T16:32:28.650Z",
+            "elapsedMs": 17959,
+            "sha256": "9ef419411118f3926080617bd31a3809f1ea672e6de9a2cee4ac6a1d4e9ba4af"
+          },
+          {
+            "frameNumber": 111,
+            "capturedAtUtc": "2026-09-26T16:32:28.766Z",
+            "elapsedMs": 18075,
+            "sha256": "9ef419411118f3926080617bd31a3809f1ea672e6de9a2cee4ac6a1d4e9ba4af"
+          },
+          {
+            "frameNumber": 112,
+            "capturedAtUtc": "2026-09-26T16:32:28.884Z",
+            "elapsedMs": 18193,
+            "sha256": "bb770e8e2fddfb6fbe831dfc9f64470d500c00544a33e5a2828eb3a1d76af842"
+          },
+          {
+            "frameNumber": 113,
+            "capturedAtUtc": "2026-09-26T16:32:29.059Z",
+            "elapsedMs": 18368,
+            "sha256": "bb770e8e2fddfb6fbe831dfc9f64470d500c00544a33e5a2828eb3a1d76af842"
+          },
+          {
+            "frameNumber": 114,
+            "capturedAtUtc": "2026-09-26T16:32:29.234Z",
+            "elapsedMs": 18543,
+            "sha256": "bb770e8e2fddfb6fbe831dfc9f64470d500c00544a33e5a2828eb3a1d76af842"
+          },
+          {
+            "frameNumber": 115,
+            "capturedAtUtc": "2026-09-26T16:32:29.415Z",
+            "elapsedMs": 18724,
+            "sha256": "9ef419411118f3926080617bd31a3809f1ea672e6de9a2cee4ac6a1d4e9ba4af"
+          },
+          {
+            "frameNumber": 116,
+            "capturedAtUtc": "2026-09-26T16:32:29.589Z",
+            "elapsedMs": 18898,
+            "sha256": "9ef419411118f3926080617bd31a3809f1ea672e6de9a2cee4ac6a1d4e9ba4af"
+          },
+          {
+            "frameNumber": 117,
+            "capturedAtUtc": "2026-09-26T16:32:29.766Z",
+            "elapsedMs": 19075,
+            "sha256": "9ef419411118f3926080617bd31a3809f1ea672e6de9a2cee4ac6a1d4e9ba4af"
+          },
+          {
+            "frameNumber": 118,
+            "capturedAtUtc": "2026-09-26T16:32:29.944Z",
+            "elapsedMs": 19253,
+            "sha256": "bb770e8e2fddfb6fbe831dfc9f64470d500c00544a33e5a2828eb3a1d76af842"
+          },
+          {
+            "frameNumber": 119,
+            "capturedAtUtc": "2026-09-26T16:32:30.118Z",
+            "elapsedMs": 19427,
+            "sha256": "bb770e8e2fddfb6fbe831dfc9f64470d500c00544a33e5a2828eb3a1d76af842"
+          },
+          {
+            "frameNumber": 120,
+            "capturedAtUtc": "2026-09-26T16:32:30.295Z",
+            "elapsedMs": 19604,
+            "sha256": "bb770e8e2fddfb6fbe831dfc9f64470d500c00544a33e5a2828eb3a1d76af842"
+          },
+          {
+            "frameNumber": 121,
+            "capturedAtUtc": "2026-09-26T16:32:30.474Z",
+            "elapsedMs": 19783,
+            "sha256": "9ef419411118f3926080617bd31a3809f1ea672e6de9a2cee4ac6a1d4e9ba4af"
+          },
+          {
+            "frameNumber": 122,
+            "capturedAtUtc": "2026-09-26T16:32:30.589Z",
+            "elapsedMs": 19898,
+            "sha256": "9ef419411118f3926080617bd31a3809f1ea672e6de9a2cee4ac6a1d4e9ba4af"
+          },
+          {
+            "frameNumber": 123,
+            "capturedAtUtc": "2026-09-26T16:32:30.703Z",
+            "elapsedMs": 20012,
+            "sha256": "9ef419411118f3926080617bd31a3809f1ea672e6de9a2cee4ac6a1d4e9ba4af"
+          },
+          {
+            "frameNumber": 124,
+            "capturedAtUtc": "2026-09-26T16:32:30.886Z",
+            "elapsedMs": 20195,
+            "sha256": "bb770e8e2fddfb6fbe831dfc9f64470d500c00544a33e5a2828eb3a1d76af842"
+          },
+          {
+            "frameNumber": 125,
+            "capturedAtUtc": "2026-09-26T16:32:31.021Z",
+            "elapsedMs": 20330,
+            "sha256": "6649c8b2ec27b16f8822834cdf79ebe47bc46c4352c8bc9e82d4b9f976870a65"
+          },
+          {
+            "frameNumber": 126,
+            "capturedAtUtc": "2026-09-26T16:32:31.144Z",
+            "elapsedMs": 20453,
+            "sha256": "6649c8b2ec27b16f8822834cdf79ebe47bc46c4352c8bc9e82d4b9f976870a65"
+          },
+          {
+            "frameNumber": 127,
+            "capturedAtUtc": "2026-09-26T16:32:31.324Z",
+            "elapsedMs": 20633,
+            "sha256": "6649c8b2ec27b16f8822834cdf79ebe47bc46c4352c8bc9e82d4b9f976870a65"
+          },
+          {
+            "frameNumber": 128,
+            "capturedAtUtc": "2026-09-26T16:32:31.508Z",
+            "elapsedMs": 20817,
+            "sha256": "6649c8b2ec27b16f8822834cdf79ebe47bc46c4352c8bc9e82d4b9f976870a65"
+          },
+          {
+            "frameNumber": 129,
+            "capturedAtUtc": "2026-09-26T16:32:31.695Z",
+            "elapsedMs": 21004,
+            "sha256": "6649c8b2ec27b16f8822834cdf79ebe47bc46c4352c8bc9e82d4b9f976870a65"
+          },
+          {
+            "frameNumber": 130,
+            "capturedAtUtc": "2026-09-26T16:32:31.877Z",
+            "elapsedMs": 21186,
+            "sha256": "6649c8b2ec27b16f8822834cdf79ebe47bc46c4352c8bc9e82d4b9f976870a65"
+          },
+          {
+            "frameNumber": 131,
+            "capturedAtUtc": "2026-09-26T16:32:32.060Z",
+            "elapsedMs": 21369,
+            "sha256": "6649c8b2ec27b16f8822834cdf79ebe47bc46c4352c8bc9e82d4b9f976870a65"
+          },
+          {
+            "frameNumber": 132,
+            "capturedAtUtc": "2026-09-26T16:32:32.245Z",
+            "elapsedMs": 21554,
+            "sha256": "6649c8b2ec27b16f8822834cdf79ebe47bc46c4352c8bc9e82d4b9f976870a65"
+          },
+          {
+            "frameNumber": 133,
+            "capturedAtUtc": "2026-09-26T16:32:32.425Z",
+            "elapsedMs": 21734,
+            "sha256": "6649c8b2ec27b16f8822834cdf79ebe47bc46c4352c8bc9e82d4b9f976870a65"
+          },
+          {
+            "frameNumber": 134,
+            "capturedAtUtc": "2026-09-26T16:32:32.607Z",
+            "elapsedMs": 21916,
+            "sha256": "6649c8b2ec27b16f8822834cdf79ebe47bc46c4352c8bc9e82d4b9f976870a65"
+          },
+          {
+            "frameNumber": 135,
+            "capturedAtUtc": "2026-09-26T16:32:32.749Z",
+            "elapsedMs": 22058,
+            "sha256": "6649c8b2ec27b16f8822834cdf79ebe47bc46c4352c8bc9e82d4b9f976870a65"
+          },
+          {
+            "frameNumber": 136,
+            "capturedAtUtc": "2026-09-26T16:32:32.870Z",
+            "elapsedMs": 22179,
+            "sha256": "6649c8b2ec27b16f8822834cdf79ebe47bc46c4352c8bc9e82d4b9f976870a65"
+          },
+          {
+            "frameNumber": 137,
+            "capturedAtUtc": "2026-09-26T16:32:33.056Z",
+            "elapsedMs": 22365,
+            "sha256": "6649c8b2ec27b16f8822834cdf79ebe47bc46c4352c8bc9e82d4b9f976870a65"
+          },
+          {
+            "frameNumber": 138,
+            "capturedAtUtc": "2026-09-26T16:32:33.241Z",
+            "elapsedMs": 22550,
+            "sha256": "6649c8b2ec27b16f8822834cdf79ebe47bc46c4352c8bc9e82d4b9f976870a65"
+          },
+          {
+            "frameNumber": 139,
+            "capturedAtUtc": "2026-09-26T16:32:33.439Z",
+            "elapsedMs": 22748,
+            "sha256": "6649c8b2ec27b16f8822834cdf79ebe47bc46c4352c8bc9e82d4b9f976870a65"
+          },
+          {
+            "frameNumber": 140,
+            "capturedAtUtc": "2026-09-26T16:32:33.625Z",
+            "elapsedMs": 22934,
+            "sha256": "6649c8b2ec27b16f8822834cdf79ebe47bc46c4352c8bc9e82d4b9f976870a65"
+          },
+          {
+            "frameNumber": 141,
+            "capturedAtUtc": "2026-09-26T16:32:33.819Z",
+            "elapsedMs": 23128,
+            "sha256": "6649c8b2ec27b16f8822834cdf79ebe47bc46c4352c8bc9e82d4b9f976870a65"
+          },
+          {
+            "frameNumber": 142,
+            "capturedAtUtc": "2026-09-26T16:32:33.960Z",
+            "elapsedMs": 23269,
+            "sha256": "933d7b86474be20c4a6e153c891ec929034e9c0f6aec51211de0a94f7b97e9cb"
+          },
+          {
+            "frameNumber": 143,
+            "capturedAtUtc": "2026-09-26T16:32:34.068Z",
+            "elapsedMs": 23377,
+            "sha256": "933d7b86474be20c4a6e153c891ec929034e9c0f6aec51211de0a94f7b97e9cb"
+          },
+          {
+            "frameNumber": 144,
+            "capturedAtUtc": "2026-09-26T16:32:34.239Z",
+            "elapsedMs": 23548,
+            "sha256": "933d7b86474be20c4a6e153c891ec929034e9c0f6aec51211de0a94f7b97e9cb"
+          },
+          {
+            "frameNumber": 145,
+            "capturedAtUtc": "2026-09-26T16:32:34.413Z",
+            "elapsedMs": 23722,
+            "sha256": "933d7b86474be20c4a6e153c891ec929034e9c0f6aec51211de0a94f7b97e9cb"
+          },
+          {
+            "frameNumber": 146,
+            "capturedAtUtc": "2026-09-26T16:32:34.594Z",
+            "elapsedMs": 23903,
+            "sha256": "933d7b86474be20c4a6e153c891ec929034e9c0f6aec51211de0a94f7b97e9cb"
+          },
+          {
+            "frameNumber": 147,
+            "capturedAtUtc": "2026-09-26T16:32:34.766Z",
+            "elapsedMs": 24075,
+            "sha256": "933d7b86474be20c4a6e153c891ec929034e9c0f6aec51211de0a94f7b97e9cb"
+          },
+          {
+            "frameNumber": 148,
+            "capturedAtUtc": "2026-09-26T16:32:34.938Z",
+            "elapsedMs": 24247,
+            "sha256": "933d7b86474be20c4a6e153c891ec929034e9c0f6aec51211de0a94f7b97e9cb"
+          },
+          {
+            "frameNumber": 149,
+            "capturedAtUtc": "2026-09-26T16:32:35.113Z",
+            "elapsedMs": 24422,
+            "sha256": "933d7b86474be20c4a6e153c891ec929034e9c0f6aec51211de0a94f7b97e9cb"
+          },
+          {
+            "frameNumber": 150,
+            "capturedAtUtc": "2026-09-26T16:32:35.287Z",
+            "elapsedMs": 24596,
+            "sha256": "933d7b86474be20c4a6e153c891ec929034e9c0f6aec51211de0a94f7b97e9cb"
+          },
+          {
+            "frameNumber": 151,
+            "capturedAtUtc": "2026-09-26T16:32:35.461Z",
+            "elapsedMs": 24770,
+            "sha256": "933d7b86474be20c4a6e153c891ec929034e9c0f6aec51211de0a94f7b97e9cb"
+          },
+          {
+            "frameNumber": 152,
+            "capturedAtUtc": "2026-09-26T16:32:35.637Z",
+            "elapsedMs": 24946,
+            "sha256": "933d7b86474be20c4a6e153c891ec929034e9c0f6aec51211de0a94f7b97e9cb"
+          },
+          {
+            "frameNumber": 153,
+            "capturedAtUtc": "2026-09-26T16:32:35.748Z",
+            "elapsedMs": 25057,
+            "sha256": "933d7b86474be20c4a6e153c891ec929034e9c0f6aec51211de0a94f7b97e9cb"
+          },
+          {
+            "frameNumber": 154,
+            "capturedAtUtc": "2026-09-26T16:32:35.865Z",
+            "elapsedMs": 25174,
+            "sha256": "933d7b86474be20c4a6e153c891ec929034e9c0f6aec51211de0a94f7b97e9cb"
+          },
+          {
+            "frameNumber": 155,
+            "capturedAtUtc": "2026-09-26T16:32:36.040Z",
+            "elapsedMs": 25349,
+            "sha256": "933d7b86474be20c4a6e153c891ec929034e9c0f6aec51211de0a94f7b97e9cb"
+          },
+          {
+            "frameNumber": 156,
+            "capturedAtUtc": "2026-09-26T16:32:36.214Z",
+            "elapsedMs": 25523,
+            "sha256": "933d7b86474be20c4a6e153c891ec929034e9c0f6aec51211de0a94f7b97e9cb"
+          },
+          {
+            "frameNumber": 157,
+            "capturedAtUtc": "2026-09-26T16:32:36.388Z",
+            "elapsedMs": 25697,
+            "sha256": "933d7b86474be20c4a6e153c891ec929034e9c0f6aec51211de0a94f7b97e9cb"
+          },
+          {
+            "frameNumber": 158,
+            "capturedAtUtc": "2026-09-26T16:32:36.518Z",
+            "elapsedMs": 25827,
+            "sha256": "c6834b2b085f3c16d0c13daca921310adeb09d858e2f3c609a1000f138bc76a9"
+          },
+          {
+            "frameNumber": 159,
+            "capturedAtUtc": "2026-09-26T16:32:36.639Z",
+            "elapsedMs": 25948,
+            "sha256": "c6834b2b085f3c16d0c13daca921310adeb09d858e2f3c609a1000f138bc76a9"
+          },
+          {
+            "frameNumber": 160,
+            "capturedAtUtc": "2026-09-26T16:32:36.823Z",
+            "elapsedMs": 26132,
+            "sha256": "6649c8b2ec27b16f8822834cdf79ebe47bc46c4352c8bc9e82d4b9f976870a65"
+          },
+          {
+            "frameNumber": 161,
+            "capturedAtUtc": "2026-09-26T16:32:37.009Z",
+            "elapsedMs": 26318,
+            "sha256": "6649c8b2ec27b16f8822834cdf79ebe47bc46c4352c8bc9e82d4b9f976870a65"
+          },
+          {
+            "frameNumber": 162,
+            "capturedAtUtc": "2026-09-26T16:32:37.192Z",
+            "elapsedMs": 26501,
+            "sha256": "6649c8b2ec27b16f8822834cdf79ebe47bc46c4352c8bc9e82d4b9f976870a65"
+          },
+          {
+            "frameNumber": 163,
+            "capturedAtUtc": "2026-09-26T16:32:37.372Z",
+            "elapsedMs": 26681,
+            "sha256": "6649c8b2ec27b16f8822834cdf79ebe47bc46c4352c8bc9e82d4b9f976870a65"
+          },
+          {
+            "frameNumber": 164,
+            "capturedAtUtc": "2026-09-26T16:32:37.557Z",
+            "elapsedMs": 26866,
+            "sha256": "6649c8b2ec27b16f8822834cdf79ebe47bc46c4352c8bc9e82d4b9f976870a65"
+          },
+          {
+            "frameNumber": 165,
+            "capturedAtUtc": "2026-09-26T16:32:37.740Z",
+            "elapsedMs": 27049,
+            "sha256": "6649c8b2ec27b16f8822834cdf79ebe47bc46c4352c8bc9e82d4b9f976870a65"
+          },
+          {
+            "frameNumber": 166,
+            "capturedAtUtc": "2026-09-26T16:32:37.919Z",
+            "elapsedMs": 27228,
+            "sha256": "6649c8b2ec27b16f8822834cdf79ebe47bc46c4352c8bc9e82d4b9f976870a65"
+          },
+          {
+            "frameNumber": 167,
+            "capturedAtUtc": "2026-09-26T16:32:38.100Z",
+            "elapsedMs": 27409,
+            "sha256": "6649c8b2ec27b16f8822834cdf79ebe47bc46c4352c8bc9e82d4b9f976870a65"
+          },
+          {
+            "frameNumber": 168,
+            "capturedAtUtc": "2026-09-26T16:32:38.283Z",
+            "elapsedMs": 27592,
+            "sha256": "6649c8b2ec27b16f8822834cdf79ebe47bc46c4352c8bc9e82d4b9f976870a65"
+          },
+          {
+            "frameNumber": 169,
+            "capturedAtUtc": "2026-09-26T16:32:38.465Z",
+            "elapsedMs": 27774,
+            "sha256": "6649c8b2ec27b16f8822834cdf79ebe47bc46c4352c8bc9e82d4b9f976870a65"
+          },
+          {
+            "frameNumber": 170,
+            "capturedAtUtc": "2026-09-26T16:32:38.647Z",
+            "elapsedMs": 27956,
+            "sha256": "6649c8b2ec27b16f8822834cdf79ebe47bc46c4352c8bc9e82d4b9f976870a65"
+          },
+          {
+            "frameNumber": 171,
+            "capturedAtUtc": "2026-09-26T16:32:38.770Z",
+            "elapsedMs": 28079,
+            "sha256": "6649c8b2ec27b16f8822834cdf79ebe47bc46c4352c8bc9e82d4b9f976870a65"
+          },
+          {
+            "frameNumber": 172,
+            "capturedAtUtc": "2026-09-26T16:32:38.888Z",
+            "elapsedMs": 28197,
+            "sha256": "6649c8b2ec27b16f8822834cdf79ebe47bc46c4352c8bc9e82d4b9f976870a65"
+          },
+          {
+            "frameNumber": 173,
+            "capturedAtUtc": "2026-09-26T16:32:39.074Z",
+            "elapsedMs": 28383,
+            "sha256": "6649c8b2ec27b16f8822834cdf79ebe47bc46c4352c8bc9e82d4b9f976870a65"
+          },
+          {
+            "frameNumber": 174,
+            "capturedAtUtc": "2026-09-26T16:32:39.253Z",
+            "elapsedMs": 28562,
+            "sha256": "c997eaaaffdf9c6d56368f0c322d2118e8b761e01a263d232bc99a685a17291a"
+          },
+          {
+            "frameNumber": 175,
+            "capturedAtUtc": "2026-09-26T16:32:39.440Z",
+            "elapsedMs": 28749,
+            "sha256": "e05fe91c005f890d324611a5ff3b70914b7b27f6b2634bf6ed9bf35c3fe14175"
+          },
+          {
+            "frameNumber": 176,
+            "capturedAtUtc": "2026-09-26T16:32:39.556Z",
+            "elapsedMs": 28865,
+            "sha256": "7da3916517d0ed522697d6a845a6937f31577a8d344ddbf0391d63ea79d99b53"
+          },
+          {
+            "frameNumber": 177,
+            "capturedAtUtc": "2026-09-26T16:32:39.688Z",
+            "elapsedMs": 28997,
+            "sha256": "6637aced006f1e1990a94c90a4e65cd51d3ff13d0e8a2b95d44497fb62314767"
+          },
+          {
+            "frameNumber": 178,
+            "capturedAtUtc": "2026-09-26T16:32:39.861Z",
+            "elapsedMs": 29170,
+            "sha256": "6637aced006f1e1990a94c90a4e65cd51d3ff13d0e8a2b95d44497fb62314767"
+          },
+          {
+            "frameNumber": 179,
+            "capturedAtUtc": "2026-09-26T16:32:40.033Z",
+            "elapsedMs": 29342,
+            "sha256": "6637aced006f1e1990a94c90a4e65cd51d3ff13d0e8a2b95d44497fb62314767"
+          },
+          {
+            "frameNumber": 180,
+            "capturedAtUtc": "2026-09-26T16:32:40.208Z",
+            "elapsedMs": 29517,
+            "sha256": "6637aced006f1e1990a94c90a4e65cd51d3ff13d0e8a2b95d44497fb62314767"
+          },
+          {
+            "frameNumber": 181,
+            "capturedAtUtc": "2026-09-26T16:32:40.383Z",
+            "elapsedMs": 29692,
+            "sha256": "6637aced006f1e1990a94c90a4e65cd51d3ff13d0e8a2b95d44497fb62314767"
+          },
+          {
+            "frameNumber": 182,
+            "capturedAtUtc": "2026-09-26T16:32:40.555Z",
+            "elapsedMs": 29864,
+            "sha256": "6637aced006f1e1990a94c90a4e65cd51d3ff13d0e8a2b95d44497fb62314767"
+          },
+          {
+            "frameNumber": 183,
+            "capturedAtUtc": "2026-09-26T16:32:40.733Z",
+            "elapsedMs": 30042,
+            "sha256": "6637aced006f1e1990a94c90a4e65cd51d3ff13d0e8a2b95d44497fb62314767"
+          },
+          {
+            "frameNumber": 184,
+            "capturedAtUtc": "2026-09-26T16:32:40.907Z",
+            "elapsedMs": 30216,
+            "sha256": "6637aced006f1e1990a94c90a4e65cd51d3ff13d0e8a2b95d44497fb62314767"
+          },
+          {
+            "frameNumber": 185,
+            "capturedAtUtc": "2026-09-26T16:32:41.079Z",
+            "elapsedMs": 30388,
+            "sha256": "6637aced006f1e1990a94c90a4e65cd51d3ff13d0e8a2b95d44497fb62314767"
+          },
+          {
+            "frameNumber": 186,
+            "capturedAtUtc": "2026-09-26T16:32:41.226Z",
+            "elapsedMs": 30535,
+            "sha256": "6637aced006f1e1990a94c90a4e65cd51d3ff13d0e8a2b95d44497fb62314767"
+          },
+          {
+            "frameNumber": 187,
+            "capturedAtUtc": "2026-09-26T16:32:41.333Z",
+            "elapsedMs": 30642,
+            "sha256": "6637aced006f1e1990a94c90a4e65cd51d3ff13d0e8a2b95d44497fb62314767"
+          },
+          {
+            "frameNumber": 188,
+            "capturedAtUtc": "2026-09-26T16:32:41.541Z",
+            "elapsedMs": 30850,
+            "sha256": "6987fd4042bee4d2577d074f901a98642c5e2f65ef0e6ba211f62a2b7b578275"
+          },
+          {
+            "frameNumber": 189,
+            "capturedAtUtc": "2026-09-26T16:32:41.655Z",
+            "elapsedMs": 30964,
+            "sha256": "24ecd40f477e25a8e124c066f6a1f60190d618ffd5d23e69fecbefceda0b5b55"
+          },
+          {
+            "frameNumber": 190,
+            "capturedAtUtc": "2026-09-26T16:32:41.771Z",
+            "elapsedMs": 31080,
+            "sha256": "24ecd40f477e25a8e124c066f6a1f60190d618ffd5d23e69fecbefceda0b5b55"
+          },
+          {
+            "frameNumber": 191,
+            "capturedAtUtc": "2026-09-26T16:32:41.948Z",
+            "elapsedMs": 31257,
+            "sha256": "24ecd40f477e25a8e124c066f6a1f60190d618ffd5d23e69fecbefceda0b5b55"
+          },
+          {
+            "frameNumber": 192,
+            "capturedAtUtc": "2026-09-26T16:32:42.127Z",
+            "elapsedMs": 31436,
+            "sha256": "77869565f904445570aea743780e31bb3731c4f87ef5205350cc898019629795"
+          },
+          {
+            "frameNumber": 193,
+            "capturedAtUtc": "2026-09-26T16:32:42.303Z",
+            "elapsedMs": 31612,
+            "sha256": "77869565f904445570aea743780e31bb3731c4f87ef5205350cc898019629795"
+          },
+          {
+            "frameNumber": 194,
+            "capturedAtUtc": "2026-09-26T16:32:42.482Z",
+            "elapsedMs": 31791,
+            "sha256": "77869565f904445570aea743780e31bb3731c4f87ef5205350cc898019629795"
+          },
+          {
+            "frameNumber": 195,
+            "capturedAtUtc": "2026-09-26T16:32:42.659Z",
+            "elapsedMs": 31968,
+            "sha256": "77869565f904445570aea743780e31bb3731c4f87ef5205350cc898019629795"
+          },
+          {
+            "frameNumber": 196,
+            "capturedAtUtc": "2026-09-26T16:32:42.833Z",
+            "elapsedMs": 32142,
+            "sha256": "77869565f904445570aea743780e31bb3731c4f87ef5205350cc898019629795"
+          },
+          {
+            "frameNumber": 197,
+            "capturedAtUtc": "2026-09-26T16:32:43.010Z",
+            "elapsedMs": 32319,
+            "sha256": "77869565f904445570aea743780e31bb3731c4f87ef5205350cc898019629795"
+          },
+          {
+            "frameNumber": 198,
+            "capturedAtUtc": "2026-09-26T16:32:43.187Z",
+            "elapsedMs": 32496,
+            "sha256": "77869565f904445570aea743780e31bb3731c4f87ef5205350cc898019629795"
+          },
+          {
+            "frameNumber": 199,
+            "capturedAtUtc": "2026-09-26T16:32:43.340Z",
+            "elapsedMs": 32649,
+            "sha256": "77869565f904445570aea743780e31bb3731c4f87ef5205350cc898019629795"
+          },
+          {
+            "frameNumber": 200,
+            "capturedAtUtc": "2026-09-26T16:32:43.456Z",
+            "elapsedMs": 32765,
+            "sha256": "77869565f904445570aea743780e31bb3731c4f87ef5205350cc898019629795"
+          },
+          {
+            "frameNumber": 201,
+            "capturedAtUtc": "2026-09-26T16:32:43.633Z",
+            "elapsedMs": 32942,
+            "sha256": "77869565f904445570aea743780e31bb3731c4f87ef5205350cc898019629795"
+          },
+          {
+            "frameNumber": 202,
+            "capturedAtUtc": "2026-09-26T16:32:43.819Z",
+            "elapsedMs": 33128,
+            "sha256": "77869565f904445570aea743780e31bb3731c4f87ef5205350cc898019629795"
+          },
+          {
+            "frameNumber": 203,
+            "capturedAtUtc": "2026-09-26T16:32:43.997Z",
+            "elapsedMs": 33306,
+            "sha256": "77869565f904445570aea743780e31bb3731c4f87ef5205350cc898019629795"
+          },
+          {
+            "frameNumber": 204,
+            "capturedAtUtc": "2026-09-26T16:32:44.184Z",
+            "elapsedMs": 33493,
+            "sha256": "77869565f904445570aea743780e31bb3731c4f87ef5205350cc898019629795"
+          }
+        ],
+        "encodedFrameTimestampsMs": [
+          0,
+          129,
+          238,
+          428,
+          613,
+          797,
+          998,
+          1172,
+          1345,
+          1519,
+          1694,
+          1816,
+          1928,
+          2100,
+          2221,
+          2348,
+          2526,
+          2702,
+          2878,
+          3063,
+          3236,
+          3416,
+          3595,
+          3773,
+          3935,
+          4051,
+          4227,
+          4412,
+          4588,
+          4771,
+          4890,
+          5004,
+          5178,
+          5353,
+          5529,
+          5703,
+          5880,
+          6062,
+          6237,
+          6417,
+          6591,
+          6707,
+          6823,
+          7000,
+          7175,
+          7355,
+          7543,
+          7660,
+          7774,
+          7947,
+          8121,
+          8297,
+          8475,
+          8649,
+          8826,
+          9003,
+          9177,
+          9353,
+          9468,
+          9581,
+          9765,
+          9949,
+          10121,
+          10298,
+          10479,
+          10601,
+          10715,
+          10891,
+          11070,
+          11245,
+          11423,
+          11599,
+          11775,
+          11952,
+          12129,
+          12303,
+          12420,
+          12534,
+          12710,
+          12829,
+          12941,
+          13115,
+          13290,
+          13466,
+          13641,
+          13815,
+          13993,
+          14170,
+          14347,
+          14522,
+          14698,
+          14883,
+          14995,
+          15107,
+          15281,
+          15402,
+          15516,
+          15692,
+          15870,
+          16049,
+          16223,
+          16399,
+          16575,
+          16753,
+          16930,
+          17108,
+          17221,
+          17336,
+          17516,
+          17695,
+          17873,
+          17989,
+          18107,
+          18282,
+          18457,
+          18638,
+          18812,
+          18989,
+          19167,
+          19341,
+          19518,
+          19697,
+          19812,
+          19926,
+          20109,
+          20244,
+          20367,
+          20547,
+          20731,
+          20918,
+          21100,
+          21283,
+          21468,
+          21648,
+          21830,
+          21972,
+          22093,
+          22279,
+          22464,
+          22662,
+          22848,
+          23042,
+          23183,
+          23291,
+          23462,
+          23636,
+          23817,
+          23989,
+          24161,
+          24336,
+          24510,
+          24684,
+          24860,
+          24971,
+          25088,
+          25263,
+          25437,
+          25611,
+          25741,
+          25862,
+          26046,
+          26232,
+          26415,
+          26595,
+          26780,
+          26963,
+          27142,
+          27323,
+          27506,
+          27688,
+          27870,
+          27993,
+          28111,
+          28297,
+          28476,
+          28663,
+          28779,
+          28911,
+          29084,
+          29256,
+          29431,
+          29606,
+          29778,
+          29956,
+          30130,
+          30302,
+          30449,
+          30556,
+          30764,
+          30878,
+          30994,
+          31171,
+          31350,
+          31526,
+          31705,
+          31882,
+          32056,
+          32233,
+          32410,
+          32563,
+          32679,
+          32856,
+          33042,
+          33220,
+          33407,
+          33607,
+          33807
+        ],
+        "events": [
+          {
+            "name": "Electron BrowserWindow and app services reopened after explicit recording discontinuity with Node Details closed",
+            "recordedAtUtc": "2026-09-26T16:32:12.789Z",
+            "elapsedMs": 2098,
+            "framesCapturedBeforeEvent": 1,
+            "capturedFrameNumber": 1,
+            "capturedFramePresentationMs": 129,
+            "capturedFrameAtUtc": "2026-09-26T16:32:10.906Z",
+            "capturedFrameSha256": "b7528bf081b56bf1eb8f1a3f5ff2db54e924bf74cd9a99d22ac4ed2a491f8fbf",
+            "paintSynchronized": "webContents.invalidate followed by two renderer animation frames before capture",
+            "expectedVisibleText": [
+              "Incoming queue"
+            ],
+            "expectedAbsentText": [
+              "NODE DETAILS",
+              "Add an annotation"
+            ],
+            "visibleContentAccepted": true,
+            "recognizedTextAtStart": "Interaction context verification\nRelayer\n+ New thread\nCHATS\n- No chats yet\nPROJECTS\n• factory-207\n• Interaction context verifica...\nIncoming queue\nScroll or pinch to zoom • Drag canvas to pan • Drag nodes for this view\nSettings\n8 Account\nFollow up...\nEnvironment\nH 1\nTurn 3 of 3\n• Loading project context...\nTwo-worker pool\nResults store\n'Thon\nFit\n• Fixture models • Fixture mo...",
+            "holdEndFrameNumber": 11,
+            "holdEndFrameAtUtc": "2026-09-26T16:32:12.593Z",
+            "holdEndFrameSha256": "67f4c9b1f7a8b1b796d5e11547d47cda36cec8b50c737a99a6749769aa451e92",
+            "recognizedTextAtHoldEnd": "Interaction context verification\nRelayer\n+ New thread\nCHATS\n- No chats yet\nPROJECTS\n• factory-207\n• Interaction context verifica...\nIncoming queue\nScroll or pinch to zoom • Drag canvas to pan • Drag nodes for this view\nSettings\n8 Account\nFollow up...\nEnvironment\nLocal snaoshot\nH 1\nTurn 3 of 3\nWorktree\nBranch\nChanges\nUntracked\nTactory-401\ncodex/factory-207\n-3627\n0 files\nTwo-worker pool\nResults store\n'Thon\nFit\nFixture models- Fixture m... ©",
+            "requestedHoldMs": 1400,
+            "observedHoldMs": 1687,
+            "maximumHoldCaptureGapMs": 201
+          },
+          {
+            "name": "restored draft A after full service/window restart",
+            "recordedAtUtc": "2026-09-26T16:32:14.938Z",
+            "elapsedMs": 4247,
+            "framesCapturedBeforeEvent": 14,
+            "capturedFrameNumber": 14,
+            "capturedFramePresentationMs": 2221,
+            "capturedFrameAtUtc": "2026-09-26T16:32:12.998Z",
+            "capturedFrameSha256": "a8c9dc760745e709d967947352f971ffc91cdd44b8a1bec9f2ccf3254cc72128",
+            "paintSynchronized": "webContents.invalidate followed by two renderer animation frames before capture",
+            "expectedVisibleText": [
+              "Keep queue claims in their original order."
+            ],
+            "expectedAbsentText": [],
+            "visibleContentAccepted": true,
+            "recognizedTextAtStart": "Interaction context verification\nRelayer\n+ New thread\nCHATS\n- No chats yet\nPROJECTS\n• factory-207\n• Interaction context verifica...\nIncoming queue\nScroll or pinch to zoom • Drag canvas to pan • Drag nodes for this view\nSettings\n8 Account\nFollow up...\nH 1\nTurn 3 of 3\nTwo-worker pool\nResults store\n1thoa\nFit\n• Fixture models • Fixture mo...\nEnvironment\nLocal snapshot\nWorktiree\nBranch\nChanges\nUntracked\nfactory-207\ncodex/factory-207\n-3627\n0 files\nNODE DETAILS\nconceot\nIncoming queue\nEvery task first enters the incoming queue. The\nqueue preserves extra work while both workers\nare busy.\nSee queue behavior\nKeep queue claims in their original order.",
+            "holdEndFrameNumber": 24,
+            "holdEndFrameAtUtc": "2026-09-26T16:32:14.712Z",
+            "holdEndFrameSha256": "a8c9dc760745e709d967947352f971ffc91cdd44b8a1bec9f2ccf3254cc72128",
+            "recognizedTextAtHoldEnd": "Interaction context verification\nRelayer\n+ New thread\nCHATS\n- No chats yet\nPROJECTS\n• factory-207\n• Interaction context verifica...\nIncoming queue\nScroll or pinch to zoom • Drag canvas to pan • Drag nodes for this view\nSettings\n8 Account\nFollow up...\nH 1\nTurn 3 of 3\nTwo-worker pool\nResults store\n1thoa\nFit\n• Fixture models • Fixture mo...\nEnvironment\nLocal snapshot\nWorktiree\nBranch\nChanges\nUntracked\nfactory-207\ncodex/factory-207\n-3627\n0 files\nNODE DETAILS\nconceot\nIncoming queue\nEvery task first enters the incoming queue. The\nqueue preserves extra work while both workers\nare busy.\nSee queue behavior\nKeep queue claims in their original order.",
+            "requestedHoldMs": 1400,
+            "observedHoldMs": 1714,
+            "maximumHoldCaptureGapMs": 185
+          },
+          {
+            "name": "restored draft B after full service/window restart",
+            "recordedAtUtc": "2026-09-26T16:32:17.707Z",
+            "elapsedMs": 7016,
+            "framesCapturedBeforeEvent": 30,
+            "capturedFrameNumber": 30,
+            "capturedFramePresentationMs": 4890,
+            "capturedFrameAtUtc": "2026-09-26T16:32:15.667Z",
+            "capturedFrameSha256": "692ad5cec2bd7b145e1c3cd1267cb315cfdfcced2a59c9e6cf724ffed9de4352",
+            "paintSynchronized": "webContents.invalidate followed by two renderer animation frames before capture",
+            "expectedVisibleText": [
+              "Keep both workers available for queued tasks."
+            ],
+            "expectedAbsentText": [],
+            "visibleContentAccepted": true,
+            "recognizedTextAtStart": "Interaction context verification\nRelayer\n+ New thread\nCHATS\n- No chats yet\nPROJECTS\n• factory-207\n• Interaction context verifica...\nIncoming queue\nScroll or pinch to zoom • Drag canvas to pan • Drag nodes for this view\nSettings\n8 Account\nFollow up...\nH 1\nTurn 3 of 3\nTwo-worker pool\nResults store\n1thoa\nFit\n• Fixture models • Fixture mo...\nEnvironment\nLocal snapshot\nWorktree\nBranch\nChanges\nUntracked\nfactory-207\ncodex/factory-207\n-3627\n0 files\nNODE DETAILS\nconceot\nTwo-worker pool\nAn available worker claims the next queued task.\nAt most two tasks run concurrently; additional\ntasks wait until a worker finishes.\nKeep both workers available for queued tasks.",
+            "holdEndFrameNumber": 41,
+            "holdEndFrameAtUtc": "2026-09-26T16:32:17.484Z",
+            "holdEndFrameSha256": "15ad9dde4d0966b1911ac52004ecb9c221b1a9e1655897bd372aa6993fd75db6",
+            "recognizedTextAtHoldEnd": "Interaction context verification\nRelayer\n+ New thread\nCHATS\n- No chats yet\nPROJECTS\n• factory-207\n• Interaction context verifica...\nIncoming queue\nScroll or pinch to zoom • Drag canvas to pan • Drag nodes for this view\nSettings\n8 Account\nFollow up...\nH 1\nTurn 3 of 3\nTwo-worker pool\nResults store\n1thoa\nFit\n• Fixture models • Fixture mo...\nEnvironment\nLocal snapshot\nWorktree\nBranch\nChanges\nUntracked\nfactory-207\ncodex/factory-207\n-3627\n0 files\nNODE DETAILS\nconceot\nTwo-worker pool\nAn available worker claims the next queued task.\nAt most two tasks run concurrently; additional\ntasks wait until a worker finishes.\nKeep both workers available for queued tasks.",
+            "requestedHoldMs": 1400,
+            "observedHoldMs": 1817,
+            "maximumHoldCaptureGapMs": 182
+          },
+          {
+            "name": "confirmed A while the full B record remained unchanged",
+            "recordedAtUtc": "2026-09-26T16:32:20.583Z",
+            "elapsedMs": 9892,
+            "framesCapturedBeforeEvent": 47,
+            "capturedFrameNumber": 47,
+            "capturedFramePresentationMs": 7660,
+            "capturedFrameAtUtc": "2026-09-26T16:32:18.437Z",
+            "capturedFrameSha256": "e54baa6712ed949bf9560dd339a3461c23396455357b8a369208608a4d32aadb",
+            "paintSynchronized": "webContents.invalidate followed by two renderer animation frames before capture",
+            "expectedVisibleText": [
+              "Incoming queue"
+            ],
+            "expectedAbsentText": [],
+            "visibleContentAccepted": true,
+            "recognizedTextAtStart": "Interaction context verification\nRelayer\n+ New thread\nH 1\nTurn 3 of 3\nCHATS\n- No chats yet\nPROJECTS\n• factory-207\n• Interaction context verifica...\nIncoming queue\nTwo-worker pool\nResults store\nScroll or pinch to zoom • Drag canvas to pan • Drag nodes for this view\n115%\nFit\nIncoming queue 1 annotation\nSettings\n8 Account\nFollow up...\n• Fixture models • Fixture mo...\nEnvironment\nWorkiiree\nBranch\nChanges\nUntracked\nLocal snapshot\nfactory-207\ncodex/factory-207\n-3627\n0 files\nNODE DETAILS\nconceot\nIncoming queue\nEvery task first enters the incoming queue. The\nqueue preserves extra work while both workers\nare busy.\nSee queue behavior",
+            "holdEndFrameNumber": 58,
+            "holdEndFrameAtUtc": "2026-09-26T16:32:20.245Z",
+            "holdEndFrameSha256": "e54baa6712ed949bf9560dd339a3461c23396455357b8a369208608a4d32aadb",
+            "recognizedTextAtHoldEnd": "Interaction context verification\nRelayer\n+ New thread\nH 1\nTurn 3 of 3\nCHATS\n- No chats yet\nPROJECTS\n• factory-207\n• Interaction context verifica...\nIncoming queue\nTwo-worker pool\nResults store\nScroll or pinch to zoom • Drag canvas to pan • Drag nodes for this view\n115%\nFit\nIncoming queue 1 annotation\nSettings\n8 Account\nFollow up...\n• Fixture models • Fixture mo...\nEnvironment\nWorkiiree\nBranch\nChanges\nUntracked\nLocal snapshot\nfactory-207\ncodex/factory-207\n-3627\n0 files\nNODE DETAILS\nconceot\nIncoming queue\nEvery task first enters the incoming queue. The\nqueue preserves extra work while both workers\nare busy.\nSee queue behavior",
+            "requestedHoldMs": 1400,
+            "observedHoldMs": 1808,
+            "maximumHoldCaptureGapMs": 178
+          },
+          {
+            "name": "restored B editor before discard",
+            "recordedAtUtc": "2026-09-26T16:32:23.436Z",
+            "elapsedMs": 12745,
+            "framesCapturedBeforeEvent": 65,
+            "capturedFrameNumber": 65,
+            "capturedFramePresentationMs": 10601,
+            "capturedFrameAtUtc": "2026-09-26T16:32:21.378Z",
+            "capturedFrameSha256": "ec877224ed72c566c37004348141af6448ad498846f912b3737632edd76f2754",
+            "paintSynchronized": "webContents.invalidate followed by two renderer animation frames before capture",
+            "expectedVisibleText": [
+              "Keep both workers available for queued tasks."
+            ],
+            "expectedAbsentText": [],
+            "visibleContentAccepted": true,
+            "recognizedTextAtStart": "Interaction context verification\nRelayer\n+ New thread\nH 1\nTurn 3 of 3\nCHATS\n- No chats yet\nPROJECTS\n• factory-207\n• Interaction context verifica...\nIncoming queue\nTwo-worker pool\nResults store\nScroll or pinch to zoom • Drag canvas to pan • Drag nodes for this view\n115%\nFit\nIncoming queue 1 annotation\nSettings\n8 Account\nFollow up...\n• Fixture models • Fixture mo...\nEnvironment\nLocal snapshot\nWorktlres\nBranch\nChanges\nUntracked\nfactory-207\ncodex/factory-207\n-3627\n0 files\nNODE DETAILS\nconceot\nTwo-worker pool\nAn available worker claims the next queued task.\nAt most two tasks run concurrently; additional\ntasks wait until a worker finishes.\nKeep both workers available for queued tasks.",
+            "holdEndFrameNumber": 76,
+            "holdEndFrameAtUtc": "2026-09-26T16:32:23.197Z",
+            "holdEndFrameSha256": "38ad47d80190b94fe4c31467bf03fa317853cf518d2d63d2385727421111e994",
+            "recognizedTextAtHoldEnd": "Interaction context verification\nRelayer\n+ New thread\nH 1\nTurn 3 of 3\nCHATS\n- No chats yet\nPROJECTS\n• factory-207\n• Interaction context verifica...\nIncoming queue\nTwo-worker pool\nResults store\nScroll or pinch to zoom • Drag canvas to pan • Drag nodes for this view\n115%\nFit\nIncoming queue 1 annotation\nSettings\n8 Account\nFollow up...\n• Fixture models • Fixture mo...\nEnvironment\nLocal snapshot\nWorktlres\nBranch\nChanges\nUntracked\nfactory-207\ncodex/factory-207\n-3627\n0 files\nNODE DETAILS\nconceot\nTwo-worker pool\nAn available worker claims the next queued task.\nAt most two tasks run concurrently; additional\ntasks wait until a worker finishes.\nKeep both workers available for queued tasks.",
+            "requestedHoldMs": 1400,
+            "observedHoldMs": 1819,
+            "maximumHoldCaptureGapMs": 179
+          },
+          {
+            "name": "discarded B leaves its historical node visible with no draft editor",
+            "recordedAtUtc": "2026-09-26T16:32:26.009Z",
+            "elapsedMs": 15318,
+            "framesCapturedBeforeEvent": 79,
+            "capturedFrameNumber": 79,
+            "capturedFramePresentationMs": 12829,
+            "capturedFrameAtUtc": "2026-09-26T16:32:23.606Z",
+            "capturedFrameSha256": "9857713aae3bb5b003d1d6a7239b19b376e37b71d3b851e7cb17d9046709f01d",
+            "paintSynchronized": "webContents.invalidate followed by two renderer animation frames before capture",
+            "expectedVisibleText": [
+              "NODE DETAILS",
+              "Two-worker pool"
+            ],
+            "expectedAbsentText": [
+              "Add an annotation",
+              "Keep both workers available for queued tasks."
+            ],
+            "visibleContentAccepted": true,
+            "recognizedTextAtStart": "Interaction context verification\nRelayer\n+ New thread\nH 1\nTurn 3 of 3\nCHATS\n- No chats yet\nPROJECTS\n• factory-207\n• Interaction context verifica...\nIncoming queue\nTwo-worker pool\nResults store\nScroll or pinch to zoom • Drag canvas to pan • Drag nodes for this view\n115%\nFit\nIncoming queue 1 annotation\nSettings\n8 Account\nFollow up...\n• Fixture models • Fixture mo...\nEnvironment\nLocal snapshot\nWorktree\nBranch\nChanges\nUntracked\nfactory-207\ncodex/factory-207\n-3627\n0 files\nNODE DETAILS\nconceot\nTwo-worker pool\nAn available worker claims the next queued task.\nAt most two tasks run concurrently; additional\ntasks wait until a worker finishes.",
+            "holdEndFrameNumber": 92,
+            "holdEndFrameAtUtc": "2026-09-26T16:32:25.772Z",
+            "holdEndFrameSha256": "9857713aae3bb5b003d1d6a7239b19b376e37b71d3b851e7cb17d9046709f01d",
+            "recognizedTextAtHoldEnd": "Interaction context verification\nRelayer\n+ New thread\nH 1\nTurn 3 of 3\nCHATS\n- No chats yet\nPROJECTS\n• factory-207\n• Interaction context verifica...\nIncoming queue\nTwo-worker pool\nResults store\nScroll or pinch to zoom • Drag canvas to pan • Drag nodes for this view\n115%\nFit\nIncoming queue 1 annotation\nSettings\n8 Account\nFollow up...\n• Fixture models • Fixture mo...\nEnvironment\nLocal snapshot\nWorktree\nBranch\nChanges\nUntracked\nfactory-207\ncodex/factory-207\n-3627\n0 files\nNODE DETAILS\nconceot\nTwo-worker pool\nAn available worker claims the next queued task.\nAt most two tasks run concurrently; additional\ntasks wait until a worker finishes.",
+            "requestedHoldMs": 1800,
+            "observedHoldMs": 2166,
+            "maximumHoldCaptureGapMs": 185
+          },
+          {
+            "name": "recreated a fresh empty B editor after discard",
+            "recordedAtUtc": "2026-09-26T16:32:28.222Z",
+            "elapsedMs": 17531,
+            "framesCapturedBeforeEvent": 95,
+            "capturedFrameNumber": 95,
+            "capturedFramePresentationMs": 15402,
+            "capturedFrameAtUtc": "2026-09-26T16:32:26.179Z",
+            "capturedFrameSha256": "a408dbc11b515aab2eab9bf6591b82595c66948d2a0cc919d6445ed61bed4a19",
+            "paintSynchronized": "webContents.invalidate followed by two renderer animation frames before capture",
+            "expectedVisibleText": [
+              "NODE DETAILS",
+              "Two-worker pool",
+              "Add an annotation"
+            ],
+            "expectedAbsentText": [],
+            "visibleContentAccepted": true,
+            "recognizedTextAtStart": "Interaction context verification\nRelayer\n+ New thread\nH 1\nTurn 3 of 3\nCHATS\n- No chats yet\nPROJECTS\n• factory-207\n• Interaction context verifica...\nIncoming queue\nTwo-worker pool\nResults store\nScroll or pinch to zoom • Drag canvas to pan • Drag nodes for this view\n115%\nFit\nIncoming queue 1 annotation\nSettings\n8 Account\nFollow up...\n• Fixture models • Fixture mo...\nEnvironment\nLocal snapshot\nWorktree\nBranch\nChanges\nUntracked\nfactory-207\ncodex/factory-207\n-3627\n0 files\nNODE DETAILS\nconceot\nTwo-worker pool\nAn available worker claims the next queued task.\nAt most two tasks run concurrently; additional\ntasks wait until a worker finishes.\nAdd an annotation...",
+            "holdEndFrameNumber": 106,
+            "holdEndFrameAtUtc": "2026-09-26T16:32:27.998Z",
+            "holdEndFrameSha256": "5309630c5e06a036bcd0e2e77167bcdacf38d5c5eafdf6405e8dbf7188fe4e3c",
+            "recognizedTextAtHoldEnd": "Interaction context verification\nRelayer\n+ New thread\nH 1\nTurn 3 of 3\nCHATS\n- No chats yet\nPROJECTS\n• factory-207\n• Interaction context verifica...\nIncoming queue\nTwo-worker pool\nResults store\nScroll or pinch to zoom • Drag canvas to pan • Drag nodes for this view\n115%\nFit\nIncoming queue 1 annotation\nSettings\n8 Account\nFollow up...\n• Fixture models • Fixture mo...\nEnvironment\nLocal snapshot\nWorktree\nBranch\nChanges\nUntracked\nfactory-207\ncodex/factory-207\n-3627\n0 files\nNODE DETAILS\nconceot\nTwo-worker pool\nAn available worker claims the next queued task.\nAt most two tasks run concurrently; additional\ntasks wait until a worker finishes.\nAdd an annotation...",
+            "requestedHoldMs": 1400,
+            "observedHoldMs": 1819,
+            "maximumHoldCaptureGapMs": 179
+          },
+          {
+            "name": "created fresh B after discarding the original B",
+            "recordedAtUtc": "2026-09-26T16:32:30.831Z",
+            "elapsedMs": 20140,
+            "framesCapturedBeforeEvent": 111,
+            "capturedFrameNumber": 111,
+            "capturedFramePresentationMs": 17989,
+            "capturedFrameAtUtc": "2026-09-26T16:32:28.766Z",
+            "capturedFrameSha256": "9ef419411118f3926080617bd31a3809f1ea672e6de9a2cee4ac6a1d4e9ba4af",
+            "paintSynchronized": "webContents.invalidate followed by two renderer animation frames before capture",
+            "expectedVisibleText": [
+              "Review worker availability before sending."
+            ],
+            "expectedAbsentText": [],
+            "visibleContentAccepted": true,
+            "recognizedTextAtStart": "Interaction context verification\nRelayer\n+ New thread\nH 1\nTurn 3 of 3\nCHATS\n- No chats yet\nPROJECTS\n• factory-207\n• Interaction context verifica...\nIncoming queue\nTwo-worker pool\nResults store\nScroll or pinch to zoom • Drag canvas to pan • Drag nodes for this view\n115%\nFit\nIncoming queue 1 annotation\nSettings\n8 Account\nFollow up...\n• Fixture models • Fixture mo...\nEnvironment\nLocal snapshot\nWorktlres\nBranch\nChanges\nUntracked\nfactory-207\ncodex/factory-207\n-3627\n0 files\nNODE DETAILS\nconceot\nTwo-worker pool\nAn available worker claims the next queued task.\nAt most two tasks run concurrently; additional\ntasks wait until a worker finishes.\nReview worker availability before sending.l",
+            "holdEndFrameNumber": 122,
+            "holdEndFrameAtUtc": "2026-09-26T16:32:30.589Z",
+            "holdEndFrameSha256": "9ef419411118f3926080617bd31a3809f1ea672e6de9a2cee4ac6a1d4e9ba4af",
+            "recognizedTextAtHoldEnd": "Interaction context verification\nRelayer\n+ New thread\nH 1\nTurn 3 of 3\nCHATS\n- No chats yet\nPROJECTS\n• factory-207\n• Interaction context verifica...\nIncoming queue\nTwo-worker pool\nResults store\nScroll or pinch to zoom • Drag canvas to pan • Drag nodes for this view\n115%\nFit\nIncoming queue 1 annotation\nSettings\n8 Account\nFollow up...\n• Fixture models • Fixture mo...\nEnvironment\nLocal snapshot\nWorktlres\nBranch\nChanges\nUntracked\nfactory-207\ncodex/factory-207\n-3627\n0 files\nNODE DETAILS\nconceot\nTwo-worker pool\nAn available worker claims the next queued task.\nAt most two tasks run concurrently; additional\ntasks wait until a worker finishes.\nReview worker availability before sending.l",
+            "requestedHoldMs": 1400,
+            "observedHoldMs": 1823,
+            "maximumHoldCaptureGapMs": 181
+          },
+          {
+            "name": "first omission warning opened with fresh B named",
+            "recordedAtUtc": "2026-09-26T16:32:32.973Z",
+            "elapsedMs": 22282,
+            "framesCapturedBeforeEvent": 125,
+            "capturedFrameNumber": 125,
+            "capturedFramePresentationMs": 20244,
+            "capturedFrameAtUtc": "2026-09-26T16:32:31.021Z",
+            "capturedFrameSha256": "6649c8b2ec27b16f8822834cdf79ebe47bc46c4352c8bc9e82d4b9f976870a65",
+            "paintSynchronized": "webContents.invalidate followed by two renderer animation frames before capture",
+            "expectedVisibleText": [
+              "Drafts will be omitted",
+              "Two-worker pool"
+            ],
+            "expectedAbsentText": [],
+            "visibleContentAccepted": true,
+            "recognizedTextAtStart": "Interaction context verification\nEnvironment\nLocal snaoshot\nRelayer\nNew thread\nG8N\nH 1\nTurn 3 of 3\nWorktrec\nBranch\nChanges\nUntracked\nTactory-40/\ncodex/factory-207\n-3627\nO files\nCHATS\n— No chats yet\nPROJECTS\n• factory-207\n• Interaction context verifica...\nIncoming queue\nTwo-worker pool\nResults store\nScroll or pinch to zoom • Drag canvas to pan • Drag nodes for this view\nDRAFTS WILL BE OMITTED\nSend without these node annotations?\nYour message and confirmed context will be sent. These drafts\nstay saved so you can confirm or use them later.\n1 unconfirmed draft\nTwo-worker pool\nGo back\nSend without drafts\nIncoming queue 1 annotation\nSettings\n& Account.\nUse the confirmed queue note for this follow-up.\nFixture models • Fixture mo... v",
+            "holdEndFrameNumber": 135,
+            "holdEndFrameAtUtc": "2026-09-26T16:32:32.749Z",
+            "holdEndFrameSha256": "6649c8b2ec27b16f8822834cdf79ebe47bc46c4352c8bc9e82d4b9f976870a65",
+            "recognizedTextAtHoldEnd": "Interaction context verification\nEnvironment\nLocal snaoshot\nRelayer\nNew thread\nG8N\nH 1\nTurn 3 of 3\nWorktrec\nBranch\nChanges\nUntracked\nTactory-40/\ncodex/factory-207\n-3627\nO files\nCHATS\n— No chats yet\nPROJECTS\n• factory-207\n• Interaction context verifica...\nIncoming queue\nTwo-worker pool\nResults store\nScroll or pinch to zoom • Drag canvas to pan • Drag nodes for this view\nDRAFTS WILL BE OMITTED\nSend without these node annotations?\nYour message and confirmed context will be sent. These drafts\nstay saved so you can confirm or use them later.\n1 unconfirmed draft\nTwo-worker pool\nGo back\nSend without drafts\nIncoming queue 1 annotation\nSettings\n& Account.\nUse the confirmed queue note for this follow-up.\nFixture models • Fixture mo... v",
+            "requestedHoldMs": 1400,
+            "observedHoldMs": 1728,
+            "maximumHoldCaptureGapMs": 187
+          },
+          {
+            "name": "Go back restored composition without changing B or interactions",
+            "recordedAtUtc": "2026-09-26T16:32:35.963Z",
+            "elapsedMs": 25272,
+            "framesCapturedBeforeEvent": 142,
+            "capturedFrameNumber": 142,
+            "capturedFramePresentationMs": 23183,
+            "capturedFrameAtUtc": "2026-09-26T16:32:33.960Z",
+            "capturedFrameSha256": "933d7b86474be20c4a6e153c891ec929034e9c0f6aec51211de0a94f7b97e9cb",
+            "paintSynchronized": "webContents.invalidate followed by two renderer animation frames before capture",
+            "expectedVisibleText": [
+              "Use the confirmed queue note for this follow-up."
+            ],
+            "expectedAbsentText": [],
+            "visibleContentAccepted": true,
+            "recognizedTextAtStart": "Interaction context verification\nEnvironment\nLocal snavshot\nRelayer\n+ New thread\nH 1\nTurn 3 of 3\nWorkiiree\nBranch\nChanges\nUntracked\nTactory-40/\ncodex/factory-207\n-3627\n0 files\nCHATS\n- No chats yet\nPROJECTS\n• factory-207\n• Interaction context verifica...\nIncoming queue\nTwo-worker pool\nResults store\nScroll or pinch to zoom • Drag canvas to pan • Drag nodes for this view\n115%\nFit\nIncoming queue 1 annotation\nSettings\n8 Account\nUse the confirmed queue note for this follow-up.\n• Fixture models • Fixture mo...",
+            "holdEndFrameNumber": 153,
+            "holdEndFrameAtUtc": "2026-09-26T16:32:35.748Z",
+            "holdEndFrameSha256": "933d7b86474be20c4a6e153c891ec929034e9c0f6aec51211de0a94f7b97e9cb",
+            "recognizedTextAtHoldEnd": "Interaction context verification\nEnvironment\nLocal snavshot\nRelayer\n+ New thread\nH 1\nTurn 3 of 3\nWorkiiree\nBranch\nChanges\nUntracked\nTactory-40/\ncodex/factory-207\n-3627\n0 files\nCHATS\n- No chats yet\nPROJECTS\n• factory-207\n• Interaction context verifica...\nIncoming queue\nTwo-worker pool\nResults store\nScroll or pinch to zoom • Drag canvas to pan • Drag nodes for this view\n115%\nFit\nIncoming queue 1 annotation\nSettings\n8 Account\nUse the confirmed queue note for this follow-up.\n• Fixture models • Fixture mo...",
+            "requestedHoldMs": 1400,
+            "observedHoldMs": 1788,
+            "maximumHoldCaptureGapMs": 181
+          },
+          {
+            "name": "second omission warning visibly reopened before explicit override",
+            "recordedAtUtc": "2026-09-26T16:32:39.007Z",
+            "elapsedMs": 28316,
+            "framesCapturedBeforeEvent": 158,
+            "capturedFrameNumber": 158,
+            "capturedFramePresentationMs": 25741,
+            "capturedFrameAtUtc": "2026-09-26T16:32:36.518Z",
+            "capturedFrameSha256": "c6834b2b085f3c16d0c13daca921310adeb09d858e2f3c609a1000f138bc76a9",
+            "paintSynchronized": "webContents.invalidate followed by two renderer animation frames before capture",
+            "expectedVisibleText": [
+              "Drafts will be omitted",
+              "Two-worker pool"
+            ],
+            "expectedAbsentText": [],
+            "visibleContentAccepted": true,
+            "recognizedTextAtStart": "Interaction context verification\nEnvironment\nLocal snaoshot\nRelayer\nNew thread\nG8N\nH 1\nTurn 3 of 3\nWorktrec\nBranch\nChanges\nUntracked\nTactory-40/\ncodex/factory-207\n-3627\nO files\nCHATS\n— No chats yet\nPROJECTS\n• factory-207\n• Interaction context verifica...\nIncoming queue\nTwo-worker pool\nResults store\nScroll or pinch to zoom • Drag canvas to pan • Drag nodes for this view\nDRAFTS WILL BE OMITTED\nSend without these node annotations?\nYour message and confirmed context will be sent. These drafts\nstay saved so you can confirm or use them later.\n1 unconfirmed draft\nTwo-worker pool\nGo back\nSend without drafts\nIncoming queue 1 annotation\nSettings\n& Account.\nUse the confirmed queue note for this follow-up.\nFixture models • Fixture mo... v",
+            "holdEndFrameNumber": 171,
+            "holdEndFrameAtUtc": "2026-09-26T16:32:38.770Z",
+            "holdEndFrameSha256": "6649c8b2ec27b16f8822834cdf79ebe47bc46c4352c8bc9e82d4b9f976870a65",
+            "recognizedTextAtHoldEnd": "Interaction context verification\nEnvironment\nLocal snaoshot\nRelayer\nNew thread\nG8N\nH 1\nTurn 3 of 3\nWorktrec\nBranch\nChanges\nUntracked\nTactory-40/\ncodex/factory-207\n-3627\nO files\nCHATS\n— No chats yet\nPROJECTS\n• factory-207\n• Interaction context verifica...\nIncoming queue\nTwo-worker pool\nResults store\nScroll or pinch to zoom • Drag canvas to pan • Drag nodes for this view\nDRAFTS WILL BE OMITTED\nSend without these node annotations?\nYour message and confirmed context will be sent. These drafts\nstay saved so you can confirm or use them later.\n1 unconfirmed draft\nTwo-worker pool\nGo back\nSend without drafts\nIncoming queue 1 annotation\nSettings\n& Account.\nUse the confirmed queue note for this follow-up.\nFixture models • Fixture mo... v",
+            "requestedHoldMs": 1800,
+            "observedHoldMs": 2252,
+            "maximumHoldCaptureGapMs": 186
+          },
+          {
+            "name": "explicit override submitted exactly A and no other context",
+            "recordedAtUtc": "2026-09-26T16:32:41.417Z",
+            "elapsedMs": 30726,
+            "framesCapturedBeforeEvent": 176,
+            "capturedFrameNumber": 176,
+            "capturedFramePresentationMs": 28779,
+            "capturedFrameAtUtc": "2026-09-26T16:32:39.556Z",
+            "capturedFrameSha256": "7da3916517d0ed522697d6a845a6937f31577a8d344ddbf0391d63ea79d99b53",
+            "paintSynchronized": "webContents.invalidate followed by two renderer animation frames before capture",
+            "expectedVisibleText": [
+              "Turn 4 of 4",
+              "Use the confirmed queue note for this follow-up."
+            ],
+            "expectedAbsentText": [
+              "Drafts will be omitted"
+            ],
+            "visibleContentAccepted": true,
+            "recognizedTextAtStart": "→\nInteraction context verification\n•..\nEnvironment\nLocal snaoshot\nRelayer\n+ New thread\nUse the confirmed queue note for this follow-up.\n98 1\nTurn 4 of 4\n• Running\nWorkilree\nBranch\nChanges\nUntracked\nfactory-207\ncodex/factory-207\n+0 -3627\n0 files\nCHATS\n- No chats yet\nPROJECTS\n• factory-207\nInteraction context verifica...\nSettings\n& Account\nFollow up...\n• Fixture models • Fixture mo... v",
+            "holdEndFrameNumber": 186,
+            "holdEndFrameAtUtc": "2026-09-26T16:32:41.226Z",
+            "holdEndFrameSha256": "6637aced006f1e1990a94c90a4e65cd51d3ff13d0e8a2b95d44497fb62314767",
+            "recognizedTextAtHoldEnd": "Interaction context verification\nEnvironment\nLocal snavshot\nRelayer\n+ New thread\nUse the confirmed queue note for this follow-up.\nH 1\nTurn 4 of 4\nWorkiiree\nBranch\nChanges\nUntracked\nTactory-40/\ncodex/factory-207\n-3627\n0 files\nCHATS\n- No chats yet\nPROJECTS\n• factory-207\n• Interaction context verifica...\nIncoming queue\nTwo-worker pool\nResults store\nScroll or pinch to zoom • Drag canvas to pan • Drag nodes for this view\n11hoa\nFit\nSettings\n8 Account\nFollow up...\nFixture models- Fixture m... ©",
+            "requestedHoldMs": 1400,
+            "observedHoldMs": 1670,
+            "maximumHoldCaptureGapMs": 178
+          },
+          {
+            "name": "restored fresh B on its exact historical occurrence after override",
+            "recordedAtUtc": "2026-09-26T16:32:43.562Z",
+            "elapsedMs": 32871,
+            "framesCapturedBeforeEvent": 189,
+            "capturedFrameNumber": 189,
+            "capturedFramePresentationMs": 30878,
+            "capturedFrameAtUtc": "2026-09-26T16:32:41.655Z",
+            "capturedFrameSha256": "24ecd40f477e25a8e124c066f6a1f60190d618ffd5d23e69fecbefceda0b5b55",
+            "paintSynchronized": "webContents.invalidate followed by two renderer animation frames before capture",
+            "expectedVisibleText": [
+              "Review worker availability before sending."
+            ],
+            "expectedAbsentText": [],
+            "visibleContentAccepted": true,
+            "recognizedTextAtStart": "Interaction context verification\nRelayer\n+ New thread\nCHATS\n- No chats yet\nPROJECTS\n• factory-207\n• Interaction context verifica...\nIncoming queue\nScroll or pinch to zoom • Drag canvas to pan • Drag nodes for this view\nSettings\n8 Account\nFollow up...\nH 1\nTurn 3 of 4\nTwo-worker pool\nResults store\n1thoa\nFit\n• Fixture models • Fixture mo...\nEnvironment\nLocal snapshot\nWorktree\nBranch\nChanges\nUntracked\nfactory-207\ncodex/factory-207\n-3627\n0 files\nNODE DETAILS\nconceot\nTwo-worker pool\nAn available worker claims the next queued task.\nAt most two tasks run concurrently; additional\ntasks wait until a worker finishes.\nReview worker availability before sending",
+            "holdEndFrameNumber": 199,
+            "holdEndFrameAtUtc": "2026-09-26T16:32:43.340Z",
+            "holdEndFrameSha256": "77869565f904445570aea743780e31bb3731c4f87ef5205350cc898019629795",
+            "recognizedTextAtHoldEnd": "Interaction context verification\nRelayer\n+ New thread\nCHATS\n- No chats yet\nPROJECTS\n• factory-207\n• Interaction context verifica...\nIncoming queue\nScroll or pinch to zoom • Drag canvas to pan • Drag nodes for this view\nSettings\n8 Account\nFollow up...\nH 1\nTurn 3 of 4\nTwo-worker pool\nResults store\n1thoa\nFit\n• Fixture models • Fixture mo...\nEnvironment\nLocal snapshot\nWorktree\nBranch\nChanges\nUntracked\nfactory-207\ncodex/factory-207\n-3627\n0 files\nNODE DETAILS\nconceot\nTwo-worker pool\nAn available worker claims the next queued task.\nAt most two tasks run concurrently; additional\ntasks wait until a worker finishes.\nReview worker availability before sending",
+            "requestedHoldMs": 1400,
+            "observedHoldMs": 1685,
+            "maximumHoldCaptureGapMs": 179
+          }
+        ],
+        "stream": {
+          "codec_name": "h264",
+          "width": 2960,
+          "height": 1840,
+          "pix_fmt": "yuv420p",
+          "side_data_list": [
+            {}
+          ]
+        },
+        "encodedDurationSeconds": 33.808,
+        "decodeToNullSucceeded": true
+      }
+    ],
+    "discontinuity": {
+      "startsAtUtc": "2026-09-26T16:32:04.975Z",
+      "endsAtUtc": "2026-09-26T16:32:10.691Z",
+      "durationMs": 5716,
+      "restartOperationStartedAtUtc": "2026-09-26T16:32:09.685Z",
+      "restartOperationEndedAtUtc": "2026-09-26T16:32:10.690Z",
+      "reason": "Recording stopped and the first segment was encoded; then the Electron BrowserWindow and Rust app/graph services were stopped and reopened; recording resumed only on the reopened window.",
+      "beforeSegment": "interaction-context-before-restart.mp4",
+      "afterSegment": "interaction-context-after-restart.mp4"
     },
-    "playbackDecoded": true,
-    "steps": [
-      "1. Selecting a graph node opens its full Node Details without covering the graph or composer",
-      "2. The node's + opens its saved annotation editor in the bottom third of Node Details",
-      "3. A failed save stays in Node Details with the draft intact and an inline retryable error",
-      "4. While the draft save is held, Node Details stays on the source node with the exact text visible",
-      "5. After persistence settles, switching opens the next node without carrying the editor across",
-      "6. Returning to the source node restores the exact unconfirmed draft in its Node Details dock",
-      "7. While Close waits on a held save, the exact draft remains visible in Node Details",
-      "8. After persistence settles, Node Details closes and the graph and composer remain usable",
-      "9. Confirming closes the editor and leaves a compact collapsed node pill above the composer",
-      "10. The × control discards only this unconfirmed draft while the confirmed node context remains attached",
-      "11. After discard, the temporary editor is gone and the confirmed collapsed pill is unchanged",
-      "12. Confirmed annotations stay read-only in an explicitly opened compact preview",
-      "13. Multiple attached-node pills scroll horizontally within the available composer width",
-      "14. A compact node pill opens a fixed scrollable list for ordered annotations above the composer",
-      "15. The turn banner shows one connected-node pill; its popover restores both annotations in order",
-      "16. Clicking the connected node reopens its full Node Details from history",
-      "17. A connected node with a non-empty annotation enables send even when message text is empty",
-      "18. Annotation-only history has no derived message label; the context pill preserves the actual input",
-      "19. After restarting Electron's Rust graph/app services and window, the exact context is still visible",
-      "20. The persisted context still reopens the exact target node after restart"
-    ]
+    "boundaryAcceptance": {
+      "eventCount": 23,
+      "observations": "OCR checks only each named event's captured start frame and captured hold-end frame; intervening continuous-recording frames are not individually classified.",
+      "distinction": "Node Details acceptance requires its visible NODE DETAILS marker; graph-only acceptance requires the selected graph title and absence of NODE DETAILS and Add an annotation. Editor absence checks also forbid the prior draft text where applicable."
+    },
+    "screenshotCaptionCheckpoints": [
+      {
+        "caption": "1. Selecting a graph node opens its full Node Details without covering the graph or composer",
+        "capturedAtUtc": "2026-09-26T16:31:20.292Z",
+        "selector": "#inspector"
+      },
+      {
+        "caption": "2. The node's + opens its saved annotation editor in the bottom third of Node Details",
+        "capturedAtUtc": "2026-09-26T16:31:21.056Z",
+        "selector": "#inspector"
+      },
+      {
+        "caption": "3. A failed save stays in Node Details with the draft intact and an inline retryable error",
+        "capturedAtUtc": "2026-09-26T16:31:21.834Z",
+        "selector": "#nodeContextDock"
+      },
+      {
+        "caption": "4. While the draft save is held, Node Details stays on the source node with the exact text visible",
+        "capturedAtUtc": "2026-09-26T16:31:22.614Z",
+        "selector": "#nodeContextDock"
+      },
+      {
+        "caption": "5. After persistence settles, switching opens the next node without carrying the editor across",
+        "capturedAtUtc": "2026-09-26T16:31:23.050Z",
+        "selector": "#inspector"
+      },
+      {
+        "caption": "6. Returning to the source node restores the exact unconfirmed draft in its Node Details dock",
+        "capturedAtUtc": "2026-09-26T16:31:23.435Z",
+        "selector": "#inspector"
+      },
+      {
+        "caption": "7. While Close waits on a held save, the exact draft remains visible in Node Details",
+        "capturedAtUtc": "2026-09-26T16:31:23.834Z",
+        "selector": "#nodeContextDock"
+      },
+      {
+        "caption": "8. After persistence settles, Node Details closes and the graph and composer remain usable",
+        "capturedAtUtc": "2026-09-26T16:31:24.274Z",
+        "selector": "#graphStage"
+      },
+      {
+        "caption": "9. Confirming closes the editor and leaves a compact collapsed node pill above the composer",
+        "capturedAtUtc": "2026-09-26T16:31:24.706Z",
+        "selector": "#composerContextTray"
+      },
+      {
+        "caption": "10. The × control discards only this unconfirmed draft while the confirmed node context remains attached",
+        "capturedAtUtc": "2026-09-26T16:31:25.469Z",
+        "selector": "#nodeContextDock"
+      },
+      {
+        "caption": "11. After discard, the temporary editor is gone and the confirmed collapsed pill is unchanged",
+        "capturedAtUtc": "2026-09-26T16:31:25.894Z",
+        "selector": "#composerContextTray"
+      },
+      {
+        "caption": "12. Confirmed annotations stay read-only in an explicitly opened compact preview",
+        "capturedAtUtc": "2026-09-26T16:31:26.349Z",
+        "selector": ".composer-context-preview"
+      },
+      {
+        "caption": "13. Multiple attached-node pills scroll horizontally within the available composer width",
+        "capturedAtUtc": "2026-09-26T16:31:26.922Z",
+        "selector": ".composer-context-pills"
+      },
+      {
+        "caption": "14. A compact node pill opens a fixed scrollable list for ordered annotations above the composer",
+        "capturedAtUtc": "2026-09-26T16:31:27.781Z",
+        "selector": "#composerContextTray"
+      },
+      {
+        "caption": "15. The turn banner shows one connected-node pill; its popover restores both annotations in order",
+        "capturedAtUtc": "2026-09-26T16:31:28.756Z",
+        "selector": "#interactionContextPopover"
+      },
+      {
+        "caption": "16. Clicking the connected node reopens its full Node Details from history",
+        "capturedAtUtc": "2026-09-26T16:31:29.138Z",
+        "selector": "#inspector"
+      },
+      {
+        "caption": "17. A connected node with a non-empty annotation enables send even when message text is empty",
+        "capturedAtUtc": "2026-09-26T16:31:29.589Z",
+        "selector": "#threadComposerShell"
+      },
+      {
+        "caption": "18. Annotation-only history has no derived message label; the context pill preserves the actual input",
+        "capturedAtUtc": "2026-09-26T16:31:30.255Z",
+        "selector": "#interactionBanner"
+      },
+      {
+        "caption": "19. After restarting Electron's Rust graph/app services and window, the exact context is still visible",
+        "capturedAtUtc": "2026-09-26T16:31:32.538Z",
+        "selector": "#interactionContextPopover"
+      },
+      {
+        "caption": "20. The persisted context still reopens the exact target node after restart",
+        "capturedAtUtc": "2026-09-26T16:31:32.923Z",
+        "selector": "#inspector"
+      },
+      {
+        "caption": "21. After a full service and window restart, the first exact unconfirmed draft restores on its node",
+        "capturedAtUtc": "2026-09-26T16:32:15.518Z",
+        "selector": "#nodeContextDock"
+      },
+      {
+        "caption": "22. Selecting the other node restores its separate exact unconfirmed draft after restart",
+        "capturedAtUtc": "2026-09-26T16:32:18.104Z",
+        "selector": "#nodeContextDock"
+      },
+      {
+        "caption": "23. Confirming the first draft leaves the other occurrence's durable draft unchanged",
+        "capturedAtUtc": "2026-09-26T16:32:21.184Z",
+        "selector": "#composerContextTray"
+      },
+      {
+        "caption": "24. Send names the remaining unconfirmed Two-worker pool draft before omitting it",
+        "capturedAtUtc": "2026-09-26T16:32:33.787Z",
+        "selector": "#contextDraftSendWarning"
+      },
+      {
+        "caption": "25. Go back restores the editable message and leaves the exact draft intact",
+        "capturedAtUtc": "2026-09-26T16:32:36.360Z",
+        "selector": "#composerContextTray"
+      },
+      {
+        "caption": "26. The accepted follow-up clears the composer; the omitted draft remains on its original historical node occurrence",
+        "capturedAtUtc": "2026-09-26T16:32:44.155Z",
+        "selector": "#nodeContextDock"
+      }
+    ],
+    "historicalStillMontage": {
+      "file": "interaction-context-still-montage-historical.mp4",
+      "sha256": "5145a85c7ca72d154ddd84aa37a4ffbaf89b63b8c83772a73ec4978fde5efcd3",
+      "role": "Retained from the prior evidence snapshot. This timed still-frame montage is historical and does not prove the missing interaction transitions."
+    }
+  },
+  "lifecycleDiagnostics": {
+    "recordedAfterCapture": true,
+    "logFile": "external repair-round5-instrumented-lifecycle.jsonl",
+    "logSha256": "44ab35c3d865db6298bdae11820b55b42bb22def60c195cd1b7272e707efb705",
+    "scope": "BrowserWindow close/closed/unresponsive/responsive, WebContents destroyed/render-process-gone, Electron before-quit/will-quit, and process exit; timestamps surround the send click, accepted response, and UI check.",
+    "secondInteraction": {
+      "windowId": 1,
+      "webContentsId": 2,
+      "clickStartedAtUtc": "2026-09-26T16:31:27.786Z",
+      "clickReturnedAtUtc": "2026-09-26T16:31:27.788Z",
+      "acceptedAtUtc": "2026-09-26T16:31:28.034Z",
+      "uiCheckStartedAtUtc": "2026-09-26T16:31:28.034Z",
+      "uiCheckPassedAtUtc": "2026-09-26T16:31:28.376Z",
+      "windowAliveThroughUiCheck": true,
+      "unexpectedLifecycleEventsObserved": false
+    },
+    "normalClosures": [
+      {
+        "windowId": 1,
+        "closedAtUtc": "2026-09-26T16:31:30.260Z",
+        "context": "explicit first BrowserWindow/service restart after checkpoint 18"
+      },
+      {
+        "windowId": 2,
+        "closedAtUtc": "2026-09-26T16:32:09.686Z",
+        "context": "explicit second BrowserWindow/service restart before the two-draft restart journey"
+      },
+      {
+        "windowId": 3,
+        "closedAtUtc": "2026-09-26T16:32:49.788Z",
+        "context": "successful runner teardown"
+      }
+    ],
+    "previousFailure": {
+      "receiptFile": "external repair-round5/failed-capture-attempt-1/receipt.txt",
+      "receiptSha256": "00c5231053b41856ba043d402ca1d6021be914b1a96545f8ea4c3377de57ffd8",
+      "summary": "The earlier attempt failed at the second-turn UI check with Electron TypeError: Object was destroyed. This instrumented run did not reproduce the failure; the initiator of the earlier destruction remains unknown.",
+      "captureLogFile": "external repair-round5-capture.log",
+      "captureLogSha256": "c0115c180c68326ef6b2285526d9f8e505eba63056bd4904bd7c45a9a7b6a126"
+    },
+    "productBehaviorChanged": false
   }
 }

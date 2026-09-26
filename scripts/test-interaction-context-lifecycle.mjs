@@ -3,6 +3,7 @@ import { mkdtempSync } from "node:fs";
 import { rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { isDeepStrictEqual } from "node:util";
 
 import { taskSystemFixtureFactory } from "@relayer/eval-runner";
 
@@ -33,6 +34,7 @@ let productSession;
 let window;
 let keepaliveWindow;
 let fixtureCompletionCount = 0;
+let composerDraftState = { pendingNewThread: null, threadFollowups: {} };
 let releasePendingFixture;
 const pendingFixtureGate = new Promise((resolveGate) => { releasePendingFixture = resolveGate; });
 
@@ -90,6 +92,11 @@ function registerIpc() {
     subject: "fixture|node-details-lifecycle",
   }));
   ipcMain.handle("relayer:appearance-read", () => ({ appearance: "dark" }));
+  ipcMain.handle("relayer:composer-drafts-read", () => composerDraftState);
+  ipcMain.handle("relayer:composer-drafts-write", (_event, value) => {
+    composerDraftState = value;
+    return composerDraftState;
+  });
   ipcMain.handle("relayer:update-status", () => ({
     phase: "development",
     channel: "stable",
@@ -114,11 +121,19 @@ function unregisterIpc() {
   for (const channel of [
     "relayer:account-read",
     "relayer:appearance-read",
+    "relayer:composer-drafts-read",
+    "relayer:composer-drafts-write",
     "relayer:update-status",
     "relayer:folder-choose",
     "relayer:tutorial-read",
     "relayer:provider-status",
   ]) ipcMain.removeHandler(channel);
+}
+
+function assertDeepEqual(actual, expected, label) {
+  if (!isDeepStrictEqual(actual, expected)) {
+    throw new Error(`${label}: ${JSON.stringify({ expected, actual })}`);
+  }
 }
 
 function assertEditorSnapshot(snapshot, label) {
@@ -320,6 +335,7 @@ async function openThreadWindow(threadId) {
     desktopDirectory: join(repositoryRoot, "desktop"),
     getAppearance: () => "dark",
     updater: { status: () => ({ phase: "development" }) },
+    openExternal: async () => {},
   });
   window = await createWindow(productSession);
   window.setSize(1280, 820);
@@ -793,6 +809,9 @@ async function run() {
 
   releasePendingFixture();
   await waitForAcceptedInteractions(thread.id, 2);
+  await waitFor("renderer composer to leave its pending state", () => evaluate(`
+    document.querySelector('#threadPrompt')?.disabled === false
+  `));
   const savedDraft = await waitFor("saved interaction-context draft", async () => {
     const response = await productRequest(`/api/threads/${thread.id}/context-drafts`);
     const draft = response.drafts?.[0];
@@ -802,11 +821,50 @@ async function run() {
       ? draft
       : false;
   });
+  await clickNode("Two-worker pool");
+  await waitFor("second durable draft target with the first editor settled", () => evaluate(`
+    document.querySelector('#detailTitle')?.textContent === 'Two-worker pool'
+      && !document.querySelector('#contextAnnotationEditor')
+      && document.querySelector('#nodeContextDock')?.classList.contains('hidden')
+  `));
+  const secondTargetControls = await evaluate(`(() => ({
+    title: document.querySelector('#detailTitle')?.textContent,
+    attachHidden: document.querySelector('#attachNodeContext')?.classList.contains('hidden'),
+    attachDisabled: document.querySelector('#attachNodeContext')?.disabled,
+    promptDisabled: document.querySelector('#threadPrompt')?.disabled,
+    sendDisabled: document.querySelector('#sendInteraction')?.disabled,
+    editorVisible: Boolean(document.querySelector('#contextAnnotationEditor')),
+    dockHidden: document.querySelector('#nodeContextDock')?.classList.contains('hidden'),
+  }))()`);
+  if (secondTargetControls.attachHidden || secondTargetControls.attachDisabled) {
+    throw new Error(`Second accepted node did not expose its + control: ${JSON.stringify(secondTargetControls)}`);
+  }
+  await click("#attachNodeContext");
+  await setValue("#contextAnnotationEditor", SECOND_DRAFT_VALUE);
+  const secondSavedDraft = await waitFor("second saved interaction-context draft", async () => {
+    const response = await productRequest(`/api/threads/${thread.id}/context-drafts`);
+    const draft = response.drafts?.find((candidate) => candidate.targetNode?.title === "Two-worker pool");
+    return response.drafts?.length === 2 && draft?.text === SECOND_DRAFT_VALUE && draft.revision >= 1
+      ? draft
+      : false;
+  });
+  await clickNode("Incoming queue");
+  await waitFor("first draft restored before restart", () => evaluate(`
+    document.querySelector('#contextAnnotationEditor')?.value === ${JSON.stringify(EDITOR_VALUE)}
+  `));
+  await clickNode("Two-worker pool");
+  await waitFor("second draft restored before restart", () => evaluate(`
+    document.querySelector('#contextAnnotationEditor')?.value === ${JSON.stringify(SECOND_DRAFT_VALUE)}
+  `));
+  await clickNode("Incoming queue");
+  await waitFor("first draft restored last before restart", () => evaluate(`
+    document.querySelector('#contextAnnotationEditor')?.value === ${JSON.stringify(EDITOR_VALUE)}
+  `));
   await restartStack(thread.id);
   await waitForAcceptedInteractions(thread.id, 2);
   const restoredDraft = await productRequest(`/api/threads/${thread.id}/context-drafts`);
-  if (JSON.stringify(restoredDraft.drafts) !== JSON.stringify([savedDraft])) {
-    throw new Error(`Restart did not preserve the exact saved draft: ${JSON.stringify({ savedDraft, restoredDraft })}`);
+  if (JSON.stringify(restoredDraft.drafts) !== JSON.stringify([savedDraft, secondSavedDraft])) {
+    throw new Error(`Restart did not preserve the exact two saved drafts: ${JSON.stringify({ savedDraft, secondSavedDraft, restoredDraft })}`);
   }
   await click("#previousTurn");
   await waitFor("saved draft source turn", () => evaluate(`
@@ -820,6 +878,19 @@ async function run() {
   if (restoredEditor.value !== EDITOR_VALUE) {
     throw new Error(`Restart restored the wrong draft text: ${JSON.stringify(restoredEditor)}`);
   }
+  await clickNode("Two-worker pool");
+  const restoredSecondEditor = await waitFor("second saved draft restored after restart", () => evaluate(`(() => {
+    const editor = document.querySelector('#contextAnnotationEditor');
+    return editor ? { value: editor.value } : false;
+  })()`));
+  if (restoredSecondEditor.value !== SECOND_DRAFT_VALUE) {
+    throw new Error(`Restart restored the wrong second draft text: ${JSON.stringify(restoredSecondEditor)}`);
+  }
+  await clickNode("Incoming queue");
+  await waitFor("first saved draft restored after restart", () => evaluate(`
+    document.querySelector('#contextAnnotationEditor')?.value === ${JSON.stringify(EDITOR_VALUE)}
+  `));
+  const secondDraftBeforeConfirm = structuredClone(secondSavedDraft);
 
   let rejectedConfirm = false;
   let rejectConfirmRequest;
@@ -859,13 +930,36 @@ async function run() {
   await click("[aria-label='Confirm annotation']");
   await assertCollapsedPill();
   const confirmedState = await productRequest(`/api/threads/${thread.id}/context-drafts`);
-  if (confirmedState.drafts?.length !== 0
-    || confirmedState.confirmations?.length !== 1
+  assertDeepEqual(confirmedState.drafts, [secondDraftBeforeConfirm], "Confirming A changed the complete durable B record");
+  if (confirmedState.confirmations?.length !== 1
     || confirmedState.confirmations[0].draftId !== savedDraft.id
     || confirmedState.confirmations[0].annotation !== EDITOR_VALUE
-    || JSON.stringify(confirmedState.confirmations[0].target) !== JSON.stringify(savedDraft.target)) {
-    throw new Error(`Confirmation was not durably restorable: ${JSON.stringify(confirmedState)}`);
+    || !isDeepStrictEqual(confirmedState.confirmations[0].target, savedDraft.target)) {
+    throw new Error(`Confirmation did not preserve A's target and exact annotation: ${JSON.stringify(confirmedState)}`);
   }
+  const confirmedARecord = structuredClone(confirmedState.confirmations[0]);
+  await clickNode("Two-worker pool");
+  await waitFor("second draft editor selected for discard", () => evaluate(`
+    document.querySelector('#contextAnnotationEditor')?.value === ${JSON.stringify(SECOND_DRAFT_VALUE)}
+      && document.querySelector('[aria-label="Discard annotation draft for Two-worker pool"]')
+  `));
+  await click("[aria-label='Discard annotation draft for Two-worker pool']");
+  const discardedState = await waitFor("second draft discarded while first confirmation remains", async () => {
+    const state = await productRequest(`/api/threads/${thread.id}/context-drafts`);
+    return state.drafts?.length === 0 && state.confirmations?.length === 1 ? state : false;
+  });
+  assertDeepEqual(discardedState.confirmations, [confirmedARecord], "Discarding B changed the complete confirmed A record");
+  await click("#attachNodeContext");
+  await setValue("#contextAnnotationEditor", SECOND_DRAFT_VALUE);
+  const freshSecondDraft = await waitFor("fresh second draft saved for warning journey", async () => {
+    const state = await productRequest(`/api/threads/${thread.id}/context-drafts`);
+    return state.drafts?.length === 1
+      && state.drafts[0].id !== secondSavedDraft.id
+      && state.drafts[0].text === SECOND_DRAFT_VALUE
+      ? state.drafts[0]
+      : false;
+  });
+  const freshSecondDraftSnapshot = structuredClone(freshSecondDraft);
   await restartStack(thread.id);
   await waitForAcceptedInteractions(thread.id, 2);
   await assertCollapsedPill();
@@ -962,9 +1056,75 @@ async function run() {
   `));
   await assertCollapsedPill();
 
+  const preWarningThread = await productRequest(`/api/threads/${thread.id}`);
+  const interactionIdsBeforeWarning = preWarningThread.interactions.map((interaction) => interaction.id);
   await setValue("#threadPrompt", SUCCESS_MESSAGE);
   await click("#sendInteraction");
+  await waitFor("draft omission warning before Send", () => evaluate(`(() => {
+    const warning = document.querySelector('#contextDraftSendWarning');
+    return warning?.open === true
+      && document.querySelector('#contextDraftSendWarningList strong')?.textContent === 'Two-worker pool';
+  })()`));
+  const warningBeforeBack = await evaluate(`({
+    count: document.querySelector('#contextDraftSendWarningCount')?.textContent,
+    message: document.querySelector('#threadPrompt')?.value,
+  })`);
+  if (warningBeforeBack.count !== "1 unconfirmed draft" || warningBeforeBack.message !== SUCCESS_MESSAGE) {
+    throw new Error(`Draft omission warning did not identify the remaining draft: ${JSON.stringify(warningBeforeBack)}`);
+  }
+  const warningDraftState = await productRequest(`/api/threads/${thread.id}/context-drafts`);
+  assertDeepEqual(warningDraftState.drafts, [freshSecondDraftSnapshot], "Opening warning changed the complete fresh B draft");
+  const warningThread = await productRequest(`/api/threads/${thread.id}`);
+  assertDeepEqual(
+    warningThread.interactions.map((interaction) => interaction.id),
+    interactionIdsBeforeWarning,
+    "Opening the warning created or removed an interaction",
+  );
+  await click("#cancelContextDraftSend");
+  await waitFor("Go back restores composer editing", () => evaluate(`(() => (
+    !document.querySelector('#contextDraftSendWarning')?.open
+      && !document.querySelector('#threadPrompt')?.disabled
+      && document.querySelector('#threadPrompt')?.value === ${JSON.stringify(SUCCESS_MESSAGE)}
+  ))()`));
+  const afterGoBack = await productRequest(`/api/threads/${thread.id}/context-drafts`);
+  assertDeepEqual(afterGoBack.drafts, [freshSecondDraftSnapshot], "Go back changed the complete fresh B draft");
+  const goBackThread = await productRequest(`/api/threads/${thread.id}`);
+  assertDeepEqual(
+    goBackThread.interactions.map((interaction) => interaction.id),
+    interactionIdsBeforeWarning,
+    "Go back created or removed an interaction",
+  );
+  await click("#sendInteraction");
+  await waitFor("draft omission warning reopened", () => evaluate(`
+    document.querySelector('#contextDraftSendWarning')?.open === true
+  `));
+  const secondWarningThread = await productRequest(`/api/threads/${thread.id}`);
+  assertDeepEqual(
+    secondWarningThread.interactions.map((interaction) => interaction.id),
+    interactionIdsBeforeWarning,
+    "Reopening the warning created or removed an interaction",
+  );
+  const secondWarningDraftState = await productRequest(`/api/threads/${thread.id}/context-drafts`);
+  assertDeepEqual(secondWarningDraftState.drafts, [freshSecondDraftSnapshot], "Reopening warning changed the complete fresh B draft");
+  await click("#confirmContextDraftSend");
   await waitForAcceptedInteractions(thread.id, 3);
+  const overriddenDetail = await productRequest(`/api/threads/${thread.id}`);
+  const overriddenInteraction = overriddenDetail.interactions.at(-1);
+  const submittedContextPayload = (overriddenInteraction.contexts || []).map(({ target, annotations }) => ({
+    target,
+    annotations,
+  }));
+  assertDeepEqual(submittedContextPayload, [{
+    target: confirmedARecord.target,
+    annotations: [confirmedARecord.annotation],
+  }], "Override submitted contexts beyond A's exact occurrence and single annotation");
+  assertDeepEqual(
+    overriddenDetail.interactions.map((interaction) => interaction.id),
+    [...interactionIdsBeforeWarning, overriddenInteraction.id],
+    "Override did not create exactly one interaction after the warning journey",
+  );
+  const afterOverride = await productRequest(`/api/threads/${thread.id}/context-drafts`);
+  assertDeepEqual(afterOverride.drafts, [freshSecondDraftSnapshot], "Override changed the complete durable B draft");
   await waitFor("next composer to become available", () => evaluate(`
     !document.querySelector('#threadPrompt')?.disabled
   `));
@@ -980,6 +1140,41 @@ async function run() {
     historicalPillVisible: true,
     historicalCount: "1",
   })) throw new Error(`Successful send cleanup was not exact: ${JSON.stringify(successfulCleanup)}`);
+  const afterOverrideHistory = await productRequest(`/api/threads/${thread.id}`);
+  const restoredHistoryDraftState = await productRequest(`/api/threads/${thread.id}/context-drafts`);
+  assertDeepEqual(restoredHistoryDraftState.drafts, [freshSecondDraftSnapshot], "Historical restoration changed the complete fresh B draft");
+  const draftSourceTurnIndex = afterOverrideHistory.interactions.findIndex((interaction) => (
+    String(interaction.graphNodeId) === String(freshSecondDraft.target.sourceInteractionNodeId)
+  ));
+  if (draftSourceTurnIndex < 0) {
+    throw new Error(`The fresh draft source occurrence is absent from accepted history: ${JSON.stringify(freshSecondDraft)}`);
+  }
+  const currentTurnLabel = await evaluate(`document.querySelector('#turnPickerButton')?.textContent`);
+  const currentTurnNumber = Number(currentTurnLabel?.match(/^Turn (\d+) of (\d+)$/)?.[1]);
+  for (let turnNumber = currentTurnNumber; turnNumber > draftSourceTurnIndex + 1; turnNumber -= 1) {
+    await click("#previousTurn");
+    await waitFor(`draft-owning historical turn ${turnNumber - 1}`, () => evaluate(`
+      document.querySelector('#turnPickerButton')?.textContent === ${JSON.stringify(`Turn ${turnNumber - 1} of ${afterOverrideHistory.interactions.length}`)}
+    `));
+  }
+  await clickNode("Two-worker pool");
+  const remainingDraftEditor = await waitFor("unconfirmed draft restored on its original occurrence", () => evaluate(`(() => {
+    const editor = document.querySelector('#contextAnnotationEditor');
+    return editor ? { value: editor.value } : false;
+  })()`));
+  if (remainingDraftEditor.value !== SECOND_DRAFT_VALUE) {
+    throw new Error(`The original draft occurrence did not restore after override: ${JSON.stringify(remainingDraftEditor)}`);
+  }
+  await click("[aria-label='Discard annotation draft for Two-worker pool']");
+  await waitFor("scenario draft cleanup before retained direct-send failure smoke", async () => {
+    const state = await productRequest(`/api/threads/${thread.id}/context-drafts`);
+    return state.drafts?.length === 0;
+  });
+  await clickNode("Incoming queue");
+  await waitFor("confirmed node remains unchanged after override", () => evaluate(`
+    document.querySelector('#detailTitle')?.textContent === 'Incoming queue'
+      && !document.querySelector('#contextAnnotationEditor')
+  `));
 
   await restartStack(thread.id);
   await waitForAcceptedInteractions(thread.id, 3);

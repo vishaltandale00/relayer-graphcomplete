@@ -1,10 +1,12 @@
 import { app, BrowserWindow, ipcMain } from "electron";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { mkdirSync, mkdtempSync } from "node:fs";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { createInterface } from "node:readline";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { join, relative, resolve } from "node:path";
+import { isDeepStrictEqual } from "node:util";
 
 import { taskSystemFixtureFactory } from "@relayer/eval-runner";
 
@@ -13,6 +15,12 @@ import { GraphCompleteRuntimeService } from "../desktop/main/services/graphcompl
 import { RelayerAppServerService } from "../desktop/main/services/relayer-app-server.mjs";
 import { createWindowFactory } from "../desktop/main/window.mjs";
 import { createElectronWorkspaceDriver } from "./electron-workspace-driver.mjs";
+import {
+  assertTrackedWorkspaceUnchanged,
+  captureTrackedWorkspaceSnapshot,
+  validateTerminalFrameCoverage,
+  validateVisibleBoundaryHold,
+} from "./lib/interaction-context-capture-proof.mjs";
 
 const OPT_IN = "RELAYER_CAPTURE_INTERACTION_CONTEXT_EVIDENCE";
 const repositoryRoot = resolve(import.meta.dirname, "..");
@@ -24,16 +32,48 @@ const outputDirectory = join(
   "evidence",
   "interaction-context",
 );
-const videoOutputFile = join(outputDirectory, "interaction-context.mp4");
+const historicalMontageFile = join(outputDirectory, "interaction-context-still-montage-historical.mp4");
+const beforeRestartVideoFile = join(outputDirectory, "interaction-context-before-restart.mp4");
+const afterRestartVideoFile = join(outputDirectory, "interaction-context-after-restart.mp4");
+const beforeTerminalScreenshotFile = join(outputDirectory, "interaction-context-before-restart-terminal.png");
+const afterTerminalScreenshotFile = join(outputDirectory, "interaction-context-after-restart-terminal.png");
 const composerScreenshotFile = join(outputDirectory, "grouped-composer.png");
 const restartedScreenshotFile = join(outputDirectory, "restarted-context.png");
+const twoDraftsScreenshotFile = join(outputDirectory, "two-drafts-restored.png");
+const secondDraftScreenshotFile = join(outputDirectory, "second-draft-restored.png");
+const confirmedDraftScreenshotFile = join(outputDirectory, "confirmed-draft-with-other-draft.png");
+const warningScreenshotFile = join(outputDirectory, "draft-omission-warning.png");
+const overrideScreenshotFile = join(outputDirectory, "draft-after-override.png");
 const manifestFile = join(outputDirectory, "manifest.json");
+const captureOutputPaths = [
+  beforeRestartVideoFile,
+  afterRestartVideoFile,
+  beforeTerminalScreenshotFile,
+  afterTerminalScreenshotFile,
+  composerScreenshotFile,
+  restartedScreenshotFile,
+  twoDraftsScreenshotFile,
+  secondDraftScreenshotFile,
+  confirmedDraftScreenshotFile,
+  warningScreenshotFile,
+  overrideScreenshotFile,
+  manifestFile,
+].map((path) => relative(repositoryRoot, path).replaceAll("\\", "/"));
 const dataDirectory = mkdtempSync(join(tmpdir(), "relayer-interaction-context-evidence-"));
-const framesDirectory = join(dataDirectory, "frames");
+const framesDirectory = join(dataDirectory, "checkpoints");
+const continuousFramesDirectory = join(dataDirectory, "continuous-frames");
+const continuousFrameIntervalMs = 100;
+const maximumContinuousFrameGapMs = 500;
+const defaultBoundaryHoldMs = 1_400;
+const criticalBoundaryHoldMs = 1_800;
+const terminalFrameHoldMs = 200;
+const textRecognizerPath = join(repositoryRoot, "scripts", "recognize-desktop-capture-frame.swift");
 const configurationPath = join(repositoryRoot, "harnesses", "fixture-task-system.yaml");
 const graphServerBinary = join(repositoryRoot, "target", "debug", "relayer-graph-server");
 const appServerBinary = join(repositoryRoot, "target", "debug", "relayer-app-server");
 const frames = [];
+const recordingSegments = [];
+let activeRecordingSegment;
 
 let runtime;
 let catalogRefreshServer;
@@ -41,6 +81,38 @@ let product;
 let productSession;
 let mainWindow;
 let keepaliveWindow;
+let captureWindowSequence = 0;
+let activeCaptureWindow;
+let activeCaptureWebContents;
+let activeCaptureWindowUrl;
+let activeCaptureWindowTitle;
+let composerDraftState = { pendingNewThread: null, threadFollowups: {} };
+let captureTextRecognizer;
+
+const captureDiagnosticStartedAt = process.hrtime.bigint();
+function recordCaptureDiagnostic(event, details = {}) {
+  process.stdout.write(`${JSON.stringify({
+    diagnostic: "interaction-context-capture-lifecycle",
+    event,
+    recordedAtUtc: new Date().toISOString(),
+    elapsedMs: Number(process.hrtime.bigint() - captureDiagnosticStartedAt) / 1_000_000,
+    ...details,
+  })}\n`);
+}
+
+function captureWindowDiagnosticState() {
+  return {
+    windowId: captureWindowSequence,
+    windowDestroyed: activeCaptureWindow?.isDestroyed() ?? true,
+    webContentsDestroyed: activeCaptureWebContents?.isDestroyed() ?? true,
+    lastKnownUrl: activeCaptureWindowUrl ?? null,
+    lastKnownTitle: activeCaptureWindowTitle ?? null,
+  };
+}
+
+app.on("before-quit", () => recordCaptureDiagnostic("app-before-quit"));
+app.on("will-quit", () => recordCaptureDiagnostic("app-will-quit"));
+process.on("exit", (exitCode) => recordCaptureDiagnostic("process-exit", { exitCode }));
 
 const {
   click,
@@ -66,10 +138,31 @@ const sourceCommit = execFileSync("git", ["rev-parse", "HEAD"], {
   cwd: repositoryRoot,
   encoding: "utf8",
 }).trim();
+const sourceProofFiles = [
+  "scripts/test-interaction-context-lifecycle.mjs",
+  "scripts/test-desktop-context-draft-warning.mjs",
+  "scripts/capture-interaction-context-evidence.mjs",
+  "scripts/lib/interaction-context-capture-proof.mjs",
+  "scripts/recognize-desktop-capture-frame.swift",
+  "scripts/electron-workspace-driver.mjs",
+];
+const sourceTree = execFileSync("git", ["rev-parse", "HEAD^{tree}"], {
+  cwd: repositoryRoot,
+  encoding: "utf8",
+}).trim();
+async function sourceFingerprints() {
+  return Promise.all(sourceProofFiles.map(async (file) => ({
+    file,
+    sha256: createHash("sha256").update(await readFile(join(repositoryRoot, file))).digest("hex"),
+  })));
+}
+const sourceHashesBeforeCapture = await sourceFingerprints();
 const workingTreeDirty = Boolean(execFileSync("git", ["status", "--porcelain"], {
   cwd: repositoryRoot,
   encoding: "utf8",
 }).trim());
+if (workingTreeDirty) throw new Error("Interaction-context evidence capture requires a clean committed source snapshot.");
+const trackedWorkspaceBeforeCapture = await captureTrackedWorkspaceSnapshot(repositoryRoot, captureOutputPaths);
 
 app.setName("Relayer Interaction Context Evidence");
 const electronProfileDirectory = join(dataDirectory, "electron-profile");
@@ -100,6 +193,11 @@ function registerIpc() {
     subject: "fixture|node-details-evidence",
   }));
   ipcMain.handle("relayer:appearance-read", () => ({ appearance: "dark" }));
+  ipcMain.handle("relayer:composer-drafts-read", () => composerDraftState);
+  ipcMain.handle("relayer:composer-drafts-write", (_event, value) => {
+    composerDraftState = value;
+    return composerDraftState;
+  });
   ipcMain.handle("relayer:update-status", () => ({
     phase: "development",
     channel: "stable",
@@ -124,6 +222,8 @@ function unregisterIpc() {
   for (const channel of [
     "relayer:account-read",
     "relayer:appearance-read",
+    "relayer:composer-drafts-read",
+    "relayer:composer-drafts-write",
     "relayer:update-status",
     "relayer:folder-choose",
     "relayer:tutorial-read",
@@ -159,37 +259,389 @@ async function capturePagePng(label, timeoutMs = 10_000) {
   }
 }
 
-async function captureStep(caption, selector, duration = 4.5) {
-  await mkdir(framesDirectory, { recursive: true });
-  await evaluate(`(() => {
-    document.querySelector('[data-relayer-evidence-caption]')?.remove();
-    document.querySelectorAll('[data-relayer-evidence-highlight]').forEach((element) => {
-      element.style.removeProperty('box-shadow');
-      element.removeAttribute('data-relayer-evidence-highlight');
-    });
-    const target = document.querySelector(${JSON.stringify(selector)});
-    if (target) {
-      target.dataset.relayerEvidenceHighlight = 'true';
-      target.style.boxShadow = '0 0 0 3px rgba(128,174,248,.78),0 14px 40px rgba(0,0,0,.5)';
+function assertDeepEqual(actual, expected, label) {
+  if (!isDeepStrictEqual(actual, expected)) {
+    throw new Error(`${label}: ${JSON.stringify({ expected, actual })}`);
+  }
+}
+
+function interactionIds(thread) {
+  return thread.interactions.map((interaction) => interaction.id);
+}
+
+function createCaptureTextRecognizer() {
+  const worker = spawn("swift", [textRecognizerPath], { stdio: ["pipe", "pipe", "inherit"] });
+  const responses = new Map();
+  const lines = createInterface({ input: worker.stdout });
+  let nextId = 0;
+  let exited = false;
+  let readyResolve;
+  let readyReject;
+  const ready = new Promise((resolveReady, rejectReady) => {
+    readyResolve = resolveReady;
+    readyReject = rejectReady;
+  });
+  const fail = (error) => {
+    if (exited) return;
+    exited = true;
+    readyReject(error);
+    for (const pending of responses.values()) pending.reject(error);
+    responses.clear();
+  };
+  lines.on("line", (line) => {
+    let response;
+    try {
+      response = JSON.parse(line);
+    } catch (error) {
+      fail(new Error(`Capture frame text recognizer returned invalid JSON: ${error.message}`));
+      return;
     }
-    const caption = document.createElement('div');
-    caption.dataset.relayerEvidenceCaption = 'true';
-    caption.textContent = ${JSON.stringify(caption)};
-    caption.style.cssText = 'position:fixed;left:50%;top:58px;transform:translateX(-50%);z-index:1000;max-width:900px;padding:10px 16px;border:1px solid #4a5058;border-radius:10px;background:rgba(20,23,27,.97);box-shadow:0 14px 42px rgba(0,0,0,.5);color:#f1f2f3;font:600 14px/1.35 Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;text-align:center;pointer-events:none';
-    document.body.append(caption);
-  })()`);
+    if (response.ready === true) {
+      readyResolve();
+      return;
+    }
+    const pending = responses.get(response.id);
+    if (!pending) return;
+    responses.delete(response.id);
+    if (response.error) pending.reject(new Error(`Capture frame text recognition failed: ${response.error}`));
+    else pending.resolve(response.text || "");
+  });
+  worker.once("error", fail);
+  worker.once("exit", (code, signal) => {
+    if (!exited && code !== 0) fail(new Error(`Capture frame text recognizer exited (${code ?? signal ?? "unknown"}).`));
+    exited = true;
+  });
+  return {
+    ready,
+    async recognize(file) {
+      await ready;
+      if (exited) throw new Error("Capture frame text recognizer is no longer running.");
+      const id = ++nextId;
+      const result = new Promise((resolveResult, rejectResult) => {
+        responses.set(id, { resolve: resolveResult, reject: rejectResult });
+      });
+      worker.stdin.write(`${JSON.stringify({ id, file })}\n`);
+      return result;
+    },
+    async close() {
+      if (exited) return;
+      worker.stdin.end();
+      await new Promise((resolveExit, rejectExit) => {
+        worker.once("exit", (code) => code === 0
+          ? resolveExit()
+          : rejectExit(new Error(`Capture frame text recognizer exited with ${code}.`)));
+        worker.once("error", rejectExit);
+      });
+      exited = true;
+    },
+  };
+}
+
+async function recognizeRecordingFrame(recorder, frame) {
+  if (!captureTextRecognizer) throw new Error("The captured-frame recognizer has not started.");
+  const file = join(recorder.directory, `frame-${String(frame.frameNumber).padStart(5, "0")}.png`);
+  return { ...frame, recognizedText: await captureTextRecognizer.recognize(file) };
+}
+
+async function startContinuousRecording(name) {
+  if (activeRecordingSegment) throw new Error("A continuous interaction-context segment is already active.");
+  const directory = join(continuousFramesDirectory, name);
+  await mkdir(directory, { recursive: true });
+  const outputFile = {
+    "before-restart": beforeRestartVideoFile,
+    "after-restart": afterRestartVideoFile,
+  }[name];
+  if (!outputFile) throw new Error(`Unknown interaction-context recording segment: ${name}`);
+  const recordingStartedAtMs = Date.now();
+  const frameTimestamps = [];
+  let capturedPixelDimensions;
+  let previousCaptureAtMs = recordingStartedAtMs;
+  let captureQueue = Promise.resolve();
+
+  const captureFrame = () => {
+    const capture = captureQueue.then(async () => {
+      if (!mainWindow || mainWindow.isDestroyed()) {
+        throw new Error(`The Electron window ended during the ${name} recording segment.`);
+      }
+      const image = await mainWindow.webContents.capturePage();
+      const dimensions = image.getSize();
+      if (!capturedPixelDimensions) {
+        capturedPixelDimensions = dimensions;
+      } else if (!isDeepStrictEqual(dimensions, capturedPixelDimensions)) {
+        throw new Error(`The ${name} recording pixel dimensions changed: ${JSON.stringify(dimensions)}`);
+      }
+      const capturedAtMs = Date.now();
+      const frameNumber = frameTimestamps.length;
+      const png = image.toPNG();
+      const file = join(directory, `frame-${String(frameNumber).padStart(5, "0")}.png`);
+      await writeFile(file, png);
+      const frame = {
+        frameNumber,
+        capturedAtUtc: new Date(capturedAtMs).toISOString(),
+        elapsedMs: capturedAtMs - recordingStartedAtMs,
+        sha256: createHash("sha256").update(png).digest("hex"),
+      };
+      frameTimestamps.push(frame);
+      previousCaptureAtMs = capturedAtMs;
+      return frame;
+    });
+    captureQueue = capture.catch(() => {});
+    return capture;
+  };
+
+  await captureFrame();
+  const recorder = {
+    name,
+    directory,
+    outputFile,
+    pixelDimensions: capturedPixelDimensions,
+    events: [],
+    frameTimestamps,
+    recordingStartedAtMs,
+    capturing: true,
+    error: undefined,
+    loop: undefined,
+  };
+  recorder.loop = (async () => {
+    try {
+      while (recorder.capturing) {
+        await sleep(Math.max(0, previousCaptureAtMs + continuousFrameIntervalMs - Date.now()));
+        if (!recorder.capturing) break;
+        await captureFrame();
+      }
+    } catch (error) {
+      recorder.error = error;
+      recorder.capturing = false;
+    }
+  })();
+  recorder.captureBoundary = async (
+    eventName,
+    expectedVisibleText,
+    holdMs = defaultBoundaryHoldMs,
+    expectedAbsentText = [],
+  ) => {
+    if (!Array.isArray(expectedVisibleText) || expectedVisibleText.length === 0) {
+      throw new Error(`Visual boundary ${eventName} has no required captured-screen content.`);
+    }
+    mainWindow.webContents.invalidate();
+    await waitForPaint();
+    const frame = await captureFrame();
+    const startFrame = await recognizeRecordingFrame(recorder, frame);
+    await sleep(holdMs);
+    mainWindow.webContents.invalidate();
+    await waitForPaint();
+    const endFrame = await captureFrame();
+    const endFrameWithText = await recognizeRecordingFrame(recorder, endFrame);
+    const holdFrames = recorder.frameTimestamps.slice(frame.frameNumber, endFrame.frameNumber + 1);
+    const holdFrameGaps = holdFrames.slice(1).map((captured, index) => (
+      captured.elapsedMs - holdFrames[index].elapsedMs
+    ));
+    const maximumHoldCaptureGapMs = holdFrameGaps.length ? Math.max(...holdFrameGaps) : 0;
+    const observedHoldMs = validateVisibleBoundaryHold({
+      startFrame,
+      endFrame: { ...endFrameWithText, maximumCaptureGapMs: maximumHoldCaptureGapMs },
+      expectedText: expectedVisibleText,
+      expectedAbsentText,
+      minimumHoldMs: Math.max(defaultBoundaryHoldMs, holdMs),
+      maximumCaptureGapMs: maximumContinuousFrameGapMs,
+    });
+    const event = {
+      name: eventName,
+      recordedAtUtc: new Date().toISOString(),
+      elapsedMs: Date.now() - recorder.recordingStartedAtMs,
+      framesCapturedBeforeEvent: frame.frameNumber,
+      capturedFrameNumber: frame.frameNumber,
+      capturedFramePresentationMs: frame.elapsedMs - recorder.frameTimestamps[0].elapsedMs,
+      capturedFrameAtUtc: frame.capturedAtUtc,
+      capturedFrameSha256: frame.sha256,
+      paintSynchronized: "webContents.invalidate followed by two renderer animation frames before capture",
+      expectedVisibleText,
+      expectedAbsentText,
+      visibleContentAccepted: true,
+      recognizedTextAtStart: startFrame.recognizedText,
+      holdEndFrameNumber: endFrame.frameNumber,
+      holdEndFrameAtUtc: endFrame.capturedAtUtc,
+      holdEndFrameSha256: endFrame.sha256,
+      recognizedTextAtHoldEnd: endFrameWithText.recognizedText,
+      requestedHoldMs: holdMs,
+      observedHoldMs,
+      maximumHoldCaptureGapMs,
+    };
+    recorder.events.push(event);
+    return event;
+  };
+  activeRecordingSegment = recorder;
+  recordingSegments.push(recorder);
+  return recorder;
+}
+
+async function captureRecordingBoundary(
+  recorder,
+  name,
+  expectedVisibleText,
+  holdMs = defaultBoundaryHoldMs,
+  expectedAbsentText = [],
+) {
+  return recorder.captureBoundary(name, expectedVisibleText, holdMs, expectedAbsentText);
+}
+
+async function stopContinuousRecording(recorder) {
+  if (activeRecordingSegment !== recorder) throw new Error("The requested recording segment is not active.");
+  recorder.capturing = false;
+  await recorder.loop;
+  activeRecordingSegment = undefined;
+  if (recorder.error) throw recorder.error;
+  if (recorder.frameTimestamps.length < 2) {
+    throw new Error(`The ${recorder.name} continuous segment captured fewer than two renderer frames.`);
+  }
+  const frameGapsMs = recorder.frameTimestamps.slice(1).map((frame, index) => (
+    frame.elapsedMs - recorder.frameTimestamps[index].elapsedMs
+  ));
+  const maximumFrameGapMs = Math.max(...frameGapsMs);
+  if (maximumFrameGapMs > maximumContinuousFrameGapMs) {
+    throw new Error(`The ${recorder.name} recording lost continuous frame sampling for ${maximumFrameGapMs}ms.`);
+  }
+  const recordingEndedAtMs = Date.now();
+  const frameListFile = join(recorder.directory, "frames.ffconcat");
+  const frameList = ["ffconcat version 1.0"];
+  for (let index = 0; index < recorder.frameTimestamps.length; index += 1) {
+    const frame = recorder.frameTimestamps[index];
+    const framePath = join(recorder.directory, `frame-${String(frame.frameNumber).padStart(5, "0")}.png`);
+    frameList.push(`file '${framePath.replaceAll("'", "'\\''")}'`);
+    frameList.push("option framerate 1000");
+    const next = recorder.frameTimestamps[index + 1];
+    if (next) {
+      frameList.push(`duration ${((next.elapsedMs - frame.elapsedMs) / 1000).toFixed(6)}`);
+    } else {
+      frameList.push(`duration ${(terminalFrameHoldMs / 1000).toFixed(6)}`);
+    }
+  }
+  const finalFrame = recorder.frameTimestamps.at(-1);
+  const finalFramePath = join(recorder.directory, `frame-${String(finalFrame.frameNumber).padStart(5, "0")}.png`);
+  frameList.push(`file '${finalFramePath.replaceAll("'", "'\\''")}'`);
+  frameList.push("option framerate 1000");
+  frameList.push(`duration ${(terminalFrameHoldMs / 1000).toFixed(6)}`);
+  frameList.push(`file '${finalFramePath.replaceAll("'", "'\\''")}'`);
+  frameList.push("option framerate 1000");
+  await writeFile(frameListFile, `${frameList.join("\n")}\n`);
+  execFileSync("ffmpeg", [
+    "-hide_banner", "-loglevel", "error", "-y",
+    "-f", "concat", "-safe", "0", "-i", frameListFile,
+    "-fps_mode", "vfr", "-enc_time_base", "1:1000",
+    "-vf", "format=yuv420p",
+    "-an", "-c:v", "libx264", "-bf", "0", "-preset", "veryfast", "-crf", "18",
+    "-video_track_timescale", "1000", "-movflags", "+faststart", recorder.outputFile,
+  ], { cwd: repositoryRoot, stdio: "inherit" });
+  const probe = JSON.parse(execFileSync("ffprobe", [
+    "-v", "error",
+    "-show_entries", "format=duration:stream=codec_name,width,height,pix_fmt:frame=best_effort_timestamp_time",
+    "-show_frames",
+    "-of", "json",
+    recorder.outputFile,
+  ], { cwd: repositoryRoot, encoding: "utf8" }));
+  const decodeValidation = spawn("ffmpeg", [
+    "-hide_banner", "-loglevel", "warning", "-i", recorder.outputFile, "-f", "null", "-",
+  ], { cwd: repositoryRoot, stdio: ["ignore", "ignore", "pipe"] });
+  let decoderDiagnostics = "";
+  decodeValidation.stderr.setEncoding("utf8");
+  decodeValidation.stderr.on("data", (chunk) => { decoderDiagnostics += chunk; });
+  const decodeExit = await new Promise((resolveDecode, rejectDecode) => {
+    decodeValidation.once("error", rejectDecode);
+    decodeValidation.once("close", (code, signal) => resolveDecode({ code, signal }));
+  });
+  if (decodeExit.code !== 0) {
+    throw new Error(`VFR decode-to-null failed (${decodeExit.code ?? decodeExit.signal}): ${decoderDiagnostics}`);
+  }
+  const encodedFrameTimestampsMs = (probe.frames || []).map((frame) => (
+    Math.round(Number(frame.best_effort_timestamp_time) * 1000)
+  ));
+  const expectedFrameTimestampsMs = recorder.frameTimestamps.map((frame) => (
+    frame.elapsedMs - recorder.frameTimestamps[0].elapsedMs
+  ));
+  const maximumPresentationTimingErrorMs = Math.max(...expectedFrameTimestampsMs.map((timestamp, index) => (
+    Math.abs(encodedFrameTimestampsMs[index] - timestamp)
+  )));
+  if (maximumPresentationTimingErrorMs > 5) {
+    throw new Error(`${recorder.name} playback timing differs from renderer capture by up to ${maximumPresentationTimingErrorMs}ms.`);
+  }
+  const terminalFrameCoverage = validateTerminalFrameCoverage({
+    capturedPresentationMs: expectedFrameTimestampsMs,
+    encodedPresentationMs: encodedFrameTimestampsMs,
+    containerDurationMs: Number(probe.format.duration) * 1000,
+    terminalFrameHoldMs,
+  });
+  const capturedSpanMs = recorder.frameTimestamps.at(-1).elapsedMs - recorder.frameTimestamps[0].elapsedMs;
+  const encodedDurationMs = Number(probe.format.duration) * 1000;
+  const encodedTerminalPtsMs = encodedFrameTimestampsMs.at(-1);
+  const encodedSpanMs = encodedTerminalPtsMs - encodedFrameTimestampsMs[0];
+  const terminalScreenshotFile = recorder.name === "before-restart"
+    ? beforeTerminalScreenshotFile
+    : afterTerminalScreenshotFile;
+  execFileSync("ffmpeg", [
+    "-hide_banner", "-loglevel", "error", "-y", "-i", recorder.outputFile,
+    "-vf", `select=eq(n\\,${encodedFrameTimestampsMs.length - 1})`,
+    "-fps_mode", "passthrough", "-frames:v", "1", terminalScreenshotFile,
+  ], { cwd: repositoryRoot, stdio: "inherit" });
+  const terminalFrameText = await captureTextRecognizer.recognize(terminalScreenshotFile);
+  const terminalExpectedText = recorder.events.at(-1)?.expectedVisibleText || [];
+  const normalizeText = (value) => String(value).toLocaleLowerCase("en-US")
+    .replace(/[^a-z0-9]+/g, " ").trim().replace(/\s+/g, " ");
+  if (terminalExpectedText.some((text) => !normalizeText(terminalFrameText).includes(normalizeText(text)))) {
+    throw new Error(`${recorder.name} terminal frame did not show its expected state: ${JSON.stringify({ terminalExpectedText, terminalFrameText })}`);
+  }
+  if (decoderDiagnostics.trim()) process.stderr.write(decoderDiagnostics);
+  const segment = {
+    file: recorder.outputFile.split("/").at(-1),
+    sha256: createHash("sha256").update(await readFile(recorder.outputFile)).digest("hex"),
+    capture: "Continuous sampled frames directly from the real Electron BrowserWindow; the final captured renderer frame is repeated to encode its measured terminal hold.",
+    frameTiming: `variable frame rate from renderer timestamps with two repeated terminal samples ${terminalFrameHoldMs}ms apart; B-frame reordering is disabled so the MP4 container covers the final PTS`,
+    frameCount: recorder.frameTimestamps.length,
+    encodedFrameCount: encodedFrameTimestampsMs.length,
+    maximumFrameGapMs,
+    maximumPresentationTimingErrorMs,
+    capturedSpanMs,
+    encodedSpanMs,
+    encodedDurationMs,
+    terminalFrameCoverage,
+    terminalScreenshot: {
+      file: terminalScreenshotFile.split("/").at(-1),
+      sha256: createHash("sha256").update(await readFile(terminalScreenshotFile)).digest("hex"),
+      recognizedText: terminalFrameText,
+    },
+    decodeValidation: {
+      decodeToNullExitCode: decodeExit.code,
+      diagnostics: decoderDiagnostics.trim(),
+      terminalFrameExtractedAndRecognized: true,
+    },
+    startedAtUtc: new Date(recorder.recordingStartedAtMs).toISOString(),
+    endedAtUtc: new Date(recordingEndedAtMs).toISOString(),
+    wallClockDurationMs: recordingEndedAtMs - recorder.recordingStartedAtMs,
+    frameTimestamps: recorder.frameTimestamps,
+    encodedFrameTimestampsMs,
+    events: recorder.events,
+    stream: probe.streams[0],
+    encodedDurationSeconds: Number(Number(probe.format.duration).toFixed(3)),
+    decodeToNullSucceeded: true,
+  };
+  recorder.receipt = segment;
+  return segment;
+}
+
+async function abandonContinuousRecording() {
+  if (!activeRecordingSegment) return;
+  const recorder = activeRecordingSegment;
+  recorder.capturing = false;
+  await recorder.loop;
+  activeRecordingSegment = undefined;
+}
+
+async function captureStep(caption, selector) {
+  await mkdir(framesDirectory, { recursive: true });
   await refreshCaptureSurface();
   const file = join(framesDirectory, `${String(frames.length + 1).padStart(2, "0")}.png`);
-  await writeFile(file, await capturePagePng(`video frame ${frames.length + 1}`));
-  frames.push({ file, duration, caption });
-  process.stdout.write(`Captured ${frames.length}/20: ${caption}\n`);
-  await evaluate(`(() => {
-    document.querySelector('[data-relayer-evidence-caption]')?.remove();
-    document.querySelectorAll('[data-relayer-evidence-highlight]').forEach((element) => {
-      element.style.removeProperty('box-shadow');
-      element.removeAttribute('data-relayer-evidence-highlight');
-    });
-  })()`);
+  await writeFile(file, await capturePagePng(`checkpoint ${frames.length + 1}`));
+  frames.push({ file, caption, capturedAtUtc: new Date().toISOString(), selector });
+  process.stdout.write(`Captured checkpoint ${frames.length}: ${caption}\n`);
 }
 
 function holdNextDraftSave() {
@@ -275,8 +727,37 @@ async function openThreadWindow(threadId) {
     desktopDirectory: join(repositoryRoot, "desktop"),
     getAppearance: () => "dark",
     updater: { status: () => ({ phase: "development" }) },
+    openExternal: async () => {},
   });
   mainWindow = await createWindow(productSession);
+  const windowId = ++captureWindowSequence;
+  const capturedWindow = mainWindow;
+  const capturedWebContents = mainWindow.webContents;
+  const webContentsId = capturedWebContents.id;
+  activeCaptureWindow = capturedWindow;
+  activeCaptureWebContents = capturedWebContents;
+  activeCaptureWindowUrl = capturedWebContents.getURL();
+  activeCaptureWindowTitle = capturedWindow.getTitle();
+  const recordWindowEvent = (event, details = {}) => recordCaptureDiagnostic(event, {
+    windowId,
+    webContentsId,
+    windowDestroyed: capturedWindow.isDestroyed(),
+    webContentsDestroyed: capturedWebContents.isDestroyed(),
+    lastKnownUrl: activeCaptureWindowUrl,
+    lastKnownTitle: activeCaptureWindowTitle,
+    ...details,
+  });
+  capturedWindow.on("close", () => recordWindowEvent("window-close"));
+  capturedWindow.on("closed", () => recordWindowEvent("window-closed"));
+  capturedWindow.on("unresponsive", () => recordWindowEvent("window-unresponsive"));
+  capturedWindow.on("responsive", () => recordWindowEvent("window-responsive"));
+  capturedWebContents.on("destroyed", () => recordWindowEvent("webcontents-destroyed"));
+  capturedWebContents.on("did-navigate", (_event, url) => { activeCaptureWindowUrl = url; });
+  capturedWebContents.on("page-title-updated", (_event, title) => { activeCaptureWindowTitle = title; });
+  capturedWebContents.on("render-process-gone", (_event, details) => (
+    recordWindowEvent("render-process-gone", { reason: details?.reason, exitCode: details?.exitCode })
+  ));
+  recordWindowEvent("window-created");
   mainWindow.setSize(1480, 920);
   await mainWindow.loadURL(`${productSession.origin}/?threadId=${encodeURIComponent(threadId)}`);
   mainWindow.show();
@@ -303,47 +784,21 @@ async function restartStack(threadId) {
   await openThreadWindow(threadId);
 }
 
-async function encodeVideo() {
-  const concatFile = join(framesDirectory, "frames.txt");
-  const entries = frames.flatMap((frame) => [
-    `file '${frame.file.replaceAll("'", "'\\''")}'`,
-    `duration ${frame.duration}`,
-  ]);
-  entries.push(`file '${frames.at(-1).file.replaceAll("'", "'\\''")}'`);
-  await writeFile(concatFile, `${entries.join("\n")}\n`);
-  execFileSync("ffmpeg", [
-    "-hide_banner", "-loglevel", "error", "-y",
-    "-f", "concat", "-safe", "0", "-i", concatFile,
-    "-vf", "scale=1480:920:force_original_aspect_ratio=decrease,pad=1480:920:(ow-iw)/2:(oh-ih)/2,format=yuv420p",
-    "-r", "30", "-movflags", "+faststart", videoOutputFile,
-  ], { cwd: repositoryRoot, stdio: "inherit" });
-  const probe = JSON.parse(execFileSync("ffprobe", [
-    "-v", "error",
-    "-show_entries", "format=duration:stream=codec_name,width,height,pix_fmt",
-    "-of", "json",
-    videoOutputFile,
-  ], { cwd: repositoryRoot, encoding: "utf8" }));
-  execFileSync("ffmpeg", [
-    "-hide_banner", "-loglevel", "error", "-i", videoOutputFile, "-f", "null", "-",
-  ], { cwd: repositoryRoot, stdio: "inherit" });
-  return {
-    file: "interaction-context.mp4",
-    sha256: createHash("sha256").update(await readFile(videoOutputFile)).digest("hex"),
-    durationSeconds: Number(Number(probe.format.duration).toFixed(3)),
-    stream: probe.streams[0],
-    playbackDecoded: true,
-  };
-}
-
 async function run() {
   process.stdout.write("Starting real-Electron zero-inference interaction-context capture.\n");
+  if (workingTreeDirty) throw new Error("Interaction-context evidence capture requires a clean committed source snapshot.");
   await mkdir(outputDirectory, { recursive: true });
   await Promise.all([
-    videoOutputFile,
+    beforeRestartVideoFile,
+    afterRestartVideoFile,
+    beforeTerminalScreenshotFile,
+    afterTerminalScreenshotFile,
     composerScreenshotFile,
     restartedScreenshotFile,
     manifestFile,
   ].map((path) => rm(path, { force: true })));
+  captureTextRecognizer = createCaptureTextRecognizer();
+  await captureTextRecognizer.ready;
   registerIpc();
   keepaliveWindow = new BrowserWindow({ width: 1, height: 1, show: false });
   await startServices();
@@ -585,6 +1040,11 @@ async function run() {
   await click("[aria-label='Show Incoming queue annotations']");
   await click("[aria-label='Close Incoming queue annotations']");
   await clickNode("Two-worker pool");
+  await waitFor("first draft editor settled before opening second draft", () => evaluate(`
+    document.querySelector('#detailTitle')?.textContent === 'Two-worker pool'
+      && !document.querySelector('#contextAnnotationEditor')
+      && document.querySelector('#nodeContextDock')?.classList.contains('hidden')
+  `));
   await click("#attachNodeContext");
   await setValue("#contextAnnotationEditor", "Keep both workers busy while tasks are queued.");
   await click("[aria-label='Confirm annotation']");
@@ -634,17 +1094,35 @@ async function run() {
   await captureStep(
     "14. A compact node pill opens a fixed scrollable list for ordered annotations above the composer",
     "#composerContextTray",
-    4.5,
   );
   await click("[aria-label='Close Incoming queue annotations']");
+  recordCaptureDiagnostic("second-turn-send-click-started", {
+    ...captureWindowDiagnosticState(),
+  });
   await click("#sendInteraction");
+  recordCaptureDiagnostic("second-turn-send-click-returned", captureWindowDiagnosticState());
   const secondDetail = await waitForAcceptedInteractions(thread.id, 2);
-  await waitFor("second turn context pill", () => evaluate(`
-    document.querySelector('#turnPickerButton')?.textContent === 'Turn 2 of 2'
-      && !document.querySelector('#interactionContextPill')?.classList.contains('hidden')
-      && document.querySelector('#interactionContextCount')?.textContent === '1'
-      && document.querySelector('#threadPrompt')?.disabled === false
-  `));
+  recordCaptureDiagnostic("second-turn-accepted", {
+    interactionId: secondDetail.interactions[1]?.id,
+    completionStatus: secondDetail.interactions[1]?.completionStatus,
+    ...captureWindowDiagnosticState(),
+  });
+  recordCaptureDiagnostic("second-turn-ui-check-started", { windowId: captureWindowSequence });
+  try {
+    await waitFor("second turn context pill", () => evaluate(`
+      document.querySelector('#turnPickerButton')?.textContent === 'Turn 2 of 2'
+        && !document.querySelector('#interactionContextPill')?.classList.contains('hidden')
+        && document.querySelector('#interactionContextCount')?.textContent === '1'
+        && document.querySelector('#threadPrompt')?.disabled === false
+    `));
+    recordCaptureDiagnostic("second-turn-ui-check-passed", { windowId: captureWindowSequence });
+  } catch (error) {
+    recordCaptureDiagnostic("second-turn-ui-check-failed", {
+      ...captureWindowDiagnosticState(),
+      message: error instanceof Error ? error.message : String(error),
+    });
+    throw error;
+  }
   const secondContext = secondDetail.interactions[1].contexts?.[0];
   if (JSON.stringify(secondContext?.annotations) !== JSON.stringify([
     "Queue order controls which task is claimed next.",
@@ -658,7 +1136,6 @@ async function run() {
   await captureStep(
     "15. The turn banner shows one connected-node pill; its popover restores both annotations in order",
     "#interactionContextPopover",
-    4.5,
   );
 
   await click("#interactionContextPopover .interaction-context-node");
@@ -706,7 +1183,6 @@ async function run() {
   await captureStep(
     "18. Annotation-only history has no derived message label; the context pill preserves the actual input",
     "#interactionBanner",
-    4.5,
   );
 
   await restartStack(thread.id);
@@ -726,7 +1202,6 @@ async function run() {
   await captureStep(
     "19. After restarting Electron's Rust graph/app services and window, the exact context is still visible",
     "#interactionContextPopover",
-    4.5,
   );
   await click("#interactionContextPopover .interaction-context-node");
   await waitFor("restarted target Node Details", () => evaluate(`
@@ -736,32 +1211,479 @@ async function run() {
   await captureStep(
     "20. The persisted context still reopens the exact target node after restart",
     "#inspector",
-    4.5,
   );
+
+  const restartDraftA = "Keep queue claims in their original order.";
+  await click("#closeInspector");
+  await waitFor("close Node Details before the recorded two-draft journey", () => evaluate(`
+    document.querySelector('#inspector')?.classList.contains('hidden')
+  `));
+  const beforeRestartRecording = await startContinuousRecording("before-restart");
+  await captureRecordingBoundary(
+    beforeRestartRecording,
+    "journey recording started with the graph ready and Node Details closed",
+    ["Incoming queue"],
+    defaultBoundaryHoldMs,
+    ["NODE DETAILS", "Add an annotation"],
+  );
+  await clickNode("Incoming queue");
+  await waitFor("recorded Incoming queue Node Details open", () => evaluate(`
+    document.querySelector('#detailTitle')?.textContent === 'Incoming queue'
+      && !document.querySelector('#inspector')?.classList.contains('hidden')
+  `));
+  await captureRecordingBoundary(beforeRestartRecording, "opened Incoming queue Node Details for draft A", ["NODE DETAILS", "Incoming queue"]);
+  await click("#attachNodeContext");
+  await waitFor("recorded first draft editor open", () => evaluate(`Boolean(document.querySelector('#contextAnnotationEditor'))`));
+  await captureRecordingBoundary(beforeRestartRecording, "opened the draft A editor", ["NODE DETAILS", "Incoming queue", "Add an annotation"]);
+  await setValue("#contextAnnotationEditor", restartDraftA);
+  const restartDraftRecordA = await waitFor("first restart draft saved", async () => {
+    const response = await productRequest(`/api/threads/${thread.id}/context-drafts`);
+    return response.drafts?.find((draft) => draft.text === restartDraftA) || false;
+  });
+  await captureRecordingBoundary(beforeRestartRecording, "typed and durably saved draft A on Incoming queue", [restartDraftA]);
+  await clickNode("Two-worker pool");
+  await waitFor("recorded switch to Two-worker pool", () => evaluate(`
+    document.querySelector('#detailTitle')?.textContent === 'Two-worker pool'
+      && !document.querySelector('#contextAnnotationEditor')
+  `));
+  await captureRecordingBoundary(
+    beforeRestartRecording,
+    "switched from Incoming queue to Two-worker pool with no annotation editor",
+    ["NODE DETAILS", "Two-worker pool"],
+    defaultBoundaryHoldMs,
+    ["Add an annotation", restartDraftA],
+  );
+  await click("#attachNodeContext");
+  const restartDraftB = "Keep both workers available for queued tasks.";
+  await waitFor("second draft editor open in continuous recording", () => evaluate(`Boolean(document.querySelector('#contextAnnotationEditor'))`));
+  await captureRecordingBoundary(beforeRestartRecording, "opened the draft B editor", ["NODE DETAILS", "Two-worker pool", "Add an annotation"]);
+  await setValue("#contextAnnotationEditor", restartDraftB);
+  const bothRestartDrafts = await waitFor("two occurrence-bound drafts saved", async () => {
+    const response = await productRequest(`/api/threads/${thread.id}/context-drafts`);
+    return response.drafts?.length === 2
+      && response.drafts.some((draft) => draft.targetNode?.title === "Incoming queue" && draft.text === restartDraftA)
+      && response.drafts.some((draft) => draft.targetNode?.title === "Two-worker pool" && draft.text === restartDraftB)
+      ? response.drafts
+      : false;
+  });
+  assertDeepEqual(
+    bothRestartDrafts.find((draft) => draft.text === restartDraftA),
+    restartDraftRecordA,
+    "Creating B changed the complete durable A record",
+  );
+  const restartDraftRecordB = bothRestartDrafts.find((draft) => draft.text === restartDraftB);
+  if (!restartDraftRecordB) throw new Error("The durable B draft record was absent after save.");
+  await captureRecordingBoundary(beforeRestartRecording, "typed and durably saved draft B on Two-worker pool", [restartDraftB]);
+  await clickNode("Incoming queue");
+  await waitFor("draft A restored before restart", () => evaluate(`
+    document.querySelector('#contextAnnotationEditor')?.value === ${JSON.stringify(restartDraftA)}
+  `));
+  await captureRecordingBoundary(beforeRestartRecording, "restored draft A after saving B", [restartDraftA]);
+  await clickNode("Two-worker pool");
+  await waitFor("draft B restored before restart", () => evaluate(`
+    document.querySelector('#contextAnnotationEditor')?.value === ${JSON.stringify(restartDraftB)}
+  `));
+  await captureRecordingBoundary(beforeRestartRecording, "restored draft B after saving and restoring A", [restartDraftB]);
+  await clickNode("Incoming queue");
+  await waitFor("draft A left visible before restart", () => evaluate(`
+    document.querySelector('#contextAnnotationEditor')?.value === ${JSON.stringify(restartDraftA)}
+  `));
+  await captureRecordingBoundary(beforeRestartRecording, "both complete durable drafts are present before service/window restart", [restartDraftA]);
+  await stopContinuousRecording(beforeRestartRecording);
+  const restartOperationStartedAtUtc = new Date().toISOString();
+  await restartStack(thread.id);
+  const restartOperationEndedAtUtc = new Date().toISOString();
+  const afterRestartRecording = await startContinuousRecording("after-restart");
+  await captureRecordingBoundary(
+    afterRestartRecording,
+    "Electron BrowserWindow and app services reopened after explicit recording discontinuity with Node Details closed",
+    ["Incoming queue"],
+    defaultBoundaryHoldMs,
+    ["NODE DETAILS", "Add an annotation"],
+  );
+  await waitForAcceptedInteractions(thread.id, 3);
+  const reopenedDrafts = await productRequest(`/api/threads/${thread.id}/context-drafts`);
+  assertDeepEqual(reopenedDrafts.drafts, bothRestartDrafts, "Full service and window restart changed either complete draft record");
+  await clickNode("Incoming queue");
+  await waitFor("first draft restored after restart", () => evaluate(`
+    document.querySelector('#contextAnnotationEditor')?.value === ${JSON.stringify(restartDraftA)}
+  `));
+  await captureRecordingBoundary(afterRestartRecording, "restored draft A after full service/window restart", [restartDraftA]);
+  await writeFile(twoDraftsScreenshotFile, await capturePagePng("two drafts restored after restart"));
+  await captureStep(
+    "21. After a full service and window restart, the first exact unconfirmed draft restores on its node",
+    "#nodeContextDock",
+  );
+  await clickNode("Two-worker pool");
+  await waitFor("second draft restored after restart", () => evaluate(`
+    document.querySelector('#contextAnnotationEditor')?.value === ${JSON.stringify(restartDraftB)}
+  `));
+  await captureRecordingBoundary(afterRestartRecording, "restored draft B after full service/window restart", [restartDraftB]);
+  await captureStep(
+    "22. Selecting the other node restores its separate exact unconfirmed draft after restart",
+    "#nodeContextDock",
+  );
+  await writeFile(secondDraftScreenshotFile, await capturePagePng("second draft restored after restart"));
+  await clickNode("Incoming queue");
+  const restartDraftRecordBBeforeConfirm = structuredClone(restartDraftRecordB);
+  await click("[aria-label='Confirm annotation']");
+  const confirmedState = await waitFor("first draft confirmed while second remains", async () => {
+    const response = await productRequest(`/api/threads/${thread.id}/context-drafts`);
+    return response.drafts?.length === 1
+      && response.drafts[0].text === restartDraftB
+      && response.confirmations?.some((item) => item.annotation === restartDraftA)
+      ? response
+      : false;
+  });
+  assertDeepEqual(confirmedState.drafts, [restartDraftRecordBBeforeConfirm], "Confirming A changed the complete durable B record");
+  const confirmedARecord = structuredClone(confirmedState.confirmations.find((item) => item.annotation === restartDraftA));
+  if (!confirmedARecord
+    || confirmedARecord.draftId !== restartDraftRecordA.id
+    || confirmedARecord.annotation !== restartDraftA) {
+    throw new Error(`Confirmation A resolved to the wrong draft: ${JSON.stringify(confirmedARecord)}`);
+  }
+  assertDeepEqual(confirmedARecord.target, restartDraftRecordA.target, "Confirmed A used a different occurrence than its draft");
+  await captureRecordingBoundary(afterRestartRecording, "confirmed A while the full B record remained unchanged", ["Incoming queue"]);
+  await writeFile(confirmedDraftScreenshotFile, await capturePagePng("confirmed draft and remaining draft"));
+  await captureStep(
+    "23. Confirming the first draft leaves the other occurrence's durable draft unchanged",
+    "#composerContextTray",
+  );
+  await clickNode("Two-worker pool");
+  await waitFor("second draft editor selected for discard", () => evaluate(`
+    document.querySelector('#contextAnnotationEditor')?.value === ${JSON.stringify(restartDraftB)}
+      && document.querySelector('[aria-label="Discard annotation draft for Two-worker pool"]')
+  `));
+  await captureRecordingBoundary(afterRestartRecording, "restored B editor before discard", [restartDraftB]);
+  await click("[aria-label='Discard annotation draft for Two-worker pool']");
+  const discardedState = await waitFor("second draft discarded without changing confirmation", async () => {
+    const response = await productRequest(`/api/threads/${thread.id}/context-drafts`);
+    return response.drafts?.length === 0
+      && response.confirmations?.some((item) => item.annotation === restartDraftA)
+      ? response
+      : false;
+  });
+  assertDeepEqual(discardedState.confirmations, [confirmedARecord], "Discarding B changed the complete confirmed A record");
+  await waitFor("discarded B leaves its Node Details visible without a draft editor", () => evaluate(`(() => {
+    const dock = document.querySelector('#nodeContextDock');
+    return document.querySelector('#detailTitle')?.textContent === 'Two-worker pool'
+      && !document.querySelector('#contextAnnotationEditor')
+      && dock?.classList.contains('hidden') === true;
+  })()`));
+  await captureRecordingBoundary(
+    afterRestartRecording,
+    "discarded B leaves its historical node visible with no draft editor",
+    ["NODE DETAILS", "Two-worker pool"],
+    criticalBoundaryHoldMs,
+    ["Add an annotation", restartDraftB],
+  );
+  await click("#attachNodeContext");
+  const freshDraftB = "Review worker availability before sending.";
+  await waitFor("fresh B editor reopened after discard", () => evaluate(`Boolean(document.querySelector('#contextAnnotationEditor'))`));
+  await captureRecordingBoundary(afterRestartRecording, "recreated a fresh empty B editor after discard", ["NODE DETAILS", "Two-worker pool", "Add an annotation"]);
+  await setValue("#contextAnnotationEditor", freshDraftB);
+  const freshDraftRecord = await waitFor("fresh unconfirmed second draft saved", async () => {
+    const response = await productRequest(`/api/threads/${thread.id}/context-drafts`);
+    return response.drafts?.length === 1 && response.drafts[0].text === freshDraftB
+      ? response.drafts[0]
+      : false;
+  });
+  const freshDraftSnapshot = structuredClone(freshDraftRecord);
+  await captureRecordingBoundary(afterRestartRecording, "created fresh B after discarding the original B", [freshDraftB]);
+  await click("#closeInspector");
+  await waitFor("fresh draft editor closes before ordinary Send", () => evaluate(`
+    document.querySelector('#inspector')?.classList.contains('hidden')
+      && !document.querySelector('#contextAnnotationEditor')
+  `));
+  const preWarningThread = await productRequest(`/api/threads/${thread.id}`);
+  const interactionIdsBeforeWarning = interactionIds(preWarningThread);
+  await setValue("#threadPrompt", "Use the confirmed queue note for this follow-up.");
+  await click("#sendInteraction");
+  const warningPresentation = await waitFor("draft omission warning is visibly anchored and names the actual remaining draft", () => evaluate(`(() => {
+    const dialog = document.querySelector('#contextDraftSendWarning');
+    const bounds = dialog?.getBoundingClientRect();
+    const style = dialog && getComputedStyle(dialog);
+    return dialog?.open === true
+      && dialog.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true })
+      && bounds.width > 0 && bounds.height > 0
+      && bounds.right <= window.innerWidth && bounds.bottom <= window.innerHeight
+      && style.display !== 'none' && style.visibility === 'visible'
+      && document.querySelector('#contextDraftSendWarningList strong')?.textContent === 'Two-worker pool'
+      ? { x: bounds.x, y: bounds.y, width: bounds.width, height: bounds.height }
+      : false;
+  })()`));
+  await captureRecordingBoundary(afterRestartRecording, "first omission warning opened with fresh B named", ["Drafts will be omitted", "Two-worker pool"]);
+  assertDeepEqual(
+    (await productRequest(`/api/threads/${thread.id}/context-drafts`)).drafts,
+    [freshDraftSnapshot],
+    "Opening warning changed the complete fresh B record",
+  );
+  assertDeepEqual(
+    interactionIds(await productRequest(`/api/threads/${thread.id}`)),
+    interactionIdsBeforeWarning,
+    "Opening warning created or removed an interaction",
+  );
+  await refreshCaptureSurface();
+  await writeFile(warningScreenshotFile, await capturePagePng("draft omission warning"));
+  await captureStep(
+    "24. Send names the remaining unconfirmed Two-worker pool draft before omitting it",
+    "#contextDraftSendWarning",
+  );
+  await click("#cancelContextDraftSend");
+  await waitFor("Go back restores exact composition and draft", async () => {
+    const response = await productRequest(`/api/threads/${thread.id}/context-drafts`);
+    return !await evaluate(`document.querySelector('#contextDraftSendWarning')?.open === true`)
+      && await evaluate(`document.querySelector('#threadPrompt')?.value === 'Use the confirmed queue note for this follow-up.'`)
+      && response.drafts?.length === 1 && response.drafts[0].text === freshDraftB;
+  });
+  const goBackDraftState = await productRequest(`/api/threads/${thread.id}/context-drafts`);
+  assertDeepEqual(goBackDraftState.drafts, [freshDraftSnapshot], "Go back changed the complete fresh B record");
+  assertDeepEqual(
+    interactionIds(await productRequest(`/api/threads/${thread.id}`)),
+    interactionIdsBeforeWarning,
+    "Go back created or removed an interaction",
+  );
+  await captureRecordingBoundary(afterRestartRecording, "Go back restored composition without changing B or interactions", ["Use the confirmed queue note for this follow-up."]);
+  await captureStep(
+    "25. Go back restores the editable message and leaves the exact draft intact",
+    "#composerContextTray",
+  );
+  await click("#sendInteraction");
+  const secondWarningPresentation = await waitFor("second omission warning visibly reopened with the remaining draft named", () => evaluate(`(() => {
+    const dialog = document.querySelector('#contextDraftSendWarning');
+    const bounds = dialog?.getBoundingClientRect();
+    const style = dialog && getComputedStyle(dialog);
+    return dialog?.open === true
+      && dialog.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true })
+      && bounds.width > 0 && bounds.height > 0
+      && bounds.right <= window.innerWidth && bounds.bottom <= window.innerHeight
+      && style.display !== 'none' && style.visibility === 'visible'
+      && document.querySelector('#contextDraftSendWarningList strong')?.textContent === 'Two-worker pool'
+      ? { x: bounds.x, y: bounds.y, width: bounds.width, height: bounds.height }
+      : false;
+  })()`));
+  assertDeepEqual(
+    (await productRequest(`/api/threads/${thread.id}/context-drafts`)).drafts,
+    [freshDraftSnapshot],
+    "Reopening warning changed the complete fresh B record",
+  );
+  assertDeepEqual(
+    interactionIds(await productRequest(`/api/threads/${thread.id}`)),
+    interactionIdsBeforeWarning,
+    "Reopening warning created or removed an interaction",
+  );
+  await captureRecordingBoundary(
+    afterRestartRecording,
+    "second omission warning visibly reopened before explicit override",
+    ["Drafts will be omitted", "Two-worker pool"],
+    criticalBoundaryHoldMs,
+  );
+  await click("#confirmContextDraftSend");
+  const overrideDetail = await waitForAcceptedInteractions(thread.id, 4);
+  const overrideInteraction = overrideDetail.interactions.at(-1);
+  const submittedContextPayload = (overrideInteraction.contexts || []).map(({ target, annotations }) => ({ target, annotations }));
+  assertDeepEqual(submittedContextPayload, [{
+    target: confirmedARecord.target,
+    annotations: [confirmedARecord.annotation],
+  }], "Override submitted contexts beyond A's exact occurrence and single annotation");
+  assertDeepEqual(
+    interactionIds(overrideDetail),
+    [...interactionIdsBeforeWarning, overrideInteraction.id],
+    "Override did not append exactly one interaction after the warning journey",
+  );
+  await captureRecordingBoundary(
+    afterRestartRecording,
+    "explicit override submitted exactly A and no other context",
+    ["Turn 4 of 4", "Use the confirmed queue note for this follow-up."],
+    defaultBoundaryHoldMs,
+    ["Drafts will be omitted"],
+  );
+  const durableAfterOverride = await productRequest(`/api/threads/${thread.id}/context-drafts`);
+  assertDeepEqual(durableAfterOverride.drafts, [freshDraftSnapshot], "Override changed the complete durable B record");
+  const freshDraftTurnIndex = overrideDetail.interactions.findIndex((interaction) => (
+    String(interaction.graphNodeId) === String(freshDraftRecord.target.sourceInteractionNodeId)
+  ));
+  if (freshDraftTurnIndex < 0) {
+    throw new Error(`The fresh draft source occurrence is absent from accepted history: ${JSON.stringify(freshDraftRecord)}`);
+  }
+  const currentTurnLabel = await evaluate(`document.querySelector('#turnPickerButton')?.textContent`);
+  const currentTurnNumber = Number(currentTurnLabel?.match(/^Turn (\d+) of (\d+)$/)?.[1]);
+  for (let turnNumber = currentTurnNumber; turnNumber > freshDraftTurnIndex + 1; turnNumber -= 1) {
+    await click("#previousTurn");
+    await waitFor(`draft-owning historical turn ${turnNumber - 1}`, () => evaluate(`
+      document.querySelector('#turnPickerButton')?.textContent === ${JSON.stringify(`Turn ${turnNumber - 1} of ${overrideDetail.interactions.length}`)}
+    `));
+  }
+  await clickNode("Two-worker pool");
+  await waitFor("unconfirmed draft restores on its original occurrence", () => evaluate(`
+    document.querySelector('#contextAnnotationEditor')?.value === ${JSON.stringify(freshDraftB)}
+      && !document.querySelector('#nodeContextDock')?.classList.contains('hidden')
+  `));
+  const restoredAfterHistoryDraftState = await productRequest(`/api/threads/${thread.id}/context-drafts`);
+  assertDeepEqual(restoredAfterHistoryDraftState.drafts, [freshDraftSnapshot], "Historical restoration changed the complete fresh B record");
+  await captureRecordingBoundary(afterRestartRecording, "restored fresh B on its exact historical occurrence after override", [freshDraftB]);
+  await writeFile(overrideScreenshotFile, await capturePagePng("draft restored after override"));
+  await captureStep(
+    "26. The accepted follow-up clears the composer; the omitted draft remains on its original historical node occurrence",
+    "#nodeContextDock",
+  );
+  const afterRestartRecordingReceipt = await stopContinuousRecording(afterRestartRecording);
+  const restartDiscontinuity = {
+    startsAtUtc: recordingSegments[0].receipt.endedAtUtc,
+    endsAtUtc: afterRestartRecordingReceipt.startedAtUtc,
+    durationMs: Date.parse(afterRestartRecordingReceipt.startedAtUtc)
+      - Date.parse(recordingSegments[0].receipt.endedAtUtc),
+    restartOperationStartedAtUtc,
+    restartOperationEndedAtUtc,
+    reason: "Recording stopped and the first segment was encoded; then the Electron BrowserWindow and Rust app/graph services were stopped and reopened; recording resumed only on the reopened window.",
+    beforeSegment: "interaction-context-before-restart.mp4",
+    afterSegment: "interaction-context-after-restart.mp4",
+  };
 
   if (restartedDetail.interactions[2].contexts?.[0]?.targetNode?.title !== "Incoming queue") {
     throw new Error("Restarted product history did not preserve the target-node snapshot.");
   }
-  const video = await encodeVideo();
+  if (recordingSegments.length !== 2
+    || recordingSegments[0].receipt?.file !== "interaction-context-before-restart.mp4"
+    || recordingSegments[1].receipt !== afterRestartRecordingReceipt) {
+    throw new Error("The before/after restart recording segments are incomplete or out of order.");
+  }
+  assertDeepEqual(recordingSegments[0].events.map((event) => event.name), [
+    "journey recording started with the graph ready and Node Details closed",
+    "opened Incoming queue Node Details for draft A",
+    "opened the draft A editor",
+    "typed and durably saved draft A on Incoming queue",
+    "switched from Incoming queue to Two-worker pool with no annotation editor",
+    "opened the draft B editor",
+    "typed and durably saved draft B on Two-worker pool",
+    "restored draft A after saving B",
+    "restored draft B after saving and restoring A",
+    "both complete durable drafts are present before service/window restart",
+  ], "The pre-restart continuous recording missed a required draft transition");
+  assertDeepEqual(recordingSegments[1].events.map((event) => event.name), [
+    "Electron BrowserWindow and app services reopened after explicit recording discontinuity with Node Details closed",
+    "restored draft A after full service/window restart",
+    "restored draft B after full service/window restart",
+    "confirmed A while the full B record remained unchanged",
+    "restored B editor before discard",
+    "discarded B leaves its historical node visible with no draft editor",
+    "recreated a fresh empty B editor after discard",
+    "created fresh B after discarding the original B",
+    "first omission warning opened with fresh B named",
+    "Go back restored composition without changing B or interactions",
+    "second omission warning visibly reopened before explicit override",
+    "explicit override submitted exactly A and no other context",
+    "restored fresh B on its exact historical occurrence after override",
+  ], "The post-restart continuous recording missed a required warning or override transition");
+  for (const segment of recordingSegments) {
+    for (const event of segment.events) {
+      const frame = segment.frameTimestamps[event.capturedFrameNumber];
+      if (!frame
+        || frame.capturedAtUtc !== event.capturedFrameAtUtc
+        || frame.sha256 !== event.capturedFrameSha256
+        || event.paintSynchronized !== "webContents.invalidate followed by two renderer animation frames before capture"
+        || event.visibleContentAccepted !== true
+        || event.observedHoldMs < defaultBoundaryHoldMs
+        || event.holdEndFrameNumber <= event.capturedFrameNumber
+        || event.maximumHoldCaptureGapMs > maximumContinuousFrameGapMs) {
+        throw new Error(`Visual boundary ${event.name} is not tied to painted, text-verified endpoint frames and a continuous measured hold.`);
+      }
+      if ((event.name.includes("discarded B leaves")
+        || event.name.includes("second omission warning"))
+        && event.observedHoldMs < criticalBoundaryHoldMs) {
+        throw new Error(`Critical visual boundary ${event.name} was held for less than ${criticalBoundaryHoldMs}ms.`);
+      }
+    }
+  }
   const composerBytes = await readFile(composerScreenshotFile);
   const restartedBytes = await readFile(restartedScreenshotFile);
+  const twoDraftsBytes = await readFile(twoDraftsScreenshotFile);
+  const secondDraftBytes = await readFile(secondDraftScreenshotFile);
+  const confirmedDraftBytes = await readFile(confirmedDraftScreenshotFile);
+  const warningBytes = await readFile(warningScreenshotFile);
+  const overrideBytes = await readFile(overrideScreenshotFile);
+  const historicalMontageBytes = await readFile(historicalMontageFile);
+  const sourceHashesAfterCapture = await sourceFingerprints();
+  const sourceCommitAfterCapture = execFileSync("git", ["rev-parse", "HEAD"], {
+    cwd: repositoryRoot,
+    encoding: "utf8",
+  }).trim();
+  const sourceTreeAfterCapture = execFileSync("git", ["rev-parse", "HEAD^{tree}"], {
+    cwd: repositoryRoot,
+    encoding: "utf8",
+  }).trim();
+  const trackedWorkspaceAfterCapture = await captureTrackedWorkspaceSnapshot(repositoryRoot, captureOutputPaths);
+  assertTrackedWorkspaceUnchanged(trackedWorkspaceBeforeCapture, trackedWorkspaceAfterCapture);
+  if (JSON.stringify(sourceHashesBeforeCapture) !== JSON.stringify(sourceHashesAfterCapture)) {
+    throw new Error(`Source proof files changed during capture: ${JSON.stringify({ sourceHashesBeforeCapture, sourceHashesAfterCapture })}`);
+  }
+  if (sourceCommitAfterCapture !== sourceCommit || sourceTreeAfterCapture !== sourceTree) {
+    throw new Error(`The committed source snapshot changed during capture: ${JSON.stringify({ sourceCommit, sourceCommitAfterCapture, sourceTree, sourceTreeAfterCapture })}`);
+  }
   const manifest = {
     schemaVersion: 1,
     passed: true,
     capturedAt: new Date().toISOString(),
     sourceCommit,
+    sourceTree,
+    sourceCommitAfterCapture,
+    sourceTreeAfterCapture,
+    sourceHashesBeforeCapture,
+    sourceHashesAfterCapture,
+    trackedWorkspaceBeforeCapture,
+    trackedWorkspaceAfterCapture,
     workingTreeDirty,
-    command: `npm run build && ${OPT_IN}=1 electron scripts/capture-interaction-context-evidence.mjs`,
+    command: {
+      executable: process.execPath,
+      argv: process.argv,
+      invocationArgs: process.argv[0] === process.execPath ? process.argv.slice(1) : process.argv,
+      workingDirectory: repositoryRoot,
+      environment: { [OPT_IN]: process.env[OPT_IN] },
+    },
     paidInferenceCalls: 0,
     runtime: "real Electron BrowserWindow + production renderer + Rust app/graph servers + SQLite",
     harness: "fixture-task-system (deterministic zero-inference implementation)",
     viewport: { width: 1480, height: 920 },
+    recordingPixelDimensions: recordingSegments.map((segment) => segment.pixelDimensions),
     thread: {
       id: thread.id,
-      interactionIds: restartedDetail.interactions.map((interaction) => interaction.id),
-      statuses: restartedDetail.interactions.map((interaction) => interaction.completionStatus),
+      interactionIds: overrideDetail.interactions.map((interaction) => interaction.id),
+      statuses: overrideDetail.interactions.map((interaction) => interaction.completionStatus),
     },
+    draftJourney: {
+      restoredDrafts: bothRestartDrafts.map((draft) => ({
+        id: draft.id,
+        revision: draft.revision,
+        text: draft.text,
+        target: draft.target,
+      })),
+      freshDraftAfterDiscard: {
+        id: freshDraftRecord.id,
+        revision: freshDraftRecord.revision,
+        text: freshDraftRecord.text,
+        target: freshDraftRecord.target,
+      },
+      confirmedDraftText: restartDraftA,
+      owningHistoryTurn: freshDraftTurnIndex + 1,
+      submittedInteractionId: overrideInteraction.id,
+      submittedContexts: overrideInteraction.contexts,
+      interactionIdsBeforeWarning,
+      interactionIdsAfterOverride: interactionIds(overrideDetail),
+      completeStateSnapshots: {
+        draftBBeforeConfirm: restartDraftRecordBBeforeConfirm,
+        draftBAfterConfirm: confirmedState.drafts[0],
+        confirmedABeforeDiscard: confirmedARecord,
+        confirmedAAfterDiscard: discardedState.confirmations[0],
+        freshDraftAtWarning: freshDraftSnapshot,
+        freshDraftAfterGoBack: goBackDraftState.drafts?.[0],
+        freshDraftAfterOverride: durableAfterOverride.drafts?.[0],
+        freshDraftAfterHistoricalRestoration: restoredAfterHistoryDraftState.drafts?.[0],
+      },
+    },
+    warningPresentation,
+    secondWarningPresentation,
     assertions: {
+      allRecordedBoundariesHavePaintedTextAndMeasuredHold: true,
       nodeDetailsOpened: true,
       nodeSwitchSavedAndRestoredDraft: true,
       closeWaitedForDraftSave: true,
@@ -779,6 +1701,15 @@ async function run() {
       servicesAndWindowRestarted: true,
       persistedContextVisibleAfterRestart: true,
       targetNodeReopenedAfterRestart: true,
+      twoOccurrenceBoundDraftsSurviveFullRestart: true,
+      separateDraftRestorationAfterRestart: true,
+      confirmingOneDraftPreservesTheOther: true,
+      discardingOneDraftPreservesConfirmedContext: true,
+      omissionWarningAndGoBackPreserveDraft: true,
+      warningAndGoBackCreateNoInteraction: true,
+      explicitOverrideSubmitsConfirmedContextOnly: true,
+      explicitOverrideAddsExactlyOneInteraction: true,
+      historicalDraftRestoredOnOwningOccurrenceAfterOverride: true,
     },
     screenshots: [
       {
@@ -789,10 +1720,27 @@ async function run() {
         file: "restarted-context.png",
         sha256: createHash("sha256").update(restartedBytes).digest("hex"),
       },
+      { file: "two-drafts-restored.png", sha256: createHash("sha256").update(twoDraftsBytes).digest("hex") },
+      { file: "second-draft-restored.png", sha256: createHash("sha256").update(secondDraftBytes).digest("hex") },
+      { file: "confirmed-draft-with-other-draft.png", sha256: createHash("sha256").update(confirmedDraftBytes).digest("hex") },
+      { file: "draft-omission-warning.png", sha256: createHash("sha256").update(warningBytes).digest("hex") },
+      { file: "draft-after-override.png", sha256: createHash("sha256").update(overrideBytes).digest("hex") },
     ],
-    video: {
-      ...video,
-      steps: frames.map((frame) => frame.caption),
+    recording: {
+      mode: "two continuous direct-renderer recordings; the named boundary events wait for paint and OCR-check required and forbidden text at start and hold end; timestamps define VFR durations with an explicit terminal-frame hold and full-restart discontinuity",
+      segments: recordingSegments.map((segment) => segment.receipt),
+      discontinuity: restartDiscontinuity,
+      boundaryAcceptance: {
+        eventCount: recordingSegments.reduce((total, segment) => total + segment.events.length, 0),
+        observations: "OCR checks only each named event's captured start frame and captured hold-end frame; intervening continuous-recording frames are not individually classified.",
+        distinction: "Node Details acceptance requires its visible NODE DETAILS marker; graph-only acceptance requires the selected graph title and absence of NODE DETAILS and Add an annotation. Editor absence checks also forbid the prior draft text where applicable.",
+      },
+      screenshotCaptionCheckpoints: frames.map(({ caption, capturedAtUtc, selector }) => ({ caption, capturedAtUtc, selector })),
+      historicalStillMontage: {
+        file: historicalMontageFile.split("/").at(-1),
+        sha256: createHash("sha256").update(historicalMontageBytes).digest("hex"),
+        role: "Retained from the prior evidence snapshot. This timed still-frame montage is historical and does not prove the missing interaction transitions.",
+      },
     },
   };
   await writeFile(manifestFile, `${JSON.stringify(manifest, null, 2)}\n`);
@@ -800,9 +1748,11 @@ async function run() {
 }
 
 async function stop() {
+  await abandonContinuousRecording();
   if (mainWindow && !mainWindow.isDestroyed()) mainWindow.destroy();
   if (keepaliveWindow && !keepaliveWindow.isDestroyed()) keepaliveWindow.destroy();
   await stopServices();
+  if (captureTextRecognizer) await captureTextRecognizer.close().catch(() => undefined);
   unregisterIpc();
   await rm(dataDirectory, { recursive: true, force: true });
 }
