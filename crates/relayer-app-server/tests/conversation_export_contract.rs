@@ -1006,6 +1006,29 @@ fn submitted_inputs_round_trip_as_turn_owned_authority_free_children() {
         .unwrap()
     });
 
+    let mut duplicate_occurrence = fixture.clone();
+    let ConversationExportRecord::Turn(turn) = &mut duplicate_occurrence[2] else {
+        unreachable!()
+    };
+    let mut duplicate = turn.submitted_inputs[0].clone();
+    duplicate.id = "input-child:duplicate-occurrence".into();
+    turn.submitted_inputs.push(duplicate);
+    turn.submitted_inputs.sort_by_key(|input| {
+        serde_json::to_vec(&(
+            &input.source.interaction_node_id,
+            &input.source.layer_id,
+            &input.source.action_id,
+            &input.source.node_id,
+            &input.action,
+            &input.value,
+        ))
+        .unwrap()
+    });
+    assert_rejected_with_parity(
+        &duplicate_occurrence,
+        "duplicate_submitted_input_occurrence",
+    );
+
     validate_export_records(&fixture).unwrap();
     let mut jsonl = Vec::new();
     for record in &fixture {

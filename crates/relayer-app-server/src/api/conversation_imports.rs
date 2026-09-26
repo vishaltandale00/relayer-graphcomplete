@@ -327,6 +327,20 @@ mod tests {
         bytes
     }
 
+    fn sort_submitted_inputs_canonically(turn: &mut ConversationExportTurn) {
+        turn.submitted_inputs.sort_by_key(|submitted| {
+            serde_json::to_vec(&(
+                &submitted.source.interaction_node_id,
+                &submitted.source.layer_id,
+                &submitted.source.action_id,
+                &submitted.source.node_id,
+                &submitted.action,
+                &submitted.value,
+            ))
+            .unwrap()
+        });
+    }
+
     fn accepted_receipt() -> ExportCompletionReceipt {
         let route = ExportAdmittedExecutionModelRoute {
             provider_id: "codex".into(),
@@ -1572,6 +1586,420 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn duplicate_imported_input_is_reported_after_publish_and_absent_from_reexport() {
+        let mut records = forged_input_records(ExportCompletionStatus::Accepted);
+        let action = {
+            let ConversationExportRecord::Turn(source) = &mut records[1] else {
+                unreachable!()
+            };
+            let input_action = source.accepted_view.as_mut().unwrap().layers[0]
+                .actions
+                .iter()
+                .find(|action| action.id == "action:input")
+                .unwrap()
+                .clone();
+            let mut distinct = input_action.clone();
+            distinct.id = "action:input-distinct".into();
+            source.accepted_view.as_mut().unwrap().layers[0]
+                .actions
+                .push(distinct);
+            input_action.input.unwrap()
+        };
+        let provenance_rejection = {
+            let ConversationExportRecord::Turn(rejected) = &mut records[3] else {
+                unreachable!()
+            };
+            let mut input = rejected.submitted_inputs.pop().unwrap();
+            input.id = "input-child:spliced".into();
+            input
+        };
+        let mut same_turn_input = export_action(
+            "action:input-same-turn",
+            "node:third",
+            Some("layer:third"),
+            ExportActionKind::Input,
+            None,
+        );
+        same_turn_input.input = Some(action.clone());
+        let mut future_input = export_action(
+            "action:input-future",
+            "node:future",
+            Some("layer:future"),
+            ExportActionKind::Input,
+            None,
+        );
+        future_input.input = Some(action.clone());
+        let ConversationExportRecord::Turn(consumer) = &mut records[3] else {
+            unreachable!()
+        };
+        consumer.accepted_view.as_mut().unwrap().layers[0]
+            .actions
+            .push(same_turn_input);
+        let future_layer = export_layer(
+            "layer:future",
+            "node:future",
+            "Future question",
+            vec![future_input],
+        );
+        let header = match &mut records[0] {
+            ConversationExportRecord::Header(header) => header,
+            _ => unreachable!(),
+        };
+        header.turns.push(ExportTurnManifestEntry {
+            id: "turn:4".into(),
+            sequence: 4,
+        });
+        records.push(ConversationExportRecord::Turn(Box::new(
+            ConversationExportTurn {
+                id: "turn:4".into(),
+                sequence: 4,
+                created_at: "1769000004000".into(),
+                text: "Future question".into(),
+                interaction_node_id: None,
+                origin: ExportTurnOrigin::User,
+                completion: accepted_receipt(),
+                contexts: vec![],
+                submitted_inputs: vec![],
+                accepted_view: Some(ExportAcceptedView {
+                    interaction_node_id: "node:interaction-4".into(),
+                    root_action: export_action(
+                        "action:root-4",
+                        "node:interaction-4",
+                        None,
+                        ExportActionKind::Navigate,
+                        Some("layer:future"),
+                    ),
+                    root_layer_id: "layer:future".into(),
+                    layers: vec![future_layer],
+                }),
+            },
+        )));
+
+        let value = ExportSubmittedInputValue::Text {
+            text: "A real answer".into(),
+        };
+        let answer = |id: &str, source: ExportInputSource| ExportSubmittedInput {
+            id: id.into(),
+            root_turn_id: "turn:3".into(),
+            source,
+            action: action.clone(),
+            value: value.clone(),
+        };
+        let ConversationExportRecord::Turn(rejected) = &mut records[3] else {
+            unreachable!()
+        };
+        rejected.submitted_inputs = vec![
+            answer(
+                "input-child:first-valid",
+                ExportInputSource {
+                    interaction_node_id: "node:interaction-1".into(),
+                    layer_id: "layer:source".into(),
+                    action_id: "action:input".into(),
+                    node_id: "node:source".into(),
+                },
+            ),
+            answer(
+                "input-child:duplicate",
+                ExportInputSource {
+                    interaction_node_id: "node:interaction-1".into(),
+                    layer_id: "layer:source".into(),
+                    action_id: "action:input".into(),
+                    node_id: "node:source".into(),
+                },
+            ),
+            answer(
+                "input-child:distinct-valid",
+                ExportInputSource {
+                    interaction_node_id: "node:interaction-1".into(),
+                    layer_id: "layer:source".into(),
+                    action_id: "action:input-distinct".into(),
+                    node_id: "node:source".into(),
+                },
+            ),
+            provenance_rejection,
+            answer(
+                "input-child:same-turn",
+                ExportInputSource {
+                    interaction_node_id: "node:interaction-3".into(),
+                    layer_id: "layer:third".into(),
+                    action_id: "action:input-same-turn".into(),
+                    node_id: "node:third".into(),
+                },
+            ),
+            answer(
+                "input-child:later-turn",
+                ExportInputSource {
+                    interaction_node_id: "node:interaction-4".into(),
+                    layer_id: "layer:future".into(),
+                    action_id: "action:input-future".into(),
+                    node_id: "node:future".into(),
+                },
+            ),
+            answer(
+                "input-child:unresolved",
+                ExportInputSource {
+                    interaction_node_id: "node:missing-interaction".into(),
+                    layer_id: "layer:missing".into(),
+                    action_id: "action:missing".into(),
+                    node_id: "node:missing".into(),
+                },
+            ),
+        ];
+        sort_submitted_inputs_canonically(rejected);
+        let path_by_id = match &records[3] {
+            ConversationExportRecord::Turn(turn) => turn
+                .submitted_inputs
+                .iter()
+                .enumerate()
+                .map(|(index, input)| {
+                    let suffix = match input.id.as_str() {
+                        "input-child:duplicate" | "input-child:unresolved" => "source",
+                        "input-child:spliced" => "source.actionId",
+                        _ => "source.interactionNodeId",
+                    };
+                    (
+                        input.id.as_str(),
+                        format!("submittedInputs[{index}].{suffix}"),
+                    )
+                })
+                .collect::<std::collections::HashMap<_, _>>(),
+            _ => unreachable!(),
+        };
+
+        let (_directory, app, _store, _graph, graph_task) = app(true).await;
+        let staged = app
+            .clone()
+            .oneshot(request("POST", "write-token", Body::from(jsonl(&records))))
+            .await
+            .unwrap();
+        if staged.status() != StatusCode::OK {
+            panic!("staging failed: {}", response_json(staged).await);
+        }
+        let staged = response_json(staged).await;
+        let published = app
+            .clone()
+            .oneshot(request(
+                "PUT",
+                "write-token",
+                Body::from(serde_json::json!({"importId": staged["importId"]}).to_string()),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(published.status(), StatusCode::OK);
+        let published = response_json(published).await;
+        let skipped = published["skippedSubmittedInputs"].as_array().unwrap();
+        assert_eq!(skipped.len(), 5);
+        let skipped_by_id = skipped
+            .iter()
+            .map(|record| (record["submittedInputId"].as_str().unwrap(), record))
+            .collect::<std::collections::HashMap<_, _>>();
+        for (id, code) in [
+            ("input-child:duplicate", "input_attachment_duplicate"),
+            ("input-child:spliced", "input_action_not_in_occurrence"),
+            ("input-child:same-turn", "input_occurrence_not_visible"),
+            ("input-child:later-turn", "input_occurrence_not_visible"),
+            ("input-child:unresolved", "input_occurrence_not_visible"),
+        ] {
+            assert_eq!(skipped_by_id[id]["code"], code);
+            assert_eq!(skipped_by_id[id]["sourceTurnId"], "turn:3");
+            assert_eq!(skipped_by_id[id]["path"], path_by_id[id]);
+        }
+
+        let reexported = app
+            .oneshot(request_uri(
+                "GET",
+                &format!(
+                    "/api/threads/{}/export",
+                    published["threadId"].as_i64().unwrap()
+                ),
+                "write-token",
+                Body::empty(),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(reexported.status(), StatusCode::OK);
+        let bytes = to_bytes(reexported.into_body(), MAX_EXPORT_BYTES)
+            .await
+            .unwrap();
+        let reexported = decode_export_jsonl(&bytes).unwrap();
+        let ConversationExportRecord::Turn(imported) = &reexported[3] else {
+            unreachable!()
+        };
+        assert_eq!(imported.submitted_inputs.len(), 2);
+        assert_eq!(
+            imported
+                .submitted_inputs
+                .iter()
+                .map(|input| input.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["input-child:first-valid", "input-child:distinct-valid"]
+        );
+        graph_task.abort();
+    }
+
+    #[tokio::test]
+    async fn rejected_child_snapshot_cannot_poison_non_input_action_materialization() {
+        for (case, non_input_action_id) in [
+            ("navigate", "action:navigate-extra"),
+            ("invoke", "action:invoke"),
+            ("response-root", "action:root-1"),
+        ] {
+            let mut records = forged_input_records(ExportCompletionStatus::Accepted);
+            let input_action = {
+                let ConversationExportRecord::Turn(source) = &mut records[1] else {
+                    unreachable!()
+                };
+                source.accepted_view.as_mut().unwrap().layers[0]
+                    .actions
+                    .iter()
+                    .find(|action| action.id == "action:input")
+                    .unwrap()
+                    .input
+                    .clone()
+                    .unwrap()
+            };
+            if case == "navigate" {
+                let ConversationExportRecord::Turn(source) = &mut records[1] else {
+                    unreachable!()
+                };
+                let view = source.accepted_view.as_mut().unwrap();
+                view.layers[0].actions.push(export_action(
+                    non_input_action_id,
+                    "node:source",
+                    Some("layer:source"),
+                    ExportActionKind::Navigate,
+                    Some("layer:navigate-target"),
+                ));
+                view.layers.push(export_layer(
+                    "layer:navigate-target",
+                    "node:navigate-target",
+                    "Navigate target",
+                    vec![],
+                ));
+            }
+
+            let value = ExportSubmittedInputValue::Text {
+                text: "Keep this valid sibling".into(),
+            };
+            let submitted = |id: &str, action_id: &str| ExportSubmittedInput {
+                id: id.into(),
+                root_turn_id: "turn:3".into(),
+                source: ExportInputSource {
+                    interaction_node_id: "node:interaction-1".into(),
+                    layer_id: "layer:source".into(),
+                    action_id: action_id.into(),
+                    node_id: if action_id == "action:root-1" {
+                        "node:interaction-1".into()
+                    } else {
+                        "node:source".into()
+                    },
+                },
+                action: input_action.clone(),
+                value: value.clone(),
+            };
+            let ConversationExportRecord::Turn(consumer) = &mut records[3] else {
+                unreachable!()
+            };
+            consumer.text = "Keep this accepted turn".into();
+            consumer.submitted_inputs = vec![
+                submitted("input-child:valid", "action:input"),
+                submitted("input-child:poison", non_input_action_id),
+            ];
+            sort_submitted_inputs_canonically(consumer);
+
+            let (_directory, app, _store, _graph, graph_task) = app(true).await;
+            let staged = app
+                .clone()
+                .oneshot(request("POST", "write-token", Body::from(jsonl(&records))))
+                .await
+                .unwrap();
+            assert_eq!(
+                staged.status(),
+                StatusCode::OK,
+                "{case}: stage should defer invalid provenance to graph-core"
+            );
+            let staged = response_json(staged).await;
+            let published = app
+                .clone()
+                .oneshot(request(
+                    "PUT",
+                    "write-token",
+                    Body::from(serde_json::json!({"importId": staged["importId"]}).to_string()),
+                ))
+                .await
+                .unwrap();
+            if published.status() != StatusCode::OK {
+                panic!(
+                    "{case}: one poisoned child must not abort valid conversation content: {}",
+                    response_json(published).await
+                );
+            }
+            let published = response_json(published).await;
+            let skipped = published["skippedSubmittedInputs"].as_array().unwrap();
+            assert_eq!(skipped.len(), 1, "{case}");
+            assert_eq!(
+                skipped[0]["submittedInputId"], "input-child:poison",
+                "{case}"
+            );
+
+            let reexported = app
+                .oneshot(request_uri(
+                    "GET",
+                    &format!(
+                        "/api/threads/{}/export",
+                        published["threadId"].as_i64().unwrap()
+                    ),
+                    "write-token",
+                    Body::empty(),
+                ))
+                .await
+                .unwrap();
+            assert_eq!(reexported.status(), StatusCode::OK, "{case}");
+            let bytes = to_bytes(reexported.into_body(), MAX_EXPORT_BYTES)
+                .await
+                .unwrap();
+            let reexported = decode_export_jsonl(&bytes).unwrap();
+            let ConversationExportRecord::Turn(source) = &reexported[1] else {
+                unreachable!()
+            };
+            match case {
+                "response-root" => {
+                    assert_eq!(
+                        source.accepted_view.as_ref().unwrap().root_action.kind,
+                        ExportActionKind::Navigate,
+                        "{case}"
+                    );
+                }
+                "invoke" => assert!(
+                    source.accepted_view.as_ref().unwrap().layers[0]
+                        .actions
+                        .iter()
+                        .any(|action| action.kind == ExportActionKind::Invoke),
+                    "{case}"
+                ),
+                "navigate" => assert!(
+                    source.accepted_view.as_ref().unwrap().layers[0]
+                        .actions
+                        .iter()
+                        .any(|action| action.kind == ExportActionKind::Navigate),
+                    "{case}"
+                ),
+                _ => unreachable!(),
+            }
+            let ConversationExportRecord::Turn(imported) = &reexported[3] else {
+                unreachable!()
+            };
+            assert_eq!(imported.text, "Keep this accepted turn", "{case}");
+            assert_eq!(imported.submitted_inputs.len(), 1, "{case}");
+            assert_eq!(
+                imported.submitted_inputs[0].id, "input-child:valid",
+                "{case}"
+            );
+            graph_task.abort();
+        }
+    }
+
+    #[tokio::test]
     async fn accepted_turn_with_only_rejected_input_is_cleaned_up_before_publish() {
         let records = forged_input_records(ExportCompletionStatus::Accepted);
         let (_directory, app, store, graph, graph_task) = app(true).await;
@@ -1648,6 +2076,41 @@ mod tests {
         let fixture = records("ordering".into());
         cases.push(jsonl(&[fixture[1].clone(), fixture[0].clone()]));
         cases.push(jsonl(&[fixture[0].clone(), fixture[0].clone()]));
+
+        // The import-only policy defers graph authority but preserves portable
+        // structure. These hostile streams must fail during stage and leave no state.
+        let input_case = |mutate: fn(&mut ExportSubmittedInput)| {
+            let mut candidate = forged_input_records(ExportCompletionStatus::Failed);
+            let ConversationExportRecord::Turn(turn) = &mut candidate[3] else {
+                unreachable!()
+            };
+            mutate(&mut turn.submitted_inputs[0]);
+            jsonl(&candidate)
+        };
+        cases.push(input_case(|input| input.id = "bad".into()));
+        cases.push(input_case(|input| input.action.prompt.clear()));
+
+        let mut duplicate_child = forged_input_records(ExportCompletionStatus::Failed);
+        let ConversationExportRecord::Turn(turn) = &mut duplicate_child[3] else {
+            unreachable!()
+        };
+        let mut duplicate = turn.submitted_inputs[0].clone();
+        duplicate.source.action_id = "action:another-occurrence".into();
+        turn.submitted_inputs.push(duplicate);
+        sort_submitted_inputs_canonically(turn);
+        cases.push(jsonl(&duplicate_child));
+
+        let mut unsorted_children = forged_input_records(ExportCompletionStatus::Failed);
+        let ConversationExportRecord::Turn(turn) = &mut unsorted_children[3] else {
+            unreachable!()
+        };
+        let mut other_child = turn.submitted_inputs[0].clone();
+        other_child.id = "input-child:aaa".into();
+        other_child.source.action_id = "action:another-occurrence".into();
+        turn.submitted_inputs.push(other_child);
+        sort_submitted_inputs_canonically(turn);
+        turn.submitted_inputs.reverse();
+        cases.push(jsonl(&unsorted_children));
 
         let mut duplicate_manifest = records("duplicate manifest".into());
         let ConversationExportRecord::Header(header) = &mut duplicate_manifest[0] else {

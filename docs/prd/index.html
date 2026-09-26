@@ -2258,6 +2258,8 @@ settings:
 <li>Text values preserve authored text. Select values persist stable option keys plus their accepted labels, with multi-select keys canonically ordered. The harness receives unordered prompt/control/value snapshots without product-assigned priority.</li>
 <li>Failure or stop restores the attempt's attachments to the draft unless a newer commit already owns the same occurrence. The immutable attempt cannot be retried in place; the next Send creates a new root.</li>
 <li>Accepted input actions retain their authored payload in V1 conversation export even when unanswered. Accepted and terminal submitted input remains readable in compact history, safe diagnostics, and export. Import assigns fresh local identities, strips execution authority and digests, and keeps imported input read-only and inert.</li>
+<li>An imported submitted input is retained only when its accepted presenting occurrence belongs to an earlier conversation turn than the consuming turn. An occurrence presented in the same turn or a later turn is dropped and recorded on the import receipt.</li>
+<li>Within one consuming turn, only the first valid answer for an exact presenting interaction, layer, and action occurrence is retained. An additional answer for that occurrence is dropped and recorded with reason <code>input_attachment_duplicate</code>; the same occurrence may be answered in a different consuming turn. These import rejection rules are tracked by <a href="https://github.com/vishaltandale00/relayer-graphcomplete/issues/312">issue #312</a>.</li>
 </ul>
 <h3>7.3 Current proof boundary</h3>
 <ul>
