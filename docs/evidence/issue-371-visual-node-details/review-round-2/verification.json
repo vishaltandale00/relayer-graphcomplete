@@ -1,0 +1,23 @@
+{
+  "sourceDigestSha256": "30c614e5b008d8c98e1b894c7eae2cd48550c85c91af389045a43baaa1979a82",
+  "commands": [
+    {
+      "command": "npm run check",
+      "exitCode": 0,
+      "details": "177 Vitest files passed, 1 skipped; 2309 tests passed, 3 skipped. Separate secret-boundary2/2, Python29/29. Rust/default/crash, Clippy, types, receipt/readability passed."
+    },
+    {
+      "command": "npm run test:desktop:visual-node-details",
+      "exitCode": 0,
+      "includesRequiredBuild": "npm run build",
+      "manifestSha256": "bf966f7f8becf55282b5cd4782ccdaaf8cdf1472fb738535252fdb42b8048d1b",
+      "details": "Original/reopened/imported image coverage, all five control kinds, navigation/history, pin preservation and server readonly403 passed."
+    }
+  ],
+  "logs": {
+    "check.log": "2ab9d4d1726354b04870e0ac55ac1ddf74d0e9eea6e0ad1f5fb41c508bd01da0",
+    "desktop.log": "edad720cac6c03708a872bc20c63fa3f3cd848adf439954587167f7b957b976a"
+  },
+  "paidInferenceCalls": 0,
+  "githubCI": "Pending updated PR run; actual macOS packaging remains required."
+}

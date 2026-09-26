@@ -1,6 +1,9 @@
 import { app, BrowserWindow, ipcMain } from "electron";
+import { execFileSync, spawn } from "node:child_process";
+import { createHash } from "node:crypto";
 import { mkdirSync, mkdtempSync } from "node:fs";
-import { rm } from "node:fs/promises";
+import { copyFile, readFile, rm, writeFile } from "node:fs/promises";
+import { createInterface } from "node:readline";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
@@ -9,9 +12,16 @@ import { taskSystemFixtureFactory } from "@relayer/eval-runner";
 import { startModelCatalogRefreshServer } from "../desktop/main/models/model-catalog-refresh-server.mjs";
 import { GraphCompleteRuntimeService } from "../desktop/main/services/graphcomplete-runtime.mjs";
 import { RelayerAppServerService } from "../desktop/main/services/relayer-app-server.mjs";
+import {
+  capturedStateMeetsReadableHold,
+  capturedStateRun,
+  classifyDesktopCaptureText,
+  sha256File,
+} from "./lib/desktop-capture-evidence.mjs";
 
 const repositoryRoot = resolve(import.meta.dirname, "..");
 const dataDirectory = mkdtempSync(join(tmpdir(), "relayer-context-draft-warning-"));
+const noThreadEvidenceDirectory = process.env.RELAYER_NO_THREAD_COMPOSER_EVIDENCE_DIR;
 const configurationPath = join(repositoryRoot, "harnesses", "fixture-task-system.yaml");
 const graphServerBinary = join(repositoryRoot, "target", "debug", "relayer-graph-server");
 const appServerBinary = join(repositoryRoot, "target", "debug", "relayer-app-server");
@@ -27,6 +37,8 @@ let productSession;
 let mainWindow;
 let keepaliveWindow;
 let exitCode = 1;
+// Minimal renderer draft bridge also added in the #207 warning-runner fixture.
+let composerDraftState = { pendingNewThread: null, threadFollowups: {} };
 
 app.setName("Relayer Context Draft Warning Smoke");
 const electronProfileDirectory = join(dataDirectory, "electron-profile");
@@ -57,6 +69,11 @@ function registerIpc() {
     subject: "fixture|node-details-warning",
   }));
   ipcMain.handle("relayer:appearance-read", () => ({ appearance: "dark" }));
+  ipcMain.handle("relayer:composer-drafts-read", () => composerDraftState);
+  ipcMain.handle("relayer:composer-drafts-write", (_event, value) => {
+    composerDraftState = value;
+    return composerDraftState;
+  });
   ipcMain.handle("relayer:provider-status", () => ({
     adapters: [],
     definitions: [],
@@ -81,6 +98,8 @@ function unregisterIpc() {
   for (const channel of [
     "relayer:account-read",
     "relayer:appearance-read",
+    "relayer:composer-drafts-read",
+    "relayer:composer-drafts-write",
     "relayer:provider-status",
     "relayer:update-status",
     "relayer:folder-choose",
@@ -111,6 +130,353 @@ async function waitFor(label, check, timeoutMs = 20_000) {
     })`).catch(() => null)
     : null;
   throw new Error(`Timed out waiting for ${label}: ${JSON.stringify(diagnostic)}`);
+}
+
+function createDesktopCaptureTextRecognizer() {
+  const worker = spawn("swift", [join(repositoryRoot, "scripts", "recognize-desktop-capture-frame.swift")], {
+    stdio: ["pipe", "pipe", "inherit"],
+  });
+  const responses = new Map();
+  const lines = createInterface({ input: worker.stdout });
+  let nextRequestId = 0;
+  let readyResolve;
+  let readyReject;
+  let exited = false;
+  const ready = new Promise((resolveReady, rejectReady) => {
+    readyResolve = resolveReady;
+    readyReject = rejectReady;
+  });
+  const failPending = (error) => {
+    if (!exited) {
+      exited = true;
+      readyReject(error);
+      for (const pending of responses.values()) pending.reject(error);
+      responses.clear();
+    }
+  };
+  lines.on("line", (line) => {
+    let response;
+    try {
+      response = JSON.parse(line);
+    } catch (error) {
+      failPending(new Error(`Frame text recognizer returned invalid JSON: ${error.message}`));
+      return;
+    }
+    if (response.ready === true) {
+      readyResolve();
+      return;
+    }
+    const pending = responses.get(response.id);
+    if (!pending) return;
+    responses.delete(response.id);
+    if (response.error) pending.reject(new Error(`Frame text recognition failed: ${response.error}`));
+    else pending.resolve(response.text || "");
+  });
+  worker.once("error", (error) => failPending(error));
+  worker.once("exit", (code, signal) => {
+    if (!exited && code !== 0) {
+      failPending(new Error(`Frame text recognizer exited (${code ?? signal ?? "unknown"})`));
+    }
+  });
+
+  return {
+    ready,
+    async recognize(file) {
+      await ready;
+      if (exited) throw new Error("Frame text recognizer is no longer running.");
+      const id = ++nextRequestId;
+      const result = new Promise((resolveResult, rejectResult) => {
+        responses.set(id, { resolve: resolveResult, reject: rejectResult });
+      });
+      worker.stdin.write(`${JSON.stringify({ id, file })}\n`);
+      return result;
+    },
+    async close() {
+      if (exited) return;
+      worker.stdin.end();
+      await new Promise((resolveExit) => worker.once("exit", resolveExit));
+      exited = true;
+    },
+  };
+}
+
+async function waitForReadableCaptureRun(frames, state, afterIndex, minimumMs, captureFailure) {
+  const deadline = Date.now() + 30_000;
+  while (Date.now() < deadline) {
+    if (captureFailure()) throw captureFailure();
+    const run = capturedStateMeetsReadableHold(
+      frames,
+      state,
+      minimumMs,
+      { afterIndex },
+    );
+    if (run) return run;
+    await sleep(25);
+  }
+  const run = capturedStateRun(frames, state, { afterIndex });
+  throw new Error(`Timed out waiting for ${state} captured frames to hold ${minimumMs}ms: ${JSON.stringify(run)}`);
+}
+
+async function captureOrdinaryNewThreadEvidence(threadId) {
+  const savedDraftText = "Keep this unsent follow-up with the saved thread.";
+  const activeInteractionId = await evaluate(`(async () => {
+    const { viewState } = await import('./src/state.js');
+    return viewState.currentInteractionId;
+  })()`);
+  const draftScopeKey = `${threadId}:${activeInteractionId ?? "none"}`;
+  await setPrompt(savedDraftText);
+  await waitFor("saved-thread follow-up persisted before New Thread", () => (
+    composerDraftState.threadFollowups[draftScopeKey] === savedDraftText
+  ));
+  if (!noThreadEvidenceDirectory) {
+    await click("#newThread", { focus: true });
+    await waitFor("ordinary New Thread button navigation", () => evaluate(`(
+      !document.querySelector('#newThreadView')?.classList.contains('hidden')
+      && document.querySelector('#threadView')?.classList.contains('hidden')
+      && document.querySelector('#newThreadPrompt')?.value === ''
+    )`));
+    const selection = await evaluate(`(async () => {
+      const { activeThread, viewState } = await import('./src/state.js');
+      return { currentThreadId: viewState.currentThreadId, activeThreadId: activeThread()?.id ?? null };
+    })()`);
+    await click(`[data-thread="${threadId}"]`, { focus: true });
+    await waitFor("ordinary saved-thread return", () => evaluate(`(
+      !document.querySelector('#threadView')?.classList.contains('hidden')
+      && document.querySelector('#threadPrompt')?.value === ${JSON.stringify(savedDraftText)}
+    )`));
+    return { passed: true, ...selection, savedDraftPreserved: true, windowRestarted: false };
+  }
+
+  mkdirSync(noThreadEvidenceDirectory, { recursive: true });
+  const minimumReadableHoldMs = 1400;
+  await waitFor("transient test notification clears before visual recording", () => evaluate(`(
+    document.querySelector('#toast')?.classList.contains('hidden') === true
+  )`));
+  const framesDirectory = join(dataDirectory, "ordinary-new-thread-frames");
+  mkdirSync(framesDirectory, { recursive: true });
+  const frames = [];
+  const recognizer = createDesktopCaptureTextRecognizer();
+  await recognizer.ready;
+  const beforeNewThreadScreenshot = await mainWindow.webContents.capturePage();
+  const beforeNewThreadScreenshotFile = join(noThreadEvidenceDirectory, "saved-thread-draft-before-new-thread.png");
+  const beforeNewThreadPng = beforeNewThreadScreenshot.toPNG();
+  await writeFile(beforeNewThreadScreenshotFile, beforeNewThreadPng);
+  const beforeScreenshotText = await recognizer.recognize(beforeNewThreadScreenshotFile);
+  const beforeScreenshotState = classifyDesktopCaptureText(beforeScreenshotText);
+  if (beforeScreenshotState !== "saved-thread") {
+    await recognizer.close();
+    throw new Error(`Pre-recording screenshot did not show the saved-thread follow-up: ${JSON.stringify({ beforeScreenshotState, beforeScreenshotText })}`);
+  }
+  const recordingStartedAt = performance.now();
+  let recording = true;
+  let captureError = null;
+  const capture = async () => {
+    while (recording) {
+      const image = await mainWindow.webContents.capturePage();
+      const file = join(framesDirectory, `${String(frames.length + 1).padStart(4, "0")}.png`);
+      const capturedAtMs = performance.now() - recordingStartedAt;
+      const png = image.toPNG();
+      await writeFile(file, png);
+      const recognizedText = await recognizer.recognize(file);
+      frames.push({
+        file,
+        capturedAtMs,
+        state: classifyDesktopCaptureText(recognizedText),
+        recognizedText,
+        sha256: createHash("sha256").update(png).digest("hex"),
+      });
+      await sleep(67);
+    }
+  };
+  const capturePromise = capture().catch((error) => { captureError = error; });
+  let stateRuns;
+  let selection;
+  try {
+    const beforeClickRun = await waitForReadableCaptureRun(
+      frames,
+      "saved-thread",
+      -1,
+      minimumReadableHoldMs,
+      () => captureError,
+    );
+    await copyFile(
+      frames[beforeClickRun.firstIndex].file,
+      join(noThreadEvidenceDirectory, "saved-thread-draft-before-new-thread.png"),
+    );
+    await click("#newThread", { focus: true });
+    await waitFor("ordinary New Thread button navigation", () => evaluate(`(
+      !document.querySelector('#newThreadView')?.classList.contains('hidden')
+      && document.querySelector('#threadView')?.classList.contains('hidden')
+      && document.querySelector('#newThreadPrompt')?.value === ''
+    )`));
+    const newThreadDomVisibleAtMs = performance.now() - recordingStartedAt;
+    const newThreadRun = await waitForReadableCaptureRun(
+      frames,
+      "empty-new-thread",
+      beforeClickRun.lastIndex,
+      minimumReadableHoldMs,
+      () => captureError,
+    );
+    await copyFile(
+      frames[newThreadRun.firstIndex].file,
+      join(noThreadEvidenceDirectory, "ordinary-new-thread-view.png"),
+    );
+    selection = await evaluate(`(async () => {
+      const { activeThread, viewState } = await import('./src/state.js');
+      return { currentThreadId: viewState.currentThreadId, activeThreadId: activeThread()?.id ?? null };
+    })()`);
+    await click(`[data-thread="${threadId}"]`, { focus: true });
+    await waitFor("ordinary saved-thread return", () => evaluate(`(
+      !document.querySelector('#threadView')?.classList.contains('hidden')
+      && document.querySelector('#threadPrompt')?.value === ${JSON.stringify(savedDraftText)}
+    )`));
+    const restoredThreadDomVisibleAtMs = performance.now() - recordingStartedAt;
+    const restoredThreadRun = await waitForReadableCaptureRun(
+      frames,
+      "saved-thread",
+      newThreadRun.lastIndex,
+      minimumReadableHoldMs,
+      () => captureError,
+    );
+    stateRuns = {
+      beforeClick: beforeClickRun,
+      emptyNewThread: newThreadRun,
+      restoredThread: restoredThreadRun,
+      domReportedAtMs: {
+        emptyNewThread: Number(newThreadDomVisibleAtMs.toFixed(1)),
+        restoredThread: Number(restoredThreadDomVisibleAtMs.toFixed(1)),
+      },
+    };
+  } finally {
+    recording = false;
+    await capturePromise;
+  }
+  if (captureError) throw captureError;
+  if (frames.length < 3) throw new Error(`Ordinary New Thread recording captured too few timestamped frames: ${frames.length}`);
+  const measuredStateRuns = {
+    beforeClick: capturedStateRun(frames, "saved-thread", {
+      beforeIndex: stateRuns.emptyNewThread.firstIndex - 1,
+    }),
+    emptyNewThread: capturedStateRun(frames, "empty-new-thread", {
+      afterIndex: stateRuns.beforeClick.lastIndex,
+      beforeIndex: stateRuns.restoredThread.firstIndex - 1,
+    }),
+    restoredThread: capturedStateRun(frames, "saved-thread", {
+      afterIndex: stateRuns.emptyNewThread.lastIndex,
+    }),
+  };
+  for (const [stateName, run] of Object.entries(measuredStateRuns)) {
+    if (!run || run.durationMs < minimumReadableHoldMs) {
+      throw new Error(`Ordinary New Thread recording did not capture a readable ${stateName} interval: ${JSON.stringify({ run, minimumReadableHoldMs })}`);
+    }
+  }
+  const beforeClickHoldMs = measuredStateRuns.beforeClick.durationMs;
+  const newThreadHoldMs = measuredStateRuns.emptyNewThread.durationMs;
+  const restoredThreadHoldMs = measuredStateRuns.restoredThread.durationMs;
+  const measuredTimelineMs = frames.at(-1).capturedAtMs;
+  const videoFile = join(noThreadEvidenceDirectory, "ordinary-new-thread-transition.mp4");
+  const concatFile = join(framesDirectory, "frames.concat");
+  const concatLines = ["ffconcat version 1.0"];
+  for (let index = 0; index < frames.length; index += 1) {
+    const frame = frames[index];
+    const nextTimestamp = frames[index + 1]?.capturedAtMs ?? measuredTimelineMs;
+    const durationSeconds = Math.max(0.001, (nextTimestamp - frame.capturedAtMs) / 1000);
+    concatLines.push(`file '${frame.file}'`, `duration ${durationSeconds.toFixed(6)}`);
+  }
+  concatLines.push(`file '${frames.at(-1).file}'`);
+  await writeFile(concatFile, `${concatLines.join("\n")}\n`);
+  execFileSync("ffmpeg", [
+    "-hide_banner", "-loglevel", "error", "-y",
+    "-f", "concat", "-safe", "0", "-i", concatFile,
+    "-fps_mode", "vfr", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-movflags", "+faststart",
+    videoFile,
+  ], { stdio: "inherit" });
+  const videoProbe = JSON.parse(execFileSync("ffprobe", [
+    "-v", "error", "-show_entries", "format=duration:stream=codec_name,width,height",
+    "-of", "json", videoFile,
+  ], { encoding: "utf8" }));
+  const videoDurationMs = Number(videoProbe.format.duration) * 1000;
+  const expectedDurationMs = measuredTimelineMs;
+  if (Math.abs(videoDurationMs - expectedDurationMs) > 250) {
+    throw new Error(`Ordinary New Thread video timing differs from captured timestamps: ${JSON.stringify({ videoDurationMs, expectedDurationMs })}`);
+  }
+  execFileSync("ffmpeg", ["-hide_banner", "-loglevel", "error", "-i", videoFile, "-f", "null", "-"], {
+    stdio: "inherit",
+  });
+  const videoBytes = await readFile(videoFile);
+  const screenshotBytes = await readFile(join(noThreadEvidenceDirectory, "ordinary-new-thread-view.png"));
+  mainWindow.destroy();
+  mainWindow = undefined;
+  await openThreadWindow(threadId);
+  await waitFor("saved-thread follow-up restored after renderer window restart", () => evaluate(`(
+    document.querySelector('#threadPrompt')?.value === ${JSON.stringify(savedDraftText)}
+  )`));
+  mainWindow.setSize(1280, 1100);
+  await sleep(160);
+  const restoredThreadScreenshot = await mainWindow.webContents.capturePage();
+  const restartedScreenshotFile = join(noThreadEvidenceDirectory, "saved-thread-draft-after-window-restart.png");
+  const restartedPng = restoredThreadScreenshot.toPNG();
+  await writeFile(restartedScreenshotFile, restartedPng);
+  const restartedScreenshotText = await recognizer.recognize(restartedScreenshotFile);
+  if (classifyDesktopCaptureText(restartedScreenshotText) !== "saved-thread") {
+    await recognizer.close();
+    throw new Error(`Post-recreation screenshot did not show the saved-thread follow-up: ${JSON.stringify(restartedScreenshotText)}`);
+  }
+  await recognizer.close();
+  return {
+    passed: true,
+    ...selection,
+    savedDraftPreserved: true,
+    windowRestarted: true,
+    appProcessRestarted: false,
+    servicesRestarted: false,
+    frames: frames.length,
+    recording: {
+      timestampSource: "performance.now() at completion of each Electron capturePage request",
+      frameContentClassifier: "macOS Vision OCR of each captured PNG; visible-state tag must match recognized screenshot text",
+      capturedFrames: frames.map(({ file, capturedAtMs, state, recognizedText, sha256 }) => ({
+        file: file.split("/").at(-1),
+        capturedAtMs: Number(capturedAtMs.toFixed(1)),
+        state,
+        recognizedText,
+        sha256,
+      })),
+      stateIntervals: Object.fromEntries(Object.entries(measuredStateRuns).map(([key, run]) => [key, {
+        firstFrameIndex: run.firstIndex,
+        lastFrameIndex: run.lastIndex,
+        firstCapturedAtMs: Number(run.firstAtMs.toFixed(1)),
+        lastCapturedAtMs: Number(run.lastAtMs.toFixed(1)),
+        durationMs: Number(run.durationMs.toFixed(1)),
+      }])),
+      beforeClickHoldMs: Number(beforeClickHoldMs.toFixed(1)),
+      newThreadHoldMs: Number(newThreadHoldMs.toFixed(1)),
+      restoredThreadHoldMs: Number(restoredThreadHoldMs.toFixed(1)),
+      minimumReadableHoldMs,
+      domReportedAtMs: stateRuns.domReportedAtMs,
+      measuredTimelineMs: Number(measuredTimelineMs.toFixed(1)),
+      videoDurationMs: Number(videoDurationMs.toFixed(1)),
+    },
+    video: {
+      file: videoFile,
+      sha256: createHash("sha256").update(videoBytes).digest("hex"),
+      durationSeconds: Number(Number(videoProbe.format.duration).toFixed(3)),
+      stream: videoProbe.streams[0],
+      playbackDecoded: true,
+    },
+    screenshot: {
+      file: join(noThreadEvidenceDirectory, "ordinary-new-thread-view.png"),
+      sha256: createHash("sha256").update(screenshotBytes).digest("hex"),
+    },
+    beforeNewThreadScreenshot: {
+      file: beforeNewThreadScreenshotFile,
+      sha256: await sha256File(beforeNewThreadScreenshotFile),
+    },
+    afterWindowRestartScreenshot: {
+      file: restartedScreenshotFile,
+      sha256: createHash("sha256").update(restartedPng).digest("hex"),
+      recognizedText: restartedScreenshotText,
+    },
+  };
 }
 
 async function productRequest(path, options = {}) {
@@ -1052,6 +1418,7 @@ async function run() {
   }
   const noDrafts = await productRequest(`/api/threads/${withoutDraft.thread.id}/context-drafts`);
   if (noDrafts.drafts.length !== 0) throw new Error("The no-draft fixture unexpectedly gained a draft.");
+  const ordinaryNewThread = await captureOrdinaryNewThreadEvidence(withoutDraft.thread.id);
 
   process.stdout.write(`RELAYER_CONTEXT_DRAFT_WARNING_SMOKE ${JSON.stringify({
     passed: true,
@@ -1064,6 +1431,7 @@ async function run() {
     workspaceDisposalCancelPassed: true,
     newThreadCancelPassed: true,
     newThreadRestorationPassed: true,
+    ordinaryNewThreadButton: ordinaryNewThread,
     failureRecovered: true,
     repeatActivationPassed: true,
     overrideContexts: requests[1].body.contexts,

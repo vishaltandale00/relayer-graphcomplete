@@ -1140,9 +1140,14 @@ V1 exposes only <strong>Local checkout</strong> and <strong>New worktree</strong
 </ul>
 <h3>3.7 Verification</h3>
 <p>Choice-driven tests cover each scope, Git option, and permission profile. Permission tests cover catalog defaulting, unavailable-profile fallback, no-profile failure, the exact thread-create request, pinned persistence, and the Full access disclosure. They also cover creation failure, revoked permission, duplicate projects, project moves, and both fork options. Filesystem and Git tests use temporary repositories. They must not change a user checkout.</p>
+<p>Checkpoint: <code>test/node-detail-runtime.test.mjs</code> exercises real workspace construction, rendering, and disposal without a saved thread while its input-draft controller is active.</p>
+<p>The test settles thread A's deferred input-draft load in the empty view. It verifies no threadless input-draft operation or interim Send. On return to A, it checks the displayed label, value, preview, and Send revision. This checkpoint maps only the no-thread workspace and input-draft lifecycle. The fixture response comparison does not prove that the workspace retained an exact occurrence, source, or draft-revision identity.</p>
+<p>The fixture also retains a graph selection when the saved thread disappears and drains pending reselection work while collecting unhandled rejections. With its thread-filtered interaction projection, no current interaction with a graph node ID is available to the input renderer. This is a conditional reachability check, not reproduction of the reported rejection for every production projection.</p>
+<p>The project-compose scenario in <code>scripts/test-desktop-project-new-thread.mjs</code> covers SCP-015 and the navigation portion of SCP-016. It exercises saved follow-ups and pending New Thread drafts across navigation, successful Send, and explicit clearing. It closes and recreates renderer windows, restarts the Rust app server, and reopens the settings store while the Electron main process remains alive. This does not verify composer-draft recovery after quitting and relaunching the Electron app, so that SCP-016 checkpoint remains open.</p>
+<p>macOS desktop visual-transition evidence classifies captured frames with Vision OCR. It measures readability between captured frames that show the same state. The 1,400 ms threshold is an evidence capture rule, not a product requirement.</p>
 <p>Project-row tests cover idle, hover, pointer exit, keyboard focus, long names, and empty projects. They assert one stable action target.</p>
 <p>Interaction tests prove exact project selection and no pre-Send thread creation. They cover same-project focus and cross-project draft preservation.</p>
-<p>Draft tests cover saved follow-ups, pending New Thread text, navigation, restart, successful Send, and explicit clearing. These tests use local deterministic fixtures.</p>
+<p>Draft tests cover saved follow-ups, pending New Thread text, navigation, and recovery after Rust app-server restart with renderer-window recreation. They also cover successful Send and explicit clearing. Full Electron process-restart recovery remains unverified. These tests use local deterministic fixtures.</p>
 <p>Rendered evidence must show the populated sidebar before hover, during hover, and after activation. Prototype screenshots do not satisfy this requirement.</p>
 <h2 data-prd-layer="Evidence" data-prd-order="15.2">15B. Work-context evidence</h2>
 <table>
@@ -1162,12 +1167,12 @@ V1 exposes only <strong>Local checkout</strong> and <strong>New worktree</strong
 <td><code>SCP-001-E1</code>, <code>SCP-001-E2</code>, <code>APP-001-E1</code>, and <code>APP-001-E2</code></td>
 <td>No folder create/reopen is verified. Existing-project population, folder-dialog completion, Git detection, and local/new-worktree choice remain unverified, so the overall requirement group stays partial.</td>
 </tr>
-<tr class="requirement-row status-verified">
+<tr class="requirement-row status-partial">
 <td>Project-row New Thread action and draft safety</td>
-<td><span class="delivery-status verified">Verified</span></td>
-<td><code>npm run test:desktop:project-new-thread</code> covers <code>SCP-010</code> through <code>SCP-017</code> through one production-renderer seam with deterministic fixtures and no paid inference.</td>
+<td><span class="delivery-status partial">Partial</span></td>
+<td><code>npm run test:desktop:project-new-thread</code> covers <code>SCP-010</code> through <code>SCP-017</code> through one production-renderer seam with deterministic fixtures and no paid inference. Its draft-recovery checkpoint restarts the Rust app server and recreates renderer windows while Electron remains running; it does not cover full-process restart.</td>
 <td>The scenario captures resting, hovered, and activated production renderer states under <code>.relayer/evidence/project-new-thread/</code>.</td>
-<td>None for this requirement group.</td>
+<td>Verify saved-follow-up and pending New Thread draft recovery after quitting and relaunching the Electron app.</td>
 </tr>
 <tr class="requirement-row status-verified">
 <td>New Thread permission profile selection</td>
@@ -2390,17 +2395,17 @@ settings:
 <table>
 <thead><tr><th>Checkpoint</th><th>Public deterministic proof</th></tr></thead>
 <tbody>
-<tr><td>Ordinary accepted Eval state</td><td><code>test/eval-app-integration.test.mjs</code> executes the fixture through real graph and product servers and inspects the canonical package, actions, and read-only review context.</td></tr>
-<tr><td>Trusted authored-control discovery</td><td><code>test/node-detail-runtime.test.mjs</code> drives the review presentation adapter against the real constrained runtime, preserving action identity and rejecting disabled or stale controls and unrelated shadow roots.</td></tr>
+<tr><td>Ordinary accepted Eval state</td><td><code>test/eval-app-integration.test.mjs</code> executes the fixture through real graph and product servers and inspects the canonical package, actions, and read-only review context. It rejects the fixture harness with unrelated cases and any mixed case or harness selection.</td></tr>
+<tr><td>Trusted authored-control discovery</td><td><code>test/node-detail-runtime.test.mjs</code> drives the review adapter against the real constrained runtime. It preserves action identity and names from referenced labels, including their ARIA labels and titles. It rejects disabled or stale controls and unrelated shadow roots.</td></tr>
 <tr><td>Rendered review and capture</td><td><code>npm run test:desktop:visual-node-details</code> opens the production review window with a read-only session, navigates authored controls, captures the selected detail through ReviewSession, and reopens accepted state. Its receipt must report image coverage separately until the asset path is proved.</td></tr>
 <tr><td>Asset authority and portability</td><td><code>packages/harness-host/test/visual-assets-bridge.test.ts</code> checks scope and authority. <code>packages/visual-assets/test/visual-assets.test.ts</code> checks catalog persistence and atomic failure. <code>test/node-detail-assets.test.mjs</code> checks response integrity. <code>test/eval-app-integration.test.mjs</code> checks delivery. <code>test/conversation-export-eval-e2e.test.mjs</code> checks portability. Full #371 acceptance is withheld until graph pinning, import integrity, archive independence, and shared rendered image evidence pass.</td></tr>
-<tr><td>Terminal and generation fencing</td><td>Lifecycle tests in <code>crates/relayer-graph-server/src/lib.rs</code> exercise rejected-submit repair, lost acknowledgments, explicit-revoke retries, and bridge replacement. Host bridge tests reject delayed work from older generations and barriers.</td></tr>
+<tr><td>Terminal and generation fencing</td><td>Lifecycle tests in <code>crates/relayer-graph-server/src/lib.rs</code> exercise rejected-submit repair, lost acknowledgments, explicit-revoke retries, bridge replacement, and recovery after a partial handoff failure. Host bridge tests reject delayed work from older generations and barriers.</td></tr>
 <tr><td>Accepted current image authority</td><td><code>test/eval-app-integration.test.mjs</code> reads pinned image bytes after Advance and before Return, while rejecting draft nodes and unrelated layers.</td></tr>
 <tr><td>Typed and packaged authoring</td><td><code>packages/graph-client/test/visual-assets.test.ts</code> checks file-handle round trips and immutable request snapshots. <code>test/graph-client-packaged-detail.test.mjs</code> checks the packaged authoring exports.</td></tr>
 <tr><td>Desktop asset startup and packaging</td><td><code>test/desktop-shell.test.mjs</code> and <code>test/codex-browser-runtime.test.mjs</code> check the bridge startup contract and native image-processing dependency packaging.</td></tr>
 <tr><td>Bounded portable transport</td><td><code>crates/relayer-graph-server/tests/import_visual_asset_transport.rs</code> checks separate digest staging, repeated large-image references, import isolation, and atomic failure under the existing request limit.</td></tr>
-<tr><td>Durable input and cursor semantics</td><td><code>packages/visual-assets/test/visual-assets.test.ts</code> checks immediate byte ownership, handled read/copy failures, and cursor stability for observable durable no-ops.</td></tr>
-<tr><td>Asset reclamation and bounded staging</td><td>Graph import transport tests check shared-content lifetime and rollback. App export and import storage tests check deduplicated fetches and separate digest staging rows.</td></tr>
+<tr><td>Durable input and cursor semantics</td><td><code>packages/visual-assets/test/visual-assets.test.ts</code> checks immediate byte and nested-scope ownership, handled read/copy failures, and cursor stability for observable durable no-ops. File-backed tests check digest-deduplicated content, legacy migration, metadata-only writes, and memory/disk consistency after publication failures.</td></tr>
+<tr><td>Asset reclamation and bounded staging</td><td>Graph import transport tests check shared-content lifetime and rollback. App export and import storage tests check deduplicated fetches and separate digest staging rows. Product-store startup schema tests reject missing or malformed staging tables, keys, and cascading foreign keys.</td></tr>
 <tr><td>Clean dependency and packaging verification</td><td>CI planner and chapter-runner tests include visual-assets before harness-host. Desktop packaging tests check entry points against the installed Sharp package.</td></tr>
 </tbody>
 </table>

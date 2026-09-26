@@ -1,0 +1,51 @@
+
+ RUN  v4.1.10 /Users/vishaltandale/.codex/worktrees/05b1/relayer-graphcomplete
+
+ ❯ |isolated| test/node-detail-runtime.test.mjs (42 tests | 1 failed) 245ms
+     × lets Eval navigate trusted authored controls while retaining read-only and disposal boundaries 13ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  |isolated| test/node-detail-runtime.test.mjs > compiled Node Detail product runtime > lets Eval navigate trusted authored controls while retaining read-only and disposal boundaries
+AssertionError: expected [ { name: 'Invoke', …(3) }, …(1) ] to deeply equal [ { name: 'Expand', …(3) }, …(3) ]
+
+- Expected
++ Received
+
+@@ -1,19 +1,7 @@
+  [
+    {
+-     "actionId": "11",
+-     "disabled": false,
+-     "kind": "navigate-action",
+-     "name": "Expand",
+-   },
+-   {
+-     "actionId": "12",
+-     "disabled": false,
+-     "kind": "navigate-action",
+-     "name": "Reference",
+-   },
+-   {
+      "actionId": "13",
+      "disabled": true,
+      "kind": "invoke-action",
+      "name": "Invoke",
+    },
+
+ ❯ test/node-detail-runtime.test.mjs:150:104
+    148|       windowObject: window, getPresentationState: () => state, navigat…
+    149|     const controls = adapter.snapshot().controls;
+    150|     expect(controls.map(({ name, kind, actionId, disabled }) => ({ nam…
+       |                                                                                                        ^
+    151|       { name: "Expand", kind: "navigate-action", actionId: "11", disab…
+    152|       { name: "Reference", kind: "navigate-action", actionId: "12", di…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 41 passed (42)
+   Start at  16:08:24
+   Duration  691ms (transform 111ms, setup 0ms, import 359ms, tests 245ms, environment 0ms)
+

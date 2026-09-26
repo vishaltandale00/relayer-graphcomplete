@@ -1,0 +1,27 @@
+{
+  "reviewer": "GPT-6-Astra /root/astra_standards",
+  "scope": "Root-owned Eval fixture admission, trusted review control naming, main composer test preservation, and checkpoint mapping",
+  "verdict": {
+    "standards": "clean; no documented violations or material heuristic smells",
+    "spec": "clean; fixture exact pairing, compiler referenced-label precedence, and main composer assertions preserved"
+  },
+  "fileSha256": {
+    "desktop/eval-main/eval-service.mjs": "2e2af873aa4f4725089f3b69965af903586db5dd58ac765e06da08290b6343a8",
+    "desktop/renderer/src/review-tools.js": "0a6a84561ac9b6517983ce22f16cbaf371235d7c4d906ce01fc0d768efd91d89",
+    "test/eval-app-integration.test.mjs": "d89005d261adbfdf20ec6b9519d2f5727d57959248b127f6773862c2219915c5",
+    "test/node-detail-runtime.test.mjs": "064eb710a9cd6b1049405dcc405a6e150d3c4f4fb20b71c21c41a547448fa798",
+    "docs/prd/index.html": "9bce09bd75c391355dd8446cd5b5075dcaf01edf1d2f1e6857511dcf302dc89c"
+  },
+  "readmePrefix": {
+    "path": "docs/evidence/issue-371-visual-node-details/review-round-2/README.md",
+    "boundary": "bytes before ## Results",
+    "byteLength": 1925,
+    "sha256": "aea1358a967ed4115ee1c9641b1006b4f13df78423d1f9d936ebb98575001cdf"
+  },
+  "limits": [
+    "Independent source and test inspection only; tests not rerun by reviewer.",
+    "Does not certify bridge, visual-assets library, or own app schema implementation.",
+    "Executable source changes invalidate their scoped assertion; final results below README prefix do not."
+  ],
+  "unresolvedFindings": []
+}

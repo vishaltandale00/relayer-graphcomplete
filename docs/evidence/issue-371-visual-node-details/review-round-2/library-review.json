@@ -1,0 +1,12 @@
+{
+  "reviewer": "GPT-6-Astra /root/astra_standards",
+  "scope": "Catalog v2 metadata/raw digest storage, v1 migration, bootstrap blobs, reopen integrity, metadata-only updates, queued nested scope snapshots, precommit cleanup, postrename memory reconciliation",
+  "specVerdict": "clean",
+  "standardsVerdict": "clean",
+  "unresolvedFindings": [],
+  "files": {
+    "packages/visual-assets/src/index.ts": "6b7a5cb86c285958dca1dba0f97d1046b3ce3cfb46ddac4d8a0bdd16f4159470",
+    "packages/visual-assets/test/visual-assets.test.ts": "deff727220ec462cdf5ac8ab7638c942e2aaf91b35b015807f184c623591a771"
+  },
+  "limits": "Independent source/test review; tests run by implementer/root. No concurrent multi-writer guarantee or crash-orphan garbage collection. Final comment-only source refresh independently verified. Source changes invalidate assertion."
+}

@@ -1,0 +1,11 @@
+{
+  "reviewer": "GPT-6-Astra /root/astra_spec",
+  "scope": "Product-store startup validation for migration31 staged asset content table, columns, composite key, and cascading foreign key",
+  "specVerdict": "clean",
+  "standardsVerdict": "clean",
+  "unresolvedFindings": [],
+  "files": {
+    "crates/relayer-app-server/src/storage/sqlite/schema.rs": "9bd0e0ca4e3d90b0189186d98ade5dcbd22ed9f442826559085fb7d608c7ff72"
+  },
+  "limits": "Independent source and test review; execution recorded separately. Source changes invalidate this assertion."
+}

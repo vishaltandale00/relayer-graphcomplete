@@ -51,7 +51,9 @@ export function accessibleControlName(element) {
   const root = element.getRootNode?.();
   const labelledBy = (element.getAttribute("aria-labelledby") || "").trim().split(/\s+/)
     .filter(Boolean).map((id) => root?.getElementById?.(id))
-    .filter(Boolean).map((label) => contentAlternative(label, true)).join(" ").trim();
+    .filter(Boolean).map((label) => (label.getAttribute("aria-label")?.trim()
+      || label.getAttribute("title")?.trim()
+      || contentAlternative(label, true))).join(" ").trim();
   const labels = [...(element.labels || [])].map((label) => contentAlternative(label)).join(" ").trim();
   return (labelledBy
     || element.getAttribute("aria-label")?.trim()

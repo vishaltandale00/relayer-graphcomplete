@@ -34,13 +34,19 @@ pub struct ServerState {
     control_token: Arc<str>,
     temporal_features: TemporalFeatureConfig,
     visual_assets_bridge: Arc<Mutex<Option<VisualAssetsBridge>>>,
-    visual_assets_admission: Arc<tokio::sync::Mutex<()>>,
+    visual_assets_admission: Arc<tokio::sync::Mutex<VisualAssetsHandoffPhase>>,
     visual_assets_gate: Arc<Mutex<HashMap<NodeId, Arc<tokio::sync::Mutex<u64>>>>>,
     http_client: reqwest::Client,
     #[cfg(feature = "ladybug")]
     search_index: Option<Arc<search_index::LadybugSearchIndex>>,
     #[cfg(all(feature = "ladybug", feature = "crash-test-support"))]
     search_cancellations: Arc<Mutex<VecDeque<search_index::QueryCancellation>>>,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum VisualAssetsHandoffPhase {
+    Reversible,
+    CutoverPending,
 }
 
 #[derive(Debug, Clone)]
@@ -92,7 +98,9 @@ impl ServerState {
             control_token: Arc::from(control_token.into()),
             temporal_features: TemporalFeatureConfig::default(),
             visual_assets_bridge: Arc::new(Mutex::new(None)),
-            visual_assets_admission: Arc::new(tokio::sync::Mutex::new(())),
+            visual_assets_admission: Arc::new(tokio::sync::Mutex::new(
+                VisualAssetsHandoffPhase::Reversible,
+            )),
             visual_assets_gate: Arc::new(Mutex::new(HashMap::new())),
             http_client: reqwest::Client::builder()
                 .timeout(std::time::Duration::from_secs(10))
@@ -309,7 +317,7 @@ async fn register_visual_assets_bridge(
     Json(input): Json<VisualAssetsBridgeRegistration>,
 ) -> Result<Json<Value>, ApiError> {
     require_bearer(&headers, &state.control_token)?;
-    let _admission = state.visual_assets_admission.lock().await;
+    let mut handoff_phase = state.visual_assets_admission.lock().await;
     let url = reqwest::Url::parse(&input.url)
         .map_err(|_| ApiError::invalid("visual-assets bridge URL is invalid"))?;
     if input.generation == 0
@@ -347,19 +355,48 @@ async fn register_visual_assets_bridge(
             .values()
             .map(|authority| authority.node_id)
             .collect();
+        // Keep every completion gate until the swap or compensation finishes.
+        // A concurrent terminal operation must not replace a rollback barrier.
+        let mut pauses = Vec::with_capacity(active_nodes.len());
         for node_id in &active_nodes {
-            let gate = completion_asset_gate(&state, *node_id)?;
-            let mut generation = gate.lock().await;
-            let barrier = format!("bridge-{}-{}", input.generation, node_id.value());
-            *generation = visual_assets_lifecycle(
-                &state,
-                *node_id,
-                json!({"kind":"pause","expectedGeneration":*generation,"barrierId":barrier,"revocationTakeover":true}),
-            )
-            .await?;
+            pauses.push(VisualAssetsHandoffPause {
+                node_id: *node_id,
+                generation: completion_asset_gate(&state, *node_id)?.lock_owned().await,
+                barrier: format!("bridge-{}-{}", input.generation, node_id.value()),
+                acknowledged: false,
+            });
         }
+        for index in 0..pauses.len() {
+            let pause = &mut pauses[index];
+            match visual_assets_lifecycle(&state, pause.node_id, pause.operation()).await {
+                Ok(generation) => {
+                    *pause.generation = generation;
+                    pause.acknowledged = true;
+                }
+                Err(error) => {
+                    if *handoff_phase == VisualAssetsHandoffPhase::CutoverPending
+                        || !restore_visual_assets_handoff(&state, &mut pauses[..=index]).await
+                    {
+                        return Err(visual_assets_handoff_recovery_required());
+                    }
+                    return Err(error);
+                }
+            }
+        }
+        // Retain the irreversible phase across failed registration attempts.
+        // A later pause failure must not resume authority cut over by an earlier try.
+        *handoff_phase = VisualAssetsHandoffPhase::CutoverPending;
         for node_id in &active_nodes {
-            state.graph.cutover_completion_authority(*node_id).await?;
+            if state
+                .graph
+                .cutover_completion_authority(*node_id)
+                .await
+                .is_err()
+            {
+                // Some epochs may already be committed. Keep every barrier in
+                // place and let registration retry finish the irreversible cutover.
+                return Err(visual_assets_handoff_recovery_required());
+            }
         }
         state
             .sessions
@@ -392,7 +429,67 @@ async fn register_visual_assets_bridge(
             generation: input.generation,
         });
     }
+    *handoff_phase = VisualAssetsHandoffPhase::Reversible;
     Ok(Json(json!({"generation": input.generation})))
+}
+
+fn visual_assets_handoff_recovery_required() -> ApiError {
+    ApiError(
+        StatusCode::SERVICE_UNAVAILABLE,
+        json!({"error": {
+            "code": "visual_assets_bridge_recovery_required",
+            "message": "Bridge replacement did not complete. The old bridge remains registered. Finish any pending terminal or revoke operation, then retry this registration to recover the handoff."
+        }}),
+    )
+}
+
+struct VisualAssetsHandoffPause {
+    node_id: NodeId,
+    generation: tokio::sync::OwnedMutexGuard<u64>,
+    barrier: String,
+    acknowledged: bool,
+}
+
+impl VisualAssetsHandoffPause {
+    fn operation(&self) -> Value {
+        // This pause is reversible; it must never take ownership of an unrelated
+        // terminal/revoke barrier that compensation could accidentally resume.
+        json!({"kind":"pause","expectedGeneration":*self.generation,"barrierId":self.barrier})
+    }
+}
+
+async fn restore_visual_assets_handoff(
+    state: &ServerState,
+    pauses: &mut [VisualAssetsHandoffPause],
+) -> bool {
+    let mut restored = true;
+    for pause in pauses.iter_mut().rev() {
+        if !pause.acknowledged {
+            // The failed request may have paused the host before losing its
+            // acknowledgment. Replaying the exact barrier learns that generation.
+            match visual_assets_lifecycle(state, pause.node_id, pause.operation()).await {
+                Ok(generation) => {
+                    *pause.generation = generation;
+                    pause.acknowledged = true;
+                }
+                Err(_) => {
+                    restored = false;
+                    continue;
+                }
+            }
+        }
+        match visual_assets_lifecycle(
+            state,
+            pause.node_id,
+            json!({"kind":"resume","assetGeneration":*pause.generation,"barrierId":pause.barrier}),
+        )
+        .await
+        {
+            Ok(generation) => *pause.generation = generation,
+            Err(_) => restored = false,
+        }
+    }
+    restored
 }
 
 #[derive(Debug, Deserialize)]
@@ -1619,7 +1716,10 @@ async fn mint_capability_with_profile(
     requested_token: Option<String>,
     profile: GraphCapabilityProfile,
 ) -> Result<String, ApiError> {
-    let _admission = state.visual_assets_admission.lock().await;
+    let handoff_phase = state.visual_assets_admission.lock().await;
+    if *handoff_phase == VisualAssetsHandoffPhase::CutoverPending {
+        return Err(visual_assets_handoff_recovery_required());
+    }
     let graph_token = requested_token.unwrap_or_else(|| Uuid::new_v4().to_string());
     if graph_token.is_empty() {
         return Err(ApiError::invalid("graphToken must be non-empty"));
@@ -2903,6 +3003,359 @@ mod tests {
             StatusCode::SERVICE_UNAVAILABLE
         );
         writer.require_active_authority().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn failed_multi_completion_bridge_handoff_recovers_pauses_and_retryable_rollback() {
+        use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+        for (
+            lost_pause_ack,
+            fail_resume,
+            lost_resume_ack,
+            preexisting_pause,
+            preexisting_revoked,
+        ) in [
+            (false, false, false, false, false),
+            (true, false, false, false, false),
+            (true, true, false, false, false),
+            (true, true, true, false, false),
+            (false, false, false, true, false),
+            (false, false, false, false, true),
+        ] {
+            let authorities = Arc::new(Mutex::new(HashMap::<i64, (u64, bool, String)>::new()));
+            let observed = authorities.clone();
+            let pauses = Arc::new(AtomicUsize::new(0));
+            let resume_failed = Arc::new(AtomicBool::new(false));
+            let fake = Router::new().route(
+                "/visual-assets/operations",
+                post(move |Json(body): Json<Value>| {
+                    let observed = observed.clone();
+                    let pauses = pauses.clone();
+                    let resume_failed = resume_failed.clone();
+                    async move {
+                        let id = body["authority"]["interactionNodeId"].as_i64().unwrap();
+                        let operation = &body["operation"];
+                        let mut states = observed.lock().unwrap();
+                        let (generation, paused, barrier) = states.entry(id).or_insert(
+                            if preexisting_pause || preexisting_revoked {
+                                (2, true, "terminal-or-revoke-owner".into())
+                            } else {
+                                (1, false, String::new())
+                            },
+                        );
+                        let unavailable = || {
+                            (
+                                StatusCode::SERVICE_UNAVAILABLE,
+                                Json(json!({"error":"injected"})),
+                            )
+                        };
+                        match operation["kind"].as_str().unwrap() {
+                            "pause" => {
+                                let fail = pauses.fetch_add(1, Ordering::SeqCst) == 1;
+                                if fail && !lost_pause_ack {
+                                    return unavailable();
+                                }
+                                if preexisting_revoked {
+                                    *barrier = operation["barrierId"].as_str().unwrap().into();
+                                } else if *paused {
+                                    if operation["barrierId"] != *barrier {
+                                        let expected =
+                                            operation["expectedGeneration"].as_u64().unwrap();
+                                        if operation["revocationTakeover"] != true
+                                            || (*generation != expected
+                                                && *generation != expected + 1)
+                                        {
+                                            return unavailable();
+                                        }
+                                        *barrier = operation["barrierId"].as_str().unwrap().into();
+                                    }
+                                } else {
+                                    assert_eq!(operation["expectedGeneration"], *generation);
+                                    *generation += 1;
+                                    *paused = true;
+                                    *barrier = operation["barrierId"].as_str().unwrap().into();
+                                }
+                                if fail {
+                                    return unavailable();
+                                }
+                            }
+                            "resume" => {
+                                assert_eq!(operation["assetGeneration"], *generation);
+                                assert_eq!(operation["barrierId"], *barrier);
+                                if preexisting_revoked {
+                                    return unavailable();
+                                }
+                                if fail_resume && !resume_failed.swap(true, Ordering::SeqCst) {
+                                    if lost_resume_ack {
+                                        *paused = false;
+                                    }
+                                    return unavailable();
+                                }
+                                *paused = false;
+                            }
+                            "list-assets" => {
+                                if *paused || body["assetGeneration"] != *generation {
+                                    return unavailable();
+                                }
+                                return (
+                                    StatusCode::OK,
+                                    Json(json!({"result":{"items":[],"nextCursor":null}})),
+                                );
+                            }
+                            other => panic!("unexpected operation {other}"),
+                        }
+                        (
+                            StatusCode::OK,
+                            Json(json!({"result":{"assetGeneration":generation}})),
+                        )
+                    }
+                }),
+            );
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let address = listener.local_addr().unwrap();
+            let server = tokio::spawn(async move {
+                axum::serve(listener, fake).await.unwrap();
+            });
+            let graph = GraphDatabase::in_memory().await.unwrap();
+            let first = graph
+                .create_interaction(None, ThreadId::new(1).unwrap(), "First")
+                .await
+                .unwrap();
+            let second = graph
+                .create_interaction(None, ThreadId::new(2).unwrap(), "Second")
+                .await
+                .unwrap();
+            let state = ServerState::new(graph.clone(), "control");
+            let app = router(state.clone());
+            let registration = |generation| {
+                Request::builder().method("PUT")
+                .uri("/api/control/visual-assets/bridge").header("authorization", "Bearer control")
+                .header("content-type", "application/json")
+                .body(Body::from(json!({"url":format!("http://{address}"),"token":"x".repeat(32),"generation":generation}).to_string())).unwrap()
+            };
+            assert_eq!(
+                app.clone().oneshot(registration(1)).await.unwrap().status(),
+                StatusCode::OK
+            );
+            let mut tokens = Vec::new();
+            for node in [first.id, second.id] {
+                tokens.push(mint_capability(&state, node, None).await.ok().unwrap());
+            }
+            let response = app.clone().oneshot(registration(2)).await.unwrap();
+            assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+            assert_eq!(
+                state
+                    .visual_assets_bridge
+                    .lock()
+                    .unwrap()
+                    .as_ref()
+                    .unwrap()
+                    .generation,
+                1
+            );
+            for token in &tokens {
+                let authority = state.sessions.lock().unwrap()[token];
+                graph
+                    .writer_for_completion_authority(authority.node_id, authority.epoch)
+                    .await
+                    .unwrap()
+                    .require_active_authority()
+                    .await
+                    .unwrap();
+            }
+            if preexisting_pause {
+                assert!(
+                    authorities.lock().unwrap().values().all(
+                        |(_, paused, barrier)| *paused && barrier == "terminal-or-revoke-owner"
+                    ),
+                    "handoff compensation must never resume or replace another lifecycle owner's barrier"
+                );
+            }
+            if preexisting_revoked {
+                assert!(
+                    authorities
+                        .lock()
+                        .unwrap()
+                        .values()
+                        .all(|(_, paused, _)| *paused),
+                    "compensation cannot revive revoked authority"
+                );
+            }
+            if fail_resume || preexisting_pause || preexisting_revoked {
+                let body: Value = serde_json::from_slice(
+                    &to_bytes(response.into_body(), usize::MAX).await.unwrap(),
+                )
+                .unwrap();
+                assert_eq!(
+                    body["error"]["code"],
+                    "visual_assets_bridge_recovery_required"
+                );
+            } else {
+                for (token, thread_id) in tokens.iter().zip([1, 2]) {
+                    let request = Request::builder().method("POST").uri("/api/graph/visual-assets/operations")
+                        .header("authorization", format!("Bearer {token}")).header("content-type", "application/json")
+                        .body(Body::from(json!({"operation":{"kind":"list-assets","scope":{"kind":"thread","threadId":thread_id}}}).to_string())).unwrap();
+                    assert_eq!(
+                        app.clone().oneshot(request).await.unwrap().status(),
+                        StatusCode::OK,
+                        "a failed later pause must not strand either completion against the old bridge"
+                    );
+                }
+            }
+            if preexisting_pause {
+                server.abort();
+                continue;
+            }
+            assert_eq!(
+                app.oneshot(registration(2)).await.unwrap().status(),
+                StatusCode::OK,
+                "retry of the same handoff must recover any unacknowledged compensation"
+            );
+            assert!(state.sessions.lock().unwrap().is_empty());
+            server.abort();
+        }
+    }
+
+    #[tokio::test]
+    async fn partial_bridge_epoch_cutover_stays_paused_until_registration_retry() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let calls = Arc::new(AtomicUsize::new(0));
+        let resumes = Arc::new(AtomicUsize::new(0));
+        let counted_resumes = resumes.clone();
+        let fake = Router::new().route(
+            "/visual-assets/operations",
+            post(move |Json(body): Json<Value>| {
+                let calls = calls.clone();
+                let resumes = counted_resumes.clone();
+                async move {
+                    if body["operation"]["kind"] == "resume" {
+                        resumes.fetch_add(1, Ordering::SeqCst);
+                    }
+                    // First attempt pauses twice. The second attempt loses its
+                    // second pause response after one old epoch already committed.
+                    if calls.fetch_add(1, Ordering::SeqCst) == 3 {
+                        return (
+                            StatusCode::SERVICE_UNAVAILABLE,
+                            Json(json!({"error":"injected retry pause failure"})),
+                        );
+                    }
+                    (
+                        StatusCode::OK,
+                        Json(json!({"result":{"assetGeneration":2}})),
+                    )
+                }
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            axum::serve(listener, fake).await.unwrap();
+        });
+        let file = tempfile::NamedTempFile::new().unwrap();
+        let graph = GraphDatabase::open(file.path()).await.unwrap();
+        let state = ServerState::new(graph.clone(), "control");
+        let app = router(state.clone());
+        let registration = |generation| {
+            Request::builder().method("PUT")
+            .uri("/api/control/visual-assets/bridge").header("authorization", "Bearer control")
+            .header("content-type", "application/json")
+            .body(Body::from(json!({"url":format!("http://{address}"),"token":"x".repeat(32),"generation":generation}).to_string())).unwrap()
+        };
+        assert_eq!(
+            app.clone().oneshot(registration(1)).await.unwrap().status(),
+            StatusCode::OK
+        );
+        let mut authorities = Vec::new();
+        for thread in [1, 2] {
+            let interaction = graph
+                .create_interaction(None, ThreadId::new(thread).unwrap(), "Question")
+                .await
+                .unwrap();
+            let token = mint_capability(&state, interaction.id, None)
+                .await
+                .ok()
+                .unwrap();
+            authorities.push(state.sessions.lock().unwrap()[&token]);
+        }
+        let pool = sqlx::SqlitePool::connect(&format!("sqlite://{}", file.path().display()))
+            .await
+            .unwrap();
+        // Abort the second real cutover transaction regardless of HashSet order.
+        sqlx::raw_sql("CREATE TABLE test_original_epochs AS SELECT interaction_node_id,authority_epoch FROM completion_authorities;
+            CREATE TRIGGER test_fail_second_cutover BEFORE UPDATE ON completion_authorities
+            WHEN EXISTS(SELECT 1 FROM completion_authorities current JOIN test_original_epochs original USING(interaction_node_id) WHERE current.authority_epoch>original.authority_epoch)
+            BEGIN SELECT RAISE(ABORT,'injected second cutover failure'); END;")
+            .execute(&pool).await.unwrap();
+        let response = app.clone().oneshot(registration(2)).await.unwrap();
+        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+        let body: Value =
+            serde_json::from_slice(&to_bytes(response.into_body(), usize::MAX).await.unwrap())
+                .unwrap();
+        assert_eq!(
+            body["error"]["code"],
+            "visual_assets_bridge_recovery_required"
+        );
+        assert_eq!(
+            state
+                .visual_assets_bridge
+                .lock()
+                .unwrap()
+                .as_ref()
+                .unwrap()
+                .generation,
+            1
+        );
+        let mut active = 0;
+        for authority in &authorities {
+            active += usize::from(
+                graph
+                    .writer_for_completion_authority(authority.node_id, authority.epoch)
+                    .await
+                    .unwrap()
+                    .require_active_authority()
+                    .await
+                    .is_ok(),
+            );
+        }
+        assert_eq!(
+            active, 1,
+            "fixture must fail after exactly one committed epoch cutover"
+        );
+        sqlx::query("DROP TRIGGER test_fail_second_cutover")
+            .execute(&pool)
+            .await
+            .unwrap();
+        let retry = app.clone().oneshot(registration(2)).await.unwrap();
+        assert_eq!(retry.status(), StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(
+            resumes.load(Ordering::SeqCst),
+            0,
+            "a later failed retry must not compensate a previously irreversible handoff"
+        );
+        assert!(
+            mint_capability(&state, authorities[0].node_id, None)
+                .await
+                .is_err(),
+            "unresolved cutover must not admit fresh authority"
+        );
+        assert_eq!(
+            app.oneshot(registration(2)).await.unwrap().status(),
+            StatusCode::OK
+        );
+        assert!(state.sessions.lock().unwrap().is_empty());
+        for authority in authorities {
+            assert!(
+                graph
+                    .writer_for_completion_authority(authority.node_id, authority.epoch)
+                    .await
+                    .unwrap()
+                    .require_active_authority()
+                    .await
+                    .is_err()
+            );
+        }
+        pool.close().await;
+        server.abort();
     }
 
     #[tokio::test]

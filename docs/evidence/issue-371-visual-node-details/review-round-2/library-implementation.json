@@ -1,0 +1,30 @@
+{
+  "sourceHash": "6b7a5cb86c285958dca1dba0f97d1046b3ce3cfb46ddac4d8a0bdd16f4159470",
+  "testHash": "deff727220ec462cdf5ac8ab7638c942e2aaf91b35b015807f184c623591a771",
+  "checkpoints": [
+    "Digest-addressed raw content is stored once outside catalog metadata and is not rewritten by metadata-only mutations.",
+    "Version 1 embedded catalogs migrate to version 2 without changing the logical assets or revision.",
+    "Version 2 reopen fails closed for missing, corrupt, or digest-mismatched content.",
+    "Create-tag and association scopes are snapshotted before queued work.",
+    "Pre-rename failures leave memory unchanged and clean blobs created by the failed mutation; post-rename directory-sync failures reconcile memory to committed disk before surfacing the error."
+  ],
+  "verification": {
+    "command": "npm run build -w @relayer/visual-assets && npx vitest run packages/visual-assets/test/visual-assets.test.ts",
+    "result": "passed",
+    "tests": "44/44",
+    "log": "docs/evidence/issue-371-visual-node-details/review-round-2/logs/visual-assets-durable-catalog-green.log",
+    "logHash": "d6632936dd5aa7bfd89f28cf3e6f6d7eba17592b679948325cfb5ba430a43b83"
+  },
+  "review": {
+    "reviewer": "gpt-6-astra standards",
+    "verdict": "clean",
+    "reviewedSourceHash": "6b7a5cb86c285958dca1dba0f97d1046b3ce3cfb46ddac4d8a0bdd16f4159470",
+    "reviewedTestHash": "deff727220ec462cdf5ac8ab7638c942e2aaf91b35b015807f184c623591a771",
+    "finalSourceDifference": "none"
+  },
+  "limits": [
+    "Crash-orphan garbage collection is deferred because the catalog has no explicit cross-instance ownership lock; eager reopen cleanup could delete an in-flight writer's blob.",
+    "Concurrent multi-writer catalog mutation is outside the current single-owner production contract.",
+    "Metadata candidates still reconstruct and validate the in-memory library, so this change removes repeated durable byte storage and writes but does not remove in-memory decoding cost."
+  ]
+}

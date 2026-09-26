@@ -1,0 +1,27 @@
+{
+  "reviewer": "GPT-6-Astra /root/astra_standards",
+  "scope": "Bridge replacement compensation, lost acknowledgments, completion gate/admission lock ordering, prior lifecycle ownership, partial epoch cutover and cross-request retry recovery",
+  "sourceSha256": {
+    "crates/relayer-graph-server/src/lib.rs": "75ddcd428370c65b47f179182dff01e631cb930fc2b361ee97794bfe98e23408"
+  },
+  "verdict": {
+    "standards": "clean; no documented violations or material heuristic smells",
+    "spec": "clean within reviewed scope"
+  },
+  "findings": [],
+  "resolvedFindings": [
+    "Reversible handoff no longer takes over an unrelated paused terminal/revoke barrier.",
+    "Partial cutover returns explicit recovery-required without compensating committed epochs.",
+    "CutoverPending persists under the existing admission mutex across failed requests and cancellation, blocks compensation and new capability minting, and resets only after successful bridge swap."
+  ],
+  "reviewedEvidence": [
+    "Real route compensation scenario covers rejected/lost pause acknowledgments, rejected/lost resume acknowledgments, preexisting paused ownership and revoked state.",
+    "Real SQLite second-cutover fault followed by retry pause failure checks zero resumes, denied new mint, successful third recovery, and stale prior epochs."
+  ],
+  "limits": [
+    "Independent source and test inspection only; implementer reported 35/35 graph-server library tests, not rerun by this reviewer.",
+    "Pending handoff requires retrying the same registration after pending unrelated terminal/revoke work completes; no automatic background recovery is claimed.",
+    "Recovery phase is process-local alongside bridge/session authority; no cross-process durable bridge recovery is claimed.",
+    "Source changes invalidate this scoped assertion."
+  ]
+}

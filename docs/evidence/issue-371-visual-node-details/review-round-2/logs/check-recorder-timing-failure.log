@@ -1,0 +1,1225 @@
+
+> relayer-graphcomplete@0.0.0 precheck
+> npm run prepare:renderer
+
+
+> relayer-graphcomplete@0.0.0 prepare:renderer
+> node scripts/prepare-renderer-vendor.mjs
+
+
+> relayer-graphcomplete@0.0.0 check
+> cargo fmt --all -- --check && cargo clippy --workspace --all-targets --all-features -- -D warnings && cargo test --workspace && npm run check:graph-crash-reconciliation && cargo build -p relayer-app-server -p relayer-graph-server && npm run build:packages && tsc --noEmit && npm run check --workspaces --if-present && vitest run && npm run test:codex-secret-boundary && PYTHONPATH=python/relayer-graph/src python3 -m unittest discover -s python/relayer-graph/tests && npm run lint:ladybug-receipt && npm run prd:check-readability
+
+    Checking relayer-graph-server v0.0.0 (/Users/vishaltandale/.codex/worktrees/05b1/relayer-graphcomplete/crates/relayer-graph-server)
+    Checking relayer-app-server v0.0.0 (/Users/vishaltandale/.codex/worktrees/05b1/relayer-graphcomplete/crates/relayer-app-server)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 10.51s
+   Compiling relayer-graph-server v0.0.0 (/Users/vishaltandale/.codex/worktrees/05b1/relayer-graphcomplete/crates/relayer-graph-server)
+warning: field `layout` is never read
+  --> crates/relayer-graph-server/src/search_index.rs:61:5
+   |
+59 | struct LadybugRuntime {
+   |        -------------- field in this struct
+60 |     store: StdRwLock<Arc<LadybugStore>>,
+61 |     layout: StoreLayout,
+   |     ^^^^^^
+   |
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: method `root` is never used
+  --> crates/relayer-graph-server/src/search_index/store.rs:49:12
+   |
+40 | impl StoreLayout {
+   | ---------------- method in this implementation
+...
+49 |     pub fn root(&self) -> &Path {
+   |            ^^^^
+
+warning: function `rows` is never used
+   --> crates/relayer-graph-server/src/search_index/store.rs:645:8
+    |
+645 | pub fn rows(connection: &Connection<'_>, query: &str) -> Result<Vec<Vec<Value>>> {
+    |        ^^^^
+
+warning: `relayer-graph-server` (lib) generated 3 warnings
+   Compiling relayer-app-server v0.0.0 (/Users/vishaltandale/.codex/worktrees/05b1/relayer-graphcomplete/crates/relayer-app-server)
+warning: `relayer-graph-server` (lib test) generated 3 warnings (3 duplicates)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 35.26s
+     Running unittests src/lib.rs (target/debug/deps/relayer_app_server-b68cd9d222dbd8f1)
+
+running 248 tests
+test api::conversation_imports::tests::streaming_bounds_reject_over_limit_lengths_without_file_sized_buffering ... ok
+test api::error::tests::nested_graph_validation_keeps_exact_internal_diagnostic ... ok
+test api::input_drafts::tests::committed_input_value_rejects_unknown_nested_fields ... ok
+test api::input_drafts::tests::committed_input_value_rejects_mixed_text_and_selection_fields ... ok
+test api::input_drafts::tests::committed_input_value_accepts_exact_text_and_selection_shapes ... ok
+test api::threads::tests::a_held_observation_releases_its_caller_when_the_hold_elapses ... ok
+test api::threads::tests::a_supervised_completion_holds_before_its_first_projection_read ... ok
+test api::threads::tests::a_held_observation_answers_immediately_once_the_child_is_terminal ... ok
+test api::model_settings::tests::onboarding_completion_request_requires_exact_tagged_family_intent ... ok
+test api::threads::tests::an_unsupervised_completion_holds_rather_than_inviting_a_request_loop ... ok
+test api::threads::tests::approval_correlation_is_pinned_to_interaction_session_and_complete_call ... ok
+test api::threads::tests::action_invocation_request_errors_include_identifiers_in_the_backend_log ... ok
+test api::threads::tests::final_ack_accepts_an_exact_cursor_or_an_already_reset_epoch ... ok
+test api::threads::tests::a_held_observation_answers_when_the_awaited_pointer_advances ... ok
+test api::threads::tests::only_the_direct_parent_execution_may_stop_a_child ... ok
+test api::threads::tests::product_decision_accepts_only_the_exact_user_resolution ... ok
+test api::threads::tests::lost_start_acknowledgement_cancels_and_durably_fails_the_keyed_native_run ... ok
+test api::threads::tests::submitted_input_projection_compares_semantic_multisets_not_occurrence_order ... ok
+test api::types::attempt_response_tests::context_projection_preserves_node_content_order_and_hidden_occurrence_identity ... ok
+test api::types::attempt_response_tests::context_projection_rejects_product_graph_drift ... ok
+test api::types::tests::recoverable_attempt_serializes_with_the_real_not_started_contract ... ok
+test api::threads::tests::explicit_stop_settles_the_child_as_stopped_with_its_retained_current ... ok
+test completion_broker::tests::lease_revokes_only_its_exact_execution_scope ... ok
+test conversation_export_service::tests::degrades_authored_detail_containing_a_windows_project_path ... ok
+test conversation_export_service::tests::degrades_authored_detail_containing_an_html_entity_encoded_project_path ... ok
+test conversation_export_service::tests::degrades_authored_detail_hidden_behind_sibling_encodings_and_records_the_omission ... ok
+test conversation_export_service::tests::degrades_authored_detail_without_mutating_its_fallback ... ok
+test conversation_export_service::tests::degrades_nested_numeric_and_named_html_character_references ... ok
+test conversation_export_service::tests::expanding_path_redaction_keeps_option_keys_within_the_portable_limit ... ok
+test conversation_export_service::tests::export_fetches_each_repeated_node_asset_only_once ... ok
+test conversation_export_service::tests::exports_approval_lifecycle_completion_statuses ... ok
+test conversation_export_service::tests::exports_context_diagnostics_with_ordered_annotations_and_authority_free_ids ... ok
+test conversation_export_service::tests::exports_native_submitted_input_with_redacted_snapshot_and_portable_provenance ... ok
+test conversation_export_service::tests::historical_mapping_exports_its_action_origin ... ok
+test conversation_export_service::tests::keeps_encoded_text_that_is_not_a_private_path ... ok
+test conversation_export_service::tests::markdown_redaction_removes_encoded_private_paths_through_the_shared_matcher ... ok
+test conversation_export_service::tests::native_submitted_inputs_sort_by_materialized_portable_identity ... ok
+test conversation_export_service::tests::preserves_unrelated_html_entities_in_authored_detail ... ok
+test conversation_export_service::tests::rejects_unbound_durable_contexts_until_graph_authority_is_bound ... ok
+test conversation_export_service::tests::resolved_invoke_exports_its_authored_shape ... ok
+test conversation_export_service::tests::unanswered_input_action_exports_its_authored_payload ... ok
+test app_server::execution_lease_reconciler_tests::concurrent_outage_wakes_share_one_worker_and_later_debt_is_processed ... ok
+test api::threads::tests::child_launch_fails_before_provider_execution_when_its_configuration_disables_complete ... ok
+test api::threads::tests::broker_exact_retries_launch_once_after_the_durable_fence ... ok
+test api::conversation_imports::tests::stages_valid_jsonl_larger_than_axums_default_body_limit ... ok
+test conversation_import_service::tests::materialized_receipt_reports_every_rejected_input ... ok
+test conversation_import_service::tests::materialized_turn_drops_only_inputs_rejected_by_graph_authority ... ok
+test api::conversation_imports::tests::rejected_imported_input_is_reported_and_absent_from_reexport ... ok
+test api::conversation_imports::tests::accepted_turn_with_only_rejected_input_is_cleaned_up_before_publish ... ok
+test api::conversation_imports::tests::export_shape_imports_as_resolved_read_only_invoke_destination ... ok
+test api::conversation_imports::tests::unanswered_input_action_round_trips_through_app_import ... ok
+test environment::tests::all_git_commands_share_one_snapshot_deadline ... ok
+test api::conversation_imports::tests::seeded_generated_jsonl_mutations_never_publish_or_retain_staging ... ok
+test environment::tests::check_attr_chunks_respect_encoded_argument_budget ... ok
+test api::conversation_imports::tests::imported_eval_thread_exposes_context_for_accepted_failed_and_stopped_turns ... ok
+test environment::tests::cached_snapshot_survives_unrelated_execution_saturation ... ok
+test environment::tests::command_runner_clears_hostile_git_repository_environment ... ok
+test environment::tests::coordinator_coalesces_and_caches_the_same_project ... ok
+test environment::tests::detached_and_clean_are_explicit ... ok
+test environment::tests::command_runner_enforces_start_timeout_and_output_bounds ... ok
+test environment::tests::coordinator_bounds_global_capacity ... ok
+test environment::tests::failed_cleanup_enqueue_returns_ownership_to_the_caller ... ok
+test environment::tests::filesystem_root_uses_neutral_project_label ... ok
+test api::threads::tests::stopping_a_child_that_already_settled_reports_its_terminal_state ... ok
+test api::conversation_imports::tests::hostile_jsonl_corpus_never_panics_or_publishes_partial_state ... ok
+test conversation_import_service::tests::failed_import_materializes_ordered_context_as_read_only_graph_input ... ok
+test environment::tests::effective_global_autocrlf_keeps_clean_worktree_and_does_not_enable_filter_helper ... ok
+test environment::tests::invalid_git_output_degrades_safely ... ok
+test environment::tests::local_filter_parser_deduplicates_clean_process_and_required_keys ... ok
+test environment::tests::missing_git_timeout_and_large_output_have_distinct_safe_states ... ok
+test environment::tests::missing_path_is_unavailable_without_running_git ... ok
+test environment::tests::non_git_folder_is_not_an_error ... ok
+test environment::tests::numstat_parser_handles_binary_and_rename_records ... ok
+test environment::tests::parses_git_snapshot_and_keeps_untracked_separate ... ok
+test environment::tests::persistent_direct_child_errors_respect_the_cleanup_deadline ... ok
+test environment::tests::process_group_cleanup_distinguishes_gone_from_retryable_failures ... ok
+test api::conversation_imports::tests::import_router_enforces_write_cookie_and_feature_gate_for_every_verb ... ok
+test conversation_import_service::tests::legacy_staged_asset_header_migrates_without_losing_content ... ok
+test environment::tests::hung_validation_keeps_pending_capacity_and_key_lock_after_caller_timeout ... ok
+test conversation_import_service::tests::graph_commit_before_product_publish_reconciles_after_restart ... ok
+test conversation_import_service::tests::streamed_asset_staging_keeps_header_small_across_reopen ... ok
+test environment::tests::protected_excludes_preserve_global_empty_reset_and_system_precedence ... ok
+test conversation_import_service::tests::product_only_stage_survives_restart_for_reconciliation ... ok
+test conversation_import_service::tests::graph_delete_failure_retains_product_marker_for_retry ... ok
+test environment::tests::repository_root_preserves_non_utf8_os_path_bytes ... ok
+test conversation_import_service::tests::staged_product_cleanup_is_foreign_key_safe_and_durable ... ok
+test environment::tests::real_git_snapshot_keeps_staged_change_and_worktree_reversal ... ok
+test conversation_import_service::tests::unavailable_asset_validator_cleans_private_graph_and_product_stages ... ok
+test environment::tests::snapshot_copy_is_bounded_and_honors_its_deadline ... ok
+test environment::tests::snapshot_hash_rejects_a_fifo_swap_without_blocking ... ok
+test environment::tests::staged_and_worktree_reversals_do_not_cancel_change_counts ... ok
+test environment::tests::stored_path_rejects_a_symlink_retarget ... ok
+test environment::tests::same_key_queue_is_bounded_before_validation ... ok
+test environment::tests::setsid_descendant_cannot_retain_writable_capture_storage ... ok
+test environment::tests::unborn_repository_uses_an_empty_tree_baseline ... ok
+test environment::tests::timed_out_inspection_retains_execution_capacity_until_blocking_work_exits ... ok
+test environment::tests::windows_snapshot_identity_requires_matching_volume_and_full_file_id ... ok
+test permissions::tests::rejects_a_fourth_base_profile ... ok
+test permissions::tests::validates_the_three_profile_product_contract_and_disabled_full_access ... ok
+test product::catalog::tests::family_membership_is_provider_specific_unique_and_capped ... ok
+test product::catalog::tests::harness_rule_validation_rejects_invalid_regex_and_duplicate_entries ... ok
+test product::execution::tests::http_transport_delegates_interaction_execution_to_product ... ok
+test product::model_policy::tests::claude_policy_uses_all_visible_aliases_in_provider_order ... ok
+test product::model_policy::tests::codex_policy_uses_all_visible_default_metadata_in_provider_order ... ok
+test product::model_policy::tests::codex_policy_v2_leads_with_the_5_6_family_then_keeps_provider_defaults ... ok
+test product::model_policy::tests::codex_policy_v2_omits_hidden_or_missing_family_members ... ok
+test product::model_policy::tests::every_api_adapter_has_a_versioned_fail_closed_fallback_policy ... ok
+test product::model_policy::tests::managed_policy_is_bounded_and_unknown_versions_fail_closed ... ok
+test product::model_policy::tests::openrouter_policy_uses_only_the_reviewed_latest_general_models ... ok
+test product::model_policy::tests::provider_policy_prefers_the_reviewed_openai_agent_family_over_legacy_catalog_order ... ok
+test product::model_policy::tests::vercel_router_policy_uses_equivalent_reviewed_latest_general_models ... ok
+test product::models::action_input_value_tests::selected_input_value_uses_the_camel_case_api_contract ... ok
+test environment::tests::repository_identity_rejects_core_worktree_redirect ... ok
+test environment::tests::inspection_never_lazy_fetches_missing_objects_through_ext_transport ... ok
+test environment::tests::repository_commands_neutralize_local_clean_filter_commands ... ok
+test environment::tests::repository_commands_forward_only_protected_safe_directories ... ok
+test environment::tests::shadow_diff_does_not_reread_filter_config_added_after_snapshot ... ok
+test environment::tests::repository_identity_rejects_ancestor_core_worktree_redirect ... ok
+test product::service::tests::input_send_rejects_more_children_than_the_portable_turn_limit ... ok
+test product::service::tests::configuration_model_exemption_is_scoped_to_the_selected_harness ... ok
+test product::service::tests::input_send_reserves_only_the_exact_inspected_draft_revision ... ok
+test environment::tests::initialized_gitlink_fails_closed_before_submodule_helpers_can_run ... ok
+test product::service::tests::every_api_adapter_materializes_a_provider_scoped_managed_family ... ok
+test product::service::tests::identified_send_replay_rejects_a_different_committed_input_draft ... ok
+test product::service::tests::rejects_a_non_utf8_canonical_project_path_instead_of_storing_a_lossy_path ... ok
+test environment::tests::effective_config_preserves_includes_paths_empty_values_and_local_precedence ... ok
+test product::service::tests::connected_policy_ineligible_api_provider_recovers_a_managed_family_after_refresh ... ok
+test environment::tests::unrepresentable_local_filter_driver_fails_closed_before_diff ... ok
+test environment::tests::global_ignore_submodules_all_preserves_diff_semantics_without_helpers ... ok
+test runtime::tests::absent_model_rules_match_the_host_harness_policy_digest ... ok
+test environment::tests::shadow_worktree_diff_supports_sha256_split_indexes ... ok
+test runtime::tests::configuration_owned_model_omits_empty_compatibility_when_forwarded ... ok
+test runtime::tests::harness_configuration_requires_explicit_well_formed_agent_complete_authority ... ok
+test runtime::tests::harness_effect_boundary_is_allowlisted_and_unknown_values_fail_closed ... ok
+test product::service::tests::openai_api_default_onboarding_selects_its_managed_family_without_custom_setup ... ok
+test product::service::tests::policy_version_change_never_replaces_a_custom_default ... ok
+test runtime::tests::invoked_start_acknowledgement_is_strict_and_attachment_is_an_object ... ok
+test runtime::tests::invoked_start_returns_attachment_before_graph_terminal_and_cancels_exact_completion ... ok
+test product::service::tests::managed_policy_never_replaces_an_explicit_provider_default ... ok
+test runtime::tests::missing_personal_presentation_contract_fails_runtime_detection ... ok
+test runtime::tests::invoke_and_identified_prepare_retry_lost_create_responses_with_stable_identity ... ok
+test runtime::tests::prepare_carries_submitted_input_children_and_a_personal_presentation_together ... ok
+test runtime::tests::rejects_shared_graph_and_harness_control_authority ... ok
+test runtime::tests::retries_capability_revocation_when_session_registration_fails ... ok
+test product::service::tests::input_send_measures_the_complete_known_portable_turn_envelope ... ok
+test product::service::tests::staged_provider_requires_a_connected_catalog_and_preserves_hidden_only_recovery ... ok
+test runtime::tests::startup_retry_classification_follows_the_primary_runtime_failure ... ok
+test runtime::tests::unavailable_catalog_entries_are_visible_but_never_executable ... ok
+test product::service::tests::runtime_default_changes_until_the_user_modifies_defaults ... ok
+test product::service::tests::settings_added_claude_gets_a_managed_family_without_changing_codex_defaults ... ok
+test runtime::tests::revokes_the_interaction_capability_after_successful_completion ... ok
+test product::service::tests::input_send_rejects_submitted_values_above_the_portable_record_byte_limit ... ok
+test environment::tests::repository_identity_allows_selected_subdirectories_and_linked_worktrees ... ok
+test runtime::tests::materializes_built_in_personal_presentation_versions_as_ordinary_completions ... ok
+test runtime::tests::invoke_prepare_bounds_permanent_invalid_json_and_transport_outage ... ok
+test runtime::tests::retries_personal_presentation_publication_with_stable_identity ... ok
+test product::service::tests::staged_codex_provider_uses_its_managed_default_then_policy_migrates_it ... ok
+test environment::tests::transforming_filter_fails_closed_without_executing_the_helper ... ok
+test storage::sqlite::action_invocations::tests::action_uses_the_last_successful_catalog_snapshot ... ok
+test storage::sqlite::action_invocations::tests::active_turn_blocks_a_second_action_interaction ... ok
+test storage::sqlite::action_invocations::tests::hidden_available_model_is_blocked_for_new_historical_actions ... ok
+test storage::sqlite::action_invocations::tests::historical_action_cannot_reuse_a_hidden_model ... ok
+test storage::sqlite::action_invocations::tests::configuration_owned_source_can_invoke_without_a_model_selection ... ok
+test storage::sqlite::action_invocations::tests::historical_action_requires_a_current_family ... ok
+test storage::sqlite::action_invocations::tests::migrated_source_without_model_selection_preserves_action_execution ... ok
+test product::service::tests::input_send_measures_submitted_values_after_portable_project_path_redaction ... ok
+test storage::sqlite::action_invocations::tests::interrupted_leased_result_stays_recoverable_and_keeps_its_binding ... ok
+test storage::sqlite::action_invocations::tests::one_shot_invocation_is_atomic_idempotent_and_durable ... ok
+test storage::sqlite::action_invocations::tests::recursive_invocations_can_bind_concurrent_children_while_the_parent_is_active ... ok
+test storage::sqlite::action_invocations::tests::reused_project_action_is_deduplicated_across_sources_and_concurrent_requests ... ok
+test storage::sqlite::annotations::tests::one_read_transaction_keeps_multi_thread_snapshot_consistent ... ok
+test storage::sqlite::action_invocations::tests::standalone_threads_do_not_share_action_invocation_dedupe_scope ... ok
+test storage::sqlite::approvals::tests::session_loss_aborts_pending_requests_and_never_restores_running ... ok
+test storage::sqlite::approvals::tests::approval_records_are_idempotent_first_terminal_wins_and_drive_waiting_state ... ok
+test storage::sqlite::attempts::tests::accepted_attempt_and_interaction_commit_as_one_terminal_unit ... ok
+test storage::sqlite::attempts::tests::attempt_admission_rejects_a_stale_harness_policy_snapshot ... ok
+test storage::sqlite::attempts::tests::legacy_attempt_without_an_admitted_plan_remains_readable ... ok
+test storage::sqlite::attempts::tests::attempt_admission_rejects_family_revision_race_and_freezes_the_admitted_plan ... ok
+test storage::sqlite::attempts::tests::attempt_receipt_is_immutable_and_terminal_transition_is_one_shot ... ok
+test storage::sqlite::attempts::tests::model_plan_preserves_resolvable_family_order_and_requires_the_orchestrator ... ok
+test storage::sqlite::attempts::tests::no_effect_failure_atomically_returns_the_same_prompt_to_unsent ... ok
+test storage::sqlite::attempts::tests::pre_execution_model_failure_atomically_preserves_receipt_and_restores_draft ... ok
+test storage::sqlite::attempts::tests::rejected_attempt_admission_preserves_frozen_plan_and_release_debt ... ok
+test storage::sqlite::attempts::tests::restart_closes_running_attempt_with_unknown_effect_and_never_replays_it ... ok
+test storage::sqlite::attempts::tests::restart_preserves_a_recoverable_unsent_draft ... ok
+test storage::sqlite::attempts::tests::submitted_input_pre_execution_failure_restores_draft_without_erasing_bound_receipts ... ok
+test storage::sqlite::attempts::tests::submitted_input_model_failure_preserves_terminal_execution_receipts ... ok
+test storage::sqlite::catalog::provider_definition_tests::absent_prime_replacement_leaves_deep_threads_untouched ... ok
+test storage::sqlite::catalog::provider_definition_tests::configuration_owned_harness_can_become_default_with_a_saved_family ... ok
+test storage::sqlite::catalog::provider_definition_tests::declarative_policy_retires_and_moves_a_legacy_system_default_atomically ... ok
+test storage::sqlite::catalog::provider_definition_tests::eval_catalog_preserves_codex_basic_high_threads_and_preferences ... ok
+test storage::sqlite::attempts::tests::repeated_retry_claim_is_idempotent_and_protected_effects_are_rejected ... ok
+test storage::sqlite::catalog::provider_definition_tests::desktop_catalog_retires_product_codex_high_without_rewriting_history ... ok
+test storage::sqlite::catalog::provider_definition_tests::harness_readiness_batch_is_digest_guarded_and_atomic ... ok
+test storage::sqlite::catalog::provider_definition_tests::model_settings_project_only_exactly_executable_harnesses_as_usable_now ... ok
+test storage::sqlite::attempts::tests::terminal_lease_reconciliation_retries_release_and_accepts_host_absence ... ok
+test storage::sqlite::catalog::provider_definition_tests::onboarding_create_and_defaults_commit_together_and_status_uses_saved_harness ... ok
+test storage::sqlite::catalog::provider_definition_tests::onboarding_managed_preview_uses_policy_and_avoids_custom_name_collision ... ok
+test storage::sqlite::catalog::provider_definition_tests::onboarding_projection_uses_exact_rules_access_and_app_default_without_fallback ... ok
+test storage::sqlite::catalog::provider_definition_tests::provider_removal_preserves_a_default_family_member_resolvable_by_default_harness ... ok
+test storage::sqlite::catalog::provider_definition_tests::onboarding_revision_conflict_rolls_back_family_and_defaults ... ok
+test runtime::tests::accepted_graph_closure_times_out_when_headers_stall ... ok
+test storage::sqlite::catalog::provider_definition_tests::sqlite_is_authoritative_for_provider_identity_and_removal_admission ... ok
+test storage::sqlite::catalog::provider_definition_tests::unavailable_execution_configurations_are_hidden_behind_provider_recovery_state ... ok
+test storage::sqlite::catalog::provider_definition_tests::provider_removal_waits_for_restart_to_finalize_a_durable_running_attempt ... ok
+test storage::sqlite::catalog::provider_definition_tests::product_catalog_retires_prime_agent_deep_onto_prime_agent_basic ... ok
+test runtime::tests::personal_presentation_contract_probe_times_out_when_headers_stall ... ok
+test storage::sqlite::conversation_imports::tests::imported_approval_lifecycle_statuses_round_trip ... ok
+test storage::sqlite::completion_executions::tests::attachment_and_settlement_are_idempotent_but_not_replaceable ... ok
+test storage::sqlite::catalog::provider_definition_tests::user_edited_harness_rules_are_revision_guarded_and_survive_runtime_sync ... ok
+test storage::sqlite::completion_executions::tests::live_failure_atomically_projects_interaction_and_execution ... ok
+test storage::sqlite::completion_executions::tests::live_acceptance_atomically_projects_interaction_and_execution ... ok
+test storage::sqlite::attempts::tests::model_failures_restore_the_same_draft_after_every_effect_boundary ... ok
+test storage::sqlite::attempts::tests::partial_effect_boundaries_are_terminal_inspectable_and_one_shot ... ok
+test storage::sqlite::completion_executions::tests::live_settlement_rolls_back_execution_when_product_projection_conflicts ... ok
+test storage::sqlite::completion_executions::tests::only_one_racer_wins_provider_launch_ownership ... ok
+test storage::sqlite::completion_executions::tests::reserve_is_durable_and_exact_retry_ignores_transient_capabilities ... ok
+test storage::sqlite::completion_executions::tests::restart_reconciliation_atomically_recovers_canonical_acceptance ... ok
+test storage::sqlite::context_drafts::tests::transactional_confirm_replay_rejects_a_confirmation_dismissed_during_validation ... ok
+test storage::sqlite::completion_executions::tests::reserve_rejects_conflicting_binding_identity ... ok
+test storage::sqlite::completion_executions::tests::restart_reconciliation_makes_launched_recursive_execution_non_replayable ... ok
+test storage::sqlite::migrations::tests::existing_action_invocations_migrate_as_pre_lease_records ... ok
+test storage::sqlite::conversation_imports::tests::preparing_import_turn_rolls_back_interaction_when_portable_update_fails ... ok
+test storage::sqlite::migrations::tests::legacy_prime_threads_migrate_to_full_access ... ok
+test storage::sqlite::input_drafts::tests::restoring_an_identical_committed_value_ignores_its_newer_timestamp ... ok
+test storage::sqlite::migrations::tests::schema_20_confirmations_migrate_as_historical_not_pending ... ok
+test storage::sqlite::input_drafts::tests::send_reserves_an_immutable_snapshot_and_failure_restores_a_new_draft ... ok
+test storage::sqlite::interaction_contexts::tests::empty_input_snapshot_is_revision_checked_inside_send_transaction ... ok
+test storage::sqlite::interaction_contexts::tests::each_confirmation_requires_a_distinct_submitted_annotation ... ok
+test storage::sqlite::input_drafts::tests::committed_slots_are_independent_replay_safe_and_survive_reopen ... ok
+test storage::sqlite::interaction_contexts::tests::interaction_atomically_consumes_and_unbound_delete_restores_confirmation ... ok
+test storage::sqlite::interaction_contexts::tests::exact_not_started_replay_reclaims_restored_confirmations ... ok
+test storage::sqlite::interaction_contexts::tests::identified_context_intent_is_atomic_ordered_replayable_and_discard_restores_thread_time ... ok
+test storage::sqlite::interactions::tests::retry_claim_updates_the_same_draft_once_and_preserves_the_failed_receipt ... ok
+test storage::sqlite::interactions::tests::restart_recovery_preserves_every_imported_completion_status ... ok
+test storage::sqlite::interactions::tests::omitted_model_is_inherited_inside_the_sequence_allocation_transaction ... ok
+test storage::sqlite::interactions::tests::last_successful_catalog_snapshot_remains_usable_until_replaced ... ok
+test storage::sqlite::migrations::tests::legacy_ui_rule_overrides_reset_once_before_catalog_reseeding ... ok
+test storage::sqlite::migrations::tests::schema_23_personal_presentation_state_survives_input_migrations ... ok
+test storage::sqlite::personal_presentation::tests::hidden_profile_versions_publish_once_and_pin_interactions_immutably ... ok
+test storage::sqlite::migrations::tests::schema_22_interactions_remain_unpinned_after_migration_and_reopen ... ok
+test storage::sqlite::schema::tests::malformed_interaction_context_table_fails_current_schema_open ... ok
+test storage::sqlite::personal_presentation::tests::retired_versions_preserve_historical_threads_and_pins ... ok
+test storage::sqlite::schema::tests::missing_action_input_detach_receipt_foreign_key_fails_current_schema_open ... ok
+test storage::sqlite::schema::tests::missing_node_context_draft_order_index_fails_current_schema_open ... ok
+test storage::sqlite::migrations::tests::legacy_reused_action_duplicates_are_canonicalized_before_open_validation ... ok
+test storage::sqlite::schema::tests::malformed_active_family_name_index_fails_current_schema_open ... ok
+test storage::sqlite::schema::tests::malformed_import_asset_contents_fails_current_schema_open ... ok
+
+test result: ok. 248 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 12.35s
+
+     Running unittests src/main.rs (target/debug/deps/relayer_app_server-ecd760b6a431f377)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/conversation_export_contract.rs (target/debug/deps/conversation_export_contract-0de2691bcc582a7b)
+
+running 19 tests
+test requires_the_exact_ordered_header_inventory ... ok
+test rejects_conflicting_reused_portable_id_definitions ... ok
+test accepted_input_action_requires_its_authored_payload ... ok
+test private_authored_detail_omission_cannot_retain_asset_bytes_or_associations ... ok
+test preserves_legacy_missing_layout_and_rejects_invalid_portable_layouts ... ok
+test older_turns_without_context_fields_decode_as_empty_context ... ok
+test canonical_authored_detail_survives_export_record_serialization ... ok
+test accepts_complete_reference_cycles_but_rejects_expand_cycles_and_missing_targets ... ok
+test serializes_exactly_header_and_turn_records_and_round_trips ... ok
+test admitted_model_plan_is_an_immutable_non_secret_export_snapshot ... ok
+test context_round_trip_preserves_order_nonaccepted_turns_and_shared_snapshots ... ok
+test admitted_model_plan_requires_its_selected_family_and_orchestrator ... ok
+test allows_reused_action_provenance_and_requires_action_origins_to_name_prior_invokes ... ok
+test preserves_actual_completion_status_without_inventing_acceptance ... ok
+test visual_asset_archive_is_optional_and_globally_deduplicated ... ok
+test visual_asset_archive_rejects_corrupt_or_unbound_content_before_import ... ok
+test incremental_validation_matches_batch_for_stream_order_and_cross_turn_semantics ... ok
+test submitted_inputs_round_trip_as_turn_owned_authority_free_children ... ok
+test separate_content_records_keep_two_legal_seven_mib_assets_below_the_line_limit ... ok
+
+test result: ok. 19 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.72s
+
+     Running tests/model_catalog_flow.rs (target/debug/deps/model_catalog_flow-bf98a423563336b0)
+
+running 2 tests
+test default_selection_uses_family_and_member_order_not_harness_preference ... ok
+test model_catalog_families_defaults_and_selection_are_typed_and_durable ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.19s
+
+     Running tests/product_persistence_flow.rs (target/debug/deps/product_persistence_flow-5220b4348c9973c4)
+
+running 28 tests
+test interaction_post_rejects_input_draft_revision_without_input_id ... ok
+test discarding_a_node_context_draft_is_durable_and_replay_safe ... ok
+test eval_annotations_are_scoped_append_only_and_durable ... ok
+test interrupted_action_invocation_remains_submitted_for_source_pair_recovery ... ok
+test interrupted_ordinary_interaction_becomes_failed_and_releases_the_thread_on_restart ... ok
+test eval_input_operator_session_is_server_scoped_to_one_thread_and_occurrence ... ok
+test exits_when_desktop_control_pipe_closes ... ok
+test confirming_a_node_context_draft_revalidates_and_replays_one_annotation ... ok
+test approval_wait_is_durable_and_the_product_decision_resumes_the_same_completion ... ok
+test interrupted_bound_invocation_recovers_canonical_graph_acceptance ... ok
+test identified_context_replays_after_response_loss_and_resumes_bound_input_after_restart ... ok
+test conversation_export_uses_real_accepted_graph_and_rejects_read_only_authority ... ok
+test action_invocation_api_is_idempotent_and_survives_restart ... ok
+test node_context_draft_autosave_is_revisioned_and_idempotent ... ok
+test orphan_context_confirmation_ids_are_rejected_without_creating_an_interaction ... ok
+test malformed_approval_reconciliation_cancels_and_fails_the_completion ... ok
+test node_context_drafts_are_thread_scoped_and_survive_reopen ... ok
+test invalid_context_client_errors_are_preserved_without_product_mutation ... ok
+test interrupted_submitted_input_without_graph_acceptance_restores_without_provider_replay ... ok
+test pre_binding_failure_restores_consumed_context_confirmation ... ok
+test resolved_invoke_destination_is_readable_cross_thread_in_review_mode ... ok
+test submitted_input_projection_ignores_order_but_rejects_missing_values ... ok
+test startup_binding_failure_preserves_unbound_invocation_for_next_recovery ... ok
+test product_harness_retirement_precedes_retryable_startup_reconciliation ... ok
+test product_model_selection_is_validated_inherited_transported_and_auditable ... ok
+test startup_malformed_create_response_preserves_unbound_lease_for_later_restart ... ok
+test persists_project_thread_and_interaction_across_restart ... ok
+test input_draft_commit_sends_the_destination_product_graph_scope ... ok
+
+test result: ok. 28 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 5.32s
+
+     Running tests/project_environment_flow.rs (target/debug/deps/project_environment_flow-1832a9fc9bbc888f)
+
+running 2 tests
+test project_environment_returns_safe_folder_unavailable_and_not_found_states ... ok
+test project_environment_is_scoped_to_the_stored_path_and_reports_git_facts ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 4.45s
+
+     Running unittests src/lib.rs (target/debug/deps/relayer_graph_core-684007b9d957c4a6)
+
+running 30 tests
+test graph::search_index::tests::revisions_start_at_one_and_advance_densely ... ok
+test graph::search_index::tests::a_target_is_its_project_when_it_has_one_and_its_thread_otherwise ... ok
+test query::limits::tests::caller_can_narrow_every_numeric_dimension_but_never_raise_one ... ok
+test query::public_request_tests::unsupported_version_still_precedes_an_invalid_internal_target ... ok
+test graph::model::context::tests::normalized_input_nodes_omit_invoke_lease_authority ... ok
+test query::public_request_tests::standalone_permit_rejects_project_scope_without_leaking_identity ... ok
+test graph::model::icon::tests::rejects_names_outside_the_curated_vocabulary ... ok
+test query::public_request_tests::invalid_public_selector_precedes_query_parsing ... ok
+test graph::model::icon::tests::resolves_canonical_names_and_compatibility_aliases ... ok
+test graph::model::node::tests::legacy_node_payloads_default_missing_lease_identity ... ok
+test query::public_request_tests::public_envelope_accepts_a_selector_but_rejects_authority_fields ... ok
+test query::public_request_tests::public_envelope_preserves_duplicate_and_malformed_json_failures ... ok
+test graph::search_index::tests::the_no_op_index_commits_the_revision_it_was_given ... ok
+test query::public_request_tests::canonical_project_permit_intersects_exact_project_and_accepted_threads ... ok
+test graph::search_index::tests::the_no_op_index_can_be_rolled_back ... ok
+test query::public_request_tests::omitted_selector_defaults_to_the_current_thread ... ok
+test storage::sqlite::migrations::tests::action_presentation_migration_defaults_existing_actions_to_pill ... ok
+test storage::sqlite::migrations::tests::navigation_relation_migration_preserves_legacy_actions ... ok
+test storage::sqlite::migrations::tests::interaction_lease_migration_preserves_legacy_nodes_and_enforces_one_lease_per_action ... ok
+test storage::sqlite::migrations::tests::layer_layout_migration_preserves_coordinate_free_history ... ok
+test storage::sqlite::migrations::tests::active_root_guard_preserves_existing_duplicates_and_rejects_new_ones ... ok
+test storage::sqlite::migrations::tests::interaction_context_migration_preserves_legacy_actions_and_root_guard ... ok
+test storage::sqlite::migrations::tests::interaction_input_children_migration_is_additive_for_existing_databases ... ok
+test storage::sqlite::migrations::tests::fresh_full_schema_foreign_keys_target_the_current_actions_table ... ok
+test storage::sqlite::migrations::tests::schema_16_nodes_reopen_without_an_authored_detail_package ... ok
+test storage::sqlite::migrations::tests::cascade_damaged_schema_12_history_is_rejected_on_open ... ok
+test storage::sqlite::migrations::tests::schema_11_actions_rebuild_preserves_all_foreign_key_references ... ok
+test storage::sqlite::migrations::tests::original_schema_12_history_reopens_and_preserves_action_references ... ok
+test storage::sqlite::migrations::tests::schema_11_graph_reopens_and_tracks_search_index_revisions_and_versions ... ok
+test storage::sqlite::migrations::tests::schema_9_graph_reopens_and_accepts_a_personal_presentation_attachment ... ok
+
+test result: ok. 30 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.35s
+
+     Running tests/graph_database.rs (target/debug/deps/graph_database-d17cf5512ece99c5)
+
+running 74 tests
+test authored_detail_rejects_rehashed_noncanonical_asset_schema ... ok
+test action_presentation_errors_are_repairable ... ok
+test authored_detail_rejects_a_package_with_corrupt_canonical_integrity ... ok
+test action_keys_are_scoped_to_their_source_nodes ... ok
+test authored_user_interaction_nodes_cannot_open_new_write_scopes ... ok
+test accepts_recursive_navigate_subgraph ... ok
+test accepts_connected_layer_and_returns_exact_view ... ok
+test active_invoke_cannot_prepare_a_child_when_parent_recursion_gate_is_off ... ok
+test completion_rejects_an_edge_accepted_by_a_concurrent_interaction ... ok
+test action_presentation_grammar_round_trips_in_authored_order ... ok
+test accepted_layers_keep_their_original_action_snapshot ... ok
+test accepted_authored_detail_survives_caller_mutation_and_database_reopen ... ok
+test accepted_completion_survives_database_reopen ... ok
+test concurrent_root_action_writes_allow_exactly_one_client_key ... ok
+test completion_rejects_mixed_relations_to_one_new_target ... ok
+test completion_rejects_navigation_to_a_discarded_layer ... ok
+test completion_rejects_orphan_current_draft_layers ... ok
+test creating_the_same_edge_object_twice_is_idempotent ... ok
+test discard_layer_rejects_reachable_accepted_and_foreign_layers ... ok
+test discard_layer_is_non_recursive_idempotent_and_unblocks_completion ... ok
+test discarded_layer_identity_is_terminal ... ok
+test canonical_input_occurrence_uses_project_scope_with_standalone_thread_fallback ... ok
+test different_threads_can_write_through_the_same_pool ... ok
+test draft_records_are_private_to_the_active_subgraph ... ok
+test current_advance_is_atomic_durable_and_idempotent ... ok
+test coordinate_free_accepted_history_remains_readable_after_restart ... ok
+test imported_conversation_notes_an_authored_detail_the_export_omitted ... ok
+test imported_action_origin_reconstructs_resolved_invoke_navigation ... ok
+test expand_paths_reject_cycles_with_repair_guidance ... ok
+test draft_resubmission_can_explicitly_clear_a_checkpointed_package ... ok
+test imported_conversation_is_materialized_read_only_and_removable ... ok
+test imported_stage_without_publications_can_be_removed ... ok
+test imported_conversation_reconnects_the_canonical_authored_detail_to_its_node ... ok
+test imported_context_snapshots_deduplicate_and_remain_inert_on_nonaccepted_turns ... ok
+test draft_resubmission_without_authored_detail_preserves_checkpointed_package ... ok
+test imported_cross_role_node_collision_rolls_back_atomically ... ok
+test imported_submitted_input_provenance_must_be_one_exact_accepted_occurrence ... ok
+test imported_submitted_input_value_must_satisfy_the_accepted_action ... ok
+test imported_submitted_inputs_are_semantic_inert_turn_owned_and_removable ... ok
+test older_authored_actions_default_to_the_pill_presentation ... ok
+test imported_unanswered_input_action_keeps_its_authored_payload ... ok
+test invoke_actions_reject_whitespace_only_interaction_text ... ok
+test invalid_layout_retry_preserves_the_last_valid_draft ... ok
+test invoke_actions_cannot_author_resolution_targets ... ok
+test interaction_context_is_control_authored_ordered_and_excluded_from_completion ... ok
+test interaction_context_rejects_duplicate_invalid_and_empty_input_atomically ... ok
+test large_layers_require_a_private_bounded_justification ... ok
+test normalizes_supported_icon_aliases_before_persistence ... ok
+test lease_issuance_rejects_invalid_authority_kind_and_scope ... ok
+test leased_completion_atomically_resolves_invoke_once_and_survives_reopen ... ok
+test interaction_context_has_no_eight_target_cap ... ok
+test personal_presentation_thread_is_reserved_from_ordinary_creation ... ok
+test product_identifiers_are_external_inputs ... ok
+test leased_completion_storage_failure_rolls_back_closure_and_resolution ... ok
+test ordinary_and_leased_interactions_expose_immutable_lease_identity ... ok
+test project_threads_share_accepted_nodes ... ok
+test personal_presentation_attachment_is_control_owned_one_shot_and_hidden_from_completion ... ok
+test input_actions_round_trip_all_controls_and_reject_malformed_options ... ok
+test projection_outbox_preserves_each_revision_and_terminal_current ... ok
+test published_active_invoke_prepares_one_recursive_completion_with_canonical_input ... ok
+test reference_layers_cannot_author_expand_or_invoke_actions ... ok
+test reference_can_target_a_visible_prior_accepted_layer_without_reaccepting_it ... ok
+test reference_layers_can_reference_each_other_in_cycles ... ok
+test rejects_unsupported_node_icons_with_repair_guidance ... ok
+test rejects_disconnected_layer_with_repair_message ... ok
+test rejects_missing_and_malformed_layouts_with_repairable_field_paths ... ok
+test resubmitting_draft_node_updates_same_object_but_accepted_is_immutable ... ok
+test remint_cuts_over_broker_epoch_and_terminal_state_denies_model_reads ... ok
+test returning_the_existing_current_appends_a_terminal_revision_without_cloning_graph ... ok
+test root_action_replay_updates_same_key_and_rejects_a_different_key_without_persisting_it ... ok
+test standalone_threads_do_not_share_accepted_nodes ... ok
+test submitted_input_children_are_canonical_isolated_and_retry_stable ... ok
+test reused_action_snapshot_leases_once_concurrently_and_replays_after_reopen ... ok
+test temporal_rollout_flags_default_off_and_enforce_stage_dependencies ... ok
+
+test result: ok. 74 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.34s
+
+     Running tests/graph_query_contract.rs (target/debug/deps/graph_query_contract-b2d6ad9ac7f5cfeb)
+
+running 6 tests
+test tagged_value_goldens_are_lossless_and_canonical ... ok
+test canonical_supergraph_freezes_identity_occurrence_and_exclusions ... ok
+test aggregate_golden_is_derived_from_the_canonical_project_memberships ... ok
+test positive_goldens_have_closed_plans_and_well_typed_results ... ok
+test manifest_is_a_complete_inventory_of_the_frozen_contract ... ok
+test rejection_and_limit_goldens_freeze_errors_and_precedence ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/graph_query_v1_parser.rs (target/debug/deps/graph_query_v1_parser-490043dcbe599abb)
+
+running 8 tests
+test the_envelope_is_checked_before_the_query ... ok
+test duplicate_parameter_names_are_an_envelope_error ... ok
+test a_forbidden_construct_never_reaches_a_plan ... ok
+test relationship_parameters_enforce_the_frozen_wire_algebra ... ok
+test frozen_negative_cases_are_refused_at_or_before_their_contract_phase ... ok
+test frozen_issue_354_hardening_cases_match_the_public_planner_contract ... ok
+test every_frozen_positive_case_either_plans_or_is_named_unsupported ... ok
+test every_frozen_positive_plan_matches_the_contract_shape ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/search_index_ordering.rs (target/debug/deps/search_index_ordering-3137512df00b9ec9)
+
+running 17 tests
+test advance_failure_rolls_back_current_acceptance_and_retry_receipt ... ok
+test an_import_the_store_rejects_leaves_nothing_imported ... ok
+test an_imported_conversation_is_indexed_with_the_rest_of_the_import ... ok
+test a_store_that_rejects_the_closure_rolls_back_both_stores ... ok
+test a_standalone_thread_publishes_to_its_thread_alone ... ok
+test a_closure_in_a_project_is_published_to_its_project_and_its_thread ... ok
+test imported_conversation_removal_is_acknowledged_only_after_derived_removal ... ok
+test a_store_that_cannot_begin_fails_the_write_with_nothing_saved ... ok
+test a_store_left_ahead_of_sqlite_never_has_its_revision_reused ... ok
+test a_save_commits_to_both_stores_and_records_the_exact_revision ... ok
+test leased_return_index_failure_rolls_back_child_completion_and_parent_resolution ... ok
+test exact_advance_retry_does_not_reindex_and_stop_or_fail_publish_nothing ... ok
+test return_after_advance_adds_the_terminal_root_action_once ... ok
+test legacy_submit_replay_clears_only_a_matching_ambiguous_canonical_commit ... ok
+test revisions_advance_per_target_and_targets_do_not_share_a_sequence ... ok
+test a_write_that_outlives_its_budget_fails_with_no_partial_state ... ok
+test a_stuck_target_does_not_stall_an_unrelated_target_indefinitely ... ok
+
+test result: ok. 17 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.61s
+
+     Running unittests src/lib.rs (target/debug/deps/relayer_graph_server-1c0695acc76457f1)
+
+running 35 tests
+test search_index::query::tests::malformed_hidden_identity_has_a_stable_safe_error ... ok
+test search_index::query::tests::composite_values_use_recursive_typed_order_instead_of_json_text ... ok
+test search_index::query::tests::row_cap_does_not_inspect_the_next_candidate_for_oversize ... ok
+test search_index::query::tests::any_oversized_candidate_within_the_row_cap_fails_the_whole_result ... ok
+test search_index::query::tests::frozen_default_hard_and_zero_row_caps_are_exact ... ok
+test search_index::query::tests::equal_visible_rows_use_hidden_matched_identity_as_the_final_tie_break ... ok
+test search_index::query::tests::frozen_complete_envelope_byte_recipes_are_exact ... ok
+test tests::bridge_replacement_fences_new_completion_admission_until_the_swap_finishes ... ok
+test tests::control_authority_can_remint_a_capability_after_server_restart ... ok
+test tests::failed_bridge_generation_handoff_preserves_the_retryable_completion_epoch ... ok
+test tests::explicit_revoke_takes_over_an_unacknowledged_pause_barrier ... ok
+test tests::control_authority_can_revoke_a_graph_capability ... ok
+test tests::explicit_revoke_keeps_its_retry_target_until_finalize_is_acknowledged ... ok
+test tests::action_api_returns_repairable_error_for_a_second_root_key ... ok
+test tests::action_api_defaults_older_authors_and_returns_repairable_variant_errors ... ok
+test tests::control_prepares_context_and_capability_reads_normalized_input_only ... ok
+test tests::control_materializes_submitted_input_and_capability_reads_only_semantics ... ok
+test tests::control_issues_and_replays_typed_invocation_leases_with_derived_neighbors ... ok
+test tests::external_interaction_requires_control_token_and_mints_scoped_graph_token ... ok
+test tests::action_read_is_scoped_to_the_source_interactions_accepted_closure ... ok
+test tests::import_content_validation_rejects_a_replaced_bridge_response ... ok
+test tests::invalid_interaction_can_be_retried_with_the_same_external_ids ... ok
+test tests::graph_capability_can_discard_an_owned_orphan_layer ... ok
+test tests::lost_finalize_ack_retries_the_same_terminal_receipt_without_restoring_authority ... ok
+test tests::node_api_round_trips_and_preserves_the_canonical_authored_detail_package ... ok
+test tests::parent_capability_prepares_one_recursive_child_without_caller_scope ... ok
+test tests::layer_api_returns_typed_layout_repairs_and_round_trips_valid_layout ... ok
+test tests::product_can_bind_before_mint_and_invalidate_a_crash_surviving_node_token ... ok
+test tests::personal_presentation_attachment_requires_control_authority_and_resolves_graph ... ok
+test tests::rejected_terminal_submit_resumes_asset_authority_at_the_advanced_generation ... ok
+test tests::product_identifiers_must_be_positive_and_project_is_optional ... ok
+test tests::staged_import_endpoints_require_control_authority_and_finalize_in_order ... ok
+test tests::partial_bridge_epoch_cutover_stays_paused_until_registration_retry ... ok
+test tests::temporal_current_routes_enforce_control_and_terminal_broker_boundaries ... ok
+test tests::failed_multi_completion_bridge_handoff_recovers_pauses_and_retryable_rollback ... ok
+
+test result: ok. 35 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.88s
+
+     Running unittests src/main.rs (target/debug/deps/relayer_graph_server-5d0d77cdf91831dd)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/desktop_parent_lifecycle.rs (target/debug/deps/desktop_parent_lifecycle-03985b6833e8acec)
+
+running 1 test
+test reads_private_control_token_from_stdin_and_exits_with_desktop_parent ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.40s
+
+     Running tests/import_visual_asset_transport.rs (target/debug/deps/import_visual_asset_transport-42e46015ca3ebb2b)
+
+running 4 tests
+test staged_content_is_import_scoped_and_missing_pins_roll_back_publication ... ok
+test draft_asset_replace_clear_and_failed_replace_reclaim_transactionally ... ok
+test removing_imports_reclaims_only_unreferenced_accepted_content ... ok
+test shared_large_content_crosses_real_import_routes_once_without_relaxing_body_limit ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 3.15s
+
+     Running tests/ladybug_qualification.rs (target/debug/deps/ladybug_qualification-54648e75a466c7b4)
+
+running 1 test
+test qualification_mode_proves_lock_shutdown_and_reopen ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.72s
+
+     Running tests/openssl_link.rs (target/debug/deps/openssl_link-ed5c10140b0bb596)
+
+running 2 tests
+test a_system_openssl_links_dynamically_without_the_msvc_archive_prefix ... ok
+test a_prepared_prefix_links_statically_under_each_target_naming_rule ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (target/debug/deps/relayer_telemetry_capability-f4e935051fcf491c)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/panic_capability.rs (target/debug/deps/panic_capability-186ee9b7f71ac6a4)
+
+running 5 tests
+test exact_bootstrap_installs_a_bounded_private_capability ... ok
+test panic_report_omits_raw_detail_and_preserves_the_prior_hook ... ok
+test reporting_failure_is_bounded_and_does_not_replace_panic_behavior ... ok
+test caught_panic_never_submits_the_pending_record ... ok
+test private_stdin_update_equips_an_already_running_panic_reporter ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.53s
+
+   Doc-tests relayer_app_server
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests relayer_graph_core
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests relayer_graph_server
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests relayer_telemetry_capability
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+> relayer-graphcomplete@0.0.0 check:graph-crash-reconciliation
+> cargo test -p relayer-graph-core -p relayer-graph-server --features crash-test-support
+
+   Compiling relayer-graph-server v0.0.0 (/Users/vishaltandale/.codex/worktrees/05b1/relayer-graphcomplete/crates/relayer-graph-server)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 48.78s
+     Running unittests src/lib.rs (target/debug/deps/relayer_graph_core-afcb33d8fb0ec801)
+
+running 30 tests
+test query::limits::tests::caller_can_narrow_every_numeric_dimension_but_never_raise_one ... ok
+test graph::search_index::tests::a_target_is_its_project_when_it_has_one_and_its_thread_otherwise ... ok
+test graph::search_index::tests::revisions_start_at_one_and_advance_densely ... ok
+test graph::model::context::tests::normalized_input_nodes_omit_invoke_lease_authority ... ok
+test query::public_request_tests::unsupported_version_still_precedes_an_invalid_internal_target ... ok
+test query::public_request_tests::invalid_public_selector_precedes_query_parsing ... ok
+test graph::model::node::tests::legacy_node_payloads_default_missing_lease_identity ... ok
+test query::public_request_tests::standalone_permit_rejects_project_scope_without_leaking_identity ... ok
+test query::public_request_tests::public_envelope_accepts_a_selector_but_rejects_authority_fields ... ok
+test graph::model::icon::tests::rejects_names_outside_the_curated_vocabulary ... ok
+test query::public_request_tests::public_envelope_preserves_duplicate_and_malformed_json_failures ... ok
+test graph::model::icon::tests::resolves_canonical_names_and_compatibility_aliases ... ok
+test graph::search_index::tests::the_no_op_index_commits_the_revision_it_was_given ... ok
+test query::public_request_tests::canonical_project_permit_intersects_exact_project_and_accepted_threads ... ok
+test graph::search_index::tests::the_no_op_index_can_be_rolled_back ... ok
+test query::public_request_tests::omitted_selector_defaults_to_the_current_thread ... ok
+test storage::sqlite::migrations::tests::action_presentation_migration_defaults_existing_actions_to_pill ... ok
+test storage::sqlite::migrations::tests::navigation_relation_migration_preserves_legacy_actions ... ok
+test storage::sqlite::migrations::tests::layer_layout_migration_preserves_coordinate_free_history ... ok
+test storage::sqlite::migrations::tests::interaction_lease_migration_preserves_legacy_nodes_and_enforces_one_lease_per_action ... ok
+test storage::sqlite::migrations::tests::active_root_guard_preserves_existing_duplicates_and_rejects_new_ones ... ok
+test storage::sqlite::migrations::tests::interaction_context_migration_preserves_legacy_actions_and_root_guard ... ok
+test storage::sqlite::migrations::tests::interaction_input_children_migration_is_additive_for_existing_databases ... ok
+test storage::sqlite::migrations::tests::fresh_full_schema_foreign_keys_target_the_current_actions_table ... ok
+test storage::sqlite::migrations::tests::cascade_damaged_schema_12_history_is_rejected_on_open ... ok
+test storage::sqlite::migrations::tests::schema_16_nodes_reopen_without_an_authored_detail_package ... ok
+test storage::sqlite::migrations::tests::schema_11_actions_rebuild_preserves_all_foreign_key_references ... ok
+test storage::sqlite::migrations::tests::original_schema_12_history_reopens_and_preserves_action_references ... ok
+test storage::sqlite::migrations::tests::schema_11_graph_reopens_and_tracks_search_index_revisions_and_versions ... ok
+test storage::sqlite::migrations::tests::schema_9_graph_reopens_and_accepts_a_personal_presentation_attachment ... ok
+
+test result: ok. 30 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.31s
+
+     Running tests/graph_database.rs (target/debug/deps/graph_database-3223641bf5fb4a6e)
+
+running 74 tests
+test authored_detail_rejects_a_package_with_corrupt_canonical_integrity ... ok
+test authored_detail_rejects_rehashed_noncanonical_asset_schema ... ok
+test action_presentation_errors_are_repairable ... ok
+test action_keys_are_scoped_to_their_source_nodes ... ok
+test authored_user_interaction_nodes_cannot_open_new_write_scopes ... ok
+test accepts_recursive_navigate_subgraph ... ok
+test action_presentation_grammar_round_trips_in_authored_order ... ok
+test accepts_connected_layer_and_returns_exact_view ... ok
+test active_invoke_cannot_prepare_a_child_when_parent_recursion_gate_is_off ... ok
+test accepted_layers_keep_their_original_action_snapshot ... ok
+test completion_rejects_an_edge_accepted_by_a_concurrent_interaction ... ok
+test accepted_completion_survives_database_reopen ... ok
+test accepted_authored_detail_survives_caller_mutation_and_database_reopen ... ok
+test completion_rejects_orphan_current_draft_layers ... ok
+test completion_rejects_navigation_to_a_discarded_layer ... ok
+test completion_rejects_mixed_relations_to_one_new_target ... ok
+test concurrent_root_action_writes_allow_exactly_one_client_key ... ok
+test creating_the_same_edge_object_twice_is_idempotent ... ok
+test discarded_layer_identity_is_terminal ... ok
+test canonical_input_occurrence_uses_project_scope_with_standalone_thread_fallback ... ok
+test draft_records_are_private_to_the_active_subgraph ... ok
+test discard_layer_rejects_reachable_accepted_and_foreign_layers ... ok
+test discard_layer_is_non_recursive_idempotent_and_unblocks_completion ... ok
+test draft_resubmission_can_explicitly_clear_a_checkpointed_package ... ok
+test different_threads_can_write_through_the_same_pool ... ok
+test current_advance_is_atomic_durable_and_idempotent ... ok
+test coordinate_free_accepted_history_remains_readable_after_restart ... ok
+test imported_action_origin_reconstructs_resolved_invoke_navigation ... ok
+test imported_context_snapshots_deduplicate_and_remain_inert_on_nonaccepted_turns ... ok
+test expand_paths_reject_cycles_with_repair_guidance ... ok
+test imported_conversation_reconnects_the_canonical_authored_detail_to_its_node ... ok
+test imported_stage_without_publications_can_be_removed ... ok
+test imported_conversation_is_materialized_read_only_and_removable ... ok
+test imported_conversation_notes_an_authored_detail_the_export_omitted ... ok
+test imported_cross_role_node_collision_rolls_back_atomically ... ok
+test draft_resubmission_without_authored_detail_preserves_checkpointed_package ... ok
+test imported_submitted_input_provenance_must_be_one_exact_accepted_occurrence ... ok
+test imported_submitted_input_value_must_satisfy_the_accepted_action ... ok
+test imported_submitted_inputs_are_semantic_inert_turn_owned_and_removable ... ok
+test older_authored_actions_default_to_the_pill_presentation ... ok
+test imported_unanswered_input_action_keeps_its_authored_payload ... ok
+test interaction_context_rejects_duplicate_invalid_and_empty_input_atomically ... ok
+test invoke_actions_reject_whitespace_only_interaction_text ... ok
+test invalid_layout_retry_preserves_the_last_valid_draft ... ok
+test large_layers_require_a_private_bounded_justification ... ok
+test invoke_actions_cannot_author_resolution_targets ... ok
+test interaction_context_is_control_authored_ordered_and_excluded_from_completion ... ok
+test lease_issuance_rejects_invalid_authority_kind_and_scope ... ok
+test normalizes_supported_icon_aliases_before_persistence ... ok
+test input_actions_round_trip_all_controls_and_reject_malformed_options ... ok
+test leased_completion_storage_failure_rolls_back_closure_and_resolution ... ok
+test leased_completion_atomically_resolves_invoke_once_and_survives_reopen ... ok
+test interaction_context_has_no_eight_target_cap ... ok
+test ordinary_and_leased_interactions_expose_immutable_lease_identity ... ok
+test personal_presentation_thread_is_reserved_from_ordinary_creation ... ok
+test product_identifiers_are_external_inputs ... ok
+test personal_presentation_attachment_is_control_owned_one_shot_and_hidden_from_completion ... ok
+test projection_outbox_preserves_each_revision_and_terminal_current ... ok
+test published_active_invoke_prepares_one_recursive_completion_with_canonical_input ... ok
+test reference_can_target_a_visible_prior_accepted_layer_without_reaccepting_it ... ok
+test reference_layers_can_reference_each_other_in_cycles ... ok
+test reference_layers_cannot_author_expand_or_invoke_actions ... ok
+test project_threads_share_accepted_nodes ... ok
+test rejects_disconnected_layer_with_repair_message ... ok
+test rejects_unsupported_node_icons_with_repair_guidance ... ok
+test rejects_missing_and_malformed_layouts_with_repairable_field_paths ... ok
+test resubmitting_draft_node_updates_same_object_but_accepted_is_immutable ... ok
+test remint_cuts_over_broker_epoch_and_terminal_state_denies_model_reads ... ok
+test returning_the_existing_current_appends_a_terminal_revision_without_cloning_graph ... ok
+test root_action_replay_updates_same_key_and_rejects_a_different_key_without_persisting_it ... ok
+test standalone_threads_do_not_share_accepted_nodes ... ok
+test reused_action_snapshot_leases_once_concurrently_and_replays_after_reopen ... ok
+test temporal_rollout_flags_default_off_and_enforce_stage_dependencies ... ok
+test submitted_input_children_are_canonical_isolated_and_retry_stable ... ok
+
+test result: ok. 74 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.45s
+
+     Running tests/graph_query_contract.rs (target/debug/deps/graph_query_contract-0b2eb7475c43f040)
+
+running 6 tests
+test tagged_value_goldens_are_lossless_and_canonical ... ok
+test canonical_supergraph_freezes_identity_occurrence_and_exclusions ... ok
+test aggregate_golden_is_derived_from_the_canonical_project_memberships ... ok
+test positive_goldens_have_closed_plans_and_well_typed_results ... ok
+test manifest_is_a_complete_inventory_of_the_frozen_contract ... ok
+test rejection_and_limit_goldens_freeze_errors_and_precedence ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/graph_query_v1_parser.rs (target/debug/deps/graph_query_v1_parser-416d570c7412db10)
+
+running 8 tests
+test the_envelope_is_checked_before_the_query ... ok
+test duplicate_parameter_names_are_an_envelope_error ... ok
+test a_forbidden_construct_never_reaches_a_plan ... ok
+test relationship_parameters_enforce_the_frozen_wire_algebra ... ok
+test frozen_negative_cases_are_refused_at_or_before_their_contract_phase ... ok
+test frozen_issue_354_hardening_cases_match_the_public_planner_contract ... ok
+test every_frozen_positive_case_either_plans_or_is_named_unsupported ... ok
+test every_frozen_positive_plan_matches_the_contract_shape ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/search_index_ordering.rs (target/debug/deps/search_index_ordering-8690111d26662144)
+
+running 21 tests
+test advance_failure_rolls_back_current_acceptance_and_retry_receipt ... ok
+test an_imported_conversation_is_indexed_with_the_rest_of_the_import ... ok
+test a_store_that_cannot_begin_fails_the_write_with_nothing_saved ... ok
+test a_store_left_ahead_of_sqlite_never_has_its_revision_reused ... ok
+test a_store_that_rejects_the_closure_rolls_back_both_stores ... ok
+test a_save_commits_to_both_stores_and_records_the_exact_revision ... ok
+test a_closure_in_a_project_is_published_to_its_project_and_its_thread ... ok
+test an_import_the_store_rejects_leaves_nothing_imported ... ok
+test a_standalone_thread_publishes_to_its_thread_alone ... ok
+test a_stuck_target_does_not_stall_an_unrelated_target_indefinitely ... ok
+test a_write_that_outlives_its_budget_fails_with_no_partial_state ... ok
+test advance_retry_converges_after_search_commit_crash_boundaries ... ok
+test import_retry_with_reallocated_ids_remains_quarantined_until_rebuild ... ok
+test imported_conversation_removal_is_acknowledged_only_after_derived_removal ... ok
+test exact_advance_retry_does_not_reindex_and_stop_or_fail_publish_nothing ... ok
+test return_after_advance_adds_the_terminal_root_action_once ... ok
+test legacy_submit_replay_clears_only_a_matching_ambiguous_canonical_commit ... ok
+test leased_return_index_failure_rolls_back_child_completion_and_parent_resolution ... ok
+test revisions_advance_per_target_and_targets_do_not_share_a_sequence ... ok
+test leased_return_retry_converges_after_search_commit_crash_boundaries ... ok
+test exact_retry_converges_after_every_completion_crash_boundary ... ok
+
+test result: ok. 21 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.87s
+
+     Running unittests src/lib.rs (target/debug/deps/relayer_graph_server-c36c452b0da490c7)
+
+running 35 tests
+test search_index::query::tests::malformed_hidden_identity_has_a_stable_safe_error ... ok
+test search_index::query::tests::composite_values_use_recursive_typed_order_instead_of_json_text ... ok
+test search_index::query::tests::row_cap_does_not_inspect_the_next_candidate_for_oversize ... ok
+test search_index::query::tests::frozen_default_hard_and_zero_row_caps_are_exact ... ok
+test search_index::query::tests::equal_visible_rows_use_hidden_matched_identity_as_the_final_tie_break ... ok
+test search_index::query::tests::any_oversized_candidate_within_the_row_cap_fails_the_whole_result ... ok
+test search_index::query::tests::frozen_complete_envelope_byte_recipes_are_exact ... ok
+test tests::bridge_replacement_fences_new_completion_admission_until_the_swap_finishes ... ok
+test tests::control_authority_can_revoke_a_graph_capability ... ok
+test tests::explicit_revoke_takes_over_an_unacknowledged_pause_barrier ... ok
+test tests::external_interaction_requires_control_token_and_mints_scoped_graph_token ... ok
+test tests::control_authority_can_remint_a_capability_after_server_restart ... ok
+test tests::explicit_revoke_keeps_its_retry_target_until_finalize_is_acknowledged ... ok
+test tests::failed_bridge_generation_handoff_preserves_the_retryable_completion_epoch ... ok
+test tests::action_api_returns_repairable_error_for_a_second_root_key ... ok
+test tests::action_api_defaults_older_authors_and_returns_repairable_variant_errors ... ok
+test tests::control_prepares_context_and_capability_reads_normalized_input_only ... ok
+test tests::control_materializes_submitted_input_and_capability_reads_only_semantics ... ok
+test tests::action_read_is_scoped_to_the_source_interactions_accepted_closure ... ok
+test tests::control_issues_and_replays_typed_invocation_leases_with_derived_neighbors ... ok
+test tests::import_content_validation_rejects_a_replaced_bridge_response ... ok
+test tests::invalid_interaction_can_be_retried_with_the_same_external_ids ... ok
+test tests::graph_capability_can_discard_an_owned_orphan_layer ... ok
+test tests::lost_finalize_ack_retries_the_same_terminal_receipt_without_restoring_authority ... ok
+test tests::node_api_round_trips_and_preserves_the_canonical_authored_detail_package ... ok
+test tests::product_identifiers_must_be_positive_and_project_is_optional ... ok
+test tests::product_can_bind_before_mint_and_invalidate_a_crash_surviving_node_token ... ok
+test tests::rejected_terminal_submit_resumes_asset_authority_at_the_advanced_generation ... ok
+test tests::layer_api_returns_typed_layout_repairs_and_round_trips_valid_layout ... ok
+test tests::staged_import_endpoints_require_control_authority_and_finalize_in_order ... ok
+test tests::parent_capability_prepares_one_recursive_child_without_caller_scope ... ok
+test tests::personal_presentation_attachment_requires_control_authority_and_resolves_graph ... ok
+test tests::partial_bridge_epoch_cutover_stays_paused_until_registration_retry ... ok
+test tests::temporal_current_routes_enforce_control_and_terminal_broker_boundaries ... ok
+test tests::failed_multi_completion_bridge_handoff_recovers_pauses_and_retryable_rollback ... ok
+
+test result: ok. 35 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.80s
+
+     Running unittests src/main.rs (target/debug/deps/relayer_graph_server-a18c5524a936c324)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/desktop_parent_lifecycle.rs (target/debug/deps/desktop_parent_lifecycle-56b42a3e841173a4)
+
+running 1 test
+test reads_private_control_token_from_stdin_and_exits_with_desktop_parent ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.29s
+
+     Running tests/graph_query_v1_conformance.rs (target/debug/deps/graph_query_v1_conformance-ebe807cb906d26d8)
+
+running 25 tests
+test authorization_precedes_per_target_readiness_and_one_target_does_not_stall_another ... ok
+test encoded_result_budget_applies_to_the_zero_row_envelope ... ok
+test frozen_values_normalization_errors_have_exact_stable_codes ... ok
+test cancellation_interrupts_only_its_owned_in_flight_job ... ok
+test cancellation_and_outer_deadline_leave_the_store_reusable ... ok
+test every_caller_narrowed_budget_fails_at_its_own_stable_boundary ... ok
+test collected_graph_values_use_relayer_recursive_order_and_precise_descriptor ... ok
+test frozen_negative_cases_return_exact_stable_errors ... ok
+test active_wall_deadline_interrupts_its_owned_job_and_reuses_the_worker ... ok
+test expansion_budget_does_not_truncate_cartesian_results ... ok
+test frozen_issue_354_hardening_corpus_conforms_through_real_ladybug ... ok
+test endpoint_normalization_never_scans_an_unrelated_target ... ok
+test frozen_positive_cases_reproduce_the_contract_results ... ok
+test acknowledged_completion_is_immediately_queryable_through_the_real_publication_boundary ... ok
+test signed_integer_sum_overflow_fails_in_normalization ... ok
+test raw_envelope_and_complete_parameter_planning_precede_authority_and_readiness ... ok
+test representative_cold_and_warm_queries_stay_below_the_contract_target ... ok
+test full_tagged_value_corpus_round_trips_when_used_as_parameters ... ok
+test joined_occurrence_trail_orientation_and_internal_parameter_boundaries_are_exact ... ok
+test invalid_numeric_aggregate_types_precede_target_authorization ... ok
+test graph_and_composite_min_max_use_relayer_canonical_order ... ok
+test work_budgets_count_structural_candidates_before_filters_and_aggregates ... ok
+test tagged_scalar_list_and_record_parameters_round_trip_through_ladybug ... ok
+test frozen_positive_cases_stay_below_the_contract_target_on_their_best_warm_run ... ok
+test frozen_traversal_cases_stay_below_the_contract_target_on_their_best_cold_run ... ok
+
+test result: ok. 25 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 8.79s
+
+     Running tests/graph_search_route.rs (target/debug/deps/graph_search_route-0ab0ee857bff049f)
+
+running 14 tests
+test missing_index_uses_the_same_generic_unavailable_boundary ... ok
+test disabled_capability_denies_valid_search_before_index_readiness_but_not_preflight ... ok
+test remint_is_idempotent_only_for_the_exact_capability_profile ... ok
+test envelope_precedence_and_capability_revocation_are_non_oracular ... ok
+test submit_acknowledgement_is_immediately_searchable_through_the_public_route ... ok
+test disabled_authoring_capability_still_projects_for_a_later_enabled_turn ... ok
+test advance_acknowledgement_is_immediately_searchable_through_the_public_route ... ok
+test store_ahead_of_rolled_back_sqlite_is_not_searchable_before_retry ... ok
+test unavailable_targets_are_generic_and_a_cancelled_deadline_leaves_the_store_reusable ... ok
+test dropping_an_in_flight_http_request_cancels_its_job_and_reuses_the_store ... ok
+test explicit_selectors_intersect_canonical_project_membership ... ok
+test ladybug_commit_is_not_searchable_before_sqlite_acknowledgement ... ok
+test a_different_retry_cannot_confirm_an_orphaned_publication ... ok
+test project_backed_omitted_thread_query_survives_reopen ... ok
+
+test result: ok. 14 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 3.06s
+
+     Running tests/import_visual_asset_transport.rs (target/debug/deps/import_visual_asset_transport-9a8cb1d329df423a)
+
+running 4 tests
+test draft_asset_replace_clear_and_failed_replace_reclaim_transactionally ... ok
+test staged_content_is_import_scoped_and_missing_pins_roll_back_publication ... ok
+test removing_imports_reclaims_only_unreferenced_accepted_content ... ok
+test shared_large_content_crosses_real_import_routes_once_without_relaxing_body_limit ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 3.15s
+
+     Running tests/ladybug_crash_reconciliation.rs (target/debug/deps/ladybug_crash_reconciliation-48d372fa224943ed)
+
+running 2 tests
+test real_kill_child ... ok
+
+running 1 test
+test sigkill_after_ladybug_commit_leaves_a_detectable_orphan_and_retry_converges ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.84s
+
+     Running tests/ladybug_qualification.rs (target/debug/deps/ladybug_qualification-e0a0b323abe12042)
+
+running 1 test
+test qualification_mode_proves_lock_shutdown_and_reopen ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.06s
+
+     Running tests/ladybug_search_index.rs (target/debug/deps/ladybug_search_index-7b582fdcb082b0e2)
+
+running 14 tests
+test the_read_path_refuses_a_query_the_engine_does_not_parse_read_only ... ok
+test the_store_is_a_sibling_of_the_sqlite_file_with_quarantine_reserved ... ok
+test the_store_reports_the_revision_it_holds_for_reconciliation ... ok
+test a_rolled_back_write_leaves_the_store_untouched ... ok
+test every_v1_value_type_round_trips_losslessly ... ok
+test dropping_an_unpolled_commit_releases_the_transaction ... ok
+test applying_the_same_closure_again_converges_rather_than_duplicating ... ok
+test a_committed_closure_survives_closing_and_reopening_the_store ... ok
+test an_abandoned_write_releases_its_transaction_so_the_next_save_still_works ... ok
+test an_imported_conversation_is_searchable_against_a_real_store ... ok
+test a_saved_graph_is_searchable_the_moment_the_author_is_told_it_saved ... ok
+test a_committed_closure_is_searchable_with_its_identities_intact ... ok
+test an_import_referenced_by_another_thread_is_not_removed_from_either_store ... ok
+test replaying_a_stable_identity_unions_its_publication_targets ... ok
+
+test result: ok. 14 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.94s
+
+     Running tests/ladybug_search_lifecycle.rs (target/debug/deps/ladybug_search_lifecycle-db2daf7175546481)
+
+running 19 tests
+test one_rebuild_deadline_includes_receipt_and_final_active_open ... ok
+test pre_generation_active_bytes_are_quarantined_and_rebuilt ... ok
+test missing_store_rebuilds_every_accepted_closure_from_sqlite ... ok
+test active_pointer_replacement_before_publish_fails_closed_without_overwriting_it ... ok
+test pointer_to_missing_generation_recovers_globally_from_sqlite ... ok
+test active_pointer_replacement_after_open_is_detected_and_rebuilt ... ok
+test logical_damage_blocks_only_its_target_while_unaffected_target_stays_usable ... ok
+test malformed_openable_inventory_is_globally_rebuilt_before_startup_returns ... ok
+test incompatible_derived_version_rebuilds_side_by_side_under_the_same_engine_pin ... ok
+test forced_validation_failure_leaves_the_prior_active_generation_intact ... ok
+test accepted_history_without_search_receipts_is_rebuilt_and_receipted ... ok
+test orphan_revision_absent_from_sqlite_is_removed_by_canonical_rebuild ... ok
+test quarantined_rollback_is_an_independent_durable_copy ... ok
+test rebuild_restores_active_stopped_and_failed_accepted_currents ... ok
+test same_revision_missing_and_extra_topology_is_never_accepted_as_ready ... ok
+test same_revision_property_mutation_and_identical_relationship_duplicate_are_rebuilt ... ok
+test symlink_pointer_and_generation_are_rejected_without_following_them ... ok
+test unopenable_active_generation_is_quarantined_and_rebuilt_from_sqlite ... ok
+test a_closure_containing_edges_rebuilds_and_validates ... ok
+
+test result: ok. 19 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 29.41s
+
+     Running tests/openssl_link.rs (target/debug/deps/openssl_link-e04f19f154fd64ab)
+
+running 2 tests
+test a_system_openssl_links_dynamically_without_the_msvc_archive_prefix ... ok
+test a_prepared_prefix_links_statically_under_each_target_naming_rule ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/search_index_corpus.rs (target/debug/deps/search_index_corpus-3681b9c3af47ed48)
+
+running 3 tests
+test corpus_keeps_the_declared_boundary_weighting ... ok
+test corpus_is_reproducible_from_its_version_and_seed ... ok
+test every_shape_reaches_real_ladybug_through_writer_complete ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.12s
+
+   Doc-tests relayer_graph_core
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests relayer_graph_server
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+    Blocking waiting for file lock on package cache
+   Compiling relayer-app-server v0.0.0 (/Users/vishaltandale/.codex/worktrees/05b1/relayer-graphcomplete/crates/relayer-app-server)
+   Compiling relayer-graph-server v0.0.0 (/Users/vishaltandale/.codex/worktrees/05b1/relayer-graphcomplete/crates/relayer-graph-server)
+warning: field `layout` is never read
+  --> crates/relayer-graph-server/src/search_index.rs:61:5
+   |
+59 | struct LadybugRuntime {
+   |        -------------- field in this struct
+60 |     store: StdRwLock<Arc<LadybugStore>>,
+61 |     layout: StoreLayout,
+   |     ^^^^^^
+   |
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: method `root` is never used
+  --> crates/relayer-graph-server/src/search_index/store.rs:49:12
+   |
+40 | impl StoreLayout {
+   | ---------------- method in this implementation
+...
+49 |     pub fn root(&self) -> &Path {
+   |            ^^^^
+
+warning: function `rows` is never used
+   --> crates/relayer-graph-server/src/search_index/store.rs:645:8
+    |
+645 | pub fn rows(connection: &Connection<'_>, query: &str) -> Result<Vec<Vec<Value>>> {
+    |        ^^^^
+
+warning: `relayer-graph-server` (lib) generated 3 warnings
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 17.06s
+
+> relayer-graphcomplete@0.0.0 build:packages
+> npm run build -w @relayer/graph-client && npm run build -w @relayer/visual-assets && npm run build -w @relayer/harness-host && npm run build -w @relayer/eval-runner
+
+
+> @relayer/graph-client@0.0.0 prebuild
+> node scripts/clean-dist.mjs
+
+
+> @relayer/graph-client@0.0.0 build
+> node scripts/generate-query-errors.mjs --check && tsc -p tsconfig.build.json && node scripts/package-runtime-deps.mjs
+
+
+> @relayer/visual-assets@0.0.0 build
+> tsc -p tsconfig.build.json
+
+
+> @relayer/harness-host@0.0.0 build
+> tsc -p tsconfig.build.json
+
+
+> @relayer/eval-runner@0.0.0 build
+> tsc -p tsconfig.build.json
+
+
+> @relayer/eval-runner@0.0.0 check
+> tsc --noEmit
+
+
+> @relayer/graph-client@0.0.0 check
+> node scripts/generate-query-errors.mjs --check && tsc --noEmit
+
+
+> @relayer/harness-host@0.0.0 check
+> tsc --noEmit
+
+
+> @relayer/visual-assets@0.0.0 check
+> tsc --noEmit && npm run test:built
+
+
+> @relayer/visual-assets@0.0.0 test:built
+> npm run build && node test/built-package-smoke.mjs
+
+
+> @relayer/visual-assets@0.0.0 build
+> tsc -p tsconfig.build.json
+
+visual-assets built-package SVG/raster smoke passed
+
+ RUN  v4.1.10 /Users/vishaltandale/.codex/worktrees/05b1/relayer-graphcomplete
+
+/private/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-seal-rollback-DPQvY6/tool-0.relayer-seal-work.sign: replacing existing signature
+/private/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-linkedit-rollback-kelqZm/tool-0.relayer-seal-work.sign: replacing existing signature
+/private/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-linkedit-rollback-kelqZm/tool-1.relayer-seal-work.sign: replacing existing signature
+/private/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-linkedit-rollback-kelqZm/tool-1.relayer-seal-work.sign: replacing existing signature
+/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/install_name_tool: warning: changes being made to the file will invalidate the code signature in: /private/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-sealed-node-runtime-e3XEfB/runtime/node.relayer-seal-work.install
+/private/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-sealed-node-runtime-e3XEfB/runtime/node.relayer-seal-work.sign: replacing existing signature
+/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/install_name_tool: warning: changes being made to the file will invalidate the code signature in: /private/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-sealed-node-runtime-e3XEfB/runtime/libada.3.dylib.relayer-seal-work.install
+/private/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-sealed-node-runtime-e3XEfB/runtime/libada.3.dylib.relayer-seal-work.sign: replacing existing signature
+/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/install_name_tool: warning: changes being made to the file will invalidate the code signature in: /private/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-sealed-node-runtime-e3XEfB/runtime/libbrotlicommon.1.dylib.relayer-seal-work.install
+/private/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-sealed-node-runtime-e3XEfB/runtime/libbrotlicommon.1.dylib.relayer-seal-work.sign: replacing existing signature
+/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/install_name_tool: warning: changes being made to the file will invalidate the code signature in: /private/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-sealed-node-runtime-e3XEfB/runtime/libbrotlidec.1.dylib.relayer-seal-work.install
+/private/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-sealed-node-runtime-e3XEfB/runtime/libbrotlidec.1.dylib.relayer-seal-work.sign: replacing existing signature
+/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/install_name_tool: warning: changes being made to the file will invalidate the code signature in: /private/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-sealed-node-runtime-e3XEfB/runtime/libbrotlienc.1.dylib.relayer-seal-work.install
+/private/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-sealed-node-runtime-e3XEfB/runtime/libbrotlienc.1.dylib.relayer-seal-work.sign: replacing existing signature
+/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/install_name_tool: warning: changes being made to the file will invalidate the code signature in: /private/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-sealed-node-runtime-e3XEfB/runtime/libcares.2.dylib.relayer-seal-work.install
+/private/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-sealed-node-runtime-e3XEfB/runtime/libcares.2.dylib.relayer-seal-work.sign: replacing existing signature
+/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/install_name_tool: warning: changes being made to the file will invalidate the code signature in: /private/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-sealed-node-runtime-e3XEfB/runtime/libcrypto.3.dylib.relayer-seal-work.install
+/private/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-sealed-node-runtime-e3XEfB/runtime/libcrypto.3.dylib.relayer-seal-work.sign: replacing existing signature
+/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/install_name_tool: warning: changes being made to the file will invalidate the code signature in: /private/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-sealed-node-runtime-e3XEfB/runtime/libhdr_histogram.6.dylib.relayer-seal-work.install
+/private/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-sealed-node-runtime-e3XEfB/runtime/libhdr_histogram.6.dylib.relayer-seal-work.sign: replacing existing signature
+/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/install_name_tool: warning: changes being made to the file will invalidate the code signature in: /private/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-sealed-node-runtime-e3XEfB/runtime/libicudata.78.dylib.relayer-seal-work.install
+/private/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-sealed-node-runtime-e3XEfB/runtime/libicudata.78.dylib.relayer-seal-work.sign: replacing existing signature
+/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/install_name_tool: warning: changes being made to the file will invalidate the code signature in: /private/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-sealed-node-runtime-e3XEfB/runtime/libicui18n.78.dylib.relayer-seal-work.install
+/private/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-sealed-node-runtime-e3XEfB/runtime/libicui18n.78.dylib.relayer-seal-work.sign: replacing existing signature
+/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/install_name_tool: warning: changes being made to the file will invalidate the code signature in: /private/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-sealed-node-runtime-e3XEfB/runtime/libicuuc.78.dylib.relayer-seal-work.install
+/private/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-sealed-node-runtime-e3XEfB/runtime/libicuuc.78.dylib.relayer-seal-work.sign: replacing existing signature
+/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/install_name_tool: warning: changes being made to the file will invalidate the code signature in: /private/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-sealed-node-runtime-e3XEfB/runtime/libllhttp.9.4.dylib.relayer-seal-work.install
+/private/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-sealed-node-runtime-e3XEfB/runtime/libllhttp.9.4.dylib.relayer-seal-work.sign: replacing existing signature
+/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/install_name_tool: warning: changes being made to the file will invalidate the code signature in: /private/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-sealed-node-runtime-e3XEfB/runtime/libmerve.1.dylib.relayer-seal-work.install
+/private/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-sealed-node-runtime-e3XEfB/runtime/libmerve.1.dylib.relayer-seal-work.sign: replacing existing signature
+/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/install_name_tool: warning: changes being made to the file will invalidate the code signature in: /private/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-sealed-node-runtime-e3XEfB/runtime/libnbytes.dylib.relayer-seal-work.install
+/private/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-sealed-node-runtime-e3XEfB/runtime/libnbytes.dylib.relayer-seal-work.sign: replacing existing signature
+/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/install_name_tool: warning: changes being made to the file will invalidate the code signature in: /private/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-sealed-node-runtime-e3XEfB/runtime/libnghttp2.14.dylib.relayer-seal-work.install
+/private/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-sealed-node-runtime-e3XEfB/runtime/libnghttp2.14.dylib.relayer-seal-work.sign: replacing existing signature
+/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/install_name_tool: warning: changes being made to the file will invalidate the code signature in: /private/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-sealed-node-runtime-e3XEfB/runtime/libnghttp3.9.dylib.relayer-seal-work.install
+/private/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-sealed-node-runtime-e3XEfB/runtime/libnghttp3.9.dylib.relayer-seal-work.sign: replacing existing signature
+ ❯ |isolated| test/graph-operation-recorder.test.mjs (10 tests | 1 failed) 6471ms
+     × waits for attributed in-flight work before sealing 155ms
+/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/install_name_tool: warning: changes being made to the file will invalidate the code signature in: /private/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-sealed-node-runtime-e3XEfB/runtime/libngtcp2.16.dylib.relayer-seal-work.install
+/private/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-sealed-node-runtime-e3XEfB/runtime/libngtcp2.16.dylib.relayer-seal-work.sign: replacing existing signature
+/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/install_name_tool: warning: changes being made to the file will invalidate the code signature in: /private/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-sealed-node-runtime-e3XEfB/runtime/libnode.147.dylib.relayer-seal-work.install
+/private/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-sealed-node-runtime-e3XEfB/runtime/libnode.147.dylib.relayer-seal-work.sign: replacing existing signature
+prebuilt Ladybug bundle rejected: liblbug.a digest does not match the manifest; liblbug.a size does not match the manifest; bundle contents digest does not match the manifest
+/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/install_name_tool: warning: changes being made to the file will invalidate the code signature in: /private/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-sealed-node-runtime-e3XEfB/runtime/libsimdjson.33.dylib.relayer-seal-work.install
+/private/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-sealed-node-runtime-e3XEfB/runtime/libsimdjson.33.dylib.relayer-seal-work.sign: replacing existing signature
+/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/install_name_tool: warning: changes being made to the file will invalidate the code signature in: /private/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-sealed-node-runtime-e3XEfB/runtime/libsimdutf.34.dylib.relayer-seal-work.install
+/private/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-sealed-node-runtime-e3XEfB/runtime/libsimdutf.34.dylib.relayer-seal-work.sign: replacing existing signature
+prebuilt Ladybug bundle rejected: platform Linux-X64 does not match macOS-ARM64
+/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/install_name_tool: warning: changes being made to the file will invalidate the code signature in: /private/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-sealed-node-runtime-e3XEfB/runtime/libsqlite3.dylib.relayer-seal-work.install
+/private/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-sealed-node-runtime-e3XEfB/runtime/libsqlite3.dylib.relayer-seal-work.sign: replacing existing signature
+/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/install_name_tool: warning: changes being made to the file will invalidate the code signature in: /private/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-sealed-node-runtime-e3XEfB/runtime/libssl.3.dylib.relayer-seal-work.install
+/private/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-sealed-node-runtime-e3XEfB/runtime/libssl.3.dylib.relayer-seal-work.sign: replacing existing signature
+/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/install_name_tool: warning: changes being made to the file will invalidate the code signature in: /private/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-sealed-node-runtime-e3XEfB/runtime/libuv.1.dylib.relayer-seal-work.install
+prebuilt Ladybug bundle rejected: rustc 1.94.0 does not match 9.9.9
+/private/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-sealed-node-runtime-e3XEfB/runtime/libuv.1.dylib.relayer-seal-work.sign: replacing existing signature
+/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/install_name_tool: warning: changes being made to the file will invalidate the code signature in: /private/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-sealed-node-runtime-e3XEfB/runtime/libuvwasi.dylib.relayer-seal-work.install
+/private/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-sealed-node-runtime-e3XEfB/runtime/libuvwasi.dylib.relayer-seal-work.sign: replacing existing signature
+prebuilt Ladybug bundle rejected: Cargo.lock digest does not match the current checkout
+/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/install_name_tool: warning: changes being made to the file will invalidate the code signature in: /private/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-sealed-node-runtime-e3XEfB/runtime/libzstd.1.dylib.relayer-seal-work.install
+/private/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-sealed-node-runtime-e3XEfB/runtime/libzstd.1.dylib.relayer-seal-work.sign: replacing existing signature
+prebuilt Ladybug bundle rejected: bundle contents digest does not match the manifest
+prebuilt Ladybug bundle rejected: liblbug.a size does not match the manifest
+prebuilt Ladybug bundle rejected: manifest.json missing or unreadable
+no build outputs under /var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-lbug-artifact-1790454285749-5a11c85af0bd7/empty-target/debug/build; run cargo build -p lbug first
+/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/install_name_tool: warning: changes being made to the file will invalidate the code signature in: /private/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-mutator-swap-0-LwiAmg/libzstd.1.dylib.relayer-seal-work.install
+/private/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-mutator-swap-1-svf99M/echo.relayer-seal-work.sign: replacing existing signature
+/private/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-mutator-swap-2-SXFfu4/echo.relayer-seal-work.sign: replacing existing signature
+/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/install_name_tool: warning: changes being made to the file will invalidate the code signature in: /private/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-mutator-swap-3-wCUpPx/libzstd.1.dylib.relayer-seal-work.install
+/private/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-mutator-swap-3-wCUpPx/libzstd.1.dylib.relayer-seal-work.sign: replacing existing signature
+/private/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-mutator-swap-4-7tCnDP/echo.relayer-seal-work.sign: replacing existing signature
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  |isolated| test/graph-operation-recorder.test.mjs > desktop graph-operation recorder > waits for attributed in-flight work before sealing
+AssertionError: expected 'exported' to be 'waiting' // Object.is equality
+
+Expected: "waiting"
+Received: "exported"
+
+ ❯ test/graph-operation-recorder.test.mjs:440:8
+    438|       exportPromise.then(() => "exported"),
+    439|       new Promise((resolve) => setTimeout(() => resolve("waiting"), 10…
+    440|     ])).resolves.toBe("waiting");
+       |        ^
+    441|     await pendingRequest;
+    442|     const descriptor = await exportPromise;
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed | 176 passed | 1 skipped (178)
+      Tests  1 failed | 2308 passed | 3 skipped (2312)
+   Start at  16:24:39
+   Duration  78.37s (transform 11.22s, setup 0ms, import 29.46s, tests 240.93s, environment 15ms)
+

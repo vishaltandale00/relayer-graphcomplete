@@ -1578,6 +1578,16 @@ describe("Relayer Eval application service", () => {
         judgeConfigurationName: "deterministic-graph-contract",
       }),
     ).rejects.toThrow("must run alone with fixture-node-detail");
+    for (const selection of [
+      { testCaseIds: ["empty-project.task-system.single-turn"], harnessConfigurationNames: ["fixture-node-detail"] },
+      { testCaseIds: ["empty-project.visual-node-detail.single-turn", "empty-project.task-system.single-turn"], harnessConfigurationNames: ["fixture-node-detail"] },
+      { testCaseIds: ["empty-project.visual-node-detail.single-turn"], harnessConfigurationNames: ["fixture-node-detail", "fixture-task-system"] },
+    ]) {
+      await expect(evalService.createRun({
+        ...selection,
+        judgeConfigurationName: "deterministic-graph-contract",
+      })).rejects.toThrow("must run alone with fixture-node-detail");
+    }
     const nodeDetailCreated = await evalService.createRun({
       testCaseIds: ["empty-project.visual-node-detail.single-turn"],
       harnessConfigurationNames: ["fixture-node-detail"],

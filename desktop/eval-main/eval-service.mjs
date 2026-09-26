@@ -1450,7 +1450,9 @@ export class EvalService {
     if (selectsGraphSearch && this.targetKey !== GRAPH_SEARCH_EVAL_TARGET) {
       throw new Error("Graph-search Eval treatments are qualified only for macOS Apple Silicon.");
     }
-    if (testCaseIds.includes(NODE_DETAIL_EVAL_CASE_ID)
+    if ((testCaseIds.includes(NODE_DETAIL_EVAL_CASE_ID)
+      || (Array.isArray(harnessConfigurationNames)
+        && harnessConfigurationNames.some((name) => nodeDetailEvalCase.requiredHarnessConfigurationNames.includes(name))))
       && (!sameJson(testCaseIds, [NODE_DETAIL_EVAL_CASE_ID])
         || !sameJson(harnessConfigurationNames, nodeDetailEvalCase.requiredHarnessConfigurationNames))) {
       throw new Error(`The deterministic visual Node Detail fixture must run alone with ${nodeDetailEvalCase.requiredHarnessConfigurationNames.join(", ")}.`);

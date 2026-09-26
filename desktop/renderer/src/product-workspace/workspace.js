@@ -2766,10 +2766,16 @@ export function createProductWorkspace({
   }
   function renderComposerContexts() {
     const tray = $("#composerContextTray");
+    const thread = getThread();
+    if (!thread) {
+      tray.replaceChildren();
+      tray.classList.add("hidden");
+      return;
+    }
     const parts = [];
     if (
       contextEditor
-      && contextEditor.ownerThreadId !== String(getThread()?.id)
+      && contextEditor.ownerThreadId !== String(thread.id)
     ) {
       contextEditor = null;
     }
@@ -2954,7 +2960,6 @@ export function createProductWorkspace({
       parts.push(pills);
     }
 
-    const thread = getThread();
     const inputDraft = inputDraftController?.current(thread?.id);
     const inputAttachments = inputDraft?.attachments || [];
     const openInput = inputAttachments.find((attachment) => (
@@ -3065,30 +3070,38 @@ export function createProductWorkspace({
   }
   const syncComposer = () => {
     resizeComposerTextarea(prompt);
+    const thread = getThread();
+    if (!thread) {
+      send.disabled = true;
+      const tray = $("#composerContextTray");
+      tray.replaceChildren();
+      tray.classList.add("hidden");
+      return;
+    }
     const contextDraftsReady = !contextDraftController
-      || loadedContextDraftThreads.has(String(getThread()?.id));
-    const inputThreadId = String(getThread()?.id);
+      || loadedContextDraftThreads.has(String(thread.id));
+    const inputThreadId = String(thread.id);
     const inputDraftsReady = !inputDraftController
       || (loadedInputDraftThreads.has(inputThreadId) && !inputDraftLoads.has(inputThreadId));
-    const inputAttachments = inputDraftController?.current(getThread()?.id)?.attachments || [];
-    const failedConfirmationSend = failedConfirmationSends.get(String(getThread()?.id));
+    const inputAttachments = inputDraftController?.current(thread.id)?.attachments || [];
+    const failedConfirmationSend = failedConfirmationSends.get(String(thread.id));
     const replayIntent = confirmationSendReplayIntent({
       intent: failedConfirmationSend?.intent,
-      threadId: getThread()?.id,
+      threadId: thread.id,
       draftScopeKey: composerDraftScopeState.activeScopeKey,
       promptRevision: composerPromptRevision,
       contextRevision: composerContextState.revision,
       replayContextRevision: failedConfirmationSend?.contextRevision,
       modelSelection: pickerSelectionPayload(modelPicker?.getSelection())?.modelSelection,
-      inputDraftRevision: currentInputDraftRevision(getThread()?.id),
-      inputCompositionRevision: currentInputCompositionRevision(getThread()?.id),
+      inputDraftRevision: currentInputDraftRevision(thread.id),
+      inputCompositionRevision: currentInputCompositionRevision(thread.id),
     });
     const replayReady = replayIntent
       && !prompt.disabled
       && (modelPicker?.isReady() ?? false)
       && !contextEditor;
-    send.disabled = threadHasInFlightSend(inFlightSendThreads, getThread()?.id)
-      || threadHasPendingInputMutation(inputPending, getThread()?.id)
+    send.disabled = threadHasInFlightSend(inFlightSendThreads, thread.id)
+      || threadHasPendingInputMutation(inputPending, thread.id)
       || !contextDraftsReady || !inputDraftsReady || (!replayReady && !composerSubmissionReady(
       prompt.value,
       prompt.disabled,

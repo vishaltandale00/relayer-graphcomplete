@@ -16,11 +16,13 @@ afterEach(async () => {
   for (const directory of directories.splice(0)) await rm(directory, { recursive: true, force: true });
 });
 
-async function startUpstream() {
+async function startUpstream({ holdNodeResponse = false } = {}) {
   let resolveSlowSearchStarted;
   const slowSearchStarted = new Promise((resolve) => { resolveSlowSearchStarted = resolve; });
   let resolveNodeStarted;
   const nodeStarted = new Promise((resolve) => { resolveNodeStarted = resolve; });
+  let releaseNodeResponse;
+  const nodeResponseReleased = new Promise((resolve) => { releaseNodeResponse = resolve; });
   let abortedSearches = 0;
   const server = createServer(async (request, response) => {
     const chunks = [];
@@ -38,7 +40,8 @@ async function startUpstream() {
     }
     if (request.url === "/api/graph/nodes" && request.method === "POST") {
       resolveNodeStarted();
-      await new Promise((resolve) => setTimeout(resolve, 35));
+      if (holdNodeResponse) await nodeResponseReleased;
+      else await new Promise((resolve) => setTimeout(resolve, 35));
       response.writeHead(201, { "content-type": "application/json" });
       response.end(JSON.stringify({ node: { id: 41, state: "draft" } }));
       return;
@@ -87,6 +90,7 @@ async function startUpstream() {
     url: `http://127.0.0.1:${address.port}`,
     slowSearchStarted,
     nodeStarted,
+    releaseNodeResponse,
     abortedSearches: () => abortedSearches,
     close: () => new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve())),
   };
@@ -425,7 +429,7 @@ describe("desktop graph-operation recorder", () => {
   });
 
   it("waits for attributed in-flight work before sealing", async () => {
-    const upstream = await startUpstream();
+    const upstream = await startUpstream({ holdNodeResponse: true });
     const recorder = await startGraphOperationRecorder({ upstreamUrl: upstream.url });
     resources.push(recorder);
     const token = "in-flight-token";
@@ -434,10 +438,17 @@ describe("desktop graph-operation recorder", () => {
     await upstream.nodeStarted;
     const target = await createCandidateTraceDirectory();
     const exportPromise = recorder.exportInteraction(17, target);
-    await expect(Promise.race([
-      exportPromise.then(() => "exported"),
-      new Promise((resolve) => setTimeout(() => resolve("waiting"), 10)),
-    ])).resolves.toBe("waiting");
+    let exportSettled = false;
+    void exportPromise.then(
+      () => { exportSettled = true; },
+      () => { exportSettled = true; },
+    );
+    try {
+      await new Promise((resolve) => setImmediate(resolve));
+      expect(exportSettled).toBe(false);
+    } finally {
+      upstream.releaseNodeResponse();
+    }
     await pendingRequest;
     const descriptor = await exportPromise;
     expect(descriptor.eventCount).toBe(1);
