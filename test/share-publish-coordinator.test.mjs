@@ -9,6 +9,28 @@ const snapshot = new TextEncoder().encode(`${JSON.stringify({
 })}\n${JSON.stringify({ recordType: "turn" })}\n`);
 
 describe("share publication coordinator", () => {
+  it("preflights export eligibility/size and quota without retaining an attempt", async () => {
+    const exportSnapshot = vi.fn(async () => snapshot);
+    const preflightPublication = vi.fn(async ({ authorization, assertAuthority }) => {
+      expect(authorization).toBe("Bearer secret");
+      await assertAuthority();
+    });
+    const publish = vi.fn();
+    const coordinator = createSharePublishCoordinator({
+      exportSnapshot,
+      accountSession: async () => ({ ownerKey: "owner-a", authorization: "Bearer secret", generation: 1 }),
+      sourceThreadIdentity: async (threadId) => `installation:test:thread:${threadId}`,
+      publish,
+      preflightPublication,
+    });
+
+    await expect(coordinator.preflight({ threadId: 42 })).resolves.toEqual({ status: "ready" });
+    expect([...exportSnapshot.mock.calls[0][1]]).toHaveLength(120);
+    expect(preflightPublication).toHaveBeenCalledOnce();
+    expect(publish).not.toHaveBeenCalled();
+    await expect(coordinator.retry("SHR-NOT-CREATED")).resolves.toMatchObject({ code: "share_attempt_unavailable" });
+  });
+
   it("freezes bytes and attempt identity for retry while keeping authority inside main", async () => {
     const publish = vi.fn()
       .mockRejectedValueOnce(Object.assign(new Error("lost response"), {
@@ -171,6 +193,29 @@ describe("share publication coordinator", () => {
       failureStage: "export",
       attemptReferenceId: "SHR-ABCDEF12",
       snapshotBytes: null,
+    });
+  });
+
+  it("preserves the service quota reset time in the closed renderer result", async () => {
+    const coordinator = createSharePublishCoordinator({
+      exportSnapshot: async () => snapshot,
+      accountSession: async () => ({ ownerKey: "owner-a", authorization: "Bearer secret", generation: 1 }),
+      sourceThreadIdentity: async (threadId) => `installation:test:thread:${threadId}`,
+      publish: async () => {
+        throw Object.assign(new Error("quota"), {
+          code: "daily_quota_exhausted",
+          resetAt: "2026-09-27T00:00:00.000Z",
+        });
+      },
+      createReferenceId: () => "SHR-QUOTA01",
+    });
+
+    await expect(coordinator.create({ threadId: 42, title: "Public title" })).resolves.toEqual({
+      status: "failed",
+      attemptReferenceId: "SHR-QUOTA01",
+      code: "daily_quota_exhausted",
+      retryable: false,
+      resetAt: "2026-09-27T00:00:00.000Z",
     });
   });
 

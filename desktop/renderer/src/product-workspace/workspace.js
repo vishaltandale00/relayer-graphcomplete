@@ -18,6 +18,7 @@ import { graphLayoutSignature, projectLayerNodePositions } from "./graph-layout.
 import { renderMarkdown } from "./markdown.js";
 import { mountCompiledNodeDetail } from "./node-detail-runtime.js";
 import { productWorkspaceMarkup } from "./view.js";
+import { createSharePublishController } from "../share-publish-ui.js";
 import {
   confirmationRestorationKey,
   restoredDraftForInteraction,
@@ -1464,6 +1465,7 @@ export function createProductWorkspace({
   onSelectTurnById,
   onSelectionChange = () => {},
   onExportConversation = null,
+  shareApi = null,
   onSubmitInteraction = async () => {},
   onOpenSettings = () => {},
   onNavigateLayer = async () => {},
@@ -1696,6 +1698,15 @@ export function createProductWorkspace({
   const settingsButton = $("#conversationSettingsButton");
   const settingsMenu = $("#conversationSettingsMenu");
   const exportButton = $("#exportConversation");
+  const shareAvailable = Boolean(
+    shareApi
+      && typeof shareApi?.account?.read === "function"
+      && typeof shareApi?.account?.login === "function"
+      && typeof shareApi?.share?.preflight === "function"
+      && typeof shareApi?.share?.create === "function"
+  );
+  $("#shareConversation")?.classList.toggle("hidden", !shareAvailable);
+  $("#shareConversationMenu")?.classList.toggle("hidden", !shareAvailable);
   const closeSettingsMenu = ({ restoreFocus = false } = {}) => {
     settingsMenuOpen = false;
     settingsMenu.classList.add("hidden");
@@ -1707,19 +1718,19 @@ export function createProductWorkspace({
     settingsMenuOpen = true;
     settingsMenu.classList.remove("hidden");
     settingsButton.setAttribute("aria-expanded", "true");
-    exportButton.focus();
+    (shareAvailable ? $("#shareConversationMenu") : exportButton).focus();
   };
   const renderExportControl = (thread = getThread()) => {
     const available = capabilities.canExportConversation
       && typeof onExportConversation === "function";
-    settingsControl.classList.toggle("hidden", !available);
+    settingsControl.classList.toggle("hidden", !available && !shareAvailable);
     exportButton.classList.toggle("hidden", !available);
     exportButton.disabled = !available || exportPending || thread?.id == null;
-    settingsButton.disabled = !available || exportPending;
+    settingsButton.disabled = (!available && !shareAvailable) || exportPending;
     settingsButton.setAttribute("aria-busy", String(exportPending));
     exportButton.setAttribute("aria-busy", String(exportPending));
     exportButton.textContent = exportPending ? "Exporting…" : "Export conversation…";
-    if (!available) closeSettingsMenu();
+    if (!available && !shareAvailable) closeSettingsMenu();
   };
   settingsButton.onclick = () => {
     if (settingsMenuOpen) closeSettingsMenu();
@@ -1748,6 +1759,14 @@ export function createProductWorkspace({
       renderExportControl();
     }
   };
+  const shareController = shareAvailable ? createSharePublishController({
+    root,
+    getThread,
+    getInteractions: () => getState()?.interactions ?? [],
+    account: shareApi.account,
+    share: shareApi.share,
+    clipboard: shareApi.clipboard,
+  }) : null;
   const graphStage = $("#graphStage");
   const graphDocument = graphStage.ownerDocument;
   const graphWindow = graphDocument.defaultView;
@@ -3840,6 +3859,7 @@ export function createProductWorkspace({
     applyMode();
     showThread();
     renderExportControl(thread);
+    shareController?.render();
     void loadAnnotations(thread);
     renderHistoryNavigation();
     $("#threadTitle").textContent = thread.title;
@@ -5119,6 +5139,7 @@ export function createProductWorkspace({
       closeContextDraftSendWarning({ focusSend: false, cancelAttempt: false });
     }
     modelPicker?.dispose();
+    shareController?.dispose();
     for (const timer of contextDraftLoadRetryTimers.values()) graphWindow.clearTimeout(timer);
     contextDraftLoadRetryTimers.clear();
     contextDraftLoadRetryAttempts.clear();

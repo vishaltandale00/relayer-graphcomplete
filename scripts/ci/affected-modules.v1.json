@@ -181,6 +181,7 @@
     { "exact": "scripts/prime-evidence/contract-matrix.mjs", "chapters": ["vitest"], "vitestFiles": ["test/prime-family-evidence-contract.test.mjs"] },
     { "exact": "scripts/prime-evidence/deterministic-openai-server.mjs", "chapters": ["vitest"], "vitestFiles": ["test/prime-deterministic-provider.test.mjs"] },
     { "exact": "scripts/capture-provider-ux-video.mjs", "chapters": ["vitest"], "vitestFiles": ["test/provider-electron-evidence.test.mjs"] },
+    { "exact": "scripts/capture-public-share-viewer-evidence.mjs", "chapters": ["vitest"], "vitestFiles": ["test/public-share-viewer-evidence.test.mjs"] },
     { "exact": "scripts/capture-conversation-eval-evidence.mjs", "chapters": [] },
     { "exact": "scripts/capture-environment-rail-evidence.mjs", "chapters": [] },
     { "exact": "scripts/capture-graph-authoring-repair-evidence.mjs", "chapters": [] },

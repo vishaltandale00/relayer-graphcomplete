@@ -20,6 +20,9 @@ import {
 } from "./providers/provider-definition-store.mjs";
 import { registerDesktopIpc } from "./ipc/register-ipc.mjs";
 import { createConversationExportService } from "./services/conversation-export.mjs";
+import { createSharePublishCoordinator } from "./services/share-publish-coordinator.mjs";
+import { createShareServiceClient } from "./services/share-service-client.mjs";
+import { createShareSourceThreadIdentity } from "./services/share-source-thread-identity.mjs";
 import {
   createDesktopAccountTelemetry,
   createDesktopErrorReporterIssuer,
@@ -557,6 +560,17 @@ if (primaryInstance) {
       getWindow: () => mainWindow,
       exportConversation: (threadId) => productServer.exportConversation(threadId),
     });
+    const shareServiceClient = createShareServiceClient({ endpoint: "https://share.relayerlabs.ai" });
+    const shareCoordinator = createSharePublishCoordinator({
+      exportSnapshot: (threadId, title, options) => productServer.exportShareSnapshot(threadId, title, options),
+      accountSession: () => accountService.shareSession(),
+      sourceThreadIdentity: createShareSourceThreadIdentity({ settings }),
+      publish: (request) => shareServiceClient.publish(request),
+      preflightPublication: (request) => shareServiceClient.preflight(request),
+      issueHandledShareFailureReporter: (identity) => (
+        authenticatedErrorReporting?.issueHandledShareFailureReporter(identity) ?? null
+      ),
+    });
 
     registerDesktopIpc({
       ipcMain,
@@ -577,6 +591,7 @@ if (primaryInstance) {
       providerDefinitions: providerSetup,
       validateProviderOnboarding: () => productServer.validateProviderOnboarding(),
       conversationExporter,
+      shareCoordinator,
       settings,
       tutorial,
       updater,

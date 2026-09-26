@@ -1,6 +1,7 @@
 import { createHash, randomBytes } from "node:crypto";
 
 const MAX_ATTEMPTS = 32;
+const MAXIMUM_PREFLIGHT_TITLE = "😀".repeat(120);
 const NON_REPORTED_CODES = new Set([
   "share_cancelled",
   "share_sign_in_required",
@@ -63,7 +64,7 @@ function failureCode(error) {
 
 function closedFailure(error, reference) {
   const code = failureCode(error);
-  return Object.freeze({
+  const result = {
     status: "failed",
     attemptReferenceId: reference,
     code,
@@ -77,7 +78,11 @@ function closedFailure(error, reference) {
       "daily_quota_exhausted",
       "share_sign_in_required",
     ].includes(code),
-  });
+  };
+  if (code === "daily_quota_exhausted" && typeof error?.resetAt === "string" && error.resetAt) {
+    result.resetAt = error.resetAt;
+  }
+  return Object.freeze(result);
 }
 
 function telemetryRecord(error, reference) {
@@ -110,6 +115,7 @@ export function createSharePublishCoordinator({
   accountSession,
   sourceThreadIdentity,
   publish,
+  preflightPublication = async () => Object.freeze({ status: "ready" }),
   issueHandledShareFailureReporter = () => null,
   createAttemptId = attemptId,
   createReferenceId = referenceId,
@@ -118,6 +124,7 @@ export function createSharePublishCoordinator({
     || typeof accountSession !== "function"
     || typeof sourceThreadIdentity !== "function"
     || typeof publish !== "function"
+    || typeof preflightPublication !== "function"
     || typeof issueHandledShareFailureReporter !== "function") {
     throw new TypeError("Share publication coordinator dependencies are invalid.");
   }
@@ -176,6 +183,38 @@ export function createSharePublishCoordinator({
   }
 
   return Object.freeze({
+    async preflight({ threadId } = {}) {
+      const reference = createReferenceId();
+      let failureReporter = null;
+      try {
+        if (!Number.isSafeInteger(threadId) || threadId <= 0) {
+          throw new TypeError("Share preflight input is invalid.");
+        }
+        const account = exactAccount(await accountSession());
+        failureReporter = issueHandledShareFailureReporter({ generation: account.generation });
+        // This deliberately does not retain bytes or create an attempt. A
+        // maximum-width public title makes the size check conservative; Create
+        // remains the one boundary that freezes accepted history and identity.
+        await exportSnapshot(threadId, MAXIMUM_PREFLIGHT_TITLE);
+        const assertAuthority = async () => {
+          const current = exactAccount(await accountSession());
+          if (current.ownerKey !== account.ownerKey || current.generation !== account.generation) {
+            const error = new Error("share_sign_in_required");
+            error.code = "share_sign_in_required";
+            throw error;
+          }
+          return current;
+        };
+        const current = await assertAuthority();
+        await preflightPublication({ authorization: current.authorization, assertAuthority });
+        await assertAuthority();
+        return Object.freeze({ status: "ready" });
+      } catch (error) {
+        await report(error, reference, failureReporter);
+        return closedFailure(error, reference);
+      }
+    },
+
     async create({ threadId, title, signal } = {}) {
       const reference = createReferenceId();
       let failureReporter = null;

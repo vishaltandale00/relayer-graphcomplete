@@ -68,6 +68,11 @@ function workspace() {
     onExportConversation: desktop?.conversation?.export
       ? (threadId) => desktop.conversation.export(threadId)
       : null,
+    shareApi: desktop?.share && desktop?.account ? {
+      account: desktop.account,
+      share: desktop.share,
+      clipboard: navigator.clipboard,
+    } : null,
     onSubmitInteraction: (
       text,
       modelSelection,

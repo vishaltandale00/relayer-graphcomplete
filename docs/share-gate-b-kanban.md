@@ -61,10 +61,11 @@ Sentry submission, or promotion of prototype code.
 - [x] `SHR-463-4` Safely embed snapshot/title/project data with escaping, CSP
   `connect-src 'none'`, no third-party scripts, noindex, static OG metadata, and
   no client telemetry. Proof: template/inventory tests with adversarial strings.
-- [ ] `SHR-463-5` Preserve the accepted desktop shell, Environment panel,
-  simplified success-adjacent viewer layout, mobile pan/details behavior, and
-  render-failure Reload state. Proof: declared Electron fixture evidence at
-  desktop and 375 px plus structural tests.
+- [x] `SHR-463-5` Preserve the accepted desktop-aligned shell while omitting the
+  desktop-only Environment panel, keep the compact top-right download card,
+  inline turn navigation, mobile pan/details behavior, and render-failure
+  Reload state. Proof: source-bound Electron fixture evidence at 1440x1000 and
+  375x812 plus structural tests.
 - [x] `SHR-464-1` Verify Auth0 ID tokens via JWKS and derive a domain-separated
   owner identity server-side. Proof: handler tests with valid, invalid, expired,
   wrong-audience, wrong-issuer, and foreign-owner fake JWKS cases.
@@ -88,6 +89,11 @@ Sentry submission, or promotion of prototype code.
 
 - [x] Integrate the issue work into one local exporter -> main authority -> fake
   service -> production viewer journey.
+- [x] Wire #468's production renderer controls through preload-safe IPC to the
+  main-owned coordinator and reserve/upload/finalize client. Proof: focused
+  eligibility, preflight, sign-in, title, pending, success, error, quota,
+  retry, account-generation, IPC, and bearer-containment tests. This alignment
+  does not claim #468's later Shared-links management surface.
 - [x] Run focused checkpoints, declared heavy evidence, `npm run check`, and
   `npm run build`; record exact commands and failures separately from the plan.
 - [ ] GPT-6 Astra adversarial review of semantic/UX/authority boundaries against
@@ -110,6 +116,8 @@ Sentry submission, or promotion of prototype code.
   tests, Rust share redaction tests, and the persisted-product export seam passed.
 - Declared evidence: telemetry 99/99, `npm run build`, `npm run check`, PRD
   readability, and CloudFormation lint passed locally.
-- `SHR-463-5` remains open for captured desktop and 375 px rendered evidence.
+- `SHR-463-5` is backed by the opt-in production Electron capture and its
+  source/viewport/image hashes; the fixture is synthetic and makes no network
+  or live-infrastructure claim.
 - Durable reopen recovery under #466 remains blocked from completion claims;
   the in-session coordinator contract is stable, but no restart store exists.
