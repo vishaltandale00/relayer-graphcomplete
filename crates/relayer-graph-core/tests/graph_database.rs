@@ -1889,6 +1889,43 @@ async fn returning_the_existing_current_appends_a_terminal_revision_without_clon
 }
 
 #[tokio::test]
+async fn app_server_failure_reasons_are_canonical() {
+    // The app server fails recursive children with these reasons. A reason the
+    // graph rejects is retried forever and never terminalizes the completion.
+    let database = GraphDatabase::in_memory().await.unwrap();
+    database
+        .set_temporal_features(TemporalFeatureConfig {
+            schema_read: true,
+            root_current_write: true,
+            ..TemporalFeatureConfig::default()
+        })
+        .await
+        .unwrap();
+    for reason in [
+        "provider_start_failed",
+        "provider_attachment_persist_failed",
+        "graph_observation_failed",
+    ] {
+        let interaction = database
+            .create_interaction(Some(project(1)), thread(1), reason)
+            .await
+            .unwrap();
+        let writer = database.writer_for_subgraph(interaction.id).await.unwrap();
+        let failed = writer
+            .transition_current(
+                0,
+                reason,
+                CurrentTransition::Fail {
+                    reason: reason.into(),
+                },
+            )
+            .await
+            .unwrap_or_else(|error| panic!("{reason} was rejected: {error}"));
+        assert_eq!(failed.lifecycle, CompletionLifecycle::Failed);
+    }
+}
+
+#[tokio::test]
 async fn projection_outbox_preserves_each_revision_and_terminal_current() {
     let database = GraphDatabase::in_memory().await.unwrap();
     let compatibility_completion = database

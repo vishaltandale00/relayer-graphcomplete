@@ -185,6 +185,162 @@
           "N"
         ]
       ]
+    },
+    {
+      "id": "completion-start-failure",
+      "module": "CompletionCurrent",
+      "preset": "completion-today",
+      "promises": [
+        "SettledExecutionAgreesWithGraph"
+      ],
+      "finalPromises": [
+        "ChildSettles"
+      ],
+      "summary": "The provider start fails and start-failure cleanup settles the child.",
+      "steps": [
+        [
+          "LaunchCheck",
+          1
+        ],
+        [
+          "LaunchReserve",
+          1
+        ],
+        [
+          "LaunchClaim",
+          1
+        ],
+        [
+          "LaunchActivate",
+          1,
+          "ok"
+        ],
+        [
+          "LaunchStart",
+          1,
+          "fail"
+        ],
+        [
+          "CleanCancel"
+        ],
+        [
+          "CleanFail"
+        ],
+        [
+          "CleanFinalize"
+        ],
+        [
+          "CleanDiscard"
+        ]
+      ]
+    },
+    {
+      "id": "completion-stop-before-failed-start",
+      "module": "CompletionCurrent",
+      "preset": "completion-today",
+      "promises": [
+        "SettledExecutionAgreesWithGraph"
+      ],
+      "finalPromises": [
+        "ChildSettles"
+      ],
+      "summary": "The parent stops the child before its provider start fails; cleanup must still settle it.",
+      "steps": [
+        [
+          "LaunchCheck",
+          1
+        ],
+        [
+          "LaunchReserve",
+          1
+        ],
+        [
+          "LaunchClaim",
+          1
+        ],
+        [
+          "LaunchActivate",
+          1,
+          "ok"
+        ],
+        [
+          "StopRead"
+        ],
+        [
+          "StopPost"
+        ],
+        [
+          "StopCancel"
+        ],
+        [
+          "LaunchStart",
+          1,
+          "fail"
+        ],
+        [
+          "CleanCancel"
+        ],
+        [
+          "CleanFail"
+        ],
+        [
+          "CleanFinalize"
+        ],
+        [
+          "CleanDiscard"
+        ]
+      ]
+    },
+    {
+      "id": "completion-return-after-lost-start",
+      "module": "CompletionCurrent",
+      "preset": "completion-today",
+      "promises": [
+        "SettledExecutionAgreesWithGraph"
+      ],
+      "finalPromises": [
+        "ChildSettles"
+      ],
+      "summary": "The start ran but its acknowledgement was lost, and the child returns before cleanup; cleanup must accept it.",
+      "steps": [
+        [
+          "LaunchCheck",
+          1
+        ],
+        [
+          "LaunchReserve",
+          1
+        ],
+        [
+          "LaunchClaim",
+          1
+        ],
+        [
+          "LaunchActivate",
+          1,
+          "ok"
+        ],
+        [
+          "LaunchStart",
+          1,
+          "lost"
+        ],
+        [
+          "ChildReturn"
+        ],
+        [
+          "CleanCancel"
+        ],
+        [
+          "CleanFail"
+        ],
+        [
+          "CleanFinalize"
+        ],
+        [
+          "CleanDiscard"
+        ]
+      ]
     }
   ]
 }

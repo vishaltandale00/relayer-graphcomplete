@@ -79,6 +79,24 @@ checks two things after every step:
   the model disagree.
 - The scenario's promises must hold. A broken promise is a bug in both.
 
+For `CompletionCurrent`, [`crates/relayer-app-server/tests/support/completion_traces.rs`](../../crates/relayer-app-server/tests/support/completion_traces.rs)
+replays against the real app-server code:
+
+- **Graph:** a real in-memory graph server holding a real recursive child.
+- **Product:** the real SQLite product store.
+- **Harness:** a fake whose start is refused, or runs while acknowledging
+  another identity (a lost acknowledgement).
+- **Launch steps:** each step calls the function `complete_prepared_child`
+  calls for it (reserve, claim, activate, start).
+- **Cleanup:** the start-failure cleanup is the real background task. The fake
+  harness holds its first call (cancel) until the replay reaches
+  `CleanCancel`, so the task cannot run ahead of the trace. Its later loops
+  cannot be paused, so the replay compares state once it has run.
+- **Child Return:** the child's model returns through its own graph writer.
+- **Projection:** the product's settlement reason (`execWhy`) is compared, so
+  a wrongly projected reason is caught.
+- **`finalPromises`:** these must hold at the end of the scenario.
+
 The first replay found a model error. The IPC layer releases a renderer
 binding once its connection settles, and the model did not.
 
@@ -145,8 +163,8 @@ This model covers one recursive child from `complete()` to settlement:
 | `completion-observe-timeout` | Confirmed | `observe_invoked_completion` has a 5 s control timeout, but the harness answers only when the run ends. A child still running after 5 s is failed with `provider_exited_without_return`, and its capability is revoked while the provider keeps running. Shipped configurations enable recursion. |
 | `completion-activation-failure` | Confirmed | A lost or failed activation settles the execution row only. The graph current stays active, the product status is never finalized, and a broker retry gets 200 with no launch. Restart skips settled rows. |
 | `completion-clean-exit` | Confirmed | For an invoked child, the harness resolves a clean native end without checking for Return (`host.ts`). The exit observer fails only on an error, so the child stays active until its parent stops it or the app restarts. |
-| `completion-start-failure-reason` | Confirmed | Start-failure cleanup retries `fail_graph_completion("provider_start_failed")` every 250 ms, and the graph rejects that reason forever. `graph_observation_failed` is also missing from `validate_terminal_reason`. `provider_attachment_persist_failed` is missing too, but it is sent once and the exit observer then fails the child with a valid reason. |
-| `completion-start-failure-terminal` | Confirmed | If the current was already terminated by a stop before launch, or by a Return after a lost start acknowledgement, `terminate_graph_completion` reports "already terminal without the expected failure receipt". Cleanup then retries forever. Adding reasons alone does not fix this. |
+| `completion-start-failure-reason` | Fixed; now passes | Before the fix: start-failure cleanup retried `fail_graph_completion("provider_start_failed")` every 250 ms, and the graph rejected that reason forever. `provider_start_failed`, `provider_attachment_persist_failed` and `graph_observation_failed` are now canonical failure reasons in `validate_terminal_reason`, so the graph and product rows share one reason. Scenario: `completion-start-failure`. `app_server_failure_reasons_are_canonical` in graph-core covers all three reasons. |
+| `completion-start-failure-terminal` | Fixed; now passes | Before the fix: if a stop before launch, or a Return after a lost start acknowledgement, terminated the current first, cleanup retried forever. Cleanup now stops at any terminal current and settles the product with that current's own outcome. It uses the same settlement as the semantic observer (`settle_terminal_recursive_child`). Scenarios: `completion-stop-before-failed-start`, `completion-return-after-lost-start`. |
 | `completion-restart` | passes | Restart reconciliation does not abort on a state the product produced. |
 | `completion-fixed-safety` | passes | With every candidate fix, every safety invariant holds. |
 | `completion-fixed-liveness` | passes | With every candidate fix, every claimed child settles. |
@@ -156,9 +174,11 @@ The candidate fixes are:
 1. Long-poll or re-poll the observation instead of timing out.
 2. Fail the child when a clean exit leaves its current active.
 3. Fail both stores when activation fails.
-4. Use valid failure reasons.
+4. Use valid failure reasons. Landed.
 5. Let cleanup settle a current another actor already terminated, with that
-   current's own outcome.
+   current's own outcome. Landed.
+
+A landed fix is on in `completion-today` as well.
 
 Fix 3 conflicts with the retryable activation path. That path restores the
 interaction to `submitted` for a retry, and resetting the execution to

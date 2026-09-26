@@ -14,11 +14,11 @@
     "completion-today": {
       "Launchers": "{1, 2}",
       "MaxRev": "3",
-      "ValidFailReasons": "{\"provider_exited_without_return\", \"application_restart\", \"execution\"}",
+      "ValidFailReasons": "{\"provider_exited_without_return\", \"application_restart\", \"execution\", \"provider_start_failed\", \"provider_attachment_persist_failed\", \"graph_observation_failed\"}",
       "ObserveTimesOut": "TRUE",
       "CleanExitIsChecked": "FALSE",
       "ActivationFailureSettlesGraph": "FALSE",
-      "TerminalReadSettlesCleanup": "FALSE"
+      "TerminalReadSettlesCleanup": "TRUE"
     },
     "completion-fixed": {
       "Launchers": "{1, 2}",
@@ -180,10 +180,8 @@
       "properties": [
         "ClaimedChildSettles"
       ],
-      "expect": {
-        "violated": "ClaimedChildSettles"
-      },
-      "finding": "Start-failure cleanup retries a failure reason the graph rejects, forever."
+      "expect": "pass",
+      "finding": "Start-failure cleanup fails the current with a reason the graph accepts (fixed; was: retried a rejected reason forever)."
     },
     {
       "id": "completion-start-failure-terminal",
@@ -200,10 +198,8 @@
       "properties": [
         "ClaimedChildSettles"
       ],
-      "expect": {
-        "violated": "ClaimedChildSettles"
-      },
-      "finding": "If another actor terminated the current first (a stop, or a Return after a lost start acknowledgement), start-failure cleanup retries forever."
+      "expect": "pass",
+      "finding": "Start-failure cleanup settles a current another actor already terminated, with that current's outcome (fixed; was: retried forever)."
     },
     {
       "id": "completion-restart",

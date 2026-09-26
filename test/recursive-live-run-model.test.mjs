@@ -353,7 +353,7 @@ describe("live run credentials", () => {
       adapterId: "openrouter",
       contract: "secret@1",
       endpoint: "https://openrouter.ai/api/v1",
-      providerId: "codex",
+      providerId: "live-run-openrouter",
       modelId: "openai/gpt-5",
       apiKey: "test-key",
     });

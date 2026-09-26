@@ -15,11 +15,33 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
+import { createManagedRuntimeInstaller } from "../desktop/main/managed-runtimes/installer.mjs";
+import { createManagedRuntimeResolver } from "../desktop/main/managed-runtimes/resolver.mjs";
+import {
+  productionHarnessRuntimeDescriptor,
+  productionProviderAdapterRegistry,
+} from "../desktop/main/providers/provider-adapter-registry.mjs";
 import {
   GraphCompleteRuntimeService,
   RECURSIVE_TEMPORAL_FEATURES,
 } from "../desktop/main/services/graphcomplete-runtime.mjs";
+import { createHarnessReadinessCoordinator } from "../desktop/main/services/harness-readiness.mjs";
+import {
+  PRIME_AGENT_ASSET_SHA256,
+  inspectPrimeAgentRuntime,
+  requirePrimeAgentRuntime,
+  selectPrimeAgentDependencyClosureSha256,
+} from "../desktop/main/services/prime-agent-runtime.mjs";
+import {
+  assemblePrimeManagedRuntime,
+  checkPrimeManagedRuntime,
+  createPrimeReviewedTreeCopier,
+} from "../desktop/main/services/prime-managed-runtime.mjs";
 import { RelayerAppServerService } from "../desktop/main/services/relayer-app-server.mjs";
+import {
+  HARNESS_MANAGED_RUNTIME_REQUIREMENTS,
+  managedRuntimeRequirementForHarness,
+} from "../desktop/shared/managed-runtime-requirements.mjs";
 import { digestHarnessConfiguration, loadHarnessConfigurations } from "@relayer/harness-host";
 
 import {
@@ -127,7 +149,9 @@ function providerExecution(profile) {
     descriptor: {
       adapterId: definition.adapterId,
       accessContract: definition.accessContract,
-      implementationVersion: "1",
+      // Harnesses admit an adapter only at the implementation version they map, so the
+      // lease carries the production adapter's version rather than a fixed one.
+      implementationVersion: productionProviderAdapterRegistry.get(definition.adapterId).implementationVersion,
     },
     runtime: {
       async executionAccess() {
@@ -224,15 +248,162 @@ async function observeUntilSettled(session, threadId, rootInteractionId, timeout
   }
 }
 
-async function runOnce({ recursionEnabled, profile, configurationPath, timeoutMs, outputDirectory, runId }) {
+/**
+ * Gives the harness host the Prime environment the desktop sets for it: the host-owned
+ * Relayer Python client that bounded Prime kernels import, and the vendored runtime's
+ * provenance. Inspection fails here, before any inference, if the Prime assets are not
+ * the reviewed ones.
+ */
+async function preparePrimeEnvironment() {
+  const pythonClientRoot = join(repositoryRoot, "python", "relayer-graph", "src");
+  const inspection = requirePrimeAgentRuntime(await inspectPrimeAgentRuntime({
+    appPath: repositoryRoot,
+    harnessDirectory: join(repositoryRoot, "harnesses"),
+    manifestPath: join(repositoryRoot, "vendor", "prime-agent", "manifest.json"),
+    pythonClientRoot,
+  }));
+  process.env.RELAYER_PRIME_PYTHON_CLIENT_ROOT = pythonClientRoot;
+  process.env.RELAYER_PRIME_RUNTIME_PROVENANCE = JSON.stringify(inspection.diagnostics);
+}
+
+/**
+ * The desktop's managed-runtime installer over a repository-local cache, so Prime runs
+ * from the same prepared runtime the app gives it. Codex runs from the profile's own
+ * executable instead, so it needs no recipe here.
+ */
+function managedRuntimeResolver() {
+  return createManagedRuntimeResolver(createManagedRuntimeInstaller({
+    root: join(repositoryRoot, ".relayer", "live", "managed-runtimes"),
+    assembleRecipe: async (context) => {
+      if (context.recipe.runtimeId !== "prime") return;
+      await assemblePrimeManagedRuntime(context, {
+        copyReviewedTrees: createPrimeReviewedTreeCopier({
+          appRoot: repositoryRoot,
+          pythonClientRoot: join(repositoryRoot, "python", "relayer-graph", "src"),
+          expectedClosureSha256: selectPrimeAgentDependencyClosureSha256({
+            isPackaged: false,
+            javascriptContract: context.recipe.runtimeContract.javascript,
+          }),
+          expectedPythonClientSha256: PRIME_AGENT_ASSET_SHA256.pythonPackageTree,
+        }),
+      });
+    },
+  }));
+}
+
+/**
+ * Makes the profile's provider and model routable the way the desktop does after a
+ * connect: the provider definition and its catalog, then harness readiness, then the
+ * family the thread selects. Product routing matches a provider's access contract to
+ * the harness, and a harness starts unavailable until readiness publishes it.
+ */
+async function prepareRoute({ session, productServer, runtime, resolver, profile }) {
+  const { providerId, modelId } = profile;
+  const catalog = {
+    providerId,
+    label: providerId,
+    connected: true,
+    models: [{
+      id: modelId,
+      label: modelId,
+      order: 0,
+      visible: true,
+      available: true,
+      providerDefault: true,
+      metadata: {},
+    }],
+    systemFamily: { key: providerId, name: providerId, modelIds: [modelId] },
+  };
+  if (profile.contract === "secret@1" && providerId !== "codex") {
+    // A key-based provider is created with its catalog in one commit, as a desktop
+    // connect creates it. The key itself stays with the execution lease.
+    const response = await fetch(new URL("/api/internal/provider-definitions/staged", session.origin), {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${session.cookie.value}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        definition: {
+          id: providerId,
+          adapterId: profile.adapterId,
+          label: providerId,
+          endpoint: profile.endpoint,
+          accessContract: profile.contract,
+          credentialReference: `provider:${providerId}`,
+          lifecycleState: "active",
+          removedAt: null,
+        },
+        catalog,
+      }),
+    });
+    if (!response.ok) {
+      throw new Error(`Provider creation failed (${response.status}): ${await response.text()}`);
+    }
+  } else {
+    await productServer.publishProviderCatalog(catalog);
+  }
+
+  const prime = profile.implementation === "prime.agent";
+  const requirement = HARNESS_MANAGED_RUNTIME_REQUIREMENTS[profile.implementation];
+  const readiness = createHarnessReadinessCoordinator({
+    configurations: runtime.session.configurations,
+    digestConfiguration: runtime.session.digestConfiguration,
+    runtimeRequirements: prime ? { [profile.implementation]: requirement } : {},
+    prepareRecipe: async (recipeId) => productionHarnessRuntimeDescriptor(await resolver.prepare(recipeId)),
+    checkers: {
+      [profile.implementation]: prime
+        ? ({ runtime: prepared }) => checkPrimeManagedRuntime({ runtime: prepared })
+        // The operator supplies the Codex executable; resolveRunProfile required it.
+        : async () => ({ available: true }),
+    },
+    publishAvailability: async (updates) => {
+      await productServer.publishHarnessReadiness(updates);
+      await runtime.recordHarnessReadiness(updates);
+    },
+  });
+  const { readyHarnessIds, routeResults } = await readiness.evaluate({
+    trigger: "connect",
+    providerDefinition: { id: providerId, adapterId: profile.adapterId, accessContract: profile.contract },
+    models: [{ id: modelId, visible: true, available: true }],
+  });
+  if (!readyHarnessIds.includes(profile.harness)) {
+    const reason = routeResults.find(({ harnessId }) => harnessId === profile.harness)?.unavailableReason;
+    throw new Error(`Harness ${profile.harness} is not ready for ${providerId}/${modelId}${reason ? `: ${reason.code}` : ""}.`);
+  }
+
+  const family = await productRequest(session, "/api/model-families", {
+    method: "POST",
+    body: JSON.stringify({
+      name: "Live run models",
+      enabled: true,
+      members: [{ providerId, modelId }],
+    }),
+  });
+  await productRequest(session, "/api/model-selection/validate", {
+    method: "POST",
+    body: JSON.stringify({ harnessId: profile.harness, familyId: family.id, providerId, modelId }),
+  });
+  return family;
+}
+
+async function runOnce({
+  recursionEnabled, profile, configurationPath, timeoutMs, outputDirectory, runId, setupOnly = false,
+}) {
   const dataDirectory = mkdtempSync(join(tmpdir(), "relayer-recursive-live-"));
   const arm = recursionEnabled ? "enabled" : "disabled";
+  const resolver = managedRuntimeResolver();
   const requestedTemporalFeatures = recursionEnabled ? RECURSIVE_TEMPORAL_FEATURES : {};
   const runtime = new GraphCompleteRuntimeService({
     userDataDirectory: dataDirectory,
     graphServerBinary: join(repositoryRoot, "target", "debug", "relayer-graph-server"),
     configurationPaths: [configurationPath],
     ...(profile.codexExecutable === undefined ? {} : { codexPathOverride: profile.codexExecutable }),
+    ...(profile.implementation === "prime.agent" ? {
+      resolvePrimeRuntime: async () => productionHarnessRuntimeDescriptor(await resolver.get(
+        managedRuntimeRequirementForHarness("prime.agent").recipeId,
+      )),
+    } : {}),
     temporalFeatures: requestedTemporalFeatures,
     candidateTrace: {
       directory: join(dataDirectory, "candidate-trace-spool"),
@@ -259,29 +430,8 @@ async function runOnce({ recursionEnabled, profile, configurationPath, timeoutMs
     const actualTemporalFeatures = await temporalFeatures(runtime.session);
     const session = await productServer.start();
     const { providerId, modelId } = profile;
-    await productServer.publishProviderCatalog({
-      providerId,
-      label: providerId,
-      connected: true,
-      models: [{
-        id: modelId,
-        label: modelId,
-        order: 0,
-        visible: true,
-        available: true,
-        providerDefault: true,
-        metadata: {},
-      }],
-      systemFamily: { key: providerId, name: providerId, modelIds: [modelId] },
-    });
-    const family = await productRequest(session, "/api/model-families", {
-      method: "POST",
-      body: JSON.stringify({
-        name: "Live run models",
-        enabled: true,
-        members: [{ providerId, modelId }],
-      }),
-    });
+    const family = await prepareRoute({ session, productServer, runtime, resolver, profile });
+    if (setupOnly) return null;
     const requestStartedAtMs = Date.now();
     const thread = await productRequest(session, "/api/threads", {
       method: "POST",
@@ -331,6 +481,9 @@ async function main() {
     throw new Error(`The recursive live run is opt-in and spends real inference. Set ${OPT_IN}=1.`);
   }
   const requested = singleArgument("--recursion", "both");
+  // Proves the provider, harness readiness, and model route, then stops before a
+  // thread starts, so it spends no inference.
+  const setupOnly = process.argv.includes("--setup-only");
   if (!["on", "off", "both"].includes(requested)) {
     throw new Error("--recursion must be on, off, or both");
   }
@@ -338,6 +491,20 @@ async function main() {
     resolve(singleArgument("--credentials", "live-run.local.json")),
     singleArgument("--profile", ""),
   );
+  if (profile.implementation === "prime.agent") await preparePrimeEnvironment();
+  if (setupOnly) {
+    await runOnce({
+      profile,
+      configurationPath,
+      timeoutMs: liveRunTimeoutMs(singleArgument("--timeout-ms", "900000")),
+      outputDirectory: mkdtempSync(join(tmpdir(), "relayer-recursive-live-setup-")),
+      runId: randomUUID(),
+      recursionEnabled: requested !== "off",
+      setupOnly: true,
+    });
+    console.log(`Setup verified for ${profile.name}: ${profile.harness} can route ${profile.providerId}/${profile.modelId}.`);
+    return;
+  }
   const outputRoot = resolve(
     singleArgument("--output-dir", join(".relayer", "live", "recursive-complete", profile.name)),
   );
