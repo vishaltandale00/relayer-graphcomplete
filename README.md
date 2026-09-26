@@ -22,7 +22,6 @@ Pre-alpha product and executable runtime. The repository now includes:
 - a persistent Node harness host that loads named file-backed configurations, caches one harness object per thread, persists opaque provider resume state without graph credentials, and supports cancellation and deterministic disposal;
 - graph-tool `codex.basic` and `claude.basic` harnesses using Relayer's Codex app-server bridge and the Claude Agent SDK respectively;
 - a `prime.agent` harness that passes the current graph scope through Prime Agent's run-scoped IPython host context;
-- an inference-free evaluation that starts the real Rust server and Node host and checks two interactions in one empty-project thread;
 - a separate internal Relayer Eval desktop application that runs test-case × harness matrices through the product app server and opens their threads in the production graph/chat workspace;
 - one Rust-owned product permission contract with Ask for approval (`ask`), Approve for me (`auto`), and Full access (`full`), translated by each harness configuration;
 - Rust, TypeScript, Python, and process-level integration tests.
@@ -94,42 +93,7 @@ Browser use stays inside each harness's existing native approval unit. Ask, Appr
 
 Unsupported setup fails as an ordinary harness limitation: Codex reports its native MCP connection or packaged-helper failure, Claude returns a sanitized unavailable/no-page/ambiguous-target/timeout error, and Prime raises its browser skill's loopback CDP failure. None of these paths may claim unread content or an action that did not execute. Site behavior, authenticated access, prompts, downloads, CAPTCHA handling, and compatibility are harness- and site-specific rather than a cross-harness guarantee. The sanitized delivery ledger is in [issue #257 evidence](docs/evidence/issue-257-browser-harnesses/README.md).
 
-## Run the GraphComplete runtime eval
-
-The default run is deterministic and makes no inference calls. It launches the Rust graph server and Node host, completes two interactions through one live harness object with separately scoped graph capabilities, exercises the real TypeScript client, and saves `result.json` plus an interactive turn-navigable `index.html` under `.relayer/evals/runtime/<test-run-id>/<test-case-id>/<harness-configuration-name>/`:
-
-```sh
-npm run eval:basic
-```
-
-The opt-in live path requires the runner to select one or more named harness configurations and receive an explicit managed Codex executable path through `RELAYER_CODEX_BINARY`. This command loads `harnesses/codex-basic.yaml`, resolves its `codex.basic` implementation, reuses the matching Codex login, and then runs the structured judge:
-
-```sh
-RELAYER_CODEX_BINARY=/absolute/path/to/managed/codex npm run eval:basic:live -- --configuration codex-basic
-```
-
-Selecting two configurations expands the same harness-agnostic case into two executions in one test run. `codex-basic` and `codex-basic-high` both select the `codex.basic` implementation with different settings:
-
-```sh
-npm run eval:basic:live -- --configuration codex-basic --configuration codex-basic-high
-```
-
-An additional opt-in live case exercises graph-authoring recovery through the
-ordinary Codex harness Complete path. It requires a whole-program stable-key
-replay, observes orphan validation, explicitly discards the orphan twice, and
-then verifies the accepted output plus the stopped layer through graph control:
-
-```sh
-npm run eval:graph-repair:live -- --configuration codex-basic
-```
-
-Its durable `result.json` and viewer are written under
-`.relayer/evals/runtime/<test-run-id>/graph-authoring.replay-repair/<configuration>/`.
-The live command is not part of `npm run check` and is the only part of this
-case that invokes inference; its evidence parser and grader run in the default
-deterministic test suite.
-
-### Recursive Complete live run
+## Recursive Complete live run
 
 Recursive `complete(inputGraph)` ships enabled. Recursion needs the whole
 persisted feature chain, so one switch turns on every prerequisite. It is not a

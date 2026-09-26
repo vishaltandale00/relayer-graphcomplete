@@ -173,10 +173,7 @@ Configuration, implementation code, session state, and live authority are delibe
 
 The packaged `codex.basic` harness uses Relayer's TypeScript Codex app-server client and approval/event bridge with the selected provider access and an explicit managed executable. It keeps one resumable Codex thread per Relayer thread, makes Codex-native subagents available under shared interaction authority, and asks Codex to execute the TypeScript graph client. `claude.basic` loads the matching managed Claude Agent SDK module and supplies its explicit managed executable. Neither harness searches ambient `PATH`. The graph is not returned as structured JSON: harnesses submit objects to the Rust engine, react to repairable validation errors, and end with `graph.submit(interactionNode)`. The optional `prime.agent` implementation uses the same host and graph contracts while owning its own recursive runtime policy.
 
-The default and opt-in live evals start from an empty temporary folder and run two interactions through one cached harness object. Each serialized Complete call receives a distinct graph capability while the harness retains its provider-session identity, and the eval runtime revokes that capability after the call settles. The case owns harness-agnostic graph-contract checks. The Eval application waits for each product interaction to reach a terminal state before starting the next turn. A selected judge configuration may add semantic scoring without changing the case:
-
-1. deterministic graph-contract checks; and
-2. a fresh structured Codex judge that scores six declared task-system facts plus graph and detail usefulness.
+Relayer Eval runs cases through the product app server and waits for each interaction to reach a terminal state before starting the next turn. The product runtime owns capability issuance and revocation, while the harness host retains provider-session identity. Cases own harness-agnostic deterministic checks; the selected desktop judge adds quality assessment without changing case execution.
 
 Project-case presentation judging runs in an immutable, network-disabled artifact
 snapshot with read-only shell and filesystem inspection enabled. The judge may use
@@ -230,9 +227,9 @@ historical judgments and screenshots are never overwritten.
 
 Deep calibration cases sit behind one manifest-driven fixture module. They form a graph-presentation calibration corpus for recursive-judge tuning and human labels, not the full verifiable-work benchmark. The module owns generated baseline files, immutable source identity, materialization, evaluator-only reference expectations, and lightweight deterministic completion checks through a small materialize/grade interface. Seven coding cases expose behavioral contracts that are red in the seeded workspace. Five noncoding cases begin without curated research content and deterministically check only artifact presence, source-ledger shape, and task-specific consistency; semantic outcome criteria remain partial until scoped review. Completion checks confirm that inspectable work exists but do not qualify its substantive quality. This prevents structural checks from masquerading as implementation, historical, creative, travel, technology, or sports expertise.
 
-The runner input is a test-run ID, selected test-case IDs, selected harness-configuration names, and one judge configuration. At the CLI boundary, configuration names resolve to validated snapshots. The runner expands their Cartesian product into executions identified by `(testRunId, testCaseId, harnessConfigurationName)` and passes each resolved `HarnessConfiguration` into case execution. Every execution artifact stores that exact snapshot and its canonical SHA-256 digest. Two configurations may select the same implementation; that is ordinary run selection, not a harness-specific case or matrix.
+The runner input is a test-run ID, selected test-case IDs, selected harness-configuration names, and one judge configuration. At the Eval service boundary, configuration names resolve to validated snapshots. The runner expands their Cartesian product into executions identified by `(testRunId, testCaseId, harnessConfigurationName)` and passes each resolved `HarnessConfiguration` into case execution. Every execution artifact stores that exact snapshot and its canonical SHA-256 digest. Two configurations may select the same implementation; that is ordinary run selection, not a harness-specific case or matrix.
 
-The ordinary test suite never invokes inference. `runtime-basic` remains a harness-agnostic lower-level integration case. Its pre-app-server movable-node HTML is intentionally minimal; execution review through the product app-server and shared production graph/chat workspace belongs to the Eval application.
+The ordinary test suite never invokes inference. Evaluation execution and review belong to the Eval application through the product app server and shared production graph/chat workspace. The retired standalone CLI and HTML viewer are no longer supported.
 
 ## Runtime package boundaries
 
@@ -242,7 +239,7 @@ The ordinary test suite never invokes inference. `runtime-basic` remains a harne
 - `packages/graph-client` is the typed Node authoring client and contains no graph persistence. Its authored-detail compiler owns draft checkpoints and the `submitNode` request seam, not durable storage or rendering.
 - `packages/visual-assets` owns the deterministic logical visual-assets interface, scope and tag semantics, and the private generic-content Module used for digest indexing. It does not compile Node Details or inject asset inventory into harness prompts.
 - `packages/harness-host` owns persistent per-thread harness objects and code-owned implementations such as `codex.basic`.
-- `packages/eval-runner` owns harness-agnostic case/run expansion, deterministic checks, and the lower-level CLI artifact path. The Relayer Eval shell composes those contracts around the production app server and renderer.
+- `packages/eval-runner` owns the Eval desktop's harness-agnostic case/run expansion, deterministic checks, fixtures, and judge contracts. The Relayer Eval shell composes those contracts around the production app server and renderer.
 - `python/relayer-graph` is the Python authoring client and contains no graph persistence.
 
 The root `src` directory contains only the canonical GraphComplete boundary and its runtime contract. There is intentionally no TypeScript graph kernel alongside the Rust graph core.
