@@ -5,13 +5,12 @@
 // build in every lane. The bundle is acceleration, never verification: every
 // test still compiles and runs freshly against whatever library it links.
 //
-// Identity model: the library is fully determined by the pinned crate source
-// (Cargo.lock checksums), the toolchain, and the platform. The commit and
-// resolved lbug feature set that produced a bundle are recorded for
-// provenance, but are not part of equality: for the pinned lbug version,
-// features affect Rust/FFI compilation separately from the cached native
-// CMake library. The manifest also carries a digest over every packaged file,
-// so a truncated include tree is rejected before any lane links against it.
+// Identity model: the library is tied to the locked crate checksum and the
+// separately reviewed digest of Cargo's resolved source tree, plus toolchain
+// and platform. The commit and resolved feature set are producer provenance;
+// accepting feature-metadata drift does not itself prove native equivalence.
+// The manifest also carries a digest over every packaged file, so a truncated
+// include tree is rejected before any lane links against it.
 
 import { createHash } from "node:crypto";
 import { execFileSync, spawnSync } from "node:child_process";
@@ -28,6 +27,7 @@ import {
 } from "node:fs";
 import { basename, dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { assertResolvedLbugNativeSource } from "./lbug-native-source-contract.mjs";
 
 const defaultRepository = resolve(
   dirname(fileURLToPath(import.meta.url)),
@@ -83,6 +83,17 @@ function lbugPackageMetadata(metadata) {
   const lbug = metadata.packages.find((candidate) => candidate.name === "lbug");
   if (!lbug) throw new Error("Cargo.lock does not contain the lbug crate");
   return lbug;
+}
+
+function assertCargoResolvedLbugNativeSource(repository, metadata) {
+  const contract = JSON.parse(
+    readFileSync(join(repository, "vendor/ladybug/source-build-manifest.json"), "utf8"),
+  );
+  return assertResolvedLbugNativeSource({
+    packageMetadata: lbugPackageMetadata(metadata),
+    cargoLockText: readFileSync(join(repository, "Cargo.lock"), "utf8"),
+    contract,
+  });
 }
 
 // The features Cargo resolved for lbug, recorded as producer provenance.
@@ -164,6 +175,7 @@ export function createLbugArtifact({
   const fullyOverridden =
     lbugSourceDirectory && lbugVersionOverride && lbugFeaturesOverride;
   const metadata = fullyOverridden ? null : cargoMetadata(repository);
+  if (metadata) assertCargoResolvedLbugNativeSource(repository, metadata);
   const lbugVersion = lbugVersionOverride ?? lbugPackageMetadata(metadata).version;
   const lbugFeatures = lbugFeaturesOverride ?? lbugResolvedFeatures(metadata);
   const lbugSource =
@@ -255,6 +267,11 @@ export function verifyLbugArtifact({
   }
   const metadata = cargoMetadata(repository);
   const lbug = lbugPackageMetadata(metadata);
+  try {
+    assertCargoResolvedLbugNativeSource(repository, metadata);
+  } catch (error) {
+    problems.push(error.message);
+  }
   if (manifest.lbugVersion !== lbug.version) {
     problems.push(`lbug ${manifest.lbugVersion} does not match pinned ${lbug.version}`);
   }

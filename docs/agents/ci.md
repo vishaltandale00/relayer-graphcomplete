@@ -112,7 +112,15 @@ key binds platform, rustc release, and `Cargo.lock` digest; verification also
 checks the pinned lbug version and packaged bytes. For pinned lbug 0.18.0,
 features affect Rust/FFI compilation separately from the cached native CMake
 library and headers, so a feature-only change does not invalidate that bundle.
-Reassess this boundary when upgrading lbug. The manifest also
+This is the bundle verifier's acceptance rule, not proof of native equivalence:
+its feature-metadata fixture only checks that producer feature provenance does
+not reject an otherwise intact bundle. The production Cargo-resolved source
+path is separately checked against the reviewed lbug version, crates.io
+checksum, and canonical full-package tree digest. The source-preparation path
+checks the same complete package tree after extracting the checksum-pinned
+crate; its only resolved-tree exclusion is Cargo's generated root `.cargo-ok`
+registry marker, which is absent from the crate archive. Re-review this native
+source contract before changing the lbug pin or any package source bytes. The manifest also
 carries a digest over every packaged file plus the library size, so a
 truncated include tree or a failed debug strip is rejected before any lane
 links. One accepted cost: while the bundle cache keeps hitting, the lanes no

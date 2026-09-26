@@ -172,6 +172,7 @@
     { "exact": "scripts/recursive-live-run-transport.mjs", "chapters": ["vitest"], "vitestFiles": ["test/recursive-live-run-transport.test.mjs"] },
     { "exact": "scripts/run-telemetry-evidence.mjs", "chapters": ["vitest"], "vitestFiles": ["test/telemetry-evidence.test.mjs"] },
     { "exact": "scripts/prepare-ladybug-source.mjs", "chapters": ["vitest", "packaging", "receipts"], "vitestFiles": ["test/ladybug-packaged-lifecycle.test.mjs", "test/ladybug-native-receipts.test.mjs", "test/ladybug-source-build.test.mjs"] },
+    { "exact": "scripts/ci/lbug-native-source-contract.mjs", "chapters": ["vitest"], "vitestFiles": ["test/ci-lbug-artifact.test.mjs"] },
     { "exact": "scripts/capture-ladybug-packaged-lifecycle.mjs", "chapters": ["vitest"], "vitestFiles": ["test/ladybug-packaged-lifecycle.test.mjs"] },
     { "exact": "scripts/audit-desktop-release-authority.mjs", "chapters": ["vitest"], "vitestFiles": ["test/desktop-shell.test.mjs"] },
     { "exact": "scripts/capture-packaged-prime-family-evidence.mjs", "chapters": ["vitest"], "vitestFiles": ["test/prime-family-evidence-contract.test.mjs"] },
