@@ -158,3 +158,35 @@ command outputs and exit files are in the same host archive as
 `0`. These gates ran on the source diff digest recorded above. No Electron UI
 or paid-inference proof ran. Hosted PR CI and fresh independent review remain
 outstanding, so this evidence is non-certifying.
+
+## Symlink-loop error propagation checkpoint
+
+The standards review identified the remaining observable branch in the
+`statSync` handler: errors other than `ENOENT` and `ENOTDIR` must remain
+failures. A production-CLI fixture creates a symlink whose target is itself,
+then asserts exit status 1 and `ELOOP` on stderr. This catches an implementation
+that turns arbitrary lookup errors into successful full-plan output. The
+checkpoint observes the planner subprocess and real filesystem behavior; it
+does not require a production change.
+
+Actual focused logs are checked in under `logs/`: the ENOTDIR regression run
+against the temporary ENOENT-only helper failed as expected with exit 1 and an
+`ENOTDIR` stack from `statSync`; the restored implementation passed the full
+57-test planner file; the targeted symlink-loop test passed and its captured
+CLI diagnostic shows `ELOOP` with status 1. These are contemporaneous command
+outputs, not reconstructed summaries.
+
+The updated planner/test executable diff against base
+`55287631dd090a59f1e9fea19a2fe3e5c3634fb0` has SHA-256
+`72c6fcfa09f5849371b7499d277ded480570cae1c0605b4a17e55cdd97cb32d4`.
+On Node `v22.23.2`, npm `11.12.1`, and rustc `1.98.0`, the focused planner
+suite passed all 57 tests. `npm run check` passed with 172 Vitest files passed
+and one skipped, 2,274 tests passed and three skipped, plus successful Rust,
+Python, secret-boundary, receipt, and PRD checks. `npm run build` passed for
+both Rust binaries and all four workspace package builds; `git diff --check`
+passed. Full gate logs and exit files are in the host archive at
+`/Users/vishal/.codex/worker-pilot/evidence/factory-408/enotdir-symlink-npm-check.log`,
+`enotdir-symlink-npm-check.exit`, `enotdir-symlink-npm-build.log`, and
+`enotdir-symlink-npm-build.exit`; both exit files contain `0`. These checks
+bind to the executable diff digest above. Hosted PR CI and independent review
+for the updated head remain outstanding.

@@ -6,6 +6,7 @@ import {
   readdirSync,
   readFileSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { basename, dirname, join } from "node:path";
@@ -422,6 +423,25 @@ describe("affected-module plan v1", { timeout: 30_000 }, () => {
         `${deletedPath}: deleted exempted path`,
       );
       expect(Object.values(result.chapters).every(Boolean)).toBe(true);
+    });
+  });
+
+  test("propagates symlink-loop errors instead of treating them as missing", () => {
+    withPlannerFixture((repository) => {
+      const changedPath = "docs/postmortems/entry.md";
+      const symlinkPath = join(repository, changedPath);
+      mkdirSync(dirname(symlinkPath), { recursive: true });
+      symlinkSync(symlinkPath, symlinkPath);
+
+      let error;
+      try {
+        planIn(repository, changedPath);
+      } catch (caught) {
+        error = caught;
+      }
+
+      expect(error?.status).toBe(1);
+      expect(String(error?.stderr)).toContain("ELOOP");
     });
   });
 
