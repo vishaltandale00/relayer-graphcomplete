@@ -209,6 +209,7 @@ describe("public share HTML boundary", () => {
     const styles = readFileSync(new URL("../desktop/renderer/src/public-share-viewer/viewer.css", import.meta.url), "utf8");
     expect(styles).toMatch(/\.public-share-main\s*{[^}]*height: 100vh;/s);
     expect(styles).toMatch(/\.public-share-workspace-host\s*{[^}]*height: 100%;[^}]*border: 0;[^}]*border-radius: 0;/s);
+    expect(styles).toMatch(/\.public-share-shell \.thread-header\s*{[^}]*border-radius: 12px;/s);
   });
 
   it("aligns the turn picker to the interaction card with five visible rows", () => {

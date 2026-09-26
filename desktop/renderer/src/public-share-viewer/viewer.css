@@ -131,6 +131,10 @@
   padding-bottom: 0;
 }
 
+.public-share-shell .thread-header {
+  border-radius: 12px;
+}
+
 .public-share-shell .interaction-banner {
   position: relative;
 }
