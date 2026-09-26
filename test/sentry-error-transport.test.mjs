@@ -24,6 +24,19 @@ const gatewayEvent = Object.freeze({
   ]),
 });
 
+const handledShareEvent = Object.freeze({
+  ...projection,
+  component: "electron-main",
+  operation: "share-publication",
+  code: "share.snapshot_too_large",
+  message: "Shared thread publication failed.",
+  exceptionClass: null,
+  frames: Object.freeze([]),
+  attemptReferenceId: "SHR-A1B2C3D4",
+  failureStage: "export",
+  snapshotBytes: 16777217,
+});
+
 function fixture({ flushResult = true, closeResult = true } = {}) {
   const accepted = [];
   let options;
@@ -134,6 +147,28 @@ describe("Sentry error transport", () => {
     expect(state.accepted[0]).not.toHaveProperty("extra");
     expect(state.accepted[0]).not.toHaveProperty("contexts");
     expect(state.accepted[0]).not.toHaveProperty("server_name");
+  });
+
+  it("maps the closed handled-share schema without admitting content or request fields", async () => {
+    const state = fixture();
+    await state.transport.enable(projection);
+    await expect(state.transport.send(handledShareEvent)).resolves.toEqual({ delivered: true });
+
+    expect(state.accepted).toHaveLength(1);
+    expect(state.accepted[0].tags).toEqual({
+      component: "electron-main",
+      operation: "share-publication",
+      failure_code: "share.snapshot_too_large",
+      os: "macos",
+      architecture: "arm64",
+      attempt_reference: "SHR-A1B2C3D4",
+      failure_stage: "export",
+      snapshot_bytes: "16777217",
+    });
+    await expect(state.transport.send({
+      ...handledShareEvent,
+      title: "private title",
+    })).rejects.toThrow();
   });
 
   it("drops SDK or hook mutation at beforeSend and rejects non-gateway input", async () => {

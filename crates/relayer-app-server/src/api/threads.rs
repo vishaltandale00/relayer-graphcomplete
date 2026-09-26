@@ -359,6 +359,46 @@ pub(super) async fn export(
         .map_err(|_| ApiError::internal("could not construct conversation export response"))
 }
 
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(super) struct ShareExportRequest {
+    title: String,
+}
+
+pub(super) async fn share_export(
+    State(state): State<ApiState>,
+    headers: HeaderMap,
+    Path(id): Path<i64>,
+    Json(request): Json<ShareExportRequest>,
+) -> Result<Response, ApiError> {
+    authorize_write(&state, &headers)?;
+    let runtime = state
+        .runtime
+        .as_ref()
+        .ok_or_else(|| ApiError::invalid("GraphComplete runtime is unavailable"))?;
+    let exported_at = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_err(|_| ApiError::internal("system time is before unix epoch"))?
+        .as_millis()
+        .to_string();
+    let body = crate::conversation_export_service::build_share_conversation_export(
+        &state.product,
+        runtime,
+        ThreadId::try_from(id)?,
+        state.export_producer.clone(),
+        exported_at,
+        &request.title,
+    )
+    .await?;
+    Response::builder()
+        .status(StatusCode::OK)
+        .header(header::CONTENT_TYPE, "application/x-ndjson; charset=utf-8")
+        .header(header::CACHE_CONTROL, "no-store")
+        .header(header::CONTENT_LENGTH, body.len())
+        .body(Body::from(body))
+        .map_err(|_| ApiError::internal("could not construct shared snapshot response"))
+}
+
 pub(super) async fn list_interactions(
     State(state): State<ApiState>,
     headers: HeaderMap,

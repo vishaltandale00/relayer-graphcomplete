@@ -51,6 +51,39 @@ const EVENT_DEFINITIONS = Object.freeze({
   }),
 });
 
+const SHARE_FAILURE_DEFINITIONS = Object.freeze({
+  "share.export_failed": Object.freeze({
+    stage: "export",
+    operation: "share-publication",
+    message: "Shared thread export failed.",
+    allowsSnapshotBytes: false,
+  }),
+  "share.snapshot_too_large": Object.freeze({
+    stage: "export",
+    operation: "share-publication",
+    message: "Shared thread publication failed.",
+    allowsSnapshotBytes: true,
+  }),
+  "share.upload_failed": Object.freeze({
+    stage: "upload",
+    operation: "share-publication",
+    message: "Shared thread upload failed.",
+    allowsSnapshotBytes: false,
+  }),
+  "share.service_failed": Object.freeze({
+    stage: "service",
+    operation: "share-publication",
+    message: "Shared thread service request failed.",
+    allowsSnapshotBytes: false,
+  }),
+  "share.delete_failed": Object.freeze({
+    stage: "delete",
+    operation: "share-deletion",
+    message: "Shared thread deletion failed.",
+    allowsSnapshotBytes: false,
+  }),
+});
+
 const QUEUE_VERSION = 1;
 const MAX_QUEUE_RECORDS = 32;
 const MAX_ENCRYPTED_QUEUE_BYTES = 256 * 1024;
@@ -107,6 +140,30 @@ function validateRecord(record, component) {
   });
 }
 
+function validateShareFailureRecord(record) {
+  if (!exactKeys(record, [
+    "code", "failureStage", "attemptReferenceId", "snapshotBytes",
+  ])) return null;
+  const definition = SHARE_FAILURE_DEFINITIONS[record.code];
+  if (!definition
+    || record.failureStage !== definition.stage
+    || typeof record.attemptReferenceId !== "string"
+    || !/^SHR-[A-Z0-9]{8,32}$/u.test(record.attemptReferenceId)
+    || (definition.allowsSnapshotBytes
+      ? (!Number.isSafeInteger(record.snapshotBytes) || record.snapshotBytes < 0)
+      : record.snapshotBytes !== null)) return null;
+  return Object.freeze({
+    code: record.code,
+    operation: definition.operation,
+    message: definition.message,
+    exceptionClass: null,
+    frames: Object.freeze([]),
+    attemptReferenceId: record.attemptReferenceId,
+    failureStage: record.failureStage,
+    snapshotBytes: record.snapshotBytes,
+  });
+}
+
 function pseudonym(subject) {
   return createHash("sha256")
     .update("graphcomplete-sentry-user-v1\0", "utf8")
@@ -115,11 +172,31 @@ function pseudonym(subject) {
 }
 
 function validateEvent(event) {
-  if (!exactKeys(event, [
+  const ordinaryKeys = [
     "user", "release", "environment", "os", "architecture", "component",
     "operation", "code", "message", "exceptionClass", "frames",
-  ]) || !exactKeys(event.user, ["id"]) || !/^[a-f0-9]{64}$/u.test(event.user.id)) return false;
+  ];
+  const shareKeys = ordinaryKeys.concat([
+    "attemptReferenceId", "failureStage", "snapshotBytes",
+  ]);
+  if ((!exactKeys(event, ordinaryKeys) && !exactKeys(event, shareKeys))
+    || !exactKeys(event.user, ["id"])
+    || !/^[a-f0-9]{64}$/u.test(event.user.id)) return false;
   if (![event.release, event.environment, event.os, event.architecture].every((value) => typeof value === "string" && value.length > 0)) return false;
+  if (event.component === "electron-main" && Object.hasOwn(event, "attemptReferenceId")) {
+    const sanitized = validateShareFailureRecord({
+      code: event.code,
+      failureStage: event.failureStage,
+      attemptReferenceId: event.attemptReferenceId,
+      snapshotBytes: event.snapshotBytes,
+    });
+    return sanitized !== null
+      && event.operation === sanitized.operation
+      && event.message === sanitized.message
+      && event.exceptionClass === null
+      && Array.isArray(event.frames)
+      && event.frames.length === 0;
+  }
   const sanitized = validateRecord({
     code: event.code,
     exceptionClass: event.exceptionClass,
@@ -165,6 +242,7 @@ export function createAuthenticatedErrorGateway({
   const reporters = new Set();
   const reporterByComponent = new Map();
   const latestProcessGenerationByComponent = new Map();
+  let handledShareFailureKeys = new Set();
   let operationQueue = Promise.resolve();
 
   function serialize(operation) {
@@ -316,6 +394,68 @@ export function createAuthenticatedErrorGateway({
     else await saveQueue(remaining);
   }
 
+  async function deliver(boundIdentity, event, stillAuthorized) {
+    return serialize(async () => {
+      if (closed || identity !== boundIdentity || !stillAuthorized()) {
+        return Object.freeze({ accepted: false, reason: "stale-capability" });
+      }
+      try {
+        if (!validateEvent(event)) return Object.freeze({ accepted: false, reason: "invalid-record" });
+        if (transportIdentity !== boundIdentity) throw new Error("Authenticated error transport is inactive.");
+        await transport.send(event);
+        return Object.freeze({ accepted: true, delivery: "sent" });
+      } catch {
+        try {
+          const records = freshRecords(await loadQueue())
+            .filter((queued) => queued.accountId === boundIdentity.userId);
+          records.push({
+            accountId: boundIdentity.userId,
+            generation: boundIdentity.generation,
+            occurredAt: now(),
+            event,
+          });
+          const persisted = await saveQueue(records);
+          return Object.freeze({ accepted: true, delivery: persisted ? "queued" : "dropped" });
+        } catch {
+          return Object.freeze({ accepted: true, delivery: "dropped" });
+        }
+      }
+    });
+  }
+
+  async function reportHandledShareFailure(boundIdentity, record, stillAuthorized) {
+    if (closed || identity !== boundIdentity || !stillAuthorized()) {
+      return Object.freeze({ accepted: false, reason: "stale-capability" });
+    }
+    const sanitized = validateShareFailureRecord(record);
+    if (!sanitized) return Object.freeze({ accepted: false, reason: "invalid-record" });
+    const dedupeKey = [
+      boundIdentity.userId,
+      sanitized.attemptReferenceId,
+      sanitized.failureStage,
+      sanitized.code,
+    ].join("\0");
+    if (handledShareFailureKeys.has(dedupeKey)) {
+      return Object.freeze({ accepted: true, delivery: "deduplicated" });
+    }
+    handledShareFailureKeys.add(dedupeKey);
+    while (handledShareFailureKeys.size > 512) {
+      handledShareFailureKeys.delete(handledShareFailureKeys.values().next().value);
+    }
+    const event = Object.freeze({
+      user: Object.freeze({ id: boundIdentity.userId }),
+      release,
+      environment: currentEnvironment,
+      os,
+      architecture,
+      component: "electron-main",
+      ...sanitized,
+    });
+    const result = await deliver(boundIdentity, event, stillAuthorized);
+    if (result.accepted === false) handledShareFailureKeys.delete(dedupeKey);
+    return result;
+  }
+
   return Object.freeze({
     async transitionIdentity(next) {
       if (next === null) {
@@ -343,6 +483,9 @@ export function createAuthenticatedErrorGateway({
       latestGeneration = Math.max(latestGeneration, next.generation);
       latestGenerationUserId = nextUserId;
       const boundIdentity = Object.freeze({ generation: next.generation, userId: nextUserId });
+      if (previous !== null && previous.userId !== boundIdentity.userId) {
+        handledShareFailureKeys = new Set();
+      }
       desiredIdentity = boundIdentity;
       identity = null;
       revokeReporters();
@@ -397,32 +540,7 @@ export function createAuthenticatedErrorGateway({
             ...sanitized,
           });
           if (!validateEvent(event)) return Object.freeze({ accepted: false, reason: "invalid-record" });
-          return serialize(async () => {
-            if (closed || !state.active || identity !== boundIdentity) {
-              return Object.freeze({ accepted: false, reason: "stale-capability" });
-            }
-            try {
-              if (!validateEvent(event)) return Object.freeze({ accepted: false, reason: "invalid-record" });
-              if (transportIdentity !== boundIdentity) throw new Error("Authenticated error transport is inactive.");
-              await transport.send(event);
-              return Object.freeze({ accepted: true, delivery: "sent" });
-            } catch {
-              try {
-                const records = freshRecords(await loadQueue())
-                  .filter((queued) => queued.accountId === boundIdentity.userId);
-                records.push({
-                  accountId: boundIdentity.userId,
-                  generation: boundIdentity.generation,
-                  occurredAt: now(),
-                  event,
-                });
-                const persisted = await saveQueue(records);
-                return Object.freeze({ accepted: true, delivery: persisted ? "queued" : "dropped" });
-              } catch {
-                return Object.freeze({ accepted: true, delivery: "dropped" });
-              }
-            }
-          });
+          return deliver(boundIdentity, event, () => state.active);
         },
         revoke() {
           state.active = false;
@@ -432,10 +550,37 @@ export function createAuthenticatedErrorGateway({
       });
     },
 
+    issueHandledShareFailureReporter({ generation } = {}) {
+      if (closed || identity === null) return null;
+      if (!Number.isSafeInteger(generation) || generation < 1) {
+        throw new TypeError("Share failure reporter identity is invalid.");
+      }
+      if (identity.generation !== generation) return null;
+      const boundIdentity = identity;
+      const state = { active: true };
+      reporters.add(state);
+      return Object.freeze({
+        report: (record) => reportHandledShareFailure(boundIdentity, record, () => state.active),
+        revoke() {
+          state.active = false;
+          reporters.delete(state);
+        },
+      });
+    },
+
+    async reportHandledShareFailure(record) {
+      if (closed || identity === null) {
+        return Object.freeze({ accepted: false, reason: "unverified-account" });
+      }
+      const boundIdentity = identity;
+      return reportHandledShareFailure(boundIdentity, record, () => true);
+    },
+
     async retireIdentity() {
       desiredIdentity = null;
       identity = null;
       revokeReporters();
+      handledShareFailureKeys = new Set();
       await serialize(async () => {
         await disableTransport();
         await clearQueue();

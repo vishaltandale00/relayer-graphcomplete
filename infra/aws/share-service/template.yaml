@@ -158,6 +158,7 @@ Resources:
                   - dynamodb:UpdateItem
                   - dynamodb:DeleteItem
                   - dynamodb:Query
+                  - dynamodb:ConditionCheckItem
                 Resource:
                   - !GetAtt SharesTable.Arn
                   - !Sub ${SharesTable.Arn}/index/byOwner

@@ -294,6 +294,7 @@ export async function runTelemetryEvidence({
   const corpus = JSON.parse(corpusText);
   invariant(corpus.schema === "relayer.telemetry-privacy-corpus/v1", "privacy corpus version is invalid");
   invariant(corpus.positiveCases.length === 5, "privacy corpus must cover five components");
+  invariant(corpus.shareFailurePositiveCases.length === 5, "privacy corpus must cover five handled share failures");
   const directory = await mkdtemp(join(tmpdir(), "relayer-telemetry-evidence-"));
   const queuePath = join(directory, "queue.json");
   const sink = await createLoopbackSink();
@@ -332,9 +333,31 @@ export async function runTelemetryEvidence({
       authority.revoke();
     }
 
-    invariant(sink.requests.length === 5, "privacy rejections created an outbound request");
+    for (const fixture of corpus.shareFailurePositiveCases) {
+      const result = await reporting.reportHandledShareFailure(fixture);
+      invariant(result.accepted === true, `${fixture.code} handled-share fixture was rejected`);
+      positiveResults.push({
+        component: "electron-main",
+        seam: "main-owned-handled-share-reporter",
+        accepted: true,
+        code: fixture.code,
+      });
+    }
+    const duplicate = await reporting.reportHandledShareFailure(corpus.shareFailurePositiveCases[0]);
+    invariant(duplicate.accepted === true && duplicate.delivery === "deduplicated", "handled share failure was not deduplicated");
+    for (const forbidden of corpus.shareFailureForbiddenCases) {
+      const result = await reporting.reportHandledShareFailure({
+        ...corpus.shareFailurePositiveCases[1],
+        [forbidden.field]: structuredClone(forbidden.value),
+      });
+      invariant(result.accepted === false && result.reason === "invalid-record", `handled share ${forbidden.field} crossed the privacy boundary`);
+      negativeResults.push({ component: "electron-main", fixture: `share-${forbidden.field}`, rejected: true });
+    }
+
+    invariant(sink.requests.length === 10, "privacy rejection or duplicate created an outbound request");
     const outbound = sink.requests.map(parseEvent);
     invariant(new Set(outbound.map((event) => event.tags.component)).size === 5, "outbound envelopes do not cover five components");
+    invariant(outbound.filter((event) => ["share-publication", "share-deletion"].includes(event.tags.operation)).length === 5, "outbound envelopes do not cover handled share failures");
     await reporting.close();
     await sink.close();
     let queuePersisted = true;

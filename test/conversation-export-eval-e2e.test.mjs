@@ -17,6 +17,15 @@ import { createConversationExportService } from "../desktop/main/services/conver
 import { GraphCompleteRuntimeService } from "../desktop/main/services/graphcomplete-runtime.mjs";
 import { RelayerAppServerService } from "../desktop/main/services/relayer-app-server.mjs";
 import { restoreLayerPath } from "../desktop/renderer/src/product-workspace/model.js";
+import { createSharePublishCoordinator } from "../desktop/main/services/share-publish-coordinator.mjs";
+import { parseConversationExportV1 } from "../desktop/renderer/src/public-share-viewer/snapshot.js";
+import { renderPublicViewerTemplate } from "../desktop/renderer/src/public-share-viewer/template.js";
+import {
+  createShareService,
+  deriveOwnerHash,
+  InMemoryShareObjectStore,
+  InMemoryShareRepository,
+} from "../packages/share-service/src/index.ts";
 
 const repositoryRoot = resolve(import.meta.dirname, "..");
 const services = [];
@@ -176,6 +185,106 @@ describe("conversation export to Eval end to end", () => {
     const exportedText = exactExportBytes.toString("utf8");
     expect(exportedText).not.toContain(canonicalProjectPath);
     expect(exportedText).not.toMatch(/relayer_control|graphControlToken|harnessControlToken|privateRationale|draft/i);
+
+    const shareRepository = new InMemoryShareRepository();
+    const shareObjectStore = new InMemoryShareObjectStore(() => 1_900_000_000_000);
+    const shareIdentity = { ownerHash: deriveOwnerHash("auth0|share-e2e-owner") };
+    const shareService = createShareService({
+      authenticator: { async verifyBearer() { return shareIdentity; } },
+      repository: shareRepository,
+      objectStore: shareObjectStore,
+      publicOrigin: "https://share.example.test",
+      installRedirectUrl: "https://app.relayerlabs.ai/desktop/login",
+      assetManifest: {
+        version: 1,
+        assets: {
+          logo: "assets/e2e/relayer-logo.svg",
+          ogImage: "assets/e2e/relayer-share-og.svg",
+          viewerScript: "assets/e2e/public-share-viewer.js",
+          viewerStyles: "assets/e2e/public-share-viewer.css",
+          workspaceStyles: "assets/e2e/workspace.css",
+          lucideScript: "assets/e2e/lucide.min.js",
+          markedScript: "assets/e2e/marked.umd.js",
+        },
+      },
+      renderPublicPage: (page) => renderPublicViewerTemplate({
+        snapshot: page.snapshotBytes,
+        title: page.title,
+        installUrl: `/t/${page.shareId}/install`,
+        assetManifest: page.assetManifest,
+      }),
+      now: () => 1_900_000_000_000,
+      randomShareId: () => "0123456789abcdef0123456789abcdef",
+    });
+    const publicationCalls = [];
+    let loseFirstFinalizeResponse = true;
+    const coordinator = createSharePublishCoordinator({
+      exportSnapshot: (threadId, title, options) => product.exportShareSnapshot(threadId, title, options),
+      accountSession: async () => ({ ownerKey: shareIdentity.ownerHash, authorization: "Bearer main-only", generation: 1 }),
+      sourceThreadIdentity: async (threadId) => `installation:e2e:thread:${threadId}`,
+      createAttemptId: () => "11111111111111111111111111111111",
+      createReferenceId: () => "SHR-E2E00001",
+      async publish({ authorization, assertAuthority, attempt, snapshotBytes }) {
+        expect(authorization).toBe("Bearer main-only");
+        publicationCalls.push({ attempt, snapshotBytes: new Uint8Array(snapshotBytes) });
+        await assertAuthority();
+        const reservation = await shareService.reserve(shareIdentity, attempt);
+        await assertAuthority();
+        if (reservation.upload) await shareObjectStore.putStaging(reservation.upload.key, snapshotBytes);
+        await assertAuthority();
+        const finalized = await shareService.finalize(shareIdentity, reservation.shareId);
+        if (loseFirstFinalizeResponse) {
+          loseFirstFinalizeResponse = false;
+          const error = new Error("lost response");
+          error.code = "share_service_failed";
+          error.failureStage = "service";
+          throw error;
+        }
+        return finalized;
+      },
+    });
+    const firstShareAttempt = await coordinator.create({ threadId: thread.id, title: "Public fixture title" });
+    expect(firstShareAttempt).toMatchObject({
+      status: "failed",
+      attemptReferenceId: "SHR-E2E00001",
+      code: "share_service_failed",
+      retryable: true,
+    });
+    const retriedShare = await coordinator.retry(firstShareAttempt.attemptReferenceId);
+    expect(retriedShare).toEqual({
+      status: "created",
+      attemptReferenceId: "SHR-E2E00001",
+      url: "https://share.example.test/t/0123456789abcdef0123456789abcdef",
+    });
+    expect(publicationCalls).toHaveLength(2);
+    expect(publicationCalls[1].attempt).toEqual(publicationCalls[0].attempt);
+    expect(publicationCalls[1].snapshotBytes).toEqual(publicationCalls[0].snapshotBytes);
+
+    const publicPage = await shareService.publicPage("0123456789abcdef0123456789abcdef");
+    const publicSnapshot = parseConversationExportV1(publicPage.snapshotBytes);
+    expect(publicSnapshot.thread.title).toBe("Public fixture title");
+    expect(publicSnapshot.interactions).toHaveLength(2);
+    expect(publicSnapshot.interactions.map((turn) => turn.completionStatus)).toEqual(["accepted", "accepted"]);
+    expect(publicSnapshot.state.currentInteractionId).toBe(publicSnapshot.interactions[0].id);
+    expect(publicSnapshot.interactions[0].completionOutput.rootLayer.nodes.some((node) => node.detail)).toBe(true);
+    expect(publicSnapshot.turns.map((turn) => turn.completion.status)).not.toContain("failed");
+    expect(publicSnapshot.turns.map((turn) => turn.completion.status)).not.toContain("running");
+    expect(new TextDecoder().decode(publicPage.snapshotBytes)).not.toContain(canonicalProjectPath);
+    const publicResponse = await shareService.handle({
+      method: "GET",
+      path: "/t/0123456789abcdef0123456789abcdef",
+    });
+    expect(publicResponse).toMatchObject({
+      status: 200,
+      headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" },
+    });
+    const publicHtml = publicResponse.body;
+    expect(publicHtml).toContain("connect-src &#39;none&#39;");
+    expect(publicHtml).toContain("id=\"relayerPublicSnapshot\"");
+    expect(publicHtml).toContain(`/t/${publicPage.shareId}/install`);
+    expect(publicHtml).toContain('/assets/e2e/public-share-viewer.js');
+    expect(publicResponse.headers["content-security-policy"]).toContain("frame-ancestors 'none'");
+    expect(publicHtml).not.toContain("Bearer main-only");
 
     const judgeCalls = [];
     const stateFile = join(dataDirectory, "eval-data", "test-runs.json");

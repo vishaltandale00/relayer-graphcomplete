@@ -211,6 +211,30 @@ describe.sequential("desktop direct Auth0 account authority", () => {
     await service.close();
   });
 
+  it("keeps the verified ID token in main for sharing without projecting bearer authority", async () => {
+    const auth0 = await fakeAuth0();
+    let launchUrl;
+    const { service } = await fixture({ auth0, openExternal: async (value) => { launchUrl = value; } });
+    await service.start();
+    await service.login();
+    await callbackFromLauncher(launchUrl);
+    await service.waitForIdle();
+
+    const session = await service.shareSession();
+    expect(session).toMatchObject({
+      ownerKey: "auth0|person",
+      generation: 1,
+    });
+    expect(session.authorization).toMatch(/^Bearer [A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/u);
+    expect(await service.account()).toEqual({ status: "signed-in", channel: "stable", subject: "auth0|person" });
+    expect(JSON.stringify(await service.account())).not.toContain(session.authorization);
+    expect(Object.keys(service)).not.toContain("shareSession");
+
+    await service.logout();
+    await expect(service.shareSession()).resolves.toBeNull();
+    await service.close();
+  });
+
   it("brings Relayer back for every settled callback and leaves a superseded one in the browser", async () => {
     const auth0 = await fakeAuth0();
     let launchUrl;

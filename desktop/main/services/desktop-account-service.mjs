@@ -138,6 +138,9 @@ export function createDesktopAccountService({
   let state = publicState(currentChannel, "signed-out");
   let generation = 0;
   let credential = null;
+  // Retained only for main-process share requests. This bearer is never
+  // persisted or projected through the renderer-facing account state.
+  let idToken = null;
   let attempt = null;
   let startupPromise;
   let jwksPromise;
@@ -291,6 +294,7 @@ export function createDesktopAccountService({
     const nextCredential = { refreshToken: tokens.refresh_token ?? saved.refreshToken, subject };
     if (!await writeCredential(nextCredential, atGeneration)) return state;
     credential = nextCredential;
+    idToken = tokens.id_token;
     await projectTelemetryIdentity({ generation: atGeneration, subject });
     return transition(publicState(currentChannel, "signed-in", { subject }));
   }
@@ -405,6 +409,7 @@ export function createDesktopAccountService({
         if (!await writeCredential(nextCredential, current.generation) ||
             attempt !== current || generation !== current.generation) return;
         credential = nextCredential;
+        idToken = tokens.id_token;
         await projectTelemetryIdentity({ generation: current.generation, subject });
         await finishAttempt(current, publicState(current.channel, "signed-in", { subject }));
       } catch {
@@ -413,7 +418,20 @@ export function createDesktopAccountService({
     };
   }
 
-  return Object.freeze({
+  async function shareSession() {
+    await startupPromise;
+    if (state.status !== "signed-in" || !credential || typeof idToken !== "string" || !idToken) return null;
+    return Object.freeze({
+      // The subject is an opaque owner key for in-process attempt binding. The
+      // service derives its own domain-separated owner identity from the
+      // verified bearer; no renderer receives either value.
+      ownerKey: credential.subject,
+      authorization: `Bearer ${idToken}`,
+      generation,
+    });
+  }
+
+  const service = {
     async start() {
       startupPromise ??= (async () => {
         try {
@@ -429,11 +447,13 @@ export function createDesktopAccountService({
           if (error instanceof InvalidRefreshError) {
             generation += 1;
             credential = null;
+            idToken = null;
             await projectTelemetryIdentity(null, { retire: true });
             await removeCredential();
             return transition(publicState(currentChannel, "signed-out"));
           }
           const reason = error instanceof UnverifiableTokenError ? "unverifiable" : "offline";
+          idToken = null;
           await projectTelemetryIdentity(null);
           return transition(publicState(currentChannel, "uncertain", { subject: credential.subject, reason }));
         }
@@ -485,6 +505,7 @@ export function createDesktopAccountService({
         await startupPromise;
         generation += 1;
         await cancelAttempt();
+        idToken = null;
         await projectTelemetryIdentity(null, { retire: Boolean(credential) });
         const atGeneration = generation;
         const attemptChannel = currentChannel;
@@ -541,6 +562,7 @@ export function createDesktopAccountService({
         await cancelAttempt();
         const retiring = credential;
         credential = null;
+        idToken = null;
         await projectTelemetryIdentity(null, { retire: true });
         await removeCredential();
         transition(publicState(currentChannel, "signed-out"));
@@ -566,9 +588,17 @@ export function createDesktopAccountService({
       return queueControlOperation(async () => {
         generation += 1;
         await cancelAttempt();
+        idToken = null;
         await projectTelemetryIdentity(null);
         await pendingCredentialMutation;
       });
     },
+  };
+  Object.defineProperty(service, "shareSession", {
+    value: shareSession,
+    enumerable: false,
+    writable: false,
+    configurable: false,
   });
+  return Object.freeze(service);
 }

@@ -105,6 +105,14 @@ change function configuration, IAM, URLs, tables, or distribution settings.
 - Snapshot isolation, upload staging, function URL authority, edge route/cache
   settings, deploy scope, and placeholders: adversarial review of the exact
   template digest. This is a configuration review, not end-to-end certification.
+- Owner-attempt idempotency and the successful-create quota share the retained
+  table. Implementations use typed reservation, quota-day, and published-share
+  items plus one conditional `TransactWriteItems` publication boundary. IAM
+  authorizes that API through its underlying item actions, including
+  `ConditionCheckItem`; DynamoDB has no separate `TransactWriteItems` IAM action. Only
+  published share items project `ownerHash` and `createdAt` into `byOwner`.
+  The runtime role includes transaction authority; this template capability is
+  not evidence that the handler uses it correctly.
 - No deterministic service runner exists yet. Upload finalization, concurrent
   quota enforcement, replay safety, deletion, and streamed 16 MiB output are
   unmapped runtime checkpoints for phase 4. Run `npm run check` as the repository
@@ -112,6 +120,26 @@ change function configuration, IAM, URLs, tables, or distribution settings.
 - Before phase 4 launch, test real 16 MiB upload and worst-case escaped page
   delivery through the deployed origins, exact 404 parity, owner deletion, and
   rejected direct function-URL access. Use synthetic data and no paid inference.
+
+## Gate B reconciliation (2026-09-25)
+
+PR #460 superseded the still-open PR #459 and is merged in `main`. The current
+stack remains the provisioned placeholder recorded below. Local Gate B keeps the
+16 MiB staged-upload and streamed-page design: API Gateway carries metadata only;
+S3 carries the frozen JSONL bytes; the page function streams HTML plus inline
+snapshot bytes. CachingDisabled and `no-store` make a strongly consistent deleted
+row check the public-access boundary; immutable viewer assets remain under their
+per-commit prefix.
+
+The local service contract requires an atomic owner-attempt reservation,
+quota-day counter, and published-share write. The original runtime policy lacked
+`dynamodb:ConditionCheckItem`, one underlying permission used by the transaction;
+the template now declares that future runtime authority. No stack update, IAM change, deployment, cache invalidation, AWS
+validation, or live capacity claim was performed as part of this reconciliation.
+The 30-second HTTP API integration deadline and worst-case escaped 16 MiB streamed
+page remain Gate C measurements. If synchronous finalization cannot meet the API
+deadline, deployment must adopt the already-documented asynchronous finalization
+job and polling design rather than lowering the product limit.
 
 ## Historical preparation record (2026-09-18)
 

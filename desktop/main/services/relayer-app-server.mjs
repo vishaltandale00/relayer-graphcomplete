@@ -13,6 +13,16 @@ import { toProductCatalogSnapshot } from "../models/model-catalog-adapter.mjs";
 
 export const RELAYER_CONTROL_COOKIE = "relayer_control";
 
+export class ShareSnapshotExportError extends Error {
+  constructor(code, { snapshotBytes = null } = {}) {
+    super(code);
+    this.name = "ShareSnapshotExportError";
+    this.code = code;
+    this.failureStage = "export";
+    this.snapshotBytes = snapshotBytes;
+  }
+}
+
 const ALLOWED_EXCEPTION_CLASSES = new Set([
   "AggregateError", "Error", "EvalError", "RangeError", "ReferenceError", "SyntaxError", "TypeError", "URIError",
 ]);
@@ -433,6 +443,45 @@ export class RelayerAppServerService {
       detail = null;
     }
     throw new Error(detail?.error || `Conversation export failed (${response.status}).`);
+  }
+
+  async exportShareSnapshot(threadId, title, { signal } = {}) {
+    if (!Number.isSafeInteger(threadId) || threadId <= 0) {
+      throw new TypeError("Shared snapshot export requires a positive thread ID.");
+    }
+    if (typeof title !== "string") throw new TypeError("Shared snapshot title must be a string.");
+    const session = await this.start();
+    signal?.throwIfAborted();
+    const response = await fetch(new URL(`/api/threads/${threadId}/share-export`, session.origin), {
+      method: "POST",
+      headers: {
+        Cookie: `${session.cookie.name}=${session.cookie.value}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ title }),
+      signal,
+    });
+    if (response.ok) {
+      const contentType = response.headers.get("content-type")?.split(";", 1)[0]?.trim().toLowerCase();
+      if (contentType !== "application/x-ndjson") {
+        throw new ShareSnapshotExportError("share_export_failed");
+      }
+      return new Uint8Array(await response.arrayBuffer());
+    }
+    let detail = null;
+    try { detail = await response.json(); } catch { /* keep the closed fallback */ }
+    const closedCodes = new Set([
+      "share_imported_conversation",
+      "share_no_accepted_completion",
+      "share_title_required",
+      "share_title_too_long",
+      "share_snapshot_too_large",
+    ]);
+    const code = closedCodes.has(detail?.code) ? detail.code : "share_export_failed";
+    const snapshotBytes = code === "share_snapshot_too_large" && Number.isSafeInteger(detail?.snapshotBytes)
+      ? detail.snapshotBytes
+      : null;
+    throw new ShareSnapshotExportError(code, { snapshotBytes });
   }
 
   #waitForReady(child, stderr) {

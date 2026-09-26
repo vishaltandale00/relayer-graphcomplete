@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630" role="img" aria-labelledby="title description">
+  <title id="title">Relayer shared conversation</title>
+  <desc id="description">A read-only graph snapshot shared from Relayer.</desc>
+  <rect width="1200" height="630" fill="#0b0c0d"/>
+  <circle cx="955" cy="120" r="210" fill="#17191c"/>
+  <circle cx="1100" cy="500" r="260" fill="#101214"/>
+  <path d="M170 406 405 250l235 138 220-142" fill="none" stroke="#7ed6a2" stroke-width="4" opacity=".72"/>
+  <circle cx="170" cy="406" r="30" fill="#17191c" stroke="#80aef8" stroke-width="4"/>
+  <circle cx="405" cy="250" r="30" fill="#17191c" stroke="#7ed6a2" stroke-width="4"/>
+  <circle cx="640" cy="388" r="30" fill="#17191c" stroke="#80aef8" stroke-width="4"/>
+  <circle cx="860" cy="246" r="30" fill="#17191c" stroke="#7ed6a2" stroke-width="4"/>
+  <text x="120" y="128" fill="#f1f2f3" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="38" font-weight="700">Relayer</text>
+  <text x="120" y="188" fill="#969ba2" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="26">Shared conversation</text>
+  <text x="120" y="548" fill="#7ed6a2" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="18" letter-spacing="3">READ-ONLY SNAPSHOT</text>
+</svg>

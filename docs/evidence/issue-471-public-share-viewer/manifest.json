@@ -1,0 +1,234 @@
+{
+  "schemaVersion": 1,
+  "evidence": "issue-471-public-share-viewer",
+  "fixture": {
+    "kind": "synthetic",
+    "file": "docs/evidence/issue-471-public-share-viewer/synthetic-snapshot.jsonl",
+    "sha256": "b05db96cb2d008e213b3bc6e3398b958f4670ed919547329a607be8f0dc7d865"
+  },
+  "source": {
+    "commit": "b0358251107058360ea9bafa638ff0f002807459",
+    "dirty": false,
+    "sourceFiles": {
+      "desktop/renderer/assets/relayer-logo.svg": {
+        "bytes": 31624,
+        "sha256": "79c1593b83dfc014f5e5bb91c6ff37d892a19ca8092236ae2a17707f5a13d020"
+      },
+      "desktop/renderer/assets/relayer-share-og.svg": {
+        "bytes": 1357,
+        "sha256": "92a9b06f3c70ec7959956614e8333f271eea7bf06a39bbe6798cedffe739e8ad"
+      },
+      "desktop/renderer/public-share.html": {
+        "bytes": 2598,
+        "sha256": "9fe98b2a55f720d7a29f42a31d332e43c880c3b6fd7ad44d1000553a1f0c12c8"
+      },
+      "desktop/renderer/src/action-invocation-state.js": {
+        "bytes": 2313,
+        "sha256": "4f3aafd6bcf79a0a3d81cb37ce0a0f1aec1f21115ea9115b21ac0c5bf9ad42be"
+      },
+      "desktop/renderer/src/api.js": {
+        "bytes": 636,
+        "sha256": "4024542092755f7167e11f0c7803a25f49c7d9b27172ce5c9dde74f16905a58e"
+      },
+      "desktop/renderer/src/approval-model.js": {
+        "bytes": 6668,
+        "sha256": "f1b0d76178c7de024d14a191930f2e419e1a7e9c9396626d56ad45b58a9a4ecf"
+      },
+      "desktop/renderer/src/composer-drafts.js": {
+        "bytes": 3808,
+        "sha256": "36c4dee570f6591d7781c6943c1c1a269d81de34afaf4214dbbe0889e43d275d"
+      },
+      "desktop/renderer/src/control-activation.js": {
+        "bytes": 455,
+        "sha256": "682962e5cfc93c2720845d409c4bd65fe51a5b4f0e9718e1fbfc452943104186"
+      },
+      "desktop/renderer/src/interaction-failure-model.js": {
+        "bytes": 1878,
+        "sha256": "770928962446ad3326d94460235775e581a542056a4477860b2e37f4ba457442"
+      },
+      "desktop/renderer/src/model-picker-model.js": {
+        "bytes": 9910,
+        "sha256": "e888dae7b2a229d41fca536f9670e716249b33317e98580a05e25ed7c729a2ba"
+      },
+      "desktop/renderer/src/model-picker.js": {
+        "bytes": 19729,
+        "sha256": "a01b3272036e18d9bddb2d32d144e1583ed68d166b08674169059a2025945050"
+      },
+      "desktop/renderer/src/node-context-drafts.js": {
+        "bytes": 25194,
+        "sha256": "0f0db2a7a00c2bae2239b584d612e5ad21b161094b3e783879d3e7b4854f2c87"
+      },
+      "desktop/renderer/src/node-input-controls.js": {
+        "bytes": 17855,
+        "sha256": "5d7bc5fee66a9ace45a01ef9dcebb20b39f1f0b94d7f35f1d61f1ef1f8672584"
+      },
+      "desktop/renderer/src/product-workspace/annotations.js": {
+        "bytes": 2162,
+        "sha256": "a6d06bc7f20dcb7116533198cb12702b790b9d724d3a08d8ebbc959bcb971510"
+      },
+      "desktop/renderer/src/product-workspace/composer-submission.js": {
+        "bytes": 2021,
+        "sha256": "e480c7e854b010905c7ac8e9e3b31e9a6193035de7ed8cbadbf64645cc3a2b92"
+      },
+      "desktop/renderer/src/product-workspace/graph-layout.js": {
+        "bytes": 3936,
+        "sha256": "d768d33964d24a753c769b37a8651097f15819dcb3b799ee9a25c0a4f03dc2e2"
+      },
+      "desktop/renderer/src/product-workspace/icons.js": {
+        "bytes": 4002,
+        "sha256": "cef43d3f68645acd8f014d4c79ee1de04784e023997e7a6ace320cef6b5e62d6"
+      },
+      "desktop/renderer/src/product-workspace/index.js": {
+        "bytes": 236,
+        "sha256": "1e6d1769552b93692d54602e68b0c02cc89789bd226e1e6ebb336dea29d117c3"
+      },
+      "desktop/renderer/src/product-workspace/markdown.js": {
+        "bytes": 2305,
+        "sha256": "338cdd8855f3b40c4138d0245262c209554b26b94c1a4655598ce976fca5b90c"
+      },
+      "desktop/renderer/src/product-workspace/model.js": {
+        "bytes": 7969,
+        "sha256": "fbcfb3cfbe6ff4650af39839551ccfa13eb9d2dbcc12abb597b8bf9fba55ef64"
+      },
+      "desktop/renderer/src/product-workspace/node-detail-runtime.js": {
+        "bytes": 26320,
+        "sha256": "32f440a289bc2cd62e4d68d66745d0a292c3f9ba0273e42fd759a3de8f249bc7"
+      },
+      "desktop/renderer/src/product-workspace/view.js": {
+        "bytes": 14045,
+        "sha256": "5acd7064cadf5090c92f90a205515f0c78de8370e2e15ac3a6fc59032a8fde5f"
+      },
+      "desktop/renderer/src/product-workspace/workspace.js": {
+        "bytes": 204685,
+        "sha256": "2d85ae71ca3b7bae2387b81969b0d3d49e881407b605974b42c0a9f1a0d67955"
+      },
+      "desktop/renderer/src/public-share-viewer/adapter.js": {
+        "bytes": 4137,
+        "sha256": "8056892bce4363a9fd5da53e4be1b26f5d8cb85bba37bf60af56d3b9ec4df07d"
+      },
+      "desktop/renderer/src/public-share-viewer/main.js": {
+        "bytes": 6820,
+        "sha256": "4571566695a237dcebd161579871c660fb64e7044cbfdd6fff7b6ef1d69a55f5"
+      },
+      "desktop/renderer/src/public-share-viewer/snapshot.js": {
+        "bytes": 32169,
+        "sha256": "cca6795bcbaf85b00734a06d6bee3c6d66090895a58fd955e6fb0c9e39215399"
+      },
+      "desktop/renderer/src/public-share-viewer/template.js": {
+        "bytes": 6255,
+        "sha256": "5c3db23bdd1e28935c46b8e1ff5c99e47e12c915483bb79601dad6256ee23a98"
+      },
+      "desktop/renderer/src/public-share-viewer/viewer.css": {
+        "bytes": 4340,
+        "sha256": "612af5184f4e25e8db190e21eca79c098c08b8e682f5a8dcb12870bd64cb0c4f"
+      },
+      "desktop/renderer/src/share-publish-ui.js": {
+        "bytes": 15305,
+        "sha256": "0ff28e4f5fe3413f25d72236d3586c5d459add1866e42092784cb16bd77accd7"
+      },
+      "desktop/renderer/src/ui.js": {
+        "bytes": 1279,
+        "sha256": "d7cd6e4a2c45d2d85e6068bc2e5d1a66c35b75b546ba432600c5008180b3cab1"
+      },
+      "desktop/renderer/styles.css": {
+        "bytes": 96685,
+        "sha256": "274b046a1605cfdbf4aa194554c276048ec6c5812adde301ef8beea8c6431d7a"
+      },
+      "desktop/renderer/vendor/lucide.min.js": {
+        "bytes": 386702,
+        "sha256": "534813d1da2f4d4550383d5db0879aedb2f74c2d0b8951ade277e8bcaea6df52"
+      },
+      "desktop/renderer/vendor/marked.umd.js": {
+        "bytes": 41042,
+        "sha256": "2e20e86f0a13107ae9bf00675894bbb573716a8e5b4fde612eacaff1e404c128"
+      },
+      "scripts/capture-public-share-viewer-evidence.mjs": {
+        "bytes": 18322,
+        "sha256": "454794de8ced6b5c8894eecf2ffd34e349558b77f175816c9f897c7b044244ee"
+      }
+    }
+  },
+  "browser": {
+    "electron": "43.0.0",
+    "origin": "http://127.0.0.1:50227",
+    "networkRequests": [],
+    "unchangedUrl": true,
+    "paidInferenceCalls": 0,
+    "assertions": [
+      {
+        "viewport": "desktop-overview",
+        "downloadCardInsideWorkspace": true,
+        "environmentPanelAbsent": true,
+        "graphNodeRendered": true,
+        "interactionBannerRendered": true,
+        "mutationControlsInert": true,
+        "nestedNavigationChangedLayer": true,
+        "turnNavigationChangedTurn": true,
+        "reloadResetFirstTurn": true
+      },
+      {
+        "viewport": "mobile-overview",
+        "downloadCardInsideWorkspace": true,
+        "environmentPanelAbsent": true,
+        "graphNodeRendered": true,
+        "interactionBannerRendered": true,
+        "mutationControlsInert": true,
+        "nestedNavigationChangedLayer": true,
+        "turnNavigationChangedTurn": true,
+        "mobilePanChangedViewport": true,
+        "reloadResetFirstTurn": true,
+        "nodeDetailsOpened": true
+      }
+    ]
+  },
+  "captures": [
+    {
+      "name": "desktop-overview",
+      "viewport": {
+        "name": "desktop-overview",
+        "width": 1440,
+        "height": 1000
+      },
+      "file": "docs/evidence/issue-471-public-share-viewer/desktop-overview.png",
+      "width": 1440,
+      "height": 1000,
+      "sourcePixelSize": {
+        "width": 2880,
+        "height": 2000
+      },
+      "sha256": "fe15b5e16f28ba4e97a6cb00c9d2b13632440edcfd555772f6613a28dc6d62b1"
+    },
+    {
+      "name": "mobile-overview",
+      "viewport": {
+        "name": "mobile-overview",
+        "width": 375,
+        "height": 812
+      },
+      "file": "docs/evidence/issue-471-public-share-viewer/mobile-overview.png",
+      "width": 375,
+      "height": 812,
+      "sourcePixelSize": {
+        "width": 750,
+        "height": 1624
+      },
+      "sha256": "0f2a9f5401e5c7c883b26c88dc980019f4fc6450a26f171cf35022c30b1b6cb8"
+    },
+    {
+      "name": "mobile-node-details",
+      "viewport": {
+        "name": "mobile-overview",
+        "width": 375,
+        "height": 812
+      },
+      "file": "docs/evidence/issue-471-public-share-viewer/mobile-node-details.png",
+      "width": 375,
+      "height": 812,
+      "sourcePixelSize": {
+        "width": 750,
+        "height": 1624
+      },
+      "sha256": "83a5ce65dea1e5124583cbaa2ce533bd598ba3e82d636fd54c7dc44f81216e14"
+    }
+  ]
+}

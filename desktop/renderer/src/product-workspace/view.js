@@ -13,11 +13,14 @@ export function productWorkspaceMarkup() {
         <div class="conversation-settings hidden" id="conversationSettings">
           <button class="conversation-settings-button" id="conversationSettingsButton" type="button" title="Conversation settings" aria-label="Conversation settings" aria-expanded="false" aria-controls="conversationSettingsMenu">•••</button>
           <div class="conversation-settings-menu hidden" id="conversationSettingsMenu" role="menu" aria-label="Conversation settings">
+            <button class="conversation-export" id="shareConversationMenu" type="button" role="menuitem" data-review-ref="share-conversation-menu" data-review-kind="conversation-share">Share…</button>
             <button class="conversation-export" id="exportConversation" type="button" role="menuitem" data-review-ref="export-conversation" data-review-kind="conversation-export">Export conversation…</button>
           </div>
         </div>
+        <button class="share-conversation-button hidden" id="shareConversation" type="button" data-review-ref="share-conversation" data-review-kind="conversation-share" aria-label="Share thread">Share</button>
       </div>
     </header>
+    <div class="share-dialog-backdrop hidden" id="shareDialog"></div>
     <div class="interaction-banner" id="interactionBanner">
           <span class="interaction-icon">›_</span>
           <div class="interaction-copy">

@@ -360,4 +360,98 @@ describe("authenticated desktop error gateway", () => {
     await expect(access(queuePath)).rejects.toMatchObject({ code: "ENOENT" });
     await gateway.close();
   });
+
+  it("admits, privacy-validates, and deduplicates main-owned handled share failures", async () => {
+    const privacy = JSON.parse(await readFile(new URL("./fixtures/telemetry-privacy-v1.json", import.meta.url), "utf8"));
+    const { gateway, send } = await fixture();
+
+    await expect(gateway.reportHandledShareFailure(privacy.shareFailurePositiveCases[0]))
+      .resolves.toEqual({ accepted: false, reason: "unverified-account" });
+    await gateway.transitionIdentity({ generation: 1, subject: "auth0|share-owner" });
+
+    for (const record of privacy.shareFailurePositiveCases) {
+      await expect(gateway.reportHandledShareFailure(record))
+        .resolves.toEqual({ accepted: true, delivery: "sent" });
+    }
+    await expect(gateway.reportHandledShareFailure(privacy.shareFailurePositiveCases[0]))
+      .resolves.toEqual({ accepted: true, delivery: "deduplicated" });
+
+    for (const forbidden of privacy.shareFailureForbiddenCases) {
+      await expect(gateway.reportHandledShareFailure({
+        ...privacy.shareFailurePositiveCases[1],
+        [forbidden.field]: structuredClone(forbidden.value),
+      })).resolves.toEqual({ accepted: false, reason: "invalid-record" });
+    }
+    for (const excluded of [
+      { code: "share.cancelled", failureStage: "service" },
+      { code: "share.sign_in_required", failureStage: "service" },
+      { code: "share.quota_exceeded", failureStage: "service" },
+    ]) {
+      await expect(gateway.reportHandledShareFailure({
+        ...excluded,
+        attemptReferenceId: "SHR-F1A2B3C4",
+        snapshotBytes: null,
+      })).resolves.toEqual({ accepted: false, reason: "invalid-record" });
+    }
+
+    expect(send).toHaveBeenCalledTimes(5);
+    expect(send).toHaveBeenCalledWith(expect.objectContaining({
+      component: "electron-main",
+      operation: "share-publication",
+      code: "share.snapshot_too_large",
+      attemptReferenceId: "SHR-A1B2C3D4",
+      failureStage: "export",
+      snapshotBytes: 16777217,
+      exceptionClass: null,
+      frames: [],
+    }));
+    await gateway.close();
+  });
+
+  it("revokes a handled-share failure capability on account-generation change", async () => {
+    const { gateway, send } = await fixture();
+    const record = {
+      code: "share.upload_failed",
+      failureStage: "upload",
+      attemptReferenceId: "SHR-55667788",
+      snapshotBytes: null,
+    };
+    await gateway.transitionIdentity({ generation: 1, subject: "auth0|first" });
+    const reporter = gateway.issueHandledShareFailureReporter({ generation: 1 });
+    expect(gateway.issueHandledShareFailureReporter({ generation: 2 })).toBeNull();
+    await gateway.transitionIdentity({ generation: 2, subject: "auth0|replacement" });
+    await expect(reporter.report(record)).resolves.toEqual({ accepted: false, reason: "stale-capability" });
+    expect(send).not.toHaveBeenCalled();
+    await gateway.close();
+  });
+
+  it("deduplicates by attempt, stage, and code while containing delivery failure", async () => {
+    const send = vi.fn(async () => { throw new Error("offline"); });
+    const { gateway, queuePath, decrypt } = await fixture({ send });
+    await gateway.transitionIdentity({ generation: 1, subject: "auth0|share-owner" });
+    const exportFailure = {
+      code: "share.export_failed",
+      failureStage: "export",
+      attemptReferenceId: "SHR-11223344",
+      snapshotBytes: null,
+    };
+
+    await expect(gateway.reportHandledShareFailure(exportFailure))
+      .resolves.toEqual({ accepted: true, delivery: "queued" });
+    await expect(gateway.reportHandledShareFailure(exportFailure))
+      .resolves.toEqual({ accepted: true, delivery: "deduplicated" });
+    await expect(gateway.reportHandledShareFailure({
+      ...exportFailure,
+      code: "share.upload_failed",
+      failureStage: "upload",
+    })).resolves.toEqual({ accepted: true, delivery: "queued" });
+
+    expect(send).toHaveBeenCalledTimes(2);
+    const records = await queuedRecords(queuePath, decrypt);
+    expect(records.map(({ event }) => [event.attemptReferenceId, event.failureStage, event.code])).toEqual([
+      ["SHR-11223344", "export", "share.export_failed"],
+      ["SHR-11223344", "upload", "share.upload_failed"],
+    ]);
+    await gateway.close();
+  });
 });

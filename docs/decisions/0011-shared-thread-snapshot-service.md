@@ -2,6 +2,9 @@
 
 Status: accepted product direction; infrastructure provisioned with placeholders, service not implemented.
 
+The immutable snapshot and reader boundary is defined by
+[ADR 0012](0012-immutable-shared-thread-snapshots.md).
+
 Issue #457 defines account-owned, immutable, read-only thread snapshots. On
 2026-09-18 the owner retained the 16 MiB payload limit after the AWS transport
 limits were identified. A direct API Gateway/Lambda upload and buffered HTML
@@ -42,15 +45,15 @@ Published titles cannot be renamed: a changed title requires a new share.
 frozen snapshot instead of exporting newly accepted records.
 
 An oversized snapshot fails without publication or truncation. The desktop shows
-a generic error message and support code without exposing the size-limit reason,
-and reports the failure to Sentry through Electron main. This is a named, planned
-exception to ADR 0009's exclusion of handled failures and validation feedback;
-it does not authorize reports for other validation failures. Existing account,
-privacy, and transport boundaries still apply. The exact event fields remain
-undecided, including whether snapshot byte size is admitted. Resolve that schema
-before implementing or claiming proof of this reporting path. This decision does
-not authorize publishing share titles, project names, or conversation content in
-telemetry. The public viewer remains outside reporting.
+a generic error message and the attempt reference without exposing the size-limit
+reason. Export, oversize, upload, service, and unexpected deletion failures use
+that same reference in a main-owned handled-failure event. The closed event admits
+only reference, stage, code, optional snapshot bytes for the oversize code, the
+existing safe app diagnostics, and the main-derived pseudonym. It is deduplicated
+by account, reference, stage, and code. Cancellation, sign-in requirements, and
+quota limits remain excluded. Titles, project names, conversation content,
+credentials, raw errors, and request data are forbidden. Telemetry availability
+cannot alter publication or deletion. The public viewer remains outside reporting.
 
 ## Upload and publication boundary
 

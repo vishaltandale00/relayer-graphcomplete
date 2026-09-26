@@ -114,6 +114,11 @@ if (contextBridge) contextBridge.exposeInMainWorld("relayerDesktop", {
   conversation: {
     export: (threadId) => ipcRenderer.invoke("relayer:conversation-export", threadId),
   },
+  share: {
+    preflight: (threadId) => ipcRenderer.invoke("relayer:share-preflight", { threadId }),
+    create: (threadId, title) => ipcRenderer.invoke("relayer:share-create", { threadId, title }),
+    retry: (attemptReferenceId) => ipcRenderer.invoke("relayer:share-retry", { attemptReferenceId }),
+  },
   models: {
     settingsOpened: () => ipcRenderer.invoke("relayer:model-catalog-settings-open"),
     refresh: (providerId) => ipcRenderer.invoke("relayer:model-catalog-refresh", providerId),

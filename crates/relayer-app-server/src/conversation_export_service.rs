@@ -1,4 +1,6 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, sync::OnceLock};
+
+use regex::Regex;
 
 use relayer_graph_core::{
     AcceptedGraphClosure, ActionKind, ActionVariant, GraphAction, GraphEdge, GraphNode,
@@ -17,7 +19,7 @@ use crate::{
         ExportNavigateRelation, ExportNode, ExportNodePlacement, ExportPermissionReceipt,
         ExportProducer, ExportRecordState, ExportResolvedLayer, ExportSubmittedInput,
         ExportSubmittedInputValue, ExportTurnManifestEntry, ExportTurnOrigin, MAX_EXPORT_BYTES,
-        MAX_JSONL_LINE_BYTES, validate_export_records,
+        MAX_JSONL_LINE_BYTES, MAX_SHARE_SNAPSHOT_BYTES, validate_export_records,
     },
     product::{
         ActionInvocation, DurableInteractionInput, Interaction, InteractionId, ProductError,
@@ -38,6 +40,16 @@ pub(crate) enum ConversationExportBuildError {
     Contract(#[from] crate::conversation_export::ExportValidationError),
     #[error(transparent)]
     Json(#[from] serde_json::Error),
+    #[error("share export is unavailable for imported conversations")]
+    ShareImportedConversation,
+    #[error("share export requires at least one accepted completion")]
+    ShareNoAcceptedCompletion,
+    #[error("share title is required")]
+    ShareTitleRequired,
+    #[error("share title exceeds 120 characters")]
+    ShareTitleTooLong,
+    #[error("share snapshot exceeds the {MAX_SHARE_SNAPSHOT_BYTES}-byte transport limit")]
+    ShareSnapshotTooLarge { bytes: usize },
 }
 
 pub(crate) async fn build_conversation_export(
@@ -227,6 +239,7 @@ pub(crate) async fn build_conversation_export(
         records.push(ConversationExportRecord::Turn(Box::new(export_turn(
             interaction,
             TurnExportContext {
+                portable_sequence: interaction.sequence,
                 closure: closure.as_ref(),
                 context_input: context_input.as_ref(),
                 submitted_evidence,
@@ -261,6 +274,214 @@ pub(crate) async fn build_conversation_export(
     Ok(body)
 }
 
+/// Build the frozen public-share snapshot. This is intentionally a separate
+/// boundary from the ordinary desktop export: only accepted interactions are
+/// selected, public metadata exceptions are applied at the header, and the
+/// completion receipt is reduced before bytes are serialized.
+pub(crate) async fn build_share_conversation_export(
+    product: &ProductService,
+    runtime: &RuntimeClient,
+    thread_id: ThreadId,
+    producer: ExportProducer,
+    exported_at: String,
+    share_title: &str,
+) -> Result<Vec<u8>, ConversationExportBuildError> {
+    if share_title.trim().is_empty() {
+        return Err(ConversationExportBuildError::ShareTitleRequired);
+    }
+    if share_title.chars().count() > 120 {
+        return Err(ConversationExportBuildError::ShareTitleTooLong);
+    }
+
+    let detail = product.get_thread(thread_id).await?;
+    if detail.thread.imported {
+        return Err(ConversationExportBuildError::ShareImportedConversation);
+    }
+    let selected = detail
+        .interactions
+        .iter()
+        .filter(|interaction| interaction.completion_status == "accepted")
+        .collect::<Vec<_>>();
+    if selected.is_empty() {
+        return Err(ConversationExportBuildError::ShareNoAcceptedCompletion);
+    }
+
+    let export_invocations = product.action_invocations_for_export(thread_id).await?;
+    let project_path = detail.project.as_ref().map(|project| project.path.as_str());
+    let redactor = ProjectPathRedactor::for_share(project_path);
+    let selected_indexes = selected
+        .iter()
+        .enumerate()
+        .map(|(index, interaction)| (interaction.id, index))
+        .collect::<HashMap<_, _>>();
+    let conversation_invocations = export_invocations
+        .iter()
+        .filter(|invocation| {
+            selected_indexes.contains_key(&invocation.source_interaction_id)
+                && selected_indexes.contains_key(&invocation.result_interaction_id)
+        })
+        .collect::<Vec<_>>();
+    let invocations = conversation_invocations
+        .iter()
+        .copied()
+        .map(|invocation| (invocation.result_interaction_id, invocation))
+        .collect::<HashMap<_, _>>();
+    let turn_sequences = selected
+        .iter()
+        .enumerate()
+        .map(|(index, interaction)| (interaction.id, (index + 1) as i64))
+        .collect::<HashMap<_, _>>();
+    let imported_turn_sequences: HashMap<&str, i64> = HashMap::new();
+    let imported_turns: HashMap<InteractionId, &crate::storage::ImportedTurnExportRecord> =
+        HashMap::new();
+
+    let mut ids = PortableIds::default();
+    let mut closures = Vec::with_capacity(selected.len());
+    let mut context_inputs = Vec::with_capacity(selected.len());
+    let mut submitted_evidence = Vec::with_capacity(selected.len());
+    for interaction in &selected {
+        let node_id = interaction.graph_node_id.ok_or_else(|| {
+            ConversationExportBuildError::Invalid(format!(
+                "accepted interaction {} has no graph node",
+                interaction.id
+            ))
+        })?;
+        let closure = runtime.accepted_graph_closure(node_id).await?;
+        if closure.node_id.value() != node_id {
+            return Err(ConversationExportBuildError::Invalid(format!(
+                "accepted graph closure root {} does not match interaction graph node {node_id}",
+                closure.node_id
+            )));
+        }
+        closures.push(closure);
+        let durable_input = product.interaction_input(interaction.id).await?;
+        context_inputs.push(ContextInput::Runtime(RuntimeContextInput {
+            input: runtime.interaction_input(node_id).await?,
+            actions: runtime.interaction_context_actions(node_id).await?,
+        }));
+        // Keep this call in the same frozen builder pass as graph/context reads;
+        // submitted-input evidence is part of the accepted turn snapshot.
+        let _ = durable_input;
+        submitted_evidence.push(product.submitted_input_evidence(interaction.id).await?);
+    }
+
+    for invocation in conversation_invocations {
+        let source_index = *selected_indexes
+            .get(&invocation.source_interaction_id)
+            .ok_or_else(|| {
+                ConversationExportBuildError::Invalid(format!(
+                    "action invocation source interaction {} is outside the accepted snapshot",
+                    invocation.source_interaction_id
+                ))
+            })?;
+        let result_index = *selected_indexes
+            .get(&invocation.result_interaction_id)
+            .ok_or_else(|| {
+                ConversationExportBuildError::Invalid(format!(
+                    "action invocation result interaction {} is outside the accepted snapshot",
+                    invocation.result_interaction_id
+                ))
+            })?;
+        if source_index >= result_index {
+            return Err(ConversationExportBuildError::Invalid(
+                "action invocation does not point from an earlier accepted turn to a later accepted turn"
+                    .into(),
+            ));
+        }
+        let action = closures[source_index]
+            .layers
+            .iter()
+            .flat_map(|layer| &layer.actions)
+            .find(|action| action.id.value() == invocation.action_id)
+            .ok_or_else(|| {
+                ConversationExportBuildError::Invalid(format!(
+                    "action invocation references action {} outside the source accepted view",
+                    invocation.action_id
+                ))
+            })?;
+        if action.kind != ActionKind::Invoke
+            || action.interaction_text.as_deref() != Some(selected[result_index].text.as_str())
+        {
+            return Err(ConversationExportBuildError::Invalid(format!(
+                "action invocation {} does not match its accepted invoke action",
+                invocation.action_id
+            )));
+        }
+    }
+
+    let turns = selected
+        .iter()
+        .enumerate()
+        .map(|(index, _)| {
+            let portable_sequence = (index + 1) as i64;
+            Ok(ExportTurnManifestEntry {
+                id: turn_id(portable_sequence),
+                sequence: sequence(portable_sequence)?,
+            })
+        })
+        .collect::<Result<Vec<_>, ConversationExportBuildError>>()?;
+    let header = ConversationExportRecord::Header(Box::new(ConversationExportHeader {
+        export_version: EXPORT_VERSION_V1,
+        exported_at,
+        producer,
+        conversation: ExportConversation {
+            id: "conversation:1".into(),
+            // A chosen share title is an explicit public metadata exception;
+            // it must not pass through path or credential redaction.
+            title: share_title.to_owned(),
+            created_at: detail.thread.created_at,
+            project_name: detail.project.as_ref().map(|project| project.name.clone()),
+            harness_configuration_name: detail.thread.harness_configuration_name,
+            permission_profile_id: detail.thread.permission_profile_id,
+        },
+        turns,
+    }));
+    let mut records = vec![header];
+    for (((interaction, closure), context_input), submitted_evidence) in selected
+        .iter()
+        .zip(closures.iter())
+        .zip(context_inputs.iter())
+        .zip(submitted_evidence.iter())
+    {
+        let portable_sequence = *turn_sequences
+            .get(&interaction.id)
+            .expect("selected interaction has a portable sequence");
+        records.push(ConversationExportRecord::Turn(Box::new(export_turn(
+            interaction,
+            TurnExportContext {
+                portable_sequence,
+                closure: Some(closure),
+                context_input: Some(context_input),
+                submitted_evidence,
+                invocation: invocations.get(&interaction.id).copied(),
+                imported: ImportedExportContext {
+                    turn: imported_turns.get(&interaction.id).copied(),
+                    turn_sequences: &imported_turn_sequences,
+                },
+                turn_sequences: &turn_sequences,
+                redactor: &redactor,
+            },
+            &mut ids,
+        )?)));
+    }
+    validate_export_records(&records)?;
+
+    let mut body = Vec::new();
+    for record in &records {
+        let line = serde_json::to_vec(record)?;
+        if line.len() > MAX_JSONL_LINE_BYTES {
+            return Err(ConversationExportBuildError::ShareSnapshotTooLarge { bytes: line.len() });
+        }
+        let next_size = body.len().saturating_add(line.len()).saturating_add(1);
+        if next_size > MAX_SHARE_SNAPSHOT_BYTES {
+            return Err(ConversationExportBuildError::ShareSnapshotTooLarge { bytes: next_size });
+        }
+        body.extend_from_slice(&line);
+        body.push(b'\n');
+    }
+    Ok(body)
+}
+
 struct ImportedExportContext<'a> {
     turn: Option<&'a crate::storage::ImportedTurnExportRecord>,
     turn_sequences: &'a HashMap<&'a str, i64>,
@@ -277,6 +498,10 @@ enum ContextInput {
 }
 
 struct TurnExportContext<'a> {
+    /// The authority-free sequence written to the portable record. Ordinary
+    /// exports use the durable interaction sequence; share snapshots compact
+    /// the accepted subset into a frozen 1..N sequence.
+    portable_sequence: i64,
     closure: Option<&'a AcceptedGraphClosure>,
     context_input: Option<&'a ContextInput>,
     submitted_evidence: &'a [SubmittedInputEvidence],
@@ -292,6 +517,7 @@ fn export_turn(
     ids: &mut PortableIds,
 ) -> Result<ConversationExportTurn, ConversationExportBuildError> {
     let TurnExportContext {
+        portable_sequence,
         closure,
         context_input,
         submitted_evidence,
@@ -329,19 +555,19 @@ fn export_turn(
         ids,
         redactor,
     )?;
-    let submitted_inputs = export_submitted_inputs(
+    let submitted_inputs = export_submitted_inputs_with_root_sequence(
         interaction,
         submitted_evidence,
         imported.turn.map(|record| &record.turn.submitted_inputs),
         ids,
         redactor,
+        portable_sequence,
     )?;
     let interaction_node_id = interaction
         .graph_node_id
         .map(|node_id| ids.node(node_id))
         .or_else(|| {
-            (!submitted_inputs.is_empty())
-                .then(|| format!("node:input-root-{}", interaction.sequence))
+            (!submitted_inputs.is_empty()).then(|| format!("node:input-root-{portable_sequence}"))
         });
     let origin = match invocation {
         Some(invocation) => {
@@ -403,8 +629,8 @@ fn export_turn(
         .then(|| imported.turn.map(|record| &record.turn.completion))
         .flatten();
     Ok(ConversationExportTurn {
-        id: turn_id(interaction.sequence),
-        sequence: sequence(interaction.sequence)?,
+        id: turn_id(portable_sequence),
+        sequence: sequence(portable_sequence)?,
         created_at: interaction.created_at.clone(),
         text: redactor.text(&interaction.text),
         interaction_node_id,
@@ -418,7 +644,9 @@ fn export_turn(
                 .transpose()?
                 .or_else(|| imported_completion.and_then(|completion| completion.attempt_outcome)),
             harness_configuration_name: interaction.harness_configuration_name.clone(),
-            harness_configuration_digest: interaction.harness_configuration_digest.clone(),
+            harness_configuration_digest: (!redactor.is_share())
+                .then(|| interaction.harness_configuration_digest.clone())
+                .flatten(),
             model_selection: interaction
                 .model_selection
                 .as_ref()
@@ -431,61 +659,72 @@ fn export_turn(
                     imported_completion.and_then(|completion| completion.model_selection.clone())
                 }),
             permission_profile_id: interaction.permission_profile_id.clone(),
-            effective_execution_digest: interaction.effective_execution_digest.clone(),
-            effective_permission_receipt,
+            effective_execution_digest: (!redactor.is_share())
+                .then(|| interaction.effective_execution_digest.clone())
+                .flatten(),
+            effective_permission_receipt: (!redactor.is_share())
+                .then_some(effective_permission_receipt)
+                .flatten(),
             error: interaction
                 .completion_error
                 .as_deref()
                 .map(|error| redactor.text(error)),
-            attempt_admission_id: interaction
-                .latest_attempt
-                .as_ref()
-                .and_then(|attempt| attempt.attempt_admission_id.clone())
-                .or_else(|| {
-                    imported_completion
-                        .and_then(|completion| completion.attempt_admission_id.clone())
-                }),
-            admitted_model_plan: interaction
-                .latest_attempt
-                .as_ref()
-                .and_then(|attempt| {
-                    attempt
-                        .admitted_plan
+            attempt_admission_id: (!redactor.is_share())
+                .then(|| {
+                    interaction
+                        .latest_attempt
                         .as_ref()
-                        .map(|plan| ExportAdmittedExecutionModelPlan {
-                            family_id: plan.family_id.value(),
-                            family_revision: plan.family_revision,
-                            orchestrator: ExportAdmittedExecutionModelRoute {
-                                provider_id: plan.orchestrator.provider_id.as_str().into(),
-                                adapter_id: plan.orchestrator.adapter_id.clone(),
-                                access_contract: plan.orchestrator.access_contract.clone(),
-                                model_id: plan.orchestrator.model_id.clone(),
-                                adapter_implementation_version: plan
-                                    .orchestrator
-                                    .adapter_implementation_version
-                                    .clone(),
-                            },
-                            roster: plan
-                                .roster
-                                .iter()
-                                .map(|route| ExportAdmittedExecutionModelRoute {
-                                    provider_id: route.provider_id.as_str().into(),
-                                    adapter_id: route.adapter_id.clone(),
-                                    access_contract: route.access_contract.clone(),
-                                    model_id: route.model_id.clone(),
-                                    adapter_implementation_version: route
-                                        .adapter_implementation_version
-                                        .clone(),
-                                })
-                                .collect(),
-                            harness_policy_digest: plan.harness_policy_digest.clone(),
-                            digest: plan.digest.clone(),
+                        .and_then(|attempt| attempt.attempt_admission_id.clone())
+                        .or_else(|| {
+                            imported_completion
+                                .and_then(|completion| completion.attempt_admission_id.clone())
                         })
                 })
-                .or_else(|| {
-                    imported_completion
-                        .and_then(|completion| completion.admitted_model_plan.clone())
-                }),
+                .flatten(),
+            admitted_model_plan: (!redactor.is_share())
+                .then(|| {
+                    interaction
+                        .latest_attempt
+                        .as_ref()
+                        .and_then(|attempt| {
+                            attempt.admitted_plan.as_ref().map(|plan| {
+                                ExportAdmittedExecutionModelPlan {
+                                    family_id: plan.family_id.value(),
+                                    family_revision: plan.family_revision,
+                                    orchestrator: ExportAdmittedExecutionModelRoute {
+                                        provider_id: plan.orchestrator.provider_id.as_str().into(),
+                                        adapter_id: plan.orchestrator.adapter_id.clone(),
+                                        access_contract: plan.orchestrator.access_contract.clone(),
+                                        model_id: plan.orchestrator.model_id.clone(),
+                                        adapter_implementation_version: plan
+                                            .orchestrator
+                                            .adapter_implementation_version
+                                            .clone(),
+                                    },
+                                    roster: plan
+                                        .roster
+                                        .iter()
+                                        .map(|route| ExportAdmittedExecutionModelRoute {
+                                            provider_id: route.provider_id.as_str().into(),
+                                            adapter_id: route.adapter_id.clone(),
+                                            access_contract: route.access_contract.clone(),
+                                            model_id: route.model_id.clone(),
+                                            adapter_implementation_version: route
+                                                .adapter_implementation_version
+                                                .clone(),
+                                        })
+                                        .collect(),
+                                    harness_policy_digest: plan.harness_policy_digest.clone(),
+                                    digest: plan.digest.clone(),
+                                }
+                            })
+                        })
+                        .or_else(|| {
+                            imported_completion
+                                .and_then(|completion| completion.admitted_model_plan.clone())
+                        })
+                })
+                .flatten(),
         },
         contexts,
         submitted_inputs,
@@ -617,6 +856,7 @@ fn export_contexts(
         .collect()
 }
 
+#[cfg(test)]
 fn export_submitted_inputs(
     interaction: &Interaction,
     evidence: &[SubmittedInputEvidence],
@@ -624,10 +864,28 @@ fn export_submitted_inputs(
     ids: &mut PortableIds,
     redactor: &ProjectPathRedactor,
 ) -> Result<Vec<ExportSubmittedInput>, ConversationExportBuildError> {
+    export_submitted_inputs_with_root_sequence(
+        interaction,
+        evidence,
+        imported,
+        ids,
+        redactor,
+        interaction.sequence,
+    )
+}
+
+fn export_submitted_inputs_with_root_sequence(
+    interaction: &Interaction,
+    evidence: &[SubmittedInputEvidence],
+    imported: Option<&Vec<ExportSubmittedInput>>,
+    ids: &mut PortableIds,
+    redactor: &ProjectPathRedactor,
+    portable_sequence: i64,
+) -> Result<Vec<ExportSubmittedInput>, ConversationExportBuildError> {
     if evidence.is_empty() {
         let mut imported = imported.cloned().unwrap_or_default();
         for submitted in &mut imported {
-            submitted.root_turn_id = turn_id(interaction.sequence);
+            submitted.root_turn_id = turn_id(portable_sequence);
             redact_submitted_input(submitted, redactor);
         }
         imported.sort_by_key(submitted_input_sort_key);
@@ -639,7 +897,7 @@ fn export_submitted_inputs(
             interaction.id
         )));
     }
-    let root_turn_id = turn_id(interaction.sequence);
+    let root_turn_id = turn_id(portable_sequence);
     let mut evidence = evidence.to_vec();
     evidence.sort_by_key(|input| input.occurrence.clone());
     let mut exported = evidence
@@ -731,7 +989,7 @@ fn export_submitted_inputs(
                 }
             };
             Ok(ExportSubmittedInput {
-                id: format!("input-child:{}-{}", interaction.sequence, index + 1),
+                id: format!("input-child:{portable_sequence}-{}", index + 1),
                 root_turn_id: root_turn_id.clone(),
                 source: ExportInputSource {
                     interaction_node_id: ids
@@ -1037,12 +1295,29 @@ fn export_node(
     redactor: &ProjectPathRedactor,
 ) -> Result<ExportNode, ConversationExportBuildError> {
     ensure_accepted(node.state, "node", node.id.value())?;
+    let private_path_in_authored_detail = node.authored_detail.as_ref().is_some_and(|detail| {
+        if redactor.is_share() {
+            redactor.contains_private_path_json(detail)
+        } else {
+            json_contains_private_project_path(detail, redactor)
+        }
+    });
+    let sensitive_data_in_authored_detail = node
+        .authored_detail
+        .as_ref()
+        .is_some_and(|detail| redactor.is_share() && redactor.contains_sensitive_json(detail));
     let authored_detail = node
         .authored_detail
         .as_ref()
+        .filter(|_| !private_path_in_authored_detail && !sensitive_data_in_authored_detail)
         .and_then(|detail| portable_authored_detail(detail, redactor));
-    let authored_detail_omitted = (node.authored_detail.is_some() && authored_detail.is_none())
-        .then_some(ExportAuthoredDetailOmission::PrivatePath);
+    let authored_detail_omitted = if private_path_in_authored_detail {
+        Some(ExportAuthoredDetailOmission::PrivatePath)
+    } else if sensitive_data_in_authored_detail {
+        Some(ExportAuthoredDetailOmission::SensitiveData)
+    } else {
+        None
+    };
     Ok(ExportNode {
         id: ids.node(node.id.value()),
         client_key: node.client_key.clone(),
@@ -1255,6 +1530,7 @@ fn turn_id(sequence: i64) -> String {
 
 struct ProjectPathRedactor {
     project_paths: Vec<String>,
+    scrub_sensitive: bool,
 }
 
 impl ProjectPathRedactor {
@@ -1275,7 +1551,20 @@ impl ProjectPathRedactor {
         }
         project_paths.sort_by_key(|path| std::cmp::Reverse(path.len()));
         project_paths.dedup();
-        Self { project_paths }
+        Self {
+            project_paths,
+            scrub_sensitive: false,
+        }
+    }
+
+    fn for_share(project_path: Option<&str>) -> Self {
+        let mut redactor = Self::new(project_path);
+        redactor.scrub_sensitive = true;
+        redactor
+    }
+
+    fn is_share(&self) -> bool {
+        self.scrub_sensitive
     }
 
     /// Redact every configured private path from Markdown-class text.
@@ -1288,7 +1577,11 @@ impl ProjectPathRedactor {
     fn text(&self, value: &str) -> String {
         let replaced = self.replace_raw(value);
         if !self.contains_private_path(&replaced) {
-            return replaced;
+            return if self.scrub_sensitive {
+                redact_share_secrets(&replaced)
+            } else {
+                replaced
+            };
         }
         let mut redacted = String::with_capacity(replaced.len());
         let mut rest = replaced.as_str();
@@ -1307,23 +1600,37 @@ impl ProjectPathRedactor {
             }
             rest = after;
         }
-        if self.contains_private_path(&redacted) {
+        let redacted = if self.contains_private_path(&redacted) {
             "[project-path]".to_owned()
+        } else {
+            redacted
+        };
+        if self.scrub_sensitive {
+            redact_share_secrets(&redacted)
         } else {
             redacted
         }
     }
 
     fn replace_raw(&self, value: &str) -> String {
-        self.project_paths
+        let redacted = self
+            .project_paths
             .iter()
             .fold(value.to_owned(), |text, path| {
                 text.replace(path, "[project-path]")
-            })
+            });
+        if self.scrub_sensitive {
+            share_home_path_regex()
+                .replace_all(&redacted, "[home-path]")
+                .into_owned()
+        } else {
+            redacted
+        }
     }
 
     fn contains_raw(&self, value: &str) -> bool {
         self.project_paths.iter().any(|path| value.contains(path))
+            || (self.scrub_sensitive && share_home_path_regex().is_match(value))
     }
 
     /// The single private-path matcher shared by Markdown redaction and the
@@ -1331,7 +1638,7 @@ impl ProjectPathRedactor {
     /// bounded decoding round of HTML character references, percent-encoding,
     /// CSS escapes, and invisible code points.
     fn contains_private_path(&self, value: &str) -> bool {
-        if self.project_paths.is_empty() {
+        if self.project_paths.is_empty() && !self.scrub_sensitive {
             return false;
         }
         let mut candidate = value.to_owned();
@@ -1363,6 +1670,115 @@ impl ProjectPathRedactor {
     fn optional(&self, value: Option<&str>) -> Option<String> {
         value.map(|value| self.text(value))
     }
+
+    fn contains_sensitive_json(&self, value: &serde_json::Value) -> bool {
+        if self.contains_private_path_json(value) {
+            return true;
+        }
+        if !self.scrub_sensitive {
+            return false;
+        }
+        let mut strings = String::new();
+        collect_json_strings(value, &mut strings);
+        has_share_secret(&strings)
+    }
+
+    fn contains_private_path_json(&self, value: &serde_json::Value) -> bool {
+        if json_contains_private_project_path(value, self) {
+            return true;
+        }
+        if self.project_paths.is_empty() && !self.scrub_sensitive {
+            return false;
+        }
+        let mut strings = String::new();
+        collect_json_strings(value, &mut strings);
+        self.contains_private_path(&strings)
+    }
+}
+
+fn collect_json_strings(value: &serde_json::Value, output: &mut String) {
+    match value {
+        serde_json::Value::String(text) => output.push_str(text),
+        serde_json::Value::Array(values) => {
+            for value in values {
+                collect_json_strings(value, output);
+            }
+        }
+        serde_json::Value::Object(values) => {
+            for value in values.values() {
+                collect_json_strings(value, output);
+            }
+        }
+        serde_json::Value::Null | serde_json::Value::Bool(_) | serde_json::Value::Number(_) => {}
+    }
+}
+
+/// Share snapshots have a second, credential-oriented scrubber in addition to
+/// the ordinary project-path redactor. Keep the replacements deliberately
+/// opaque: the viewer is public and these values must not remain recoverable
+/// from the serialized payload.
+fn redact_share_secrets(value: &str) -> String {
+    let mut redacted = pem_secret_regex()
+        .replace_all(value, "[redacted-secret]")
+        .into_owned();
+    redacted = bearer_secret_regex()
+        .replace_all(&redacted, "Bearer [redacted-secret]")
+        .into_owned();
+    redacted = jwt_secret_regex()
+        .replace_all(&redacted, "$1[redacted-secret]")
+        .into_owned();
+    provider_secret_regex()
+        .replace_all(&redacted, "$1[redacted-secret]")
+        .into_owned()
+}
+
+fn has_share_secret(value: &str) -> bool {
+    redact_share_secrets(value) != value
+}
+
+fn share_home_path_regex() -> &'static Regex {
+    static REGEX: OnceLock<Regex> = OnceLock::new();
+    REGEX.get_or_init(|| {
+        Regex::new(
+            r#"(?i)(?:/(?:Users|home)/[^/\s]+(?:/[^\s<>"']*)?|[A-Z]:\\Users\\[^\\\s]+(?:\\[^\s<>"']*)?)"#,
+        )
+        .expect("valid home-path redaction regex")
+    })
+}
+
+fn pem_secret_regex() -> &'static Regex {
+    static REGEX: OnceLock<Regex> = OnceLock::new();
+    REGEX.get_or_init(|| {
+        Regex::new(r"(?s)-----BEGIN [A-Z0-9 ]+-----.*?-----END [A-Z0-9 ]+-----")
+            .expect("valid PEM redaction regex")
+    })
+}
+
+fn bearer_secret_regex() -> &'static Regex {
+    static REGEX: OnceLock<Regex> = OnceLock::new();
+    REGEX.get_or_init(|| {
+        Regex::new(r"(?i)\bBearer\s+[A-Za-z0-9._~+/-]+=*").expect("valid bearer redaction regex")
+    })
+}
+
+fn jwt_secret_regex() -> &'static Regex {
+    static REGEX: OnceLock<Regex> = OnceLock::new();
+    REGEX.get_or_init(|| {
+        Regex::new(
+            r"(^|[^A-Za-z0-9_-])(eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{4,}\.[A-Za-z0-9_-]{4,})",
+        )
+        .expect("valid JWT redaction regex")
+    })
+}
+
+fn provider_secret_regex() -> &'static Regex {
+    static REGEX: OnceLock<Regex> = OnceLock::new();
+    REGEX.get_or_init(|| {
+        Regex::new(
+            r"(?i)(^|[^A-Za-z0-9_])((?:sk-(?:ant-)?[A-Za-z0-9_-]{12,}|gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|xox[a-z](?:\.xox[a-z])?-[A-Za-z0-9-]{10,}|AKIA[A-Z0-9]{16}|ASIA[A-Z0-9]{16}|AIza[A-Za-z0-9_-]{20,}|npm_[A-Za-z0-9]{20,}|hf_[A-Za-z0-9]{20,}|(?:rk|sk)_(?:live|test)_[A-Za-z0-9]{12,}))",
+        )
+        .expect("valid provider secret redaction regex")
+    })
 }
 
 const NORMALIZATION_ROUNDS: usize = 16;
@@ -2000,6 +2416,138 @@ mod tests {
             spaced.text("see %2FUsers%2Fx%2FMy%20Project now"),
             "see [project-path] now"
         );
+    }
+
+    #[test]
+    fn share_redaction_scrubs_provider_keys_pem_blocks_jwts_and_bearer_values() {
+        let redactor = ProjectPathRedactor::for_share(Some("/Users/x"));
+        let jwt = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.signature-value";
+        let value = format!(
+            "sk-proj-12345678901234567890 {jwt} Bearer abc.def.ghi\n-----BEGIN PRIVATE KEY-----\nsecret bytes\n-----END PRIVATE KEY-----"
+        );
+        let redacted = redactor.text(&value);
+        assert!(!redacted.contains("sk-proj-12345678901234567890"));
+        assert!(!redacted.contains(jwt));
+        assert!(!redacted.contains("secret bytes"));
+        assert!(redacted.matches("[redacted-secret]").count() >= 3);
+        let adjacent = redactor.text("sk-proj-12345678901234567890 sk-proj-09876543210987654321");
+        assert_eq!(adjacent.matches("[redacted-secret]").count(), 2);
+        assert!(!adjacent.contains("sk-proj-"));
+        let adjacent_jwts = redactor.text(&format!("{jwt} {jwt}"));
+        assert_eq!(adjacent_jwts.matches("[redacted-secret]").count(), 2);
+        assert!(!adjacent_jwts.contains("eyJ"));
+    }
+
+    #[test]
+    fn share_redaction_scrubs_home_paths_without_a_selected_project() {
+        let redactor = ProjectPathRedactor::for_share(None);
+        for value in [
+            "/Users/alice/.ssh/config",
+            "/home/alice/.config/relayer",
+            r"C:\Users\alice\AppData\Local\Relayer",
+            "%2FUsers%2Falice%2Fsecret.txt",
+        ] {
+            let redacted = redactor.text(value);
+            assert!(!redacted.contains("alice"), "{value} -> {redacted}");
+        }
+        assert!(redactor.contains_private_path_json(&serde_json::json!({
+            "a": "/Users/ali",
+            "b": "ce/.ssh/config"
+        })));
+    }
+
+    #[test]
+    fn share_authored_detail_omits_sensitive_fragmented_rich_detail() {
+        let package = serde_json::json!({
+            "version": 1,
+            "components": [{
+                "id": "summary",
+                "order": 0,
+                "html": ["sk-proj-1234567890", "1234567890"],
+                "css": ""
+            }],
+            "mounts": [],
+            "assets": [],
+            "integritySha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        });
+        let exported = export_node(
+            &authored_node(package),
+            &mut PortableIds::default(),
+            &ProjectPathRedactor::for_share(Some("/Users/x")),
+        )
+        .unwrap();
+
+        assert!(exported.authored_detail.is_none());
+        assert_eq!(
+            exported.authored_detail_omitted,
+            Some(ExportAuthoredDetailOmission::SensitiveData)
+        );
+        assert_eq!(exported.detail, "Portable fallback");
+    }
+
+    #[test]
+    fn share_turn_strips_attempt_receipts_and_digests_but_keeps_public_completion_fields() {
+        let interaction_id = InteractionId::from_database(7);
+        let interaction = Interaction {
+            id: interaction_id,
+            thread_id: ThreadId::from_database(1),
+            sequence: 42,
+            text: "Accepted text".into(),
+            created_at: "2026-01-01T00:00:00Z".into(),
+            graph_node_id: None,
+            completion_status: "accepted".into(),
+            harness_configuration_name: Some("codex.basic".into()),
+            harness_configuration_digest: Some("harness-secret-digest".into()),
+            permission_profile_id: "default".into(),
+            model_selection: None,
+            effective_execution_digest: Some("execution-secret-digest".into()),
+            effective_permission_receipt: Some(serde_json::json!({
+                "schemaVersion": 1,
+                "permissionProfileId": "default",
+                "label": "Workspace",
+                "authority": "local",
+                "reviewer": "user",
+                "bindingPresent": true,
+                "unconfinedHostAccess": false,
+                "disclosure": "private"
+            })),
+            completion_output: None,
+            completion_error: None,
+            latest_attempt: None,
+        };
+        let turn_sequences = [(interaction_id, 1)].into_iter().collect();
+        let mut ids = PortableIds::default();
+        let exported = export_turn(
+            &interaction,
+            TurnExportContext {
+                portable_sequence: 1,
+                closure: None,
+                context_input: None,
+                submitted_evidence: &[],
+                invocation: None,
+                imported: ImportedExportContext {
+                    turn: None,
+                    turn_sequences: &Default::default(),
+                },
+                turn_sequences: &turn_sequences,
+                redactor: &ProjectPathRedactor::for_share(Some("/Users/x")),
+            },
+            &mut ids,
+        )
+        .unwrap();
+
+        assert_eq!(exported.id, "turn:1");
+        assert_eq!(exported.completion.status, ExportCompletionStatus::Accepted);
+        assert_eq!(
+            exported.completion.harness_configuration_name.as_deref(),
+            Some("codex.basic")
+        );
+        assert_eq!(exported.completion.permission_profile_id, "default");
+        assert!(exported.completion.harness_configuration_digest.is_none());
+        assert!(exported.completion.effective_execution_digest.is_none());
+        assert!(exported.completion.effective_permission_receipt.is_none());
+        assert!(exported.completion.attempt_admission_id.is_none());
+        assert!(exported.completion.admitted_model_plan.is_none());
     }
 
     #[test]
@@ -2712,6 +3260,7 @@ mod tests {
         let exported = export_turn(
             &interaction,
             TurnExportContext {
+                portable_sequence: interaction.sequence,
                 closure: None,
                 context_input: None,
                 submitted_evidence: &[],

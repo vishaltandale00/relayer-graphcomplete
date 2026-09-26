@@ -51,12 +51,22 @@ Handled operation failures are not reported in V1. Validation feedback, permissi
 denial, user cancellation, handled retry, provider disconnection, authentication
 state, warnings, informational events, and success are also excluded.
 
-ADR 0011 names one planned exception: an oversized shared-thread snapshot shows
-a generic error and support code, and reports to Sentry through Electron main.
-It does not expand reporting to other handled or validation failures. Existing
-account and privacy boundaries remain in force. The event schema is undecided;
-this exception is not implemented or verified. See
+ADR 0011 names one narrow exception for shared-thread publication. Export,
+oversize, upload, service, and unexpected deletion failures show a generic error
+and attempt reference and may report through Electron main. Cancellation,
+sign-in requirements, and quota limits remain excluded. Existing account and
+privacy boundaries remain in force. See
 [ADR 0011](0011-shared-thread-snapshot-service.md#share-title-and-snapshot-boundary).
+
+The handled-share record admits only a code-owned failure code and stage, the
+`SHR-` attempt reference shown to the user, optional snapshot bytes for the
+oversize code, and the existing main-owned release, environment, platform, and
+pseudonymous account fields. Electron main deduplicates one process lifetime by
+account, reference, stage, and code before the ordinary final validator, bounded
+queue, and transport. Durable deduplication across application restart belongs
+to the persisted attempt owner; until that integration lands, restart-spanning
+deduplication remains unproven. Titles, project names, conversation content,
+credentials, raw errors, and request data remain forbidden.
 
 The accepted record contains only stable failure code or sanitized class, a
 code-owned message, approved frames, fixed component and operation identifiers,
@@ -121,7 +131,7 @@ unsigned development package cannot satisfy it.
 - Cross-process adapters remain small and cannot bypass identity or final filtering.
 - The bounded queue has deterministic retention, overflow, corruption, and account-
   replacement behavior.
-- V1 deliberately excludes handled terminal operation failures until a later product
-  decision names them. ADR 0011 names the planned oversized-share exception.
+- V1 excludes handled terminal operation failures except the exact shared-thread
+  publication and unexpected-deletion codes named above.
 - Default verification remains deterministic, local, and free of paid inference.
 - Packaged and symbolication claims are release-candidate and target-specific.

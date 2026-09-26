@@ -10,7 +10,7 @@ import {
 } from "../scripts/run-telemetry-evidence.mjs";
 
 describe("deterministic telemetry evidence portfolio", () => {
-  it("proves five component contracts at the local gateway and records native process proof as not run", async () => {
+  it("proves five component and handled-share contracts at the local gateway and records native process proof as not run", async () => {
     const directory = await mkdtemp(join(tmpdir(), "telemetry-evidence-test-"));
     const outputPath = join(directory, "evidence.json");
     try {
@@ -27,12 +27,12 @@ describe("deterministic telemetry evidence portfolio", () => {
         liveSentry: false,
         network: "loopback-only",
       });
-      expect(artifact.checkpoints.positive).toHaveLength(5);
-      expect(artifact.checkpoints.privacy).toHaveLength(165);
+      expect(artifact.checkpoints.positive).toHaveLength(10);
+      expect(artifact.checkpoints.privacy).toHaveLength(171);
       expect(artifact.checkpoints.privacy.every((item) => item.rejected)).toBe(true);
       expect(artifact.checkpoints.adapterPrivacy).toHaveLength(99);
       expect(artifact.checkpoints.adapterPrivacy.every((item) => item.crossed === false)).toBe(true);
-      expect(artifact.checkpoints.outbound.requestCount).toBe(5);
+      expect(artifact.checkpoints.outbound.requestCount).toBe(10);
       expect(artifact.checkpoints.outbound.forbiddenQueuePersistence).toBe(false);
       expect(artifact.checkpoints.releaseSymbols).toMatchObject({
         status: "not-run",

@@ -23,3 +23,10 @@ _Avoid_: Thread, completion
 **Native helper**:
 A provider-owned subagent or recursive helper operating inside one completion's execution attachment. It does not become a semantic child unless agent-authored code calls Complete.
 _Avoid_: Completion child
+
+**Shared thread snapshot**:
+An immutable, public, read-only conversation-export v1 projection of one local
+thread's accepted history, frozen for one owner-bound publication attempt. It is
+not a live thread, provider session, product-data backup, or source of graph
+authority.
+_Avoid_: Shared thread, cloud thread, remote workspace
