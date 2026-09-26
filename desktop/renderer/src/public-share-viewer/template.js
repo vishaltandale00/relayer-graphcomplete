@@ -126,7 +126,6 @@ export function renderPublicViewerTemplate({
       </div>
       <div class="public-share-download-actions">
         <a class="public-share-primary-action" href="${install}" target="_blank" rel="noopener noreferrer">Download</a>
-        <span class="public-share-platform-note">Also for Windows</span>
       </div>
     </aside>
     <section id="publicViewerHost" class="public-share-workspace-host" aria-label="Shared conversation workspace">

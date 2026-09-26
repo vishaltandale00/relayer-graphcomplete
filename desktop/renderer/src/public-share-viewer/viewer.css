@@ -10,20 +10,6 @@
 .public-share-download-actions {
   display: flex;
   align-items: center;
-  gap: 12px;
-}
-
-.public-share-download-actions {
-  align-items: flex-end;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.public-share-platform-note {
-  color: var(--muted);
-  font-size: 10px;
-  letter-spacing: .07em;
-  text-transform: uppercase;
 }
 
 .public-share-main {
@@ -199,16 +185,10 @@ html[data-theme="light"] .public-share-error {
 }
 
 @media (min-width: 1101px) {
-  .public-share-shell .workspace-layout {
-    position: relative;
-  }
-
   .public-share-download-card {
-    position: absolute;
     z-index: 4;
-    top: 0;
-    right: 0;
-    width: var(--inspector);
+    grid-column: 2;
+    grid-row: 1 / 3;
   }
 }
 

@@ -193,6 +193,7 @@ describe("public share HTML boundary", () => {
     expect(html).not.toContain("public-share-topbar");
     expect(html).not.toContain(">Open Relayer</a>");
     expect(html).not.toContain("public-share-footer");
+    expect(html).not.toContain("Also for Windows");
   });
 
   it("keeps the static shell aligned with the generated no-top-bar contract", () => {
@@ -201,6 +202,7 @@ describe("public share HTML boundary", () => {
     expect(html).not.toContain(">Open Relayer</a>");
     expect(html).not.toContain("public-share-footer");
     expect(html).toContain('class="public-share-download-card"');
+    expect(html).not.toContain("Also for Windows");
     expect(html).toContain("Explore this thread, then build your own.");
   });
 
@@ -209,6 +211,7 @@ describe("public share HTML boundary", () => {
     expect(styles).toMatch(/\.public-share-main\s*{[^}]*height: 100vh;/s);
     expect(styles).toMatch(/\.public-share-workspace-host\s*{[^}]*height: 100%;[^}]*border: 0;[^}]*border-radius: 0;/s);
     expect(styles).toMatch(/\.public-share-shell \.thread-header\s*{[^}]*border-radius: 12px;/s);
+    expect(styles).toMatch(/@media \(min-width: 1101px\)[\s\S]*\.public-share-download-card\s*{[^}]*grid-row: 1 \/ 3;/s);
   });
 
   it("aligns the turn picker to the interaction card with five visible rows", () => {
