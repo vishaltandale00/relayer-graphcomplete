@@ -779,10 +779,11 @@ describe("compiled Node Detail product runtime", () => {
     const active = { id: 6, threadId: 3, sequence: 2, text: "Later", graphNodeId: 60, completionStatus: "accepted", completionOutput: { rootLayer: current } };
     const thread = { id: 3, rootInteractionId: 5, title: "Thread", harnessId: "fixture" };
     const state = { status: "accepted", currentInteractionId: 6, interactions: [source, active], visibleLayer: current, nodes: current.nodes, actions: [], projects: [], permissionProfiles: [], modelSettings: { defaults: { harnessId: "fixture" }, harnesses: [{ id: "fixture", available: true }], providers: [], families: [] }, modelCatalog: [], actionInvocations: [], pendingActionInvocations: [] };
+    const release = vi.fn();
     const resolver = vi.fn(async (_asset, context) => {
       // Model the production asset route's exact presenting-layer membership check.
       if (context.interaction?.id !== 5 || context.layerId !== 99) return undefined;
-      return { digestSha256: asset.digestSha256, mediaType: asset.mediaType, url: "blob:http://127.0.0.1:3000/context-image", release() {} };
+      return { digestSha256: asset.digestSha256, mediaType: asset.mediaType, url: "blob:http://127.0.0.1:3000/context-image", release };
     });
     const workspace = createProductWorkspace({
       root: window.document, getState: () => state, getThread: () => thread,
@@ -795,10 +796,18 @@ describe("compiled Node Detail product runtime", () => {
       await window.happyDOM.waitUntilComplete();
       window.document.querySelector('[aria-label="Show Context illustration annotations"]').click();
       window.document.querySelector('[aria-label="Open Context illustration details"]').click();
-      await window.happyDOM.waitUntilComplete();
-      expect(resolver).toHaveBeenCalledWith(asset, expect.objectContaining({ interaction: source, layerId: 99, thread, node }));
-      expect(window.document.querySelector("#detailContent [data-node-detail-runtime]").shadowRoot.querySelector("img").src).toBe("blob:http://127.0.0.1:3000/context-image");
-    } finally { workspace.dispose(); }
+      // Package integrity uses native WebCrypto, which Happy DOM does not track.
+      await vi.waitFor(() => {
+        expect(resolver).toHaveBeenCalledWith(asset, expect.objectContaining({ interaction: source, layerId: 99, thread, node }));
+        expect(window.document.querySelector("#detailContent [data-node-detail-runtime]").shadowRoot.querySelector("img").src).toBe("blob:http://127.0.0.1:3000/context-image");
+      });
+    } finally {
+      const mountedHost = window.document.querySelector("#detailContent [data-node-detail-runtime]");
+      workspace.dispose();
+      // Disposing must release the existing asset without starting another render.
+      expect(window.document.querySelector("#detailContent [data-node-detail-runtime]")).toBe(mountedHost);
+      expect(release).toHaveBeenCalledTimes(1);
+    }
   });
 
   it("mounts the canonical package when a user opens a node through the real Product workspace selection path", async () => {

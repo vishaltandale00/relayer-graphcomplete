@@ -79,22 +79,20 @@ it.each([{ missingModel: true }, { rejectValidation: true }, { connectionError: 
 it("does not initialize the managed installer on fixture-only or unsupported-platform startup", async () => {
   const createInstaller = vi.fn(() => { throw new Error("unsupported platform"); });
   const runtime = createEvalManagedPrimeRuntime({ root: "/unused", createInstaller });
-  expect(runtime.installer.activeOperations()).toEqual([]);
   await runtime.installer.cancelAll();
   expect(createInstaller).not.toHaveBeenCalled();
   await expect(runtime.resolve()).rejects.toThrow("unsupported platform");
 });
 
 it("loads local credentials only with an explicit development opt-in and sanitizes malformed input", async () => {
-  expect(await loadEvalPrimeProfile({ isPackaged: false, environment: {} })).toBeNull();
+  expect(await loadEvalPrimeProfile({ environment: {} })).toBeNull();
   const directory = await mkdtemp(join(tmpdir(), "eval-profile-")); directories.push(directory);
   const path = join(directory, "profile.json");
   const environment = { RELAYER_EVAL_PRIME_PROFILE_FILE: path };
   await writeFile(path, JSON.stringify({ runs: { "prime-openrouter": { auth: { kind: "openrouter", apiKey: profile.apiKey }, modelId: models[0], verificationHelperModelId: models[1] } } }));
-  expect(await loadEvalPrimeProfile({ isPackaged: false, environment })).toEqual({ ...profile, endpoint: undefined });
-  await expect(loadEvalPrimeProfile({ isPackaged: true, environment })).rejects.toThrow("development-only");
+  expect(await loadEvalPrimeProfile({ environment })).toEqual({ ...profile, endpoint: undefined });
   await writeFile(path, `malformed ${profile.apiKey}`);
-  await expect(loadEvalPrimeProfile({ isPackaged: false, environment })).rejects.toThrow("Could not read the local Prime Eval profile.");
+  await expect(loadEvalPrimeProfile({ environment })).rejects.toThrow("Could not read the local Prime Eval profile.");
 });
 
 it("rejects family drift instead of silently widening the native helper roster", async () => {

@@ -439,7 +439,8 @@ These are planned service boundaries, not implemented product capabilities. See
 
 Relayer Eval starts from the checkout under Node and serves its dashboard on
 loopback. It supervises the same Rust product/graph servers and harness host.
-It has no Electron package. Each human review has a separate loopback origin;
+It has no Electron package or launch-time build. Developers explicitly rebuild shared
+Rust and TypeScript artifacts when their inputs change. Each human review has a separate loopback origin;
 a capability header authenticates requests and a gateway supplies only read-only
 Rust authority plus a scoped human annotation credential. Browser-supplied
 cookies never become upstream credentials. Judges use fresh Chromium contexts

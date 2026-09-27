@@ -3130,7 +3130,7 @@ export function createProductWorkspace({
     send.removeAttribute("aria-busy");
     confirmContextDraftSend.disabled = false;
     syncComposer();
-    if (selection.selectedNodeId != null) {
+    if (!disposed && selection.selectedNodeId != null) {
       void selectNode(getState(), selection.selectedNodeId, { notify: false });
     }
   };

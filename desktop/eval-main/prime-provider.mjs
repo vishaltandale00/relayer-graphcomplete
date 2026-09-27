@@ -10,10 +10,9 @@ import { HARNESS_MANAGED_RUNTIME_REQUIREMENTS, managedRuntimeRequirementForHarne
 
 // Explicit development opt-in. Credentials never become part of an Eval selection
 // or run record; the Eval host retains them in memory until shutdown.
-export async function loadEvalPrimeProfile({ isPackaged, environment = process.env }) {
+export async function loadEvalPrimeProfile({ environment = process.env } = {}) {
   const path = environment.RELAYER_EVAL_PRIME_PROFILE_FILE;
   if (!path) return null;
-  if (isPackaged) throw new Error("Local Prime Eval profiles are development-only.");
   let profile;
   try {
     const document = JSON.parse(await readFile(path, "utf8"));
@@ -31,7 +30,7 @@ export async function loadEvalPrimeProfile({ isPackaged, environment = process.e
     modelIds: [profile.modelId, profile.verificationHelperModelId] };
 }
 
-export function createEvalManagedPrimeRuntime({ root, appRoot, pythonClientRoot, isPackaged,
+export function createEvalManagedPrimeRuntime({ root, appRoot, pythonClientRoot,
   createInstaller = createManagedRuntimeInstaller }) {
   let installer;
   let resolver;
@@ -40,7 +39,7 @@ export function createEvalManagedPrimeRuntime({ root, appRoot, pythonClientRoot,
     await assemblePrimeManagedRuntime(context, {
       copyReviewedTrees: createPrimeReviewedTreeCopier({ appRoot, pythonClientRoot,
         expectedClosureSha256: selectPrimeAgentDependencyClosureSha256({
-          isPackaged, javascriptContract: context.recipe.runtimeContract.javascript,
+          isPackaged: false, javascriptContract: context.recipe.runtimeContract.javascript,
         }),
         expectedPythonClientSha256: PRIME_AGENT_ASSET_SHA256.pythonPackageTree,
       }),
@@ -49,7 +48,6 @@ export function createEvalManagedPrimeRuntime({ root, appRoot, pythonClientRoot,
   const getResolver = () => resolver ??= createManagedRuntimeResolver(getInstaller());
   const recipeId = managedRuntimeRequirementForHarness("prime.agent").recipeId;
   return { installer: {
-    activeOperations: () => installer?.activeOperations() ?? [],
     cancelAll: (reason) => installer?.cancelAll(reason) ?? Promise.resolve(),
   },
     prepare: async () => productionHarnessRuntimeDescriptor(await getResolver().prepare(recipeId)),

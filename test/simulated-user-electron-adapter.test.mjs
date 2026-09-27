@@ -291,11 +291,6 @@ describe("local Electron simulated-user judge adapter", () => {
       arguments: [],
       availableHarnessConfigurationNames: [],
     })).toThrow("requires codex-layered-navigation-luna");
-    expect(() => resolveLocalSimulatedUserAutorun({
-      environment: { [LOCAL_SIMULATED_USER_AUTORUN_ENV]: "1" },
-      arguments: [],
-      packaged: true,
-    })).toThrow("only in a local development checkout");
     const personalSelection = {
       testCaseIds: ["empty-project.task-system.single-turn"],
       harnessConfigurationNames: [

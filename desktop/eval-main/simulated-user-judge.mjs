@@ -165,7 +165,6 @@ export async function releaseInputOperatorLease(lease) {
 export function resolveLocalSimulatedUserAutorun({
   environment = process.env,
   arguments: commandLineArguments = process.argv,
-  packaged = false,
   availableHarnessConfigurationNames,
 } = {}) {
   const personalPresentationEnabled = environment[PERSONAL_PRESENTATION_AUTORUN_ENV] === "1"
@@ -180,7 +179,6 @@ export function resolveLocalSimulatedUserAutorun({
   if ([enabled, personalPresentationEnabled, productPresentationEnabled, inputRoundTripEnabled].filter(Boolean).length > 1) {
     throw new Error("Select only one local simulated-user autorun.");
   }
-  if (packaged) throw new Error("The simulated-user autorun is available only in a local development checkout.");
   if (inputRoundTripEnabled) {
     const availableHarnesses = availableHarnessConfigurationNames === undefined
       ? null

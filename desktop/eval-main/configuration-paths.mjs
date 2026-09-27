@@ -1,7 +1,6 @@
 import { join } from "node:path";
 
 import {
-  desktopTarget,
   developmentDesktopHost,
   developmentDesktopHostByKey,
 } from "../shared/target.mjs";
@@ -10,12 +9,10 @@ const primeAgentPackage = "@earendil-works/pi-coding-agent";
 export const GRAPH_SEARCH_EVAL_TARGET = "macos-arm64";
 
 export function evalRuntimeTarget({
-  isPackaged,
   environment = process.env,
   platform = process.platform,
   architecture = process.arch,
 }) {
-  if (isPackaged) return desktopTarget({ platform, architecture });
   const requested = String(environment.RELAYER_DESKTOP_TARGET || "").trim();
   if (requested) return developmentDesktopHostByKey(requested);
   return developmentDesktopHost({
@@ -26,7 +23,6 @@ export function evalRuntimeTarget({
 
 export function evalHarnessConfigurationPaths({
   harnessDirectory,
-  isPackaged,
   packageAvailable = defaultPackageAvailable,
   targetKey,
 }) {
@@ -52,7 +48,7 @@ export function evalHarnessConfigurationPaths({
     join(harnessDirectory, "codex-layered-personal-presentation-v1.yaml"),
     join(harnessDirectory, "codex-layered-personal-presentation-v2.yaml"),
   ];
-  if (!isPackaged && packageAvailable(primeAgentPackage)) {
+  if (packageAvailable(primeAgentPackage)) {
     paths.push(
       join(harnessDirectory, "prime-agent-basic.yaml"),
       join(harnessDirectory, "prime-agent-deep.yaml"),

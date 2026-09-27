@@ -42,3 +42,20 @@ profile, with its native credential file left untouched.
 This replaces the original separate internal Electron distribution decision.
 Keeping Electron would preserve an installation workflow that developers do not
 need. A remotely hosted, multi-user evaluation service remains outside this decision.
+
+## Development loop (2026-09-27)
+
+Eval launch uses the checkout's existing shared runtime artifacts without invoking
+build or packaging commands. Developers rebuild changed Rust or TypeScript inputs
+explicitly; dashboard, renderer, and host JavaScript edits need no Eval build.
+Packaged-Eval configuration, credential, autorun, and startup-maintenance branches
+are removed. Existing review authority and browser proof remain unchanged.
+
+`npm run eval-app:prepare` runs the existing shared build with a private checkout
+`target`. Preparation migrates a target symlink by removing only that link; it
+never deletes the shared destination. Default launch rejects external Cargo
+targets and escaping binary paths. Explicit per-binary overrides retain their
+advanced/test meaning outside that guarantee. Launch and browser proof resolve
+the same artifacts. Readiness checks existence and ownership, not source freshness;
+compiled changes require explicit preparation and host restart. This step adds
+no watcher, alternate compiler pipeline, or cache manager.

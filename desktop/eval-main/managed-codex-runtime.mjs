@@ -10,7 +10,6 @@ import { withManagedCodexPath } from "../shared/codex-runtime-environment.mjs";
 export function createEvalManagedCodexRuntime({
   root,
   developmentExecutable,
-  enableMaintenance = true,
   environment = process.env,
   createInstaller = createManagedRuntimeInstaller,
 } = {}) {
@@ -45,11 +44,7 @@ export function createEvalManagedCodexRuntime({
       });
       return runtimePromise;
     },
-    activeOperations: () => installer?.activeOperations() ?? Object.freeze([]),
     cancelAll: (reason) => installer?.cancelAll(reason) ?? Promise.resolve(),
-    pruneInactiveInstallations: () => enableMaintenance
-      ? getInstaller().pruneInactiveInstallations()
-      : Promise.resolve(Object.freeze({ removed: Object.freeze([]), failures: Object.freeze([]) })),
   });
 }
 

@@ -63,9 +63,9 @@
     "prototype:project-row-hover": "open desktop/renderer/project-row-hover.prototype.html",
     "predesktop:dev:prime": "npm run build",
     "desktop:dev:prime": "node scripts/run-prime-desktop.mjs",
-    "eval-app:dev": "npm run build && node desktop/eval-main/index.mjs",
+    "eval-app:dev": "node desktop/eval-main/index.mjs",
     "live:recursive-complete": "npm run build && node scripts/run-recursive-live-run.mjs",
-    "eval:input-roundtrip:live": "npm run build && RELAYER_EVAL_AUTORUN_INPUT_ROUNDTRIP=1 node desktop/eval-main/index.mjs",
+    "eval:input-roundtrip:live": "RELAYER_EVAL_AUTORUN_INPUT_ROUNDTRIP=1 node desktop/eval-main/index.mjs",
     "lint:ladybug-receipt": "cargo fmt --manifest-path docs/evidence/issue-261-ladybug-probe/Cargo.toml -- --check && rustfmt --edition 2021 --check docs/evidence/issue-261-ladybug-probe/source-build-probe/src/main.rs && node scripts/lint-ladybug-qualification-receipt.mjs && npm run lint:ladybug-native-receipt && npm run lint:ladybug-contract-probe",
     "lint:ladybug-native-receipt": "node scripts/verify-ladybug-native-receipts.mjs",
     "lint:ladybug-contract-probe": "node scripts/lint-ladybug-contract-probe.mjs",
@@ -77,7 +77,12 @@
     "desktop:release:audit-authority": "node scripts/audit-desktop-release-authority.mjs",
     "desktop:release:publish-preview": "node desktop/release/publish-preview.mjs",
     "desktop:release:promote-stable": "node desktop/release/promote-stable.mjs",
-    "test:eval-web": "node scripts/test-eval-web.mjs"
+    "test:eval-web": "node scripts/test-eval-web.mjs",
+    "eval-app:prepare": "node desktop/eval-main/runtime-artifacts.mjs prepare",
+    "preeval-app:dev": "node desktop/eval-main/runtime-artifacts.mjs",
+    "preeval:input-roundtrip:live": "node desktop/eval-main/runtime-artifacts.mjs",
+    "pretest:eval-web": "node desktop/eval-main/runtime-artifacts.mjs",
+    "test:eval-prepared-runtime": "vitest run --config scripts/eval-prepared.vitest.config.mjs"
   },
   "devDependencies": {
     "@electron/asar": "3.4.1",

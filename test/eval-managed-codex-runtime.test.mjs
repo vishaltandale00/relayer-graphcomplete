@@ -31,13 +31,10 @@ describe("Eval managed Codex runtime", () => {
     const createInstaller = vi.fn(() => { throw new Error("unsupported linux target"); });
     const runtime = createEvalManagedCodexRuntime({
       root: "/eval/managed-runtimes",
-      enableMaintenance: false,
       environment: { PATH: "/usr/bin" },
       createInstaller,
     });
 
-    expect(runtime.activeOperations()).toEqual([]);
-    await expect(runtime.pruneInactiveInstallations()).resolves.toEqual({ removed: [], failures: [] });
     expect(createInstaller).not.toHaveBeenCalled();
     await expect(runtime.resolve()).rejects.toThrow("unsupported linux target");
     expect(createInstaller).toHaveBeenCalledOnce();
@@ -59,16 +56,6 @@ describe("Eval managed Codex runtime", () => {
     expect(createInstaller).not.toHaveBeenCalled();
   });
 
-  it("runs packaged maintenance through the managed installer before a runtime is requested", async () => {
-    const pruneInactiveInstallations = vi.fn(async () => ({ removed: ["old"], failures: [] }));
-    const createInstaller = vi.fn(() => ({ pruneInactiveInstallations }));
-    const runtime = createEvalManagedCodexRuntime({ root: "/eval/managed-runtimes", createInstaller });
-
-    await expect(runtime.pruneInactiveInstallations()).resolves.toEqual({ removed: ["old"], failures: [] });
-    expect(createInstaller).toHaveBeenCalledOnce();
-    expect(pruneInactiveInstallations).toHaveBeenCalledOnce();
-  });
-
   it("caches one successful installation result for all Eval consumers", async () => {
     const prepare = vi.fn(async () => ({
       runtimeId: "codex",
@@ -79,7 +66,7 @@ describe("Eval managed Codex runtime", () => {
     const runtime = createEvalManagedCodexRuntime({
       root: "/eval/managed-runtimes",
       environment: { PATH: "/usr/bin" },
-      createInstaller: () => ({ prepare, activeOperations: () => [], cancelAll: async () => {} }),
+      createInstaller: () => ({ prepare, cancelAll: async () => {} }),
     });
 
     const [first, second] = await Promise.all([runtime.resolve(), runtime.resolve()]);

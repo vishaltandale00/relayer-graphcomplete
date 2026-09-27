@@ -1,3 +1,4 @@
+import { requireEvalArtifacts } from "../desktop/eval-main/runtime-artifacts.mjs";
 import assert from "node:assert/strict";
 import { spawn, execFileSync } from "node:child_process";
 import { pathToFileURL } from "node:url";
@@ -16,7 +17,10 @@ const directory = await mkdtemp(join(tmpdir(), "relayer-eval-web-proof-"));
 const resources = [];
 const shutdownShim = join(directory, "shutdown-shim.mjs");
 await writeFile(shutdownShim, 'process.on("message", (message) => { if (message === "shutdown") process.emit("SIGINT"); });\n');
-const hostArguments = ["--import", pathToFileURL(shutdownShim).href, "desktop/eval-main/index.mjs"];
+const { scripts } = JSON.parse(await readFile(new URL("../package.json", import.meta.url), "utf8"));
+assert.equal(scripts["eval-app:dev"], "node desktop/eval-main/index.mjs", "Eval launch must not build or package");
+assert.equal(scripts["eval:input-roundtrip:live"], "RELAYER_EVAL_AUTORUN_INPUT_ROUNDTRIP=1 node desktop/eval-main/index.mjs");
+const hostArguments = ["--import", pathToFileURL(shutdownShim).href, scripts["eval-app:dev"].slice("node ".length)];
 function requestShutdown(child) {
   // Windows kill(SIGINT) terminates rather than dispatching the Node handler.
   if (process.platform === "win32") child.send("shutdown");
@@ -165,12 +169,12 @@ try {
 
   // Exercise the actual judge adapter against the real product server, without inference.
   const root = resolve(".");
-  const binaries = resolve(process.env.CARGO_TARGET_DIR || "target", "debug");
+  const { graphServerBinary, appServerBinary } = requireEvalArtifacts(root);
   const configurationPaths = [join(root, "harnesses/fixture-task-system.yaml")];
   const data = join(directory, "judge");
-  const runtime = new GraphCompleteRuntimeService({ userDataDirectory: data, graphServerBinary: join(binaries, "relayer-graph-server"), configurationPaths, additionalImplementations: { "fixture.task-system": taskSystemFixtureFactory } });
+  const runtime = new GraphCompleteRuntimeService({ userDataDirectory: data, graphServerBinary, configurationPaths, additionalImplementations: { "fixture.task-system": taskSystemFixtureFactory } });
   resources.push(runtime);
-  const product = new RelayerAppServerService({ userDataDirectory: data, binaryPath: join(binaries, "relayer-app-server"), webDirectory: join(root, "desktop/renderer"), permissionCatalogPath: join(root, "permissions/desktop.json"), runtimeSession: await runtime.start(), defaultHarnessConfiguration: "fixture-task-system", allowHarnessOverride: true, enableReadOnlySession: true });
+  const product = new RelayerAppServerService({ userDataDirectory: data, binaryPath: appServerBinary, webDirectory: join(root, "desktop/renderer"), permissionCatalogPath: join(root, "permissions/desktop.json"), runtimeSession: await runtime.start(), defaultHarnessConfiguration: "fixture-task-system", allowHarnessOverride: true, enableReadOnlySession: true });
   resources.push(product);
   const productSession = await product.start();
   const service = await new EvalService({ stateFile: join(data, "eval-data/test-runs.json"), productSession, configurationPaths }).open();

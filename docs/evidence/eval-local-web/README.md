@@ -39,15 +39,78 @@ those product evidence scripts; ordinary Eval uses the browser transport.
 
 ## Build acceleration and evidence limits
 
-The local machine supplied an existing Cargo target cache at
-`/Volumes/2T-SSD/cargo/relayer-graphcomplete`. Cargo rebuilt the current workspace
-and validated its dependency fingerprints; no downloaded native artifact was
-adopted or represented as test proof. Existing process tests assume
-`target/debug`, so the ignored local `target` link points to that configured Cargo
-output. A first full check exposed that missing link and one 30-second Homebrew
-sealing timeout. Those failures are retained in the PR verification report; later
-runs are reported separately.
+The initial browser migration reused a shared local Cargo target. That setup
+allowed another worktree to replace binaries during verification and is no
+longer supported by default Eval launch. Step 1 uses a physical checkout-local
+`target`; migration removes only this checkout's symlink.
+
+Before this step's cold preparation, local artifact inventories and the existing
+private Cargo output were inspected. No compatible bundle with verified provenance,
+identities, and hashes was available. Preparation therefore builds from source,
+using ordinary Cargo registry/git dependency caches. The mutable shared target
+is neither cloned nor reused as a trusted artifact. This is a local execution
+record, not a claim about caches on other developer machines.
 
 The PR records actual command results and the adversarial reviewers' exact source
 snapshot. Browser proof certifies the shared workspace and local web host, not
 Electron rendering equivalence, live provider quality, or release readiness.
+
+## Checkout-only launch simplification
+
+Normal and opt-in live Eval commands now start Node without a build. The existing
+browser proof checks those command contracts and launches the declared entrypoint.
+Shared Rust/TypeScript artifacts remain explicit preparation, documented in README.
+
+Changed-seam checkpoints remain in the existing tests:
+- Development targets and actual harness availability: `eval-configuration-paths`.
+- Lazy runtime setup, cancellation, and credentials: `eval-managed-codex-runtime`
+  and `eval-prime-provider`.
+- Explicit live opt-in, conflicting selections, and harness availability:
+  `simulated-user-electron-adapter`.
+
+Only unreachable packaged-Eval cases and disabled maintenance assertions are
+retired; their production callers already selected unpackaged/no-maintenance.
+Required handoff proof is `npm run check`, `npm run build`, and
+`npm run test:eval-web`. Product-native evidence and review authority are unchanged.
+Adversarial deletion review and exact-source outcomes are recorded in the PR.
+
+## Worktree-owned preparation
+
+| Changed executable seam / promise | Deterministic checkpoint |
+| --- | --- |
+| Preparation and launch agree on private native outputs | `eval-runtime-artifacts`: two temporary checkouts receive divergent executable fixtures through the preparation runner and launch their own versions after the other is rebuilt |
+| Migration preserves another checkout's output; external targets cannot silently win | Same suite: target-link migration preserves destination; external Cargo target, escaped debug directory, and escaped binary are rejected before build/launch |
+| Overrides remain explicit and limited to the named binary | Same suite: external override accepted while the other default still needs local preparation |
+| Preparation retains the full shared build and propagates failures | Same suite: build invocation, nonzero/spawn failure, post-build readiness, and Cargo-reported executable paths (rejecting older defaults under a configured target layout); `npm run build` exercises actual production compilation |
+| Readiness includes indirect runtime dependencies and remains build-free | Same suite: root dist, all four workspace entries, graph-client agent bundle, renderer vendor files, and all launch/proof prehooks; absence points to preparation |
+| Existing Eval execution, authority, capture, restart, and recursion remain valid | `npm run test:eval-web`; `npm run test:eval-prepared-runtime` reuses `test/recursive-complete-e2e.test.mjs` with its root Complete import redirected to emitted `dist/index.js`; the ordinary source suite remains in full check |
+
+Required proof: `npm run check`, `npm run build`, `npm run test:eval-web`, and
+`npm run test:eval-prepared-runtime`. The dedicated proof configuration is itself
+a changed seam: its real recursive scenarios must pass after preparation, while
+normal `npm run check` continues to use the source entry point.
+The isolated warm suite is `npx vitest run test/eval-runtime-artifacts.test.mjs`.
+The two-checkout test uses executable fixtures, not two complete native builds.
+It proves output selection and replacement isolation, not compilation equivalence.
+
+No test is retired in this step. Presence/containment checks do not establish
+source freshness or sandbox arbitrary build scripts. Explicit binary overrides
+and manually shared/hardlinked generated outputs are outside the default
+ownership contract. Compiled edits require preparation and restart. No end-to-end
+speed percentage or candidate/judge latency reduction is claimed.
+
+### Teardown failure found during verification
+
+The full check exposed an existing context-preview race. Happy DOM's task drain
+does not wait for native WebCrypto integrity work, and workspace disposal called
+`releaseSendAttempt`, which could start a new detail render after releasing the
+mounted asset. The same real-preview checkpoint now waits for the actual image
+and provenance, then asserts disposal retains the same host and releases the
+asset exactly once. Reselection is suppressed when the workspace is disposed.
+This changes only teardown, not node-selection or graph authority semantics.
+
+Changed seam: the production workspace's send-attempt cleanup during disposal.
+Checkpoint: `test/node-detail-runtime.test.mjs`, “resolves context-preview images
+from their original presenting interaction and layer”. The strengthened assertion
+failed before the one-line guard and passed afterward. Browser proof retains
+shutdown/restart coverage. The full deterministic check remains required.

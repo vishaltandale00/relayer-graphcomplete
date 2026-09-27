@@ -232,13 +232,38 @@ service access. Unsupported bounded runtimes fail before inference.
 
 ## Relayer Eval
 
-Relayer Eval is a separate internal application and profile. Its dashboard configures cases, named harness configurations, and a judge; shows persisted test runs and aggregate results by harness; and opens any specific case × harness execution in a separate read-only production workspace window.
+Relayer Eval is a developer-only browser application with a separate profile. Its dashboard configures cases, named harness configurations, and a judge; shows persisted test runs and aggregate results by harness; and opens any specific case × harness execution in a separate read-only production workspace window.
+
+Prepare the shared product runtime once with `npm run eval-app:prepare`. Then launch Eval:
 
 ```sh
 npm run eval-app:dev
 ```
 
-The default `fixture-task-system` harness is the safe deterministic path: it exercises the real Rust app server, Node harness host, graph client, product workspace, and Eval UI without credentials or inference. `npm run eval-app:dev` still needs the native Rust/Ladybug build prerequisites below because the backend is built before the Node host starts. `codex-basic`, `codex-basic-high`, and the other provider-backed configurations are paid live-Eval paths; selecting one and approving a run is explicit, and live runs are excluded from `npm run check`. Development Eval exposes Prime configurations when the checked-in runtime passes preflight and supplies the trusted Python graph client to their IPython kernels. Eval runs from the checkout and has no desktop package. Run `npm run test:eval-web` after building for inference-free browser proof.
+Launching checks for prepared artifacts but does not compile or package anything.
+Dashboard and renderer edits need a page reload; host JavaScript edits need a
+restart. After compiled source, checkout, or dependency changes, stop Eval,
+run `npm run eval-app:prepare`, and restart. Preparation runs the existing full
+shared build, including root TypeScript for recursive Complete, workspace outputs,
+the generated graph-client agent bundle, and renderer vendor assets. It does not
+introduce a separate Eval build or detect source freshness automatically.
+Preparation asks Cargo to incrementally report both server outputs afterward,
+so a custom target layout cannot silently leave launch using older binaries.
+
+Eval uses this checkout's private `target/debug` binaries, as do the runtime tests.
+Unset external `CARGO_TARGET_DIR`/`CARGO_BUILD_TARGET_DIR` overrides and
+`CARGO_BUILD_TARGET` before preparing or launching; remove Cargo `build.target`
+configuration for this native-host loop. Preparation
+replaces a `target` symlink with a local directory, leaving its old destination
+untouched. The first private build may be cold; ordinary Cargo dependency caches
+remain reusable. Explicit `RELAYER_GRAPH_SERVER_BIN` and
+`RELAYER_APP_SERVER_BINARY` overrides are advanced/test escape hatches outside
+the worktree isolation guarantee. Do not share mutable output directories or
+hardlink build outputs between checkouts.
+
+The default `fixture-task-system` harness is the safe deterministic path: it exercises the real Rust app server, Node harness host, graph client, product workspace, and Eval UI without credentials or inference. Initial runtime preparation needs the native Rust/Ladybug build prerequisites below. `codex-basic`, `codex-basic-high`, and the other provider-backed configurations are paid live-Eval paths; selecting one and approving a run is explicit, and live runs are excluded from `npm run check`. Development Eval exposes Prime configurations when the checked-in runtime passes preflight and supplies the trusted Python graph client to their IPython kernels. Eval runs from the checkout and has no desktop package. Run `npm run test:eval-web` for inference-free browser proof and
+`npm run test:eval-prepared-runtime` to exercise recursive Complete through the
+compiled entry point after preparation.
 
 The dashboard also exposes the non-default **Visual Node Details · recursive
 baseline** case and its required Codex pair:
@@ -351,7 +376,7 @@ Apache-2.0
 ### Running Eval from a checkout
 
 Run `npm ci`, then `npx playwright install chromium` for the screenshot judge
-browser. Start Eval with `npm run eval-app:dev` and open the authenticated URL
+browser, then `npm run eval-app:prepare` for shared runtime artifacts. Start Eval with `npm run eval-app:dev` and open the authenticated URL
 printed in the terminal. Keep that terminal running; Ctrl-C stops the services,
 while closing a tab leaves evaluations running. The default profile is
 `~/.relayer/eval-web`; `RELAYER_EVAL_USER_DATA_DIR` selects another profile.

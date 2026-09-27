@@ -413,7 +413,7 @@ describe("desktop skeleton", () => {
     expect(webHost).toContain("productSession.readOnlyCookie");
     expect(evalMain).toContain("createEvalDashboard");
     expect(evalMain).toContain("createReview(executionId)");
-    expect(evalMain).toContain("evalRuntimeTarget({ isPackaged: false, environment: process.env })");
+    expect(evalMain).toContain("evalRuntimeTarget({ environment: process.env })");
     expect(evalMain).toContain("targetKey: evalTarget.key");
     expect(evalMain).toContain("process.env.PYTHONPATH");
     expect(evalDashboard).toContain("Test cases");

@@ -13,29 +13,9 @@ const names = (paths) => paths.map((path) => basename(path));
 const repositoryRoot = resolve(fileURLToPath(new URL("../", import.meta.url)));
 
 describe("Eval harness configuration availability", () => {
-  it("uses actual packaged runtime identity instead of an environment-spoofed graph-search target", () => {
-    const spoofed = { RELAYER_DESKTOP_TARGET: "macos-arm64" };
+  it("honors the explicit development target override", () => {
     expect(evalRuntimeTarget({
-      isPackaged: true,
-      environment: spoofed,
-      platform: "darwin",
-      architecture: "x64",
-    }).key).toBe("macos-x64");
-    expect(evalRuntimeTarget({
-      isPackaged: true,
-      environment: spoofed,
-      platform: "win32",
-      architecture: "x64",
-    }).key).toBe("windows-x64");
-    expect(evalRuntimeTarget({
-      isPackaged: true,
-      environment: { RELAYER_DESKTOP_TARGET: "windows-x64" },
-      platform: "darwin",
-      architecture: "arm64",
-    }).key).toBe("macos-arm64");
-    expect(evalRuntimeTarget({
-      isPackaged: false,
-      environment: spoofed,
+      environment: { RELAYER_DESKTOP_TARGET: "macos-arm64" },
       platform: "win32",
       architecture: "x64",
     }).key).toBe("macos-arm64");
@@ -43,23 +23,15 @@ describe("Eval harness configuration availability", () => {
 
   it("resolves linux-x64 as a development-only unpackaged Eval host", () => {
     expect(evalRuntimeTarget({
-      isPackaged: false,
       environment: {},
       platform: "linux",
       architecture: "x64",
     })).toMatchObject({ key: "linux-x64", platform: "linux", architecture: "x64" });
     expect(evalRuntimeTarget({
-      isPackaged: false,
       environment: { RELAYER_DESKTOP_TARGET: "linux-x64" },
       platform: "darwin",
       architecture: "arm64",
     }).key).toBe("linux-x64");
-    expect(() => evalRuntimeTarget({
-      isPackaged: true,
-      environment: { RELAYER_DESKTOP_TARGET: "linux-x64" },
-      platform: "linux",
-      architecture: "x64",
-    })).toThrow("Unsupported Relayer Desktop target: linux-x64.");
   });
 
   it("records the package.json product version on unpackaged Eval exports", async () => {
@@ -74,7 +46,6 @@ describe("Eval harness configuration availability", () => {
 
     expect(names(evalHarnessConfigurationPaths({
       harnessDirectory: "/tmp/harnesses",
-      isPackaged: false,
       packageAvailable,
       targetKey: "macos-arm64",
     }))).toEqual([
@@ -105,7 +76,6 @@ describe("Eval harness configuration availability", () => {
   it("hides Prime configurations when the development package is unavailable", () => {
     expect(names(evalHarnessConfigurationPaths({
       harnessDirectory: "/tmp/harnesses",
-      isPackaged: false,
       packageAvailable: () => false,
       targetKey: "macos-arm64",
     }))).toEqual([
@@ -129,41 +99,10 @@ describe("Eval harness configuration availability", () => {
     ]);
   });
 
-  it("never exposes development-only Prime configurations in packaged Eval", () => {
-    const packageAvailable = vi.fn(() => true);
-
-    expect(names(evalHarnessConfigurationPaths({
-      harnessDirectory: "/tmp/harnesses",
-      isPackaged: true,
-      packageAvailable,
-      targetKey: "macos-arm64",
-    }))).toEqual([
-      "fixture-task-system.yaml",
-      "fixture-node-detail.yaml",
-      "fixture-graph-memory.yaml",
-      "codex-basic.yaml",
-      "codex-basic-high.yaml",
-      "codex-eval-visual-node-details-control.yaml",
-      "codex-eval-visual-node-details-treatment.yaml",
-      "codex-eval-lantern-search-disabled-recursion-disabled.yaml",
-      "codex-eval-lantern-search-query-v1-recursion-disabled.yaml",
-      "codex-eval-lantern-search-disabled-recursion-enabled.yaml",
-      "codex-eval-lantern-search-query-v1-recursion-enabled.yaml",
-      "codex-layered-navigation-luna.yaml",
-      "codex-multi-agent-layered-navigation.yaml",
-      "claude-basic.yaml",
-      "codex-layered-personal-presentation-v0.yaml",
-      "codex-layered-personal-presentation-v1.yaml",
-      "codex-layered-personal-presentation-v2.yaml",
-    ]);
-    expect(packageAvailable).not.toHaveBeenCalled();
-  });
-
   it("keeps baseline harnesses but omits graph-search experiments off Apple Silicon", () => {
     for (const targetKey of ["macos-x64", "windows-x64", "linux-x64"]) {
       const available = names(evalHarnessConfigurationPaths({
         harnessDirectory: "/tmp/harnesses",
-        isPackaged: false,
         packageAvailable: () => true,
         targetKey,
       }));
@@ -187,7 +126,7 @@ describe("Eval harness configuration availability", () => {
   it("resolves the multi-agent configuration through the generic Eval catalog path", async () => {
     const catalog = await loadHarnessConfigurations(evalHarnessConfigurationPaths({
       harnessDirectory: resolve(repositoryRoot, "harnesses"),
-      isPackaged: true,
+      packageAvailable: () => false,
       targetKey: "macos-arm64",
     }));
 
@@ -206,7 +145,6 @@ describe("Eval harness configuration availability", () => {
   it("loads the Apple-Silicon-only Codex quartet without exposing non-runnable combined provider cells", async () => {
     const catalog = await loadHarnessConfigurations(evalHarnessConfigurationPaths({
       harnessDirectory: resolve(repositoryRoot, "harnesses"),
-      isPackaged: false,
       packageAvailable: () => false,
       targetKey: "macos-arm64",
     }));
