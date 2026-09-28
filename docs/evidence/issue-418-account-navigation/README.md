@@ -299,3 +299,64 @@ source-bound native evidence, applicable deterministic checks, canonical
 check/build, and independent review are required before this repair is declared
 verified. Results belong to their recorded source snapshots; this section records
 the mapping and failed baseline, not a passing repair claim.
+
+## Follow-up 563/564: turn picker and populated sidebar
+
+After PR 477 was merged as `f764dd44`, follow-up review reported two additional
+ACC-008 reachability failures. The recorded production-renderer red for the
+turn picker was a 320px popup extending from x=42 to x=362 while the remaining
+workspace began at x=210 in a 375px expanded-sidebar window. The populated
+sidebar red at 960×640 recorded `overflow-y: visible`, scrollHeight 631 versus
+clientHeight 510, and a final project row below the viewport (bottom y=707).
+These are separate failure boundaries: popup geometry and readable turn
+metadata in the narrow workspace, and navigation scrolling while keeping the
+footer controls fixed. The prior green scope-menu captures and the 59 existing
+native scenarios do not cover either boundary. Their receipts remain under
+`/Volumes/2T-SSD/evidence/temp/factory-418-navigation-repair/`; neither an
+earlier green probe of the first CSS candidate nor the pre-follow-up canonical
+proof certifies the current source.
+
+The replacement mapping stays in the existing
+`scripts/test-desktop-narrow-sidebar.mjs` production Electron runner and its
+declared `npm run test:desktop:narrow-sidebar` entry point. The turn-picker
+checkpoint uses real accepted turns, an active Stop lifecycle, and two
+API-created annotations so sequence, bounded prompt preview, status, and comment
+metadata are present together. It checks the 375px expanded and collapsed
+states plus the 483px expanded boundary against the workspace and clipping
+ancestors; it also exercises Escape/focus restoration, keyboard turn selection,
+draft retention, exact interaction identity, and unchanged server history. The
+populated navigation checkpoint uses real project and chat IDs at 960×640,
+checks the scrolling region and fixed Account/Settings footer, reaches late
+project actions by keyboard and wheel input, and verifies project scope without
+creating a thread. It covers Settings Back and the first/last narrow Settings
+tabs at 375px, with 375px collapsed/expanded and 1280px companion layout checks.
+These checkpoints observe existing navigation and selection authority; they do
+not certify OS-level wheel delivery, filesystem dialogs, or live provider
+execution.
+
+The baseline reproductions are confirmed failures. The follow-up native
+checkpoint and applicable deterministic checks have not yet run on the final
+combined source. No pass is claimed here; fresh source-bound receipts, the
+applicable canonical check/build, and independent review remain required.
+
+Native3 and its single unchanged retry native4 were interrupted before the new
+checkpoints: macOS occluded the window, Page Visibility became hidden, and
+animation frames stopped. Both failures are preserved in the external ledger.
+The follow-up runner keeps the production window factory, preload, security,
+minimum size, and real viewport, then disables background throttling for the
+test. Electron also changes Page Visibility under that override. The result
+records this foreground-like scheduling, and native input requires window and
+web-content focus. Screenshots prove rendered content; this test does not prove
+default occlusion, background refresh, physical OS visibility, or hardware input.
+Bounded frame, input, visibility, and clipping checks remain required.
+
+Native7 passed its 65 mapped scenarios on tree `14565737`, but independent
+screenshot review found a separate occlusion gap at 483px: the background layer
+comment badge (stacking level 6) appeared above the open turn picker inside the
+banner (stacking level 3). Within the app shell, the banner now rises to
+level 7 only while history is open; public-share pages have no app shell and
+retain their existing stacking. The existing annotated fixture checks the exact overlap with
+`elementFromPoint`, sends native pointer input there, and requires selection of
+Turn 2. Once history closes, the layer-comment badge must again be visible,
+enabled, and own its hit target. The previous geometry pass does not certify
+this stacking correction; fresh native and canonical evidence is required.

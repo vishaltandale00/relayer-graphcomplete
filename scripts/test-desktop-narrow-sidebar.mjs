@@ -1,8 +1,11 @@
 import { app, BrowserWindow, ipcMain } from "electron";
+import { randomBytes } from "node:crypto";
 import assert from "node:assert/strict";
 import { appendFile, mkdtemp, mkdir, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { createSettingsStore } from "../desktop/main/services/settings-store.mjs";
+import { registerLayerSelectionIpc } from "../desktop/main/ipc/register-ipc.mjs";
 import { createWindowFactory } from "../desktop/main/window.mjs";
 import { stopRunFixture, waitFor } from "../test/support/stop-run-fixture.mjs";
 
@@ -52,6 +55,7 @@ const handlers = {
     definitions: [{ id: "fixture-openai", adapterId: "openai-api", adapterLabel: "OpenAI API", label: "Deterministic provider", endpoint: "https://api.openai.com/v1", accessContract: "secret@1", lifecycleState: "active", connected: true }],
   }),
 };
+registerLayerSelectionIpc({ipcMain,settings:createSettingsStore(profile)});
 for (const [name, handler] of Object.entries(handlers)) ipcMain.handle(`relayer:${name}`, handler);
 function withTimeout(promise, timeoutMs, message) {
   let timer;
@@ -114,11 +118,26 @@ async function capture(name) {
   await settle(`capture:${name}`);
   await writeFile(join(evidence, `${name}.png`), (await window.webContents.capturePage()).toPNG());
 }
-async function pointerClick(selector) {
-  const point = await evaluate(`(() => {const e=document.querySelector(${JSON.stringify(selector)});if(!e)throw Error('Missing pointer target '+${JSON.stringify(selector)});const r=e.getBoundingClientRect();return {x:Math.round((r.left+r.right)/2),y:Math.round((r.top+r.bottom)/2)};})()`);
-  window.webContents.sendInputEvent({type:'mouseDown',x:point.x,y:point.y,button:'left',clickCount:1});
-  window.webContents.sendInputEvent({type:'mouseUp',x:point.x,y:point.y,button:'left',clickCount:1});
+async function sendNativeInput(event) {
+  if (!window.isFocused() || !window.webContents.isFocused()) {
+    window.focus();
+    window.webContents.focus();
+    await waitFor('verification window receives native input focus',()=>window.isFocused()&&window.webContents.isFocused(),1500);
+  }
+  window.webContents.sendInputEvent(event);
 }
+async function pointerClick(selector) {
+  await settle(`pointer:${selector}`);
+  const point = await evaluate(`(() => {const e=document.querySelector(${JSON.stringify(selector)});if(!e)throw Error('Missing pointer target '+${JSON.stringify(selector)});const r=e.getBoundingClientRect(),x=Math.round((r.left+r.right)/2),y=Math.round((r.top+r.bottom)/2),hit=document.elementFromPoint(x,y);return {x,y,visible:e.checkVisibility({checkOpacity:true,checkVisibilityCSS:true}),hit:e===hit||e.contains(hit),rect:{left:r.left,right:r.right,top:r.top,bottom:r.bottom},viewport:{width:innerWidth,height:innerHeight}};})()`);
+  assert.ok(point.x>=0&&point.x<point.viewport.width&&point.y>=0&&point.y<point.viewport.height,`Native pointer target is in the viewport: ${selector} ${JSON.stringify(point)}`);
+  // Project compose actions intentionally reveal on hover or keyboard focus.
+  // Move the real pointer, then require the revealed target to receive the hit.
+  await sendNativeInput({type:'mouseMove',x:point.x,y:point.y});
+  await waitFor(`Native pointer target is revealed and hit-testable: ${selector}`,()=>evaluate(`(()=>{const e=document.querySelector(${JSON.stringify(selector)}),hit=document.elementFromPoint(${point.x},${point.y});return e?.checkVisibility({checkOpacity:true,checkVisibilityCSS:true})&&getComputedStyle(e).opacity==='1'&&(e===hit||e.contains(hit))})()`),1500);
+  await sendNativeInput({type:'mouseDown',x:point.x,y:point.y,button:'left',clickCount:1});
+  await sendNativeInput({type:'mouseUp',x:point.x,y:point.y,button:'left',clickCount:1});
+}
+
 async function dispatchBrowserWheel(point, deltaY) {
   // CDP's Input.dispatchMouseEvent sends a browser input event in viewport CSS
   // pixels. Positive deltaY scrolls down; verify its trusted WheelEvent receipt
@@ -328,8 +347,8 @@ async function auditNewThreadComposer(name, threadId, scopeProjects) {
   assert.ok(wheelReach.rect.left>=scopeMenu.rect.left-.5&&wheelReach.rect.right<=scopeMenu.rect.right+.5&&wheelReach.rect.top>=scopeMenu.rect.top-.5&&wheelReach.rect.bottom<=scopeMenu.rect.bottom+.5,`${name}: last project is reachable within effective menu clip ${JSON.stringify(wheelReach)}`);
   const focusedItems=[];
   for(let index=0;index<scopeMenu.options.length;index++) {
-    window.webContents.sendInputEvent({type:'keyDown',keyCode:'TAB'});
-    window.webContents.sendInputEvent({type:'keyUp',keyCode:'TAB'});
+    await sendNativeInput({type:'keyDown',keyCode:'TAB'});
+    await sendNativeInput({type:'keyUp',keyCode:'TAB'});
     await settle();
     const focused=await evaluate(`(() => {const e=document.activeElement,m=document.querySelector('#scopeMenu'),r=e.getBoundingClientRect();let clip={left:0,top:0,right:innerWidth,bottom:innerHeight};for(let p=e.parentElement;p;p=p.parentElement){const s=getComputedStyle(p),b=p.getBoundingClientRect();if(['auto','scroll','hidden','clip'].includes(s.overflowX)){clip.left=Math.max(clip.left,b.left+p.clientLeft);clip.right=Math.min(clip.right,b.left+p.clientLeft+p.clientWidth)}if(['auto','scroll','hidden','clip'].includes(s.overflowY)){clip.top=Math.max(clip.top,b.top+p.clientTop);clip.bottom=Math.min(clip.bottom,b.top+p.clientTop+p.clientHeight)}}return {scope:e.dataset.scope||null,project:e.dataset.project||null,label:e.innerText||'',visible:e.checkVisibility({checkOpacity:true,checkVisibilityCSS:true}),rect:{left:r.left,right:r.right,top:r.top,bottom:r.bottom,width:r.width,height:r.height},clip,scrollTop:m.scrollTop};})()`);
     const expected=scopeMenu.options[index];
@@ -341,8 +360,8 @@ async function auditNewThreadComposer(name, threadId, scopeProjects) {
   }
   assert.ok(focusedItems.at(-1).scrollTop>focusedItems[0].scrollTop,`${name}: tab traversal scrolls through the menu`);
   const menuButton = await evaluate(`(() => {const e=[...document.querySelectorAll('#scopeMenu [data-scope="project"]')].at(-1),r=e.getBoundingClientRect();return {x:Math.round((r.left+r.right)/2),y:Math.round((r.top+r.bottom)/2)};})()`);
-  window.webContents.sendInputEvent({type:'mouseDown',x:menuButton.x,y:menuButton.y,button:'left',clickCount:1});
-  window.webContents.sendInputEvent({type:'mouseUp',x:menuButton.x,y:menuButton.y,button:'left',clickCount:1});
+  await sendNativeInput({type:'mouseDown',x:menuButton.x,y:menuButton.y,button:'left',clickCount:1});
+  await sendNativeInput({type:'mouseUp',x:menuButton.x,y:menuButton.y,button:'left',clickCount:1});
   await waitFor(`${name}: selected late project`,()=>evaluate(`import('./src/state.js').then(m=>m.viewState.selectedScope.kind==='project'&&String(m.viewState.selectedScope.projectId)===${JSON.stringify(String(scopeProjects.at(-1).id))})`));
   assert.equal(await evaluate("document.querySelector('#newThreadPrompt').value"),'keep this draft while choosing a project',`${name}: scope selection keeps the composer draft`);
   assert.equal(await evaluate("document.querySelector('#scopeButton').getAttribute('aria-expanded')"),'false',`${name}: selecting a project closes the menu`);
@@ -350,18 +369,18 @@ async function auditNewThreadComposer(name, threadId, scopeProjects) {
   assert.equal((await fixture.request('/api/state')).threads.length,threadCountBeforeScope,`${name}: selecting scope does not create a thread before Send`);
   await pointerClick('#scopeButton');
   await waitFor(`${name}: scope menu reopens after native pointer input`,()=>evaluate("document.querySelector('#scopeButton').getAttribute('aria-expanded')==='true'"),1500);
-  window.webContents.sendInputEvent({type:'keyDown',keyCode:'TAB'});
-  window.webContents.sendInputEvent({type:'keyUp',keyCode:'TAB'});
+  await sendNativeInput({type:'keyDown',keyCode:'TAB'});
+  await sendNativeInput({type:'keyUp',keyCode:'TAB'});
   await settle();
   const standalone = await evaluate(`(() => {const e=document.activeElement,m=document.querySelector('#scopeMenu'),r=e.getBoundingClientRect(),b=m.getBoundingClientRect();return {scope:e.dataset.scope||null,visible:e.checkVisibility({checkOpacity:true,checkVisibilityCSS:true}),rect:{left:r.left,right:r.right,top:r.top,bottom:r.bottom,width:r.width,height:r.height},menu:{left:b.left,right:b.right,top:b.top,bottom:b.bottom}};})()`);
   assert.equal(standalone.scope,'standalone',`${name}: reopening the menu tabs to No folder`);
   assert.ok(standalone.visible&&standalone.rect.width>0&&standalone.rect.height>0&&standalone.rect.left>=standalone.menu.left-.5&&standalone.rect.right<=standalone.menu.right+.5&&standalone.rect.top>=standalone.menu.top-.5&&standalone.rect.bottom<=standalone.menu.bottom+.5,`${name}: No folder is keyboard-reachable inside the menu ${JSON.stringify(standalone)}`);
   await evaluate("(() => {window.__scopeEnterReceipts=[];for(const type of ['keydown','keypress','keyup'])document.addEventListener(type,event=>{if(event.key==='Enter'||event.key==='\\r')window.__scopeEnterReceipts.push({type,key:event.key,code:event.code,isTrusted:event.isTrusted,target:event.target?.dataset?.scope||event.target?.tagName||null});},{capture:true});})()");
-  window.webContents.sendInputEvent({type:'keyDown',keyCode:'ENTER'});
+  await sendNativeInput({type:'keyDown',keyCode:'ENTER'});
   // Electron's keyDown input is rawKeyDown; the separate char event generates
   // the trusted keypress used by the browser's native button activation.
-  window.webContents.sendInputEvent({type:'char',keyCode:'ENTER'});
-  window.webContents.sendInputEvent({type:'keyUp',keyCode:'ENTER'});
+  await sendNativeInput({type:'char',keyCode:'ENTER'});
+  await sendNativeInput({type:'keyUp',keyCode:'ENTER'});
   await waitFor(`${name}: trusted native Enter key sequence`,()=>evaluate("window.__scopeEnterReceipts.some(event=>event.type==='keydown')&&window.__scopeEnterReceipts.some(event=>event.type==='keypress')&&window.__scopeEnterReceipts.some(event=>event.type==='keyup')"),1500);
   const enterReceipt=await evaluate("window.__scopeEnterReceipts");
   assert.deepEqual(enterReceipt.map(event=>event.type),['keydown','keypress','keyup'],`${name}: Enter produces the native keydown/keypress/keyup sequence ${JSON.stringify(enterReceipt)}`);
@@ -397,6 +416,221 @@ async function auditNewThreadComposer(name, threadId, scopeProjects) {
   await capture(name);
   await evaluate(`document.querySelector('[data-thread="${threadId}"]').click()`);
   await waitFor(`${name}: return to saved thread`,()=>evaluate(`import('./src/state.js').then(m=>m.viewState.mainView==='thread'&&String(m.viewState.currentThreadId)===${JSON.stringify(String(threadId))})`));
+}
+
+async function auditTurnPickerLayout(threadId, turnIds, annotatedTurnId) {
+  const scenarios = [];
+  for (const [width, expanded] of [[375, true], [375, false], [483, true]]) {
+    await resize(width);
+    const collapsed = await evaluate("document.body.classList.contains('sidebar-collapsed')");
+    if (collapsed === expanded) await pointerClick('#collapseSidebar');
+    await waitFor(`turn picker ${width}px sidebar state`, () => evaluate(`document.body.classList.contains('sidebar-collapsed')===${!expanded}`));
+    await pointerClick('#turnPickerButton');
+    await waitFor(`turn picker opens at ${width}px`, () => evaluate("document.querySelector('#turnPickerButton').getAttribute('aria-expanded')==='true'"), 1_500);
+    const state = await evaluate(`(() => {
+      const box=e=>{const r=e.getBoundingClientRect();return {left:r.left,right:r.right,top:r.top,bottom:r.bottom,width:r.width,height:r.height}};
+      const menu=document.querySelector('#turnPopover'),pane=document.querySelector('.main-area'),r=menu.getBoundingClientRect(),p=pane.getBoundingClientRect();
+      let clip={left:0,top:0,right:innerWidth,bottom:innerHeight};
+      for(let a=menu.parentElement;a;a=a.parentElement){const s=getComputedStyle(a),b=a.getBoundingClientRect();if(['auto','scroll','hidden','clip'].includes(s.overflowX)){clip.left=Math.max(clip.left,b.left+a.clientLeft);clip.right=Math.min(clip.right,b.left+a.clientLeft+a.clientWidth)}if(['auto','scroll','hidden','clip'].includes(s.overflowY)){clip.top=Math.max(clip.top,b.top+a.clientTop);clip.bottom=Math.min(clip.bottom,b.top+a.clientTop+a.clientHeight)}}
+      const rows=[...menu.querySelectorAll('.turn-option')].map(row=>{const prompt=row.querySelector('.turn-option-prompt'),meta=row.querySelector('.turn-option-meta'),status=row.querySelector('.turn-option-status'),comments=row.querySelector('.turn-option-comments');const child=e=>{if(!e)return null;const r=e.getBoundingClientRect();let c={left:0,top:0,right:innerWidth,bottom:innerHeight};for(let a=e.parentElement;a;a=a.parentElement){const s=getComputedStyle(a),b=a.getBoundingClientRect();if(['auto','scroll','hidden','clip'].includes(s.overflowX)){c.left=Math.max(c.left,b.left+a.clientLeft);c.right=Math.min(c.right,b.left+a.clientLeft+a.clientWidth)}if(['auto','scroll','hidden','clip'].includes(s.overflowY)){c.top=Math.max(c.top,b.top+a.clientTop);c.bottom=Math.min(c.bottom,b.top+a.clientTop+a.clientHeight)}}return{...box(e),visible:e.checkVisibility({checkOpacity:true,checkVisibilityCSS:true}),contained:r.left>=row.getBoundingClientRect().left-.5&&r.right<=row.getBoundingClientRect().right+.5&&r.top>=row.getBoundingClientRect().top-.5&&r.bottom<=row.getBoundingClientRect().bottom+.5,scrollWidth:e.scrollWidth,clientWidth:e.clientWidth}};return {id:row.dataset.turnId,current:row.getAttribute('aria-current')==='true',focused:document.activeElement===row,rect:box(row),visible:row.checkVisibility({checkOpacity:true,checkVisibilityCSS:true}),sequence:child(row.querySelector('.turn-option-number')),prompt:child(prompt),promptText:prompt.textContent,promptScrollWidth:prompt.scrollWidth,promptClientWidth:prompt.clientWidth,meta:child(meta),status:child(status),statusText:status?.textContent||'',comments:child(comments),commentsText:comments?.textContent||''}});
+      return {menu:box(menu),pane:box(pane),clip,overflowY:getComputedStyle(menu).overflowY,scrollTop:menu.scrollTop,scrollHeight:menu.scrollHeight,clientHeight:menu.clientHeight,scrollWidth:menu.scrollWidth,clientWidth:menu.clientWidth,rows,activeId:document.activeElement?.dataset?.turnId||null};
+    })()`);
+    const currentTurnId=await evaluate("import('./src/state.js').then(m=>String(m.viewState.currentInteractionId))");
+    assert.equal(state.rows.length, turnIds.length, `${width}: all saved and live turns are rendered in history`);
+    assert.deepEqual(state.rows.map(row=>row.id), turnIds, `${width}: turn picker retains exact interaction IDs`);
+    assert.ok(state.menu.left>=state.pane.left-.5&&state.menu.right<=state.pane.right+.5&&state.menu.left>=state.clip.left-.5&&state.menu.right<=state.clip.right+.5&&state.menu.top>=state.clip.top-.5&&state.menu.bottom<=state.clip.bottom+.5, `${width}: turn picker stays inside the remaining workspace and its clipping ancestors ${JSON.stringify(state)}`);
+    assert.ok(state.menu.width>0&&state.menu.height>0&&state.scrollWidth<=state.clientWidth+1, `${width}: turn picker has positive bounds without horizontal overflow`);
+    assert.ok(state.rows.every(row=>row.visible&&row.rect.height<=state.clientHeight&&row.sequence?.visible&&row.sequence.contained&&row.prompt?.visible&&row.prompt.contained&&row.prompt.width>0&&row.prompt.height>0&&row.prompt.height<=30&&row.prompt.scrollWidth<=row.prompt.clientWidth+1), `${width}: visible turn numbers and bounded prompt previews stay inside every row ${JSON.stringify(state.rows)}`);
+    const annotatedRow=state.rows.find(row=>row.id===String(annotatedTurnId));
+    assert.ok(annotatedRow?.comments?.visible&&annotatedRow.comments.contained&&annotatedRow.comments.width>0&&annotatedRow.comments.scrollWidth<=annotatedRow.comments.clientWidth+1&&annotatedRow.commentsText==='2 comments'&&annotatedRow.meta?.visible&&annotatedRow.meta.contained&&annotatedRow.meta.width>0, `${width}: real annotation metadata remains visible and bounded ${JSON.stringify(annotatedRow)}`);
+    const runningRow=state.rows.at(-1);
+    assert.ok(runningRow?.status?.visible&&runningRow.status.contained&&runningRow.status.width>0&&runningRow.status.scrollWidth<=runningRow.status.clientWidth+1&&runningRow.statusText==='Stopping…', `${width}: real Stop lifecycle status fits its turn row ${JSON.stringify(runningRow)}`);
+    assert.equal(state.activeId, currentTurnId, `${width}: opening the picker focuses the current turn`);
+    assert.ok(['auto','scroll'].includes(state.overflowY)&&state.scrollHeight>state.clientHeight, `${width}: long turn history remains user-scrollable`);
+    await capture(`native-${width}-${expanded?'expanded':'collapsed'}-turn-picker`);
+
+    if (width===375&&expanded) {
+      await sendNativeInput({type:'keyDown',keyCode:'Escape'});
+      await sendNativeInput({type:'keyUp',keyCode:'Escape'});
+      await waitFor('Escape closes turn picker and restores trigger focus',()=>evaluate("document.querySelector('#turnPickerButton').getAttribute('aria-expanded')==='false'&&document.activeElement.id==='turnPickerButton'"));
+      await pointerClick('#turnPickerButton');
+      await waitFor('turn picker reopens for real scroll and selection',()=>evaluate("document.querySelector('#turnPickerButton').getAttribute('aria-expanded')==='true'"),1_500);
+      const beforeScroll=await evaluate("document.querySelector('#turnPopover').scrollTop");
+      const menuBox=await evaluate("(()=>{const r=document.querySelector('#turnPopover').getBoundingClientRect();return{x:Math.round((r.left+r.right)/2),y:Math.round((r.top+r.bottom)/2)}})()");
+      await dispatchBrowserWheel(menuBox,-700);
+      await waitFor('turn picker scrolls toward the first turn',()=>evaluate(`document.querySelector('#turnPopover').scrollTop<${beforeScroll}`));
+      const first=await evaluate(`(()=>{const menu=document.querySelector('#turnPopover'),row=menu.querySelector('[data-turn-id="${turnIds[0]}"]'),r=row.getBoundingClientRect(),m=menu.getBoundingClientRect();return{scrollTop:menu.scrollTop,rect:{left:r.left,right:r.right,top:r.top,bottom:r.bottom,width:r.width,height:r.height},menu:{left:m.left,right:m.right,top:m.top,bottom:m.bottom}}})()`);
+      assert.ok(first.scrollTop<beforeScroll&&first.rect.width>0&&first.rect.height>0&&first.rect.left>=first.menu.left-.5&&first.rect.right<=first.menu.right+.5&&first.rect.top>=first.menu.top-.5&&first.rect.bottom<=first.menu.bottom+.5, `First turn is reachable after browser wheel input ${JSON.stringify(first)}`);
+      await capture('native-375-expanded-turn-picker-first');
+      const apiBefore=(await fixture.request(`/api/threads/${threadId}`)).interactions.map(item=>String(item.id));
+      await pointerClick(`#turnPopover [data-turn-id="${turnIds[0]}"]`);
+      await waitFor('exact first turn selected by native pointer',()=>evaluate(`import('./src/state.js').then(m=>String(m.viewState.currentInteractionId)===${JSON.stringify(String(turnIds[0]))})`));
+      assert.equal(await evaluate("document.querySelector('#turnPickerButton').getAttribute('aria-expanded')"),'false','Selecting a turn closes the picker');
+      assert.deepEqual((await fixture.request(`/api/threads/${threadId}`)).interactions.map(item=>String(item.id)),apiBefore,'Turn selection leaves accepted and pending history unchanged');
+      scenarios.push({width,expanded,focus:state.activeId,turnIds:state.rows.map(row=>row.id),comments:annotatedRow.commentsText,status:runningRow.statusText,escapeFocus:true,firstTurnReachable:true,selectedTurnId:String(turnIds[0]),historyUnchanged:true});
+    } else if (width===483) {
+      await sendNativeInput({type:'keyDown',keyCode:'Escape'});
+      await sendNativeInput({type:'keyUp',keyCode:'Escape'});
+      await waitFor(`Escape closes turn picker at ${width}px`,()=>evaluate("document.querySelector('#turnPickerButton').getAttribute('aria-expanded')==='false'"));
+      await pointerClick('#turnPickerButton');
+      await waitFor('turn picker reopens for annotation overlap',()=>evaluate("document.querySelector('#turnPickerButton').getAttribute('aria-expanded')==='true'"));
+      // The background root-layer comment badge overlaps Turn 2 at this width.
+      // Bounds alone cannot prove the popup wins the actual pointer target.
+      const overlap=await evaluate(`(()=>{const badge=document.querySelector('#workspaceBreadcrumb .breadcrumb-annotation-badge'),row=document.querySelector('#turnPopover [data-turn-id="${turnIds[1]}"]'),b=badge.getBoundingClientRect(),r=row.getBoundingClientRect(),x=Math.round((b.left+b.right)/2),y=Math.round((b.top+b.bottom)/2),hit=document.elementFromPoint(x,y);return{x,y,badgeVisible:badge.checkVisibility({checkOpacity:true,checkVisibilityCSS:true}),insideRow:x>r.left&&x<r.right&&y>r.top&&y<r.bottom,rowOwnsHit:row===hit||row.contains(hit),hitTag:hit?.tagName,hitClass:hit?.className}})()`);
+      assert.ok(overlap.badgeVisible&&overlap.insideRow&&overlap.rowOwnsHit,`Open picker owns the background annotation overlap ${JSON.stringify(overlap)}`);
+      await sendNativeInput({type:'mouseMove',x:overlap.x,y:overlap.y});
+      await sendNativeInput({type:'mouseDown',x:overlap.x,y:overlap.y,button:'left',clickCount:1});
+      await sendNativeInput({type:'mouseUp',x:overlap.x,y:overlap.y,button:'left',clickCount:1});
+      await waitFor('overlap click selects exact second turn',()=>evaluate(`import('./src/state.js').then(m=>String(m.viewState.currentInteractionId)===${JSON.stringify(turnIds[1])}&&document.querySelector('#turnPickerButton').getAttribute('aria-expanded')==='false')`));
+      const closedBadge=await evaluate(`(()=>{const e=document.querySelector('#workspaceBreadcrumb .breadcrumb-annotation-badge'),r=e.getBoundingClientRect(),hit=document.elementFromPoint((r.left+r.right)/2,(r.top+r.bottom)/2);return{visible:e.checkVisibility({checkOpacity:true,checkVisibilityCSS:true}),enabled:!e.disabled,ownsHit:e===hit||e.contains(hit)}})()`);
+      assert.ok(closedBadge.visible&&closedBadge.enabled&&closedBadge.ownsHit,`Layer comments remain reachable after history closes ${JSON.stringify(closedBadge)}`);
+      await capture('native-483-layer-comments-after-turn-selection');
+      scenarios.push({width,expanded,focus:state.activeId,turnIds:state.rows.map(row=>row.id),comments:annotatedRow.commentsText,status:runningRow.statusText,overlap,selectedTurnId:turnIds[1],closedBadge});
+    } else {
+      await sendNativeInput({type:'keyDown',keyCode:'Escape'});
+      await sendNativeInput({type:'keyUp',keyCode:'Escape'});
+      await waitFor(`Escape closes turn picker at ${width}px`,()=>evaluate("document.querySelector('#turnPickerButton').getAttribute('aria-expanded')==='false'"));
+      scenarios.push({width,expanded,focus:state.activeId,turnIds:state.rows.map(row=>row.id),comments:annotatedRow.commentsText,status:runningRow.statusText});
+    }
+  }
+  results.push({name:'turn-picker-responsive-layout',scenarios,annotationEnabled:true,preview:'two-line clamped prompt; full history remains selectable'});
+  return scenarios;
+}
+
+async function auditHistoryKeyboard(turnIds) {
+  await resize(375);
+  if(await evaluate("document.body.classList.contains('sidebar-collapsed')")) await pointerClick('#collapseSidebar');
+  await pointerClick('#turnPickerButton');
+  await waitFor('keyboard journey opens on current last turn',()=>evaluate(`document.activeElement?.dataset?.turnId===${JSON.stringify(turnIds.at(-1))}`));
+  const focusedRows=[];
+  for(let index=turnIds.length-1;index>=0;index--) {
+    if(index<turnIds.length-1) {
+      await sendNativeInput({type:'keyDown',keyCode:'TAB',modifiers:['shift']});
+      await sendNativeInput({type:'keyUp',keyCode:'TAB',modifiers:['shift']});
+    }
+    await waitFor(`keyboard reaches turn ${turnIds[index]}`,()=>evaluate(`document.activeElement?.dataset?.turnId===${JSON.stringify(turnIds[index])}`));
+    const focus=await evaluate("(()=>{const e=document.activeElement,r=e.getBoundingClientRect(),m=document.querySelector('#turnPopover').getBoundingClientRect();return{id:e.dataset.turnId,top:r.top,bottom:r.bottom,left:r.left,right:r.right,menu:{top:m.top,bottom:m.bottom,left:m.left,right:m.right}}})()");
+    assert.ok(focus.top>=focus.menu.top-.5&&focus.bottom<=focus.menu.bottom+.5&&focus.left>=focus.menu.left-.5&&focus.right<=focus.menu.right+.5,`Focused turn is visible ${JSON.stringify(focus)}`);
+    focusedRows.push(focus.id);
+  }
+  await sendNativeInput({type:'keyDown',keyCode:'ENTER'});
+  await sendNativeInput({type:'char',keyCode:'ENTER'});
+  await sendNativeInput({type:'keyUp',keyCode:'ENTER'});
+  await waitFor('keyboard selects exact first turn',()=>evaluate(`import('./src/state.js').then(m=>String(m.viewState.currentInteractionId)===${JSON.stringify(turnIds[0])})`));
+  assert.equal(await evaluate("document.querySelector('#threadPrompt').value"),'Keep this unsent follow-up while inspecting history','Keyboard history selection retains composer draft');
+  await pointerClick('#turnPickerButton');
+  await waitFor('picker reopens on first turn',()=>evaluate(`document.activeElement?.dataset?.turnId===${JSON.stringify(turnIds[0])}`));
+  for(let index=1;index<turnIds.length;index++) {
+    await sendNativeInput({type:'keyDown',keyCode:'TAB'});
+    await sendNativeInput({type:'keyUp',keyCode:'TAB'});
+    await waitFor(`forward Tab reaches turn ${turnIds[index]}`,()=>evaluate(`document.activeElement?.dataset?.turnId===${JSON.stringify(turnIds[index])}`));
+  }
+  await sendNativeInput({type:'keyDown',keyCode:'ENTER'});
+  await sendNativeInput({type:'char',keyCode:'ENTER'});
+  await sendNativeInput({type:'keyUp',keyCode:'ENTER'});
+  await waitFor('keyboard returns to exact active turn',()=>evaluate(`import('./src/state.js').then(m=>String(m.viewState.currentInteractionId)===${JSON.stringify(turnIds.at(-1))})`));
+  assert.equal(await evaluate("document.querySelector('#threadPrompt').value"),'Keep this unsent follow-up while inspecting history','Returning to active turn retains composer draft');
+  await pointerClick('#turnPickerButton');
+  await waitFor('picker reopens on active turn',()=>evaluate(`document.activeElement?.dataset?.turnId===${JSON.stringify(turnIds.at(-1))}`));
+  results.push({name:'turn-picker-keyboard-draft',keyboardReached:focusedRows,keyboardSelected:[turnIds[0],turnIds.at(-1)],draftRetained:true});
+  await sendNativeInput({type:'keyDown',keyCode:'Escape'});
+  await sendNativeInput({type:'keyUp',keyCode:'Escape'});
+}
+
+async function auditPopulatedSidebar(width, expanded, expectedProjectIds, expectedChatIds) {
+  await resize(width);
+  const collapsed=await evaluate("document.body.classList.contains('sidebar-collapsed')");
+  if(collapsed===expanded) await pointerClick('#collapseSidebar');
+  await waitFor(`sidebar ${width}px state`,()=>evaluate(`document.body.classList.contains('sidebar-collapsed')===${!expanded}`));
+  const state=await evaluate(`(()=>{const box=e=>{const r=e.getBoundingClientRect();return{left:r.left,right:r.right,top:r.top,bottom:r.bottom,width:r.width,height:r.height,visible:e.checkVisibility({checkOpacity:true,checkVisibilityCSS:true})}};const content=document.querySelector('#appSidebarContent'),sidebar=document.querySelector('.sidebar'),footer=document.querySelector('.sidebar-footer'),projects=[...document.querySelectorAll('#projectList [data-project-row]')],chats=[...document.querySelectorAll('#chatList [data-thread]')],f=box(footer),s=box(sidebar),c=box(content);return{sidebar:s,content:c,overflowY:getComputedStyle(content).overflowY,scrollTop:content.scrollTop,scrollHeight:content.scrollHeight,clientHeight:content.clientHeight,footer:f,footerOutside:!content.contains(footer),footerVisible:f.visible&&f.top>=0&&f.bottom<=innerHeight,footerContained:f.left>=s.left-.5&&f.right<=s.right+.5,settings:box(document.querySelector('#settingsButton')),account:box(document.querySelector('#desktopAccountButton')),update:box(document.querySelector('#updateButton')),newThread:box(document.querySelector('#newThread')),projectIds:projects.map(e=>e.dataset.projectRow),chatIds:chats.map(e=>e.dataset.thread),projects:projects.length,chats:chats.length,documentWidth:document.documentElement.scrollWidth}})()`);
+  assert.deepEqual([...state.projectIds].sort(),expectedProjectIds,`${width}: all populated project IDs are present exactly once`);
+  assert.deepEqual([...state.chatIds].sort(),expectedChatIds,`${width}: all populated chat IDs are present exactly once`);
+  assert.ok(['auto','scroll'].includes(state.overflowY)&&state.scrollHeight>state.clientHeight,`${width}: populated sidebar content owns a real scroll range ${JSON.stringify(state)}`);
+  assert.ok(state.footerOutside&&state.footerVisible&&state.footerContained,`${width}: footer remains fixed and fully visible outside the scrolling content`);
+  assert.ok(state.documentWidth<=width,`${width}: populated navigation creates no horizontal page overflow`);
+  assert.ok(state.settings.visible&&state.settings.width>0&&state.settings.height>0&&state.account.visible&&state.account.width>0&&state.account.height>0&&state.update.visible&&state.update.width>0&&state.update.height>0,`${width}: Settings and Account footer controls remain visible`);
+  assert.ok([state.settings,state.account,state.update].every(control=>control.left>=state.footer.left-.5&&control.right<=state.footer.right+.5&&control.top>=state.footer.top-.5&&control.bottom<=state.footer.bottom+.5),`${width}: all three footer controls fit their fixed footer ${JSON.stringify(state)}`);
+  assert.ok(state.newThread.visible&&state.newThread.width>0&&state.newThread.height>=36,`${width}: New Thread remains a positive-size control`);
+  await capture(`native-${width}-${expanded?'expanded':'collapsed'}-populated-sidebar`);
+  if(width===960&&expanded) {
+    const point=await evaluate(`(()=>{const e=document.querySelector('#appSidebarContent'),r=e.getBoundingClientRect();window.__sidebarWheelReceipt=null;e.addEventListener('wheel',event=>window.__sidebarWheelReceipt={trusted:event.isTrusted,deltaY:event.deltaY,targetInside:event.target.closest('#appSidebarContent')===e},{once:true});return{x:Math.round(r.left+r.width/2),y:Math.round(r.top+r.height/2)}})()`);
+    const before=await evaluate("document.querySelector('#appSidebarContent').scrollTop");
+    await dispatchBrowserWheel(point,500);
+    await waitFor('populated sidebar receives trusted wheel and scrolls',()=>evaluate(`Boolean(window.__sidebarWheelReceipt?.trusted&&window.__sidebarWheelReceipt.deltaY>0&&window.__sidebarWheelReceipt.targetInside&&document.querySelector('#appSidebarContent').scrollTop>${before})`));
+    state.wheel=await evaluate("({receipt:window.__sidebarWheelReceipt,scrollTop:document.querySelector('#appSidebarContent').scrollTop})");
+    assert.ok(state.wheel.scrollTop>before,state.wheel);
+  }
+  return state;
+}
+
+async function auditSidebarKeyboardAndSettings(expectedProjectIds, expectedChatIds, draftThreadId, nestedThreadId, draftTurnId) {
+  const scrollPoint=await evaluate("(()=>{const r=document.querySelector('#appSidebarContent').getBoundingClientRect();return{x:Math.round((r.left+r.right)/2),y:Math.round((r.top+r.bottom)/2)}})()");
+  await dispatchBrowserWheel(scrollPoint,-2000);
+  await waitFor('wheel returns to New Thread',()=>evaluate("document.querySelector('#appSidebarContent').scrollTop===0"));
+  await pointerClick('#newThread');
+  await waitFor('New Thread starts the native sidebar tab journey',()=>evaluate("import('./src/state.js').then(m=>m.viewState.mainView==='new')"));
+  // New Thread activation focuses its composer; seed the tab journey at the
+  // already pointer-reached navigation control, then use native keys throughout.
+  await evaluate("document.querySelector('#newThread').focus()");
+  const targets=await evaluate(`(()=>[...document.querySelectorAll('#appSidebarContent [data-thread],#projectList .project-button,#projectList .project-new-thread')].map(e=>({kind:e.matches('[data-thread]')?'chat':e.matches('.project-button')?'project':'project-action',id:e.dataset.thread||e.closest('[data-project-row]')?.dataset.projectRow||e.dataset.projectNewThread,selector:e.matches('[data-thread]')?'chat':e.matches('.project-button')?'project':'project-action'})))()`);
+  assert.deepEqual(targets.filter(item=>item.kind==='chat').map(item=>item.id).sort(),expectedChatIds,'Tab order includes each saved chat');
+  assert.deepEqual([...new Set(targets.filter(item=>item.kind!=='chat').map(item=>item.id))].sort(),expectedProjectIds,'Tab order includes each project row');
+  assert.equal(targets.filter(item=>item.kind==='project-action').length,expectedProjectIds.length,'Every project exposes its nested New Thread action');
+  const threadCountBefore=(await fixture.request('/api/state')).threads.length;
+  const contentTop=await evaluate("document.querySelector('#appSidebarContent').scrollTop");
+  assert.equal(contentTop,0,'User wheel input restores the first navigation control');
+  const reached=[];
+  for(const [index,target] of targets.entries()) {
+    await sendNativeInput({type:'keyDown',keyCode:'TAB'});
+    await sendNativeInput({type:'keyUp',keyCode:'TAB'});
+    const expected=JSON.stringify(target);
+    await waitFor(`Tab reaches ${target.kind} ${target.id}`,()=>evaluate(`(()=>{const target=${expected},e=document.activeElement;if(target.kind==='chat')return e?.dataset?.thread===target.id;if(target.kind==='project')return e?.matches('.project-button')&&e.closest('[data-project-row]')?.dataset.projectRow===target.id;return e?.dataset?.projectNewThread===target.id})()`));
+    await waitFor(`Focused ${target.kind} ${target.id} finishes its reveal`,()=>evaluate("document.activeElement.checkVisibility({checkOpacity:true,checkVisibilityCSS:true})&&getComputedStyle(document.activeElement).opacity==='1'"),1500);
+    const focus=await evaluate(`(()=>{const e=document.activeElement,r=e.getBoundingClientRect();let clip={left:0,top:0,right:innerWidth,bottom:innerHeight};for(let p=e.parentElement;p;p=p.parentElement){const s=getComputedStyle(p),b=p.getBoundingClientRect();if(['auto','scroll','hidden','clip'].includes(s.overflowX)){clip.left=Math.max(clip.left,b.left+p.clientLeft);clip.right=Math.min(clip.right,b.left+p.clientLeft+p.clientWidth)}if(['auto','scroll','hidden','clip'].includes(s.overflowY)){clip.top=Math.max(clip.top,b.top+p.clientTop);clip.bottom=Math.min(clip.bottom,b.top+p.clientTop+p.clientHeight)}}return{kind:${JSON.stringify(target.kind)},id:${JSON.stringify(target.id)},visible:e.checkVisibility({checkOpacity:true,checkVisibilityCSS:true}),rect:{left:r.left,right:r.right,top:r.top,bottom:r.bottom,width:r.width,height:r.height},clip,scrollTop:document.querySelector('#appSidebarContent').scrollTop}})()`);
+    assert.ok(focus.visible&&focus.rect.width>0&&focus.rect.height>0&&focus.rect.left>=focus.clip.left-.5&&focus.rect.right<=focus.clip.right+.5&&focus.rect.top>=focus.clip.top-.5&&focus.rect.bottom<=focus.clip.bottom+.5,`Tab target ${target.kind} ${target.id} is visible within the sidebar scroller ${JSON.stringify(focus)}`);
+    reached.push({kind:target.kind,id:target.id,scrollTop:focus.scrollTop});
+    if(index===targets.length-1) await capture('native-960-last-project-action-focused');
+  }
+  assert.ok(reached.at(-1).scrollTop>reached[0].scrollTop,'Keyboard traversal scrolls from chats through the final project action');
+  await pointerClick(`#projectList [data-thread="${nestedThreadId}"]`);
+  await waitFor('nested project chat selects its exact saved thread',()=>evaluate(`import('./src/state.js').then(m=>String(m.viewState.currentThreadId)===${JSON.stringify(String(nestedThreadId))})`));
+  const lastProjectId=targets.filter(item=>item.kind==='project').at(-1).id;
+  await pointerClick(`#projectList [data-project-new-thread="${lastProjectId}"]`);
+  await waitFor('late project action opens its scoped New Thread',()=>evaluate(`import('./src/state.js').then(m=>m.viewState.mainView==='new'&&m.viewState.selectedScope.kind==='project'&&String(m.viewState.selectedScope.projectId)===${JSON.stringify(lastProjectId)})`));
+  assert.equal((await fixture.request('/api/state')).threads.length,threadCountBefore,'Project New Thread action does not create a saved thread before Send');
+  const settingsBefore=await evaluate("document.querySelector('#settingsButton').getBoundingClientRect().toJSON()");
+  assert.ok(settingsBefore.width>0&&settingsBefore.height>0,'Settings footer remains available after sidebar scrolling');
+  await pointerClick('#settingsButton');
+  await waitFor('Settings opens from fixed footer',()=>evaluate("import('./src/state.js').then(m=>m.viewState.mainView==='settings')"));
+  await waitFor('desktop Settings tab receives focus',()=>evaluate("document.activeElement.matches('[data-settings-tab]')"));
+  await sendNativeInput({type:'keyDown',keyCode:'TAB',modifiers:['shift']});
+  await sendNativeInput({type:'keyUp',keyCode:'TAB',modifiers:['shift']});
+  await waitFor('Shift+Tab reaches Settings Back',()=>evaluate("document.activeElement.id==='settingsBackButton'"));
+  const back=await evaluate(`(()=>{const e=document.querySelector('#settingsBackButton'),r=e.getBoundingClientRect(),c=document.querySelector('#settingsSidebarContent'),cr=c.getBoundingClientRect(),s=document.querySelector('.sidebar').getBoundingClientRect();return{focused:document.activeElement===e,text:e.innerText,rect:{left:r.left,right:r.right,top:r.top,bottom:r.bottom,width:r.width,height:r.height},content:{left:cr.left,right:cr.right,top:cr.top,bottom:cr.bottom},sidebar:{left:s.left,right:s.right,top:s.top,bottom:s.bottom}}})()`);
+  assert.ok(back.focused&&back.text.includes('Back')&&back.rect.width>0&&back.rect.height>0&&back.rect.left>=back.content.left-.5&&back.rect.right<=back.content.right+.5&&back.rect.top>=back.content.top-.5&&back.rect.bottom<=back.content.bottom+.5&&back.rect.left>=back.sidebar.left-.5&&back.rect.right<=back.sidebar.right+.5,'Settings Back remains keyboard reachable and contained in the settings scroller');
+  await capture('native-960-settings-back-focused');
+  await pointerClick('#settingsBackButton');
+  await waitFor('Settings Back returns to New Thread',()=>evaluate("import('./src/state.js').then(m=>m.viewState.mainView==='new')"));
+  assert.equal((await fixture.request('/api/state')).threads.length,threadCountBefore,'Navigation and project actions do not create a thread');
+  await resize(375);
+  await pointerClick('#settingsButton');
+  await waitFor('narrow Settings opens from the fixed footer',()=>evaluate("import('./src/state.js').then(m=>m.viewState.mainView==='settings')"));
+  for(const tab of ['account','advanced']) {
+    await settingsPanel(tab,`native-375-populated-sidebar-${tab}`);
+    assert.equal(await evaluate("document.querySelector('#settingsCompactSelect').value"),tab,`375px Settings reaches ${tab} through the compact navigation`);
+  }
+  await pointerClick('#settingsCompactBackButton');
+  await waitFor('narrow Settings Back returns without creating a thread',()=>evaluate("import('./src/state.js').then(m=>m.viewState.mainView==='new')"));
+  assert.equal((await fixture.request('/api/state')).threads.length,threadCountBefore,'Narrow Settings navigation creates no saved thread');
+  await resize(960);
+  const returnScrollPoint=await evaluate("(()=>{const r=document.querySelector('#appSidebarContent').getBoundingClientRect();return{x:Math.round((r.left+r.right)/2),y:Math.round((r.top+r.bottom)/2)}})()");
+  await dispatchBrowserWheel(returnScrollPoint,-2000);
+  await waitFor('return wheel reaches saved chats',()=>evaluate("document.querySelector('#appSidebarContent').scrollTop===0"));
+  await pointerClick(`#chatList [data-thread="${draftThreadId}"]`);
+  // loadThread sets the thread ID before its asynchronous refresh hydrates the turn and composer.
+  await waitFor('sidebar hydrates the exact original draft turn',()=>evaluate(`import('./src/state.js').then(m=>String(m.viewState.currentThreadId)===${JSON.stringify(String(draftThreadId))}&&String(m.viewState.currentInteractionId)===${JSON.stringify(String(draftTurnId))})`));
+  assert.equal(await evaluate("document.querySelector('#threadPrompt').value"),'Keep this unsent follow-up while inspecting history','Sidebar project and Settings journey retains saved follow-up draft');
+  results.push({name:'populated-sidebar-keyboard-settings',draftRetained:true,nestedThreadId,reached,settingsFooter:settingsBefore,settingsBack:back,projectActionScopeId:lastProjectId,threadCountBefore});
 }
 const panels = {
   account: ["#desktopAccountLogout"],
@@ -483,6 +717,11 @@ async function main() {
   await waitFor("accepted graph", async () => (await fixture.request(`/api/threads/${thread.id}`)).interactions[0]?.completionStatus === "accepted");
   window = await createWindowFactory({ BrowserWindow, desktopDirectory: resolve("desktop"), getAppearance: () => appearance, updater: { status: () => ({ phase: "development" }) }, openExternal: async () => { throw new Error("Unexpected external navigation"); }, onWindowCreated: created => {
     window = created;
+    // Test scheduling only: keep rendered layout progressing if another macOS
+    // window occludes this production-created window. Electron also changes
+    // Page Visibility here; this runner does not prove default background behavior.
+    window.webContents.setBackgroundThrottling(false);
+    assert.equal(window.webContents.getBackgroundThrottling(),false);
     window.webContents.on("console-message", (_event, level, message) => { if (level >= 3) rendererErrors.push(message); });
   } })(fixture.session);
   window.show(); window.focus();
@@ -583,8 +822,63 @@ async function main() {
   await resize(375);
   if(await evaluate("document.body.classList.contains('sidebar-collapsed')")) await evaluate("document.querySelector('#collapseSidebar').click()");
   await auditNewThreadComposer("native-375-expanded-new-thread",thread.id,scopeProjects);
+  await recordPhase('follow-up:563-564-fixtures');
+  const nested=await fixture.request('/api/threads',{method:'POST',body:JSON.stringify({projectId:scopeProjects.at(-1).id,initialMessage:'accept nested project navigation',harnessId:'fixture-stop-codex',permissionProfileId:'full',modelSelection:fixture.modelSelection})});
+  await waitFor('nested project thread accepted',async()=>(await fixture.request(`/api/threads/${nested.id}`)).interactions[0]?.completionStatus==='accepted');
+  const history=await fixture.create('codex','accept responsive history with a long prompt '+ 'unbroken'.repeat(10));
+  await waitFor('history first turn accepted',async()=>(await fixture.request(`/api/threads/${history.id}`)).interactions[0]?.completionStatus==='accepted');
+  for(let i=1;i<4;i++) {
+    await fixture.request(`/api/threads/${history.id}/interactions`,{method:'POST',body:JSON.stringify({text:`accept historical turn ${i} with a deliberately long prompt ${'unbroken'.repeat(10)}`,modelSelection:fixture.modelSelection})});
+    await waitFor(`history accepted turn ${i+1}`,async()=>{const turns=(await fixture.request(`/api/threads/${history.id}`)).interactions;return turns.length===i+1&&turns.at(-1).completionStatus==='accepted'});
+  }
+  await fixture.request(`/api/threads/${history.id}/interactions`,{method:'POST',body:JSON.stringify({text:'Inspect responsive tool work with a long status-bearing prompt '+ 'unbroken'.repeat(10),modelSelection:fixture.modelSelection})});
+  const live=await waitFor('history active turn',async()=>{const turn=(await fixture.request(`/api/threads/${history.id}`)).interactions.at(-1);return fixture.controls.has(turn.graphNodeId)&&turn});
+  const liveControl=fixture.controls.get(live.graphNodeId);
+  await withTimeout(liveControl.started.promise,5000,'Live fixture did not start');
+  await recordPhase('follow-up:live-turn-started');
+  const annotationToken=randomBytes(32).toString('hex');
+  const controlCookie=`${fixture.session.cookie.name}=${fixture.session.cookie.value}`;
+  const registration=await fetch(new URL('/api/internal/annotation-sessions',fixture.session.origin),{method:'POST',headers:{Cookie:controlCookie,'Content-Type':'application/json'},body:JSON.stringify({token:annotationToken,threadIds:[history.id],authorId:'fixture:layout',authorDisplayName:'Layout fixture'})});
+  assert.equal(registration.status,204,'Real thread-scoped annotation session registered');
+  for(let i=1;i<=2;i++) await fixture.request(`/api/threads/${history.id}/annotations`,{method:'POST',headers:{Cookie:`${controlCookie}; relayer_annotation=${annotationToken}`},body:JSON.stringify({anchor:{kind:'turn',interactionId:live.id},comment:`Layout metadata comment ${i}`})});
+  await window.webContents.session.cookies.set({url:fixture.session.origin,name:'relayer_annotation',value:annotationToken,httpOnly:true,sameSite:'strict'});
+  await resize(960);
+  await window.loadURL(fixture.session.origin);
+  window.show();window.focus();
+  await waitFor('fresh writable annotated shell',()=>evaluate("import('./src/state.js').then(m=>m.appState.capabilities?.annotations===true&&document.querySelector('#appShell').checkVisibility())"));
+  await evaluate(`import('./src/threads.js').then(m=>m.loadThread(${history.id}))`);
+  await waitFor('live Stop control',()=>evaluate("document.querySelector('#sendInteraction')?.getAttribute('aria-label')==='Stop run'&&!document.querySelector('#sendInteraction').disabled"));
+  await pointerClick('#sendInteraction');
+  await withTimeout(liveControl.aborted.promise,5000,'Native Stop click did not abort the fixture');
+  await recordPhase('follow-up:stop-aborted');
+  await waitFor('held Stopping lifecycle',()=>evaluate("document.querySelector('#sendInteraction')?.getAttribute('aria-label')==='Stopping'"));
+  const historyBefore=(await fixture.request(`/api/threads/${history.id}`)).interactions.map(({id,completionStatus})=>({id,completionStatus}));
+  await auditTurnPickerLayout(history.id,historyBefore.map(turn=>String(turn.id)),live.id);
+  assert.deepEqual((await fixture.request(`/api/threads/${history.id}`)).interactions.map(({id,completionStatus})=>({id,completionStatus})),historyBefore,'Pointer and keyboard selection preserve exact history statuses');
+  liveControl.settled.resolve();
+  await waitFor('history stopped',async()=>(await fixture.request(`/api/threads/${history.id}`)).interactions.at(-1).completionStatus==='stopped');
+  await resize(960);
+  await evaluate(`import('./src/threads.js').then(m=>m.loadThread(${history.id}))`);
+  await waitFor('stopped thread has writable composer',()=>evaluate("!document.querySelector('#threadPrompt').disabled"));
+  await pointerClick('#threadPrompt');
+  window.webContents.insertText('Keep this unsent follow-up while inspecting history');
+  await waitFor('native draft input arrives',()=>evaluate("document.querySelector('#threadPrompt').value==='Keep this unsent follow-up while inspecting history'"));
+  const stoppedHistory=(await fixture.request(`/api/threads/${history.id}`)).interactions.map(({id,completionStatus})=>({id,completionStatus}));
+  await auditHistoryKeyboard(stoppedHistory.map(turn=>String(turn.id)));
+  assert.deepEqual((await fixture.request(`/api/threads/${history.id}`)).interactions.map(({id,completionStatus})=>({id,completionStatus})),stoppedHistory,'Keyboard draft journey leaves stopped and accepted history unchanged');
+  window.webContents.send('relayer:update-changed',{phase:'available',channel:'stable',version:'0.0.0-evidence',availableVersion:'0.0.1-evidence'});
+  await waitFor('real updater IPC reveals footer indicator',()=>evaluate("document.querySelector('#updateButton').checkVisibility()"));
+
+  await evaluate("import('./src/threads.js').then(m=>m.refreshState())");
+  const populated=await fixture.request('/api/state');
+  const expectedProjects=populated.projects.map(item=>String(item.id)).sort();
+  const expectedChats=populated.threads.filter(item=>!item.projectId).map(item=>String(item.id)).sort();
+  const sidebarScenarios=[];
+  for(const [width,expanded] of [[375,true],[375,false],[1280,true],[960,true]]) sidebarScenarios.push(await auditPopulatedSidebar(width,expanded,expectedProjects,expectedChats));
+  results.push({name:'populated-sidebar-scroll-layout',scenarios:sidebarScenarios});
+  await auditSidebarKeyboardAndSettings(expectedProjects,populated.threads.map(item=>String(item.id)).sort(),history.id,nested.id,live.id);
   assert.deepEqual(rendererErrors, [], "No renderer error messages");
-  await writeFile(join(evidence, "result.json"), JSON.stringify({ passed: true, platform: process.platform, inference: false, productionWindowFactory: true, results }, null, 2));
+  await writeFile(join(evidence, "result.json"), JSON.stringify({ passed: true, platform: process.platform, inference: false, productionWindowFactory: true, scheduling: { backgroundThrottling: window.webContents.getBackgroundThrottling(), pageVisibilityOverride: true, defaultBackgroundBehaviorVerified: false, physicalOsInputVerified: false }, results }, null, 2));
   console.log(JSON.stringify({ passed: true, evidence, scenarios: results.length }));
   exitCode = 0;
 }

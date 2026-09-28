@@ -286,3 +286,24 @@ html[data-theme="light"] .annotation-panel{background:#fafaf9;box-shadow:0 18px 
 body.sidebar-collapsed .sidebar-title{justify-content:center;gap:0}
 body.sidebar-collapsed .sidebar-title strong,body.sidebar-collapsed .new-thread-button kbd{display:none}
 body.sidebar-collapsed .new-thread-button{gap:0;padding-inline:0}
+
+/* Keep sidebar sections intact inside the bounded, independently scrollable navigation pane. */
+.sidebar-content{overflow-x:hidden;overflow-y:auto}
+.sidebar-content>.side-section,.sidebar-content>.new-thread-button,.sidebar-content>.settings-back-button{flex:0 0 auto}
+.sidebar-footer{flex:none}
+
+/* Reserve the workspace and banner insets on both sides of the anchored picker. */
+.turn-popover{width:min(320px,calc(100cqw - 44px))}
+@container workspace-pane (max-width:272px){
+  .turn-popover{width:calc(100cqw - 24px)}
+}
+@container workspace-pane (max-width:400px){
+  .turn-option{height:auto;min-height:52px;grid-template-columns:42px minmax(0,1fr);grid-template-rows:auto auto;align-items:start;gap:3px 6px;padding:6px 8px}
+  .turn-option-number{align-self:start;padding-top:2px}
+  .turn-option-meta{grid-column:2;min-width:0;max-width:100%;align-items:flex-start;overflow-wrap:anywhere}
+  .turn-option-status,.turn-option-comments{min-width:0;max-width:100%;overflow-wrap:anywhere}
+  .turn-option-prompt{display:-webkit-box;height:auto;max-height:2.5em;overflow:hidden;white-space:normal;overflow-wrap:anywhere;line-height:1.25;-webkit-box-orient:vertical;-webkit-line-clamp:2}
+}
+
+/* Open history must sit above background graph annotation controls. */
+.app-shell .interaction-banner:has(.turn-popover:not(.hidden)){z-index:7}
