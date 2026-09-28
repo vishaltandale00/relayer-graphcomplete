@@ -1,0 +1,75 @@
+name: Compiled Rust inventory probe
+
+# Non-authoritative inventory only. No compiled-output cache writes, transport or replay.
+on:
+  push:
+    branches: [codex/compiled-inventory-probe]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+concurrency:
+  group: compiled-inventory-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CARGO_INCREMENTAL: "0"
+  CARGO_PROFILE_DEV_DEBUG: line-tables-only
+  CARGO_PROFILE_TEST_DEBUG: line-tables-only
+  CARGO_TARGET_DIR: /home/runner/work/_temp/cargo-target
+  PILOT_EVIDENCE: /home/runner/work/_temp/compiled-test-evidence
+  PILOT_IDENTITY: /home/runner/work/_temp/compiled-test-identity.json
+
+jobs:
+  inventory:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup-node-dependencies
+      - uses: ./.github/actions/setup-rust-compilation
+        id: rust
+        with:
+          lane: compiled-test-control
+          sccache-mode: READ_ONLY
+      - uses: ./.github/actions/install-lbug-bundle
+        with:
+          lbug-cached: "true"
+          rustc-release: ${{ steps.rust.outputs.rustc-release }}
+          artifact-name: deliberately-no-pilot-native-artifact
+      - name: Record compiler settings
+        run: |
+          mkdir -p "$PILOT_EVIDENCE"
+          echo "RUSTC_WRAPPER=$GITHUB_WORKSPACE/scripts/ci/sccache-wrapper.sh" >> "$GITHUB_ENV"
+          echo "RELAYER_SCCACHE_ENABLED=${{ steps.rust.outputs.sccache-enabled }}" >> "$GITHUB_ENV"
+          echo "SCCACHE_GHA_VERSION=${{ steps.rust.outputs.cache-version }}" >> "$GITHUB_ENV"
+          echo "SCCACHE_GHA_ENABLED=true" >> "$GITHUB_ENV"
+          echo "SCCACHE_GHA_RW_MODE=READ_ONLY" >> "$GITHUB_ENV"
+          echo "SCCACHE_CLIENT_SIDE=1" >> "$GITHUB_ENV"
+          echo "SCCACHE_IGNORE_SERVER_IO_ERROR=1" >> "$GITHUB_ENV"
+          git rev-parse HEAD > "$PILOT_EVIDENCE/source.txt"
+      - name: Derive exact consumer-recomputable build identity
+        id: identity
+        run: |
+          python3 -B scripts/ci/compiled-test-pilot/bundle.py identity --target "$CARGO_TARGET_DIR" --native "$RUNNER_TEMP/lbug-prebuilt" --identity "$PILOT_IDENTITY" --metrics "$PILOT_EVIDENCE/identity.json"
+          echo "digest=$(sha256sum "$PILOT_IDENTITY" | cut -d ' ' -f 1)" >> "$GITHUB_OUTPUT"
+          cp "$PILOT_IDENTITY" "$PILOT_EVIDENCE/identity-inputs.json"
+      - name: Capture full default compilation inventory
+        run: |
+          cargo metadata --locked --no-deps --format-version 1 > "$PILOT_EVIDENCE/metadata.json"
+          cargo test --workspace --no-run --message-format=json > "$PILOT_EVIDENCE/cargo.jsonl" 2> "$PILOT_EVIDENCE/cargo.stderr"
+      - name: Observe each closure section independently
+        if: always() && steps.identity.outcome == 'success'
+        run: |
+          python3 -B scripts/ci/compiled-inventory/report.py --cargo-json "$PILOT_EVIDENCE/cargo.jsonl" --metadata "$PILOT_EVIDENCE/metadata.json" --target "$CARGO_TARGET_DIR" --cargo-home "$HOME/.cargo" --repository "$GITHUB_WORKSPACE" --output "$PILOT_EVIDENCE/inventory.json"
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
+        if: always()
+        with:
+          name: compiled-inventory-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ env.PILOT_EVIDENCE }}
+          retention-days: 14
