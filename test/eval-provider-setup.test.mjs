@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { mkdtemp, readFile, rm, mkdir, writeFile } from "node:fs/promises";
+import { access, mkdtemp, readFile, rm, mkdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createEvalProviderSetup } from "../desktop/eval-main/provider-setup.mjs";
@@ -19,6 +19,8 @@ async function setup({ managed = false, failing = false, credentialStore, now, a
   const registry = createProviderAdapterRegistry([{
     adapterId, implementationVersion: "1", label: "Test provider",
     accessContract: managed ? "managed-runtime@1" : "secret@1",
+    // As the production API adapters declare: removal deletes their private home.
+    ...(managed ? {} : { definitionRuntimeState: true }),
     defaultEndpoint: managed ? null : "https://provider.example/v1",
     connection: managed ? { mode: "managed-login" } : { mode: "secret-fields", fields: [{ id: "api-key", label: "Key", kind: "secret" }] },
     create: ({ definition, ...deps }) => {
@@ -82,6 +84,11 @@ describe("Eval production provider setup", () => {
     expect(status.adapters[0].adapterId).toBe("openrouter");
     expect(JSON.stringify(status)).not.toContain("private-key");
     expect(JSON.stringify(fixture.stored())).not.toContain("private-key");
+    // An API-key provider gets its private Codex home in the Eval profile, as in Relayer
+    // Desktop, so a new codex.basic conversation on it can run (PRD AGT-013).
+    const home = join(fixture.directory, "provider-runtime", "chosen", "codex-home");
+    expect(fixture.dependencies.at(-1).environment).toEqual({ CODEX_HOME: home });
+    await expect(access(home)).resolves.toBeUndefined();
     const lease = await fixture.service.acquireExecution("chosen");
     expect(await lease.runtime.executionAccess()).toEqual({ kind: "secret", value: "private-key" });
     await lease.release();
@@ -91,6 +98,7 @@ describe("Eval production provider setup", () => {
     fixture.setBusy(false);
     await fixture.service.remove("chosen");
     await expect(fixture.service.acquireExecution("chosen")).rejects.toThrow("unavailable");
+    await expect(access(join(fixture.directory, "provider-runtime", "chosen"))).rejects.toMatchObject({ code: "ENOENT" });
   });
 
   it("prepares native login explicitly and scopes its native credential home to the Eval definition", async () => {

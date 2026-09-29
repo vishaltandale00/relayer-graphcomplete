@@ -1,4 +1,5 @@
 import { readFile } from "node:fs/promises";
+import { join } from "node:path";
 import { createManagedRuntimeInstaller } from "../main/managed-runtimes/installer.mjs";
 import { createManagedRuntimeResolver } from "../main/managed-runtimes/resolver.mjs";
 import { createProviderComposition } from "../main/providers/provider-composition.mjs";
@@ -92,7 +93,11 @@ export function createEvalPrimeProvider({ userDataDirectory, productServer, prod
     providerStatuses: () => productServer.providerStatuses(),
     runtimeDependencies: async (definition) => {
       if (definition.accessContract === "secret@1") {
-        return productionProviderRuntimeDependencies(definition, {});
+        // An API-key provider gets its private native home, as in Relayer Desktop, so a
+        // codex.basic or claude.basic run on it never falls back to the user's home.
+        return productionProviderRuntimeDependencies(definition, {
+          runtimeRoot: join(userDataDirectory, "provider-runtimes"),
+        });
       }
       if (definition.id !== "codex" || definition.adapterId !== "codex-subscription") {
         throw new Error("This provider has no Desktop Eval execution adapter.");

@@ -41,6 +41,40 @@ function providerLease({
 }
 
 describe("desktop provider execution access broker", () => {
+  it("carries only an API-key provider's private home as one absolute path, and releases a refused lease", async () => {
+    const secret = (environment) => ({
+      kind: "secret",
+      endpoint: "https://api.example.test/v1",
+      fields: { "api-key": "secret" },
+      environment,
+    });
+    const acquire = (environment) => {
+      const provider = providerLease({ providerId: "openai-work", resolved: secret(environment) });
+      const lease = createProviderExecutionAccessBroker(async () => provider.lease).acquire(
+        { providerId: "openai-work", adapterId: "openai-api", modelId: "gpt-5" },
+        ["secret@1"],
+        new AbortController().signal,
+      );
+      return { lease, release: provider.release };
+    };
+
+    const accepted = acquire({ CODEX_HOME: "/profile/provider-runtimes/openai-work/codex-home" });
+    await expect(accepted.lease).resolves.toMatchObject({
+      access: { environment: { CODEX_HOME: "/profile/provider-runtimes/openai-work/codex-home" } },
+    });
+    for (const environment of [
+      { CODEX_HOME: "relative/codex-home" },
+      { CODEX_HOME: "" },
+      { PATH: "/usr/bin" },
+      { CODEX_HOME: "/a", CLAUDE_CONFIG_DIR: "/b" },
+      { CODEX_HOME: 7 },
+    ]) {
+      const refused = acquire(environment);
+      await expect(refused.lease).rejects.toThrow("invalid secret execution access");
+      expect(refused.release).toHaveBeenCalledOnce();
+    }
+  });
+
   it("passes the owner's acknowledgement through to the provider lease", async () => {
     const provider = providerLease({ providerId: "openai-work" });
     const acknowledge = vi.fn(async () => {});

@@ -73,7 +73,8 @@ export function createEvalProviderSetup({ userDataDirectory, productServer, prod
     providerStatuses: () => productServer.providerStatuses(),
     removeRuntimeState: createProviderRuntimeStateRemover({ runtimeRoot, registry }),
     runtimeDependencies: async (definition) => {
-      if (definition.accessContract === "secret@1") return productionProviderRuntimeDependencies(definition, {});
+      // An API-key provider gets its private native home here too (PRD AGT-013).
+      if (definition.accessContract === "secret@1") return productionProviderRuntimeDependencies(definition, { runtimeRoot });
       const managedRuntime = await runtime(managedRuntimeRequirementForAdapter(definition.adapterId).recipeId);
       const dependencies = await productionProviderRuntimeDependencies(definition, {
         runtimeRoot, legacyCodexHome, environment, managedRuntime,

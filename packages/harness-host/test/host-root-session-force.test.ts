@@ -65,7 +65,7 @@ describe("root session state when the host force-stops a root turn", () => {
     void first.complete(1, 2, graph(2)).catch(() => undefined);
     await vi.waitFor(() => expect(submissions).toHaveLength(2));
     await first.forceClose();
-    expect(await persistedState()).toEqual({ codexRootResetReason: "force_stopped" });
+    expect(await persistedState()).toEqual({ codexProviderHome: "isolated", codexRootResetReason: "force_stopped" });
 
     const second = makeHost();
     await second.initialize();

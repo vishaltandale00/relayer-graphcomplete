@@ -177,7 +177,6 @@
       "ForceClosePersists": "TRUE",
       "SessionScopedInstructions": "TRUE"
     },
-    "codex-auth": {},
     "lifecycle-today": {
       "MaxRt": "3",
       "MaxGen": "4",
@@ -2390,30 +2389,6 @@
       ],
       "expect": "pass",
       "finding": "A force-stopped root turn's host run always ends and frees the session lock, even when its native turn never settles."
-    },
-    {
-      "id": "codex-auth-safety",
-      "module": "HarnessCodexAuth",
-      "preset": "codex-auth",
-      "invariants": [
-        "TypeOK",
-        "RunningHasKey",
-        "CountExact",
-        "NoLeftoverKey"
-      ],
-      "expect": "pass",
-      "finding": "A running Codex turn always finds its provider key file, the user count is exact, and no key file remains once every turn ends, with force-stops and a host that stops waiting."
-    },
-    {
-      "id": "codex-auth-liveness",
-      "module": "HarnessCodexAuth",
-      "preset": "codex-auth",
-      "fair": true,
-      "properties": [
-        "EventuallyClean"
-      ],
-      "expect": "pass",
-      "finding": "The key file is eventually removed for good."
     },
     {
       "id": "lifecycle-lease-during-reconnect",

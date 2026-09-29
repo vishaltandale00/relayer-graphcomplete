@@ -1,7 +1,7 @@
 import { createServer, type IncomingMessage } from "node:http";
 import { execFile } from "node:child_process";
 import { createRequire } from "node:module";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { promisify } from "node:util";
@@ -25,6 +25,8 @@ describe("Codex secret-provider process boundary", () => {
   });
 
   // Non-Darwin binaries are not evidence for the shipped macOS boundary.
+  // The provider home starts with no auth.json, and codex.basic writes none: this proves Codex
+  // authenticates the API-key provider from OPENAI_API_KEY through the override's env_key.
   // Snapshot isolation is checked against the native parser before the real turn,
   // so the regression does not depend on racing snapshot generation.
   nativeDarwinIt("authenticates the selected Responses endpoint while excluding provider secrets from model-requested shell tools", async () => {
@@ -116,11 +118,10 @@ describe("Codex secret-provider process boundary", () => {
           runtimeId: "codex",
           version: pinnedCodexVersion(),
           executable: codexBinary,
-          environment: {
-            CODEX_HOME: codexHome,
-            RELAYER_CODEX_BINARY: codexBinary,
-          },
+          environment: { RELAYER_CODEX_BINARY: codexBinary },
         },
+        // The provider's private home, as a new conversation gets it (PRD AGT-013).
+        environment: { CODEX_HOME: codexHome },
       },
       graph: {
         interactionNodeId: 1,
@@ -160,6 +161,9 @@ describe("Codex secret-provider process boundary", () => {
       expect(shellOutput).toContain("RELAYER_NODE_ID_PRESENT");
       expect(shellOutput).not.toContain(SYNTHETIC_API_KEY);
       await expect(completion).resolves.toBeUndefined();
+      // The bearer above came from the environment alone: the home holds no auth.json (AGT-017).
+      await expect(readFile(join(codexHome, "auth.json"), "utf8")).rejects.toMatchObject({ code: "ENOENT" });
+      expect(await readdir(codexHome)).not.toContain("auth.json");
     } finally {
       abort.abort(new Error("Process-boundary test cleanup."));
       harness.forceShutdown();

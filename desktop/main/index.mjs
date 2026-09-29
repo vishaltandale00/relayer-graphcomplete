@@ -468,8 +468,8 @@ if (primaryInstance) {
         "One or more retired managed runtimes could not be removed.",
       ));
     }
-    // SIGKILL during a secret Codex turn skips harness-host finally and can
-    // leave plaintext API-key auth.json under an isolated provider home.
+    // codex.basic no longer writes an API-key auth.json. Remove any a build
+    // that did left under a provider home, since it would hold a plaintext key.
     const leftoverAuth = await removeLeftoverEphemeralCodexAuthFiles(providerRuntimeRoot);
     if (leftoverAuth.failures.length) {
       console.error("Leftover Codex API-key auth cleanup failed:", new AggregateError(

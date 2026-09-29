@@ -82,8 +82,6 @@ export class SecretApiProviderAdapter extends ModelCatalogAdapter {
     verifyConnectionBeforeDiscovery = false,
     modelCapabilities = () => null,
     requireCatalogBeforeExecution = false,
-    managedRuntime,
-    runtimeId,
     environment,
     modelEligibility = () => MODEL_CAPABILITY_UNKNOWN,
   }) {
@@ -101,6 +99,11 @@ export class SecretApiProviderAdapter extends ModelCatalogAdapter {
     this.requireCatalogBeforeExecution = requireCatalogBeforeExecution;
     this.catalogDiscovered = false;
     this.modelEligibility = modelEligibility;
+    // Only the provider's private native home (CODEX_HOME or CLAUDE_CONFIG_DIR).
+    // The harness resolves the managed runtime itself when a turn runs.
+    this.environment = environment && Object.keys(environment).length > 0
+      ? Object.freeze({ ...environment })
+      : null;
   }
 
   async discover({ signal } = {}) {
@@ -217,6 +220,7 @@ export class SecretApiProviderAdapter extends ModelCatalogAdapter {
       endpoint: this.definition.endpoint,
       fields: Object.freeze({ "api-key": this.credentials.apiKey }),
       ...(Object.keys(this.modelCapabilities).length === 0 ? {} : { modelCapabilities: this.modelCapabilities }),
+      ...(this.environment === null ? {} : { environment: this.environment }),
     });
   }
 }

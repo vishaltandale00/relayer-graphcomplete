@@ -3,11 +3,13 @@ import { isAbsolute, join, relative, resolve } from "node:path";
 
 const PROVIDER_ID = /^[a-z0-9]+(?:[._-][a-z0-9]+)*$/;
 
-// codex.basic writes the API key to `.auth.json.<uuid>.tmp` and renames it onto
-// auth.json. Only codex.basic creates this name inside a provider's codex-home.
+// codex.basic once wrote the API key to `.auth.json.<uuid>.tmp` and renamed it
+// onto auth.json. It now writes neither: Codex reads the key from the turn's
+// environment. This sweep stays as a cheap guard, because such a file would
+// hold a plaintext key inside a provider's codex-home.
 const CODEX_API_KEY_AUTH_TEMPORARY = /^\.auth\.json\..+\.tmp$/;
 
-// Matches the ephemeral file written by codex.basic for secret adapters.
+// Matches the ephemeral file codex.basic once wrote for secret adapters.
 // Subscription sessions (legacy userData/codex-home and isolated Codex
 // connections) use a different shape and must not be deleted.
 export function isEphemeralCodexApiKeyAuth(value) {
@@ -68,8 +70,9 @@ async function leftoverAuthTemporaries(codexHome) {
     .map((entry) => join(codexHome, entry.name));
 }
 
-// SIGKILL during a secret Codex turn can leave the API key in plaintext, either
-// in codex-home/auth.json or in a temporary file written before its rename.
+// A secret Codex turn killed by SIGKILL, in a build that wrote the key file,
+// could leave the API key in plaintext, either in codex-home/auth.json or in a
+// temporary file written before its rename.
 // `removed` lists each provider with at least one removed leftover; `failures`
 // lists each leftover that could not be checked or removed.
 export async function removeLeftoverEphemeralCodexAuthFiles(runtimeRoot) {

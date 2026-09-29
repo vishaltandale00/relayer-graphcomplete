@@ -1,7 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { spawn } from "node:child_process";
 import { chmod, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { isAbsolute, join } from "node:path";
 import { createInterface } from "node:readline";
 
 import { terminateChildProcess } from "./child-process.mjs";
@@ -70,6 +70,17 @@ function stringRecord(value) {
     && Object.values(value).every((entry) => typeof entry === "string");
 }
 
+// Secret access may carry only the provider's private native home, as one absolute path.
+const PRIVATE_HOME_VARIABLES = new Set(["CODEX_HOME", "CLAUDE_CONFIG_DIR"]);
+
+function privateHomeEnvironment(value) {
+  if (!stringRecord(value)) return false;
+  const entries = Object.entries(value);
+  return entries.length === 1
+    && PRIVATE_HOME_VARIABLES.has(entries[0][0])
+    && isAbsolute(entries[0][1]);
+}
+
 function validatedModelCapabilities(value) {
   if (value === undefined) return undefined;
   if (value === null || typeof value !== "object" || Array.isArray(value)) {
@@ -133,6 +144,9 @@ function validatedExecutionAccess(resolved, definition, descriptor) {
     const runtime = resolved.runtime === undefined
       ? undefined
       : validatedManagedRuntime(resolved.runtime);
+    if (resolved.environment !== undefined && !privateHomeEnvironment(resolved.environment)) {
+      throw new Error("Provider adapter returned invalid secret execution access.");
+    }
     const modelCapabilities = validatedModelCapabilities(resolved.modelCapabilities);
     return Object.freeze({
       kind: "secret",
@@ -144,6 +158,7 @@ function validatedExecutionAccess(resolved, definition, descriptor) {
       fields: Object.freeze({ ...resolved.fields }),
       ...(modelCapabilities === undefined ? {} : { modelCapabilities }),
       ...(runtime === undefined ? {} : { runtime }),
+      ...(resolved.environment === undefined ? {} : { environment: Object.freeze({ ...resolved.environment }) }),
     });
   }
   if (definition.accessContract === "managed-runtime@1") {

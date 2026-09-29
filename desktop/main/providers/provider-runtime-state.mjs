@@ -1,4 +1,4 @@
-import { readdir, rm } from "node:fs/promises";
+import { lstat, readdir, rm } from "node:fs/promises";
 import { isAbsolute, relative, resolve } from "node:path";
 
 const PROVIDER_ID = /^[a-z0-9]+(?:[._-][a-z0-9]+)*$/;
@@ -27,13 +27,29 @@ export function providerRuntimeDirectory(runtimeRoot, definition, registry) {
   return target;
 }
 
-export function createProviderRuntimeStateRemover({ runtimeRoot, registry, remove = rm, list = readdir }) {
+// A runtime root replaced by a symlink, from restored or tampered data, could point into the
+// user's own files. Removal then refuses instead of deleting beneath the link.
+async function assertRealRuntimeRoot(runtimeRoot, inspect) {
+  let entry;
+  try {
+    entry = await inspect(resolve(runtimeRoot));
+  } catch (error) {
+    if (error?.code === "ENOENT") return;
+    throw error;
+  }
+  if (entry.isSymbolicLink() || !entry.isDirectory()) {
+    throw new Error("The provider runtime root must be a real directory.");
+  }
+}
+
+export function createProviderRuntimeStateRemover({ runtimeRoot, registry, remove = rm, list = readdir, inspect = lstat }) {
   if (!registry || typeof registry.get !== "function") {
     throw new Error("Managed provider runtime cleanup requires the authoritative provider adapter registry.");
   }
   const remover = async (definition) => {
     const target = providerRuntimeDirectory(runtimeRoot, definition, registry);
     if (target === null) return false;
+    await assertRealRuntimeRoot(runtimeRoot, inspect);
     await remove(target, { recursive: true, force: true });
     return true;
   };
@@ -44,6 +60,7 @@ export function createProviderRuntimeStateRemover({ runtimeRoot, registry, remov
       // Preserve state owned by an adapter missing from this build. A later build may restore it.
       return eligibility === true || eligibility === null ? [definition.id] : [];
     }));
+    await assertRealRuntimeRoot(runtimeRoot, inspect);
     let entries;
     try {
       entries = await list(resolve(runtimeRoot), { withFileTypes: true });

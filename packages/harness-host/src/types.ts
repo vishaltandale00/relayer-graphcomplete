@@ -284,6 +284,12 @@ export type HarnessExecutionAccess =
         readonly imageInput?: boolean;
       }>>>;
       readonly runtime?: HarnessManagedRuntimeAccess;
+      /**
+       * The provider's private native home: CODEX_HOME or CLAUDE_CONFIG_DIR. A harness uses it
+       * for a conversation started with per-provider homes. An older conversation keeps the
+       * runtime's default home, where its native history is (#584).
+       */
+      readonly environment?: Readonly<Record<string, string>>;
     }
   | ({
       readonly kind: "managed-runtime";

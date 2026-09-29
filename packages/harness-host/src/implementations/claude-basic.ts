@@ -84,6 +84,15 @@ export class ClaudeBasicHarness implements Harness {
   private sessionLocationIdentity: string | undefined;
   private sessionProviderDefinitionId: string | undefined;
   private sessionPersonalPresentationVersionId: number | null | undefined;
+  /**
+   * Which home this conversation's API-key turns use, recorded as `claudeProviderHome` in its
+   * saved state. "isolated" is the provider's private CLAUDE_CONFIG_DIR, for a conversation
+   * started with per-provider homes. "legacy-shared" is Claude's default home, for one saved
+   * before them: its native history is there, so it keeps that home for its whole life. This
+   * records storage only. It does not mark a conversation as supporting provider-neutral
+   * continuation (#584).
+   */
+  private readonly providerHome: "isolated" | "legacy-shared";
   /** Why the root session was dropped, until the next root turn reports it. Saved with the state. */
   private pendingRootReset: NativeSessionResetReason | undefined;
 
@@ -93,6 +102,7 @@ export class ClaudeBasicHarness implements Harness {
   ) {
     this.clientModuleUrl = dependencies.clientModuleUrl ?? import.meta.resolve("@relayer/graph-client");
     this.completeModuleUrl = dependencies.completeModuleUrl ?? new URL("../../../../dist/index.js", import.meta.url).href;
+    this.providerHome = savedProviderHome(context.savedState, "claudeProviderHome");
     const savedSessionId = context.savedState?.claudeSessionId;
     const savedProviderDefinitionId = context.savedState?.claudeSessionProviderDefinitionId;
     const savedPresentationVersionId = context.savedState?.claudeSessionPersonalPresentationVersionId;
@@ -115,6 +125,11 @@ export class ClaudeBasicHarness implements Harness {
       this.sessionPersonalPresentationVersionId = savedPresentationVersionId;
     } else if (typeof savedSessionId === "string") {
       this.pendingRootReset = "session_unavailable";
+    }
+    // An unreadable marker selects the private home, but the session may exist only in the home
+    // it named. Resuming it here would fail on every turn, so it is dropped, visibly.
+    if (this.sessionId !== undefined && unreadableProviderHome(context.savedState, "claudeProviderHome")) {
+      this.forgetRootSession("session_unavailable");
     }
   }
 
@@ -151,9 +166,10 @@ export class ClaudeBasicHarness implements Harness {
       throw new Error("This conversation's native history cannot be verified for the selected route. Its saved history was preserved; a fresh session was not started.");
     }
     if (isRoot && context.requireNativeContinuity && this.sessionPersonalPresentationVersionId === undefined) this.sessionPersonalPresentationVersionId = personalPresentationVersionId;
-    // Each provider definition has its own Claude configuration directory, so another
-    // definition's session cannot be resumed. This decides only resumption for the provider the
-    // product selected, never which providers it may select.
+    // In a new conversation each provider definition has its own Claude configuration directory,
+    // so another definition's session cannot be resumed. In a legacy one they share Claude's
+    // default home, and rotating is conservative. This decides only resumption for the provider
+    // the product selected, never which providers it may select.
     if (isRoot && this.sessionId !== undefined && this.sessionProviderDefinitionId !== providerDefinitionId) {
       this.forgetRootSession("provider_changed");
     }
@@ -212,10 +228,14 @@ export class ClaudeBasicHarness implements Harness {
   }
 
   state(): HarnessSessionState {
+    // A legacy conversation's saved state stays exactly as an earlier release wrote it: a missing
+    // marker already means legacy-shared, so only a new conversation records one.
+    const home = this.providerHome === "isolated" ? { claudeProviderHome: "isolated" } : {};
     return this.sessionId === undefined
       || this.sessionProviderDefinitionId === undefined
-      ? (this.pendingRootReset === undefined ? {} : { claudeRootResetReason: this.pendingRootReset })
+      ? { ...home, ...(this.pendingRootReset === undefined ? {} : { claudeRootResetReason: this.pendingRootReset }) }
       : {
+          ...home,
           claudeSessionId: this.sessionId,
           ...(this.sessionLocationIdentity === undefined ? {} : { claudeSessionLocationIdentity: this.sessionLocationIdentity }),
           claudeSessionProviderDefinitionId: this.sessionProviderDefinitionId,
@@ -235,7 +255,14 @@ export class ClaudeBasicHarness implements Harness {
     isRoot = false,
   ): Promise<{ text: string; sessionId?: string }> {
     const runtime = await claudeRuntime(access, this.dependencies.resolveClaudeRuntime);
-    const environment = executionEnvironment(access, runtime.environment, graph, completionBroker, this.dependencies.platform);
+    const environment = executionEnvironment(
+      access,
+      runtime.environment,
+      graph,
+      completionBroker,
+      this.providerHome,
+      this.dependencies.platform,
+    );
     const locationIdentity = createHash("sha256").update(JSON.stringify({
       providerId: access.providerId, adapterId: access.adapterId, kind: access.kind,
       endpoint: access.kind === "secret" ? access.endpoint : null,
@@ -372,6 +399,7 @@ function executionEnvironment(
   runtimeEnvironment: Readonly<Record<string, string>>,
   graph: GraphCapability,
   completionBroker: HarnessRunContext["completionBroker"],
+  providerHome: "isolated" | "legacy-shared",
   platform = process.platform,
 ): Record<string, string> {
   const environment = Object.fromEntries(Object.entries(process.env).filter((entry): entry is [string, string] => (
@@ -386,6 +414,14 @@ function executionEnvironment(
   if (access.kind === "secret") {
     const apiKey = access.fields["api-key"];
     if (!apiKey) throw new Error("claude.basic requires the provider API key");
+    // A legacy conversation keeps the runtime environment's home unchanged. The production
+    // descriptor never sets CLAUDE_CONFIG_DIR, so that is Claude's default home.
+    if (providerHome === "isolated") {
+      const privateHome = access.environment?.CLAUDE_CONFIG_DIR;
+      // Never fall back to the user's own Claude home for a new conversation.
+      if (!privateHome) throw new Error("claude.basic requires the API-key provider's private CLAUDE_CONFIG_DIR");
+      environment.CLAUDE_CONFIG_DIR = privateHome;
+    }
     environment.ANTHROPIC_API_KEY = apiKey;
     // Provider definitions store the catalog/API prefix (for example `/v1`), while
     // Claude Code appends the Anthropic API version path itself.
@@ -451,4 +487,27 @@ function isStringRecord(value: unknown): value is Record<string, string> {
 
 export function createClaudeBasicFactory(dependencies: ClaudeBasicDependencies = {}): HarnessFactory {
   return (context) => new ClaudeBasicHarness(context, dependencies);
+}
+
+/**
+ * Only a conversation saved before per-provider homes has saved state without the marker, and
+ * only it keeps the shared default home. An unknown value, from corruption or a newer build,
+ * fails closed to the provider's private home: it never reaches the user's own home.
+ */
+/** A marker is present but is neither known value, from corruption or a newer build. */
+function unreadableProviderHome(
+  savedState: HarnessSessionState | undefined,
+  key: "codexProviderHome" | "claudeProviderHome",
+): boolean {
+  return savedState !== undefined && key in savedState
+    && savedState[key] !== "isolated" && savedState[key] !== "legacy-shared";
+}
+
+function savedProviderHome(
+  savedState: HarnessSessionState | undefined,
+  key: "codexProviderHome" | "claudeProviderHome",
+): "isolated" | "legacy-shared" {
+  if (savedState === undefined) return "isolated";
+  if (!(key in savedState)) return "legacy-shared";
+  return savedState[key] === "legacy-shared" ? "legacy-shared" : "isolated";
 }

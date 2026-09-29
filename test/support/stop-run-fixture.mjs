@@ -138,7 +138,8 @@ export async function stopRunFixture() {
       return ({
       definition: { id: providerId, adapterId: "openai-api", accessContract: "secret@1", endpoint: "https://api.openai.com/v1" },
       descriptor: { adapterId: "openai-api", accessContract: "secret@1", implementationVersion: "2" },
-      runtime: { async executionAccess() { return { kind: "secret", endpoint: "https://api.openai.com/v1", fields: { "api-key": "fixture-never-sent" } }; } },
+      // Production gives an API-key provider its private CODEX_HOME (PRD AGT-013).
+      runtime: { async executionAccess() { return { kind: "secret", endpoint: "https://api.openai.com/v1", fields: { "api-key": "fixture-never-sent" }, environment: { CODEX_HOME: join(directory, "provider-runtimes", providerId, "codex-home") } }; } },
       async release() { releases++; },
     }); },
   });

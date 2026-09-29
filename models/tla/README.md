@@ -984,7 +984,8 @@ It must be kept whenever it can be resumed, and a reset must be visible.
   Codex 0.147.0 binary does.
 - **Providers and homes:** the subscription `s` has its own home `S`. Two
   API-key providers, `k1` and `k2`, share Codex's default home `D`, as they do
-  in production today.
+  in a conversation saved before per-provider homes. In a new conversation each
+  API-key provider has its own home, which behaves like `s` and `S`.
 - **Interruptions:** Stop, the per-turn force-stop and force shutdown, and a
   thread saved by an earlier release, whose home is unknown and whose rollout
   may be missing. A force marks the turn, and the kill lands later (`Kill`), so
@@ -1042,7 +1043,7 @@ The properties are:
 | `codex-thread-force-reverted` | violated: shows why the fix is needed | A force that keeps the saved thread lets the next root turn resume the killed conversation. |
 | `codex-thread-late-commit-reverted` | violated: shows why the fix is needed | A `turn/start` answer that arrives after the force saves the forced thread again. |
 | `codex-thread-forget-unwritten-reverted` | violated: shows why the fix is needed | Found in review: a force during `thread/resume`, before `turn/start`, forgot a thread nothing wrote. Now kept. Regressions: the two "before its turn/start" cases in `codex-root-thread.test.ts`. |
-| `codex-thread-home-binding-reverted` | violated: shows why the fix is needed | #584: binding the thread to its provider definition dropped native history when a follow-up moved between API-key providers sharing Codex's default home. Regression: "keeps resuming across providers that share a Codex home". |
+| `codex-thread-home-binding-reverted` | violated: shows why the fix is needed | #584: binding the thread to its provider definition dropped native history when a follow-up moved between API-key providers sharing Codex's default home. Regression: "keeps a legacy conversation's API-key thread in Codex's default home, resuming across providers". |
 | `codex-thread-stop-kill-reverted` | violated: shows why the fix is needed | Found in review: a Stop while `turn/start` was pending killed the app-server but kept the thread. Regression: "forgets, visibly, a root thread whose turn a Stop killed while turn/start was pending". |
 | `codex-thread-silent-reset-reverted` | violated: shows why the fix is needed | #584: without the notice, a root turn silently starts over after its native conversation was lost. Regressions: the reset assertions in `codex-root-thread.test.ts`. |
 | `codex-thread-resume-witness` | violated: witness | A real resume is reachable. |
@@ -1103,19 +1104,6 @@ off. Five constants hold the fixes:
 
 `Restart` after a close or force close waits for the writes they await. A
 crash may restart at any point.
-
-### `HarnessCodexAuth.tla`
-
-This model covers the per-`CODEX_HOME` `auth.json` refcount and its serialized
-write and remove queue in `codex-basic.ts`. It has three concurrent turns,
-roots and children, on one provider home. It includes the per-turn
-force-stop and a host that stops waiting before a turn's cleanup ends. It found
-no bug, and its checks guard the queue against regressions.
-
-| Check | Verdict | Finding |
-| --- | --- | --- |
-| `codex-auth-safety` | passes | A running turn always finds its key file, the user count is exact, and no key file remains once every turn ends. |
-| `codex-auth-liveness` | passes | The key file is eventually removed for good. |
 
 ## Limits
 

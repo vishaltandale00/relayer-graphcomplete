@@ -242,6 +242,8 @@ describe("desktop skeleton", () => {
     expect(desktopMain).toContain("developmentTelemetryPackageMetadata(desktopVersion)");
     expect(desktopMain).toContain("appVersion: desktopVersion");
     expect(desktopMain).toContain("removeLeftoverEphemeralCodexAuthFiles(providerRuntimeRoot)");
+    // PRD AGT-013: API-key providers get their private home under the provider runtime root.
+    expect(desktopMain).toMatch(/if \(definition\.accessContract === "secret@1"\) \{\s*return productionProviderRuntimeDependencies\(definition, \{\s*runtimeRoot: providerRuntimeRoot,/u);
     expect(desktopMain).toContain("graphRuntime.refreshErrorCapability()");
     expect(desktopMain).toContain("productServer?.refreshErrorCapability()");
     expect(desktopMain).toContain('allowHarnessOverride: !app.isPackaged && defaultHarnessConfiguration.startsWith("prime-agent-")');

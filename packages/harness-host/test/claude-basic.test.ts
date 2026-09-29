@@ -99,8 +99,10 @@ function secretAccess(overrides = {}): HarnessExecutionAccess {
       version: "0.3.250",
       executable: "/managed/claude",
       moduleUrl: "file:///managed/claude-agent-sdk/sdk.mjs",
-      environment: { CLAUDE_CONFIG_DIR: "/isolated/anthropic-work" },
+      environment: {},
     },
+    // The provider's private home, which a new conversation uses (PRD AGT-013).
+    environment: { CLAUDE_CONFIG_DIR: "/isolated/anthropic-work" },
     ...overrides,
   } as HarnessExecutionAccess;
 }
@@ -165,6 +167,40 @@ function personalPresentationRunContext(
 }
 
 describe("ClaudeBasicHarness", () => {
+  it("drops, visibly, a saved session whose home marker is unreadable", async () => {
+    let call: Parameters<ClaudeSdkQuery>[0] | undefined;
+    const harness = new ClaudeBasicHarness(factoryContext("ask", {
+      claudeProviderHome: "future-home",
+      claudeSessionId: "session-in-an-unknown-home",
+      claudeSessionProviderDefinitionId: "anthropic-work",
+      claudeSessionPersonalPresentationVersionId: null,
+    }), {
+      query: sdkQuery([{ type: "result", subtype: "success", result: "done" }], (input) => { call = input; }),
+      browserSdk: browserSdk(),
+    });
+    const recorder = resetRecorder();
+
+    await harness.complete({ ...runContext(secretAccess()), trace: recorder.trace });
+
+    // The session may exist only in the home the marker named, so it is not resumed elsewhere.
+    expect(call?.options.resume).toBeUndefined();
+    expect(call?.options.env.CLAUDE_CONFIG_DIR).toBe("/isolated/anthropic-work");
+    expect(recorder.resets()).toEqual(["session_unavailable"]);
+  });
+
+  it.each(["future-home", 7, null])("fails closed to the provider's private home for an unknown marker %s", async (marker) => {
+    let env: Readonly<Record<string, string>> | undefined;
+    const harness = new ClaudeBasicHarness(factoryContext("ask", { claudeProviderHome: marker }), {
+      query: sdkQuery([{ type: "result", subtype: "success", result: "done" }], (input) => { env = input.options.env; }),
+      browserSdk: browserSdk(),
+    });
+
+    await harness.complete(runContext(secretAccess()));
+
+    expect(env?.CLAUDE_CONFIG_DIR).toBe("/isolated/anthropic-work");
+    expect(harness.state()).toMatchObject({ claudeProviderHome: "isolated" });
+  });
+
   it("maps product approval modes onto supported Claude SDK permission modes", () => {
     expect(claudePermissionMode("ask")).toBe("default");
     expect(claudePermissionMode("auto")).toBe("acceptEdits");
@@ -184,7 +220,9 @@ describe("ClaudeBasicHarness", () => {
       ], (input) => calls.push(input)),
     }));
     try {
-      const harness = new ClaudeBasicHarness(factoryContext("acceptEdits"), {
+      // A new conversation: no saved state.
+      const { savedState: _unused, ...newConversation } = factoryContext("acceptEdits");
+      const harness = new ClaudeBasicHarness(newConversation, {
         loadSdk,
         clientModuleUrl: "@relayer/graph-client",
       });
@@ -237,6 +275,7 @@ describe("ClaudeBasicHarness", () => {
       expect(options.env).not.toHaveProperty("OPENAI_API_KEY");
       expect(options.env.RELAYER_GRAPH_TOKEN).toBe("token");
       expect(harness.state()).toEqual({
+        claudeProviderHome: "isolated",
         claudeSessionLocationIdentity: expect.any(String),
         claudeSessionId: "session-1",
         claudeSessionProviderDefinitionId: "anthropic-work",
