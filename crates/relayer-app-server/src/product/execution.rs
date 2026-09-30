@@ -434,7 +434,7 @@ impl InteractionExecutionService {
             && invocation.is_none()
             && continuity
                 .as_ref()
-                .is_none_or(|value| value.status != "unrestricted");
+                .is_none_or(|value| value.requires_native_continuity());
         let command = CompleteInteraction {
             require_native_continuity,
             native_history_anchor: continuity

@@ -46,3 +46,15 @@ thread's accepted history, frozen for one owner-bound publication attempt. It is
 not a live thread, provider session, product-data backup, or source of graph
 authority.
 _Avoid_: Shared thread, cloud thread, remote workspace
+
+**Continuation conversation**:
+A thread created with the `continuation-v1` format. Its earlier turns are read from the graph on demand, so each turn may choose its harness, provider, and model.
+_Avoid_: Portable thread, migrated conversation
+
+**Legacy conversation**:
+A thread with the `legacy` format. Its earlier turns exist for the agent only in a native provider session, so it keeps its original execution route.
+_Avoid_: Old thread, unmarked thread
+
+**Conversation read**:
+The read-only, completion-scoped graph API that returns a continuation conversation's earlier root turns in order. It is not graph search and grants no authority.
+_Avoid_: History bootstrap, transcript

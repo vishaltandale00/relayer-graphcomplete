@@ -262,9 +262,9 @@
 <article class="journey-card">
 <h4>Configure execution</h4>
 <p><strong>User goal:</strong> Choose the model for the next interaction.</p>
-<p><strong>Product rule:</strong> Model is primary. Advanced pins one harness to a new thread.</p>
+<p><strong>Product rule:</strong> Model is primary. In a legacy conversation, Advanced pins one harness to a new thread.</p>
 <p><strong>Observable result:</strong> The composer shows the selected family, model, and pinned harness.</p>
-<p><strong>Acceptance:</strong> Each interaction records its model. Each thread retains its harness.</p>
+<p><strong>Acceptance:</strong> Each interaction records its model. Each legacy thread retains its harness.</p>
 <a href="#2-3-model-and-harness-selection">Read execution requirements →</a>
 </article>
 <article class="journey-card">
@@ -833,7 +833,8 @@ interface CompletionTerminalError extends Error {
 <li>The composer places Model immediately before Submit.</li>
 <li>The Model tab selects one enabled family and one available compatible model.</li>
 <li>The Advanced tab selects one compatible harness before thread creation.</li>
-<li>The thread pins that harness. Follow-up interactions cannot change it.</li>
+<li>In a legacy conversation, the thread pins that harness. Follow-up interactions cannot change it.</li>
+<li>A continuation conversation chooses the harness for each turn (section 12B). Until that change is enabled, every conversation is legacy.</li>
 <li>A follow-up may select another compatible model. Prior interaction receipts remain unchanged.</li>
 <li>Harnesses Settings lists only harnesses usable now. Provider and model diagnostics remain in their owning Settings surfaces.</li>
 <li>Every connected provider with eligible execution models exposes its product-managed family in both first-run onboarding and Settings without a separate family-construction step.</li>
@@ -959,21 +960,21 @@ type InteractionModelBinding = {
   modelId: string;
 };
 </code></pre>
-<p>The harness binding is written when the thread&#39;s root interaction is created and is inherited by every interaction in that thread. The model picker remains available in the composer and may change before any interaction. Every submitted interaction records the exact provider, credential reference, and model used for that call.</p>
+<p>In a legacy conversation, creating the root interaction writes the harness binding, and every later interaction inherits it. A continuation conversation records the harness on each interaction instead (CONT-006). The model picker remains available in the composer and may change before any interaction. Every submitted interaction records the exact provider, credential reference, and model used for that call.</p>
 <h3>2.7 Product requirements</h3>
 <ul>
 <li><strong>AGT-001:</strong> Agent-provider login remains independent from the optional Relayer account. No avatar or cloud-sync promise appears in V1.</li>
 <li><strong>AGT-002:</strong> Agent login is the primary setup task. Harness selection does not compete with credential setup.</li>
-<li><strong>AGT-003:</strong> Model is the primary composer choice. Advanced selects a compatible harness before thread creation. A harness change applies only to new threads.</li>
+<li><strong>AGT-003:</strong> Model is the primary composer choice. Advanced selects a compatible harness before thread creation. In a legacy conversation, a harness change applies only to new threads. CONT-006 governs continuation conversations.</li>
 <li><strong>AGT-004:</strong> Codex and API key are the enabled V1 login methods.</li>
 <li><strong>AGT-005:</strong> Provider-specific controls appear only after API key is chosen.</li>
 <li><strong>AGT-006:</strong> <code>Other</code> requires provider name and a valid HTTPS API URL, except explicitly permitted local development URLs in developer mode.</li>
 <li><strong>AGT-007:</strong> Secrets are stored through the OS credential store and are redacted from every persistence and diagnostic path.</li>
 <li><strong>AGT-008:</strong> Continue is disabled until the preselected or advanced-selected harness, credential, provider, and initial model form a valid configuration.</li>
 <li><strong>AGT-009:</strong> The composer exposes the model for the next interaction. Changing it affects that interaction and later defaults, never prior interaction records.</li>
-<li><strong>AGT-010:</strong> An existing thread cannot switch harnesses in place. To use a different harness, the user starts or forks into a new thread.</li>
-<li><strong>AGT-011 — Legacy conversation compatibility (2026-09-28):</strong> Until provider-neutral continuation is implemented, an existing conversation offers only verified compatible execution routes. Successful root execution receipts establish its original route; a later failed foreign-provider attempt does not change ownership. The original supported provider and pinned harness remain usable with compatible model changes. Another provider definition is unverified unless native storage and provider configuration compatibility are established. A different provider ID alone does not prove incompatibility. A shared native home alone does not prove compatibility. Unknown or conflicting provenance blocks continuation with an explanation and preserves history. Compatibility notices use short, plain language and yellow warning styling.</li>
-<li><strong>AGT-012 — Legacy admission and continuity:</strong> Send, retry, and atomic execution admission enforce the same restriction after catalog changes or reopen. Rejection preserves the draft, attachments, inputs and prior history and does not start inference. A missing or unverified native session must not be replaced by a fresh session for legacy continuation. A reset notice does not establish faithful continuity. Native state is never copied between provider homes. Provider-neutral storage and free cross-harness continuation are a separate design decision.</li>
+<li><strong>AGT-010:</strong> An existing legacy thread cannot switch harnesses in place. To use a different harness, the user starts or forks into a new thread. CONT-006 governs continuation conversations.</li>
+<li><strong>AGT-011 — Legacy conversation compatibility (2026-09-28):</strong> A legacy conversation offers only verified compatible execution routes. CONT-004 keeps this rule after continuation conversations ship. Successful root execution receipts establish its original route; a later failed foreign-provider attempt does not change ownership. The original supported provider and pinned harness remain usable with compatible model changes. Another provider definition is unverified unless native storage and provider configuration compatibility are established. A different provider ID alone does not prove incompatibility. A shared native home alone does not prove compatibility. Unknown or conflicting provenance blocks continuation with an explanation and preserves history. Compatibility notices use short, plain language and yellow warning styling.</li>
+<li><strong>AGT-012 — Legacy admission and continuity:</strong> Send, retry, and atomic execution admission enforce the same restriction after catalog changes or reopen. Rejection preserves the draft, attachments, inputs and prior history and does not start inference. A missing or unverified native session must not be replaced by a fresh session for legacy continuation. A reset notice does not establish faithful continuity. Native state is never copied between provider homes. ADR 0014 and section 12B define continuation conversations separately.</li>
 <li><strong>ACC-001:</strong> Optional account login is direct Auth0 Authorization Code plus PKCE with no Relayer API or database dependency.</li>
 <li><strong>ACC-002:</strong> Main binds the channel-specific loopback listener before browser launch and fails closed for invalid, duplicate, late, mismatched, timed-out, cancelled, or stale callbacks.</li>
 <li><strong>ACC-003:</strong> Main validates the Auth0 signature, issuer, audience, authorized party, expiry, subject, and nonce whenever requested.</li>
@@ -2193,9 +2194,10 @@ interface NativeExecutionHandle {
   &quot;prime.agent&quot;: createPrimeAgentHarness,
 };
 </code></pre>
-<p>The thread stores a copy of its selected named harness configuration. The configuration's <code>implementation</code> field selects a factory from the map. The host does not interpret the implementation-specific <code>settings</code> object. The host may keep the same JavaScript harness object and provider session alive across turns when the adapter can safely reuse them. Factories may initialize asynchronously.</p>
+<p>The thread stores a copy of its selected named harness configuration. The configuration's <code>implementation</code> field selects a factory from the map. The host does not interpret the implementation-specific <code>settings</code> object. The host may keep the same JavaScript harness object and provider session alive across turns when the adapter can safely reuse them. Factories may initialize asynchronously. A continuation conversation will instead resolve the harness for each turn (section 12B).</p>
 <p>If the Node process or provider session expires, the host recreates the object from stored configuration and opaque provider resume state when available. The next Complete call supplies its own graph scope and remains semantically valid even when the provider starts a fresh session. Session reuse should be used when obvious and behavior preserving, but continuous GraphComplete context must not depend on it.</p>
 <p><strong>Legacy qualification:</strong> AGT-011 and AGT-012 qualify the provider-session optimization claim above for current stored conversations. Fresh-session equivalence is not established for native-only history. Legacy continuation therefore requires compatible native history; safe refusal preserves the saved conversation.</p>
+<p><strong>Continuation qualification:</strong> Section 12B covers continuation conversations once enabled. Their earlier turns will come from the graph conversation read, so a native session is only an optimization. The host will keep one native session per harness configuration the conversation has used.</p>
 <p>Today prompts carry only the current turn, so the native session holds the prior conversation (<a href="https://github.com/vishaltandale00/relayer-graphcomplete/issues/584">#584</a>). The host keeps a native session whenever it can be resumed. When AGT-012 does not require native continuity, a reset starts a fresh session and is recorded in the turn's diagnostics, never silently.</p>
 <p>Only human root turns count toward a thread's one active turn. A user's message and a user's invoke action are human root turns. A child that an agent launched never blocks the next human turn. It keeps running on its own current while that turn runs. A new human turn inherits its model from the latest human turn, never from a child. The product's Stop refuses such a child with a client error, because only its parent agent may stop it.</p>
 <p>The Relayer app server owns one-active-human-root-completion coordination for a thread. The Node host owns the live JavaScript object and a completion registry keyed by canonical completion identity. It serializes construction and durable provider-session state mutation where required, but it does not place recursive provider work behind a thread-global Complete queue. Cancellation, approval, trace, capability, and settlement state are completion scoped. Parent terminality never waits for, cancels, settles, or incorporates an active child. Codex and Prime Agent each retain their native execution behavior; the host owns no recursive child-agent scheduler.</p>
@@ -2287,6 +2289,80 @@ settings:
 </tbody>
 </table>
 <p>This foundation does not compile authored Node Details, define accepted-detail persistence or export, render Product surfaces, or integrate Eval. Those remain separate work nodes under #241.</p>
+<h2 data-prd-layer="Contracts" data-prd-order="12.2">12B. Conversation continuation</h2>
+<p><strong>Primary issue:</strong> <a href="https://github.com/vishaltandale00/relayer-graphcomplete/issues/584">#584</a>. The decision record is ADR 0014 in <code>docs/decisions/</code>.</p>
+<p><strong>Status:</strong> The contract is settled and its building blocks ship inert. Every conversation stays a legacy conversation until the enabling change ships.</p>
+<p>The thread owns the durable conversation, and the graph is its record. Harness, provider, and model are execution choices for each turn.</p>
+<h3>12B.1 Conversation formats</h3>
+<ul>
+<li><strong>CONT-001 — Format marker:</strong> Every thread records one conversation format, <code>legacy</code> or <code>continuation-v1</code>. Existing and imported threads are legacy.</li>
+<li><strong>CONT-002 — Set once:</strong> The format is set when the thread is created and never changes. A legacy conversation never becomes a continuation conversation.</li>
+<li><strong>CONT-003 — Storage does not qualify:</strong> Private provider homes, native home bindings, and native session identities never make a conversation a continuation conversation.</li>
+<li><strong>CONT-004 — Legacy stays contained:</strong> AGT-011 and AGT-012 still govern every legacy conversation. Its prompts do not change, and it has no conversation read.</li>
+<li><strong>CONT-005 — Portable status:</strong> A continuation conversation reports the <code>portable</code> compatibility status. Original-route containment and required native continuity do not apply to it.</li>
+<li><strong>CONT-006 — Per-turn execution:</strong> Each turn of a continuation conversation chooses its harness, provider, and model. The next turn defaults to the previous turn's harness.</li>
+<li><strong>CONT-007 — Authority is unchanged:</strong> The permission profile stays pinned to the thread. Catalog, model-rule, and access checks still apply to every turn.</li>
+</ul>
+<h3>12B.2 The graph is the conversation record</h3>
+<ul>
+<li><strong>CONT-008 — No pasted history:</strong> A prompt never contains earlier turns. A fresh, switched, or reset native session receives only the current turn and its attachments.</li>
+<li><strong>CONT-009 — Conversation read:</strong> A running turn may read its conversation's earlier root turns through a read-only graph API. This read is not graph search.</li>
+<li><strong>CONT-010 — Read content:</strong> Each earlier turn returns its message, attachments and notes, submitted inputs, outcome, effect class, and action ledger, in turn order.</li>
+<li><strong>CONT-011 — Answer pointers:</strong> Accepted answers and retained work appear as node and layer pointers. The agent reads their content through the existing node and layer reads.</li>
+<li><strong>CONT-012 — Read scope:</strong> The read covers this conversation only. Its node and layer pointers reference only accepted, published graph records. It grants no navigation or edit authority.</li>
+<li><strong>CONT-013 — Action ledger:</strong> Each settled attempt keeps at most 64 action summaries with kind, status, and exit code. No tool output bytes are kept.</li>
+<li><strong>CONT-014 — Frozen order:</strong> Send freezes the ordered list of earlier turns into the graph with the new interaction. A freeze failure refuses the turn and preserves the draft.</li>
+<li><strong>CONT-015 — Standing guidance:</strong> Every harness prompt in a continuation conversation says earlier turns are readable, and when to read them. No per-turn hint is added.</li>
+<li><strong>CONT-016 — Native reset:</strong> A native reset keeps its diagnostic. That diagnostic also says earlier turns remain readable through the graph. No user-facing warning is added.</li>
+<li><strong>CONT-017 — Semantic children:</strong> A semantic child gets no pasted history. It may use the conversation read under its own authority.</li>
+</ul>
+<h3>12B.3 Conversation read API</h3>
+<pre><code class="language-ts">type ConversationOutcome = "accepted" | "stopped" | "failed" | "pending_reconciliation";
+
+interface ConversationAction {
+  kind: "command" | "file_change" | "web" | "mcp_tool" | "native_subagent" | "other";
+  summary: string;           // at most 512 bytes, redacted by the adapter
+  status: "completed" | "failed" | "interrupted";
+  exitCode?: number;
+}
+
+interface ConversationTurn {
+  sequence: number;
+  origin: { kind: "user" } | { kind: "action"; sourceSequence: number };
+  input: Omit&lt;InteractionInput, "interactionPermissions"&gt;;
+  outcome: { status: ConversationOutcome; message?: string; failureCategory?: string; effectBoundary: string };
+  response: { interactionNodeId?: GraphId; rootLayerId?: GraphId; retainedCurrentLayerId?: GraphId };
+  actions: { entries: readonly ConversationAction[]; omitted: number };
+  provenance: { harnessConfigurationName: string; adapterId: string; modelId: string };
+}
+
+graph.getConversation(options?: { before?: number; limit?: number }): Promise&lt;{ turns: ConversationTurn[]; hasMore: boolean }&gt;;
+graph.getConversationTurn(sequence: number): Promise&lt;ConversationTurn&gt;;
+</code></pre>
+<p>Python exposes the same records as <code>get_conversation()</code> and <code>get_conversation_turn()</code>. A page holds 20 turns by default and at most 50.</p>
+<p>A page caps each message and annotation at 4 KiB and marks cut text as truncated. The single-turn read returns the full record.</p>
+<p>A legacy completion receives <code>continuation_not_attached</code>. The routes are completion-scoped and never widen the capability's graph authority.</p>
+<h3>12B.4 Enabling gates</h3>
+<p>The enabling change makes every new conversation a continuation conversation. It merges only after both gates pass on its exact candidate.</p>
+<ul>
+<li>The #584 Relayer Dev human gate passes with isolated deterministic fixtures. It is separate from the #597 gate.</li>
+<li>A paid live test runs only with explicit user authorization. It covers Codex, Claude, and Prime.</li>
+<li>Each harness reads earlier turns before acting on at least 90% of context-dependent turns. An outcome judge must also pass.</li>
+</ul>
+<h3>12B.5 Verification checkpoints</h3>
+<table>
+<thead><tr><th>Checkpoint</th><th>Smallest deterministic proof</th><th>Status</th></tr></thead>
+<tbody>
+<tr><td><code>CONT-001</code>, <code>CONT-002</code></td><td>Product storage tests cover the legacy default, the continuation value, rejection of imported continuation threads, and rejected format changes. Reopen refuses a missing or weakened format constraint.</td><td>Delivered</td></tr>
+<tr><td><code>CONT-003</code></td><td>No production path writes the continuation format yet. The enabling change adds a creation test that storage homes and session identities never set it.</td><td>Planned</td></tr>
+<tr><td><code>CONT-004</code></td><td>#597's legacy compatibility tests still pass on the default legacy format. The same switched-route fixtures without the marker still refuse.</td><td>Delivered</td></tr>
+<tr><td><code>CONT-005</code></td><td>Storage tests accept a route switch at Send, identified Send, retry, and admission. Unit tests keep native continuity optional and the picker unrestricted.</td><td>Delivered</td></tr>
+<tr><td><code>CONT-006</code>, <code>CONT-007</code></td><td>Product API and host session-slot tests.</td><td>Planned</td></tr>
+<tr><td><code>CONT-008</code> to <code>CONT-012</code></td><td>Graph route authority tests, client parity, and prompt tests for each harness without earlier-turn text.</td><td>Planned</td></tr>
+<tr><td><code>CONT-013</code> to <code>CONT-017</code></td><td>Adapter ledger tests, manifest freeze tests, guidance prompt tests, and reset diagnostic tests.</td><td>Planned</td></tr>
+</tbody>
+</table>
+<p>Deterministic checks prove data, authority, and prompt content. They do not prove that a model reads when it should. The live gate measures that separately.</p>
 <h2 data-prd-layer="Product" data-prd-order="4">4. Run a task</h2>
 <section class="capability-summary" aria-label="Run a task summary">
 <p><strong>User goal:</strong> Send one interaction to the selected agent.</p>

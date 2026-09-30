@@ -27,6 +27,7 @@ const THREAD_COLUMNS: &[(&str, &str, bool, i64)] = &[
     ("conversation_import_id", "TEXT", false, 0),
     ("surface", "TEXT", true, 0),
     ("personal_presentation_version_key", "TEXT", false, 0),
+    ("conversation_format", "TEXT", true, 0),
 ];
 const CONVERSATION_IMPORT_COLUMNS: &[(&str, &str, bool, i64)] = &[
     ("id", "TEXT", true, 1),
@@ -633,6 +634,7 @@ pub(super) async fn validate(pool: &SqlitePool) -> Result<(), StorageError> {
         false,
     )
     .await?;
+    validate_conversation_format_constraints(pool).await?;
     validate_foreign_key(pool, "threads", "project_id", "projects", "id", "SET NULL").await?;
     validate_foreign_key(
         pool,
@@ -1216,6 +1218,46 @@ async fn validate_active_family_name_index(pool: &SqlitePool) -> Result<(), Stor
     ))
 }
 
+/// The conversation-format column definition and immutability trigger from migration 0040,
+/// compared without whitespace or case. A later rebuild of `threads` must keep both: without
+/// them a legacy conversation could become a portable one (ADR 0014).
+const CONVERSATION_FORMAT_COLUMN: &str = "conversation_format TEXT NOT NULL DEFAULT 'legacy' CHECK (conversation_format = 'legacy' OR (conversation_format = 'continuation-v1' AND surface = 'conversation' AND conversation_import_id IS NULL))";
+const CONVERSATION_FORMAT_TRIGGER: &str = "CREATE TRIGGER thread_conversation_format_immutable BEFORE UPDATE OF conversation_format ON threads WHEN OLD.conversation_format IS NOT NEW.conversation_format BEGIN SELECT RAISE(ABORT, 'conversation_format_immutable'); END";
+
+fn normalized_sql(sql: &str) -> String {
+    sql.chars()
+        .filter(|character| !character.is_whitespace())
+        .flat_map(char::to_lowercase)
+        .collect()
+}
+
+async fn validate_conversation_format_constraints(pool: &SqlitePool) -> Result<(), StorageError> {
+    let table: Option<String> =
+        sqlx::query_scalar("SELECT sql FROM sqlite_schema WHERE type='table' AND name='threads'")
+            .fetch_optional(pool)
+            .await?;
+    if !table.is_some_and(|sql| {
+        normalized_sql(&sql).contains(&normalized_sql(CONVERSATION_FORMAT_COLUMN))
+    }) {
+        return Err(incompatible(
+            "table threads is missing its required conversation_format CHECK",
+        ));
+    }
+    let trigger: Option<String> = sqlx::query_scalar(
+        "SELECT sql FROM sqlite_schema WHERE type='trigger' AND name='thread_conversation_format_immutable' AND tbl_name='threads'",
+    )
+    .fetch_optional(pool)
+    .await?;
+    if !trigger
+        .is_some_and(|sql| normalized_sql(&sql) == normalized_sql(CONVERSATION_FORMAT_TRIGGER))
+    {
+        return Err(incompatible(
+            "table threads is missing its required conversation_format immutability trigger",
+        ));
+    }
+    Ok(())
+}
+
 async fn validate_index(
     pool: &SqlitePool,
     table: &str,
@@ -1426,6 +1468,124 @@ mod tests {
                 .to_string()
                 .contains("table node_context_drafts is missing its required non-unique index"),
             "{error}"
+        );
+    }
+
+    /// Rebuilds `threads` from its stored SQL after `rewrite`, as a later table rebuild would,
+    /// restoring every index and trigger on it.
+    async fn rebuild_threads(pool: &sqlx::SqlitePool, rewrite: impl Fn(String) -> String) {
+        use sqlx::Row;
+        let table: String = sqlx::query_scalar(
+            "SELECT sql FROM sqlite_schema WHERE type='table' AND name='threads'",
+        )
+        .fetch_one(pool)
+        .await
+        .unwrap();
+        let dependents = sqlx::query(
+            "SELECT type,name,sql FROM sqlite_schema WHERE tbl_name='threads' AND type IN ('index','trigger') AND sql IS NOT NULL",
+        )
+        .fetch_all(pool)
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|row| {
+            (
+                row.get::<String, _>("name"),
+                row.get::<String, _>("sql"),
+            )
+        })
+        .collect::<Vec<_>>();
+        let rebuilt =
+            rewrite(table).replacen("CREATE TABLE threads", "CREATE TABLE threads_rebuilt", 1);
+        let mut connection = pool.acquire().await.unwrap();
+        for statement in [
+            "PRAGMA foreign_keys=OFF".to_owned(),
+            // Other tables' triggers name threads; skip their revalidation while it is absent.
+            "PRAGMA legacy_alter_table=ON".to_owned(),
+            rebuilt,
+            "INSERT INTO threads_rebuilt SELECT * FROM threads".to_owned(),
+            "DROP TABLE threads".to_owned(),
+            "ALTER TABLE threads_rebuilt RENAME TO threads".to_owned(),
+        ] {
+            sqlx::query(&statement)
+                .execute(&mut *connection)
+                .await
+                .unwrap();
+        }
+        for (_name, sql) in dependents {
+            sqlx::query(&sql).execute(&mut *connection).await.unwrap();
+        }
+        for statement in ["PRAGMA legacy_alter_table=OFF", "PRAGMA foreign_keys=ON"] {
+            sqlx::query(statement)
+                .execute(&mut *connection)
+                .await
+                .unwrap();
+        }
+    }
+
+    /// CONT-002: a database whose conversation-format CHECK or immutability trigger went
+    /// missing, or was weakened, is refused on reopen instead of letting a legacy thread
+    /// become a continuation conversation.
+    #[tokio::test]
+    async fn missing_or_weakened_conversation_format_constraints_fail_current_schema_open() {
+        let mut accepted = Vec::new();
+        for label in [
+            "trigger dropped",
+            "trigger weakened",
+            "check dropped by a rebuild",
+            "check weakened by a rebuild",
+        ] {
+            let temporary = tempfile::Builder::new()
+                .prefix("relayer-conversation-format-constraints-")
+                .tempdir()
+                .unwrap();
+            let path = temporary.path().join("product.sqlite3");
+            let store = SqliteProductStore::open(&path).await.unwrap();
+            let pool = &store.pool;
+            match label {
+                "trigger dropped" | "trigger weakened" => {
+                    let mut connection = pool.acquire().await.unwrap();
+                    sqlx::raw_sql("DROP TRIGGER thread_conversation_format_immutable")
+                        .execute(&mut *connection)
+                        .await
+                        .unwrap();
+                    if label == "trigger weakened" {
+                        sqlx::raw_sql("CREATE TRIGGER thread_conversation_format_immutable BEFORE UPDATE OF conversation_format ON threads WHEN NEW.conversation_format = 'legacy' BEGIN SELECT RAISE(ABORT, 'conversation_format_immutable'); END")
+                            .execute(&mut *connection)
+                            .await
+                            .unwrap();
+                    }
+                }
+                "check dropped by a rebuild" => {
+                    rebuild_threads(pool, |sql| {
+                        let check = sql.find("CHECK (").expect("format CHECK");
+                        let column = sql[..check].rfind("conversation_format").unwrap();
+                        format!(
+                            "{}conversation_format TEXT NOT NULL DEFAULT 'legacy')",
+                            &sql[..column]
+                        )
+                    })
+                    .await;
+                }
+                _ => {
+                    rebuild_threads(pool, |sql| {
+                        sql.replacen("AND conversation_import_id IS NULL", "", 1)
+                    })
+                    .await;
+                }
+            }
+            store.pool.close().await;
+            match SqliteProductStore::open(&path).await {
+                Ok(_) => accepted.push(label),
+                Err(error) => assert!(
+                    error.to_string().contains("conversation_format"),
+                    "{label}: {error}"
+                ),
+            }
+        }
+        assert!(
+            accepted.is_empty(),
+            "reopen accepted damaged schemas: {accepted:?}"
         );
     }
 

@@ -1,5 +1,7 @@
 import {
   availablePickerFamilies,
+  compatibilityExposesNoRoute,
+  compatibilityRestrictsRoute,
   familyModelSetup,
   harnessUsesConfigurationModel,
   modelPickerContextCandidate,
@@ -33,7 +35,7 @@ export function modelPickerModelSetup(settings, selection) {
   if (!settings || pickerSelectionIsAvailable(settings, selection)) return null;
   const compatibility = settings.conversationCompatibility;
   const setup = familyModelSetup(settings, selection?.familyId ?? settings.defaults?.familyId);
-  if (compatibility?.status === "blocked") return null;
+  if (compatibilityExposesNoRoute(compatibility)) return null;
   if (compatibility?.status === "compatible" && (
     setup?.providerId !== compatibility.providerId
     || selection?.harnessId !== compatibility.harnessId
@@ -320,7 +322,7 @@ export function createModelPicker({
       const unavailableMessage = compatibility?.status === "compatible"
         ? "Reconnect the original provider or enable a compatible model in Settings."
         : compatibility?.message ?? "Connect an available provider in Settings.";
-      panel.innerHTML = `<div class="model-picker-empty"><strong>${compatibility?.status && compatibility.status !== "unrestricted" ? "No compatible route available" : "No available models"}</strong><span>${escapeHtml(unavailableMessage)}</span><button type="button" class="secondary" data-model-picker-settings>Open Settings</button></div>`;
+      panel.innerHTML = `<div class="model-picker-empty"><strong>${compatibilityRestrictsRoute(compatibility) ? "No compatible route available" : "No available models"}</strong><span>${escapeHtml(unavailableMessage)}</span><button type="button" class="secondary" data-model-picker-settings>Open Settings</button></div>`;
       panel.querySelector("[data-model-picker-settings]").onclick = () => {
         onUserTakeover();
         close();

@@ -34,3 +34,4 @@ The packaged application includes the `codex.basic` implementation through `code
 - Adding a supported provider or harness requires an adapter, catalog compatibility, permission translation, lifecycle tests, and product evidence.
 - Eval cases remain harness agnostic and may compare supported configurations without changing the underlying product workflow.
 - [ADR 0001](0001-prime-agent-runtime-boundary.md) is narrowed to the optional `prime.agent` implementation and is otherwise superseded.
+- [ADR 0014](0014-provider-neutral-conversation-continuation.md) narrows the one-harness pin in the Decision and in the consequence above to legacy conversations. Once enabled, continuation conversations choose harness, provider, and model per turn.

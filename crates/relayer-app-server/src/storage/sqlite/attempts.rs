@@ -604,6 +604,17 @@ mod tests {
         InteractionId,
         ExecutionModelSelection,
     ) {
+        seeded_store_with_format("legacy").await
+    }
+
+    async fn seeded_store_with_format(
+        conversation_format: &str,
+    ) -> (
+        tempfile::TempDir,
+        SqliteProductStore,
+        InteractionId,
+        ExecutionModelSelection,
+    ) {
         let directory = tempfile::Builder::new()
             .prefix("relayer-attempts-")
             .tempdir()
@@ -625,12 +636,19 @@ mod tests {
             .execute(&store.pool).await.expect("family").last_insert_rowid();
         sqlx::query("INSERT INTO model_family_members(family_id,position,provider_id,model_id) VALUES (?1,0,'codex','gpt-test')")
             .bind(family_id).execute(&store.pool).await.expect("member");
-        let thread_id =
+        // A legacy thread relies on the column default, exactly as every production insert does.
+        let thread_id = if conversation_format == "legacy" {
             sqlx::query("INSERT INTO threads(title,created_at,updated_at) VALUES ('Test','1','1')")
                 .execute(&store.pool)
                 .await
-                .expect("thread")
-                .last_insert_rowid();
+        } else {
+            sqlx::query("INSERT INTO threads(title,created_at,updated_at,conversation_format) VALUES ('Test','1','1',?1)")
+                .bind(conversation_format)
+                .execute(&store.pool)
+                .await
+        }
+        .expect("thread")
+        .last_insert_rowid();
         let interaction_id = sqlx::query("INSERT INTO interactions(thread_id,sequence,text,created_at,completion_status,model_provider_id,provider_model_id,model_family_id) VALUES (?1,0,'hello','1','running','codex','gpt-test',?2)")
             .bind(thread_id).bind(family_id).execute(&store.pool).await.expect("interaction").last_insert_rowid();
         (
@@ -911,6 +929,210 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(count, 0);
+    }
+
+    /// A conversation whose successful history ran on `original-provider`. Its running
+    /// second turn uses the catalog's `codex` route, so every check sees a route switch.
+    async fn switched_route_store(
+        conversation_format: &str,
+    ) -> (
+        tempfile::TempDir,
+        SqliteProductStore,
+        ThreadId,
+        InteractionId,
+        ExecutionModelSelection,
+    ) {
+        let (directory, store, interaction_id, route) =
+            seeded_store_with_format(conversation_format).await;
+        sqlx::query("UPDATE interactions SET sequence=2 WHERE id=?1")
+            .bind(interaction_id.value())
+            .execute(&store.pool)
+            .await
+            .unwrap();
+        sqlx::query("INSERT INTO interactions(thread_id,sequence,text,created_at,completion_status,model_provider_id,provider_model_id,model_family_id,harness_configuration_name) SELECT thread_id,1,'Original accepted history','1','accepted','original-provider','original-model',model_family_id,'codex-basic' FROM interactions WHERE id=?1")
+            .bind(interaction_id.value()).execute(&store.pool).await.unwrap();
+        let thread_id: i64 = sqlx::query_scalar("SELECT thread_id FROM interactions WHERE id=?1")
+            .bind(interaction_id.value())
+            .fetch_one(&store.pool)
+            .await
+            .unwrap();
+        (
+            directory,
+            store,
+            ThreadId::from_database(thread_id),
+            interaction_id,
+            route,
+        )
+    }
+
+    fn switched_selection(route: &ExecutionModelSelection) -> InteractionModelSelection {
+        InteractionModelSelection {
+            family_id: route.family_id,
+            provider_id: route.provider_id.clone(),
+            model_id: route.model_id.clone(),
+        }
+    }
+
+    async fn end_running_turn(store: &SqliteProductStore, interaction_id: InteractionId) {
+        sqlx::query("UPDATE interactions SET completion_status='failed' WHERE id=?1")
+            .bind(interaction_id.value())
+            .execute(&store.pool)
+            .await
+            .unwrap();
+    }
+
+    /// CONT-004 and CONT-005 at each route check #597 enforces: resolution, admission, Send,
+    /// identified Send and retry. The same switched route is refused in a legacy
+    /// conversation and accepted in a continuation conversation.
+    #[tokio::test]
+    async fn portable_conversation_accepts_route_switches_that_legacy_containment_refuses() {
+        for format in ["legacy", "continuation-v1"] {
+            let portable = format == "continuation-v1";
+            let refused = |outcome: Option<String>, seam: &str| {
+                if portable {
+                    assert_eq!(outcome, None, "{format} {seam} must accept the switch");
+                } else {
+                    let error = outcome.unwrap_or_else(|| panic!("{format} {seam} must refuse"));
+                    assert!(
+                        error.contains("original provider"),
+                        "{format} {seam}: {error}"
+                    );
+                }
+            };
+
+            let (_directory, store, thread, interaction, route) =
+                switched_route_store(format).await;
+            let compatibility = store.conversation_compatibility(thread).await.unwrap();
+            assert_eq!(
+                compatibility.status,
+                if portable { "portable" } else { "compatible" }
+            );
+            assert_eq!(compatibility.requires_native_continuity(), !portable);
+            if portable {
+                assert_eq!(compatibility.provider_id, None);
+                assert_eq!(compatibility.message, None);
+                assert!(compatibility.native_history_anchor.is_none());
+            }
+            let admission = store
+                .begin_interaction_attempt(receipt(interaction, &route), "10")
+                .await;
+            refused(admission.err().map(|error| error.to_string()), "admission");
+
+            let (_directory, store, thread, interaction, route) =
+                switched_route_store(format).await;
+            end_running_turn(&store, interaction).await;
+            let sent = store
+                .insert_interaction(
+                    thread,
+                    "Continue on another provider",
+                    Some(&switched_selection(&route)),
+                    true,
+                    true,
+                )
+                .await;
+            refused(sent.err().map(|error| error.to_string()), "Send");
+
+            let (_directory, store, thread, interaction, route) =
+                switched_route_store(format).await;
+            end_running_turn(&store, interaction).await;
+            let identified = store
+                .insert_interaction_input(
+                    thread,
+                    crate::storage::NewInteractionInput {
+                        text: "Continue on another provider",
+                        input_identity: "switched-send",
+                        input_digest: "sha256:switched-send",
+                        contexts: &[],
+                        context_confirmation_ids: &[],
+                        submitted_input_draft_revision: None,
+                    },
+                    Some(&switched_selection(&route)),
+                    true,
+                    true,
+                )
+                .await;
+            refused(
+                identified.err().map(|error| error.to_string()),
+                "identified Send",
+            );
+
+            let (_directory, store, _thread, interaction, route) =
+                switched_route_store(format).await;
+            let failed_attempt = sqlx::query("INSERT INTO interaction_attempts(interaction_id,attempt_number,started_at,finished_at,family_id,family_revision,harness_configuration_name,harness_configuration_revision,harness_configuration_digest,provider_id,adapter_id,adapter_implementation_version,model_id,access_contract,outcome,failure_category,effect_boundary) VALUES (?1,1,'10','11',?2,1,'codex-basic',1,'sha256:test','codex','codex-subscription',1,'gpt-test','managed-runtime@1','model_failed','provider_timeout','none')")
+                .bind(interaction.value())
+                .bind(route.family_id.value())
+                .execute(&store.pool)
+                .await
+                .unwrap()
+                .last_insert_rowid();
+            sqlx::query("UPDATE interactions SET completion_status='not_started' WHERE id=?1")
+                .bind(interaction.value())
+                .execute(&store.pool)
+                .await
+                .unwrap();
+            let retried = store
+                .claim_interaction_retry(
+                    interaction,
+                    failed_attempt,
+                    retry_input("Retry on another provider"),
+                    &switched_selection(&route),
+                    "codex-basic",
+                )
+                .await;
+            refused(retried.err().map(|error| error.to_string()), "retry");
+        }
+    }
+
+    /// CONT-007: the portable status lifts only original-route containment. A route the
+    /// catalog does not offer is still refused, at Send and at admission.
+    #[tokio::test]
+    async fn portable_conversation_still_refuses_a_route_the_catalog_does_not_offer() {
+        let (_directory, store, thread, interaction, route) =
+            switched_route_store("continuation-v1").await;
+        let unknown = InteractionModelSelection {
+            family_id: route.family_id,
+            provider_id: ProviderId::from_database("not-in-catalog".into()),
+            model_id: "not-in-catalog-model".into(),
+        };
+        let unknown_route = ExecutionModelSelection {
+            provider_id: unknown.provider_id.clone(),
+            model_id: unknown.model_id.clone(),
+            ..route.clone()
+        };
+        let admission = store
+            .begin_interaction_attempt(receipt(interaction, &unknown_route), "10")
+            .await
+            .expect_err("admission still checks the catalog");
+        assert!(
+            admission.to_string().contains("is unknown"),
+            "admission must fail the catalog check, not containment: {admission}"
+        );
+        end_running_turn(&store, interaction).await;
+        let sent = store
+            .insert_interaction(thread, "Unknown route", Some(&unknown), true, true)
+            .await
+            .expect_err("Send still checks the catalog");
+        assert!(sent.to_string().contains("unknown"), "{sent}");
+    }
+
+    /// CONT-005: a continuation conversation does not derive a route from receipts, so
+    /// provenance that blocks a legacy conversation leaves it portable.
+    #[tokio::test]
+    async fn portable_conversation_ignores_provenance_that_blocks_legacy_containment() {
+        for (format, expected) in [("legacy", "blocked"), ("continuation-v1", "portable")] {
+            let (_directory, store, thread, _interaction, _route) =
+                switched_route_store(format).await;
+            sqlx::query("UPDATE interactions SET harness_configuration_name='claude-basic' WHERE sequence=1")
+                .execute(&store.pool)
+                .await
+                .unwrap();
+            let compatibility = store.conversation_compatibility(thread).await.unwrap();
+            assert_eq!(compatibility.status, expected, "{format}");
+            assert_eq!(
+                compatibility.requires_native_continuity(),
+                format == "legacy"
+            );
+        }
     }
 
     #[tokio::test]

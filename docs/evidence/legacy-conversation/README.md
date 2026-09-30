@@ -1,6 +1,6 @@
 # Legacy conversation compatibility evidence
 
-User decision: PRD AGT-011/012, 2026-09-28. This is temporary original-provider containment until provider-neutral continuation (#584). It does not migrate provider homes or copy native state. The user accepted the desktop scenario and subsequently authorized merge. No release or paid inference is included.
+User decision: PRD AGT-011/012, 2026-09-28. This is original-provider containment for conversations whose history exists only natively. Later, #584 (ADR 0014, CONT-004) kept it permanently for legacy conversations; only new continuation conversations are portable. It does not migrate provider homes or copy native state. The user accepted the desktop scenario and subsequently authorized merge. No release or paid inference is included.
 
 ## Changed seams and checkpoints
 
