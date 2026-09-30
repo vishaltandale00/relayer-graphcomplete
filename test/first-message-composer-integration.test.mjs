@@ -19,12 +19,13 @@ afterEach(async () => {
 });
 
 describe("first-message composer integration", () => {
-  it.each(["personal-presentation-v1", "personal-presentation-v3"])("promotes new Codex threads while preserving reopened %s follow-up and invoke pins", async (previousVersion) => {
+  it.each(["personal-presentation-v1", "personal-presentation-v3", "personal-presentation-v4"])("promotes new Codex threads while preserving reopened %s follow-up and invoke pins", async (previousVersion) => {
     const dataDirectory = await mkdtemp(join(tmpdir(), "relayer-codex-presentation-"));
     directories.push(dataDirectory);
     const configurationPath = join(dataDirectory, "codex-basic.yaml");
     const shipped = await readFile(join(repositoryRoot, "harnesses/codex-basic.yaml"), "utf8");
-    // Exercise both the original implicit default and the immediately preceding visual default.
+    // Exercise the original implicit default, the authored-detail treatment, and
+    // the immediately preceding production default.
     await writeFile(configurationPath, shipped.replace(/^  personalPresentationVersion:.*\n/m, previousVersion === "personal-presentation-v1" ? "" : `  personalPresentationVersion: ${previousVersion}\n`));
     const observed = [];
     const start = async () => {
@@ -129,11 +130,11 @@ describe("first-message composer integration", () => {
     const newPresentation = observed.find(({ graphNodeId }) => graphNodeId === newAccepted.interactions[0].graphNodeId).presentation;
     expect(newPresentation.attachment.versionInteractionNodeId).not.toBe(oldPresentation.attachment.versionInteractionNodeId);
     const titles = (presentation) => presentation.graph.layers.flatMap(({ nodes }) => nodes.map(({ title }) => title));
-    expect(titles(oldPresentation)).not.toContain("Explanatory presentation");
+    expect(titles(oldPresentation).includes("Explanatory presentation")).toBe(previousVersion === "personal-presentation-v4");
     expect(titles(newPresentation)).toContain("Authored visual Node Details");
     expect(titles(newPresentation)).toContain("Explanatory presentation");
     const newTrace = await after.runtime.exportCandidateTrace(newAccepted.interactions[0].id, join(dataDirectory, "new-trace"));
-    expect(newTrace.personalPresentationVersionKey).toBe("personal-presentation-v4");
+    expect(newTrace.personalPresentationVersionKey).toBe("personal-presentation-v5");
   }, 20_000);
 
   it("submits on Enter and accepts a graph through the zero-inference fixture harness", async () => {

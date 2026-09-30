@@ -2,7 +2,7 @@ schemaVersion: 1
 name: prime-agent-deep
 implementation: prime.agent
 implementationVersion: 1
-revision: 4
+revision: 5
 permissionBindings:
   ask:
     boundary: workspace-write@1
@@ -32,7 +32,7 @@ modelDefaults:
 graphCapabilityProfile:
   search: disabled
 settings:
-  personalPresentationVersion: personal-presentation-v4
+  personalPresentationVersion: personal-presentation-v5
   thinkingLevel: high
   rlmMaxDepth: 4
   prewarmIpythonKernel: true

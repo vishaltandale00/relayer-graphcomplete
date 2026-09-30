@@ -635,15 +635,20 @@ controls model instructions; it does not redefine filesystem read permissions.
 
 ### Explanatory presentation delivery
 
-Production Codex and Prime configurations select the immutable V4 presentation
-for new threads. It adds task-adaptive explanatory presentation without changing
-V0–V3 or existing pins. Shared semantics belong in the presentation graph. Each
+Production Codex and Prime configurations select the immutable V5 presentation
+for new threads. It makes graph topology mandatory after model judgment determines
+that distinct concepts, stages, mechanisms, or comparisons materially carry an
+explanation. Flat graphs remain structurally valid, and V5 considers them
+presentation-appropriate when topology would add no explanatory value. Quantities
+and spatial structure may stay inside one detail when a chart, map, or diagram is
+the clearer representation. V5 does not change V0–V4 or existing pins. Shared semantics belong in the presentation graph. Each
 harness supplies a compact capability overview and language-appropriate public
 API recipes; examples demonstrate mechanics, not response design. Native
 parents are instructed to pass the pinned preference and applicable recipes to
 graph-authoring children. That instruction is not automatic child injection.
 Acceptance establishes graph integrity; rendered-result review establishes
-whether the chosen representation communicates the task effectively.
+whether the chosen representation communicates the task effectively and follows
+the pinned topology preference.
 
 ## Typed interaction permissions (gated Slice 1)
 

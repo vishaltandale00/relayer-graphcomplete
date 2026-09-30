@@ -2,7 +2,7 @@ schemaVersion: 1
 name: prime-agent-basic
 implementation: prime.agent
 implementationVersion: 1
-revision: 5
+revision: 6
 complete:
   agentAuthored: true
 permissionBindings:
@@ -34,7 +34,7 @@ modelDefaults:
 graphCapabilityProfile:
   search: query-v1
 settings:
-  personalPresentationVersion: personal-presentation-v4
+  personalPresentationVersion: personal-presentation-v5
   thinkingLevel: medium
   rlmMaxDepth: 1
   prewarmIpythonKernel: true

@@ -41,7 +41,7 @@ graphCapabilityProfile:
   search: query-v1
   preview: enabled
 settings:
-  personalPresentationVersion: personal-presentation-v4
+  personalPresentationVersion: personal-presentation-v5
   modelReasoningEffort: medium
   promptProfile: layered-navigation-multi-agent-v1
   skipGitRepoCheck: true

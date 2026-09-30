@@ -104,6 +104,22 @@ Visible working state: For work that will not finish immediately, prefer establi
     expect(personalPresentationTraceValues({ personalPresentation: pinned } as Parameters<typeof personalPresentationTraceValues>[0])?.legacyBlocks).toEqual([]);
   });
 
+  it("renders V5 topological guidance without rewriting V4", () => {
+    const source = readFileSync(new URL("../../../crates/relayer-app-server/src/runtime.rs", import.meta.url), "utf8");
+    const encodedDetails = [...source.matchAll(/title: "Explanatory presentation",\s*detail: ("(?:[^"\\]|\\.)*")/g)]
+      .map((match) => JSON.parse(match[1]!));
+    expect(encodedDetails).toHaveLength(2);
+    const [v4Detail, v5Detail] = encodedDetails;
+    expect(v4Detail).not.toContain("graph topology itself");
+    expect(v5Detail).toContain("graph topology itself");
+    expect(v5Detail).toContain("distinct nodes and meaningful edges");
+    expect(v5Detail).toContain("A flat one-node presentation is appropriate only when");
+    expect(v5Detail).toContain("Do not split prose into decorative nodes or boxes");
+    expect(v5Detail).toContain("a chart, map, or diagram may remain inside one Node Detail");
+    const pinned = presentation([{ id: 93, kind: "presentation-preference", icon: "palette", title: "Explanatory presentation", detail: v5Detail, state: "accepted" }]);
+    expect(renderPersonalPresentationGuidance(pinned)).toBe(`Personal graph presentation preferences:\n\nExplanatory presentation: ${v5Detail}`);
+  });
+
   it("fails closed when the attachment and resolved graph disagree", () => {
     const valid = presentation([]);
     const invalid = {

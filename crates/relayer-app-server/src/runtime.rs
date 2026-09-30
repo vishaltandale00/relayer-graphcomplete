@@ -709,6 +709,7 @@ impl RuntimeClient {
                         | "personal-presentation-v2"
                         | "personal-presentation-v3"
                         | "personal-presentation-v4"
+                        | "personal-presentation-v5"
                 ) =>
             {
                 Ok(Some(value))
@@ -2355,6 +2356,20 @@ const PERSONAL_PRESENTATION_V4_NODES: &[PersonalPresentationNodeDefinition] = &[
     },
 ];
 
+const PERSONAL_PRESENTATION_V5_NODES: &[PersonalPresentationNodeDefinition] = &[
+    PERSONAL_PRESENTATION_V4_NODES[0],
+    PERSONAL_PRESENTATION_V4_NODES[1],
+    PERSONAL_PRESENTATION_V4_NODES[2],
+    PERSONAL_PRESENTATION_V4_NODES[3],
+    PersonalPresentationNodeDefinition {
+        client_key: "explanatory-presentation",
+        kind: "presentation-preference",
+        icon: "palette",
+        title: "Explanatory presentation",
+        detail: "Shape the response around what the user needs to understand or do. When distinct concepts, stages, mechanisms, or comparisons and their relationships materially carry the explanation, represent them in the graph topology itself with distinct nodes and meaningful edges; do not confine that structure to one node's visual detail. A flat one-node presentation is appropriate only when topological separation would add no meaningful explanatory structure. Do not split prose into decorative nodes or boxes. Use an appropriate representation for quantities and spatial structure; a chart, map, or diagram may remain inside one Node Detail when graph topology would not improve understanding. Let the content determine the form and level of detail. Visual elements should communicate information, not merely decorate prose. Keep the central answer clear, readable, accessible, and proportionate to the task. Use images or controls when they materially improve understanding or help the user act. Concise prose is appropriate when it communicates the task well.",
+    },
+];
+
 fn personal_presentation_definition(
     version_key: &str,
 ) -> Result<PersonalPresentationDefinition, RuntimeError> {
@@ -2386,6 +2401,18 @@ fn personal_presentation_definition(
         "personal-presentation-v4" => Ok(PersonalPresentationDefinition {
             interaction_text: "Personal presentation V4",
             nodes: PERSONAL_PRESENTATION_V4_NODES,
+            edges: &[[0, 1], [0, 2], [0, 3], [0, 4]],
+            placements: &[
+                [0.5, 0.15],
+                [0.2, 0.5],
+                [0.8, 0.5],
+                [0.3, 0.85],
+                [0.7, 0.85],
+            ],
+        }),
+        "personal-presentation-v5" => Ok(PersonalPresentationDefinition {
+            interaction_text: "Personal presentation V5",
+            nodes: PERSONAL_PRESENTATION_V5_NODES,
             edges: &[[0, 1], [0, 2], [0, 3], [0, 4]],
             placements: &[
                 [0.5, 0.15],
@@ -4091,6 +4118,10 @@ mod tests {
             .ensure_personal_presentation_version("personal-presentation-v4")
             .await
             .unwrap();
+        let v5 = runtime
+            .ensure_personal_presentation_version("personal-presentation-v5")
+            .await
+            .unwrap();
         assert_eq!(v4.closure.layers[0].nodes.len(), 5);
         assert_eq!(v4.closure.layers[0].edges.len(), 4);
         assert_eq!(
@@ -4108,6 +4139,24 @@ mod tests {
                 .contains("detailAuthoring")
         );
         assert_ne!(v3.interaction_node_id, v4.interaction_node_id);
+        assert_ne!(v4.interaction_node_id, v5.interaction_node_id);
+        assert_eq!(v5.closure.layers[0].nodes.len(), 5);
+        assert_eq!(v5.closure.layers[0].edges.len(), 4);
+        assert!(
+            !v4.closure.layers[0].nodes[4]
+                .detail
+                .contains("graph topology itself")
+        );
+        assert!(
+            v5.closure.layers[0].nodes[4]
+                .detail
+                .contains("graph topology itself")
+        );
+        assert!(
+            v5.closure.layers[0].nodes[4]
+                .detail
+                .contains("distinct nodes and meaningful edges")
+        );
         assert_eq!(v3.closure.layers[0].nodes.len(), 4);
         assert_eq!(v3.closure.layers[0].edges.len(), 3);
         assert_eq!(

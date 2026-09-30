@@ -374,7 +374,7 @@ export function visualNodeDetailCheck(output, personalPresentationVersion) {
     && Array.isArray(authoredDetail.assets)
     && /^[a-f0-9]{64}$/.test(authoredDetail.integritySha256 || "")
   ));
-  const treatment = ["personal-presentation-v3", "personal-presentation-v4"].includes(personalPresentationVersion);
+  const treatment = ["personal-presentation-v3", "personal-presentation-v4", "personal-presentation-v5"].includes(personalPresentationVersion);
   return {
     name: "visual-node-detail:authored-output",
     passed: treatment ? nodes.length > 0 && compiledNodes.length === nodes.length : authoredNodes.length === 0,
@@ -451,7 +451,8 @@ export function recursiveCompleteChecks(execution, { requireChildWhenEnabled = f
   const personalPresentationVersion = execution.harnessConfiguration?.settings?.personalPresentationVersion;
   if ((personalPresentationVersion === "personal-presentation-v2"
     || personalPresentationVersion === "personal-presentation-v3"
-    || personalPresentationVersion === "personal-presentation-v4") && children.length > 0) {
+    || personalPresentationVersion === "personal-presentation-v4"
+    || personalPresentationVersion === "personal-presentation-v5") && children.length > 0) {
     for (const child of children.filter((candidate) => candidate.status === "accepted")) {
       checks.push({
         ...visualNodeDetailCheck(

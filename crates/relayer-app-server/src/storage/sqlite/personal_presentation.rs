@@ -391,6 +391,7 @@ mod tests {
                 "personal-presentation-v2",
                 "personal-presentation-v3",
                 "personal-presentation-v4",
+                "personal-presentation-v5",
             ]
         );
         assert_eq!(profile.active_version_key, "personal-presentation-v1");

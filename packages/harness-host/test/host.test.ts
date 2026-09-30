@@ -3884,7 +3884,7 @@ describe("HarnessHost", () => {
       for (const traceContext of [
         { productInteractionId: 1, personalPresentationVersionKey: "personal-presentation-v3" },
         { productInteractionId: 1, personalPresentationVersionId: 90, personalPresentationVersionKey: "unknown" },
-        { productInteractionId: 1, personalPresentationVersionId: 90, personalPresentationVersionKey: "personal-presentation-v5" },
+        { productInteractionId: 1, personalPresentationVersionId: 90, personalPresentationVersionKey: "personal-presentation-v6" },
         { productInteractionId: 1, personalPresentationVersionId: 90, personalPresentationVersionKey: 3 },
       ]) {
         const response = await fetch(`${running.url}/sessions/1/complete`, {
