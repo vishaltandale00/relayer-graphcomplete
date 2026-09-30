@@ -108,12 +108,14 @@ describe("CodexBasicHarness", () => {
     expect(brokerAuthorized).toContain("Your turn ending does not wait for children");
     // Each child event is one the root may act on; it moves its own current only when that helps the user.
     expect(brokerAuthorized).toContain("const watch = watchCompletions(children)");
+    expect(brokerAuthorized).toContain("Appending to children does not extend an existing watch");
+    expect(brokerAuthorized).not.toContain("launch every independent child before watching");
     // The watch takes the array the recipe fills, so the recipe must declare it.
     expect(brokerAuthorized).toContain("Start with const children = [] and launch each child from its own input graph with children.push(complete(inputGraph))");
     // One prepared input graph identifies one completion, so each child needs its own invoke action.
     expect(brokerAuthorized).toContain("give each child its own invoke action");
     expect(brokerAuthorized).toContain("one input graph starts exactly one child");
-    expect(brokerAuthorized).toContain("Only then submit a layer that presents the work itself and advance your current to it; otherwise keep waiting.");
+    expect(brokerAuthorized).toContain("You choose whether to publish a new current, continue other work, or observe again.");
     expect(brokerAuthorized).toContain("Import complete and watchCompletions from");
     expect(brokerAuthorized).toContain("The first current layer may contain visible accepted nodes");
     expect(brokerAuthorized).toContain("Reuse an existing valid path when one already exists");

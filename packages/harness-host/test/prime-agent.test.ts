@@ -708,12 +708,14 @@ describe("PrimeAgentHarness", () => {
     // Each child event is one the root may act on; it moves its own current only when that helps the user.
     expect(prompts[0]!.text).toContain("from relayer_graph import complete, CompletionWatch");
     expect(prompts[0]!.text).toContain("changes = await watch.changes()");
+    expect(prompts[0]!.text).toContain("Appending to children does not extend an existing watch");
+    expect(prompts[0]!.text).not.toContain("launch every independent child before watching");
     // The watch takes the list the recipe fills, so the recipe must declare it.
     expect(prompts[0]!.text).toContain("Start with children = [] and launch each child from its own input graph with children.append(complete(input_graph))");
     // One prepared input graph identifies one completion, so each child needs its own invoke action.
     expect(prompts[0]!.text).toContain("give each child its own invoke action");
     expect(prompts[0]!.text).toContain("one input graph starts exactly one child");
-    expect(prompts[0]!.text).toContain("Only then submit a layer that presents the work itself and advance your current to it; otherwise keep waiting.");
+    expect(prompts[0]!.text).toContain("You choose whether to publish a new current, continue other work, or observe again.");
     expect(prompts[0]!.text).toContain("never leave them in a background task");
     // A stopped or failed child raises from child.result, so the root must catch it to integrate the rest.
     expect(prompts[0]!.text).toContain("A stopped or failed child raises CompletionTerminalError there instead");

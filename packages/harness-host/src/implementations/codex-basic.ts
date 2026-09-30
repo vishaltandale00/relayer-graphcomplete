@@ -10,6 +10,7 @@ import {
   type NativeSessionResetReason,
 } from "../native-session-reset.js";
 import { redactTraceData } from "../trace.js";
+import { JS_AUTHORING_REFERENCE } from "./graph-authoring-reference.js";
 import { CURRENT_WORKSPACE_GUIDANCE, GRAPH_PRESENTATION_GUIDANCE } from "./graph-presentation-guidance.js";
 import {
   personalPresentationNativeInstructions,
@@ -728,6 +729,7 @@ Codex native subagents are available when useful. Subagents may directly author,
 Answer the current user interaction by authoring and accepting a useful graph layer that truthfully presents the completed work or genuine blocker.
 
 ${GRAPH_PRESENTATION_GUIDANCE}
+${JS_AUTHORING_REFERENCE}
 ${CODEX_VISUAL_GUIDANCE}
 ${CODEX_ASSET_GUIDANCE}
 ${CURRENT_WORKSPACE_GUIDANCE}${includePersonalPresentation ? personalPresentationPrompt(context) : ""}
@@ -868,9 +870,10 @@ Do not turn a node, relationship, path, list, record, or arbitrary string into a
   const draftPreviewGuidance = context !== undefined && draftPreviewsAvailable(context) ? `\n${DRAFT_PREVIEW_GUIDANCE}\n` : "";
   return `You are the Relayer layered-navigation harness. ${UNDERLYING_TASK_GUIDANCE}
 
-After doing the underlying work, answer the current user interaction with a useful graph that truthfully presents the result, evidence, and limitations. A flat answer is valid. Add navigation only when opening it would materially improve understanding or support; apply that same test again inside every layer you author.
+Choose how to carry out and present the work using the available capabilities. Submit a final graph that truthfully presents the result, evidence, and limitations. A flat answer is valid. Add navigation only when opening it would materially improve understanding or support; apply that same test again inside every layer you author.
 
 ${GRAPH_PRESENTATION_GUIDANCE}
+${JS_AUTHORING_REFERENCE}
 ${CODEX_VISUAL_GUIDANCE}
 ${CODEX_ASSET_GUIDANCE}
 ${CURRENT_WORKSPACE_GUIDANCE}${includePersonalPresentation && context !== undefined ? personalPresentationPrompt(context) : ""}
@@ -940,7 +943,7 @@ function semanticCompletionGuidanceJs(
   nativeAgentLabel: string,
 ): string {
   if (context?.completionBroker === undefined) return "";
-  return `For explicit semantic child work, give each child its own invoke action. First author and submit those invoke actions in their layer and advance that layer as current. Only after that succeeds, prepare each child separately with const inputGraph = await graph.prepareComplete(invokeAction); one input graph starts exactly one child. Import complete and watchCompletions from ${completeModuleUrl}. Start with const children = [] and launch each child from its own input graph with children.push(complete(inputGraph)). Each handle returns immediately with completionId, current, and result; launch every independent child before watching them. Every change to a child's current is an event you may act on. Create const watch = watchCompletions(children) once. Then run const changes = await watch.changes(); it resolves as soon as any child's current moves or ends, even when that takes minutes. Each change is { child, current }, or { child, error } once the watch can no longer observe that child, for example because its start was refused; the watch then stops watching it. After each event, decide whether the user now needs a better view, for example when a workstream reaches a finding or finishes. Only then submit a layer that presents the work itself and advance your current to it; otherwise keep waiting. Repeat until watch.settled is true. Your turn ending does not wait for children, so never leave them unawaited. Then integrate every child and return this completion. await child.result gives a succeeded child's final layer. A stopped or failed child rejects it with CompletionTerminalError, also exported by that module; catch it and integrate the work its error.current still retains. If child.result rejects with any other error, as it may for a child reported with an error, you cannot read that child's work; present that part as not done, without quoting the error or inventing findings. Native ${nativeAgentLabel} subagents remain inside this completion and do not create semantic children by themselves.\n`;
+  return `Semantic child capability: you decide whether and when to create separate work scopes. For explicit semantic child work, give each child its own invoke action. First author and submit those invoke actions in their layer and advance that layer as current. Only after that succeeds, prepare each child separately with const inputGraph = await graph.prepareComplete(invokeAction); one input graph starts exactly one child. Import complete and watchCompletions from ${completeModuleUrl}. Start with const children = [] and launch each child from its own input graph with children.push(complete(inputGraph)). Each handle returns immediately with completionId, current, and result; you may launch independent children concurrently or observe a child before launching more. Every change to a child's current is an event you may act on. For a chosen child set, create const watch = watchCompletions(children). A watch captures its child set at construction. Reuse it for that set; if you launch more children later, create another watch for those new handles. Appending to children does not extend an existing watch. Then run const changes = await watch.changes(); it resolves as soon as any child's current moves or ends, even when that takes minutes. Each change is { child, current }, or { child, error } once the watch can no longer observe that child, for example because its start was refused; the watch then stops watching it. After each event, decide whether the user now needs a better view, for example when a workstream reaches a finding or finishes. You choose whether to publish a new current, continue other work, or observe again. watch.settled reports when every watched child is terminal or no longer observable. Your turn ending does not wait for children, so never leave them unawaited. Account for the outcomes of children you launched before returning this completion. await child.result gives a succeeded child's final layer. A stopped or failed child rejects it with CompletionTerminalError, also exported by that module; catch it and integrate the work its error.current still retains. If child.result rejects with any other error, as it may for a child reported with an error, you cannot read that child's work; present that part as not done, without quoting the error or inventing findings. Native ${nativeAgentLabel} subagents remain inside this completion and do not create semantic children by themselves.\n`;
 }
 
 function graphAuthoringCommand(launcher: string | undefined): string {

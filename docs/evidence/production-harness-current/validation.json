@@ -1,0 +1,39 @@
+{
+  "schemaVersion": 1,
+  "baseCommit": "fd24be077444308698de35572128934f5d0200d4",
+  "reviewedExecutableDigest": "5617c52da0286f9f108f463c849f09bd24a5c5bebbd046b0cf9c31bf9338340a",
+  "reviewer": "/root/reference_review",
+  "commands": [
+    {
+      "command": "npm run check (initial)",
+      "exitCode": 1,
+      "localLog": "/tmp/harness-reference-check.log",
+      "sha256": "7f00fb22b40d393c7752fb234e46a1977fbf0a82bd87d5e180aad4b7391e2c23"
+    },
+    {
+      "command": "npm run check (final)",
+      "exitCode": 0,
+      "localLog": "/tmp/harness-reference-check-final.log",
+      "sha256": "19147d4e7281ab47d79358416b58380ef66de9fdb4a1dbfb5c15c76a04b6c21e"
+    },
+    {
+      "command": "npm run build (final)",
+      "exitCode": 0,
+      "localLog": "/tmp/harness-reference-build-final.log",
+      "sha256": "222fa622ca114f7f001ab3253d436f92812527a9e2defc3d2ac74b04438bf182"
+    },
+    {
+      "command": "focused provider/configuration/reference suite",
+      "exitCode": 0,
+      "localLog": "/tmp/harness-reference-focused-final.log",
+      "sha256": "e316482c3477d0dfa015db86fa1cc239f10bdd2fef50e92e0c130ce372a918c4"
+    }
+  ],
+  "finalCounts": {
+    "vitestPassed": 3174,
+    "vitestSkipped": 3,
+    "codexSecretBoundaryPassed": 2,
+    "pythonPassed": 60
+  },
+  "liveProof": "not run for this revision; earlier live receipt is baseline only"
+}

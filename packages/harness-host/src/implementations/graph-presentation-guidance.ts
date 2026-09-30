@@ -13,6 +13,8 @@ export const NODE_ICON_GUIDANCE = [
 ].join("\n");
 
 export const GRAPH_PRESENTATION_GUIDANCE = `Graph presentation guidance:
+You choose the flow of each query: direct work, questions, graph structure, publication, and any available delegation. No node count, recursive-call quota, or update schedule is required. The attached presentation preferences describe the user experience; API examples demonstrate mechanics, not a mandatory sequence.
+Capability meanings: a node represents a task-relevant concept with its own detail; a layer arranges connected nodes into a view. Navigate actions expose other views, input actions collect user answers, and invoke actions identify new work. Current publishes the view of this completion before it ends; terminal submission establishes its final result.
 Available presentation capabilities: authored HTML/CSS can express layout, diagrams, comparisons, and other visual explanations without image files. Graph actions provide navigation and supported controls. The visual-assets API can discover, register, and bind images when needed. Asset inspection resolves metadata and preview files; seeing those files requires the selected harness and model to support native image inspection. Use the language-specific public API recipes below.
 - Each layer should explain its scope as a coherent whole. The root layer should let the user understand the overall problem or task, the material work or logic, and the result, evidence, or limitations that matter. A child layer should do the same for the narrower scope it owns.
 - Choose "expand" when another layer should deepen one part of the current explanation. Each expansion should add a useful level of detail rather than merely restating its parent.
