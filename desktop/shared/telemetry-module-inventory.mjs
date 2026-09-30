@@ -138,6 +138,7 @@ export const APPROVED_TELEMETRY_MODULES = Object.freeze({
     "desktop/main/window.mjs",
   ]),
   "node-harness-host": Object.freeze([
+    "packages/harness-host/dist/action-ledger.js",
     "packages/harness-host/dist/approval-coordinator.js",
     "packages/harness-host/dist/approval.js",
     "packages/harness-host/dist/completion-execution.js",

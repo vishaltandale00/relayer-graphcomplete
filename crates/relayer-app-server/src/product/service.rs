@@ -2333,6 +2333,17 @@ impl ProductService {
             .map_err(Into::into)
     }
 
+    pub(crate) async fn record_attempt_action_ledger(
+        &self,
+        attempt_id: i64,
+        ledger: &crate::runtime::RuntimeActionLedger,
+    ) -> Result<bool, ProductError> {
+        self.storage
+            .record_attempt_action_ledger(attempt_id, ledger, &now())
+            .await
+            .map_err(Into::into)
+    }
+
     pub(crate) async fn end_attempt_native_wait(
         &self,
         attempt_id: i64,

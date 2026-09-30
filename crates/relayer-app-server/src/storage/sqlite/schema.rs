@@ -429,6 +429,17 @@ pub(super) async fn validate(pool: &SqlitePool) -> Result<(), StorageError> {
     validate_columns(pool, "interaction_attempts", INTERACTION_ATTEMPT_COLUMNS).await?;
     validate_columns(
         pool,
+        "interaction_attempt_actions",
+        &[
+            ("attempt_id", "INTEGER", false, 1),
+            ("entries_json", "TEXT", true, 0),
+            ("omitted", "INTEGER", true, 0),
+            ("recorded_at", "TEXT", true, 0),
+        ],
+    )
+    .await?;
+    validate_columns(
+        pool,
         "interaction_context_intents",
         INTERACTION_CONTEXT_COLUMNS,
     )
@@ -635,6 +646,7 @@ pub(super) async fn validate(pool: &SqlitePool) -> Result<(), StorageError> {
     )
     .await?;
     validate_conversation_format_constraints(pool).await?;
+    validate_attempt_action_constraints(pool).await?;
     validate_foreign_key(pool, "threads", "project_id", "projects", "id", "SET NULL").await?;
     validate_foreign_key(
         pool,
@@ -713,6 +725,15 @@ pub(super) async fn validate(pool: &SqlitePool) -> Result<(), StorageError> {
         "interaction_attempts",
         "interaction_id",
         "interactions",
+        "id",
+        "CASCADE",
+    )
+    .await?;
+    validate_foreign_key(
+        pool,
+        "interaction_attempt_actions",
+        "attempt_id",
+        "interaction_attempts",
         "id",
         "CASCADE",
     )
@@ -1258,6 +1279,50 @@ async fn validate_conversation_format_constraints(pool: &SqlitePool) -> Result<(
     Ok(())
 }
 
+/// The action-ledger bound and triggers from migration 0041, compared without whitespace or
+/// case. Without them a legacy conversation could keep a ledger, or a ledger could change or
+/// exceed 64 entries (#584, PRD CONT-013).
+const ATTEMPT_ACTIONS_BOUND: &str = "json_array_length(entries_json) <= 64";
+const ATTEMPT_ACTIONS_TRIGGERS: &[(&str, &str)] = &[
+    (
+        "interaction_attempt_actions_require_continuation",
+        "CREATE TRIGGER interaction_attempt_actions_require_continuation BEFORE INSERT ON interaction_attempt_actions WHEN NOT EXISTS ( SELECT 1 FROM interaction_attempts a JOIN interactions i ON i.id = a.interaction_id JOIN threads t ON t.id = i.thread_id WHERE a.id = NEW.attempt_id AND t.conversation_format = 'continuation-v1' ) BEGIN SELECT RAISE(ABORT, 'attempt_actions_require_continuation'); END",
+    ),
+    (
+        "interaction_attempt_actions_immutable",
+        "CREATE TRIGGER interaction_attempt_actions_immutable BEFORE UPDATE ON interaction_attempt_actions BEGIN SELECT RAISE(ABORT, 'attempt_actions_immutable'); END",
+    ),
+];
+
+async fn validate_attempt_action_constraints(pool: &SqlitePool) -> Result<(), StorageError> {
+    let table: Option<String> = sqlx::query_scalar(
+        "SELECT sql FROM sqlite_schema WHERE type='table' AND name='interaction_attempt_actions'",
+    )
+    .fetch_optional(pool)
+    .await?;
+    if !table
+        .is_some_and(|sql| normalized_sql(&sql).contains(&normalized_sql(ATTEMPT_ACTIONS_BOUND)))
+    {
+        return Err(incompatible(
+            "table interaction_attempt_actions is missing its required entry bound",
+        ));
+    }
+    for (name, expected) in ATTEMPT_ACTIONS_TRIGGERS {
+        let trigger: Option<String> = sqlx::query_scalar(
+            "SELECT sql FROM sqlite_schema WHERE type='trigger' AND name=?1 AND tbl_name='interaction_attempt_actions'",
+        )
+        .bind(name)
+        .fetch_optional(pool)
+        .await?;
+        if !trigger.is_some_and(|sql| normalized_sql(&sql) == normalized_sql(expected)) {
+            return Err(incompatible(&format!(
+                "table interaction_attempt_actions is missing its required trigger {name}"
+            )));
+        }
+    }
+    Ok(())
+}
+
 async fn validate_index(
     pool: &SqlitePool,
     table: &str,
@@ -1579,6 +1644,56 @@ mod tests {
                 Ok(_) => accepted.push(label),
                 Err(error) => assert!(
                     error.to_string().contains("conversation_format"),
+                    "{label}: {error}"
+                ),
+            }
+        }
+        assert!(
+            accepted.is_empty(),
+            "reopen accepted damaged schemas: {accepted:?}"
+        );
+    }
+
+    /// #584, PRD CONT-013: reopen refuses a product database whose action-ledger triggers
+    /// or entry bound are missing or weakened, since storage enforces them.
+    #[tokio::test]
+    async fn missing_or_weakened_attempt_action_constraints_fail_current_schema_open() {
+        let mut accepted = Vec::new();
+        for (label, damage) in [
+            (
+                "legacy refusal dropped",
+                "DROP TRIGGER interaction_attempt_actions_require_continuation",
+            ),
+            (
+                "immutability dropped",
+                "DROP TRIGGER interaction_attempt_actions_immutable",
+            ),
+            (
+                "immutability weakened",
+                "DROP TRIGGER interaction_attempt_actions_immutable; CREATE TRIGGER interaction_attempt_actions_immutable BEFORE UPDATE OF omitted ON interaction_attempt_actions BEGIN SELECT RAISE(ABORT, 'attempt_actions_immutable'); END",
+            ),
+            (
+                "bound dropped by a rebuild",
+                "DROP TABLE interaction_attempt_actions; CREATE TABLE interaction_attempt_actions (attempt_id INTEGER PRIMARY KEY REFERENCES interaction_attempts(id) ON DELETE CASCADE, entries_json TEXT NOT NULL, omitted INTEGER NOT NULL, recorded_at TEXT NOT NULL); CREATE TRIGGER interaction_attempt_actions_require_continuation BEFORE INSERT ON interaction_attempt_actions WHEN NOT EXISTS ( SELECT 1 FROM interaction_attempts a JOIN interactions i ON i.id = a.interaction_id JOIN threads t ON t.id = i.thread_id WHERE a.id = NEW.attempt_id AND t.conversation_format = 'continuation-v1' ) BEGIN SELECT RAISE(ABORT, 'attempt_actions_require_continuation'); END; CREATE TRIGGER interaction_attempt_actions_immutable BEFORE UPDATE ON interaction_attempt_actions BEGIN SELECT RAISE(ABORT, 'attempt_actions_immutable'); END",
+            ),
+        ] {
+            let temporary = tempfile::Builder::new()
+                .prefix("relayer-attempt-action-constraints-")
+                .tempdir()
+                .unwrap();
+            let path = temporary.path().join("product.sqlite3");
+            let store = SqliteProductStore::open(&path).await.unwrap();
+            let mut connection = store.pool.acquire().await.unwrap();
+            sqlx::raw_sql(damage)
+                .execute(&mut *connection)
+                .await
+                .unwrap();
+            drop(connection);
+            store.pool.close().await;
+            match SqliteProductStore::open(&path).await {
+                Ok(_) => accepted.push(label),
+                Err(error) => assert!(
+                    error.to_string().contains("interaction_attempt_actions"),
                     "{label}: {error}"
                 ),
             }

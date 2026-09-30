@@ -5,6 +5,7 @@ import { realpathSync } from "node:fs";
 import { lstat, mkdir, realpath, stat } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { RELAYER_ICON_NAMES, type GraphCapability } from "@relayer/graph-client";
+import { firstLineSummary, type HarnessActionKind, type HarnessActionStatus } from "../action-ledger.js";
 import { nativeExecutionHandle, type NativeExecutionHandle } from "../completion-execution.js";
 import {
   parseNativeSessionResetReason,
@@ -808,7 +809,11 @@ export class PrimeAgentHarness implements Harness {
       createKernelBoundary: this.createKernelBoundary,
     });
     const childStreams = new Map<string, HarnessTraceStream>();
-    const unsubscribe = session.subscribe?.((event) => tracePrimeEvent(context, event, childStreams, execution));
+    const unsubscribe = session.subscribe?.((event) => {
+      // The action ledger comes from Prime's own session events, never from the trace.
+      recordPrimeAction(context, event, execution);
+      tracePrimeEvent(context, event, childStreams, execution);
+    });
     const runtimeProvenance = primeRuntimeProvenance(process.env.RELAYER_PRIME_RUNTIME_PROVENANCE);
     if (runtimeProvenance) context.trace.emit({
       type: "provider.event",
@@ -1348,6 +1353,91 @@ function primeRuntimeProvenance(serialized: string | undefined): JsonObject | un
   } catch {
     return undefined;
   }
+}
+
+/** Keys a tool call that reports no identity; unique for the life of the process. */
+let primeAnonymousActionCount = 0;
+
+/**
+ * #584, CONT-013: maps one Prime session event to the turn's action ledger. A tool call and
+ * an RLM child are actions. A summary names the action with Prime's own trace redaction; it
+ * never carries tool results or child answers.
+ */
+function recordPrimeAction(context: HarnessRunContext, value: unknown, execution: PrimeAgentExecutionScope): void {
+  const actions = context.actions;
+  if (actions === undefined || !isRecord(value)) return;
+  try {
+    const sanitize = (text: string) => sanitizePrimeTraceValue(
+      text, execution.sensitiveValues, execution.presentationTraceValues, true,
+    ) as string;
+    if (value.type === "tool_execution_start" || value.type === "tool_execution_end") {
+      const toolName = typeof value.toolName === "string" && value.toolName.trim() !== "" ? value.toolName : "tool";
+      const identified = typeof value.toolCallId === "string" && value.toolCallId !== "";
+      // A call without an identity cannot pair its start with its end: only its end counts.
+      if (!identified && value.type === "tool_execution_start") return;
+      const key = identified ? `prime-tool-${value.toolCallId as string}` : `prime-tool-anonymous-${primeAnonymousActionCount++}`;
+      const action = primeToolAction(toolName, value.args);
+      const summary = sanitize(action.summary);
+      if (value.type === "tool_execution_start") {
+        actions.started(key, { kind: action.kind, summary });
+        return;
+      }
+      const exitCode = toolName === "bash" ? primeBashExitCode(value.result, value.isError === true) : undefined;
+      actions.ended(key, {
+        kind: action.kind,
+        summary,
+        status: value.isError === true ? "failed" : "completed",
+        ...(exitCode === undefined ? {} : { exitCode }),
+      });
+      return;
+    }
+    if (value.type === "rlm_child_update" && isRecord(value.child) && typeof value.child.id === "string") {
+      const child = value.child;
+      const key = `prime-child-${child.id as string}`;
+      const label = typeof child.label === "string" ? child.label : typeof child.sessionName === "string" ? child.sessionName : "";
+      const summary = sanitize(firstLineSummary(label));
+      const status = primeChildStatus(child.status);
+      if (status === undefined) actions.started(key, { kind: "native_subagent", summary });
+      else actions.ended(key, { kind: "native_subagent", summary, status });
+    }
+  } catch {
+    // An unrecognized event shape records nothing; the turn itself is unaffected.
+  }
+}
+
+function primeToolAction(toolName: string, args: unknown): { readonly kind: HarnessActionKind; readonly summary: string } {
+  const input = isRecord(args) ? args : {};
+  const normalized = toolName.toLowerCase();
+  if (normalized === "ipython") return { kind: "command", summary: `ipython: ${firstLineSummary(input.code)}` };
+  if (normalized === "bash") return { kind: "command", summary: firstLineSummary(input.command) };
+  if (normalized === "edit" || normalized === "write") {
+    return { kind: "file_change", summary: `${normalized} ${typeof input.path === "string" ? input.path : "file"}` };
+  }
+  if (normalized.startsWith("mcp")) return { kind: "mcp_tool", summary: toolName };
+  if (normalized.includes("web") || normalized.includes("fetch") || normalized.includes("browser")) {
+    return { kind: "web", summary: toolName };
+  }
+  return { kind: "other", summary: toolName };
+}
+
+/** Prime's bash tool reports a nonzero exit only as its error text; the code alone is kept. */
+function primeBashExitCode(result: unknown, isError: boolean): number | undefined {
+  if (!isError) return 0;
+  const text = typeof result === "string"
+    ? result
+    : isRecord(result) && Array.isArray(result.content)
+      ? result.content.flatMap((block) => isRecord(block) && typeof block.text === "string" ? [block.text] : []).join("\n")
+      : "";
+  const match = /Command exited with code (-?\d+)\s*$/u.exec(text);
+  return match?.[1] === undefined ? undefined : Number(match[1]);
+}
+
+/** Undefined while the child is queued or running. */
+function primeChildStatus(value: unknown): HarnessActionStatus | undefined {
+  if (value === "done" || value === "completed") return "completed";
+  if (value === "error" || value === "failed") return "failed";
+  if (value === "cancelled") return "interrupted";
+  return undefined;
 }
 
 function tracePrimeEvent(

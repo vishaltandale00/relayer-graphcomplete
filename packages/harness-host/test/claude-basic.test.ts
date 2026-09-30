@@ -6,6 +6,7 @@ import {
   type ClaudeSdkQuery,
   type ClaudeSdkModule,
 } from "../src/implementations/claude-basic.js";
+import { HarnessActionLedgerRecorder } from "../src/action-ledger.js";
 import { CLAUDE_BROWSER_TOOL } from "../src/implementations/claude-basic-browser.js";
 import { createNoopHarnessTraceSink } from "../src/trace.js";
 import type { HarnessExecutionAccess, HarnessFactoryContext, HarnessRunContext, HarnessTraceEventInput } from "../src/types.js";
@@ -686,5 +687,103 @@ describe("ClaudeBasicHarness", () => {
     });
     await expect(harness.complete(runContext(secretAccess()))).rejects.toThrow("Claude Agent SDK completion failed.");
     await expect(harness.complete(runContext(secretAccess()))).rejects.not.toThrow(/customer@example\.test|sk-secret/);
+  });
+});
+
+describe("ClaudeBasicHarness action ledger (#584, CONT-013)", () => {
+  const toolUse = (id: string, name: string, input: Record<string, unknown>) => ({
+    type: "assistant", session_id: "session-1", message: { content: [{ type: "tool_use", id, name, input }] },
+  });
+  const toolResult = (id: string, isError: boolean) => ({
+    type: "user", session_id: "session-1",
+    message: { content: [{ type: "tool_result", tool_use_id: id, is_error: isError, content: `secret-tool-output-${id}` }] },
+  });
+
+  it("records tool calls from the Agent SDK's own messages, since Claude emits no tool events", async () => {
+    const recorder = new HarnessActionLedgerRecorder();
+    const harness = new ClaudeBasicHarness(factoryContext("full"), {
+      query: sdkQuery([
+        { type: "system", subtype: "init", session_id: "session-1" },
+        toolUse("bash-1", "Bash", { command: "npm test\necho secret-second-line", description: "Run tests" }),
+        toolResult("bash-1", true),
+        toolUse("edit-1", "Edit", { file_path: "src/queue.ts", old_string: "secret-old", new_string: "secret-new" }),
+        toolResult("edit-1", false),
+        toolUse("fetch-1", "WebFetch", { url: "https://docs.bullmq.io/retries", prompt: "secret-fetch-prompt" }),
+        toolResult("fetch-1", false),
+        toolUse("browser-1", CLAUDE_BROWSER_TOOL, { action: "read", token: "secret-browser-input" }),
+        toolResult("browser-1", false),
+        toolUse("task-1", "Task", { subagent_type: "general-purpose", description: "Compare queues", prompt: "secret-task-prompt" }),
+        toolResult("task-1", false),
+        toolUse("read-1", "Read", { file_path: "package.json" }),
+        toolResult("read-1", false),
+        { type: "assistant", session_id: "session-1", message: { content: [{ type: "text", text: "secret-assistant-text" }] } },
+        toolUse("bash-2", "Bash", { command: "npm run migrate" }),
+        { type: "result", subtype: "success", result: "done", session_id: "session-1" },
+      ]),
+      browserSdk: browserSdk(),
+    });
+
+    await harness.complete({ ...runContext(managedAccess()), actions: recorder });
+    const ledger = recorder.seal();
+
+    expect(ledger).toEqual({
+      entries: [
+        { kind: "command", summary: "npm test …", status: "failed" },
+        { kind: "file_change", summary: "Edit src/queue.ts", status: "completed" },
+        { kind: "web", summary: "fetch https://docs.bullmq.io/retries", status: "completed" },
+        { kind: "mcp_tool", summary: CLAUDE_BROWSER_TOOL.replace(/^mcp__(.+?)__/, "$1."), status: "completed" },
+        { kind: "native_subagent", summary: "general-purpose: Compare queues", status: "completed" },
+        { kind: "other", summary: "Read package.json", status: "completed" },
+        { kind: "command", summary: "npm run migrate", status: "interrupted" },
+      ],
+      omitted: 0,
+    });
+    expect(JSON.stringify(ledger)).not.toContain("secret-");
+  });
+
+  it("keeps a stopped Claude turn's actions, with the unfinished one interrupted", async () => {
+    const recorder = new HarnessActionLedgerRecorder();
+    let sdkSignal: AbortSignal | undefined;
+    const query: ClaudeSdkQuery = ((input) => (async function* () {
+      sdkSignal = input.options.abortController.signal;
+      yield toolUse("bash-1", "Bash", { command: "npm run migrate" });
+      await new Promise<void>((_resolve, reject) => {
+        sdkSignal!.addEventListener("abort", () => reject(sdkSignal!.reason), { once: true });
+      });
+    })()) as ClaudeSdkQuery;
+    const harness = new ClaudeBasicHarness(factoryContext("full"), { query, browserSdk: browserSdk() });
+    const controller = new AbortController();
+    const completion = harness.complete({ ...runContext(managedAccess()), actions: recorder }, controller.signal);
+    await vi.waitFor(() => expect(sdkSignal).toBeDefined());
+    controller.abort(new Error("Stopped by user"));
+    await expect(completion).rejects.toThrow("Stopped by user");
+
+    expect(recorder.seal()).toEqual({
+      entries: [{ kind: "command", summary: "npm run migrate", status: "interrupted" }],
+      omitted: 0,
+    });
+  });
+
+  it("keeps the actions a failed Claude turn took before it failed", async () => {
+    const recorder = new HarnessActionLedgerRecorder();
+    const harness = new ClaudeBasicHarness(factoryContext("full"), {
+      query: sdkQuery([
+        toolUse("bash-1", "Bash", { command: "npm run migrate" }),
+        toolResult("bash-1", false),
+        toolUse("bash-2", "Bash", { command: "npm run seed" }),
+        { type: "result", subtype: "error_during_execution", errors: ["secret-provider-error"] },
+      ]),
+      browserSdk: browserSdk(),
+    });
+
+    await expect(harness.complete({ ...runContext(managedAccess()), actions: recorder })).rejects.toThrow("Claude Agent SDK completion failed.");
+
+    expect(recorder.seal()).toEqual({
+      entries: [
+        { kind: "command", summary: "npm run migrate", status: "completed" },
+        { kind: "command", summary: "npm run seed", status: "interrupted" },
+      ],
+      omitted: 0,
+    });
   });
 });

@@ -256,6 +256,82 @@ pub(crate) struct RuntimeCompletion {
     pub(crate) output: Value,
 }
 
+/// One harness settlement: the completion result and, beside it, the action ledger the host
+/// reported with it. The ledger is taken out of the response here, so it never reaches an
+/// error message, a log line, or `completion_error`, and it survives a failed revocation.
+pub(crate) struct RuntimeSettlement {
+    pub(crate) actions: Option<RuntimeActionLedger>,
+    pub(crate) result: Result<RuntimeCompletion, RuntimeError>,
+}
+
+/// The most actions one attempt's ledger holds (#584, PRD CONT-013).
+pub(crate) const MAX_ATTEMPT_ACTIONS: usize = 64;
+/// The most UTF-8 bytes one action summary holds.
+pub(crate) const MAX_ATTEMPT_ACTION_SUMMARY_BYTES: usize = 512;
+
+/// One settled attempt's bounded native action ledger, as the harness host reported it at
+/// settlement. The host is outside the product's trust boundary, so a ledger is accepted only
+/// when it has exactly this shape and bound; anything else is dropped whole, never repaired.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct RuntimeActionLedger {
+    pub(crate) entries: Vec<RuntimeLedgerAction>,
+    pub(crate) omitted: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct RuntimeLedgerAction {
+    pub(crate) kind: RuntimeLedgerActionKind,
+    pub(crate) summary: String,
+    pub(crate) status: RuntimeLedgerActionStatus,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) exit_code: Option<i32>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum RuntimeLedgerActionKind {
+    Command,
+    FileChange,
+    Web,
+    McpTool,
+    NativeSubagent,
+    Other,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum RuntimeLedgerActionStatus {
+    Completed,
+    Failed,
+    Interrupted,
+}
+
+impl RuntimeActionLedger {
+    /// Accepts a reported ledger only when it is exactly the bounded contract.
+    pub(crate) fn from_reported(value: &Value) -> Option<Self> {
+        let ledger = serde_json::from_value::<Self>(value.clone()).ok()?;
+        let valid = ledger.entries.len() <= MAX_ATTEMPT_ACTIONS
+            && ledger.entries.iter().all(|entry| {
+                !entry.summary.trim().is_empty()
+                    && entry.summary.len() <= MAX_ATTEMPT_ACTION_SUMMARY_BYTES
+                    && !entry.summary.chars().any(char::is_control)
+            });
+        valid.then_some(ledger)
+    }
+}
+
+/// The ledger a harness host reported beside an attempt's settlement. A malformed ledger
+/// yields none and is logged without its content.
+fn reported_action_ledger(reported: &Value) -> Option<RuntimeActionLedger> {
+    let ledger = RuntimeActionLedger::from_reported(reported);
+    if ledger.is_none() {
+        eprintln!("ignored a malformed action ledger reported by the harness host");
+    }
+    ledger
+}
+
 pub(crate) struct RuntimeCompletionBroker<'a> {
     pub(crate) url: &'a str,
     pub(crate) token: &'a str,
@@ -708,7 +784,9 @@ impl RuntimeClient {
     ) -> Result<RuntimeCompletion, RuntimeError> {
         let prepared = self.prepare(&command).await?;
         self.activate_prepared(&prepared).await?;
-        self.complete_prepared(&command, prepared, None).await
+        self.complete_prepared(&command, prepared, None)
+            .await
+            .result
     }
 
     pub(crate) async fn prepare(
@@ -958,18 +1036,21 @@ impl RuntimeClient {
         command: &CompleteInteraction<'_>,
         prepared: PreparedInteraction,
         completion_broker: Option<RuntimeCompletionBroker<'_>>,
-    ) -> Result<RuntimeCompletion, RuntimeError> {
+    ) -> RuntimeSettlement {
         if completion_broker.is_some() && !self.agent_authored_complete_available(&prepared) {
-            return Err(RuntimeError::Configuration(
-                "harness configuration does not allow agent-authored Complete".into(),
-            ));
+            return RuntimeSettlement {
+                actions: None,
+                result: Err(RuntimeError::Configuration(
+                    "harness configuration does not allow agent-authored Complete".into(),
+                )),
+            };
         }
         let graph = serde_json::json!({
             "url": self.graph_url.as_str().trim_end_matches('/'),
             "token": &prepared.graph_token,
             "nodeId": prepared.graph_node_id,
         });
-        let completion = async {
+        let completion: Result<CompleteResponse, RuntimeError> = async {
             let _: Value = self
                 .post(
                     self.harness_url.join("sessions")?,
@@ -1032,6 +1113,26 @@ impl RuntimeClient {
             .await
         }
         .await;
+        let (actions, completion) = match completion {
+            Ok(mut completed) => (
+                completed
+                    .actions
+                    .take()
+                    .as_ref()
+                    .and_then(reported_action_ledger),
+                Ok(completed),
+            ),
+            Err(mut error) => (error.take_action_ledger(), Err(error)),
+        };
+        let result = self.settle_prepared_completion(prepared, completion).await;
+        RuntimeSettlement { actions, result }
+    }
+
+    async fn settle_prepared_completion(
+        &self,
+        prepared: PreparedInteraction,
+        completion: Result<CompleteResponse, RuntimeError>,
+    ) -> Result<RuntimeCompletion, RuntimeError> {
         let revocation = self.revoke_capability(&prepared.graph_token).await;
         let completed: CompleteResponse = match (completion, revocation) {
             (Ok(completed), Ok(())) => completed,
@@ -2416,6 +2517,8 @@ struct RemintCapabilityResponse {
 #[derive(Deserialize)]
 struct CompleteResponse {
     output: Value,
+    #[serde(default)]
+    actions: Option<Value>,
 }
 
 async fn response_json(
@@ -2806,6 +2909,22 @@ pub(crate) enum RuntimeError {
 }
 
 impl RuntimeError {
+    /// Takes the action ledger the harness host reported with a failed or stopped settlement
+    /// out of the error, so the error's message never carries its summaries.
+    pub(crate) fn take_action_ledger(&mut self) -> Option<RuntimeActionLedger> {
+        match self {
+            Self::Completion { operation, .. } | Self::Cleanup { operation, .. } => {
+                operation.take_action_ledger()
+            }
+            Self::Remote { body, .. } => body
+                .as_object_mut()
+                .and_then(|body| body.remove("actions"))
+                .as_ref()
+                .and_then(reported_action_ledger),
+            _ => None,
+        }
+    }
+
     pub(crate) fn cancellation_settled(&self) -> bool {
         match self {
             Self::Completion { operation, .. } => operation.cancellation_settled(),
@@ -2943,6 +3062,106 @@ mod tests {
         },
         time::Duration,
     };
+
+    /// #584, PRD CONT-013: the host reports a settled attempt's ledger with a stopped
+    /// (409) or failed (500) settlement as well as an accepted one. The host is outside the
+    /// product's trust boundary: only the exact bounded shape is kept, and anything else is
+    /// dropped whole rather than repaired.
+    #[test]
+    fn harness_action_ledger_is_read_from_every_settlement_and_malformed_ledgers_are_dropped() {
+        let ledger = json!({
+            "entries": [
+                { "kind": "command", "summary": "npm test", "status": "failed", "exitCode": 1 },
+                { "kind": "native_subagent", "summary": "Research queues", "status": "interrupted" }
+            ],
+            "omitted": 3
+        });
+        let expected = super::RuntimeActionLedger {
+            entries: vec![
+                super::RuntimeLedgerAction {
+                    kind: super::RuntimeLedgerActionKind::Command,
+                    summary: "npm test".into(),
+                    status: super::RuntimeLedgerActionStatus::Failed,
+                    exit_code: Some(1),
+                },
+                super::RuntimeLedgerAction {
+                    kind: super::RuntimeLedgerActionKind::NativeSubagent,
+                    summary: "Research queues".into(),
+                    status: super::RuntimeLedgerActionStatus::Interrupted,
+                    exit_code: None,
+                },
+            ],
+            omitted: 3,
+        };
+        let mut stopped = super::RuntimeError::Remote {
+            status: 409,
+            body: json!({ "error": "Stopped by user", "cancellationSettled": true, "actions": ledger }),
+        };
+        let mut failed = super::RuntimeError::Completion {
+            graph_node_id: 7,
+            operation: Box::new(super::RuntimeError::Cleanup {
+                operation: Box::new(super::RuntimeError::Remote {
+                    status: 500,
+                    body: json!({ "error": "failed", "effectBoundary": "tool_effect", "actions": ledger }),
+                }),
+                cleanup: Box::new(super::RuntimeError::Timeout("capability revocation")),
+            }),
+        };
+        assert_eq!(stopped.take_action_ledger(), Some(expected.clone()));
+        assert_eq!(failed.take_action_ledger(), Some(expected.clone()));
+        // Taken, the ledger no longer reaches the error's message, which the product may keep
+        // as `completion_error` or log, legacy conversations included.
+        for error in [&stopped, &failed] {
+            let message = error.to_string();
+            assert!(
+                !message.contains("npm test") && !message.contains("actions"),
+                "{message}"
+            );
+        }
+        assert!(stopped.cancellation_settled());
+        assert_eq!(
+            super::RuntimeError::Remote {
+                status: 500,
+                body: json!({ "error": "no ledger" })
+            }
+            .take_action_ledger(),
+            None
+        );
+        assert_eq!(
+            serde_json::to_value(&expected.entries).unwrap(),
+            ledger["entries"],
+            "a stored ledger keeps the reported wire shape"
+        );
+
+        let entry =
+            |summary: &str| json!({ "kind": "command", "summary": summary, "status": "completed" });
+        let malformed = [
+            json!({ "entries": (0..65).map(|index| entry(&format!("step {index}"))).collect::<Vec<_>>(), "omitted": 0 }),
+            json!({ "entries": [entry(&"x".repeat(513))], "omitted": 0 }),
+            json!({ "entries": [entry("line\nbreak")], "omitted": 0 }),
+            json!({ "entries": [entry("  ")], "omitted": 0 }),
+            json!({ "entries": [{ "kind": "shell", "summary": "npm test", "status": "completed" }], "omitted": 0 }),
+            json!({ "entries": [{ "kind": "command", "summary": "npm test", "status": "running" }], "omitted": 0 }),
+            json!({ "entries": [{ "kind": "command", "summary": "npm test", "status": "completed", "output": "bytes" }], "omitted": 0 }),
+            json!({ "entries": [{ "kind": "command", "summary": "npm test", "status": "completed", "exitCode": 4294967296_i64 }], "omitted": 0 }),
+            json!({ "entries": [], "omitted": -1 }),
+            json!({ "entries": [], "omitted": 0, "transcript": "raw" }),
+        ];
+        for reported in malformed {
+            let mut error = super::RuntimeError::Remote {
+                status: 500,
+                body: json!({ "error": "failed", "actions": reported }),
+            };
+            assert_eq!(error.take_action_ledger(), None, "{reported}");
+            assert!(!error.to_string().contains("actions"));
+        }
+        let full = json!({ "entries": (0..64).map(|index| entry(&format!("step {index}"))).collect::<Vec<_>>(), "omitted": 9 });
+        assert_eq!(
+            super::RuntimeActionLedger::from_reported(&full)
+                .map(|ledger| (ledger.entries.len(), ledger.omitted)),
+            Some((64, 9))
+        );
+    }
 
     #[test]
     fn harness_effect_boundary_is_allowlisted_and_unknown_values_fail_closed() {

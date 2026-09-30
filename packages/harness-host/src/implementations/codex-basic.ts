@@ -2,6 +2,7 @@ import { RELAYER_ICON_NAMES, type GraphCapability, type GraphNode } from "@relay
 import { createHash, randomUUID } from "node:crypto";
 import { mkdir, rename, rm, unlink, writeFile } from "node:fs/promises";
 import { isAbsolute, join, resolve } from "node:path";
+import { firstLineSummary, type HarnessActionSettlement, type HarnessActionStatus } from "../action-ledger.js";
 import { nativeExecutionHandle, type NativeExecutionHandle } from "../completion-execution.js";
 import { INTERACTION_INPUT_GUIDANCE, renderInteractionInput } from "../interaction-input.js";
 import {
@@ -183,6 +184,7 @@ interface CodexTraceState {
   readonly collaborationSpans: Map<string, HarnessTraceSpan>;
   readonly graphAuthoringCommandIds: Set<string>;
   readonly fallbackGraphAuthoringEnabled: boolean;
+  anonymousActionCount: number;
 }
 
 interface NormalizedCollaborationItem {
@@ -380,6 +382,7 @@ export class CodexBasicHarness implements Harness {
       collaborationSpans: new Map(),
       graphAuthoringCommandIds: new Set(),
       fallbackGraphAuthoringEnabled: this.dependencies.graphAuthoringLauncherPath === undefined,
+      anonymousActionCount: 0,
     };
     // The host's per-turn force-stop kills this turn's app-server process group, exactly as a
     // harness force shutdown does, and no other turn's. A turn force-stopped before it spawns
@@ -458,7 +461,11 @@ export class CodexBasicHarness implements Harness {
             turnId,
           }));
         },
-        onNotification: (method, params) => traceCodexAppServerNotification(context, method, params, traceState),
+        onNotification: (method, params) => {
+          // The action ledger comes from Codex's own item events, never from the trace.
+          recordCodexAction(context, method, params, traceState);
+          traceCodexAppServerNotification(context, method, params, traceState);
+        },
         onServerRequest: (method, params) => traceCodexAppServerNotification(context, method, params, traceState),
       });
     } finally {
@@ -943,6 +950,105 @@ function graphAuthoringCommand(launcher: string | undefined): string {
 function pinnedExecutionClause(launcher: string | undefined): string {
   if (launcher === undefined) return "";
   return `In this pinned mode, the launcher heredoc is the only permitted shell action for graph authoring. Do not run sed, rg, cat, find, or any other inspection command through the launcher or from the authored graph program. If the authored program fails, repair it only from the returned error and rerun the same launcher heredoc. This restriction applies only to the graph-authoring path: complete the underlying user task with ordinary Codex workspace tools under the configured permission policy. LayerLayoutObject accepts exactly one argument: the placements array, for example new LayerLayoutObject([new NodePlacementObject(node, 0.5, 0.5)]). Its version is already fixed at 1; never pass a version argument and never assign layout.version.`;
+}
+
+/**
+ * #584, CONT-013: maps one Codex app-server item event to the turn's action ledger. Only
+ * command, file-change, web-search, MCP, and collaboration items are actions. A summary names
+ * the action; it never carries command output, diffs, tool results, or arguments.
+ */
+function recordCodexAction(context: HarnessRunContext, method: string, params: unknown, state: CodexTraceState): void {
+  const actions = context.actions;
+  if (actions === undefined || !isRecord(params) || !isRecord(params.item)) return;
+  const phase = collaborationNotificationPhase(method);
+  if (phase === undefined) return;
+  try {
+    const action = codexItemAction(params.item, state);
+    if (action === undefined) return;
+    const itemId = optionalNonemptyString(params.item.id);
+    // An item without an identity cannot pair its start with its end: only its end counts.
+    if (itemId === undefined && phase === "started") return;
+    const key = itemId === undefined ? `codex-anonymous-${state.anonymousActionCount++}` : `codex-item-${itemId}`;
+    const summary = redactPersonalPresentationTraceData(context, action.summary, true) as string;
+    if (phase === "started" && action.status === undefined) {
+      actions.started(key, { kind: action.kind, summary });
+    } else {
+      actions.ended(key, {
+        kind: action.kind,
+        summary,
+        status: action.status ?? "completed",
+        ...(action.exitCode === undefined ? {} : { exitCode: action.exitCode }),
+      });
+    }
+  } catch {
+    // An unrecognized item shape records nothing; the turn itself is unaffected.
+  }
+}
+
+function codexItemAction(
+  item: JsonObject,
+  state: CodexTraceState,
+): (Omit<HarnessActionSettlement, "status"> & { readonly status?: HarnessActionStatus }) | undefined {
+  const type = normalizeName(item.type);
+  const status = codexItemStatus(item.status);
+  if (type === "commandexecution") {
+    const exitCode = typeof item.exitCode === "number" ? item.exitCode : undefined;
+    const commands = [item.command, ...(Array.isArray(item.commandActions)
+      ? item.commandActions.flatMap((action) => isRecord(action) ? [action.command] : [])
+      : [])];
+    const graphProgram = commands.some((command) => pinnedGraphAuthoringLauncher(command) !== undefined
+      || (state.fallbackGraphAuthoringEnabled && isFallbackGraphAuthoringCommand(command)));
+    return {
+      kind: "command",
+      summary: graphProgram ? "Relayer graph program" : firstLineSummary(item.command),
+      ...(status === undefined ? {} : { status: exitCode !== undefined && exitCode !== 0 ? "failed" : status }),
+      ...(exitCode === undefined ? {} : { exitCode }),
+    };
+  }
+  if (type === "filechange") {
+    const changes = Array.isArray(item.changes) ? item.changes.filter(isRecord) : [];
+    const summary = changes.map((change) => {
+      const kind = isRecord(change.kind) ? optionalNonemptyString(change.kind.type) : optionalNonemptyString(change.kind);
+      const path = optionalNonemptyString(change.path) ?? "file";
+      return kind === undefined ? path : `${kind} ${path}`;
+    }).join(", ");
+    return { kind: "file_change", summary, ...(status === undefined ? {} : { status }) };
+  }
+  if (type === "mcptoolcall") {
+    const server = optionalNonemptyString(item.server);
+    const tool = optionalNonemptyString(item.tool) ?? "tool";
+    const failed = item.error !== undefined && item.error !== null;
+    return {
+      kind: "mcp_tool",
+      summary: server === undefined ? tool : `${server}.${tool}`,
+      ...(status === undefined ? {} : { status: failed ? "failed" : status }),
+    };
+  }
+  if (type === "websearch") {
+    const query = optionalNonemptyString(item.query);
+    return { kind: "web", summary: query === undefined ? "" : `search: ${query}`, ...(status === undefined ? {} : { status }) };
+  }
+  const collaboration = normalizeCollaborationItem(item);
+  if (collaboration !== undefined) {
+    const collaborationStatus = collaboration.status === "completed" ? "completed"
+      : collaboration.status === "failed" ? "failed" : undefined;
+    // Only the operation: a delegation prompt is model-written text that may quote the user.
+    return {
+      kind: "native_subagent",
+      summary: collaboration.operation === "unknown" ? collaboration.providerOperation ?? "agent" : collaboration.operation,
+      ...(collaborationStatus === undefined ? {} : { status: collaborationStatus }),
+    };
+  }
+  return undefined;
+}
+
+/** A Codex item status; undefined while it is still in progress. Declined never ran: failed. */
+function codexItemStatus(value: JsonValue | undefined): HarnessActionStatus | undefined {
+  const normalized = normalizeName(value);
+  if (normalized === "completed") return "completed";
+  if (normalized === "failed" || normalized === "declined") return "failed";
+  if (normalized === "interrupted" || normalized === "cancelled") return "interrupted";
+  return undefined;
 }
 
 function traceCodexAppServerNotification(context: HarnessRunContext, method: string, params: unknown, state: CodexTraceState): void {

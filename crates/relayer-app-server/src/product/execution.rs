@@ -12,7 +12,7 @@ use crate::{
     runtime::{
         ApprovalEvent, ApprovalEventSnapshot, CompleteInteraction, PreparedInteraction,
         PreparedInvocation, RuntimeClient, RuntimeCompletion, RuntimeCompletionBroker,
-        RuntimeError,
+        RuntimeError, RuntimeSettlement,
     },
 };
 use serde_json::Value;
@@ -474,9 +474,14 @@ impl InteractionExecutionService {
         let mut complete_call_id = None;
         let mut interval = tokio::time::interval(std::time::Duration::from_millis(100));
         interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        let mut reported_actions = None;
         let completion_result: Result<RuntimeCompletion, RuntimeError> = loop {
             tokio::select! {
-                result = &mut completion => {
+                settlement = &mut completion => {
+                    // The host reports the ledger with every settlement it answers; keep it
+                    // even when approval reconciliation below replaces the result.
+                    let RuntimeSettlement { actions, result } = settlement;
+                    reported_actions = actions;
                     match runtime.approval_events(thread.id.value(), cursor).await {
                         Ok(snapshot) => {
                             if let Err(error) = persist_approval_snapshot(
@@ -558,6 +563,9 @@ impl InteractionExecutionService {
                                     std::time::Duration::from_secs(2),
                                     &mut completion,
                                 ).await;
+                                if let Ok(settlement) = &cleanup {
+                                    reported_actions.clone_from(&settlement.actions);
+                                }
                                 let mut message = format!(
                                     "could not reconcile approval events for thread {}: {error}",
                                     thread.id
@@ -579,6 +587,17 @@ impl InteractionExecutionService {
                 }
             }
         };
+        // #584, PRD CONT-013: an attempt keeps the action ledger its settlement reported,
+        // whether the product then accepts, fails, or stops it. Storage keeps it only for a
+        // continuation conversation. It is inert: nothing reads it until the conversation read.
+        if let (Some(attempt), Some(ledger)) = (attempt, reported_actions.as_ref())
+            && let Err(error) = execution
+                .product
+                .record_attempt_action_ledger(attempt, ledger)
+                .await
+        {
+            eprintln!("could not record the action ledger of attempt {attempt}: {error}");
+        }
         let aborted = match execution
         .product
         .abort_pending_approvals(

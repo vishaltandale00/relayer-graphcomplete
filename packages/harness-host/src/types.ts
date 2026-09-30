@@ -1,4 +1,5 @@
 import type { CompletionOutput, GraphCapability, GraphId, GraphNode, InteractionInput, ResolvedPersonalPresentation } from "@relayer/graph-client";
+import type { HarnessActionLedger, HarnessActionRecorder } from "./action-ledger.js";
 import type { HarnessApprovalChannel } from "./approval-coordinator.js";
 import type { NativeExecutionHandle } from "./completion-execution.js";
 
@@ -247,6 +248,11 @@ export interface HarnessRunContext {
   readonly access?: HarnessExecutionAccess;
   readonly trace: HarnessTraceSink;
   /**
+   * The host's bounded action ledger for this turn (#584, CONT-013). The adapter records its
+   * own native actions here, independently of the trace. Absent outside a host run.
+   */
+  readonly actions?: HarnessActionRecorder;
+  /**
    * Present only for a harness that declares `supportsForceStop`. It aborts when this
    * completion was cancelled and its native turn has not settled within two minutes. The
    * harness then ends this one turn's native work, and nothing else, and settles.
@@ -413,4 +419,6 @@ export interface HarnessCompleteResult {
   readonly configurationName: string;
   readonly output: CompletionOutput;
   readonly trace: HarnessTraceDescriptor;
+  /** The turn's native action ledger, sealed at settlement. Absent when this call started no native turn. */
+  readonly actions?: HarnessActionLedger;
 }

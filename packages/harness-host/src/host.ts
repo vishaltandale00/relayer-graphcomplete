@@ -28,6 +28,7 @@ import {
   harnessAllowsModel,
   sameHarnessExecutionConfiguration,
 } from "./configuration.js";
+import { HarnessActionLedgerRecorder, type HarnessActionLedger } from "./action-ledger.js";
 import { resolveHarnessFactory } from "./registry.js";
 import {
   HarnessTraceStore,
@@ -824,6 +825,9 @@ export class HarnessHost {
     let result: HarnessCompleteResult | HarnessInvokedCompletionObservation | undefined;
     let operationError: unknown;
     let nativeStarted = false;
+    // One bounded ledger per run. It is sealed when the run settles, including after a
+    // force-stop, so native events that arrive later cannot change what the product stores.
+    const actions = new HarnessActionLedgerRecorder();
     try {
       if (this.closed) throw new Error("Harness host is closed");
       controller.signal.throwIfAborted();
@@ -847,11 +851,16 @@ export class HarnessHost {
         input.admissionInteractionId,
         () => controller.abort(new Error("Provider execution access was released by its owner")),
         forceController.signal,
+        actions,
       );
     } catch (error) {
       operationError = error;
       if (!nativeStarted && error !== null && typeof error === "object") executionNotStartedErrors.add(error);
     }
+    // Sealed as soon as the run has settled. Only a turn whose native work started has a
+    // ledger: a replayed or refused turn reports none, which is not the same as "did nothing".
+    const sealedLedger = actions.seal();
+    const ledger = nativeStarted ? sealedLedger : undefined;
     controller.signal.removeEventListener("abort", armForceStop);
     forceController.signal.removeEventListener("abort", recordForcedState);
     if (forceTimer !== undefined) clearTimeout(forceTimer);
@@ -874,8 +883,14 @@ export class HarnessHost {
     } catch (error) {
       errors.push(error);
     }
-    if (errors.length === 1) throw errors[0];
-    if (errors.length > 1) throw new AggregateError(errors, "Harness completion and cleanup failed");
+    // Only a root turn reports its ledger: it settles one product attempt.
+    const reportedLedger = input.origin.kind === "root" ? ledger : undefined;
+    if (errors.length > 0) {
+      const failure = errors.length === 1 ? errors[0] : new AggregateError(errors, "Harness completion and cleanup failed");
+      if (reportedLedger !== undefined && failure !== null && typeof failure === "object") settledActionLedgers.set(failure, reportedLedger);
+      throw failure;
+    }
+    if (reportedLedger !== undefined && result !== undefined && "output" in result) return { ...result, actions: reportedLedger };
     return result!;
   }
 
@@ -1150,6 +1165,7 @@ export class HarnessHost {
     admissionInteractionId: number = productInteractionId,
     abandonCompletion?: () => void,
     forceSignal: AbortSignal = new AbortController().signal,
+    actions?: HarnessActionLedgerRecorder,
   ): Promise<HarnessCompleteResult | HarnessInvokedCompletionObservation> {
     const graph = new RelayerGraphClient(capability);
     const interactionNodeId = capability.nodeId;
@@ -1293,6 +1309,7 @@ export class HarnessHost {
         ...(accessBundle === undefined ? {} : { accessBundle }),
         ...(selectedAccess === undefined ? {} : { access: selectedAccess }),
         ...(session.harness.supportsForceStop === true ? { forceSignal } : {}),
+        ...(actions === undefined ? {} : { actions }),
       }, signal);
       onNativeExecution?.(isNativeExecutionHandle(native) ? native : undefined);
       await settledOrForceStopped(native, forceSignal);
@@ -1848,6 +1865,21 @@ export async function startHarnessHost(options: HarnessHostOptions): Promise<Run
 }
 
 const executionNotStartedErrors = new WeakSet<object>();
+/** The sealed action ledger of the root turn a thrown settlement error ended. */
+const settledActionLedgers = new WeakMap<object, HarnessActionLedger>();
+
+/**
+ * The sealed action ledger a root turn's settlement error carries: a stopped, force-stopped,
+ * or failed turn reports what it did as a successful one does.
+ */
+export function harnessSettlementActionLedger(error: unknown): HarnessActionLedger | undefined {
+  return error !== null && typeof error === "object" ? settledActionLedgers.get(error) : undefined;
+}
+
+function settledActionLedger(error: unknown): { readonly actions?: HarnessActionLedger } {
+  const ledger = harnessSettlementActionLedger(error);
+  return ledger === undefined ? {} : { actions: ledger };
+}
 
 class ExecutionLeaseReleaseInProgress extends Error {
   constructor() { super("execution_lease_release_in_progress"); }
@@ -2011,7 +2043,7 @@ async function route(host: HarnessHost, options: HarnessHostOptions, request: In
       return reply(response, 503, { error: error.message });
     }
     if (error instanceof HarnessCancellationSettled) {
-      return reply(response, 409, { error: error.message, cancellationSettled: true });
+      return reply(response, 409, { error: error.message, cancellationSettled: true, ...settledActionLedger(error) });
     }
     if (error instanceof HarnessApprovalCoordinatorError) {
       const status = error.code === "invalid_approval_request"
@@ -2026,6 +2058,7 @@ async function route(host: HarnessHost, options: HarnessHostOptions, request: In
         ? { error: error.message, failureCategory: error.failureCategory, effectBoundary: error.effectBoundary }
         : { error: error instanceof Error ? error.message : String(error), failureCategory: "application", effectBoundary: "unknown" }),
       ...(error !== null && typeof error === "object" && executionNotStartedErrors.has(error) ? { executionNotStarted: true } : {}),
+      ...settledActionLedger(error),
     });
   }
 }

@@ -2337,7 +2337,8 @@ graph.getConversationTurn(sequence: number): Promise&lt;ConversationTurn&gt;;
 <tr><td><code>CONT-005</code></td><td>Storage tests accept a route switch at Send, identified Send, retry, and admission. Unit tests keep native continuity optional and the picker unrestricted.</td><td>Delivered</td></tr>
 <tr><td><code>CONT-006</code>, <code>CONT-007</code></td><td>Product API and host session-slot tests.</td><td>Planned</td></tr>
 <tr><td><code>CONT-008</code> to <code>CONT-012</code></td><td>Graph route authority tests, client parity, and prompt tests for each harness without earlier-turn text.</td><td>Planned</td></tr>
-<tr><td><code>CONT-013</code> to <code>CONT-017</code></td><td>Adapter ledger tests, manifest freeze tests, guidance prompt tests, and reset diagnostic tests.</td><td>Planned</td></tr>
+<tr><td><code>CONT-013</code></td><td>Each harness's ledger tests use its own native events. Host tests cover accepted, failed, stopped, and force-stopped turns. Storage tests cover the 64-entry bound, reopen, and immutability. A legacy attempt keeps no ledger. Nothing reads the ledger yet.</td><td>Delivered</td></tr>
+<tr><td><code>CONT-014</code> to <code>CONT-017</code></td><td>Manifest freeze tests, guidance prompt tests, and reset diagnostic tests.</td><td>Planned</td></tr>
 </tbody>
 </table>
 <p>Deterministic checks prove data, authority, and prompt content. They do not prove that a model reads when it should. The live gate measures that separately.</p>

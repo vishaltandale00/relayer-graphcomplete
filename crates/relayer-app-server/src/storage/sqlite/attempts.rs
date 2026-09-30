@@ -5,6 +5,7 @@ use super::{
 use crate::product::{ExecutionModelSelection, InteractionId, InteractionModelSelection};
 use crate::{
     product::{BeginInteractionAttempt, ExecutionLeaseDebt, PreExecutionModelFailure, ThreadId},
+    runtime::RuntimeActionLedger,
     storage::StorageError,
 };
 #[cfg(test)]
@@ -440,6 +441,51 @@ impl SqliteProductStore {
         .execute(&self.pool)
         .await?;
         Ok(result.rows_affected() == 1)
+    }
+
+    /// #584, PRD CONT-013: keeps one settled attempt's native action ledger when its thread
+    /// is a continuation conversation. A legacy attempt keeps none, because nothing can read
+    /// it. The first report wins and a ledger never changes. Returns whether it was stored.
+    pub(crate) async fn record_attempt_action_ledger(
+        &self,
+        attempt_id: i64,
+        ledger: &RuntimeActionLedger,
+        timestamp: &str,
+    ) -> Result<bool, StorageError> {
+        let entries = serde_json::to_string(&ledger.entries)
+            .map_err(|error| StorageError::Serialization(error.to_string()))?;
+        let result = sqlx::query(
+            "INSERT INTO interaction_attempt_actions(attempt_id,entries_json,omitted,recorded_at) SELECT a.id,?2,?3,?4 FROM interaction_attempts a JOIN interactions i ON i.id=a.interaction_id JOIN threads t ON t.id=i.thread_id WHERE a.id=?1 AND t.conversation_format='continuation-v1' ON CONFLICT(attempt_id) DO NOTHING",
+        )
+        .bind(attempt_id)
+        .bind(entries)
+        .bind(i64::from(ledger.omitted))
+        .bind(timestamp)
+        .execute(&self.pool)
+        .await?;
+        Ok(result.rows_affected() == 1)
+    }
+
+    #[cfg(test)]
+    pub(crate) async fn attempt_action_ledger(
+        &self,
+        attempt_id: i64,
+    ) -> Result<Option<RuntimeActionLedger>, StorageError> {
+        let row: Option<(String, i64)> = sqlx::query_as(
+            "SELECT entries_json,omitted FROM interaction_attempt_actions WHERE attempt_id=?1",
+        )
+        .bind(attempt_id)
+        .fetch_optional(&self.pool)
+        .await?;
+        row.map(|(entries, omitted)| {
+            Ok(RuntimeActionLedger {
+                entries: serde_json::from_str(&entries)
+                    .map_err(|error| StorageError::Serialization(error.to_string()))?,
+                omitted: u32::try_from(omitted)
+                    .map_err(|error| StorageError::Serialization(error.to_string()))?,
+            })
+        })
+        .transpose()
     }
 
     #[cfg(test)]
@@ -1131,6 +1177,118 @@ mod tests {
             assert_eq!(
                 compatibility.requires_native_continuity(),
                 format == "legacy"
+            );
+        }
+    }
+
+    /// #584, PRD CONT-013: a continuation attempt keeps the one bounded ledger its settlement
+    /// reported, across reopen; it never changes. A legacy attempt keeps none, and storage
+    /// itself refuses one, because nothing can read a legacy conversation's earlier turns.
+    #[tokio::test]
+    async fn continuation_attempts_keep_one_immutable_bounded_action_ledger_and_legacy_attempts_keep_none()
+     {
+        let ledger = crate::runtime::RuntimeActionLedger::from_reported(&json!({
+            "entries": [
+                { "kind": "command", "summary": "npm run migrate", "status": "interrupted" },
+                { "kind": "command", "summary": "npm test", "status": "failed", "exitCode": 1 }
+            ],
+            "omitted": 2
+        }))
+        .expect("valid ledger");
+        let later = crate::runtime::RuntimeActionLedger {
+            entries: Vec::new(),
+            omitted: 0,
+        };
+        for format in ["legacy", "continuation-v1"] {
+            let continuation = format == "continuation-v1";
+            let (directory, store, interaction, route) = seeded_store_with_format(format).await;
+            let attempt = store
+                .begin_interaction_attempt(receipt(interaction, &route), "10")
+                .await
+                .unwrap();
+            store
+                .finish_interaction_attempt(
+                    attempt,
+                    "cancelled",
+                    Some("cancelled_by_user"),
+                    "tool_effect",
+                    "11",
+                )
+                .await
+                .unwrap();
+
+            assert_eq!(
+                store
+                    .record_attempt_action_ledger(attempt, &ledger, "12")
+                    .await
+                    .unwrap(),
+                continuation,
+                "{format}"
+            );
+            // The first report wins: a repeated one stores nothing.
+            assert!(
+                !store
+                    .record_attempt_action_ledger(attempt, &later, "13")
+                    .await
+                    .unwrap()
+            );
+            let direct = sqlx::query("INSERT INTO interaction_attempt_actions(attempt_id,entries_json,omitted,recorded_at) VALUES (?1,'[]',0,'14')")
+                .bind(attempt)
+                .execute(&store.pool)
+                .await
+                .expect_err("a second ledger is refused");
+            if continuation {
+                let changed = sqlx::query(
+                    "UPDATE interaction_attempt_actions SET omitted=0 WHERE attempt_id=?1",
+                )
+                .bind(attempt)
+                .execute(&store.pool)
+                .await
+                .expect_err("a ledger is immutable");
+                assert!(
+                    changed.to_string().contains("attempt_actions_immutable"),
+                    "{changed}"
+                );
+                let second = store
+                    .begin_interaction_attempt(
+                        BeginInteractionAttempt {
+                            attempt_admission_id: "00000000-0000-0000-0000-000000000002".into(),
+                            execution_lease_id: "lease-second",
+                            ..receipt(interaction, &route)
+                        },
+                        "15",
+                    )
+                    .await
+                    .unwrap();
+                let entries = serde_json::to_string(&vec![
+                    json!({ "kind": "command", "summary": "x", "status": "completed" });
+                    65
+                ])
+                .unwrap();
+                let unbounded = sqlx::query("INSERT INTO interaction_attempt_actions(attempt_id,entries_json,omitted,recorded_at) VALUES (?1,?2,0,'16')")
+                    .bind(second)
+                    .bind(entries)
+                    .execute(&store.pool)
+                    .await
+                    .expect_err("storage bounds a ledger at 64 entries");
+                assert!(unbounded.to_string().contains("CHECK"), "{unbounded}");
+            } else {
+                assert!(
+                    direct
+                        .to_string()
+                        .contains("attempt_actions_require_continuation"),
+                    "{direct}"
+                );
+            }
+
+            store.pool.close().await;
+            let reopened = SqliteProductStore::open(directory.path().join("product.sqlite"))
+                .await
+                .expect("reopen");
+            assert_eq!(
+                reopened.attempt_action_ledger(attempt).await.unwrap(),
+                continuation.then(|| ledger.clone()),
+                "{format}"
             );
         }
     }

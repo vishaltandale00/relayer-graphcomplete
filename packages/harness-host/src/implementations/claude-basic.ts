@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import type { GraphCapability } from "@relayer/graph-client";
+import { firstLineSummary, type HarnessActionObservation } from "../action-ledger.js";
 import { nativeExecutionHandle, type NativeExecutionHandle } from "../completion-execution.js";
 import {
   parseNativeSessionResetReason,
@@ -182,6 +183,7 @@ export class ClaudeBasicHarness implements Harness {
       attach,
       signal,
       isRoot,
+      claudeActionObserver(context),
     );
     if (!isRoot && result.sessionId === undefined) {
       throw new Error("Claude invoked completion did not expose a durable native session identity");
@@ -233,6 +235,7 @@ export class ClaudeBasicHarness implements Harness {
     attach?: (identity: JsonObject) => void,
     signal?: AbortSignal,
     isRoot = false,
+    observe?: (message: Record<string, unknown>) => void,
   ): Promise<{ text: string; sessionId?: string }> {
     const runtime = await claudeRuntime(access, this.dependencies.resolveClaudeRuntime);
     const environment = executionEnvironment(access, runtime.environment, graph, completionBroker, this.dependencies.platform);
@@ -272,7 +275,7 @@ export class ClaudeBasicHarness implements Harness {
           stderr: () => {},
         },
       });
-      const result = await collectClaudeResult(messages, attach, signal);
+      const result = await collectClaudeResult(messages, attach, signal, observe);
       if (isRoot && resumeSessionId !== undefined && result.sessionId !== resumeSessionId) throw new Error("Native conversation identity changed during resume");
       if (isRoot && result.sessionId !== undefined) this.sessionLocationIdentity = locationIdentity;
       return result;
@@ -415,12 +418,14 @@ async function collectClaudeResult(
   messages: AsyncIterable<unknown>,
   attach?: (identity: JsonObject) => void,
   signal?: AbortSignal,
+  observe?: (message: Record<string, unknown>) => void,
 ): Promise<{ text: string; sessionId?: string }> {
   let sessionId: string | undefined;
   let attached = false;
   for await (const message of messages) {
     if (signal?.aborted) throw abortReason(signal);
     if (!isRecord(message)) continue;
+    observe?.(message);
     if (typeof message.session_id === "string" && message.session_id.trim() !== "") {
       sessionId = message.session_id;
       if (!attached) {
@@ -435,6 +440,57 @@ async function collectClaudeResult(
     return { text: message.result, ...(sessionId === undefined ? {} : { sessionId }) };
   }
   throw new Error("Claude Agent SDK ended without a successful result.");
+}
+
+/**
+ * #584, CONT-013: Claude reports no tool trace events, so the action ledger comes from the
+ * Agent SDK's own messages: an assistant `tool_use` block starts an action and the matching
+ * user `tool_result` block ends it. A summary names the tool and its target; it never carries
+ * the tool's input body or result. The SDK reports no exit code.
+ */
+function claudeActionObserver(context: HarnessRunContext): ((message: Record<string, unknown>) => void) | undefined {
+  const actions = context.actions;
+  if (actions === undefined) return undefined;
+  const started = new Map<string, HarnessActionObservation>();
+  return (message) => {
+    try {
+      const content = isRecord(message.message) && Array.isArray(message.message.content) ? message.message.content : [];
+      for (const block of content) {
+        if (!isRecord(block)) continue;
+        if (message.type === "assistant" && block.type === "tool_use" && typeof block.id === "string") {
+          const action = claudeToolAction(typeof block.name === "string" ? block.name : "tool", block.input);
+          const observed = { kind: action.kind, summary: redactPersonalPresentationResult(context, action.summary) };
+          started.set(block.id, observed);
+          actions.started(`claude-tool-${block.id}`, observed);
+        } else if (message.type === "user" && block.type === "tool_result" && typeof block.tool_use_id === "string") {
+          const observed = started.get(block.tool_use_id) ?? { kind: "other", summary: "tool" };
+          actions.ended(`claude-tool-${block.tool_use_id}`, { ...observed, status: block.is_error === true ? "failed" : "completed" });
+        }
+      }
+    } catch {
+      // An unrecognized message shape records nothing; the turn itself is unaffected.
+    }
+  };
+}
+
+function claudeToolAction(name: string, input: unknown): HarnessActionObservation {
+  const args = isRecord(input) ? input : {};
+  const text = (value: unknown) => typeof value === "string" ? value : "";
+  if (name === "Bash") return { kind: "command", summary: firstLineSummary(args.command) };
+  if (name === "Edit" || name === "MultiEdit" || name === "Write" || name === "NotebookEdit") {
+    return { kind: "file_change", summary: `${name} ${text(args.file_path) || text(args.notebook_path) || "file"}` };
+  }
+  if (name === "WebFetch") return { kind: "web", summary: `fetch ${text(args.url)}` };
+  if (name === "WebSearch") return { kind: "web", summary: `search: ${firstLineSummary(args.query)}` };
+  if (name === "Task" || name === "Agent") {
+    const agent = text(args.subagent_type) || "agent";
+    const description = firstLineSummary(args.description);
+    return { kind: "native_subagent", summary: description === "" ? agent : `${agent}: ${description}` };
+  }
+  const mcp = /^mcp__(.+?)__(.+)$/u.exec(name);
+  if (mcp !== null) return { kind: "mcp_tool", summary: `${mcp[1]}.${mcp[2]}` };
+  const target = text(args.file_path) || text(args.path) || text(args.pattern);
+  return { kind: "other", summary: target === "" ? name : `${name} ${firstLineSummary(target)}` };
 }
 
 function abortReason(signal: AbortSignal): Error {

@@ -644,8 +644,14 @@ whether the chosen representation communicates the task effectively.
   - `validate_on` restricts only `compatible` and `blocked`, so Send, identified-input Send, retry, and admission accept a portable route switch through the unchanged catalog and model checks.
   - `ConversationCompatibility::requires_native_continuity` is the single decision passed to the harness host. It is false for `unrestricted` and `portable`.
   - The renderer picker's `compatibilityRestrictsRoute` treats `portable` like `unrestricted`, and any other or missing status as restricted. `compatibilityExposesNoRoute` gives `blocked` and any unknown or missing status no family route and no model-setup refresh. Legacy statuses keep #597's behaviour exactly.
+- **Action ledger.** Each adapter records its turn's actions from its own native events, never from the trace.
+  - Codex maps app-server items, Claude maps the Agent SDK's `tool_use` and `tool_result` blocks, and Prime maps its session's tool and RLM-child events.
+  - A summary names the action and its target, such as a command's first line or a file path. It never holds tool output, diffs, arguments, or prompt text.
+  - The host owns the ledger (`packages/harness-host/src/action-ledger.ts`): at most 64 entries plus an omitted count, and redacted one-line summaries of at most 512 bytes. It seals the ledger when a root turn settles, including after a force-stop, and returns it with the accepted, stopped, or failed settlement. A turn whose native work never started reports no ledger.
+  - Product takes the ledger out of the host's response before anything else reads it, so it never reaches an error message or log. It accepts only that exact bounded shape and keeps it per attempt in `interaction_attempt_actions` (migration 0041).
+  - Triggers refuse a ledger for a legacy thread and any update to a stored one; opening the store refuses a database missing either trigger or the 64-entry bound.
+  - A crash before the host answers leaves no ledger; `effect_boundary='unknown'` remains the only signal. Nothing reads the ledger until the conversation read.
 - **Planned building blocks,** each merged inert:
-  - a bounded adapter action ledger;
   - a manifest of earlier turns, frozen into graph control atomically with each interaction;
   - the completion-scoped `GET /api/graph/conversation` read, with TypeScript and Python clients;
   - standing harness guidance;

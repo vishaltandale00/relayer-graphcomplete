@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it, vi } from "vitest";
+import { HarnessActionLedgerRecorder } from "../src/action-ledger.js";
 import { loadHarnessConfiguration } from "../src/configuration.js";
 import { createNoopHarnessTraceSink, HarnessTraceStore } from "../src/trace.js";
 import type { CodexAppServerTurnOptions } from "../src/implementations/codex-app-server.js";
@@ -1857,6 +1858,63 @@ describe("CodexBasicHarness", () => {
     } finally {
       await rm(directory, { recursive: true, force: true });
     }
+  });
+});
+
+describe("CodexBasicHarness action ledger (#584, CONT-013)", () => {
+  it("records command, file, MCP, web, and subagent items from Codex's own events without their output", async () => {
+    const recorder = new HarnessActionLedgerRecorder();
+    const notify = (options: CodexAppServerTurnOptions, method: string, item: Record<string, unknown>) => {
+      options.onNotification?.(method, { threadId: "thread-1", turnId: "turn-1", item });
+    };
+    const harness = harnessFixture("full", async (options) => {
+      await options.onThreadId("thread-1");
+      await options.onTurnId?.("thread-1", "turn-1");
+      notify(options, "item/started", { type: "commandExecution", id: "cmd-1", command: "npm test", status: "inProgress" });
+      notify(options, "item/completed", {
+        type: "commandExecution", id: "cmd-1", command: "npm test", status: "failed", exitCode: 1,
+        aggregatedOutput: "FAIL secret-command-output",
+      });
+      notify(options, "item/completed", {
+        type: "fileChange", id: "file-1", status: "completed",
+        changes: [{ path: "src/queue.ts", kind: { type: "update", move_path: null }, diff: "@@ secret-diff-body @@" }],
+      });
+      notify(options, "item/started", { type: "mcpToolCall", id: "mcp-1", server: "chrome-devtools", tool: "evaluate_script", arguments: { token: "secret-mcp-argument" }, status: "inProgress" });
+      notify(options, "item/completed", { type: "mcpToolCall", id: "mcp-1", server: "chrome-devtools", tool: "evaluate_script", status: "failed", error: { message: "secret-mcp-error" } });
+      notify(options, "item/started", { type: "webSearch", id: "web-1" });
+      notify(options, "item/completed", { type: "webSearch", id: "web-1", query: "bullmq retry defaults" });
+      notify(options, "item/completed", {
+        type: "collabAgentToolCall", id: "collab-1", tool: "spawnAgent", status: "completed",
+        prompt: "Compare the queue options\nwith this private detail", receiverThreadIds: ["child-1"],
+      });
+      notify(options, "item/completed", { type: "agentMessage", id: "message-1", text: "secret-agent-message" });
+      notify(options, "item/completed", {
+        type: "commandExecution", id: "graph-1", status: "completed", exitCode: 0,
+        command: "node --input-type=module <<'RELAYER_GRAPH_PROGRAM'\nconst secret = 'graph-program-body';\nRELAYER_GRAPH_PROGRAM",
+      });
+      notify(options, "item/completed", { type: "commandExecution", id: "cmd-2", command: "npm run migrate", status: "declined" });
+      notify(options, "item/started", { type: "commandExecution", id: "cmd-3", command: "npm run build", status: "inProgress" });
+      return { threadId: "thread-1", turnId: "turn-1", status: "interrupted" };
+    });
+
+    // The trace is the no-op sink traces use in product: the ledger does not come from it.
+    await harness.complete({ ...runContext(1, "token"), actions: recorder });
+    const ledger = recorder.seal();
+
+    expect(ledger).toEqual({
+      entries: [
+        { kind: "command", summary: "npm test", status: "failed", exitCode: 1 },
+        { kind: "file_change", summary: "update src/queue.ts", status: "completed" },
+        { kind: "mcp_tool", summary: "chrome-devtools.evaluate_script", status: "failed" },
+        { kind: "web", summary: "search: bullmq retry defaults", status: "completed" },
+        { kind: "native_subagent", summary: "spawn_agent", status: "completed" },
+        { kind: "command", summary: "Relayer graph program", status: "completed", exitCode: 0 },
+        { kind: "command", summary: "npm run migrate", status: "failed" },
+        { kind: "command", summary: "npm run build", status: "interrupted" },
+      ],
+      omitted: 0,
+    });
+    expect(JSON.stringify(ledger)).not.toMatch(/secret-|queue options|private detail/);
   });
 });
 

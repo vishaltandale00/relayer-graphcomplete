@@ -5280,6 +5280,356 @@ async fn product_model_selection_is_validated_inherited_transported_and_auditabl
     harness_task.abort();
 }
 
+/// One attempt's thread, text, outcome, and stored ledger entries and omitted count.
+type AttemptLedgerRow = (i64, String, String, Option<String>, Option<i64>);
+
+/// #584, PRD CONT-013: every settlement the harness host answers carries the attempt's
+/// action ledger. Product keeps it per attempt for a continuation conversation, for accepted,
+/// failed, and stopped turns alike, and when capability revocation fails after the host
+/// answered. It keeps none for a legacy conversation, and drops a ledger outside the bounded
+/// contract without changing the turn's outcome. Nothing reads it.
+#[tokio::test]
+async fn continuation_attempts_keep_the_reported_action_ledger_and_legacy_attempts_keep_none() {
+    let temporary = tempfile::Builder::new()
+        .prefix("relayer-action-ledger-")
+        .tempdir()
+        .unwrap();
+    let root = temporary.path().to_path_buf();
+    let database = root.join("product.sqlite3");
+    let graph_node_ids = Arc::new(AtomicUsize::new(900));
+    let next_graph_node_id = graph_node_ids.clone();
+    let fail_revocation = Arc::new(AtomicBool::new(false));
+    let graph_fail_revocation = fail_revocation.clone();
+    let graph = axum::Router::new()
+        .route(
+            "/api/control/interactions",
+            axum::routing::post(move |axum::Json(body): axum::Json<Value>| {
+                let next_graph_node_id = next_graph_node_id.clone();
+                async move {
+                    axum::Json(json!({
+                        "node": { "id": next_graph_node_id.fetch_add(1, Ordering::SeqCst) },
+                        "graphToken": "",
+                        "inputIdentity": body["inputIdentity"],
+                        "inputDigest": body["inputDigest"]
+                    }))
+                }
+            }),
+        )
+        .route(
+            "/api/control/capabilities",
+            axum::routing::post(|axum::Json(body): axum::Json<Value>| async move {
+                axum::Json(json!({ "graphToken": body["graphToken"] }))
+            })
+            .delete(move |axum::Json(body): axum::Json<Value>| {
+                let graph_fail_revocation = graph_fail_revocation.clone();
+                async move {
+                    if body.get("graphToken").is_some()
+                        && graph_fail_revocation.swap(false, Ordering::SeqCst)
+                    {
+                        return (
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            axum::Json(json!({ "error": "deterministic revocation failure" })),
+                        );
+                    }
+                    (StatusCode::OK, axum::Json(json!({ "revoked": true })))
+                }
+            }),
+        )
+        .route(
+            "/api/control/interactions/{id}",
+            axum::routing::get(
+                |axum::extract::Path(id): axum::extract::Path<usize>| async move {
+                    axum::Json(json!({ "nodeId": id, "invocation": null }))
+                },
+            ),
+        )
+        .route(
+            "/api/control/interactions/{id}/output",
+            axum::routing::get(|| async {
+                (
+                    StatusCode::NOT_FOUND,
+                    axum::Json(json!({"error":{"code":"completion_not_found"}})),
+                )
+            }),
+        );
+    let ledger = |summary: &str, omitted: u32| {
+        json!({
+            "entries": [
+                { "kind": "command", "summary": summary, "status": "failed", "exitCode": 1 },
+                { "kind": "file_change", "summary": "update src/queue.ts", "status": "interrupted" }
+            ],
+            "omitted": omitted
+        })
+    };
+    let unbounded = json!({
+        "entries": vec![json!({ "kind": "command", "summary": "npm test", "status": "completed" }); 65],
+        "omitted": 0
+    });
+    // One scripted host answer per completion, in send order.
+    let answers = Arc::new(Mutex::new(std::collections::VecDeque::from([
+        (
+            StatusCode::OK,
+            json!({ "actions": ledger("legacy turn", 0) }),
+        ),
+        (
+            StatusCode::OK,
+            json!({ "actions": ledger("accepted turn", 0) }),
+        ),
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            json!({
+                "error": "deterministic harness failure",
+                "failureCategory": "execution",
+                "effectBoundary": "tool_effect",
+                "actions": ledger("failed turn", 4)
+            }),
+        ),
+        (StatusCode::OK, json!({ "actions": unbounded })),
+        (
+            StatusCode::CONFLICT,
+            json!({
+                "error": "Stopped by user",
+                "cancellationSettled": true,
+                "actions": ledger("stopped turn", 0)
+            }),
+        ),
+        (
+            StatusCode::OK,
+            json!({ "actions": ledger("revocation failure turn", 2), "failRevocation": true }),
+        ),
+    ])));
+    let harness = axum::Router::new()
+        .route(
+            "/sessions",
+            axum::routing::post(|| async { (StatusCode::CREATED, axum::Json(json!({}))) }),
+        )
+        .route(
+            "/sessions/{id}/execution-leases",
+            axum::routing::post(|axum::Json(body): axum::Json<Value>| async move {
+                (StatusCode::CREATED, axum::Json(test_execution_admission(
+                    &body,
+                    "00000000-0000-0000-0000-000000000009",
+                    "7",
+                )))
+            }),
+        )
+        .route(
+            "/sessions/{id}/execution-leases/{lease}",
+            axum::routing::delete(|| async { axum::Json(json!({ "released": false })) }),
+        )
+        .route(
+            "/sessions/{id}/complete",
+            axum::routing::post(move |axum::Json(body): axum::Json<Value>| {
+                let answers = answers.clone();
+                let fail_revocation = fail_revocation.clone();
+                async move {
+                    let (status, mut answer) = answers.lock().unwrap().pop_front().unwrap();
+                    if answer.as_object_mut().unwrap().remove("failRevocation").is_some() {
+                        fail_revocation.store(true, Ordering::SeqCst);
+                    }
+                    if status == StatusCode::OK {
+                        answer["output"] = json!({
+                            "nodeId": body["graph"]["nodeId"],
+                            "rootLayer": { "layer": { "id": 1 }, "nodes": [], "edges": [], "actions": [] }
+                        });
+                    }
+                    (status, axum::Json(answer))
+                }
+            }),
+        );
+    let (graph_url, graph_task) = serve_test_app(graph).await;
+    let (harness_url, harness_task) = serve_test_app(harness).await;
+    let catalog = root.join("catalog.json");
+    fs::write(
+        &catalog,
+        json!({
+            "schemaVersion": 1,
+            "configurations": [{
+                "configuration": {
+                    "schemaVersion": 1,
+                    "name": "codex-basic",
+                    "implementation": "test",
+                    "implementationVersion": 1,
+                    "permissionBindings": { "ask": {}, "auto": {}, "full": {} },
+                    "modelCompatibility": [{ "providerId": "codex" }],
+                    "executionAccessContracts": ["managed-runtime@1"],
+                    "settings": {}
+                },
+                "digest": "sha256:ledger-test"
+            }]
+        })
+        .to_string(),
+    )
+    .unwrap();
+    let app =
+        open_app_with_runtime_observed(&database, &root, &catalog, &graph_url, &harness_url).await;
+    assert_eq!(
+        app.clone()
+            .oneshot(provider_publish_request(test_provider_snapshot()))
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::NO_CONTENT
+    );
+    let family = app
+        .clone()
+        .oneshot(api_request(
+            "POST",
+            "/api/model-families",
+            Some(json!({
+                "name": "Ledger models",
+                "members": [
+                    { "providerId": "codex", "modelId": "test-model" },
+                    { "providerId": "codex", "modelId": "second-model" },
+                    { "providerId": "codex", "modelId": "broken-model" }
+                ]
+            })),
+            true,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(family.status(), StatusCode::CREATED);
+    let family_id = response_json(family).await["id"].as_i64().unwrap();
+
+    let legacy = app
+        .clone()
+        .oneshot(api_request(
+            "POST",
+            "/api/threads",
+            Some(json!({
+                "title": "Legacy",
+                "initialMessage": "Legacy turn",
+                "harnessId": "codex-basic",
+                "modelSelection": model_selection(family_id, "test-model")
+            })),
+            true,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(legacy.status(), StatusCode::CREATED);
+    let legacy_thread = response_json(legacy).await["id"].as_i64().unwrap();
+    wait_for_interaction_count_and_terminal(&app, legacy_thread, 1).await;
+
+    // Production never creates a continuation conversation before the enabling change, so
+    // this one is created directly, exactly as the enabling change will.
+    let pool = sqlite_pool(&database).await;
+    let continuation_thread = sqlx::query("INSERT INTO threads(title,created_at,updated_at,harness_configuration_name,permission_profile_id,conversation_format) SELECT 'Continuation',created_at,updated_at,harness_configuration_name,permission_profile_id,'continuation-v1' FROM threads WHERE id=?1")
+        .bind(legacy_thread)
+        .execute(&pool)
+        .await
+        .unwrap()
+        .last_insert_rowid();
+    sqlx::query("INSERT INTO interactions(thread_id,sequence,text,created_at,completion_status,harness_configuration_name,model_provider_id,provider_model_id,model_family_id) VALUES (?1,0,'Seeded root turn','1','accepted','codex-basic','codex','test-model',?2)")
+        .bind(continuation_thread)
+        .bind(family_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    pool.close().await;
+    let turns = [
+        "Accepted turn",
+        "Failed turn",
+        "Unbounded ledger turn",
+        "Stopped turn",
+        "Revocation failure turn",
+    ];
+    for (count, text) in turns.into_iter().enumerate() {
+        let sent = app
+            .clone()
+            .oneshot(api_request(
+                "POST",
+                &format!("/api/threads/{continuation_thread}/interactions"),
+                Some(json!({ "text": text, "modelSelection": model_selection(family_id, "test-model") })),
+                true,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(sent.status(), StatusCode::CREATED, "{text}");
+        wait_for_interaction_count_and_terminal(&app, continuation_thread, count + 2).await;
+    }
+
+    let pool = sqlite_pool(&database).await;
+    let attempts: Vec<AttemptLedgerRow> = sqlx::query_as(
+        "SELECT i.thread_id,i.text,a.outcome,x.entries_json,x.omitted FROM interaction_attempts a JOIN interactions i ON i.id=a.interaction_id LEFT JOIN interaction_attempt_actions x ON x.attempt_id=a.id ORDER BY a.id",
+    )
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    let completion_errors: Vec<Option<String>> =
+        sqlx::query_scalar("SELECT completion_error FROM interactions ORDER BY id")
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+    pool.close().await;
+    let stored = |row: &AttemptLedgerRow| {
+        (
+            row.0,
+            row.1.clone(),
+            row.2.clone(),
+            row.3
+                .as_deref()
+                .map(|entries| serde_json::from_str::<Value>(entries).unwrap()),
+            row.4,
+        )
+    };
+    let kept = |text: &str, outcome: &str, summary: &str, omitted: i64| {
+        (
+            continuation_thread,
+            text.to_owned(),
+            outcome.to_owned(),
+            Some(ledger(summary, 0)["entries"].clone()),
+            Some(omitted),
+        )
+    };
+    assert_eq!(attempts.len(), 6, "{attempts:?}");
+    assert_eq!(
+        stored(&attempts[0]),
+        (
+            legacy_thread,
+            "Legacy turn".to_owned(),
+            "accepted".to_owned(),
+            None,
+            None
+        ),
+        "a legacy attempt keeps no ledger"
+    );
+    assert_eq!(
+        stored(&attempts[1]),
+        kept("Accepted turn", "accepted", "accepted turn", 0)
+    );
+    assert_eq!(
+        stored(&attempts[2]),
+        kept("Failed turn", "execution_failed", "failed turn", 4)
+    );
+    assert_eq!(
+        stored(&attempts[3]),
+        (
+            continuation_thread,
+            "Unbounded ledger turn".to_owned(),
+            "accepted".to_owned(),
+            None,
+            None
+        ),
+        "a ledger outside the contract is dropped without changing the outcome"
+    );
+    assert_eq!(stored(&attempts[4]).3, kept("", "", "stopped turn", 0).3);
+    assert_eq!(
+        stored(&attempts[5]).3,
+        kept("", "", "revocation failure turn", 0).3,
+        "a ledger survives a failed capability revocation"
+    );
+    assert_eq!(stored(&attempts[5]).4, Some(2));
+    // No summary reaches an interaction's error text.
+    for error in completion_errors.into_iter().flatten() {
+        assert!(
+            !error.contains("turn\"") && !error.contains("src/queue.ts"),
+            "{error}"
+        );
+    }
+    graph_task.abort();
+    harness_task.abort();
+}
+
 #[tokio::test]
 async fn interrupted_action_invocation_remains_submitted_for_source_pair_recovery() {
     let temporary = tempfile::Builder::new()

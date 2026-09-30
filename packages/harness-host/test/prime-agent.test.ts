@@ -4,6 +4,7 @@ import { mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from "node
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
+import { HarnessActionLedgerRecorder } from "../src/action-ledger.js";
 import { MAX_HARNESS_APPROVAL_TEXT_LENGTH, parseHarnessApprovalRequestInput } from "../src/approval.js";
 import { RELAYER_ICON_NAMES } from "@relayer/graph-client";
 import { PrimeAgentHarness, PYTHON_GRAPH_API_REFERENCE } from "../src/implementations/prime-agent.js";
@@ -2849,6 +2850,79 @@ describe("PrimeAgentHarness", () => {
       if (previous === undefined) delete process.env.RELAYER_PRIME_RUNTIME_PROVENANCE;
       else process.env.RELAYER_PRIME_RUNTIME_PROVENANCE = previous;
     }
+  });
+});
+
+describe("PrimeAgentHarness action ledger (#584, CONT-013)", () => {
+  it("records tool calls and RLM children from Prime's own session events with Prime's redaction", async () => {
+    let listener: ((event: unknown) => void) | undefined;
+    const session = primeSession("/tmp/ledger-session.jsonl", {
+      promptAndWait: vi.fn(async () => {
+        listener?.({ type: "tool_execution_start", toolCallId: "call-1", toolName: "ipython", args: { code: "rows = graph.read()\nprint('secret-second-line')" } });
+        listener?.({ type: "tool_execution_end", toolCallId: "call-1", toolName: "ipython", isError: false, result: { content: [{ type: "text", text: "secret-ipython-output" }] } });
+        listener?.({ type: "tool_execution_start", toolCallId: "call-2", toolName: "ipython", args: { code: "print('test-secret')" } });
+        listener?.({ type: "tool_execution_end", toolCallId: "call-2", toolName: "ipython", isError: true, result: "secret-traceback" });
+        listener?.({ type: "tool_execution_start", toolCallId: "call-3", toolName: "bash", args: { command: "npm test" } });
+        listener?.({ type: "tool_execution_end", toolCallId: "call-3", toolName: "bash", isError: true, result: { content: [{ type: "text", text: "secret-bash-output\n\nCommand exited with code 2" }] } });
+        listener?.({ type: "rlm_child_update", child: { id: "child-1", label: "Research queues", status: "running", sessionDir: "/tmp/c1" } });
+        listener?.({ type: "rlm_child_update", child: { id: "child-1", label: "Research queues", status: "done", answerPreview: "secret-child-answer", sessionDir: "/tmp/c1" } });
+        listener?.({ type: "rlm_child_update", child: { id: "child-2", label: "Draft migration", status: "running", sessionDir: "/tmp/c2" } });
+        listener?.({ type: "message_end", message: { role: "assistant", content: [{ type: "text", text: "secret-assistant-text" }] } });
+      }),
+      subscribe: vi.fn((next: (event: unknown) => void) => { listener = next; return vi.fn(); }),
+    });
+    const harness = await createHarness(session);
+    const recorder = new HarnessActionLedgerRecorder();
+
+    // The trace is the no-op sink traces use in product: the ledger does not come from it.
+    await harness.complete({ ...runContext(11, "token"), actions: recorder });
+    const ledger = recorder.seal();
+
+    expect(ledger).toEqual({
+      entries: [
+        { kind: "command", summary: "ipython: rows = graph.read() …", status: "completed" },
+        { kind: "command", summary: "ipython: print('[redacted-provider-access]')", status: "failed" },
+        { kind: "command", summary: "npm test", status: "failed", exitCode: 2 },
+        { kind: "native_subagent", summary: "Research queues", status: "completed" },
+        { kind: "native_subagent", summary: "Draft migration", status: "interrupted" },
+      ],
+      omitted: 0,
+    });
+    expect(JSON.stringify(ledger)).not.toMatch(/secret-|test-secret/);
+  });
+});
+
+describe("PrimeAgentHarness action ledger on Stop (#584, CONT-013)", () => {
+  it("keeps a stopped Prime turn's actions, with the unfinished ones interrupted", async () => {
+    let listener: ((event: unknown) => void) | undefined;
+    let aborted!: () => void;
+    const abortedPrompt = new Promise<void>((resolve) => { aborted = resolve; });
+    const session = primeSession("/tmp/ledger-stop-session.jsonl", {
+      promptAndWait: vi.fn(async () => {
+        listener?.({ type: "tool_execution_start", toolCallId: "call-1", toolName: "ipython", args: { code: "migrate()" } });
+        listener?.({ type: "rlm_child_update", child: { id: "child-1", label: "Draft migration", status: "running", sessionDir: "/tmp/c1" } });
+        await abortedPrompt;
+        listener?.({ type: "rlm_child_update", child: { id: "child-1", label: "Draft migration", status: "cancelled", sessionDir: "/tmp/c1" } });
+      }),
+      abort: vi.fn(async () => { aborted(); }),
+      subscribe: vi.fn((next: (event: unknown) => void) => { listener = next; return vi.fn(); }),
+    });
+    const harness = await createHarness(session);
+    const recorder = new HarnessActionLedgerRecorder();
+    const controller = new AbortController();
+
+    const completion = harness.complete({ ...runContext(12, "token"), actions: recorder }, controller.signal);
+    await vi.waitFor(() => expect(session.promptAndWait).toHaveBeenCalled());
+    controller.abort(new Error("Stopped by user"));
+    await Promise.resolve(completion).catch(() => undefined);
+
+    expect(recorder.seal()).toEqual({
+      entries: [
+        { kind: "command", summary: "ipython: migrate()", status: "interrupted" },
+        { kind: "native_subagent", summary: "Draft migration", status: "interrupted" },
+      ],
+      omitted: 0,
+    });
   });
 });
 
