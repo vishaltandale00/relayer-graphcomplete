@@ -1,0 +1,169 @@
+{
+  "schemaVersion": 1,
+  "date": "2026-09-29",
+  "runId": "2026-09-30T02-30-40.130Z-783fa72c",
+  "source": {
+    "commit": "e3b77c36246dbcdd899c70c16946551e3e0f186e",
+    "clean": true,
+    "workspaceDigest": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "unchangedAfterRuns": true
+  },
+  "model": "qwen/qwen3.8-max-prime",
+  "providerAdapter": "openrouter",
+  "permissionProfile": "auto",
+  "timeoutMs": 600000,
+  "settleGraceMs": 30000,
+  "pollMs": 250,
+  "order": ["treatment", "control"],
+  "protocolConformance": {
+    "directUserAuthorization": true,
+    "positiveDollarCapRecorded": false,
+    "budgetCheckpoint": "failed",
+    "rootRetries": 0,
+    "hostAutomaticRetries": 0
+  },
+  "taskSha256": "7b640d1c7b8f09f1e6a380345e4edf86fa27acb7c1724fe500ee60cc680e3e92",
+  "rubricSha256": "bfa59d666aba9d2d038059714cfadfe9f2ebebae664c5ba27803b3c4b624b9e6",
+  "configurationSha256": {
+    "control": "56ac32933b3b73a3f60a655e16911ddcddec95d6afae9f967dac1e912f214363",
+    "treatment": "e600fcbda51d32c8820b85a62a3dc409782b4803d874f7611e3c7abb86c964d4"
+  },
+  "executionIdentity": {
+    "nodeSha256": "18e387c90ab8a8400183e8bdd396376e1e875b91b4c874b894dcade7b35bf572",
+    "graphServerSha256": "bd491ee2d814bbbfe3d79217f0105991bd86ef9bf4074805384db6140477f2a4",
+    "appServerSha256": "0e7b85146b91bb7e646469088e33567a841f76805309fa1f2d112e94f5b7c384",
+    "gateSha256": "3978a4123edd20e4dc2f8b9a4dffe079f8ebfec74e98ce0d2c0b917589ae9267",
+    "launcherSha256": "8f11786ac9389ce8cf1710fe3bdedfd1e5f396f83b4ccd037bd698e162cada50",
+    "helpersSha256": "50e195f9a558305a54cd6b8774b7135ff2e35029e0b5b5694c2a07d692677a80",
+    "rootDistSha256": "4a5448eb835b63b981199dd8895045b927ce30968e2c949e86a46e933bb1afc8",
+    "graphClientSha256": "86fad4adadedf01b3f6f472a5415ac9a1e7bf1f8ba41f40c423767433df69235",
+    "harnessHostSha256": "ae23d527f6f13e388555aefc151a6afaf0bf9931e6b54907618dabc0eda65cb1",
+    "primeRuntimeSha256": "38b49abd52d7b60e4f38f021c2749801a7b4d0d287b5a4698201491979b05b12",
+    "primeRuntimeReceiptSha256": "41802de1fd088affa56b901ebc80f99908257764a2e4e56947e66790356b717e",
+    "separateValidatedPrivateStatePerArm": true,
+    "matchedBeforeAndAfter": true
+  },
+  "runs": [
+    {
+      "arm": "treatment",
+      "strategy": "code-model-recursion-v1",
+      "productStatus": "stopped",
+      "timedOut": true,
+      "stopRequestedOnce": true,
+      "firstCurrentMs": 81240,
+      "settledMs": 600536,
+      "accepted": false,
+      "contentScore": 3,
+      "contentScoreMaximum": 8,
+      "experimentalModelCalls": {
+        "started": 33,
+        "completed": 10,
+        "failed": 22,
+        "cancelledAtStop": 1,
+        "uniquePromptDigests": 14,
+        "maximumIdenticalPromptStarts": 10,
+        "agentSamePromptSemanticRetriesObserved": true,
+        "depths": { "0": 33 },
+        "callsWithParent": 0,
+        "successfulUsage": {
+          "inputTokens": 3812,
+          "outputTokens": 4358,
+          "totalTokens": 8170,
+          "providerDollarCost": null
+        }
+      },
+      "nativeRecursion": {
+        "rlmChildStreams": 0,
+        "rlmChildUpdates": 0,
+        "semanticGraphCompleteChildren": 0
+      },
+      "rootModelUsage": {
+        "reportedCalls": 23,
+        "inputTokens": 55060,
+        "outputTokens": 20400,
+        "cacheReadTokens": 695680,
+        "totalTokens": 771140,
+        "providerDollarCost": null
+      },
+      "mechanismGatePassed": false,
+      "mechanismFinding": "The root parsed some successful returned JSON, but every experimental call stayed at depth 0 with no parent. The intended returned-value-driven recursive call tree never occurred. The root issued repeated same-prompt semantic retries after failures, including one prompt ten times, and stopped at the deadline before publishing classifications.",
+      "graphFinding": "A readable three-node factual current showed validation plus exact component and severity counts. No classifications, rationales, ranked risks, or go/no recommendation were published.",
+      "trace": {
+        "status": "partial",
+        "eventCount": 6329,
+        "sha256": "fb4e1885a5190049412ec48fb4aecc89b802dc5722514a0c2791ce9a51301757",
+        "privateSessionSha256": "8ee2df3dc0c282a0cbcea200b0e19f3cc1df1bca5417828143acd48eb207b596"
+      },
+      "visualEvidence": {
+        "path": "treatment-review-2026-09-29.png",
+        "sha256": "acb8ce3ebd6d0b6ddf49b334b7ed3f3311622be83abd50b39ff69f5c3f359a9c"
+      }
+    },
+    {
+      "arm": "control",
+      "strategy": null,
+      "productStatusAtGraceDeadline": "running",
+      "currentLifecycleAtStop": "stopped",
+      "timedOut": true,
+      "stopRequestedOnce": true,
+      "stopUnsettledAtGraceDeadline": true,
+      "firstCurrentMs": 290963,
+      "settledMs": null,
+      "accepted": false,
+      "contentScore": 3,
+      "contentScoreMaximum": 8,
+      "experimentalModelCalls": { "started": 0 },
+      "nativeRecursion": {
+        "rlmChildStreams": 1,
+        "rlmChildUpdates": 593,
+        "semanticGraphCompleteChildren": 0
+      },
+      "rootModelUsage": {
+        "reportedCalls": 8,
+        "inputTokens": 54292,
+        "outputTokens": 27338,
+        "cacheReadTokens": 220160,
+        "totalTokens": 301790,
+        "providerDollarCost": null
+      },
+      "graphFinding": "A readable three-node factual current showed validation plus exact counts and explicitly labeled classifications, risks, and the go/no recommendation as still open. No final task graph was published.",
+      "localArtifacts": {
+        "pythonSha256": "53b0fcfad414d6f603a513255a20c46046669ea134faf1e9c334f2ec83945bc5",
+        "classificationReceiptSha256": "6a410e20becf6c5e244a87f47cfd12348fadc86f3ec4480f745aa5260059f662"
+      },
+      "trace": {
+        "status": "partial",
+        "eventCount": 9262,
+        "eventsSha256": "b6c5b9985f570053dbbbe3e05bade97867f91795a767af3876e4d181835887c5",
+        "manifestSha256": "ea4a36eb4a10aee748b80fb4e88fb1edd31d58dffed98a22b8045d25ea400bd6",
+        "privateSessionSha256": "e3a73d7476c9ef677d7ec6afa1ca9370b8d63e9aba964b4639ddf7496ec1562f"
+      },
+      "visualEvidence": {
+        "path": "control-review-2026-09-29.png",
+        "sha256": "f50fea6523bfb3594343d01991254675bb2f4e0119d00344d7e5e4f8569bed44"
+      }
+    }
+  ],
+  "comparison": {
+    "firstCurrentTreatmentDifferencePercent": 72.08,
+    "settledComparisonAvailable": false,
+    "qualityImprovementObserved": false,
+    "mechanismFeasibleInThisScreen": false
+  },
+  "verdict": {
+    "feasibilityGatePassed": false,
+    "productionDefaultRecommended": false,
+    "summary": "The callable worked and returned values, but this root did not turn them into the required recursive call tree or final graph. Both roots timed out after publishing only deterministic factual currents. Timing is descriptive and cannot support a win claim."
+  },
+  "limitations": [
+    "First-current uses 250 ms product-projection polling, not renderer paint.",
+    "Browser inspection proves the stopped layouts, but no contemporaneous hashed observation log exists and no exact renderer-time claim is made.",
+    "The pre-run protocol required a positive dollar cap. None was recorded; direct user authorization permitted the run, but the budget checkpoint failed.",
+    "No root was rerun and the host bridge disabled automatic retries. The treatment agent nevertheless issued new same-prompt calls after failures; those semantic retries are preserved as a protocol deviation.",
+    "The control used one native RLM worker for judgment. The treatment used none, and neither arm created a semantic GraphComplete child.",
+    "Provider dollar cost was reported as zero and is treated as unavailable, not as a verified zero-cost run.",
+    "Both traces are partial because the roots were stopped at the deadline.",
+    "The control current advanced to stopped while its interaction still reported running at the 30-second grace deadline, so its exported public trace receipt was unavailable; the preserved candidate trace is hashed instead.",
+    "This receipt binds the pre-rebase source commit only. Any later rebased commit requires separate deterministic validation and does not inherit exact-source live proof."
+  ]
+}

@@ -28,6 +28,12 @@ import type {
   HarnessTraceSupport,
   JsonObject,
 } from "../types.js";
+import { PYTHON_AUTHORING_REFERENCE } from "./graph-authoring-reference.js";
+import {
+  EXPERIMENTAL_AUTHORING_STRATEGIES,
+  pythonExperimentalAuthoringGuidance,
+  type ExperimentalAuthoringStrategy,
+} from "./experimental-authoring-guidance.js";
 import { CURRENT_WORKSPACE_GUIDANCE, GRAPH_PRESENTATION_GUIDANCE } from "./graph-presentation-guidance.js";
 import {
   personalPresentationNativeInstructions,
@@ -169,6 +175,8 @@ export interface PrimeAgentDependencies {
     readonly workspaceRoot: string;
     readonly workspaceScopeDigest: string;
   }) => PrimeAgentKernelBoundaryFactory;
+  /** Deterministic test seam below the production one-shot adapter. */
+  readonly loadPiAi?: () => Promise<Pick<typeof import("@earendil-works/pi-ai"), "completeSimple">>;
 }
 
 async function validateManagedPrivateState(runtime: {
@@ -210,6 +218,7 @@ interface PrimeAgentConfiguration {
   readonly rlmMaxDepth?: number;
   readonly prewarmIpythonKernel?: boolean;
   readonly promptProfile?: "layered-navigation-v1";
+  readonly experimentalAuthoringStrategy?: ExperimentalAuthoringStrategy;
 }
 
 type PrimeAgentPermission =
@@ -293,6 +302,10 @@ type PrimeAgentKernelBoundaryFactory = (
 interface PrimeAgentRunContext {
   readonly graph: HarnessRunContext["graph"];
   readonly completionBroker?: HarnessRunContext["completionBroker"];
+  readonly experimentalModelComplete?: (
+    request: PrimeExperimentalModelRequest,
+    requestSignal: AbortSignal,
+  ) => Promise<PrimeExperimentalModelCallResult>;
 }
 
 interface PrimeAgentRequestAccess {
@@ -321,6 +334,39 @@ interface PrimeAgentModel {
   readonly compat?: Readonly<Record<string, unknown>>;
 }
 
+interface PrimeExperimentalModelUsage {
+  readonly input: number;
+  readonly output: number;
+  readonly cacheRead: number;
+  readonly cacheWrite: number;
+  readonly totalTokens: number;
+  readonly cost: Readonly<{
+    input: number;
+    output: number;
+    cacheRead: number;
+    cacheWrite: number;
+    total: number;
+  }>;
+}
+
+interface PrimeExperimentalModelResult {
+  readonly text: string;
+  readonly usage: PrimeExperimentalModelUsage;
+}
+
+interface PrimeExperimentalModelRequest {
+  readonly prompt: string;
+  readonly callId: string;
+  readonly parentCallId: string | null;
+  readonly depth: number;
+}
+
+interface PrimeExperimentalModelCallResult extends PrimeExperimentalModelResult {
+  readonly callIndex: number;
+  readonly promptSha256: string;
+  readonly textSha256: string;
+}
+
 interface PrimeAdapterMapping {
   readonly api: string;
   readonly implementationVersion: string;
@@ -333,6 +379,8 @@ interface PrimeAgentExecutionScope {
   readonly routeByNativeModel: ReadonlyMap<string, HarnessAdmittedModelRoute>;
   readonly sensitiveValues: readonly string[];
   readonly presentationTraceValues: ReturnType<typeof personalPresentationTraceValues>;
+  readonly rootModel: PrimeAgentModel;
+  readonly rootAccess: PrimeAgentRequestAccess;
 }
 
 class PrimeAgentSessionLifecycle {
@@ -498,8 +546,10 @@ export class PrimeAgentHarness implements Harness {
     private readonly context: HarnessFactoryContext,
     private readonly primeAgent: PrimeAgentModule,
     private readonly permission: PrimeAgentPermission,
+    private readonly experimentalAuthoringStrategy: ExperimentalAuthoringStrategy | undefined,
     private readonly workspaceRoot: string,
     private readonly createKernelBoundary: PrimeAgentDependencies["createKernelBoundary"],
+    private readonly loadPiAi: NonNullable<PrimeAgentDependencies["loadPiAi"]>,
     private readonly createSession: (sessionManager: unknown, instructions: string) => Promise<PrimeAgentSessionHandle>,
     private readonly createSessionManager: () => unknown,
     private resumableSessionFile: string | undefined,
@@ -554,6 +604,32 @@ export class PrimeAgentHarness implements Harness {
       if (broker === undefined) throw new Error("relayer.complete.current requires an active completion broker");
       return Object.freeze({ url: broker.url, token: broker.token });
     });
+    const experimentalModelComplete = configuration.experimentalAuthoringStrategy === "code-model-recursion-v1"
+      ? primeAgent.createHostRequestHandler<PrimeAgentRunContext>(async (payload, invocation) => {
+          if (!invocation.isCurrent() || invocation.signal.aborted) {
+            throw new Error("The code/model composition run is no longer active");
+          }
+          const run = invocation.runContext;
+          if (run?.experimentalModelComplete === undefined) {
+            throw new Error("Code/model composition requires an active experimental Prime run");
+          }
+          const request = parseExperimentalModelRequest(payload);
+          const result = await run.experimentalModelComplete(request, invocation.signal);
+          if (!invocation.isCurrent() || invocation.signal.aborted) {
+            throw new Error("The code/model composition run is no longer active");
+          }
+          return {
+            text: result.text,
+            callIndex: result.callIndex,
+            promptSha256: result.promptSha256,
+            textSha256: result.textSha256,
+            usage: {
+              ...result.usage,
+              cost: { ...result.usage.cost },
+            },
+          };
+        })
+      : undefined;
     const savedSessionFile = context.savedState?.primeAgentSessionFile;
     const savedPresentationVersionId = context.savedState?.primeAgentSessionPersonalPresentationVersionId;
     const validSavedPresentationVersion = savedPresentationVersionId === undefined
@@ -605,6 +681,9 @@ export class PrimeAgentHarness implements Harness {
           "relayer.graph.current": graphCurrent,
           "relayer.graph.visual-authoring": visualAuthoring,
           "relayer.complete.current": completeCurrent,
+          ...(experimentalModelComplete === undefined
+            ? {}
+            : { "relayer.experimental.model.complete": experimentalModelComplete }),
         },
         telemetryDisabled: true,
         ...(configuration.thinkingLevel === undefined ? {} : { thinkingLevel: configuration.thinkingLevel }),
@@ -655,8 +734,10 @@ export class PrimeAgentHarness implements Harness {
       context,
       primeAgent,
       permission,
+      configuration.experimentalAuthoringStrategy,
       workspaceRoot,
       dependencies.createKernelBoundary,
+      dependencies.loadPiAi ?? (() => import("@earendil-works/pi-ai")),
       createSession,
       createSessionManager,
       restorableSessionFile,
@@ -795,9 +876,83 @@ export class PrimeAgentHarness implements Harness {
     signal?.throwIfAborted();
     this.throwIfShuttingDown();
     const execution = createPrimeAgentModelScope(context, this.primeAgent);
+    let experimentalCallIndex = 0;
+    const experimentalModelComplete = this.experimentalAuthoringStrategy === "code-model-recursion-v1"
+      ? async (
+          request: PrimeExperimentalModelRequest,
+          requestSignal: AbortSignal,
+        ): Promise<PrimeExperimentalModelCallResult> => {
+          const callSignal = signal === undefined
+            ? requestSignal
+            : AbortSignal.any([signal, requestSignal]);
+          callSignal.throwIfAborted();
+          const callIndex = ++experimentalCallIndex;
+          const promptSha256 = `sha256:${createHash("sha256").update(request.prompt).digest("hex")}`;
+          context.trace.emit({
+            type: "model.call.started",
+            data: {
+              provider: "prime-agent",
+              eventType: "experimental.code_model_call",
+              callIndex,
+              callId: request.callId,
+              parentCallId: request.parentCallId,
+              depth: request.depth,
+              promptSha256,
+              ...traceRoute(execution.orchestrator),
+            },
+          });
+          try {
+            const result = await completePrimeExperimentalModel({
+              model: execution.rootModel,
+              access: execution.rootAccess,
+              prompt: request.prompt,
+              signal: callSignal,
+            }, this.loadPiAi);
+            callSignal.throwIfAborted();
+            const textSha256 = `sha256:${createHash("sha256").update(result.text).digest("hex")}`;
+            context.trace.emit({
+              type: "model.call.completed",
+              data: {
+                provider: "prime-agent",
+                eventType: "experimental.code_model_call",
+                status: "completed",
+                callIndex,
+                callId: request.callId,
+                parentCallId: request.parentCallId,
+                depth: request.depth,
+                promptSha256,
+                textSha256,
+                usage: {
+                  ...result.usage,
+                  cost: { ...result.usage.cost },
+                },
+                ...traceRoute(execution.orchestrator),
+              },
+            });
+            return Object.freeze({ ...result, callIndex, promptSha256, textSha256 });
+          } catch (error) {
+            context.trace.emit({
+              type: "model.call.completed",
+              data: {
+                provider: "prime-agent",
+                eventType: "experimental.code_model_call",
+                status: callSignal.aborted ? "cancelled" : "failed",
+                callIndex,
+                callId: request.callId,
+                parentCallId: request.parentCallId,
+                depth: request.depth,
+                promptSha256,
+                ...traceRoute(execution.orchestrator),
+              },
+            });
+            throw error;
+          }
+        }
+      : undefined;
     const runContext: PrimeAgentRunContext = Object.freeze({
       graph: context.graph,
       ...(context.completionBroker === undefined ? {} : { completionBroker: context.completionBroker }),
+      ...(experimentalModelComplete === undefined ? {} : { experimentalModelComplete }),
     });
     const permissions = createPrimeAgentPermissionScopes({
       context,
@@ -1101,6 +1256,10 @@ export class PrimeAgentHarness implements Harness {
 
   private prompt(context: HarnessRunContext, includePersonalPresentation = true): string {
     const interaction = context.inputGraph;
+    const experimentalGuidance = pythonExperimentalAuthoringGuidance(
+      this.experimentalAuthoringStrategy,
+      interaction.id,
+    );
     if (this.context.configuration.settings.promptProfile === "layered-navigation-v1") {
       return this.layeredNavigationPrompt(context, includePersonalPresentation);
     }
@@ -1108,8 +1267,8 @@ export class PrimeAgentHarness implements Harness {
 
 ${GRAPH_PRESENTATION_GUIDANCE}
 ${PRIME_VISUAL_GUIDANCE}
-${primeVisualExample(interaction.id)}
-${CURRENT_WORKSPACE_GUIDANCE}${includePersonalPresentation ? personalPresentationPrompt(context) : ""}
+${PYTHON_AUTHORING_REFERENCE}
+${CURRENT_WORKSPACE_GUIDANCE}${includePersonalPresentation ? personalPresentationPrompt(context) : ""}${experimentalGuidance === "" ? "" : `\n${experimentalGuidance}`}
 
 Current interaction node: ${interaction.id}
 Normalized interaction input:
@@ -1146,12 +1305,16 @@ If a graph call fails, edit and rerun the same authoring code with the same clie
 
   private layeredNavigationPrompt(context: HarnessRunContext, includePersonalPresentation: boolean): string {
     const interaction = context.inputGraph;
+    const experimentalGuidance = pythonExperimentalAuthoringGuidance(
+      this.experimentalAuthoringStrategy,
+      interaction.id,
+    );
     return `Complete the current Relayer interaction by using Python in IPython to author a useful graph response. A flat answer is valid. Add navigation only when opening it would materially improve understanding or support; apply that same test again inside every layer you author.
 
 ${GRAPH_PRESENTATION_GUIDANCE}
 ${PRIME_VISUAL_GUIDANCE}
-${primeVisualExample(interaction.id)}
-${CURRENT_WORKSPACE_GUIDANCE}${includePersonalPresentation ? personalPresentationPrompt(context) : ""}
+${PYTHON_AUTHORING_REFERENCE}
+${CURRENT_WORKSPACE_GUIDANCE}${includePersonalPresentation ? personalPresentationPrompt(context) : ""}${experimentalGuidance === "" ? "" : `\n${experimentalGuidance}`}
 
 Current interaction node: ${interaction.id}
 Normalized interaction input:
@@ -1271,6 +1434,7 @@ export const PYTHON_GRAPH_API_REFERENCE = `Graph client reference (every graph m
 - await graph.submit_node(node) -> node; await graph.create_edge(left, right, client_key=...) -> edge; await graph.submit_layer(layer, size_justification=None) -> layer.
 - await graph.add_navigate_action(source_node, label, target_layer, relation="expand" | "reference", client_key=..., source_layer=None, variant="pill", icon=None, description=None).
 - await graph.add_invoke_action(source_node, label, interaction_text, source_layer=..., client_key=..., variant="pill", icon=None, description=None).
+- await graph.add_action(source_node, action); await graph.add_input_action(source_node, label, prompt, control="text", source_layer=..., client_key=...); select controls also take options=[("key", "Label")].
 - await graph.get_current(); await graph.advance_current(layer, expected_revision=..., operation_key=...); await graph.get_interaction_input(); await graph.discard_layer(layer); await graph.submit(interaction_node).
 - Graph objects do not expose client_key after submission; keep your own references to the objects you submitted.`;
 
@@ -1280,7 +1444,7 @@ const PYTHON_GRAPH_AUTHORING_RULES = `Every node and every optional action icon 
 // Present only when the product granted this completion a broker, as in codex.basic.
 function semanticChildGuidancePython(context: HarnessRunContext): string {
   if (context.completionBroker === undefined) return "";
-  return `For explicit semantic child work, give each child its own invoke action. First author and submit those invoke actions in their layer and advance that layer as current. Only after that succeeds, prepare each child separately with input_graph = await graph.prepare_complete(invoke_action); one input graph starts exactly one child. Import with from relayer_graph import complete, CompletionWatch. Start with children = [] and launch each child from its own input graph with children.append(complete(input_graph)). Each handle returns immediately with completion_id, current, and result; launch every independent child before watching them. Every change to a child's current is an event you may act on. Create watch = CompletionWatch(children) once. Then run changes = await watch.changes() in its own cell; it returns as soon as any child's current moves or ends, even when that takes minutes. Each change is a (child, current) pair, or (child, error) with the exception in place of the current once the watch can no longer observe that child, for example because its start was refused; check isinstance(current, Exception) before reading it. The watch then stops watching that child. After each event, decide whether the user now needs a better view, for example when a workstream reaches a finding or finishes. Only then submit a layer that presents the work itself and advance your current to it; otherwise keep waiting. Repeat until watch.settled is true. Your turn ending does not wait for children, so never leave them in a background task. Then integrate every child and return this completion. await child.result gives a succeeded child's final layer. A stopped or failed child raises CompletionTerminalError there instead, also importable from relayer_graph; catch it and integrate the work its error.current still retains. If child.result raises any other exception, as it may for a child reported with an error, you cannot read that child's work; present that part as not done, without quoting the error or inventing findings. Prime RLM children and subagents remain inside this completion and do not create semantic children by themselves.
+  return `Semantic child capability: you decide whether and when to create separate work scopes. For explicit semantic child work, give each child its own invoke action. First author and submit those invoke actions in their layer and advance that layer as current. Only after that succeeds, prepare each child separately with input_graph = await graph.prepare_complete(invoke_action); one input graph starts exactly one child. Import with from relayer_graph import complete, CompletionWatch. Start with children = [] and launch each child from its own input graph with children.append(complete(input_graph)). Each handle returns immediately with completion_id, current, and result; you may launch independent children concurrently or observe a child before launching more. Every change to a child's current is an event you may act on. For a chosen child set, create watch = CompletionWatch(children). A watch captures its child set at construction. Reuse it for that set; if you launch more children later, create another watch for those new handles. Appending to children does not extend an existing watch. Then run changes = await watch.changes() in its own cell; it returns as soon as any child's current moves or ends, even when that takes minutes. Each change is a (child, current) pair, or (child, error) with the exception in place of the current once the watch can no longer observe that child, for example because its start was refused; check isinstance(current, Exception) before reading it. The watch then stops watching that child. After each event, decide whether the user now needs a better view, for example when a workstream reaches a finding or finishes. You choose whether to publish a new current, continue other work, or observe again. watch.settled reports when every watched child is terminal or no longer observable. Your turn ending does not wait for children, so never leave them in a background task. Account for the outcomes of children you launched before returning this completion. await child.result gives a succeeded child's final layer. A stopped or failed child raises CompletionTerminalError there instead, also importable from relayer_graph; catch it and integrate the work its error.current still retains. If child.result raises any other exception, as it may for a child reported with an error, you cannot read that child's work; present that part as not done, without quoting the error or inventing findings. Prime RLM children and subagents remain inside this completion and do not create semantic children by themselves.
 `;
 }
 
@@ -1586,7 +1750,7 @@ function parsePrimeAgentConfiguration(context: HarnessFactoryContext): PrimeAgen
   if (selected.implementation !== PRIME_AGENT_KEY) throw new Error(`prime.agent cannot run implementation ${selected.implementation}`);
   if (selected.implementationVersion !== 1) throw new Error(`Unsupported prime.agent implementation version: ${selected.implementationVersion}`);
   const settings = selected.settings;
-  const allowed = new Set(["thinkingLevel", "rlmMaxDepth", "prewarmIpythonKernel", "promptProfile", "personalPresentationVersion"]);
+  const allowed = new Set(["thinkingLevel", "rlmMaxDepth", "prewarmIpythonKernel", "promptProfile", "personalPresentationVersion", "experimentalAuthoringStrategy"]);
   const unknown = Object.keys(settings).filter((key) => !allowed.has(key));
   if (unknown.length > 0) throw new Error(`Unknown prime.agent configuration field: ${unknown.join(", ")}`);
   optionalEnum(settings.personalPresentationVersion, ["personal-presentation-v0", "personal-presentation-v1", "personal-presentation-v2", "personal-presentation-v3", "personal-presentation-v4"] as const, "personalPresentationVersion");
@@ -1594,11 +1758,13 @@ function parsePrimeAgentConfiguration(context: HarnessFactoryContext): PrimeAgen
   const rlmMaxDepth = optionalPositiveInteger(settings.rlmMaxDepth, "rlmMaxDepth");
   const prewarmIpythonKernel = optionalBoolean(settings.prewarmIpythonKernel, "prewarmIpythonKernel");
   const promptProfile = optionalEnum(settings.promptProfile, ["layered-navigation-v1"] as const, "promptProfile");
+  const experimentalAuthoringStrategy = optionalEnum(settings.experimentalAuthoringStrategy, EXPERIMENTAL_AUTHORING_STRATEGIES, "experimentalAuthoringStrategy");
   return {
     ...(thinkingLevel === undefined ? {} : { thinkingLevel }),
     ...(rlmMaxDepth === undefined ? {} : { rlmMaxDepth }),
     ...(prewarmIpythonKernel === undefined ? {} : { prewarmIpythonKernel }),
     ...(promptProfile === undefined ? {} : { promptProfile }),
+    ...(experimentalAuthoringStrategy === undefined ? {} : { experimentalAuthoringStrategy }),
   };
 }
 
@@ -1873,12 +2039,99 @@ function createPrimeAgentModelScope(context: HarnessRunContext, primeAgent: Prim
       access: requestAccessByNativeModel.get(nativeModelIdentity(model.provider, model.id))!,
     }))),
   });
+  const rootAccess = requestAccessByNativeModel.get(nativeModelIdentity(root.provider, root.id));
+  if (rootAccess === undefined) throw new Error("prime.agent orchestrator has no admitted request access");
   return Object.freeze({
     modelScope,
     orchestrator: plan.orchestrator,
     routeByNativeModel,
     sensitiveValues: Object.freeze([...sensitiveValues].filter((value) => value !== "")),
     presentationTraceValues,
+    rootModel: root,
+    rootAccess,
+  });
+}
+
+const MAX_EXPERIMENTAL_MODEL_PROMPT_LENGTH = 16_000;
+const EXPERIMENTAL_MODEL_CALL_ID = /^[A-Za-z0-9._:-]{1,128}$/;
+
+function parseExperimentalModelRequest(payload: Record<string, unknown>): PrimeExperimentalModelRequest {
+  const {
+    type: _type,
+    cellSourceCode: _cellSourceCode,
+    prompt,
+    callId,
+    parentCallId,
+    depth,
+    ...unknown
+  } = payload;
+  if (Object.keys(unknown).length > 0) {
+    throw new Error(`Code/model composition request contains unknown fields: ${Object.keys(unknown).join(", ")}`);
+  }
+  if (typeof prompt !== "string" || prompt.trim() === "") {
+    throw new Error("Code/model composition prompt must be a non-empty string");
+  }
+  if (prompt.length > MAX_EXPERIMENTAL_MODEL_PROMPT_LENGTH) {
+    throw new Error(`Code/model composition prompt exceeds ${MAX_EXPERIMENTAL_MODEL_PROMPT_LENGTH} characters`);
+  }
+  if (typeof callId !== "string" || !EXPERIMENTAL_MODEL_CALL_ID.test(callId)) {
+    throw new Error("Code/model composition callId must be a safe identifier of 1 to 128 characters");
+  }
+  if (parentCallId !== null && (typeof parentCallId !== "string" || !EXPERIMENTAL_MODEL_CALL_ID.test(parentCallId))) {
+    throw new Error("Code/model composition parentCallId must be null or a safe identifier");
+  }
+  if (!Number.isSafeInteger(depth) || (depth as number) < 0 || (depth as number) > 16) {
+    throw new Error("Code/model composition depth must be an integer from 0 to 16");
+  }
+  return Object.freeze({ prompt, callId, parentCallId, depth: depth as number });
+}
+
+async function completePrimeExperimentalModel(input: {
+  readonly model: PrimeAgentModel;
+  readonly access: PrimeAgentRequestAccess;
+  readonly prompt: string;
+  readonly signal: AbortSignal;
+}, loadPiAi: NonNullable<PrimeAgentDependencies["loadPiAi"]>): Promise<PrimeExperimentalModelResult> {
+  const { completeSimple } = await loadPiAi();
+  const model = {
+    ...input.model,
+    input: [...input.model.input],
+    cost: { ...input.model.cost },
+    ...(input.model.compat === undefined ? {} : { compat: { ...input.model.compat } }),
+  } as Parameters<typeof completeSimple>[0];
+  const result = await completeSimple(
+    model,
+    {
+      systemPrompt: "You are a bounded model call inside an agent-authored Python function. Return only the concise value or format requested by the caller. You have no tools.",
+      messages: [{ role: "user", content: input.prompt, timestamp: Date.now() }],
+    },
+    {
+      apiKey: input.access.apiKey,
+      ...(input.access.headers === undefined ? {} : { headers: { ...input.access.headers } }),
+      disableEnvApiKey: true,
+      signal: input.signal,
+      maxTokens: 1_024,
+      maxRetries: 0,
+    },
+  );
+  const text = result.content
+    .filter((block): block is Extract<(typeof result.content)[number], { type: "text" }> => block.type === "text")
+    .map((block) => block.text)
+    .join("")
+    .trim();
+  if (result.stopReason === "error" || result.stopReason === "aborted" || text === "") {
+    throw new Error("Experimental Prime model call did not return text");
+  }
+  return Object.freeze({
+    text,
+    usage: Object.freeze({
+      input: result.usage.input,
+      output: result.usage.output,
+      cacheRead: result.usage.cacheRead,
+      cacheWrite: result.usage.cacheWrite,
+      totalTokens: result.usage.totalTokens,
+      cost: Object.freeze({ ...result.usage.cost }),
+    }),
   });
 }
 
@@ -2032,32 +2285,3 @@ function optionalEnum<const T extends readonly string[]>(value: unknown, allowed
 
 const PRIME_VISUAL_GUIDANCE = `For visual Node Details, import html, asset_ref, external_link, action_capability, ActionObject, and VisualAssetFile from relayer_graph. node.detail_authoring.set_component("main", html("<h2>Answer</h2>"), "h2 { color: blue; }") authors a component; node.detail remains the Markdown fallback. Each node’s detail must explain that node’s title and purpose. Reuse styles and layout helpers, but do not copy a whole explanation across siblings. If several nodes would have the same explanation, consolidate them. HTML binds permanently on first attachment, including fragments; copies retain ownership. Only node.detail_authoring authors components. For same-node repair reusing an existing template, call graph.bind_node(original) and graph.bind_node(replacement) before attachment; both must have the same stable client_key in this interaction. Use html(["<button gc=", ">Continue</button>"], action_capability("continue", action)) for a declared ActionObject. When present, source_layer must be the exact LayerObject containing that node; authorized node-owned navigate additions may use source_layer=None. Reuse the same action in await graph.add_action(node, action) after submitting nodes and layers. Navigate actions use kind="navigate", relation="expand" or "reference", and target=layer; invoke actions use interaction_text; input actions use control, prompt, and options. Checkpoint with await graph.checkpoint_node_detail(node). submit_node freezes the local object's detail; while the record remains a draft, use a fresh NodeObject with the same client_key for repairs. Accepted node identity and semantic content remain immutable; for an authorized attached-node replacement, read await graph.get_node_presentation(node_id). Use its node.clientKey for a fresh NodeObject, preserve all existing action clientKey, kind and sourceLayer provenance, and bind every new action. Reconstruct retained source layers with their sourceLayerClientKey and the exact presentation NodeObject as a member; omitted source provenance must stay omitted in its binding. Call await graph.replace_node_presentation(node_id, snapshot["revision"], presentation) to stage the full compiled detail without editing title or semantic text. On stale_presentation_revision, reread and repair the full replacement. Read the frozen policy through (await graph.get_interaction_input()).interaction_permissions; do not infer version-2 obligations from old or disabled preparations. Untouched detail retains its prior package; detail_authoring.clear() explicitly removes it.
 Discover assets with graph.visual_assets.scope(), list_assets(scope=scope), list_tags(scope=scope), and inspect(asset_id, scope). Add caller-read bytes with VisualAssetFile(name, media_type, bytes) and await graph.visual_assets.add(file=file, scope=scope, name=name). Bind logical asset IDs with html(['<img asset=', ' alt="Description">'], asset_ref(asset_id)); the host resolves and pins content. Never supply compiled packages, mounts, hashes, raw image URLs, or executable JavaScript.`;
-
-function primeVisualExample(interactionNodeId: number): string {
-  return `This runnable example demonstrates the Python client lifecycle and required call ordering only. Its placeholder content and layout are not a recommended response design. Choose the representation for the task and attached presentation preferences. Use the public client API; inspect a specific signature or error only when needed instead of reading compiler or server internals. Discover assets when the chosen explanation benefits from them.
-
-\`\`\`python
-from relayer_graph import GraphSession, NodeObject, LayerObject, LayerLayoutObject, NodePlacementObject, ActionObject, html, action_capability
-graph = await GraphSession.current()
-node = NodeObject("info", "Answer", "Replace with the answer.", client_key="answer")
-child = NodeObject("info", "Details", "Replace with useful depth.", client_key="details")
-layer = LayerObject([node], [], LayerLayoutObject([NodePlacementObject(node, 0.5, 0.5)]), client_key="answer-layer")
-child_layer = LayerObject([child], [], LayerLayoutObject([NodePlacementObject(child, 0.5, 0.5)]), client_key="details-layer")
-expand = ActionObject("navigate", "Details", layer, "details-action", relation="expand", target=child_layer)
-shared_styles = "section { display: grid; gap: 0.75rem; }"
-node.detail_authoring.set_component("main", html(["<section><h2>Answer</h2><p>Replace with the answer.</p><button gc=", ">Details</button></section>"], action_capability("details-control", expand)), shared_styles)
-child.detail_authoring.set_component("main", html("<section><h2>Supporting evidence</h2><p>Explain the evidence behind the answer.</p></section>"), shared_styles)
-for item in [node, child]:
-    await graph.checkpoint_node_detail(item)
-    await graph.submit_node(item)
-await graph.submit_layer(child_layer)
-await graph.submit_layer(layer)
-await graph.add_action(node, expand)
-await graph.add_navigate_action(${interactionNodeId}, "Answer", layer, relation="expand", client_key="response")
-# Optional progress publication: all actions must already exist.
-current = await graph.get_current()
-await graph.advance_current(layer, expected_revision=current["headRevision"], operation_key="answer-ready")
-await graph.submit(${interactionNodeId})
-\`\`\`
-The final submit accepts the graph; do not run this placeholder unchanged. Additional nodes and controls should serve the user's task.`;
-}

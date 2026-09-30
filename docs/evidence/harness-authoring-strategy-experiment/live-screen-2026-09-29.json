@@ -1,0 +1,59 @@
+{
+  "schemaVersion": 1,
+  "date": "2026-09-29",
+  "model": "gpt-5.6-sol",
+  "reasoningEffort": "medium",
+  "permissionProfile": "auto",
+  "timeoutMs": 600000,
+  "pollMs": 250,
+  "subscriptionDollarCost": null,
+  "sourceCommit": "01ea0c446871c7a061d83406bf51f1819a929899",
+  "runtimeIdentity": {
+    "appSha256": "829c3082f2ac0e64b33cced7b115a41f9ab61c6bc99b0e40db8823221f278179",
+    "graphSha256": "0dfafc0301b0b54f9b21418dd87f2f28f0bcda7ee19cfd95c070cd267ec6f4cf",
+    "codexVersion": "0.147.0",
+    "artifactSourceCommit": "01ea0c446871c7a061d83406bf51f1819a929899",
+    "artifactReuseReason": "Exact-source trusted binaries were reused because the experiment changes no Rust inputs."
+  },
+  "initialScreen": {
+    "runId": "2026-09-29T21-01-59.654Z-d2b6b694",
+    "order": ["decompose-publish", "saved-module", "functions", "control"],
+    "blindedChecklistScores": {
+      "control": 8,
+      "functions": 8,
+      "saved-module": 8,
+      "decompose-publish": 8
+    },
+    "runs": [
+      {"arm": "control", "status": "accepted", "firstCurrentMs": 275884, "settledMs": 280502, "commands": 3, "failedCommands": 1, "traceSha256": "4c6e1b0877201ddec81c2309d0a4aa25d30df37243609109d9f1eac234472a14"},
+      {"arm": "functions", "status": "accepted", "firstCurrentMs": 177077, "settledMs": 181729, "commands": 2, "failedCommands": 0, "namedFunctions": ["checkpoint", "submitEdges", "submitNodes", "layout", "node"], "traceSha256": "48506397b432da4043ccd43df15014541a5816f94bab6ee38d817275105b681a"},
+      {"arm": "saved-module", "status": "accepted", "firstCurrentMs": 184474, "settledMs": 191711, "commands": 3, "failedCommands": 1, "moduleBytes": 27981, "moduleNewlineCount": 158, "moduleSha256": "0ffcb096672d69a4bf61a4a062a912b1099d3e7e3225882a0304f2b8a60cb26b", "traceSha256": "4756274b9dfe6773b9ddef61da786425ba577daa451197ba05e964fdb8a246ec"},
+      {"arm": "decompose-publish", "status": "accepted", "firstCurrentMs": 170146, "settledMs": 175652, "commands": 2, "failedCommands": 0, "semanticChildren": 0, "nativeHelpers": 0, "traceSha256": "e0d0b69b8ffe543cc7d5410dd01ee71260210f0f1a2f1a96ce4ab4de14b7f161"}
+    ]
+  },
+  "replication": {
+    "primaryRunId": "2026-09-29T21-23-31.434Z-f3014f32",
+    "supplementRunId": "2026-09-29T21-38-19.302Z-9c8e8a41",
+    "runs": [
+      {"arm": "lantern-control-r2", "status": "accepted", "firstCurrentMs": 152655, "settledMs": 157108, "traceSha256": "49167e1cd9010e40728883c31cdcac3be8e849d7110ba70bfa76c194c13dcc94"},
+      {"arm": "lantern-functions-r2", "status": "invalid", "firstCurrentMs": 234863, "settledMs": 239298, "reason": "workspace execution identity changed during the run; preserved and not retried", "traceSha256": "148f0107ffd71e29cd6d992e19be4d0cda7078c8b5d5d0ae6a5991a013981d13"},
+      {"arm": "lantern-saved-module-r2", "status": "accepted", "firstCurrentMs": 240378, "settledMs": 245595, "commands": 5, "failedCommands": 1, "moduleBytes": 36762, "moduleLines": 189, "moduleSha256": "3dc3f5557ef6a0c54dda4fcec9c313bc56ce5675d681d6f9876a3edf1baf09d2", "traceSha256": "669f04a2d95f70f272ee7b7d612a9c1d7f12026003ca8a9c566f2011c4afcd8c"},
+      {"arm": "syncsmith-control", "status": "accepted", "firstCurrentMs": 239166, "settledMs": 249564, "traceSha256": "275899f0d422f34725be4a203abccbad8f33d43c0b88ca593918a7cbdff87bd2"},
+      {"arm": "syncsmith-functions", "status": "accepted", "firstCurrentMs": 216180, "settledMs": 219041, "comparisonMatched": false, "observedFirstCurrentDifferencePercent": 9.61, "observedSettledDifferencePercent": 12.23, "traceSha256": "6e6f645461f0bbe538803cb3e623e7f181e5b8d2dda217fb1378dca06df7d8ea"},
+      {"arm": "syncsmith-saved-module", "status": "accepted", "firstCurrentMs": 233233, "settledMs": 238988, "comparisonMatched": false, "observedFirstCurrentDifferencePercent": 2.48, "observedSettledDifferencePercent": 4.24, "moduleBytes": 28402, "moduleLines": 324, "moduleSha256": "06ab4bd7325f50e40d2936b49f8ebf198627447e0939794bf4d6ebac08af6064", "traceSha256": "e6f1d5af9e15698c1482573087f77019f7268b2d5e94090400b282164ed8e88e"}
+    ]
+  },
+  "verdict": {
+    "thresholdMetOnReplication": false,
+    "productionDefaultRecommended": false,
+    "summary": "All valid runs were accepted and observationally useful. SyncSmith treatment timings are cross-snapshot and cannot satisfy the matched-comparison threshold; the same-snapshot Lantern saved-module repeat was slower than control, and the Lantern function repeat was invalidated by an execution-identity change."
+  },
+  "limitations": [
+    "First-current is a 250 ms projection poll, not renderer paint.",
+    "Provider-reported token usage and subscription dollar cost were unavailable.",
+    "The initial saved-module receipt lookup was defective; the module hash was recovered directly from the preserved isolated workspace.",
+    "SyncSmith control and treatment runs used different workspace and gate source digests, so their timing differences are descriptive only.",
+    "Blinded checklist and settled browser review were observational; the committed receipt does not contain the opaque-label mapping, reviewer transcript, or screenshots needed to reproduce those judgments independently.",
+    "Live inference used recorded built-bundle identities from a dirty workspace and does not certify the later committed source snapshot."
+  ]
+}

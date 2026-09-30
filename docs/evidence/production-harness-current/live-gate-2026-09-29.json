@@ -1,0 +1,359 @@
+{
+  "schemaVersion": 1,
+  "measurement": "Request start to first root current projection observed by a 250ms polling observer; monotonic elapsed time. Not renderer latency.",
+  "reports": [
+    {
+      "localReport": ".relayer/live/current-gate/result.json",
+      "reportSha256": "a1ad748d500eedfa66c176de846861cf38527fa5868cab3c4c1ff0c069483aab",
+      "task": "You're planning a six-week private beta for Lantern, a fictional macOS desktop agent that runs local developer tools. The team has four engineers, no cloud execution, and expects 100 technical beta users. Produce an integrated launch plan covering onboarding, consent, and recovery UX; runtime isolation, updates, and failure recovery; and abuse scenarios and operational risks. Resolve conflicts between usability and safety, rank the five most important launch risks, and finish with weekly milestones and a concrete go/no-go checklist.",
+      "pollMs": 250,
+      "timeoutMs": 600000,
+      "executionIdentity": {
+        "source": {
+          "commit": "fd24be077444308698de35572128934f5d0200d4",
+          "clean": false,
+          "workspaceDigest": "sha256:7dbe8cea6d32bd1c3211ecc25bdd43f83a54da0c22af4c1d76555b7a853769e5"
+        },
+        "executables": {
+          "node": {
+            "sha256": "sha256:18e387c90ab8a8400183e8bdd396376e1e875b91b4c874b894dcade7b35bf572",
+            "bytes": 112937728
+          },
+          "graph": {
+            "sha256": "sha256:0dfafc0301b0b54f9b21418dd87f2f28f0bcda7ee19cfd95c070cd267ec6f4cf",
+            "bytes": 124663544
+          },
+          "app": {
+            "sha256": "sha256:829c3082f2ac0e64b33cced7b115a41f9ab61c6bc99b0e40db8823221f278179",
+            "bytes": 74447216
+          },
+          "codex": {
+            "sha256": "sha256:19c4f144c5226a9f17c58e6f0fa854843b0f77a6eb420f40e2745a12f10f5d37",
+            "bytes": 219997536
+          },
+          "gate": {
+            "sha256": "sha256:44d8e5733449d272767cd29c898d46e252862305a98157c72dbecf3cdf8ad9db",
+            "bytes": 9517
+          },
+          "helpers": {
+            "sha256": "sha256:6b84854a4f37bebb65c3852b806f7548c847f351c72f6526600137ce233456a3",
+            "bytes": 27263
+          },
+          "codexConfig": {
+            "sha256": "sha256:c2a7daebca3d10c2d982adb9709ef088d2b82c72d8da0bde777b50bb093d96dc",
+            "bytes": 1137
+          },
+          "primeConfig": {
+            "sha256": "sha256:51e96a50ca5cba7240437fcd5846d120b01b62c0de738a1d126afadf048848bf",
+            "bytes": 897
+          }
+        },
+        "bundles": {
+          "rootDist": {
+            "sha256": "sha256:4a5448eb835b63b981199dd8895045b927ce30968e2c949e86a46e933bb1afc8",
+            "files": 6,
+            "bytes": 19636
+          },
+          "graphClient": {
+            "sha256": "sha256:86fad4adadedf01b3f6f472a5415ac9a1e7bf1f8ba41f40c423767433df69235",
+            "files": 22,
+            "bytes": 167266
+          },
+          "harnessHost": {
+            "sha256": "sha256:dbf64b9eb9565ea14e79b7a5888df91f0aa2443fc3d1b04f77b155adef105a69",
+            "files": 44,
+            "bytes": 709097
+          },
+          "primeRuntime": {
+            "sha256": "sha256:38b49abd52d7b60e4f38f021c2749801a7b4d0d287b5a4698201491979b05b12",
+            "files": 28641,
+            "bytes": 762160189
+          }
+        }
+      },
+      "identityUnchanged": true,
+      "runs": [
+        {
+          "harness": "codex-basic",
+          "model": "gpt-6-sol",
+          "startedAtMs": 1790656676563,
+          "events": [
+            {
+              "sequence": 11,
+              "completionId": 21,
+              "revision": 0,
+              "previousRevision": null,
+              "lifecycle": "active",
+              "currentLayerId": null,
+              "finalLayerId": null,
+              "safeReason": null,
+              "observedAfterMs": 66
+            },
+            {
+              "sequence": 12,
+              "completionId": 21,
+              "revision": 1,
+              "previousRevision": 0,
+              "lifecycle": "failed",
+              "currentLayerId": null,
+              "finalLayerId": null,
+              "safeReason": "execution",
+              "observedAfterMs": 3163
+            }
+          ],
+          "temporalFeatures": {
+            "configVersion": 1,
+            "schemaRead": true,
+            "rootCurrentWrite": true,
+            "projectionUi": true,
+            "invokeResolution": true,
+            "providerRecursion": true
+          },
+          "firstGraphMs": null,
+          "firstNonterminalGraphMs": null,
+          "threadId": 1,
+          "interactionId": 1,
+          "completionId": 21,
+          "status": "failed",
+          "settledMs": 3163,
+          "traces": [
+            {
+              "productInteractionId": 1,
+              "completionId": 21,
+              "status": "failed",
+              "format": "relayer-harness-trace-v1",
+              "sha256": "sha256:3f504de7018d154d5b0347eff2a673b2afc4f8409daa7daef40800b04cb58388",
+              "byteLength": 130718,
+              "eventCount": 28,
+              "coverage": {
+                "prompt": "summary",
+                "messages": "summary",
+                "reasoningSummaries": "summary",
+                "modelCalls": "summary",
+                "toolCalls": "summary",
+                "usage": "summary",
+                "childStreams": "none",
+                "nativeArtifacts": "none"
+              },
+              "coverageComplete": false,
+              "completionBrokerAvailable": true,
+              "ref": "codex-traces/1/manifest.json"
+            }
+          ]
+        },
+        {
+          "harness": "prime-agent-basic",
+          "model": "qwen/qwen3.8-max-prime",
+          "startedAtMs": 1790656689024,
+          "events": [
+            {
+              "sequence": 11,
+              "completionId": 21,
+              "revision": 0,
+              "previousRevision": null,
+              "lifecycle": "active",
+              "currentLayerId": null,
+              "finalLayerId": null,
+              "safeReason": null,
+              "observedAfterMs": 183
+            },
+            {
+              "sequence": 12,
+              "completionId": 21,
+              "revision": 1,
+              "previousRevision": 0,
+              "lifecycle": "stopped",
+              "currentLayerId": null,
+              "finalLayerId": null,
+              "safeReason": "cancelled_by_user",
+              "observedAfterMs": 600502
+            }
+          ],
+          "temporalFeatures": {
+            "configVersion": 1,
+            "schemaRead": true,
+            "rootCurrentWrite": true,
+            "projectionUi": true,
+            "invokeResolution": true,
+            "providerRecursion": true
+          },
+          "firstGraphMs": null,
+          "firstNonterminalGraphMs": null,
+          "threadId": 1,
+          "interactionId": 1,
+          "completionId": 21,
+          "status": "stopped",
+          "settledMs": 600502,
+          "timedOut": true,
+          "traces": [
+            {
+              "productInteractionId": 1,
+              "completionId": 21,
+              "status": "partial",
+              "format": "relayer-harness-trace-v1",
+              "sha256": "sha256:12e61a4e14c0e9b51814559265b02624cd6d7471ba4727d8ae8dbc6423634bf7",
+              "byteLength": 10485532,
+              "eventCount": 16489,
+              "coverage": {
+                "prompt": "summary",
+                "messages": "summary",
+                "reasoningSummaries": "none",
+                "modelCalls": "summary",
+                "toolCalls": "summary",
+                "usage": "summary",
+                "childStreams": "summary",
+                "nativeArtifacts": "none"
+              },
+              "coverageComplete": false,
+              "truncated": true,
+              "completionBrokerAvailable": true,
+              "ref": "prime-traces/1/manifest.json"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "localReport": ".relayer/live/current-gate-codex-retry/result.json",
+      "reportSha256": "2de37280acf2cabc1cac8cf556266e02b212d2a4d1b4d1682457b37a48ac2c35",
+      "task": "You're planning a six-week private beta for Lantern, a fictional macOS desktop agent that runs local developer tools. The team has four engineers, no cloud execution, and expects 100 technical beta users. Produce an integrated launch plan covering onboarding, consent, and recovery UX; runtime isolation, updates, and failure recovery; and abuse scenarios and operational risks. Resolve conflicts between usability and safety, rank the five most important launch risks, and finish with weekly milestones and a concrete go/no-go checklist.",
+      "pollMs": 250,
+      "timeoutMs": 600000,
+      "executionIdentity": {
+        "source": {
+          "commit": "fd24be077444308698de35572128934f5d0200d4",
+          "clean": false,
+          "workspaceDigest": "sha256:7dbe8cea6d32bd1c3211ecc25bdd43f83a54da0c22af4c1d76555b7a853769e5"
+        },
+        "executables": {
+          "node": {
+            "sha256": "sha256:18e387c90ab8a8400183e8bdd396376e1e875b91b4c874b894dcade7b35bf572",
+            "bytes": 112937728
+          },
+          "graph": {
+            "sha256": "sha256:0dfafc0301b0b54f9b21418dd87f2f28f0bcda7ee19cfd95c070cd267ec6f4cf",
+            "bytes": 124663544
+          },
+          "app": {
+            "sha256": "sha256:829c3082f2ac0e64b33cced7b115a41f9ab61c6bc99b0e40db8823221f278179",
+            "bytes": 74447216
+          },
+          "codex": {
+            "sha256": "sha256:19c4f144c5226a9f17c58e6f0fa854843b0f77a6eb420f40e2745a12f10f5d37",
+            "bytes": 219997536
+          },
+          "gate": {
+            "sha256": "sha256:1ea097e6a30dd5f2e8835c297b1c86cb545bbaaa1a6c3868c69448011a123a45",
+            "bytes": 9704
+          },
+          "helpers": {
+            "sha256": "sha256:6b84854a4f37bebb65c3852b806f7548c847f351c72f6526600137ce233456a3",
+            "bytes": 27263
+          },
+          "codexConfig": {
+            "sha256": "sha256:c2a7daebca3d10c2d982adb9709ef088d2b82c72d8da0bde777b50bb093d96dc",
+            "bytes": 1137
+          },
+          "primeConfig": {
+            "sha256": "sha256:51e96a50ca5cba7240437fcd5846d120b01b62c0de738a1d126afadf048848bf",
+            "bytes": 897
+          }
+        },
+        "bundles": {
+          "rootDist": {
+            "sha256": "sha256:4a5448eb835b63b981199dd8895045b927ce30968e2c949e86a46e933bb1afc8",
+            "files": 6,
+            "bytes": 19636
+          },
+          "graphClient": {
+            "sha256": "sha256:86fad4adadedf01b3f6f472a5415ac9a1e7bf1f8ba41f40c423767433df69235",
+            "files": 22,
+            "bytes": 167266
+          },
+          "harnessHost": {
+            "sha256": "sha256:dbf64b9eb9565ea14e79b7a5888df91f0aa2443fc3d1b04f77b155adef105a69",
+            "files": 44,
+            "bytes": 709097
+          },
+          "primeRuntime": {
+            "sha256": "sha256:38b49abd52d7b60e4f38f021c2749801a7b4d0d287b5a4698201491979b05b12",
+            "files": 28641,
+            "bytes": 762160189
+          }
+        }
+      },
+      "identityUnchanged": true,
+      "runs": [
+        {
+          "harness": "codex-basic",
+          "model": "gpt-5.6-sol",
+          "startedAtMs": 1790656807992,
+          "events": [
+            {
+              "sequence": 11,
+              "completionId": 21,
+              "revision": 0,
+              "previousRevision": null,
+              "lifecycle": "active",
+              "currentLayerId": null,
+              "finalLayerId": null,
+              "safeReason": null,
+              "observedAfterMs": 226
+            },
+            {
+              "sequence": 12,
+              "completionId": 21,
+              "revision": 1,
+              "previousRevision": 0,
+              "lifecycle": "succeeded",
+              "currentLayerId": 9,
+              "finalLayerId": 9,
+              "safeReason": null,
+              "observedAfterMs": 404956
+            }
+          ],
+          "temporalFeatures": {
+            "configVersion": 1,
+            "schemaRead": true,
+            "rootCurrentWrite": true,
+            "projectionUi": true,
+            "invokeResolution": true,
+            "providerRecursion": true
+          },
+          "firstGraphMs": 404956,
+          "firstNonterminalGraphMs": null,
+          "threadId": 1,
+          "interactionId": 1,
+          "completionId": 21,
+          "status": "accepted",
+          "settledMs": 407795,
+          "traces": [
+            {
+              "productInteractionId": 1,
+              "completionId": 21,
+              "status": "complete",
+              "format": "relayer-harness-trace-v1",
+              "sha256": "sha256:e7d4d37df47b6a07fe7f4e5771024589dcfedfc7afa02a4a4efa878c08a4c0d8",
+              "byteLength": 602643,
+              "eventCount": 354,
+              "coverage": {
+                "prompt": "full",
+                "messages": "full",
+                "reasoningSummaries": "full",
+                "modelCalls": "full",
+                "toolCalls": "full",
+                "usage": "full",
+                "childStreams": "none",
+                "nativeArtifacts": "none"
+              },
+              "coverageComplete": true,
+              "completionBrokerAvailable": true,
+              "ref": "codex-traces/1/manifest.json"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "codexCatalogSha256": "4bd9834aae98278d47d2532becb880a116c085c5d0a7ec71d53b8dd938f6f5c5"
+}

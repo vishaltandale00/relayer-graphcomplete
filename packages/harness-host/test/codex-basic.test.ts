@@ -108,12 +108,14 @@ describe("CodexBasicHarness", () => {
     expect(brokerAuthorized).toContain("Your turn ending does not wait for children");
     // Each child event is one the root may act on; it moves its own current only when that helps the user.
     expect(brokerAuthorized).toContain("const watch = watchCompletions(children)");
+    expect(brokerAuthorized).toContain("Appending to children does not extend an existing watch");
+    expect(brokerAuthorized).not.toContain("launch every independent child before watching");
     // The watch takes the array the recipe fills, so the recipe must declare it.
     expect(brokerAuthorized).toContain("Start with const children = [] and launch each child from its own input graph with children.push(complete(inputGraph))");
     // One prepared input graph identifies one completion, so each child needs its own invoke action.
     expect(brokerAuthorized).toContain("give each child its own invoke action");
     expect(brokerAuthorized).toContain("one input graph starts exactly one child");
-    expect(brokerAuthorized).toContain("Only then submit a layer that presents the work itself and advance your current to it; otherwise keep waiting.");
+    expect(brokerAuthorized).toContain("You choose whether to publish a new current, continue other work, or observe again.");
     expect(brokerAuthorized).toContain("Import complete and watchCompletions from");
     expect(brokerAuthorized).toContain("The first current layer may contain visible accepted nodes");
     expect(brokerAuthorized).toContain("Reuse an existing valid path when one already exists");
@@ -1857,6 +1859,62 @@ describe("CodexBasicHarness", () => {
     } finally {
       await rm(directory, { recursive: true, force: true });
     }
+  });
+});
+
+describe("Codex experimental authoring strategies", () => {
+  it.each(["function-increments-v1", "saved-module-v1", "decompose-publish-v1"] as const)(
+    "delivers %s through the strict parser and provider prompt",
+    async (experimentalAuthoringStrategy) => {
+      let prompt = "";
+      const base = context("auto");
+      const harness = new CodexBasicHarness({
+        ...base,
+        configuration: {
+          ...base.configuration,
+          settings: {
+            ...base.configuration.settings,
+            promptProfile: "layered-navigation-multi-agent-v1",
+            experimentalAuthoringStrategy,
+          },
+        },
+      }, {
+        codexPathOverride: "/managed/codex",
+        runAppServerTurn: async (options) => {
+          prompt = options.prompt;
+          options.onThreadId("codex-thread");
+          return { threadId: "codex-thread", turnId: "turn-1", status: "completed" };
+        },
+      });
+
+      await harness.complete(runContext(21, "token"));
+
+      expect(prompt).toContain("Experimental authoring strategy");
+      expect(prompt).toContain("await graph.submit(21)");
+      expect(prompt).not.toContain("graph_helpers.py");
+    },
+  );
+
+  it("rejects an unknown strategy before provider execution", () => {
+    const base = context("auto");
+    expect(() => new CodexBasicHarness({
+      ...base,
+      configuration: {
+        ...base.configuration,
+        settings: { ...base.configuration.settings, experimentalAuthoringStrategy: "unknown-v1" },
+      },
+    })).toThrow("experimentalAuthoringStrategy must be one of");
+  });
+
+  it("rejects a strategy without the layered experiment prompt", () => {
+    const base = context("auto");
+    expect(() => new CodexBasicHarness({
+      ...base,
+      configuration: {
+        ...base.configuration,
+        settings: { ...base.configuration.settings, experimentalAuthoringStrategy: "function-increments-v1" },
+      },
+    })).toThrow("requires a layered-navigation promptProfile");
   });
 });
 

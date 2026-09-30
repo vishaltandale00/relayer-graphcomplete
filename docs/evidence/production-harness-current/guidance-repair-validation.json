@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 1,
+  "reviewedExecutableDigest": "d9dd1e76c33f7cd667d5e2cb0adeac65d42f894f536775dfe6e9fa28d3df0e4b",
+  "checks": {
+    "focused": {
+      "outcome": "passed",
+      "sha256": "70f053f585e1067b2cb024ddfa42be51d6c30a0bdb9a3f052dbc474116d816ac"
+    },
+    "npm run check": {
+      "outcome": "passed",
+      "sha256": "84f460708a60963f0452f008128d351b4996c365584619f5e16f85f53dfafa26"
+    },
+    "npm run build": {
+      "outcome": "passed",
+      "sha256": "fcf2b85623398d5edbee62691b6f7c84d3a7e8dcc1c541ace03a8f2aafaa3022"
+    }
+  },
+  "liveRetested": false
+}

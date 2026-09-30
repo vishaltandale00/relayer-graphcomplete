@@ -120,7 +120,7 @@ describe("harness configuration", () => {
     });
   });
 
-  it.each(["codex-basic", "prime-agent-basic", "prime-agent-deep"])(
+  it.each(["codex-basic", "claude-basic", "prime-agent-basic", "prime-agent-deep"])(
     "pins the shipped %s configuration to explanatory presentation V4",
     async (name) => {
       const configuration = await loadHarnessConfiguration(join(repositoryRoot, `harnesses/${name}.yaml`));

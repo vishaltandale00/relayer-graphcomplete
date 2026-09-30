@@ -288,7 +288,7 @@ Each human-root interaction is serialized on its thread's host queue and receive
 
 The recursive target keeps `complete(inputGraph)` as one deep module interface. A GraphComplete thread is a graph of completions, not a provider conversation. Product-authored human interactions and agent-authored recursive code enter through trusted origins but receive the same completion handle: one durable current pointer and one result promise. Each call creates or recovers a distinct completion identity and scoped capability. The harness associates each completion with an independently runnable, replaceable provider execution attachment. This separation avoids making provider-session identity a semantic obstacle if mixed-harness routing is designed later; it does not make mixed-harness threads a V1 capability. Current V1 threads still pin one harness configuration. Agent code decides what to invoke, inspect, search, and await; the harness owns no recursive work queue or incorporation policy.
 
-The common harness-configuration envelope optionally declares `complete.agentAuthored`. Absence or `false` fails closed. `true` permits the product to issue completion-broker authority only when the runtime's recursive temporal substrate is also active; the app server and harness host both revalidate that conjunction for roots and invoked children. This is capability authority, not an implementation-specific recursion policy and not a scheduler. Relayer Eval uses this seam for a paired Codex comparison whose two configurations are otherwise execution-equivalent. The shipped Desktop catalog does not opt in.
+The common harness-configuration envelope optionally declares `complete.agentAuthored`. Absence or `false` fails closed. `true` permits the product to issue completion-broker authority only when the runtime's recursive temporal substrate is also active; the app server and harness host both revalidate that conjunction for roots and invoked children. This is capability authority, not an implementation-specific recursion policy and not a scheduler. Relayer Eval uses this seam for a paired Codex comparison whose two configurations are otherwise execution-equivalent. The shipped Claude, Codex, and Prime configurations opt in, and Desktop enables the prerequisite temporal feature chain by default.
 
 For `prime.agent`, a prompt settling is not the run boundary. The adapter waits for that Prime session's recursive runtime to become quiescent before returning or releasing graph and provider access. Human-root turns remain serialized around the persistent root session. Each explicit invoked Complete uses a fresh ordinary Prime session, so it can run independently without replacing root continuity or converting Prime's RLM topology into GraphComplete topology. External cancellation targets only the owning session and still waits for quiescence and cleanup; barrier and abort failures remain visible rather than releasing authority early. The per-turn force-stop below is the one exception: it force-disposes that turn's own session and stops waiting for it. For an invoked child, that is the child's session only. Every native session reads its own interaction's presentation instructions through its own view of the shared resource loader, so a rotated root session and each invoked child are built from their own pin, never from the instructions another session last loaded. For a root turn force-stopped while running on the root session, that session is disposed and the next root turn starts a fresh native session rather than resuming a file the stopped session may still write. A root turn force-stopped while still acquiring its session, for example in a reload or a session creation that never settles, abandons that acquisition: the root session it was working on is force-disposed, and a session it creates too late is disposed instead of installed. An invoked child force-stopped before its own session existed force-disposes that session once it is created.
 
@@ -626,7 +626,7 @@ controls model instructions; it does not redefine filesystem read permissions.
 
 ### Explanatory presentation delivery
 
-Production Codex and Prime configurations select the immutable V4 presentation
+Production Claude, Codex, and Prime configurations select the immutable V4 presentation
 for new threads. It adds task-adaptive explanatory presentation without changing
 V0–V3 or existing pins. Shared semantics belong in the presentation graph. Each
 harness supplies a compact capability overview and language-appropriate public
@@ -646,3 +646,45 @@ the exact old compiled binding. Search updates preserve each publication's scope
 The graph-server `--interaction-permissions` qualification flag defaults off.
 Persistent attached-node mutation and portable conversion export remain unavailable;
 see [ADR 0010](decisions/0010-typed-interaction-permissions.md).
+
+## Turn-specific authoring guidance
+
+Claude and Codex receive the JavaScript capability reference; Prime receives the
+Python reference. Shared semantics distinguish hard graph constraints from
+presentation preferences and optional mechanics examples. Recursive APIs are
+delivered only when execution has the existing completion binding. The agent
+chooses topology, delegation, observation, questions, and publication timing.
+Input guidance describes the existing finalized-response and next-Send contract;
+it does not promise delivery of future answers to an active completion.
+
+The reference examples share source with deterministic tests that execute both
+native languages and compile owner-bound visual/question controls through the
+canonical compiler. They add no scheduler, authoring API, or authority.
+
+Named, unconfigured authoring-strategy treatments vary delivered harness
+guidance for experiments. Absence of the setting is the production control.
+Codex admits a guidance treatment only with a layered-navigation prompt profile;
+the saved-module treatment also requires an unpinned launcher. JavaScript or
+Python functions and saved modules remain same-completion authoring mechanics;
+Codex subagents and Prime RLM helpers remain provider-native helpers inside that
+completion; only an explicit `complete(inputGraph)` call is a semantic child. A
+saved-module treatment is refused when Codex uses the trusted pinned launcher,
+so an experiment cannot widen that launcher's zero-argument stdin authority.
+
+The Prime-only `code-model-recursion-v1` treatment additionally exposes one
+run-scoped `relayer.experimental.model.complete` host request. Ordinary Python
+code supplies a bounded prompt and receives text plus usage from a no-tool,
+no-retry `pi-ai` call using the exact admitted orchestrator model and request
+access. Credentials remain host-only. Current-run and cancellation checks bind
+the request to its execution attachment, and sanitized start/completion events
+make each call observable. Safe caller IDs, parent IDs, depth, and prompt/output
+digests correlate the trace without retaining prompt or result text; the host
+also returns its call index and digests to the Python caller. Active-run and
+cancellation checks run both before and after provider dispatch. The returned
+value may drive local branching and recursion, but the call is neither a Prime
+RLM child nor a GraphComplete semantic child. It receives no graph capability
+and cannot publish by itself. Codex rejects this Prime-specific treatment before
+execution.
+
+No treatment adds a scheduler, quota, graph operation, or automatic publication
+policy.

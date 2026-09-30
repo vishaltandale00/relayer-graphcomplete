@@ -52,9 +52,33 @@ export function primeVisualFixtureFactory(context) {
             if (/detailAuthoring|checkpointNodeDetail|detailCapability|html`/.test(prompt)) {
               throw new Error("Prime V3 prompt contains TypeScript authoring instructions");
             }
-            const example = prompt.match(/```python\n([\s\S]*?)\n```/)?.[1];
-            if (!example) throw new Error("Prime V3 prompt has no runnable example");
-            // Execute the actual composed prompt, not a separately maintained recipe.
+            const examples = [...prompt.matchAll(/```python\n([\s\S]*?)\n```/g)].map(match => match[1]);
+            const visual = examples.find(code => code.includes('shared_styles'));
+            const question = examples.find(code => code.includes('question = ActionObject'));
+            if (!visual || !question) throw new Error("Prime prompt has no visual/question examples");
+            // Execute the delivered independent examples with explicit fixture-owned
+            // context/publication. Prompt examples no longer dictate a whole response.
+            const example = `from relayer_graph import GraphSession, NodeObject, LayerObject, LayerLayoutObject, NodePlacementObject, ActionObject, html, action_capability
+graph = await GraphSession.current()
+${visual}
+layer = LayerObject([node], [], LayerLayoutObject([NodePlacementObject(node, 0.5, 0.5)]), client_key="answer-layer")
+${question}
+child = NodeObject("info", "Details", "Supporting evidence.", client_key="details")
+child.detail_authoring.set_component("main", html("<p>Explain the evidence behind the answer.</p>"))
+child_layer = LayerObject([child], [], LayerLayoutObject([NodePlacementObject(child, 0.5, 0.5)]), client_key="details-layer")
+expand = ActionObject("navigate", "Details", layer, "details-action", relation="expand", target=child_layer)
+node.detail_authoring.set_component("navigation", html(['<button gc=', '>Details</button>'], action_capability("details", expand)))
+for item in [node, child]:
+    await graph.checkpoint_node_detail(item)
+    await graph.submit_node(item)
+await graph.submit_layer(child_layer)
+await graph.submit_layer(layer)
+await graph.add_action(node, question)
+await graph.add_action(node, expand)
+await graph.add_navigate_action(graph.node_id, "Answer", layer, relation="expand", client_key="response")
+current = await graph.get_current()
+await graph.advance_current(layer, expected_revision=current["headRevision"], operation_key="fixture-answer-ready")
+await graph.submit(graph.node_id)`;
             python = PYTHON.slice(0, PYTHON.indexOf("from relayer_graph import"))
               + "async def main():\n" + example.split("\n").map((line) => "    " + line).join("\n")
               + "\nasyncio.run(main())\n";

@@ -93,10 +93,11 @@ it.each(["prime-agent-basic", "prime-agent-deep"])("%s accepts Python authored a
     expect(freshTrace.personalPresentationVersionKey).toBe('personal-presentation-v4');
     expect(freshTurn.completionOutput.rootLayer.nodes).toHaveLength(1);
     expect(freshTurn.completionOutput.rootLayer.nodes[0].authoredDetail).toBeDefined();
-    expect(freshTurn.completionOutput.rootLayer.nodes[0].title).toBe('Answer');
-    expect(freshTurn.completionOutput.rootLayer.nodes[0].authoredDetail.mounts).toHaveLength(1);
+    expect(freshTurn.completionOutput.rootLayer.nodes[0].title).toBe('Comparison');
+    expect(freshTurn.completionOutput.rootLayer.nodes[0].authoredDetail.mounts).toHaveLength(2);
     expect(freshTurn.completionOutput.rootLayer.actions).toEqual(expect.arrayContaining([
       expect.objectContaining({ kind: 'navigate', relation: 'expand', label: 'Details' }),
+      expect.objectContaining({ kind: 'input', label: 'Answer' }),
     ]));
     const expansion = freshTurn.completionOutput.rootLayer.actions.find((action) => action.label === 'Details');
     const child = await request(session, `/api/threads/${fresh.id}/interactions/${freshTurn.id}/layers/${expansion.targetLayerId}`);

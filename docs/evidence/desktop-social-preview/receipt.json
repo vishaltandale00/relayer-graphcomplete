@@ -8,7 +8,7 @@
     "contracts/share-service-v1/contract.json": "7407c99d32fb04a62ab958257be5525dc3451adc9899d600e07de730dccc89ff",
     "scripts/capture-share-preview-evidence.mjs": "7cf6e874b14de7e24b12e0e20043ce48e04c319e511d54e612ff93a3df0a578e",
     "test/fixtures/social-preview.jsonl": "ff4a4545de49ccc20562f2f763b6a120d87fa37f7703a994abeb71b219a405aa",
-    "desktop/shared/telemetry-module-inventory.mjs": "df917ad24da468398ab5a587a3a64ce5f3a4ea33cd093a816e9315ebc37c37e9"
+    "desktop/shared/telemetry-module-inventory.mjs": "b2dc397e18657d30a364df5178c835c12c3f276b96ce83c40a11324a13274287"
   },
   "rendererArtifact": {
     "directory": "desktop/renderer",
