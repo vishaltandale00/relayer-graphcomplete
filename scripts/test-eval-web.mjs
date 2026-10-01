@@ -1,3 +1,5 @@
+import { CalibrationService } from "../desktop/eval-main/calibration-service.mjs";
+import { SetupRegistry } from "../desktop/eval-main/setup-registry.mjs";
 import assert from "node:assert/strict";
 import { randomBytes } from "node:crypto";
 import { loadAtomicAnnotationSnapshots } from "../desktop/eval-main/annotation-snapshot-loader.mjs";
@@ -466,10 +468,12 @@ async function proveProductionSettings({ browser, product, productSession, runti
 }
 
 async function proveTaskActor({ browser, service, productSession, data }) {
-  const tasks = await new HumanTaskService({ stateFile: join(data, "actor-tasks.json"), evalService: service, productSession }).open();
+  let tasks;
+  const setupRegistry = await new SetupRegistry({ stateFile: join(data, "actor-setups.json"), feedbackLoader: (ref) => tasks.feedbackReference(ref) }).open();
+  tasks = await new HumanTaskService({ stateFile: join(data, "actor-tasks.json"), evalService: service, productSession, setupRegistry }).open();
   let decision = 0;
   const snapshots = [];
-  const actors = new TaskActorService({ tasks, resolveRuntime: async () => ({}),
+  const actors = new TaskActorService({ tasks, setupRegistry, resolveRuntime: async () => ({}),
     openBrowser: async (sessionId, signal) => {
       const controller = await openTaskActorBrowser({ tasks, sessionId, productSession, browser, signal });
       const actorPage = browser.contexts().flatMap((context) => context.pages()).find((page) => new URL(page.url()).searchParams.get("taskActor") === "1");
@@ -561,7 +565,8 @@ async function proveTaskActor({ browser, service, productSession, data }) {
     } }),
   });
   resources.push(actors);
-  const surface = await createEvalDashboard({ service, humanTasks: tasks, taskActors: actors, rendererDirectory: resolve("desktop/eval-renderer") });
+  const calibration = await new CalibrationService({ stateFile: join(data, "actor-calibration.json"), setups: setupRegistry, tasks, evalService: service, author: tasks.annotator }).open();
+  const surface = await createEvalDashboard({ service, humanTasks: tasks, taskActors: actors, setupRegistry, calibration, rendererDirectory: resolve("desktop/eval-renderer") });
   resources.push(surface);
   const page = await browser.newPage();
   try {
@@ -595,6 +600,92 @@ async function proveTaskActor({ browser, service, productSession, data }) {
     assert.equal(exported.bundle.actorScreenshots.length, 6);
     assert.equal(await page.locator("#actorSettings [name=actorModel]").inputValue(), "gpt-5.6-luna");
     assert.ok(snapshots.every((snapshot) => !JSON.stringify(snapshot).includes("Independent human feedback") && !JSON.stringify(snapshot).includes("Unnecessary exploration")));
+    const baseline = setupRegistry.selected("actor");
+    await page.locator("#setupPredecessor").selectOption(baseline.id);
+    await page.locator('#setupPublish [name="name"]').fill("Brief user from human feedback");
+    await page.locator('#setupPublish [name="promptVersion"]').fill("browser-manual-actor-v1");
+    await page.locator('#setupPublish [name="promptTemplate"]').fill(baseline.promptTemplate + "\nKeep replies brief.");
+    await page.locator("#setupFeedbackSession").selectOption(task.id);
+    await page.locator("#setupFeedbackRecords input").first().check();
+    await page.locator("#setupPublish button").click();
+    const revision = await until(() => setupRegistry.catalog().revisions.find((item) => item.promptVersion === "browser-manual-actor-v1"), "setup revision published");
+    assert.equal(revision.predecessorId, baseline.id);
+    assert.ok(revision.feedback[0].feedback.comment.includes("Unnecessary exploration"));
+    assert.equal(tasks.get(task.id).actorSetup.id, baseline.id);
+    await page.locator("#actorSetupRevision").selectOption(revision.id);
+    assert.equal(await page.locator("#actorSetupRevision").inputValue(), revision.id);
+    await page.locator('#setupPromote [name="comment"]').fill("Human reviewed the saved action feedback.");
+    await page.locator("#setupPromote button").click();
+    await until(() => setupRegistry.selected("actor").id === revision.id, "explicit promotion persisted");
+    const reopened = await new SetupRegistry({ stateFile: join(data, "actor-setups.json") }).open();
+    assert.deepEqual(reopened.get(revision.id), revision);
+    assert.deepEqual((await tasks.export(task.id)).bundle.session.actorSetup, baseline);
+    if (process.env.RELAYER_EVAL_SETUP_SCREENSHOT) await page.screenshot({ path: process.env.RELAYER_EVAL_SETUP_SCREENSHOT, fullPage: true });
+    console.log("PASS setup revisions: actual dashboard publication, predecessor/human lineage, selection, explicit promotion, reopen and original run/export unchanged");
+    const judgeBaseline = setupRegistry.selected("judge");
+    await page.locator("#setupPredecessor").selectOption(judgeBaseline.id);
+    await page.locator("#judgeConfigFile").waitFor({ state: "visible" });
+    const config = setupRegistry.judgeConfigs()[0];
+    assert.equal(await page.locator("#judgeConfigFile").inputValue(), config.file);
+    assert.equal(await page.locator('#setupPublish [name="promptVersion"]').count(), 0);
+    assert.equal(await page.locator('#setupPublish input, #setupPublish textarea, #setupPublish select[name="modelReasoningEffort"]').count(), 0);
+    assert.ok((await page.locator("#setupEditor").textContent()).includes(config.path));
+    assert.ok((await page.locator("#setupPublish").textContent()).includes(config.digest));
+    await page.locator("#setupFeedbackSession").selectOption(task.id);
+    await page.locator("#setupFeedbackRecords input").first().check();
+    await page.locator("#setupPublish button").click();
+    const fileJudge = await until(() => setupRegistry.catalog().revisions.find((item) => item.kind === "judge" && item.predecessorId === judgeBaseline.id), "judge config published through dashboard");
+    assert.equal(fileJudge.configSource.digest, config.digest);
+    assert.equal(fileJudge.configSource.contents, config.definition.configSource.contents);
+    assert.equal(fileJudge.promptTemplate, config.definition.promptTemplate);
+    console.log("PASS judge config file: selected repository YAML, file-only configuration, exact file snapshot and motivating feedback publication");
+    await page.locator("#calibrationRefresh").click();
+    await until(async () => (await page.locator('#calibrationMember [name="source"]').textContent()).includes(task.id), "calibration sources refreshed");
+    await page.locator('#calibrationMember [name="source"]').selectOption("0");
+    const anchor = task.events.find((event) => event.kind === "actor_action").id;
+    await page.locator('#calibrationMember [name="subject"]').selectOption(anchor);
+    await page.locator('#calibrationMember [name="value"]').fill("2");
+    await page.locator('#calibrationMember [name="comment"]').fill("Independent human realism label on recorded behavior");
+    await page.locator("#calibrationMember button[type=submit], #calibrationMember button:not([type])").click();
+    await page.locator('#calibrationFreeze [name="name"]').fill("Frozen browser calibration");
+    await page.locator("#calibrationFreeze button").click();
+    const set = await until(() => calibration.catalog().sets[0], "frozen set saved from dashboard");
+    assert.equal(set.members[0].membership, "tuning");
+    assert.equal(set.members[0].labels[0].scale, "human-actor-realism-1-4");
+    await page.locator('#calibrationCompare [name="candidateRevisionId"]').selectOption(revision.id);
+    await page.locator("#calibrationCompare button").click();
+    const comparison = await until(() => calibration.catalog().comparisons[0], "comparison created on exact frozen set");
+    await page.locator('#calibrationObservation [name="revisionId"]').selectOption(baseline.id);
+    await page.locator('#calibrationObservation [name="taskId"]').fill(task.id);
+    await page.locator('#calibrationObservation [name="value"]').fill("2");
+    await page.locator('#calibrationObservation [name="comment"]').fill("Baseline realism reviewed separately from satisfaction");
+    await page.locator("#calibrationObservation button:not([type])").click();
+    await until(() => calibration.report(comparison.id).rows[0].baseline?.score === 2, "baseline human realism recorded");
+    decision = 0;
+    await page.locator('#calibrationObservation [name="revisionId"]').selectOption(revision.id);
+    page.once("dialog", (dialog) => dialog.accept());
+    await page.locator("#calibrationRunArm").click();
+    const revised = await until(() => { const latest = tasks.list()[0]; return latest.id !== task.id && latest.status === "completed" ? tasks.get(latest.id) : null; }, "selected actor revision completed in real workspace");
+    assert.equal(revised.actorSetup.id, revision.id);
+    assert.ok(revised.events.find((event) => event.kind === "actor_started").prompt.includes("Keep replies brief."));
+    await page.locator("#calibrationComparison").selectOption(comparison.id);
+    await page.locator('#calibrationObservation [name="revisionId"]').selectOption(revision.id);
+    await page.locator('#calibrationObservation [name="taskId"]').fill(revised.id);
+    await page.locator('#calibrationObservation [name="value"]').fill("3");
+    await page.locator('#calibrationObservation [name="comment"]').fill("Candidate realism rated by a human independently");
+    await page.locator("#calibrationObservation button:not([type])").click();
+    await until(() => calibration.report(comparison.id).status === "completed", "recorded realism comparison complete");
+    const report = calibration.report(comparison.id);
+    assert.equal(report.comparison.dimension, "actor-realism");
+    assert.equal(report.rows[0].candidate.score, 3);
+    assert.equal(report.rows[0].candidate.agreesWithHuman, undefined);
+    const calibrationBundle = await calibration.export();
+    assert.deepEqual(calibrationBundle.sets[0], set);
+    assert.equal(calibrationBundle.observations.length, 2);
+    const reopenedCalibration = await new CalibrationService({ stateFile: join(data, "actor-calibration.json"), setups: setupRegistry, tasks, evalService: service }).open();
+    assert.deepEqual(reopenedCalibration.report(comparison.id), report);
+    if (process.env.RELAYER_EVAL_CALIBRATION_SCREENSHOT) { await page.locator("#calibrationReport").scrollIntoViewIfNeeded(); await page.screenshot({ path: process.env.RELAYER_EVAL_CALIBRATION_SCREENSHOT }); }
+    console.log("PASS calibration: frozen native human label/evidence, tuning membership, pinned actor comparison, real second selected-revision run, independent human scores, export/reopen");
   } finally { await actors.close(); await page.close(); }
   console.log("PASS task actor: dashboard configuration, production screenshots/node selection/composer/Send/invoke, three-completion admission, active read-only human grading isolated from actor, export (fixture inference)");
 }
@@ -613,12 +704,15 @@ async function proveHumanTask({ browser, service, productSession, data }) {
   const registerAnnotations = (session, scope) => productJson(session, "/api/internal/annotation-sessions", {
     method: "POST", body: { ...scope, authorId: "browser-proof", authorDisplayName: "Browser proof" },
   });
-  const tasks = await new HumanTaskService({ stateFile: join(data, "human-tasks.json"), evalService: service, productSession,
+  let tasks;
+  const setupRegistry = await new SetupRegistry({ stateFile: join(data, "human-setups.json"), feedbackLoader: (ref) => tasks.feedbackReference(ref) }).open();
+  tasks = await new HumanTaskService({ stateFile: join(data, "human-tasks.json"), evalService: service, productSession,
     annotationSnapshotLoader: (threadIds) => loadAtomicAnnotationSnapshots({ session: productSession, threadIds,
       token: randomBytes(32).toString("hex"), authorId: "browser-proof", authorDisplayName: "Browser proof" }),
   }).open();
   const surfaceUrl = async (pending) => { const surface = await pending; localResources.push(surface); return surface.url; };
-  const host = await createEvalDashboard({ service, humanTasks: tasks, rendererDirectory: resolve("desktop/eval-renderer"),
+  const calibration = await new CalibrationService({ stateFile: join(data, "human-calibration.json"), setups: setupRegistry, tasks, evalService: service, author: tasks.annotator }).open();
+  const host = await createEvalDashboard({ service, humanTasks: tasks, setupRegistry, calibration, rendererDirectory: resolve("desktop/eval-renderer"),
     openHumanTask: (sessionId) => surfaceUrl(createHumanTaskSurface({ tasks, sessionId, productSession, registerAnnotations })),
     reviewHumanTask: (sessionId) => surfaceUrl(openHumanReview({ executionId: sessionId,
       productSession: async () => productSession, registerAnnotations, assertRunning: () => {},

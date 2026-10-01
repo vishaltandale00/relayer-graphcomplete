@@ -4,6 +4,7 @@ import { dirname, join } from "node:path";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { SetupRegistry } from "../desktop/eval-main/setup-registry.mjs";
 import { EvalService } from "../desktop/eval-main/eval-service.mjs";
 import { restoreLayerPath } from "../desktop/renderer/src/product-workspace/model.js";
 
@@ -26,8 +27,12 @@ describe("imported conversation production review and judging", () => {
     const detail = importedThreadDetail();
     vi.stubGlobal("fetch", importedBackend(receipt, detail));
     const judgeCalls = [];
+    const setups = await new SetupRegistry({ stateFile: join(root, "setups.json"), feedbackLoader: async (ref) => ({ ...ref, feedback: { comment: "TARGET LABEL NEVER SUPPLIED" } }) }).open();
+    const baseline = setups.selected("judge");
+    const proposed = await setups.publish({ ...baseline, name: "Imported selected judge", predecessorId: baseline.id, feedback: [{ sessionId: "human", gradeIndex: 0 }] });
     const service = new EvalService({
       stateFile,
+      setupRegistry: setups,
       productSession: {
         origin: "http://127.0.0.1:43123",
         cookie: { name: "write", value: "secret" },
@@ -96,6 +101,7 @@ describe("imported conversation production review and judging", () => {
     const simulated = await service.judgeImportedConversation(
       imported.executions[0].id,
       "simulated-user",
+      proposed.id,
     );
     expect(judgeCalls).toHaveLength(1);
     expect(judgeCalls[0]).toMatchObject({
@@ -137,6 +143,14 @@ describe("imported conversation production review and judging", () => {
     });
     expect(judgeArtifact.execution.turns[0].judgeResults[0].provenance.sourceSha256)
       .toBe(receipt.sourceSha256);
+    const prior = structuredClone(simulated.executions[0].turns[0].judgeResults.at(-1));
+    expect(prior.judgeSetup).toEqual(proposed);
+    const rejudged = await service.judgeImportedConversation(imported.executions[0].id, "simulated-user", baseline.id);
+    expect(rejudged.executions[0].judgeSetup).toEqual(proposed);
+    expect(rejudged.executions[0].turns[0].judgeResults).toEqual([prior, expect.objectContaining({ judgeSetup: baseline })]);
+    expect(judgeCalls.map((call) => call.judgeSetup.id)).toEqual([proposed.id, baseline.id]);
+    expect(JSON.stringify(judgeCalls)).not.toContain("TARGET LABEL NEVER SUPPLIED");
+    expect(await readFile(join(dirname(stateFile), simulated.bundleRef), "utf8")).toBe(importBundleBeforeJudging);
   });
 
   it("rejects result judging when an import has no accepted turn", async () => {

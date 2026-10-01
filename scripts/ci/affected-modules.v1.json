@@ -119,7 +119,7 @@
         "test/desktop-shell.test.mjs",
         "test/eval-web-host.test.mjs",
         "test/eval-human-task.test.mjs",
-        "test/eval-task-actor.test.mjs", "test/eval-task-actor-errors.test.mjs",
+        "test/eval-task-actor.test.mjs", "test/eval-task-actor-errors.test.mjs", "test/eval-setup-registry.test.mjs",
         "test/eval-provider-setup.test.mjs",
         "test/eval-service-simulated-user.test.mjs",
         "test/eval-service-human-model.test.mjs",

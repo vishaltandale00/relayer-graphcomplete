@@ -942,6 +942,7 @@ function summarize(run) {
 export class EvalService {
   constructor({
     stateFile,
+    setupRegistry = null,
     productSession,
     configurationPaths,
     onChanged = () => {},
@@ -971,6 +972,7 @@ export class EvalService {
     semanticChildDiscoveryClock = realDiscoveryClock,
   }) {
     this.stateFile = stateFile;
+    this.setupRegistry = setupRegistry;
     this.productSession = productSession;
     this.configurationPaths = configurationPaths;
     this.onChanged = onChanged;
@@ -1123,7 +1125,7 @@ export class EvalService {
     return copy({ ...run, summary: summarize(run) });
   }
 
-  async judgeImportedConversation(executionId, judgeConfigurationName) {
+  async judgeImportedConversation(executionId, judgeConfigurationName, judgeSetupRevisionId = null) {
     const located = this.#findExecution(executionId);
     if (located.run.kind !== "imported-conversation" || located.execution.kind !== "imported-conversation") {
       throw new Error("Only imported conversation executions can use this judge action.");
@@ -1139,13 +1141,14 @@ export class EvalService {
     const operation = this.#judgeImportedExecution({
       ...located,
       judgeConfigurationName,
+      judgeSetup: simulatedUserJudgeIds.has(judgeConfigurationName) ? this.setupRegistry?.selected("judge", judgeSetupRevisionId) : null,
     }).finally(() => this.running.delete(located.run.id));
     this.running.set(located.run.id, operation);
     await operation;
     return this.getRun(located.run.id);
   }
 
-  async rejudgeExecution(executionId, judgeConfigurationName, liveAuthorization = null) {
+  async rejudgeExecution(executionId, judgeConfigurationName, liveAuthorization = null, judgeSetupRevisionId = null) {
     const located = this.#findExecution(executionId);
     if (!simulatedUserJudgeIds.has(judgeConfigurationName)) {
       throw new Error("Judge-only reruns require a simulated-user judge configuration.");
@@ -1153,6 +1156,7 @@ export class EvalService {
     if (this.simulatedUserJudgeRunner === null) {
       throw new Error("Simulated-user judge is not available in this EvalService.");
     }
+    const judgeSetup = this.setupRegistry?.selected("judge", judgeSetupRevisionId);
     const operationKey = `rejudge:${executionId}`;
     if (this.running.has(operationKey)) throw new Error("This execution is already being rejudged.");
 
@@ -1191,6 +1195,7 @@ export class EvalService {
       const executionForJudge = {
         ...located.execution,
         judgeConfiguration: { name: judgeConfigurationName },
+        ...(judgeSetup ? { judgeSetup } : {}),
       };
       const accepted = [];
       for (const turn of located.execution.turns || []) {
@@ -1323,6 +1328,7 @@ export class EvalService {
     }
     const harnessConfigurationNames = selection?.harnessConfigurationNames;
     const judgeConfigurationName = selection?.judgeConfigurationName;
+    const judgeSetup = simulatedUserJudgeIds.has(judgeConfigurationName) ? this.setupRegistry?.selected("judge", selection?.judgeSetupRevisionId) : null;
     if (Array.isArray(harnessConfigurationNames) && harnessConfigurationNames.some((name) => (
       this.configurations.get(name)?.implementation === "prime.agent"
       && (this.selectPrimeModel === null || this.primeModelAvailability?.(name)?.available === false)
@@ -1498,6 +1504,7 @@ export class EvalService {
       testCaseIds: [...testCaseIds],
       harnessConfigurationNames: [...harnessConfigurationNames],
       judgeConfigurationName,
+      ...(judgeSetup ? { judgeSetup: copy(judgeSetup) } : {}),
       liveAuthorization: externalLiveAuthorization ?? (testCaseIds.includes(RECURSIVE_COMPLETE_EVAL_CASE_ID)
         || testCaseIds.includes(RECURSIVE_GRAPH_MEMORY_CASE_ID)
         ? copy(selection?.liveAuthorization || null)
@@ -1546,6 +1553,7 @@ export class EvalService {
           ? { pinnedModelResolution: copy(pinnedLiveModelResolutions.get(plan.harnessConfigurationName)) }
           : {}),
         judgeConfiguration: plan.judgeConfiguration,
+        ...(judgeSetup ? { judgeSetup: copy(judgeSetup) } : {}),
         status: "queued",
         lifecycle: {
           status: "queued",
@@ -1768,11 +1776,13 @@ export class EvalService {
     throw new Error(`Unknown execution: ${executionId}`);
   }
 
-  async #judgeImportedExecution({ run, execution, judgeConfigurationName }) {
+  async #judgeImportedExecution({ run, execution, judgeConfigurationName, judgeSetup }) {
     run.status = "judging";
     run.judgeConfigurationName = judgeConfigurationName;
     execution.status = "judging";
     execution.judgeConfiguration = { name: judgeConfigurationName };
+    if (judgeSetup) execution.judgeSetup ??= copy(judgeSetup);
+    const executionForJudge = { ...execution, judgeConfiguration: { name: judgeConfigurationName }, ...(judgeSetup ? { judgeSetup: copy(judgeSetup) } : {}) };
     execution.error = null;
     await this.#changed();
 
@@ -1853,7 +1863,7 @@ export class EvalService {
         const eligible = accepted.filter(({ turn }) => turn.deterministicPassed);
         for (const [index, candidate] of eligible.entries()) {
           const result = await this.#judgeAcceptedTurn({
-            execution,
+            execution: executionForJudge,
             ...candidate,
             reviewSequence: { index, count: eligible.length },
           });
@@ -1883,6 +1893,25 @@ export class EvalService {
     }
   }
 
+  async calibrationEvidence(executionId) {
+    const exported = await this.exportAnnotatedExecution(executionId);
+    const evidence = JSON.parse(await readFile(join(dirname(this.stateFile), ...exported.bundleRef.split("/")), "utf8"));
+    const execution = evidence.execution;
+    return { source: { kind: "execution", id: executionId }, evidence, evidenceDigest: `sha256:${evidence.integritySha256.replace(/^sha256:/, "")}`,
+      caseIdentity: { testCaseId: execution.testCaseId, caseSnapshotDigest: execution.caseSnapshotDigest, harnessConfigurationDigest: execution.harnessConfigurationDigest },
+      subjects: execution.turns.filter((turn) => turn.status === "accepted").map((turn) => this.calibrationSubject(turn)) };
+  }
+  calibrationSubject(turn) {
+    return { kind: "turn", id: String(turn.interactionId), threadId: String(turn.threadId),
+      graphNodeId: String(turn.graphNodeId), rootLayerId: String(turn.rootLayerId) };
+  }
+  calibrationJudgment({ executionId, turnId, judgeResultId }) {
+    const { execution } = this.#findExecution(executionId);
+    const turn = execution.turns.find((item) => String(item.interactionId) === String(turnId));
+    const result = turn?.judgeResults.find((item) => item.id === judgeResultId);
+    if (!result) throw new Error("Unknown judgment against original calibration evidence.");
+    return copy({ subject: this.calibrationSubject(turn), result });
+  }
   async exportAnnotatedExecution(executionId) {
     if (typeof this.annotationSnapshotLoader !== "function") {
       throw new Error("Annotation export is unavailable in this EvalService.");
@@ -2750,6 +2779,7 @@ export class EvalService {
       artifactAuthority: "references",
       rubricVersion: GRAPH_PRESENTATION_RUBRIC_V11.rubricVersion,
       judgeConfiguration: copy(execution.judgeConfiguration),
+      ...(execution.judgeSetup ? { judgeSetup: copy(execution.judgeSetup) } : {}),
       references: emptyJudgeReferences(),
       review: null,
       coverage: null,
@@ -2790,7 +2820,8 @@ export class EvalService {
         },
         artifact: judgeArtifactForExecution(execution, turn),
         artifactEvidence: judgeArtifactEvidenceForExecution(execution, turn),
-        rubric: copy(GRAPH_PRESENTATION_RUBRIC_V11),
+        rubric: copy(execution.judgeSetup?.rubric ?? GRAPH_PRESENTATION_RUBRIC_V11),
+        ...(execution.judgeSetup ? { judgeSetup: Object.fromEntries(["id", "digest", "promptVersion", "promptTemplate", "inputPromptTemplate", "settings", "rubric", "scoringRules"].map((key) => [key, copy(execution.judgeSetup[key])])) } : {}),
         judgeConfiguration: copy(execution.judgeConfiguration),
         ...(provenance === null ? {} : { provenance: copy(provenance) }),
       };

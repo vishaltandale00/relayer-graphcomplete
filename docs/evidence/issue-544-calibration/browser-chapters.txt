@@ -1,0 +1,11 @@
+PASS interrupted startup: pending native child terminated and profile lock released
+PASS real index human lifecycle: initial graph, finish/export RPCs, process restart, persisted task/read-only review; disconnected actor rejected before candidate creation
+PASS host: real fixture, tab independence, review authority, judge/trace pages, shutdown and restart
+PASS Eval Settings: production Providers, login/cancel/reconnect, model refresh, persisted families/defaults and Harnesses (fake provider; no inference)
+PASS human task: live composer, recorded graph, two completions, finish, read-only review, annotation and export
+PASS setup revisions: actual dashboard publication, predecessor/human lineage, selection, explicit promotion, reopen and original run/export unchanged
+PASS calibration: frozen native human label/evidence, tuning membership, pinned actor comparison, real second selected-revision run, independent human scores, export/reopen
+PASS task actor: dashboard configuration, production screenshots/node selection/composer/Send/invoke, three-completion admission, active read-only human grading isolated from actor, export (fixture inference)
+PASS actor input: visible authored input, draft commit and composer Send through real product routes with preserved answer evidence
+PASS judge: isolated context, exact execution/turn readiness, viewport/full capture and restoration
+PASS human persistence: native product restart, task-service reopen, accepted turns and verified route preserved

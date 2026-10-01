@@ -30,12 +30,13 @@ function actorFailure(error, { cancelled = false, timedOut = false } = {}) {
 }
 
 export class TaskActorService {
-  constructor({ tasks, resolveRuntime, openBrowser, createActor = createCodexTaskActor, pollMs = 250, deadlineMs = 900000 }) {
-    Object.assign(this, { tasks, resolveRuntime, openBrowser, createActor, pollMs, deadlineMs });
+  constructor({ tasks, resolveRuntime, openBrowser, createActor = createCodexTaskActor, pollMs = 250, deadlineMs = 900000, setupRegistry = null }) {
+    Object.assign(this, { tasks, resolveRuntime, openBrowser, createActor, pollMs, deadlineMs, setupRegistry });
     this.running = new Map();
   }
   async create(selection) {
-    const config = actorConfiguration(selection.actor);
+    const setup = this.setupRegistry?.selected("actor", selection.actorSetupRevisionId);
+    const config = setup ? actorConfiguration({ ...setup.settings, promptTemplate: setup.promptTemplate, promptVersion: setup.promptVersion }) : actorConfiguration(selection.actor);
     const startupId = selection.startupId ?? randomUUID();
     if (typeof startupId !== "string" || !/^[a-zA-Z0-9-]{1,80}$/.test(startupId) || this.running.has(startupId)) throw new Error("Invalid actor startup identity.");
     const controller = new AbortController();
@@ -48,7 +49,7 @@ export class TaskActorService {
       try {
         // The same deadline covers discovery, preparation and all user actions.
         const runtime = await abortable(signal, () => this.resolveRuntime(config, { signal }));
-        task = await this.tasks.create({ ...selection, mode: "simulated", actor: config }, { signal });
+        task = await this.tasks.create({ ...selection, mode: "simulated", actor: config, ...(setup ? { actorSetupRevisionId: setup.id } : {}) }, { signal });
         this.running.set(task.id, run);
         this.running.delete(startupId);
         resolveStarted(task);

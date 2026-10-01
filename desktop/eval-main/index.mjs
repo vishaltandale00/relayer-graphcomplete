@@ -1,3 +1,5 @@
+import { CalibrationService } from "./calibration-service.mjs";
+import { SetupRegistry } from "./setup-registry.mjs";
 import { createEvalProviderSetup } from "./provider-setup.mjs";
 import { createEvalCredentialStore } from "./credential-store.mjs";
 import { createManagedRuntimeInstaller } from "../main/managed-runtimes/installer.mjs";
@@ -226,7 +228,7 @@ async function start() {
     selectPrimeModel: (harnessId) => providerSetup.select(harnessId),
   });
   const simulatedUserJudgeRunner = createLocalSimulatedUserJudgeRunner({
-    resolveCodexRuntime: () => providerSetup.resolveCodexJudgeRuntime(),
+    resolveCodexRuntime: (config) => providerSetup.resolveCodexJudgeRuntime(config),
     loadLayer: ({ threadId, turnId, layerId }) => productRequest(productSession, (
       `/api/threads/${encodeURIComponent(threadId)}`
       + `/interactions/${encodeURIComponent(turnId)}`
@@ -236,7 +238,11 @@ async function start() {
     createInputOperator: (input) => createScopedInputOperator(productSession, input),
     captureInputRoundTrip: (input) => captureInputRoundTripEvidence(productSession, input),
   });
+  let calibration;
+  const setupRegistry = await new SetupRegistry({ stateFile: join(dirname(evalStateFile), "setup-revisions.json"),
+    feedbackLoader: (ref) => { if (calibration?.isHeldOutFeedback(ref)) throw new Error("Held-out labels cannot motivate setup tuning."); return humanTasks.feedbackReference(ref); } }).open();
   evalService = await new EvalService({
+    setupRegistry,
     stateFile: evalStateFile,
     productSession,
     configurationPaths,
@@ -278,16 +284,18 @@ async function start() {
   }).open();
   requireRunning();
   humanTasks = await new HumanTaskService({
-    stateFile: join(dirname(evalStateFile), "human-tasks.json"), evalService, productSession,
+    stateFile: join(dirname(evalStateFile), "human-tasks.json"), evalService, productSession, setupRegistry,
     annotator: { id: `local:${userInfo().username}`, displayName: userInfo().username },
     annotationSnapshotLoader: (threadIds) => loadAnnotationSnapshots(productSession, threadIds),
   }).open();
-  taskActors = new TaskActorService({ tasks: humanTasks,
+  taskActors = new TaskActorService({ tasks: humanTasks, setupRegistry,
     resolveRuntime: (config, options) => providerSetup.resolveCodexJudgeRuntime(config, options),
     openBrowser: async (sessionId, signal) => openTaskActorBrowser({ tasks: humanTasks, sessionId, productSession, signal, browser: await judgeBrowser.get() }),
   });
+  calibration = await new CalibrationService({ stateFile: join(dirname(evalStateFile), "calibration.json"), setups: setupRegistry,
+    tasks: humanTasks, evalService, author: humanTasks.annotator }).open();
   dashboard = await createEvalDashboard({
-    service: evalService, rendererDirectory: evalRendererDirectory, humanTasks, taskActors,
+    service: evalService, rendererDirectory: evalRendererDirectory, humanTasks, taskActors, setupRegistry, calibration,
     openSettings: async () => {
       requireRunning();
       const pending = createSettingsSurface({ productSession, providerSetup, isBusy: evalIsBusy });

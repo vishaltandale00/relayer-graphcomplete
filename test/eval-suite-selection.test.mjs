@@ -4,6 +4,7 @@ import { applyAblationToControls, selectionFromControls } from "../desktop/eval-
 
 function rootWith(groups) {
   return {
+    querySelector(selector) { return selector === "#judgeSetupRevision" ? groups.judgeSetupRevision?.[0] ?? null : null; },
     querySelectorAll(selector) {
       const name = /name="([^"]+)"/.exec(selector)?.[1];
       const checkedOnly = selector.includes(":checked");
@@ -19,6 +20,7 @@ describe("Eval suite selection", () => {
       cases: [{ value: "case-a", checked: true }, { value: "case-b", checked: true }],
       harnesses: [{ value: "codex-basic", checked: true }],
       judge: [{ value: "simulated-user", checked: true }],
+      judgeSetupRevision: [{ value: "setup-selected-immutable" }],
     });
 
     expect(selectionFromControls(root)).toEqual({
@@ -26,6 +28,7 @@ describe("Eval suite selection", () => {
       testCaseIds: [],
       harnessConfigurationNames: ["codex-basic"],
       judgeConfigurationName: "simulated-user",
+      judgeSetupRevisionId: "setup-selected-immutable",
     });
   });
 

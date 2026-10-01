@@ -1,0 +1,7 @@
+desktop/eval-main/setup-registry.mjs
+desktop/eval-main/web-host.mjs
+desktop/eval-renderer/setup-editor.js
+docs/prd/index.html
+eval-configs/judges/simulated-user-judge-prompt-v11.yaml
+scripts/test-eval-web.mjs
+test/eval-setup-registry.test.mjs

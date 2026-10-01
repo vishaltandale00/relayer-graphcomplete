@@ -1,7 +1,27 @@
+import { initializeCalibrationEditor } from "./calibration-editor.js";
+import { initializeSetupEditor } from "./setup-editor.js";
 const escape = (text) => String(text ?? "").replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char]);
 
 export function initializeHumanTasks({ api, show, toast }) {
   const root = document.querySelector("#humanView");
+  const calibration = initializeCalibrationEditor({ api, root: root.querySelector("#calibrationEditor"), toast });
+  const setups = initializeSetupEditor({ api, root: root.querySelector("#setupEditor"), toast, changed: () => refreshSetups() });
+  async function refreshSetups() {
+    const catalog = await api.setupRevisions();
+    const select = root.querySelector("#actorSetupRevision");
+    const current = select.value;
+    const selected = catalog.promotions.findLast((item) => item.kind === "actor")?.revisionId || catalog.revisions.find((item) => item.kind === "actor")?.id;
+    select.innerHTML = catalog.revisions.filter((item) => item.kind === "actor").map((item) => `<option value="${escape(item.id)}">${escape(item.name)} · ${escape(item.promptVersion)} · ${escape(item.id)}</option>`).join("");
+    select.value = catalog.revisions.some((item) => item.id === current) ? current : selected;
+    const display = () => {
+      const revision = catalog.revisions.find((item) => item.id === select.value);
+      for (const [name, key] of [["actorModel", "model"], ["actorReasoning", "modelReasoningEffort"], ["exploration", "exploration"], ["meticulousness", "meticulousness"], ["maxActions", "maxActions"]]) {
+        const input = root.querySelector(`[name="${name}"]`); input.value = revision.settings[key];
+        if (input.tagName === "SELECT") input.disabled = true; else input.readOnly = true;
+      }
+    };
+    select.onchange = display; display();
+  }
   let selected;
   let displayedStatus;
   let checkingStatus = false;
@@ -28,7 +48,7 @@ export function initializeHumanTasks({ api, show, toast }) {
     const plan = task.prepared?.plan || [];
     root.querySelector("#humanTaskDetail").innerHTML = `
       <h2>${escape(task.prepared?.name || task.id)}</h2><p>${escape(task.status)} · ${task.completions}/${task.maxCompletions} completions · Step ${task.step + 1}/${plan.length}</p>
-      ${simulated ? `<p>Simulated user · ${escape(task.actor.model)} · ${escape(task.actor.modelReasoningEffort)} reasoning · exploration ${escape(task.actor.exploration)} · meticulousness ${escape(task.actor.meticulousness)}</p>` : ""}
+      ${simulated ? `<p>Simulated user · setup ${escape(task.actorSetup?.id || "historical unregistered setup")} · ${escape(task.actor.model)} · ${escape(task.actor.modelReasoningEffort)} reasoning · exploration ${escape(task.actor.exploration)} · meticulousness ${escape(task.actor.meticulousness)}</p>` : ""}
       ${simulated ? `<p>Actor satisfaction: ${escape(actorRating?.value ?? "not recorded")} / 4 · ${escape(actorRating?.comment || "")}</p><p>Actor-reported endpoint: ${escape(actorRating?.endpointStatus || "not assessed")}. Remaining work: ${escape(actorRating?.remainingWork || "not recorded")}</p>` : ""}
       <p><b>Endpoint:</b> ${escape(task.endpoint)}</p>
       <p>Objective success is assessed separately from human or actor satisfaction. ${task.firstVisibleGraph ? `First visible graph: ${Math.round(task.firstVisibleGraph.latencyMs)} ms (includes time before the workspace was opened).` : "First visible graph: not observed."}</p>
@@ -90,6 +110,7 @@ export function initializeHumanTasks({ api, show, toast }) {
     root.querySelector("#humanHarness").innerHTML = catalog.harnessConfigurations.filter((item) => item.available).map((item) => `<option value="${escape(item.name)}">${escape(item.name)}</option>`).join("");
     const setEndpoint = () => { root.querySelector("#humanEndpoint").value = catalog.cases.find((item) => item.id === root.querySelector("#humanCase").value)?.description || ""; };
     root.querySelector("#humanCase").onchange = setEndpoint; setEndpoint();
+    await refreshSetups(); await setups.open(); await calibration.open();
     await list();
     if (selected) await inspect(selected);
   }
@@ -123,7 +144,7 @@ export function initializeHumanTasks({ api, show, toast }) {
     if (new FormData(form).get("mode") === "simulated") button.after(cancel);
     try {
       const data = Object.fromEntries(new FormData(form)); data.startupId = startupId; data.maxCompletions = Number(data.maxCompletions);
-      if (data.mode === "simulated") data.actor = { model: data.actorModel, modelReasoningEffort: data.actorReasoning, exploration: data.exploration, meticulousness: data.meticulousness, maxActions: Number(data.maxActions) };
+      if (data.mode !== "simulated") delete data.actorSetupRevisionId;
       const task = await api.createHumanTask(data); await list(); await inspect(task.id);
     } finally { cancel.remove(); button.disabled = false; }
   }); };

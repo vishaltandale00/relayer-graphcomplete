@@ -59,6 +59,10 @@ async function configure() {
     description: item.unavailableReason,
     detail: `${item.implementation} · graph search ${item.graphCapabilityProfile?.search === "query-v1" ? "query-v1" : "off"} · recursion ${item.complete?.agentAuthored === true ? "on" : "off"}`,
   }, "harnesses", item.name === "fixture-task-system")).join("");
+  const setups = await api.setupRevisions();
+  const judgeSelect = $("#judgeSetupRevision");
+  judgeSelect.innerHTML = setups.revisions.filter((item) => item.kind === "judge").map((item) => `<option value="${escapeHtml(item.id)}">${escapeHtml(item.name)} · ${escapeHtml(item.promptVersion)} · ${escapeHtml(item.id)}</option>`).join("");
+  judgeSelect.value = setups.promotions.findLast((item) => item.kind === "judge")?.revisionId || setups.revisions.find((item) => item.kind === "judge")?.id;
   $("#judgeOptions").innerHTML = catalog.judges.map((item, index) => optionMarkup(item, "judge", index === 0)).join("");
   const syncJudgeCompatibility = () => {
     const selectedCaseIds = [...document.querySelectorAll('input[name="cases"]:checked')]
@@ -144,6 +148,7 @@ async function startRun() {
     const run = await createRunFromControls(document, {
       createRun: (controlSelection) => api.createRun({
         ...controlSelection,
+        judgeSetupRevisionId: $("#judgeSetupRevision").value,
         ...(selection.liveAuthorization ? { liveAuthorization: selection.liveAuthorization } : {}),
       }),
     });
@@ -251,6 +256,7 @@ function renderRun(run) {
         const judged = await api.judgeImportedConversation(
           button.dataset.judgeExecutionId,
           button.dataset.runImportedJudge,
+          $("#judgeSetupRevision").value || null,
         );
         runs = await api.listRuns();
         renderRunList();

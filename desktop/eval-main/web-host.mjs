@@ -171,13 +171,27 @@ export async function createReviewSurface({ productSession, context, annotationT
   });
 }
 
-export async function createEvalDashboard({ service, rendererDirectory, refreshCatalog, openReview, loadScreenshot, humanTasks, taskActors, openHumanTask, reviewHumanTask, openSettings }) {
+export async function createEvalDashboard({ service, rendererDirectory, refreshCatalog, openReview, loadScreenshot, humanTasks, taskActors, setupRegistry, calibration, openHumanTask, reviewHumanTask, openSettings }) {
   const operations = {
+    calibrationCatalog: () => calibration.catalog(),
+    freezeCalibrationSet: ([input]) => calibration.freeze(input),
+    compareSetupRevisions: ([input]) => calibration.compare(input),
+    recordCalibrationObservation: ([input]) => calibration.observe(input),
+    calibrationReport: ([id]) => calibration.report(id),
+    exportCalibration: () => calibration.export(),
+    calibrationSource: ([ref]) => calibration.source(ref),
+    setupRevisions: () => setupRegistry.catalog(),
+    publishSetup: ([input]) => input?.configFile ? setupRegistry.publishConfig(input) : input?.kind === "judge" ? Promise.reject(Object.assign(new Error("Select a judge config file."), { status: 400 })) : setupRegistry.publish(input),
+    promoteSetup: ([input]) => setupRegistry.promote(input, humanTasks.annotator),
     openSettings: () => openSettings(),
     humanTasks: () => humanTasks.list(),
     humanTask: ([id]) => humanTasks.get(id),
     actorScreenshot: ([id, eventId]) => humanTasks.actorScreenshot(id, eventId),
-    createHumanTask: ([selection]) => selection?.mode === "simulated" ? taskActors.create(selection) : humanTasks.create(selection),
+    createHumanTask: ([selection]) => {
+      if (selection?.calibrationRef) selection = { ...calibration.actorSelection(selection.calibrationRef), startupId: selection.startupId, liveAuthorization: selection.liveAuthorization };
+      else if (selection?.calibrationCandidate) throw fail(400, "Choose a frozen calibration comparison.");
+      return selection?.mode === "simulated" ? taskActors.create(selection) : humanTasks.create(selection);
+    },
     stopTaskActor: ([id]) => taskActors.stop(id),
     nextHumanTaskStep: ([id]) => humanTasks.nextStep(id),
     finishHumanTask: ([id, input]) => humanTasks.finish(id, input),
@@ -190,8 +204,8 @@ export async function createEvalDashboard({ service, rendererDirectory, refreshC
     listRuns: () => service.listRuns(),
     getRun: ([id]) => service.getRun(id),
     createRun: ([selection]) => service.createRun(selection),
-    judgeImportedConversation: ([id, judge]) => service.judgeImportedConversation(id, judge),
-    rejudgeExecution: ([id, judge, authorization]) => service.rejudgeExecution(id, judge, authorization),
+    judgeImportedConversation: ([id, judge, revision]) => service.judgeImportedConversation(id, judge, revision),
+    rejudgeExecution: ([id, judge, authorization, revision]) => service.rejudgeExecution(id, judge, authorization, revision),
     openReview: ([id]) => openReview(id),
     exportAnnotations: ([id]) => service.exportAnnotatedExecution(id),
     loadCandidateTrace: ([id, turn]) => service.candidateTraceContext(id, turn),

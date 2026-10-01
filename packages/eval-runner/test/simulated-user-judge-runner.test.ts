@@ -139,6 +139,33 @@ describe("simulated-user Codex judge runner", () => {
     expect(prompt).not.toContain("commissions the answers");
   });
 
+  it("executes pinned prompt bytes with settings and single-pass evidence, without exposing labels", async () => {
+    const calls: string[] = [];
+    let request: JudgeThreadStartRequest | undefined;
+    const result = await runSimulatedUserJudge({
+      executionId: "selected-revision", originalRequest: "Literal {{rubric}} request", controller: unusedController(),
+      reviewStore: finalizedStore(), workingDirectory: process.cwd(), environment: {},
+      configuration: { model: "selected-model", modelReasoningEffort: "low", shellAccess: false, promptVersion: "human-revision-1",
+        promptTemplate: "Selected instructions\n{{request}}\n{{artifactEvidence}}\n{{inventory}}\n{{rubric}}" },
+      threadFactory: { start(value) { request = value; return { id: "selected", run: async (prompt) => {
+        calls.push(prompt); return { items: [], finalResponse: "Done", usage: null };
+      } }; } },
+    });
+    expect(request?.threadOptions).toMatchObject({ model: "selected-model", modelReasoningEffort: "low", sandboxMode: "read-only" });
+    expect(request?.codexOptions.config?.features).toMatchObject({ shell_tool: false, unified_exec: false, view_image: false });
+    expect(result.enforcement.shellAccess).toBe(false);
+    expect(calls[0]).toContain("Selected instructions\nLiteral {{rubric}} request");
+    expect(calls[0]).toContain("simulated-user-rubric-v1");
+    expect(calls[0]).not.toMatch(/human grade|feedback lineage|held-out/);
+    expect(result.prompt).toEqual({ version: "human-revision-1", text: calls[0] });
+    await expect(runSimulatedUserJudge({
+      executionId: "forbidden-shell", originalRequest: "Review", controller: unusedController(),
+      reviewStore: finalizedStore(), workingDirectory: process.cwd(), environment: {},
+      configuration: { model: "selected-model", modelReasoningEffort: "low", shellAccess: false },
+      threadFactory: { start() { return { id: "forbidden", run: async () => ({ items: [{ id: "command", type: "command_execution", command: "cat calibration.json", aggregated_output: "", exit_code: 0, status: "completed" }], finalResponse: "Done", usage: null }) }; } },
+    })).rejects.toThrow("Versioned judge cannot use shell or filesystem execution");
+  });
+
   it("starts a locked-down injected Codex thread and records an immutable audit artifact", async () => {
     const store = finalizedStore();
     let startRequest: JudgeThreadStartRequest | undefined;
@@ -215,6 +242,7 @@ describe("simulated-user Codex judge runner", () => {
         browser_use: false,
         computer_use: false,
         image_generation: false,
+        multi_agent: false,
         shell_tool: true,
         skill_search: false,
         unified_exec: true,

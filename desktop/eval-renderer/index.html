@@ -30,7 +30,7 @@
         <div class="configuration-grid">
           <fieldset><legend>Test cases</legend><div id="caseOptions" class="option-list"></div></fieldset>
           <fieldset><legend>Harnesses under test</legend><div id="harnessOptions" class="option-list"></div></fieldset>
-          <fieldset><legend>Judge</legend><div id="judgeOptions" class="option-list"></div></fieldset>
+          <fieldset><legend>Judge</legend><label>Graph judge setup revision<select id="judgeSetupRevision"></select></label><div id="judgeOptions" class="option-list"></div></fieldset>
         </div>
         <div class="actions"><button class="secondary" id="cancelRun">Cancel</button><button class="primary" id="startRun">Run evaluation</button></div>
       </section>
@@ -38,13 +38,14 @@
         <header><span class="eyebrow">Human Grader</span><h1>Work through a task</h1><p>Use the graph naturally, then review and annotate your experience. Starting a session runs its initial request using the selected harness.</p></header>
         <form id="humanCreate" class="panel human-form">
           <label>User<select name="mode" id="taskMode"><option value="human">Human</option><option value="simulated">Simulated user</option></select></label>
-          <fieldset id="actorSettings" class="hidden"><legend>Simulated user · Codex connection</legend><p>Uses this Eval profile’s connected Codex runtime. Starting spends actor and candidate inference. Completion limits are not cost limits.</p><label>Actor model<input name="actorModel" value="gpt-5.6-luna"></label><label>Reasoning<select name="actorReasoning"><option>low</option><option>medium</option><option>high</option></select></label><label>Exploration<select name="exploration"><option>low</option><option>medium</option><option>high</option></select></label><label>Meticulousness<select name="meticulousness"><option>low</option><option>medium</option><option>high</option></select></label><label>Maximum actor actions<input name="maxActions" type="number" min="1" max="500" value="60"></label></fieldset>
+          <fieldset id="actorSettings" class="hidden"><legend>Simulated user · Codex connection</legend><p>Uses this Eval profile’s connected Codex runtime. Starting spends actor and candidate inference. Completion limits are not cost limits.</p><label>Actor setup revision<select id="actorSetupRevision" name="actorSetupRevisionId"></select></label><label>Actor model<input name="actorModel" readonly value="gpt-5.6-luna"></label><label>Reasoning<select name="actorReasoning"><option>low</option><option>medium</option><option>high</option></select></label><label>Exploration<select name="exploration"><option>low</option><option>medium</option><option>high</option></select></label><label>Meticulousness<select name="meticulousness"><option>low</option><option>medium</option><option>high</option></select></label><label>Maximum actor actions<input name="maxActions" type="number" min="1" max="500" value="60"></label></fieldset>
           <label>Case<select id="humanCase" name="testCaseId"></select></label>
           <label>Harness<select id="humanHarness" name="harnessConfigurationName"></select></label>
           <label>Maximum completions<input name="maxCompletions" type="number" min="1" max="1000" required placeholder="Choose a limit"></label>
           <label>Artifact or endpoint<textarea id="humanEndpoint" name="endpoint" maxlength="8000" required></textarea></label>
           <button class="primary">Start task session</button>
         </form>
+        <section id="setupEditor" class="panel"></section><section id="calibrationEditor" class="panel"></section>
         <section class="panel"><h2>Sessions</h2><div id="humanSessions" class="human-sessions"></div></section>
         <section id="humanTaskDetail" class="panel"></section>
       </section>
