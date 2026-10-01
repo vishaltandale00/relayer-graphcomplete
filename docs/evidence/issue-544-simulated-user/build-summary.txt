@@ -1,0 +1,4 @@
+npm run build — exit 0
+Source/test scope: review-scope.json
+Renderer preparation, clean dist, native app/graph server build, root TypeScript and all package builds passed.
+CARGO_TARGET_DIR=/Volumes/2T-SSD/cargo/relayer-graphcomplete

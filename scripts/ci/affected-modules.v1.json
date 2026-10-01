@@ -96,7 +96,7 @@
     { "exact": "docs/graph-query-v1.md", "package": "relayer-graph-core" }
   ],
   "npmOwners": [
-    { "prefix": "packages/eval-runner/", "package": "@relayer/eval-runner", "vitestFiles": ["packages/eval-runner/test", "test/eval-app-integration.test.mjs"] },
+    { "prefix": "packages/eval-runner/", "package": "@relayer/eval-runner", "vitestFiles": ["packages/eval-runner/test", "test/eval-app-integration.test.mjs", "test/eval-task-actor.test.mjs", "test/eval-task-actor-errors.test.mjs"] },
     { "prefix": "packages/visual-assets/", "package": "@relayer/visual-assets", "vitestFiles": ["packages/visual-assets/test"] },
     {
       "prefix": "packages/graph-client/",
@@ -119,6 +119,7 @@
         "test/desktop-shell.test.mjs",
         "test/eval-web-host.test.mjs",
         "test/eval-human-task.test.mjs",
+        "test/eval-task-actor.test.mjs", "test/eval-task-actor-errors.test.mjs",
         "test/eval-provider-setup.test.mjs",
         "test/eval-service-simulated-user.test.mjs",
         "test/eval-service-human-model.test.mjs",

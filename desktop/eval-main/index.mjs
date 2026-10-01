@@ -3,6 +3,8 @@ import { createEvalCredentialStore } from "./credential-store.mjs";
 import { createManagedRuntimeInstaller } from "../main/managed-runtimes/installer.mjs";
 import { managedRuntimeRequirementForHarness } from "../shared/managed-runtime-requirements.mjs";
 import { HumanTaskService } from "./human-task-service.mjs";
+import { TaskActorService } from "./task-actor-service.mjs";
+import { openTaskActorBrowser } from "./task-actor-browser.mjs";
 import { homedir } from "node:os";
 import { createEvalDashboard, openHumanReview, createHumanTaskSurface, createSettingsSurface } from "./web-host.mjs";
 import { createJudgeBrowser, openBrowserReview } from "./browser-review.mjs";
@@ -132,11 +134,13 @@ const graphRuntime = new GraphCompleteRuntimeService({
 let productServer;
 let evalService;
 let humanTasks;
+let taskActors;
 let stopPromise;
 let stopping = false;
 function requireRunning() { if (stopping) throw new Error("Eval is stopping."); }
 function evalIsBusy() {
   return (humanTasks?.list() || []).some((task) => ["active", "preparing", "finishing"].includes(task.status))
+    || Boolean(taskActors?.running.size)
     || Boolean(evalService?.running.size)
     || (evalService?.listRuns() || []).some((run) => ["queued", "running"].includes(run.status));
 }
@@ -278,8 +282,12 @@ async function start() {
     annotator: { id: `local:${userInfo().username}`, displayName: userInfo().username },
     annotationSnapshotLoader: (threadIds) => loadAnnotationSnapshots(productSession, threadIds),
   }).open();
+  taskActors = new TaskActorService({ tasks: humanTasks,
+    resolveRuntime: (config, options) => providerSetup.resolveCodexJudgeRuntime(config, options),
+    openBrowser: async (sessionId, signal) => openTaskActorBrowser({ tasks: humanTasks, sessionId, productSession, signal, browser: await judgeBrowser.get() }),
+  });
   dashboard = await createEvalDashboard({
-    service: evalService, rendererDirectory: evalRendererDirectory, humanTasks,
+    service: evalService, rendererDirectory: evalRendererDirectory, humanTasks, taskActors,
     openSettings: async () => {
       requireRunning();
       const pending = createSettingsSurface({ productSession, providerSetup, isBusy: evalIsBusy });
@@ -289,6 +297,7 @@ async function start() {
     },
     openHumanTask: async (sessionId) => {
       requireRunning();
+      if (humanTasks.get(sessionId).mode === "simulated") throw new Error("Open graph review to watch a simulated session.");
       if (humanTasks.get(sessionId).status !== "active") throw new Error("This task has ended. Open its review instead.");
       const pending = createHumanTaskSurface({ tasks: humanTasks, sessionId, productSession, assertRunning: requireRunning,
         registerAnnotations: (session, scope) => controlProductRequest(session, "/api/internal/annotation-sessions", {
@@ -300,7 +309,7 @@ async function start() {
     },
     reviewHumanTask: async (sessionId) => {
       const task = humanTasks.get(sessionId);
-      if (task.status === "active") throw new Error("Finish the task before reviewing it.");
+      if (task.status === "active" && task.mode !== "simulated") throw new Error("Finish the task before reviewing it.");
       const pending = openHumanReview({
         executionId: sessionId, assertRunning: requireRunning, productSession: async () => productSession,
         humanGrading: {
@@ -308,7 +317,7 @@ async function start() {
           grade: (input) => humanTasks.grade(sessionId, input),
           annotate: (input) => humanTasks.annotate(sessionId, input),
         },
-        reviewContext: () => ({ readOnly: true, selectedExecutionId: sessionId, harnessConfigurationName: task.prepared.execution.harnessConfigurationName, cases: [{ executionId: sessionId, name: task.prepared.name, status: task.status, threadIds: task.threadIds, threads: task.threadIds.map((id, index) => ({ id, name: task.prepared.plan[index]?.name || `Step ${index + 1}` })) }] }),
+        reviewContext: () => { const task = humanTasks.get(sessionId); return { readOnly: true, selectedExecutionId: sessionId, harnessConfigurationName: task.prepared.execution.harnessConfigurationName, cases: [{ executionId: sessionId, name: task.prepared.name, status: task.status, threadIds: task.threadIds, threads: task.threadIds.map((id, index) => ({ id, name: task.prepared.plan[index]?.name || `Step ${index + 1}` })) }] }; },
         registerAnnotations: (session, scope) => controlProductRequest(session, "/api/internal/annotation-sessions", {
           method: "POST", body: { ...scope, authorId: `local:${userInfo().username}`, authorDisplayName: userInfo().username },
         }),
@@ -637,6 +646,7 @@ function stop() {
     const errors = [];
     const attempt = async (operation) => { try { await operation(); } catch (error) { errors.push(error); } };
     await attempt(() => dashboard?.close());
+    await attempt(() => taskActors?.close());
     await attempt(() => productServer?.close());
     for (const pending of reviewSurfaces) {
       const surface = await pending.catch(() => null);

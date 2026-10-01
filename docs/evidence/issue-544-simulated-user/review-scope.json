@@ -1,0 +1,26 @@
+{
+  "digest": "6102fb0b74d4f5b3ad0ffc5eb4a3ad741d6c8e356f1a46c0b641d8d28065b956",
+  "files": [
+    "desktop/eval-main/eval-service.mjs",
+    "desktop/eval-main/human-task-service.mjs",
+    "desktop/eval-main/index.mjs",
+    "desktop/eval-main/task-actor-browser.mjs",
+    "desktop/eval-main/task-actor-service.mjs",
+    "desktop/eval-main/task-actor.mjs",
+    "desktop/eval-main/web-host.mjs",
+    "desktop/eval-renderer/human-tasks.js",
+    "desktop/eval-renderer/index.html",
+    "desktop/eval-renderer/web-bridge.js",
+    "desktop/renderer/src/human-task-grading.js",
+    "desktop/renderer/src/human-task-observer.js",
+    "desktop/renderer/src/main.js",
+    "packages/eval-runner/src/index.ts",
+    "packages/eval-runner/src/simulated-user/task-actor.ts",
+    "scripts/ci/affected-modules.v1.json",
+    "scripts/test-eval-web.mjs",
+    "test/ci-affected-plan.test.mjs",
+    "test/eval-human-task.test.mjs",
+    "test/eval-task-actor.test.mjs",
+    "test/eval-web-host.test.mjs"
+  ]
+}

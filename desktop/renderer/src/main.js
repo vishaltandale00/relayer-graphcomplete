@@ -521,13 +521,15 @@ async function boot() {
       setInputOperatorCommitted: (committed) => workspace().setInputOperatorCommitted(committed),
     }));
   }
-  if (window.relayerHumanTask || window.relayerHumanGrading) initializeHumanTaskGrading(window.relayerHumanTask || window.relayerHumanGrading);
+  if ((window.relayerHumanTask || window.relayerHumanGrading) && new URLSearchParams(location.search).get("taskActor") !== "1") initializeHumanTaskGrading(window.relayerHumanTask || window.relayerHumanGrading);
   if (window.relayerHumanTask) observeHumanTaskPresentation({
     bridge: window.relayerHumanTask,
     getState: () => ({
       threadId: viewState.currentThreadId, turnId: viewState.currentInteractionId,
       layerId: appState.visibleLayer?.layer?.id ?? null, selectedNodeId: viewState.selectedNodeId,
       completionStatus: appState.interactions.find((item) => String(item.id) === String(viewState.currentInteractionId))?.completionStatus ?? null,
+      attemptId: appState.interactions.find((item) => String(item.id) === String(viewState.currentInteractionId))?.latestAttempt?.id ?? null,
+      attemptOutcome: appState.interactions.find((item) => String(item.id) === String(viewState.currentInteractionId))?.latestAttempt?.outcome ?? null,
       navigationPath: viewState.layerPath.map((entry) => ({ layerId: entry.layerId, viaActionId: entry.actionId ?? entry.viaActionId ?? null })),
     }),
   });

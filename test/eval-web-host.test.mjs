@@ -390,3 +390,24 @@ it("persists Eval layout across origins while keeping preference writes authenti
     })).status).toBe(403);
   } finally { await rm(directory, { recursive: true, force: true }); }
 });
+
+it("an active actor review refreshes its annotation roster only after registration succeeds", async () => {
+  let roster = [7]; let fail = false;
+  const scopes = [];
+  const surface = await openHumanReview({
+    executionId: "e1", assertRunning: () => {}, humanGrading: { task: () => ({ status: "active" }) },
+    reviewContext: () => ({ readOnly: true, cases: [{ executionId: "e1", threadIds: [...roster] }] }),
+    productSession: async () => ({ origin: "http://127.0.0.1:1", readOnlyCookie: { name: "read", value: "only" } }),
+    registerAnnotations: async (_session, scope) => { if (fail) throw new Error("Registration failed"); scopes.push(scope); },
+  }); opened.push(surface);
+  const read = () => fetch(surface.origin + "/eval-api/context", { headers: authorized(surface) });
+  roster = [7, 8]; fail = true;
+  expect((await read()).status).toBe(400);
+  expect(scopes).toHaveLength(1);
+  fail = false;
+  expect((await (await read()).json()).cases[0].threadIds).toEqual([7, 8]);
+  expect(scopes.map(scope => scope.threadIds)).toEqual([[7], [7, 8]]);
+  expect(scopes[1].token).toBe(scopes[0].token);
+  expect((await fetch(surface.origin + "/api/threads/9/annotations", { method: "POST", headers: authorized(surface), body: "{}" })).status).toBe(403);
+  expect((await fetch(surface.origin + "/api/threads/8/interactions", { method: "POST", headers: authorized(surface), body: "{}" })).status).toBe(403);
+});

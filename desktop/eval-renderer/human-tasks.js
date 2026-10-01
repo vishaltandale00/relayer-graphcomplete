@@ -13,7 +13,7 @@ export function initializeHumanTasks({ api, show, toast }) {
   };
   async function list() {
     const sessions = await api.humanTasks();
-    root.querySelector("#humanSessions").innerHTML = sessions.map((item) => `<button class="secondary" data-human-session="${escape(item.id)}">${escape(item.name || item.id)} · ${escape(item.status)} · ${item.completions}/${item.maxCompletions}</button>`).join("") || "No human sessions yet.";
+    root.querySelector("#humanSessions").innerHTML = sessions.map((item) => `<button class="secondary" data-human-session="${escape(item.id)}">${escape(item.name || item.id)} · ${escape(item.mode || "human")} · ${escape(item.status)} · ${item.completions}/${item.maxCompletions}</button>`).join("") || "No human sessions yet.";
     root.querySelectorAll("[data-human-session]").forEach((button) => { button.onclick = () => run(() => inspect(button.dataset.humanSession)); });
   }
   async function inspect(id, onlyStatusChange = false) {
@@ -23,27 +23,45 @@ export function initializeHumanTasks({ api, show, toast }) {
     displayedStatus = task.status;
     const reviewable = ["completed", "failed", "interrupted"].includes(task.status);
     const active = task.status === "active";
+    const simulated = task.mode === "simulated";
+    const actorRating = task.events.findLast((event) => event.kind === "actor_satisfaction");
     const plan = task.prepared?.plan || [];
     root.querySelector("#humanTaskDetail").innerHTML = `
       <h2>${escape(task.prepared?.name || task.id)}</h2><p>${escape(task.status)} · ${task.completions}/${task.maxCompletions} completions · Step ${task.step + 1}/${plan.length}</p>
+      ${simulated ? `<p>Simulated user · ${escape(task.actor.model)} · ${escape(task.actor.modelReasoningEffort)} reasoning · exploration ${escape(task.actor.exploration)} · meticulousness ${escape(task.actor.meticulousness)}</p>` : ""}
+      ${simulated ? `<p>Actor satisfaction: ${escape(actorRating?.value ?? "not recorded")} / 4 · ${escape(actorRating?.comment || "")}</p><p>Actor-reported endpoint: ${escape(actorRating?.endpointStatus || "not assessed")}. Remaining work: ${escape(actorRating?.remainingWork || "not recorded")}</p>` : ""}
       <p><b>Endpoint:</b> ${escape(task.endpoint)}</p>
-      <p>Objective success is assessed separately from human satisfaction. ${task.firstVisibleGraph ? `First visible graph: ${Math.round(task.firstVisibleGraph.latencyMs)} ms (includes time before the workspace was opened).` : "First visible graph: not observed."}</p>
+      <p>Objective success is assessed separately from human or actor satisfaction. ${task.firstVisibleGraph ? `First visible graph: ${Math.round(task.firstVisibleGraph.latencyMs)} ms (includes time before the workspace was opened).` : "First visible graph: not observed."}</p>
       ${task.prepared?.humanBrief ? `<details><summary>Private user brief · not sent to Relayer</summary><p style="white-space:pre-wrap">${escape(task.prepared.humanBrief)}</p><h3>What to grade</h3><p>${escape(task.prepared.humanRubric)}</p></details>` : ""}
       <details><summary>Case instructions</summary>${plan.map((step) => `<h3>${escape(step.name)}</h3>${step.prompts.map((text) => `<p>${escape(text)}</p>`).join("")}`).join("")}</details>
-      <p id="humanLifecycle">${active ? "Review and grade inside the task workspace while you interact. Save grade keeps the task active. Finish task ends interaction separately." : reviewable ? "This session has ended. Open graph review to revisit the graph and add annotations; task interaction is closed." : "The session is changing state. Graph review becomes available once it has ended."}</p>
-      <div class="actions"><button id="humanOpen" class="primary" ${task.threadIds.length && (active || reviewable) ? "" : "disabled"}>${active ? "Open task workspace" : "Open graph review"} ↗</button>
-      ${active && task.step + 1 < plan.length ? '<button id="humanNext" class="secondary">Finish step and start next</button>' : ""}
-      ${["completed", "failed", "interrupted"].includes(task.status) ? '<button id="humanExport" class="secondary">Export session ↓</button>' : ""}<button id="humanRefresh" class="secondary">Refresh</button></div>
-      ${active ? `<form id="humanFinish"><label>Finish reason <select name="reason"><option value="endpoint_reached">Endpoint reached</option><option value="satisfied">Satisfied</option><option value="abandoned">Abandoned</option><option value="budget_exhausted">Completion limit reached</option></select></label>
+      <p id="humanLifecycle">${active && simulated ? "The simulated user is working. Open graph review to watch and grade; your feedback stays separate from its decisions." : active ? "Review and grade inside the task workspace while you interact. Save grade keeps the task active. Finish task ends interaction separately." : reviewable ? "This session has ended. Open graph review to revisit the graph and add annotations; task interaction is closed." : "The session is changing state. Graph review becomes available once it has ended."}</p>
+      <div class="actions"><button id="humanOpen" class="primary" ${task.threadIds.length && (active || reviewable) ? "" : "disabled"}>${active && !simulated ? "Open task workspace" : "Open graph review"} ↗</button>
+      ${active && !simulated && task.step + 1 < plan.length ? '<button id="humanNext" class="secondary">Finish step and start next</button>' : ""}
+      ${["completed", "failed", "interrupted"].includes(task.status) ? '<button id="humanExport" class="secondary">Export session ↓</button>' : ""}${active && simulated ? '<button id="actorStop" class="secondary">Stop simulated user</button>' : ""}<button id="humanRefresh" class="secondary">Refresh</button></div>
+      ${active && !simulated ? `<form id="humanFinish"><label>Finish reason <select name="reason"><option value="endpoint_reached">Endpoint reached</option><option value="satisfied">Satisfied</option><option value="abandoned">Abandoned</option><option value="budget_exhausted">Completion limit reached</option></select></label>
       <label>Satisfaction <select name="satisfaction"><option value="">Choose…</option><option value="1">1 · Bad</option><option value="2">2 · Needs work</option><option value="3">3 · Good</option><option value="4">4 · Great</option></select></label>
       <label>Feedback <textarea name="comment" maxlength="8000"></textarea></label><button type="button" id="humanSaveGrade" class="secondary">Save grade</button><button class="primary">Finish task</button></form>` : `<p>Termination: ${escape(task.termination?.reason || task.status)} · Satisfaction: ${escape(task.satisfaction?.value ?? "not recorded")}</p>`}
-      <h3>Response timing</h3><pre>${escape(JSON.stringify(task.responseTimings || [], null, 2))}</pre><p>Only observations armed before a submission are suitable for response comparisons.</p><h3>Recorded trajectory</h3><p>Presentation records contain rendered text and navigation state, not screenshot proof of visual quality.</p>
-      <ol class="human-timeline">${task.events.map((event) => `<li><details><summary>${event.sequence}. ${escape(event.kind)} · ${escape(event.at)}</summary><pre>${escape(JSON.stringify(event, null, 2))}</pre></details>
+      <h3>Response timing</h3><pre>${escape(JSON.stringify(task.responseTimings || [], null, 2))}</pre><p>Only observations armed before a submission are suitable for response comparisons.</p><h3>Recorded trajectory</h3><p>Presentation records contain rendered text and navigation state, not a visual-quality verdict. Actor observations include captured screenshots.</p>
+      <ol class="human-timeline">${task.events.map((event) => `<li><details ${event.observation?.screenshotArtifact ? `data-actor-image="${escape(event.id)}"` : ""}><summary>${event.sequence}. ${escape(event.kind)} · ${escape(event.at)}</summary><pre>${escape(JSON.stringify(event.observation?.screenshot ? { ...event, observation: { ...event.observation, screenshot: "PNG captured with this observation" } } : event, null, 2))}</pre>${event.observation?.screenshot ? `<img alt="Workspace observed by the simulated user" style="max-width:100%" src="data:image/png;base64,${escape(event.observation.screenshot)}">` : ""}</details>
       ${active || reviewable ? `<button class="secondary" data-annotate-event="${escape(event.id)}">Annotate this moment</button>` : ""}</li>`).join("")}</ol>
       <h3>Moment annotations</h3>${task.annotations.map((note) => `<p><b>${escape(note.eventId)}</b> ${escape(note.comment)}</p>`).join("")}
       <form id="humanAnnotation" class="hidden"><input name="eventId" type="hidden"><label>Comment on this moment<textarea name="comment" maxlength="8000" required></textarea></label><button class="primary">Save annotation</button></form>`;
-    root.querySelector("#humanOpen").onclick = () => run(() => api.openHumanTask(id, !active));
+    root.querySelector("#humanOpen").onclick = () => run(() => api.openHumanTask(id, !active || simulated));
     root.querySelector("#humanRefresh").onclick = () => run(() => inspect(id));
+    root.querySelectorAll("[data-actor-image]").forEach(details => {
+      details.ontoggle = () => {
+        if (!details.open || details.dataset.loaded) return;
+        details.dataset.loaded = "pending";
+        void run(async () => {
+          try {
+            const image = document.createElement("img"); image.alt = "Workspace observed by the simulated user"; image.style.maxWidth = "100%";
+            image.src = await api.actorScreenshot(id, details.dataset.actorImage); details.append(image); details.dataset.loaded = "yes";
+          } catch (error) { delete details.dataset.loaded; throw error; }
+        });
+      };
+    });
+    const stopActor = root.querySelector("#actorStop");
+    if (stopActor) stopActor.onclick = () => run(async () => { await api.stopTaskActor(id); await inspect(id); await list(); });
     const next = root.querySelector("#humanNext");
     if (next) next.onclick = () => run(async () => { next.disabled = true; try { await api.nextHumanTaskStep(id); await inspect(id); await list(); } finally { next.disabled = false; } });
     const exportButton = root.querySelector("#humanExport");
@@ -96,11 +114,17 @@ export function initializeHumanTasks({ api, show, toast }) {
     window.removeEventListener("focus", refreshLifecycle);
   }, { once: true });
   document.querySelector("#humanGrader").onclick = () => run(open);
+  root.querySelector("#taskMode").onchange = (event) => root.querySelector("#actorSettings").classList.toggle("hidden", event.target.value !== "simulated");
   root.querySelector("#humanCreate").onsubmit = (event) => { event.preventDefault(); void run(async () => {
     const form = event.target; const button = form.querySelector("button"); button.disabled = true;
+    const startupId = crypto.randomUUID();
+    const cancel = document.createElement("button"); cancel.type = "button"; cancel.className = "secondary"; cancel.textContent = "Cancel starting user";
+    cancel.onclick = () => run(() => api.stopTaskActor(startupId));
+    if (new FormData(form).get("mode") === "simulated") button.after(cancel);
     try {
-      const data = Object.fromEntries(new FormData(form)); data.maxCompletions = Number(data.maxCompletions);
+      const data = Object.fromEntries(new FormData(form)); data.startupId = startupId; data.maxCompletions = Number(data.maxCompletions);
+      if (data.mode === "simulated") data.actor = { model: data.actorModel, modelReasoningEffort: data.actorReasoning, exploration: data.exploration, meticulousness: data.meticulousness, maxActions: Number(data.maxActions) };
       const task = await api.createHumanTask(data); await list(); await inspect(task.id);
-    } finally { button.disabled = false; }
+    } finally { cancel.remove(); button.disabled = false; }
   }); };
 }

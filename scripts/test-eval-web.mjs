@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import { randomBytes } from "node:crypto";
+import { loadAtomicAnnotationSnapshots } from "../desktop/eval-main/annotation-snapshot-loader.mjs";
 import { spawn, execFileSync } from "node:child_process";
 import { pathToFileURL } from "node:url";
 import { once } from "node:events";
@@ -6,11 +8,14 @@ import { mkdtemp, rm, readFile, writeFile, access } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { chromium } from "playwright";
-import { taskSystemFixtureFactory } from "@relayer/eval-runner";
+import { taskSystemFixtureFactory, nodeDetailFixtureFactory } from "@relayer/eval-runner";
 import { GraphCompleteRuntimeService } from "../desktop/main/services/graphcomplete-runtime.mjs";
 import { RelayerAppServerService } from "../desktop/main/services/relayer-app-server.mjs";
+import { HumanTaskService } from "../desktop/eval-main/human-task-service.mjs";
+import { TaskActorService } from "../desktop/eval-main/task-actor-service.mjs";
+import { openTaskActorBrowser } from "../desktop/eval-main/task-actor-browser.mjs";
 import { EvalService } from "../desktop/eval-main/eval-service.mjs";
-import { createEvalDashboard, createSettingsSurface } from "../desktop/eval-main/web-host.mjs";
+import { createEvalDashboard, createSettingsSurface, createHumanTaskSurface, openHumanReview } from "../desktop/eval-main/web-host.mjs";
 import { createEvalProviderSetup } from "../desktop/eval-main/provider-setup.mjs";
 import { createProviderAdapterRegistry } from "../desktop/main/providers/provider-adapter-contract.mjs";
 import { unavailableModelCatalogSnapshot } from "../desktop/main/models/model-catalog-adapter.mjs";
@@ -178,155 +183,81 @@ try {
   await dashboard.evaluate(({ id, turn }) => window.relayerEval.openCandidateTrace(id, turn), { id: execution.id, turn: execution.turns[0].interactionId });
   const tracePage = await tracePopup; await tracePage.waitForLoadState();
   await until(async () => (await tracePage.locator("body").textContent()).includes("fixture-task-system"), "candidate trace");
-  // Human task slice: the production composer remains writable under separate
-  // scope; evidence is captured without paid inference or an alternate renderer.
-  await dashboard.locator("#humanGrader").click();
-  await dashboard.locator("#humanCase").selectOption("empty-project.task-system.two-turn");
-  await dashboard.locator("#humanHarness").selectOption("fixture-human-task");
-  await dashboard.locator('[name="maxCompletions"]').fill("2");
-  await dashboard.locator("#humanEndpoint").fill("An explained task system and a refined response");
-  await dashboard.locator("#humanCreate button").click();
-  await dashboard.locator("#humanOpen").waitFor();
-  const humanId = (await rpc(host.url, "humanTasks"))[0].id;
-  // A completed matrix run continues polling while Human Grader is open.
-  // Wait for an actual poll, rather than assuming a timer fired.
-  await dashboard.waitForResponse((response) => response.url().endsWith("/eval-api/listRuns"));
-  assert.equal(await dashboard.locator("#humanView").isVisible(), true);
-  const taskPopup = dashboard.context().waitForEvent("page");
-  await dashboard.locator("#humanOpen").click();
-  const humanPage = await taskPopup;
-  humanPage.on("pageerror", (error) => pageErrors.push(error.message));
-  await humanPage.waitForLoadState();
-  await until(async () => (await rpc(host.url, "humanTask", [humanId])).events.some((event) => event.kind === "presentation" && event.snapshot.graphVisible), "human first visible graph");
-  assert.equal(await humanPage.evaluate(() => Boolean(window.relayerEvalReview)), false);
-  assert.equal(await humanPage.evaluate(async () => (await (await fetch("/api/capabilities")).json()).annotations), true);
-  const modelValidation = await humanPage.evaluate(async () => {
-    const response = await fetch("/api/model-selection/validate", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ harnessId: "fixture-human-task", familyId: 1, providerId: "codex", modelId: "deliberately-missing-model" }) });
-    return { status: response.status, body: await response.json() };
-  });
-  assert.equal(modelValidation.status, 422, JSON.stringify(modelValidation));
-  assert.equal(modelValidation.body.code, "model_selection_unknown", "validation must reach product semantics, not fail with read-only authority");
-  await humanPage.locator(".graph-node").first().click();
-  await humanPage.locator("#annotationComment").fill("This node helped me understand the task.");
-  await humanPage.locator("#submitAnnotation").click();
-  await until(async () => (await humanPage.locator("#annotationList").textContent()).includes("This node helped me understand the task."), "native live node annotation saved");
-
-  await humanPage.evaluate(() => window.relayerHumanTask.workspaceLayout.set(0.64));
-  const reopenedTask = await browser.newPage();
-  await reopenedTask.goto(await rpc(host.url, "openHumanTask", [humanId]));
-  assert.notEqual(new URL(reopenedTask.url()).origin, new URL(humanPage.url()).origin);
-  await until(async () => (await reopenedTask.locator("#workspaceDivider").getAttribute("aria-valuenow")) === "64", "live task split restored across origins");
-  assert.equal(await reopenedTask.evaluate(() => Boolean(window.relayerEvalReview)), false);
-  await reopenedTask.locator(".graph-node").first().click();
-  await until(async () => (await reopenedTask.locator("#annotationList").textContent()).includes("This node helped me understand the task."), "native node annotation restored in new live workspace");
-  await reopenedTask.close();
-
-  for (const surface of [humanPage, review]) {
-    assert.deepEqual(await surface.evaluate(async () => Promise.all([
-      fetch("/api/model-settings/defaults", { method: "PUT", headers: { "Content-Type": "application/json" }, body: "{}" }).then((response) => response.status),
-      fetch("/eval-api/connect", { method: "POST", headers: { "Content-Type": "application/json" }, body: "[]" }).then((response) => response.status),
-    ])), [403, 404], "task and review authority cannot change provider/model setup");
-  }
-  await humanPage.locator("#threadPrompt").fill("Explain how the workers coordinate.");
-  try { await humanPage.locator("#sendInteraction:not([disabled])").click(); }
-  catch (error) { console.error(await humanPage.locator("#sendInteraction").evaluate((element) => element.outerHTML)); throw error; }
-  await until(async () => {
-    const task = await rpc(host.url, "humanTask", [humanId]);
-    return task.events.some((event) => event.kind === "presentation" && event.snapshot.completionStatus === "accepted" && String(event.snapshot.turnId) !== String(task.events.find((item) => item.kind === "thread_started").interactionId));
-  }, "human follow-up accepted and observed");
-  await humanPage.locator("#humanTaskGrading summary").click();
-  await humanPage.locator('#humanTaskGrading [name="satisfaction"]').selectOption("3");
-  await humanPage.locator('#humanTaskGrading [data-session-grade] [name="comment"]').fill("The follow-up helped.");
-  await humanPage.getByRole("button", { name: "Save grade", exact: true }).click();
-  await until(async () => (await humanPage.locator("[data-grade-status]").textContent()).includes("Grade saved"), "nonterminal grade saved");
-  assert.equal((await rpc(host.url, "humanTask", [humanId])).status, "active");
-  const liveMoment = (await rpc(host.url, "humanTask", [humanId])).events.find(event => event.kind === "presentation");
-  await humanPage.locator('#humanTaskGrading [name="eventId"]').selectOption(liveMoment.id);
-  await humanPage.locator('#humanTaskGrading form:not([data-session-grade]) [name="comment"]').fill("Live feedback");
-  await humanPage.getByRole("button", { name: "Save moment annotation", exact: true }).click();
-  await until(async () => (await humanPage.locator("[data-grade-status]").textContent()).includes("Moment annotation saved"), "live annotation saved");
-  assert.equal((await rpc(host.url, "humanTask", [humanId])).status, "active");
-  await humanPage.locator('#humanTaskGrading [name="reason"]').selectOption("endpoint_reached");
-  await humanPage.getByRole("button", { name: "Finish task", exact: true }).click();
-  await until(async () => (await humanPage.locator("[data-grade-status]").textContent()).includes("Task finished"), "workspace task finished");
-  await until(async () => (await dashboard.locator("#humanOpen").textContent()).includes("Open graph review"), "dashboard switches to graph review after workspace finish");
-  assert.equal(await dashboard.locator("#humanFinish").count(), 0);
-  const humanFinished = await rpc(host.url, "humanTask", [humanId]);
-  assert.equal(humanFinished.satisfaction.value, 3);
-  assert.equal(humanFinished.satisfaction.comment, "The follow-up helped.");
-  assert.equal(humanFinished.completions, 2);
-  assert.equal(humanFinished.termination.success, null);
-  assert.equal(humanFinished.responseTimings.length, 2);
-  assert.equal(humanFinished.responseTimings[1].observerPresentBeforeSubmission, true);
-  const humanMoment = humanFinished.events.find((event) => event.kind === "presentation" && event.snapshot.graphVisible);
-  await humanPage.locator('#humanTaskGrading [name="eventId"]').selectOption(humanMoment.id);
-  await humanPage.locator('#humanTaskGrading form:not([data-session-grade]) [name="comment"]').fill("First useful map.");
-  await humanPage.getByRole("button", { name: "Save moment annotation", exact: true }).click();
-  await until(async () => (await humanPage.locator("[data-grade-status]").textContent())  .includes("Moment annotation saved"), "workspace annotation saved");
-  const humanReviewUrl = await rpc(host.url, "reviewHumanTask", [humanId]);
-  const humanReview = await browser.newPage(); await humanReview.goto(humanReviewUrl);
-  await humanReview.waitForFunction(() => Boolean(window.__evalPresentation?.snapshot()?.turnId));
-  await humanReview.locator("#humanTaskGrading summary").first().click();
-  await humanReview.locator('#humanTaskGrading [data-session-grade] [name="comment"]').fill("Reviewed inside the graph review page.");
-  await humanReview.getByRole("button", { name: "Refresh session status", exact: true }).click();
-  await until(async () => (await humanReview.locator("[data-grade-status]").textContent()) === "Session completed.", "review status refreshed");
-  assert.equal(await humanReview.locator('#humanTaskGrading [data-session-grade] [name="comment"]').inputValue(), "Reviewed inside the graph review page.");
-  await humanReview.route("**/eval-api/grade", route => route.fulfill({ status: 503, contentType: "application/json", body: JSON.stringify({ error: "Temporary grading failure" }) }));
-  await humanReview.getByRole("button", { name: "Save grade", exact: true }).click();
-  await until(async () => (await humanReview.locator("[data-grade-status]").textContent()) === "Temporary grading failure", "review save failure visible");
-  assert.equal(await humanReview.locator('#humanTaskGrading [data-session-grade] [name="comment"]').inputValue(), "Reviewed inside the graph review page.");
-  await humanReview.unroute("**/eval-api/grade");
-  await humanReview.getByRole("button", { name: "Save grade", exact: true }).click();
-  await until(async () => (await humanReview.locator("[data-grade-status]").textContent()).includes("Grade saved"), "archived graph review grade saved");
-  assert.equal((await rpc(host.url, "humanTask", [humanId])).satisfaction.comment, "Reviewed inside the graph review page.");
-  assert.equal(await humanReview.getByRole("button", { name: "Finish task", exact: true }).count(), 0);
-
-  assert.equal(await humanReview.evaluate(async (threadId) => (await fetch(`/api/threads/${threadId}/interactions`, { method: "POST", body: '{}' })).status, humanFinished.threadIds[0]), 403);
-  const humanExport = await rpc(host.url, "exportHumanTask", [humanId]);
-  assert.equal(humanExport.bundle.session.annotations.at(-1).comment, "First useful map.");
-  assert.equal(humanExport.bundle.session.conversations.length, 1);
-  const graphAnnotation = humanExport.bundle.graphAnnotations.threads.flatMap(({ annotations }) => annotations)
-    .find(({ revisions }) => revisions.some(({ comment }) => comment === "This node helped me understand the task."));
-  assert.equal(graphAnnotation?.anchor.kind, "node", "native node feedback remains in immutable human-task export");
-  assert.ok(humanExport.sha256.startsWith("sha256:"));
-  if (process.env.RELAYER_HUMAN_TASK_SCREENSHOT) {
-    await dashboard.locator("#humanRefresh").click();
-    await dashboard.locator("#humanExport").waitFor();
-    await humanReview.screenshot({ path: process.env.RELAYER_HUMAN_TASK_SCREENSHOT, fullPage: true });
-  }
-  const discoveryTask = await rpc(host.url, "createHumanTask", [{ testCaseId: "interactive.planning.group-europe-trip", harnessConfigurationName: "fixture-human-task", maxCompletions: 3, endpoint: "An agreed itinerary" }]);
-  const discoveryUrl = await rpc(host.url, "openHumanTask", [discoveryTask.id]);
-  const discoveryPage = await browser.newPage();
-  await discoveryPage.goto(discoveryUrl);
-  await discoveryPage.locator("#humanTaskGrading summary").first().click();
-  await discoveryPage.getByText("Private user brief · not sent to Relayer", { exact: true }).click();
-  assert.ok((await discoveryPage.locator("#humanTaskGrading").innerText()).includes("$4,500"));
-  assert.equal(await discoveryPage.getByRole("button", { name: "Finish task", exact: true }).isVisible(), true);
-  await discoveryPage.close();
-  console.log("PASS human task: live composer, recorded graph, two completions, finish, read-only review, annotation and export");
+  assert.deepEqual(await review.evaluate(async () => Promise.all([
+    fetch("/api/model-settings/defaults", { method: "PUT", headers: { "Content-Type": "application/json" }, body: "{}" }).then((response) => response.status),
+    fetch("/eval-api/connect", { method: "POST", headers: { "Content-Type": "application/json" }, body: "[]" }).then((response) => response.status),
+  ])), [403, 404], "review authority cannot change provider/model setup");
+  // The real index owns startup, RPC composition, shutdown and restart. This
+  // receiptless fixture proves one opening response only; continuation is covered
+  // below with an admitted provider route, without bypassing AGT-011.
+  const hostTaskSelection = { testCaseId: "empty-project.task-system.two-turn", harnessConfigurationName: "fixture-human-task", maxCompletions: 1, endpoint: "Inspect the initial task-system graph" };
+  const tasksBeforeRejectedActor = await rpc(host.url, "humanTasks");
+  const rejectedActor = await dashboard.evaluate(async (selection) => {
+    try { await window.relayerEval.createHumanTask({ ...selection, mode: "simulated" }); return null; }
+    catch (error) { return error.message; }
+  }, hostTaskSelection);
+  assert.match(rejectedActor, /Actor authentication is unavailable/i);
+  assert.deepEqual(await rpc(host.url, "humanTasks"), tasksBeforeRejectedActor, "missing actor authentication must fail before creating or spending a candidate session");
+  const hostTask = await rpc(host.url, "createHumanTask", [hostTaskSelection]);
+  const hostTaskUrl = await rpc(host.url, "openHumanTask", [hostTask.id]);
+  const hostTaskPage = await browser.newPage();
+  await hostTaskPage.goto(hostTaskUrl);
+  await until(async () => (await rpc(host.url, "humanTask", [hostTask.id])).events.some(({ kind, snapshot }) => kind === "presentation" && snapshot.graphVisible && snapshot.completionStatus === "accepted"), "real index human opening graph");
+  const hostTaskFinished = await rpc(host.url, "finishHumanTask", [hostTask.id, { reason: "budget_exhausted", satisfaction: 3, comment: "Persist this host-owned human review." }]);
+  assert.equal(hostTaskFinished.status, "completed");
+  assert.equal(hostTaskFinished.completions, 1);
+  const hostTaskExport = await rpc(host.url, "exportHumanTask", [hostTask.id]);
+  assert.equal(hostTaskExport.bundle.session.satisfaction.comment, "Persist this host-owned human review.");
+  await hostTaskPage.close();
   assert.deepEqual(pageErrors, []);
   await host.close();
   await assert.rejects(fetch(new URL("/eval-api/context", reviewUrl)));
   const restarted = await launchHost();
   assert.equal((await rpc(restarted.url, "getRun", [run.id])).status, "passed");
-  const reopenedHuman = await rpc(restarted.url, "humanTask", [humanId]);
-  assert.equal(reopenedHuman.status, "completed");
-  assert.equal(reopenedHuman.annotations.at(-1).comment, "First useful map.");
+  const reopenedHostTask = await rpc(restarted.url, "humanTask", [hostTask.id]);
+  assert.equal(reopenedHostTask.status, "completed");
+  assert.equal(reopenedHostTask.completions, 1);
+  assert.equal(reopenedHostTask.satisfaction.comment, "Persist this host-owned human review.");
+  const reopenedHostExport = await rpc(restarted.url, "exportHumanTask", [hostTask.id]);
+  assert.deepEqual(reopenedHostExport.bundle.session.conversations, hostTaskExport.bundle.session.conversations);
+  const reopenedHostReview = await browser.newPage();
+  await reopenedHostReview.goto(await rpc(restarted.url, "reviewHumanTask", [hostTask.id]));
+  await reopenedHostReview.locator(".graph-node").first().waitFor({ state: "visible" });
+  assert.equal(await reopenedHostReview.evaluate(async (threadId) => (await fetch(`/api/threads/${threadId}/interactions`, { method: "POST", body: "{}" })).status, hostTask.threadIds[0]), 403);
+  await reopenedHostReview.close();
+  console.log("PASS real index human lifecycle: initial graph, finish/export RPCs, process restart, persisted task/read-only review; disconnected actor rejected before candidate creation");
   await restarted.close();
   console.log("PASS host: real fixture, tab independence, review authority, judge/trace pages, shutdown and restart");
 
   // Exercise the actual judge adapter against the real product server, without inference.
   const root = resolve(".");
   const binaries = resolve(process.env.CARGO_TARGET_DIR || "target", "debug");
-  const configurationPaths = [join(root, "harnesses/fixture-task-system.yaml"), join(root, "harnesses/codex-basic.yaml")];
+  const configurationPaths = [join(root, "harnesses/fixture-task-system.yaml"), join(root, "harnesses/fixture-node-detail.yaml"), join(root, "harnesses/codex-basic.yaml")];
   const data = join(directory, "judge");
-  const runtime = new GraphCompleteRuntimeService({ userDataDirectory: data, graphServerBinary: join(binaries, "relayer-graph-server"), configurationPaths, additionalImplementations: { "fixture.task-system": taskSystemFixtureFactory } });
+  const runtime = new GraphCompleteRuntimeService({ userDataDirectory: data, graphServerBinary: join(binaries, "relayer-graph-server"), configurationPaths, additionalImplementations: { "fixture.task-system": taskSystemFixtureFactory, "fixture.node-detail": nodeDetailFixtureFactory },
+    acquireProviderExecution: async (providerId) => ({
+      definition: { id: providerId, adapterId: "codex-subscription", accessContract: "managed-runtime@1" },
+      descriptor: { adapterId: "codex-subscription", accessContract: "managed-runtime@1", implementationVersion: "1" },
+      runtime: { executionAccess: async () => ({ kind: "managed-runtime", environment: {} }) },
+      async release() {},
+    }),
+  });
   resources.push(runtime);
-  const product = new RelayerAppServerService({ userDataDirectory: data, binaryPath: join(binaries, "relayer-app-server"), webDirectory: join(root, "desktop/renderer"), permissionCatalogPath: join(root, "permissions/desktop.json"), runtimeSession: await runtime.start(), defaultHarnessConfiguration: "fixture-task-system", allowHarnessOverride: true, evalMode: true, enableReadOnlySession: true });
+  const productOptions = { userDataDirectory: data, binaryPath: join(binaries, "relayer-app-server"), webDirectory: join(root, "desktop/renderer"), permissionCatalogPath: join(root, "permissions/desktop.json"), runtimeSession: await runtime.start(), defaultHarnessConfiguration: "fixture-task-system", allowHarnessOverride: true, evalMode: true, enableReadOnlySession: true };
+  const product = new RelayerAppServerService(productOptions);
   resources.push(product);
   const productSession = await product.start();
   await proveProductionSettings({ browser, product, productSession, runtime, data });
   const service = await new EvalService({ stateFile: join(data, "eval-data/test-runs.json"), productSession, configurationPaths }).open();
+  // Deterministic execution still uses real provider admission and successful receipts.
+  // Configuration-only fixture history is correctly blocked by AGT-011 as unverified.
+  await product.seedProviderCatalog({ providerId: "codex", label: "Fixture Codex", connected: true,
+    models: [{ id: "fixture-model", label: "Fixture model", order: 0, visible: true, available: true, providerDefault: true, metadata: {} }],
+    systemFamily: { key: "codex", name: "Fixture Codex", modelIds: ["fixture-model"] },
+  });
+  const humanProof = await proveHumanTask({ browser, service, productSession, data });
+  await proveTaskActor({ browser, service, productSession, data });
+  await proveTaskActorInputs({ browser, service, productSession, data });
   const fixture = await service.createRun(selection);
   const completed = await until(() => { const value = service.getRun(fixture.id); return ["passed", "failed", "error", "interrupted"].includes(value.status) ? value : null; }, "judge fixture");
   assert.equal(completed.status, "passed");
@@ -353,7 +284,13 @@ try {
   assert.ok(selected.selectedNodeId);
   assert.notEqual(selected.selectedNodeId, initial.selectedNodeId);
   assert.equal(`node-${selected.selectedNodeId}`, nodeControl.elementRef);
-  const nextTurn = (await opened.session.state()).controls.find((control) => control.kind === "turn" && !control.disabled);
+  // Native threads use the production interaction graph (PRD 7.2B).
+  // Exercise its visible controls through the judge adapter, preserving the
+  // same turn-selection and history boundary formerly covered by the arrows.
+  const navigator = (await opened.session.state()).controls.find((control) => control.name.startsWith("Open interaction graph.") && !control.disabled);
+  assert.ok(navigator);
+  await opened.session.interact({ elementRef: navigator.elementRef, activate: true });
+  const nextTurn = (await opened.session.state()).controls.find((control) => control.name.startsWith("Follow up in the same thread:") && !control.disabled);
   assert.ok(nextTurn);
   await opened.session.interact({ elementRef: nextTurn.elementRef, activate: true });
   assert.notEqual((await opened.session.state()).turnId, initial.turnId);
@@ -371,6 +308,18 @@ try {
   assert.equal(metadata.contentDigest, shot.screenshot.contentDigest);
   await opened.release({ close: true });
   console.log("PASS judge: isolated context, exact execution/turn readiness, viewport/full capture and restoration");
+  await product.close();
+  const reopenedProduct = new RelayerAppServerService(productOptions);
+  resources.push(reopenedProduct);
+  const reopenedSession = await reopenedProduct.start();
+  const reopenedTasks = await new HumanTaskService({ stateFile: join(data, "human-tasks.json"), evalService: service, productSession: reopenedSession }).open();
+  const reopenedHuman = reopenedTasks.get(humanProof.id);
+  assert.equal(reopenedHuman.status, "completed");
+  assert.equal(reopenedHuman.annotations.at(-1).comment, "First useful map.");
+  const reopenedState = await productJson(reopenedSession, `/api/state?threadId=${humanProof.threadId}`);
+  assert.equal(reopenedState.conversationCompatibility.status, "compatible");
+  assert.equal(reopenedState.interactions.filter(({ completionStatus }) => completionStatus === "accepted").length, 2);
+  console.log("PASS human persistence: native product restart, task-service reopen, accepted turns and verified route preserved");
 } finally {
   const errors = [];
   for (const resource of resources.reverse()) { try { await resource.close(); } catch (error) { errors.push(error); } }
@@ -514,4 +463,353 @@ async function proveProductionSettings({ browser, product, productSession, runti
     const response = await fetch(new URL("/api/model-settings", productSession.origin), { headers: { Cookie: `${productSession.cookie.name}=${productSession.cookie.value}` } });
     assert.equal(response.status, 200); return response.json();
   }
+}
+
+async function proveTaskActor({ browser, service, productSession, data }) {
+  const tasks = await new HumanTaskService({ stateFile: join(data, "actor-tasks.json"), evalService: service, productSession }).open();
+  let decision = 0;
+  const snapshots = [];
+  const actors = new TaskActorService({ tasks, resolveRuntime: async () => ({}),
+    openBrowser: async (sessionId, signal) => {
+      const controller = await openTaskActorBrowser({ tasks, sessionId, productSession, browser, signal });
+      const actorPage = browser.contexts().flatMap((context) => context.pages()).find((page) => new URL(page.url()).searchParams.get("taskActor") === "1");
+      await actorPage.locator(".graph-node").first().waitFor({ state: "visible" });
+      assert.equal(await actorPage.locator("#humanTaskGrading").count(), 0);
+      assert.equal(await actorPage.evaluate(async () => (await (await fetch("/api/capabilities")).json()).annotations), false);
+      await actorPage.evaluate(() => {
+        const root = document.querySelector(".workspace-layout");
+        const hidden = document.createElement("div");
+        hidden.id = "actor-hidden-test"; hidden.style.cssText = "position:fixed;left:0;top:0;width:10px;height:10px;overflow:hidden";
+        const button = document.createElement("button"); button.textContent = "HIDDEN EVALUATOR FEEDBACK"; button.style.cssText = "position:absolute;top:100px";
+        hidden.append(button); root.append(hidden);
+        const fields = document.createElement("div"); fields.id = "actor-fields-test";
+        fields.style.cssText = "position:fixed;left:400px;top:200px;z-index:9999;background:white;color:black";
+        fields.innerHTML = '<label>Choice<select><option>Visible choice</option><option value="INTERNAL_OPTION">CLOSED_OPTION_SENTINEL</option></select></label><label>Note<textarea style="width:40px;height:20px">CLIPPED_VALUE_SENTINEL</textarea></label>';
+        root.append(fields);
+      });
+      await actorPage.route("**/api/threads/1/interactions/1/actions/1/destination", async route => {
+        await new Promise(resolve => setTimeout(resolve, 350));
+        await route.fulfill({ status: 200, contentType: "application/json", body: "{}" });
+      });
+      await actorPage.evaluate(() => {
+        const button = document.createElement("button"); button.textContent = "Delayed navigation";
+        button.onclick = async () => { await fetch("/api/threads/1/interactions/1/actions/1/destination"); button.textContent = "Navigation settled"; };
+        document.querySelector("#actor-fields-test").append(button);
+      });
+      const navigation = await controller.observe();
+      await controller.act({ kind: "click", ref: navigation.controls.find(control => control.name === "Delayed navigation").ref });
+      assert.equal(await actorPage.getByRole("button", { name: "Navigation settled", exact: true }).count(), 1, "action waits for navigation GET completion");
+      const first = await controller.observe();
+      assert.ok(first.controls.some(control => control.name === "Choice"));
+      assert.ok(!JSON.stringify(first.controls).match(/CLOSED_OPTION_SENTINEL|INTERNAL_OPTION|CLIPPED_VALUE_SENTINEL/));
+      await actorPage.locator("#actor-fields-test").evaluate(element => element.remove());
+      assert.ok(first.controls.every((control) => !control.name.includes("HIDDEN EVALUATOR FEEDBACK")));
+      await controller.observe();
+      if (first.controls[0]) await assert.rejects(controller.act({ kind: "click", ref: first.controls[0].ref }), /stale/);
+      await assert.rejects(controller.act({ kind: "click", ref: "forged" }), /stale/);
+      await actorPage.locator("#actor-hidden-test").evaluate((element) => element.remove());
+      return controller;
+    },
+    createActor: async () => ({ close: async () => {}, decide: async (observation) => {
+      snapshots.push(observation);
+      if (decision <= 1) {
+        const active = tasks.get(tasks.list()[0].id);
+        assert.equal(active.status, "active");
+        const review = await openHumanReview({ executionId: active.id,
+          productSession: async () => productSession, assertRunning: () => {},
+          registerAnnotations: (session, scope) => productJson(session, "/api/internal/annotation-sessions", {
+            method: "POST", body: { ...scope, authorId: "actor-review-proof", authorDisplayName: "Actor review proof" },
+          }),
+          humanGrading: { task: () => tasks.get(active.id), grade: (input) => tasks.grade(active.id, input), annotate: (input) => tasks.annotate(active.id, input) },
+          reviewContext: () => ({ readOnly: true, selectedExecutionId: active.id, harnessConfigurationName: active.prepared.execution.harnessConfigurationName,
+            cases: [{ executionId: active.id, name: active.prepared.name, status: "active", threadIds: active.threadIds,
+              threads: active.threadIds.map((id) => ({ id, name: "Active simulated task" })) }] }),
+        });
+        const reviewer = await browser.newPage();
+        try {
+          await reviewer.goto(review.url);
+          await reviewer.locator("#humanTaskGrading summary").first().click();
+          assert.equal(await reviewer.getByRole("button", { name: "Finish task", exact: true }).count(), 0);
+          await reviewer.locator('#humanTaskGrading [name="satisfaction"]').selectOption("1");
+          await reviewer.locator('#humanTaskGrading [data-session-grade] [name="comment"]').fill("Independent human feedback");
+          await reviewer.getByRole("button", { name: "Save grade", exact: true }).click();
+          await until(async () => (await reviewer.locator("[data-grade-status]").textContent()).includes("Grade saved"), "active actor human grade saved");
+          assert.equal(await reviewer.evaluate(async (threadId) => (await fetch(`/api/threads/${threadId}/interactions`, { method: "POST", body: "{}" })).status, active.currentThreadId), 403);
+          assert.equal(tasks.get(active.id).status, "active");
+          if (decision === 1) {
+            const actionEvent = tasks.get(active.id).events.find(event => event.kind === "actor_action");
+            await reviewer.locator('#humanTaskGrading [name="eventId"]').selectOption(actionEvent.id);
+            await reviewer.locator('#humanTaskGrading form:not([data-session-grade]) [name="comment"]').fill("Unnecessary exploration: review this actor choice.");
+            await reviewer.getByRole("button", { name: "Save moment annotation", exact: true }).click();
+            await until(async () => (await reviewer.locator("[data-grade-status]").textContent()).includes("Moment annotation saved"), "actor action annotation saved");
+            assert.equal(tasks.get(active.id).annotations.at(-1).eventId, actionEvent.id);
+          }
+        } finally { await reviewer.close(); await review.close(); }
+      }
+      if (process.env.RELAYER_EVAL_ACTOR_SCREENSHOT) await writeFile(process.env.RELAYER_EVAL_ACTOR_SCREENSHOT, Buffer.from(observation.screenshot, "base64"));
+      assert.ok(Buffer.from(observation.screenshot, "base64").readUInt32BE(16) > 0);
+      assert.ok(!JSON.stringify(observation.controls).includes("Review & grade"));
+      const action = { kind: "finish", ref: "", value: "", reason: "satisfied", satisfaction: 3, comment: "The follow-up is good enough.", endpointStatus: "incomplete", remainingWork: "Further choices remain." };
+      const find = (predicate) => { const control = observation.controls.find(predicate); assert.ok(control, JSON.stringify(observation.controls)); return control.ref; };
+      if (decision === 0) Object.assign(action, { kind: "click", ref: find((control) => control.name.includes("Two-worker")) });
+      if (decision === 1) Object.assign(action, { kind: "fill", ref: find((control) => control.role === "textarea"), value: "Explain how the workers coordinate." });
+      if (decision === 2) Object.assign(action, { kind: "click", ref: find((control) => ["Send", "↑"].includes(control.name)) });
+      if (decision === 3) Object.assign(action, { kind: "click", ref: find((control) => control.name.includes("Results store")) });
+      if (decision === 4) Object.assign(action, { kind: "click", ref: find((control) => control.name.includes("Plan the next improvement")) });
+      decision++;
+      return { action, usage: null };
+    } }),
+  });
+  resources.push(actors);
+  const surface = await createEvalDashboard({ service, humanTasks: tasks, taskActors: actors, rendererDirectory: resolve("desktop/eval-renderer") });
+  resources.push(surface);
+  const page = await browser.newPage();
+  try {
+    await page.goto(surface.url);
+    await page.locator("#humanGrader").click();
+    await page.locator("#taskMode").selectOption("simulated");
+    assert.equal(await page.locator("#actorSettings").isVisible(), true);
+    await page.locator("#humanCase").selectOption("empty-project.task-system.two-turn");
+    await page.locator("#humanHarness").selectOption("fixture-task-system");
+    await page.locator('[name="maxCompletions"]').fill("3");
+    await page.locator("#humanEndpoint").fill("An understandable task system");
+    await page.locator("#humanCreate button").click();
+    await until(() => tasks.list().length > 0, "actor session created through dashboard");
+    const task = await until(() => { const task = tasks.get(tasks.list()[0].id); return ["completed", "interrupted", "failed"].includes(task.status) ? task : null; }, "actor session terminal");
+    assert.equal(task.status, "completed", JSON.stringify(task.events.map(({ kind, ...event }) => ({ kind, ...(kind === "actor_error" ? event : {}) }))));
+    assert.equal(task.completions, 3);
+    assert.equal(decision, 6);
+    assert.ok(task.events.some((event) => event.kind === "submission" && event.path?.endsWith("/invoke")));
+    const lastTurn = (await tasks.detail(task.currentThreadId)).interactions.at(-1);
+    assert.equal(String(task.events.findLast(event => event.kind === "presentation").snapshot.turnId), String(lastTurn.id), "latest completed response is painted before actor finishes");
+    for (const snapshot of snapshots) {
+      assert.deepEqual(Object.keys(snapshot).sort(), ["controls", "screenshot", "text"]);
+      for (const control of snapshot.controls) assert.deepEqual(Object.keys(control).sort(), ["name", "ref", "role"]);
+    }
+    assert.ok(task.events.filter(event => event.kind === "actor_observation").every(event => !event.observation.screenshot && event.observation.screenshotArtifact));
+    assert.equal(task.events.filter((event) => event.kind === "actor_satisfaction").length, 1);
+    assert.equal(task.satisfaction.value, 1, "human grade saved during the active actor session stays separate from actor satisfaction");
+    const exported = await tasks.export(task.id);
+    assert.equal(exported.bundle.session.events.filter((event) => event.kind === "actor_observation").length, 6);
+    assert.equal(exported.bundle.session.satisfaction.value, 1);
+    assert.equal(exported.bundle.actorScreenshots.length, 6);
+    assert.equal(await page.locator("#actorSettings [name=actorModel]").inputValue(), "gpt-5.6-luna");
+    assert.ok(snapshots.every((snapshot) => !JSON.stringify(snapshot).includes("Independent human feedback") && !JSON.stringify(snapshot).includes("Unnecessary exploration")));
+  } finally { await actors.close(); await page.close(); }
+  console.log("PASS task actor: dashboard configuration, production screenshots/node selection/composer/Send/invoke, three-completion admission, active read-only human grading isolated from actor, export (fixture inference)");
+}
+
+async function productJson(session, path, options = {}) {
+  const response = await fetch(new URL(path, session.origin), { ...options,
+    headers: { Cookie: `${session.cookie.name}=${session.cookie.value}`, "Content-Type": "application/json" },
+    ...(options.body ? { body: JSON.stringify(options.body) } : {}),
+  });
+  const text = await response.text();
+  const value = text ? JSON.parse(text) : null; assert.ok(response.ok, JSON.stringify(value)); return value;
+}
+
+async function proveHumanTask({ browser, service, productSession, data }) {
+  const localResources = [];
+  const registerAnnotations = (session, scope) => productJson(session, "/api/internal/annotation-sessions", {
+    method: "POST", body: { ...scope, authorId: "browser-proof", authorDisplayName: "Browser proof" },
+  });
+  const tasks = await new HumanTaskService({ stateFile: join(data, "human-tasks.json"), evalService: service, productSession,
+    annotationSnapshotLoader: (threadIds) => loadAtomicAnnotationSnapshots({ session: productSession, threadIds,
+      token: randomBytes(32).toString("hex"), authorId: "browser-proof", authorDisplayName: "Browser proof" }),
+  }).open();
+  const surfaceUrl = async (pending) => { const surface = await pending; localResources.push(surface); return surface.url; };
+  const host = await createEvalDashboard({ service, humanTasks: tasks, rendererDirectory: resolve("desktop/eval-renderer"),
+    openHumanTask: (sessionId) => surfaceUrl(createHumanTaskSurface({ tasks, sessionId, productSession, registerAnnotations })),
+    reviewHumanTask: (sessionId) => surfaceUrl(openHumanReview({ executionId: sessionId,
+      productSession: async () => productSession, registerAnnotations, assertRunning: () => {},
+      humanGrading: { task: () => tasks.get(sessionId), grade: (input) => tasks.grade(sessionId, input), annotate: (input) => tasks.annotate(sessionId, input) },
+      reviewContext: () => { const task = tasks.get(sessionId); return { readOnly: true, selectedExecutionId: sessionId,
+        harnessConfigurationName: task.prepared.execution.harnessConfigurationName,
+        cases: [{ executionId: sessionId, name: task.prepared.name, status: task.status, threadIds: task.threadIds,
+          threads: task.threadIds.map((id, index) => ({ id, name: task.prepared.plan[index]?.name || `Step ${index + 1}` })) }] }; },
+    })),
+  });
+  localResources.push(host);
+  const dashboard = await browser.newPage();
+  localResources.push(dashboard);
+  const pageErrors = [];
+  dashboard.on("pageerror", (error) => pageErrors.push(error.message));
+  await dashboard.goto(host.url);
+  // Keep a completed run polling while Human Grader is open, as in the child host.
+  const run = await service.createRun(selection);
+  await until(() => service.getRun(run.id).status === "passed", "shared dashboard completed run");
+  try {
+    // Human task slice: the production composer remains writable under separate
+    // scope; evidence is captured without paid inference or an alternate renderer.
+    await dashboard.locator("#humanGrader").click();
+    await dashboard.locator("#humanCase").selectOption("empty-project.task-system.two-turn");
+    await dashboard.locator("#humanHarness").selectOption("fixture-task-system");
+    await dashboard.locator('[name="maxCompletions"]').fill("2");
+    await dashboard.locator("#humanEndpoint").fill("An explained task system and a refined response");
+    await dashboard.locator("#humanCreate button").click();
+    await dashboard.locator("#humanOpen").waitFor();
+    const humanId = (await rpc(host.url, "humanTasks"))[0].id;
+    // A completed matrix run continues polling while Human Grader is open.
+    // Wait for an actual poll, rather than assuming a timer fired.
+    await dashboard.waitForResponse((response) => response.url().endsWith("/eval-api/listRuns"));
+    assert.equal(await dashboard.locator("#humanView").isVisible(), true);
+    const taskPopup = dashboard.context().waitForEvent("page");
+    await dashboard.locator("#humanOpen").click();
+    const humanPage = await taskPopup;
+    humanPage.on("pageerror", (error) => pageErrors.push(error.message));
+    await humanPage.waitForLoadState();
+    await until(async () => (await rpc(host.url, "humanTask", [humanId])).events.some((event) => event.kind === "presentation" && event.snapshot.graphVisible), "human first visible graph").catch(async (error) => { console.error(JSON.stringify(tasks.get(humanId)), await dashboard.locator("body").innerText()); throw error; });
+    assert.equal(await humanPage.evaluate(() => Boolean(window.relayerEvalReview)), false);
+    assert.equal(await humanPage.evaluate(async () => (await (await fetch("/api/capabilities")).json()).annotations), true);
+    const pinnedModel = (await rpc(host.url, "humanTask", [humanId])).prepared.execution.modelResolution.selectedModel;
+    assert.equal(pinnedModel.providerId, "codex");
+    const modelValidation = await humanPage.evaluate(async (selection) => {
+      const response = await fetch("/api/model-selection/validate", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ harnessId: "fixture-task-system", ...selection }) });
+      return { status: response.status, body: await response.json() };
+    }, pinnedModel);
+    assert.equal(modelValidation.status, 200, "validation must reach the product resolver with scoped control authority: " + JSON.stringify(modelValidation));
+    await humanPage.locator(".graph-node").first().click();
+    await humanPage.locator("#annotationComment").fill("This node helped me understand the task.");
+    await humanPage.locator("#submitAnnotation").click();
+    await until(async () => (await humanPage.locator("#annotationList").textContent()).includes("This node helped me understand the task."), "native live node annotation saved");
+
+    await humanPage.evaluate(() => window.relayerHumanTask.workspaceLayout.set(0.64));
+    const reopenedTask = await browser.newPage();
+    await reopenedTask.goto(await rpc(host.url, "openHumanTask", [humanId]));
+    assert.notEqual(new URL(reopenedTask.url()).origin, new URL(humanPage.url()).origin);
+    await until(async () => (await reopenedTask.locator("#workspaceDivider").getAttribute("aria-valuenow")) === "64", "live task split restored across origins");
+    assert.equal(await reopenedTask.evaluate(() => Boolean(window.relayerEvalReview)), false);
+    await reopenedTask.locator(".graph-node").first().click();
+    await until(async () => (await reopenedTask.locator("#annotationList").textContent()).includes("This node helped me understand the task."), "native node annotation restored in new live workspace");
+    await reopenedTask.close();
+
+    for (const surface of [humanPage]) {
+      assert.deepEqual(await surface.evaluate(async () => Promise.all([
+        fetch("/api/model-settings/defaults", { method: "PUT", headers: { "Content-Type": "application/json" }, body: "{}" }).then((response) => response.status),
+        fetch("/eval-api/connect", { method: "POST", headers: { "Content-Type": "application/json" }, body: "[]" }).then((response) => response.status),
+      ])), [403, 404], "task and review authority cannot change provider/model setup");
+    }
+    await humanPage.locator("#threadPrompt").fill("Explain how the workers coordinate.");
+    try { await humanPage.locator("#sendInteraction:not([disabled])").click(); }
+    catch (error) { console.error(await humanPage.locator("#sendInteraction").evaluate((element) => element.outerHTML)); throw error; }
+    await until(async () => {
+      const task = await rpc(host.url, "humanTask", [humanId]);
+      return task.events.some((event) => event.kind === "presentation" && event.snapshot.completionStatus === "accepted" && String(event.snapshot.turnId) !== String(task.events.find((item) => item.kind === "thread_started").interactionId));
+    }, "human follow-up accepted and observed");
+    await humanPage.locator("#humanTaskGrading summary").click();
+    await humanPage.locator('#humanTaskGrading [name="satisfaction"]').selectOption("3");
+    await humanPage.locator('#humanTaskGrading [data-session-grade] [name="comment"]').fill("The follow-up helped.");
+    await humanPage.getByRole("button", { name: "Save grade", exact: true }).click();
+    await until(async () => (await humanPage.locator("[data-grade-status]").textContent()).includes("Grade saved"), "nonterminal grade saved");
+    assert.equal((await rpc(host.url, "humanTask", [humanId])).status, "active");
+    const liveMoment = (await rpc(host.url, "humanTask", [humanId])).events.find(event => event.kind === "presentation");
+    await humanPage.locator('#humanTaskGrading [name="eventId"]').selectOption(liveMoment.id);
+    await humanPage.locator('#humanTaskGrading form:not([data-session-grade]) [name="comment"]').fill("Live feedback");
+    await humanPage.getByRole("button", { name: "Save moment annotation", exact: true }).click();
+    await until(async () => (await humanPage.locator("[data-grade-status]").textContent()).includes("Moment annotation saved"), "live annotation saved");
+    assert.equal((await rpc(host.url, "humanTask", [humanId])).status, "active");
+    await humanPage.locator('#humanTaskGrading [name="reason"]').selectOption("endpoint_reached");
+    await humanPage.getByRole("button", { name: "Finish task", exact: true }).click();
+    await until(async () => (await humanPage.locator("[data-grade-status]").textContent()).includes("Task finished"), "workspace task finished");
+    await until(async () => (await dashboard.locator("#humanOpen").textContent()).includes("Open graph review"), "dashboard switches to graph review after workspace finish");
+    assert.equal(await dashboard.locator("#humanFinish").count(), 0);
+    const humanFinished = await rpc(host.url, "humanTask", [humanId]);
+    assert.equal(humanFinished.satisfaction.value, 3);
+    assert.equal(humanFinished.satisfaction.comment, "The follow-up helped.");
+    assert.equal(humanFinished.completions, 2);
+    assert.equal(humanFinished.termination.success, null);
+    assert.equal(humanFinished.responseTimings.length, 2);
+    assert.equal(humanFinished.responseTimings[1].observerPresentBeforeSubmission, true);
+    const humanMoment = humanFinished.events.find((event) => event.kind === "presentation" && event.snapshot.graphVisible);
+    await humanPage.locator('#humanTaskGrading [name="eventId"]').selectOption(humanMoment.id);
+    await humanPage.locator('#humanTaskGrading form:not([data-session-grade]) [name="comment"]').fill("First useful map.");
+    await humanPage.getByRole("button", { name: "Save moment annotation", exact: true }).click();
+    await until(async () => (await humanPage.locator("[data-grade-status]").textContent())  .includes("Moment annotation saved"), "workspace annotation saved");
+    const humanReviewUrl = await rpc(host.url, "reviewHumanTask", [humanId]);
+    const humanReview = await browser.newPage(); await humanReview.goto(humanReviewUrl);
+    await humanReview.waitForFunction(() => Boolean(window.__evalPresentation?.snapshot()?.turnId));
+    await humanReview.locator("#humanTaskGrading summary").first().click();
+    await humanReview.locator('#humanTaskGrading [data-session-grade] [name="comment"]').fill("Reviewed inside the graph review page.");
+    await humanReview.getByRole("button", { name: "Refresh session status", exact: true }).click();
+    await until(async () => (await humanReview.locator("[data-grade-status]").textContent()) === "Session completed.", "review status refreshed");
+    assert.equal(await humanReview.locator('#humanTaskGrading [data-session-grade] [name="comment"]').inputValue(), "Reviewed inside the graph review page.");
+    await humanReview.route("**/eval-api/grade", route => route.fulfill({ status: 503, contentType: "application/json", body: JSON.stringify({ error: "Temporary grading failure" }) }));
+    await humanReview.getByRole("button", { name: "Save grade", exact: true }).click();
+    await until(async () => (await humanReview.locator("[data-grade-status]").textContent()) === "Temporary grading failure", "review save failure visible");
+    assert.equal(await humanReview.locator('#humanTaskGrading [data-session-grade] [name="comment"]').inputValue(), "Reviewed inside the graph review page.");
+    await humanReview.unroute("**/eval-api/grade");
+    await humanReview.getByRole("button", { name: "Save grade", exact: true }).click();
+    await until(async () => (await humanReview.locator("[data-grade-status]").textContent()).includes("Grade saved"), "archived graph review grade saved");
+    assert.equal((await rpc(host.url, "humanTask", [humanId])).satisfaction.comment, "Reviewed inside the graph review page.");
+    assert.equal(await humanReview.getByRole("button", { name: "Finish task", exact: true }).count(), 0);
+
+    assert.equal(await humanReview.evaluate(async (threadId) => (await fetch(`/api/threads/${threadId}/interactions`, { method: "POST", body: '{}' })).status, humanFinished.threadIds[0]), 403);
+    const humanExport = await rpc(host.url, "exportHumanTask", [humanId]);
+    assert.equal(humanExport.bundle.session.annotations.at(-1).comment, "First useful map.");
+    assert.equal(humanExport.bundle.session.conversations.length, 1);
+    const graphAnnotation = humanExport.bundle.graphAnnotations.threads.flatMap(({ annotations }) => annotations)
+      .find(({ revisions }) => revisions.some(({ comment }) => comment === "This node helped me understand the task."));
+    assert.equal(graphAnnotation?.anchor.kind, "node", "native node feedback remains in immutable human-task export");
+    assert.ok(humanExport.sha256.startsWith("sha256:"));
+    if (process.env.RELAYER_HUMAN_TASK_SCREENSHOT) {
+      await dashboard.locator("#humanRefresh").click();
+      await dashboard.locator("#humanExport").waitFor();
+      await humanReview.screenshot({ path: process.env.RELAYER_HUMAN_TASK_SCREENSHOT, fullPage: true });
+    }
+    const discoveryTask = await rpc(host.url, "createHumanTask", [{ testCaseId: "interactive.planning.group-europe-trip", harnessConfigurationName: "fixture-task-system", maxCompletions: 3, endpoint: "An agreed itinerary" }]);
+    const discoveryUrl = await rpc(host.url, "openHumanTask", [discoveryTask.id]);
+    const discoveryPage = await browser.newPage();
+    await discoveryPage.goto(discoveryUrl);
+    await discoveryPage.locator("#humanTaskGrading summary").first().click();
+    await discoveryPage.getByText("Private user brief · not sent to Relayer", { exact: true }).click();
+    assert.ok((await discoveryPage.locator("#humanTaskGrading").innerText()).includes("$4,500"));
+    assert.equal(await discoveryPage.getByRole("button", { name: "Finish task", exact: true }).isVisible(), true);
+    await discoveryPage.close();
+    console.log("PASS human task: live composer, recorded graph, two completions, finish, read-only review, annotation and export");
+
+    assert.deepEqual(pageErrors, []);
+    const state = await productJson(productSession, `/api/state?threadId=${humanFinished.threadIds[0]}`);
+    assert.equal(state.conversationCompatibility.status, "compatible");
+    assert.equal(state.conversationCompatibility.providerId, "codex");
+    assert.equal(state.interactions.length, 2);
+    for (const turn of state.interactions) {
+      assert.equal(turn.latestAttempt.outcome, "accepted");
+      assert.equal(turn.latestAttempt.modelSelection.providerId, "codex");
+      assert.equal(turn.latestAttempt.modelSelection.modelId, "fixture-model");
+      assert.ok(turn.latestAttempt.attemptAdmissionId, "each fixture turn has a real admitted execution receipt");
+    }
+    return { id: humanId, threadId: humanFinished.threadIds[0] };
+  } finally { for (const resource of localResources.reverse()) await resource.close(); }
+}
+
+async function proveTaskActorInputs({ browser, service, productSession, data }) {
+  const tasks = await new HumanTaskService({ stateFile: join(data, "actor-input-tasks.json"), evalService: service, productSession }).open();
+  let stage = 0;
+  const actors = new TaskActorService({ tasks, resolveRuntime: async () => ({}),
+    openBrowser: (sessionId, signal) => openTaskActorBrowser({ tasks, sessionId, productSession, browser, signal }),
+    createActor: async () => ({ close: async () => {}, decide: async ({ controls }) => {
+      const action = { kind: "scroll", ref: "", value: "down", reason: "", satisfaction: null, comment: "", endpointStatus: "incomplete", remainingWork: "Further choices remain." };
+      const note = controls.find((control) => control.name === "Review note" && control.role === "input");
+      if (stage === 0 && note) { Object.assign(action, { kind: "fill", ref: note.ref, value: "A note entered through the graph" }); stage++; }
+      else if (stage === 1) {
+        const composer = controls.find((control) => control.role === "textarea");
+        assert.ok(composer, "Visible composer after node input");
+        Object.assign(action, { kind: "fill", ref: composer.ref, value: "Use my review note to refine this." }); stage++;
+      } else if (stage === 2) {
+        const send = controls.find((control) => ["Send", "↑"].includes(control.name)); assert.ok(send, "Send enabled after input commitment");
+        Object.assign(action, { kind: "click", ref: send.ref }); stage++;
+      } else if (stage === 3) { Object.assign(action, { kind: "finish", reason: "satisfied", satisfaction: 3 }); stage++; }
+      return { action, usage: null };
+    } }),
+  });
+  resources.push(actors);
+  const task = await actors.create({ testCaseId: "empty-project.visual-node-detail.single-turn", harnessConfigurationName: "fixture-node-detail", maxCompletions: 2, endpoint: "A refined visual answer", actor: { maxActions: 25 } });
+  await actors.running.get(task.id).done;
+  const finished = tasks.get(task.id);
+  assert.equal(finished.status, "completed", JSON.stringify(finished.events.filter((event) => event.kind === "actor_error")));
+  assert.equal(stage, 4, "Actor reached and committed the authored input");
+  assert.equal(finished.completions, 2, "Drafting does not spend a completion");
+  assert.ok(finished.events.some((event) => event.kind === "product_action" && event.path.endsWith("/input-draft/attachments") && event.outcome === "accepted"));
+  assert.ok(finished.conversations.some((conversation) => conversation.jsonl.includes("A note entered through the graph")));
+  console.log("PASS actor input: visible authored input, draft commit and composer Send through real product routes with preserved answer evidence");
 }

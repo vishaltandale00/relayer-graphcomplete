@@ -1,3 +1,4 @@
+import { abortable } from "./abortable.mjs";
 import { join } from "node:path";
 import { mkdir, writeFile, readFile } from "node:fs/promises";
 import { createManagedRuntimeInstaller } from "../main/managed-runtimes/installer.mjs";
@@ -105,9 +106,9 @@ export function createEvalProviderSetup({ userDataDirectory, productServer, prod
     evaluateReadiness: (input) => readiness.evaluate(input),
     publishCatalog: (snapshot, options) => productServer.publishProviderCatalog(snapshot, options),
   });
-  async function request(path, { method = "GET", body } = {}) {
+  async function request(path, { method = "GET", body, signal } = {}) {
     const response = await fetchImpl(new URL(path, productSession.origin), {
-      method, headers: { "Content-Type": "application/json",
+      method, signal, headers: { "Content-Type": "application/json",
         Cookie: `${productSession.cookie.name}=${productSession.cookie.value}` },
       ...(body === undefined ? {} : { body: JSON.stringify(body) }),
     });
@@ -250,22 +251,38 @@ export function createEvalProviderSetup({ userDataDirectory, productServer, prod
       selections.set(harnessId, selection);
       return selection;
     },
-    async resolveCodexJudgeRuntime() {
-      const settings = await request("/api/model-settings");
+    async resolveCodexJudgeRuntime(config, { signal } = {}) {
+      signal?.throwIfAborted();
+      const settings = await request("/api/model-settings", { signal });
       const connected = (await definitions.list()).filter((definition) => (
         definition.adapterId === "codex-subscription" && definition.lifecycleState === "active" && definition.connected
       ));
       const definition = connected.find(({ id }) => id === settings.defaults?.providerId)
         ?? connected.find(({ id }) => id === "codex")
         ?? (connected.length === 1 ? connected[0] : null);
-      if (!definition) throw new Error("Choose a connected Codex subscription as the default provider before running a Codex judge.");
+      if (!definition) throw Object.assign(new Error("Choose a connected Codex subscription as the default provider before running a Codex judge."), { code: "actor_authentication_required" });
       const lease = await definitions.acquireExecution(definition.id);
       try {
-        const access = await lease.runtime.executionAccess();
+        if (config !== undefined) {
+          // Discovery is read-only native model/list, never runtime installation or
+          // inference. Hold this connection's lease through discovery and resolution.
+          const requested = typeof config === "string" ? { model: config } : config;
+          const snapshot = await abortable(signal, () => composition.modelCatalog.refresh(definition.id, "pre-inference"));
+          const model = snapshot?.provider?.status === "available" && snapshot.models?.find((candidate) => (
+            (candidate.id === requested?.model || candidate.executionModel === requested?.model)
+            && candidate.visible !== false && candidate.availability === "available" && candidate.inputModalities?.includes("image")
+          ));
+          if (!model) throw Object.assign(new Error("The actor model is unavailable in this connection's discovered catalog."), { code: "actor_model_unsupported" });
+          if (requested.modelReasoningEffort !== undefined && !model.supportedEfforts?.some(({ id }) => id === requested.modelReasoningEffort)) {
+            throw Object.assign(new Error("The actor reasoning effort is unavailable for this model."), { code: "actor_effort_unsupported" });
+          }
+        }
+        signal?.throwIfAborted();
+        const access = await abortable(signal, () => lease.runtime.executionAccess());
         if (access.kind !== "managed-runtime" || access.runtimeId !== "codex") {
           throw new Error("The selected provider has no managed Codex execution access.");
         }
-        return Object.freeze({ ...await runtime(HARNESS_MANAGED_RUNTIME_REQUIREMENTS["codex.basic"].recipeId), environment: access.environment });
+        return Object.freeze({ ...await abortable(signal, () => runtime(HARNESS_MANAGED_RUNTIME_REQUIREMENTS["codex.basic"].recipeId)), environment: access.environment });
       } finally { await lease.release(); }
     },
     acquireExecution: (id) => definitions.acquireExecution(id),

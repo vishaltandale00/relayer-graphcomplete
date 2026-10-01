@@ -1,0 +1,18 @@
+{
+  "digest": "353ecfe80f94c5891b07a4da0d43a4fcb7cee318cc529483a4fdeba397b59ec7",
+  "files": [
+    "desktop/eval-main/index.mjs",
+    "desktop/eval-main/provider-setup.mjs",
+    "desktop/eval-main/task-actor-service.mjs",
+    "desktop/eval-main/task-actor.mjs",
+    "desktop/eval-renderer/human-tasks.js",
+    "desktop/eval-renderer/index.html",
+    "desktop/renderer/src/human-task-grading.js",
+    "scripts/ci/affected-modules.v1.json",
+    "scripts/test-eval-web.mjs",
+    "test/ci-affected-plan.test.mjs",
+    "test/eval-provider-setup.test.mjs",
+    "test/eval-task-actor-errors.test.mjs",
+    "test/eval-task-actor.test.mjs"
+  ]
+}

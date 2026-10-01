@@ -1,7 +1,9 @@
+import { abortable } from "./abortable.mjs";
 import { interactionReturnsToUnsent } from "../renderer/src/interaction-failure-model.js";
 import { randomUUID, createHash } from "node:crypto";
 import { mkdir, readFile, writeFile, rename } from "node:fs/promises";
 import { dirname, join } from "node:path";
+import { actorConfiguration } from "./task-actor.mjs";
 
 const clone = (value) => structuredClone(value);
 const digest = (value) => `sha256:${createHash("sha256").update(JSON.stringify(value)).digest("hex")}`;
@@ -53,42 +55,89 @@ export class HumanTaskService {
   }
   list() { return this.sessions.map(({ prepared, events, conversations, stepChecks, annotations, grades, responseTimings, ...session }) => ({ ...clone(session), name: prepared?.name, eventCount: events.length })); }
   get(id) { return clone(this.find(id)); }
-  async upstream(path, { method = "GET", body } = {}, write = false) {
+  actorEvent(id, kind, data) {
+    return this.serial(async () => {
+      const session = this.find(id);
+      if (session.mode !== "simulated" || session.status !== "active") throw failure("Actor session is not active.", 409);
+      const before = session.events.length;
+      const recorded = clone(data);
+      if (kind === "actor_observation" && recorded.observation?.screenshot) {
+        const bytes = Buffer.from(recorded.observation.screenshot, "base64");
+        if (bytes.length > 10 * 1024 * 1024 || bytes.toString("base64") !== recorded.observation.screenshot) throw failure("Invalid actor screenshot.");
+        const sha256 = createHash("sha256").update(bytes).digest("hex");
+        const folder = join(dirname(this.stateFile), "actor-screenshots");
+        await mkdir(folder, { recursive: true });
+        try { await writeFile(join(folder, `${sha256}.png`), bytes, { flag: "wx", mode: 0o600 }); }
+        catch (error) { if (error.code !== "EEXIST") throw error; }
+        delete recorded.observation.screenshot;
+        recorded.observation.screenshotArtifact = { sha256, mediaType: "image/png" };
+      }
+      const event = this.event(session, kind, recorded);
+      try { await this.persist(); } catch (error) { session.events.length = before; throw error; }
+      return clone(event);
+    });
+  }
+  async actorScreenshot(id, eventId) {
+    const event = this.find(id).events.find(item => item.id === eventId && item.kind === "actor_observation");
+    if (!event) throw failure("Unknown actor observation.", 404);
+    if (event.observation.screenshot) return `data:image/png;base64,${event.observation.screenshot}`;
+    const hash = event.observation.screenshotArtifact?.sha256;
+    if (!/^[a-f0-9]{64}$/.test(hash || "")) throw failure("Missing actor screenshot.", 404);
+    const bytes = await readFile(join(dirname(this.stateFile), "actor-screenshots", `${hash}.png`));
+    if (createHash("sha256").update(bytes).digest("hex") !== hash) throw failure("Actor screenshot integrity failure.");
+    return `data:image/png;base64,${bytes.toString("base64")}`;
+  }
+  interruptActor(id, reason) {
+    return this.serial(async () => {
+      const session = this.find(id);
+      if (session.mode !== "simulated" || session.status !== "active") return;
+      session.status = "interrupted";
+      session.termination = { reason, at: new Date().toISOString(), success: null };
+      this.event(session, "actor_interrupted", { reason });
+      await this.persist();
+    });
+  }
+  async upstream(path, { method = "GET", body, signal } = {}, write = false) {
     const cookie = write ? this.productSession.cookie : this.productSession.readOnlyCookie;
     const response = await this.fetchImpl(new URL(path, this.productSession.origin), {
-      method, redirect: "error", headers: { Cookie: `${cookie.name}=${cookie.value}`, ...(body === undefined ? {} : { "Content-Type": "application/json" }) },
+      method, signal, redirect: "error", headers: { Cookie: `${cookie.name}=${cookie.value}`, ...(body === undefined ? {} : { "Content-Type": "application/json" }) },
       ...(body === undefined ? {} : { body: JSON.stringify(body) }),
     });
     return response;
   }
-  async detail(threadId) {
-    const response = await this.upstream(`/api/threads/${threadId}`);
+  async detail(threadId, { signal } = {}) {
+    const response = await this.upstream(`/api/threads/${threadId}`, { signal });
     if (!response.ok) throw failure("Could not read the task thread.", 502);
     return response.json();
   }
-  async settled(session) {
+  async settled(session, { signal } = {}) {
     for (const threadId of session.threadIds) {
-      const detail = await this.detail(threadId);
+      const detail = await this.detail(threadId, { signal });
       if ((detail.interactions || []).some((turn) => !terminal.has(turn.completionStatus) && !interactionReturnsToUnsent(turn))) {
         throw failure("Wait for the current response, or stop it in the workspace, before continuing.", 409);
       }
     }
   }
-  create(selection) {
+  create(selection, { signal } = {}) {
     return this.serial(async () => {
+      signal?.throwIfAborted();
       if (!Number.isSafeInteger(selection?.maxCompletions) || selection.maxCompletions < 1 || selection.maxCompletions > 1000) throw failure("Choose a completion limit from 1 to 1000.");
       if (typeof selection.endpoint !== "string" || !selection.endpoint.trim() || selection.endpoint.length > 8000) throw failure("Describe the task artifact or endpoint.");
       const session = { schemaVersion: 1, id: `human-${randomUUID()}`, mode: "human", status: "preparing", createdAt: new Date().toISOString(), maxCompletions: selection.maxCompletions, completions: 0, endpoint: selection.endpoint.trim(), step: 0, threadIds: [], events: [], annotations: [], stepChecks: [], satisfaction: null, termination: null };
+      if (selection.mode !== undefined && !["human", "simulated"].includes(selection.mode)) throw failure("Unknown task mode.");
+      if (selection.mode === "simulated") { session.mode = "simulated"; session.actor = actorConfiguration(selection.actor); }
       this.sessions.unshift(session);
       await this.persist();
       try {
-        session.prepared = await this.evalService.prepareHumanTask({ ...selection, sessionId: session.id });
+        session.prepared = await abortable(signal, () => this.evalService.prepareHumanTask({ ...selection, sessionId: session.id }, { signal }));
+        signal?.throwIfAborted();
         session.status = "active";
-        await this.startThread(session);
+        await this.startThread(session, { signal });
       } catch (error) {
         const unknown = session.completions > 0;
+        const cancelled = signal?.aborted && !unknown;
         session.status = unknown ? "interrupted" : "failed";
-        session.termination = { reason: unknown ? "product_write_unknown" : "preparation_failed", at: new Date().toISOString(), success: null };
+        session.termination = { reason: unknown ? "product_write_unknown" : cancelled ? (signal.reason?.name === "TimeoutError" ? "actor_timeout" : "actor_cancelled") : "preparation_failed", at: new Date().toISOString(), success: null };
         this.event(session, "error", { message: error.message });
         await this.persist();
         throw error;
@@ -96,14 +145,18 @@ export class HumanTaskService {
       return this.get(session.id);
     });
   }
-  async startThread(session) {
+  async startThread(session, { signal } = {}) {
     if (session.completions >= session.maxCompletions) throw failure("Completion limit reached.", 409);
     // Reserve durably before calling a product API; an ambiguous transport failure
     // never refunds authority or silently replays a possibly started completion.
     session.completions++;
     const submission = this.event(session, "submission", { step: session.step, initial: true, text: session.prepared.plan[session.step].prompts[0] });
     await this.persist();
-    const thread = await this.evalService.createHumanTaskThread(session.prepared, session.step);
+    if (signal?.aborted) {
+      session.completions--; submission.outcome = "cancelled_before_dispatch";
+      await this.persist(); signal.throwIfAborted();
+    }
+    const thread = await this.evalService.createHumanTaskThread(session.prepared, session.step, { signal });
     submission.interactionId = thread.rootInteractionId;
     submission.threadId = thread.id;
     session.threadIds.push(thread.id);
@@ -111,18 +164,26 @@ export class HumanTaskService {
     this.event(session, "thread_started", { threadId: thread.id, interactionId: thread.rootInteractionId });
     await this.persist();
   }
-  nextStep(id) {
+  nextStep(id, { signal } = {}) {
     return this.serial(async () => {
+      signal?.throwIfAborted();
       const session = this.find(id);
       if (session.status !== "active") throw failure("Task session is not active.", 409);
       if (session.step + 1 >= session.prepared.plan.length) throw failure("No further case step.");
-      await this.settled(session);
+      await this.settled(session, { signal });
       if (session.completions >= session.maxCompletions) throw failure("Completion limit reached.", 409);
-      const checks = await this.evalService.gradeHumanTaskStep(session.prepared, session.step);
+      const checks = await abortable(signal, () => this.evalService.gradeHumanTaskStep(session.prepared, session.step, { signal }));
+      signal?.throwIfAborted();
+      const previousStep = session.step;
+      const previousChecks = session.stepChecks.length;
       session.stepChecks.push({ step: session.step, checks });
       session.step++;
-      try { await this.startThread(session); }
+      try { await this.startThread(session, { signal }); }
       catch (error) {
+        if (session.events.at(-1)?.outcome === "cancelled_before_dispatch") {
+          session.step = previousStep; session.stepChecks.length = previousChecks;
+          await this.persist(); throw error;
+        }
         session.status = "interrupted";
         session.termination = { reason: "product_write_unknown", at: new Date().toISOString(), success: null };
         this.event(session, "error", { message: "Initial dispatch outcome unknown; session locked against replay." });
@@ -131,8 +192,9 @@ export class HumanTaskService {
       return this.get(id);
     });
   }
-  write(id, path, method, body) {
+  write(id, path, method, body, { signal } = {}) {
     return this.serial(async () => {
+      signal?.throwIfAborted();
       const session = this.find(id);
       if (session.status !== "active") throw failure("Task session is read-only.", 403);
       const pathname = new URL(path, "http://task.invalid").pathname;
@@ -140,7 +202,7 @@ export class HumanTaskService {
         const selected = session.prepared.execution.modelResolution?.selectedModel;
         if (body?.harnessId && body.harnessId !== session.prepared.execution.harnessConfigurationName) throw failure("This task uses its starting harness.", 403);
         if (selected && ["familyId", "providerId", "modelId"].some((key) => body?.[key] !== undefined && body[key] !== selected[key])) throw failure("This task uses its starting model.", 403);
-        const response = await this.upstream(path, { method, body }, true);
+        const response = await this.upstream(path, { method, body, signal }, true);
         return { status: response.status, contentType: response.headers.get("content-type"), bytes: await response.text() };
       }
       const prefix = `/api/threads/${session.currentThreadId}`;
@@ -155,7 +217,7 @@ export class HumanTaskService {
         || (method === "POST" && /^\/context-drafts\/[^/%]+\/confirm$/.test(route));
       if (!allowed) throw failure("Write is outside this task session.", 403);
       const controlDuringRun = method === "POST" && /^\/interactions\/[1-9][0-9]*\/(?:stop|approvals\/[^/%]+\/decision)$/.test(route);
-      if (!controlDuringRun) await this.settled(session);
+      if (!controlDuringRun) await this.settled(session, { signal });
       const previousCompletions = session.completions;
       const previousEventCount = session.events.length;
       if (starts) {
@@ -182,8 +244,11 @@ export class HumanTaskService {
         session.events.length = previousEventCount;
         throw error;
       }
+      let dispatched = false;
       try {
-        const response = await this.upstream(path, { method, body }, true);
+        signal?.throwIfAborted();
+        dispatched = true;
+        const response = await this.upstream(path, { method, body, signal }, true);
         const bytes = await response.text();
         event.status = response.status;
         event.outcome = response.ok ? "accepted" : "rejected";
@@ -212,6 +277,11 @@ export class HumanTaskService {
         await this.persist();
         return { status: response.status, contentType: response.headers.get("content-type"), bytes };
       } catch (error) {
+        if (!dispatched) {
+          session.completions = previousCompletions;
+          event.outcome = "cancelled_before_dispatch";
+          await this.persist(); throw error;
+        }
         event.outcome = "unknown";
         session.status = "interrupted";
         session.termination = { reason: "product_write_unknown", at: new Date().toISOString(), success: null };
@@ -221,13 +291,14 @@ export class HumanTaskService {
       }
     });
   }
-  observe(id, observation) {
+  observe(id, observation, { signal } = {}) {
     return this.serial(async () => {
       const session = this.find(id);
       if (session.status !== "active") return null;
       if (!session.threadIds.some((thread) => String(thread) === String(observation?.threadId))) throw failure("Observation is outside this task.", 403);
       if (!Number.isFinite(observation.observedAt) || typeof observation.content !== "string" || observation.content.length > 200000) throw failure("Invalid presentation observation.");
-      const detail = await this.detail(observation.threadId);
+      const detail = await this.detail(observation.threadId, { signal });
+      signal?.throwIfAborted();
       if (observation.turnId != null && !detail.interactions.some((turn) => String(turn.id) === String(observation.turnId))) throw failure("Unknown observed interaction.");
       const snapshot = {
         threadId: observation.threadId, turnId: observation.turnId ?? null, layerId: observation.layerId ?? null,
@@ -283,37 +354,43 @@ export class HumanTaskService {
       return this.get(id);
     });
   }
-  finish(id, input) {
+  finish(id, input, { signal } = {}) {
     return this.serial(async () => {
+      signal?.throwIfAborted();
       const session = this.find(id);
       if (session.status !== "active") throw failure("Task session is not active.", 409);
       if (!["endpoint_reached", "satisfied", "abandoned", "budget_exhausted"].includes(input?.reason)) throw failure("Choose a termination reason.");
       if (input.satisfaction !== undefined && ![1, 2, 3, 4].includes(input.satisfaction)) throw failure("Choose a satisfaction rating from 1 to 4.");
       if (input.reason === "budget_exhausted" && session.completions < session.maxCompletions) throw failure("The completion budget is not exhausted.");
       if (input.reason === "endpoint_reached" && session.step + 1 < session.prepared.plan.length) throw failure("Complete the remaining case steps first.");
-      await this.settled(session);
+      await this.settled(session, { signal });
       const previousSatisfaction = session.satisfaction;
       const previousGradeCount = session.grades?.length ?? 0;
       const previousCheckCount = session.stepChecks.length;
+      const previousEventCount = session.events.length;
+      if (input.actorActionEventId !== undefined && (session.mode !== "simulated" || !session.events.some(event => event.id === input.actorActionEventId && event.kind === "actor_action" && event.action.kind === "finish"))) throw failure("Unknown actor finish intent.");
       session.status = "finishing";
       try { await this.persist(); }
       catch (error) { session.status = "active"; throw error; }
       try {
-        session.stepChecks.push({ step: session.step, checks: await this.evalService.gradeHumanTaskStep(session.prepared, session.step) });
+        session.stepChecks.push({ step: session.step, checks: await abortable(signal, () => this.evalService.gradeHumanTaskStep(session.prepared, session.step, { signal })) });
       } catch (error) { session.stepChecks.push({ step: session.step, checks: { status: "error", reason: error.message } }); }
       try {
+        signal?.throwIfAborted();
         const conversations = [];
         for (const threadId of session.threadIds) {
-          const response = await this.upstream(`/api/threads/${threadId}/export`, {}, true);
+          const response = await this.upstream(`/api/threads/${threadId}/export`, { signal }, true);
           if (!response.ok) throw failure("Could not freeze the task conversation.", 502);
           conversations.push({ threadId, jsonl: await response.text() });
         }
+        signal?.throwIfAborted();
         session.conversations = conversations;
         if (input.satisfaction !== undefined) {
           session.satisfaction = { scale: "human-1-4", value: input.satisfaction, comment: String(input.comment || "").slice(0, 8000), at: new Date().toISOString(), author: clone(this.annotator) };
           (session.grades ??= []).push(session.satisfaction);
         }
-        session.termination = { reason: input.reason, at: new Date().toISOString(), success: null, endpointAttainment: input.reason === "endpoint_reached" ? "human_reported" : "not_claimed" };
+        session.termination = { reason: input.reason, at: new Date().toISOString(), success: null, endpointAttainment: input.reason === "endpoint_reached" ? (session.mode === "simulated" ? "actor_reported" : "human_reported") : "not_claimed" };
+        if (input.actorActionEventId) this.event(session, "actor_action_completed", { actionEventId: input.actorActionEventId });
         this.event(session, "finished", { termination: session.termination, satisfaction: session.satisfaction });
         session.status = "completed";
         session.evidenceDigest = digest({ events: session.events, conversations: session.conversations, stepChecks: session.stepChecks });
@@ -326,7 +403,7 @@ export class HumanTaskService {
         session.stepChecks.length = previousCheckCount;
         session.termination = null;
         session.status = "active";
-        if (session.events.at(-1)?.kind === "finished") session.events.pop();
+        session.events.length = previousEventCount;
         this.event(session, "finish_failed", { message: error.message });
         await this.persist(); throw error;
       }
@@ -350,7 +427,11 @@ export class HumanTaskService {
       if (!["completed", "failed", "interrupted"].includes(session.status)) throw failure("Finish the session before exporting immutable evidence.");
       if (session.status === "completed") await this.settled(session);
       const graphAnnotations = this.annotationSnapshotLoader && session.threadIds.length ? await this.annotationSnapshotLoader(session.threadIds) : null;
-      const bundle = { schemaVersion: 1, kind: "relayer_human_task_bundle", exportedAt: new Date().toISOString(), session: clone(session), graphAnnotations, conversationEvidence: session.status === "completed" && session.conversations?.length === session.threadIds.length ? "frozen-at-finish" : "unavailable-after-interruption" };
+      const actorScreenshots = [];
+      for (const event of session.events) {
+        if (event.kind === "actor_observation" && event.observation?.screenshotArtifact) actorScreenshots.push({ eventId: event.id, ...event.observation.screenshotArtifact, dataUrl: await this.actorScreenshot(id, event.id) });
+      }
+      const bundle = { ...(actorScreenshots.length ? { actorScreenshots } : {}), schemaVersion: 1, kind: "relayer_human_task_bundle", exportedAt: new Date().toISOString(), session: clone(session), graphAnnotations, conversationEvidence: session.status === "completed" && session.conversations?.length === session.threadIds.length ? "frozen-at-finish" : "unavailable-after-interruption" };
       const sha256 = digest(bundle);
       const path = join(dirname(this.stateFile), "human-task-exports", `${session.id}-${sha256.slice(7)}.json`);
       await mkdir(dirname(path), { recursive: true });

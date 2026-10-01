@@ -389,3 +389,44 @@ it("rolls back an unpersisted write reservation before any product dispatch", as
   expect(f.tasks.get(f.session.id).completions).toBe(2);
   expect(f.tasks.get(f.session.id).events).toHaveLength(before.events.length + 1);
 });
+
+it.each(["write", "nextStep"])("cancellation during %s reservation refunds only proven undispatched work", async (kind) => {
+  const f = await fixture({ steps: 2 });
+  const controller = new AbortController();
+  const persist = f.tasks.persist.bind(f.tasks);
+  f.tasks.persist = async () => { await persist(); if (f.tasks.find(f.session.id).events.at(-1)?.outcome === "pending" || f.tasks.find(f.session.id).events.at(-1)?.initial) controller.abort(); };
+  const request = kind === "write" ? f.tasks.write(f.session.id, "/api/threads/1/interactions", "POST", { text: "Refine" }, { signal: controller.signal }) : f.tasks.nextStep(f.session.id, { signal: controller.signal });
+  await expect(request).rejects.toMatchObject({ name: "AbortError" });
+  expect(f.threads.size).toBe(1);
+  expect(f.calls.some(call => call.method === "POST")).toBe(false);
+  expect(f.tasks.get(f.session.id)).toMatchObject({ status: "active", completions: 1, step: 0, stepChecks: [], termination: null });
+  expect(f.tasks.get(f.session.id).events.at(-1).outcome).toBe("cancelled_before_dispatch");
+});
+
+it.each(["nextStep", "finish"])("Stop releases a noncooperative %s grading callback without later dispatch", async (method) => {
+  const f = await fixture({ steps: 2 });
+  let started, release;
+  const entered = new Promise(resolve => { started = resolve; });
+  f.tasks.evalService.gradeHumanTaskStep = () => { started(); return new Promise(resolve => { release = resolve; }); };
+  const controller = new AbortController();
+  const pending = method === "nextStep" ? f.tasks.nextStep(f.session.id, { signal: controller.signal }) : f.tasks.finish(f.session.id, { reason: "satisfied" }, { signal: controller.signal });
+  const rejected = expect(pending).rejects.toMatchObject({ name: "AbortError" });
+  await entered; controller.abort(); await rejected;
+  await f.tasks.grade(f.session.id, { satisfaction: 2, comment: "Queue remains usable" });
+  release({ passed: true }); await new Promise(resolve => setImmediate(resolve));
+  expect(f.threads.size).toBe(1);
+  expect(f.tasks.get(f.session.id)).toMatchObject({ status: "active", completions: 1, stepChecks: [] });
+  expect(f.calls.some(call => call.path.endsWith("/export"))).toBe(false);
+});
+
+it("Stop aborts presentation capture and releases session admission", async () => {
+  const f = await fixture();
+  let started; const entered = new Promise(resolve => { started = resolve; });
+  f.tasks.fetchImpl = (_url, { signal }) => { started(); return new Promise((_resolve, reject) => { signal.addEventListener("abort", () => reject(signal.reason), { once: true }); }); };
+  const controller = new AbortController();
+  const pending = f.tasks.observe(f.session.id, { threadId: 1, turnId: 10, observedAt: Date.now(), content: "visible" }, { signal: controller.signal });
+  const rejected = expect(pending).rejects.toMatchObject({ name: "AbortError" });
+  await entered; controller.abort(); await rejected;
+  await f.tasks.grade(f.session.id, { satisfaction: 1, comment: "No captured moment" });
+  expect(f.tasks.get(f.session.id).events.some(event => event.kind === "presentation")).toBe(false);
+});
