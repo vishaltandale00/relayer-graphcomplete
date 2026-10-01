@@ -68,6 +68,34 @@ export interface GraphPresentationPolicy {
   readonly layerDepthDecay: number;
 }
 
+/** Private evaluator contract, included in the case snapshot digest. */
+export interface InteractiveCaseContractV1 {
+  readonly schemaVersion: 1;
+  readonly participantBrief: string;
+  readonly reviewerRubric: { readonly version: string; readonly criteria: readonly string[] };
+  readonly endpoint: string;
+  readonly maxCompletions: number;
+  readonly research: "current-sources-and-dates" | "case-defined";
+}
+
+/** Only operational defaults are exposed by the public catalog. */
+export type PublicInteractiveCaseContractV1 = Pick<InteractiveCaseContractV1,
+  "schemaVersion" | "endpoint" | "maxCompletions" | "research">;
+
+export function validateInteractiveCaseContract(value: InteractiveCaseContractV1): void {
+  if (!value || value.schemaVersion !== 1) throw new Error("Unsupported interactive case contract.");
+  const keys = ["schemaVersion", "participantBrief", "reviewerRubric", "endpoint", "maxCompletions", "research"];
+  if (Object.keys(value).some((key) => !keys.includes(key))) throw new Error("Unknown interactive case field.");
+  requireNonEmpty(value.participantBrief, "participant brief");
+  requireNonEmpty(value.endpoint, "interactive endpoint");
+  if (!Number.isSafeInteger(value.maxCompletions) || value.maxCompletions < 1 || value.maxCompletions > 100) throw new Error("Invalid interactive completion limit.");
+  if (!["current-sources-and-dates", "case-defined"].includes(value.research)) throw new Error("Invalid interactive research contract.");
+  if (!value.reviewerRubric || Object.keys(value.reviewerRubric).some((key) => !["version", "criteria"].includes(key))) throw new Error("Invalid interactive rubric.");
+  requireNonEmpty(value.reviewerRubric.version, "interactive rubric version");
+  if (!Array.isArray(value.reviewerRubric.criteria) || !value.reviewerRubric.criteria.length) throw new Error("Interactive rubric requires criteria.");
+  for (const criterion of value.reviewerRubric.criteria) requireNonEmpty(criterion, "interactive criterion");
+}
+
 /**
  * Immutable evaluator-owned identity for one autonomous benchmark case.
  *
@@ -83,6 +111,7 @@ export interface AutonomousCaseSnapshotV1 {
   readonly taskType: string;
   /** Candidate cases are runnable for calibration but are not benchmark-promoted. */
   readonly authoringStatus: "candidate" | "human_reviewed";
+  readonly interactive?: InteractiveCaseContractV1;
   readonly artifacts: {
     readonly task: VisibleTaskArtifactDescriptor;
     readonly workspace: FrozenWorkspaceArtifactDescriptor;
@@ -108,7 +137,8 @@ export type PublicReferenceArtifactDescriptor = Omit<SealedReferenceArtifactDesc
 export type PublicVerifierArtifactDescriptor = Omit<SealedVerifierArtifactDescriptor, "sealedPath">;
 
 /** Safe to expose through the Eval catalog. It contains no sealed content or path. */
-export interface PublicAutonomousCaseSnapshotV1 extends Omit<AutonomousCaseSnapshotV1, "artifacts"> {
+export interface PublicAutonomousCaseSnapshotV1 extends Omit<AutonomousCaseSnapshotV1, "artifacts" | "interactive"> {
+  readonly interactive?: PublicInteractiveCaseContractV1;
   readonly artifacts: {
     readonly task: VisibleTaskArtifactDescriptor;
     readonly workspace: FrozenWorkspaceArtifactDescriptor;
@@ -130,6 +160,7 @@ export function createAutonomousCaseSnapshot(input: AutonomousCaseSnapshotInputV
     taskType: input.taskType,
     authoringStatus: input.authoringStatus ?? "candidate",
     artifacts: structuredClone(input.artifacts),
+    ...(input.interactive === undefined ? {} : { interactive: structuredClone(input.interactive) }),
     presentation: {
       graphApplicable: input.presentation?.graphApplicable ?? true,
       layerDepthDecay: input.presentation?.layerDepthDecay ?? DEFAULT_LAYER_DEPTH_DECAY,
@@ -154,6 +185,7 @@ export function validateAutonomousCaseSnapshot(snapshot: AutonomousCaseSnapshot)
     throw new Error(`Invalid autonomous case authoring status: ${String(snapshot.authoringStatus)}`);
   }
 
+  if (snapshot.interactive !== undefined) validateInteractiveCaseContract(snapshot.interactive);
   const { task, workspace, reference, verifier, outcomeRubric } = snapshot.artifacts;
   if (task.kind !== "visible-task") throw new Error("Autonomous case task artifact has the wrong kind.");
   requireNonEmpty(task.text, "visible task text");

@@ -1,0 +1,179 @@
+{
+  "sessionId": "human-d54b531e-98ce-418b-bbfe-84ee1af18656",
+  "recordedAt": "2026-09-29T20:41:31.144Z",
+  "createdAt": "2026-09-29T20:25:43.155Z",
+  "actor": {
+    "model": "gpt-5.6-luna",
+    "modelReasoningEffort": "low",
+    "exploration": "low",
+    "meticulousness": "low",
+    "maxActions": 20,
+    "timeoutMs": 900000,
+    "promptVersion": "task-actor-v2"
+  },
+  "candidate": {
+    "harnessId": "codex-basic",
+    "familyId": 1,
+    "providerId": "codex",
+    "modelId": "gpt-5.6-sol"
+  },
+  "status": "interrupted",
+  "termination": {
+    "reason": "actor_timeout",
+    "at": "2026-09-29T20:40:43.307Z",
+    "success": null
+  },
+  "admittedResponses": 3,
+  "candidateTurnStates": [
+    {
+      "id": 6,
+      "status": "accepted",
+      "attemptOutcome": "accepted",
+      "startedAt": "1790713543931",
+      "finishedAt": "1790713796215"
+    },
+    {
+      "id": 7,
+      "status": "accepted",
+      "attemptOutcome": "accepted",
+      "startedAt": "1790713835347",
+      "finishedAt": "1790714265173"
+    },
+    {
+      "id": 8,
+      "status": "accepted",
+      "attemptOutcome": "accepted",
+      "startedAt": "1790714308167",
+      "finishedAt": "1790714445528"
+    }
+  ],
+  "firstVisibleGraph": {
+    "latencyMs": 250434,
+    "observerPresentBeforeSubmission": false,
+    "usefulness": "not_assessed"
+  },
+  "actorActions": [
+    {
+      "at": "2026-09-29T20:30:04.865Z",
+      "kind": "fill",
+      "value": "Sep 5–19, 2027; 6 travelers. Maya arrives Sep 6; Sam and Jordan leave Sep 16; everyone together Sep 11–12. Departures: San Francisco, New York, Miami, London, Toronto, Austin.",
+      "reason": "Provide the requested trip timing, group, and departure details.",
+      "satisfaction": null,
+      "comment": "I’ve shared the basic logistics first.",
+      "endpointStatus": null,
+      "remainingWork": ""
+    },
+    {
+      "at": "2026-09-29T20:30:11.171Z",
+      "kind": "select",
+      "value": "comfortable",
+      "reason": "The group can spend up to about €3,800 per person on the ground while staying under the stated overall budget before flights.",
+      "satisfaction": null,
+      "comment": "A comfortable ground-budget range seems realistic for a two-week trip.",
+      "endpointStatus": null,
+      "remainingWork": ""
+    },
+    {
+      "at": "2026-09-29T20:30:18.317Z",
+      "kind": "select",
+      "value": "history",
+      "reason": "Museums and food are core priorities, with nightlife also important for part of the group; history is the closest primary shared priority.",
+      "satisfaction": null,
+      "comment": "The trip should stay slow, with museums, food, and some nightlife options.",
+      "endpointStatus": null,
+      "remainingWork": ""
+    },
+    {
+      "at": "2026-09-29T20:30:28.618Z",
+      "kind": "fill",
+      "value": "Maya and Luis want nightlife; Priya and Sam prioritize museums and food. Jordan needs accessible transport, walks of about 30 minutes max, and seated breaks. I prefer relaxed mornings, neighborhood cafés, and no more than three hotel changes. Please propose a few well-connected bases with optional activities, shared meals, and a realistic dated outline around Sep 11–12.",
+      "reason": "Add the group’s mobility, pace, accommodation, and activity constraints so the proposed options are usable.",
+      "satisfaction": null,
+      "comment": "I’ve added the practical constraints and asked for a small set of connected options.",
+      "endpointStatus": null,
+      "remainingWork": ""
+    },
+    {
+      "at": "2026-09-29T20:30:35.193Z",
+      "kind": "click",
+      "value": "",
+      "reason": "Submit the trip constraints and request a concrete dated outline.",
+      "satisfaction": null,
+      "comment": "I’m sending the constraints so Relayer can build the itinerary options.",
+      "endpointStatus": null,
+      "remainingWork": ""
+    },
+    {
+      "at": "2026-09-29T20:37:51.943Z",
+      "kind": "click",
+      "value": "",
+      "reason": "Open the dated itinerary details to verify the route, shared weekend, activities, and costs.",
+      "satisfaction": null,
+      "comment": "The three-base route looks promising; I’m checking the dated details before deciding.",
+      "endpointStatus": null,
+      "remainingWork": ""
+    },
+    {
+      "at": "2026-09-29T20:37:58.148Z",
+      "kind": "click",
+      "value": "",
+      "reason": "Return to the route summary to inspect mobility and budget evidence before approving it.",
+      "satisfaction": null,
+      "comment": "The dated outline fits the shared weekend and pace; I’m checking Jordan’s accessibility needs and the budget next.",
+      "endpointStatus": null,
+      "remainingWork": ""
+    },
+    {
+      "at": "2026-09-29T20:38:06.191Z",
+      "kind": "click",
+      "value": "",
+      "reason": "Return to the generated three-base route and inspect its remaining evidence.",
+      "satisfaction": null,
+      "comment": "I’m returning to the route view to finish checking accessibility and budget.",
+      "endpointStatus": null,
+      "remainingWork": ""
+    },
+    {
+      "at": "2026-09-29T20:38:12.177Z",
+      "kind": "click",
+      "value": "",
+      "reason": "Verify that the proposed route accommodates Jordan and stays within the group budget.",
+      "satisfaction": null,
+      "comment": "The route matches the dates and shared weekend; I’m checking the final feasibility evidence.",
+      "endpointStatus": null,
+      "remainingWork": ""
+    },
+    {
+      "at": "2026-09-29T20:38:22.048Z",
+      "kind": "fill",
+      "value": "This route works for us if you can add a rough per-person ground-cost estimate and confirm accessible city transport in London, Paris, and Amsterdam. Keep the dated outline as proposed; no booking.",
+      "reason": "Resolve the remaining budget and local accessibility details before agreeing to the itinerary.",
+      "satisfaction": null,
+      "comment": "The rail-assistance evidence is reassuring; I’m asking for the last missing feasibility details.",
+      "endpointStatus": null,
+      "remainingWork": ""
+    },
+    {
+      "at": "2026-09-29T20:38:28.042Z",
+      "kind": "click",
+      "value": "",
+      "reason": "Submit the final feasibility request for cost and accessible city transport.",
+      "satisfaction": null,
+      "comment": "The route is nearly agreed; I’m requesting the final cost and local accessibility confirmation.",
+      "endpointStatus": null,
+      "remainingWork": ""
+    }
+  ],
+  "actorRating": null,
+  "errors": [
+    {
+      "id": "human-d54b531e-98ce-418b-bbfe-84ee1af18656:52",
+      "sequence": 52,
+      "at": "2026-09-29T20:40:43.286Z",
+      "kind": "actor_error",
+      "category": "timeout",
+      "message": "Actor timed out. Review the saved trajectory before starting another task."
+    }
+  ],
+  "lastResponseAfterActorDeadlineMs": 2221
+}

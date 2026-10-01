@@ -152,6 +152,7 @@ export function createLiveCredentialValidator({
         modelId: route.selectedModel.modelId,
       },
       productModelSelection: route.productModelSelection,
+      providerAdapterId: route.provider.adapterId,
       ...(route.configurationModel === undefined ? {} : { configurationModel: route.configurationModel }),
     };
   };
@@ -223,7 +224,7 @@ async function validateCodexAccount({ resolveCodexRuntime, createCredentials }) 
       RELAYER_CODEX_BINARY: runtime.executable,
     });
     const account = await credentials.account();
-    if (account?.status !== "connected") throw new Error("Codex account is disconnected.");
+    if (account?.status !== "connected" || account?.account?.type !== "chatgpt") throw new Error("Codex ChatGPT subscription is disconnected.");
   } catch {
     throw new Error("The live Eval Codex credential is not connected.");
   } finally {

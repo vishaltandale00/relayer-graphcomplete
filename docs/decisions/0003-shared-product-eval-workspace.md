@@ -102,3 +102,57 @@ without return context display recovery instructions instead of silently failing
 Dashboard-opened Settings links intentionally carry both browser capabilities
 for same-user navigation. They must be treated as authenticated dashboard links,
 not as Settings-only delegation links. Rust credentials remain server-side.
+
+## Simulated task users (issue #544, slice 2)
+
+A separate Eval actor drives the production live-task surface between settled
+responses. It reuses HumanTaskService admission and recording. It observes
+viewport screenshots and current enabled controls, not raw graph records, task
+files, or judge topology. A dedicated native Codex thread has no shell, search,
+filesystem tools, or MCP servers. This user interaction loop does not schedule
+GraphComplete agents or change provider-owned recursion.
+
+The user approved a narrow native-dropdown observation exception on 2026-10-01.
+After the actor opens a visible native dropdown, its option names may enter the
+next observation even when headless screenshots omit the native popup. Closed
+and unopened menus remain hidden. This grant belongs to the exact opened control
+and ends on closure, replacement, or navigation scope change. It exposes neither
+option values nor unrelated hidden content. Selection must match an offered
+enabled option; unsupported selection is rejected before dispatch. PRD 13.2.3
+owns the product contract and its evidence mapping.
+
+The actor capability projects only task display context, disables annotations,
+and rejects grading operations. Humans watch and grade through a separate
+read-only review capability. Actor satisfaction is distinct from human grades.
+Cancellation, deadlines, action limits and host interruption preserve evidence
+without implicit replay or inferred task success.
+
+### Live actor calibration follow-up
+
+After the first live run, the user approved using the existing private user brief
+for actor consistency. Only the actor receives that brief; the candidate still
+receives ordinary task prompts and user actions. Rubrics and human feedback
+remain unavailable to the actor. Version 2 favors short immediate replies,
+consistent preferences and explicit uncertainty. It records endpoint status and
+remaining work independently of satisfaction. Action-specific human annotations
+support manual tuning, not automatic policy changes. The actor default is
+GPT-5.6 Luna, with model/effort catalog preflight before candidate inference.
+
+
+### Optional completion judge (approved 2026-10-01)
+
+A versioned actor setup may enable a stronger, separately configured completion
+judge. This explicitly supersedes the earlier no-influence rule only for stopping
+guidance: the judge may reject a proposed normal finish and require another user
+interaction. Historical setups retain their original behavior. Model and effort
+availability for both actor and judge are checked before candidate dispatch.
+
+The judge evaluates the endpoint from bounded task context, actor-visible
+evidence, and a host-read artifact packet with explicit omissions. Artifact
+contents are not evidence that the user saw them. It has no candidate or user action capability. Its continuation guidance
+is brief; grading rubrics, human feedback and held-out labels stay hidden. It does
+not invent preferences, rewrite satisfaction, or turn approval to finish into an
+objective success judgment. Each proposed finish and judge decision is durable.
+Stop, cancellation, failure and existing budgets prevail over continuation.
+Default tests use injected decisions rather than paid inference. PRD 13.2.3 owns
+this opt-in contract; setup lineage remains governed by PRD 13.2.4.

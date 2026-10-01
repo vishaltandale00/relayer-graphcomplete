@@ -1,4 +1,4 @@
-import { mkdtemp, rm, readFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { createSettingsStore } from "../desktop/main/services/settings-store.mjs";
@@ -21,7 +21,7 @@ async function fixture({ steps = 1 } = {}) {
     stateFile: join(dir, "sessions.json"),
     productSession: { origin: "http://product.invalid", cookie: { name: "control", value: "secret" }, readOnlyCookie: { name: "read", value: "only" } },
     evalService: {
-      prepareHumanTask: async () => ({ name: "Task", execution: { harnessConfigurationName: "fixture", modelResolution: { productModelSelection: true, selectedModel: { familyId: 1, providerId: "pinned", modelId: "model" } } }, plan: Array.from({ length: steps }, (_, i) => ({ name: `Step ${i}`, prompts: ["Build the thing"], permissionProfileId: "auto" })) }),
+      prepareHumanTask: async () => ({ name: "Task", execution: { testCaseId: "case", harnessConfigurationName: "fixture", modelResolution: { productModelSelection: true, selectedModel: { familyId: 1, providerId: "pinned", modelId: "model" } } }, plan: Array.from({ length: steps }, (_, i) => ({ name: `Step ${i}`, prompts: ["Build the thing"], permissionProfileId: "auto" })) }),
       createHumanTaskThread: async () => {
         const id = threads.size + 1; threads.set(id, [{ id: 10 * id, completionStatus: "accepted" }]);
         return { id, rootInteractionId: id * 10 };
@@ -58,6 +58,7 @@ async function fixture({ steps = 1 } = {}) {
 it("preserves a multi-step human trajectory through reopen, anchored annotations and immutable export", async () => {
   const { tasks, session, options } = await fixture({ steps: 2 });
   const id = session.id;
+  expect(tasks.list()[0].testCaseId).toBe("case");
   const eventId = await tasks.observe(id, { threadId: 1, turnId: 10, layerId: 5, selectedNodeId: 6, navigationPath: [{ layerId: 5 }], graphVisible: true, observedAt: Date.now(), content: "A useful option" });
   await tasks.write(id, "/api/threads/1/input-draft/attachments", "PUT", { value: { text: "Warm colors" } });
   expect(tasks.get(id).completions).toBe(1);
@@ -166,7 +167,7 @@ it("prepares a real catalog project case with its fixture, separate thread steps
     const input = chunks.length ? JSON.parse(Buffer.concat(chunks).toString()) : null;
     received.push({ path: request.url, input });
     response.setHeader("Content-Type", "application/json");
-    response.end(JSON.stringify(request.url === "/api/projects" ? { id: 7 }
+    response.end(JSON.stringify(request.url === "/api/projects" ? { id: 7, path: input.path }
       : request.url === "/api/model-settings" ? { defaults: { harnessId: "fixture-human-task" }, harnesses: [{ id: "fixture-human-task", available: true }], providers: [], families: [] }
         : { id: received.length, rootInteractionId: 100 + received.length }));
   });
@@ -179,6 +180,7 @@ it("prepares a real catalog project case with its fixture, separate thread steps
     productSession: { origin: `http://127.0.0.1:${server.address().port}`, cookie: { name: "control", value: "test" } },
     projectFixtureMaterializer: async ({ workspaceDirectory }) => {
       materialized = workspaceDirectory;
+      await mkdir(workspaceDirectory, { recursive: true });
       return { schemaVersion: 1, fixtureId: H3_PROJECT_CASE_ID, workspaceDirectory, repositoryUrl: H3_REPOSITORY_URL, upstreamCommit: H3_UPSTREAM_COMMIT, upstreamTree: H3_UPSTREAM_TREE, seededCommit: H3_SEEDED_COMMIT, seededTree: H3_SEEDED_TREE, packageManager: H3_PACKAGE_MANAGER, installedWithFrozenLockfile: true };
     },
   }).open();
@@ -388,4 +390,151 @@ it("rolls back an unpersisted write reservation before any product dispatch", as
   expect((await f.tasks.write(f.session.id, "/api/threads/1/interactions", "POST", { text: "Refine" })).status).toBe(201);
   expect(f.tasks.get(f.session.id).completions).toBe(2);
   expect(f.tasks.get(f.session.id).events).toHaveLength(before.events.length + 1);
+});
+
+it.each(["write", "nextStep"])("cancellation during %s reservation refunds only proven undispatched work", async (kind) => {
+  const f = await fixture({ steps: 2 });
+  const controller = new AbortController();
+  const persist = f.tasks.persist.bind(f.tasks);
+  f.tasks.persist = async () => { await persist(); if (f.tasks.find(f.session.id).events.at(-1)?.outcome === "pending" || f.tasks.find(f.session.id).events.at(-1)?.initial) controller.abort(); };
+  const request = kind === "write" ? f.tasks.write(f.session.id, "/api/threads/1/interactions", "POST", { text: "Refine" }, { signal: controller.signal }) : f.tasks.nextStep(f.session.id, { signal: controller.signal });
+  await expect(request).rejects.toMatchObject({ name: "AbortError" });
+  expect(f.threads.size).toBe(1);
+  expect(f.calls.some(call => call.method === "POST")).toBe(false);
+  expect(f.tasks.get(f.session.id)).toMatchObject({ status: "active", completions: 1, step: 0, stepChecks: [], termination: null });
+  expect(f.tasks.get(f.session.id).events.at(-1).outcome).toBe("cancelled_before_dispatch");
+});
+
+it.each(["nextStep", "finish"])("Stop releases a noncooperative %s grading callback without later dispatch", async (method) => {
+  const f = await fixture({ steps: 2 });
+  let started, release;
+  const entered = new Promise(resolve => { started = resolve; });
+  f.tasks.evalService.gradeHumanTaskStep = () => { started(); return new Promise(resolve => { release = resolve; }); };
+  const controller = new AbortController();
+  const pending = method === "nextStep" ? f.tasks.nextStep(f.session.id, { signal: controller.signal }) : f.tasks.finish(f.session.id, { reason: "satisfied" }, { signal: controller.signal });
+  const rejected = expect(pending).rejects.toMatchObject({ name: "AbortError" });
+  await entered; controller.abort(); await rejected;
+  await f.tasks.grade(f.session.id, { satisfaction: 2, comment: "Queue remains usable" });
+  release({ passed: true }); await new Promise(resolve => setImmediate(resolve));
+  expect(f.threads.size).toBe(1);
+  expect(f.tasks.get(f.session.id)).toMatchObject({ status: "active", completions: 1, stepChecks: [] });
+  expect(f.calls.some(call => call.path.endsWith("/export"))).toBe(false);
+});
+
+it("Stop aborts presentation capture and releases session admission", async () => {
+  const f = await fixture();
+  let started; const entered = new Promise(resolve => { started = resolve; });
+  f.tasks.fetchImpl = (_url, { signal }) => { started(); return new Promise((_resolve, reject) => { signal.addEventListener("abort", () => reject(signal.reason), { once: true }); }); };
+  const controller = new AbortController();
+  const pending = f.tasks.observe(f.session.id, { threadId: 1, turnId: 10, observedAt: Date.now(), content: "visible" }, { signal: controller.signal });
+  const rejected = expect(pending).rejects.toMatchObject({ name: "AbortError" });
+  await entered; controller.abort(); await rejected;
+  await f.tasks.grade(f.session.id, { satisfaction: 1, comment: "No captured moment" });
+  expect(f.tasks.get(f.session.id).events.some(event => event.kind === "presentation")).toBe(false);
+});
+
+it("rejects external catalog drift before admitting a follow-up completion", async () => {
+  const { tasks, session, calls, options } = await fixture();
+  options.evalService.assertHumanTaskCatalog = async () => { throw new Error("External catalog changed"); };
+  const before = tasks.get(session.id).completions;
+  await expect(tasks.write(session.id, "/api/threads/1/interactions", "POST", { text: "Refine" })).rejects.toThrow("External catalog changed");
+  expect(tasks.get(session.id).completions).toBe(before);
+  expect(calls.some(call => call.method === "POST" && call.path.endsWith("/interactions"))).toBe(false);
+});
+
+it("Stop releases a stalled external catalog check before follow-up admission", async () => {
+  const f = await fixture();
+  let entered, release;
+  const started = new Promise(resolve => { entered = resolve; });
+  f.tasks.evalService.assertHumanTaskCatalog = () => { entered(); return new Promise(resolve => { release = resolve; }); };
+  const controller = new AbortController();
+  const before = f.tasks.get(f.session.id).completions;
+  const pending = f.tasks.write(f.session.id, "/api/threads/1/interactions", "POST", { text: "Refine" }, { signal: controller.signal });
+  const rejected = expect(pending).rejects.toMatchObject({ name: "AbortError" });
+  await started; controller.abort(); await rejected;
+  await f.tasks.grade(f.session.id, { satisfaction: 2, comment: "Queue released" });
+  release(); await new Promise(resolve => setImmediate(resolve));
+  expect(f.tasks.get(f.session.id).completions).toBe(before);
+  expect(f.calls.some(call => call.method === "POST")).toBe(false);
+});
+
+async function gatedTask() {
+  const f = await fixture();
+  const session = f.tasks.find(f.session.id);
+  session.mode = "simulated";
+  session.actor = { maxActions: 5 };
+  session.actorSetup = { behaviorContract: { completionJudge: { version: "completion-judge-v1", model: "strong", modelReasoningEffort: "high" } } };
+  return f;
+}
+async function judgedFinish(f, verdict = "complete") {
+  const action = await f.tasks.actorEvent(f.session.id, "actor_action", { observationEventId: "visible", action: { kind: "finish", reason: "satisfied", endpointStatus: "incomplete", remainingWork: "User thinks work remains", satisfaction: 3 } });
+  const evidence = await f.tasks.actorEvent(f.session.id, "actor_completion_evidence", { actorActionEventId: action.id, observationEventId: "visible", judge: f.tasks.get(f.session.id).actorSetup.behaviorContract.completionJudge, evidence: { artifactEvidence: {} } });
+  const judgment = await f.tasks.actorEvent(f.session.id, "actor_completion_judgment", { actorActionEventId: action.id, observationEventId: "visible", judge: f.tasks.get(f.session.id).actorSetup.behaviorContract.completionJudge, evidenceEventId: evidence.id, verdict });
+  return { reason: "endpoint_reached", actorActionEventId: action.id, completionJudgeEventId: judgment.id };
+}
+
+it("gates normal finishes on the latest exact completion judgment and freezes the original claim", async () => {
+  const f = await gatedTask(); const id = f.session.id;
+  for (const reason of ["satisfied", "abandoned", "endpoint_reached", "budget_exhausted"]) await expect(f.tasks.finish(id, { reason })).rejects.toThrow();
+  await expect(f.tasks.finish(id, await judgedFinish(f, "incomplete"))).rejects.toThrow("completion judgment");
+  const stale = await judgedFinish(f);
+  await f.tasks.actorEvent(id, "actor_action", { action: { kind: "click", ref: "visible" } });
+  await expect(f.tasks.finish(id, stale)).rejects.toThrow("completion judgment");
+  const superseded = await judgedFinish(f);
+  await f.tasks.actorEvent(id, "actor_completion_judgment", { actorActionEventId: superseded.actorActionEventId, verdict: "uncertain" });
+  await expect(f.tasks.finish(id, superseded)).rejects.toThrow("completion judgment");
+  const accepted = await judgedFinish(f);
+  const judgment = f.tasks.find(id).events.find(event => event.id === accepted.completionJudgeEventId);
+  const evidenceId = judgment.evidenceEventId; judgment.evidenceEventId = "missing";
+  await expect(f.tasks.finish(id, accepted)).rejects.toThrow("completion judgment");
+  judgment.evidenceEventId = evidenceId;
+  const result = await f.tasks.finish(id, accepted);
+  expect(result.termination).toMatchObject({ endpointAttainment: "judge_reported", success: null, completionJudgeEventId: accepted.completionJudgeEventId, actorClaim: { reason: "satisfied", endpointStatus: "incomplete", satisfaction: 3 } });
+  const reopened = await new HumanTaskService(f.options).open();
+  expect((await reopened.export(id)).bundle.session.termination).toEqual(result.termination);
+});
+
+it("does not reuse judgment after submission or accept another judge identity", async () => {
+  const f = await gatedTask(); const id = f.session.id;
+  const prior = await judgedFinish(f);
+  await f.tasks.write(id, "/api/threads/1/interactions", "POST", { text: "More work" });
+  await expect(f.tasks.finish(id, prior)).rejects.toThrow("completion judgment");
+  const latest = await judgedFinish(f);
+  f.tasks.find(id).events.find(event => event.id === latest.completionJudgeEventId).judge.model = "other";
+  await expect(f.tasks.finish(id, latest)).rejects.toThrow("completion judgment");
+  expect((await f.tasks.finish(id, { reason: "budget_exhausted" })).termination.endpointAttainment).toBe("not_claimed");
+});
+
+it("builds bounded completion evidence without grades and rechecks settled state after artifact reads", async () => {
+  const f = await gatedTask(); const id = f.session.id;
+  Object.assign(f.tasks.find(id).prepared, { humanBrief: "Private taste", humanRubric: "HIDDEN_RUBRIC" });
+  await f.tasks.grade(id, { satisfaction: 1, comment: "HIDDEN_GRADE" });
+  await f.tasks.actorEvent(id, "actor_action", { action: { kind: "fill", value: "x".repeat(10000), secret: "HIDDEN_ACTION_FIELD" }, usage: { hidden: "HIDDEN_USAGE" } });
+  f.options.evalService.completionJudgeArtifactEvidence = vi.fn(async () => ({ files: [{ path: "deliverable.md", content: "Bounded output" }] }));
+  f.options.evalService.gradeHumanTaskStep = vi.fn();
+  const packet = await f.tasks.completionJudgeEvidence(id);
+  expect(packet).toMatchObject({ request: "Build the thing", endpoint: "A working artifact", privateBrief: "Private taste", artifactEvidence: { files: [{ path: "deliverable.md", content: "Bounded output" }] } });
+  expect(packet.trajectory[0]).toMatchObject({ kind: "task_progress", currentStep: 1, totalSteps: 1, remainingSteps: 0, completions: 1, maxCompletions: 2 });
+  expect(JSON.stringify(packet)).not.toContain("HIDDEN_");
+  expect(packet.trajectory.at(-1).action.value.length).toBeLessThan(10000);
+  expect(packet.trajectory.at(-1).action.value).toContain("[truncated:");
+  for (let i = 0; i < 90; i++) f.tasks.event(f.tasks.find(id), "actor_action", { action: { kind: "fill", value: "界".repeat(5000) } });
+  const bounded = await f.tasks.completionJudgeEvidence(id);
+  expect(Buffer.byteLength(JSON.stringify(bounded.trajectory))).toBeLessThan(21000);
+  expect(bounded.trajectory.at(-1)).toMatchObject({ kind: "evidence_omitted" });
+  expect(f.options.evalService.gradeHumanTaskStep).not.toHaveBeenCalled();
+  f.options.evalService.completionJudgeArtifactEvidence.mockImplementation(async () => { f.threads.get(1)[0].completionStatus = "running"; return {}; });
+  await expect(f.tasks.completionJudgeEvidence(id)).rejects.toThrow("Wait for the current response");
+});
+
+it("cancels completion evidence collection without holding the task queue", async () => {
+  const f = await gatedTask(); let enter, release;
+  const entered = new Promise(resolve => { enter = resolve; });
+  f.options.evalService.completionJudgeArtifactEvidence = () => { enter(); return new Promise(resolve => { release = resolve; }); };
+  const controller = new AbortController();
+  const pending = f.tasks.completionJudgeEvidence(f.session.id, { signal: controller.signal });
+  const rejected = expect(pending).rejects.toMatchObject({ name: "AbortError" });
+  await entered; controller.abort(); await rejected;
+  await f.tasks.interruptActor(f.session.id, "actor_cancelled"); release({});
+  expect(f.tasks.get(f.session.id).status).toBe("interrupted");
 });

@@ -75,7 +75,11 @@ export interface JudgeThreadFactory {
 export interface SimulatedUserJudgeConfiguration {
   readonly model: string;
   readonly modelReasoningEffort: ModelReasoningEffort;
-  readonly promptVersion?: typeof SIMULATED_USER_PROMPT_VERSION;
+  readonly promptVersion?: string;
+  /** Frozen full prompt template; runtime evidence is substituted in one pass. */
+  readonly shellAccess?: boolean;
+  readonly promptTemplate?: string;
+  readonly inputPromptTemplate?: string;
   readonly rubric?: SimulatedUserRubricManifest;
 }
 
@@ -109,7 +113,7 @@ export interface SimulatedUserJudgeRunRecord {
     readonly modelReasoningEffort: ModelReasoningEffort;
   };
   readonly prompt: {
-    readonly version: typeof SIMULATED_USER_PROMPT_VERSION;
+    readonly version: string;
     readonly text: string;
   };
   readonly rubric: SimulatedUserRubricManifest;
@@ -120,7 +124,7 @@ export interface SimulatedUserJudgeRunRecord {
     readonly webSearchMode: "disabled";
     readonly allowedMcpServer: typeof SIMULATED_USER_MCP_SERVER_NAME;
     readonly allowedTools: typeof SIMULATED_USER_MCP_TOOL_NAMES;
-    readonly shellAccess: true;
+    readonly shellAccess: boolean;
     readonly environmentKeys: readonly string[];
   };
   readonly codexThreadId: string | null;
@@ -165,10 +169,10 @@ export async function runSimulatedUserJudge(
     throw new Error("graph-presentation-rubric-v11 requires recursive presentation contract v6");
   }
   const promptVersion = options.configuration.promptVersion ?? SIMULATED_USER_PROMPT_VERSION;
-  if (promptVersion !== SIMULATED_USER_PROMPT_VERSION) {
+  if (options.configuration.promptTemplate === undefined && promptVersion !== SIMULATED_USER_PROMPT_VERSION) {
     throw new Error(`Unsupported simulated-user prompt version: ${promptVersion}`);
   }
-  const prompt = recursive
+  const generatedPrompt = recursive
     ? buildRecursivePresentationJudgePrompt(
         options.originalRequest,
         rubric,
@@ -182,6 +186,17 @@ export async function runSimulatedUserJudge(
         options.reviewStore.inventory,
         options.artifactEvidence,
       );
+  const template = options.inputOperatorAvailable
+    ? options.configuration.inputPromptTemplate : options.configuration.promptTemplate;
+  const prompt = template === undefined ? generatedPrompt : template.replace(/\{\{([a-zA-Z]+)\}\}/g, (_, key: string) => {
+    const values: Record<string, string> = {
+      request: options.originalRequest, inventory: JSON.stringify(options.reviewStore.inventory, null, 2),
+      rubric: JSON.stringify(rubric, null, 2), artifactEvidence: options.artifactEvidence === undefined
+        ? "No bounded candidate artifact evidence was supplied." : JSON.stringify(options.artifactEvidence, null, 2),
+    };
+    if (!Object.hasOwn(values, key)) throw new Error(`Unknown judge setup prompt variable: ${key}`);
+    return values[key]!;
+  });
   const requestedWorkingDirectory = options.artifact?.workingDirectory ?? options.workingDirectory;
   const temporaryWorkingDirectory = requestedWorkingDirectory === undefined
     ? await mkdtemp(join(tmpdir(), "relayer-simulated-user-judge-"))
@@ -206,9 +221,10 @@ export async function runSimulatedUserJudge(
           browser_use: false,
           computer_use: false,
           image_generation: false,
-          shell_tool: true,
+          multi_agent: false,
+          shell_tool: options.configuration.shellAccess !== false,
           skill_search: false,
-          unified_exec: true,
+          unified_exec: options.configuration.shellAccess !== false,
           view_image: false,
         },
         mcp_servers: {
@@ -235,6 +251,9 @@ export async function runSimulatedUserJudge(
     const thread = threadFactory.start({ codexOptions, threadOptions });
     const turn = await thread.run(prompt, options.signal === undefined ? {} : { signal: options.signal });
     assertReviewOnlyCodexTrace(turn.items);
+    if (options.configuration.shellAccess === false && turn.items.some((item) => item.type === "command_execution")) {
+      throw new Error("Versioned judge cannot use shell or filesystem execution");
+    }
     const review = options.reviewStore.finalizedResult();
     if (review === undefined) {
       throw new Error("Simulated-user judge ended without submitReview finalizing complete review coverage");
@@ -257,7 +276,7 @@ export async function runSimulatedUserJudge(
         webSearchMode: "disabled" as const,
         allowedMcpServer: SIMULATED_USER_MCP_SERVER_NAME,
         allowedTools: SIMULATED_USER_MCP_TOOL_NAMES,
-        shellAccess: true as const,
+        shellAccess: options.configuration.shellAccess !== false,
         environmentKeys: Object.keys(environment).sort(),
       },
       codexThreadId: thread.id,

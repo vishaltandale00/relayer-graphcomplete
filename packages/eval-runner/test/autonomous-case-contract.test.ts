@@ -182,3 +182,26 @@ describe("autonomous case catalog projection", () => {
     expect(Object.isFrozen(catalog)).toBe(true);
   });
 });
+
+
+describe("interactive case identity and privacy", () => {
+  it("pins private facts and rubric while projecting only public operational defaults", () => {
+    const legacy = createAutonomousCaseSnapshot(caseInput());
+    const interactive = { schemaVersion: 1 as const, participantBrief: "PRIVATE_TASTE_SENTINEL",
+      reviewerRubric: { version: "human-pilot-v1", criteria: ["PRIVATE_GRADE_SENTINEL"] },
+      endpoint: "An agreed itinerary", maxCompletions: 5, research: "current-sources-and-dates" as const };
+    const current = createAutonomousCaseSnapshot({ ...caseInput(), interactive });
+    const publicCase = sanitizeAutonomousCaseSnapshot(current);
+    expect(publicCase.interactive).toEqual({ schemaVersion: 1, endpoint: interactive.endpoint, maxCompletions: 5, research: interactive.research });
+    expect(JSON.stringify(publicCase)).not.toMatch(/PRIVATE_|participantBrief|reviewerRubric/);
+    for (const changed of [{ ...interactive, participantBrief: "Different taste" }, { ...interactive, reviewerRubric: { version: "v2", criteria: ["New criteria"] } }]) {
+      expect(digestAutonomousCaseSnapshot(createAutonomousCaseSnapshot({ ...caseInput(), interactive: changed }))).not.toBe(digestAutonomousCaseSnapshot(current));
+    }
+    interactive.reviewerRubric.criteria.push("Later edit");
+    expect(current.interactive?.reviewerRubric.criteria).toHaveLength(1);
+    expect(sanitizeAutonomousCaseSnapshot(legacy)).not.toHaveProperty("interactive");
+    expect(digestAutonomousCaseSnapshot(legacy)).toBe(digestAutonomousCaseSnapshot(createAutonomousCaseSnapshot(caseInput())));
+    expect(() => createAutonomousCaseSnapshot({ ...caseInput(), interactive: { ...interactive, maxCompletions: 0 } })).toThrow("completion limit");
+    expect(() => createAutonomousCaseSnapshot({ ...caseInput(), interactive: { ...interactive, reviewerRubric: { version: "v1", criteria: [] } } })).toThrow("criteria");
+  });
+});

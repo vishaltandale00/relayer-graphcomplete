@@ -1,9 +1,11 @@
+import { completionArtifactEvidence } from "./task-completion-artifacts.mjs";
+import { abortable } from "./abortable.mjs";
 import { interactiveTripCase } from "./interactive-trip-case.mjs";
 import { evalSelectionRequiresLiveAuthorization, validateExternalLiveAuthorization } from "../eval-renderer/eval-live-authorization.js";
 import { createHash, randomUUID } from "node:crypto";
 import { execFile } from "node:child_process";
 import { createReadStream, createWriteStream } from "node:fs";
-import { cp, link, mkdir, open, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
+import { cp, link, mkdir, open, readFile, readdir, realpath, rename, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { Transform } from "node:stream";
 import { pipeline } from "node:stream/promises";
@@ -941,6 +943,7 @@ function summarize(run) {
 export class EvalService {
   constructor({
     stateFile,
+    setupRegistry = null,
     productSession,
     configurationPaths,
     onChanged = () => {},
@@ -970,6 +973,7 @@ export class EvalService {
     semanticChildDiscoveryClock = realDiscoveryClock,
   }) {
     this.stateFile = stateFile;
+    this.setupRegistry = setupRegistry;
     this.productSession = productSession;
     this.configurationPaths = configurationPaths;
     this.onChanged = onChanged;
@@ -1079,6 +1083,8 @@ export class EvalService {
         .filter(({ id }) => !this.unavailableCaseIds.has(id))
         .map(({ promptsForRun: _promptsForRun, gradeExecution: _gradeExecution, ...definition }) => definition)),
       suites: copy((this.externalCatalog?.suites ?? []).map((manifest) => projectCapabilitySuiteCatalog(manifest, [...this.externalCases.values()].map((entry) => entry.boundCase))).map((suite) => {
+        const interactiveMember = suite.members.find(({ caseId }) => this.externalCases.get(caseId)?.boundCase.snapshot.interactive);
+        if (interactiveMember) return { ...suite, available: false, unavailableReason: "Interactive cases require a participant. Open them in Human Grader." };
         const unavailableMember = suite.members.find(({ caseId }) => this.unavailableCaseIds.has(caseId));
         return unavailableMember === undefined ? suite : {
           ...suite,
@@ -1122,7 +1128,7 @@ export class EvalService {
     return copy({ ...run, summary: summarize(run) });
   }
 
-  async judgeImportedConversation(executionId, judgeConfigurationName) {
+  async judgeImportedConversation(executionId, judgeConfigurationName, judgeSetupRevisionId = null) {
     const located = this.#findExecution(executionId);
     if (located.run.kind !== "imported-conversation" || located.execution.kind !== "imported-conversation") {
       throw new Error("Only imported conversation executions can use this judge action.");
@@ -1138,13 +1144,14 @@ export class EvalService {
     const operation = this.#judgeImportedExecution({
       ...located,
       judgeConfigurationName,
+      judgeSetup: simulatedUserJudgeIds.has(judgeConfigurationName) ? this.setupRegistry?.selected("judge", judgeSetupRevisionId) : null,
     }).finally(() => this.running.delete(located.run.id));
     this.running.set(located.run.id, operation);
     await operation;
     return this.getRun(located.run.id);
   }
 
-  async rejudgeExecution(executionId, judgeConfigurationName, liveAuthorization = null) {
+  async rejudgeExecution(executionId, judgeConfigurationName, liveAuthorization = null, judgeSetupRevisionId = null) {
     const located = this.#findExecution(executionId);
     if (!simulatedUserJudgeIds.has(judgeConfigurationName)) {
       throw new Error("Judge-only reruns require a simulated-user judge configuration.");
@@ -1152,6 +1159,7 @@ export class EvalService {
     if (this.simulatedUserJudgeRunner === null) {
       throw new Error("Simulated-user judge is not available in this EvalService.");
     }
+    const judgeSetup = this.setupRegistry?.selected("judge", judgeSetupRevisionId);
     const operationKey = `rejudge:${executionId}`;
     if (this.running.has(operationKey)) throw new Error("This execution is already being rejudged.");
 
@@ -1190,6 +1198,7 @@ export class EvalService {
       const executionForJudge = {
         ...located.execution,
         judgeConfiguration: { name: judgeConfigurationName },
+        ...(judgeSetup ? { judgeSetup } : {}),
       };
       const accepted = [];
       for (const turn of located.execution.turns || []) {
@@ -1322,6 +1331,7 @@ export class EvalService {
     }
     const harnessConfigurationNames = selection?.harnessConfigurationNames;
     const judgeConfigurationName = selection?.judgeConfigurationName;
+    const judgeSetup = simulatedUserJudgeIds.has(judgeConfigurationName) ? this.setupRegistry?.selected("judge", selection?.judgeSetupRevisionId) : null;
     if (Array.isArray(harnessConfigurationNames) && harnessConfigurationNames.some((name) => (
       this.configurations.get(name)?.implementation === "prime.agent"
       && (this.selectPrimeModel === null || this.primeModelAvailability?.(name)?.available === false)
@@ -1330,6 +1340,9 @@ export class EvalService {
       this.unavailableCaseIds.has(id) || !this.cases.some((item) => item.id === id)
     ))) {
       throw new Error("Test run contains an unknown test case.");
+    }
+    if (testCaseIds.some((id) => this.externalCases.get(id)?.boundCase.snapshot.interactive)) {
+      throw new Error("Interactive cases require a participant. Open them in Human Grader.");
     }
     if (testCaseIds.some((id) => this.externalCases.has(id))) await this.externalCatalog.assertUnchanged();
     const incompatibleJudgeCase = this.cases.find((item) => (
@@ -1497,6 +1510,7 @@ export class EvalService {
       testCaseIds: [...testCaseIds],
       harnessConfigurationNames: [...harnessConfigurationNames],
       judgeConfigurationName,
+      ...(judgeSetup ? { judgeSetup: copy(judgeSetup) } : {}),
       liveAuthorization: externalLiveAuthorization ?? (testCaseIds.includes(RECURSIVE_COMPLETE_EVAL_CASE_ID)
         || testCaseIds.includes(RECURSIVE_GRAPH_MEMORY_CASE_ID)
         ? copy(selection?.liveAuthorization || null)
@@ -1545,6 +1559,7 @@ export class EvalService {
           ? { pinnedModelResolution: copy(pinnedLiveModelResolutions.get(plan.harnessConfigurationName)) }
           : {}),
         judgeConfiguration: plan.judgeConfiguration,
+        ...(judgeSetup ? { judgeSetup: copy(judgeSetup) } : {}),
         status: "queued",
         lifecycle: {
           status: "queued",
@@ -1767,11 +1782,13 @@ export class EvalService {
     throw new Error(`Unknown execution: ${executionId}`);
   }
 
-  async #judgeImportedExecution({ run, execution, judgeConfigurationName }) {
+  async #judgeImportedExecution({ run, execution, judgeConfigurationName, judgeSetup }) {
     run.status = "judging";
     run.judgeConfigurationName = judgeConfigurationName;
     execution.status = "judging";
     execution.judgeConfiguration = { name: judgeConfigurationName };
+    if (judgeSetup) execution.judgeSetup ??= copy(judgeSetup);
+    const executionForJudge = { ...execution, judgeConfiguration: { name: judgeConfigurationName }, ...(judgeSetup ? { judgeSetup: copy(judgeSetup) } : {}) };
     execution.error = null;
     await this.#changed();
 
@@ -1852,7 +1869,7 @@ export class EvalService {
         const eligible = accepted.filter(({ turn }) => turn.deterministicPassed);
         for (const [index, candidate] of eligible.entries()) {
           const result = await this.#judgeAcceptedTurn({
-            execution,
+            execution: executionForJudge,
             ...candidate,
             reviewSequence: { index, count: eligible.length },
           });
@@ -1882,6 +1899,25 @@ export class EvalService {
     }
   }
 
+  async calibrationEvidence(executionId) {
+    const exported = await this.exportAnnotatedExecution(executionId);
+    const evidence = JSON.parse(await readFile(join(dirname(this.stateFile), ...exported.bundleRef.split("/")), "utf8"));
+    const execution = evidence.execution;
+    return { source: { kind: "execution", id: executionId }, evidence, evidenceDigest: `sha256:${evidence.integritySha256.replace(/^sha256:/, "")}`,
+      caseIdentity: { testCaseId: execution.testCaseId, caseSnapshotDigest: execution.caseSnapshotDigest, harnessConfigurationDigest: execution.harnessConfigurationDigest },
+      subjects: execution.turns.filter((turn) => turn.status === "accepted").map((turn) => this.calibrationSubject(turn)) };
+  }
+  calibrationSubject(turn) {
+    return { kind: "turn", id: String(turn.interactionId), threadId: String(turn.threadId),
+      graphNodeId: String(turn.graphNodeId), rootLayerId: String(turn.rootLayerId) };
+  }
+  calibrationJudgment({ executionId, turnId, judgeResultId }) {
+    const { execution } = this.#findExecution(executionId);
+    const turn = execution.turns.find((item) => String(item.interactionId) === String(turnId));
+    const result = turn?.judgeResults.find((item) => item.id === judgeResultId);
+    if (!result) throw new Error("Unknown judgment against original calibration evidence.");
+    return copy({ subject: this.calibrationSubject(turn), result });
+  }
   async exportAnnotatedExecution(executionId) {
     if (typeof this.annotationSnapshotLoader !== "function") {
       throw new Error("Annotation export is unavailable in this EvalService.");
@@ -2427,13 +2463,20 @@ export class EvalService {
     return { ...executed, threadDefinition: null, workspaceChecks: new Map() };
   }
 
-  async prepareHumanTask({ testCaseId, harnessConfigurationName, sessionId }) {
-    if (this.externalCases.has(testCaseId)) throw new Error("External catalog human tasks require budget and credential approval, which Human Grader does not yet support.");
-    const definition = evalCases.find((item) => item.id === testCaseId);
+  async prepareHumanTask({ testCaseId, harnessConfigurationName, sessionId, maxCompletions, endpoint, mode = "human", liveAuthorization }, { signal } = {}) {
+    signal?.throwIfAborted();
+    const external = this.externalCases.get(testCaseId);
+    const definition = this.cases.find((item) => item.id === testCaseId);
     const configuration = this.configurations.get(harnessConfigurationName);
     if (!definition || !configuration) throw new Error("Choose a known case and harness.");
     if (configuration.graphCapabilityProfile?.search === "query-v1" && this.targetKey !== GRAPH_SEARCH_EVAL_TARGET) {
       throw new Error("Graph-search Eval is qualified only for macOS Apple Silicon.");
+    }
+    const interactive = external?.boundCase.snapshot.interactive;
+    if (external) {
+      await abortable(signal, () => this.externalCatalog.assertUnchanged());
+      if (!external.available) throw new Error(external.unavailableReason || "External case unavailable.");
+      if (interactive && (endpoint !== interactive.endpoint || maxCompletions > interactive.maxCompletions)) throw new Error("Interactive task endpoint or completion limit differs from its case contract.");
     }
     const execution = {
       id: sessionId, testRunId: sessionId, testCaseId,
@@ -2442,20 +2485,59 @@ export class EvalService {
       caseSnapshotDigest: definition.caseSnapshotDigest || null,
       caseSnapshot: copy(definition.caseSnapshot || null), threadIds: [],
     };
+    if (external) {
+      execution.catalogIdentity = copy(this.externalCatalog.identity);
+      const live = !["fixture.task-system", "fixture.node-detail", "fixture.graph-memory"].includes(configuration.implementation);
+      if (live || mode === "simulated") {
+        if (liveAuthorization?.confirmed !== true || liveAuthorization.billingMode !== "subscription-only"
+          || liveAuthorization.testCaseId !== testCaseId || liveAuthorization.harnessConfigurationName !== harnessConfigurationName
+          || liveAuthorization.maxCompletions !== maxCompletions || liveAuthorization.endpoint !== endpoint || liveAuthorization.mode !== mode) {
+          throw new Error("External interactive tasks require confirmation bound to this case, harness, endpoint, mode and completion limit.");
+        }
+        execution.liveAuthorization = copy(liveAuthorization);
+      }
+      if (live) {
+        if (typeof this.validateLiveCredential !== "function") throw new Error("External interactive task has no trusted credential validator.");
+        const route = await abortable(signal, () => this.validateLiveCredential(configuration, "connected-product-provider"));
+        if (route?.providerAdapterId !== "codex-subscription") throw new Error("External interactive tasks currently require the Codex subscription; API spending is not authorized.");
+        const selected = route.selectedModel;
+        const productRoute = route.productModelSelection === true
+          && typeof selected?.providerId === "string" && selected.providerId.trim() !== ""
+          && typeof selected?.modelId === "string" && selected.modelId.trim() !== "";
+        const configuredRoute = route.productModelSelection === false && selected === null
+          && configuration.implementation === "codex.basic"
+          && typeof configuration.settings?.model === "string" && configuration.settings.model.trim() !== ""
+          && route.configurationModel === configuration.settings.model.trim()
+          && harnessUsesConfigurationModel(await abortable(signal, () => this.#productRequest("/api/model-settings", { signal })), harnessConfigurationName);
+        if (!productRoute && !configuredRoute) throw new Error("External interactive task did not resolve an exact provider model route.");
+        execution.pinnedModelResolution = copy(route);
+      }
+    }
     let plan;
-    if (projectCaseIds.has(testCaseId)) {
-      if (this.platform !== "darwin") throw new Error("Pinned project cases are local Mac only.");
-      await this.#prepareProjectFixture(execution, definition);
+    if (this.projectCaseIds.has(testCaseId)) {
+      if (!external && this.platform !== "darwin") throw new Error("Pinned project cases are local Mac only.");
+      await abortable(signal, () => this.#prepareProjectFixture(execution, definition, { signal }));
       plan = definition.threads.map((item) => ({
         ...copy(item), permissionProfileId: resolveH3PermissionProfile(configuration, item.permissionProfileId).effectiveProfileId,
       }));
     } else {
       plan = [{ id: testCaseId, name: definition.name, prompts: resolveEvalCasePrompts(definition, sessionId), permissionProfileId: selectEvalPermissionProfile(configuration) }];
     }
-    return { execution, name: definition.name, description: definition.description, humanBrief: definition.humanBrief || null, humanRubric: definition.humanRubric || null, plan, casePlanDigest: sha256(canonicalJson(definition.humanBrief ? { plan, humanBrief: definition.humanBrief, humanRubric: definition.humanRubric } : plan)) };
+    const humanBrief = interactive?.participantBrief ?? definition.humanBrief ?? null;
+    const humanRubric = interactive ? [interactive.reviewerRubric.version, ...interactive.reviewerRubric.criteria].join("\n") : definition.humanRubric ?? null;
+    return { execution, name: definition.name, description: definition.description, humanBrief, humanRubric, plan,
+      casePlanDigest: sha256(canonicalJson({ plan, humanBrief, humanRubric, caseSnapshotDigest: execution.caseSnapshotDigest })) };
   }
 
-  async createHumanTaskThread(prepared, step) {
+  async assertHumanTaskCatalog(prepared) {
+    if (!prepared.execution.catalogIdentity) return;
+    if (!this.externalCatalog || !this.externalCases.has(prepared.execution.testCaseId)) throw new Error("The pinned external catalog is unavailable.");
+    await this.externalCatalog.assertUnchanged();
+    if (canonicalJson(prepared.execution.catalogIdentity) !== canonicalJson(this.externalCatalog.identity)) throw new Error("External task catalog identity changed.");
+  }
+
+  async createHumanTaskThread(prepared, step, { signal } = {}) {
+    await abortable(signal, () => this.assertHumanTaskCatalog(prepared));
     const item = prepared.plan[step];
     if (!item) throw new Error("Unknown case step.");
     // A session's first route owns every case thread, including persisted sessions
@@ -2467,21 +2549,33 @@ export class EvalService {
       execution: prepared.execution, title: `${prepared.name} · human · ${item.name}`,
       prompt: item.prompts[0], projectId: prepared.execution.projectId ?? null,
       permissionProfileId: item.permissionProfileId,
+      signal,
     });
     prepared.execution.pinnedModelResolution ??= copy(prepared.execution.modelResolution);
     return thread;
   }
 
-  async gradeHumanTaskStep(prepared, step) {
+  async completionJudgeArtifactEvidence(prepared, { signal } = {}) {
+    await abortable(signal, () => this.assertHumanTaskCatalog(prepared));
+    return completionArtifactEvidence(prepared.execution.fixture?.workspaceDirectory, { signal });
+  }
+
+  async gradeHumanTaskStep(prepared, step, { signal } = {}) {
+    signal?.throwIfAborted();
     const execution = prepared.execution;
     if (!execution.fixture) return { status: "not_run", reason: "Original scripted graph checks do not certify an adaptive human trajectory." };
     const workspaceDirectory = join(dirname(this.stateFile), "runs", encodeURIComponent(execution.testRunId), "executions", encodeURIComponent(execution.id), "workspace");
-    const definition = evalCases.find((item) => item.id === execution.testCaseId);
-    const result = h3CaseIds.has(definition.id)
-      ? await this.workspaceGrader({ workspaceDirectory, grade: prepared.plan[step].workspaceGrade })
+    await abortable(signal, () => this.assertHumanTaskCatalog(prepared));
+    const definition = this.cases.find((item) => item.id === execution.testCaseId);
+    const external = this.externalCases.get(definition.id);
+    const result = await abortable(signal, async () => external
+      ? await this.#runExternalCatalogCallback(async () => validateEvalChecksV1(await external.grade({ caseId: definition.id, workspaceDirectory, fixture: execution.fixture, threadDefinition: prepared.plan[step] })))
+      : h3CaseIds.has(definition.id)
+      ? await this.workspaceGrader({ workspaceDirectory, grade: prepared.plan[step].workspaceGrade, signal })
       : calibrationAutonomousCaseIds.has(definition.id)
-        ? await this.calibrationWorkspaceGrader({ caseId: definition.id, workspaceDirectory, baseRevision: execution.fixture.seededCommit })
-        : await this.frontierWorkspaceGrader({ caseId: definition.id, workspaceDirectory });
+        ? await this.calibrationWorkspaceGrader({ caseId: definition.id, workspaceDirectory, baseRevision: execution.fixture.seededCommit, signal })
+        : await this.frontierWorkspaceGrader({ caseId: definition.id, workspaceDirectory, signal }));
+    signal?.throwIfAborted();
     try {
       const artifact = await captureTurnArtifactSnapshot(execution, workspaceDirectory, `human-step-${step + 1}-${randomUUID()}`);
       return { status: "recorded", result, artifact };
@@ -2490,7 +2584,8 @@ export class EvalService {
     }
   }
 
-  async #prepareProjectFixture(execution, definition) {
+  async #prepareProjectFixture(execution, definition, { signal } = {}) {
+    signal?.throwIfAborted();
     const executionDirectory = join(
       dirname(this.stateFile),
       "runs",
@@ -2501,7 +2596,7 @@ export class EvalService {
     const workspaceDirectory = join(executionDirectory, "workspace");
     const external = this.externalCases.get(definition.id);
     if (external) {
-      await this.externalCatalog.assertUnchanged();
+      await abortable(signal, () => this.externalCatalog.assertUnchanged());
       if (canonicalJson(execution.catalogIdentity) !== canonicalJson(this.externalCatalog.identity)) {
         throw new Error("External Eval catalog identity changed after run creation.");
       }
@@ -2532,14 +2627,20 @@ export class EvalService {
         workspaceDirectory,
         platform: this.platform,
       });
+    signal?.throwIfAborted();
     validateFixtureAgainstCaseSnapshot(execution, fixture);
     const project = await this.#productRequest("/api/projects", {
+      signal,
       method: "POST",
       body: {
         name: `${definition.name} · ${execution.id.slice(0, 8)}`,
         path: workspaceDirectory,
+        separateSubfolder: true,
       },
     });
+    if (typeof project.path !== "string" || await realpath(project.path) !== await realpath(workspaceDirectory)) {
+      throw new Error("Eval project must use the isolated fixture workspace; refusing candidate dispatch.");
+    }
     execution.projectId = project.id;
     execution.fixture = copy(fixture);
     return { project, fixture, workspaceDirectory, isH3, isCalibration, external };
@@ -2593,7 +2694,7 @@ export class EvalService {
     }
   }
 
-  async #createProductThread({ execution, title, prompt, projectId = null, permissionProfileId = "auto" }) {
+  async #createProductThread({ execution, title, prompt, projectId = null, permissionProfileId = "auto", signal }) {
     let selectedModel = execution.pinnedModelResolution?.selectedModel;
     let productModelSelection = execution.pinnedModelResolution?.productModelSelection;
     const configurationOwned = execution.pinnedModelResolution === undefined && this.selectModel
@@ -2658,6 +2759,7 @@ export class EvalService {
     };
     const thread = await this.#productRequest("/api/threads", {
       method: "POST",
+      signal,
       body: {
         title,
         initialMessage: prompt,
@@ -2745,6 +2847,7 @@ export class EvalService {
       artifactAuthority: "references",
       rubricVersion: GRAPH_PRESENTATION_RUBRIC_V11.rubricVersion,
       judgeConfiguration: copy(execution.judgeConfiguration),
+      ...(execution.judgeSetup ? { judgeSetup: copy(execution.judgeSetup) } : {}),
       references: emptyJudgeReferences(),
       review: null,
       coverage: null,
@@ -2785,7 +2888,8 @@ export class EvalService {
         },
         artifact: judgeArtifactForExecution(execution, turn),
         artifactEvidence: judgeArtifactEvidenceForExecution(execution, turn),
-        rubric: copy(GRAPH_PRESENTATION_RUBRIC_V11),
+        rubric: copy(execution.judgeSetup?.rubric ?? GRAPH_PRESENTATION_RUBRIC_V11),
+        ...(execution.judgeSetup ? { judgeSetup: Object.fromEntries(["id", "digest", "promptVersion", "promptTemplate", "inputPromptTemplate", "settings", "rubric", "scoringRules"].map((key) => [key, copy(execution.judgeSetup[key])])) } : {}),
         judgeConfiguration: copy(execution.judgeConfiguration),
         ...(provenance === null ? {} : { provenance: copy(provenance) }),
       };
@@ -3098,6 +3202,7 @@ export class EvalService {
   async #productRequest(path, options = {}) {
     const response = await fetch(new URL(path, this.productSession.origin), {
       method: options.method || "GET",
+      signal: options.signal,
       headers: {
         Accept: "application/json",
         Cookie: `${this.productSession.cookie.name}=${this.productSession.cookie.value}`,

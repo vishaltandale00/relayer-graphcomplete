@@ -41,8 +41,10 @@ export function sanitizeAutonomousCaseSnapshot(snapshot: AutonomousCaseSnapshot)
     contentDigest: snapshot.artifacts.verifier.contentDigest,
     mandatoryGates: structuredClone(snapshot.artifacts.verifier.mandatoryGates),
   } as const;
+  const { interactive, ...publicSnapshot } = structuredClone(snapshot);
   return deepFreeze({
-    ...structuredClone(snapshot),
+    ...publicSnapshot,
+    ...(interactive === undefined ? {} : { interactive: { schemaVersion: interactive.schemaVersion, endpoint: interactive.endpoint, maxCompletions: interactive.maxCompletions, research: interactive.research } }),
     artifacts: {
       task: structuredClone(snapshot.artifacts.task),
       workspace: structuredClone(snapshot.artifacts.workspace),

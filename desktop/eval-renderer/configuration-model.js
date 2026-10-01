@@ -40,6 +40,7 @@ export function selectionFromControls(root) {
     testCaseIds: suiteId === null ? values("cases") : [],
     harnessConfigurationNames: values("harnesses"),
     judgeConfigurationName: values("judge")[0],
+    ...(root.querySelector("#judgeSetupRevision")?.value ? { judgeSetupRevisionId: root.querySelector("#judgeSetupRevision").value } : {}),
   };
 }
 

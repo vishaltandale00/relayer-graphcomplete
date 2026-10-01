@@ -12,6 +12,13 @@ describe("external evaluation catalog boundary", () => {
     expect(catalog.suites).toHaveLength(1);
     expect(JSON.stringify(catalog.cases.map(({ definition }) => definition))).not.toContain("sealedPath");
   });
+  it("rejects private interactive metadata on public definitions", () => {
+    const catalog = createSyntheticExternalCatalog();
+    const first = catalog.cases[0]!;
+    for (const key of ["humanBrief", "humanRubric", "interactive", "participantBrief"]) {
+      expect(() => validateEvalCatalogV1({ ...catalog, cases: [{ ...first, definition: { ...first.definition, [key]: "private" } }] })).toThrow("Private interactive metadata");
+    }
+  });
   it("rejects missing callbacks and project threads with invalid authority", () => {
     const catalog = createSyntheticExternalCatalog();
     const first = catalog.cases[0]!;

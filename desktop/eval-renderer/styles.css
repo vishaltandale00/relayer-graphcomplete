@@ -10,3 +10,10 @@
 .human-sessions { display: grid; gap: 8px; }
 .human-timeline pre { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 400px; overflow: auto; }
 .human-timeline li { padding-block: 8px; }
+
+#humanView summary { cursor: pointer; font-weight: 600; }
+#humanView details > .human-sessions { margin-top: 12px; }
+#humanHistory { margin-top: 16px; }
+#humanView .compact-choice { display: flex; align-items: flex-start; gap: 10px; }
+#humanView .compact-choice input { width: auto; flex: none; margin-top: 3px; }
+#humanExecutionSummary { font-weight: 400; color: var(--muted); }

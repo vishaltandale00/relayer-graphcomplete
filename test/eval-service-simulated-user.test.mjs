@@ -1,3 +1,5 @@
+import { CalibrationService } from "../desktop/eval-main/calibration-service.mjs";
+import { SetupRegistry } from "../desktop/eval-main/setup-registry.mjs";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -308,7 +310,12 @@ describe("EvalService simulated-user result persistence", () => {
   it("runs after deterministic checks and reloads the immutable completed artifact", async () => {
     const { stateFile, configurationPath } = await testPaths();
     globalThis.fetch = fakeAcceptedProduct();
+    const setupRegistry = await new SetupRegistry({ stateFile: join(dirname(stateFile), "setups.json"), feedbackLoader: async (ref) => ({ ...ref, feedback: { value: 2, comment: "TARGET HUMAN GRADE" } }) }).open();
+    const baseline = setupRegistry.selected("judge");
+    const selectedSetup = await setupRegistry.publish({ ...baseline, predecessorId: baseline.id, name: "Manual judge revision", promptVersion: "judge-manual-v1",
+      settings: { model: "gpt-test-revised", modelReasoningEffort: "low" }, feedback: [{ sessionId: "source-human", gradeIndex: 0 }] });
     const calls = [];
+    let nativeJudgment = false;
     const runner = async (context) => {
       calls.push(context);
       return {
@@ -320,7 +327,10 @@ describe("EvalService simulated-user result persistence", () => {
         screenshotRefs: ["screenshots/shot-root.json"],
         reviewRef: "reviews.json",
         coverageRef: "coverage.json",
-        review: { turn: { ratings: { answer_quality: 4 } } },
+        review: nativeJudgment ? { schemaVersion: 6, contractId: "recursive-presentation-judge-v6", turn: { criterionJudgments: {
+          presentation_quality: { score: 6, reason: "Meaningful visible graph", evidence: [{ screenshotId: "shot-root" }] },
+          answer_quality: { score: 5, reason: "Response value", evidence: [{ screenshotId: "shot-root" }] },
+        }, scoreCeiling: { maximum: 8 } } } : { turn: { ratings: { answer_quality: 4 } } },
         coverage: { complete: true, missingSubjects: [] },
         summary: "Complete screenshot-grounded review.",
       };
@@ -329,7 +339,9 @@ describe("EvalService simulated-user result persistence", () => {
       stateFile,
       productSession: productSession(),
       configurationPaths: [configurationPath],
-      simulatedUserJudgeRunner: runner,
+      simulatedUserJudgeRunner: runner, setupRegistry,
+      annotationSnapshotLoader: async (threadIds) => ({ schemaVersion: 1, kind: "relayer_eval_annotation_snapshot_set", annotationsSha256: "sha256:human-labels",
+        threads: threadIds.map((threadId) => ({ threadId, annotations: [] })) }),
     }).open();
 
     expect(service.catalog().judges.map(({ id }) => id)).toEqual([
@@ -346,11 +358,16 @@ describe("EvalService simulated-user result persistence", () => {
       HTTPX_PROXY_AUTH_REPORT_CASE_ID,
       ...calibrationAutonomousCaseIds,
     ]);
-    const created = await service.createRun(simulatedUserSelection());
+    const created = await service.createRun({ ...simulatedUserSelection(), judgeSetupRevisionId: selectedSetup.id });
+    expect(created.judgeSetup).toEqual(selectedSetup);
     const completed = await waitForCompletedRun(service, created.id);
 
     expect(completed.status).toBe("passed");
     expect(calls).toHaveLength(1);
+    expect(completed.executions[0].judgeSetup).toEqual(selectedSetup);
+    expect(completed.executions[0].turns[0].judgeResults[0].judgeSetup).toEqual(selectedSetup);
+    expect(calls[0].judgeSetup).toMatchObject({ id: selectedSetup.id, settings: selectedSetup.settings });
+    expect(JSON.stringify(calls)).not.toContain("TARGET HUMAN GRADE");
     expect(calls[0]).toMatchObject({
       schemaVersion: 1,
       execution: {
@@ -427,6 +444,36 @@ describe("EvalService simulated-user result persistence", () => {
     const restored = reloaded.getRun(completed.id);
     expect(restored.executions[0].turns[0].judgeResults[0]).toEqual(turn.judgeResults[0]);
     expect(reloaded.catalog().judges.map(({ id }) => id)).toEqual(["deterministic-graph-contract"]);
+    expect(await readFile(bundleFile, "utf8")).toBe(bundleBeforeReload);
+    const originalResult = structuredClone(turn.judgeResults[0]);
+    const rerun = await service.rejudgeExecution(completed.executions[0].id, "simulated-user", null, baseline.id);
+    expect(rerun.results[0].judgeSetup).toEqual(baseline);
+    const rerunExecution = service.getRun(completed.id).executions[0];
+    expect(rerunExecution.judgeSetup).toEqual(selectedSetup);
+    expect(rerunExecution.turns[0].judgeResults[0]).toEqual(originalResult);
+    expect(rerunExecution.turns[0].judgeResults).toHaveLength(2);
+    const calibration = await new CalibrationService({ stateFile: join(dirname(stateFile), "calibration.json"), setups: setupRegistry, evalService: service, author: { id: "human", displayName: "Human" } }).open();
+    const set = await calibration.freeze({ name: "Native graph agreement", members: [{ source: { kind: "execution", id: completed.executions[0].id }, membership: "held-out",
+      labels: [{ dimension: "graph-presentation", scale: "graph-presentation-v11-1-8", subject: { kind: "turn", id: "interaction-1" }, criterion: "presentation_quality", value: 6, comment: "FROZEN HUMAN TARGET LABEL" }] }] });
+    const comparison = await calibration.compare({ baselineRevisionId: baseline.id, candidateRevisionId: selectedSetup.id, calibrationSetId: set.id });
+    const source = { comparisonId: comparison.comparison.id, memberId: set.members[0].id, labelId: set.members[0].labels[0].id };
+    const partial = await calibration.observe({ ...source, revisionId: baseline.id, judgeResultId: rerun.results[0].id });
+    expect(partial).toMatchObject({ status: "incomplete", rows: [{ baseline: { status: "incomplete", score: null, agreesWithHuman: null }, humanTarget: 6 }] });
+    nativeJudgment = true;
+    for (const revision of [baseline, selectedSetup]) {
+      const judged = await service.rejudgeExecution(completed.executions[0].id, "simulated-user", null, revision.id);
+      expect(judged.results[0].error).toBeNull();
+      expect(judged.results[0]).toMatchObject({ status: "completed", rubricVersion: "graph-presentation-rubric-v11", coverage: { complete: true }, review: { turn: { criterionJudgments: { presentation_quality: { score: 6 } } } } });
+      await calibration.observe({ ...source, revisionId: revision.id, judgeResultId: judged.results[0].id });
+    }
+    const agreed = calibration.report(comparison.comparison.id);
+    expect(agreed).toMatchObject({ status: "completed", comparison: { dimension: "human-judge-agreement" }, rows: [{ baseline: { score: 6, agreesWithHuman: true }, candidate: { score: 6, agreesWithHuman: true } }] });
+    expect(JSON.stringify(calls)).not.toMatch(/FROZEN HUMAN TARGET LABEL|TARGET HUMAN GRADE/);
+    expect(service.getRun(completed.id).executions[0].turns[0].judgeResults[0]).toEqual(originalResult);
+    const reloadedCalibration = await new CalibrationService({ stateFile: join(dirname(stateFile), "calibration.json"), setups: setupRegistry, evalService: service }).open();
+    expect(reloadedCalibration.report(comparison.comparison.id)).toEqual(agreed);
+    const bundle = await calibration.export();
+    expect(bundle.sets[0].members[0].labels[0].value).toBe(6);
     expect(await readFile(bundleFile, "utf8")).toBe(bundleBeforeReload);
 
   });
@@ -837,6 +884,18 @@ describe("EvalService simulated-user result persistence", () => {
   });
 
 
+  it("rejects product project consolidation outside the isolated fixture before dispatch", async () => {
+    const { stateFile, configurationPath, directory } = await testPaths();
+    const product = fakeExternalAcceptedProduct();
+    globalThis.fetch = vi.fn(async (url, options = {}) => {
+      if (new URL(url).pathname === "/api/projects" && options.method === "POST") return jsonResponse({ id: "ancestor-project", path: directory });
+      return product.fetch(url, options);
+    });
+    const service = await new EvalService({ stateFile, productSession: productSession(), configurationPaths: [configurationPath], platform: "darwin", externalCatalog: withExternalIdentity(createSyntheticExternalCatalog()) }).open();
+    await expect(service.prepareHumanTask({ testCaseId: "fixture.external-a", harnessConfigurationName: "fixture-task-system", sessionId: "isolated-task", maxCompletions: 2, endpoint: "A result" })).rejects.toThrow("isolated fixture");
+    expect(product.fetch.mock.calls.some(([url, options]) => new URL(url).pathname === "/api/threads" && options?.method === "POST")).toBe(false);
+  });
+
   it("runs generic external cases and suites through materialize, grade, and durable catalog provenance", async () => {
     const { stateFile, configurationPath } = await testPaths();
     const product = fakeExternalAcceptedProduct();
@@ -1183,7 +1242,7 @@ function fakeExternalAcceptedProduct() {
     if (path === "/api/projects" && options.method === "POST") {
       const body = JSON.parse(options.body);
       projects.push(body);
-      return jsonResponse({ id: `external-project-${++nextProject}` });
+      return jsonResponse({ id: `external-project-${++nextProject}`, path: body.path });
     }
     const layerRoute = /^\/api\/threads\/thread-1\/interactions\/interaction-1\/layers\/(\d+)$/.exec(path);
     if (layerRoute) {
@@ -1191,7 +1250,7 @@ function fakeExternalAcceptedProduct() {
       return jsonResponse({ layer, nodes: output.rootLayer.nodes, edges: output.rootLayer.edges, actions: output.rootLayer.actions });
     }
     if (path === "/api/threads/thread-1" && (options.method === undefined || options.method === "GET")) {
-      return jsonResponse({ id: "thread-1", interactions: [interaction] });
+      return jsonResponse({ id: "thread-1", thread: { id: "thread-1" }, interactions: [interaction] });
     }
     return base(url, options);
   });
@@ -1330,7 +1389,7 @@ function fakeAcceptedProduct() {
       return jsonResponse({ id: "thread-1", rootInteractionId: interaction.id });
     }
     if (path === "/api/threads/thread-1" && (options.method === undefined || options.method === "GET")) {
-      return jsonResponse({ id: "thread-1", interactions: [interaction] });
+      return jsonResponse({ id: "thread-1", thread: { id: "thread-1" }, interactions: [interaction] });
     }
     return jsonResponse({ error: `Unexpected fake product request: ${options.method || "GET"} ${path}` }, 404);
   });

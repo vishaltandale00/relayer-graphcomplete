@@ -720,8 +720,11 @@ export function createLocalSimulatedUserJudgeRunner({
     || typeof resolveCodexRuntime !== "function" || typeof runJudge !== "function") {
     throw new Error("Local simulated-user judge integration is incomplete.");
   }
-  const selectedConfiguration = structuredClone(configuration);
+  const defaultConfiguration = structuredClone(configuration);
   return async (context) => {
+    const selectedConfiguration = context.judgeSetup ? { ...structuredClone(context.judgeSetup.settings),
+      promptVersion: context.judgeSetup.promptVersion, promptTemplate: context.judgeSetup.promptTemplate,
+      inputPromptTemplate: context.judgeSetup.inputPromptTemplate } : defaultConfiguration;
     const rootLayerId = String(context.turn.rootLayerId ?? "");
     if (!rootLayerId) throw new Error("Accepted turn has no root layer for simulated-user review.");
     const topology = await buildAcceptedReviewTopology({
@@ -804,7 +807,7 @@ export function createLocalSimulatedUserJudgeRunner({
       });
       let record;
       try {
-        const codexRuntime = await resolveCodexRuntime();
+        const codexRuntime = await resolveCodexRuntime(selectedConfiguration);
         record = await runJudge({
           executionId: String(context.execution.id),
           originalRequest: context.request.text,

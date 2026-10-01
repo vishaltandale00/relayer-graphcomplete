@@ -1,5 +1,8 @@
-import { execFile } from "node:child_process";
-import { readFile } from "node:fs/promises";
+import { execFile, spawn } from "node:child_process";
+import { mkdtemp, open, readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 
 import { describe, expect, it } from "vitest";
@@ -22,7 +25,26 @@ function variant(config, change) {
 
 describe("design config validation", () => {
   it("accepts H with check-by-check the same results as the preserved prototype checker", async () => {
-    const { stdout } = await run(process.execPath, ["contrast.mjs", "--md"], { cwd: prototype });
+    // The preserved checker calls process.exit(), which can truncate piped
+    // console output. A regular file makes its writes synchronous without
+    // changing the historical reference or weakening the 282-row comparison.
+    const directory = await mkdtemp(join(tmpdir(), "design-reference-"));
+    let stdout;
+    try {
+      const output = await open(join(directory, "reference.md"), "w");
+      try {
+        await new Promise((resolve, reject) => {
+          const child = spawn(process.execPath, ["contrast.mjs", "--md"], {
+            cwd: fileURLToPath(prototype), stdio: ["ignore", output.fd, "pipe"],
+          });
+          let errorOutput = "";
+          child.stderr.on("data", (chunk) => { errorOutput += chunk; });
+          child.once("error", reject);
+          child.once("close", (code, signal) => code === 0 ? resolve() : reject(new Error(`Prototype checker failed (${code ?? signal}): ${errorOutput}`)));
+        });
+      } finally { await output.close(); }
+      stdout = await readFile(join(directory, "reference.md"), "utf8");
+    } finally { await rm(directory, { recursive: true, force: true }); }
     const row = /^\| (light|dark) \| .*? \| `([^`]+)` \| `([^`]+)` \| ([^|]+) \| [^|]+ \| ([^|]+) \|(.*)$/;
     const expected = stdout.split("\n").map((line) => row.exec(line)).filter(Boolean).map(([, mode, a, b, value, floor]) => ({
       key: `${mode}|${a}|${b}|${value.trim()}`, floor: floor.trim() === "—" ? 0 : Number(floor),

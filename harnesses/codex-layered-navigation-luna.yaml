@@ -2,6 +2,8 @@ schemaVersion: 1
 name: codex-layered-navigation-luna
 implementation: codex.basic
 implementationVersion: 1
+revision: 2
+executionAccessContracts: [managed-runtime@1]
 permissionBindings:
   ask:
     sandboxMode: workspace-write

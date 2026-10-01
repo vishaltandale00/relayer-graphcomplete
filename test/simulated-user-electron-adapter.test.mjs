@@ -1265,7 +1265,10 @@ describe("local Electron simulated-user judge adapter", () => {
       captureInputRoundTrip,
     });
 
+    const pinned = { settings: { model: "selected-model", modelReasoningEffort: "low", shellAccess: false }, promptVersion: "selected-local-v1", promptTemplate: "selected template", inputPromptTemplate: "selected input template" };
+    const selectedConfiguration = { ...pinned.settings, promptVersion: pinned.promptVersion, promptTemplate: pinned.promptTemplate, inputPromptTemplate: pinned.inputPromptTemplate };
     const result = await runner({
+      judgeSetup: pinned,
       artifactDirectory,
       execution: { id: "execution-1" },
       artifact: {
@@ -1295,6 +1298,7 @@ describe("local Electron simulated-user judge adapter", () => {
     }));
     expect(runJudge).toHaveBeenCalledTimes(1);
     expect(runJudge).toHaveBeenCalledWith(expect.objectContaining({
+      configuration: selectedConfiguration,
       workingDirectory: artifactDirectory,
       additionalDirectories: [],
       artifactEvidence: undefined,
@@ -1303,6 +1307,7 @@ describe("local Electron simulated-user judge adapter", () => {
       inputOperatorAvailable: false,
     }));
     expect(resolveCodexRuntime).toHaveBeenCalledOnce();
+    expect(resolveCodexRuntime).toHaveBeenCalledWith(selectedConfiguration);
     expect(session.screenshot).toHaveBeenCalledTimes(5);
     expect(session.interact).toHaveBeenCalledTimes(1);
     expect(session.history).toHaveBeenCalledTimes(1);
@@ -1330,10 +1335,7 @@ describe("local Electron simulated-user judge adapter", () => {
       },
     });
     expect(captureInputRoundTrip).toHaveBeenCalledOnce();
-    expect(JSON.parse(await readFile(join(artifactDirectory, "judge-configuration.json"), "utf8"))).toEqual({
-      model: "gpt-5.6-sol",
-      modelReasoningEffort: "high",
-    });
+    expect(JSON.parse(await readFile(join(artifactDirectory, "judge-configuration.json"), "utf8"))).toEqual(selectedConfiguration);
     expect(JSON.parse(await readFile(join(artifactDirectory, "interaction-trace.json"), "utf8"))).toMatchObject({
       session: [{ type: "session-opened" }],
       tools: [{ tool: "screenshot" }],

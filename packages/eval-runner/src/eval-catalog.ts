@@ -91,6 +91,7 @@ export function validateEvalCatalogV1(value: unknown): EvalCatalogV1 {
     const evaluateMandatoryGate = registrationProperties.evaluateMandatoryGate?.value;
     if (!isRecord(definition) || !isRecord(boundCase)) throw new Error("Invalid evaluation case registration.");
     assertSerializable(definition);
+    if (["interactive", "humanBrief", "humanRubric", "participantBrief", "reviewerRubric", "disclosureGuidance"].some((key) => Object.hasOwn(definition, key))) throw new Error("Private interactive metadata belongs in the canonical snapshot, not the public definition.");
     assertSerializable(boundCase);
     for (const key of ["id", "name", "description"] as const) if (typeof definition[key] !== "string" || definition[key].trim() === "") throw new Error(`Evaluation case definition ${key} must be non-empty.`);
     if (caseIds.has(definition.id)) throw new Error(`Duplicate evaluation case ID: ${definition.id}`);

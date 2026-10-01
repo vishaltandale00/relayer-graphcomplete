@@ -1,0 +1,37 @@
+{
+  "sourceDigest": "ca81a4f246fb10495e742f3769ffd08d3db103f726ee9e64481cd7b7b62c8a24",
+  "logs": {
+    "browser": {
+      "localLog": "/tmp/eval-calibration-web-final3.log",
+      "sha256": "81c6dcd09addae50cee3ce0296b0a436dba934fa9fa2ded3b497b12894338bcf"
+    },
+    "build": {
+      "localLog": "/tmp/eval-calibration-build-final.log",
+      "sha256": "f6e3865a92491815205568a5c89748b3f1f60d15580758a9ce787a50f39539fe"
+    },
+    "compiled-runtime": {
+      "localLog": "/tmp/eval-calibration-compiled.log",
+      "sha256": "6f6bdceb8c8d90151764c869aaea829e372582b9346710b8df309101e1ad35dc"
+    },
+    "focused-adapter-import-native": {
+      "localLog": "/tmp/eval-calibration-focused-final.log",
+      "sha256": "7f6de3d1166af7bc5b412a3134abaf2f2ee1587155274295add7da76f65b5e19"
+    },
+    "forbidden-shell": {
+      "localLog": "/tmp/eval-calibration-privacy.log",
+      "sha256": "2f3608dcfeffe2d5dab5dbc2efe0c6fabd99f26f08f9cc42e1ebb0692a84f5ea"
+    },
+    "canonical-json-selection": {
+      "localLog": "/tmp/eval-calibration-json-selector.log",
+      "sha256": "c58c8c7f4c55346a8f001e3d748a2deae6965ddbb9e8fc65bd14cf2474f0b674"
+    },
+    "node25-check-failure": {
+      "localLog": "/tmp/eval-calibration-check-final.log",
+      "sha256": "70c558aa496433dc31e7c75db3a3cd959f1cbd7e3c96a0103e4f90dcf4d420a1"
+    },
+    "node24-check": {
+      "localLog": "/tmp/eval-calibration-check-node24.log",
+      "sha256": "ed7561ec241499b73f3144da7bc82dd9db75ba30a2629ebb56b21aaa235aa6d4"
+    }
+  }
+}
