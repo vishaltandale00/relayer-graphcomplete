@@ -216,3 +216,9 @@ producer attempt, both Rust binaries and symbols, fresh signing/notarization,
 telemetry upload/correlation, and candidate receipts. No hosted hit, Sentry
 symbolication, candidate acceptance or publication is claimed here. The existing
 Preview run and its source/worktree/tags were not modified.
+
+## 2026-09-30 symbol producer repair
+
+The repeated cache-sealing failure and post-Cargo symbol repair are tracked in
+[the repair checkpoint and evidence ledger](repair-2026-09-30.md). Historical
+passes above do not certify this changed implementation or hosted seeding.

@@ -485,8 +485,8 @@ absent cache entry will become a hit.
 
 The manual macOS arm64 signed-candidate job opts into a separate
 `relayer.signed-native-cache/v1` workflow artifact. It contains only the two
-unsigned Rust release binaries (`CARGO_PROFILE_RELEASE_DEBUG=1`, default
-features), their dSYMs, and a manifest. Development/CI Ladybug and runtime entries
+unsigned Rust release binaries (`CARGO_PROFILE_RELEASE_DEBUG=1`, packed debug
+info, default features), their dSYMs, and a manifest. Development/CI Ladybug and runtime entries
 are never accepted as signed-profile output. A verified runtime hit avoids the
 entire Rust/Ladybug/OpenSSL compilation and Cargo fetch; a miss fetches the locked
 dependency closure and uses the existing pinned offline native build.
@@ -509,9 +509,15 @@ and bounds compressed and expanded bytes to 2 GiB. GitHub normalizes ZIP modes;
 the extractor reinstates only code-owned binary executable modes before comparing
 the sealed inventory. A post-download metadata check rejects a changed attempt.
 
-Sealing generates symbols while Cargo objects exist, rejects dsymutil warning or
-error diagnostics, and requires compilation units, valid DWARF and matching
-arm64 UUIDs. Restore verifies every file hash and mode. Installation and telemetry
+Cargo explicitly generates packed dSYMs before temporary objects disappear.
+Sealing preserves those exact symbol bytes, normalizes Cargo's owned dSYM link
+and hashed DWARF filename, and refuses absent or malformed compiler output.
+It requires compilation units, valid DWARF, matching arm64 UUIDs, and C/C++
+DWARF code ranges covering every linked Ladybug function in the executable's
+embedded Mach-O debug map. Reading that map does not require surviving archives;
+`dsymutil --dump-debug-map` does and may omit missing inputs. Regeneration is
+never a sealing fallback. Tool failures retain bounded, URL-redacted diagnostics.
+Restore verifies every file hash and mode. Installation and telemetry
 retain and recheck the authenticated inventory, including copied destination
 bytes. Telemetry consumes these dSYMs instead of trying to reconstruct them from
 bare cached binaries, then still correlates them with the freshly signed package.
