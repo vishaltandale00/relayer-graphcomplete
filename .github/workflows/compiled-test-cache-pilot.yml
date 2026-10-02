@@ -1,0 +1,174 @@
+name: Compiled Rust test cache pilot
+
+# Non-authoritative, bounded experiment. No required CI job consumes this cache.
+on:
+  push:
+    branches: [codex/compiled-test-cache-pilot]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+concurrency:
+  group: compiled-test-pilot-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CARGO_INCREMENTAL: "0"
+  CARGO_PROFILE_DEV_DEBUG: line-tables-only
+  CARGO_PROFILE_TEST_DEBUG: line-tables-only
+  CARGO_TARGET_DIR: /home/runner/work/_temp/compiled-test-target
+  PILOT_EVIDENCE: /home/runner/work/_temp/compiled-test-evidence
+  PILOT_ARCHIVE: /home/runner/work/_temp/compiled-test-bundle/bundle.tar.gz
+  PILOT_IDENTITY: /home/runner/work/_temp/compiled-test-identity.json
+
+jobs:
+  producer:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    outputs:
+      identity: ${{ steps.identity.outputs.digest }}
+      receipt: ${{ steps.pack.outputs.digest }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup-node-dependencies
+      - uses: ./.github/actions/setup-rust-compilation
+        id: rust
+        with:
+          lane: compiled-test-control
+          sccache-mode: READ_ONLY
+      - uses: ./.github/actions/install-lbug-bundle
+        with:
+          lbug-cached: "true"
+          rustc-release: ${{ steps.rust.outputs.rustc-release }}
+          artifact-name: deliberately-no-pilot-native-artifact
+      - name: Record compiler settings
+        run: |
+          mkdir -p "$PILOT_EVIDENCE"
+          echo "RUSTC_WRAPPER=$GITHUB_WORKSPACE/scripts/ci/sccache-wrapper.sh" >> "$GITHUB_ENV"
+          echo "RELAYER_SCCACHE_ENABLED=${{ steps.rust.outputs.sccache-enabled }}" >> "$GITHUB_ENV"
+          echo "SCCACHE_GHA_VERSION=${{ steps.rust.outputs.cache-version }}" >> "$GITHUB_ENV"
+          echo "SCCACHE_GHA_ENABLED=true" >> "$GITHUB_ENV"
+          echo "SCCACHE_GHA_RW_MODE=READ_ONLY" >> "$GITHUB_ENV"
+          echo "SCCACHE_CLIENT_SIDE=1" >> "$GITHUB_ENV"
+          echo "SCCACHE_IGNORE_SERVER_IO_ERROR=1" >> "$GITHUB_ENV"
+          git rev-parse HEAD > "$PILOT_EVIDENCE/source.txt"
+      - name: Derive exact consumer-recomputable build identity
+        id: identity
+        continue-on-error: true
+        run: |
+          python3 -B scripts/ci/compiled-test-pilot/bundle.py identity --target "$CARGO_TARGET_DIR" --native "$RUNNER_TEMP/lbug-prebuilt" --identity "$PILOT_IDENTITY" --metrics "$PILOT_EVIDENCE/identity.json"
+          echo "digest=$(sha256sum "$PILOT_IDENTITY" | cut -d ' ' -f 1)" >> "$GITHUB_OUTPUT"
+          cp "$PILOT_IDENTITY" "$PILOT_EVIDENCE/identity-inputs.json"
+      - name: Compile complete default-feature test inventory
+        run: node scripts/ci/compiled-test-pilot/run.mjs compile 2>&1 | tee "$PILOT_EVIDENCE/compile.log"
+      - name: Seal compilation bytes before any test executes
+        id: pack
+        if: steps.identity.outcome == 'success'
+        continue-on-error: true
+        run: |
+          python3 -B scripts/ci/compiled-test-pilot/bundle.py pack --target "$CARGO_TARGET_DIR" --identity "$PILOT_IDENTITY" --archive "$PILOT_ARCHIVE" --metrics "$PILOT_EVIDENCE/pack.json"
+          echo "digest=$(sha256sum "$PILOT_ARCHIVE" | cut -d ' ' -f 1)" >> "$GITHUB_OUTPUT"
+      - name: Run every default-feature Rust test freshly
+        run: node scripts/ci/compiled-test-pilot/run.mjs test 2>&1 | tee "$PILOT_EVIDENCE/test.log"
+      - name: Save experimental compiled bytes to actual Actions cache
+        if: steps.pack.outcome == 'success'
+        continue-on-error: true
+        uses: actions/cache/save@v5
+        with:
+          path: /home/runner/work/_temp/compiled-test-bundle/bundle.tar.gz
+          key: compiled-test-pilot-v1-${{ github.run_id }}-${{ github.run_attempt }}-${{ steps.identity.outputs.digest }}
+      - name: Report compiler-cache evidence
+        if: always()
+        continue-on-error: true
+        uses: ./.github/actions/report-rust-compilation
+        with:
+          lane: compiled-test-control
+          sccache-enabled: ${{ steps.rust.outputs.sccache-enabled }}
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
+        if: always()
+        with:
+          name: compiled-test-control-${{ github.run_id }}-${{ github.run_attempt }}
+          path: /home/runner/work/_temp/compiled-test-evidence
+          retention-days: 14
+
+  consumer:
+    needs: producer
+    if: ${{ !cancelled() && needs.producer.result == 'success' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup-node-dependencies
+      - uses: ./.github/actions/setup-rust-compilation
+        id: rust
+        with:
+          lane: compiled-test-consumer
+          sccache-mode: READ_ONLY
+      - uses: ./.github/actions/install-lbug-bundle
+        with:
+          lbug-cached: "true"
+          rustc-release: ${{ steps.rust.outputs.rustc-release }}
+          artifact-name: deliberately-no-pilot-native-artifact
+      - name: Record compiler settings
+        run: |
+          mkdir -p "$PILOT_EVIDENCE"
+          echo "RUSTC_WRAPPER=$GITHUB_WORKSPACE/scripts/ci/sccache-wrapper.sh" >> "$GITHUB_ENV"
+          echo "RELAYER_SCCACHE_ENABLED=${{ steps.rust.outputs.sccache-enabled }}" >> "$GITHUB_ENV"
+          echo "SCCACHE_GHA_VERSION=${{ steps.rust.outputs.cache-version }}" >> "$GITHUB_ENV"
+          echo "SCCACHE_GHA_ENABLED=true" >> "$GITHUB_ENV"
+          echo "SCCACHE_GHA_RW_MODE=READ_ONLY" >> "$GITHUB_ENV"
+          echo "SCCACHE_CLIENT_SIDE=1" >> "$GITHUB_ENV"
+          echo "SCCACHE_IGNORE_SERVER_IO_ERROR=1" >> "$GITHUB_ENV"
+          git rev-parse HEAD > "$PILOT_EVIDENCE/source.txt"
+      - name: Independently derive this runner identity
+        id: identity
+        continue-on-error: true
+        run: |
+          python3 -B scripts/ci/compiled-test-pilot/bundle.py identity --target "$CARGO_TARGET_DIR" --native "$RUNNER_TEMP/lbug-prebuilt" --identity "$PILOT_IDENTITY" --metrics "$PILOT_EVIDENCE/identity.json"
+          cp "$PILOT_IDENTITY" "$PILOT_EVIDENCE/identity-inputs.json"
+      - name: Restore actual hosted cache to quarantine
+        id: cache
+        if: steps.identity.outcome == 'success' && needs.producer.outputs.receipt != ''
+        continue-on-error: true
+        uses: actions/cache/restore@v5
+        with:
+          path: /home/runner/work/_temp/compiled-test-bundle/bundle.tar.gz
+          key: compiled-test-pilot-v1-${{ github.run_id }}-${{ github.run_attempt }}-${{ needs.producer.outputs.identity }}
+      - name: Verify receipt, identity and exact inventory before installation
+        id: restore
+        if: steps.cache.outputs.cache-hit == 'true'
+        continue-on-error: true
+        env:
+          PRODUCER_RECEIPT: ${{ needs.producer.outputs.receipt }}
+        run: python3 -B scripts/ci/compiled-test-pilot/bundle.py restore --target "$CARGO_TARGET_DIR" --identity "$PILOT_IDENTITY" --archive "$PILOT_ARCHIVE" --receipt "$PRODUCER_RECEIPT" --metrics "$PILOT_EVIDENCE/restore.json"
+      - name: Record cache outcome without converting it to verification evidence
+        if: always()
+        env:
+          CACHE_HIT: ${{ steps.cache.outputs.cache-hit }}
+          RESTORE_OUTCOME: ${{ steps.restore.outcome }}
+        run: |
+          python3 -c 'import json,os; from pathlib import Path; Path(os.environ["PILOT_EVIDENCE"], "cache.json").write_text(json.dumps({k:os.environ[k] for k in ["CACHE_HIT", "RESTORE_OUTCOME"]}))'
+          if [ "$RESTORE_OUTCOME" != success ] && [ -e "$CARGO_TARGET_DIR" ]; then
+            echo "Rejected restoration left unexpected target state" >&2
+            exit 1
+          fi
+      - name: Run every default-feature Rust test freshly
+        run: node scripts/ci/compiled-test-pilot/run.mjs test 2>&1 | tee "$PILOT_EVIDENCE/test.log"
+      - name: Report compiler-cache evidence
+        if: always()
+        continue-on-error: true
+        uses: ./.github/actions/report-rust-compilation
+        with:
+          lane: compiled-test-consumer
+          sccache-enabled: ${{ steps.rust.outputs.sccache-enabled }}
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
+        if: always()
+        with:
+          name: compiled-test-consumer-${{ github.run_id }}-${{ github.run_attempt }}
+          path: /home/runner/work/_temp/compiled-test-evidence
+          retention-days: 14
