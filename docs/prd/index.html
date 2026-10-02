@@ -2557,7 +2557,7 @@ settings:
 <li>Send is the only execution boundary. It atomically creates a new root interaction and snapshots every committed attachment into one immutable submitted-input attempt.</li>
 <li>Send waits for an input commit still in flight, including one started when pressing Send moves focus out of the input (<a href="https://github.com/vishaltandale00/relayer-graphcomplete/issues/521">#521</a>). That answer then goes with that Send.</li>
 <li>If that commit fails, the Send stops. The input reports the failure, and the message stays in the composer. A commit still in flight counts toward Send being ready.</li>
-<li>A failed commit stops the next Send once, even after its Node Details closes. Sending again goes without that answer. Detaching or committing that input again clears the failure.</li>
+<li>A failed commit stops the next Send once, even after its Node Details closes. Sending again goes without the answer that did not save. An answer committed earlier for that input still goes, as its pill shows, until the user detaches it (<a href="https://github.com/vishaltandale00/relayer-graphcomplete/issues/578">#578</a>). Detaching or committing that input again clears the failure.</li>
 <li>Input controls are locked while a Send is in flight. A commit made while an interaction runs goes into the draft for the next Send.</li>
 <li>No input action is required. An empty message is valid when at least one attachment is submitted.</li>
 <li>Text values preserve authored text. Select values persist stable option keys plus their accepted labels, with multi-select keys canonically ordered. The harness receives unordered prompt/control/value snapshots without product-assigned priority.</li>
