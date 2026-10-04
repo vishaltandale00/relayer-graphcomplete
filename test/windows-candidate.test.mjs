@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
+import { fileURLToPath } from "node:url";
 import { createPackage } from "@electron/asar";
 import { parse } from "yaml";
 import { describe, expect, it } from "vitest";
@@ -16,6 +17,28 @@ import { validateDesktopPreviewCandidateRun, WINDOWS_CANDIDATE_WORKFLOW_PATH } f
 const execFileAsync = promisify(execFile);
 
 describe("independent Windows candidate", () => {
+  it("emits static OpenSSL system dependencies from the actual target build script", async () => {
+    const root = await mkdtemp(join(tmpdir(), "windows-openssl-link-"));
+    try {
+      const executable = join(root, process.platform === "win32" ? "build-script.exe" : "build-script");
+      await execFileAsync("rustc", [fileURLToPath(new URL("../crates/relayer-graph-server/build.rs", import.meta.url)), "-o", executable]);
+      const directives = async (targetEnvironment, ladybug = true) => {
+        const environment = { ...process.env, OPENSSL_DIR: root, CARGO_CFG_TARGET_ENV: targetEnvironment };
+        delete environment.OPENSSL_LIB_DIR;
+        delete environment.CARGO_FEATURE_LADYBUG;
+        if (ladybug) environment.CARGO_FEATURE_LADYBUG = "1";
+        const { stdout } = await execFileAsync(executable, [], { env: environment });
+        return stdout.trim().split(/\r?\n/u).filter(line => line.startsWith("cargo:rustc-link-lib="));
+      };
+      expect(await directives("msvc")).toEqual([
+        "cargo:rustc-link-lib=static=libssl", "cargo:rustc-link-lib=static=libcrypto",
+        ...["gdi32", "user32", "crypt32", "ws2_32", "advapi32"].map(library => `cargo:rustc-link-lib=dylib=${library}`),
+      ]);
+      expect(await directives("")).toEqual(["cargo:rustc-link-lib=static=ssl", "cargo:rustc-link-lib=static=crypto"]);
+      expect(await directives("msvc", false)).toEqual([]);
+    } finally { await rm(root, { recursive: true, force: true }); }
+  });
+
   it("checks out canonical generated query contracts with Windows line ending conversion enabled", async () => {
     const root = await mkdtemp(join(tmpdir(), "windows-contract-checkout-"));
     const generated = "packages/graph-client/src/query-errors.generated.ts";

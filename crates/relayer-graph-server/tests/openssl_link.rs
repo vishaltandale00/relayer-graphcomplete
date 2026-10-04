@@ -11,7 +11,15 @@ fn a_prepared_prefix_links_statically_under_each_target_naming_rule() {
     );
     assert_eq!(
         openssl_library_names(Linkage::Static, true),
-        ["static=libssl", "static=libcrypto"]
+        [
+            "static=libssl",
+            "static=libcrypto",
+            "dylib=gdi32",
+            "dylib=user32",
+            "dylib=crypt32",
+            "dylib=ws2_32",
+            "dylib=advapi32"
+        ]
     );
 }
 

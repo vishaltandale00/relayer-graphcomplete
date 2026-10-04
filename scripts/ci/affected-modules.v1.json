@@ -152,6 +152,8 @@
     }
   ],
   "chapterOwners": [
+    { "exact": "crates/relayer-graph-server/build.rs", "chapters": ["vitest", "packaging"], "vitestFiles": ["test/windows-candidate.test.mjs", "test/ladybug-packaged-lifecycle.test.mjs"] },
+    { "exact": "crates/relayer-graph-server/build_support/openssl_link.rs", "chapters": ["vitest", "packaging"], "vitestFiles": ["test/windows-candidate.test.mjs", "test/ladybug-packaged-lifecycle.test.mjs"] },
     {
       "prefix": "python/relayer-graph/src/",
       "chapters": ["python", "vitest", "packaging"],

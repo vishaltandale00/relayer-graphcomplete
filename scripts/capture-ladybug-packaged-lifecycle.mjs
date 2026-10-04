@@ -26,6 +26,8 @@ export const RECEIPT_INPUT_PATHS = [
   ".gitattributes",
   "Cargo.lock",
   "crates/relayer-graph-server/Cargo.toml",
+  "crates/relayer-graph-server/build.rs",
+  "crates/relayer-graph-server/build_support/openssl_link.rs",
   "crates/relayer-graph-server/src/main.rs",
   "desktop/packaging/build-development.mjs",
   "desktop/packaging/pinned-ladybug-build.mjs",

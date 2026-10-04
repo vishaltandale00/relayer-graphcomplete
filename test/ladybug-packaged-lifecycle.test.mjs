@@ -256,6 +256,8 @@ describe("Ladybug packaged lifecycle qualification", () => {
     // must stay in the authenticated set.
     expect(RECEIPT_INPUT_PATHS).toContain(".gitattributes");
     expect(RECEIPT_INPUT_PATHS).toContain("desktop/packaging/pinned-ladybug-build.mjs");
+    expect(RECEIPT_INPUT_PATHS).toContain("crates/relayer-graph-server/build.rs");
+    expect(RECEIPT_INPUT_PATHS).toContain("crates/relayer-graph-server/build_support/openssl_link.rs");
     expect(new Set(RECEIPT_INPUT_PATHS).size).toBe(RECEIPT_INPUT_PATHS.length);
     // The frozen 23a2d3d1 receipts predate `.gitattributes` coverage. Every path
     // they authenticate must still be authenticated today; regenerating a receipt

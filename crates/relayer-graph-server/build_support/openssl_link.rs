@@ -13,10 +13,21 @@ enum Linkage {
 
 /// MSVC names the static archives `libssl`/`libcrypto`; every other target drops
 /// the prefix.
-fn openssl_library_names(linkage: Linkage, msvc: bool) -> [String; 2] {
-    ["ssl", "crypto"].map(|library| match linkage {
-        Linkage::Static if msvc => format!("static=lib{library}"),
-        Linkage::Static => format!("static={library}"),
-        Linkage::Dynamic => library.to_owned(),
-    })
+fn openssl_library_names(linkage: Linkage, msvc: bool) -> Vec<String> {
+    let mut libraries: Vec<_> = ["ssl", "crypto"]
+        .map(|library| match linkage {
+            Linkage::Static if msvc => format!("static=lib{library}"),
+            Linkage::Static => format!("static={library}"),
+            Linkage::Dynamic => library.to_owned(),
+        })
+        .into();
+    if linkage == Linkage::Static && msvc {
+        // Static archives do not propagate OpenSSL's Windows system dependencies.
+        // Match the pinned OpenSSL 3.5.8 VC-noCE-common ex_libs configuration.
+        libraries.extend(
+            ["gdi32", "user32", "crypt32", "ws2_32", "advapi32"]
+                .map(|library| format!("dylib={library}")),
+        );
+    }
+    libraries
 }
