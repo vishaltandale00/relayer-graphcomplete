@@ -751,10 +751,12 @@ describe("affected-module plan v1", { timeout: 30_000 }, () => {
     expect(result.chapters.vitest).toBe(true);
     // prime-agent-packaging checks the harness/python eol pins; the ladybug
     // lifecycle test runs git check-attr over the receipt-input paths and is
-    // the checkpoint that actually verifies the ladybug LF pins.
+    // the checkpoint that actually verifies the ladybug LF pins. The Windows
+    // candidate scenario rematerializes generated contracts through real Git.
     expect(result.vitestFiles).toEqual([
       "test/ladybug-packaged-lifecycle.test.mjs",
       "test/prime-agent-packaging.test.mjs",
+      "test/windows-candidate.test.mjs",
     ]);
   });
 

@@ -1,6 +1,8 @@
 import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import { createPackage } from "@electron/asar";
 import { parse } from "yaml";
 import { describe, expect, it } from "vitest";
@@ -11,7 +13,31 @@ import { verifyPackagedDesktopContract } from "../desktop/release/verify-package
 import { validatePreviewPublicationProvenance } from "../desktop/release/publish-preview.mjs";
 import { validateDesktopPreviewCandidateRun, WINDOWS_CANDIDATE_WORKFLOW_PATH } from "../desktop/release/preview-candidate-run.mjs";
 
+const execFileAsync = promisify(execFile);
+
 describe("independent Windows candidate", () => {
+  it("checks out canonical generated query contracts with Windows line ending conversion enabled", async () => {
+    const root = await mkdtemp(join(tmpdir(), "windows-contract-checkout-"));
+    const generated = "packages/graph-client/src/query-errors.generated.ts";
+    const python = "python/relayer-graph/src/relayer_graph/query_errors_generated.py";
+    const generator = "packages/graph-client/scripts/generate-query-errors.mjs";
+    try {
+      for (const file of [".gitattributes", generated, python, generator, "docs/graph-query-v1-errors.json", "crates/relayer-graph-core/src/query/error.rs"]) {
+        await mkdir(dirname(join(root, file)), { recursive: true });
+        await writeFile(join(root, file), await readFile(new URL(`../${file}`, import.meta.url)));
+      }
+      const git = (...args) => execFileAsync("git", args, { cwd: root });
+      await git("init", "--quiet");
+      await git("config", "core.autocrlf", "true");
+      await git("add", ".");
+      await git("-c", "user.name=Qualification fixture", "-c", "user.email=fixture@example.invalid", "commit", "--quiet", "-m", "canonical source");
+      await rm(join(root, generated));
+      await rm(join(root, python));
+      await git("checkout", "--", generated, python);
+      await execFileAsync(process.execPath, [join(root, generator), "--check"], { cwd: root });
+    } finally { await rm(root, { recursive: true, force: true }); }
+  });
+
   it("seals the Windows version in the real ASAR while retaining the macOS version", async () => {
     const root = await mkdtemp(join(tmpdir(), "windows-version-"));
     try {

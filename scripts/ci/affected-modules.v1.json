@@ -176,7 +176,7 @@
     { "prefix": "docs/agents/", "chapters": ["vitest"], "vitestFiles": ["test/documentation-product-boundary.test.mjs"] },
     { "prefix": "docs/decisions/", "chapters": ["vitest", "prd"], "vitestFiles": ["test/documentation-product-boundary.test.mjs"] },
     { "exact": "docs/architecture.md", "chapters": ["vitest", "prd"], "vitestFiles": ["test/documentation-product-boundary.test.mjs"] },
-    { "exact": ".gitattributes", "chapters": ["vitest"], "vitestFiles": ["test/ladybug-packaged-lifecycle.test.mjs", "test/prime-agent-packaging.test.mjs"] },
+    { "exact": ".gitattributes", "chapters": ["vitest"], "vitestFiles": ["test/ladybug-packaged-lifecycle.test.mjs", "test/prime-agent-packaging.test.mjs", "test/windows-candidate.test.mjs"] },
     { "exact": ".gitignore", "chapters": [] },
     { "exact": "LICENSE", "chapters": [] },
     { "exact": "CONTRIBUTING.md", "chapters": [] },
