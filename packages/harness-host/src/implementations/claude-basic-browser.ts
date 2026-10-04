@@ -36,12 +36,13 @@ const requestSchema = {
 type BrowserRequest = z.infer<z.ZodObject<typeof requestSchema>>;
 type BrowserTargetSelector = z.infer<typeof targetSelector>;
 
+/** The in-process MCP boundary of the Claude Agent SDK that code-owned tools use. */
 export interface ClaudeBrowserSdk {
-  readonly tool: (
+  readonly tool: <Shape extends z.ZodRawShape>(
     name: string,
     description: string,
-    inputSchema: typeof requestSchema,
-    handler: (input: BrowserRequest, extra: unknown) => Promise<ClaudeBrowserToolResult>,
+    inputSchema: Shape,
+    handler: (input: z.infer<z.ZodObject<Shape>>, extra: unknown) => Promise<ClaudeSdkToolResult>,
   ) => unknown;
   readonly createSdkMcpServer: (options: {
     readonly name: string;
@@ -51,9 +52,17 @@ export interface ClaudeBrowserSdk {
   }) => unknown;
 }
 
-export interface ClaudeBrowserToolResult {
-  readonly content: readonly { readonly type: "text"; readonly text: string }[];
+export type ClaudeToolContent =
+  | { readonly type: "text"; readonly text: string }
+  | { readonly type: "image"; readonly data: string; readonly mimeType: "image/png" };
+
+export interface ClaudeSdkToolResult {
+  readonly content: readonly ClaudeToolContent[];
   readonly isError?: boolean;
+}
+
+export interface ClaudeBrowserToolResult extends ClaudeSdkToolResult {
+  readonly content: readonly Extract<ClaudeToolContent, { readonly type: "text" }>[];
 }
 
 interface BrowserSocket {
@@ -97,7 +106,7 @@ export function createClaudeBasicBrowserServer(
     CLAUDE_BROWSER_TOOL_NAME,
     "Use the user's already-running Chrome through its loopback DevTools endpoint. Runs one bounded batch of navigation, text observation, click, and fill operations. Click and fill must be the final operation because either may navigate; use a later call to reattach before continuing. If Chrome has multiple pages, select exactly one by targetId, URL substring, or title substring. It never starts or stops Chrome.",
     requestSchema,
-    async (input, extra) => {
+    async (input, extra): Promise<ClaudeBrowserToolResult> => {
       const signal = signalFromExtra(extra);
       try {
         const output = await runBrowserOperations(input, endpoint, dependencies, signal);

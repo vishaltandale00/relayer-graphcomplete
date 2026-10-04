@@ -1,30 +1,42 @@
 /**
  * PREV-005: opt-in live proof that a real model received a draft-preview image.
  *
- * This spends paid inference and needs the Eval profile's connected Codex
- * provider. It is excluded from `npm run check`. It runs `codex-basic` on one
- * layout-heavy built-in case through the real Eval host, then passes only when
- * the trace shows Codex viewed a `submitLayer` preview image (`imageView`) and
- * the turn was accepted. It makes no claim that previews improve quality.
+ * This spends paid inference and needs the Eval profile's connected provider
+ * for the chosen harness. It is excluded from `npm run check`. It runs one
+ * harness (`--harness codex-basic`, the default, `claude-basic` or
+ * `prime-agent-basic`) on one layout-heavy built-in case through the real Eval
+ * host. It passes only when the turn was accepted and, before the successful
+ * graph.submit, the model received a `submitLayer` preview image:
+ * - Codex opened it with its image viewer (`imageView`);
+ * - Claude's `view_graph_preview` tool returned it;
+ * - Prime's `attach_image` skill attached it to the ipython result.
+ * It makes no claim that previews improve quality.
  */
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { once } from "node:events";
 import { cp, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
-import { basename, join, resolve } from "node:path";
+import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
+import { parseArgs } from "node:util";
+import { PREVIEW_VIEWERS } from "./agent-preview-viewers.mjs";
 
 const OPT_IN = "RELAYER_AGENT_PREVIEW_LIVE";
 if (process.env[OPT_IN] !== "1") {
   throw new Error(`The agent-preview live run spends real inference. Set ${OPT_IN}=1 to run it.`);
 }
+const { values: options } = parseArgs({ options: { harness: { type: "string", default: "codex-basic" } } });
+const harness = options.harness;
+if (!Object.hasOwn(PREVIEW_VIEWERS, harness)) {
+  throw new Error(`--harness must be one of ${Object.keys(PREVIEW_VIEWERS).join(", ")}.`);
+}
 const root = resolve(import.meta.dirname, "..");
 const userData = resolve(process.env.RELAYER_EVAL_USER_DATA_DIR || join(homedir(), ".relayer", "eval-web"));
-const output = resolve(root, ".relayer/evidence/agent-preview-live");
+const output = resolve(root, ".relayer/evidence/agent-preview-live", harness);
 const selection = {
   testCaseIds: ["empty-project.hierarchical-overview.single-turn"],
-  harnessConfigurationNames: ["codex-basic"],
+  harnessConfigurationNames: [harness],
   judgeConfigurationName: "deterministic-graph-contract",
 };
 
@@ -96,23 +108,18 @@ try {
   const renderedLayers = events
     .filter((event) => event.type === "graph.preview" && event.data.outcome === "rendered" && event.data.target.kind === "layer")
     .map((event) => event.data.fingerprint.slice("sha256:".length, "sha256:".length + 16));
-  const viewed = events
-    .filter((event) => event.type === "provider.event" && event.data?.method === "item/completed"
-      && event.data.params?.item?.type === "imageView")
-    .map((event) => String(event.data.params.item.path ?? ""));
+  const viewed = PREVIEW_VIEWERS[harness](events);
   // The model must see the image while it can still act on it: before the
   // successful graph.submit that ends graph access.
   const operations = (await readFile(join(turnDirectory, "candidate-trace", "graph-operations.jsonl"), "utf8").catch(() => ""))
     .trim().split("\n").filter(Boolean).map((line) => JSON.parse(line));
   const submittedAt = operations.find((operation) => operation.path === "/api/graph/submit"
     && operation.status >= 200 && operation.status < 300)?.observedAt;
-  const viewedLayerPreviews = events
-    .filter((event) => event.type === "provider.event" && event.data?.method === "item/completed"
-      && event.data.params?.item?.type === "imageView"
-      && (submittedAt === undefined || event.observedAt < submittedAt))
-    .map((event) => String(event.data.params.item.path ?? ""))
-    .filter((path) => {
-      const match = /^layer-\d+-([0-9a-f]{16})\.png$/.exec(basename(path));
+  const viewedLayerPreviews = viewed
+    .filter((view) => submittedAt === undefined || view.observedAt < submittedAt)
+    .map((view) => view.file)
+    .filter((file) => {
+      const match = /^layer-\d+-([0-9a-f]{16})\.png$/.exec(file);
       return match !== null && renderedLayers.includes(match[1]);
     });
   const accepted = turn.status === "accepted";
@@ -124,9 +131,9 @@ try {
     turnAccepted: accepted,
     renderedLayerPreviews: renderedLayers.length,
     previewEvents: events.filter((event) => event.type === "graph.preview").map((event) => event.data),
-    imageViews: viewed.map((path) => basename(path)),
+    imageViews: viewed.map((view) => view.file),
     submittedAt: submittedAt ?? null,
-    viewedLayerPreviews: viewedLayerPreviews.map((path) => basename(path)),
+    viewedLayerPreviews,
     passed: accepted && viewedLayerPreviews.length > 0,
     qualityClaim: "none",
   };
@@ -137,7 +144,7 @@ try {
   console.log(JSON.stringify(receipt, null, 2));
   assert.ok(accepted, "The live turn was not accepted.");
   assert.ok(viewedLayerPreviews.length > 0, "No submitLayer preview image reached the model as image input before submit.");
-  console.log(`PASS PREV-005 ${run.id}`);
+  console.log(`PASS PREV-005 ${harness} ${run.id}`);
 } finally {
   if (child.exitCode === null) {
     child.send("shutdown");

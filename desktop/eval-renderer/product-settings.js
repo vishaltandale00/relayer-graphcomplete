@@ -1,3 +1,5 @@
+import { createBrandLockup, spreadOnHover } from "/src/relayer-mark.js";
+
 // Initialize before importing production state, which captures its desktop bridge.
 // This entry point is selected by the settings server, not by a URL query flag.
 window.initializeRelayerEvalSettings();
@@ -18,7 +20,13 @@ document.title = "Relayer Eval · Provider and model setup";
 document.body.classList.remove("desktop-account-pending");
 document.querySelector("#authScreen")?.classList.add("hidden");
 document.querySelector("#appShell").classList.remove("hidden");
-document.querySelector(".sidebar-title strong").textContent = "Relayer Eval";
+document.querySelector(".sidebar-title strong").textContent = "Eval";
+// The shared shell draws the wordmark lockups itself; this entry point replaces main.js, so it
+// must initialise them too or the empty SVGs fall back to their 300x150 intrinsic size.
+for (const [id, height] of [["brandLockup", 24], ["heroLockup", 40]]) {
+  const svg = document.getElementById(id);
+  if (svg) spreadOnHover(svg, createBrandLockup(svg, { height, reducedMotion: () => matchMedia("(prefers-reduced-motion: reduce)").matches }));
+}
 for (const button of document.querySelectorAll("[data-settings-tab]")) {
   if (!tabs.has(button.dataset.settingsTab)) button.remove();
   else button.onclick = () => setSettingsTab(button.dataset.settingsTab);

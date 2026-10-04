@@ -1,0 +1,30 @@
+{
+  "mainCommit": "c76ab6e26c9cfffec1366d697c5d419896ba3487",
+  "featureCommit": "8b12da16410b89796119b8f9327936acc1ee7f7d",
+  "sourceFiles": {
+    "crates/relayer-app-server/src/api/environment.rs": "8b8f4e98da4a64c4f1c0186b30257477b470d142cd6605f9ac61a8fea46e03e7",
+    "desktop/main/index.mjs": "c05f13093122085434fcd3704c894add4c1fa23525bf8ce118de1354a92e7600",
+    "desktop/main/ipc/register-ipc.mjs": "32f21f384a156583b9be9ae08e8e687f5bf5f784bdeed4c150dc824b0e3b004a",
+    "desktop/main/models/model-availability-publisher.mjs": "77d8d3457168eab1ffc6ebbb748b9d90dc6ac17517a04aace7cb650e7c051231",
+    "desktop/main/services/worktree-service.mjs": "e5d810e8b6b72f479cd18a9288a5b57c98cd5a26d3a1f374f068e5ffd6d348a9",
+    "desktop/package.json": "37ccd89a789d407da8fa47f42c534c5df247a697bd0f9408765dc340346859bf",
+    "desktop/preload/index.cjs": "93f24b5bf72ce09ae72c998506548a90a7b11d87c146c2b859172b41130aef44",
+    "desktop/renderer/src/checkout.js": "6dfd4f70f1508bfbe078d6da682f4b36ac727e0673a5c9e5968f49631d51af78",
+    "desktop/renderer/src/composer-drafts.js": "15b619a244c6b27996805c60868b21123332376b7553380f82a8148103aa532c",
+    "desktop/renderer/src/environment-context.js": "9813114cc78844ce28c8532ef4585262be1c915f8c5cfac53334b623e69b66a6",
+    "desktop/renderer/src/model-availability-refresh.js": "5332c74883898f1343d63b3eb8b9400ccf0f703ef38b091e62446ab3082db72d",
+    "desktop/renderer/src/product-workspace/workspace.js": "dd84e7bedaf283613e66df0d0e0d5f8c12985b2355629f799d0eecb0bc6a6eba",
+    "desktop/renderer/src/threads.js": "894e855f0968bf53544d5785870c655feeb77430aaef261a45c45cb1d12570ad",
+    "desktop/renderer/src/worktree-controller.js": "8ef7bdf6d8b97ef298e083ad42c7e87670e4bd588468970a43c1f73da60c0831",
+    "desktop/renderer/styles.css": "5a5a0da9ac48b8dd86cb5bdd72579c98b9492902a49221d612c3ae73ef0f6817",
+    "desktop/shared/telemetry-module-inventory.mjs": "93c3aab5097cc763dea60924b9e8bd8430f469147bfd6878a7625dd9569b3d9c",
+    "docs/evidence/desktop-social-preview/receipt.json": "42b4e7a03e3c7c08923a26d19c72c2a258037a87aebad40a83570992362ad7f2",
+    "docs/prd/index.html": "0e6348d87b2b87c5ee9f8a188d172f7a4d2b6f67dbd0cdb6d12bfabd948962d8",
+    "package-lock.json": "03ad1f9e64cb8ba3987c7644753289d24e460c384ff635a82491432fc94a2d02",
+    "scripts/run-worktree-test.mjs": "bb69d07298812a49914b7c53b61860deec5f530d65ca5d5a942d34e82c92b495",
+    "scripts/test-desktop-worktrees.mjs": "2a0c1cc596bbb76aec6c19af9fc77eec7008f146e4fca1452659b504f9e55b1a",
+    "test/model-availability-refresh.test.mjs": "324348a97ae0ac41677334db0f1e220038ffccd0a3bd9be7a5dfcd1298997242",
+    "test/worktree-renderer.test.mjs": "b5b82e4f88e305a9cb7c24872a78f4efb4c13958c4cfd3edf2f459c656254c0a"
+  },
+  "digest": "64d82f7ec80be2f55ef05c1cd888ac8d5e5ac97d55c22165c5ea76fc93883d37"
+}

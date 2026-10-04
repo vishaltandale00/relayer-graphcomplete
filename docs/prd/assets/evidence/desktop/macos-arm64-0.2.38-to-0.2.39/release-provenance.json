@@ -1,0 +1,48 @@
+{
+  "schemaVersion": 1,
+  "target": "macos-arm64",
+  "version": "0.2.39",
+  "sourceCommit": "dfd2b2888193fdaf34ff7b2ec2ecda7b42a44eb4",
+  "sourceTree": "be4b63fd7ce5ec594477d307328110cf153ab710",
+  "tag": "desktop-v0.2.39",
+  "sourceMainCiRun": "37231893034/1",
+  "candidate": {
+    "run": "37232292435/1",
+    "artifactId": 11314673354,
+    "archiveDigest": "sha256:f1fb0f414502b03755e9e1964087a53574b3278466d272e3e9399042204a2d1d"
+  },
+  "publication": {
+    "run": "37234508105/1",
+    "artifactId": 11314314412,
+    "archiveDigest": "sha256:6e12adbeaa9dc1524a2cc76009072372eb7794b888bbf55709faf87ae0da299e"
+  },
+  "canary": {
+    "run": "37234774025/1",
+    "implementationCommit": "dfd2b2888193fdaf34ff7b2ec2ecda7b42a44eb4",
+    "artifactId": 11315475694,
+    "archiveDigest": "sha256:ab9f9ae0074ae5d4ec5cfeb543b5fef974fc0e7d6d3d63feac8ce33aa9d9d557",
+    "evidenceSha256": "5f21ce6d6236af2377b24a169f19131645011bca38aa3a481a5761b558c34278"
+  },
+  "seed": {
+    "version": "0.2.38",
+    "sourceCommit": "c76ab6e26c9cfffec1366d697c5d419896ba3487",
+    "run": "37071544819/1",
+    "artifactId": 11256024290,
+    "archiveDigest": "sha256:6291210bd62869e7bc8e22a122fead21dbe7e125f6bca2e9fe1ed98d69825b2e"
+  },
+  "failedAttempts": [],
+  "nativeCache": {
+    "restore": "miss: no compatible trusted artifact",
+    "build": "fresh source compilation; Cargo release18m54s",
+    "save": "unavailable: incomplete dSYM generation diagnostics",
+    "cacheHitAcceptance": false
+  },
+  "limits": [
+    "Apple Silicon macOS only",
+    "No paid inference or live account acceptance",
+    "Existing connected-provider and saved-chat upgrade acceptance remains indeterminate",
+    "Finder/Dock icon-cache refresh was not independently certified",
+    "No end-to-end symbolication claim",
+    "Stable pointer acceptance requires separate promotion receipt and live verification"
+  ]
+}

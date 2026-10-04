@@ -1,5 +1,8 @@
 # Issue 544 — simulated task user
 
+See the [October 4 checkpoint](checkpoint.md) for the combined delivery, honest
+live-result limits, and proposed separate evaluator and harness improvement loops.
+
 This report records the original slice-2 snapshot. The subsequent user-approved
 calibration changes and their verification are in [actor v2](actor-v2.md).
 The original review digest below does not certify those later source changes.

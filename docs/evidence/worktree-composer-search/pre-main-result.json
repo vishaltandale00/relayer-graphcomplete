@@ -1,0 +1,54 @@
+{
+  "passed": true,
+  "restartPersistence": true,
+  "checkpoints": {
+    "boundedBranchSearchPinnedBases": true,
+    "enterCreatesAndStartsTask": true,
+    "registeredCheckoutListScroll": true,
+    "externalCheckoutSelection": true,
+    "cachedRemoteDefaultBase": true,
+    "sendOnlyMutation": true,
+    "interruptedCreateDurableReopenReuse": true,
+    "exactThreadWorkingDirectory": true,
+    "selectedCommittedBase": true,
+    "acceptedGraphAfterServerReopen": true,
+    "missingSavedCwdBlocksExecution": true,
+    "missingSavedCwdHistoryReadable": true,
+    "rootConsolidationAcceptedLayerVisibility": true,
+    "harnessReceivesExactCwd": true,
+    "environmentSelectedCheckout": true,
+    "environmentRejectsForeignThread": true,
+    "environmentIgnoresStaleThreadResponse": true
+  },
+  "sourceHashes": {
+    "scripts/test-desktop-worktrees.mjs": "f9ed684bd5dd96e4962898c958815c2cc319b960a2f03a2c95406f5fa1429cea",
+    "scripts/run-worktree-test.mjs": "bb69d07298812a49914b7c53b61860deec5f530d65ca5d5a942d34e82c92b495",
+    "desktop/main/services/worktree-service.mjs": "e5d810e8b6b72f479cd18a9288a5b57c98cd5a26d3a1f374f068e5ffd6d348a9",
+    "desktop/main/ipc/register-ipc.mjs": "32f21f384a156583b9be9ae08e8e687f5bf5f784bdeed4c150dc824b0e3b004a",
+    "desktop/preload/index.cjs": "f950abf2342c9274bdab0bb8a191647c4c6aea26fc45238a016295906a80ef8e",
+    "desktop/renderer/src/checkout.js": "6c59da9f992e9b41cfd0ae0b8f6676fb2e6bac2cfe1890cbfa0715f75e269c09",
+    "desktop/renderer/styles.css": "d5239396f4230549969ffb2372ae6993febe37f4b61efba6a7322f4710e2a866",
+    "desktop/renderer/src/worktree-controller.js": "8ef7bdf6d8b97ef298e083ad42c7e87670e4bd588468970a43c1f73da60c0831",
+    "desktop/renderer/src/threads.js": "b62539b551e0a635d0184a1b3e8233713f5077bde8687af18aaabe3f73926f34",
+    "desktop/renderer/src/composer-drafts.js": "15b619a244c6b27996805c60868b21123332376b7553380f82a8148103aa532c",
+    "desktop/renderer/src/environment-context.js": "9813114cc78844ce28c8532ef4585262be1c915f8c5cfac53334b623e69b66a6",
+    "desktop/renderer/src/product-workspace/workspace.js": "5bed0fde71276956e741d81099ce9bf0d711a3a911490cc6bcf0793cc5c13d5f",
+    "crates/relayer-app-server/src/api/environment.rs": "8b8f4e98da4a64c4f1c0186b30257477b470d142cd6605f9ac61a8fea46e03e7"
+  },
+  "binaryHashes": {
+    "relayer-app-server": "1162145c6eb17ff04b07ad7b2d3b37ff37a9058f2bdbaa031c126a9a70842dab",
+    "relayer-graph-server": "dd46f858e70f17c7d16763010fddcfe26ba6cea06d322ea1ec174671a30b879a"
+  },
+  "planId": "3060db4151e14dccb1f8dfc72aa18325",
+  "workingDirectory": "/private/var/folders/dw/zlxwg4f160x18375bk2bx6h00000gn/T/relayer-worktrees-6vrVq5/worktrees/3060db4151e14dccb1f8dfc72aa18325",
+  "acceptedInteractions": 1,
+  "evidence": {
+    "scrollingCheckouts": "/Volumes/2T-SSD/worktrees/8de5/relayer-graphcomplete/.relayer/evidence/worktrees/07-many-registered-checkouts.png",
+    "menu": "/Volumes/2T-SSD/worktrees/8de5/relayer-graphcomplete/.relayer/evidence/worktrees/01-checkout-menu.png",
+    "retry": "/Volumes/2T-SSD/worktrees/8de5/relayer-graphcomplete/.relayer/evidence/worktrees/02-retry-after-create.png",
+    "graph": "/Volumes/2T-SSD/worktrees/8de5/relayer-graphcomplete/.relayer/evidence/worktrees/03-accepted-worktree-thread.png",
+    "reopened": "/Volumes/2T-SSD/worktrees/8de5/relayer-graphcomplete/.relayer/evidence/worktrees/04-reopened-exact-thread.png",
+    "environment": "/Volumes/2T-SSD/worktrees/8de5/relayer-graphcomplete/.relayer/evidence/worktrees/06-selected-worktree-environment.png",
+    "missingHistory": "/Volumes/2T-SSD/worktrees/8de5/relayer-graphcomplete/.relayer/evidence/worktrees/05-missing-location-readable-history.png"
+  }
+}

@@ -401,7 +401,7 @@ after B4 · PD-17 releases and the hosted share artifact use the default design 
 | **PD-19** | ADR 0013 item 2 (40px collapsed "Add annotation" row) versus #570's floating annotation editor (PRD `:2327`, pin `test/workspace-keyboard.test.mjs:595`), which already reserves no space when hidden | Re-review against #570 | B2 annotations |
 | PD-A1 | Authoring tokens (4 parts, old §2.8). Also: does the agent guidance palette (`graph-presentation-guidance.ts:17`) stay one fixed text, updated once at B4, rather than following the build's design? | Tokens; fixed text | A5 |
 | PD-6 / PD-13 | Eval dashboard, judge and trace pages: follow the OS or stay dark; tokenise them or amend ADR `:76` | Your call | B4 |
-| PD-14 | OG link image: recolour the SVG or generate a PNG | **Decided 2026-09-29:** the design build generates the SVG (`design/share-og.svg`) from the configured dark roles, families and fonts | B4 |
+| PD-14 | OG link image: recolour the SVG or generate a PNG | **Decided 2026-09-29:** the design build generates the SVG (`design/share-og.svg`) from the configured dark roles, families and fonts. Since the logo redesign the title is the drawn wordmark from `relayer-mark.js`, not typeset in the display font | B4 |
 | PD-15 | Tutorial coach mark drops its private blue | Your call | A3 |
 
 ---

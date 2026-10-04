@@ -329,10 +329,15 @@ Consequences for design:
 
 ### 2.8 Brand
 
-- **The logo stays unchanged.** It is the skateboarder PNG-in-SVG on cream `#FAF2E6`, with the deck red-orange `#D74326`.
-  - Drop today's `#4a4f55` tile border; the baked-in 14px black frame already reads as an edge (the cream tile is only
-    1.04:1 against A's light page, so the frame is what separates it).
-  - A vector redraw is a **brand decision for Vishal** and must not be silently drawn.
+- **The logo is the three-slash mark** (Vishal, 2026-10-03; supersedes "the logo stays unchanged"). The app mark is three
+  slashes at an 18° lean on an ink tile; spread, they become the wordmark RE / A \\ ƎЯ, drawn in strokes at the slash weight
+  from Bricolage Grotesque 700 metrics (design A of the Round 3 logo canvas). `desktop/renderer/src/relayer-mark.js` owns
+  the geometry; `scripts/build-relayer-logo-assets.mjs` writes the committed icon and tile-mask SVGs from it.
+  - The sidebar and new-thread hero lockups are the transition: each rests on the mark, hovering it spreads the mark into
+    the wordmark and leaving folds it back (700 ms each way, instant under reduced motion); the collapsed icon rail has no
+    room for the word and ignores hover. Provider-setup and account tiles stay the mark, drawn in the theme's text colour
+    through a luminance mask so the page shows through the slashes.
+  - The skateboarder PNG-in-SVG is retired from the product; relayerlabs.ai is out of scope here.
 - **Brand colours are respected, not necessarily used as UI accents**: cream `#FAF2E6` and deck `#D74326`.
   - Palettes A, B and D extend them. The reel's `#F54731`/`#F44731` is within about 3° of hue of the deck, and B's
     marshmallow `#FDFAEA` is close to the cream.

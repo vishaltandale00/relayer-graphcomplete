@@ -1,0 +1,39 @@
+{
+  "runId": "run-2026-10-03T02-24-10-187Z-0a5a3843",
+  "runStatus": "passed",
+  "case": "empty-project.hierarchical-overview.single-turn",
+  "harness": "claude-basic",
+  "turnAccepted": true,
+  "renderedLayerPreviews": 2,
+  "previewEvents": [
+    {
+      "outcome": "rendered",
+      "target": {
+        "kind": "layer",
+        "layerId": 11
+      },
+      "fingerprint": "sha256:1cfed61479b2bcd399bb2203809c2759d164fbd8c72cdbb60b8a79965a5bc45d",
+      "width": 1164,
+      "height": 703,
+      "byteLength": 27887,
+      "durationMs": 1330
+    },
+    {
+      "outcome": "rendered",
+      "target": {
+        "kind": "layer",
+        "layerId": 12
+      },
+      "fingerprint": "sha256:d3c66007ae44036e65407a796cb9dd05de77b3f4d381f47f6b98a66be2a16401",
+      "width": 1164,
+      "height": 703,
+      "byteLength": 24577,
+      "durationMs": 207
+    }
+  ],
+  "imageViews": [],
+  "submittedAt": "2026-10-03T02:24:38.370Z",
+  "viewedLayerPreviews": [],
+  "passed": false,
+  "qualityClaim": "none"
+}

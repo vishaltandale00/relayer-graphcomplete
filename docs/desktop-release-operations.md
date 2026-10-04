@@ -177,6 +177,38 @@ Each native job:
 
 The runner temporarily places the isolated canary profile and evidence-log paths in the per-user launch environment. This preserves them when Squirrel relaunches through LaunchServices; the script restores any prior values before it exits.
 
+Canary profiles save Preview before launching the seed. The driver waits for
+startup discovery of the exact target before its explicit check and download,
+so an older seed's delayed startup check cannot overwrite download readiness.
+Final Settings capture waits for the relaunched document body and the existing
+visible version/channel/status checks; missing renderer readiness still times out
+without producing acceptance evidence.
+
+The driver bounds DevTools HTTP discovery, socket opening, and handshake acknowledgements.
+Observation and screenshot commands allow at most 30 seconds, or the smaller phase budget.
+Check, download, and install commands retain the supplied phase budget because they may do real work.
+A missing answer fails the canary; the driver never retries a mutating command or treats timeout as acceptance.
+The first-install target must exit within 30 seconds after SIGTERM before seed installation starts.
+Completed job logs identify the native mount, copy, signature, notarization, termination, and updater phases.
+Native OS commands still rely on the workflow's outer timeout; stage labels help diagnose a blocked call.
+
+`test/desktop-cdp-canary.test.mjs` observes these production driver boundaries in process.
+Its stalled discovery, socket, handshake, updater-read, and screenshot scenarios protect distinct failure edges.
+A lost download answer scenario applies the download once, then proves the runner neither retries nor installs.
+Existing scenarios retain startup ordering, early discovery, renderer readiness, and unavailable-evidence coverage.
+These deterministic checkpoints protect the evidence authority boundary of UPD-002 and ADR 0002.
+They do not replace the declared native canary or certify an existing connected-provider profile.
+
+A fresh seed profile retains an active but disconnected default Codex definition.
+App download can therefore prefetch a managed runtime even without a signed-in provider.
+The canary waits for the exact incoming runtime receipts and staging-directory teardown before requesting restart.
+It reads requirements from the public Preview manifest, verified against the immutable publication receipt.
+The wait is bounded and rejects changed metadata, wrong recipes, and connected profiles.
+It never removes the protected default provider or answers the native runtime-download quit confirmation.
+Production activation still validates staged runtime contents when the target launches.
+The in-process canary tests cover receipt/teardown ordering, wrong recipes, incomplete staging before install,
+and the manifest/profile authority boundaries. Native update and connected-profile acceptance remain separate.
+
 The hosted runner proves native packaging and updater behavior for its target. It does not replace a physical-device check for release-critical hardware or user-specific security software.
 
 Apple Silicon workflow `32399053432` completed the exact `0.2.10` to `0.2.11` Preview update on native arm64 macOS. Its committed evidence is under `docs/prd/assets/evidence/desktop/macos-arm64-0.2.10-to-0.2.11/`. Protected workflow `32399976404` later promoted the same `0.2.11` bytes to Stable.

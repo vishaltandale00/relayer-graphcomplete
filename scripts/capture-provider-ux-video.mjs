@@ -318,7 +318,7 @@ async function captureBrowserScene(url, frame, profile, width = 1280, { forcedCo
             newThreadButton.focus({ preventScroll: true });
             const focused = iconOffset();
             previousFocus?.focus?.({ preventScroll: true });
-            const logo = document.querySelector(".sidebar-title .logo").getBoundingClientRect();
+            const logo = document.querySelector(".sidebar-title .brand-lockup").getBoundingClientRect();
             const button = newThreadButton.getBoundingClientRect();
             const logoOffsetX = logo.left + logo.width / 2 - button.left - button.width / 2;
             newThreadIconCentering = { resting, focused, logoOffsetX,

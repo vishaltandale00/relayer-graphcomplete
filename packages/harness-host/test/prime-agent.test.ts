@@ -770,6 +770,24 @@ describe("PrimeAgentHarness", () => {
     await expect(hostHandlers[1]?.(visual, invocation(second))).rejects.toThrow("another run");
     await expect(hostHandlers[1]?.(visual, { ...invocation(first), isCurrent: () => false })).rejects.toThrow("no longer active");
     await expect(hostHandlers[1]?.(visual, { ...invocation(first), signal: AbortSignal.abort() })).rejects.toThrow("no longer active");
+    expect(createAgentSessionFromServices).toHaveBeenCalledWith(expect.objectContaining({ hostRequestHandlers: {
+      "relayer.graph.current": hostHandlers[0],
+      "relayer.graph.visual-authoring": hostHandlers[1],
+      "relayer.complete.current": hostHandlers[2],
+      "relayer.graph.submit-layer": hostHandlers[3],
+    } }));
+    const layer = { version: 1, token: "first-token", nodeId: 11, layer: { clientKey: "root", nodes: [2], edges: [], layout: { version: 1, placements: [{ nodeId: 2, x: 0.5, y: 0.5 }], edgeShape: "default" } } };
+    // Prime adds its native envelope fields to every IPython host request.
+    const layerFetch = vi.fn(async (_url: unknown, init: RequestInit) => Response.json({ layer: { id: 30, state: "draft", ...JSON.parse(init.body as string) } }));
+    vi.stubGlobal("fetch", layerFetch);
+    try {
+      await expect(hostHandlers[3]?.({ ...layer, type: "relayer.graph.submit-layer", cellSourceCode: "await graph.submit_layer(layer)" }, invocation(first)))
+        .resolves.toMatchObject({ ok: true, value: { id: 30, clientKey: "root" } });
+      expect(layerFetch).toHaveBeenCalledWith("http://127.0.0.1:43123/api/graph/layers", expect.objectContaining({ method: "POST" }));
+    } finally { vi.unstubAllGlobals(); }
+    await expect(hostHandlers[3]?.(layer, invocation(second))).rejects.toThrow("another run");
+    await expect(hostHandlers[3]?.(layer, { ...invocation(first), isCurrent: () => false })).rejects.toThrow("no longer active");
+    await expect(hostHandlers[3]?.(layer, { ...invocation(first), signal: AbortSignal.abort() })).rejects.toThrow("no longer active");
 
     expect(harness.state()).toEqual({
       primeAgentSessionFile: "/tmp/prime-session.jsonl",
@@ -1702,8 +1720,18 @@ describe("PrimeAgentHarness", () => {
           contextWindow: 196_608, maxOutputTokens: 131_072, reasoning, reasoningEffort, ...(imageInput === undefined ? {} : { imageInput }),
         })).catch(() => undefined);
       }
-      expect(payloads).toHaveLength(2);
-      expect(payloads.map((payload) => JSON.stringify(payload).includes("data:image/png;base64,aW1hZ2UtcHJvYmU="))).toEqual([imageInput === true, imageInput === true]);
+      // attach_image returns a draft preview as an image block in the ipython tool result.
+      session!.agent.state.messages = [...session!.agent.state.messages,
+        { role: "assistant", content: [{ type: "toolCall", id: "attach-1", name: "ipython", arguments: { code: "print(await attach_image(layer.preview.path))" } }], api: "openai-completions", provider: "openrouter", model: "probe", usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } }, stopReason: "toolUse", timestamp: Date.now() },
+        { role: "toolResult", toolCallId: "attach-1", toolName: "ipython", content: [{ type: "text", text: "Loaded 1 image(s) into context" }, { type: "image", data: "cHJldmlldy1wcm9iZQ==", mimeType: "image/png" }], isError: false, timestamp: Date.now() },
+      ] as never;
+      await harness.complete(singleAdapterRunContext(53, "openrouter", {
+        contextWindow: 196_608, maxOutputTokens: 131_072, reasoning, reasoningEffort, ...(imageInput === undefined ? {} : { imageInput }),
+      })).catch(() => undefined);
+      expect(payloads).toHaveLength(3);
+      expect(payloads.map((payload) => JSON.stringify(payload).includes("data:image/png;base64,aW1hZ2UtcHJvYmU="))).toEqual([imageInput === true, imageInput === true, imageInput === true]);
+      expect(JSON.stringify(payloads[2]).includes("data:image/png;base64,cHJldmlldy1wcm9iZQ==")).toBe(imageInput === true);
+      payloads.pop();
       expect(payloads.map((payload) => payload.reasoning)).toEqual([expected, expected]);
       expect(session!.model?.provider).toBe("unknown");
     } finally {
@@ -1945,6 +1973,54 @@ describe("PrimeAgentHarness", () => {
       expect(JSON.stringify(tool)).toContain("[redacted-personal-presentation]");
       expect(JSON.stringify(trace.events)).not.toContain(rawDetail);
       expect(node.detail).toBe(rawDetail);
+    } finally { await harness.dispose(); }
+  });
+
+  it.each([undefined, "layered-navigation-v1"])("teaches attach_image draft previews only when the host granted a folder (%s)", async (promptProfile) => {
+    const prompts: string[] = [];
+    const harness = await createHarness(primeSession("/tmp/prime-preview.jsonl", {
+      agent: { state: { thinkingLevel: "off" } },
+      sessionManager: { appendThinkingLevelChange: vi.fn() },
+      promptAndWait: vi.fn(async (text: string) => { prompts.push(text); }),
+    }), { ...configuration, settings: { ...configuration.settings, ...(promptProfile ? { promptProfile } : {}) } });
+    const plain = runContext(11, "token");
+    await harness.complete({
+      ...plain,
+      graph: { ...plain.graph, acquireCapability: () => ({ ...plain.graph.acquireCapability(), previewDirectory: "/tmp/previews-1" }) },
+    });
+    await harness.complete(runContext(12, "token"));
+
+    expect(prompts[0]).toContain("Draft previews are on for this run.");
+    expect(prompts[0]).toContain("print(await attach_image(submitted.preview.path))");
+    expect(prompts[0]).toContain("If attach_image reports that the model cannot see images, stop using previews");
+    expect(prompts[0]).toContain("Look before your final graph.submit");
+    expect(prompts[1]).not.toContain("Draft previews are on");
+    expect(prompts[1]).not.toContain("attach_image");
+  });
+
+  it("traces attach_image results with each image's MIME type and size, never the image", async () => {
+    const image = Buffer.from("draft preview png bytes").toString("base64");
+    let listener: ((event: unknown) => void) | undefined;
+    const harness = await createHarness(primeSession("/tmp/prime-attach.jsonl", {
+      subscribe: vi.fn((next) => { listener = next; return vi.fn(); }),
+      agent: { state: { thinkingLevel: "off" } },
+      sessionManager: { appendThinkingLevelChange: vi.fn() },
+      promptAndWait: vi.fn(async () => {
+        listener?.({ type: "tool_execution_end", toolCallId: "attach-1", toolName: "ipython", isError: false, result: {
+          content: [{ type: "text", text: "Loaded 1 image(s) into context" }, { type: "image", data: image, mimeType: "image/png" }],
+          details: { status: "ok", attachments: [{ mimeType: "image/png", data: image, path: "/tmp/previews-1/layer-30-abababababababab.png" }] },
+        } });
+      }),
+    }));
+    const trace = recordingTrace();
+    try {
+      await harness.complete({ ...runContext(11, "token"), trace: trace.sink });
+      expect(JSON.stringify(trace.events)).not.toContain(image);
+      const completed = trace.events.find((event) => event.type === "tool.call.completed");
+      expect(completed?.data.result).toEqual({
+        content: [{ type: "text", text: "Loaded 1 image(s) into context" }, { type: "image", mimeType: "image/png", byteLength: 23 }],
+        details: { status: "ok", attachments: [{ mimeType: "image/png", byteLength: 23, path: "/tmp/previews-1/layer-30-abababababababab.png" }] },
+      });
     } finally { await harness.dispose(); }
   });
 

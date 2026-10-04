@@ -62,6 +62,7 @@ import {
 } from "./services/desktop-account-service.mjs";
 import { createDesktopUpdater, resolveUpdateChannel } from "./services/updater.mjs";
 import { createManagedRuntimeInstaller, runtimesChangedByActivation } from "./managed-runtimes/installer.mjs";
+import { createModelAvailabilityPublisher } from "./models/model-availability-publisher.mjs";
 import { createManagedRuntimeResolver, managedRecipeInstalled } from "./managed-runtimes/resolver.mjs";
 import { createHarnessReadinessCoordinator, createPostUpgradeReadiness } from "./services/harness-readiness.mjs";
 import { confirmManagedRuntimeQuit } from "./managed-runtimes/quit-guard.mjs";
@@ -517,6 +518,11 @@ if (primaryInstance) {
       issueErrorCapability,
     });
     const productSession = await productServer.start();
+    const modelAvailability = createModelAvailabilityPublisher({
+      publishReadiness: (updates) => productServer.publishHarnessReadiness(updates),
+      publishCatalog: (snapshot, options) => productServer.publishProviderCatalog(snapshot, options),
+      getWindow: () => mainWindow,
+    });
     const readiness = createHarnessReadinessCoordinator({
       configurations: runtimeSession.configurations,
       digestConfiguration: runtimeSession.digestConfiguration,
@@ -544,13 +550,11 @@ if (primaryInstance) {
         "prime.agent": ({ runtime, signal }) => checkPrimeManagedRuntime({ runtime, signal }),
       },
       // The app server's record is the only readiness record (PROV-006).
-      publishAvailability: (updates) => productServer.publishHarnessReadiness(updates),
+      publishAvailability: modelAvailability.publishReadiness,
       recipeInstalled: (recipeId) => managedRecipeInstalled(managedRuntimeResolver, recipeId),
       diagnostics: providerDiagnostics,
     });
-    const publishCatalog = (snapshot, { signal, connectionGeneration, connectionEvent } = {}) => (
-      productServer.publishProviderCatalog(snapshot, { signal, connectionGeneration, connectionEvent })
-    );
+    const publishCatalog = modelAvailability.publishCatalog;
     providerComposition = createProviderComposition({
       registry: productionProviderAdapterRegistry,
       definitionStore: productServer.providerDefinitionStore(),

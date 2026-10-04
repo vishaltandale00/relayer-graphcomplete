@@ -5,6 +5,7 @@ import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { wordmark } from "../../desktop/renderer/src/relayer-mark.js";
 import { loadStructure, validateDesign } from "./validate.mjs";
 
 const repositoryRoot = fileURLToPath(new URL("../../", import.meta.url));
@@ -76,7 +77,7 @@ export function shareImageSvg(config, fonts = []) {
   <rect width="1200" height="630" fill="${role("bg")}"/>
   ${arcs.join("\n  ")}
   ${pills.join("\n  ")}
-  <text x="120" y="128" fill="${role("text")}" font-family="${fontFamily("display")}" font-size="40" font-weight="700">Relayer</text>
+  ${wordmark({ ink: role("text"), x: 120, baseline: 128, capHeight: 44 })}
   <text x="120" y="184" fill="${role("text-muted")}" font-family="${fontFamily("ui")}" font-size="26">Shared conversation</text>
   <text x="120" y="548" fill="${role("accent-text")}" font-family="${fontFamily("mono")}" font-size="18" letter-spacing="3">READ-ONLY SNAPSHOT</text>
 </svg>

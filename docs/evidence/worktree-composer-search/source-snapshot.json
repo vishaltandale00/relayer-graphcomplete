@@ -1,0 +1,13 @@
+{
+  "head": "eb4ec76f09d540c186911a5f32ed49c1ddf2bbe1",
+  "base": "99c7ddc12b5c505ed21c9ab176776b19117b76d3",
+  "digest": "82afe6041ca99e991d4ac21119501b9dd9838c5721deb1503e0b593f182c5f61",
+  "files": {
+    "desktop/renderer/src/checkout.js": "6c59da9f992e9b41cfd0ae0b8f6676fb2e6bac2cfe1890cbfa0715f75e269c09",
+    "desktop/renderer/styles.css": "dd05c2301b1e13ec82d32b5d774ddca48805fabfd20269206e2afb65c5235046",
+    "docs/prd/index.html": "3411e75bd306944770f7c52c8d63b43784f604c1977c8b2d82a2cbf10a073594",
+    "scripts/run-worktree-test.mjs": "bb69d07298812a49914b7c53b61860deec5f530d65ca5d5a942d34e82c92b495",
+    "scripts/test-desktop-worktrees.mjs": "f9ed684bd5dd96e4962898c958815c2cc319b960a2f03a2c95406f5fa1429cea",
+    "test/worktree-renderer.test.mjs": "85d30ba1768ab24b33241c26b982feca40c516b2dc49bfa0b51372d3aac1d36b"
+  }
+}

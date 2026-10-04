@@ -1,7 +1,9 @@
 import { execFileSync } from "node:child_process";
-import { resolve } from "node:path";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { PrimeVisualAuthoring } from "../src/implementations/prime-visual-authoring.js";
+import { PrimeVisualAuthoring, submitPrimeLayer } from "../src/implementations/prime-visual-authoring.js";
 
 const capability = { url: "http://graph.test", token: "run-one", nodeId: 1 };
 const request = () => ({ version: 1, objectId: "object-one", token: "run-one", nodeId: 1, operation: "submit",
@@ -152,5 +154,74 @@ asyncio.run(run())
     const result = await new PrimeVisualAuthoring().execute(input, capability, () => { if (!active) throw new Error("revoked"); }, signal());
     expect(result).toMatchObject({ ok: false, frozen: false, message: "revoked" });
     expect(fetch).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("Prime layer submission", () => {
+  const PNG = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x07]);
+  // The exact payload GraphSession.submit_layer sends to the host.
+  const pythonLayerRequest = () => JSON.parse(execFileSync("python3", ["-c", `
+import asyncio, json, sys, types
+from relayer_graph import GraphSession, NodeObject, EdgeObject, EdgeRouteObject, EdgeEndObject, LayerObject, LayerLayoutObject, NodePlacementObject
+from relayer_graph.authoring import GraphEdge, GraphNode
+async def run():
+    first, second = NodeObject("box", "First", "One", client_key="first"), NodeObject("box", "Second", "Two", client_key="second")
+    first.ref, second.ref = GraphNode(5, "concept", "box", "First", "One", "draft"), GraphNode(6, "concept", "box", "Second", "Two", "draft")
+    edge = EdgeObject((first, second), client_key="edge")
+    edge.ref = GraphEdge(9, (5, 6), "draft")
+    layer = LayerObject([first, second], [edge], LayerLayoutObject(
+        [NodePlacementObject(first, 0.25, 0.5), NodePlacementObject(second, 0.75, 0.5)], "elbow-horizontal",
+        (EdgeRouteObject(edge, ends=(EdgeEndObject(first, "top"), EdgeEndObject(second, "top")), waypoints=((0.5, 0.1),)),)),
+        client_key="root", default_node=second)
+    async def host_request(method, payload):
+        print(json.dumps({"method": method, "payload": payload}))
+        return {"ok": True, "value": {"id": 30, "nodes": [5, 6], "edges": [9], "state": "draft"}}
+    sys.modules["rlm"] = types.SimpleNamespace(host_request=host_request)
+    await GraphSession("http://graph.test", "run-one", 1).submit_layer(layer, size_justification="private")
+asyncio.run(run())
+`], { encoding: "utf8", env: { ...process.env, PYTHONPATH: resolve("python/relayer-graph/src") } }));
+
+  function layerTransport(reply: (body: Record<string, unknown>) => Response) {
+    const calls: { url: string; body: Record<string, unknown> }[] = [];
+    const fetch = vi.fn(async (url: unknown, init: RequestInit) => {
+      const body = JSON.parse(init.body as string);
+      calls.push({ url: String(url), body });
+      return reply(body);
+    });
+    vi.stubGlobal("fetch", fetch);
+    return calls;
+  }
+
+  it("forwards Python's exact layer and writes its preview into the host folder", async () => {
+    const { method, payload } = pythonLayerRequest();
+    expect(method).toBe("relayer.graph.submit-layer");
+    const folder = await mkdtemp(join(tmpdir(), "prime-layer-preview-"));
+    try {
+      const calls = layerTransport((body) => Response.json({
+        layer: { id: 30, nodes: body.nodes, edges: body.edges, layout: body.layout, defaultNodeId: body.defaultNodeId, state: "draft" },
+        preview: { status: "rendered", fingerprint: `sha256:${"ab".repeat(32)}`, width: 1176, height: 812, pngBase64: PNG.toString("base64") },
+      }));
+      const result = await submitPrimeLayer(payload, { ...capability, previewDirectory: folder }, () => {}, signal());
+      expect(calls).toEqual([{ url: "http://graph.test/api/graph/layers", body: payload.layer }]);
+      const path = join(folder, "layer-30-abababababababab.png");
+      expect(result).toEqual({ ok: true, value: expect.objectContaining({ id: 30, preview: { status: "rendered", path, width: 1176, height: 812 } }) });
+      expect(await readFile(path)).toEqual(PNG);
+    } finally {
+      await rm(folder, { recursive: true, force: true });
+    }
+  });
+
+  it("returns graph rejections for repair and fences authority before transport", async () => {
+    const { payload } = pythonLayerRequest();
+    const issues = [{ code: "overlap", path: "layout", message: "Spread the nodes out" }];
+    const calls = layerTransport(() => Response.json({ error: { code: "validation_failed", message: "Layer is invalid", issues } }, { status: 422 }));
+    expect(await submitPrimeLayer(payload, capability, () => {}, signal())).toEqual({
+      ok: false, httpStatus: 422, error: { code: "validation_failed", message: "Layer is invalid", issues },
+    });
+    await expect(submitPrimeLayer({ ...payload, token: "old" }, capability, () => {}, signal())).rejects.toThrow("another run");
+    expect(await submitPrimeLayer({ ...payload, layer: { ...payload.layer, extra: true } }, capability, () => {}, signal()))
+      .toMatchObject({ ok: false, httpStatus: 400, error: { code: "invalid_request" } });
+    await expect(submitPrimeLayer(payload, capability, () => { throw new Error("revoked"); }, signal())).rejects.toThrow("revoked");
+    expect(calls).toHaveLength(1);
   });
 });

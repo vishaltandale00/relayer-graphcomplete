@@ -1,5 +1,5 @@
 import { threadIconGuidance } from "./thread-icon-guidance.js";
-import { PrimeVisualAuthoring } from "./prime-visual-authoring.js";
+import { PrimeVisualAuthoring, submitPrimeLayer } from "./prime-visual-authoring.js";
 import { Buffer } from "node:buffer";
 import { createHash } from "node:crypto";
 import { realpathSync } from "node:fs";
@@ -556,6 +556,17 @@ export class PrimeAgentHarness implements Harness {
       if (broker === undefined) throw new Error("relayer.complete.current requires an active completion broker");
       return Object.freeze({ url: broker.url, token: broker.token });
     });
+    const submitLayer = primeAgent.createHostRequestHandler<PrimeAgentRunContext>(async (payload, invocation) => {
+      const active = () => {
+        if (!invocation.isCurrent() || invocation.signal.aborted) throw new Error("The graph run is no longer active");
+        if (invocation.runContext === undefined) throw new Error("Layer submission requires an active GraphComplete run");
+        invocation.runContext.graph.acquireCapability();
+      };
+      active();
+      const run = invocation.runContext!;
+      const { type: _requestType, cellSourceCode: _cellSourceCode, ...program } = payload;
+      return submitPrimeLayer(program, run.graph.acquireCapability(), active, invocation.signal);
+    });
     const savedSessionFile = context.savedState?.primeAgentSessionFile;
     const savedPresentationVersionId = context.savedState?.primeAgentSessionPersonalPresentationVersionId;
     const validSavedPresentationVersion = savedPresentationVersionId === undefined
@@ -606,6 +617,7 @@ export class PrimeAgentHarness implements Harness {
         hostRequestHandlers: {
           "relayer.graph.current": graphCurrent,
           "relayer.graph.visual-authoring": visualAuthoring,
+          "relayer.graph.submit-layer": submitLayer,
           "relayer.complete.current": completeCurrent,
         },
         telemetryDisabled: true,
@@ -1130,7 +1142,7 @@ graph = await GraphSession.current()
 ${PYTHON_GRAPH_API_REFERENCE}
 
 ${currentWorkspaceMechanicsPython()}
-${semanticChildGuidancePython(context)}${graphSearchGuidancePython(this.context.configuration.graphCapabilityProfile?.search === "query-v1")}
+${semanticChildGuidancePython(context)}${graphSearchGuidancePython(this.context.configuration.graphCapabilityProfile?.search === "query-v1")}${draftPreviewGuidancePython(context)}
 
 The graph scope is supplied by the host for this complete() execution and is inherited by your RLM children. Do not read graph credentials from environment variables or files. Give every persisted NodeObject, EdgeObject, LayerObject, navigate action, and invoke action an explicit descriptive client_key that is unique within this interaction and stable across edits and reruns. Never rely on generated client keys in authored code.
 
@@ -1174,7 +1186,7 @@ graph = await GraphSession.current()
 ${PYTHON_GRAPH_API_REFERENCE}
 
 ${currentWorkspaceMechanicsPython()}
-${semanticChildGuidancePython(context)}${graphSearchGuidancePython(this.context.configuration.graphCapabilityProfile?.search === "query-v1")}
+${semanticChildGuidancePython(context)}${graphSearchGuidancePython(this.context.configuration.graphCapabilityProfile?.search === "query-v1")}${draftPreviewGuidancePython(context)}
 
 The graph scope is supplied by the host for this complete() execution and is inherited by your RLM children. Do not read graph credentials from environment variables or files. Give every persisted NodeObject, EdgeObject, LayerObject, navigate action, and invoke action an explicit descriptive client_key that is unique within this interaction and stable across edits and reruns. For example, use NodeObject("info", "Summary", "...", client_key="summary-node"), EdgeObject((summary_node, detail_node), client_key="summary-detail-edge"), and LayerObject(nodes, edges, layout, client_key="response-layer"). Never rely on generated client keys in authored code. Author in whatever order fits the task, while submitting each referenced object before using it. The final graph call must be await graph.submit(${interaction.id}); call it only after the full response has been authored.
 
@@ -1288,6 +1300,17 @@ function semanticChildGuidancePython(context: HarnessRunContext): string {
   if (context.completionBroker === undefined) return "";
   return `For explicit semantic child work, give each child its own invoke action. First author and submit those invoke actions in their layer and advance that layer as current. Only after that succeeds, prepare each child separately with input_graph = await graph.prepare_complete(invoke_action); one input graph starts exactly one child. Import with from relayer_graph import complete, CompletionWatch. Start with children = [] and launch each child from its own input graph with children.append(complete(input_graph)). Each handle returns immediately with completion_id, current, and result; launch every independent child before watching them. Every change to a child's current is an event you may act on. Create watch = CompletionWatch(children) once. Then run changes = await watch.changes() in its own cell; it returns as soon as any child's current moves or ends, even when that takes minutes. Each change is a (child, current) pair, or (child, error) with the exception in place of the current once the watch can no longer observe that child, for example because its start was refused; check isinstance(current, Exception) before reading it. The watch then stops watching that child. After each event, decide whether the user now needs a better view, for example when a workstream reaches a finding or finishes. Only then submit a layer that presents the work itself and advance your current to it; otherwise keep waiting. Repeat until watch.settled is true. Your turn ending does not wait for children, so never leave them in a background task. Then integrate every child and return this completion. await child.result gives a succeeded child's final layer. A stopped or failed child raises CompletionTerminalError there instead, also importable from relayer_graph; catch it and integrate the work its error.current still retains. If child.result raises any other exception, as it may for a child reported with an error, you cannot read that child's work; present that part as not done, without quoting the error or inventing findings. Prime RLM children and subagents remain inside this completion and do not create semantic children by themselves.
 `;
+}
+
+/**
+ * Present only when the host granted this completion a preview folder (PRD §11.10).
+ * attach_image is Prime's native skill; it works only when the selected model accepts images.
+ */
+function draftPreviewGuidancePython(context: HarnessRunContext): string {
+  if (context.graph.acquireCapability().previewDirectory === undefined) return "";
+  return `
+
+Draft previews are on for this run. A successful await graph.submit_layer(layer) returns an image of the layer as the user will see it, and await graph.submit_node(node) returns one for a node with authored detail. The returned record's preview field has a status of rendered, cached, failed, or limit_reached; a rendered or cached preview also has path, width, and height. To look at one, run print(await attach_image(submitted.preview.path)) in IPython; attach_image is already imported. If attach_image reports that the model cannot see images, stop using previews and continue without them. Look before your final graph.submit, because graph access ends when it succeeds. If you see overlaps, cramped or unreadable nodes, or a layout that doesn't show the real relationships, edit your code and rerun it with the same client_key values; a changed object returns a fresh image. Controls for actions you have not added yet appear unavailable in a preview; that is expected. The image is advisory: a failed or limit_reached preview never blocks your work.`;
 }
 
 function graphSearchGuidancePython(enabled: boolean): string {
@@ -1490,9 +1513,23 @@ function safePrimeToolEvent(
     toolCallId: event.toolCallId,
     toolName: event.toolName,
     args: event.args,
-    result: event.result,
+    result: redactPrimeImages(event.result),
     isError: event.isError,
   }, sensitiveValues, presentationTraceValues, false)) as JsonObject;
+}
+
+/**
+ * attach_image puts base64 images in the ipython result's content and attachments.
+ * The trace keeps each image's MIME type and size, never the image (PRD §11.10).
+ */
+function redactPrimeImages(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(redactPrimeImages);
+  if (!isRecord(value)) return value;
+  if (typeof value.data === "string" && typeof value.mimeType === "string" && value.mimeType.startsWith("image/")) {
+    const { data, ...rest } = value;
+    return { ...rest, byteLength: Buffer.byteLength(data, "base64") };
+  }
+  return Object.fromEntries(Object.entries(value).map(([key, child]) => [key, redactPrimeImages(child)]));
 }
 
 function sanitizePrimeTraceValue(

@@ -49,5 +49,21 @@ def materialize_preview(value: Any, directory: str | None, target: str) -> Graph
     return GraphPreview(status, path, width, height)
 
 
+def host_preview(value: Any) -> GraphPreview | None:
+    """Read a preview the Prime host already wrote into the turn's preview folder."""
+    if value is None:
+        return None
+    if not isinstance(value, dict):
+        return _FAILED
+    status = value.get("status")
+    if status in ("failed", "limit_reached"):
+        return GraphPreview(status)
+    path, width, height = value.get("path"), value.get("width"), value.get("height")
+    if status not in ("rendered", "cached") or not isinstance(path, str) or not path \
+            or not _positive(width) or not _positive(height):
+        return _FAILED
+    return GraphPreview(status, path, width, height)
+
+
 def _positive(value: Any) -> bool:
     return isinstance(value, int) and not isinstance(value, bool) and value > 0

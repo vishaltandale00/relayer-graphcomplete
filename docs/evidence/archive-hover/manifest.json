@@ -1,0 +1,100 @@
+{
+  "version": 1,
+  "sourceCommit": "fb26a2c2b197c9acf7d223fa86729065e67624f1",
+  "sourceFiles": {
+    "desktop/renderer/index.html": "775e004390131b7a1115813ed9f01cedbe9f463e37d0d2248bea08636b114cc1",
+    "desktop/renderer/styles.css": "9acab2ad6162ad88648c844c821d1dcfd869a39eef8dc22f89f037f427ec74d6",
+    "desktop/renderer/src/main.js": "171261f8dda1444b7892b5cc3888bf0318b7260d3dbae5864f3d68b04a4ff8ff",
+    "desktop/renderer/src/thread-archive.js": "f88988a24e4f603e27dd85dedaccf3c806a147188125877a09752a0667cc3d32",
+    "desktop/renderer/src/navigation.js": "9d00cf7a8c9da6d3fab7f13abb3e84b2703d22b6444026cb1601d735dff815c8",
+    "desktop/renderer/src/threads.js": "894e855f0968bf53544d5785870c655feeb77430aaef261a45c45cb1d12570ad",
+    "desktop/renderer/src/ui.js": "e1cda9b0294e179091569d90e7c5b2877da0c6f220bdf20ab91a99166c0f57c8",
+    "desktop/renderer/src/graph.js": "1f5f313da5af92ebacac3054f9be3ccb60a25fcbd71cc8d3139a81c63d39f8a5",
+    "desktop/renderer/src/product-workspace/view.js": "258d3ad0d6af68b29e66252284c487178303eaf513439e6fc6f08a954818f35b",
+    "desktop/renderer/src/product-workspace/model.js": "2dd08cfff01676da030935ae971f767e3daacb8a65e4aa693e11f0cf44ee20fd",
+    "desktop/renderer/src/product-workspace/workspace.js": "dd84e7bedaf283613e66df0d0e0d5f8c12985b2355629f799d0eecb0bc6a6eba",
+    "crates/relayer-app-server/src/api/threads.rs": "e6fa0b68164b4316a9855f0588f8728f6a2521ccc9d2f80d928b928a999f843d",
+    "crates/relayer-app-server/src/product/service.rs": "0e50a9c321996b2994863027988e509bcd486e3ee1049fedd34b4828540ced62",
+    "crates/relayer-app-server/src/storage/sqlite/threads.rs": "2caf70d98188b3d9f940b42f65862dbc3322028941c74a4bd25d2612e00ea605",
+    "crates/relayer-app-server/src/storage/sqlite/migrations/0042_thread_archive.sql": "a4f3c656b728cf711967fcd41067509ca5c681a3b5ad30b3f019eeb1a26bedc8",
+    "scripts/capture-thread-archive-evidence.mjs": "42921f8835abc2f0dbe35f16ac7ec3c4ed39524bded95e5195fe2e1d76d91860"
+  },
+  "workspaceDigest": "6dfdd8cd44c3d34c1eb8d923d79032562ebdb506f86508596626261d834e0db2",
+  "binarySha256": "297aafd9db94f4231a57f415fb16f1c511e5d0b3397d72739313082300955913",
+  "videoSha256": "7d676e9a153293bd09e58b2d6dc83dc51a5626a7224396f1a25ce99caa2d6029",
+  "hoverVideoSha256": "f077fcd50e21b6b170f3fb09468bcbe40c8b78b11c07fe4cc31cbbe00c5049fa",
+  "checkpoints": [
+    {
+      "name": "direct-rightmost-trashcan",
+      "verdict": "passed"
+    },
+    {
+      "name": "01-before",
+      "verdict": "passed",
+      "caption": "Pointer away: archive icons stay hidden"
+    },
+    {
+      "name": "hover-selected",
+      "verdict": "passed",
+      "caption": "Hover selected chat: only its archive icon appears"
+    },
+    {
+      "name": "hover-project",
+      "verdict": "passed",
+      "caption": "Hover project chat: only its archive icon appears"
+    },
+    {
+      "name": "hover-away",
+      "verdict": "passed",
+      "caption": "Move away: archive icons hide again"
+    },
+    {
+      "name": "02-project-archived",
+      "verdict": "passed",
+      "caption": "2. The red trashcan archives a chat; Undo is available"
+    },
+    {
+      "name": "03-undo",
+      "verdict": "passed",
+      "caption": "3. Undo restores the same project chat"
+    },
+    {
+      "name": "04-thread-menu",
+      "verdict": "passed",
+      "caption": "4. Archive is also available in the open chat menu"
+    },
+    {
+      "name": "retained-reading-position-and-disabled-send",
+      "verdict": "passed"
+    },
+    {
+      "name": "05-current-archived",
+      "verdict": "passed",
+      "caption": "5. The archived workspace stays open, with its draft intact"
+    },
+    {
+      "name": "06-settings",
+      "verdict": "passed",
+      "caption": "6. Find archived chats only in Settings"
+    },
+    {
+      "name": "07-open-restores",
+      "verdict": "passed",
+      "caption": "7. Opening restores the chat and preserves its draft"
+    },
+    {
+      "name": "process-reopen-and-order",
+      "verdict": "passed"
+    },
+    {
+      "name": "busy-api-and-read-only-authority",
+      "verdict": "passed"
+    }
+  ],
+  "syntheticFixture": "Real accepted graphs created by a deterministic inference-free harness; third completion held pending until cleanup",
+  "pointerMarker": "Noninteractive overlay follows actual CDP pointer coordinates",
+  "paidInferenceCalls": 0,
+  "platform": "darwin",
+  "architecture": "arm64",
+  "humanAcceptance": "pending"
+}

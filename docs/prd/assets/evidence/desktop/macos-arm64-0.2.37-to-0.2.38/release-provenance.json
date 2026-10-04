@@ -1,0 +1,106 @@
+{
+  "schemaVersion": 1,
+  "target": "macos-arm64",
+  "version": "0.2.38",
+  "sourceCommit": "c76ab6e26c9cfffec1366d697c5d419896ba3487",
+  "sourceTree": "53b5b3917d75ed4610a68ed45be1dd583b5c17a6",
+  "tag": "desktop-v0.2.38",
+  "sourceMainCiRun": "37070943996/1",
+  "candidate": {
+    "run": "37071544819/1",
+    "artifactId": 11256024290,
+    "archiveDigest": "sha256:6291210bd62869e7bc8e22a122fead21dbe7e125f6bca2e9fe1ed98d69825b2e"
+  },
+  "publication": {
+    "run": "37074844481/1",
+    "artifactId": 11256505197,
+    "archiveDigest": "sha256:b534774ac32b30ea9e2aef9740c36fb1d93a4a24854c3baa6b62878458f32239"
+  },
+  "canary": {
+    "run": "37093891333/1",
+    "implementationCommit": "f4c3617d240f1bbeaa9ec9ab075dd3c5707f2f22",
+    "artifactId": 11262693478,
+    "archiveDigest": "sha256:b71d35dedd79903c7b91c6812159285afcd7e24bc67a7cc625f6dab47934ce8c",
+    "evidenceSha256": "d478eda58057be50568ac0f59c750adb10c23ec826ca4a7af9a88b4fff2b43cc"
+  },
+  "seed": {
+    "version": "0.2.37",
+    "sourceCommit": "f32506a8f529e1454463b056e8872dc5841967ce",
+    "run": "36894985772/2",
+    "artifactId": 11182871457,
+    "archiveDigest": "sha256:c4529c6a7e0df4d3680bea00d5caf17c3d5992656ab198b32a4b5c60aaec93fa"
+  },
+  "failedAttempts": [
+    {
+      "runId": 37075038884,
+      "attempt": 1,
+      "implementationCommit": "c76ab6e26c9cfffec1366d697c5d419896ba3487",
+      "conclusion": "cancelled at 60-minute workflow boundary",
+      "artifactId": 11257998701,
+      "artifactDigest": "sha256:9455e15815be3d4067f99c637d3bc43f4af91a68853204e0329148e05ddea0ae",
+      "observed": "first-install, available, ready screenshots; full download and Squirrel proxy listening",
+      "unknown": "ready screenshot write completion or subsequent install CDP/IPC; no update-mode completion, native relaunch or acceptance",
+      "reviewer": "release_review",
+      "extractedDigest": "e01294ec9a834708859c624c6ae5b928b7f40278afec030fd67bdb0b3fe7b4f5",
+      "unchangedRetryQualified": false
+    },
+    {
+      "runId": 37081769241,
+      "attempt": 1,
+      "implementationCommit": "c281b79dbf0ec6a9d203f9d776ced43738598178",
+      "artifactId": 11259154248,
+      "artifactDigest": "sha256:229273f936e58754658c5035d8e19a40272f0febd2c3c3ffba3764e208eed4e5",
+      "result": "install Runtime.evaluate deadline after900000ms",
+      "evidenceDigest": "757de4644e14f650baa75d3107c75483221fe43571af3ad0e9d74e4fb4000428"
+    }
+  ],
+  "runnerRepairs": [
+    {
+      "pr": 653,
+      "sourceCommit": "8ff9847c9c03f531fc70f93ab21c387fbb28580e",
+      "reviewDigest": "2c93aa86a00fdef732840858319466e3feb0e37043423af61866a2309249771c",
+      "reviewer": "release_review",
+      "ciRun": 37081024452,
+      "focusedTests": {
+        "passed": 35,
+        "seconds": 115.65,
+        "files": 3
+      },
+      "build": "passed sequentially",
+      "fullCheck": "passed exact 8ff9847 / tree4d01191; all3416 JS+2secret+66Python and Rust/lint/readability, one local worker",
+      "ciStatus": "passed",
+      "mergeCommit": "c281b79dbf0ec6a9d203f9d776ced43738598178"
+    },
+    {
+      "pr": 655,
+      "sourceCommit": "7b576f8885c5f5fe0e6c1f6568683dced33a0034",
+      "reviewDigest": "b9dedf1990fd1245277c02649f74c35ed55c5c3f7adf9d551e8a577536feec75",
+      "reviewer": "release_review",
+      "focusedTests": 16,
+      "fullCheck": "passed:3420JS+2secret+66Python,Rust/lint/readability; serial local workers",
+      "build": "passed sequentially",
+      "firstCheckFailure": "unrelated command_runner output limit;356pass/1fail;isolated unchanged0.39s pass",
+      "ciRun": 37093532169,
+      "ciStatus": "passed",
+      "ciTestedMerge": "e47d9aa2",
+      "ciTests": {
+        "passed": 3397,
+        "skipped": 27
+      },
+      "mergeCommit": "f4c3617d240f1bbeaa9ec9ab075dd3c5707f2f22"
+    }
+  ],
+  "nativeCache": {
+    "restore": "miss: no compatible trusted artifact",
+    "build": "fresh source compilation",
+    "save": "unavailable: incomplete dSYM generation diagnostics",
+    "cacheHitAcceptance": false
+  },
+  "limits": [
+    "Apple Silicon macOS only",
+    "No paid inference or live account acceptance",
+    "Existing connected-provider and saved-chat upgrade acceptance remains indeterminate",
+    "No cache-hit acceptance or end-to-end symbolication claim",
+    "Stable pointer acceptance requires separate promotion receipt and live verification"
+  ]
+}

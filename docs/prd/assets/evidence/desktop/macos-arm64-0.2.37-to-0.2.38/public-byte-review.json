@@ -1,0 +1,49 @@
+{
+  "ok": true,
+  "version": "0.2.38",
+  "sourceCommit": "c76ab6e26c9cfffec1366d697c5d419896ba3487",
+  "publicationRun": "37074844481",
+  "manifest": {
+    "key": "desktop/macos/arm64/beta-mac.yml",
+    "size": 697,
+    "sha256": "a6b3228b19c42dfbcfcb50309adcf4eedbf786db26c3d60018c15f15bde773b7"
+  },
+  "artifacts": [
+    {
+      "name": "Relayer-0.2.38-mac-arm64.dmg",
+      "size": 208628684,
+      "sha256": "446dcebe883e7df440cb618a061e507aa94f2cc23faa24ffee70cf095ff47501",
+      "passed": true
+    },
+    {
+      "name": "Relayer-0.2.38-mac-arm64.zip",
+      "size": 207679784,
+      "sha256": "d2901c9e38b464a14cbe77916858ab09dee16a60cd030580524da735c7890a1b",
+      "passed": true
+    },
+    {
+      "name": "Relayer-0.2.38-mac-arm64.dmg.blockmap",
+      "size": 216317,
+      "sha256": "dc7c175bcc07c4f44716fcf85628db9c5fd32567467bb49f1590a0b92e640100",
+      "passed": true
+    },
+    {
+      "name": "Relayer-0.2.38-mac-arm64.zip.blockmap",
+      "size": 216036,
+      "sha256": "97f1c607ef3d92789720d1d3351a86e3dd4272a7318ac8f86cde9466be73b4b4",
+      "passed": true
+    },
+    {
+      "name": "Relayer-0.2.38-mac-arm64-SHA256SUMS.txt",
+      "size": 190,
+      "sha256": "90ec6026a2c0d1f9cabd28e63e793fb604991fc6b2c0cdccc035a7260115234e",
+      "passed": true
+    },
+    {
+      "name": "Relayer-0.2.38-mac-arm64-RELEASE.json",
+      "size": 1195,
+      "sha256": "05b65d41425d83d59ffe12b56a3581f2b322bfc1064ebe5c2ef81fefc4ea089f",
+      "passed": true
+    }
+  ]
+}

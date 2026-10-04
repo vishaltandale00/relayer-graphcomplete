@@ -299,6 +299,26 @@ class CompletionInputGraph:
         return cls(node)
 
 
+def _layer_payload(layer: LayerObject, size_justification: str | None) -> dict[str, Any]:
+    return {
+        "clientKey": layer.client_key,
+        "nodes": [_node_id(item) for item in layer.nodes],
+        "defaultNodeId": None if layer.default_node is None else _node_id(layer.default_node),
+        "edges": [_edge_id(item) for item in layer.edges],
+        "layout": {
+            "version": layer.layout.version,
+            "placements": [
+                {"nodeId": _node_id(item.node), "x": item.x, "y": item.y}
+                for item in layer.layout.placements
+            ],
+            "edgeShape": layer.layout.edge_shape,
+            **({"edgeRoutes": [_route_payload(route) for route in layer.layout.edge_routes]}
+               if layer.layout.edge_routes else {}),
+        },
+        "sizeJustification": size_justification,
+    }
+
+
 def _route_payload(route: EdgeRouteObject) -> dict[str, Any]:
     """Serialize a route, leaving out what it does not set."""
     payload: dict[str, Any] = {"edgeId": _edge_id(route.edge)}
@@ -390,23 +410,7 @@ class RelayerGraphClient:
 
     async def submit_layer(self, layer: LayerObject, *, size_justification: str | None = None) -> GraphLayer:
         """Submit a layer. Layers with 6-8 nodes require a private justification."""
-        value = await self._request("POST", "/api/graph/layers", {
-            "clientKey": layer.client_key,
-            "nodes": [_node_id(item) for item in layer.nodes],
-            "defaultNodeId": None if layer.default_node is None else _node_id(layer.default_node),
-            "edges": [_edge_id(item) for item in layer.edges],
-            "layout": {
-                "version": layer.layout.version,
-                "placements": [
-                    {"nodeId": _node_id(item.node), "x": item.x, "y": item.y}
-                    for item in layer.layout.placements
-                ],
-                "edgeShape": layer.layout.edge_shape,
-                **({"edgeRoutes": [_route_payload(route) for route in layer.layout.edge_routes]}
-                   if layer.layout.edge_routes else {}),
-            },
-            "sizeJustification": size_justification,
-        })
+        value = await self._request("POST", "/api/graph/layers", _layer_payload(layer, size_justification))
         layer.ref = GraphLayer.from_dict(value["layer"])
         return self._with_preview(layer.ref, value.get("preview"), f"layer-{layer.ref.id}")
 
@@ -593,37 +597,40 @@ class RelayerGraphClient:
                     raw = error.read()
                 finally:
                     error.close()
-                details = json.loads(raw or b"{}")
-                item = details.get("error", {}) if isinstance(details, Mapping) else {}
-                message = item.get("message", f"Graph request failed with HTTP {error.code}")
-                if (graph_query and isinstance(item, Mapping)
-                        and isinstance(item.get("code"), str)
-                        and GRAPH_QUERY_ERROR_PHASES.get(item["code"]) == item.get("phase")
-                        and isinstance(item.get("path"), str)):
-                    raise GraphQueryError(
-                        str(message), status=error.code, code=item["code"],
-                        phase=item["phase"], path=item["path"]
-                    ) from error
-                error_type = (
-                    AuthenticationError if error.code in (401, 403)
-                    else NotFound if error.code == 404
-                    else ValidationError if error.code in (400, 409, 422)
-                    else APIError
-                )
-                issues = tuple(
-                    ValidationIssue.from_dict(issue)
-                    for issue in item.get("issues", ())
-                    if isinstance(issue, Mapping)
-                )
-                if error_type is ValidationError:
-                    raise ValidationError(
-                        str(message), status=error.code, details=details, issues=issues
-                    ) from error
-                raise error_type(str(message), status=error.code, details=details) from error
+                raise _graph_error(error.code, json.loads(raw or b"{}"), graph_query=graph_query) from error
             except (URLError, socket.timeout, TimeoutError, OSError) as error:
                 raise TransportError(f"could not reach Relayer Graph at {self.url}: {error}") from error
 
         return await asyncio.to_thread(send)
+
+
+def _graph_error(status: int, details: Any, *, graph_query: bool = False) -> Exception:
+    """Map a graph API error body to the exception its HTTP status names."""
+    item = details.get("error", {}) if isinstance(details, Mapping) else {}
+    if not isinstance(item, Mapping):
+        item = {}
+    message = item.get("message", f"Graph request failed with HTTP {status}")
+    if (graph_query and isinstance(item.get("code"), str)
+            and GRAPH_QUERY_ERROR_PHASES.get(item["code"]) == item.get("phase")
+            and isinstance(item.get("path"), str)):
+        return GraphQueryError(
+            str(message), status=status, code=item["code"],
+            phase=item["phase"], path=item["path"]
+        )
+    error_type = (
+        AuthenticationError if status in (401, 403)
+        else NotFound if status == 404
+        else ValidationError if status in (400, 409, 422)
+        else APIError
+    )
+    if error_type is ValidationError:
+        issues = tuple(
+            ValidationIssue.from_dict(issue)
+            for issue in item.get("issues", ())
+            if isinstance(issue, Mapping)
+        )
+        return ValidationError(str(message), status=status, details=details, issues=issues)
+    return error_type(str(message), status=status, details=details)
 
 
 def _node_id(value: NodeReference) -> int:

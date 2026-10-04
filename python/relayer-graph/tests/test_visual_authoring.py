@@ -5,11 +5,12 @@ import sys
 import types
 import unittest
 from unittest.mock import patch
-from relayer_graph import (ActionObject, GraphSession, NodeObject, LayerObject,
-    LayerLayoutObject, NodePlacementObject, html, action_capability, external_link,
-    VisualAssetFile, GraphVisualAssets)
+from relayer_graph import (ActionObject, EdgeEndObject, EdgeObject, EdgeRouteObject,
+    GraphPreview, GraphSession, NodeObject, LayerObject, LayerLayoutObject, NodePlacementObject,
+    html, action_capability, external_link, VisualAssetFile, GraphVisualAssets)
+from relayer_graph.authoring import GraphEdge, GraphNode, _layer_payload
 from relayer_graph.visual_assets import _decode_file
-from relayer_graph.exceptions import ValidationError
+from relayer_graph.exceptions import AuthenticationError, ValidationError
 
 
 class VisualAuthoringTests(unittest.IsolatedAsyncioTestCase):
@@ -156,6 +157,64 @@ class VisualAuthoringTests(unittest.IsolatedAsyncioTestCase):
                     node.detail_authoring.set_component('main', html('<p>Repaired</p>'))
                     await graph.submit_node(node)
                     self.assertEqual(node.ref.id, 2)
+
+    async def test_submit_node_keeps_the_preview_the_host_wrote(self):
+        node = NodeObject('box', 'Answer', 'Fallback', client_key='answer')
+        node.detail_authoring.set_component('main', html('<p>Answer</p>'))
+        value = {'id': 2, 'kind': 'concept', 'icon': 'box', 'title': 'Answer', 'detail': 'Fallback', 'state': 'draft',
+                 'preview': {'status': 'rendered', 'path': '/tmp/previews-1/node-2-abababababababab.png',
+                             'width': 380, 'height': 640}}
+        async def host_request(method, payload):
+            return {'ok': True, 'frozen': True, 'value': value}
+        with patch.dict(sys.modules, {'rlm': types.SimpleNamespace(host_request=host_request)}):
+            submitted = await GraphSession('http://unused', 'run', 1).submit_node(node)
+        self.assertEqual(submitted.preview, GraphPreview('rendered', '/tmp/previews-1/node-2-abababababababab.png', 380, 640))
+        self.assertEqual(submitted.id, 2)
+
+    async def test_submit_layer_goes_through_the_host_and_keeps_its_preview(self):
+        first, second = NodeObject('box', 'First', 'One', client_key='first'), NodeObject('box', 'Second', 'Two', client_key='second')
+        first.ref, second.ref = (GraphNode(id, 'concept', 'box', title, title, 'draft') for id, title in ((5, 'First'), (6, 'Second')))
+        edge = EdgeObject((first, second), client_key='edge')
+        edge.ref = GraphEdge(9, (5, 6), 'draft')
+        layer = LayerObject([first, second], [edge], LayerLayoutObject(
+            [NodePlacementObject(first, .25, .5), NodePlacementObject(second, .75, .5)], 'elbow-horizontal',
+            (EdgeRouteObject(edge, ends=(EdgeEndObject(first, 'top'), EdgeEndObject(second, 'top')), waypoints=((.5, .1),)),)),
+            client_key='root', default_node=second)
+        requests, replies = [], [
+            {'ok': False, 'httpStatus': 422, 'error': {'code': 'validation_failed', 'message': 'Layer is invalid',
+                                                     'issues': [{'code': 'overlap', 'path': 'layout', 'message': 'Spread the nodes out'}]}},
+            {'ok': True, 'value': {'id': 30, 'nodes': [5, 6], 'edges': [9], 'state': 'draft', 'defaultNodeId': 6,
+                                   'preview': {'status': 'cached', 'path': '/tmp/previews-1/layer-30-abababababababab.png',
+                                               'width': 1176, 'height': 812}}},
+            {'ok': True, 'value': {'id': 30, 'nodes': [5, 6], 'edges': [9], 'state': 'draft', 'preview': {'status': 'limit_reached'}}},
+        ]
+        async def host_request(method, payload):
+            requests.append((method, payload))
+            # Prime's kernel replies {**result, "status": "ok"} and rlm strips "status".
+            reply = {**replies.pop(0), 'status': 'ok'}
+            return {key: value for key, value in reply.items() if key != 'status'}
+        async def direct(method, path, body=None):
+            raise AssertionError('Prime submits layers through the host')
+        with patch.dict(sys.modules, {'rlm': types.SimpleNamespace(host_request=host_request)}):
+            graph = GraphSession('http://unused', 'run', 1)
+            graph._request = direct
+            with self.assertRaises(ValidationError) as caught:
+                await graph.submit_layer(layer, size_justification='private')
+            self.assertEqual(caught.exception.status, 422)
+            self.assertEqual(caught.exception.issues[0].message, 'Spread the nodes out')
+            submitted = await graph.submit_layer(layer, size_justification='private')
+            limited = await graph.submit_layer(layer)
+            replies.append({'ok': False, 'httpStatus': 401, 'error': {'code': 'unauthorized', 'message': 'Token expired'}})
+            with self.assertRaises(AuthenticationError):
+                await graph.submit_layer(layer)
+        self.assertEqual([method for method, _ in requests], ['relayer.graph.submit-layer'] * 4)
+        self.assertEqual(requests[0][1], {'version': 1, 'token': 'run', 'nodeId': 1,
+                                          'layer': _layer_payload(layer, 'private')})
+        self.assertEqual(requests[0][1]['layer']['layout']['edgeRoutes'][0]['ends'][0], {'nodeId': 5, 'side': 'top'})
+        self.assertEqual(submitted.preview, GraphPreview('cached', '/tmp/previews-1/layer-30-abababababababab.png', 1176, 812))
+        self.assertEqual(submitted.default_node_id, 6)
+        self.assertEqual(layer.ref.id, 30)
+        self.assertEqual(limited.preview, GraphPreview('limit_reached'))
 
     async def test_owner_identity_and_clear_are_explicit(self):
         owner = NodeObject('box', 'Answer', 'Fallback', client_key='answer')

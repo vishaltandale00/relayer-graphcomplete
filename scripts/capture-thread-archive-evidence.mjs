@@ -100,8 +100,16 @@ async function main() {
   await window.loadURL(`${session.origin}/?threadId=${standalone.id}`);
   await waitFor("full application boot", `document.querySelector('#threadTitle')?.textContent === 'Quarterly planning' && document.querySelector('[data-archive-thread="${standalone.id}"]')`);
   window.webContents.debugger.attach("1.3");
+  // capturePage omits the OS cursor. This noninteractive marker follows the
+  // actual CDP pointer coordinates so the hover journey is visible in video.
+  const move = async (point) => {
+    await window.webContents.debugger.sendCommand("Input.dispatchMouseEvent", { type: "mouseMoved", ...point });
+    await evaluate(`(() => {let e=document.getElementById('archiveEvidencePointer');if(!e){e=document.createElement('div');e.id='archiveEvidencePointer';e.style.cssText='position:fixed;width:12px;height:18px;background:white;clip-path:polygon(0 0,100% 65%,55% 68%,35% 100%);filter:drop-shadow(0 0 2px black);z-index:201;pointer-events:none';document.body.append(e);}e.style.left=${JSON.stringify(`${point.x}px`)};e.style.top=${JSON.stringify(`${point.y}px`)};})()`);
+  };
   const click = async (selector) => {
     const point = await evaluate(`(() => { const e=document.querySelector(${JSON.stringify(selector)}); if(!e) throw Error('Missing click target'); e.scrollIntoView({block:'nearest'}); const r=e.getBoundingClientRect(); return {x:r.x+r.width/2,y:r.y+r.height/2}; })()`);
+    await move(point);
+    assert.equal(await evaluate(`(() => {const e=document.querySelector(${JSON.stringify(selector)});return Number(getComputedStyle(e).opacity)>0 && e.contains(document.elementFromPoint(${point.x},${point.y}));})()`), true, `Visible pointer target: ${selector}`);
     for (const type of ["mousePressed", "mouseReleased"]) await window.webContents.debugger.sendCommand("Input.dispatchMouseEvent", { type, ...point, button: "left", clickCount: 1 });
   };
   let frame = 0;
@@ -123,7 +131,21 @@ async function main() {
     assert.equal(await evaluate(`(() => {const b=document.querySelector('[data-archive-thread="${id}"]');return b.firstElementChild?.outerHTML === lucide.createElement(lucide.Trash2, {'aria-hidden':'true',focusable:'false'}).outerHTML && b.parentElement.lastElementChild === b && Math.abs(b.getBoundingClientRect().right-b.parentElement.getBoundingClientRect().right)<1;})()`), true);
   }
   checkpoints.push({ name: "direct-rightmost-trashcan", verdict: "passed" });
-  await capture("01-before", "1. Saved project and standalone chats");
+  const allIconsHidden = `Array.from(document.querySelectorAll('.thread-archive-button')).every(b=>Number(getComputedStyle(b).opacity)===0)`;
+  await move({ x: 650, y: 160 });
+  await evaluate("document.activeElement.blur()");
+  assert.equal(await evaluate(allIconsHidden), true, "Archive icons hidden at rest");
+  await capture("01-before", "Pointer away: archive icons stay hidden");
+  for (const [id, name] of [[standalone.id, "selected"], [projectThread.id, "project"]]) {
+    const point = await evaluate(`(() => {const r=document.querySelector('[data-thread="${id}"]').getBoundingClientRect();return {x:r.x+20,y:r.y+r.height/2};})()`);
+    await move(point);
+    assert.equal(await evaluate(`Array.from(document.querySelectorAll('.thread-archive-button')).every(b=>Number(getComputedStyle(b).opacity)===(b.dataset.archiveThread===${JSON.stringify(String(id))}?1:0))`), true, "Only hovered row reveals Archive");
+    await capture(`hover-${name}`, `Hover ${name} chat: only its archive icon appears`);
+  }
+  await move({ x: 650, y: 160 });
+  assert.equal(await evaluate(allIconsHidden), true, "Archive icons hide after pointer leaves");
+  await capture("hover-away", "Move away: archive icons hide again");
+  const hoverDuration = frame / 6;
   const busyDisabled = await evaluate(`document.querySelector('[data-archive-thread="${busy.id}"]').disabled`); assert.equal(busyDisabled, true);
   await click(`[data-archive-thread="${projectThread.id}"]`);
   await waitFor("project archive hidden", `!document.querySelector('#projectList [data-thread="${projectThread.id}"]')`);
@@ -167,8 +189,11 @@ async function main() {
   const video = join(output, "archive-demo.mp4");
   const ffmpeg = spawnSync(process.env.RELAYER_EVIDENCE_FFMPEG ?? "/opt/homebrew/bin/ffmpeg", ["-y", "-framerate", "6", "-i", join(frames, "%04d.png"), "-vf", "fps=12,format=yuv420p", "-c:v", "libx264", "-crf", "21", "-movflags", "+faststart", video], { encoding: "utf8" });
   if (ffmpeg.status !== 0) throw new Error(`Video encoding failed: ${ffmpeg.stderr.slice(-1000)}`);
+  const hoverVideo = join(output, "hover-demo.mp4");
+  const hoverEncoding = spawnSync(process.env.RELAYER_EVIDENCE_FFMPEG ?? "/opt/homebrew/bin/ffmpeg", ["-y", "-i", video, "-t", String(hoverDuration), "-c", "copy", "-movflags", "+faststart", hoverVideo], { encoding: "utf8" });
+  if (hoverEncoding.status !== 0) throw new Error(`Hover video encoding failed: ${hoverEncoding.stderr.slice(-1000)}`);
   const endHashes = await digest(); assert.deepEqual(endHashes, startHashes, "Sources remained stable throughout capture");
-  await writeFile(join(output, "manifest.json"), JSON.stringify({ version: 1, sourceCommit: execFileSync("git", ["rev-parse", "HEAD"], { cwd: root, encoding: "utf8" }).trim(), sourceFiles: startHashes, workspaceDigest: hash(JSON.stringify(startHashes)), binarySha256: hash(await readFile(binary)), videoSha256: hash(await readFile(video)), checkpoints, syntheticFixture: "Real accepted graphs created by a deterministic inference-free harness; third completion held pending until cleanup", paidInferenceCalls: 0, platform: process.platform, architecture: process.arch, humanAcceptance: "pending" }, null, 2) + "\n");
+  await writeFile(join(output, "manifest.json"), JSON.stringify({ version: 1, sourceCommit: execFileSync("git", ["rev-parse", "HEAD"], { cwd: root, encoding: "utf8" }).trim(), sourceFiles: startHashes, workspaceDigest: hash(JSON.stringify(startHashes)), binarySha256: hash(await readFile(binary)), videoSha256: hash(await readFile(video)), hoverVideoSha256: hash(await readFile(hoverVideo)), checkpoints, syntheticFixture: "Real accepted graphs created by a deterministic inference-free harness; third completion held pending until cleanup", pointerMarker: "Noninteractive overlay follows actual CDP pointer coordinates", paidInferenceCalls: 0, platform: process.platform, architecture: process.arch, humanAcceptance: "pending" }, null, 2) + "\n");
   await rm(frames, { recursive: true, force: true });
   console.log(`PASS archive desktop evidence: ${video}`);
 }

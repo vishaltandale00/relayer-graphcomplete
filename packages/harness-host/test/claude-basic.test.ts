@@ -1,12 +1,18 @@
+import { execFileSync } from "node:child_process";
+import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import {
+  CLAUDE_PREVIEW_TOOL,
   ClaudeBasicHarness,
   claudePermissionMode,
   createClaudeBasicFactory,
   type ClaudeSdkQuery,
   type ClaudeSdkModule,
 } from "../src/implementations/claude-basic.js";
-import { CLAUDE_BROWSER_TOOL } from "../src/implementations/claude-basic-browser.js";
+import { CLAUDE_BROWSER_TOOL, type ClaudeSdkToolResult } from "../src/implementations/claude-basic-browser.js";
+import { CLAUDE_PREVIEW_VIEWING, draftPreviewGuidance } from "../src/implementations/codex-basic.js";
 import { createNoopHarnessTraceSink } from "../src/trace.js";
 import type { HarnessExecutionAccess, HarnessFactoryContext, HarnessRunContext, HarnessTraceEventInput } from "../src/types.js";
 import { expectGraphPresentationGuidance } from "./graph-presentation-guidance-assertions.js";
@@ -704,5 +710,90 @@ describe("ClaudeBasicHarness", () => {
     });
     await expect(harness.complete(runContext(secretAccess()))).rejects.toThrow("Claude Agent SDK completion failed.");
     await expect(harness.complete(runContext(secretAccess()))).rejects.not.toThrow(/customer@example\.test|sk-secret/);
+  });
+
+  describe("draft previews", () => {
+    const PNG = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x01, 0x02]);
+
+    function previewContext(previewDirectory: string | undefined, events: HarnessTraceEventInput[] = []): HarnessRunContext {
+      const context = runContext(managedAccess());
+      return {
+        ...context,
+        graph: {
+          ...context.graph,
+          acquireCapability: () => ({ ...context.graph.acquireCapability(), ...(previewDirectory === undefined ? {} : { previewDirectory }) }),
+        },
+        trace: { ...createNoopHarnessTraceSink(), emit: (event) => { events.push(event); } },
+      };
+    }
+
+    async function previewRun(approvalMode: string, previewDirectory: string | undefined, events: HarnessTraceEventInput[] = []) {
+      let call: Parameters<ClaudeSdkQuery>[0] | undefined;
+      const harness = new ClaudeBasicHarness(factoryContext(approvalMode), {
+        query: sdkQuery([{ type: "result", subtype: "success", result: "done", session_id: "session-1" }], (input) => { call = input; }),
+        browserSdk: browserSdk(),
+      });
+      await harness.complete(previewContext(previewDirectory, events));
+      const server = call?.options.mcpServers.relayer_graph_preview as { options: { tools: { name: string; handler: (input: { path: string }, extra: unknown) => Promise<ClaudeSdkToolResult> }[] } } | undefined;
+      return { call: call!, view: server?.options.tools[0]?.handler };
+    }
+
+    it.each([
+      ["ask", "default", ["Bash", CLAUDE_PREVIEW_TOOL]],
+      ["auto", "acceptEdits", ["Bash", CLAUDE_BROWSER_TOOL, CLAUDE_PREVIEW_TOOL]],
+      ["full", "bypassPermissions", ["Bash", CLAUDE_PREVIEW_TOOL]],
+    ])("in %s, passes the folder, pre-approves view_graph_preview and teaches it only when the host granted a folder", async (_mode, approvalMode, allowedTools) => {
+      const previewed = await previewRun(approvalMode, "/tmp/previews-1");
+      expect(previewed.call.options.env.RELAYER_GRAPH_PREVIEW_DIR).toBe("/tmp/previews-1");
+      expect(previewed.call.options.allowedTools).toEqual(allowedTools);
+      expect(previewed.call.options.mcpServers).toHaveProperty("relayer_graph_preview");
+      expect(previewed.call.prompt).toContain(draftPreviewGuidance(CLAUDE_PREVIEW_VIEWING));
+
+      const plain = await previewRun(approvalMode, undefined);
+      expect(plain.call.options.env).not.toHaveProperty("RELAYER_GRAPH_PREVIEW_DIR");
+      expect(plain.call.options.allowedTools).not.toContain(CLAUDE_PREVIEW_TOOL);
+      expect(plain.call.options.mcpServers).not.toHaveProperty("relayer_graph_preview");
+      expect(plain.call.prompt).not.toContain("Draft previews are on");
+      expect(plain.view).toBeUndefined();
+    });
+
+    it("shows only PNGs inside the turn's folder and traces metadata, never the image", async () => {
+      const root = await mkdtemp(join(tmpdir(), "claude-preview-test-"));
+      try {
+        const folder = join(root, "previews");
+        await mkdir(join(folder, "nested"), { recursive: true });
+        const layer = join(folder, "layer-7-abababababababab.png");
+        await writeFile(layer, PNG);
+        await writeFile(join(folder, "nested", "layer-8.png"), PNG);
+        await writeFile(join(folder, "fake.png"), "not a png");
+        await writeFile(join(folder, "layer.txt"), PNG);
+        await writeFile(join(root, "outside.png"), PNG);
+        await symlink(join(root, "outside.png"), join(folder, "escape.png"));
+        await symlink(root, join(folder, "parent"));
+        // Opening a FIFO for reading would block a thread forever.
+        execFileSync("mkfifo", [join(folder, "pipe.png")]);
+        const events: HarnessTraceEventInput[] = [];
+        const { view } = await previewRun("default", folder, events);
+
+        const expected = { content: [{ type: "image", data: PNG.toString("base64"), mimeType: "image/png" }] };
+        await expect(view!({ path: layer }, {})).resolves.toEqual(expected);
+        await expect(view!({ path: "layer-7-abababababababab.png" }, {})).resolves.toEqual(expected);
+        for (const path of [
+          join(root, "outside.png"), join(folder, "..", "outside.png"), join(folder, "escape.png"),
+          join(folder, "parent", "outside.png"), join(folder, "nested", "layer-8.png"),
+          join(folder, "fake.png"), join(folder, "layer.txt"), join(folder, "missing.png"), "/etc/passwd",
+          join(folder, "pipe.png"),
+        ]) {
+          await expect(view!({ path }, {}), path).resolves.toMatchObject({ isError: true, content: [{ type: "text" }] });
+        }
+
+        const views = events.filter((event) => event.type === "tool.call.completed");
+        expect(views[0]?.data).toEqual({ tool: "view_graph_preview", outcome: "viewed", file: "layer-7-abababababababab.png", byteLength: PNG.byteLength });
+        expect(views.slice(2).map((event) => event.data)).toEqual(Array(10).fill({ tool: "view_graph_preview", outcome: "refused" }));
+        expect(JSON.stringify(events)).not.toContain(PNG.toString("base64"));
+      } finally {
+        await rm(root, { recursive: true, force: true });
+      }
+    });
   });
 });

@@ -133,7 +133,7 @@ export function renderSidebar() {
     const chatList = $("#chatList");
     const chatSection = chatList.closest(".side-section");
     const projectSection = $("#projectList").closest(".side-section");
-    document.querySelector(".sidebar-title strong").textContent = "Relayer Eval";
+    document.querySelector(".sidebar-title strong").textContent = "Eval";
     $("#newThread").classList.add("hidden");
     chatSection.querySelector(".section-label").textContent = evalSidebarHeading(viewState.evalContext);
     chatSection.classList.remove("hidden");

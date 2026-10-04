@@ -88,14 +88,19 @@ verify_dmg() {
   expected="$(artifact_sha "$receipt" "$(basename "$dmg")")"
   actual="$(shasum -a 256 "$dmg" | awk '{print $1}')"
   [[ "$actual" == "$expected" ]] || { echo "DMG SHA-256 does not match its receipt: $dmg" >&2; exit 1; }
+  echo "[desktop-canary] Validate notarization: $(basename "$dmg")" >&2
   xcrun stapler validate "$dmg"
+  echo "[desktop-canary] Assess DMG Gatekeeper: $(basename "$dmg")" >&2
   spctl --assess --type open --context context:primary-signature --verbose=4 "$dmg"
 }
 
 verify_app() {
   local app="$1" expected_version="$2"
+  echo "[desktop-canary] Verify app signature: $expected_version" >&2
   codesign --verify --deep --strict --verbose=2 "$app"
+  echo "[desktop-canary] Assess app Gatekeeper: $expected_version" >&2
   spctl --assess --type execute --verbose=4 "$app"
+  echo "[desktop-canary] Validate app notarization: $expected_version" >&2
   xcrun stapler validate "$app"
   [[ "$(defaults read "$app/Contents/Info.plist" CFBundleShortVersionString)" == "$expected_version" ]] || {
     echo "Relayer.app version does not match $expected_version." >&2
@@ -111,11 +116,14 @@ install_dmg() {
   local dmg="$1" destination="$2"
   local mount
   mount="$(mktemp -d "${TMPDIR:-/tmp}/relayer-canary-mount.XXXXXX")"
+  echo "[desktop-canary] Mount DMG: $(basename "$dmg")" >&2
   hdiutil attach -nobrowse -readonly -mountpoint "$mount" "$dmg" >/dev/null
   trap 'hdiutil detach "$mount" -force >/dev/null 2>&1 || true; rm -rf "$mount"' RETURN
   [[ -d "$mount/Relayer.app" ]] || { echo "DMG does not contain Relayer.app." >&2; exit 1; }
   rm -rf "$destination"
+  echo "[desktop-canary] Copy app: $(basename "$dmg")" >&2
   ditto "$mount/Relayer.app" "$destination"
+  echo "[desktop-canary] Unmount DMG: $(basename "$dmg")" >&2
   hdiutil detach "$mount" >/dev/null
   rm -rf "$mount"
   trap - RETURN
@@ -228,11 +236,13 @@ output="$evidence_directory/${evidence_prefix}-preview-canary.json"
 
 install_dmg "$target_dmg" "$application"
 verify_app "$application" "$target_version"
+echo "[desktop-canary] Launch first-install target" >&2
 RELAYER_DESKTOP_USER_DATA_DIR="$runtime_directory/first-install-user-data" \
   "$application/Contents/MacOS/Relayer" --remote-debugging-port=9228 >"$evidence_directory/first-install.log" 2>&1 &
 first_install_pid=$!
 node "$script_directory/electron-cdp-canary.mjs" --mode capture --port 9228 --screenshot "$first_install_screenshot" --timeout-seconds 60
-kill "$first_install_pid" >/dev/null 2>&1 || true
+echo "[desktop-canary] Terminate first-install target" >&2
+terminate_process "$first_install_pid" "first-install target"
 wait "$first_install_pid" >/dev/null 2>&1 || true
 
 install_dmg "$seed_dmg" "$application"
@@ -275,9 +285,13 @@ node "$script_directory/electron-cdp-canary.mjs" \
   --mode update \
   --port 9229 \
   --target-version "$target_version" \
+  --target "$target" \
+  --profile-directory "$update_user_data" \
+  --preview-publication-receipt "$publication_receipt" \
   --screenshot-available "$available_screenshot" \
   --screenshot-ready "$ready_screenshot" \
   --timeout-seconds "$timeout_seconds"
+echo "[desktop-canary] Await updater-relaunched target trace" >&2
 wait_for_target_trace "$live_state_log" "$target_version" "$seed_pid"
 updated_pid="$(target_process_id_from_trace "$live_state_log" "$target_version")"
 verify_app "$application" "$target_version"

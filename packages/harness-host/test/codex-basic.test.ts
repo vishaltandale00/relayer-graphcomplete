@@ -7,7 +7,7 @@ import { describe, expect, it, vi } from "vitest";
 import { loadHarnessConfiguration } from "../src/configuration.js";
 import { createNoopHarnessTraceSink, HarnessTraceStore } from "../src/trace.js";
 import type { CodexAppServerTurnOptions } from "../src/implementations/codex-app-server.js";
-import { buildLayeredNavigationPrompt, CodexBasicHarness, DRAFT_PREVIEW_GUIDANCE, type CodexBasicDependencies } from "../src/implementations/codex-basic.js";
+import { buildLayeredNavigationPrompt, CODEX_PREVIEW_VIEWING, CodexBasicHarness, draftPreviewGuidance, type CodexBasicDependencies } from "../src/implementations/codex-basic.js";
 import type { HarnessConfiguration, HarnessRunContext, HarnessTraceEvent, HarnessTraceEventInput, HarnessTracePolicy, HarnessTraceSink } from "../src/types.js";
 
 const repositoryRoot = resolve(fileURLToPath(new URL("../../../", import.meta.url)));
@@ -800,7 +800,7 @@ describe("CodexBasicHarness", () => {
 
     await harness.complete(previewed);
     expect(submitted[0]?.environment.RELAYER_GRAPH_PREVIEW_DIR).toBe("/tmp/previews-1");
-    expect(buildLayeredNavigationPrompt(previewed, "@relayer/graph-client")).toContain(DRAFT_PREVIEW_GUIDANCE);
+    expect(buildLayeredNavigationPrompt(previewed, "@relayer/graph-client")).toContain(draftPreviewGuidance(CODEX_PREVIEW_VIEWING));
     expect(buildLayeredNavigationPrompt(plain, "@relayer/graph-client")).not.toContain("Draft previews are on");
   });
 

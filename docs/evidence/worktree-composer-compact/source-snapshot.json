@@ -1,0 +1,11 @@
+{
+  "baseCommit": "f897cc785270fd9a5e3b8de13514be3aaf25e680",
+  "sourceFiles": {
+    "desktop/renderer/src/checkout.js": "efaf00919f30e1ff14818cbaba09779fad320ead41a2e45ed056ec2446edcebf",
+    "desktop/renderer/styles.css": "5a5a0da9ac48b8dd86cb5bdd72579c98b9492902a49221d612c3ae73ef0f6817",
+    "docs/prd/index.html": "6df4a3a4e8d1930f68a4297f1a32fa1744278075ec2c57acc1bf6f073d428d83",
+    "scripts/test-desktop-worktrees.mjs": "dbb20c2884f0c766e6183b8f34b21477e103115383a68c3b2acfd89b62737566",
+    "test/worktree-renderer.test.mjs": "bb2e8c8f11234ac9de8f09a7bad56fc1412b3cc5bd0664902a683950973dc1fb"
+  },
+  "digest": "16e7babdacc096590b60054ab87f07f717f426287ffbd6bdba1dab00d611d573"
+}

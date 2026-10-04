@@ -57,7 +57,10 @@ describe("Sticker structure", () => {
     for (const colour of [roles.bg.dark, roles.text.dark, roles["accent-text"].dark, roles.edge.dark, families.f3.dark, families.f6.dark]) {
       expect(svg).toContain(`"${colour}"`);
     }
-    expect(svg).toContain(`font-family="Bricolage Grotesque,-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif"`);
+    expect(svg).toContain(`font-family="Figtree,-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif"`);
+    // The drawn wordmark replaces the typeset title.
+    expect(svg).toContain('<g role="img" aria-label="Relayer"');
+    expect(svg).not.toContain(">Relayer</text>");
     expect([...svg.matchAll(/#[0-9A-Fa-f]{6}/g)].every(([colour]) => JSON.stringify(config.palette).includes(colour))).toBe(true);
     const aliased = structuredClone(config);
     aliased.palette.roles["accent-text"].dark = "var(--accent-solid)";

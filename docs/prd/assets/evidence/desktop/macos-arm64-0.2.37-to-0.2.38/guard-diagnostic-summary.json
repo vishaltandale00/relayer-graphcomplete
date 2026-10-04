@@ -1,0 +1,37 @@
+{
+  "schemaVersion": 1,
+  "diagnosticOnly": true,
+  "seedVersion": "0.2.37",
+  "seedSourceCommit": "f32506a8f529e1454463b056e8872dc5841967ce",
+  "seedZipSha256": "fbbab73c5462e0d52f733324daea073391f5b3230b1514d622fa7ed93e3e7a50",
+  "targetVersion": "0.2.38",
+  "nativeInstallInvoked": false,
+  "paidInference": false,
+  "withoutWait": {
+    "activeAtReady": [
+      "codex"
+    ],
+    "dialog": {
+      "title": "Runtime download in progress",
+      "message": "Relayer is still downloading a provider runtime.",
+      "buttons": [
+        "Keep downloading",
+        "Quit anyway"
+      ]
+    }
+  },
+  "withWait": {
+    "activeAtReady": [
+      "codex"
+    ],
+    "activeAfterStagingWait": [],
+    "guardResult": true,
+    "dialog": null
+  },
+  "limits": [
+    "Disposable disconnected profile only",
+    "Invoked actual quit guard, not native install or relaunch",
+    "Locally observed cause; no hosted modal observation",
+    "No connected-provider recovery acceptance"
+  ]
+}

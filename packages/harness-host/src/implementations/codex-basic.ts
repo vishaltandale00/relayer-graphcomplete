@@ -870,7 +870,9 @@ if (!Number.isSafeInteger(priorLayerId)) throw new Error("Expected a safe accept
 await graph.addAction(summaryNode, { kind: "navigate", relation: "reference", sourceLayer: currentLayer, label: "View prior context", target: priorLayerId, clientKey: "summary-prior-context" });
 Do not turn a node, relationship, path, list, record, or arbitrary string into an action target. Search is optional: use it when prior accepted graph context can improve the answer, not as a substitute for inspecting the workspace or completing the underlying task.
 ` : "";
-  const draftPreviewGuidance = context !== undefined && draftPreviewsAvailable(context) ? `\n${DRAFT_PREVIEW_GUIDANCE}\n` : "";
+  const previewGuidance = context !== undefined && draftPreviewsAvailable(context)
+    ? `\n${draftPreviewGuidance(nativeAgentLabel === "Claude" ? CLAUDE_PREVIEW_VIEWING : CODEX_PREVIEW_VIEWING)}\n`
+    : "";
   return `You are the Relayer layered-navigation harness. ${UNDERLYING_TASK_GUIDANCE}
 
 After doing the underlying work, answer the current user interaction with a useful graph that truthfully presents the result, evidence, and limitations. A flat answer is valid. Add navigation only when opening it would materially improve understanding or support; apply that same test again inside every layer you author.
@@ -900,7 +902,7 @@ ${semanticCompletionGuidanceJs(context, completeModuleUrl, nativeAgentLabel)}
 
 The current interaction may carry an invoke lease created by the product. Before authoring, use graph.getNode(${interactionNode.id}) and graph.getNeighbors(${interactionNode.id}) to inspect the current node and any relevant source context exposed by the graph. Treat that context as input to your answer; do not copy, forge, or manage lease metadata. Author the response normally. A successful ordinary graph.submit(${interactionNode.id}) automatically fulfills any lease held by this interaction. There is no separate resolveAction call.
 
-${graphSearchGuidance}${draftPreviewGuidance}
+${graphSearchGuidance}${previewGuidance}
 
 Navigation has two meanings:
 - "expand" continues the explanation with a more detailed layer. Expansion must not point back to an expansion ancestor.
@@ -929,8 +931,14 @@ Action variants are "chip", "pill", "wide", or "card". A card requires descripti
 The graph service enforces exact provenance, target visibility, layer size, expansion cycles, and accepted closure. If a call fails, read every natural-language issue, edit the same program and rerun it with the same clientKey values; stable keys make the whole-program rerun update the same drafts instead of creating duplicates when each object's identity-owning context stays unchanged. An action's clientKey is scoped to its source node: keep every draft action on the same source node during repair, because moving it creates a different action and leaves the original draft behind. Do not add fake navigate or reference actions merely to make abandoned draft layers reachable. Only when graph.submit identifies a genuinely abandoned orphan draft, recover with graph.discardLayer(layer); this preserves that layer as stopped history without discarding its nodes, edges, actions, or child layers. A model turn ending is not completion. A successful graph.submit call is required to complete the GraphComplete response, but it does not by itself complete the underlying user task. Do not submit a plan as though it were completed work. Before final submission, verify that requested workspace effects have actually occurred and represent their real results in the graph.`;
 }
 
+/** How each harness looks at a preview PNG (PRD §11.10). */
+export const CODEX_PREVIEW_VIEWING = "open that PNG with your image viewing tool";
+export const CLAUDE_PREVIEW_VIEWING = "call the view_graph_preview tool with that path";
+
 /** Present only when the run supports previews and the host has a renderer (PRD §11.10). */
-export const DRAFT_PREVIEW_GUIDANCE = `Draft previews are on for this run. A successful graph.submitLayer returns an image of the layer as the user will see it, and graph.submitNode returns one for a node with authored detail. The returned object's preview field has a status of rendered, cached, failed, or limit_reached; a rendered or cached preview also has path, width, and height. Print preview.path from your program, then open that PNG with your image viewing tool and look at it. Look before your final graph.submit, because graph access ends when it succeeds: run the program without graph.submit first, check the images, then rerun it with the same clientKey values and submit. If you see overlaps, cramped or unreadable nodes, or a layout that doesn't show the real relationships, edit the program and rerun it with the same clientKey values; a changed object returns a fresh image. Controls for actions you have not added yet appear unavailable in a preview; that is expected. The image is advisory: a failed or limit_reached preview never blocks your work.`;
+export function draftPreviewGuidance(howToView: string): string {
+  return `Draft previews are on for this run. A successful graph.submitLayer returns an image of the layer as the user will see it, and graph.submitNode returns one for a node with authored detail. The returned object's preview field has a status of rendered, cached, failed, or limit_reached; a rendered or cached preview also has path, width, and height. Print preview.path from your program, then ${howToView} and look at it. Look before your final graph.submit, because graph access ends when it succeeds: run the program without graph.submit first, check the images, then rerun it with the same clientKey values and submit. If you see overlaps, cramped or unreadable nodes, or a layout that doesn't show the real relationships, edit the program and rerun it with the same clientKey values; a changed object returns a fresh image. Controls for actions you have not added yet appear unavailable in a preview; that is expected. The image is advisory: a failed or limit_reached preview never blocks your work.`;
+}
 
 /** The host grants a preview folder only when previews are supported and a renderer exists. */
 export function draftPreviewsAvailable(context: HarnessRunContext): boolean {

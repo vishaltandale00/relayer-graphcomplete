@@ -401,7 +401,7 @@ async function run() {
     const turn = box('.interaction-banner');
     const heading = box('.thread-header');
     const workspace = box('.workspace-layout');
-    const logo = box('.sidebar-title .logo');
+    const logo = box('.sidebar-title .brand-lockup');
     const newThread = box('#newThread');
     const plus = box('#newThread span');
     return { sidebarWidth: sidebar.width, detailWidth: inspector.width, graphWidth: graph.width,

@@ -1,0 +1,47 @@
+{
+  "schemaVersion": 1,
+  "target": "macos-arm64",
+  "version": "0.2.37",
+  "sourceCommit": "f32506a8f529e1454463b056e8872dc5841967ce",
+  "sourceTree": "944b45865cf74f1f98a2bf57ef29e794a0179a15",
+  "tag": "desktop-v0.2.37",
+  "sourceMainCiRun": "36894087237/1",
+  "candidate": {
+    "run": "36894985772/2",
+    "artifactId": 11182871457,
+    "archiveDigest": "sha256:c4529c6a7e0df4d3680bea00d5caf17c3d5992656ab198b32a4b5c60aaec93fa"
+  },
+  "publication": {
+    "run": "36903947224/1",
+    "artifactId": 11182024760,
+    "archiveDigest": "sha256:fe14b8dc03b533823a4686c4efeeeea3879d4131618a51e2d77a5489316d19c1"
+  },
+  "canary": {
+    "run": "36908147263/1",
+    "implementationCommit": "ae2951aebe8acbc9f12855b66935f4bf429d87d6",
+    "artifactId": 11185307545,
+    "archiveDigest": "sha256:904e4c6e345f7099d71813b7b40256fcb72a8d0176443e81194db96584140f13",
+    "evidenceSha256": "639be759d9c175f82a3ccce1fb35866d4ebf0a7abfd8f26868e070d7256893f9"
+  },
+  "seed": {
+    "version": "0.2.30",
+    "sourceCommit": "1dc9e50d67e6e9fd174f28b7e3b6987e11659846",
+    "run": "33670860800",
+    "artifactId": 9863464033,
+    "archiveDigest": "sha256:7f16bb8461da553563a704cb741cbaed30cc89a47e7d2243aee69acd49170714"
+  },
+  "failedAttempts": {
+    "candidate": "36894985772/1 Apple agreement HTTP403",
+    "canary": [
+      "36904544950/1 finalcapture before document.body exists",
+      "36904544950/2 seed startupcheck overwrote ready; no third unchanged retry"
+    ]
+  },
+  "repairPr": 647,
+  "limits": [
+    "Apple Silicon macOS only",
+    "No paid inference or live account acceptance",
+    "No native cache hit or end-to-end symbolication proof",
+    "Stable pointer acceptance requires separate promotion receipt and live manifest verification"
+  ]
+}

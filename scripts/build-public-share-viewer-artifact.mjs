@@ -11,6 +11,7 @@ const builder = "scripts/build-public-share-viewer-artifact.mjs@1";
 
 const browserResources = Object.freeze([
   "assets/relayer-logo.svg",
+  "assets/relayer-mark-mask.svg",
   "styles.css",
   "vendor/lucide.min.js",
   "vendor/marked.umd.js",

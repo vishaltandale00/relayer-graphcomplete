@@ -132,6 +132,7 @@ if (contextBridge) contextBridge.exposeInMainWorld("relayerDesktop", {
   models: {
     settingsOpened: () => ipcRenderer.invoke("relayer:model-catalog-settings-open"),
     refresh: (providerId) => ipcRenderer.invoke("relayer:model-catalog-refresh", providerId),
+    onChanged: (callback) => subscribe("relayer:models-changed", callback),
   },
   providers: {
     status: () => ipcRenderer.invoke("relayer:provider-status"),

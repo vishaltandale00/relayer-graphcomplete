@@ -40,9 +40,63 @@ async function main() {
       document.querySelector('#desktopAccountLabel').textContent = 'Account';
       appState.projects = Array.from({ length: 12 }, (_, i) => ({ id: i + 1, name: 'relayer-graphcomplete-' + i + '-long-project-name' }));
       appState.threads = Array.from({ length: 12 }, (_, i) => ({ id: i + 1, title: 'A long standalone chat title ' + i }));
+      appState.threads[1].activity = 'running';
       for (const project of appState.projects) for (let i = 0; i < 4; i++) appState.threads.push({ id: appState.threads.length + 1, projectId: project.id, title: 'Can you explain the project thread ' + i });
       renderSidebar();
     })()`);
+    // ARC-003 visibility and ARC-002 disabled presentation use the real CSS and
+    // production sidebar projection, including selected, project and busy chats.
+    window.webContents.debugger.attach('1.3');
+    try {
+      await evaluate("sidebarFixture.viewState.currentThreadId=1; sidebarFixture.renderSidebar();");
+      const move = (x, y) => window.webContents.debugger.sendCommand('Input.dispatchMouseEvent', { type: 'mouseMoved', x, y });
+      const archiveState = (id) => evaluate(`(() => {
+        const button=document.querySelector('[data-archive-thread="${id}"]'),row=button.parentElement,r=button.getBoundingClientRect();
+        const style=getComputedStyle(button);
+        return {opacity:Number(style.opacity),pointerEvents:style.pointerEvents,disabled:button.disabled,title:button.title,x:r.x,width:r.width,rowWidth:row.getBoundingClientRect().width,hit:button.contains(document.elementFromPoint(r.x+r.width/2,r.y+r.height/2)),hitTag:document.elementFromPoint(r.x+r.width/2,r.y+r.height/2)?.outerHTML.slice(0,160)};
+      })()`);
+      for (const id of [1, 13, 2]) {
+        await move(1000, 20);
+        await evaluate("document.activeElement.blur();");
+        const resting=await archiveState(id);
+        assert.equal(resting.opacity, 0, `chat ${id}: trashcan hidden at rest`);
+        assert.equal(resting.pointerEvents, 'none', `chat ${id}: hidden trashcan cannot receive pointer input`);
+        assert.equal(resting.hit, false);
+        if (id === 1) await writeFile(resolve(evidence, 'archive-resting.png'), (await window.webContents.capturePage()).toPNG());
+        const point=await evaluate(`(() => {const row=document.querySelector('[data-archive-thread="${id}"]').parentElement;row.scrollIntoView({block:'center'});const r=row.querySelector('.entry').getBoundingClientRect();return {x:r.x+12,y:r.y+r.height/2};})()`);
+        await evaluate("new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))");
+        // Let macOS overlay scrollbars fade before checking the rightmost hit target.
+        await new Promise(done=>setTimeout(done,1200));
+        await move(point.x, point.y);
+        await evaluate("new Promise(resolve=>requestAnimationFrame(resolve))");
+        const hovered=await archiveState(id);
+        assert.equal(hovered.opacity, id === 2 ? .4 : 1, `chat ${id}: reveal on row hover`);
+        assert.equal(hovered.pointerEvents, 'auto');
+        assert.equal(hovered.hit, true, `chat ${id}: hovered pointer target ${JSON.stringify(hovered)}`);
+        assert.equal(hovered.x, resting.x, 'reveal does not move the control');
+        assert.equal(hovered.rowWidth, resting.rowWidth, 'reveal does not resize the row');
+        assert.equal(hovered.disabled, id === 2);
+        if (id === 2) assert.equal(hovered.title, 'Available when work finishes.');
+        assert.equal((await archiveState(id === 1 ? 2 : 1)).opacity, 0, 'neighboring rows stay hidden');
+        if (id === 1) await writeFile(resolve(evidence, 'archive-hovered.png'), (await window.webContents.capturePage()).toPNG());
+        for (const type of ['mousePressed','mouseReleased']) await window.webContents.debugger.sendCommand('Input.dispatchMouseEvent', {type,...point,button:'left',clickCount:1});
+        await move(1000, 20);
+        assert.equal((await archiveState(id)).opacity, 0, 'pointer focus does not leave the control visible');
+        await window.webContents.debugger.sendCommand('Input.dispatchKeyEvent', { type:'keyDown', key:'Tab', code:'Tab', windowsVirtualKeyCode:9 });
+        await window.webContents.debugger.sendCommand('Input.dispatchKeyEvent', { type:'keyUp', key:'Tab', code:'Tab', windowsVirtualKeyCode:9 });
+        await evaluate(`document.querySelector('[data-thread="${id}"]').focus();`);
+        assert.equal((await archiveState(id)).opacity, id === 2 ? .4 : 1, 'row keyboard focus reveals the control');
+        if (id !== 2) {
+          await window.webContents.debugger.sendCommand('Input.dispatchKeyEvent', { type:'keyDown', key:'Tab', code:'Tab', windowsVirtualKeyCode:9 });
+          await window.webContents.debugger.sendCommand('Input.dispatchKeyEvent', { type:'keyUp', key:'Tab', code:'Tab', windowsVirtualKeyCode:9 });
+          assert.equal(await evaluate(`document.activeElement.matches('[data-archive-thread="${id}"]')`), true, 'Tab reaches Archive');
+          assert.equal((await archiveState(id)).opacity, 1);
+        }
+        results.push({name:`archive-visibility-${id}`,resting,hovered});
+      }
+      await evaluate("document.activeElement.blur(); document.querySelector('#appSidebarContent').scrollTop=0;");
+      console.log('PASS archive visibility: resting, hovered, keyboard focus, selected, project and busy rows');
+    } finally { window.webContents.debugger.detach(); }
     for (const width of [1100, 761, 375]) {
       window.setContentSize(width, 640);
       await evaluate("new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))");
@@ -57,6 +111,7 @@ async function main() {
           return { content:box(content), footer:box(footer), chats:box(chats), projects:box(projects), scrollHeight:content.scrollHeight, clientHeight:content.clientHeight, overflow:getComputedStyle(content).overflowY, footerHit, pageWidth:document.documentElement.scrollWidth, width:innerWidth };
         })()`);
         const name = `${width}-${collapsed ? 'collapsed' : 'expanded'}`;
+        if (collapsed) assert.equal(await evaluate("[...document.querySelectorAll('.thread-archive-button')].every(button=>getComputedStyle(button).display==='none')"), true, `${name}: archive controls stay hidden in the rail`);
         await new Promise(done => setTimeout(done, 180)); // Finish the sidebar icon transition before capture.
         await writeFile(resolve(evidence, `${name}.png`), (await window.webContents.capturePage()).toPNG());
         results.push({ name, ...state });

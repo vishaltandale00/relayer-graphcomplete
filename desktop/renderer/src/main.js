@@ -48,6 +48,7 @@ import { createReviewPresentationAdapter } from "./review-tools.js";
 import { initializeProviderSettings, refreshProviderSettings } from "./provider-settings.js";
 import { setProviderModelsRefreshedHandler } from "./provider-models-refresh.js";
 import { createProviderModelsRefreshedHandler } from "./provider-ui-model.js";
+import { watchModelAvailability } from "./model-availability-refresh.js";
 import {
   installOnboardingTutorialController,
   onboardingTutorialController,
@@ -67,6 +68,7 @@ import {
 } from "./composer-drafts.js";
 import { projectComposerGate } from "./project-composer-navigation.js";
 import { initializeSidebar } from "./sidebar.js";
+import { createBrandLockup, spreadOnHover } from "./relayer-mark.js";
 const PROJECT_COMPOSER_DESTINATION_SELECTOR = [
   "#settingsButton",
   "[data-thread]",
@@ -405,11 +407,17 @@ function bindEvents() {
 
 async function boot() {
   assertRelayerIconRendererReady();
+  const motion = window.matchMedia("(prefers-reduced-motion: reduce)");
+  const reducedMotion = () => motion.matches;
+  const lockup = createBrandLockup($("#brandLockup"), { reducedMotion });
+  spreadOnHover($("#heroLockup"), createBrandLockup($("#heroLockup"), { height: 40, reducedMotion }));
   await loadDesignFonts();
   initializeSidebar({
     body: document.body,
     toggle: $("#collapseSidebar"),
     mediaQuery: window.matchMedia("(max-width: 760px)"),
+    lockup,
+    brand: $("#brandLockup"),
   });
   await initializeProjectSidebar();
   if (evalReview) viewState.evalContext = await evalReview.context();
@@ -544,6 +552,18 @@ async function boot() {
     }),
   });
   connectEvents();
+  if (productApiAvailable && desktop?.models?.onChanged) {
+    const availabilityRefresh = watchModelAvailability({
+      subscribe: desktop.models.onChanged,
+      refresh: async () => {
+        await refreshProviderSettings();
+        await refreshProviderModelUi();
+      },
+      onError: (error) => toast(error.message),
+    });
+    window.addEventListener("pagehide", () => availabilityRefresh.stop(), { once: true });
+    await availabilityRefresh.ready;
+  }
 }
 
 void boot().catch((error) => {

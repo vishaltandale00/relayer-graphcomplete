@@ -1,0 +1,47 @@
+{
+  "frameCount": 119,
+  "taskStarted": true,
+  "inference": false,
+  "planId": "5dddf0ac265d4b8e88b6d44eb43e8346",
+  "stages": [
+    {
+      "frame": 0,
+      "title": "Select New worktree"
+    },
+    {
+      "frame": 35,
+      "title": "Search 100 branches; keep Local checkout and origin/main available"
+    },
+    {
+      "frame": 63,
+      "title": "Press Enter to create the worktree and start the task"
+    },
+    {
+      "frame": 79,
+      "title": "Task completed in the created worktree"
+    }
+  ],
+  "sourceCommit": "f897cc785270fd9a5e3b8de13514be3aaf25e680",
+  "sourceCommitNote": "Uncommitted compact-picker changes over recorded HEAD; exact reviewed source is bound by source-snapshot.json.",
+  "sourceSnapshotDigest": "16e7babdacc096590b60054ab87f07f717f426287ffbd6bdba1dab00d611d573",
+  "binaryHashes": {
+    "relayer-app-server": "1627f3eb42e958950a7bf835265dbae783bd1b0478d686f647efa17f3f25fffa",
+    "relayer-graph-server": "11796e8a14e81277f89893e1501902ebb45af79f8a4aec10eb0aecf64c5f7908"
+  },
+  "video": {
+    "path": "docs/evidence/worktree-composer-compact/worktree-demo.mp4",
+    "bytes": 137402,
+    "sha256": "bbe56cd1066db92e7b05e1e0b83161a26688a5d76bb1fd6726f9e2ec52116914",
+    "durationSeconds": 11.9,
+    "width": 1420,
+    "height": 900
+  },
+  "driverSha256": "a9da7b6fb1ce926fbab1ac327ebc569a7d7e2c1d2f377a42e191683cf33f91f8",
+  "sourceFiles": {
+    "desktop/renderer/src/checkout.js": "efaf00919f30e1ff14818cbaba09779fad320ead41a2e45ed056ec2446edcebf",
+    "desktop/renderer/styles.css": "5a5a0da9ac48b8dd86cb5bdd72579c98b9492902a49221d612c3ae73ef0f6817",
+    "docs/prd/index.html": "6df4a3a4e8d1930f68a4297f1a32fa1744278075ec2c57acc1bf6f073d428d83",
+    "scripts/test-desktop-worktrees.mjs": "dbb20c2884f0c766e6183b8f34b21477e103115383a68c3b2acfd89b62737566",
+    "test/worktree-renderer.test.mjs": "bb2e8c8f11234ac9de8f09a7bad56fc1412b3cc5bd0664902a683950973dc1fb"
+  }
+}

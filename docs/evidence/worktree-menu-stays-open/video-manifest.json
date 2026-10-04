@@ -1,0 +1,47 @@
+{
+  "frameCount": 118,
+  "taskStarted": true,
+  "inference": false,
+  "planId": "e82963186fb44c5ea4a411165ccb3db4",
+  "stages": [
+    {
+      "frame": 0,
+      "title": "Select New worktree"
+    },
+    {
+      "frame": 35,
+      "title": "Search 100 branches; keep Local checkout and origin/main available"
+    },
+    {
+      "frame": 62,
+      "title": "Press Enter to create the worktree and start the task"
+    },
+    {
+      "frame": 78,
+      "title": "Task completed in the created worktree"
+    }
+  ],
+  "sourceCommit": "ee6d2207707961c26640de23e6adc501a22726e4",
+  "sourceCommitNote": "Recorded uncommitted stay-open follow-up; exact source hashes are authoritative.",
+  "sourceSnapshotDigest": "30f66d33f74850a20d673ff528eb5ea31268c56a19e3535bb46af82b37c7f7ca",
+  "sourceFiles": {
+    "desktop/renderer/src/checkout.js": "6dfd4f70f1508bfbe078d6da682f4b36ac727e0673a5c9e5968f49631d51af78",
+    "desktop/renderer/styles.css": "5a5a0da9ac48b8dd86cb5bdd72579c98b9492902a49221d612c3ae73ef0f6817",
+    "docs/prd/index.html": "a120c058b49fd533ddae30f81bb3f3b3b06e1e857f4b7c2ac8d02fa03cfdc19b",
+    "scripts/test-desktop-worktrees.mjs": "2a0c1cc596bbb76aec6c19af9fc77eec7008f146e4fca1452659b504f9e55b1a",
+    "test/worktree-renderer.test.mjs": "b5b82e4f88e305a9cb7c24872a78f4efb4c13958c4cfd3edf2f459c656254c0a"
+  },
+  "binaryHashes": {
+    "relayer-app-server": "1627f3eb42e958950a7bf835265dbae783bd1b0478d686f647efa17f3f25fffa",
+    "relayer-graph-server": "11796e8a14e81277f89893e1501902ebb45af79f8a4aec10eb0aecf64c5f7908"
+  },
+  "video": {
+    "path": "docs/evidence/worktree-menu-stays-open/worktree-demo.mp4",
+    "bytes": 121267,
+    "sha256": "479508ee139312e52e86394ba41a371db3e2ec981fe59a41b4984a0dd86fa61c",
+    "durationSeconds": 11.8,
+    "width": 1420,
+    "height": 900
+  },
+  "driverSha256": "affad23687d5eff7e7e58c706a4ac58a64054f07656da793d1cc8934e8e82cdf"
+}

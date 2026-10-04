@@ -44,7 +44,7 @@ const exit = await new Promise((resolve, reject) => {
 
 const markerLine = stdout.split("\n").find((line) => line.startsWith(passMarker));
 const result = markerLine ? JSON.parse(markerLine.slice(passMarker.length)) : null;
-if (exit.code !== 0 || exit.signal || result?.passed !== true || result?.restartPersistence !== true || Object.keys(result?.checkpoints || {}).length !== 15 || Object.values(result.checkpoints).some(passed => passed !== true)) {
+if (exit.code !== 0 || exit.signal || result?.passed !== true || result?.restartPersistence !== true || Object.keys(result?.checkpoints || {}).length !== 17 || Object.values(result.checkpoints).some(passed => passed !== true)) {
   throw new Error(`Worktree Electron smoke failed: ${JSON.stringify({
     exit,
     result: result && {

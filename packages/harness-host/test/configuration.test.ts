@@ -92,8 +92,8 @@ describe("harness configuration", () => {
     "prime-agent-basic",
   ])("ships %s with query-v1 graph search and agent-authored Complete", async (name) => {
     const configuration = await loadHarnessConfiguration(join(repositoryRoot, `harnesses/${name}.yaml`));
-    // Only codex-basic declares draft previews so far; Claude and Prime are #618.
-    const profile = name === "codex-basic" ? { search: "query-v1", preview: "enabled" } : { search: "query-v1" };
+    // Each of these harnesses can show draft previews to its model (PRD §11.10).
+    const profile = { search: "query-v1", preview: "enabled" };
     expect(configuration.graphCapabilityProfile).toEqual(profile);
     expect(resolveGraphCapabilityProfile(configuration)).toEqual(profile);
     expect(configuration.complete).toEqual({ agentAuthored: true });
@@ -103,8 +103,8 @@ describe("harness configuration", () => {
     "prime-agent-deep",
   ])("keeps %s as a search-disabled baseline", async (name) => {
     const configuration = await loadHarnessConfiguration(join(repositoryRoot, `harnesses/${name}.yaml`));
-    expect(configuration.graphCapabilityProfile).toEqual({ search: "disabled" });
-    expect(resolveGraphCapabilityProfile(configuration)).toEqual({ search: "disabled" });
+    expect(configuration.graphCapabilityProfile).toEqual({ search: "disabled", preview: "enabled" });
+    expect(resolveGraphCapabilityProfile(configuration)).toEqual({ search: "disabled", preview: "enabled" });
   });
 
   it.each([

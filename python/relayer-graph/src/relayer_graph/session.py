@@ -2,12 +2,14 @@
 from __future__ import annotations
 
 import asyncio
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any, Mapping
 
-from .authoring import GraphNode, NodeObject, NodeReference, RelayerGraphClient, _node_id
+from .authoring import (GraphLayer, GraphNode, LayerObject, NodeObject, NodeReference,
+                        RelayerGraphClient, _graph_error, _layer_payload, _node_id)
 from .exceptions import ConfigurationError, ValidationError
 from .detail import NodeDetailAuthoring
+from .preview import host_preview
 
 
 @dataclass
@@ -114,7 +116,9 @@ class GraphSession(RelayerGraphClient):
             try:
                 value = await self._visual_authoring("submit", node, submission.payload, authoring=key)
                 node.ref = GraphNode.from_dict(value)
-                return node.ref
+                # The host wrote any draft preview into the turn's preview folder.
+                preview = host_preview(value.get("preview"))
+                return node.ref if preview is None else replace(node.ref, preview=preview)
             except BaseException as error:
                 # Only an explicit mutable rejection releases the frozen envelope.
                 # Lost responses and frozen host failures replay the exact payload.
@@ -135,6 +139,22 @@ class GraphSession(RelayerGraphClient):
         task.add_done_callback(lambda done: None if done.cancelled() else done.exception())
         submission.task = task
         return await asyncio.shield(task)
+
+    async def submit_layer(self, layer: LayerObject, *, size_justification: str | None = None) -> GraphLayer:
+        """Submit a layer through the host, which writes its draft preview where this run can read it."""
+        from rlm import host_request
+        payload = {"version": 1, "token": self.token, "nodeId": self.node_id,
+                   "layer": _layer_payload(layer, size_justification)}
+        result = await host_request("relayer.graph.submit-layer", payload)
+        if not isinstance(result, Mapping) or result.get("ok") is not True:
+            details = result if isinstance(result, Mapping) else {}
+            status = details.get("httpStatus")
+            raise _graph_error(status if isinstance(status, int) and not isinstance(status, bool) else 500,
+                               {"error": details.get("error")})
+        value = result["value"]
+        layer.ref = GraphLayer.from_dict(value)
+        preview = host_preview(value.get("preview"))
+        return layer.ref if preview is None else replace(layer.ref, preview=preview)
 
     def __getstate__(self) -> None:
         raise TypeError("GraphSession is run-scoped and cannot be serialized")

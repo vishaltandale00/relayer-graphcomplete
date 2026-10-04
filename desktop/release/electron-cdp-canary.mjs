@@ -1,24 +1,43 @@
 import { writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { waitForCanaryRuntimeStaging } from "./canary-runtime-staging.mjs";
 
 function delay(milliseconds) {
   return new Promise((resolvePromise) => setTimeout(resolvePromise, milliseconds));
 }
 
+async function withinDeadline(operation, timeoutMs, label, cancel = () => {}) {
+  let timer;
+  try {
+    return await Promise.race([
+      operation,
+      new Promise((_, reject) => {
+        timer = setTimeout(() => {
+          reject(new Error(`Timed out ${label} after ${timeoutMs}ms.`));
+          try { cancel(); } catch { /* Timeout still fails closed if cleanup fails. */ }
+        }, timeoutMs);
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 class CdpClient {
-  constructor(url) {
+  constructor(url, commandTimeoutMs) {
     this.url = url;
+    this.commandTimeoutMs = commandTimeoutMs;
     this.nextId = 1;
     this.pending = new Map();
   }
 
-  async open() {
+  async open(timeoutMs = this.commandTimeoutMs) {
     this.socket = new WebSocket(this.url);
-    await new Promise((resolvePromise, reject) => {
+    await withinDeadline(new Promise((resolvePromise, reject) => {
       this.socket.addEventListener("open", resolvePromise, { once: true });
       this.socket.addEventListener("error", reject, { once: true });
-    });
+    }), timeoutMs, "opening Electron DevTools socket", () => this.close());
     this.socket.addEventListener("message", (event) => {
       const message = JSON.parse(String(event.data));
       if (!message.id) return;
@@ -34,20 +53,22 @@ class CdpClient {
     });
   }
 
-  call(method, params = {}) {
+  call(method, params = {}, timeoutMs = this.commandTimeoutMs) {
     const id = this.nextId++;
-    return new Promise((resolvePromise, reject) => {
+    const response = new Promise((resolvePromise, reject) => {
       this.pending.set(id, { resolve: resolvePromise, reject });
       this.socket.send(JSON.stringify({ id, method, params }));
     });
+    return withinDeadline(response, timeoutMs, `waiting for Electron DevTools command ${method}`)
+      .finally(() => this.pending.delete(id));
   }
 
-  async evaluate(expression) {
+  async evaluate(expression, timeoutMs = this.commandTimeoutMs) {
     const result = await this.call("Runtime.evaluate", {
       expression,
       awaitPromise: true,
       returnByValue: true,
-    });
+    }, timeoutMs);
     if (result.exceptionDetails) {
       throw new Error(result.exceptionDetails.exception?.description || result.exceptionDetails.text || "Renderer evaluation failed.");
     }
@@ -61,22 +82,30 @@ class CdpClient {
 
 async function connect(port, timeoutMs) {
   const deadline = Date.now() + timeoutMs;
+  const budget = () => Math.max(1, Math.min(30_000, deadline - Date.now()));
   let lastError;
   while (Date.now() < deadline) {
+    let client;
     try {
-      const response = await fetch(`http://127.0.0.1:${port}/json/list`, { cache: "no-store" });
-      if (!response.ok) throw new Error(`DevTools target discovery returned ${response.status}.`);
-      const targets = await response.json();
+      const controller = new AbortController();
+      const targets = await withinDeadline((async () => {
+        const response = await fetch(`http://127.0.0.1:${port}/json/list`, {
+          cache: "no-store", signal: controller.signal,
+        });
+        if (!response.ok) throw new Error(`DevTools target discovery returned ${response.status}.`);
+        return response.json();
+      })(), budget(), "discovering Electron DevTools targets", () => controller.abort());
       const target = targets.find((candidate) => candidate.type === "page" && candidate.webSocketDebuggerUrl);
       if (!target) throw new Error("No Electron renderer DevTools target is available.");
-      const client = new CdpClient(target.webSocketDebuggerUrl);
-      await client.open();
-      await client.call("Runtime.enable");
-      await client.call("Page.enable");
+      client = new CdpClient(target.webSocketDebuggerUrl, Math.min(30_000, timeoutMs));
+      await client.open(budget());
+      await client.call("Runtime.enable", {}, budget());
+      await client.call("Page.enable", {}, budget());
       return client;
     } catch (error) {
+      client?.close();
       lastError = error;
-      await delay(500);
+      await delay(Math.max(0, Math.min(500, deadline - Date.now())));
     }
   }
   throw new Error(`Timed out connecting to Electron DevTools: ${lastError?.message || "unknown error"}`);
@@ -86,10 +115,11 @@ async function waitForUpdater(client, predicate, timeoutMs) {
   const deadline = Date.now() + timeoutMs;
   let state;
   while (Date.now() < deadline) {
-    state = await client.evaluate("window.relayerDesktop?.updater?.status?.()");
+    state = await client.evaluate("window.relayerDesktop?.updater?.status?.()",
+      Math.max(1, Math.min(client.commandTimeoutMs, deadline - Date.now())));
     if (state && predicate(state)) return state;
     if (state?.phase === "failed") throw new Error(`Updater failed: ${state.error || "unknown error"}`);
-    await delay(500);
+    await delay(Math.max(0, Math.min(500, deadline - Date.now())));
   }
   throw new Error(`Timed out waiting for updater state; last state=${JSON.stringify(state)}.`);
 }
@@ -103,9 +133,10 @@ async function waitForRendererState(client, expression, predicate, timeoutMs) {
   const deadline = Date.now() + timeoutMs;
   let state;
   while (Date.now() < deadline) {
-    state = await client.evaluate(expression);
+    state = await client.evaluate(expression,
+      Math.max(1, Math.min(client.commandTimeoutMs, deadline - Date.now())));
     if (state && predicate(state)) return state;
-    await delay(250);
+    await delay(Math.max(0, Math.min(250, deadline - Date.now())));
   }
   throw new Error(`Timed out waiting for visible updater evidence; last state=${JSON.stringify(state)}.`);
 }
@@ -140,12 +171,19 @@ export async function driveElectronUpdateCanary({
   availableScreenshotPath,
   readyScreenshotPath,
   timeoutMs = 20 * 60 * 1000,
+  runtimeStaging,
 } = {}) {
   const client = await connect(port, timeoutMs);
   try {
-    await waitForUpdater(client, () => true, timeoutMs);
-    await client.evaluate("window.relayerDesktop.updater.setChannel('preview')");
-    await client.evaluate("window.relayerDesktop.updater.check()");
+    console.error("[desktop-canary] Await seed startup discovery");
+    // Native canary profiles save Preview before launch. Let startup discovery
+    // finish before driving a manual check: older seeds can otherwise overwrite
+    // a ready download with their delayed startup check's available event.
+    await waitForUpdater(client, (state) => (
+      state.phase === "available" && state.availableVersion === targetVersion && state.channel === "preview"
+    ), timeoutMs);
+    console.error("[desktop-canary] Invoke updater check");
+    await client.evaluate("window.relayerDesktop.updater.check()", timeoutMs);
     await waitForUpdater(client, (state) => (
       state.phase === "available" && state.availableVersion === targetVersion && state.channel === "preview"
     ), timeoutMs);
@@ -155,7 +193,8 @@ export async function driveElectronUpdateCanary({
       timeoutMs,
     });
     await capture(client, availableScreenshotPath);
-    await client.evaluate("window.relayerDesktop.updater.download()");
+    console.error("[desktop-canary] Invoke updater download");
+    await client.evaluate("window.relayerDesktop.updater.download()", timeoutMs);
     await waitForUpdater(client, (state) => (
       state.phase === "ready" && state.availableVersion === targetVersion && state.channel === "preview"
     ), timeoutMs);
@@ -165,8 +204,13 @@ export async function driveElectronUpdateCanary({
       timeoutMs,
     });
     await capture(client, readyScreenshotPath);
+    if (runtimeStaging) {
+      const providerState = await client.evaluate("window.relayerDesktop.providers.status()");
+      await waitForCanaryRuntimeStaging({ ...runtimeStaging, definitions: providerState?.definitions, targetVersion, timeoutMs });
+    }
     try {
-      await client.evaluate("window.relayerDesktop.updater.install()");
+      console.error("[desktop-canary] Invoke updater install");
+      await client.evaluate("window.relayerDesktop.updater.install()", timeoutMs);
     } catch (error) {
       if (!/connection closed/i.test(error.message)) throw error;
     }
@@ -191,6 +235,8 @@ export async function captureInstalledUpdateState({ port, outputPath, targetVers
       state.phase === "idle" && state.version === targetVersion && state.channel === "preview" && state.error == null
     ), timeoutMs);
     await waitForRendererState(client, `(() => {
+      // Updater IPC can be ready while the relaunched page is still navigating.
+      if (!document.body) return null;
       const auth = document.querySelector("#authScreen");
       const shell = document.querySelector("#appShell");
       const settings = document.querySelector("#settingsView");
@@ -281,6 +327,13 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
       availableScreenshotPath: argument("screenshot-available"),
       readyScreenshotPath: argument("screenshot-ready"),
       timeoutMs,
+      ...(argument("profile-directory", { optional: true }) ? {
+        runtimeStaging: {
+          profileDirectory: argument("profile-directory"),
+          publicationReceiptPath: argument("preview-publication-receipt"),
+          targetKey: argument("target"),
+        },
+      } : {}),
     });
   } else if (mode === "capture") {
     await captureElectronRenderer({ port, outputPath: argument("screenshot"), timeoutMs });

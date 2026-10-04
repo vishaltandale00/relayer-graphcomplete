@@ -17,9 +17,15 @@ function classList() {
   };
 }
 
-function fixture(narrow = false) {
+function fixture(narrow = false, lockup) {
   const body = { classList: classList() };
   const listeners = new Map();
+  const brandListeners = new Map();
+  const brand = {
+    addEventListener: (name, callback) => brandListeners.set(name, callback),
+    hover: () => brandListeners.get("pointerenter")(),
+    leave: () => brandListeners.get("pointerleave")(),
+  };
   const toggle = {
     title: "",
     attributes: new Map(),
@@ -36,8 +42,8 @@ function fixture(narrow = false) {
       for (const callback of mediaListeners) callback({ matches });
     },
   };
-  initializeSidebar({ body, toggle, mediaQuery });
-  return { body, toggle, mediaQuery };
+  initializeSidebar({ body, toggle, mediaQuery, lockup, brand });
+  return { body, toggle, mediaQuery, brand };
 }
 
 describe("responsive sidebar", () => {
@@ -57,12 +63,31 @@ describe("responsive sidebar", () => {
     expect(body.classList.contains("sidebar-collapsed")).toBe(true);
   });
 
+  it("spreads the brand lockup on hover, folds it back on leave, and ignores hover in the icon rail", () => {
+    const spreads = [];
+    const lockup = { setSpread: (value, options = {}) => spreads.push(options.animate === false ? "snap" : value) };
+    const { toggle, brand } = fixture(false, lockup);
+    expect(spreads).toEqual(["snap"]); // rests on the mark
+    brand.hover();
+    brand.leave();
+    expect(spreads).toEqual(["snap", 1, 0]);
+    brand.hover();
+    toggle.click(); // collapsing while hovered snaps to the mark with the rail, no overhang
+    expect(spreads).toEqual(["snap", 1, 0, 1, "snap"]);
+    brand.hover();
+    expect(spreads).toEqual(["snap", 1, 0, 1, "snap"]); // no room for the word in the rail
+    brand.leave();
+    toggle.click();
+    expect(spreads.slice(-2)).toEqual([0, "snap"]); // expanding returns to the mark, not the word
+  });
+
   it("keeps the sidebar in flow and sizes the new-thread composer from available space", async () => {
-    const [html, css, main, account] = await Promise.all([
+    const [html, css, main, account, evalSettings] = await Promise.all([
       readFile(new URL("../desktop/renderer/index.html", import.meta.url), "utf8"),
       readFile(new URL("../desktop/renderer/styles.css", import.meta.url), "utf8"),
       readFile(new URL("../desktop/renderer/src/main.js", import.meta.url), "utf8"),
       readFile(new URL("../desktop/renderer/src/desktop-account.js", import.meta.url), "utf8"),
+      readFile(new URL("../desktop/eval-renderer/product-settings.js", import.meta.url), "utf8"),
     ]);
     expect(html).toContain('id="collapseSidebar"');
     expect(html).toContain('id="desktopAccountButton"');
@@ -92,6 +117,16 @@ describe("responsive sidebar", () => {
     expect(css).toContain("left:calc(var(--sidebar-width) + 8px)");
     expect(css).toContain("max-width:calc(100vw - var(--sidebar-width) - 16px)");
     expect(main).toContain("initializeSidebar({");
+    expect(html).toContain('<svg class="brand-lockup" id="brandLockup"');
+    expect(main).toContain('createBrandLockup($("#brandLockup")');
+    expect(main).toContain('brand: $("#brandLockup")');
+    expect(html).toContain('<svg class="brand-lockup hero-lockup" id="heroLockup"');
+    expect(main).toContain('spreadOnHover($("#heroLockup"), createBrandLockup($("#heroLockup"), { height: 40, reducedMotion }))');
+    expect(main).toContain('const reducedMotion = () => motion.matches;');
+    // The Eval settings host swaps main.js for its own entry point, which must draw the same lockups.
+    expect(evalSettings).toContain('import { createBrandLockup, spreadOnHover } from "/src/relayer-mark.js";');
+    expect(evalSettings).toContain('[["brandLockup", 24], ["heroLockup", 40]]');
+    expect(evalSettings).toContain('.sidebar-title strong").textContent = "Eval";');
     expect(account).not.toContain("additionalAccountButtons");
   });
 });

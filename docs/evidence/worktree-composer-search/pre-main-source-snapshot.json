@@ -1,0 +1,12 @@
+{
+  "head": "ebb1a1be3a805ca93482ccb958cce3881ef0136f",
+  "digest": "5930c30254d38e25ebd15e6fdaf19d7073533afa63af8c5e65c5f9d709905866",
+  "files": {
+    "desktop/renderer/src/checkout.js": "6c59da9f992e9b41cfd0ae0b8f6676fb2e6bac2cfe1890cbfa0715f75e269c09",
+    "desktop/renderer/styles.css": "d5239396f4230549969ffb2372ae6993febe37f4b61efba6a7322f4710e2a866",
+    "docs/prd/index.html": "233b8f8f61d744964c5770e97710305a6b6654a1567d46f18aa639f74ddb1a04",
+    "scripts/run-worktree-test.mjs": "bb69d07298812a49914b7c53b61860deec5f530d65ca5d5a942d34e82c92b495",
+    "scripts/test-desktop-worktrees.mjs": "f9ed684bd5dd96e4962898c958815c2cc319b960a2f03a2c95406f5fa1429cea",
+    "test/worktree-renderer.test.mjs": "85d30ba1768ab24b33241c26b982feca40c516b2dc49bfa0b51372d3aac1d36b"
+  }
+}

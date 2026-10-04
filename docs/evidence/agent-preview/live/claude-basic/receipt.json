@@ -1,0 +1,141 @@
+{
+  "runId": "run-2026-10-03T03-05-43-654Z-49f1a9e0",
+  "runStatus": "passed",
+  "case": "empty-project.hierarchical-overview.single-turn",
+  "harness": "claude-basic",
+  "turnAccepted": true,
+  "renderedLayerPreviews": 10,
+  "previewEvents": [
+    {
+      "outcome": "rendered",
+      "target": {
+        "kind": "layer",
+        "layerId": 18
+      },
+      "fingerprint": "sha256:7f9fe30105cbc39b799d354b2921c033a777e299ec9793ee49fc4b900ef5374b",
+      "width": 1164,
+      "height": 703,
+      "byteLength": 28002,
+      "durationMs": 1135
+    },
+    {
+      "outcome": "rendered",
+      "target": {
+        "kind": "layer",
+        "layerId": 19
+      },
+      "fingerprint": "sha256:4c941ac2247a18587e6180125604e3ec9a15bedcdae21c517e3c5dba25ac279e",
+      "width": 1164,
+      "height": 703,
+      "byteLength": 27691,
+      "durationMs": 226
+    },
+    {
+      "outcome": "rendered",
+      "target": {
+        "kind": "layer",
+        "layerId": 20
+      },
+      "fingerprint": "sha256:ab5f9feddc960423455349e5e16ab71a5b05c31ad8cec261d8f40d20129f6adb",
+      "width": 1164,
+      "height": 703,
+      "byteLength": 30579,
+      "durationMs": 210
+    },
+    {
+      "outcome": "rendered",
+      "target": {
+        "kind": "layer",
+        "layerId": 21
+      },
+      "fingerprint": "sha256:ebf8dd53e905ebd6c31ce5bb0eeb89dd9323b683ec5e7b582c69cb6d7ac94b1b",
+      "width": 1164,
+      "height": 703,
+      "byteLength": 31238,
+      "durationMs": 210
+    },
+    {
+      "outcome": "rendered",
+      "target": {
+        "kind": "layer",
+        "layerId": 22
+      },
+      "fingerprint": "sha256:ff3d9cc99194b98c1d136f587064b4216835a6dd63c048755491feb04b406ba2",
+      "width": 1164,
+      "height": 703,
+      "byteLength": 27187,
+      "durationMs": 205
+    },
+    {
+      "outcome": "rendered",
+      "target": {
+        "kind": "layer",
+        "layerId": 18
+      },
+      "fingerprint": "sha256:b6000e9956d0f1dfd97778cd655555d77b79242030defe7088b5826f2b289378",
+      "width": 1164,
+      "height": 703,
+      "byteLength": 28417,
+      "durationMs": 275
+    },
+    {
+      "outcome": "rendered",
+      "target": {
+        "kind": "layer",
+        "layerId": 19
+      },
+      "fingerprint": "sha256:cb25dd81d89a25d6af7916a85bcc354a2312afd03be264dfc4afc839493a6b97",
+      "width": 1164,
+      "height": 703,
+      "byteLength": 27544,
+      "durationMs": 273
+    },
+    {
+      "outcome": "rendered",
+      "target": {
+        "kind": "layer",
+        "layerId": 20
+      },
+      "fingerprint": "sha256:5b84c6d2daa8e27bef235953586ce61995a587563230ab03a66a87d953906fb4",
+      "width": 1164,
+      "height": 703,
+      "byteLength": 30316,
+      "durationMs": 202
+    },
+    {
+      "outcome": "rendered",
+      "target": {
+        "kind": "layer",
+        "layerId": 21
+      },
+      "fingerprint": "sha256:b2418b734d8b41b7d8c37e6aae0e1071f2eefe5b28f13e96a907e6d2dba3d745",
+      "width": 1164,
+      "height": 703,
+      "byteLength": 31011,
+      "durationMs": 209
+    },
+    {
+      "outcome": "rendered",
+      "target": {
+        "kind": "layer",
+        "layerId": 22
+      },
+      "fingerprint": "sha256:8ece2ad8a2fa5c630d481da5a685cfacafd7011f07036d7e783fc59e082e14c5",
+      "width": 1164,
+      "height": 703,
+      "byteLength": 26261,
+      "durationMs": 193
+    }
+  ],
+  "imageViews": [
+    "layer-18-7f9fe30105cbc39b.png",
+    "layer-21-ebf8dd53e905ebd6.png"
+  ],
+  "submittedAt": "2026-10-03T03:08:50.470Z",
+  "viewedLayerPreviews": [
+    "layer-18-7f9fe30105cbc39b.png",
+    "layer-21-ebf8dd53e905ebd6.png"
+  ],
+  "passed": true,
+  "qualityClaim": "none"
+}
