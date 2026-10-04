@@ -42,7 +42,7 @@ export async function buildDevelopmentDesktop({
     } catch (error) { console.log(`Packaging cache unavailable: ${error.message}`); }
   }
   // Recheck licensing even when compilation is reused; cache receipts grant no authority.
-  if (target.key === "macos-arm64") await requireLicense();
+  if (target.key === "macos-arm64" || target.key === "windows-x64") await requireLicense();
   const outputDirectory = resolve(repositoryRoot, "target", target.rustTarget, "release");
   const compile = async () => {
     // CI can omit all compilation preparation after a verified runtime hit. If

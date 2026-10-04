@@ -11,8 +11,18 @@ function positiveRunId(value, label = "candidate workflow run ID") {
   return normalized;
 }
 
+export const WINDOWS_CANDIDATE_WORKFLOW_PATH = ".github/workflows/desktop-windows-candidate.yml";
+
+function candidateWorkflowPath(targets) {
+  if (targets.includes("windows-x64")) {
+    if (targets.length !== 1) throw new Error("Windows candidates have an independent workflow run.");
+    return WINDOWS_CANDIDATE_WORKFLOW_PATH;
+  }
+  return DESKTOP_SIGNED_PREVIEW_WORKFLOW_PATH;
+}
+
 function candidateJobName(target) {
-  if (target === "windows-x64") return "Windows x64 Preview (blocked)";
+  if (target === "windows-x64") return "Sign Windows x64 Preview";
   return `Sign and notarize ${target} Preview`;
 }
 
@@ -77,7 +87,7 @@ export function validateDesktopPreviewCandidateRun({
     run?.status !== "completed" ||
     String(run?.head_sha || "").toLowerCase() !== expectedCommit ||
     run?.head_branch !== "main" ||
-    run?.path !== DESKTOP_SIGNED_PREVIEW_WORKFLOW_PATH ||
+    run?.path !== candidateWorkflowPath(targets) ||
     run?.repository?.full_name !== expectedRepository
   ) {
     throw new Error("Pinned Desktop Preview candidate run is not a completed manual run for this exact main commit and workflow attempt.");
@@ -122,7 +132,9 @@ async function readJson(response, label) {
 
 export async function resolveDesktopPreviewCandidateRun({ environment = process.env, fetchImpl = fetch } = {}) {
   const version = String(environment.RELAYER_DESKTOP_VERSION || "").trim();
+  const targets = environment.RELAYER_DESKTOP_TARGET === "windows-x64" ? ["windows-x64"] : ["macos-arm64"];
   const { candidateRunId, candidateRunAttempt, candidateArtifacts } = parseDesktopPreviewCandidateTag({
+    targets,
     objectType: environment.RELAYER_DESKTOP_TAG_OBJECT_TYPE,
     message: environment.RELAYER_DESKTOP_TAG_MESSAGE,
     version,
@@ -153,6 +165,7 @@ export async function resolveDesktopPreviewCandidateRun({ environment = process.
     candidateRunId,
     candidateRunAttempt,
     candidateArtifacts,
+    targets,
     sourceCommit: environment.GITHUB_SHA,
     repository,
   });
@@ -163,6 +176,7 @@ export async function resolveDesktopPreviewCandidateRun({ environment = process.
     candidateRunId,
     candidateRunAttempt,
     candidateArtifacts,
+    targets,
     sourceCommit: environment.GITHUB_SHA,
     repository,
   });

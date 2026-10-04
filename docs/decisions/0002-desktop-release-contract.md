@@ -12,7 +12,7 @@ The first production release is `0.2.0`. Desktop versions use numeric `major.min
 - Intel macOS: `desktop/macos/x64/{beta-mac.yml,latest-mac.yml,releases/...}`
 - Windows x64: `desktop/windows/x64/{beta.yml,latest.yml,releases/...}`
 
-All targets for a version are built from the same source commit. A target may be promoted only from its own verified Preview bytes and target-specific canary evidence.
+macOS and Windows have independent numeric release versions and schedules. macOS retains `desktop/package.json` and `desktop-vX.Y.Z` tags. Windows uses `desktop/windows-version.json` and reserves `desktop-windows-vX.Y.Z` tags. Sharing a numeric version across platforms does not imply sharing a source commit. Each candidate seals its exact source commit. A target may be promoted only from its own verified Preview bytes and target-specific canary evidence.
 
 Every signed candidate is built from a clean Git commit and includes its source commit, version, target, channel, update URL, and signing identity in sealed package metadata and a release receipt. macOS production packaging requires the Developer ID Application identity for team `NZ253AL7U6` and complete Apple notarization credentials; a notarized DMG is the first-install artifact and a notarized ZIP is the update artifact. Windows production packaging requires the `relayercodesigning` Azure Artifact Signing account, a Public Trust certificate profile, and a GitHub OIDC identity holding only the certificate-profile signer role; the signed NSIS executable is both the first-install and update artifact.
 
@@ -22,6 +22,7 @@ The signed-candidate workflow may be run manually from `main` without changing t
 
 ## Consequences
 
+- Windows candidate packaging runs in its own manual workflow and never gates main CI or macOS release jobs. Unsigned Windows native qualification may run on pull requests without cloud signing access. Windows feed publication and tag protection remain deferred until the signed candidate passes VM acceptance.
 - The original `0.1.0` Relayer build and the new desktop share product continuity; `0.2.0` is the first new signed seed and `0.2.1` is the first update proof.
 - Preview and Stable cannot be installed side by side, while `Relayer Dev` can coexist with either.
 - A Preview user cannot downgrade to an older Stable version. Stable promotion therefore follows a successful Preview canary and uses monotonically increasing numeric versions.

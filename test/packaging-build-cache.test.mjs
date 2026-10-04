@@ -133,11 +133,43 @@ test("a release hit still licenses, assembles and inspects the current app; corr
   await expect(buildDevelopmentDesktop(failing)).rejects.toThrow("compile rejected");
 });
 
-test("non-Apple-Silicon development packaging preserves its native tool environment", async () => {
-  const environment = { RELAYER_DESKTOP_TARGET: "windows-x64", PATH: "C:\\tools;D:\\tools" };
+test("Intel macOS development packaging preserves its native tool environment", async () => {
+  const environment = { RELAYER_DESKTOP_TARGET: "macos-x64", PATH: "/fixture/tools" };
   const execute = vi.fn(async (_command, _args, options) => expect(options.env).toEqual(environment));
   await buildDevelopmentDesktop({ environment, execute });
   expect(execute).toHaveBeenCalledTimes(2);
+});
+
+test("Windows development packaging licenses and compiles the pinned static source offline before assembly", async () => {
+  const environment = { RELAYER_DESKTOP_TARGET: "windows-x64", PATH: "C:\\tools;D:\\tools", OPENSSL_DIR: "/ambient/ssl" };
+  const pinned = { OPENSSL_DIR: "/fixture/ssl", LBUG_SOURCE_DIR: "/fixture/lbug", OPENSSL_STATIC: "1", LBUG_BUILD_FROM_SOURCE: "1", CARGO_NET_OFFLINE: "true" };
+  const license = vi.fn(async () => {});
+  const dispose = vi.fn();
+  const prepare = vi.fn(async ({ target }) => {
+    expect(target.rustTarget).toBe("x86_64-pc-windows-msvc");
+    return { environment: pinned, dispose };
+  });
+  const execute = vi.fn(async () => {});
+  await buildDevelopmentDesktop({ environment, execute, prepareLadybug: prepare, requireLicense: license });
+  expect(license).toHaveBeenCalledOnce();
+  expect(prepare).toHaveBeenCalledOnce();
+  expect(dispose).toHaveBeenCalledOnce();
+  expect(execute.mock.calls[0]).toEqual(["cargo", ["build", "--release", "-p", "relayer-app-server", "-p", "relayer-graph-server", "--target", "x86_64-pc-windows-msvc", "--locked", "--offline"], expect.objectContaining({ env: { ...environment, ...pinned } })]);
+  expect(execute.mock.calls[1][1]).toEqual(expect.arrayContaining(["--dir", "--win", "--x64"]));
+  expect(execute.mock.calls[1][2].env).toEqual(environment);
+});
+
+test("Windows development packaging refuses unlicensed distribution before native preparation or assembly", async () => {
+  const prepare = vi.fn();
+  const execute = vi.fn();
+  await expect(buildDevelopmentDesktop({
+    environment: { RELAYER_DESKTOP_TARGET: "windows-x64" },
+    prepareLadybug: prepare,
+    execute,
+    requireLicense: async () => { throw Error("distribution license incomplete"); },
+  })).rejects.toThrow("distribution license incomplete");
+  expect(prepare).not.toHaveBeenCalled();
+  expect(execute).not.toHaveBeenCalled();
 });
 
 

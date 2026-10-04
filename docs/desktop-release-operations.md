@@ -8,9 +8,9 @@ This runbook covers the operator-controlled steps around the code-owned release 
 | --- | --- | --- | --- | --- |
 | `macos-arm64` | Developer ID DMG and updater ZIP | `desktop/macos/arm64/beta-mac.yml` | `desktop/macos/arm64/latest-mac.yml` | Physical or remote Apple Silicon Mac |
 | `macos-x64` | Developer ID DMG and updater ZIP | `desktop/macos/x64/beta-mac.yml` | `desktop/macos/x64/latest-mac.yml` | GitHub `macos-15-intel`; physical Intel Mac remains stronger final proof |
-| `windows-x64` | **Blocked; pipeline disabled.** Azure Artifact Signing NSIS installer is implemented but unverified. | `desktop/windows/x64/beta.yml` | `desktop/windows/x64/latest.yml` | Interactive Windows 11 Azure Virtual Desktop |
+| `windows-x64` | **Candidate qualification pending.** Independent manual Azure Artifact Signing NSIS workflow; native signing and VM acceptance remain unverified. | `desktop/windows/x64/beta.yml` | `desktop/windows/x64/latest.yml` | Interactive Windows 11 Azure Virtual Desktop |
 
-Enabled targets for a version come from one commit. Preview publication and Stable promotion happen independently per target. Windows is disabled until the exact publisher variable exists, Azure signing succeeds, and the interactive canary passes.
+Each candidate seals its own source commit. macOS and Windows manage versions independently. Preview publication and Stable promotion happen independently per target. Windows is disabled until the exact publisher variable exists, Azure signing succeeds, and the interactive canary passes.
 
 Every signed Preview and Stable candidate uses `https://share.relayerlabs.ai`.
 Stable promotion reuses the signed Preview bytes, so their sealed service origin
@@ -36,7 +36,7 @@ The intended Azure resources are:
 
 - Artifact Signing account: `relayercodesigning`
 - Region endpoint: `https://eus.codesigning.azure.net/`
-- Public Trust certificate profile: `relayer-public-trust`
+- Public Trust certificate profile: `relayer-windows`
 - GitHub environment: `desktop-production-windows`
 - GitHub repository: `vishaltandale00/relayer-graphcomplete`
 
@@ -58,7 +58,7 @@ Set these non-secret variables on `desktop-production-windows` after the profile
 AZURE_TENANT_ID
 AZURE_CLIENT_ID
 AZURE_SUBSCRIPTION_ID
-RELAYER_WINDOWS_CERTIFICATE_PROFILE=relayer-public-trust
+RELAYER_WINDOWS_CERTIFICATE_PROFILE=relayer-windows
 RELAYER_WINDOWS_PUBLISHER_NAME=<exact validated certificate publisher>
 ```
 
@@ -147,18 +147,21 @@ This rollout completed with native canary workflow `32350071508` and Stable prom
 
 Do not promote the bootstrap version to Stable. Apple Silicon Preview `0.2.9` and Stable `0.2.4` remain valid independent feed history; `0.2.7` is the historical first target-aware Apple Silicon candidate. The immutable `desktop-v0.2.6` tag predates the target-aware publisher and is not an Intel or Windows bootstrap candidate.
 
-### Windows rollout blocker
+### Windows candidate and rollout
 
-The Windows workflow path is implemented but disabled. Use this sequence:
+Windows owns `desktop/windows-version.json`, starting at `0.2.0`. macOS keeps its existing package version and `desktop-v*` tags. Windows reserves `desktop-windows-v*` tags; no Windows publication workflow or tag is enabled in the candidate milestone.
 
-1. Complete identity validation and set the exact `RELAYER_WINDOWS_PUBLISHER_NAME` value.
-2. Enable only the Windows candidate job and run the Windows-inclusive authority audit.
-3. Run the manual workflow and verify the Azure-signed installer and receipt. Manual runs cannot publish.
-4. Add Windows Preview publication and publish two new reviewed Windows versions.
-5. Prove the bootstrap-to-target update in the interactive Windows 11 AVD session.
-6. Allow Windows Stable promotion only after the committed canary evidence passes review.
+`Windows Desktop Candidate` runs unsigned native qualification only on affected pull requests labeled `windows-qualification`. It grants no signing identity to that job. A manual run from main additionally requires successful exact-source main CI, signs through `desktop-production-windows`, verifies the signed application and installer, uploads telemetry, and seals its candidate artifact. It cannot change an update feed. Main CI and macOS release jobs have no dependency on this workflow.
 
-The manual run cannot publish. The tag run rejects a tag/version mismatch and a commit outside `origin/main`.
+The native source route uses MSVC, pinned Ladybug and static OpenSSL, locked offline Cargo, PE architecture/import verification for both Rust executables, and a packaged graph-server create/lock/shutdown/reopen test. Existing native caches qualify macOS arm64 only; the first Windows runs compile fresh and record that reason. Never relax the main-source gate to sign pull-request code.
+
+1. Configure the active profile and exact certificate subject. Verify the OIDC federation and profile-scoped signer role.
+2. Run the Windows-inclusive authority audit and unsigned Windows native qualification.
+3. Merge the reviewed candidate implementation, wait for main CI, and dispatch the manual Windows workflow.
+4. Download the signed artifact by immutable ID; preserve its run, attempt, digest, source, version, and receipt.
+5. Test that installer in the interactive Windows 11 VM before enabling Windows publication.
+6. In the later publication change, protect Windows tags and enable the target feed. Publish two reviewed versions and prove the VM update.
+7. Promote Windows Stable only after committed canary evidence passes review.
 
 ## Native macOS canaries
 

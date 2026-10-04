@@ -2458,11 +2458,11 @@ describe("desktop skeleton", () => {
     ));
     for (const [target, jobName] of [
       ["macos-x64", candidateWorkflow.jobs["package-macos"].name.replace("${{ matrix.target }}", "macos-x64")],
-      ["windows-x64", candidateWorkflow.jobs["package-windows"].name],
+      ["windows-x64", "Sign Windows x64 Preview"],
     ]) {
       const targetArtifactName = `relayer-desktop-preview-${target}-${sourceCommit}`;
       expect(validateDesktopPreviewCandidateRun({
-        run,
+        run: target === "windows-x64" ? { ...run, path: ".github/workflows/desktop-windows-candidate.yml" } : run,
         jobs: { jobs: [{ name: jobName, status: "completed", conclusion: "success" }] },
         artifacts: { artifacts: [{ ...artifact, name: targetArtifactName }] },
         candidateRunId: "12345",
@@ -2629,12 +2629,13 @@ describe("desktop skeleton", () => {
     expect(releaseWorkflow).toContain("RELAYER_DESKTOP_CANDIDATE_ARTIFACT_DIGEST: ${{ fromJSON(needs.validate.outputs.candidate_artifacts)[matrix.target].digest }}");
     expect(releaseWorkflow).toContain("if: ${{ github.event_name == 'workflow_dispatch' }}");
     expect(releaseWorkflow).not.toMatch(/required=\([\s\S]*RELAYER_SHARE_SERVICE_ENDPOINT[\s\S]*\)/u);
-    expect(releaseWorkflow).toContain("uses: azure/login@f5d393ae46f8fde4be8b75f32e3fc50e654ad0ca");
-    expect(releaseWorkflow).toContain("subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}");
-    expect(releaseWorkflow).toContain("AZURE_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}");
-    expect(releaseWorkflow).toContain("RELAYER_WINDOWS_PUBLISHER_NAME: ${{ vars.RELAYER_WINDOWS_PUBLISHER_NAME }}");
-    expect(releaseWorkflow).toContain("Missing required Windows signing variable");
-    expect(releaseWorkflow).toContain("if: ${{ false }}");
+    const windowsWorkflow = await readFile(new URL("../.github/workflows/desktop-windows-candidate.yml", import.meta.url), "utf8");
+    expect(windowsWorkflow).toContain("uses: azure/login@f5d393ae46f8fde4be8b75f32e3fc50e654ad0ca");
+    expect(windowsWorkflow).toContain("subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}");
+    expect(windowsWorkflow).toContain("AZURE_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}");
+    expect(windowsWorkflow).toContain("RELAYER_WINDOWS_PUBLISHER_NAME: ${{ vars.RELAYER_WINDOWS_PUBLISHER_NAME }}");
+    expect(windowsWorkflow).toContain("Missing signing variable");
+    expect(releaseWorkflow).not.toContain("azure/login");
     expect(releaseWorkflow).toContain("needs: [validate, package-macos]");
     expect(releaseWorkflow).toContain("target: [macos-arm64]");
     expect(releaseWorkflow).not.toContain("macos-15-intel");
@@ -3131,10 +3132,13 @@ describe("desktop skeleton", () => {
       // The Windows resources layout exercises the same default notice verifier
       // (not a stub), so the win32 bundle path is covered too.
       await cp(noticesExtra.from, join(windowsPath, "resources", noticesExtra.to), { recursive: true });
+      const windowsChecks = [];
       await expect(verifyBundledAppServer(windowsPath, {
         readSharpPackage,
         platform: "win32",
         execute: async () => { throw new Error("lipo must not run for Windows"); },
+        verifyWindowsNative: async (path) => { windowsChecks.push(path); },
+        proveWindowsLifecycle: async (path) => { windowsChecks.push(path); },
         listPackageEntries: () => packagedRuntimeEntries().map((entry) => `\\${entry.replaceAll("/", "\\")}`),
         verifyPrimeAgent: async (_resourcesPath, packagedEntries) => {
           expect(packagedEntries).toEqual(new Set(packagedRuntimeEntries()));
@@ -3142,9 +3146,14 @@ describe("desktop skeleton", () => {
         },
       })).resolves.toEqual({
         binaryPath: join(windowsPath, "resources", "bin", "relayer-app-server.exe"),
-        architecture: null,
+        architecture: "x86_64",
       });
 
+      expect(windowsChecks).toEqual([
+        join(windowsPath, "resources", "bin", "relayer-app-server.exe"),
+        join(windowsPath, "resources", "bin", "relayer-graph-server.exe"),
+        join(windowsPath, "resources", "bin", "relayer-graph-server.exe"),
+      ]);
       const noticeFixture = join(directory, "notice-fixture");
       await mkdir(join(noticeFixture, "notices", "ladybug", "third-party"), { recursive: true });
       const noticeBytes = Buffer.from("reviewed MIT notice bytes\n");

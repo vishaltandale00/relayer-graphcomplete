@@ -1,0 +1,92 @@
+import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { createPackage } from "@electron/asar";
+import { parse } from "yaml";
+import { describe, expect, it } from "vitest";
+import { loadDesktopReleaseContract } from "../desktop/release/contract.mjs";
+import { desktopReleaseTag, loadDesktopVersion } from "../desktop/release/version.mjs";
+import { createDesktopBuilderConfig } from "../desktop/packaging/electron-builder.mjs";
+import { verifyPackagedDesktopContract } from "../desktop/release/verify-packaged-contract.mjs";
+import { validatePreviewPublicationProvenance } from "../desktop/release/publish-preview.mjs";
+import { validateDesktopPreviewCandidateRun, WINDOWS_CANDIDATE_WORKFLOW_PATH } from "../desktop/release/preview-candidate-run.mjs";
+
+describe("independent Windows candidate", () => {
+  it("seals the Windows version in the real ASAR while retaining the macOS version", async () => {
+    const root = await mkdtemp(join(tmpdir(), "windows-version-"));
+    try {
+      await writeFile(join(root, "package.json"), JSON.stringify({ version: "0.9.7" }));
+      await writeFile(join(root, "windows-version.json"), JSON.stringify({ version: "0.2.0" }));
+      expect(await loadDesktopVersion({ desktopRoot: root, targetKey: "macos-arm64" })).toBe("0.9.7");
+      const contract = await loadDesktopReleaseContract({
+        desktopRoot: root,
+        environment: {
+          RELAYER_DESKTOP_RELEASE: "1", RELAYER_DESKTOP_TARGET: "windows-x64", RELAYER_DESKTOP_CHANNEL: "preview",
+          RELAYER_DESKTOP_CANDIDATE_RUN_ID: "123", RELAYER_DESKTOP_CANDIDATE_RUN_ATTEMPT: "1",
+          RELAYER_DESKTOP_UPDATE_BASE_URL: "https://updates.relayerlabs.ai/desktop/windows/x64",
+          RELAYER_WINDOWS_SIGNING_ENDPOINT: "https://eus.codesigning.azure.net/",
+          RELAYER_WINDOWS_SIGNING_ACCOUNT: "relayercodesigning", RELAYER_WINDOWS_CERTIFICATE_PROFILE: "relayer-windows",
+          RELAYER_WINDOWS_PUBLISHER_NAME: "CN=Relayer Labs LLC, O=Relayer Labs LLC, L=Lewes, S=Delaware, C=US",
+        },
+        execute: async (_command, args) => ({ stdout: args[0] === "rev-parse" ? "a".repeat(40) : "" }),
+      });
+      const builder = createDesktopBuilderConfig(contract, { environment: {}, argv: [] });
+      const source = join(root, "asar-source");
+      const appPath = join(root, "win-unpacked");
+      const resources = join(appPath, "resources");
+      await mkdir(join(source, "node_modules/electron-updater"), { recursive: true });
+      await mkdir(resources, { recursive: true });
+      await writeFile(join(source, "package.json"), JSON.stringify({ version: "0.9.7", ...builder.extraMetadata }));
+      await writeFile(join(source, "node_modules/electron-updater/package.json"), "{}");
+      await createPackage(source, join(resources, "app.asar"));
+      await writeFile(join(resources, "app-update.yml"), `provider: generic\nurl: ${contract.updateBaseUrl}\nchannel: beta\n`);
+      expect((await verifyPackagedDesktopContract({ appPath, contract })).packageMetadata.version).toBe("0.2.0");
+      await expect(verifyPackagedDesktopContract({ appPath, contract: { ...contract, version: "0.9.7" } })).rejects.toThrow("metadata version");
+      expect(desktopReleaseTag(contract.version, "windows-x64")).toBe("desktop-windows-v0.2.0");
+      expect(desktopReleaseTag("0.9.7", "macos-arm64")).toBe("desktop-v0.9.7");
+      await writeFile(join(root, "windows-version.json"), '{"version":"latest"}');
+      await expect(loadDesktopVersion({ desktopRoot: root, targetKey: "windows-x64" })).rejects.toThrow("numeric");
+    } finally { await rm(root, { recursive: true, force: true }); }
+  });
+
+  it("binds Windows publication provenance to its own tags and candidate workflow", () => {
+    const digest = `sha256:${"b".repeat(64)}`;
+    const environment = {
+      GITHUB_SHA: "a".repeat(40), GITHUB_REF_NAME: "desktop-windows-v0.2.0", GITHUB_RUN_ID: "10", GITHUB_RUN_ATTEMPT: "1",
+      RELAYER_DESKTOP_CANDIDATE_RUN_ID: "11", RELAYER_DESKTOP_CANDIDATE_RUN_ATTEMPT: "1",
+      RELAYER_DESKTOP_CANDIDATE_ARTIFACT_ID: "12", RELAYER_DESKTOP_CANDIDATE_ARTIFACT_DIGEST: digest,
+    };
+    expect(validatePreviewPublicationProvenance(environment, "0.2.0", "windows-x64").candidateArtifactId).toBe("12");
+    expect(() => validatePreviewPublicationProvenance({ ...environment, GITHUB_REF_NAME: "desktop-v0.2.0" }, "0.2.0", "windows-x64")).toThrow("desktop-windows-v");
+    const input = {
+      targets: ["windows-x64"], sourceCommit: environment.GITHUB_SHA, repository: "owner/repo", candidateRunId: "11", candidateRunAttempt: "1",
+      candidateArtifacts: { "windows-x64": { id: "12", digest } },
+      run: { id: 11, run_attempt: 1, event: "workflow_dispatch", status: "completed", head_sha: environment.GITHUB_SHA, head_branch: "main", path: WINDOWS_CANDIDATE_WORKFLOW_PATH, repository: { full_name: "owner/repo" } },
+      jobs: { jobs: [{ name: "Sign Windows x64 Preview", status: "completed", conclusion: "success", run_attempt: 1 }] },
+      artifacts: { artifacts: [{ id: 12, digest, expired: false, name: `relayer-desktop-preview-windows-x64-${environment.GITHUB_SHA}` }] },
+    };
+    expect(validateDesktopPreviewCandidateRun(input).candidateArtifacts["windows-x64"].id).toBe("12");
+    expect(() => validateDesktopPreviewCandidateRun({ ...input, run: { ...input.run, path: ".github/workflows/desktop-signed-preview.yml" } })).toThrow("exact main commit");
+  });
+
+  it("keeps signing manual, native qualification unprivileged, and Windows outside main/mac dependencies", async () => {
+    const workflow = parse(await readFile(new URL("../.github/workflows/desktop-windows-candidate.yml", import.meta.url), "utf8"));
+    expect(Object.keys(workflow.on).sort()).toEqual(["pull_request", "workflow_dispatch"]);
+    expect(workflow.jobs.qualify.permissions).toEqual({ contents: "read" });
+    expect(workflow.jobs.qualify.if).toContain("contains(github.event.pull_request.labels.*.name, 'windows-qualification')");
+    expect(workflow.jobs.qualify.if).toContain("needs.validate.result == 'success'");
+    expect(workflow.jobs.qualify.environment).toBeUndefined();
+    expect(workflow.jobs.package.if).toBe("${{ github.event_name == 'workflow_dispatch' }}");
+    expect(workflow.jobs.package.needs).toEqual(["validate", "qualify"]);
+    expect(workflow.jobs.package.environment).toBe("desktop-production-windows");
+    expect(workflow.jobs.validate.steps.some(step => step.run === 'test "$GITHUB_REF" = refs/heads/main')).toBe(true);
+    expect(workflow.jobs.validate.steps.some(step => step.run === "node desktop/release/main-ci-check.mjs")).toBe(true);
+    const text = JSON.stringify(workflow);
+    expect(text).not.toMatch(/configure-aws|publish-preview|promote-stable|desktop-update-preview/);
+    for (const file of ["ci.yml", "desktop-signed-preview.yml"]) {
+      const other = parse(await readFile(new URL(`../.github/workflows/${file}`, import.meta.url), "utf8"));
+      expect(JSON.stringify(other.jobs)).not.toContain("desktop-windows-candidate");
+      expect(other.jobs.check?.needs ?? []).not.toContain("ladybug-windows-qualification");
+    }
+  });
+});

@@ -38,6 +38,7 @@ export function createDesktopBuilderConfig(
     forceCodeSigning: release,
     directories: { app: desktopRoot, output: resolve(desktopRoot, "dist") },
     extraMetadata: {
+      version: contract.version,
       main: "main/index.mjs",
       relayerArtifactMode: contract.artifactMode,
       relayerProductName: contract.productName,

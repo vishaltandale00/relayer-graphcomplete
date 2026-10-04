@@ -10,6 +10,7 @@ import { promisify } from "node:util";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 
 import { DESKTOP_RELEASE, desktopReleaseTarget } from "./contract.mjs";
+import { desktopReleaseTag, loadDesktopVersion } from "./version.mjs";
 import { compareNumericVersions, isNumericVersion } from "./numeric-version.mjs";
 import { RELEASE_MANAGED_RUNTIME_REQUIREMENTS } from "../shared/managed-runtime-requirements.mjs";
 
@@ -66,7 +67,7 @@ function expectedChecksumText(evidenceByName, target, version) {
     .join("\n");
 }
 
-export function validatePreviewPublicationProvenance(environment, version) {
+export function validatePreviewPublicationProvenance(environment, version, targetKey = "macos-arm64") {
   const sourceCommit = String(environment.GITHUB_SHA || "").trim().toLowerCase();
   const refName = String(environment.GITHUB_REF_NAME || "").trim();
   const workflowRunId = String(environment.GITHUB_RUN_ID || "").trim();
@@ -78,8 +79,9 @@ export function validatePreviewPublicationProvenance(environment, version) {
   if (!/^[a-f0-9]{40}$/.test(sourceCommit)) {
     throw new Error("Preview publication requires a full GitHub source commit SHA.");
   }
-  if (refName !== `desktop-v${version}`) {
-    throw new Error(`Preview publication requires tag desktop-v${version}.`);
+  const expectedTag = desktopReleaseTag(version, targetKey);
+  if (refName !== expectedTag) {
+    throw new Error(`Preview publication requires tag ${expectedTag}.`);
   }
   if (
     !/^[1-9]\d*$/.test(workflowRunId) ||
@@ -397,10 +399,9 @@ export async function publishDesktopPreview({
 } = {}) {
   if (!bucket) throw new Error("Preview publication requires an S3 bucket.");
   if (baseUrl !== target.updateBaseUrl) throw new Error("Preview publication base URL is not sealed.");
-  const packageMetadata = JSON.parse(await readFile(resolve(import.meta.dirname, "../package.json"), "utf8"));
-  const version = String(packageMetadata.version || "").trim();
+  const version = await loadDesktopVersion({ desktopRoot: resolve(import.meta.dirname, ".."), targetKey: target.key });
   if (!isNumericVersion(version)) throw new Error("Desktop version must be numeric major.minor.patch.");
-  const provenance = validatePreviewPublicationProvenance(environment, version);
+  const provenance = validatePreviewPublicationProvenance(environment, version, target.key);
 
   const { prefix, primary } = releaseArtifactNames(target, version);
   const artifactNames = [

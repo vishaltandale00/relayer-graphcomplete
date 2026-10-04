@@ -9,6 +9,7 @@ import { describe, expect, it } from "vitest";
 import { buildDevelopmentDesktop } from "../desktop/packaging/build-development.mjs";
 import { requireLadybugDistributionLicenseReady } from "../desktop/packaging/pinned-ladybug-build.mjs";
 import { buildReleaseRustServers } from "../desktop/release/build-release.mjs";
+import { verifyWindowsNativeExecutable } from "../desktop/packaging/windows-native.mjs";
 import { verifyPackagedMacOSGraphServer } from "../desktop/packaging/verify-bundled-app-server.mjs";
 import {
   RECEIPT_INPUT_PATHS,
@@ -245,14 +246,7 @@ describe("Ladybug packaged lifecycle qualification", () => {
   });
 
   it("materializes every authenticated text input with stable LF bytes", async () => {
-    const paths = [
-      ".gitattributes",
-      "desktop/packaging/build-development.mjs",
-      "desktop/shared/target.mjs",
-      "scripts/capture-ladybug-packaged-lifecycle.mjs",
-      "scripts/prepare-ladybug-source.mjs",
-      "vendor/ladybug/source-build-manifest.json",
-    ];
+    const paths = RECEIPT_INPUT_PATHS;
     const { stdout } = await execFileAsync("git", ["check-attr", "eol", "--", ...paths]);
     expect(stdout.trim().split(/\r?\n/u)).toEqual(paths.map((path) => `${path}: eol: lf`));
   });
@@ -483,6 +477,21 @@ describe("Ladybug packaged lifecycle qualification", () => {
       .toThrow("forbidden native libraries");
   });
 
+  it("verifies native executable bytes through the production Windows packaging seam", async () => {
+    const root = await mkdtemp(join(tmpdir(), "windows-native-pe-"));
+    const path = join(root, "server.exe");
+    try {
+      await writeFile(path, minimalPe());
+      expect((await verifyWindowsNativeExecutable(path)).architecture).toBe("x86_64");
+      await writeFile(path, minimalPe({ machine: 0xaa64 }));
+      await expect(verifyWindowsNativeExecutable(path)).rejects.toThrow("must be x64");
+      await writeFile(path, minimalPe({ imports: ["libssl-3-x64.dll"] }));
+      await expect(verifyWindowsNativeExecutable(path)).rejects.toThrow("forbidden native libraries");
+      await writeFile(path, "not a PE");
+      await expect(verifyWindowsNativeExecutable(path)).rejects.toThrow("invalid PE");
+    } finally { await rm(root, { recursive: true, force: true }); }
+  });
+
   it("invokes npm through the Windows command shell", () => {
     expect(npmCommandForPlatform("win32", "C:\\Windows\\System32\\cmd.exe")).toEqual({
       executable: "C:\\Windows\\System32\\cmd.exe",
@@ -608,15 +617,15 @@ describe("Ladybug packaged lifecycle qualification", () => {
     expect(executeCalls).toBe(0);
   });
 
-  it("builds the Apple-Silicon release servers from the pinned static source after the license gate passes", async () => {
+  it.each([["macos-arm64", "aarch64-apple-darwin"], ["windows-x64", "x86_64-pc-windows-msvc"]])("builds %s release servers from pinned static source after the license gate", async (targetKey, rustTarget) => {
     const calls = [];
     let disposed = false;
     await buildReleaseRustServers({
-      contract: { targetKey: "macos-arm64", rustTarget: "aarch64-apple-darwin" },
-      environment: { RELAYER_DESKTOP_TARGET: "macos-arm64", RELAYER_DESKTOP_RELEASE: "1" },
+      contract: { targetKey, rustTarget },
+      environment: { RELAYER_DESKTOP_TARGET: targetKey, RELAYER_DESKTOP_RELEASE: "1" },
       verifyLadybugDistributionLicense: async () => {},
       prepareLadybug: async ({ target }) => {
-        expect(target.key).toBe("macos-arm64");
+        expect(target.key).toBe(targetKey);
         return {
           environment: {
             CARGO_NET_OFFLINE: "true",
@@ -638,7 +647,7 @@ describe("Ladybug packaged lifecycle qualification", () => {
         "build", "--release",
         "-p", "relayer-app-server",
         "-p", "relayer-graph-server",
-        "--target", "aarch64-apple-darwin",
+        "--target", rustTarget,
         "--locked", "--offline",
       ],
       options: {
@@ -658,7 +667,6 @@ describe("Ladybug packaged lifecycle qualification", () => {
   it("rejects every deferred release target before preparation or Cargo execution", async () => {
     for (const contract of [
       { targetKey: "macos-x64", rustTarget: "x86_64-apple-darwin" },
-      { targetKey: "windows-x64", rustTarget: "x86_64-pc-windows-msvc" },
     ]) {
       let prepareCalls = 0;
       let executeCalls = 0;

@@ -41,8 +41,8 @@ describe("desktop telemetry release artifacts", () => {
     expect(lock.packages[""].devDependencies["@sentry/cli"]).toBe("3.7.0");
     expect(lock.packages["node_modules/@sentry/cli"]).toMatchObject({ version: "3.7.0", dev: true });
     const workflow = parseYaml(await readFile(new URL("../.github/workflows/desktop-signed-preview.yml", import.meta.url), "utf8"));
-    for (const name of ["package-macos", "package-windows"]) {
-      const steps = workflow.jobs[name].steps;
+    const windowsWorkflow = parseYaml(await readFile(new URL("../.github/workflows/desktop-windows-candidate.yml", import.meta.url), "utf8"));
+    for (const steps of [workflow.jobs["package-macos"].steps, windowsWorkflow.jobs.package.steps]) {
       const install = steps.findIndex((step) => step.run === "npm ci");
       const build = steps.findIndex((step) => step.run?.includes("npm run desktop:dist:preview"));
       const upload = steps.findIndex((step) => step.run === "node desktop/release/telemetry-artifacts.mjs");

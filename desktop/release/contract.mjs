@@ -1,9 +1,9 @@
 import { execFile } from "node:child_process";
-import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { promisify } from "node:util";
 
 import { compareNumericVersions, isNumericVersion } from "./numeric-version.mjs";
+import { loadDesktopVersion } from "./version.mjs";
 import { DESKTOP_UPDATE_BASE_URL } from "../shared/release-metadata.mjs";
 import { PRODUCTION_SHARE_SERVICE_ENDPOINT } from "../main/services/share-service-endpoint.mjs";
 import {
@@ -276,7 +276,7 @@ export async function loadDesktopReleaseContract({
   desktopRoot = resolve(import.meta.dirname, ".."),
   execute = execFileAsync,
 } = {}) {
-  const packageMetadata = JSON.parse(await readFile(resolve(desktopRoot, "package.json"), "utf8"));
+  const version = await loadDesktopVersion({ desktopRoot, targetKey: desktopTargetFromEnvironment(environment).key });
   const release = value(environment, "RELAYER_DESKTOP_RELEASE") === "1";
   const declaredCommit = value(environment, "RELAYER_DESKTOP_SOURCE_COMMIT");
   let sourceCommit = null;
@@ -295,7 +295,7 @@ export async function loadDesktopReleaseContract({
     }
     sourceCommit = declaredCommit || checkedOutCommit;
   }
-  return resolveDesktopReleaseContract({ environment, version: packageMetadata.version, sourceCommit });
+  return resolveDesktopReleaseContract({ environment, version, sourceCommit });
 }
 
 export function electronBuilderSigningIdentity(signingIdentity) {

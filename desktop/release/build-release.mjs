@@ -47,12 +47,12 @@ export async function buildReleaseRustServers({
   generateSymbols,
 }) {
   const target = { key: contract.targetKey, rustTarget: contract.rustTarget };
-  if (target.key !== "macos-arm64") {
+  if (target.key !== "macos-arm64" && target.key !== "windows-x64") {
     throw new Error(`Ladybug release packaging is not qualified for ${target.key}.`);
   }
   await verifyLadybugDistributionLicense();
   let cache;
-  if (environment.RELAYER_SIGNED_NATIVE_CACHE === "1") {
+  if (environment.RELAYER_SIGNED_NATIVE_CACHE === "1" && target.key === "macos-arm64") {
     try {
       const producer = signedCacheProducer(environment);
       if (producer.sourceCommit !== contract.sourceCommit) throw Error("candidate/cache source mismatch");
@@ -133,7 +133,7 @@ export async function buildDesktopRelease({
   const builderArguments = contract.platform === "darwin"
     ? ["--config", "desktop/packaging/electron-builder.mjs", "--mac", "dmg", "zip", `--${contract.architecture}`, "--publish", "never"]
     : ["--config", "desktop/packaging/electron-builder.mjs", "--win", "nsis", "--x64", "--publish", "never"];
-  await run(resolve(repositoryRoot, "node_modules", ".bin", "electron-builder"), builderArguments, {
+  await run(process.execPath, [resolve(repositoryRoot, "node_modules", "electron-builder", "out", "cli", "cli.js"), ...builderArguments], {
     cwd: repositoryRoot,
     env: releaseEnvironment,
   });

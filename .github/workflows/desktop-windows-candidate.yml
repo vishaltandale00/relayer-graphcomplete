@@ -1,0 +1,167 @@
+name: Windows Desktop Candidate
+
+on:
+  workflow_dispatch:
+  pull_request:
+    types: [opened, synchronize, reopened, labeled]
+    paths:
+      - '.github/workflows/desktop-windows-candidate.yml'
+      - 'desktop/windows-version.json'
+      - 'desktop/release/**'
+      - 'desktop/packaging/**'
+      - 'scripts/prepare-ladybug-source.mjs'
+      - 'scripts/capture-ladybug-packaged-lifecycle.mjs'
+      - 'vendor/ladybug/**'
+      - 'crates/**'
+      - 'Cargo.lock'
+
+concurrency:
+  group: windows-desktop-candidate-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  validate:
+    if: ${{ github.event_name == 'workflow_dispatch' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version-file: .node-version
+      - name: Require protected main source
+        run: test "$GITHUB_REF" = refs/heads/main
+      - name: Require exact-source main CI
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: node desktop/release/main-ci-check.mjs
+
+  qualify:
+    name: Qualify Windows native package
+    needs: validate
+    if: ${{ always() && ((github.event_name == 'workflow_dispatch' && needs.validate.result == 'success') || (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'windows-qualification'))) }}
+    runs-on: windows-2025
+    timeout-minutes: 90
+    permissions:
+      contents: read
+    env:
+      RELAYER_DESKTOP_TARGET: windows-x64
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version-file: .node-version
+          cache: npm
+      - uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756
+        with:
+          arch: amd64
+      - run: node scripts/check-node-version.mjs
+      - run: npm ci
+      - name: Record native cache decision and toolchains
+        shell: pwsh
+        run: |
+          # Existing signed/native caches authenticate macOS arm64 only. No
+          # Windows qualification receipt has been published; compile fresh.
+          "Cold Windows qualification: no compatible trusted native cache." >> $env:GITHUB_STEP_SUMMARY
+          rustc -vV
+          cmake --version
+          perl -v
+      - name: Prepare pinned static native sources
+        shell: pwsh
+        run: |
+          cargo fetch --locked --target x86_64-pc-windows-msvc
+          npm run ladybug:source -- fetch --cache "$env:RUNNER_TEMP/ladybug-cache"
+          npm run ladybug:source -- prepare --cache "$env:RUNNER_TEMP/ladybug-cache" --output "$env:RUNNER_TEMP/ladybug-prepared" --target x86_64-pc-windows-msvc
+      - name: Verify unsigned package and native lifecycle
+        shell: pwsh
+        run: node scripts/capture-ladybug-packaged-lifecycle.mjs --source-output "$env:RUNNER_TEMP/ladybug-prepared" --source-commit "${{ github.sha }}" --receipt-output "$env:RUNNER_TEMP/windows-native-receipt.json"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: windows-native-qualification-${{ github.sha }}
+          path: ${{ runner.temp }}/windows-native-receipt.json
+          if-no-files-found: error
+          retention-days: 90
+
+  package:
+    name: Sign Windows x64 Preview
+    if: ${{ github.event_name == 'workflow_dispatch' }}
+    needs: [validate, qualify]
+    runs-on: windows-2025
+    timeout-minutes: 90
+    environment: desktop-production-windows
+    permissions:
+      actions: read
+      contents: read
+      id-token: write
+    env:
+      AZURE_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
+      AZURE_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
+      AZURE_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      RELAYER_DESKTOP_TARGET: windows-x64
+      RELAYER_DESKTOP_SOURCE_COMMIT: ${{ github.sha }}
+      RELAYER_DESKTOP_CANDIDATE_RUN_ID: ${{ github.run_id }}
+      RELAYER_DESKTOP_CANDIDATE_RUN_ATTEMPT: ${{ github.run_attempt }}
+      RELAYER_DESKTOP_UPDATE_BASE_URL: https://updates.relayerlabs.ai/desktop/windows/x64
+      RELAYER_WINDOWS_SIGNING_ENDPOINT: https://eus.codesigning.azure.net/
+      RELAYER_WINDOWS_SIGNING_ACCOUNT: relayercodesigning
+      RELAYER_WINDOWS_CERTIFICATE_PROFILE: ${{ vars.RELAYER_WINDOWS_CERTIFICATE_PROFILE }}
+      RELAYER_WINDOWS_PUBLISHER_NAME: ${{ vars.RELAYER_WINDOWS_PUBLISHER_NAME }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version-file: .node-version
+          cache: npm
+      - uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756
+        with:
+          arch: amd64
+      - run: node scripts/check-node-version.mjs
+      - run: npm ci
+      - name: Require signing configuration
+        shell: pwsh
+        run: |
+          foreach ($name in @("AZURE_CLIENT_ID", "AZURE_TENANT_ID", "AZURE_SUBSCRIPTION_ID", "RELAYER_WINDOWS_CERTIFICATE_PROFILE", "RELAYER_WINDOWS_PUBLISHER_NAME")) {
+            if ([string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($name))) { throw "Missing signing variable: $name" }
+          }
+      - uses: azure/login@f5d393ae46f8fde4be8b75f32e3fc50e654ad0ca
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      - name: Build and verify signed installer
+        run: npm run desktop:dist:preview
+      - name: Upload version-matched telemetry
+        env:
+          RELAYER_DESKTOP_RELEASE: '1'
+          RELAYER_DESKTOP_CHANNEL: preview
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+          SENTRY_CLI_BINARY: ${{ github.workspace }}\node_modules\.bin\sentry-cli.cmd
+          SENTRY_ORG: relayer-labs-llc
+          SENTRY_PROJECT: graphcomplete-desktop
+        run: node desktop/release/telemetry-artifacts.mjs
+      - name: Upload sealed signed candidate
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: relayer-desktop-preview-windows-x64-${{ github.sha }}
+          if-no-files-found: error
+          retention-days: 90
+          path: |
+            desktop/dist/Relayer-*.exe
+            desktop/dist/Relayer-*.exe.blockmap
+            desktop/dist/beta.yml
+            desktop/dist/Relayer-*-SHA256SUMS.txt
+            desktop/dist/Relayer-*-RELEASE.json
+            desktop/dist/telemetry/**

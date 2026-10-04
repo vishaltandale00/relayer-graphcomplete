@@ -15,7 +15,7 @@ import { verifyLadybugNativeReceipts } from "../../scripts/verify-ladybug-native
 
 import { cachedBuild, timedStage } from "./build-cache.mjs";
 
-const QUALIFIED_TARGET = "macos-arm64";
+const PINNED_TARGETS = new Set(["macos-arm64", "windows-x64"]);
 
 export async function requireLadybugDistributionLicenseReady({
   loadSourceManifest = loadLadybugSourceManifest,
@@ -39,7 +39,7 @@ export async function requireLadybugDistributionLicenseReady({
 }
 
 export async function preparePinnedLadybugForPackaging({ target, environment = process.env, cache }) {
-  if (target.key !== QUALIFIED_TARGET) {
+  if (!PINNED_TARGETS.has(target.key)) {
     throw new Error(`Pinned Ladybug packaging is not qualified for ${target.key}.`);
   }
   const manifest = await loadLadybugSourceManifest();
@@ -52,11 +52,12 @@ export async function preparePinnedLadybugForPackaging({ target, environment = p
     await timedStage("static OpenSSL build", () => buildPinnedOpenSsl({ manifest, outputDirectory, target: target.rustTarget, environment }), environment);
     // Only the reviewed lbug tree and static prefix are needed by Cargo. Configure
     // embeds this stable prefix, so cache identity binds its absolute location.
-    await rm(join(outputDirectory, `openssl-${manifest.openssl.version}`), { recursive: true, force: true });
+    await rm(join(outputDirectory, `openssl-${manifest.openssl.version}`), { recursive: true, force: true, maxRetries: 3 });
   }
   async function validate(outputDirectory) {
     const prefix = join(outputDirectory, "openssl-prefix");
-    for (const name of ["libssl.a", "libcrypto.a"]) {
+    const suffix = target.key === "windows-x64" ? "lib" : "a";
+    for (const name of [`libssl.${suffix}`, `libcrypto.${suffix}`]) {
       const info = await stat(join(prefix, "lib", name));
       if (!info.isFile() || info.size === 0) throw new Error("cached static OpenSSL archive missing or empty");
     }
@@ -91,7 +92,7 @@ export async function withPinnedLadybugPackagingEnvironment({
   target,
   prepareLadybug = preparePinnedLadybugForPackaging,
 }, operation) {
-  if (target.key !== QUALIFIED_TARGET) return operation(environment, []);
+  if (!PINNED_TARGETS.has(target.key)) return operation(environment, []);
   if (environment.RUSTFLAGS || environment.CARGO_ENCODED_RUSTFLAGS) {
     throw new Error("Pinned Ladybug packaging rejects ambient Rust compiler flags.");
   }
@@ -105,7 +106,7 @@ export async function withPinnedLadybugPackagingEnvironment({
     || pinned.LBUG_BUILD_FROM_SOURCE !== "1"
     || pinned.CARGO_NET_OFFLINE !== "true") {
     await prepared?.dispose?.();
-    throw new Error("Apple-Silicon packaging requires the complete pinned static Ladybug/OpenSSL environment.");
+    throw new Error("Pinned packaging requires the complete pinned static Ladybug/OpenSSL environment.");
   }
   const buildEnvironment = { ...environment };
   for (const name of prepared.environmentMustBeUnset ?? manifest.build.environmentMustBeUnset) {
