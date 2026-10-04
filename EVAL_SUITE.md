@@ -48,3 +48,40 @@ Selecting a real harness or model judge for external cases requires an explicit 
 The loader copies verified tracked catalog files into a private, read-only snapshot before importing code. Its installed dependencies, including the linked host SDK, remain trusted developer tooling rather than part of the catalog Git pin. Git replacements, grafts, filesystem-monitor hooks, and clean filters cannot redirect catalog verification.
 
 External judge-only reruns also require fresh authorization for their case, harness identity, and selected judge. Their authorization is recorded separately from the original run.
+
+## Opt-in actor diagnostics
+
+To collect local browser diagnostics for new simulated-user sessions, start Eval with:
+
+```sh
+RELAYER_EVAL_ACTOR_DIAGNOSTICS=1 npm run eval-app:dev
+```
+
+Keep your existing profile, catalog and runtime environment settings. The flag is
+off by default and does not launch a session or authorize inference. Diagnostics
+are stored separately under the Eval profile's `eval-data/actor-diagnostics` directory,
+organized by session and capture attempt. Existing runs are not backfilled.
+
+Action records correlate with recorded observation and action-event IDs. They
+capture sanitized browser errors and stages, structural target state, recovery
+decisions and browser lifecycle events. A failure screenshot is best-effort;
+page closure or a capture error can make it unavailable. Missing dispatch evidence
+means unknown, never proof that no input reached the page.
+
+The Playwright trace retains operation timing and sanitized failures. Network
+payloads, source files and DOM snapshots are excluded; credentials and unsafe
+trace fields are removed before retaining the archive. Private temporary capture
+files are removed after processing; abrupt process termination can leave private
+scratch files. A missing or unfinished manifest means capture is incomplete. Diagnostic files stay local and do not enter
+actor observations, completion-judge input, human grades or ordinary exports.
+Screenshots can contain visible task content; treat these local bundles as private.
+Inspect `manifest.json` and the event log for capture omissions before drawing
+an RCA conclusion. Capture is observational: it does not replay actions or relax
+recovery rules. Turn the flag off on the next host launch to stop new captures.
+
+Each attempt contains `events.jsonl`, `manifest.json`, and, when capture succeeds,
+`trace.zip` plus failure PNGs. Open a saved archive with
+`npx playwright show-trace /absolute/path/to/trace.zip`. Join `action_started`
+records to the task trajectory using `actionEventId` and `observationEventId`;
+use their `actionId` for corresponding error and recovery records. A sanitized
+trace has no DOM replay; inspect the separate screenshots and target-state events.

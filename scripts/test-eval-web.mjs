@@ -6,7 +6,7 @@ import { loadAtomicAnnotationSnapshots } from "../desktop/eval-main/annotation-s
 import { spawn, execFileSync } from "node:child_process";
 import { pathToFileURL } from "node:url";
 import { once } from "node:events";
-import { mkdtemp, rm, readFile, writeFile, access, mkdir } from "node:fs/promises";
+import { mkdtemp, rm, readFile, writeFile, access, mkdir, readdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { chromium } from "playwright";
@@ -487,19 +487,23 @@ async function proveTaskActor({ browser, service, productSession, data }) {
   const snapshots = [];
   let controlPage;
   let completionAssessments = 0;
+  const diagnosticDirectory = join(data, "actor-diagnostics-proof");
+  let actorCapability;
   const actors = new TaskActorService({ tasks, setupRegistry, resolveRuntime: async () => ({}),
     resolveCompletionJudgeRuntime: async (spec) => { assert.equal(spec.model, "gpt-5.6-sol"); return {}; },
     createCompletionJudge: async () => ({ close: async () => {}, evaluate: async (evidence) => {
       assert.ok(evidence.screenshot, "completion reviewer receives current rendered screenshot");
+      assert.ok(!JSON.stringify(evidence).includes(diagnosticDirectory), "diagnostic artifacts never enter completion-judge input");
       completionAssessments++;
       return completionAssessments === 1
         ? { verdict: "incomplete", evidenceExplanation: "Fixture reviewer requires one more visible graph inspection.", continuationHint: "Could I check one more part of the plan?", usage: null }
         : { verdict: "complete", evidenceExplanation: "Fixture reviewer accepts the plan after the additional graph inspection.", continuationHint: "", usage: null };
     } }),
     openBrowser: async (sessionId, signal, observationContract) => {
-      const controller = await openTaskActorBrowser({ tasks, sessionId, productSession, browser, signal, observationContract });
+      const controller = await openTaskActorBrowser({ tasks, sessionId, productSession, browser, signal, observationContract, diagnosticDirectory });
       const actorPage = browser.contexts().flatMap((context) => context.pages()).find((page) => new URL(page.url()).searchParams.get("taskActor") === "1");
       controlPage = actorPage;
+      actorCapability = new URL(actorPage.url()).hash.slice(1);
       await actorPage.locator(".graph-node").first().waitFor({ state: "visible" });
       try {
       // Force the actual renderer's refresh in the gap after preflight, before
@@ -850,6 +854,35 @@ async function proveTaskActor({ browser, service, productSession, data }) {
     const task = await until(() => { const task = tasks.get(tasks.list()[0].id); return ["completed", "interrupted", "failed"].includes(task.status) ? task : null; }, "actor session terminal");
     assert.equal(task.status, "completed", JSON.stringify(task.events.map(({ kind, ...event }) => ({ kind, ...(kind === "actor_error" ? event : {}) }))));
     assert.equal(task.completions, 3);
+    await actors.running.get(task.id)?.done;
+    const attempts = await readdir(diagnosticDirectory);
+    assert.equal(attempts.length, 1);
+    const diagnosticRoot = join(diagnosticDirectory, attempts[0]);
+    const diagnosticFiles = await readdir(diagnosticRoot);
+    assert.ok(!diagnosticFiles.some(name => name.startsWith(".trace-")), "raw trace scratch removed");
+    const diagnosticText = await readFile(join(diagnosticRoot, "events.jsonl"), "utf8");
+    const diagnosticEvents = diagnosticText.trim().split("\n").map(line => JSON.parse(line));
+    assert.ok(!actorCapability || !diagnosticText.includes(actorCapability), "capability absent from diagnostic events");
+    const recoveries = diagnosticEvents.filter(event => event.type === "click_recovery");
+    assert.ok(recoveries.some(event => event.eligible && event.reason === "proven_nondispatch"));
+    assert.ok(recoveries.filter(event => !event.eligible && event.checks?.untouchedInput === false).length >= 2,
+      "delivered click and trusted scroll each explain refused recovery");
+    assert.ok(diagnosticEvents.some(event => event.type === "action_error" && event.stage === "dispatch_click" && /not attached/.test(event.error.message)));
+    assert.ok(diagnosticEvents.some(event => event.type === "navigation"));
+    const correlated = diagnosticEvents.filter(event => event.type === "action_started" && event.actionEventId);
+    assert.equal(correlated.length, task.events.filter(event => event.kind === "actor_action" && ["click", "fill", "select", "scroll"].includes(event.action.kind)).length);
+    for (const event of correlated) {
+      assert.ok(task.events.some(item => item.id === event.actionEventId && item.kind === "actor_action"));
+      assert.ok(task.events.some(item => item.id === event.observationEventId && item.kind === "actor_observation"));
+    }
+    assert.ok(diagnosticFiles.some(name => name.endsWith(".png")), "failure screenshots persisted");
+    const traceText = execFileSync("python3", ["-c", "import zipfile,sys; z=zipfile.ZipFile(sys.argv[1]); assert set(z.namelist()) == {'trace.trace','trace.network'}; print(z.read('trace.trace').decode())", join(diagnosticRoot, "trace.zip")], { encoding: "utf8", maxBuffer: 32 * 1024 * 1024 });
+    assert.ok(!actorCapability || !traceText.includes(actorCapability));
+    const traceEvents = traceText.trim().split("\n").map(line => JSON.parse(line));
+    assert.ok(traceEvents.some(event => event.type === "before" && event.method === "click"));
+    assert.ok(traceEvents.some(event => event.type === "after" && event.error));
+    console.log("PASS actor diagnostic capture: actual Playwright archive, errors, recovery decisions, action correlation and failure screenshots; no raw capability");
+
     await until(async () => (await page.locator("#humanTaskDetail").textContent()).includes("Completion reviewer: gpt-5.6-sol"), "pinned completion reviewer visible in task details");
     assert.ok((await page.locator("#humanTaskDetail").textContent()).includes("high reasoning"));
     assert.equal(decision, 8);
@@ -879,6 +912,7 @@ async function proveTaskActor({ browser, service, productSession, data }) {
     assert.equal(exported.bundle.session.events.filter((event) => event.kind === "actor_observation").length, 8);
     assert.equal(exported.bundle.session.satisfaction.value, 1);
     assert.equal(exported.bundle.actorScreenshots.length, 8);
+    assert.ok(!JSON.stringify(exported.bundle).includes(diagnosticDirectory), "diagnostics excluded from ordinary evidence exports");
     assert.equal(exported.bundle.session.termination.completionJudgeEventId, judgments[1].id);
     assert.equal(await page.locator("#actorSettings [name=actorModel]").inputValue(), "gpt-5.6-luna");
     assert.ok(snapshots.every((snapshot) => !JSON.stringify(snapshot).includes("Independent human feedback") && !JSON.stringify(snapshot).includes("Unnecessary exploration")));

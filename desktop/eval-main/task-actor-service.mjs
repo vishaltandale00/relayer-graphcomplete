@@ -192,7 +192,7 @@ export class TaskActorService {
         phase = "act";
         if (action.kind === "next_step") { await this.tasks.nextStep(id, { signal }); signal.throwIfAborted(); await browser.nextStep(); }
         else {
-          try { await browser.act(action); }
+          try { await browser.act(action, { actionEventId: intent.id, observationEventId: observed.id }); }
           catch (error) {
             // Only the browser's own checks before click/fill/select certify no
             // dispatch. Playwright failures and product-write errors are ambiguous.

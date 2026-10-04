@@ -514,3 +514,65 @@ digest (sorted path + NUL + bytes) is
 `6186045af05b5221ed410cd48f940225954a1c68ccdc07600637a32021913a48`.
 The reviewer did not independently rerun tests. This assertion invalidates when
 those files change. The separate live follow-up is not yet outcome evidence.
+
+## Opt-in actor RCA diagnostics (approved October 4, 2026)
+
+Product authority: PRD §13.2.3. This adds capture only. It does not certify the
+historical Local weekend failure's cause or change any recorded outcome.
+
+Changed executable seams: Eval host flag/configuration; browser capture setup and
+shutdown; browser action-stage/target/error/recovery instrumentation; service
+observation/action correlation; local trace sanitization and artifact persistence.
+Browser abort and capture failure are secondary lifecycle boundaries. Diagnostic
+artifacts must remain outside actor observations, judge packets, and task exports.
+
+| Checkpoint | Required proof |
+| --- | --- |
+| Default-off, explicit host flag | Host wiring and diagnostic factory tests: only exact opt-in creates artifacts; browser without diagnostics retains normal behavior |
+| Preserve actionable cause and correlation | Production action failures retain sanitized error, stage, observation/action IDs, target state and outcome |
+| Explain recovery without changing authority | Existing detach/input/document-rewrite browser scenarios retain recovery outcomes and record the relevant evidence/rejection |
+| Exclude credentials and privileged context | Sanitizer tests with secret-bearing URLs, params, messages and archive resources; no diagnostic fields in actor/judge/export payloads |
+| Browser events and actual Playwright trace | Real Chromium scenario verifies timing archive, event stream and screenshot; omissions explicit |
+| Capture cannot mask execution failure | Unwritable or failing capture and page closure preserve original failure; cleanup is idempotent and artifacts finalize before normal context close |
+
+Required gates: focused diagnostics and actor/session tests during edits, then
+`npm run check`, `npm run build`, and `npm run test:eval-web`. Use the existing
+warm native target; no Rust source or native recipe is changed. No paid inference
+is needed to verify instrumentation. A later live diagnostic attempt must remain
+separate from historical cohorts and is not evidence until it actually runs.
+
+Verification so far: final production browser portfolio passed, including actual
+trace ZIP, sanitized errors, recovered and refused recovery predicates, action /
+observation correlation, screenshots, unchanged observation shape and ordinary
+export isolation (`/tmp/actor-diagnostics-browser-final.log`). The initial browser
+attempt failed an incorrect fixture count that included a non-browser completion;
+the corrected assertion compares actual browser action intents. That failure
+remains in `/tmp/actor-diagnostics-browser.log`.
+
+Reviewer `/root/diagnostic_review` independently opened the projected archive in
+the actual Playwright viewer: actions/timings loaded without errors. The initial
+projection failed because the viewer requires empty parameter objects; its repair
+preserves the omission of actual parameters. Viewer evidence is
+`/tmp/actor-diagnostic-viewer-review.log`. Screenshots remain private task content;
+known-secret redaction cannot certify arbitrary authored content secret-free.
+Abrupt process death can leave private scratch; unavailable storage can leave no
+manifest. Neither absence establishes a successful capture or an RCA.
+
+Final verification passed on executable/test digest
+`1d317bcdb9c80fa53f1ffd665580b3c17a014ff9d1c61cb7d27da49edd31ade3`:
+full check (3515 JavaScript tests, three existing skips, two separate secret-boundary
+tests, Rust, 66 Python tests and type checks), build, and the browser portfolio.
+Logs: `/tmp/actor-diagnostics-check-final.log`, `/tmp/actor-diagnostics-build.log`,
+and `/tmp/actor-diagnostics-browser-final.log`. The initial full check failed the
+unchanged Rust command-output one-second bound; its isolated rerun passed in
+0.24 seconds, then the unchanged full check passed without concurrent browser
+load. Preserve `/tmp/actor-diagnostics-check.log` and
+`/tmp/actor-diagnostics-timeout-isolated.log`; contention is an inference, not a
+proved cause of that unrelated test failure.
+
+Adversarial reviewer `/root/diagnostic_review` found no unresolved blocking finding
+at that six-file sorted-path + NUL + bytes digest. Scope: host wiring, browser,
+diagnostic sink, actor service, diagnostics test and browser proof. The reviewer
+independently verified the real trace viewer and inspected the final browser log;
+full repository gates were root-run. Capture/privacy limits above remain explicit.
+No paid run was launched and no historical outcome was changed.

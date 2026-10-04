@@ -1,3 +1,4 @@
+import { createActorDiagnostics } from "./task-actor-diagnostics.mjs";
 import { randomUUID } from "node:crypto";
 import { createHumanTaskSurface } from "./web-host.mjs";
 
@@ -69,11 +70,17 @@ export function taskActorOpenedSelect(element) {
       options.map(option => [option.label, option.value, option.disabled, option.hidden, option.parentElement?.disabled]), offered.map(option => option.index)]) };
 }
 
-export async function openTaskActorBrowser({ tasks, sessionId, productSession, browser, signal, observationContract }) {
+export async function openTaskActorBrowser({ tasks, sessionId, productSession, browser, signal, observationContract, diagnosticDirectory }) {
   signal?.throwIfAborted();
   const surface = await createHumanTaskSurface({ tasks, sessionId, productSession, actor: true, signal });
   let context;
-  const abort = () => { void context?.close().catch(() => {}); };
+  let diagnostics;
+  const abort = () => {
+    // Cancellation authority wins over trace completeness. Do not leave pending
+    // browser input alive while diagnostic teardown waits for an archive.
+    void context?.close().catch(() => {});
+    void diagnostics?.close().catch(() => {});
+  };
   signal?.addEventListener("abort", abort, { once: true });
   try {
     signal?.throwIfAborted();
@@ -113,7 +120,9 @@ export async function openTaskActorBrowser({ tasks, sessionId, productSession, b
     });
     const origin = new URL(surface.url).origin;
     await context.route("**/*", (route) => new URL(route.request().url()).origin === origin ? route.continue() : route.abort());
+    try { diagnostics = await createActorDiagnostics({ directory: diagnosticDirectory, context, surfaceUrl: surface.url, sessionId }); } catch { console.error("Eval actor diagnostics unavailable: could not initialize private capture directory. Task execution continues."); }
     const page = await context.newPage();
+    diagnostics?.attach(page);
     page.on("popup", (popup) => { void popup.close(); });
     await page.goto(surface.url);
     await page.locator(".workspace-layout").waitFor({ state: "visible" });
@@ -195,18 +204,24 @@ export async function openTaskActorBrowser({ tasks, sessionId, productSession, b
       } finally { await snapshot.dispose(); }
     }
     return {
-      observe,
-      async act(action) {
+      async observe(expected) { try { return await observe(expected); } catch (error) { await diagnostics?.operationError("observe", error); throw error; } },
+      async act(action, correlation = {}) {
+        const actionId = randomUUID();
+        let stage = "preflight"; let diagnosticTarget = null;
+        await diagnostics?.record("action_started", { actionId, actionEventId: correlation.actionEventId ?? null, observationEventId: correlation.observationEventId ?? null, kind: action.kind, ref: action.ref ?? null });
+        try {
         signal?.throwIfAborted();
         if (!["click", "select"].includes(action.kind) && openedSelect) {
           await openedSelect.dispose(); openedSelect = null; menuAuthorities.clear();
         }
         if (action.kind === "scroll") {
           if (!["up", "down"].includes(action.value)) throw new Error("Scroll must be up or down.");
+          stage = "dispatch_scroll";
           await page.locator("#inspectorContent").hover();
           await page.mouse.wheel(0, action.value === "up" ? -600 : 600);
         } else {
           let handle = handles.get(action.ref)?.asElement();
+          stage = "resolve_target";
           // Renderer refresh replaces graph and navigation controls during model latency.
           // Rebind only exact control identity in the same presentation, never by name.
           const identity = controlIdentities.get(action.ref);
@@ -216,6 +231,9 @@ export async function openTaskActorBrowser({ tasks, sessionId, productSession, b
             if (rebound) { await handle.dispose(); handles.set(action.ref, replacement); handle = rebound; }
             else await replacement.dispose();
           }
+          diagnosticTarget = handle;
+          stage = "validate_target";
+          if (diagnostics) { try { await diagnostics.record("target_before", { actionId, state: await diagnostics.targetState(handle) }); } catch (error) { await diagnostics.operationError("target_before", error); } }
           if (!handle) throw Object.assign(new Error("Actor control is stale or outside the observed workspace."), { code: "actor_control_stale", actionDispatched: false });
           if (!await handle.evaluate(async (element) => {
             const { isVisibleElement } = await import("/src/review-tools.js");
@@ -235,28 +253,42 @@ export async function openTaskActorBrowser({ tasks, sessionId, productSession, b
               recorder: window.__taskActorInputEvidence, count: window.__taskActorInputEvidence?.checkpoint(),
             }));
             try {
+              stage = "dispatch_click";
               await handle.click({ timeout: 5000 });
             } catch (error) {
               // Text identifies the narrow browser failure, but never establishes
               // nondispatch by itself. A same-document barrier and untouched input
               // recorder are required. No click is replayed here.
               const detached = /Element is not attached to the DOM/.test(error?.message || "");
-              const untouched = detached && !signal?.aborted && await clickEvidence.evaluate(evidence =>
-                evidence.document === document && evidence.root === document.documentElement && evidence.target.ownerDocument === document
-                && !evidence.target.isConnected && evidence.recorder === window.__taskActorInputEvidence
-                && Number.isSafeInteger(evidence.count) && evidence.recorder.checkpoint() === evidence.count,
-              ).catch(() => false);
+              let recoveryEvidence = null;
+              const untouched = detached && !signal?.aborted && await clickEvidence.evaluate(evidence => {
+                const checks = {
+                  sameDocument: evidence.document === document,
+                  sameRoot: evidence.root === document.documentElement,
+                  sameOwner: evidence.target.ownerDocument === document,
+                  detachedTarget: !evidence.target.isConnected,
+                  sameRecorder: evidence.recorder === window.__taskActorInputEvidence,
+                  validInitialCount: Number.isSafeInteger(evidence.count),
+                };
+                // Preserve short-circuit checkpoint semantics of the authority proof.
+                checks.untouchedInput = Object.values(checks).every(Boolean) ? evidence.recorder.checkpoint() === evidence.count : null;
+                return checks;
+              }).then(checks => { recoveryEvidence = checks; return Object.values(checks).every(value => value === true); }).catch(() => false);
+              await diagnostics?.record("click_recovery", { actionId, error: diagnostics.errorInfo(error), detachedError: detached,
+                aborted: Boolean(signal?.aborted), checks: recoveryEvidence, eligible: Boolean(untouched && !signal?.aborted),
+                reason: !detached ? "not_detached_error" : signal?.aborted ? "aborted" : !recoveryEvidence ? "evidence_unavailable" : untouched ? "proven_nondispatch" : "authority_checks_failed" });
               if (untouched && !signal?.aborted) throw Object.assign(new Error("Actor control detached before browser input dispatch."), {
                 code: "actor_control_unavailable", actionDispatched: false,
               });
               throw error;
             } finally { await clickEvidence.dispose().catch(() => {}); }
+            stage = "inspect_open_menu";
             if (nativeMenuObservation && await handle.evaluate(element => element.tagName === "SELECT" && element.matches(":open"))) {
               openedSelect = await handle.evaluateHandle(element => element);
               openedMenuSignature = (await handle.evaluate(taskActorOpenedSelect))?.signature;
             }
           }
-          else if (action.kind === "fill") await handle.fill(action.value, { timeout: 5000 });
+          else if (action.kind === "fill") { stage = "dispatch_fill"; await handle.fill(action.value, { timeout: 5000 }); }
           else if (action.kind === "select") {
             if (nativeMenuObservation) {
               const authority = menuAuthorities.get(action.ref);
@@ -267,6 +299,7 @@ export async function openTaskActorBrowser({ tasks, sessionId, productSession, b
                 throw Object.assign(new Error("Actor option is not authorized by the currently observed open menu."), { code: "actor_control_unavailable", actionDispatched: false });
               }
             }
+            stage = "dispatch_select";
             await handle.selectOption({ label: action.value }, { timeout: 5000 });
             // Playwright dispatches normal input/change but does not dismiss the
             // native popup. Close only this still-open menu before another action.
@@ -278,16 +311,25 @@ export async function openTaskActorBrowser({ tasks, sessionId, productSession, b
           }
           else throw new Error("Unknown actor browser action.");
         }
+        stage = "wait_for_render";
         await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+        stage = "wait_for_writes";
         await page.waitForFunction(() => window.__taskActorWrites.pending === 0 && Date.now() - window.__taskActorWrites.changedAt >= 200, null, { timeout: 30000 });
+        await diagnostics?.record("action_completed", { actionId });
+        } catch (error) {
+          try { await diagnostics?.failure(page, { actionId, stage, error, target: diagnosticTarget }); } catch { /* Preserve the original exception. */ }
+          throw error;
+        }
       },
       async nextStep() {
+        try {
         const url = new URL(surface.url);
         url.searchParams.set("threadId", String(tasks.get(sessionId).currentThreadId));
         await page.goto(url.href);
         await page.locator(".workspace-layout").waitFor({ state: "visible" });
+        } catch (error) { await diagnostics?.operationError("next_step", error); throw error; }
       },
-      async close() { signal?.removeEventListener("abort", abort); try { await context.close(); } finally { await surface.close(); } },
+      async close() { signal?.removeEventListener("abort", abort); try { await diagnostics?.close(); } finally { try { await context.close(); } finally { await surface.close(); } } },
     };
-  } catch (error) { signal?.removeEventListener("abort", abort); try { await context?.close(); } finally { await surface.close(); } throw error; }
+  } catch (error) { await diagnostics?.operationError("startup", error); signal?.removeEventListener("abort", abort); try { await diagnostics?.close(); } finally { try { await context?.close(); } finally { await surface.close(); } } throw error; }
 }
