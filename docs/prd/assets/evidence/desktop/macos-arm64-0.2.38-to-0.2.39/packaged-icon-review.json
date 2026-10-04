@@ -1,0 +1,70 @@
+{
+  "schemaVersion": 1,
+  "version": "0.2.39",
+  "sourceCommit": "dfd2b2888193fdaf34ff7b2ec2ecda7b42a44eb4",
+  "candidateRun": 37232292435,
+  "candidateArtifactId": 11314673354,
+  "candidateArtifactDigest": "sha256:f1fb0f414502b03755e9e1964087a53574b3278466d272e3e9399042204a2d1d",
+  "bundleIdentifier": "ai.relayer.desktop",
+  "bundleIconFile": "icon.icns",
+  "icnsSha256": "9a300a57c0c0a511f5853d6e394500818503d155150334e26320a3e72f025514",
+  "packagedSourceMatches": {
+    "assets/relayer-logo.svg": "786bca48d6b2486c8127f4830908245e128880a1179040c8608366cb1275f66d",
+    "assets/relayer-mark-mask.svg": "8a70f1140838e78c165cfee63a8dadd74e9d1db82c0f2352db28b71bf370c916",
+    "src/relayer-mark.js": "b2f908b6e98b4e0ff23a4bb2623884d77e3bc3be4911eb33fbf2ae4b67d36777"
+  },
+  "images": [
+    {
+      "file": "icon_128x128.png",
+      "sha256": "b79ec514673178020f7fd2ec956d4796031dbd7915b9c27194a9befa6fb80666"
+    },
+    {
+      "file": "icon_128x128@2x.png",
+      "sha256": "11b2f47131e3fb761849ba66f0e5c50dde2648607f0061a423b531d22e77febf"
+    },
+    {
+      "file": "icon_16x16.png",
+      "sha256": "6d955968d8e8fc9bbe964078998c56bae3138138a55f99a7b81f0c7183b0b0ef"
+    },
+    {
+      "file": "icon_16x16@2x.png",
+      "sha256": "ba70f36ddc28a56d8cbcab092de52b6b0b04cddf9c5d0cbb84f5497ac65f590e"
+    },
+    {
+      "file": "icon_256x256.png",
+      "sha256": "31b0d5a22bcd7c27790e09045c61388269d74d8c4c213b7051ea5eb8ef91f5c9"
+    },
+    {
+      "file": "icon_256x256@2x.png",
+      "sha256": "e9196fe32ab0b7b968c98ba454d71e13a6f821333bebcb96dd11afa8dbc4c1c8"
+    },
+    {
+      "file": "icon_32x32.png",
+      "sha256": "cf94b7dba31d5b575ff7366321bd29de3846c7119639d22d92f9b41003b94b54"
+    },
+    {
+      "file": "icon_32x32@2x.png",
+      "sha256": "4dbc335d19d403c68227d53159025c5290e75e858be0550af6e50ed4a3afd78d"
+    },
+    {
+      "file": "icon_48x48.png",
+      "sha256": "280af3e86acd386452f0132a1bd99501c7ca3328e76297785b39ada50654a4bd"
+    },
+    {
+      "file": "icon_512x512.png",
+      "sha256": "11b2f47131e3fb761849ba66f0e5c50dde2648607f0061a423b531d22e77febf"
+    },
+    {
+      "file": "icon_512x512@2x.png",
+      "sha256": "e9196fe32ab0b7b968c98ba454d71e13a6f821333bebcb96dd11afa8dbc4c1c8"
+    }
+  ],
+  "reviewImage": {
+    "file": "packaged-app-icon.png",
+    "sha256": "11b2f47131e3fb761849ba66f0e5c50dde2648607f0061a423b531d22e77febf",
+    "derivedFrom": "icon_512x512.png"
+  },
+  "limits": [
+    "Static signed ZIP resources inspected; Finder/Dock cache behavior is not independently certified"
+  ]
+}
