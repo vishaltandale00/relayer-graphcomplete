@@ -13,7 +13,7 @@ export const WINDOWS_NATIVE_PROFILE = Object.freeze({ target: "x86_64-pc-windows
 // These are compilation inputs, not the renderer, release version or current
 // source commit. A compatible binary hit still requires fresh consumer proof.
 const nativePaths = ["vendor/ladybug", "scripts/prepare-ladybug-source.mjs", "scripts/verify-ladybug-native-receipts.mjs", "desktop/packaging/pinned-ladybug-build.mjs", "desktop/packaging/build-cache.mjs", "desktop/packaging/windows-native.mjs", "desktop/shared/target.mjs", "scripts/ci/packaging-input-contract.json", "desktop/release/windows-native-build.mjs", "desktop/release/windows-native-identity.mjs"];
-const runtimePaths = ["crates", "Cargo.toml", "Cargo.lock", ".cargo", "docs/graph-query-v1.md", "fixtures/graph-query-v1", "desktop/release/build-native-release.mjs"];
+const runtimePaths = ["crates", "Cargo.toml", "Cargo.lock", ".cargo", "docs/graph-query-v1.md", "docs/icon-catalog.json", "fixtures/graph-query-v1", "desktop/release/build-native-release.mjs"];
 
 function normalizeEnvironment(environment) {
   const result = {};

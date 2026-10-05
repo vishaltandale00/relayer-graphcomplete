@@ -129,7 +129,7 @@ test("producer rerun during download invalidates required handoff", async () => 
   await expect(restoreWindowsNative({ identity, directory: join(f.root, "changed-attempt"), environment: { GITHUB_TOKEN: "synthetic" }, capture, fetchImpl, expected: producer })).rejects.toThrow();
 });
 
-test("Windows identity preserves renderer/version/workflow-only reuse and separates native, Rust, SDK and override changes", async () => {
+test("Windows identity preserves renderer/version/workflow-only reuse and separates native, Rust, embedded catalog, SDK and override changes", async () => {
   const root = await temporary();
   const dirs = ["vendor/ladybug", "desktop/packaging", "desktop/shared", "desktop/release", "scripts/ci", "crates/core", ".cargo", "docs", "fixtures/graph-query-v1", "tools"];
   for (const path of dirs) await mkdir(join(root, path), { recursive: true });
@@ -139,9 +139,20 @@ test("Windows identity preserves renderer/version/workflow-only reuse and separa
   const env = { CARGO_HOME: join(root, "cargo-home"), VCToolsVersion: "14.51", WindowsSDKVersion: "10.0.26100.0", Path: join(root, "tools"), RUNNER_TEMP: root };
   const capture = async (name, args) => ({ stdout: name === "where.exe" ? join(root, "tools", `${args[0]}.exe`) : args[0] === "metadata" ? JSON.stringify({ packages: [] }) : `${name} reviewed version`, stderr: "" });
   const options = { repositoryRoot: root, environment: env, capture, platform: "win32", architecture: "x64" };
+  const catalogPath = join(root, "docs/icon-catalog.json");
+  const catalog = { icons: [{ name: "search", aliases: ["find"], description: "Find records", useCases: ["Search"] }] };
+  await writeFile(catalogPath, JSON.stringify(catalog));
   const first = await windowsNativeIdentity(options);
   await mkdir(join(root, "desktop/renderer")); await writeFile(join(root, "desktop/renderer/ui.js"), "new UI");
   await writeFile(join(root, "desktop/windows-version.json"), "new version");
+  expect(await windowsNativeIdentity(options)).toEqual(first);
+  // Metadata is embedded by include_str! even when generated Rust names/aliases stay unchanged.
+  catalog.icons[0].description = "Search existing records";
+  await writeFile(catalogPath, JSON.stringify(catalog));
+  const embedded = await windowsNativeIdentity(options);
+  expect(embedded.runtime).not.toBe(first.runtime);
+  expect(embedded.native).toBe(first.native); expect(embedded.dependency).toBe(first.dependency);
+  await writeFile(catalogPath, JSON.stringify({ ...catalog, icons: [{ ...catalog.icons[0], description: "Find records" }] }));
   expect(await windowsNativeIdentity(options)).toEqual(first);
   await writeFile(join(root, "crates/core/lib.rs"), "changed Rust");
   const rust = await windowsNativeIdentity(options);
