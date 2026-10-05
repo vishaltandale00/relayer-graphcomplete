@@ -56,6 +56,17 @@ describe("desktop telemetry release artifacts", () => {
       const cold = job.steps.findIndex(step => step.run?.includes("cargo fetch") || step.run?.includes("windows-native-build.mjs adopt"));
       expect(probe).toBeGreaterThan(job.steps.findIndex(step => step.run === "npm ci"));
       expect(cold).toBeGreaterThan(probe);
+      const telemetry = job.steps.findIndex(step => step.name === "Verify Windows native cache transfer and handoff");
+      expect(telemetry).toBeGreaterThan(job.steps.findIndex(step => step.run === "npm ci"));
+      expect(job.steps[telemetry].run).toBe("node node_modules/vitest/vitest.mjs run test/windows-native-cache.test.mjs test/desktop-telemetry-release-artifacts.test.mjs");
+      expect(job.steps[telemetry].env?.SENTRY_AUTH_TOKEN).toBeUndefined();
+      expect(job.env?.SENTRY_AUTH_TOKEN).toBeUndefined();
+      for (const [index, step] of job.steps.entries()) {
+        if (step.run?.includes("cargo fetch") || step.run?.includes("windows-native-build.mjs qualify") || step.run?.includes("windows-native-build.mjs adopt")) {
+          expect(index).toBeGreaterThan(telemetry);
+        }
+        if (index <= telemetry) expect(step.env?.SENTRY_AUTH_TOKEN).toBeUndefined();
+      }
       expect(job.steps[probe].env).toEqual({ SENTRY_CLI_BINARY: nativeCli });
       expect(job.steps[probe].run).toContain("spawnSync(process.env.SENTRY_CLI_BINARY,['--version'],{stdio:'inherit'})");
       const script = job.steps[probe].run.slice('node -e "'.length, -1);
@@ -235,7 +246,16 @@ describe("desktop telemetry release artifacts", () => {
       rustBinaries: [rustBinary, graphBinary],
       capture,
     });
-    expect(manifest.sourceMaps.map(entry => entry.module)).toEqual(["desktop/main/credentials/codex-credential-adapter.mjs", "desktop/main/index.mjs"]);
+    expect(manifest.sourceMaps.map(entry => [entry.component, entry.module])).toEqual([
+      ["electron", "desktop/main/credentials/codex-credential-adapter.mjs"],
+      ["electron", "desktop/main/index.mjs"],
+    ]);
+    const nestedSource = manifest.sourceMaps[0];
+    expect(await readFile(join(outputRoot, nestedSource.source.path), "utf8")).toBe("export const credentialAdapter = 42;\n");
+    expect(JSON.parse(await readFile(join(outputRoot, nestedSource.path), "utf8"))).toMatchObject({
+      sources: ["desktop/main/credentials/codex-credential-adapter.mjs"],
+      sourcesContent: ["export const credentialAdapter = 42;\n"],
+    });
     expect(await verifyDesktopTelemetryArtifacts({ outputRoot })).toEqual(manifest);
     expect(manifest.nativeDebugIdentities).toEqual([
       { binary: "bin/relayer-app-server.exe", debug: "debug/relayer-app-server.pdb", debugId: `${guid}-3` },
