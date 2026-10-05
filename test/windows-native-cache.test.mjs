@@ -200,6 +200,14 @@ test("Windows workflow builds in unprivileged qualification, adopts before login
   const workflow = parse(await readFile(new URL("../.github/workflows/desktop-windows-candidate.yml", import.meta.url), "utf8"));
   expect(workflow.jobs.qualify.permissions["id-token"]).toBeUndefined(); expect(workflow.jobs.qualify.environment).toBeUndefined();
   expect(workflow.jobs.qualify.outputs.native_identity).toBe("${{ steps.native-plan.outputs.identity }}");
+  // GitHub evaluates job env before routing to a runner. Runtime paths must
+  // reach subsequent actions/processes through GITHUB_ENV instead.
+  expect(Object.values(workflow.jobs.qualify.env).join("\n")).not.toContain("runner.");
+  const initialize = workflow.jobs.qualify.steps[0];
+  expect(initialize.shell).toBe("pwsh");
+  for (const value of ["TEMP=$env:RUNNER_TEMP", "TMP=$env:RUNNER_TEMP", "SCCACHE_DIR=$env:RUNNER_TEMP/rwc"]) {
+    expect(initialize.run).toContain(`"${value}" >> $env:GITHUB_ENV`);
+  }
   const steps = workflow.jobs.package.steps;
   const adopt = steps.findIndex(step => step.run === "node desktop/release/windows-native-build.mjs adopt");
   expect(adopt).toBeGreaterThan(-1); expect(steps.findIndex(step => step.uses?.startsWith("azure/login@"))).toBeGreaterThan(adopt);

@@ -49,13 +49,16 @@ jobs:
       actions: read
     env:
       RELAYER_DESKTOP_TARGET: windows-x64
-      TEMP: ${{ runner.temp }}
-      TMP: ${{ runner.temp }}
       SCCACHE_GHA_ENABLED: "false"
-      SCCACHE_DIR: ${{ runner.temp }}/rwc
       SCCACHE_CACHE_SIZE: 2G
       RELAYER_WINDOWS_NATIVE_CACHE: ${{ inputs.force_native_rebuild && '0' || '1' }}
     steps:
+      - name: Initialize Windows native cache paths
+        shell: pwsh
+        run: |
+          "TEMP=$env:RUNNER_TEMP" >> $env:GITHUB_ENV
+          "TMP=$env:RUNNER_TEMP" >> $env:GITHUB_ENV
+          "SCCACHE_DIR=$env:RUNNER_TEMP/rwc" >> $env:GITHUB_ENV
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           ref: ${{ github.sha }}
