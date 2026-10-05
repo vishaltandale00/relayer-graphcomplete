@@ -101,7 +101,7 @@ describe("desktop telemetry release artifacts", () => {
     await writeFile(join(asarSource, "main", "index.mjs"), "export const answer = 42;\n", "utf8");
     await writeFile(join(asarSource, "node_modules", "@relayer", "harness-host", "dist", "index.js"), "export const answer = 42;\n", "utf8");
     await writeFile(join(packagedResources, "renderer", "src", "main.js"), "export const answer = 42;\n", "utf8");
-    await createPackage(asarSource, join(packagedResources, "app.asar"));
+    await finished(await createPackage(asarSource, join(packagedResources, "app.asar")), { cleanup: true });
     const rustBinary = join(root, "target", "aarch64-apple-darwin", "release", "relayer-app-server");
     const packagedRustBinary = join(packagedResources, "bin", "relayer-app-server");
     await mkdir(join(rustBinary, ".."), { recursive: true });
