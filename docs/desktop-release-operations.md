@@ -64,6 +64,8 @@ RELAYER_WINDOWS_PUBLISHER_NAME=<exact validated certificate publisher>
 
 The Windows job uses the pinned official Azure login action to exchange GitHub's environment-bound OIDC assertion for a short-lived Azure CLI session. Electron-builder's Artifact Signing module consumes that session. No Azure client secret or exported signing certificate belongs in GitHub.
 
+Before either cold Windows build, `node scripts/check-windows-signature-runtime.mjs` exercises the production signature query through the workflow's `pwsh` to Node child process. The Windows PowerShell verifier removes inherited `PSModulePath` only from its own child environment, allowing compatible built-in modules to load. The read-only probe requires a valid Microsoft system executable signature and rejects its different publisher; it cannot qualify Relayer signing or replace the final application, Rust-server and installer signature gates.
+
 ## Update publication authority
 
 The protected `desktop-update-preview` environment supplies the existing update bucket and Preview AWS role. Before publishing Intel or Windows, inspect that role's current policy and extend it only as needed for these exact namespaces:

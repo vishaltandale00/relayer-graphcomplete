@@ -361,6 +361,31 @@ describe("desktop skeleton", () => {
     expect(windowsExecutables.join("\n")).not.toMatch(/codex|claude/i);
   });
 
+  it("isolates Windows PowerShell module paths inherited through Node", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "relayer-windows-module-path-"));
+    const path = join(directory, "Relayer's.exe");
+    const environment = { PATH: "trusted-system-path", PSModulePath: "PowerShell-7-modules",
+      psmodulepath: "case-insensitive-alias", AZURE_CLIENT_ID: "unchanged-fixture" };
+    try {
+      await writeFile(path, "signed-executable-fixture");
+      await expect(verifyWindowsSignatures({ paths: [path], publisherName: WINDOWS_PUBLISHER_DN, environment,
+        execute: async (command, args, options) => {
+          expect(command).toBe("powershell.exe");
+          if (!options.env || Object.keys(options.env).some(key => key.toUpperCase() === "PSMODULEPATH")) {
+            throw new Error("Get-AuthenticodeSignature: Microsoft.PowerShell.Security could not be loaded");
+          }
+          expect(options.env).toEqual({ PATH: environment.PATH, AZURE_CLIENT_ID: environment.AZURE_CLIENT_ID });
+          const script = Buffer.from(args.at(-1), "base64").toString("utf16le");
+          expect(script).toContain("Relayer''s.exe");
+          return { stdout: JSON.stringify({ Path: path, Status: "Valid", Subject: WINDOWS_PUBLISHER_DN,
+            Thumbprint: "A".repeat(40), TimestampSubject: "CN=Microsoft timestamp" }) };
+        },
+      })).resolves.toHaveLength(1);
+      expect(environment.PSModulePath).toBe("PowerShell-7-modules");
+      expect(environment.psmodulepath).toBe("case-insensitive-alias");
+    } finally { await rm(directory, { recursive: true, force: true }); }
+  });
+
   it("requires the exact timestamped Windows certificate subject", async () => {
     const directory = await mkdtemp(join(tmpdir(), "relayer-windows-signature-"));
     const paths = [join(directory, "Relayer.exe"), join(directory, "relayer-app-server.exe")];
@@ -390,6 +415,12 @@ describe("desktop skeleton", () => {
           stderr: "",
         }),
       })).rejects.toThrow("Authenticode verification failed");
+      for (const changed of [{ Status: "NotSigned" }, { Thumbprint: "" }, { TimestampSubject: "" }]) {
+        await expect(verifyWindowsSignatures({ paths, publisherName: WINDOWS_PUBLISHER_DN,
+          execute: async () => ({ stdout: JSON.stringify(result(WINDOWS_PUBLISHER_DN)
+            .map(signature => ({ ...signature, ...changed }))) }),
+        })).rejects.toThrow("Authenticode verification failed");
+      }
     } finally {
       await rm(directory, { recursive: true, force: true });
     }

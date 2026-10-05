@@ -17,7 +17,7 @@ async function requireFile(filePath) {
   if (!fileStat.isFile() || fileStat.size === 0) throw new Error(`Signed Windows file is missing or empty: ${filePath}`);
 }
 
-export async function verifyWindowsSignatures({ paths, publisherName, execute = execFileAsync } = {}) {
+export async function verifyWindowsSignatures({ paths, publisherName, environment = process.env, execute = execFileAsync } = {}) {
   if (!Array.isArray(paths) || paths.length === 0) throw new Error("Windows signature verification requires files.");
   if (!publisherName) throw new Error("Windows signature verification requires the sealed publisher name.");
   await Promise.all(paths.map(requireFile));
@@ -37,9 +37,14 @@ export async function verifyWindowsSignatures({ paths, publisherName, execute = 
     "}",
     "$results | ConvertTo-Json -Compress",
   ].join("\n");
+  // Node inherits PS7 module paths from the workflow's pwsh host. Windows
+  // PowerShell must construct its own paths, or it can load incompatible PS7
+  // security modules. Change only this child environment, not the signing host.
+  const childEnvironment = Object.fromEntries(Object.entries(environment)
+    .filter(([name]) => name.toUpperCase() !== "PSMODULEPATH"));
   const { stdout } = await execute("powershell.exe", [
     "-NoLogo", "-NoProfile", "-NonInteractive", "-EncodedCommand", encodedPowerShell(script),
-  ], { encoding: "utf8", maxBuffer: 10 * 1024 * 1024 });
+  ], { env: childEnvironment, encoding: "utf8", maxBuffer: 10 * 1024 * 1024 });
   const parsed = JSON.parse(String(stdout || "").trim());
   const results = Array.isArray(parsed) ? parsed : [parsed];
   if (results.length !== paths.length) throw new Error("Windows signature verifier returned an incomplete result set.");

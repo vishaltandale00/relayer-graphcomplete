@@ -153,6 +153,8 @@
     }
   ],
   "chapterOwners": [
+    { "exact": "desktop/release/verify-windows-app.mjs", "chapters": ["vitest", "packaging"], "vitestFiles": ["test/desktop-shell.test.mjs", "test/windows-candidate.test.mjs"] },
+    { "exact": "scripts/check-windows-signature-runtime.mjs", "chapters": ["vitest", "packaging"], "vitestFiles": ["test/desktop-shell.test.mjs", "test/windows-candidate.test.mjs"] },
     { "exact": "desktop/release/windows-rust-debug.mjs", "chapters": ["vitest", "packaging"], "vitestFiles": ["test/windows-candidate.test.mjs", "test/desktop-telemetry-release-artifacts.test.mjs"] },
     { "exact": "desktop/release/windows-native-handoff.mjs", "chapters": ["vitest", "packaging"], "vitestFiles": ["test/windows-candidate.test.mjs", "test/desktop-telemetry-release-artifacts.test.mjs"] },
     { "exact": "desktop/release/telemetry-artifacts.mjs", "chapters": ["vitest", "packaging"], "vitestFiles": ["test/windows-candidate.test.mjs", "test/desktop-telemetry-release-artifacts.test.mjs"] },

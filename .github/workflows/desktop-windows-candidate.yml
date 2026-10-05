@@ -57,6 +57,9 @@ jobs:
           arch: amd64
       - run: node scripts/check-node-version.mjs
       - run: npm ci
+      - name: Verify Windows signature runtime
+        shell: pwsh
+        run: node scripts/check-windows-signature-runtime.mjs
       - name: Verify native Cargo EXE and PDB paths
         run: node scripts/check-windows-rust-symbols.mjs
       - name: Record native cache decision and toolchains
@@ -124,6 +127,9 @@ jobs:
           arch: amd64
       - run: node scripts/check-node-version.mjs
       - run: npm ci
+      - name: Verify Windows signature runtime
+        shell: pwsh
+        run: node scripts/check-windows-signature-runtime.mjs
       - name: Verify native Cargo EXE and PDB paths
         run: node scripts/check-windows-rust-symbols.mjs
       - name: Require signing configuration

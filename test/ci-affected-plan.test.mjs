@@ -84,6 +84,14 @@ function fullPlanWithoutDiff() {
 // Each case spawns the planner as a subprocess, and the full-plan cases also
 // run cargo metadata; the default 5s per-test budget races CI runner load.
 describe("affected-module plan v1", { timeout: 30_000 }, () => {
+  test("maps the Windows Authenticode runtime and early probe to signature and workflow checkpoints", () => {
+    for (const path of ["desktop/release/verify-windows-app.mjs", "scripts/check-windows-signature-runtime.mjs"]) {
+      const result = plan(path);
+      expect(result.chapters.packaging).toBe(true);
+      expect(result.vitestFiles).toContain("test/desktop-shell.test.mjs");
+      expect(result.vitestFiles).toContain("test/windows-candidate.test.mjs");
+    }
+  });
   test("maps Windows compiler symbol paths and both consumers to handoff, telemetry, and packaging checkpoints", () => {
     for (const path of ["desktop/release/windows-rust-debug.mjs", "desktop/release/windows-native-handoff.mjs",
       "desktop/release/telemetry-artifacts.mjs", "scripts/check-windows-rust-symbols.mjs"]) {

@@ -233,13 +233,18 @@ describe("independent Windows candidate", () => {
     expect(workflow.jobs.package.environment).toBe("desktop-production-windows");
     const steps = workflow.jobs.package.steps;
     for (const job of [workflow.jobs.qualify, workflow.jobs.package]) {
+      const signatureProbe = job.steps.findIndex(step => step.run === "node scripts/check-windows-signature-runtime.mjs");
       const probe = job.steps.findIndex(step => step.run === "node scripts/check-windows-rust-symbols.mjs");
       const msvc = job.steps.findIndex(step => step.uses?.startsWith("ilammy/msvc-dev-cmd@"));
       const coldBuild = job.steps.findIndex(step => step.run?.includes("cargo fetch") || step.run?.includes("--prepare-windows-native"));
       expect(probe).toBeGreaterThan(msvc);
       expect(msvc).toBeGreaterThan(-1);
       expect(coldBuild).toBeGreaterThan(probe);
+      expect(signatureProbe).toBeGreaterThan(job.steps.findIndex(step => step.run === "npm ci"));
+      expect(job.steps[signatureProbe].shell).toBe("pwsh");
+      expect(coldBuild).toBeGreaterThan(signatureProbe);
     }
+    await execFileAsync(process.execPath, ["--check", fileURLToPath(new URL("../scripts/check-windows-signature-runtime.mjs", import.meta.url))]);
     const preparation = steps.findIndex(step => step.run?.includes("--prepare-windows-native"));
     const login = steps.findIndex(step => step.uses?.startsWith("azure/login@"));
     const resourceToken = steps.findIndex(step => step.run?.includes("get-access-token"));
