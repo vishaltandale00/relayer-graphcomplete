@@ -1,6 +1,9 @@
 import { mkdtemp, mkdir, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
+import { SentryCli } from "@sentry/cli";
 
 import { createPackage } from "@electron/asar";
 import { describe, expect, it, vi } from "vitest";
@@ -42,6 +45,27 @@ describe("desktop telemetry release artifacts", () => {
     expect(lock.packages["node_modules/@sentry/cli"]).toMatchObject({ version: "3.7.0", dev: true });
     const workflow = parseYaml(await readFile(new URL("../.github/workflows/desktop-signed-preview.yml", import.meta.url), "utf8"));
     const windowsWorkflow = parseYaml(await readFile(new URL("../.github/workflows/desktop-windows-candidate.yml", import.meta.url), "utf8"));
+    const nativeCli = "${{ github.workspace }}\\node_modules\\@sentry\\cli-win32-x64\\bin\\sentry-cli.exe";
+    expect(lock.packages["node_modules/@sentry/cli-win32-x64"]).toMatchObject({ version: "3.7.0", optional: true });
+    expect(lock.packages["node_modules/@sentry/cli-win32-x64"].integrity).toMatch(/^sha512-/);
+    const upload = windowsWorkflow.jobs.package.steps.find(step => step.run === "node desktop/release/telemetry-artifacts.mjs");
+    expect(upload.env.SENTRY_CLI_BINARY).toBe(nativeCli);
+    for (const job of [windowsWorkflow.jobs.qualify, windowsWorkflow.jobs.package]) {
+      const probe = job.steps.findIndex(step => step.name === "Verify pinned Windows telemetry CLI startup");
+      const cold = job.steps.findIndex(step => step.run?.includes("cargo fetch") || step.run?.includes("--prepare-windows-native"));
+      expect(probe).toBeGreaterThan(job.steps.findIndex(step => step.run === "npm ci"));
+      expect(cold).toBeGreaterThan(probe);
+      expect(job.steps[probe].env).toEqual({ SENTRY_CLI_BINARY: nativeCli });
+      expect(job.steps[probe].run).toContain("spawnSync(process.env.SENTRY_CLI_BINARY,['--version'],{stdio:'inherit'})");
+      const script = job.steps[probe].run.slice('node -e "'.length, -1);
+      const environment = { ...process.env, SENTRY_CLI_BINARY: SentryCli.getPath() };
+      delete environment.SENTRY_AUTH_TOKEN;
+      const { stdout } = await promisify(execFile)(process.execPath, ["-e", script], { env: environment });
+      expect(stdout).toContain("sentry-cli 3.7.0");
+      await expect(promisify(execFile)(process.execPath, ["-e", script], {
+        env: { ...environment, SENTRY_CLI_BINARY: join(tmpdir(), "missing-relayer-sentry-cli.exe") },
+      })).rejects.toThrow();
+    }
     for (const steps of [workflow.jobs["package-macos"].steps, windowsWorkflow.jobs.package.steps]) {
       const install = steps.findIndex((step) => step.run === "npm ci");
       const build = steps.findIndex((step) => step.run?.includes("npm run desktop:dist:preview"));
@@ -285,6 +309,13 @@ describe("desktop telemetry release artifacts", () => {
       SENTRY_ORG: "relayer-labs-llc",
       SENTRY_PROJECT: "graphcomplete-desktop",
     };
+    const nativeCli = "/opt/relayer/node_modules/@sentry/cli-win32-x64/bin/sentry-cli.exe";
+    const nativePlan = createDesktopTelemetryUploadPlan({ manifest,
+      environment: { ...environment, SENTRY_CLI_BINARY: nativeCli }, artifactsRoot: "/tmp/telemetry" });
+    expect(nativePlan.every(step => step.command === nativeCli)).toBe(true);
+    expect(() => createDesktopTelemetryUploadPlan({ manifest,
+      environment: { ...environment, SENTRY_CLI_BINARY: "/opt/relayer/node_modules/.bin/sentry-cli.cmd" },
+      artifactsRoot: "/tmp/telemetry" })).toThrow("absolute pinned Sentry CLI binary");
     const plan = createDesktopTelemetryUploadPlan({ manifest, environment, artifactsRoot: "/tmp/telemetry" });
     expect(plan).toHaveLength(4);
     expect(plan.flatMap((step) => step.args)).toContain(manifest.release);

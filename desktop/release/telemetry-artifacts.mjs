@@ -471,7 +471,7 @@ export function createDesktopTelemetryUploadPlan({ manifest, environment = proce
     throw new Error("Desktop telemetry upload target is not the approved Sentry project.");
   }
   const sentryCliBinary = requiredEnvironment(environment, "SENTRY_CLI_BINARY");
-  if (!isAbsolute(sentryCliBinary) || !/(?:^|[/\\])sentry-cli(?:\.cmd)?$/u.test(sentryCliBinary)) {
+  if (!isAbsolute(sentryCliBinary) || !/(?:^|[/\\])sentry-cli(?:\.exe)?$/u.test(sentryCliBinary)) {
     throw new Error("Desktop telemetry upload requires the absolute pinned Sentry CLI binary.");
   }
   if (manifest.release !== `${RELEASE_ID_PREFIX}${manifest.version}+${sourceCommit}`

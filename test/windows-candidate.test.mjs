@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, win32 } from "node:path";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
+import { finished } from "node:stream/promises";
 import { fileURLToPath } from "node:url";
 import { createPackage, extractFile, listPackage, uncache } from "@electron/asar";
 import { WinPackager } from "app-builder-lib";
@@ -60,7 +61,7 @@ describe("independent Windows candidate", () => {
         await writeFile(join(source, entry), "{}");
       }
       uncache(archive);
-      await createPackage(source, archive);
+      await finished(await createPackage(source, archive), { cleanup: true });
     };
     const writeFeed = url => writeFile(join(resources, "app-update.yml"),
       `provider: generic\nurl: ${url}\nchannel: beta\n`);
@@ -279,7 +280,7 @@ describe("independent Windows candidate", () => {
       await mkdir(resources, { recursive: true });
       await writeFile(join(source, "package.json"), JSON.stringify({ version: "0.9.7", ...builder.extraMetadata }));
       await writeFile(join(source, "node_modules/electron-updater/package.json"), "{}");
-      await createPackage(source, join(resources, "app.asar"));
+      await finished(await createPackage(source, join(resources, "app.asar")), { cleanup: true });
       await writeFile(join(resources, "app-update.yml"), `provider: generic\nurl: ${contract.updateBaseUrl}\nchannel: beta\n`);
       expect((await verifyPackagedDesktopContract({ appPath, contract })).packageMetadata.version).toBe("0.2.0");
       await expect(verifyPackagedDesktopContract({ appPath, contract: { ...contract, version: "0.9.7" } })).rejects.toThrow("metadata version");

@@ -59,6 +59,10 @@ jobs:
       - run: npm ci
       - name: Verify packaged ASAR contract before native compilation
         run: node node_modules/vitest/vitest.mjs run test/windows-candidate.test.mjs -t "canonicalizes packaged ASAR inventory"
+      - name: Verify pinned Windows telemetry CLI startup
+        env:
+          SENTRY_CLI_BINARY: ${{ github.workspace }}\node_modules\@sentry\cli-win32-x64\bin\sentry-cli.exe
+        run: node -e "const {spawnSync}=require('node:child_process'); const result=spawnSync(process.env.SENTRY_CLI_BINARY,['--version'],{stdio:'inherit'}); if(result.error)throw result.error; if(result.status!==0)process.exit(result.status ?? 1)"
       - name: Verify Windows signature runtime
         shell: pwsh
         run: node scripts/check-windows-signature-runtime.mjs
@@ -131,6 +135,10 @@ jobs:
       - run: npm ci
       - name: Verify packaged ASAR contract before native compilation
         run: node node_modules/vitest/vitest.mjs run test/windows-candidate.test.mjs -t "canonicalizes packaged ASAR inventory"
+      - name: Verify pinned Windows telemetry CLI startup
+        env:
+          SENTRY_CLI_BINARY: ${{ github.workspace }}\node_modules\@sentry\cli-win32-x64\bin\sentry-cli.exe
+        run: node -e "const {spawnSync}=require('node:child_process'); const result=spawnSync(process.env.SENTRY_CLI_BINARY,['--version'],{stdio:'inherit'}); if(result.error)throw result.error; if(result.status!==0)process.exit(result.status ?? 1)"
       - name: Verify Windows signature runtime
         shell: pwsh
         run: node scripts/check-windows-signature-runtime.mjs
@@ -160,7 +168,7 @@ jobs:
           RELAYER_DESKTOP_RELEASE: '1'
           RELAYER_DESKTOP_CHANNEL: preview
           SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
-          SENTRY_CLI_BINARY: ${{ github.workspace }}\node_modules\.bin\sentry-cli.cmd
+          SENTRY_CLI_BINARY: ${{ github.workspace }}\node_modules\@sentry\cli-win32-x64\bin\sentry-cli.exe
           SENTRY_ORG: relayer-labs-llc
           SENTRY_PROJECT: graphcomplete-desktop
         run: node desktop/release/telemetry-artifacts.mjs
