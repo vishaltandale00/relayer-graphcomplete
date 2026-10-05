@@ -1,0 +1,16 @@
+desktop/eval-main/calibration-service.mjs
+desktop/eval-main/evaluator-selection.mjs
+desktop/eval-main/human-task-service.mjs
+desktop/eval-main/setup-registry.mjs
+desktop/eval-main/task-actor-service.mjs
+desktop/eval-main/task-completion-judge.mjs
+desktop/eval-main/web-host.mjs
+desktop/eval-renderer/human-tasks.js
+desktop/eval-renderer/index.html
+desktop/eval-renderer/setup-editor.js
+desktop/eval-renderer/web-bridge.js
+docs/prd/index.html
+eval-configs/completion-judges/completion-judge-v1.yaml
+scripts/test-eval-web.mjs
+test/eval-evaluator-releases.test.mjs
+test/eval-setup-registry.test.mjs

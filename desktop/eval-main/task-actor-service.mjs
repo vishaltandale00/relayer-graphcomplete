@@ -1,4 +1,6 @@
-import { createCompletionJudge as createNativeCompletionJudge, validateCompletionAssessment } from "./task-completion-judge.mjs";
+import { resolveEvaluatorSelection, completionJudgeSpec } from "./evaluator-selection.mjs";
+import { setupDigest } from "./setup-registry.mjs";
+import { createCompletionJudge as createNativeCompletionJudge, validateCompletionAssessment, COMPLETION_JUDGE_EVIDENCE_CONTRACT } from "./task-completion-judge.mjs";
 import { randomUUID } from "node:crypto";
 import { abortable } from "./abortable.mjs";
 import { setTimeout as delay } from "node:timers/promises";
@@ -42,7 +44,9 @@ export class TaskActorService {
     this.running = new Map();
   }
   async create(selection) {
-    const setup = this.setupRegistry?.selected("actor", selection.actorSetupRevisionId);
+    const resolved = resolveEvaluatorSelection(this.setupRegistry, selection);
+    selection = resolved.selection;
+    const setup = resolved.actorSetup;
     const config = setup ? actorConfiguration({ ...setup.settings, promptTemplate: setup.promptTemplate, promptVersion: setup.promptVersion }) : actorConfiguration(selection.actor);
     const startupId = selection.startupId ?? randomUUID();
     if (typeof startupId !== "string" || !/^[a-zA-Z0-9-]{1,80}$/.test(startupId) || this.running.has(startupId)) throw new Error("Invalid actor startup identity.");
@@ -56,7 +60,7 @@ export class TaskActorService {
       try {
         // The same deadline covers discovery, preparation and all user actions.
         const runtime = await abortable(signal, () => this.resolveRuntime(config, { signal }));
-        const judgeSpec = setup?.behaviorContract?.completionJudge;
+        const judgeSpec = resolved.completionJudgeSetup?.spec ?? setup?.behaviorContract?.completionJudge;
         if (judgeSpec) {
           if (!this.resolveCompletionJudgeRuntime || !this.createCompletionJudge) throw new Error("Completion judge is unavailable.");
           const judgeRuntime = await abortable(signal, () => this.resolveCompletionJudgeRuntime(structuredClone(judgeSpec), { signal }));
@@ -156,20 +160,22 @@ export class TaskActorService {
         signal.throwIfAborted();
         if (action.kind === "finish") {
           await this.tasks.actorEvent(id, "actor_satisfaction", { scale: "actor-1-4", value: action.satisfaction, comment: action.comment, endpointStatus: action.endpointStatus, remainingWork: action.remainingWork });
-          if (task.actorSetup?.behaviorContract?.completionJudge) {
+          if (completionJudgeSpec(task)) {
             phase = "completion_judge";
             if (!completionJudge) throw new Error("Pinned completion judge is unavailable.");
             const evidence = await abortable(signal, () => this.tasks.completionJudgeEvidence(id, { signal }));
+            const judgeInput = { ...evidence, ...(observation.screenshot === undefined ? {} : { screenshot: observation.screenshot }), actorFinish: action };
             const evidenceEvent = await this.tasks.actorEvent(id, "actor_completion_evidence", {
-              actorActionEventId: intent.id, observationEventId: observed.id, judge: structuredClone(task.actorSetup.behaviorContract.completionJudge), evidence,
+              actorActionEventId: intent.id, observationEventId: observed.id, judge: structuredClone(completionJudgeSpec(task)), evidence,
+              input: judgeInput, inputDigest: setupDigest(judgeInput), evidenceContract: COMPLETION_JUDGE_EVIDENCE_CONTRACT.id,
             });
             signal.throwIfAborted();
-            const result = await abortable(signal, () => completionJudge.evaluate({ ...evidence, screenshot: observation.screenshot, actorFinish: action }, signal));
+            const result = await abortable(signal, () => completionJudge.evaluate(judgeInput, signal));
             signal.throwIfAborted();
             const { usage: judgeUsage, ...assessment } = result ?? {};
             validateCompletionAssessment(assessment);
             const judgment = await this.tasks.actorEvent(id, "actor_completion_judgment", {
-              actorActionEventId: intent.id, observationEventId: observed.id, evidenceEventId: evidenceEvent.id, judge: structuredClone(task.actorSetup.behaviorContract.completionJudge),
+              actorActionEventId: intent.id, observationEventId: observed.id, evidenceEventId: evidenceEvent.id, judge: structuredClone(completionJudgeSpec(task)),
               verdict: result.verdict, evidenceExplanation: result.evidenceExplanation, continuationHint: result.continuationHint, usage: judgeUsage ?? null,
             });
             signal.throwIfAborted();

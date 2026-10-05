@@ -15,6 +15,27 @@ export const COMPLETION_JUDGE_SCHEMA = {
 function freeze(value) { for (const nested of Object.values(value)) if (nested && typeof nested === "object") freeze(nested); return Object.freeze(value); }
 export const COMPLETION_JUDGE_SPEC = freeze({ version: "completion-judge-v1", model: "gpt-5.6-sol", modelReasoningEffort: "high", promptTemplate: COMPLETION_JUDGE_PROMPT, outputSchema: COMPLETION_JUDGE_SCHEMA });
 
+// The evidence and authority envelope is code-owned, independently of prompt tuning.
+export const COMPLETION_JUDGE_EVIDENCE_CONTRACT = freeze({
+  id: "completion-evidence-v1", fields: ["request", "endpoint", "privateBrief", "trajectory", "artifactEvidence", "actorFinish"],
+  maxEvidenceCharacters: 512000, maxScreenshotCharacters: 16000000,
+  tools: false, humanLabels: false, artifactVisibilityImpliesUserVisibility: false,
+});
+export function validateCompletionJudgeSpec(config) {
+  const legacy = JSON.stringify(config) === JSON.stringify(COMPLETION_JUDGE_SPEC);
+  const allowed = ["version", "model", "modelReasoningEffort", "promptTemplate", "outputSchema", "evidenceContract"];
+  if (!config || Object.keys(config).some(key => !allowed.includes(key))
+    || !/^[a-zA-Z0-9._-]{1,100}$/.test(config.version ?? "")
+    || !/^[a-zA-Z0-9._-]{1,100}$/.test(config.model ?? "")
+    || !["low", "medium", "high"].includes(config.modelReasoningEffort)
+    || typeof config.promptTemplate !== "string" || !config.promptTemplate.trim() || config.promptTemplate.length > 100000
+    || JSON.stringify(config.outputSchema) !== JSON.stringify(COMPLETION_JUDGE_SCHEMA)
+    || (!legacy && JSON.stringify(config.evidenceContract) !== JSON.stringify(COMPLETION_JUDGE_EVIDENCE_CONTRACT))) {
+    throw new Error("Unsupported completion judge specification.");
+  }
+  return config;
+}
+
 function invalid() { return Object.assign(new Error("Completion judge returned an invalid assessment."), { code: "completion_judge_invalid_result" }); }
 export function validateCompletionAssessment(value) {
   if (!value || typeof value !== "object" || Array.isArray(value)
@@ -28,15 +49,15 @@ export function validateCompletionAssessment(value) {
 
 function boundedEvidence(input) {
   const evidence = {};
-  for (const field of ["request", "endpoint", "privateBrief", "trajectory", "artifactEvidence", "actorFinish"]) {
+  for (const field of COMPLETION_JUDGE_EVIDENCE_CONTRACT.fields) {
     if (input[field] !== undefined) evidence[field] = input[field];
   }
   // The owner supplies a bounded, read-only projection. Reject rather than silently
   // truncate evidence and let the reviewer mistake omitted constraints for success.
   if (typeof evidence.request !== "string" || !evidence.request.trim() || typeof evidence.endpoint !== "string" || !evidence.endpoint.trim()
-    || JSON.stringify(evidence).length > 512000) throw Object.assign(new Error("Completion evidence is missing or exceeds its budget."), { code: "completion_judge_invalid_evidence" });
+    || JSON.stringify(evidence).length > COMPLETION_JUDGE_EVIDENCE_CONTRACT.maxEvidenceCharacters) throw Object.assign(new Error("Completion evidence is missing or exceeds its budget."), { code: "completion_judge_invalid_evidence" });
   if (input.screenshot !== undefined) {
-    if (typeof input.screenshot !== "string" || input.screenshot.length > 16000000 || !/^[A-Za-z0-9+/]*={0,2}$/.test(input.screenshot)) throw Object.assign(new Error("Completion screenshot is invalid."), { code: "completion_judge_invalid_evidence" });
+    if (typeof input.screenshot !== "string" || input.screenshot.length > COMPLETION_JUDGE_EVIDENCE_CONTRACT.maxScreenshotCharacters || !/^[A-Za-z0-9+/]*={0,2}$/.test(input.screenshot)) throw Object.assign(new Error("Completion screenshot is invalid."), { code: "completion_judge_invalid_evidence" });
     evidence.screenshot = input.screenshot;
   }
   return evidence;
@@ -44,7 +65,7 @@ function boundedEvidence(input) {
 
 export async function createCompletionJudge({ runtime, config = COMPLETION_JUDGE_SPEC, signal, createActor = createCodexTaskActor }) {
   signal?.throwIfAborted();
-  if (config.version !== COMPLETION_JUDGE_SPEC.version || typeof config.promptTemplate !== "string" || !config.outputSchema) throw new Error("Unsupported completion judge specification.");
+  validateCompletionJudgeSpec(config);
   const actor = await createActor({ runtime, config, prompt: config.promptTemplate, outputSchema: config.outputSchema });
   try { signal?.throwIfAborted(); } catch (error) { await actor.close(); throw error; }
   return {

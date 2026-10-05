@@ -1,3 +1,4 @@
+import { completionJudgeSpec } from "./evaluator-selection.mjs";
 import { isDeepStrictEqual } from "node:util";
 import { randomUUID } from "node:crypto";
 import { mkdir, readFile, writeFile, rename } from "node:fs/promises";
@@ -92,6 +93,7 @@ export class CalibrationService {
   compare({ baselineRevisionId, candidateRevisionId, calibrationSetId }) {
     return this.serial(async () => {
       const baseline = this.setups.get(baselineRevisionId); const candidate = this.setups.get(candidateRevisionId, baseline.kind);
+      if (!["actor", "judge"].includes(baseline.kind)) fail("Completion-judge calibration requires its own stopping-point contract; graph calibration is incompatible.");
       if (baseline.id === candidate.id) fail("Choose two distinct revisions.");
       const set = this.set(calibrationSetId);
       if (candidate.predecessorId !== baseline.id) fail("Compare a proposed revision with its predecessor.");
@@ -127,9 +129,11 @@ export class CalibrationService {
     const member = this.set(comparison.calibrationSetId).members.find(item => item.id === memberId);
     if (member?.source.kind !== "task") fail("Actor execution requires a frozen task seed.");
     const original = member.evidence.session;
+    if (!original.completionJudgeSetup && !isDeepStrictEqual(completionJudgeSpec(original), this.setups.get(revisionId, "actor").behaviorContract?.completionJudge)) fail("Actor comparison requires the original completion judge.");
     return { mode: "simulated", testCaseId: original.prepared.execution.testCaseId,
       harnessConfigurationName: original.prepared.execution.harnessConfigurationName,
       endpoint: original.endpoint, maxCompletions: original.maxCompletions, actorSetupRevisionId: revisionId,
+      ...(original.completionJudgeSetup ? { completionJudgeRevisionId: original.completionJudgeSetup.id } : {}),
       calibrationCandidate: { identity: { ...copy(member.caseIdentity), catalogIdentity: copy(catalogIdentity(member)) }, modelResolution: copy(original.prepared.execution.modelResolution ?? { selectedModel: null, productModelSelection: false }) } };
   }
   observe(input) {
@@ -144,6 +148,8 @@ export class CalibrationService {
         const task = this.tasks.get(input.taskId);
         if (task.status !== "completed" || task.actorSetup?.id !== revision.id || task.mode !== "simulated") fail("Choose a finished task pinned to this actor revision.");
         const expected = member.caseIdentity;
+        if (!isDeepStrictEqual(member.evidence.session.completionJudgeSetup ?? null, task.completionJudgeSetup ?? null)
+          || !isDeepStrictEqual(completionJudgeSpec(member.evidence.session), completionJudgeSpec(task))) fail("Actor comparison requires the pinned completion judge.");
         if (!isDeepStrictEqual(catalogIdentity(member), task.prepared.execution.catalogIdentity ?? null) || expected.endpoint !== task.endpoint || expected.maxCompletions !== task.maxCompletions || JSON.stringify(expected.selectedModel) !== JSON.stringify(task.prepared.execution.modelResolution?.selectedModel ?? null) || expected.testCaseId !== task.prepared.execution.testCaseId || expected.casePlanDigest !== task.prepared.casePlanDigest || expected.harnessConfigurationDigest !== task.prepared.execution.harnessConfigurationDigest) fail("Actor comparison requires the pinned case, profile and candidate harness.");
         if (!Number.isInteger(input.value) || input.value < 1 || input.value > 4 || typeof input.comment !== "string" || !input.comment.trim() || input.comment.length > 8000) fail("Record a human realism rating and evidence-based comment on its native 1–4 scale.");
         const exported = await this.tasks.export(task.id);

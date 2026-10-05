@@ -108,7 +108,7 @@ it("restricts revision publication/promotion to the dashboard while actor observ
   expect((await request(dashboard, "setupRevisions", [])).status).toBe(200);
   expect((await request(dashboard, "promoteSetup", [{ revisionId: f.registry.selected("actor").id, comment: "Human choice" }])).status).toBe(200);
   expect((await request(dashboard, "publishSetup", [{ kind: "judge", promptVersion: "forged" }])).status).toBe(400);
-  for (const operation of ["setupRevisions", "publishSetup", "promoteSetup", "calibrationCatalog", "calibrationSource", "freezeCalibrationSet", "compareSetupRevisions", "recordCalibrationObservation", "exportCalibration"]) expect((await request(actor, operation, [])).status).toBe(403);
+  for (const operation of ["setupRevisions", "publishSetup", "publishEvaluatorRelease", "promoteSetup", "calibrationCatalog", "calibrationSource", "freezeCalibrationSet", "compareSetupRevisions", "recordCalibrationObservation", "exportCalibration"]) expect((await request(actor, operation, [])).status).toBe(403);
   const projection = await fetch(new URL("/eval-api/task", actor.url), { headers: { Authorization: `Bearer ${new URL(actor.url).hash.slice(1)}` } });
   expect(JSON.stringify(await projection.json())).not.toMatch(/setup|feedback|rubric|grade|prompt|calibration/);
 });
@@ -367,4 +367,74 @@ it.each([false, true])("retains frozen external catalog provenance after reopen 
   expect(f.tasks.list()[0].completions).toBe(0);
   const revised = await f.start(candidate.id);
   await expect(reopened.observe({ comparisonId: comparison.id, memberId: set.members[0].id, labelId: set.members[0].labels[0].id, revisionId: candidate.id, taskId: revised.id, value: 3, comment: "Different catalog despite same case descriptor" })).rejects.toThrow("pinned case");
+});
+
+
+it("executes an explicit evaluator release independently of the actor and preserves exact stopping evidence after reopen", async () => {
+  const f = await fixture();
+  const historical = await f.start();
+  const actor = f.registry.selected("actor");
+  const judge = f.registry.selected("judge");
+  const completion = f.registry.selected("completion-judge");
+  const release = await f.registry.publishRelease({ name: "Frozen evaluator", actorRevisionId: actor.id, completionJudgeRevisionId: completion.id, judgeRevisionId: judge.id });
+  const evaluate = vi.fn(async () => ({ verdict: "complete", evidenceExplanation: "Fixture artifact checked", continuationHint: "", usage: null }));
+  f.actors.createCompletionJudge = async ({ config }) => { expect(config).toEqual(completion.spec); return { evaluate, close: async () => {} }; };
+  const task = await f.actors.create({ mode: "simulated", maxCompletions: 1, endpoint: "Agreement", evaluatorReleaseId: release.id });
+  await f.actors.running.get(task.id).done;
+  const finished = f.tasks.get(task.id);
+  expect(finished.actorSetup).toEqual(actor);
+  expect(finished.completionJudgeSetup).toEqual(completion);
+  expect(finished.evaluatorRelease).toEqual(release);
+  expect(f.tasks.get(historical.id).completionJudgeSetup).toBeUndefined();
+  expect(f.tasks.get(historical.id).actorSetup).toEqual(actor);
+  const evidence = finished.events.find(event => event.kind === "actor_completion_evidence");
+  expect(evidence.input).toEqual(evaluate.mock.calls[0][0]);
+  expect(evidence.inputDigest).toBe(setupDigest(evidence.input));
+  expect(evidence.evidenceContract).toBe("completion-evidence-v1");
+  expect(JSON.stringify(evidence.input)).not.toMatch(/SECRET RUBRIC|feedback|humanTarget/);
+  const reopened = await new HumanTaskService(f.options).open();
+  expect((await reopened.export(task.id)).bundle.session.evaluatorRelease).toEqual(release);
+  expect(reopened.get(task.id).events.find(event => event.id === evidence.id)).toEqual(evidence);
+  expect(finished.termination).toMatchObject({ success: null, endpointAttainment: "judge_reported" });
+});
+
+it("rejects conflicting release pins and completion preflight failures before candidate dispatch", async () => {
+  const f = await fixture();
+  const actor = f.registry.selected("actor"); const completion = f.registry.selected("completion-judge"); const judge = f.registry.selected("judge");
+  const release = await f.registry.publishRelease({ name: "Preflight evaluator", actorRevisionId: actor.id, completionJudgeRevisionId: completion.id, judgeRevisionId: judge.id });
+  const selection = { mode: "simulated", maxCompletions: 1, endpoint: "Agreement", evaluatorReleaseId: release.id };
+  for (const field of ["actorSetupRevisionId", "completionJudgeRevisionId", "judgeSetupRevisionId"]) {
+    await expect(f.actors.create({ ...selection, [field]: "other" })).rejects.toThrow("conflicts");
+  }
+  expect(f.runtime).not.toHaveBeenCalled();
+  expect(f.tasks.list()).toEqual([]);
+  f.actors.resolveCompletionJudgeRuntime = async () => { throw new Error("unavailable"); };
+  const dispatch = vi.spyOn(f.options.evalService, "createHumanTaskThread");
+  await expect(f.actors.create(selection)).rejects.toThrow();
+  expect(dispatch).not.toHaveBeenCalled();
+  expect(f.tasks.list()).toEqual([]);
+});
+
+
+it("keeps the independent completion revision fixed across actor calibration, including identical-spec revisions", async () => {
+  const f = await fixture();
+  const completion = f.registry.selected("completion-judge");
+  const first = await f.actors.create({ mode: "simulated", maxCompletions: 1, endpoint: "Agreement", completionJudgeRevisionId: completion.id });
+  await f.actors.running.get(first.id).done;
+  const original = f.tasks.get(first.id);
+  await f.tasks.grade(original.id, { satisfaction: 2, comment: "Shorter user responses would be more credible" });
+  const baseline = f.registry.selected("actor");
+  const candidate = await f.registry.publish({ ...baseline, predecessorId: baseline.id, feedback: [{ sessionId: original.id, gradeIndex: 0 }], name: "Revised actor" });
+  const set = await f.calibration.freeze({ name: "Fixed completion reviewer", members: [{ source: { kind: "task", id: original.id }, membership: "tuning", labels: [{ dimension: "actor-realism", scale: "human-actor-realism-1-4", value: 2, subject: { kind: "event", id: original.events.find(event => event.kind === "actor_action").id }, comment: "Response realism" }] }] });
+  const { comparison } = await f.calibration.compare({ baselineRevisionId: baseline.id, candidateRevisionId: candidate.id, calibrationSetId: set.id });
+  const ref = { comparisonId: comparison.id, memberId: set.members[0].id, revisionId: candidate.id };
+  const selection = f.calibration.actorSelection(ref);
+  expect(selection.completionJudgeRevisionId).toBe(completion.id);
+  const config = f.registry.completionJudgeConfigs()[0];
+  const other = await f.registry.publishCompletionJudgeConfig({ configFile: config.file, configDigest: config.digest, predecessorId: completion.id, feedback: [{ sessionId: original.id, gradeIndex: 0 }] });
+  expect(other.spec).toEqual(completion.spec);
+  const changed = await f.actors.create({ ...selection, completionJudgeRevisionId: other.id });
+  await f.actors.running.get(changed.id).done;
+  await expect(f.calibration.observe({ ...ref, labelId: set.members[0].labels[0].id, taskId: changed.id, value: 3, comment: "Changed immutable evaluator" })).rejects.toThrow("pinned completion judge");
+  await expect(f.calibration.compare({ baselineRevisionId: completion.id, candidateRevisionId: other.id, calibrationSetId: set.id })).rejects.toThrow("stopping-point contract");
 });

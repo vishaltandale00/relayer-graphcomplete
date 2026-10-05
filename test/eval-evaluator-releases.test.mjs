@@ -1,0 +1,75 @@
+import { mkdtemp, mkdir, readFile, writeFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { stringify, parse } from "yaml";
+import { afterEach, expect, it, vi } from "vitest";
+import { SetupRegistry, setupDigest } from "../desktop/eval-main/setup-registry.mjs";
+import { COMPLETION_JUDGE_SPEC, COMPLETION_JUDGE_PROMPT, createCompletionJudge } from "../desktop/eval-main/task-completion-judge.mjs";
+const cleanup = [];
+afterEach(async () => { for (const close of cleanup.splice(0)) await close(); });
+async function fixture() {
+  const directory = await mkdtemp(join(tmpdir(), "evaluator-releases-"));
+  cleanup.push(() => rm(directory, { recursive: true, force: true }));
+  const configs = join(directory, "completion-judges"); await mkdir(configs);
+  const source = await readFile(new URL("../eval-configs/completion-judges/completion-judge-v1.yaml", import.meta.url), "utf8");
+  await writeFile(join(configs, "completion-judge-v1.yaml"), source);
+  const options = { stateFile: join(directory, "registry.json"), completionJudgeConfigDirectory: configs, feedbackLoader: async ref => ({ ...ref, label: "Human saw an unjustified finish" }) };
+  const registry = await new SetupRegistry(options).open();
+  const selections = () => ({ actorRevisionId: registry.selected("actor").id, completionJudgeRevisionId: registry.selected("completion-judge").id, judgeRevisionId: registry.selected("judge").id });
+  return { registry, options, configs, source, selections };
+}
+it("pins exact independent components, executes the completion prompt and preserves old actor contracts across publication/reopen", async () => {
+  const f = await fixture(); const actor = f.registry.selected("actor"); const baseline = f.registry.selected("completion-judge");
+  expect(actor.behaviorContract.completionJudge).toEqual(COMPLETION_JUDGE_SPEC);
+  expect(baseline.spec.promptTemplate).toBe(COMPLETION_JUDGE_PROMPT);
+  const release = await f.registry.publishRelease({ name: "Frozen evaluator", ...f.selections() });
+  const nextFile = parse(f.source); nextFile.promptTemplate += "\nReview artifact omissions carefully.";
+  await writeFile(join(f.configs, "completion-judge-v2.yaml"), stringify(nextFile));
+  const config = f.registry.completionJudgeConfigs().find(item => item.file === "completion-judge-v2.yaml");
+  const next = await f.registry.publishCompletionJudgeConfig({ configFile: config.file, configDigest: config.digest, predecessorId: baseline.id, feedback: [{ sessionId: "human-session", annotationId: "finish-label" }] });
+  expect(next.spec.version).toBe("completion-judge-v2"); expect(next.feedback[0].label).toContain("unjustified");
+  expect(f.registry.selected("completion-judge").id).toBe(baseline.id);
+  expect(f.registry.selected("actor")).toEqual(actor);
+  const revised = await f.registry.publishRelease({ name: "Proposed evaluator", ...f.selections(), completionJudgeRevisionId: next.id, predecessorId: release.id });
+  const createActor = vi.fn(async () => ({ close: async () => {}, decide: async () => ({ action: { verdict: "uncertain", evidenceExplanation: "Artifact was omitted", continuationHint: "Can I check the result?" } }) }));
+  const judge = await createCompletionJudge({ runtime: {}, config: revised.completionJudgeSetup.spec, createActor });
+  await judge.evaluate({ request: "Make a plan", endpoint: "A usable plan" }); await judge.close();
+  expect(createActor.mock.calls[0][0].prompt).toBe(next.spec.promptTemplate);
+  revised.completionJudgeSetup.spec.model = "mutated";
+  const reopened = await new SetupRegistry(f.options).open();
+  expect(reopened.release(release.id)).toEqual(release);
+  expect(reopened.release(revised.id).completionJudgeSetup).toEqual(next);
+  expect(reopened.catalog().promotions).toEqual([]);
+});
+it("rejects stale YAML, tools/schema/authority changes, cross-kind and unknown pins before storing anything", async () => {
+  const f = await fixture(); const baseline = f.registry.selected("completion-judge"); const config = f.registry.completionJudgeConfigs()[0];
+  await writeFile(join(f.configs, config.file), f.source + "\n# changed\n");
+  await expect(f.registry.publishCompletionJudgeConfig({ configFile: config.file, configDigest: config.digest, predecessorId: baseline.id, feedback: [] })).rejects.toThrow("changed");
+  const before = f.registry.catalog();
+  await expect(f.registry.publishRelease({ name: "Wrong", ...f.selections(), completionJudgeRevisionId: f.selections().actorRevisionId })).rejects.toThrow("wrong setup kind");
+  await expect(f.registry.publishRelease({ name: "Missing", ...f.selections(), judgeRevisionId: "unknown" })).rejects.toThrow("Unknown setup");
+  await expect(f.registry.publish({ ...baseline, predecessorId: baseline.id, feedback: [], spec: { ...baseline.spec, tools: true } })).rejects.toThrow("Unsupported completion");
+  await expect(f.registry.publish({ ...baseline, predecessorId: baseline.id, feedback: [], spec: { ...baseline.spec, outputSchema: { type: "string" } } })).rejects.toThrow("Unsupported completion");
+  expect(f.registry.catalog()).toEqual(before);
+  const invalid = parse(f.source); invalid.settings.shellAccess = true;
+  await writeFile(join(f.configs, config.file), stringify(invalid));
+  expect(() => f.registry.completionJudgeConfigs()).toThrow("Unsupported completion judge config");
+});
+it("migrates historical registry stores without rewriting actor revisions and rejects release snapshot tampering", async () => {
+  const f = await fixture(); const release = await f.registry.publishRelease({ name: "Baseline", ...f.selections() });
+  const saved = JSON.parse(await readFile(f.options.stateFile, "utf8"));
+  saved.evaluatorReleases[0].completionJudgeSetup.spec.model = "rewritten";
+  await writeFile(f.options.stateFile, JSON.stringify(saved));
+  await expect(new SetupRegistry(f.options).open()).rejects.toThrow("integrity");
+  // Even re-sealed snapshots must refer to the exact registry revision.
+  saved.evaluatorReleases[0].completionJudgeSetup.digest = setupDigest(Object.fromEntries(Object.entries(saved.evaluatorReleases[0].completionJudgeSetup).filter(([key]) => key !== "digest")));
+  saved.evaluatorReleases[0].digest = setupDigest(Object.fromEntries(Object.entries(saved.evaluatorReleases[0]).filter(([key]) => key !== "digest")));
+  await writeFile(f.options.stateFile, JSON.stringify(saved));
+  await expect(new SetupRegistry(f.options).open()).rejects.toThrow("exact registry revisions");
+  delete saved.evaluatorReleases; saved.revisions = saved.revisions.filter(item => item.kind !== "completion-judge");
+  await writeFile(f.options.stateFile, JSON.stringify(saved));
+  const oldActor = saved.revisions.find(item => item.kind === "actor");
+  const reopened = await new SetupRegistry(f.options).open();
+  expect(reopened.get(oldActor.id)).toEqual(oldActor); expect(reopened.catalog().evaluatorReleases).toEqual([]);
+  expect(reopened.selected("completion-judge").spec).toEqual(release.completionJudgeSetup.spec);
+});

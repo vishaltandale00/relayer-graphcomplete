@@ -95,7 +95,7 @@
     window.open(url.href, "_blank", "noopener,noreferrer");
   }
   window.relayerEval = {
-    ...Object.fromEntries(["calibrationCatalog", "freezeCalibrationSet", "compareSetupRevisions", "recordCalibrationObservation", "calibrationReport", "exportCalibration", "calibrationSource", "setupRevisions", "publishSetup", "promoteSetup", "catalog", "listRuns", "getRun", "createRun", "judgeImportedConversation", "rejudgeExecution", "exportAnnotations", "loadJudgeScreenshot", "humanTasks", "humanTask", "actorScreenshot", "createHumanTask", "nextHumanTaskStep", "finishHumanTask", "gradeHumanTask", "annotateHumanTask", "exportHumanTask", "stopTaskActor"].map((name) => [name, (...args) => call(name, ...args)])),
+    ...Object.fromEntries(["calibrationCatalog", "freezeCalibrationSet", "compareSetupRevisions", "recordCalibrationObservation", "calibrationReport", "exportCalibration", "calibrationSource", "setupRevisions", "publishSetup", "publishEvaluatorRelease", "promoteSetup", "catalog", "listRuns", "getRun", "createRun", "judgeImportedConversation", "rejudgeExecution", "exportAnnotations", "loadJudgeScreenshot", "humanTasks", "humanTask", "actorScreenshot", "createHumanTask", "nextHumanTaskStep", "finishHumanTask", "gradeHumanTask", "annotateHumanTask", "exportHumanTask", "stopTaskActor"].map((name) => [name, (...args) => call(name, ...args)])),
     async openSettings() {
       const tab = window.open("about:blank", "_blank");
       if (!tab) throw new Error("Allow popups to open Eval Settings.");

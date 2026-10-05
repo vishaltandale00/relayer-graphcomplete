@@ -1,3 +1,4 @@
+import { resolveEvaluatorSelection, completionJudgeSpec } from "./evaluator-selection.mjs";
 import { isDeepStrictEqual } from "node:util";
 import { abortable } from "./abortable.mjs";
 import { interactionReturnsToUnsent } from "../renderer/src/interaction-failure-model.js";
@@ -126,7 +127,12 @@ export class HumanTaskService {
       if (typeof selection.endpoint !== "string" || !selection.endpoint.trim() || selection.endpoint.length > 8000) throw failure("Describe the task artifact or endpoint.");
       const session = { schemaVersion: 1, id: `human-${randomUUID()}`, mode: "human", status: "preparing", createdAt: new Date().toISOString(), maxCompletions: selection.maxCompletions, completions: 0, endpoint: selection.endpoint.trim(), step: 0, threadIds: [], events: [], annotations: [], stepChecks: [], satisfaction: null, termination: null };
       if (selection.mode !== undefined && !["human", "simulated"].includes(selection.mode)) throw failure("Unknown task mode.");
-      if (selection.mode === "simulated") { session.mode = "simulated"; const setup = this.setupRegistry?.selected("actor", selection.actorSetupRevisionId);
+      if (selection.mode === "simulated") { session.mode = "simulated";
+        const resolved = resolveEvaluatorSelection(this.setupRegistry, selection);
+        selection = resolved.selection;
+        const setup = resolved.actorSetup;
+        if (resolved.completionJudgeSetup) session.completionJudgeSetup = resolved.completionJudgeSetup;
+        if (resolved.evaluatorRelease) session.evaluatorRelease = resolved.evaluatorRelease;
         if (setup) session.actorSetup = setup;
         session.actor = setup ? actorConfiguration({ ...setup.settings, promptTemplate: setup.promptTemplate, promptVersion: setup.promptVersion }) : actorConfiguration(selection.actor); }
       this.sessions.unshift(session);
@@ -373,7 +379,7 @@ export class HumanTaskService {
     return this.serial(async () => {
       signal?.throwIfAborted();
       const session = this.find(id);
-      if (session.mode !== "simulated" || session.status !== "active" || !session.actorSetup?.behaviorContract?.completionJudge) throw failure("Completion judge session is not active.", 409);
+      if (session.mode !== "simulated" || session.status !== "active" || !completionJudgeSpec(session)) throw failure("Completion judge session is not active.", 409);
       await abortable(signal, () => this.settled(session, { signal }));
       const artifactEvidence = await abortable(signal, () => this.evalService.completionJudgeArtifactEvidence(session.prepared, { signal }));
       signal?.throwIfAborted();
@@ -415,7 +421,7 @@ export class HumanTaskService {
       if (session.status !== "active") throw failure("Task session is not active.", 409);
       if (!["endpoint_reached", "satisfied", "abandoned", "budget_exhausted"].includes(input?.reason)) throw failure("Choose a termination reason.");
       if (input.satisfaction !== undefined && ![1, 2, 3, 4].includes(input.satisfaction)) throw failure("Choose a satisfaction rating from 1 to 4.");
-      const judgeSpec = session.mode === "simulated" && session.actorSetup?.behaviorContract?.completionJudge;
+      const judgeSpec = session.mode === "simulated" && completionJudgeSpec(session);
       const actionBudgetExhausted = judgeSpec && Number.isSafeInteger(session.actor?.maxActions)
         && session.events.filter(event => ["actor_action", "actor_action_rejected"].includes(event.kind)).length >= session.actor.maxActions;
       if (input.reason === "budget_exhausted" && session.completions < session.maxCompletions && !actionBudgetExhausted) throw failure("The completion budget is not exhausted.");

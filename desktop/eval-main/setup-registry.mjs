@@ -1,4 +1,4 @@
-import { COMPLETION_JUDGE_SPEC } from "./task-completion-judge.mjs";
+import { COMPLETION_JUDGE_SPEC, COMPLETION_JUDGE_SCHEMA, COMPLETION_JUDGE_EVIDENCE_CONTRACT, validateCompletionJudgeSpec } from "./task-completion-judge.mjs";
 import { createHash, randomUUID } from "node:crypto";
 import { mkdir, readFile, writeFile, rename } from "node:fs/promises";
 import { dirname, join, basename } from "node:path";
@@ -23,6 +23,7 @@ function template(value, variables) {
   return value;
 }
 const defaultJudgeDirectory = fileURLToPath(new URL("../../eval-configs/judges/", import.meta.url));
+const defaultCompletionJudgeDirectory = fileURLToPath(new URL("../../eval-configs/completion-judges/", import.meta.url));
 const judgeScoringRules = { contractId: "recursive-presentation-judge-v6", dimension: "graph-presentation", scale: "ordered-1-8" };
 function judgeConfigurations(directory) {
   const files = readdirSync(directory).filter((file) => /^[a-zA-Z0-9._-]+\.yaml$/.test(file)).sort();
@@ -45,6 +46,30 @@ function judgeConfigurations(directory) {
     return { file, path, digest: configSource.digest, definition };
   });
 }
+function completionJudgeConfigurations(directory) {
+  const files = readdirSync(directory).filter(file => /^[a-zA-Z0-9._-]+\.yaml$/.test(file)).sort();
+  if (!files.length) fail("No completion judge config files are available.");
+  return files.map(file => {
+    const path = join(directory, file);
+    if (!lstatSync(path).isFile()) fail("Completion judge config must be an ordinary file.");
+    const contents = readFileSync(path, "utf8");
+    if (contents.length > 250000) fail("Completion judge config file is too large.");
+    const document = parseDocument(contents, { uniqueKeys: true });
+    if (document.errors.length) fail(`Invalid completion judge config ${file}: ${document.errors[0].message}`);
+    const input = document.toJS();
+    if (!input || Array.isArray(input) || Object.keys(input).some(key => !["schemaVersion", "kind", "name", "settings", "evidenceContract", "outputSchema", "promptTemplate"].includes(key))
+      || input.schemaVersion !== 1 || input.kind !== "completion-judge"
+      || input.evidenceContract !== COMPLETION_JUDGE_EVIDENCE_CONTRACT.id || input.outputSchema !== "completion-assessment-v1"
+      || !input.settings || Object.keys(input.settings).some(key => !["model", "modelReasoningEffort", "shellAccess"].includes(key))
+      || input.settings.shellAccess !== false) fail(`Unsupported completion judge config contract: ${file}`);
+    const configSource = { file, path, digest: setupDigest(contents), contents };
+    const spec = { version: basename(file, ".yaml"), model: input.settings.model, modelReasoningEffort: input.settings.modelReasoningEffort,
+      promptTemplate: input.promptTemplate, outputSchema: copy(COMPLETION_JUDGE_SCHEMA), evidenceContract: copy(COMPLETION_JUDGE_EVIDENCE_CONTRACT) };
+    const definition = normalize({ kind: input.kind, name: input.name, promptVersion: spec.version, spec, configSource });
+    return { file, path, digest: configSource.digest, definition };
+  });
+}
+export function defaultCompletionJudgeSetup() { return completionJudgeConfigurations(defaultCompletionJudgeDirectory)[0].definition; }
 export function defaultActorSetup() {
   return { kind: "actor", name: "Low-effort user", promptVersion: ACTOR_PROMPT_VERSION, promptTemplate: ACTOR_PROMPT_TEMPLATE,
     settings: actorConfiguration(), behaviorContract: { id: "task-actor-v4", actionSchema: copy(ACTOR_ACTION_SCHEMA), observationContract: copy(ACTOR_OBSERVATION_CONTRACT), completionJudge: copy(COMPLETION_JUDGE_SPEC) } };
@@ -55,9 +80,26 @@ export function defaultJudgeSetup() {
   return config.definition;
 }
 function normalize(input) {
-  if (!["actor", "judge"].includes(input?.kind)) fail("Choose actor or judge setup.");
+  if (!["actor", "judge", "completion-judge"].includes(input?.kind)) fail("Choose actor, completion judge or graph judge setup.");
   if (typeof input.name !== "string" || !input.name.trim() || input.name.length > 200) fail("Name the setup revision.");
   if (typeof input.promptVersion !== "string" || !input.promptVersion.trim() || input.promptVersion.length > 100) fail("Name the prompt version.");
+  if (input.kind === "completion-judge") {
+    try { validateCompletionJudgeSpec(input.spec); } catch { fail("Unsupported completion judge specification."); }
+    if (input.spec.version !== input.promptVersion || JSON.stringify(input.spec.evidenceContract) !== JSON.stringify(COMPLETION_JUDGE_EVIDENCE_CONTRACT)) fail("Completion judge evidence contract is not editable.");
+    // Definitions must retain the exact repository source; dashboard edits are not configs.
+    const source = input.configSource;
+    if (!source || typeof source.contents !== "string" || source.contents.length > 250000
+      || !/^[a-zA-Z0-9._-]+\.yaml$/.test(source.file ?? "") || source.digest !== setupDigest(source.contents)
+      || input.promptVersion !== basename(source.file, ".yaml")) fail("Completion judge requires an exact config snapshot.");
+    const document = parseDocument(source.contents, { uniqueKeys: true });
+    const file = document.toJS();
+    if (document.errors.length || !file || Object.keys(file).some(key => !["schemaVersion", "kind", "name", "settings", "evidenceContract", "outputSchema", "promptTemplate"].includes(key))
+      || file.schemaVersion !== 1 || file.kind !== input.kind || file.name !== input.name || file.promptTemplate !== input.spec.promptTemplate
+      || file.outputSchema !== "completion-assessment-v1" || file.evidenceContract !== COMPLETION_JUDGE_EVIDENCE_CONTRACT.id
+      || Object.keys(file.settings ?? {}).some(key => !["model", "modelReasoningEffort", "shellAccess"].includes(key))
+      || file.settings?.shellAccess !== false || file.settings?.model !== input.spec.model || file.settings?.modelReasoningEffort !== input.spec.modelReasoningEffort) fail("Completion judge config snapshot does not match its definition.");
+    return { kind: input.kind, name: input.name.trim(), promptVersion: input.promptVersion, spec: copy(input.spec), configSource: copy(source) };
+  }
   if (input.kind === "actor") {
     const behaviorContract = defaultActorSetup().behaviorContract;
     const nativeMenuContract = { id: "task-actor-v3", actionSchema: copy(ACTOR_ACTION_SCHEMA), observationContract: copy(ACTOR_OBSERVATION_CONTRACT) };
@@ -90,9 +132,9 @@ function normalize(input) {
 
 // Eval evidence storage only. Publishing and promoting never invoke inference.
 export class SetupRegistry {
-  constructor({ stateFile, judgeConfigDirectory = defaultJudgeDirectory, feedbackLoader = async () => fail("Human feedback is unavailable.") }) {
-    Object.assign(this, { stateFile, feedbackLoader, judgeConfigDirectory });
-    this.state = { schemaVersion: 1, revisions: [], promotions: [] };
+  constructor({ stateFile, judgeConfigDirectory = defaultJudgeDirectory, completionJudgeConfigDirectory = defaultCompletionJudgeDirectory, feedbackLoader = async () => fail("Human feedback is unavailable.") }) {
+    Object.assign(this, { stateFile, feedbackLoader, judgeConfigDirectory, completionJudgeConfigDirectory });
+    this.state = { schemaVersion: 1, revisions: [], promotions: [], evaluatorReleases: [] };
     this.tail = Promise.resolve();
   }
   async open() {
@@ -100,8 +142,12 @@ export class SetupRegistry {
       this.state = JSON.parse(await readFile(this.stateFile, "utf8"));
       if (this.state.schemaVersion !== 1 || !Array.isArray(this.state.revisions) || !Array.isArray(this.state.promotions)) fail("Unsupported setup registry.");
       this.state.revisions.forEach(verify); this.state.promotions.forEach(verify);
+      this.state.evaluatorReleases ??= [];
+      if (!Array.isArray(this.state.evaluatorReleases)) fail("Unsupported evaluator releases.");
+      this.state.evaluatorReleases.forEach(verify);
+      for (const release of this.state.evaluatorReleases) this.validateRelease(release);
     } catch (error) { if (error.code !== "ENOENT") throw error; }
-    for (const [kind, createDefault] of [["actor", defaultActorSetup], ["judge", defaultJudgeSetup]]) {
+    for (const [kind, createDefault] of [["actor", defaultActorSetup], ["judge", defaultJudgeSetup], ["completion-judge", () => this.completionJudgeConfigs()[0].definition]]) {
       if (!this.state.revisions.some(revision => revision.kind === kind)) await this.publish({ ...createDefault(), predecessorId: null, feedback: [] });
     }
     return this;
@@ -130,10 +176,13 @@ export class SetupRegistry {
   selected(kind, id) {
     return this.get(id || this.state.promotions.findLast((item) => item.kind === kind)?.revisionId || this.state.revisions.find((item) => item.kind === kind)?.id, kind);
   }
-  catalog() { return { ...copy(this.state), actorDefinition: defaultActorSetup(), judgeConfigs: this.judgeConfigs() }; }
+  catalog() { return { ...copy(this.state), actorDefinition: defaultActorSetup(), judgeConfigs: this.judgeConfigs(), completionJudgeConfigs: this.completionJudgeConfigs() }; }
   judgeConfigs() { return copy(judgeConfigurations(this.judgeConfigDirectory)); }
-  async publishConfig({ configFile, configDigest, predecessorId, feedback }) {
-    const config = this.judgeConfigs().find((item) => item.file === configFile);
+  completionJudgeConfigs() { return copy(completionJudgeConfigurations(this.completionJudgeConfigDirectory)); }
+  publishCompletionJudgeConfig(input) { return this.publishConfig({ ...input, kind: "completion-judge" }); }
+  async publishConfig({ configFile, configDigest, predecessorId, feedback, kind = "judge" }) {
+    if (!["judge", "completion-judge"].includes(kind)) fail("Unsupported file-backed setup kind.");
+    const config = (kind === "judge" ? this.judgeConfigs() : this.completionJudgeConfigs()).find((item) => item.file === configFile);
     if (!config || config.digest !== configDigest) fail("Judge config changed or is unavailable. Reload it before publishing.");
     return this.publish({ ...config.definition, predecessorId, feedback });
   }
@@ -149,6 +198,30 @@ export class SetupRegistry {
       for (const ref of input.feedback) feedback.push(await this.feedbackLoader(copy(ref)));
       const revision = sealed({ schemaVersion: 1, id: `setup-${randomUUID()}`, ...definition, predecessorId, feedback, publishedAt: new Date().toISOString() });
       this.state.revisions.push(revision); return revision;
+    });
+  }
+  validateRelease(release) {
+    if (release.schemaVersion !== 1 || release.kind !== "evaluator-release" || typeof release.name !== "string" || !release.name.trim() || release.name.length > 200) fail("Invalid evaluator release.");
+    for (const [field, kind] of [["actorSetup", "actor"], ["completionJudgeSetup", "completion-judge"], ["judgeSetup", "judge"]]) {
+      verify(release[field] ?? {});
+      if (JSON.stringify(release[field]) !== JSON.stringify(this.get(release[field].id, kind))) fail("Evaluator release must pin exact registry revisions.");
+    }
+    if (release.predecessorId !== null && !this.state.evaluatorReleases.some(item => item.id === release.predecessorId && item.id !== release.id)) fail("Unknown evaluator release predecessor.");
+  }
+  release(id) {
+    const release = this.state.evaluatorReleases.find(item => item.id === id);
+    if (!release) fail("Unknown evaluator release.");
+    return copy(release);
+  }
+  publishRelease({ name, actorRevisionId, completionJudgeRevisionId, judgeRevisionId, predecessorId = null }) {
+    return this.serial(async () => {
+      if (predecessorId !== null) this.release(predecessorId);
+      const release = sealed({ schemaVersion: 1, kind: "evaluator-release", id: `evaluator-${randomUUID()}`, name,
+        actorSetup: this.get(actorRevisionId, "actor"), completionJudgeSetup: this.get(completionJudgeRevisionId, "completion-judge"),
+        judgeSetup: this.get(judgeRevisionId, "judge"), predecessorId, publishedAt: new Date().toISOString() });
+      this.validateRelease(release);
+      this.state.evaluatorReleases.push(release);
+      return release;
     });
   }
   promote({ revisionId, comment }, author) {
