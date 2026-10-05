@@ -4,16 +4,6 @@ on:
   workflow_dispatch:
   pull_request:
     types: [opened, synchronize, reopened, labeled]
-    paths:
-      - '.github/workflows/desktop-windows-candidate.yml'
-      - 'desktop/windows-version.json'
-      - 'desktop/release/**'
-      - 'desktop/packaging/**'
-      - 'scripts/prepare-ladybug-source.mjs'
-      - 'scripts/capture-ladybug-packaged-lifecycle.mjs'
-      - 'vendor/ladybug/**'
-      - 'crates/**'
-      - 'Cargo.lock'
 
 concurrency:
   group: windows-desktop-candidate-${{ github.event.pull_request.number || github.ref }}

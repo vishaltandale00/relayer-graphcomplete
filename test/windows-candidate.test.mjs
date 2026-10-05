@@ -220,9 +220,10 @@ describe("independent Windows candidate", () => {
     expect(() => validateDesktopPreviewCandidateRun({ ...input, run: { ...input.run, path: ".github/workflows/desktop-signed-preview.yml" } })).toThrow("exact main commit");
   });
 
-  it("keeps signing manual, native qualification unprivileged, and Windows outside main/mac dependencies", async () => {
+  it("lets the explicit label qualify any PR while isolating signing and main/mac dependencies", async () => {
     const workflow = parse(await readFile(new URL("../.github/workflows/desktop-windows-candidate.yml", import.meta.url), "utf8"));
     expect(Object.keys(workflow.on).sort()).toEqual(["pull_request", "workflow_dispatch"]);
+    expect(workflow.on.pull_request).toEqual({ types: ["opened", "synchronize", "reopened", "labeled"] });
     expect(workflow.jobs.qualify.permissions).toEqual({ contents: "read" });
     expect(workflow.jobs.qualify.if).toContain("contains(github.event.pull_request.labels.*.name, 'windows-qualification')");
     expect(workflow.jobs.qualify.if).toContain("needs.validate.result == 'success'");
