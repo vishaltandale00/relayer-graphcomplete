@@ -3,6 +3,7 @@ import { execFile, spawn } from "node:child_process";
 import { createReadStream } from "node:fs";
 import {
   copyFile,
+  lstat,
   mkdir,
   readFile,
   readdir,
@@ -25,7 +26,7 @@ import { extractFile, listPackage } from "@electron/asar";
 import { desktopTargetByKey } from "../shared/target.mjs";
 import { exactKeys } from "../shared/telemetry-validation.mjs";
 
-import { copySignedSymbols, verifySignedSnapshot } from "../packaging/signed-native-cache.mjs";
+import { copySignedSymbols, preserveCompilerSymbols, validateSignedSymbols, verifySignedSnapshot } from "../packaging/signed-native-cache.mjs";
 
 const RELEASE_ID_PREFIX = "ai.relayer.desktop@";
 const RELEASE_COMMIT_PATTERN = /^[a-f0-9]{40}$/u;
@@ -310,7 +311,18 @@ export async function prepareDesktopTelemetryArtifacts({
     for (const binary of selectedRustBinaries) {
       const destination = resolve(debugRoot, `${basename(binary)}.dSYM`);
       if (nativeDebugArtifacts) await copySignedSymbols(nativeDebugArtifacts, basename(binary), destination);
-      else await execute("dsymutil", [binary, "-o", destination], { cwd: repositoryRoot });
+      else {
+        let compilerSymbols = false;
+        try { await lstat(`${binary}.dSYM`); compilerSymbols = true; }
+        catch (error) { if (error.code !== "ENOENT") throw error; }
+        if (compilerSymbols && contract.targetKey === "macos-arm64") {
+          // Packed Cargo symbols outlive temporary objects even when the cache
+          // is disabled or optional sealing/storage failed. Never regenerate a
+          // present but invalid compiler bundle to hide incomplete coverage.
+          await preserveCompilerSymbols(binary, destination);
+          await validateSignedSymbols(binary, destination, async (command, args) => (await capture(command, args)).stdout);
+        } else await execute("dsymutil", [binary, "-o", destination], { cwd: repositoryRoot });
+      }
       const identity = await correlateNativeDebugIdentity({ contract, resources, sourceBinary: binary, debugPath: destination, capture });
       nativeDebugIdentities.push({
         binary: normalizedRelativePath(relative(resources, identity.packagedBinary)),

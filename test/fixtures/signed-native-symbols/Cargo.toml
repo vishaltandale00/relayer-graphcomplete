@@ -1,0 +1,15 @@
+[package]
+name = "signed-native-symbol-fixture"
+version = "0.0.0"
+edition = "2021"
+[workspace]
+[lib]
+name = "lbug"
+[[bin]]
+name = "relayer-app-server"
+path = "src/main.rs"
+[[bin]]
+name = "relayer-graph-server"
+path = "src/main.rs"
+[profile.release]
+debug = 1

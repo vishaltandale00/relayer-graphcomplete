@@ -35,6 +35,14 @@ function run(command, args, options) {
   });
 }
 
+async function cacheOutcome(environment, outcome) {
+  console.log(`Signed native cache outcome: ${outcome}`);
+  try {
+    if (environment.GITHUB_OUTPUT) await appendFile(environment.GITHUB_OUTPUT, `native_cache_outcome=${outcome}\n`);
+    if (environment.GITHUB_STEP_SUMMARY) await appendFile(environment.GITHUB_STEP_SUMMARY, `- Signed native cache: ${outcome}\n`);
+  } catch { /* Optional diagnostic transport cannot change compilation. */ }
+}
+
 export async function buildReleaseRustServers({
   contract,
   environment,
@@ -64,10 +72,13 @@ export async function buildReleaseRustServers({
       const payload = await restore({ identity, directory, environment, capture });
       if (payload) {
         await installSignedNative(payload, resolve(repositoryRoot, "target", target.rustTarget, "release"), capture);
+        await cacheOutcome(environment, "verified-hit; native compilation skipped");
         return payload;
       }
+      await cacheOutcome(environment, "lookup-miss; compiling fresh");
     } catch (error) {
       console.log(`Signed native cache: unavailable/rejected (${error.message}); compiling fresh`);
+      await cacheOutcome(environment, "lookup-unavailable-or-rejected; compiling fresh");
       cache = undefined;
     }
   }
@@ -87,7 +98,7 @@ export async function buildReleaseRustServers({
     ...cargoIntegrityArguments,
   ], {
     cwd: repositoryRoot,
-    env: { ...buildEnvironment, CARGO_PROFILE_RELEASE_DEBUG: "1" },
+    env: { ...buildEnvironment, CARGO_PROFILE_RELEASE_DEBUG: "1", CARGO_PROFILE_RELEASE_SPLIT_DEBUGINFO: "packed" },
   }));
   if (cache) {
     try {
@@ -95,12 +106,14 @@ export async function buildReleaseRustServers({
         generateSymbols, capture });
       if (environment.GITHUB_OUTPUT) await appendFile(environment.GITHUB_OUTPUT,
         `native_artifact=${signedArtifactName(cache.identity, cache.producer)}\nnative_directory=${cache.directory}\n`);
+      await cacheOutcome(environment, "sealed; native artifact ready for upload");
       console.log("Signed native cache: sealed fresh binaries and matching dSYMs");
       return payload;
     } catch (error) {
       // Cache storage/symbol preparation is optional. Keep the successful Cargo
       // build; ordinary telemetry generation remains the release symbol gate.
       console.log(`Signed native cache: save unavailable (${error.message}); using fresh Cargo output`);
+      await cacheOutcome(environment, "seal-failed; no native artifact upload");
     }
   }
   return null;

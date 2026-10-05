@@ -172,6 +172,7 @@ jobs:
       # reused. Restoration authenticates this workflow's successful main attempt
       # and the immutable artifact archive digest before inspecting its payload.
       - name: Preserve verified signed-profile native build output
+        id: native-upload
         if: ${{ steps.signed-build.outputs.native_artifact != '' }}
         continue-on-error: true
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
@@ -181,6 +182,17 @@ jobs:
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 30
+
+      - name: Report signed native cache upload
+        if: always()
+        shell: bash
+        env:
+          CACHE_OUTCOME: ${{ steps.signed-build.outputs.native_cache_outcome }}
+          UPLOAD_OUTCOME: ${{ steps.native-upload.outcome }}
+          ARTIFACT_ID: ${{ steps.native-upload.outputs.artifact-id }}
+          ARTIFACT_DIGEST: ${{ steps.native-upload.outputs.artifact-digest }}
+        run: |
+          printf '%s\n' "### Signed native cache" "- Build: ${CACHE_OUTCOME:-not reached}" "- Upload: ${UPLOAD_OUTCOME:-skipped}" "- Artifact ID: ${ARTIFACT_ID:-none}" "- Archive SHA-256: ${ARTIFACT_DIGEST:-none}" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload version-matched telemetry artifacts
         shell: bash
