@@ -30,7 +30,7 @@ async function nativeHandoffFixture() {
   };
   const contract = resolveDesktopReleaseContract({ environment, version: "0.2.0", sourceCommit: "a".repeat(40) });
   const directory = join(repositoryRoot, "target", contract.rustTarget, "release");
-  const names = ["relayer-app-server.exe", "relayer-app-server.pdb", "relayer-graph-server.exe", "relayer-graph-server.pdb"];
+  const names = ["relayer-app-server.exe", "relayer_app_server.pdb", "relayer-graph-server.exe", "relayer_graph_server.pdb"];
   await mkdir(directory, { recursive: true });
   const receiptPath = join(repositoryRoot, "native.json");
   const produce = async () => { for (const name of names) await writeFile(join(directory, name), `native fixture: ${name}`); };
@@ -232,6 +232,14 @@ describe("independent Windows candidate", () => {
     expect(workflow.jobs.package.needs).toEqual(["validate", "qualify"]);
     expect(workflow.jobs.package.environment).toBe("desktop-production-windows");
     const steps = workflow.jobs.package.steps;
+    for (const job of [workflow.jobs.qualify, workflow.jobs.package]) {
+      const probe = job.steps.findIndex(step => step.run === "node scripts/check-windows-rust-symbols.mjs");
+      const msvc = job.steps.findIndex(step => step.uses?.startsWith("ilammy/msvc-dev-cmd@"));
+      const coldBuild = job.steps.findIndex(step => step.run?.includes("cargo fetch") || step.run?.includes("--prepare-windows-native"));
+      expect(probe).toBeGreaterThan(msvc);
+      expect(msvc).toBeGreaterThan(-1);
+      expect(coldBuild).toBeGreaterThan(probe);
+    }
     const preparation = steps.findIndex(step => step.run?.includes("--prepare-windows-native"));
     const login = steps.findIndex(step => step.uses?.startsWith("azure/login@"));
     const resourceToken = steps.findIndex(step => step.run?.includes("get-access-token"));

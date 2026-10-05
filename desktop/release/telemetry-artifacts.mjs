@@ -26,6 +26,7 @@ import { desktopTargetByKey } from "../shared/target.mjs";
 import { exactKeys } from "../shared/telemetry-validation.mjs";
 
 import { copySignedSymbols, verifySignedSnapshot } from "../packaging/signed-native-cache.mjs";
+import { windowsRustPdbPath } from "./windows-rust-debug.mjs";
 
 const RELEASE_ID_PREFIX = "ai.relayer.desktop@";
 const RELEASE_COMMIT_PATTERN = /^[a-f0-9]{40}$/u;
@@ -322,7 +323,7 @@ export async function prepareDesktopTelemetryArtifacts({
     for (const binary of selectedRustBinaries) {
       const stem = basename(binary).replace(/\.exe$/iu, "");
       const destination = resolve(debugRoot, `${stem}.pdb`);
-      await copyFile(resolve(dirname(binary), `${stem}.pdb`), destination);
+      await copyFile(windowsRustPdbPath(binary), destination);
       const identity = await correlateNativeDebugIdentity({ contract, resources, sourceBinary: binary, debugPath: destination, capture });
       nativeDebugIdentities.push({
         binary: normalizedRelativePath(relative(resources, identity.packagedBinary)),

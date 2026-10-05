@@ -153,6 +153,9 @@
     }
   ],
   "chapterOwners": [
+    { "exact": "desktop/release/windows-rust-debug.mjs", "chapters": ["vitest", "packaging"], "vitestFiles": ["test/windows-candidate.test.mjs", "test/desktop-telemetry-release-artifacts.test.mjs"] },
+    { "exact": "desktop/release/windows-native-handoff.mjs", "chapters": ["vitest", "packaging"], "vitestFiles": ["test/windows-candidate.test.mjs", "test/desktop-telemetry-release-artifacts.test.mjs"] },
+    { "exact": "desktop/release/telemetry-artifacts.mjs", "chapters": ["vitest", "packaging"], "vitestFiles": ["test/windows-candidate.test.mjs", "test/desktop-telemetry-release-artifacts.test.mjs"] },
     { "exact": "crates/relayer-graph-server/build.rs", "chapters": ["vitest", "packaging"], "vitestFiles": ["test/windows-candidate.test.mjs", "test/ladybug-packaged-lifecycle.test.mjs"] },
     { "exact": "crates/relayer-graph-server/build_support/openssl_link.rs", "chapters": ["vitest", "packaging"], "vitestFiles": ["test/windows-candidate.test.mjs", "test/ladybug-packaged-lifecycle.test.mjs"] },
     {
@@ -200,6 +203,7 @@
     { "exact": "docs/provider-model-family-harness-test-matrix.md", "chapters": [] }
   ],
   "scriptOwners": [
+    { "exact": "scripts/check-windows-rust-symbols.mjs", "chapters": ["vitest", "packaging"], "vitestFiles": ["test/windows-candidate.test.mjs", "test/desktop-telemetry-release-artifacts.test.mjs"] },
     { "exact": "scripts/fixtures/share-action-details.mjs", "chapters": ["vitest"], "vitestFiles": ["test/public-share-viewer.test.mjs", "test/conversation-export-eval-e2e.test.mjs"] },
     { "exact": "scripts/fixtures/public-share-embed.mjs", "chapters": ["vitest"], "vitestFiles": ["test/public-share-embed.test.mjs", "test/public-share-viewer.test.mjs"] },
     { "exact": "scripts/capture-public-share-embed-evidence.mjs", "chapters": ["vitest"], "vitestFiles": ["test/public-share-embed.test.mjs", "test/public-share-viewer.test.mjs"] },

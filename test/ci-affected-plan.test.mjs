@@ -84,6 +84,16 @@ function fullPlanWithoutDiff() {
 // Each case spawns the planner as a subprocess, and the full-plan cases also
 // run cargo metadata; the default 5s per-test budget races CI runner load.
 describe("affected-module plan v1", { timeout: 30_000 }, () => {
+  test("maps Windows compiler symbol paths and both consumers to handoff, telemetry, and packaging checkpoints", () => {
+    for (const path of ["desktop/release/windows-rust-debug.mjs", "desktop/release/windows-native-handoff.mjs",
+      "desktop/release/telemetry-artifacts.mjs", "scripts/check-windows-rust-symbols.mjs"]) {
+      const result = plan(path);
+      expect(result.chapters.packaging).toBe(true);
+      expect(result.vitestFiles).toContain("test/windows-candidate.test.mjs");
+      expect(result.vitestFiles).toContain("test/desktop-telemetry-release-artifacts.test.mjs");
+    }
+  });
+
   test("maps static OpenSSL link inputs to target directives, receipts, Rust, and real packaging", () => {
     for (const path of ["crates/relayer-graph-server/build.rs", "crates/relayer-graph-server/build_support/openssl_link.rs"]) {
       const result = plan(path);

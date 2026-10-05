@@ -179,12 +179,18 @@ describe("desktop telemetry release artifacts", () => {
     await mkdir(join(rustBinary, ".."), { recursive: true });
     await mkdir(join(resources, "bin"), { recursive: true });
     await writeFile(rustBinary, "pe", "utf8");
-    await writeFile(join(rustBinary, "..", "relayer-app-server.pdb"), "pdb", "utf8");
+    await writeFile(join(rustBinary, "..", "relayer_app_server.pdb"), "app pdb", "utf8");
     await writeFile(join(resources, "bin", "relayer-app-server.exe"), "pe", "utf8");
+    const graphBinary = join(rustBinary, "..", "relayer-graph-server.exe");
+    await writeFile(graphBinary, "graph pe", "utf8");
+    await writeFile(join(rustBinary, "..", "relayer_graph_server.pdb"), "graph pdb", "utf8");
+    await writeFile(join(resources, "bin", "relayer-graph-server.exe"), "graph pe", "utf8");
     const guid = "87654321-4321-4321-4321-cba987654321";
-    const capture = vi.fn(async (command) => ({
-      stdout: command === "llvm-readobj" ? `PDBGUID: {${guid}}\nPDBAge: 3\n` : `Guid: ${guid}\nAge: 3\n`,
-    }));
+    const graphGuid = "12345678-1234-1234-1234-123456789abc";
+    const capture = vi.fn(async (command, args) => {
+      const identity = args.at(-1).includes("relayer-graph-server") ? graphGuid : guid;
+      return { stdout: command === "llvm-readobj" ? `PDBGUID: {${identity}}\nPDBAge: 3\n` : `Guid: ${identity}\nAge: 3\n` };
+    });
     const manifest = await prepareDesktopTelemetryArtifacts({
       contract: contract({
         targetKey: "windows-x64",
@@ -197,11 +203,19 @@ describe("desktop telemetry release artifacts", () => {
       outputRoot,
       packagedApplication,
       sourceGroups: [["electron", "desktop/main/index.mjs"]],
-      rustBinaries: [rustBinary],
+      rustBinaries: [rustBinary, graphBinary],
       capture,
     });
-    expect(manifest.nativeDebugIdentities[0].debugId).toBe(`${guid}-3`);
-    expect(capture).toHaveBeenCalledWith("llvm-readobj", expect.arrayContaining([expect.stringMatching(/relayer-app-server\.exe$/u)]));
+    expect(manifest.nativeDebugIdentities).toEqual([
+      { binary: "bin/relayer-app-server.exe", debug: "debug/relayer-app-server.pdb", debugId: `${guid}-3` },
+      { binary: "bin/relayer-graph-server.exe", debug: "debug/relayer-graph-server.pdb", debugId: `${graphGuid}-3` },
+    ]);
+    for (const [name, contents] of [["relayer-app-server", "app pdb"], ["relayer-graph-server", "graph pdb"]]) {
+      const copiedPdb = join(outputRoot, "debug", `${name}.pdb`);
+      expect(await readFile(copiedPdb, "utf8")).toBe(contents);
+      expect(capture).toHaveBeenCalledWith("llvm-readobj", ["--coff-debug-directory", join(resources, "bin", `${name}.exe`)]);
+      expect(capture).toHaveBeenCalledWith("llvm-pdbutil", ["dump", "-summary", copiedPdb]);
+    }
 
     const mismatchedCapture = vi.fn(async (command) => ({
       stdout: command === "llvm-readobj" ? `PDBGUID: {${guid}}\nPDBAge: 3\n` : `Guid: ${guid}\nAge: 4\n`,

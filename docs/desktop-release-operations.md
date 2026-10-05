@@ -155,6 +155,8 @@ Windows owns `desktop/windows-version.json`, starting at `0.2.0`. macOS keeps it
 
 The protected Windows package job compiles native release inputs before Azure login. A same-job handoff binds the clean release contract, workflow run/attempt/job, both EXEs, and both PDB hashes. After fresh login it silently obtains the Artifact Signing resource token; packaging rechecks the license and handoff, then performs the existing assembly, lifecycle, signature, telemetry, and sealing gates without recompilation. The handoff grants no cache or publication authority. This avoids consuming a login session older than the hour-long cold native build.
 
+Before either Windows native build, `node scripts/check-windows-rust-symbols.mjs` compiles two dependency-free targets with the pinned Rust toolchain and MSVC. It checks the real EXE/PDB outputs through the same source-path resolver used by handoff and telemetry: Cargo retains hyphens in EXE names and uses underscores in PDB names. Telemetry copies those source PDBs to its existing hyphenated manifest paths, then correlates their GUID and age with the packaged EXEs. This probe is Windows-only; local fixtures do not substitute for its compiler proof.
+
 The native source route uses MSVC, pinned Ladybug and static OpenSSL, locked offline Cargo, PE architecture/import verification for both Rust executables, and a packaged graph-server create/lock/shutdown/reopen test. Existing native caches qualify macOS arm64 only; the first Windows runs compile fresh and record that reason. Never relax the main-source gate to sign pull-request code.
 
 1. Configure the active profile and exact certificate subject. Verify the OIDC federation and profile-scoped signer role.

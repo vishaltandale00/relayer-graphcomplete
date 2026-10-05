@@ -1,11 +1,12 @@
 import { createHash } from "node:crypto";
 import { createReadStream } from "node:fs";
 import { lstat, readFile, writeFile } from "node:fs/promises";
-import { resolve } from "node:path";
+import { basename, resolve } from "node:path";
 
 import { requireLadybugDistributionLicenseReady } from "../packaging/pinned-ladybug-build.mjs";
+import { windowsRustPdbPath } from "./windows-rust-debug.mjs";
 
-const FILES = ["relayer-app-server.exe", "relayer-app-server.pdb", "relayer-graph-server.exe", "relayer-graph-server.pdb"];
+const BINARIES = ["relayer-app-server.exe", "relayer-graph-server.exe"];
 
 export function windowsNativeHandoffContext(contract, environment) {
   if (!contract.release || contract.targetKey !== "windows-x64"
@@ -21,8 +22,12 @@ export function windowsNativeHandoffContext(contract, environment) {
 
 async function inventory(repositoryRoot, contract) {
   const directory = resolve(repositoryRoot, "target", contract.rustTarget, "release");
-  return Promise.all(FILES.map(async name => {
-    const path = resolve(directory, name);
+  const files = BINARIES.flatMap(name => {
+    const binary = resolve(directory, name);
+    return [binary, windowsRustPdbPath(binary)];
+  });
+  return Promise.all(files.map(async path => {
+    const name = basename(path);
     const info = await lstat(path);
     if (!info.isFile() || info.size === 0) throw new Error(`Windows native handoff requires a nonempty regular file: ${name}`);
     const hash = createHash("sha256");
