@@ -1,4 +1,4 @@
-import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { execFile } from "node:child_process";
@@ -7,7 +7,8 @@ import { fileURLToPath } from "node:url";
 import { createPackage } from "@electron/asar";
 import { parse } from "yaml";
 import { describe, expect, it } from "vitest";
-import { loadDesktopReleaseContract } from "../desktop/release/contract.mjs";
+import { loadDesktopReleaseContract, resolveDesktopReleaseContract } from "../desktop/release/contract.mjs";
+import { buildDesktopRelease, buildReleaseNativeInputs, parseDesktopReleaseArguments, prepareWindowsNativeInputs } from "../desktop/release/build-release.mjs";
 import { desktopReleaseTag, loadDesktopVersion } from "../desktop/release/version.mjs";
 import { createDesktopBuilderConfig } from "../desktop/packaging/electron-builder.mjs";
 import { verifyPackagedDesktopContract } from "../desktop/release/verify-packaged-contract.mjs";
@@ -16,7 +17,108 @@ import { validateDesktopPreviewCandidateRun, WINDOWS_CANDIDATE_WORKFLOW_PATH } f
 
 const execFileAsync = promisify(execFile);
 
+async function nativeHandoffFixture() {
+  const repositoryRoot = await mkdtemp(join(tmpdir(), "windows-native-handoff-"));
+  const environment = {
+    GITHUB_ACTIONS: "true", GITHUB_RUN_ID: "123", GITHUB_RUN_ATTEMPT: "1", GITHUB_JOB: "package",
+    RELAYER_DESKTOP_RELEASE: "1", RELAYER_DESKTOP_TARGET: "windows-x64", RELAYER_DESKTOP_CHANNEL: "preview",
+    RELAYER_DESKTOP_CANDIDATE_RUN_ID: "123", RELAYER_DESKTOP_CANDIDATE_RUN_ATTEMPT: "1",
+    RELAYER_DESKTOP_UPDATE_BASE_URL: "https://updates.relayerlabs.ai/desktop/windows/x64",
+    RELAYER_WINDOWS_SIGNING_ENDPOINT: "https://eus.codesigning.azure.net/",
+    RELAYER_WINDOWS_SIGNING_ACCOUNT: "relayercodesigning", RELAYER_WINDOWS_CERTIFICATE_PROFILE: "relayer-windows",
+    RELAYER_WINDOWS_PUBLISHER_NAME: "CN=Relayer Labs LLC, O=Relayer Labs LLC, L=Lewes, S=Delaware, C=US",
+  };
+  const contract = resolveDesktopReleaseContract({ environment, version: "0.2.0", sourceCommit: "a".repeat(40) });
+  const directory = join(repositoryRoot, "target", contract.rustTarget, "release");
+  const names = ["relayer-app-server.exe", "relayer-app-server.pdb", "relayer-graph-server.exe", "relayer-graph-server.pdb"];
+  await mkdir(directory, { recursive: true });
+  const receiptPath = join(repositoryRoot, "native.json");
+  const produce = async () => { for (const name of names) await writeFile(join(directory, name), `native fixture: ${name}`); };
+  return { repositoryRoot, environment, contract, directory, names, receiptPath, produce };
+}
+
 describe("independent Windows candidate", () => {
+  it("dispatches CLI preparation and consumption through production release orchestration before assembly", async () => {
+    const f = await nativeHandoffFixture();
+    const commands = [];
+    const options = { ...f, loadContract: async () => f.contract,
+      execute: async (_command, args) => { commands.push(args); throw Error("assembly boundary reached"); } };
+    try {
+      await buildDesktopRelease({ ...options, ...parseDesktopReleaseArguments(["preview", "--prepare-windows-native", f.receiptPath]),
+        buildNative: f.produce });
+      expect(commands).toEqual([]);
+      const consume = { ...options, ...parseDesktopReleaseArguments(["preview", "--use-windows-native", f.receiptPath]),
+        buildNative: async () => { throw Error("unexpected compilation"); } };
+      await writeFile(join(f.directory, f.names[0]), "tampered");
+      await expect(buildDesktopRelease(consume)).rejects.toThrow("EXE/PDB bytes");
+      expect(commands).toEqual([]);
+      await f.produce();
+      await expect(buildDesktopRelease(consume)).rejects.toThrow("assembly boundary reached");
+      expect(commands).toHaveLength(1);
+      expect(commands[0]).toContain("--win");
+      expect(commands[0]).toContain("nsis");
+      for (const args of [["preview", "--use-windows-native"], ["preview", "--skip-native", f.receiptPath],
+        ["preview", "--prepare-windows-native", f.receiptPath, "extra"]]) {
+        expect(() => parseDesktopReleaseArguments(args)).toThrow("Usage");
+      }
+    } finally { await rm(f.repositoryRoot, { recursive: true, force: true }); }
+  });
+  it("seals native inputs only after the production pinned release builder succeeds", async () => {
+    const f = await nativeHandoffFixture();
+    const commands = [];
+    try {
+      const result = await prepareWindowsNativeInputs({ ...f,
+        prepareLadybug: async () => ({ environment: { OPENSSL_DIR: f.repositoryRoot, LBUG_SOURCE_DIR: f.repositoryRoot,
+          OPENSSL_STATIC: "1", LBUG_BUILD_FROM_SOURCE: "1", CARGO_NET_OFFLINE: "true" }, dispose: async () => {} }),
+        execute: async (command, args, options) => {
+          commands.push({ command, args, environment: options.env });
+          if (args[0] === "build") await f.produce();
+        },
+      });
+      expect(result.nativeReceipt).toBe(f.receiptPath);
+      expect(commands.map(call => call.args[0])).toEqual(["fetch", "build"]);
+      expect(commands[1].args).toContain("--offline");
+      expect(commands[1].environment.CARGO_PROFILE_RELEASE_DEBUG).toBe("1");
+      expect(JSON.parse(await readFile(f.receiptPath, "utf8")).files).toHaveLength(4);
+      await expect(prepareWindowsNativeInputs({ ...f,
+        verifyLadybugDistributionLicense: async () => { throw Error("license blocked"); },
+      })).rejects.toThrow("license blocked");
+      await expect(readFile(f.receiptPath)).rejects.toMatchObject({ code: "ENOENT" });
+      await expect(prepareWindowsNativeInputs({ ...f, buildNative: async () => { throw Error("native compilation failed"); } }))
+        .rejects.toThrow("native compilation failed");
+      await expect(readFile(f.receiptPath)).rejects.toMatchObject({ code: "ENOENT" });
+    } finally { await rm(f.repositoryRoot, { recursive: true, force: true }); }
+  });
+
+  it("consumes only unchanged same-job EXE/PDB inputs without preparing or compiling native code", async () => {
+    const f = await nativeHandoffFixture();
+    try {
+      await prepareWindowsNativeInputs({ ...f, buildNative: f.produce });
+      const consume = { ...f, preparedWindowsNativeReceipt: f.receiptPath,
+        buildNative: async () => { throw Error("native compilation must not run"); } };
+      expect(await buildReleaseNativeInputs(consume)).toBeNull();
+      for (const changed of [{ sourceCommit: "b".repeat(40) }, { version: "0.2.1" }, { channelName: "stable" },
+        { targetKey: "macos-arm64" }, { candidateWorkflowRunId: "124" }, { candidateWorkflowRunAttempt: "2" },
+        { publisherName: "CN=Other, O=Other" }]) {
+        await expect(buildReleaseNativeInputs({ ...consume, contract: { ...f.contract, ...changed } })).rejects.toThrow("handoff");
+      }
+      for (const changed of [{ GITHUB_JOB: "different-job" }, { GITHUB_RUN_ID: "124" }, { GITHUB_RUN_ATTEMPT: "2" }, { GITHUB_ACTIONS: "false" }]) {
+        await expect(buildReleaseNativeInputs({ ...consume, environment: { ...f.environment, ...changed } })).rejects.toThrow("handoff");
+      }
+      await expect(buildReleaseNativeInputs({ ...consume, requireLicense: async () => { throw Error("license revoked"); } }))
+        .rejects.toThrow("license revoked");
+      for (const name of f.names) {
+        await writeFile(join(f.directory, name), "changed native bytes");
+        await expect(buildReleaseNativeInputs(consume)).rejects.toThrow("EXE/PDB bytes");
+        await f.produce();
+      }
+      await rm(join(f.directory, f.names[0]));
+      await symlink(join(f.directory, f.names[2]), join(f.directory, f.names[0]));
+      await expect(buildReleaseNativeInputs(consume)).rejects.toThrow("regular file");
+      expect(await buildReleaseNativeInputs({ contract: { targetKey: "macos-arm64" }, buildNative: async () => "ordinary native build" }))
+        .toBe("ordinary native build");
+    } finally { await rm(f.repositoryRoot, { recursive: true, force: true }); }
+  });
   it("emits static OpenSSL system dependencies from the actual target build script", async () => {
     const root = await mkdtemp(join(tmpdir(), "windows-openssl-link-"));
     try {
@@ -128,6 +230,16 @@ describe("independent Windows candidate", () => {
     expect(workflow.jobs.package.if).toBe("${{ github.event_name == 'workflow_dispatch' }}");
     expect(workflow.jobs.package.needs).toEqual(["validate", "qualify"]);
     expect(workflow.jobs.package.environment).toBe("desktop-production-windows");
+    const steps = workflow.jobs.package.steps;
+    const preparation = steps.findIndex(step => step.run?.includes("--prepare-windows-native"));
+    const login = steps.findIndex(step => step.uses?.startsWith("azure/login@"));
+    const resourceToken = steps.findIndex(step => step.run?.includes("get-access-token"));
+    const packaging = steps.findIndex(step => step.run?.includes("--use-windows-native"));
+    expect(preparation).toBeGreaterThan(-1);
+    expect(login).toBeGreaterThan(preparation);
+    expect(resourceToken).toBeGreaterThan(login);
+    expect(packaging).toBeGreaterThan(resourceToken);
+    expect(steps[resourceToken].run).toBe("az account get-access-token --resource https://codesigning.azure.net --output none");
     expect(workflow.jobs.validate.steps.some(step => step.run === 'test "$GITHUB_REF" = refs/heads/main')).toBe(true);
     expect(workflow.jobs.validate.steps.some(step => step.run === "node desktop/release/main-ci-check.mjs")).toBe(true);
     const text = JSON.stringify(workflow);

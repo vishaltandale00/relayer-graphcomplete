@@ -97,7 +97,9 @@ jobs:
     if: ${{ github.event_name == 'workflow_dispatch' }}
     needs: [validate, qualify]
     runs-on: windows-2025
-    timeout-minutes: 90
+    # Cold native compilation already took over an hour; leave room for fresh
+    # signing, installer verification, and mandatory symbol upload.
+    timeout-minutes: 120
     environment: desktop-production-windows
     permissions:
       actions: read
@@ -136,13 +138,19 @@ jobs:
           foreach ($name in @("AZURE_CLIENT_ID", "AZURE_TENANT_ID", "AZURE_SUBSCRIPTION_ID", "RELAYER_WINDOWS_CERTIFICATE_PROFILE", "RELAYER_WINDOWS_PUBLISHER_NAME")) {
             if ([string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($name))) { throw "Missing signing variable: $name" }
           }
+      - name: Build exact-source native release before signing login
+        shell: pwsh
+        run: node desktop/release/build-release.mjs preview --prepare-windows-native "$env:RUNNER_TEMP/windows-release-native.json"
       - uses: azure/login@f5d393ae46f8fde4be8b75f32e3fc50e654ad0ca
         with:
           client-id: ${{ vars.AZURE_CLIENT_ID }}
           tenant-id: ${{ vars.AZURE_TENANT_ID }}
           subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      - name: Authenticate Artifact Signing resource
+        run: az account get-access-token --resource https://codesigning.azure.net --output none
       - name: Build and verify signed installer
-        run: npm run desktop:dist:preview
+        shell: pwsh
+        run: npm run desktop:dist:preview -- --use-windows-native "$env:RUNNER_TEMP/windows-release-native.json"
       - name: Upload version-matched telemetry
         env:
           RELAYER_DESKTOP_RELEASE: '1'

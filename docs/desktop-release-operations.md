@@ -153,6 +153,8 @@ Windows owns `desktop/windows-version.json`, starting at `0.2.0`. macOS keeps it
 
 `Windows Desktop Candidate` runs unsigned native qualification only on affected pull requests labeled `windows-qualification`. It grants no signing identity to that job. A manual run from main additionally requires successful exact-source main CI, signs through `desktop-production-windows`, verifies the signed application and installer, uploads telemetry, and seals its candidate artifact. It cannot change an update feed. Main CI and macOS release jobs have no dependency on this workflow.
 
+The protected Windows package job compiles native release inputs before Azure login. A same-job handoff binds the clean release contract, workflow run/attempt/job, both EXEs, and both PDB hashes. After fresh login it silently obtains the Artifact Signing resource token; packaging rechecks the license and handoff, then performs the existing assembly, lifecycle, signature, telemetry, and sealing gates without recompilation. The handoff grants no cache or publication authority. This avoids consuming a login session older than the hour-long cold native build.
+
 The native source route uses MSVC, pinned Ladybug and static OpenSSL, locked offline Cargo, PE architecture/import verification for both Rust executables, and a packaged graph-server create/lock/shutdown/reopen test. Existing native caches qualify macOS arm64 only; the first Windows runs compile fresh and record that reason. Never relax the main-source gate to sign pull-request code.
 
 1. Configure the active profile and exact certificate subject. Verify the OIDC federation and profile-scoped signer role.
