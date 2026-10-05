@@ -252,7 +252,7 @@ it("recovers an interrupted first-open registry without rewriting the saved acto
   expect((await new SetupRegistry({ stateFile }).open()).catalog().revisions).toEqual(reopened.catalog().revisions);
 });
 
-it("pins historical v2 through a promotion during discovery, while explicit v7 executes its own template", async () => {
+it("pins historical v2 through a promotion during discovery, while explicit v8 executes its own template", async () => {
   const legacy = { ...defaultActorSetup(), promptVersion: "task-actor-v2", promptTemplate: defaultActorSetup().promptTemplate.replace("a visibly displayed option label", "an option value") };
   const f = await fixture({ initialActor: legacy });
   // Reopen a sealed pre-v4 record, rather than publishing an obsolete contract today.
@@ -261,6 +261,7 @@ it("pins historical v2 through a promotion during discovery, while explicit v7 e
   historical.behaviorContract.id = "task-actor-v2";
   delete historical.behaviorContract.observationContract;
   delete historical.behaviorContract.completionJudge;
+  delete historical.behaviorContract.participantMayStopIncomplete;
   historical.behaviorContract.actionSchema.properties.reason = { type: "string" };
   const { digest: previousDigest, ...historicalRecord } = historical;
   historical.digest = setupDigest(historicalRecord);
@@ -277,7 +278,7 @@ it("pins historical v2 through a promotion during discovery, while explicit v7 e
   f.actors.resolveRuntime = async () => { entered(); await new Promise(resolve => { release = resolve; }); return {}; };
   const pending = f.actors.create({ mode: "simulated", maxCompletions: 1, endpoint: "Agreement" });
   await discovering;
-  await reopened.promote({ revisionId: next.id, comment: "Human explicitly promotes v7" }, f.tasks.annotator);
+  await reopened.promote({ revisionId: next.id, comment: "Human explicitly promotes v8" }, f.tasks.annotator);
   release(); const task = await pending; await f.actors.running.get(task.id).done;
   expect(f.tasks.get(task.id).actorSetup).toEqual(old);
   expect(f.calls.at(-1).config.promptVersion).toBe("task-actor-v2");
@@ -288,7 +289,7 @@ it("pins historical v2 through a promotion during discovery, while explicit v7 e
   const revised = await f.start(next.id);
   expect(revised.actorSetup).toEqual(next);
   expect(old.behaviorContract.actionSchema).not.toEqual(next.behaviorContract.actionSchema);
-  expect(f.calls.at(-1).config.promptVersion).toBe("task-actor-v7");
+  expect(f.calls.at(-1).config.promptVersion).toBe("task-actor-v8");
   expect(next.behaviorContract.observationContract).toEqual({ id: "task-actor-observation-v2", optionObservation: "opened-native-select-accessibility" });
   expect(f.calls.filter(call => "browserObservationContract" in call).at(-1).browserObservationContract).toEqual(next.behaviorContract.observationContract);
   expect(f.calls.at(-1).prompt).toContain("Never guess an option or use a hidden value");
@@ -395,7 +396,7 @@ it("executes an explicit evaluator release independently of the actor and preser
   const reopened = await new HumanTaskService(f.options).open();
   expect((await reopened.export(task.id)).bundle.session.evaluatorRelease).toEqual(release);
   expect(reopened.get(task.id).events.find(event => event.id === evidence.id)).toEqual(evidence);
-  expect(finished.termination).toMatchObject({ success: null, endpointAttainment: "judge_reported" });
+  expect(finished.termination).toMatchObject({ success: null, reason: "satisfied", endpointAttainment: "not_claimed" });
 });
 
 it("rejects conflicting release pins and completion preflight failures before candidate dispatch", async () => {
@@ -437,4 +438,37 @@ it("keeps the independent completion revision fixed across actor calibration, in
   await f.actors.running.get(changed.id).done;
   await expect(f.calibration.observe({ ...ref, labelId: set.members[0].labels[0].id, taskId: changed.id, value: 3, comment: "Changed immutable evaluator" })).rejects.toThrow("pinned completion judge");
   await expect(f.calibration.compare({ baselineRevisionId: completion.id, candidateRevisionId: other.id, calibrationSetId: set.id })).rejects.toThrow("stopping-point contract");
+});
+
+it("selects v2 evidence through a real release and preserves the actual changed-file packet after export and reopen", async () => {
+  const { execFileSync } = await import("node:child_process");
+  const { EvalService } = await import("../desktop/eval-main/eval-service.mjs");
+  const f = await fixture(); const workspace = join(f.directory, "repair"); await mkdir(join(workspace, "test"), { recursive: true });
+  const git = (...args) => execFileSync("git", args, { cwd: workspace, encoding: "utf8" }).trim();
+  git("init", "-q"); git("config", "user.name", "Fixture"); git("config", "user.email", "fixture@example.invalid");
+  await writeFile(join(workspace, "index.js"), "old();\n" + "unchanged();\n".repeat(4000)); git("add", "."); git("commit", "-qm", "Baseline"); const baseline = git("rev-parse", "HEAD");
+  await writeFile(join(workspace, "index.js"), "reserveBeforeWrite();\n" + "unchanged();\n".repeat(4000));
+  await writeFile(join(workspace, "test", "command-queue-race.test.js"), "assertQueueSettles();\n"); git("add", "."); git("commit", "-qm", "Repair");
+  const config = f.registry.completionJudgeConfigs().find(c => c.file === "completion-judge-v2.yaml");
+  const prior = await f.start(); await f.tasks.grade(prior.id, { satisfaction: 2, comment: "Completion evidence omitted the changed regression." });
+  const completion = await f.registry.publishCompletionJudgeConfig({ configFile: config.file, configDigest: config.digest, predecessorId: f.registry.selected("completion-judge").id, feedback: [{ sessionId: prior.id, gradeIndex: 0 }] });
+  const release = await f.registry.publishRelease({ name: "Evidence v2", actorRevisionId: f.registry.selected("actor").id, completionJudgeRevisionId: completion.id, judgeRevisionId: f.registry.selected("judge").id });
+  const prepare = f.options.evalService.prepareHumanTask;
+  f.options.evalService.prepareHumanTask = async () => { const prepared = await prepare(); prepared.execution.fixture = { workspaceDirectory: workspace, upstreamCommit: baseline }; return prepared; };
+  f.options.evalService.assertHumanTaskCatalog = async () => {};
+  f.options.evalService.completionJudgeArtifactEvidence = (...args) => EvalService.prototype.completionJudgeArtifactEvidence.apply(f.options.evalService, args);
+  const evaluate = vi.fn(async evidence => {
+    expect(evidence.artifactEvidence.repository).toMatchObject({ baseline, head: git("rev-parse", "HEAD"), stable: true, commitCount: 1 });
+    expect(evidence.artifactEvidence.repository.diff.text).toContain("reserveBeforeWrite");
+    expect(evidence.artifactEvidence.files.some(file => file.path === "test/command-queue-race.test.js")).toBe(true);
+    return { verdict: "uncertain", evidenceExplanation: "Draft retained; physical fit not confirmed.", continuationHint: "Check the missing measurements when available.", usage: null };
+  });
+  f.actors.createCompletionJudge = async ({ config }) => { expect(config).toEqual(completion.spec); return { evaluate, close: async () => {} }; };
+  const task = await f.actors.create({ mode: "simulated", maxCompletions: 2, endpoint: "Agreement", evaluatorReleaseId: release.id }); await f.actors.running.get(task.id).done;
+  const result = f.tasks.get(task.id), evidence = result.events.find(e => e.kind === "actor_completion_evidence");
+  expect(evaluate).toHaveBeenCalledOnce(); expect(evidence.evidenceContract).toBe("completion-evidence-v2");
+  expect(evidence.inputDigest).toBe(setupDigest(evaluate.mock.calls[0][0])); expect(result.termination).toMatchObject({ reason: "satisfied", endpointAttainment: "not_claimed", success: null });
+  const reopened = await new HumanTaskService(f.options).open(); const exported = await reopened.export(task.id);
+  expect(exported.bundle.session.events.find(e => e.id === evidence.id)).toEqual(evidence); expect(exported.bundle.session.evaluatorRelease).toEqual(release);
+  expect(f.registry.selected("completion-judge").spec.evidenceContract.id).toBe("completion-evidence-v1");
 });

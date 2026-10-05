@@ -22,3 +22,12 @@ export function resolveEvaluatorSelection(registry, selection) {
   };
 }
 export const completionJudgeSpec = task => task.completionJudgeSetup?.spec ?? task.actorSetup?.behaviorContract?.completionJudge;
+
+// Opt-in participant authority; old actor revisions keep judge-gated stopping.
+export function participantMayStopIncomplete(task, action) {
+  return task.actorSetup?.behaviorContract?.id === "task-actor-v5"
+    && task.actorSetup.behaviorContract.participantMayStopIncomplete === true
+    && ["satisfied", "abandoned"].includes(action?.reason)
+    && ["incomplete", "uncertain"].includes(action?.endpointStatus)
+    && typeof action?.remainingWork === "string" && action.remainingWork.trim().length > 0;
+}

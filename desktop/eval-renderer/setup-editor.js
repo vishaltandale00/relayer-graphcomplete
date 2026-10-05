@@ -20,7 +20,7 @@ export function initializeSetupEditor({ api, root, toast, changed }) {
       <label>Model<input name="model" value="${escape(source.settings.model)}" required></label>
       <label>Reasoning<select name="modelReasoningEffort">${["low", "medium", "high"].map((value) => `<option ${source.settings.modelReasoningEffort === value ? "selected" : ""}>${value}</option>`).join("")}</select></label>
       <label>Exploration<select name="exploration">${["low", "medium", "high"].map((value) => `<option ${source.settings.exploration === value ? "selected" : ""}>${value}</option>`).join("")}</select></label><label>Meticulousness<select name="meticulousness">${["low", "medium", "high"].map((value) => `<option ${source.settings.meticulousness === value ? "selected" : ""}>${value}</option>`).join("")}</select></label><label>Action limit<input name="maxActions" type="number" value="${source.settings.maxActions}" min="1" max="500"></label><label>Deadline in minutes (including startup)<input name="timeoutMinutes" type="number" value="${source.settings.timeoutMs / 60000}" min="1" max="60" step="any" required></label>
-      ${source.behaviorContract?.completionJudge ? `<p id="setupCompletionReviewer">Completion reviewer: ${escape(source.behaviorContract.completionJudge.model)} · ${escape(source.behaviorContract.completionJudge.modelReasoningEffort)} reasoning · ${escape(source.behaviorContract.completionJudge.version)}. This revision requires its approval to finish.</p>` : `<p id="setupCompletionReviewer">This historical revision lets the actor decide when to finish.</p>`}
+      ${source.behaviorContract?.completionJudge ? `<p id="setupCompletionReviewer">Completion reviewer: ${escape(source.behaviorContract.completionJudge.model)} · ${escape(source.behaviorContract.completionJudge.modelReasoningEffort)} reasoning · ${escape(source.behaviorContract.completionJudge.version)}. ${source.behaviorContract.participantMayStopIncomplete ? "Endpoint claims require approval; the participant may stop with unresolved work recorded." : "This revision requires its approval to finish."}</p>` : `<p id="setupCompletionReviewer">This historical revision lets the actor decide when to finish.</p>`}
       <label>Prompt template<textarea name="promptTemplate" rows="10" maxlength="100000" required>${escape(source.promptTemplate)}</textarea></label>
       <p>Keep the {{runtime}} variables. Task evidence is supplied at execution, without feedback lineage or human target grades.</p>`}
       <p>Select motivating human feedback before publishing.</p>
@@ -47,6 +47,7 @@ export function initializeSetupEditor({ api, root, toast, changed }) {
     const upgradeActor = root.querySelector("#setupUseCurrentActor");
     if (upgradeActor) upgradeActor.onclick = () => {
       const definition = catalog.actorDefinition;
+      source = { ...source, behaviorContract: structuredClone(definition.behaviorContract) };
       root.querySelector('[name="promptVersion"]').value = definition.promptVersion;
       root.querySelector('[name="promptTemplate"]').value = definition.promptTemplate;
       root.querySelector("#setupCompletionReviewer").textContent = `Pending new revision: ${definition.behaviorContract.completionJudge.model} · ${definition.behaviorContract.completionJudge.modelReasoningEffort} completion review. Publish to save; existing runs stay unchanged.`;

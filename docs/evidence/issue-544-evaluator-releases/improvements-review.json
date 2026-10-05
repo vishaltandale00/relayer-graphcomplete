@@ -1,0 +1,36 @@
+{
+  "reviewers": [
+    {
+      "reviewer": "/root/independent_authority",
+      "scope": "all 19 changed source/PRD/YAML/test files, excluding evidence docs",
+      "sourceDigest": "65cf6c7e1f7035c4fb4edc7b07c4929a801cbfb767e6762bba9ebb4c9e1a289d",
+      "scopeFile": "improvements-source-scope.txt",
+      "verdict": "no unresolved authority findings; executable filters and same-status mutation findings repaired",
+      "unresolved": []
+    },
+    {
+      "reviewer": "/root/release_ui",
+      "scope": [
+        "desktop/eval-main/evaluator-selection.mjs",
+        "desktop/eval-main/human-task-service.mjs",
+        "desktop/eval-main/setup-registry.mjs",
+        "desktop/eval-main/task-actor-service.mjs",
+        "desktop/eval-main/task-actor.mjs",
+        "desktop/eval-renderer/human-tasks.js",
+        "desktop/eval-renderer/setup-editor.js",
+        "docs/evidence/issue-544-evaluator-releases/README.md",
+        "docs/prd/index.html",
+        "eval-configs/completion-judges/completion-judge-v2.yaml",
+        "scripts/test-eval-web.mjs",
+        "test/eval-human-task.test.mjs",
+        "test/eval-setup-registry.test.mjs",
+        "test/eval-task-actor.test.mjs"
+      ],
+      "sourceDigest": "563b03f3c58298422ccce15e7aa234d14ce184ea2f555cfd262eb40462565ec3",
+      "verdict": "no unresolved semantic, UX or product-mapping findings",
+      "unresolved": []
+    }
+  ],
+  "digestMethod": "SHA256 sorted relative UTF8 path + NUL + exact file bytes + NUL",
+  "certification": "Non-certifying without a PR; reviewers did not run heavy gates. Invalidate on scoped state change."
+}

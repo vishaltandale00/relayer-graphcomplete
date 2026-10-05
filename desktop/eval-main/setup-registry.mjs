@@ -1,4 +1,4 @@
-import { COMPLETION_JUDGE_SPEC, COMPLETION_JUDGE_SCHEMA, COMPLETION_JUDGE_EVIDENCE_CONTRACT, validateCompletionJudgeSpec } from "./task-completion-judge.mjs";
+import { COMPLETION_JUDGE_SPEC, COMPLETION_JUDGE_SCHEMA, COMPLETION_JUDGE_EVIDENCE_CONTRACT, completionEvidenceContract, validateCompletionJudgeSpec } from "./task-completion-judge.mjs";
 import { createHash, randomUUID } from "node:crypto";
 import { mkdir, readFile, writeFile, rename } from "node:fs/promises";
 import { dirname, join, basename } from "node:path";
@@ -6,7 +6,7 @@ import { readFileSync, readdirSync, lstatSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { parseDocument } from "yaml";
 import { GRAPH_PRESENTATION_RUBRIC_V11 } from "@relayer/eval-runner";
-import { actorConfiguration, ACTOR_PROMPT_TEMPLATE, ACTOR_ACTION_SCHEMA, ACTOR_OBSERVATION_CONTRACT, ACTOR_PROMPT_VERSION } from "./task-actor.mjs";
+import { actorConfiguration, ACTOR_PROMPT_TEMPLATE, ACTOR_PROMPT_V8_GUIDANCE, ACTOR_ACTION_SCHEMA, ACTOR_OBSERVATION_CONTRACT, ACTOR_PROMPT_VERSION } from "./task-actor.mjs";
 
 const copy = (value) => structuredClone(value);
 const fail = (message) => { throw Object.assign(new Error(message), { status: 400 }); };
@@ -59,20 +59,20 @@ function completionJudgeConfigurations(directory) {
     const input = document.toJS();
     if (!input || Array.isArray(input) || Object.keys(input).some(key => !["schemaVersion", "kind", "name", "settings", "evidenceContract", "outputSchema", "promptTemplate"].includes(key))
       || input.schemaVersion !== 1 || input.kind !== "completion-judge"
-      || input.evidenceContract !== COMPLETION_JUDGE_EVIDENCE_CONTRACT.id || input.outputSchema !== "completion-assessment-v1"
+      || !completionEvidenceContract(input.evidenceContract) || input.outputSchema !== "completion-assessment-v1"
       || !input.settings || Object.keys(input.settings).some(key => !["model", "modelReasoningEffort", "shellAccess"].includes(key))
       || input.settings.shellAccess !== false) fail(`Unsupported completion judge config contract: ${file}`);
     const configSource = { file, path, digest: setupDigest(contents), contents };
     const spec = { version: basename(file, ".yaml"), model: input.settings.model, modelReasoningEffort: input.settings.modelReasoningEffort,
-      promptTemplate: input.promptTemplate, outputSchema: copy(COMPLETION_JUDGE_SCHEMA), evidenceContract: copy(COMPLETION_JUDGE_EVIDENCE_CONTRACT) };
+      promptTemplate: input.promptTemplate, outputSchema: copy(COMPLETION_JUDGE_SCHEMA), evidenceContract: copy(completionEvidenceContract(input.evidenceContract)) };
     const definition = normalize({ kind: input.kind, name: input.name, promptVersion: spec.version, spec, configSource });
     return { file, path, digest: configSource.digest, definition };
   });
 }
 export function defaultCompletionJudgeSetup() { return completionJudgeConfigurations(defaultCompletionJudgeDirectory)[0].definition; }
 export function defaultActorSetup() {
-  return { kind: "actor", name: "Low-effort user", promptVersion: ACTOR_PROMPT_VERSION, promptTemplate: ACTOR_PROMPT_TEMPLATE,
-    settings: actorConfiguration(), behaviorContract: { id: "task-actor-v4", actionSchema: copy(ACTOR_ACTION_SCHEMA), observationContract: copy(ACTOR_OBSERVATION_CONTRACT), completionJudge: copy(COMPLETION_JUDGE_SPEC) } };
+  return { kind: "actor", name: "Low-effort user", promptVersion: ACTOR_PROMPT_VERSION, promptTemplate: ACTOR_PROMPT_TEMPLATE + "\n" + ACTOR_PROMPT_V8_GUIDANCE,
+    settings: actorConfiguration(), behaviorContract: { id: "task-actor-v5", participantMayStopIncomplete: true, actionSchema: copy(ACTOR_ACTION_SCHEMA), observationContract: copy(ACTOR_OBSERVATION_CONTRACT), completionJudge: copy(COMPLETION_JUDGE_SPEC) } };
 }
 export function defaultJudgeSetup() {
   const config = judgeConfigurations(defaultJudgeDirectory)[0];
@@ -85,7 +85,7 @@ function normalize(input) {
   if (typeof input.promptVersion !== "string" || !input.promptVersion.trim() || input.promptVersion.length > 100) fail("Name the prompt version.");
   if (input.kind === "completion-judge") {
     try { validateCompletionJudgeSpec(input.spec); } catch { fail("Unsupported completion judge specification."); }
-    if (input.spec.version !== input.promptVersion || JSON.stringify(input.spec.evidenceContract) !== JSON.stringify(COMPLETION_JUDGE_EVIDENCE_CONTRACT)) fail("Completion judge evidence contract is not editable.");
+    if (input.spec.version !== input.promptVersion || JSON.stringify(input.spec.evidenceContract) !== JSON.stringify(completionEvidenceContract(input.spec.evidenceContract?.id))) fail("Completion judge evidence contract is not editable.");
     // Definitions must retain the exact repository source; dashboard edits are not configs.
     const source = input.configSource;
     if (!source || typeof source.contents !== "string" || source.contents.length > 250000
@@ -95,19 +95,20 @@ function normalize(input) {
     const file = document.toJS();
     if (document.errors.length || !file || Object.keys(file).some(key => !["schemaVersion", "kind", "name", "settings", "evidenceContract", "outputSchema", "promptTemplate"].includes(key))
       || file.schemaVersion !== 1 || file.kind !== input.kind || file.name !== input.name || file.promptTemplate !== input.spec.promptTemplate
-      || file.outputSchema !== "completion-assessment-v1" || file.evidenceContract !== COMPLETION_JUDGE_EVIDENCE_CONTRACT.id
+      || file.outputSchema !== "completion-assessment-v1" || file.evidenceContract !== input.spec.evidenceContract.id
       || Object.keys(file.settings ?? {}).some(key => !["model", "modelReasoningEffort", "shellAccess"].includes(key))
       || file.settings?.shellAccess !== false || file.settings?.model !== input.spec.model || file.settings?.modelReasoningEffort !== input.spec.modelReasoningEffort) fail("Completion judge config snapshot does not match its definition.");
     return { kind: input.kind, name: input.name.trim(), promptVersion: input.promptVersion, spec: copy(input.spec), configSource: copy(source) };
   }
   if (input.kind === "actor") {
     const behaviorContract = defaultActorSetup().behaviorContract;
+    const guidedContract = { ...copy(behaviorContract), id: "task-actor-v4" }; delete guidedContract.participantMayStopIncomplete;
     const nativeMenuContract = { id: "task-actor-v3", actionSchema: copy(ACTOR_ACTION_SCHEMA), observationContract: copy(ACTOR_OBSERVATION_CONTRACT) };
     const priorContract = { id: "task-actor-v2", actionSchema: copy(ACTOR_ACTION_SCHEMA) };
     const legacyContract = copy(priorContract);
     legacyContract.actionSchema.properties.reason = { type: "string" };
     // Publication may upgrade a known historical contract; stored revisions stay immutable.
-    if (![behaviorContract, nativeMenuContract, priorContract, legacyContract].some(contract => JSON.stringify(input.behaviorContract) === JSON.stringify(contract))) fail("Actor behavior authority contract is not editable.");
+    if (![behaviorContract, guidedContract, nativeMenuContract, priorContract, legacyContract].some(contract => JSON.stringify(input.behaviorContract) === JSON.stringify(contract))) fail("Actor behavior authority contract is not editable.");
     return { kind: input.kind, name: input.name.trim(), promptVersion: input.promptVersion,
       promptTemplate: template(input.promptTemplate, ["request", "endpoint", "privateBrief", "exploration", "meticulousness"]),
       settings: actorConfiguration(input.settings), behaviorContract: input.promptVersion === ACTOR_PROMPT_VERSION ? behaviorContract : copy(input.behaviorContract) };

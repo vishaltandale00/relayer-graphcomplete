@@ -1,10 +1,12 @@
+import { completionArtifactEvidenceV2 } from "./task-completion-artifacts-v2.mjs";
 import { constants } from "node:fs";
 import { readdir, realpath, open, lstat } from "node:fs/promises";
 import { join, relative, isAbsolute } from "node:path";
 import { createHash } from "node:crypto";
 
 // Host-read, bounded task artifacts. No tools or workspace path are given to the judge.
-export async function completionArtifactEvidence(directory, { signal } = {}) {
+export async function completionArtifactEvidence(directory, { signal, contract = "completion-evidence-v1", baseline } = {}) {
+  if (contract === "completion-evidence-v2") return completionArtifactEvidenceV2(directory, { signal, baseline, generalEvidence: completionArtifactEvidence });
   const packet = { source: "bounded_task_workspace", files: [], omitted: 0, complete: true };
   if (!directory) return { ...packet, complete: false, unavailable: "No task workspace is available." };
   const rootIdentity = await lstat(directory);

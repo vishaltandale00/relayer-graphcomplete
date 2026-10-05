@@ -1,4 +1,4 @@
-import { resolveEvaluatorSelection, completionJudgeSpec } from "./evaluator-selection.mjs";
+import { resolveEvaluatorSelection, completionJudgeSpec, participantMayStopIncomplete } from "./evaluator-selection.mjs";
 import { setupDigest } from "./setup-registry.mjs";
 import { createCompletionJudge as createNativeCompletionJudge, validateCompletionAssessment, COMPLETION_JUDGE_EVIDENCE_CONTRACT } from "./task-completion-judge.mjs";
 import { randomUUID } from "node:crypto";
@@ -167,7 +167,7 @@ export class TaskActorService {
             const judgeInput = { ...evidence, ...(observation.screenshot === undefined ? {} : { screenshot: observation.screenshot }), actorFinish: action };
             const evidenceEvent = await this.tasks.actorEvent(id, "actor_completion_evidence", {
               actorActionEventId: intent.id, observationEventId: observed.id, judge: structuredClone(completionJudgeSpec(task)), evidence,
-              input: judgeInput, inputDigest: setupDigest(judgeInput), evidenceContract: COMPLETION_JUDGE_EVIDENCE_CONTRACT.id,
+              input: judgeInput, inputDigest: setupDigest(judgeInput), evidenceContract: completionJudgeSpec(task).evidenceContract?.id ?? COMPLETION_JUDGE_EVIDENCE_CONTRACT.id,
             });
             signal.throwIfAborted();
             const result = await abortable(signal, () => completionJudge.evaluate(judgeInput, signal));
@@ -179,7 +179,7 @@ export class TaskActorService {
               verdict: result.verdict, evidenceExplanation: result.evidenceExplanation, continuationHint: result.continuationHint, usage: judgeUsage ?? null,
             });
             signal.throwIfAborted();
-            if (result.verdict !== "complete") {
+            if (result.verdict !== "complete" && !participantMayStopIncomplete(task, action)) {
               if (this.tasks.get(id).completions >= this.tasks.get(id).maxCompletions) {
                 await this.tasks.finish(id, { reason: "budget_exhausted" }, { signal });
                 return;
@@ -188,7 +188,7 @@ export class TaskActorService {
               judgeInteractionRequired = true;
               continue;
             }
-            await this.tasks.finish(id, { reason: "endpoint_reached", actorActionEventId: intent.id, completionJudgeEventId: judgment.id }, { signal });
+            await this.tasks.finish(id, { reason: participantMayStopIncomplete(task, action) ? action.reason : "endpoint_reached", actorActionEventId: intent.id, completionJudgeEventId: judgment.id }, { signal });
           } else await this.tasks.finish(id, { reason: action.reason, actorActionEventId: intent.id }, { signal });
           return;
         }

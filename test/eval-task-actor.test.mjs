@@ -15,12 +15,14 @@ import { createHumanTaskSurface } from "../desktop/eval-main/web-host.mjs";
 const cleanups = [];
 afterEach(async () => { for (const cleanup of cleanups.splice(0).reverse()) await cleanup(); });
 const action = (kind, extra = {}) => ({ kind, ref: "visible", value: "", reason: "", satisfaction: null, comment: "", endpointStatus: "incomplete", remainingWork: "Route undecided", ...extra });
-async function fixture({ decide, maxActions = 8, busy = false, failWrite = false, navigateOnly = false, retry = false, timeoutMs = 900000, planCount = 1, maxCompletions = 2, controlErrors = [], completionJudge = null, judgeEvaluate = null } = {}) {
+async function fixture({ decide, maxActions = 8, busy = false, failWrite = false, navigateOnly = false, retry = false, timeoutMs = 900000, planCount = 1, maxCompletions = 2, controlErrors = [], completionJudge = null, judgeEvaluate = null, voluntaryStop = false } = {}) {
   const directory = await mkdtemp(join(tmpdir(), "task-actor-test-"));
   cleanups.push(() => rm(directory, { recursive: true, force: true }));
   const turns = [{ id: 1, completionStatus: busy ? "running" : retry ? "not_started" : "accepted", ...(retry ? { latestAttempt: { id: 91, outcome: "model_failed" } } : {}) }];
   const dispatches = [];
-  const setupRegistry = completionJudge ? { selected: () => ({ ...defaultActorSetup(), id: "judge-gated-setup", settings: { ...defaultActorSetup().settings, maxActions }, behaviorContract: { ...defaultActorSetup().behaviorContract, completionJudge } }) } : null;
+  const behavior = { ...defaultActorSetup().behaviorContract, completionJudge };
+  if (!voluntaryStop) { behavior.id = "task-actor-v4"; delete behavior.participantMayStopIncomplete; }
+  const setupRegistry = completionJudge ? { selected: () => ({ ...defaultActorSetup(), id: "judge-gated-setup", settings: { ...defaultActorSetup().settings, maxActions }, behaviorContract: behavior }) } : null;
   const options = { setupRegistry, stateFile: join(directory, "tasks.json"), productSession: { origin: "http://product.invalid", cookie: { name: "control", value: "secret" }, readOnlyCookie: { name: "read", value: "only" } },
     evalService: {
       prepareHumanTask: async () => ({ name: "Task", humanBrief: "PRIVATE BRIEF", humanRubric: "SECRET RUBRIC", execution: { harnessConfigurationName: "fixture", projectId: 1, modelResolution: {} }, plan: Array.from({ length: planCount }, () => ({ name: "Task", prompts: ["Help me plan a trip"] })) }),
@@ -554,4 +556,16 @@ it("stops at the completion budget after recording a rejected final-turn judgmen
   expect(task.events.some(event => event.kind === "actor_error")).toBe(false);
   expect(f.browser.act).not.toHaveBeenCalled();
   expect(f.seen).toHaveLength(1);
+});
+
+it.each(["incomplete", "uncertain", "complete"])("new actor contract preserves an unfinished participant stop despite judge verdict %s", async verdict => {
+  const f = await fixture({ voluntaryStop: true, completionJudge: COMPLETION_JUDGE_SPEC,
+    decide: () => action("finish", { reason: "satisfied", satisfaction: 3, endpointStatus: "uncertain", remainingWork: "I cannot supply my monitor measurements yet." }),
+    judgeEvaluate: async () => ({ verdict, evidenceExplanation: "Fit still depends on unavailable measurements.", continuationHint: verdict === "complete" ? "" : "Please check the fit.", usage: null }) });
+  await f.done;
+  expect(f.judge.evaluate).toHaveBeenCalledOnce();
+  expect(f.browser.act).not.toHaveBeenCalled();
+  const task = f.tasks.get(f.id);
+  expect(task.termination).toMatchObject({ reason: "satisfied", success: null, endpointAttainment: "not_claimed", actorClaim: { endpointStatus: "uncertain", remainingWork: expect.stringContaining("measurements") } });
+  expect(task.events.find(e => e.kind === "actor_completion_judgment").verdict).toBe(verdict);
 });

@@ -1,4 +1,4 @@
-import { resolveEvaluatorSelection, completionJudgeSpec } from "./evaluator-selection.mjs";
+import { resolveEvaluatorSelection, completionJudgeSpec, participantMayStopIncomplete } from "./evaluator-selection.mjs";
 import { isDeepStrictEqual } from "node:util";
 import { abortable } from "./abortable.mjs";
 import { interactionReturnsToUnsent } from "../renderer/src/interaction-failure-model.js";
@@ -381,7 +381,7 @@ export class HumanTaskService {
       const session = this.find(id);
       if (session.mode !== "simulated" || session.status !== "active" || !completionJudgeSpec(session)) throw failure("Completion judge session is not active.", 409);
       await abortable(signal, () => this.settled(session, { signal }));
-      const artifactEvidence = await abortable(signal, () => this.evalService.completionJudgeArtifactEvidence(session.prepared, { signal }));
+      const artifactEvidence = await abortable(signal, () => this.evalService.completionJudgeArtifactEvidence(session.prepared, { signal, contract: completionJudgeSpec(session).evidenceContract?.id ?? "completion-evidence-v1" }));
       signal?.throwIfAborted();
       await abortable(signal, () => this.settled(session, { signal }));
       signal?.throwIfAborted();
@@ -394,10 +394,30 @@ export class HumanTaskService {
         while (Buffer.byteLength(JSON.stringify(prefix + marker)) > limit) prefix = prefix.slice(0, Math.floor(prefix.length * 0.8));
         return prefix + marker;
       };
+      const v2 = completionJudgeSpec(session).evidenceContract?.id === "completion-evidence-v2";
+      const committed = new Map();
+      if (v2) for (const threadId of session.threadIds) {
+        const detail = await abortable(signal, () => this.detail(threadId, { signal }));
+        for (const turn of detail.interactions ?? []) {
+          if (!terminal.has(turn.completionStatus) && !interactionReturnsToUnsent(turn)) throw failure("Wait for the current response before collecting evidence.", 409);
+          committed.set(`${threadId}:${turn.id}`, turn);
+        }
+      }
       const candidates = session.events.filter(event => ["submission", "actor_action"].includes(event.kind));
       const projected = candidates.slice(-80).map(event => {
         const item = { id: event.id, kind: event.kind, at: event.at };
-        if (event.kind === "submission") return { ...item, text: text(event.text ?? event.request?.text), outcome: text(event.outcome, 100) };
+        if (event.kind === "submission") {
+          const base = { ...item, text: text(event.text ?? event.request?.text), outcome: text(event.outcome, 100) };
+          if (!v2) return base;
+          const turn = event.outcome === "accepted" ? committed.get(`${event.threadId}:${event.interactionId}`) : undefined;
+          const inputs = (turn?.submittedInputs ?? []).slice(0, 12).map(input => {
+            const serialized = JSON.stringify(input.value ?? null);
+            return { prompt: text(input.action?.prompt), ...(Buffer.byteLength(serialized) <= 2000 ? { value: clone(input.value ?? null) } : { valueText: text(serialized), truncated: true }) };
+          });
+          return { ...base, participant: "simulated_user", interactionId: event.interactionId ?? null,
+            ...(turn ? { committedAt: text(turn.createdAt, 100), submittedInputs: inputs,
+              ...(turn.submittedInputs?.length > inputs.length ? { inputsOmitted: turn.submittedInputs.length - inputs.length } : {}) } : { committedInputsUnavailable: true }) };
+        }
         const action = event.action ?? {};
         return { ...item, action: { kind: text(action.kind, 100), value: text(action.value), comment: text(action.comment), reason: text(action.reason, 100), endpointStatus: text(action.endpointStatus, 100), remainingWork: text(action.remainingWork), satisfaction: [1, 2, 3, 4].includes(action.satisfaction) ? action.satisfaction : null } };
       });
@@ -431,10 +451,11 @@ export class HumanTaskService {
         const intent = session.events.find(event => event.id === input.actorActionEventId && event.kind === "actor_action" && event.action?.kind === "finish");
         const latestJudgment = session.events.findLast(event => event.kind === "actor_completion_judgment");
         const evidence = session.events.find(event => event.id === judgment?.evidenceEventId && event.kind === "actor_completion_evidence");
-        if (input.reason !== "endpoint_reached" || !judgment || !intent || judgment !== latestJudgment
+        const voluntaryStop = participantMayStopIncomplete(session, intent?.action) && input.reason === intent.action.reason;
+        if ((!voluntaryStop && input.reason !== "endpoint_reached") || !judgment || !intent || judgment !== latestJudgment
           || !evidence || evidence.actorActionEventId !== intent.id || evidence.observationEventId !== intent.observationEventId
           || !isDeepStrictEqual(evidence.judge, judgeSpec) || evidence.sequence <= intent.sequence || evidence.sequence >= judgment.sequence
-          || judgment.verdict !== "complete" || judgment.actorActionEventId !== intent.id
+          || (!voluntaryStop && judgment.verdict !== "complete") || !["complete", "incomplete", "uncertain"].includes(judgment.verdict) || judgment.actorActionEventId !== intent.id
           || judgment.observationEventId !== intent.observationEventId || judgment.sequence <= intent.sequence
           || !isDeepStrictEqual(judgment.judge, judgeSpec)
           || session.events.some(event => event.sequence > intent.sequence && ["actor_action", "submission", "actor_action_rejected"].includes(event.kind))) {

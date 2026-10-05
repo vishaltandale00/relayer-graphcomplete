@@ -538,3 +538,27 @@ it("cancels completion evidence collection without holding the task queue", asyn
   await f.tasks.interruptActor(f.session.id, "actor_cancelled"); release({});
   expect(f.tasks.get(f.session.id).status).toBe("interrupted");
 });
+
+it("v2 judge evidence binds structured participant approval to the committed submission and excludes drafts", async () => {
+  const f = await gatedTask(); const session = f.tasks.find(f.session.id);
+  session.actorSetup.behaviorContract.completionJudge.evidenceContract = { id: "completion-evidence-v2" };
+  f.options.evalService.completionJudgeArtifactEvidence = async () => ({ files: [] });
+  await f.tasks.write(session.id, "/api/threads/1/interactions", "POST", { text: "" });
+  Object.assign(f.threads.get(1).at(-1), { createdAt: "2026-10-05T15:29:25.591Z", submittedInputs: [{ value: { text: "Garden Table works for us; please proceed." }, action: { prompt: "Choose a restaurant" } }], inputDraft: "UNSENT_DRAFT" });
+  const packet = await f.tasks.completionJudgeEvidence(session.id);
+  expect(packet.trajectory.find(item => item.kind === "submission" && item.interactionId === 11)).toMatchObject({ participant: "simulated_user", committedAt: "2026-10-05T15:29:25.591Z", submittedInputs: [{ prompt: "Choose a restaurant", value: { text: "Garden Table works for us; please proceed." } }] });
+  expect(JSON.stringify(packet)).not.toContain("UNSENT_DRAFT");
+  delete session.actorSetup.behaviorContract.completionJudge.evidenceContract;
+  expect((await f.tasks.completionJudgeEvidence(session.id)).trajectory.some(item => item.submittedInputs)).toBe(false);
+});
+
+it("only the versioned participant-stop contract permits a judged unfinished stop without claiming attainment", async () => {
+  const f = await gatedTask(); const id = f.session.id;
+  const approved = await judgedFinish(f, "uncertain");
+  const input = { ...approved, reason: "satisfied" };
+  await expect(f.tasks.finish(id, input)).rejects.toThrow("completion judgment");
+  Object.assign(f.tasks.find(id).actorSetup.behaviorContract, { id: "task-actor-v5", participantMayStopIncomplete: true });
+  await expect(f.tasks.finish(id, { ...input, reason: "endpoint_reached" })).rejects.toThrow("completion judgment");
+  const finished = await f.tasks.finish(id, input);
+  expect(finished.termination).toMatchObject({ reason: "satisfied", endpointAttainment: "not_claimed", success: null, completionJudgeEventId: input.completionJudgeEventId, actorClaim: { endpointStatus: "incomplete", remainingWork: "User thinks work remains" } });
+});

@@ -491,10 +491,11 @@ async function proveTaskActor({ browser, service, productSession, data }) {
   let actorCapability;
   const actors = new TaskActorService({ tasks, setupRegistry, resolveRuntime: async () => ({}),
     resolveCompletionJudgeRuntime: async (spec) => { assert.equal(spec.model, "gpt-5.6-sol"); return {}; },
-    createCompletionJudge: async () => ({ close: async () => {}, evaluate: async (evidence) => {
+    createCompletionJudge: async ({ config }) => ({ close: async () => {}, evaluate: async (evidence) => {
       assert.ok(evidence.screenshot, "completion reviewer receives current rendered screenshot");
       assert.ok(!JSON.stringify(evidence).includes(diagnosticDirectory), "diagnostic artifacts never enter completion-judge input");
       completionAssessments++;
+      if (config.evidenceContract?.id === "completion-evidence-v2") return { verdict: "uncertain", evidenceExplanation: "Participant measurements are unavailable; endpoint not confirmed.", continuationHint: "Please check fit when measurements are available.", usage: null };
       return completionAssessments === 1
         ? { verdict: "incomplete", evidenceExplanation: "Fixture reviewer requires one more visible graph inspection.", continuationHint: "Could I check one more part of the plan?", usage: null }
         : { verdict: "complete", evidenceExplanation: "Fixture reviewer accepts the plan after the additional graph inspection.", continuationHint: "", usage: null };
@@ -808,6 +809,7 @@ async function proveTaskActor({ browser, service, productSession, data }) {
       assert.ok(Buffer.from(observation.screenshot, "base64").readUInt32BE(16) > 0);
       assert.ok(!JSON.stringify(observation.controls).includes("Review & grade"));
       const action = { kind: "finish", ref: "", value: "", reason: "satisfied", satisfaction: 3, comment: "The follow-up is good enough.", endpointStatus: "incomplete", remainingWork: "Further choices remain." };
+      if ([5, 7].includes(decision)) Object.assign(action, { reason: "endpoint_reached", endpointStatus: "reached", remainingWork: "" });
       const find = (predicate) => { const control = observation.controls.find(predicate); assert.ok(control, JSON.stringify(observation.controls)); return control.ref; };
       if (decision === 0) Object.assign(action, { kind: "click", ref: find((control) => control.name.includes("Two-worker")) });
       if (decision === 1) Object.assign(action, { kind: "fill", ref: find((control) => control.role === "textarea"), value: "Explain how the workers coordinate." });
@@ -920,7 +922,7 @@ async function proveTaskActor({ browser, service, productSession, data }) {
     await page.locator("#humanTools > summary").click();
     await page.locator("#setupPredecessor").selectOption(baseline.id);
     await until(async () => (await page.locator("#setupEditor").textContent()).includes("Completion reviewer: gpt-5.6-sol"), "pinned reviewer rendered in setup editor");
-    assert.ok((await page.locator("#setupEditor").textContent()).includes("requires its approval to finish"));
+    assert.ok((await page.locator("#setupEditor").textContent()).includes("Endpoint claims require approval"));
     await page.locator("#setupUseCurrentActor").click();
     assert.ok((await page.locator("#setupCompletionReviewer").textContent()).includes("gpt-5.6-sol"));
     assert.equal(await page.locator('#setupPublish [name="promptVersion"]').inputValue(), setupRegistry.catalog().actorDefinition.promptVersion);
@@ -972,6 +974,8 @@ async function proveTaskActor({ browser, service, productSession, data }) {
     await until(async () => (await page.locator("#setupEditor").textContent()).includes("Completion judge config file"), "completion config editor rendered");
     assert.equal(await page.locator('#setupPublish [name="model"], #setupPublish [name="exploration"]').count(), 0);
     assert.equal(await page.locator("#setupPromote").count(), 0);
+    await page.locator("#judgeConfigFile").selectOption("completion-judge-v2.yaml");
+    await until(async () => (await page.locator("#setupEditor").textContent()).includes("completion-judge-v2.yaml"), "v2 completion file selection rendered");
     await page.locator("#setupFeedbackSession").selectOption(task.id);
     await page.locator("#setupFeedbackRecords input").first().check();
     await page.locator("#setupPublish button").click();
@@ -1012,6 +1016,10 @@ async function proveTaskActor({ browser, service, productSession, data }) {
     assert.equal(packets[0].inputDigest, setupDigest(packets[0].input));
     assert.deepEqual(packets[0].judge, completionRevision.spec);
     assert.equal(packets[0].input.actorFinish.kind, "finish");
+    assert.equal(packets[0].evidenceContract, "completion-evidence-v2");
+    assert.equal(releaseTask.termination.reason, "satisfied");
+    assert.equal(releaseTask.termination.endpointAttainment, "not_claimed");
+    assert.equal(releaseTask.events.find(e => e.kind === "actor_completion_judgment").verdict, "uncertain");
     assert.ok(packets[0].input.screenshot, "exact screenshot retained at completion inference seam");
     assert.equal(setupRegistry.catalog().promotions.length, promotionsBeforeRelease);
     assert.equal(setupRegistry.selected("actor").id, revision.id);

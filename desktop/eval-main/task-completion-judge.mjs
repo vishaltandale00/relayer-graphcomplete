@@ -21,6 +21,10 @@ export const COMPLETION_JUDGE_EVIDENCE_CONTRACT = freeze({
   maxEvidenceCharacters: 512000, maxScreenshotCharacters: 16000000,
   tools: false, humanLabels: false, artifactVisibilityImpliesUserVisibility: false,
 });
+export const COMPLETION_JUDGE_EVIDENCE_V2 = freeze({ ...COMPLETION_JUDGE_EVIDENCE_CONTRACT, id: "completion-evidence-v2" });
+export function completionEvidenceContract(id = "completion-evidence-v1") {
+  return [COMPLETION_JUDGE_EVIDENCE_CONTRACT, COMPLETION_JUDGE_EVIDENCE_V2].find(contract => contract.id === id);
+}
 export function validateCompletionJudgeSpec(config) {
   const legacy = JSON.stringify(config) === JSON.stringify(COMPLETION_JUDGE_SPEC);
   const allowed = ["version", "model", "modelReasoningEffort", "promptTemplate", "outputSchema", "evidenceContract"];
@@ -30,7 +34,7 @@ export function validateCompletionJudgeSpec(config) {
     || !["low", "medium", "high"].includes(config.modelReasoningEffort)
     || typeof config.promptTemplate !== "string" || !config.promptTemplate.trim() || config.promptTemplate.length > 100000
     || JSON.stringify(config.outputSchema) !== JSON.stringify(COMPLETION_JUDGE_SCHEMA)
-    || (!legacy && JSON.stringify(config.evidenceContract) !== JSON.stringify(COMPLETION_JUDGE_EVIDENCE_CONTRACT))) {
+    || (!legacy && (!completionEvidenceContract(config.evidenceContract?.id) || JSON.stringify(config.evidenceContract) !== JSON.stringify(completionEvidenceContract(config.evidenceContract?.id))))) {
     throw new Error("Unsupported completion judge specification.");
   }
   return config;
