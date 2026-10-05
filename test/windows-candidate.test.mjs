@@ -1,10 +1,12 @@
-import { mkdtemp, mkdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, readdir, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
 import { createPackage } from "@electron/asar";
+import { WinPackager } from "app-builder-lib";
+import { copyFiles, getFileMatchers } from "app-builder-lib/out/fileMatcher.js";
 import { parse } from "yaml";
 import { describe, expect, it } from "vitest";
 import { loadDesktopReleaseContract, resolveDesktopReleaseContract } from "../desktop/release/contract.mjs";
@@ -38,6 +40,45 @@ async function nativeHandoffFixture() {
 }
 
 describe("independent Windows candidate", () => {
+  it("routes both copied Rust executables through electron-builder signing without mutating native inputs", async () => {
+    const f = await nativeHandoffFixture();
+    try {
+      await f.produce();
+      await writeFile(join(f.directory, "unrelated.exe"), "excluded");
+      const appOutDir = join(f.repositoryRoot, "win-unpacked");
+      const resources = join(appOutDir, "resources");
+      const builder = createDesktopBuilderConfig(f.contract, {
+        environment: { RELAYER_CARGO_TARGET_DIR: join(f.repositoryRoot, "target") }, argv: [],
+      });
+      const matchers = getFileMatchers(builder, "extraResources", resources, {
+        macroExpander: value => value, customBuildOptions: builder.win,
+        globalOutDir: appOutDir, defaultSrc: f.repositoryRoot,
+      }).filter(matcher => matcher.from.startsWith(join(f.repositoryRoot, "target")));
+      const signed = [];
+      const signingPackager = {
+        platformSpecificBuildOptions: builder.win,
+        shouldSignFile: WinPackager.prototype.shouldSignFile,
+        signIf: async destination => {
+          signed.push(destination);
+          await writeFile(destination, `${await readFile(destination, "utf8")}\nsigned fixture`);
+        },
+      };
+      const transformer = WinPackager.prototype.createTransformerForExtraFiles.call(signingPackager, { appOutDir });
+      await copyFiles(matchers, transformer);
+      const executables = ["relayer-app-server.exe", "relayer-graph-server.exe"];
+      expect(signed.sort()).toEqual(executables.map(name => join(resources, "bin", name)).sort());
+      expect((await readdir(join(resources, "bin"))).sort()).toEqual(executables.sort());
+      for (const name of f.names) {
+        expect(await readFile(join(f.directory, name), "utf8")).toBe(`native fixture: ${name}`);
+      }
+      for (const name of executables) {
+        expect(await readFile(join(resources, "bin", name), "utf8")).toBe(`native fixture: ${name}\nsigned fixture`);
+      }
+      signingPackager.signIf = async () => { throw Error("signing rejected"); };
+      await expect(copyFiles(matchers, transformer)).rejects.toThrow("signing rejected");
+    } finally { await rm(f.repositoryRoot, { recursive: true, force: true }); }
+  });
+
   it("dispatches CLI preparation and consumption through production release orchestration before assembly", async () => {
     const f = await nativeHandoffFixture();
     const commands = [];

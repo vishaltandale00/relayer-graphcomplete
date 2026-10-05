@@ -80,8 +80,17 @@ export function createDesktopBuilderConfig(
       ...PACKAGED_PROVIDER_MODULES.map((modulePath) => `main/${modulePath}`),
     ],
     extraResources: [
-      { from: resolve(cargoTargetRoot, `${serverTarget}/release/relayer-app-server${target.platform === "win32" ? ".exe" : ""}`), to: `bin/relayer-app-server${target.platform === "win32" ? ".exe" : ""}` },
-      { from: resolve(cargoTargetRoot, `${serverTarget}/release/relayer-graph-server${target.platform === "win32" ? ".exe" : ""}`), to: `bin/relayer-graph-server${target.platform === "win32" ? ".exe" : ""}` },
+      // electron-builder applies its Windows signing transformer to directory
+      // copies only. Filter these copies so both service EXEs are signed in the
+      // package without modifying the sealed native inputs or copying PDBs.
+      ...(target.platform === "win32" ? [{
+        from: resolve(cargoTargetRoot, `${serverTarget}/release`),
+        to: "bin",
+        filter: ["relayer-app-server.exe", "relayer-graph-server.exe"],
+      }] : [
+        { from: resolve(cargoTargetRoot, `${serverTarget}/release/relayer-app-server`), to: "bin/relayer-app-server" },
+        { from: resolve(cargoTargetRoot, `${serverTarget}/release/relayer-graph-server`), to: "bin/relayer-graph-server" },
+      ]),
       { from: resolve(repositoryRoot, "harnesses/codex-basic.yaml"), to: "harnesses/codex-basic.yaml" },
       { from: resolve(repositoryRoot, "harnesses/claude-basic.yaml"), to: "harnesses/claude-basic.yaml" },
       { from: resolve(repositoryRoot, "harnesses/prime-agent-basic.yaml"), to: "harnesses/prime-agent-basic.yaml" },
