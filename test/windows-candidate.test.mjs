@@ -1,10 +1,10 @@
 import { mkdtemp, mkdir, readFile, readdir, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, join, win32 } from "node:path";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
-import { createPackage } from "@electron/asar";
+import { createPackage, extractFile, listPackage, uncache } from "@electron/asar";
 import { WinPackager } from "app-builder-lib";
 import { copyFiles, getFileMatchers } from "app-builder-lib/out/fileMatcher.js";
 import { parse } from "yaml";
@@ -40,6 +40,55 @@ async function nativeHandoffFixture() {
 }
 
 describe("independent Windows candidate", () => {
+  it("canonicalizes packaged ASAR inventory without relaxing release gates", async () => {
+    const f = await nativeHandoffFixture();
+    const source = join(f.repositoryRoot, "asar-source");
+    const appPath = join(f.repositoryRoot, "win-unpacked");
+    const resources = join(appPath, "resources");
+    const archive = join(resources, "app.asar");
+    const updater = "node_modules/electron-updater/package.json";
+    const metadata = createDesktopBuilderConfig(f.contract, { environment: {}, argv: [] }).extraMetadata;
+    const windowsEntries = archivePath => listPackage(archivePath).map(entry =>
+      win32.join("/", ...entry.replaceAll("\\", "/").split("/").filter(Boolean)));
+    const verify = () => verifyPackagedDesktopContract({ appPath, contract: f.contract, listPackageEntries: windowsEntries });
+    const packageFiles = async (entries, packageMetadata = metadata) => {
+      await rm(source, { recursive: true, force: true });
+      await mkdir(source, { recursive: true });
+      await writeFile(join(source, "package.json"), JSON.stringify(packageMetadata));
+      for (const entry of entries) {
+        await mkdir(dirname(join(source, entry)), { recursive: true });
+        await writeFile(join(source, entry), "{}");
+      }
+      uncache(archive);
+      await createPackage(source, archive);
+    };
+    const writeFeed = url => writeFile(join(resources, "app-update.yml"),
+      `provider: generic\nurl: ${url}\nchannel: beta\n`);
+    try {
+      await mkdir(resources, { recursive: true });
+      await writeFeed(f.contract.updateBaseUrl);
+      await packageFiles([updater]);
+      expect(JSON.parse(extractFile(archive, updater).toString())).toEqual({});
+      expect(windowsEntries(archive)).toContain("\\node_modules\\electron-updater\\package.json");
+      expect((await verifyPackagedDesktopContract({ appPath, contract: f.contract })).packageMetadata.version).toBe("0.2.0");
+      expect((await verify()).packageMetadata.version).toBe("0.2.0");
+      await packageFiles([]);
+      await expect(verify()).rejects.toThrow("missing its electron-updater dependency");
+      await packageFiles([updater, "node_modules/prime-agent/package.json"]);
+      await expect(verify()).rejects.toThrow("deferred agent harness");
+      for (const runtime of ["@openai/codex", "@openai/codex-darwin-arm64", "@openai/codex-linux-x64",
+        "@openai/codex-win32-x64", "@anthropic-ai/claude-agent-sdk-win32-x64"]) {
+        await packageFiles([updater, `node_modules/${runtime}/package.json`]);
+        await expect(verify()).rejects.toThrow("must not package a native harness runtime");
+      }
+      await packageFiles([updater], { ...metadata, relayerReleaseSourceCommit: "b".repeat(40) });
+      await expect(verify()).rejects.toThrow("metadata relayerReleaseSourceCommit");
+      await packageFiles([updater]);
+      await writeFeed("https://other.example.invalid/desktop");
+      await expect(verify()).rejects.toThrow("sealed release feed contract");
+    } finally { await rm(f.repositoryRoot, { recursive: true, force: true }); }
+  });
+
   it("routes both copied Rust executables through electron-builder signing without mutating native inputs", async () => {
     const f = await nativeHandoffFixture();
     try {
@@ -274,6 +323,8 @@ describe("independent Windows candidate", () => {
     expect(workflow.jobs.package.environment).toBe("desktop-production-windows");
     const steps = workflow.jobs.package.steps;
     for (const job of [workflow.jobs.qualify, workflow.jobs.package]) {
+      const contractProbe = job.steps.findIndex(step => step.run === 'node node_modules/vitest/vitest.mjs run test/windows-candidate.test.mjs -t "canonicalizes packaged ASAR inventory"');
+      expect(contractProbe).toBeGreaterThan(job.steps.findIndex(step => step.run === "npm ci"));
       const signatureProbe = job.steps.findIndex(step => step.run === "node scripts/check-windows-signature-runtime.mjs");
       const probe = job.steps.findIndex(step => step.run === "node scripts/check-windows-rust-symbols.mjs");
       const msvc = job.steps.findIndex(step => step.uses?.startsWith("ilammy/msvc-dev-cmd@"));
@@ -281,6 +332,7 @@ describe("independent Windows candidate", () => {
       expect(probe).toBeGreaterThan(msvc);
       expect(msvc).toBeGreaterThan(-1);
       expect(coldBuild).toBeGreaterThan(probe);
+      expect(coldBuild).toBeGreaterThan(contractProbe);
       expect(signatureProbe).toBeGreaterThan(job.steps.findIndex(step => step.run === "npm ci"));
       expect(job.steps[signatureProbe].shell).toBe("pwsh");
       expect(coldBuild).toBeGreaterThan(signatureProbe);

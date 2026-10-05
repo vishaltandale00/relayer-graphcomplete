@@ -57,6 +57,8 @@ jobs:
           arch: amd64
       - run: node scripts/check-node-version.mjs
       - run: npm ci
+      - name: Verify packaged ASAR contract before native compilation
+        run: node node_modules/vitest/vitest.mjs run test/windows-candidate.test.mjs -t "canonicalizes packaged ASAR inventory"
       - name: Verify Windows signature runtime
         shell: pwsh
         run: node scripts/check-windows-signature-runtime.mjs
@@ -127,6 +129,8 @@ jobs:
           arch: amd64
       - run: node scripts/check-node-version.mjs
       - run: npm ci
+      - name: Verify packaged ASAR contract before native compilation
+        run: node node_modules/vitest/vitest.mjs run test/windows-candidate.test.mjs -t "canonicalizes packaged ASAR inventory"
       - name: Verify Windows signature runtime
         shell: pwsh
         run: node scripts/check-windows-signature-runtime.mjs

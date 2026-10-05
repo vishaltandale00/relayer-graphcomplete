@@ -18,7 +18,7 @@ export function assertNoBundledHarnessRuntimes(entries) {
   }
 }
 
-export async function verifyPackagedDesktopContract({ appPath, contract } = {}) {
+export async function verifyPackagedDesktopContract({ appPath, contract, listPackageEntries = listPackage } = {}) {
   if (!contract?.release) {
     throw new Error("Packaged desktop verification requires the signed release contract.");
   }
@@ -47,7 +47,7 @@ export async function verifyPackagedDesktopContract({ appPath, contract } = {}) 
     }
   }
 
-  const entries = new Set(listPackage(asarPath).map((entry) => String(entry).replace(/^\//, "")));
+  const entries = new Set(listPackageEntries(asarPath).map((entry) => String(entry).replaceAll("\\", "/").replace(/^\/+/, "")));
   if (!entries.has("node_modules/electron-updater/package.json")) {
     throw new Error("Packaged desktop is missing its electron-updater dependency.");
   }
