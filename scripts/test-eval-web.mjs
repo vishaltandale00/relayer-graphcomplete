@@ -995,8 +995,16 @@ async function proveTaskActor({ browser, service, productSession, data }) {
     }
     await page.locator("#taskMode").selectOption("simulated");
     await page.locator("#evaluatorRelease").selectOption(evaluatorRelease.id);
+    assert.equal(await page.locator("#completionJudgeRevision").isDisabled(), true);
+    assert.equal(await page.locator("#completionJudgeRevision").inputValue(), completionRevision.id);
     assert.equal(await page.locator("#actorSetupRevision").isDisabled(), true);
     assert.equal(await page.locator("#actorSetupRevision").inputValue(), revision.id);
+    await page.locator('#evaluatorReleasePublish [name="name"]').fill("Refresh while release selected");
+    for (const [name, id] of [["actorRevisionId", revision.id], ["completionJudgeRevisionId", completionRevision.id], ["judgeRevisionId", fileJudge.id]]) await page.locator(`#evaluatorReleasePublish [name="${name}"]`).selectOption(id);
+    await page.locator("#evaluatorReleasePublish button").click();
+    await until(() => setupRegistry.catalog().evaluatorReleases.some(item => item.name === "Refresh while release selected"), "catalog refresh while release pinned");
+    await until(async () => (await page.locator("#evaluatorReleasePublished").textContent()).includes("Published"), "release refresh publication rendered");
+    assert.equal(await page.locator("#evaluatorRelease").inputValue(), evaluatorRelease.id);
     const tasksBeforeRelease = new Set(tasks.list().map(item => item.id));
     await page.locator("#humanCreate button").click();
     const releaseTask = await until(() => {
@@ -1013,7 +1021,7 @@ async function proveTaskActor({ browser, service, productSession, data }) {
     assert.deepEqual(releaseExport.bundle.session.evaluatorRelease, evaluatorRelease);
     const packets = releaseExport.bundle.session.events.filter(event => event.kind === "actor_completion_evidence");
     assert.equal(packets.length, 1);
-    assert.equal(packets[0].inputDigest, setupDigest(packets[0].input));
+    assert.equal(packets[0].inputDigest, setupDigest(await tasks.completionJudgeInput(releaseTask.id, packets[0].id)));
     assert.deepEqual(packets[0].judge, completionRevision.spec);
     assert.equal(packets[0].input.actorFinish.kind, "finish");
     assert.equal(packets[0].evidenceContract, "completion-evidence-v2");
@@ -1027,6 +1035,22 @@ async function proveTaskActor({ browser, service, productSession, data }) {
     await page.locator("#humanNewTask > summary").click();
     await page.locator("#evaluatorRelease").selectOption("");
     assert.equal(await page.locator("#actorSetupRevision").isDisabled(), false);
+    assert.equal(await page.locator("#completionJudgeRevision").isDisabled(), false);
+    assert.equal(await page.locator("#completionJudgeRevision").inputValue(), "");
+    await page.locator("#completionJudgeRevision").selectOption(completionRevision.id);
+    const beforeIndividual = new Set(tasks.list().map(item => item.id));
+    await page.locator("#humanCreate button").click();
+    const individual = await until(() => {
+      const created = tasks.list().find(item => !beforeIndividual.has(item.id));
+      return created && ["completed", "interrupted", "failed"].includes(created.status) ? tasks.get(created.id) : null;
+    }, "independent completion selection completed through actual form");
+    assert.equal(individual.status, "completed");
+    assert.equal(individual.evaluatorRelease, undefined);
+    assert.deepEqual(individual.completionJudgeSetup, completionRevision);
+    const individualExport = await tasks.export(individual.id);
+    assert.deepEqual(individualExport.bundle.session.completionJudgeSetup, completionRevision);
+    assert.equal(setupRegistry.catalog().promotions.length, promotionsBeforeRelease);
+    console.log("PASS independent completion selector: actual form, exact revision/export pin, release locking and unchanged defaults");
     console.log("PASS evaluator release: file-only completion publication, explicit three-revision release, real form submission with frozen run/export pins and exact stopping evidence; unchanged defaults (fixture inference)");
     await page.locator("#calibrationRefresh").click();
     await until(async () => (await page.locator('#calibrationMember [name="source"]').textContent()).includes(task.id), "calibration sources refreshed");

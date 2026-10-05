@@ -1,4 +1,4 @@
-import { mkdtemp, mkdir, writeFile, symlink, rm } from "node:fs/promises";
+import { mkdtemp, mkdir, writeFile, symlink, rm, realpath } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { it, expect } from "vitest";
@@ -117,5 +117,29 @@ it("v2 marks dirty-content mutation incomplete even when HEAD and porcelain stat
     expect(git("status", "--porcelain")).toBe(before);
     expect(packet.repository.stable).toBe(false); expect(packet.complete).toBe(false);
     expect(packet.omissions).toContainEqual(expect.objectContaining({ reason: expect.stringContaining("changed during capture") }));
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+it("distinguishes missing expected repository metadata from a genuine non-Git task", async () => {
+  const root = await mkdtemp(join(tmpdir(), "completion-missing-git-"));
+  try {
+    await writeFile(join(root, "plan.md"), "Conditional plan");
+    const ordinary = await completionArtifactEvidence(root, { contract: "completion-evidence-v2" });
+    expect(ordinary.complete).toBe(true);
+    const expected = await completionArtifactEvidence(root, { contract: "completion-evidence-v2", baseline: "a".repeat(40) });
+    expect(expected).toMatchObject({ complete: false, repository: { unavailable: expect.any(String) }, files: ordinary.files });
+    expect(expected.omissions).toContainEqual(expect.objectContaining({ path: "repository" }));
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+it("resolves only absolute host Git paths outside the candidate workspace, including Windows git.exe", async () => {
+  const { trustedGitExecutable } = await import("../desktop/eval-main/completion-git-view.mjs");
+  const root = await mkdtemp(join(tmpdir(), "completion-git-path-"));
+  try {
+    const workspace = join(root, "workspace"), tools = join(root, "tools"); await mkdir(workspace); await mkdir(tools);
+    await writeFile(join(workspace, "git.exe"), "candidate", { mode: 0o700 });
+    await writeFile(join(tools, "git.exe"), "host", { mode: 0o700 });
+    expect(await trustedGitExecutable(workspace, { platform: "win32", path: `.;${workspace};${tools}` })).toBe(await realpath(join(tools, "git.exe")));
+    await expect(trustedGitExecutable(workspace, { platform: "win32", path: `.;${workspace}` })).rejects.toThrow("unavailable");
   } finally { await rm(root, { recursive: true, force: true }); }
 });

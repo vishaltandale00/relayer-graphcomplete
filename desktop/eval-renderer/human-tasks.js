@@ -6,10 +6,15 @@ export function initializeHumanTasks({ api, show, toast }) {
   const root = document.querySelector("#humanView");
   const calibration = initializeCalibrationEditor({ api, root: root.querySelector("#calibrationEditor"), toast });
   const setups = initializeSetupEditor({ api, root: root.querySelector("#setupEditor"), toast, changed: () => refreshSetups() });
+  let individualActor = "", individualCompletion = "", pinned = false;
   async function refreshSetups() {
     const catalog = await api.setupRevisions();
     const select = root.querySelector("#actorSetupRevision");
     const releaseSelect = root.querySelector("#evaluatorRelease");
+    const completionSelect = root.querySelector("#completionJudgeRevision");
+    const completionId = completionSelect.value;
+    completionSelect.innerHTML = `<option value="">Use actor’s historical reviewer</option>` + catalog.revisions.filter(item => item.kind === "completion-judge").map(item => `<option value="${escape(item.id)}">${escape(item.name)} · ${escape(item.promptVersion)} · ${escape(item.id)}</option>`).join("");
+    completionSelect.value = catalog.revisions.some(item => item.id === completionId && item.kind === "completion-judge") ? completionId : "";
     const releaseId = releaseSelect.value;
     releaseSelect.innerHTML = `<option value="">Individual setup selection</option>` + (catalog.evaluatorReleases || []).map((item) => `<option value="${escape(item.id)}">${escape(item.name)} · ${escape(item.id)}</option>`).join("");
     releaseSelect.value = (catalog.evaluatorReleases || []).some((item) => item.id === releaseId) ? releaseId : "";
@@ -27,7 +32,12 @@ export function initializeHumanTasks({ api, show, toast }) {
     select.onchange = display;
     releaseSelect.onchange = () => {
       const release = (catalog.evaluatorReleases || []).find((item) => item.id === releaseSelect.value);
-      if (release) select.value = release.actorSetup.id;
+      if (release) {
+        if (!pinned) { individualActor = select.value; individualCompletion = completionSelect.value; }
+        select.value = release.actorSetup.id; completionSelect.value = release.completionJudgeSetup.id;
+      } else if (pinned) { select.value = individualActor; completionSelect.value = individualCompletion; }
+      pinned = Boolean(release);
+      completionSelect.disabled = Boolean(release);
       select.disabled = Boolean(release); display();
     };
     releaseSelect.onchange();
@@ -196,9 +206,9 @@ export function initializeHumanTasks({ api, show, toast }) {
     if (new FormData(form).get("mode") === "simulated") button.after(cancel);
     try {
       const data = Object.fromEntries(new FormData(form)); data.startupId = startupId; data.maxCompletions = Number(data.maxCompletions);
-      if (data.mode !== "simulated") { delete data.actorSetupRevisionId; delete data.evaluatorReleaseId; }
-      else if (data.evaluatorReleaseId) delete data.actorSetupRevisionId;
-      else delete data.evaluatorReleaseId;
+      if (data.mode !== "simulated") { delete data.actorSetupRevisionId; delete data.completionJudgeRevisionId; delete data.evaluatorReleaseId; }
+      else if (data.evaluatorReleaseId) { delete data.actorSetupRevisionId; delete data.completionJudgeRevisionId; }
+      else { delete data.evaluatorReleaseId; if (!data.completionJudgeRevisionId) delete data.completionJudgeRevisionId; }
       if (externalCaseIds.has(data.testCaseId)) {
         if (data.subscriptionConfirmed !== "on") throw new Error("Confirm subscription use before starting an external task.");
         data.liveAuthorization = { confirmed: true, billingMode: "subscription-only",

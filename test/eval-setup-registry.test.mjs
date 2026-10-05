@@ -454,7 +454,7 @@ it("selects v2 evidence through a real release and preserves the actual changed-
   const completion = await f.registry.publishCompletionJudgeConfig({ configFile: config.file, configDigest: config.digest, predecessorId: f.registry.selected("completion-judge").id, feedback: [{ sessionId: prior.id, gradeIndex: 0 }] });
   const release = await f.registry.publishRelease({ name: "Evidence v2", actorRevisionId: f.registry.selected("actor").id, completionJudgeRevisionId: completion.id, judgeRevisionId: f.registry.selected("judge").id });
   const prepare = f.options.evalService.prepareHumanTask;
-  f.options.evalService.prepareHumanTask = async () => { const prepared = await prepare(); prepared.execution.fixture = { workspaceDirectory: workspace, upstreamCommit: baseline }; return prepared; };
+  f.options.evalService.prepareHumanTask = async () => { const prepared = await prepare(); prepared.execution.fixture = { workspaceDirectory: workspace, sourceRevision: baseline }; return prepared; };
   f.options.evalService.assertHumanTaskCatalog = async () => {};
   f.options.evalService.completionJudgeArtifactEvidence = (...args) => EvalService.prototype.completionJudgeArtifactEvidence.apply(f.options.evalService, args);
   const evaluate = vi.fn(async evidence => {

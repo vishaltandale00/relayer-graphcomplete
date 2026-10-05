@@ -21,6 +21,7 @@ export async function completionArtifactEvidenceV2(directory, { baseline, signal
   const inside = path => { const part = relative(root, path); return part !== ".." && !part.startsWith("../") && !isAbsolute(part); };
   const metadata = await exists(join(root, ".git"));
   let remaining = 64000, before, git, verifySnapshot, view;
+  if (!metadata && baseline) { packet.repository = { unavailable: "Repository metadata is missing." }; omit("repository", "Expected repository metadata is missing."); }
   if (metadata) try {
     if (!metadata.isDirectory() || metadata.isSymbolicLink() || await realpath(join(root, ".git")) !== join(root, ".git")) throw Error("Repository metadata is not local.");
     for (const name of ["HEAD", "index", "config", "objects", "refs"]) {

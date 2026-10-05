@@ -1,0 +1,51 @@
+{
+  "baseCommit": "d418e78ec9189491cba80eebeba060e090fb3c95",
+  "reviews": [
+    {
+      "reviewer": "/root/independent_authority",
+      "scope": [
+        "desktop/eval-main/completion-git-view.mjs",
+        "desktop/eval-main/eval-service.mjs",
+        "desktop/eval-main/task-completion-artifacts-v2.mjs",
+        "test/eval-setup-registry.test.mjs",
+        "test/eval-task-completion-artifacts.test.mjs"
+      ],
+      "sourceDigest": "83de684481b65d0ec65667c21ca7527373f85e6b652b8f92d5431641fb899136",
+      "verdict": "no unresolved findings in reviewed repair scope",
+      "unresolved": []
+    },
+    {
+      "reviewer": "/root/release_registry",
+      "scope": [
+        "desktop/eval-main/human-task-service.mjs",
+        "desktop/eval-main/task-actor-service.mjs",
+        "scripts/test-eval-web.mjs",
+        "test/eval-setup-registry.test.mjs",
+        "test/eval-task-actor.test.mjs"
+      ],
+      "sourceDigest": "688e0918908892af6fa0dd2f66a7608963b25ac81cee2dbf7738b8274769a177",
+      "verdict": "no unresolved findings in reviewed repair scope",
+      "unresolved": []
+    },
+    {
+      "reviewer": "/root/release_ui",
+      "scope": [
+        "desktop/eval-renderer/human-tasks.js",
+        "desktop/eval-renderer/index.html",
+        "docs/evidence/issue-544-evaluator-releases/README.md",
+        "scripts/test-eval-web.mjs"
+      ],
+      "sourceDigest": "7ffc019ff5bd3245af43f493b3bddcac423497422be722a96049d3e8e7fd0a53",
+      "verdict": "no unresolved findings in reviewed repair scope",
+      "unresolved": []
+    }
+  ],
+  "digestMethod": "SHA256 sorted relative UTF8 path + NUL + exact bytes + NUL",
+  "limits": [
+    "Reviewers did not run gates.",
+    "Native Windows Git/junction proof unavailable.",
+    "Earlier review assertions remain historical and are superseded for changed scopes.",
+    "Earlier fresh model validation applies only to pre-repair source."
+  ],
+  "invalidate": "Scoped state changes invalidate assertion."
+}

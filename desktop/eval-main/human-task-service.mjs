@@ -63,16 +63,25 @@ export class HumanTaskService {
       if (session.mode !== "simulated" || session.status !== "active") throw failure("Actor session is not active.", 409);
       const before = session.events.length;
       const recorded = clone(data);
-      if (kind === "actor_observation" && recorded.observation?.screenshot) {
-        const bytes = Buffer.from(recorded.observation.screenshot, "base64");
-        if (bytes.length > 10 * 1024 * 1024 || bytes.toString("base64") !== recorded.observation.screenshot) throw failure("Invalid actor screenshot.");
+      const screenshotOwner = kind === "actor_observation" ? recorded.observation : kind === "actor_completion_evidence" ? recorded.input : null;
+      if (screenshotOwner?.screenshot) {
+        const bytes = Buffer.from(screenshotOwner.screenshot, "base64");
+        if (bytes.length > 10 * 1024 * 1024 || bytes.toString("base64") !== screenshotOwner.screenshot) throw failure("Invalid actor screenshot.");
         const sha256 = createHash("sha256").update(bytes).digest("hex");
         const folder = join(dirname(this.stateFile), "actor-screenshots");
         await mkdir(folder, { recursive: true });
         try { await writeFile(join(folder, `${sha256}.png`), bytes, { flag: "wx", mode: 0o600 }); }
-        catch (error) { if (error.code !== "EEXIST") throw error; }
-        delete recorded.observation.screenshot;
-        recorded.observation.screenshotArtifact = { sha256, mediaType: "image/png" };
+        catch (error) {
+          if (error.code !== "EEXIST") throw error;
+          if (createHash("sha256").update(await readFile(join(folder, `${sha256}.png`))).digest("hex") !== sha256) throw failure("Actor screenshot integrity failure.");
+        }
+        if (kind === "actor_observation") { delete screenshotOwner.screenshot; screenshotOwner.screenshotArtifact = { sha256, mediaType: "image/png" }; }
+        else {
+          const observation = session.events.find(item => item.id === recorded.observationEventId && item.kind === "actor_observation");
+          const observed = observation?.observation?.screenshotArtifact?.sha256 ?? (observation?.observation?.screenshot ? createHash("sha256").update(Buffer.from(observation.observation.screenshot, "base64")).digest("hex") : null);
+          if (observed !== sha256 || digest(recorded.input) !== recorded.inputDigest) throw failure("Completion screenshot/input binding changed.");
+          screenshotOwner.screenshot = { sha256, mediaType: "image/png" }; recorded.inputEncoding = "screenshot-reference-v1";
+        }
       }
       const event = this.event(session, kind, recorded);
       try { await this.persist(); } catch (error) { session.events.length = before; throw error; }
@@ -88,6 +97,21 @@ export class HumanTaskService {
     const bytes = await readFile(join(dirname(this.stateFile), "actor-screenshots", `${hash}.png`));
     if (createHash("sha256").update(bytes).digest("hex") !== hash) throw failure("Actor screenshot integrity failure.");
     return `data:image/png;base64,${bytes.toString("base64")}`;
+  }
+  async completionJudgeInput(id, eventId) {
+    const event = this.find(id).events.find(item => item.id === eventId && item.kind === "actor_completion_evidence");
+    if (!event?.input) throw failure("Missing completion judge input.", 404);
+    const input = clone(event.input);
+    if (event.inputEncoding !== undefined) {
+      const ref = input.screenshot;
+      if (event.inputEncoding !== "screenshot-reference-v1" || ref?.mediaType !== "image/png" || !/^[a-f0-9]{64}$/.test(ref?.sha256 ?? "")) throw failure("Invalid completion screenshot reference.");
+      const observation = this.find(id).events.find(item => item.id === event.observationEventId && item.kind === "actor_observation");
+      const screenshot = (await this.actorScreenshot(id, observation?.id)).slice("data:image/png;base64,".length);
+      if (createHash("sha256").update(Buffer.from(screenshot, "base64")).digest("hex") !== ref.sha256) throw failure("Completion screenshot binding changed.");
+      input.screenshot = screenshot;
+    }
+    if (digest(input) !== event.inputDigest) throw failure("Completion judge input integrity failure.");
+    return input;
   }
   interruptActor(id, reason) {
     return this.serial(async () => {
@@ -537,6 +561,7 @@ export class HumanTaskService {
       if (!["completed", "failed", "interrupted"].includes(session.status)) throw failure("Finish the session before exporting immutable evidence.");
       if (session.status === "completed") await this.settled(session);
       const graphAnnotations = this.annotationSnapshotLoader && session.threadIds.length ? await this.annotationSnapshotLoader(session.threadIds) : null;
+      for (const event of session.events) { if (event.kind === "actor_completion_evidence" && event.input) await this.completionJudgeInput(id, event.id); }
       const actorScreenshots = [];
       for (const event of session.events) {
         if (event.kind === "actor_observation" && event.observation?.screenshotArtifact) actorScreenshots.push({ eventId: event.id, ...event.observation.screenshotArtifact, dataUrl: await this.actorScreenshot(id, event.id) });

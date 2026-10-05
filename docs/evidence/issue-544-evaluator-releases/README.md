@@ -60,3 +60,17 @@ Approved scope: the user requested the reported improvements after reviewing the
 No tests are deleted. Collector tests protect bounded filesystem/Git authority; integrated session tests protect actual routing, native input and immutable evidence. The current actor definition is task-actor-v8: publishing that prompt version explicitly upgrades authority to v5. Historical records are not rewritten. Existing v1 completion selection stays unchanged; v2 must be selected explicitly. Deterministic task grading remains at its existing finish lifecycle and does not become completion-judge authority.
 
 Verification plan: focused six-file in-process loop; `npm run check`, `npm run build`, `npm run test:eval-compiled-runtime`, all compatible `npm run test:eval-web` chapters. Adversarial reviews cover product/stopping meaning, legacy pins, Git authority/bounds and exact evidence. Actual final results and source digest will be appended after those gates; planned commands are not proof. Live sample outcomes remain private local evidence and are not human calibration labels.
+
+## PR #671 review repairs — October 5
+
+These repairs implement the existing PRD evidence, independent-selection and platform promises; they add no stopping authority or model-success rules.
+
+| Changed seam / checkpoint | Smallest production proof |
+| --- | --- |
+| External full-commit sourceRevision reaches v2 Git collector | `eval-setup-registry`: real EvalService method, sourceRevision-only fixture, changed source/test/diff, native injected judge, export/reopen |
+| Missing expected local Git metadata is explicit incomplete evidence; genuine non-Git tasks remain ordinary file evidence | `eval-task-completion-artifacts`: same small workspace with/without trusted baseline |
+| Host absolute Git discovery excludes candidate paths and uses portable executable/config/hooks/object-link paths | artifacts resolver fixture including Windows git.exe, real Git helper/filter safety scenarios; native Windows execution remains unavailable-platform proof |
+| Completion screenshots leave hot state; exact input order/digest and observation binding survive reopen/export | `eval-task-actor`: shared blob reference, hydration, rejection on changed input, one export sidecar copy, corrupted-blob failure |
+| Individually selected completion judge reaches actual task form; release pins and disables both selectors | `test:eval-web`: direct selection/export, release locking/clearing, unchanged promotions and historical blank default |
+
+Required heavy gates: `npm run check`, `npm run build`, `npm run test:eval-compiled-runtime`, `npm run test:eval-web`. Existing tests remain; the release-bound packet fixture now uses sourceRevision-only to observe the previously untested external shape. Legacy upstream-commit and collector baseline tests retain their distinct coverage. Evidence results and exact-source review assertions are recorded in the PR before merge. Earlier live-model evidence certifies only its recorded pre-repair source snapshot.
