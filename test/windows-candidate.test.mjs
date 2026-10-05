@@ -47,7 +47,7 @@ describe("independent Windows candidate", () => {
     const appPath = join(f.repositoryRoot, "win-unpacked");
     const resources = join(appPath, "resources");
     const archive = join(resources, "app.asar");
-    const updater = "node_modules/electron-updater/package.json";
+    const updater = join("node_modules", "electron-updater", "package.json");
     const metadata = createDesktopBuilderConfig(f.contract, { environment: {}, argv: [] }).extraMetadata;
     const windowsEntries = archivePath => listPackage(archivePath).map(entry =>
       win32.join("/", ...entry.replaceAll("\\", "/").split("/").filter(Boolean)));
