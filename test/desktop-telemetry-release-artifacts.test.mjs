@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
+import { finished } from "node:stream/promises";
 import { SentryCli } from "@sentry/cli";
 
 import { createPackage } from "@electron/asar";
@@ -52,7 +53,7 @@ describe("desktop telemetry release artifacts", () => {
     expect(upload.env.SENTRY_CLI_BINARY).toBe(nativeCli);
     for (const job of [windowsWorkflow.jobs.qualify, windowsWorkflow.jobs.package]) {
       const probe = job.steps.findIndex(step => step.name === "Verify pinned Windows telemetry CLI startup");
-      const cold = job.steps.findIndex(step => step.run?.includes("cargo fetch") || step.run?.includes("--prepare-windows-native"));
+      const cold = job.steps.findIndex(step => step.run?.includes("cargo fetch") || step.run?.includes("windows-native-build.mjs adopt"));
       expect(probe).toBeGreaterThan(job.steps.findIndex(step => step.run === "npm ci"));
       expect(cold).toBeGreaterThan(probe);
       expect(job.steps[probe].env).toEqual({ SENTRY_CLI_BINARY: nativeCli });
@@ -187,7 +188,7 @@ describe("desktop telemetry release artifacts", () => {
     })).rejects.toThrow("dSYM UUID");
   });
 
-  it("correlates the packaged Windows PE CodeView identity with its PDB", async () => {
+  it("correlates Windows PDBs and reads nested packaged source maps through native ASAR paths", async () => {
     const root = await mkdtemp(join(tmpdir(), "relayer-telemetry-windows-symbols-"));
     const outputRoot = join(root, "desktop", "dist", "telemetry");
     const packagedApplication = join(root, "desktop", "dist", "win-unpacked");
@@ -198,7 +199,12 @@ describe("desktop telemetry release artifacts", () => {
     await writeFile(join(root, "desktop", "main", "index.mjs"), "export const answer = 42;\n", "utf8");
     await writeFile(join(asarSource, "main", "index.mjs"), "export const answer = 42;\n", "utf8");
     await mkdir(resources, { recursive: true });
-    await createPackage(asarSource, join(resources, "app.asar"));
+    await mkdir(join(resources, "renderer"), { recursive: true });
+    for (const directory of [join(root, "desktop/main/credentials"), join(asarSource, "main/credentials")]) {
+      await mkdir(directory, { recursive: true });
+      await writeFile(join(directory, "codex-credential-adapter.mjs"), "export const credentialAdapter = 42;\n");
+    }
+    await finished(await createPackage(asarSource, join(resources, "app.asar")), { cleanup: true });
     const rustBinary = join(root, "target", "x86_64-pc-windows-msvc", "release", "relayer-app-server.exe");
     await mkdir(join(rustBinary, ".."), { recursive: true });
     await mkdir(join(resources, "bin"), { recursive: true });
@@ -226,10 +232,11 @@ describe("desktop telemetry release artifacts", () => {
       repositoryRoot: root,
       outputRoot,
       packagedApplication,
-      sourceGroups: [["electron", "desktop/main/index.mjs"]],
       rustBinaries: [rustBinary, graphBinary],
       capture,
     });
+    expect(manifest.sourceMaps.map(entry => entry.module)).toEqual(["desktop/main/credentials/codex-credential-adapter.mjs", "desktop/main/index.mjs"]);
+    expect(await verifyDesktopTelemetryArtifacts({ outputRoot })).toEqual(manifest);
     expect(manifest.nativeDebugIdentities).toEqual([
       { binary: "bin/relayer-app-server.exe", debug: "debug/relayer-app-server.pdb", debugId: `${guid}-3` },
       { binary: "bin/relayer-graph-server.exe", debug: "debug/relayer-graph-server.pdb", debugId: `${graphGuid}-3` },
@@ -237,8 +244,8 @@ describe("desktop telemetry release artifacts", () => {
     for (const [name, contents] of [["relayer-app-server", "app pdb"], ["relayer-graph-server", "graph pdb"]]) {
       const copiedPdb = join(outputRoot, "debug", `${name}.pdb`);
       expect(await readFile(copiedPdb, "utf8")).toBe(contents);
-      expect(capture).toHaveBeenCalledWith("llvm-readobj", ["--coff-debug-directory", join(resources, "bin", `${name}.exe`)]);
-      expect(capture).toHaveBeenCalledWith("llvm-pdbutil", ["dump", "-summary", copiedPdb]);
+      expect(capture).toHaveBeenCalledWith("llvm-readobj", ["--coff-debug-directory", join(resources, "bin", `${name}.exe`)], { timeout: 15_000, maxBuffer: 4 * 1024 * 1024 });
+      expect(capture).toHaveBeenCalledWith("llvm-pdbutil", ["dump", "-summary", copiedPdb], { timeout: 15_000, maxBuffer: 4 * 1024 * 1024 });
     }
 
     const mismatchedCapture = vi.fn(async (command) => ({

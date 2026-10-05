@@ -35,3 +35,9 @@ The signed-candidate workflow may be run manually from `main` without changing t
 - Recovery from a failed local-data schema migration belongs to the future persistence contract, where the schema and transaction boundary can be tested. It is not an updater acceptance criterion before that persistence layer exists.
 - The updater UI and publication pipeline consume this contract; they do not redefine release identity or channel semantics.
 - A tag is publication authority, not merely a version label. Deleting or recreating a tag cannot overwrite immutable artifacts for that version.
+
+## Windows build reuse decision (2026-10-05)
+
+Manual-main qualification owns one release-profile build with default features and debug level 1, or authenticates compatible output from an earlier successful manual-main native job. It always packages unsigned copies and repeats the native lifecycle. The protected signing job adopts only the current run/attempt/source-qualified four-file EXE/PDB artifact, then performs existing signing, package, telemetry and sealing gates without native compilation. Required handoff rejection stops signing; optional prior-run cache rejection compiles once. A later signing failure does not invalidate successfully qualified native inputs.
+
+Private native artifacts are compilation inputs, not distributable candidates. Input identities bind native/Rust sources, compiler orchestration, reviewed build configuration, target/profile, actual tools and MSVC/SDK selections. Optional main-scoped dependency, native-preparation and compiler caches remain subordinate to hash verification and fresh checks. Windows proof distinguishes fresh compilation from artifact reuse and does not gate main or macOS workflows. VM and publication decisions remain separate.

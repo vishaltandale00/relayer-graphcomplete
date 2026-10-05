@@ -155,7 +155,7 @@ Windows owns `desktop/windows-version.json`, starting at `0.2.0`. macOS keeps it
 
 `Windows Desktop Candidate` runs unsigned native qualification only on pull requests labeled `windows-qualification`, regardless of changed paths. It grants no signing identity to that job. A manual run from main additionally requires successful exact-source main CI, signs through `desktop-production-windows`, verifies the signed application and installer, uploads telemetry, and seals its candidate artifact. It cannot change an update feed. Main CI and macOS release jobs have no dependency on this workflow.
 
-The protected Windows package job compiles native release inputs before Azure login. A same-job handoff binds the clean release contract, workflow run/attempt/job, both EXEs, and both PDB hashes. After fresh login it silently obtains the Artifact Signing resource token; packaging rechecks the license and handoff, then performs the existing assembly, lifecycle, signature, telemetry, and sealing gates without recompilation. The handoff grants no cache or publication authority. This avoids consuming a login session older than the hour-long cold native build.
+The unprivileged manual-main qualification job builds release native inputs once, packages those exact bytes unsigned, and repeats the native lifecycle. It preserves two EXEs, matching PDBs, and a verified manifest as a private build-input artifact. The protected package job authenticates that current run/attempt/source artifact before Azure login and writes its existing same-job handoff. After fresh login it obtains the Artifact Signing resource token; packaging rechecks the license and handoff, then performs existing assembly, lifecycle, signature, telemetry, and sealing gates without recompilation. Required handoff rejection stops signing. No handoff grants publication authority.
 
 Windows copies the native release directory with a filter naming only the two Rust EXEs. electron-builder's single-file resource mappings bypass its signing transformer; filtered directory copies invoke the existing Azure signing path on the packaged copies without mutating the handoff inputs or including PDBs. The `routes both copied Rust executables` scenario in `test/windows-candidate.test.mjs` exercises the pinned builder's actual matcher, copy, and signing-transformer implementations, including source preservation, exact executable inventory, and signing-failure propagation. Its signing callback is a deterministic fixture; the Windows runner's application and installer Authenticode gates remain required proof of actual signing.
 
@@ -165,7 +165,7 @@ Both Windows jobs run the real-ASAR packaged-contract scenario before native com
 
 Before either Windows native build, `node scripts/check-windows-rust-symbols.mjs` compiles two dependency-free targets with the pinned Rust toolchain and MSVC. It checks the real EXE/PDB outputs through the same source-path resolver used by handoff and telemetry: Cargo retains hyphens in EXE names and uses underscores in PDB names. Telemetry copies those source PDBs to its existing hyphenated manifest paths, then correlates their GUID and age with the packaged EXEs. This probe is Windows-only; local fixtures do not substitute for its compiler proof.
 
-The native source route uses MSVC, pinned Ladybug and static OpenSSL, locked offline Cargo, PE architecture/import verification for both Rust executables, and a packaged graph-server create/lock/shutdown/reopen test. Existing native caches qualify macOS arm64 only; the first Windows runs compile fresh and record that reason. Never relax the main-source gate to sign pull-request code.
+The native source route uses MSVC, pinned Ladybug and static OpenSSL, locked offline Cargo, PE architecture/import verification for both Rust executables, and a packaged graph-server create/lock/shutdown/reopen test. Manual main runs may reuse verified compatible Windows native artifacts; every hit repeats unsigned packaging and lifecycle proof. Labeled PRs retain the separate cold unsigned qualification recipe. Never relax the main-source gate to sign pull-request code.
 
 1. Configure the active profile and exact certificate subject. Verify the OIDC federation and profile-scoped signer role.
 2. Run the Windows-inclusive authority audit and unsigned Windows native qualification.
@@ -289,3 +289,9 @@ confirmation: promote-<target key>-X.Y.Z
 ```
 
 Promotion revalidates the committed evidence, immutable Preview receipt, historical manifest, and every public artifact byte. It moves only that target's Stable pointer and never rebuilds or re-signs the application.
+
+### Windows native cache operation
+
+See [the Windows cache contract](agents/ci.md#windows-release-native-build-reuse) and [checkpoint ledger](evidence/windows-native-cache/README.md). A new manual dispatch is the supported signing fix loop: compatible native binaries can be restored from an earlier successful native job even when later signing failed. Rerunning only failed package jobs cannot adopt a previous attempt's artifact; dispatch a new run or rerun all required jobs. Never weaken the attempt binding.
+
+The optional `force_native_rebuild` dispatch input bypasses binary reuse while retaining dependency/preparation/compiler acceleration, so the fallback can be measured. Record actual compiler statistics and stage durations. A cache hit or fixture pass alone does not establish a latency gain, signing success, installation, or release acceptance.

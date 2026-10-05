@@ -117,6 +117,7 @@
         "test/composer-provider-lifecycle.test.mjs",
         "test/desktop-release-main-ci-check.test.mjs",
         "test/windows-candidate.test.mjs",
+        "test/windows-native-cache.test.mjs",
         "test/ladybug-packaged-lifecycle.test.mjs",
         "test/desktop-shell.test.mjs",
         "test/eval-web-host.test.mjs",
@@ -153,6 +154,10 @@
     }
   ],
   "chapterOwners": [
+    {"exact": "desktop/release/build-native-release.mjs", "chapters": ["vitest", "packaging"], "vitestFiles": ["test/windows-native-cache.test.mjs", "test/windows-candidate.test.mjs", "test/signed-native-cache.test.mjs", "test/desktop-telemetry-release-artifacts.test.mjs"]},
+    {"exact": "desktop/release/windows-native-build.mjs", "chapters": ["vitest", "packaging"], "vitestFiles": ["test/windows-native-cache.test.mjs", "test/windows-candidate.test.mjs", "test/signed-native-cache.test.mjs", "test/desktop-telemetry-release-artifacts.test.mjs"]},
+    {"exact": "desktop/release/windows-native-cache.mjs", "chapters": ["vitest", "packaging"], "vitestFiles": ["test/windows-native-cache.test.mjs", "test/windows-candidate.test.mjs", "test/signed-native-cache.test.mjs", "test/desktop-telemetry-release-artifacts.test.mjs"]},
+    {"exact": "desktop/release/windows-native-identity.mjs", "chapters": ["vitest", "packaging"], "vitestFiles": ["test/windows-native-cache.test.mjs", "test/windows-candidate.test.mjs", "test/signed-native-cache.test.mjs", "test/desktop-telemetry-release-artifacts.test.mjs"]},
     { "exact": "desktop/release/verify-windows-app.mjs", "chapters": ["vitest", "packaging"], "vitestFiles": ["test/desktop-shell.test.mjs", "test/windows-candidate.test.mjs"] },
     { "exact": "scripts/check-windows-signature-runtime.mjs", "chapters": ["vitest", "packaging"], "vitestFiles": ["test/desktop-shell.test.mjs", "test/windows-candidate.test.mjs"] },
     { "exact": "desktop/release/windows-rust-debug.mjs", "chapters": ["vitest", "packaging"], "vitestFiles": ["test/windows-candidate.test.mjs", "test/desktop-telemetry-release-artifacts.test.mjs"] },

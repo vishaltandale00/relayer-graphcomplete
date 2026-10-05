@@ -2,8 +2,14 @@ name: Windows Desktop Candidate
 
 on:
   workflow_dispatch:
+    inputs:
+      force_native_rebuild:
+        description: Bypass binary reuse to qualify dependency/compiler cache behavior
+        type: boolean
+        default: false
+        required: false
   pull_request:
-    types: [opened, synchronize, reopened, labeled]
+    types: [ opened, synchronize, reopened, labeled ]
 
 concurrency:
   group: windows-desktop-candidate-${{ github.event.pull_request.number || github.ref }}
@@ -40,8 +46,15 @@ jobs:
     timeout-minutes: 90
     permissions:
       contents: read
+      actions: read
     env:
       RELAYER_DESKTOP_TARGET: windows-x64
+      TEMP: ${{ runner.temp }}
+      TMP: ${{ runner.temp }}
+      SCCACHE_GHA_ENABLED: "false"
+      SCCACHE_DIR: ${{ runner.temp }}/rwc
+      SCCACHE_CACHE_SIZE: 2G
+      RELAYER_WINDOWS_NATIVE_CACHE: ${{ inputs.force_native_rebuild && '0' || '1' }}
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
@@ -68,6 +81,8 @@ jobs:
         run: node scripts/check-windows-signature-runtime.mjs
       - name: Verify native Cargo EXE and PDB paths
         run: node scripts/check-windows-rust-symbols.mjs
+      - name: Verify Windows native cache transfer and handoff
+        run: node node_modules/vitest/vitest.mjs run test/windows-native-cache.test.mjs test/desktop-telemetry-release-artifacts.test.mjs
       - name: Record native cache decision and toolchains
         shell: pwsh
         run: |
@@ -77,28 +92,145 @@ jobs:
           rustc -vV
           cmake --version
           perl -v
+        if: ${{ github.event_name == 'pull_request' }}
       - name: Prepare pinned static native sources
         shell: pwsh
         run: |
           cargo fetch --locked --target x86_64-pc-windows-msvc
           npm run ladybug:source -- fetch --cache "$env:RUNNER_TEMP/ladybug-cache"
           npm run ladybug:source -- prepare --cache "$env:RUNNER_TEMP/ladybug-cache" --output "$env:RUNNER_TEMP/ladybug-prepared" --target x86_64-pc-windows-msvc
+        if: ${{ github.event_name == 'pull_request' }}
       - name: Verify unsigned package and native lifecycle
         shell: pwsh
         run: node scripts/capture-ladybug-packaged-lifecycle.mjs --source-output "$env:RUNNER_TEMP/ladybug-prepared" --source-commit "${{ github.sha }}" --receipt-output "$env:RUNNER_TEMP/windows-native-receipt.json"
+        if: ${{ github.event_name == 'pull_request' }}
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: windows-native-qualification-${{ github.sha }}
           path: ${{ runner.temp }}/windows-native-receipt.json
           if-no-files-found: error
           retention-days: 90
+        if: ${{ github.event_name == 'pull_request' }}
+      - name: Identify Windows native build inputs
+        id: native-plan
+        if: ${{ github.event_name == 'workflow_dispatch' }}
+        run: node desktop/release/windows-native-build.mjs plan
+      - name: Restore verified Windows native output
+        id: native-restore
+        if: ${{ github.event_name == 'workflow_dispatch' }}
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: node desktop/release/windows-native-build.mjs restore
+      - name: Restore locked native source downloads
+        id: native-downloads
+        if: ${{ github.event_name == 'workflow_dispatch' && steps.native-restore.outputs.hit != 'true' && steps.native-plan.outputs.cache_eligible == 'true' }}
+        continue-on-error: true
+        timeout-minutes: 3
+        uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25
+        with:
+          path: |-
+            ~/.cargo/registry
+            ~/.cargo/git
+            ${{ runner.temp }}/relayer-ladybug-source-cache-v1
+          key: windows-release-cargo-v1-${{ steps.native-plan.outputs.native_identity }}-${{ steps.native-plan.outputs.dependency_identity }}
+          restore-keys: windows-release-cargo-v1-${{ steps.native-plan.outputs.native_identity }}-
+          download-chunk-timeout-minutes: 1
+      - name: Restore verified native preparation
+        id: native-preparation
+        if: ${{ github.event_name == 'workflow_dispatch' && steps.native-restore.outputs.hit != 'true' && steps.native-plan.outputs.cache_eligible == 'true' }}
+        continue-on-error: true
+        timeout-minutes: 3
+        uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25
+        with:
+          path: ${{ runner.temp }}/rwn
+          key: windows-release-preparation-v1-${{ steps.native-plan.outputs.native_identity }}-${{ github.sha }}
+          restore-keys: windows-release-preparation-v1-${{ steps.native-plan.outputs.native_identity }}-
+          download-chunk-timeout-minutes: 1
+      - name: Restore native compiler objects
+        id: native-objects
+        if: ${{ github.event_name == 'workflow_dispatch' && steps.native-restore.outputs.hit != 'true' && steps.native-plan.outputs.cache_eligible == 'true' }}
+        continue-on-error: true
+        timeout-minutes: 3
+        uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25
+        with:
+          path: ${{ runner.temp }}/rwc
+          key: windows-release-objects-v1-${{ steps.native-plan.outputs.native_identity }}-${{ github.sha }}
+          restore-keys: windows-release-objects-v1-${{ steps.native-plan.outputs.native_identity }}-
+          download-chunk-timeout-minutes: 1
+      - name: Set up pinned Windows compiler cache
+        if: ${{ github.event_name == 'workflow_dispatch' && steps.native-restore.outputs.hit != 'true' && steps.native-plan.outputs.cache_eligible == 'true' }}
+        continue-on-error: true
+        uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba
+        with:
+          version: v0.18.0
+          disable_annotations: true
+      - name: Qualify release native inputs once
+        id: native-qualification
+        if: ${{ github.event_name == 'workflow_dispatch' }}
+        run: node desktop/release/windows-native-build.mjs qualify
+      - name: Preserve qualified Windows native inputs
+        if: ${{ github.event_name == 'workflow_dispatch' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: ${{ steps.native-qualification.outputs.artifact_name }}
+          path: ${{ steps.native-qualification.outputs.artifact_directory }}
+          if-no-files-found: error
+          retention-days: 30
+      - name: Preserve release-profile lifecycle receipt
+        if: ${{ github.event_name == 'workflow_dispatch' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: windows-release-qualification-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/windows-release-qualification.json
+          if-no-files-found: error
+          retention-days: 90
+      - name: Record Windows compiler cache statistics
+        if: ${{ always() && github.event_name == 'workflow_dispatch' && steps.native-restore.outputs.hit != 'true' }}
+        continue-on-error: true
+        shell: pwsh
+        run: if ($env:SCCACHE_PATH) { & $env:SCCACHE_PATH --show-stats; & $env:SCCACHE_PATH --show-stats --stats-format json | Out-File -Encoding utf8 "$env:RUNNER_TEMP/windows-sccache-stats.json" }
+      - name: Preserve Windows compiler cache statistics
+        if: ${{ always() && github.event_name == 'workflow_dispatch' && steps.native-restore.outputs.hit != 'true' }}
+        continue-on-error: true
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: windows-compiler-statistics-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/windows-sccache-stats.json
+          if-no-files-found: warn
+          retention-days: 14
+      - name: Save locked native source downloads
+        if: ${{ success() && github.event_name == 'workflow_dispatch' && steps.native-restore.outputs.hit != 'true' && steps.native-plan.outputs.cache_eligible == 'true' }}
+        continue-on-error: true
+        uses: actions/cache/save@caa296126883cff596d87d8935842f9db880ef25
+        with:
+          path: |-
+            ~/.cargo/registry
+            ~/.cargo/git
+            ${{ runner.temp }}/relayer-ladybug-source-cache-v1
+          key: windows-release-cargo-v1-${{ steps.native-plan.outputs.native_identity }}-${{ steps.native-plan.outputs.dependency_identity }}
+      - name: Save verified native preparation
+        if: ${{ success() && github.event_name == 'workflow_dispatch' && steps.native-restore.outputs.hit != 'true' && steps.native-plan.outputs.cache_eligible == 'true' }}
+        continue-on-error: true
+        uses: actions/cache/save@caa296126883cff596d87d8935842f9db880ef25
+        with:
+          path: ${{ runner.temp }}/rwn
+          key: windows-release-preparation-v1-${{ steps.native-plan.outputs.native_identity }}-${{ github.sha }}
+      - name: Save native compiler objects
+        if: ${{ success() && github.event_name == 'workflow_dispatch' && steps.native-restore.outputs.hit != 'true' && steps.native-plan.outputs.cache_eligible == 'true' }}
+        continue-on-error: true
+        uses: actions/cache/save@caa296126883cff596d87d8935842f9db880ef25
+        with:
+          path: ${{ runner.temp }}/rwc
+          key: windows-release-objects-v1-${{ steps.native-plan.outputs.native_identity }}-${{ github.sha }}
+    outputs:
+      native_identity: ${{ steps.native-plan.outputs.identity }}
 
   package:
     name: Sign Windows x64 Preview
     if: ${{ github.event_name == 'workflow_dispatch' }}
-    needs: [validate, qualify]
+    needs: [ validate, qualify ]
     runs-on: windows-2025
-    # Cold native compilation already took over an hour; leave room for fresh
+    # Native inputs are qualified in the producer job. This budget covers fresh
     # signing, installer verification, and mandatory symbol upload.
     timeout-minutes: 120
     environment: desktop-production-windows
@@ -144,15 +276,20 @@ jobs:
         run: node scripts/check-windows-signature-runtime.mjs
       - name: Verify native Cargo EXE and PDB paths
         run: node scripts/check-windows-rust-symbols.mjs
+      - name: Verify Windows native cache transfer and handoff
+        run: node node_modules/vitest/vitest.mjs run test/windows-native-cache.test.mjs test/desktop-telemetry-release-artifacts.test.mjs
       - name: Require signing configuration
         shell: pwsh
         run: |
           foreach ($name in @("AZURE_CLIENT_ID", "AZURE_TENANT_ID", "AZURE_SUBSCRIPTION_ID", "RELAYER_WINDOWS_CERTIFICATE_PROFILE", "RELAYER_WINDOWS_PUBLISHER_NAME")) {
             if ([string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($name))) { throw "Missing signing variable: $name" }
           }
-      - name: Build exact-source native release before signing login
+      - name: Adopt qualified release native before signing login
         shell: pwsh
-        run: node desktop/release/build-release.mjs preview --prepare-windows-native "$env:RUNNER_TEMP/windows-release-native.json"
+        run: node desktop/release/windows-native-build.mjs adopt
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          RELAYER_WINDOWS_NATIVE_IDENTITY: ${{ needs.qualify.outputs.native_identity }}
       - uses: azure/login@f5d393ae46f8fde4be8b75f32e3fc50e654ad0ca
         with:
           client-id: ${{ vars.AZURE_CLIENT_ID }}
@@ -165,7 +302,7 @@ jobs:
         run: npm run desktop:dist:preview -- --use-windows-native "$env:RUNNER_TEMP/windows-release-native.json"
       - name: Upload version-matched telemetry
         env:
-          RELAYER_DESKTOP_RELEASE: '1'
+          RELAYER_DESKTOP_RELEASE: "1"
           RELAYER_DESKTOP_CHANNEL: preview
           SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
           SENTRY_CLI_BINARY: ${{ github.workspace }}\node_modules\@sentry\cli-win32-x64\bin\sentry-cli.exe

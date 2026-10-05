@@ -1,0 +1,27 @@
+# Windows native build acceleration: verification plan
+
+User decision: build once for qualification/signing, reuse compatible verified native outputs across runs, and cache native dependencies/compiler outputs to improve the Windows fix loop. Original candidate37343995280/1 remains on clean source31b29d915d69e78035ea0f666930fd373db0f0c1; this change does not replace its evidence.
+
+Base31b29d915d69e78035ea0f666930fd373db0f0c1. Branch codex/windows-native-cache. Source/fixture proof and hosted proof are separate.
+
+Changed executable seams and checkpoints:
+- Native release compilation has its own module; macOS behavior and debug1/profile/default-features remain unchanged. Both cache identities include its bytes. Existing builder/cache tests and macOS main CI qualify this extraction.
+- Manual-main Windows qualification builds release-profile native inputs once, assembles unsigned development packaging from those exact inputs, rehashes both originals/copied EXEs, runs both PE/import gates and the actual graph-server create/lock/shutdown/reopen seam. Receipt states fresh-Cargo versus verified-runtime artifact; it never claims an empty cold target on a hit. Labeled PR cold qualification retains its old contract and has no signing access.
+- Internal bundle contains exactly two unsigned EXEs and their Cargo underscore-named PDBs plus manifest; both EXE CodeView GUID/age identities match PDBs. Source inputs/profile/toolchain/target/inventory hashes are verified before use.
+- Optional cross-run restore accepts only trusted manual-main Windows native producers with successful source validation and native job, even when later signing/telemetry failed. API associations, current producer attempt, immutable artifact ID/archive digest, safe fixed ZIP inventory, producer and installed file hashes are explicit gates. Rejected/missing/unavailable prior entries fall back to exactly one native build; compiler failures propagate.
+- Required same-run handoff authenticates exact source/run/attempt/current successful native job and artifact; it fails closed instead of rebuilding in the signing job. Only verified installed inputs may create the existing package-local handoff. Signing mutates packaged copies, never cached originals.
+- Windows-specific identity binds reviewed native/crate/build-script closure, actual MSVC/SDK/Rust/CMake/Perl/LLVM tools and environment, target/profile/debug1. Windows case-insensitive overrides/configuration/external paths are rejected. UI/release-version/source-commit changes alone do not invalidate native inputs.
+- Dependency downloads and native preparation/compiler caches are optional, isolated to Windows and trusted main producer namespace. Native manifest/source hashes remain verified; cache errors do not suppress actual compilation/qualification failures. Real stats/hashes/timings distinguish cache hits from claimed speedups.
+- All package/notice/ASAR/source/feed gates, fresh signatures, symbols/source maps, telemetry and sealed artifact verification remain mandatory. Windows stays absent from main/macOS prerequisites; no VM/publication action belongs here.
+
+Warm proof: production native identity, real EXE/PDB and ZIP/cache/handoff fixtures, release-builder miss/hit/failure counts, fresh lifecycle, retained Windows/telemetry suites. No tests deleted. Add explicit portfolio ownership for each new executable seam.
+
+Required broad proof before commit: npm run check and npm run build. Declared applicable local heavy proof: npm run evidence:telemetry. Required hosted proof: actual Windows build-once producer/handoff/signing, compatible binary-cache hit with zero native compile, changed-native-input miss with dependency/compiler hits, real lifecycle/signatures/telemetry/sealed receipts. This is a plan, not observed proof.
+
+Adversarial design reviewers windows_cache_authority/windows_cache_verification accepted the separate successful-native producer approach subject to the checkpoints above. Their design transcripts do not certify implementation or artifacts; final source and hosted evidence reviews remain due.
+
+## Original candidate diagnosis and telemetry checkpoint
+
+Candidate37343995280/1 on31b29d91 completed native release preparation in79m04s, fresh Azure login/resource authentication, actual Azure signing calls for both Rust servers, application and NSIS installer, afterPack verification, Windows signature verification and packaged-contract verification. It then failed at telemetry source extraction before upload/sealing. The pinned ASAR reader traverses directories using the host path separator; telemetry supplied canonical forward-slash paths on Windows. The error named the first nested module, desktop/main/credentials/codex-credential-adapter.mjs, which had been discovered in the actual packaged inventory. No sealed artifact, successful telemetry upload, or VM acceptance is claimed for that run. An unchanged retry is not justified.
+
+The corrective seam translates canonical telemetry ASAR names to host-native lookup paths while retaining exact packaged/source byte checks. The retained Windows symbol fixture now uses the production default packaged inventory, nested credential source, real ASAR producer/extractor, matching PDBs, manifest verification and GUID/age rejection. Both Windows jobs run cache and telemetry fixtures before long native work. macOS source mismatch and symbol UUID gates remain unchanged. This protects TEL-010 target-specific packaged source/symbol integrity; no new product promise is introduced.

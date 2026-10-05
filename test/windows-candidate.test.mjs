@@ -315,7 +315,7 @@ describe("independent Windows candidate", () => {
     const workflow = parse(await readFile(new URL("../.github/workflows/desktop-windows-candidate.yml", import.meta.url), "utf8"));
     expect(Object.keys(workflow.on).sort()).toEqual(["pull_request", "workflow_dispatch"]);
     expect(workflow.on.pull_request).toEqual({ types: ["opened", "synchronize", "reopened", "labeled"] });
-    expect(workflow.jobs.qualify.permissions).toEqual({ contents: "read" });
+    expect(workflow.jobs.qualify.permissions).toEqual({ contents: "read", actions: "read" });
     expect(workflow.jobs.qualify.if).toContain("contains(github.event.pull_request.labels.*.name, 'windows-qualification')");
     expect(workflow.jobs.qualify.if).toContain("needs.validate.result == 'success'");
     expect(workflow.jobs.qualify.environment).toBeUndefined();
@@ -329,7 +329,7 @@ describe("independent Windows candidate", () => {
       const signatureProbe = job.steps.findIndex(step => step.run === "node scripts/check-windows-signature-runtime.mjs");
       const probe = job.steps.findIndex(step => step.run === "node scripts/check-windows-rust-symbols.mjs");
       const msvc = job.steps.findIndex(step => step.uses?.startsWith("ilammy/msvc-dev-cmd@"));
-      const coldBuild = job.steps.findIndex(step => step.run?.includes("cargo fetch") || step.run?.includes("--prepare-windows-native"));
+      const coldBuild = job.steps.findIndex(step => step.run?.includes("cargo fetch") || step.run?.includes("windows-native-build.mjs adopt"));
       expect(probe).toBeGreaterThan(msvc);
       expect(msvc).toBeGreaterThan(-1);
       expect(coldBuild).toBeGreaterThan(probe);
@@ -339,7 +339,7 @@ describe("independent Windows candidate", () => {
       expect(coldBuild).toBeGreaterThan(signatureProbe);
     }
     await execFileAsync(process.execPath, ["--check", fileURLToPath(new URL("../scripts/check-windows-signature-runtime.mjs", import.meta.url))]);
-    const preparation = steps.findIndex(step => step.run?.includes("--prepare-windows-native"));
+    const preparation = steps.findIndex(step => step.run?.includes("windows-native-build.mjs adopt"));
     const login = steps.findIndex(step => step.uses?.startsWith("azure/login@"));
     const resourceToken = steps.findIndex(step => step.run?.includes("get-access-token"));
     const packaging = steps.findIndex(step => step.run?.includes("--use-windows-native"));

@@ -30,7 +30,7 @@ export async function signedNativeIdentity({ repositoryRoot, environment, target
   const base = await packagingIdentity({ repositoryRoot, cacheRoot: join(repositoryRoot, ".relayer/signed-native-cache-v1"), target, environment, command });
   command ??= (name, args) => execFileSync(name, args, { encoding: "utf8", env: packagingBuildEnvironment(environment) }).trim();
   const implementation = {};
-  for (const path of ["desktop/release/build-release.mjs", "desktop/release/telemetry-artifacts.mjs", signedWorkflow]) {
+  for (const path of ["desktop/release/build-release.mjs", "desktop/release/build-native-release.mjs", "desktop/release/telemetry-artifacts.mjs", signedWorkflow]) {
     implementation[path] = hash(await readFile(join(repositoryRoot, path)));
   }
   return hash(JSON.stringify({ schema: signedCacheSchema, base, implementation, ...signedProfile,

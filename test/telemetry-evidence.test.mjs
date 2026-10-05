@@ -50,7 +50,7 @@ describe("deterministic telemetry evidence portfolio", () => {
         status: "not-run",
         context: "invoke-npm-run-evidence-telemetry-for-production-portfolio",
       });
-      expect(artifact.checkpoints.releaseSymbols.inspected).toHaveLength(7);
+      expect(artifact.checkpoints.releaseSymbols.inspected).toHaveLength(13);
       expect(artifactText).not.toContain("privacy-sentinel");
     } finally {
       await rm(directory, { recursive: true, force: true });

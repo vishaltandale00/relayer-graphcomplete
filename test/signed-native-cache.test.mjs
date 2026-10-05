@@ -182,12 +182,12 @@ test("real release build consumes verified hit, licenses, or compiles debug/lock
 test("signed identity separates development profile and binds source, symbol tools and release implementation", async () => {
   const root = await temporary();
   for (const path of ["vendor/ladybug", "scripts/ci", "desktop/packaging", "desktop/shared", "desktop/release", "crates/core", ".cargo", "docs", "fixtures/graph-query-v1", ".github/workflows"]) await mkdir(join(root, path), { recursive: true });
-  for (const path of ["scripts/prepare-ladybug-source.mjs", "scripts/verify-ladybug-native-receipts.mjs", "desktop/shared/target.mjs", "Cargo.toml", "Cargo.lock", "docs/graph-query-v1.md", "crates/core/lib.rs", "desktop/release/build-release.mjs", "desktop/release/telemetry-artifacts.mjs", signedWorkflow]) await writeFile(join(root, path), path);
+  for (const path of ["scripts/prepare-ladybug-source.mjs", "scripts/verify-ladybug-native-receipts.mjs", "desktop/shared/target.mjs", "Cargo.toml", "Cargo.lock", "docs/graph-query-v1.md", "crates/core/lib.rs", "desktop/release/build-release.mjs", "desktop/release/build-native-release.mjs", "desktop/release/telemetry-artifacts.mjs", signedWorkflow]) await writeFile(join(root, path), path);
   await writeFile(join(root, "scripts/ci/packaging-input-contract.json"), JSON.stringify({ version: 1, reviewedBuildConfiguration: {} }));
   const command = (name, args) => args[0] === "metadata" ? JSON.stringify({ packages: [] }) : name;
   const options = { repositoryRoot: root, target: { key: "macos-arm64", rustTarget: "aarch64-apple-darwin" }, environment: { HOME: root }, command };
   const first = await signedNativeIdentity(options);
-  for (const path of ["crates/core/lib.rs", "desktop/packaging/signed-native-transport.mjs", "desktop/release/build-release.mjs", "desktop/release/telemetry-artifacts.mjs", signedWorkflow]) {
+  for (const path of ["crates/core/lib.rs", "desktop/packaging/signed-native-transport.mjs", "desktop/release/build-release.mjs", "desktop/release/build-native-release.mjs", "desktop/release/telemetry-artifacts.mjs", signedWorkflow]) {
     const original = await readFile(join(root, path)).catch(() => null);
     await writeFile(join(root, path), "changed");
     expect(await signedNativeIdentity(options)).not.toBe(first);

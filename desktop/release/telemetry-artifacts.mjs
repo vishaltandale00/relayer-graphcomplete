@@ -1,3 +1,4 @@
+import { verifyWindowsRustDebugIdentity } from "./windows-rust-debug.mjs";
 import { createHash } from "node:crypto";
 import { execFile, spawn } from "node:child_process";
 import { createReadStream } from "node:fs";
@@ -210,7 +211,7 @@ async function readPackagedSource({ packagedApplication, platform, modulePath })
   const entry = packagedAsarEntry(modulePath);
   if (!entry) throw new Error(`Desktop telemetry has no packaged source mapping for ${modulePath}.`);
   try {
-    return extractFile(resolve(resources, "app.asar"), entry);
+    return extractFile(resolve(resources, "app.asar"), join(...entry.split("/")));
   } catch {
     throw new Error(`Desktop telemetry packaged source is missing: ${modulePath}.`);
   }
@@ -220,13 +221,6 @@ function parseMacDebugIds(output) {
   return [...String(output || "").matchAll(/UUID:\s*([a-f0-9-]{36})\s*\(/giu)]
     .map((match) => match[1].toLowerCase())
     .sort();
-}
-
-function parseWindowsDebugId(output) {
-  const text = String(output || "");
-  const guid = /(?:PDB)?GUID:\s*[({]?([a-f0-9-]{36})[)}]?/iu.exec(text)?.[1]?.toLowerCase();
-  const age = /(?:PDB)?Age:\s*(\d+)/iu.exec(text)?.[1];
-  return guid && age ? `${guid}-${age}` : null;
 }
 
 async function correlateNativeDebugIdentity({ contract, resources, sourceBinary, debugPath, capture }) {
@@ -243,15 +237,7 @@ async function correlateNativeDebugIdentity({ contract, resources, sourceBinary,
     }
     return { packagedBinary, debugId: packagedIds.join(",") };
   }
-  const [packaged, debug] = await Promise.all([
-    capture("llvm-readobj", ["--coff-debug-directory", packagedBinary]),
-    capture("llvm-pdbutil", ["dump", "-summary", debugPath]),
-  ]);
-  const packagedId = parseWindowsDebugId(packaged.stdout);
-  const debugId = parseWindowsDebugId(debug.stdout);
-  if (!packagedId || packagedId !== debugId) {
-    throw new Error("Desktop telemetry PDB identity does not match the packaged Rust executable.");
-  }
+  const debugId = await verifyWindowsRustDebugIdentity(packagedBinary, debugPath, capture);
   return { packagedBinary, debugId };
 }
 
