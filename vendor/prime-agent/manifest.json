@@ -63,7 +63,8 @@
     "pythonPackageTreeSha256": "c29bae58b44db45bde3ada29f13eaa2c87e3e49314bde16abd98565543d633e8"
   },
   "dependencyClosureSha256ByTarget": {
-    "darwin-arm64": "1253fd136c0d63e751fffdae68327a1b5cbb3176f2b9780de372744f8b83ef41"
+    "darwin-arm64": "1253fd136c0d63e751fffdae68327a1b5cbb3176f2b9780de372744f8b83ef41",
+    "win32-x64": "32601b3223d54d5d5f59860abd16b10799a3c98be08920c783323099c6de86cf"
   },
   "repositoryDependencyClosureSha256": "02f15fb2ce6366f1e9709e66336a94476dc6605bb8618885afea9e7d2e19766f",
   "harnessConfigurations": ["prime-agent-basic.yaml"],

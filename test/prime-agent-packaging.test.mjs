@@ -194,6 +194,9 @@ describe("Prime Agent packaged runtime", () => {
       (candidate) => { candidate.runtimeContract.constants = {}; },
       (candidate) => { candidate.runtimeContract.functions = []; },
       (candidate) => { candidate.runtimeContract.sessionFunctions = []; },
+      (candidate) => { delete candidate.dependencyClosureSha256ByTarget["win32-x64"]; },
+      (candidate) => { candidate.dependencyClosureSha256ByTarget["win32-x64"] = "0".repeat(64); },
+      (candidate) => { candidate.dependencyClosureSha256ByTarget["win32-arm64"] = "0".repeat(64); },
     ]) {
       const candidate = structuredClone(manifest);
       mutate(candidate);
@@ -304,12 +307,26 @@ describe("Prime Agent packaged runtime", () => {
       }))).flat());
       for (const path of PACKAGED_PROVIDER_MODULES) packagedEntries.add(`main/${path}`);
       const extractPackageFile = (_asar, path) => readFileSync(join(repositoryRoot, path));
-      await expect(verifyPackagedPrimeAgent(resources, packagedEntries, {
-        extractPackageFile,
-        vendorDirectory: join(repositoryRoot, "vendor", "prime-agent"),
-        verifyDependencyClosure: () => manifest.dependencyClosureSha256ByTarget["darwin-arm64"],
-        targetKey: "darwin-arm64",
-      })).resolves.toMatchObject({ sourceCommit: manifest.source.commit, packages: 4 });
+      // These independently observed identities exercise the production target
+      // lookup. The closure collector's byte/tamper boundaries are tested above;
+      // actual target assembly remains a hosted qualification gate.
+      for (const [targetKey, digest] of Object.entries({
+        "darwin-arm64": "1253fd136c0d63e751fffdae68327a1b5cbb3176f2b9780de372744f8b83ef41",
+        "win32-x64": "32601b3223d54d5d5f59860abd16b10799a3c98be08920c783323099c6de86cf",
+      })) {
+        await expect(verifyPackagedPrimeAgent(resources, packagedEntries, {
+          extractPackageFile,
+          vendorDirectory: join(repositoryRoot, "vendor", "prime-agent"),
+          verifyDependencyClosure: () => digest,
+          targetKey,
+        })).resolves.toMatchObject({ sourceCommit: manifest.source.commit, packages: 4 });
+        await expect(verifyPackagedPrimeAgent(resources, packagedEntries, {
+          extractPackageFile,
+          vendorDirectory: join(repositoryRoot, "vendor", "prime-agent"),
+          verifyDependencyClosure: () => "0".repeat(64),
+          targetKey,
+        })).rejects.toThrow("dependency closure mismatch");
+      }
       await expect(verifyPackagedPrimeAgent(resources, packagedEntries, {
         extractPackageFile,
         vendorDirectory: join(repositoryRoot, "vendor", "prime-agent"),
@@ -319,6 +336,7 @@ describe("Prime Agent packaged runtime", () => {
 
       expect(Object.keys(manifest.dependencyClosureSha256ByTarget).sort()).toEqual([
         "darwin-arm64",
+        "win32-x64",
       ]);
 
       const copiedVendor = join(resources, "vendor");
