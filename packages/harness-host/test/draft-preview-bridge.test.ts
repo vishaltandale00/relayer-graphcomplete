@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -30,7 +30,7 @@ afterEach(async () => {
 });
 
 /** Fakes the graph server for the host's own reads; host routes use real HTTP. */
-function stubGraphServer(host: () => string | undefined): void {
+function stubGraphServer(host: () => string | undefined, acceptOnInput = true): void {
   let accepted = false;
   vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
     const hostUrl = host();
@@ -41,7 +41,7 @@ function stubGraphServer(host: () => string | undefined): void {
         ? json({ nodeId: 1, rootAction: null, rootLayer: { layer: { id: 3, nodes: [], edges: [], state: "accepted" }, nodes: [], edges: [], actions: [] } })
         : json({ error: { code: "completion_not_found" } }, 404);
     }
-    if (url.endsWith("/api/graph/input")) accepted = true;
+    if (url.endsWith("/api/graph/input")) accepted = acceptOnInput;
     return json(url.endsWith("/api/graph/input")
       ? { interaction: { id: 1, kind: "user-interaction", icon: "user", title: "Question", detail: "Question", state: "accepted" }, contexts: [] }
       : { node: { id: 1, kind: "user-interaction", icon: "user", title: "Question", detail: "Question", state: "accepted" } });
@@ -51,11 +51,12 @@ function stubGraphServer(host: () => string | undefined): void {
 async function startHost(
   harnessConfiguration: HarnessConfiguration,
   renderer: DraftPreviewRenderer | undefined,
-  complete: (context: HarnessRunContext, running: RunningHarnessHost) => Promise<void>,
+  complete: (context: HarnessRunContext, running: RunningHarnessHost, signal: AbortSignal | undefined) => Promise<void>,
+  acceptOnInput = true,
 ): Promise<{ running: RunningHarnessHost; directory: string }> {
   const directory = await mkdtemp(join(tmpdir(), "relayer-draft-preview-"));
   let running: RunningHarnessHost | undefined;
-  stubGraphServer(() => running?.url);
+  stubGraphServer(() => running?.url, acceptOnInput);
   running = await startHarnessHost({
     stateFile: join(directory, "sessions.json"),
     controlToken: "control",
@@ -64,7 +65,7 @@ async function startHost(
       policy: { mode: "required", requiredFeatures: {}, includeNativeArtifacts: false, maxBytesPerTurn: 100_000, maxEventsPerTurn: 100 },
     },
     ...(renderer === undefined ? {} : { draftPreviews: { token: PREVIEW_TOKEN, renderer } }),
-    implementations: { test: () => ({ complete: (context) => complete(context, running!), state: () => ({}) }) },
+    implementations: { test: () => ({ complete: (context, signal) => complete(context, running!, signal), state: () => ({}) }) },
   });
   const started = running;
   cleanup.push(async () => {
@@ -88,11 +89,16 @@ describe("draft preview render bridge", () => {
     const renderer = { render: vi.fn(async () => ({ png: PNG, width: 1176, height: 812 })) };
     let folder: string | undefined;
     let folderExisted = false;
+    let programFolder: string | undefined;
+    let programFolderExisted = false;
     let unauthorized = 0;
     let rendered: unknown;
     const { running, directory } = await startHost(previewConfiguration, renderer, async (context, host) => {
       folder = context.graph.acquireCapability().previewDirectory;
       folderExisted = folder !== undefined && (await stat(folder)).isDirectory();
+      // The host creates the program parent before invoking the harness.
+      programFolder = context.graph.acquireCapability().programDirectory;
+      programFolderExisted = programFolder !== undefined && await stat(programFolder).then((info) => info.isDirectory(), () => false);
       unauthorized = (await renderRequest(host.url, "wrong")).status;
       rendered = await (await renderRequest(host.url, PREVIEW_TOKEN)).json();
     });
@@ -106,6 +112,9 @@ describe("draft preview render bridge", () => {
       interactionNodeId: 1, fingerprint: "sha256:abc", snapshot: { version: 1, target: { kind: "layer", layerId: 3 } },
     });
     await expect(stat(folder!)).rejects.toThrow();
+    expect(programFolderExisted).toBe(true);
+    expect(programFolder).toContain("relayer-graph-programs-");
+    await expect(stat(programFolder!)).rejects.toThrow();
     const exported = join(directory, "exported");
     await running.host.exportCandidateTrace(31, exported, {
       runId: "run", executionId: "execution", interactionId: "31", harnessConfigurationName: "test-preview",
@@ -116,18 +125,52 @@ describe("draft preview render bridge", () => {
     expect(events).not.toContain(Buffer.from(PNG).toString("base64"));
   });
 
+  it.each(["success", "failure", "cancel"] as const)("removes saved programs after %s settles", async (outcome) => {
+    let programFolder!: string;
+    let started!: () => void;
+    const ready = new Promise<void>((resolve) => { started = resolve; });
+    const { running } = await startHost(configuration, undefined, async (context, _host, signal) => {
+      programFolder = context.graph.acquireCapability().programDirectory!;
+      await mkdir(join(programFolder, "programs"), { recursive: true });
+      await writeFile(join(programFolder, "programs", "saved.mjs"), "// saved graph program");
+      if (outcome === "cancel") {
+        if (signal === undefined) throw new Error("cancellation signal missing");
+        const waiting = new Promise<never>((_resolve, reject) => {
+          signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+        });
+        started();
+        await waiting;
+      }
+      started();
+      if (outcome === "failure") throw new Error("failed after saving");
+    }, outcome === "success");
+    const completing = running.host.complete(1, 1, graph);
+    if (outcome === "cancel") {
+      await ready;
+      expect(await readFile(join(programFolder, "programs", "saved.mjs"), "utf8")).toContain("saved graph program");
+      expect(running.host.cancel(1, 1)).toBe(true);
+    }
+    if (outcome === "success") await completing;
+    else await expect(completing).rejects.toThrow(outcome === "cancel" ? "cancelled" : "failed after saving");
+    await expect(stat(programFolder)).rejects.toThrow();
+  });
+
   it.each([
     ["the configuration declares no preview support", configuration, true],
     ["the host has no renderer", previewConfiguration, false],
   ] as const)("grants no preview folder when %s", async (_case, harnessConfiguration, withRenderer) => {
     let folder: string | undefined = "unset";
+    let programFolder: string | undefined;
     const renderer = { render: vi.fn(async () => ({ png: PNG, width: 1, height: 1 })) };
     const { running } = await startHost(harnessConfiguration, withRenderer ? renderer : undefined, async (context) => {
       folder = context.graph.acquireCapability().previewDirectory;
+      programFolder = context.graph.acquireCapability().programDirectory;
     });
 
     await running.host.complete(1, 1, graph, undefined, undefined, { productInteractionId: 32 });
 
     expect(folder).toBeUndefined();
+    // Program edits do not depend on previews; every run gets a path the client may create.
+    expect(programFolder).toContain("relayer-graph-programs-");
   });
 });

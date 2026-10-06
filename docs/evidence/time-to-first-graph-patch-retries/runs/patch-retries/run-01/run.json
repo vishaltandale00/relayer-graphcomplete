@@ -1,0 +1,19 @@
+{
+  "label": "patch-retries",
+  "index": 1,
+  "startedAt": "2026-10-05T17:25:54.609Z",
+  "finishedAt": "2026-10-05T17:29:53.221Z",
+  "runId": "run-2026-10-05T17-25-54-655Z-4e6eff19",
+  "runStatus": "passed",
+  "case": "empty-project.hierarchical-overview.single-turn",
+  "harness": "codex-basic",
+  "judge": "deterministic-graph-contract",
+  "modelSelection": {
+    "familyId": 2,
+    "providerId": "codex",
+    "modelId": "gpt-6.1-sol"
+  },
+  "turnStatus": "accepted",
+  "executionError": null,
+  "checks": []
+}

@@ -1,0 +1,19 @@
+{
+  "label": "main",
+  "index": 2,
+  "startedAt": "2026-10-05T17:00:29.232Z",
+  "finishedAt": "2026-10-05T17:10:00.700Z",
+  "runId": "run-2026-10-05T17-00-29-233Z-07652c28",
+  "runStatus": "passed",
+  "case": "empty-project.hierarchical-overview.single-turn",
+  "harness": "codex-basic",
+  "judge": "deterministic-graph-contract",
+  "modelSelection": {
+    "familyId": 2,
+    "providerId": "codex",
+    "modelId": "gpt-6.1-sol"
+  },
+  "turnStatus": "accepted",
+  "executionError": null,
+  "checks": []
+}

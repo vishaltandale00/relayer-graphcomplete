@@ -221,6 +221,8 @@ export interface GraphCapability {
   readonly nodeId: GraphId;
   /** Where this completion's draft-preview PNGs are written (PRD §11.10). */
   readonly previewDirectory?: string;
+  /** Where this completion's saved graph programs are kept, so a retry can name one and send edits. */
+  readonly programDirectory?: string;
 }
 
 export interface GraphApiErrorBody {

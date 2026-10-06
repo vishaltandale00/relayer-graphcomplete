@@ -1,5 +1,5 @@
 import { NativeExecutionCancelled } from "./completion-execution.js";
-import { createHash, randomUUID } from "node:crypto";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { mkdir, mkdtemp, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import type { Socket } from "node:net";
@@ -1262,7 +1262,15 @@ export class HarnessHost {
       && resolveGraphCapabilityProfile(session.descriptor.configuration).preview === "enabled"
       ? await mkdtemp(join(tmpdir(), "relayer-graph-previews-"))
       : undefined;
-    const scope = new ActiveHarnessGraphScope({ ...capability, ...(previewDirectory === undefined ? {} : { previewDirectory }), ...(traceContext === undefined ? {} : { authoringErrors: true }) });
+    // The host owns the turn folder lifetime; clients may only create children.
+    // Create inside the try so failures still clean up previews and normalize.
+    const programDirectory = join(tmpdir(), `relayer-graph-programs-${randomBytes(9).toString("base64url")}`);
+    const scope = new ActiveHarnessGraphScope({
+      ...capability,
+      programDirectory,
+      ...(previewDirectory === undefined ? {} : { previewDirectory }),
+      ...(traceContext === undefined ? {} : { authoringErrors: true }),
+    });
     if (previewDirectory !== undefined) this.previewTraces.set(interactionNodeId, traceSink);
     const observedTrace = new EffectObservingTraceSink(traceSink);
     let completionError: HarnessExecutionFailure | undefined;
@@ -1276,6 +1284,7 @@ export class HarnessHost {
     /** Set when the force-stop fired before the native turn settled: how that turn ended. */
     let forceStoppedNativeOutcome: { readonly kind: ForceStoppedNativeOutcome; readonly detail?: string } | undefined;
     try {
+      await mkdir(programDirectory, { mode: 0o700 });
       const acceptedContracts = session.descriptor.configuration.executionAccessContracts;
       if (executionLeaseId !== undefined) {
         const pending = this.pendingExecutionAccess.get(executionLeaseId);
@@ -1378,6 +1387,8 @@ export class HarnessHost {
           completionError ??= normalizeHarnessFailure(error, true, observedTrace.effectBoundary());
         }
       }
+      // Saved programs are transient too: they never outlive the turn.
+      await rm(programDirectory, { recursive: true, force: true }).catch(() => undefined);
     }
     const forceStopped = forceStoppedNativeOutcome !== undefined;
     if (forceStoppedNativeOutcome !== undefined) {

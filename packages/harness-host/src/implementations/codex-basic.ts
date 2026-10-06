@@ -560,6 +560,11 @@ export class CodexBasicHarness implements Harness {
     environment.RELAYER_NODE_ID = String(graph.nodeId);
     delete environment.RELAYER_GRAPH_PREVIEW_DIR;
     if (graph.previewDirectory !== undefined) environment.RELAYER_GRAPH_PREVIEW_DIR = graph.previewDirectory;
+    delete environment.RELAYER_GRAPH_PROGRAM_DIR;
+    // The pinned launcher strips the environment and reads no files, so only the fallback heredoc gets it.
+    if (graph.programDirectory !== undefined && this.dependencies.graphAuthoringLauncherPath === undefined) {
+      environment.RELAYER_GRAPH_PROGRAM_DIR = graph.programDirectory;
+    }
     if (completionBroker !== undefined) {
       environment.RELAYER_COMPLETE_URL = completionBroker.url;
       environment.RELAYER_COMPLETE_TOKEN = completionBroker.token;
@@ -788,7 +793,7 @@ Choose variants with the available inspector space in mind: chips and pills suit
 
 Navigate and invoke actions are first-class options, not requirements for every node. Use them where they materially improve the answer, and submit every referenced node, edge, and layer before adding its action.
 
-If a graph call rejects an object or graph.submit reports a repairable issue, edit the same program and rerun it with the same clientKey values. Stable keys make the whole-program rerun update the same drafts instead of creating duplicates when each object's identity-owning context stays unchanged. An action's clientKey is scoped to its source node: keep every draft action on the same source node during repair, because moving it creates a different action and leaves the original draft behind. Do not add fake navigate or reference actions merely to make abandoned draft layers reachable. Only when graph.submit identifies a genuinely abandoned orphan draft, recover with graph.discardLayer(layer); this preserves that layer as stopped history without discarding its nodes, edges, actions, or child layers. The graph is complete only after graph.submit succeeds.`;
+${graphProgramRepairGuidance(programEditsAvailable(context, this.dependencies.graphAuthoringLauncherPath), "If a graph call rejects an object or graph.submit reports a repairable issue")} Stable keys make a rerun, whole or edited, update the same drafts instead of creating duplicates when each object's identity-owning context stays unchanged. An action's clientKey is scoped to its source node: keep every draft action on the same source node during repair, because moving it creates a different action and leaves the original draft behind. Do not add fake navigate or reference actions merely to make abandoned draft layers reachable. Only when graph.submit identifies a genuinely abandoned orphan draft, recover with graph.discardLayer(layer); this preserves that layer as stopped history without discarding its nodes, edges, actions, or child layers. The graph is complete only after graph.submit succeeds.`;
   }
 
   private layeredNavigationPrompt(context: HarnessRunContext, includePersonalPresentation: boolean): string {
@@ -930,7 +935,7 @@ ${NODE_ICON_GUIDANCE}
 
 Action variants are "chip", "pill", "wide", or "card". A card requires description; other variants do not accept one.
 
-The graph service enforces exact provenance, target visibility, layer size, expansion cycles, and accepted closure. If a call fails, read every natural-language issue, edit the same program and rerun it with the same clientKey values; stable keys make the whole-program rerun update the same drafts instead of creating duplicates when each object's identity-owning context stays unchanged. An action's clientKey is scoped to its source node: keep every draft action on the same source node during repair, because moving it creates a different action and leaves the original draft behind. Do not add fake navigate or reference actions merely to make abandoned draft layers reachable. Only when graph.submit identifies a genuinely abandoned orphan draft, recover with graph.discardLayer(layer); this preserves that layer as stopped history without discarding its nodes, edges, actions, or child layers. A model turn ending is not completion. A successful graph.submit call is required to complete the GraphComplete response, but it does not by itself complete the underlying user task. Do not submit a plan as though it were completed work. Before final submission, verify that requested workspace effects have actually occurred and represent their real results in the graph.`;
+The graph service enforces exact provenance, target visibility, layer size, expansion cycles, and accepted closure. ${graphProgramRepairGuidance(programEditsAvailable(context, graphAuthoringLauncherPath), "If a call fails, read every natural-language issue")} Stable keys make a rerun, whole or edited, update the same drafts instead of creating duplicates when each object's identity-owning context stays unchanged. An action's clientKey is scoped to its source node: keep every draft action on the same source node during repair, because moving it creates a different action and leaves the original draft behind. Do not add fake navigate or reference actions merely to make abandoned draft layers reachable. Only when graph.submit identifies a genuinely abandoned orphan draft, recover with graph.discardLayer(layer); this preserves that layer as stopped history without discarding its nodes, edges, actions, or child layers. A model turn ending is not completion. A successful graph.submit call is required to complete the GraphComplete response, but it does not by itself complete the underlying user task. Do not submit a plan as though it were completed work. Before final submission, verify that requested workspace effects have actually occurred and represent their real results in the graph.`;
 }
 
 /** How each harness looks at a preview PNG (PRD §11.10). */
@@ -966,6 +971,17 @@ function graphAuthoringCommand(launcher: string | undefined): string {
     throw new Error("The graph-authoring launcher must be a shell-safe absolute path.");
   }
   return JSON.stringify(launcher);
+}
+
+/** Program edits need the host's folder and the fallback heredoc; the pinned launcher strips the environment and reads no files. */
+export function programEditsAvailable(context: HarnessRunContext | undefined, launcher: string | undefined): boolean {
+  return launcher === undefined && context?.graph.acquireCapability().programDirectory !== undefined;
+}
+
+/** How to repair a failed program: by sending edits to a saved program when the run supports it, else by retyping it. */
+export function graphProgramRepairGuidance(editsAvailable: boolean, lead: string): string {
+  if (!editsAvailable) return `${lead}, edit the same program and rerun it with the same clientKey values.`;
+  return `${lead}, fix the program and rerun it with the same clientKey values. Do not retype the whole program for a small fix. Every program prints "graph program id: <id>" when it starts. Through the same heredoc, run a short program that imports rerunGraphProgram from the same module and calls await rerunGraphProgram("<id>", [{ find: "exact text from that program", replace: "fixed text" }]). In that patch heredoc, call rerunGraphProgram directly; do not call RelayerGraphClient.fromEnv(), which would save the patch wrapper under its own id. Each find must match exactly one place in that program; edits apply in order; the edited program runs and prints its own id, which is the one to edit next. A program that crashed before printing an id has no saved copy: rerun it in full. If an id or a find does not match, nothing runs and the error says so. Rerun only for an explicit repairable graph rejection. If submission succeeded, or its response was lost and the outcome is unknown, do not rerun the program or repeat workspace effects; let the host recover the persisted outcome.`;
 }
 
 function pinnedExecutionClause(launcher: string | undefined): string {
@@ -1066,7 +1082,8 @@ function rememberGraphAuthoringCommand(state: CodexTraceState, params: unknown):
   }
 }
 
-function isFallbackGraphAuthoringCommand(command: unknown): boolean {
+/** The one fallback command form: a stdin heredoc, whether it carries a full program or edits. */
+export function isFallbackGraphAuthoringCommand(command: unknown): boolean {
   if (typeof command !== "string") return false;
   const input = command.trim();
   return /^node[ \t]+--input-type=module[ \t]+<<'RELAYER_GRAPH_PROGRAM'[ \t]*\r?\n/.test(input);

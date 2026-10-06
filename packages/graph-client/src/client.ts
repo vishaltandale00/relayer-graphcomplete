@@ -12,6 +12,7 @@ import { GraphQueryError, isGraphQueryErrorBody, type GraphQueryErrorBody, type 
 import { GraphApiError, type CompletionInputGraph, type CompletionOutput, type CompletionState, type CurrentTransitionReceipt, type GraphAction, type GraphApiErrorBody, type GraphCapability, type GraphEdge, type GraphId, type GraphLayer, type GraphNode, type InteractionInput, type ResolvedLayer, type ResolvedPersonalPresentation, type StopReason } from "./types.js";
 import { GraphIcons } from "./icon-discovery.js";
 import { materializeGraphPreview, type GraphPreview } from "./preview.js";
+import { rememberGraphProgram } from "./program.js";
 import { GraphVisualAssets } from "./visual-assets.js";
 
 /** A committed write, with its advisory draft preview when the run supports one. */
@@ -38,10 +39,17 @@ export class RelayerGraphClient {
     const token = environment.RELAYER_GRAPH_TOKEN;
     const node = Number(environment.RELAYER_NODE_ID);
     const previewDirectory = environment.RELAYER_GRAPH_PREVIEW_DIR;
+    const programDirectory = environment.RELAYER_GRAPH_PROGRAM_DIR;
     if (!url || !token || !Number.isSafeInteger(node) || node < 1) {
       throw new Error("RELAYER_GRAPH_URL, RELAYER_GRAPH_TOKEN, and RELAYER_NODE_ID are required");
     }
-    return new RelayerGraphClient({ url, token, nodeId: node, ...(previewDirectory ? { previewDirectory } : {}), ...(environment.RELAYER_GRAPH_AUTHORING_ERRORS === "1" ? { authoringErrors: true } : {}) });
+    rememberGraphProgram(programDirectory);
+    return new RelayerGraphClient({
+      url, token, nodeId: node,
+      ...(previewDirectory ? { previewDirectory } : {}),
+      ...(programDirectory ? { programDirectory } : {}),
+      ...(environment.RELAYER_GRAPH_AUTHORING_ERRORS === "1" ? { authoringErrors: true } : {}),
+    });
   }
 
   async getNode(reference: NodeReference): Promise<GraphNode> {

@@ -23,7 +23,13 @@ original window. Update the branch to create fresh PR CI when it expires.
 7, 22, 37, and 52, on CI completion, relevant PR changes, and main pushes. Manual
 dispatch on main is also available. It never reruns expensive CI or merges PRs.
 Only the latest CI run associated with this PR and its exact current head can qualify; its current
-attempt must have a successful `check` job. A matching plan artifact from an
+attempt must have a successful `check` job. When GitHub returns an empty PR
+association list (observed for fork runs), selection requires the exact source
+repository ID and name, branch, and head SHA. A nonempty association list never
+uses this fallback. The plan receipt must still bind this PR number, run,
+attempt, head, and tested merge; source identity alone cannot grant success.
+Newest-first selection retains a newer pending or failed run rather than
+borrowing an older success. A matching plan artifact from an
 earlier attempt of that same immutable run is allowed because re-running only
 failed jobs does not repeat a successful plan. This never renews the window.
 Missing/expired evidence, conflicts, unknown mergeability, and per-PR API or

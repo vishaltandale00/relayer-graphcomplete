@@ -721,7 +721,10 @@ describe("ClaudeBasicHarness", () => {
         ...context,
         graph: {
           ...context.graph,
-          acquireCapability: () => ({ ...context.graph.acquireCapability(), ...(previewDirectory === undefined ? {} : { previewDirectory }) }),
+          acquireCapability: () => ({
+            ...context.graph.acquireCapability(),
+            ...(previewDirectory === undefined ? {} : { previewDirectory, programDirectory: "/tmp/programs-1" }),
+          }),
         },
         trace: { ...createNoopHarnessTraceSink(), emit: (event) => { events.push(event); } },
       };
@@ -745,15 +748,21 @@ describe("ClaudeBasicHarness", () => {
     ])("in %s, passes the folder, pre-approves view_graph_preview and teaches it only when the host granted a folder", async (_mode, approvalMode, allowedTools) => {
       const previewed = await previewRun(approvalMode, "/tmp/previews-1");
       expect(previewed.call.options.env.RELAYER_GRAPH_PREVIEW_DIR).toBe("/tmp/previews-1");
+      expect(previewed.call.options.env.RELAYER_GRAPH_PROGRAM_DIR).toBe("/tmp/programs-1");
+      // Claude runs the fallback heredoc, so a granted folder lets it name a program and send edits.
+      expect(previewed.call.prompt).toContain("outcome is unknown, do not rerun");
+      expect(previewed.call.prompt).toContain('await rerunGraphProgram("<id>", [{ find: "exact text from that program", replace: "fixed text" }])');
       expect(previewed.call.options.allowedTools).toEqual(allowedTools);
       expect(previewed.call.options.mcpServers).toHaveProperty("relayer_graph_preview");
       expect(previewed.call.prompt).toContain(draftPreviewGuidance(CLAUDE_PREVIEW_VIEWING));
 
       const plain = await previewRun(approvalMode, undefined);
       expect(plain.call.options.env).not.toHaveProperty("RELAYER_GRAPH_PREVIEW_DIR");
+      expect(plain.call.options.env).not.toHaveProperty("RELAYER_GRAPH_PROGRAM_DIR");
       expect(plain.call.options.allowedTools).not.toContain(CLAUDE_PREVIEW_TOOL);
       expect(plain.call.options.mcpServers).not.toHaveProperty("relayer_graph_preview");
       expect(plain.call.prompt).not.toContain("Draft previews are on");
+      expect(plain.call.prompt).not.toContain("rerunGraphProgram");
       expect(plain.view).toBeUndefined();
     });
 

@@ -141,6 +141,38 @@ describe("scheduled merge freshness", () => {
     expect(evaluateEvidence(f).conclusion).toBe("failure");
   });
 
+  it("verifies a fork run with an empty PR association through its exact source and receipt", async () => {
+    const f = fixture(), fake = fakeGitHub(f);
+    f.pr.head = { sha: head, ref: "patch-retries", repo: { id: 123, full_name: "fork/repo" } };
+    const run = { ...f.run, pull_requests: [], head_branch: "patch-retries",
+      head_repository: { id: 123, full_name: "fork/repo" } };
+    const paginate = fake.api.paginate;
+    let runs = [run];
+    fake.api.paginate = async (method, args) => method === fake.api.rest.actions.listWorkflowRuns
+      ? runs : paginate(method, args);
+    expect((await sweep(fake.options))[0].conclusion).toBe("success");
+    for (const candidate of [
+      { ...run, head_branch: "another-branch" },
+      { ...run, head_repository: { id: 456, full_name: "other/repo" } },
+      { ...run, head_repository: null },
+      { ...run, head_repository: { id: 123, full_name: "other/repo" } },
+      { ...run, pull_requests: [{ number: 99, head: { sha: head } }] },
+    ]) {
+      runs = [candidate];
+      expect((await sweep(fake.options))[0].conclusion).toBe("failure");
+    }
+    runs = [{ ...run, id: 11, status: "in_progress", conclusion: null }, run];
+    expect((await sweep(fake.options))[0].conclusion).toBe("failure");
+    runs = [run];
+    for (const fullName of [undefined, ""]) {
+      f.pr.head.repo.full_name = run.head_repository.full_name = fullName;
+      expect((await sweep(fake.options))[0].conclusion).toBe("failure");
+    }
+    f.pr.head.repo.full_name = run.head_repository.full_name = "fork/repo";
+    f.receipt.pr = 99;
+    expect((await sweep(fake.options))[0].conclusion).toBe("failure");
+  });
+
   it("sweeps a current PR through success, expiration, and renewed CI", async () => {
     const f = fixture(), fake = fakeGitHub(f);
     expect((await sweep(fake.options))[0].conclusion).toBe("success");

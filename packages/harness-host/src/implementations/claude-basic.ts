@@ -418,6 +418,7 @@ function executionEnvironment(
   environment.RELAYER_GRAPH_TOKEN = graph.token;
   environment.RELAYER_NODE_ID = String(graph.nodeId);
   if (graph.previewDirectory !== undefined) environment.RELAYER_GRAPH_PREVIEW_DIR = graph.previewDirectory;
+  if (graph.programDirectory !== undefined) environment.RELAYER_GRAPH_PROGRAM_DIR = graph.programDirectory;
   if (completionBroker !== undefined) {
     environment.RELAYER_COMPLETE_URL = completionBroker.url;
     environment.RELAYER_COMPLETE_TOKEN = completionBroker.token;

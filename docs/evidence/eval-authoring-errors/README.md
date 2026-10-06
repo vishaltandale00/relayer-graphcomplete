@@ -189,7 +189,9 @@ expires after an included-source change.
 The live probe remains evidence for production commit `09b144d88d9015a0bdb69c95a6a09cac6a24c964`.
 It is not a new live run of the integrated source or a natural-error baseline.
 
-## Review follow-up — 2026-10-06
+## Review follow-up snapshot — 2026-10-06
+
+These results apply to commit `3a773a1280e3afcc0c4c5f30ab656b9f0611c084`.
 
 GitHub blocked merge on four unresolved review threads despite passing CI. All
 four map to the existing PRD §9.4 measurement promise; they require no new product
@@ -242,3 +244,48 @@ run. The independent final warm suites and review also observe the repaired
 source. Log hashes are in [final verification receipts](final-verification.json).
 Historical proof above remains bound to its recorded snapshots. No new live
 inference ran; exhaustive coverage and task/graph-quality improvement remain unclaimed.
+
+## Integration with patch retries — 2026-10-06
+
+Main advanced during final CI: #688 repaired fork-run freshness selection and
+#661 introduced named graph-program patch retries. CI for `3a773a1280e3afcc0c4c5f30ab656b9f0611c084`
+passed, but the fresh guard correctly blocked its conflicting head. Integration
+uses main `d9fc380c6172651482e44f2b916d160bf97ba368`.
+
+The two executable conflict seams are client `fromEnv()` option construction and
+host graph-scope construction. Both retain the diagnostics opt-in alongside the
+per-turn program directory and program capture. Provider environment auto-merges
+preserve both features; existing host ownership and cleanup stay unchanged.
+The existing real stdin program-save/patch journey now asserts that diagnostics
+remain enabled. The program, Codex, Claude and host bridge suites passed all
+117 tests. No tests were removed. Required final verification is full check/build,
+compiled runtime, browser proof and renewed source review; default tests remain
+inference-free. No new live or release proof applies.
+
+Exact 20-path executable/test/PRD digest relative to that main commit, sorted path
++ NUL + bytes + NUL, evidence excluded:
+`0a5863af2bafb53c964a354b47c7e6879c444dd29e2df23a3603b567408c965b`.
+
+Adversarial assertion: reviewer `/root/design_authority_review`; all 20 paths at
+the exact digest above; scope final metric implementation plus program capture,
+patch context, host scope ownership/cleanup, provider environment propagation,
+recorder attribution/budgets and separation from program-helper bookkeeping;
+verdict **PASS**, no unresolved findings. Reviewer independently ran 33 lightweight
+metric/recorder/dashboard tests on this digest. Heavy/live receipts above remain
+historical. This assertion expires after an included-source change.
+
+Actual combined-source verification with pinned Node 22.23.2:
+
+| Checkpoint | Result |
+| --- | --- |
+| Program/Codex/Claude/host bridge suites | 117 tests passed; diagnostics remain enabled while real saved programs are patched |
+| `npm run check` | Passed native workspace/crash tests, fmt/clippy, package checks, 292 Vitest files / 3,652 tests passed (1 file / 3 tests skipped), 2 secret-boundary tests, 68 Python tests, receipt integrity and PRD readability |
+| `npm run build` | Passed both native runtimes and all TypeScript packages |
+| `npm run test:eval-compiled-runtime` | All 4 tests passed |
+| `npm run test:eval-web` | All declared chapters passed; both metric sections, root/child distinction and unknown evidence remain correct alongside startup/reopen, review authority, actor, evaluator release, calibration and human persistence |
+
+Source stayed unchanged during final verification. The unchanged Rust/Cargo
+inputs reuse the verified Ladybug bundle and private warm target; all required
+tests ran afresh. Log hashes are in
+[patch integration verification receipts](patch-integration-verification.json).
+No new live inference or release proof ran. Prior receipts remain historical.

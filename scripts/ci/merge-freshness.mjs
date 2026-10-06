@@ -140,8 +140,20 @@ async function refreshPullRequest({ github, owner, repo, repository, listed, clo
       });
       // Different branch refs can share a SHA. Never borrow another PR's run.
       // Preserve newest-first API order, including pending or failed runs.
-      const run = runs.find((candidate) => candidate.pull_requests?.some((associated) =>
-        associated.number === pr.number && associated.head?.sha === pr.head.sha));
+      const run = runs.find((candidate) => {
+        const associations = candidate.pull_requests;
+        if (!Array.isArray(associations)) return false;
+        if (associations.length) return associations.some((associated) =>
+          associated.number === pr.number && associated.head?.sha === pr.head.sha);
+        // GitHub can omit fork PR associations. Select only this exact source
+        // ref, then require the PR-bound plan receipt below before success.
+        return Number.isSafeInteger(pr.head.repo?.id) && pr.head.repo.id > 0 &&
+          typeof pr.head.repo.full_name === "string" && pr.head.repo.full_name.length > 0 &&
+          candidate.head_repository?.id === pr.head.repo.id &&
+          candidate.head_repository?.full_name === pr.head.repo.full_name &&
+          typeof pr.head.ref === "string" && pr.head.ref.length > 0 &&
+          candidate.head_branch === pr.head.ref && candidate.head_sha === pr.head.sha;
+      });
       let jobs = [], receipt, merge;
       if (run?.status === "completed" && run.conclusion === "success" &&
           clock() - Date.parse(run.created_at) < WINDOW_MS) {
