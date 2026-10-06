@@ -766,3 +766,24 @@ it("counts visual-asset mutations while excluding multiplexed reads and retainin
   expect(authoringErrorsFromOperations(records)).toMatchObject({ observed: 6, total: null, byCause: { server_rejection: 6 } });
   for (const privateValue of [token, "private asset name", "private bytes", "private-unknown-kind"]) expect(text).not.toContain(privateValue);
 });
+
+it("captures recursive preparation and icon-write origins without counting reads or changing publication timing", async () => {
+  const { RelayerGraphClient } = await import("../packages/graph-client/src/index.ts");
+  const { authoringErrorsFromOperations } = await import("../desktop/eval-main/authoring-errors.mjs");
+  const { graphTimingFromTrace } = await import("../desktop/eval-main/graph-timing.mjs");
+  const upstream = await startUpstream();
+  const recorder = await startGraphOperationRecorder({ upstreamUrl: upstream.url }); resources.push(recorder);
+  const token = "recursive-authoring-secret"; await bindCapability(recorder.url, token);
+  const client = new RelayerGraphClient({ url: recorder.url, token, nodeId: 17, authoringErrors: true });
+  await expect(client.prepareComplete({})).rejects.toThrow();
+  await expect(client.prepareComplete(123)).rejects.toThrow();
+  await expect(client.proposeThreadIcon("private icon proposal")).rejects.toThrow();
+  await expect(client.getNode(999)).rejects.toThrow();
+  await new Promise((resolve) => setTimeout(resolve, 100));
+  const target = await createCandidateTraceDirectory(); await recorder.exportInteraction(17, target);
+  const text = await readFile(join(target, "graph-operations.jsonl"), "utf8");
+  const records = text.trim().split("\n").map(JSON.parse);
+  expect(authoringErrorsFromOperations(records)).toMatchObject({ observed: 3, total: null, byCause: { client: 1, server_rejection: 2 } });
+  expect(graphTimingFromTrace({ sentAt: records[0].observedAt, graphOperations: records, ledgerComplete: true })).toMatchObject({ graphWriteRejections: 0 });
+  expect(text).not.toContain(token); expect(text).not.toContain("private icon proposal");
+});

@@ -245,7 +245,9 @@ source. Log hashes are in [final verification receipts](final-verification.json)
 Historical proof above remains bound to its recorded snapshots. No new live
 inference ran; exhaustive coverage and task/graph-quality improvement remain unclaimed.
 
-## Integration with patch retries — 2026-10-06
+## Patch integration snapshot — 2026-10-06
+
+These results apply to commit `01667c58a35d657b513b76b609005001be5c4371`.
 
 Main advanced during final CI: #688 repaired fork-run freshness selection and
 #661 introduced named graph-program patch retries. CI for `3a773a1280e3afcc0c4c5f30ab656b9f0611c084`
@@ -289,3 +291,55 @@ inputs reuse the verified Ladybug bundle and private warm target; all required
 tests ran afresh. Log hashes are in
 [patch integration verification receipts](patch-integration-verification.json).
 No new live inference or release proof ran. Prior receipts remain historical.
+
+## Public-write capture audit — 2026-10-06
+
+CI passed for `01667c58a35d657b513b76b609005001be5c4371`, but an automated
+review identified recursive preparation outside the supported observer/route set.
+The final audit of public client mutations adds `prepareComplete` and
+`proposeThreadIcon` observations plus rejected `/api/graph/completions/prepare`
+and `/api/graph/thread-icon` POST origins. A non-throwing icon proposal result is
+not invented as a failure. POST search, detail-asset resolution, icon discovery
+and visual-asset reads remain excluded.
+
+The real client/recorder fixture observes one pre-transport preparation failure,
+one rejected preparation POST, and one rejected icon POST. A failed node read is
+excluded; server origins emit no duplicate client diagnostic. Publication timing
+keeps its own rejection classification. No arguments, icon content or tokens are
+retained. This adds no child authority or execution scheduler. Existing acceptance,
+grading, trace validity and diagnostic-budget boundaries remain unchanged.
+
+Required verification is the focused capture journey, full check/build, compiled
+runtime/browser runners, and a renewed source review. No test was deleted and no
+paid/live or release proof is required. Final focused metric/recorder suites
+passed all 20 tests.
+
+Exact 20-path executable/test/PRD digest relative to main
+`d9fc380c6172651482e44f2b916d160bf97ba368`, sorted path + NUL + bytes + NUL,
+evidence excluded:
+`6009a136c80d2e848b0b90be6c85c1a6acb34bce61b3d1a10ae2d56acc27d124`.
+
+Adversarial assertion: reviewer `/root/design_authority_review`; all 20 paths at
+the exact digest above; scope full public mutation-route audit, recursive/icon
+origins and read exclusion, all prior capture/reporting repairs, authority,
+privacy/budgets, program-retry integration and timing separation; verdict **PASS**,
+no unresolved findings. The reviewer independently ran 34 metric/recorder/dashboard
+tests on this digest. Heavy/CI proof is separate; source changes invalidate this
+assertion. Capture remains partial, and the historical live probe remains bound
+to its original production commit.
+
+Actual final verification with pinned Node 22.23.2 and the same verified warm
+native setup:
+
+| Checkpoint | Result |
+| --- | --- |
+| Focused metric/recorder capture suites | All 20 tests passed |
+| `npm run check` | Passed native workspace/crash tests, fmt/clippy, package checks, 292 Vitest files / 3,653 tests passed (1 file / 3 tests skipped), 2 secret-boundary tests, 68 Python tests, receipt integrity and PRD readability |
+| `npm run build` | Passed both native runtimes and all TypeScript packages |
+| `npm run test:eval-compiled-runtime` | All 4 tests passed |
+| `npm run test:eval-web` | All declared chapters passed, including both metrics, root/child provenance and unknown evidence, reopen, review authority, actor/evaluator workflows, calibration and persistence |
+
+The executable source stayed unchanged throughout these commands. Log hashes
+are in [public-write verification receipts](public-write-verification.json).
+Historical receipts above do not substitute for these final checks. No new live
+inference, exhaustive-error coverage, optimization efficacy or quality gain is claimed.

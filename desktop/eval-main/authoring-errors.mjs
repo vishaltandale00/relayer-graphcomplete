@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 
-const WRITE = /^\/api\/graph\/(?:nodes|edges|layers|actions|submit|current\/transitions)(?:\/|$)/;
+const WRITE = /^\/api\/graph\/(?:nodes|edges|layers|actions|submit|current\/transitions|completions\/prepare|thread-icon)(?:\/|$)/;
 const ASSET_WRITES = new Set(["add", "create-tag", "move-tag", "associate", "organize", "archive"]);
 export function unavailableAuthoringErrors(reason = "not_recorded") {
   return { schemaVersion: 1, coverage: "unavailable", total: null, observed: null, byCause: {}, reasons: [reason] };

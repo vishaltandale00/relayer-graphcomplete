@@ -1,0 +1,37 @@
+{
+  "sourceDigest": "6009a136c80d2e848b0b90be6c85c1a6acb34bce61b3d1a10ae2d56acc27d124",
+  "sourceDigestDefinition": "20 sorted changed paths relative to main d9fc380c6172651482e44f2b916d160bf97ba368, excluding docs/evidence/: path UTF-8 + NUL + file bytes + NUL",
+  "node": "22.23.2",
+  "logs": [
+    {
+      "checkpoint": "focused",
+      "exitCode": 0,
+      "bytes": 256,
+      "sha256": "18ab5a129994b9f8ee47b155d216fe4a216f925f231f1da31bc3763f05a1668a"
+    },
+    {
+      "checkpoint": "check",
+      "exitCode": 0,
+      "bytes": 126171,
+      "sha256": "72ed96e6d5c92d7fdfe228154b734ff62cccc21999bddbbc9c9fa3309e05ab2c"
+    },
+    {
+      "checkpoint": "build",
+      "exitCode": 0,
+      "bytes": 2040,
+      "sha256": "4cbf109709fcd7989734f13bce575b8e8b7f30ac425798a62711da8dee532b48"
+    },
+    {
+      "checkpoint": "compiled-runtime",
+      "exitCode": 0,
+      "bytes": 375,
+      "sha256": "edeb1c88022acfe14c0bf7583d8f17b81a638aa4d26073dfba62663f145f9845"
+    },
+    {
+      "checkpoint": "eval-web",
+      "exitCode": 0,
+      "bytes": 4328,
+      "sha256": "f746713839c90f903bee8390c7fff5033a8fc46ded8d0e5c98bc4f4953e7c3eb"
+    }
+  ]
+}
