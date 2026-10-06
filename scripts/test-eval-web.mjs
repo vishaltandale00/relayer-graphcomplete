@@ -136,6 +136,13 @@ try {
   assert.equal(execution.turns.length, 2);
   await observer.getByText(run.id, { exact: true }).first().waitFor(); // Polling updates an already-open dashboard.
   assert.equal((await rpc(host.url, "getRun", [run.id])).status, "passed");
+  await observer.locator(`[data-execution-detail="${execution.id}"]`).click();
+  const reliability = observer.locator(".dossier-block").filter({ has: observer.getByRole("heading", { name: "Authoring errors per turn" }) });
+  await reliability.waitFor();
+  await reliability.locator(".finding-row").nth(1).waitFor(); // Wait for the observer's terminal-run polling snapshot.
+  assert.equal(await reliability.locator(".finding-row").count(), 2);
+  assert.ok((await reliability.textContent()).includes("Total: unknown"));
+  assert.ok((await reliability.textContent()).includes("0 observed"));
   const reviewUrl = await rpc(host.url, "openReview", [execution.id]);
   const secondReviewUrl = await rpc(host.url, "openReview", [execution.id]);
   assert.notEqual(new URL(secondReviewUrl).origin, new URL(reviewUrl).origin);

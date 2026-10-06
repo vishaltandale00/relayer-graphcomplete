@@ -69,6 +69,7 @@ import {
   buildAcceptedReviewTopology,
   gradeAcceptedReviewTopology,
 } from "./simulated-user-judge.mjs";
+import { authoringErrorsFromTraceDirectory, unavailableAuthoringErrors } from "./authoring-errors.mjs";
 import { GRAPH_SEARCH_EVAL_TARGET } from "./configuration-paths.mjs";
 
 /**
@@ -2215,10 +2216,12 @@ export class EvalService {
         deterministicChecks: [],
         deterministicPassed: false,
         judgeResults: [],
+        authoringErrors: copy(execution.authoringErrorMetrics?.[String(interaction.id)] ?? unavailableAuthoringErrors()),
         candidateTrace: copy(execution.candidateTraceCaptures?.[String(interaction.id)] || disabledCandidateTrace()),
         ...(artifact === null ? {} : { artifact: copy(artifact) }),
       }));
       delete execution.candidateTraceCaptures;
+      delete execution.authoringErrorMetrics;
       execution.promotable = execution.turns.every((turn) => !this.candidateTraceRequired || turn.candidateTrace.status === "complete");
       if (definition.requiredChecks?.includes("agent-authored-complete")) {
         execution.promotable = execution.promotable
@@ -2993,6 +2996,7 @@ export class EvalService {
             acceptedNodes: copy(acceptedNodes),
             resultCompletionStatus: invocation.resultCompletionStatus,
             execution: copy(invocation.execution || null),
+            authoringErrors: copy(execution.authoringErrorMetrics?.[String(child.id)] ?? unavailableAuthoringErrors()),
             candidateTrace: copy(execution.candidateTraceCaptures?.[String(child.id)] || disabledCandidateTrace()),
             projectionObservations: copy(
               execution.currentProjectionEvidence?.observations?.filter((observation) => (
@@ -3133,6 +3137,12 @@ export class EvalService {
             || execution.testCaseId === RECURSIVE_GRAPH_MEMORY_CASE_ID,
         },
       );
+      execution.authoringErrorMetrics ||= {};
+      try {
+        execution.authoringErrorMetrics[String(interaction.id)] = await authoringErrorsFromTraceDirectory(targetDirectory, descriptor, interaction.graphNodeId);
+      } catch {
+        execution.authoringErrorMetrics[String(interaction.id)] = unavailableAuthoringErrors("ledger_invalid_or_unreadable");
+      }
       execution.candidateTraceCaptures ||= {};
       execution.candidateTraceCaptures[String(interaction.id)] = {
         ...copy(descriptor),

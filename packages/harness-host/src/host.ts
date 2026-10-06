@@ -1262,7 +1262,7 @@ export class HarnessHost {
       && resolveGraphCapabilityProfile(session.descriptor.configuration).preview === "enabled"
       ? await mkdtemp(join(tmpdir(), "relayer-graph-previews-"))
       : undefined;
-    const scope = new ActiveHarnessGraphScope(previewDirectory === undefined ? capability : { ...capability, previewDirectory });
+    const scope = new ActiveHarnessGraphScope({ ...capability, ...(previewDirectory === undefined ? {} : { previewDirectory }), ...(traceContext === undefined ? {} : { authoringErrors: true }) });
     if (previewDirectory !== undefined) this.previewTraces.set(interactionNodeId, traceSink);
     const observedTrace = new EffectObservingTraceSink(traceSink);
     let completionError: HarnessExecutionFailure | undefined;

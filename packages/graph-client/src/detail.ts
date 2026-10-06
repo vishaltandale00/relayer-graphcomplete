@@ -1,3 +1,4 @@
+import { reportEnvironmentAuthoringError } from "./authoring-errors.js";
 import { isImageIcon } from "./image-icons.js";
 import { createHash } from "node:crypto";
 import { isProxy } from "node:util/types";
@@ -297,6 +298,7 @@ export class DetailCompilationError extends Error {
   constructor(readonly issues: readonly DetailCompilationIssue[]) {
     super(`Node Detail checkpoint failed with ${issues.length} validation issue${issues.length === 1 ? "" : "s"}`);
     this.name = "DetailCompilationError";
+    reportEnvironmentAuthoringError(this);
     if (issues.length === 1 && issues[0]?.code.startsWith("detail_")) this.message = `${issues[0].code}: ${issues[0].message}`;
   }
 }
@@ -851,7 +853,9 @@ function compiledPackageByteLimitError(): DetailCompilationError {
 
 function template(kind: TemplateKind, strings: TemplateStringsArray, values: readonly unknown[]): DetailTemplate {
   if (kind === "html" && values.some((value) => typeof value === "object" && value !== null && TEMPLATE_STATE.get(value as DetailTemplate)?.kind === "html")) {
-    throw new TypeError("detail_template_nested: HTML templates cannot wrap other HTML templates; use a helper that constructs fresh node-specific markup");
+    const error = new TypeError("detail_template_nested: HTML templates cannot wrap other HTML templates; use a helper that constructs fresh node-specific markup");
+    reportEnvironmentAuthoringError(error, ["detail_template_nested"]);
+    throw error;
   }
   const result = Object.freeze({
     [DETAIL_TEMPLATE]: kind,

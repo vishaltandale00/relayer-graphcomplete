@@ -305,6 +305,10 @@ export function projectExecutionDossier(run, execution) {
         : asArray(presentation.layers).flatMap((layer) => asArray(layer?.evidenceRefs)))
         .map(evidenceRefLabel),
     },
+    authoringErrors: asArray(execution.turns).map((turn) => ({
+      interactionId: turn.interactionId,
+      ...(turn.authoringErrors ?? { schemaVersion: 1, coverage: "unavailable", total: null, observed: null, byCause: {}, reasons: ["not_recorded"] }),
+    })),
     recursiveComplete: {
       declared: execution.harnessConfiguration?.complete !== undefined,
       configured: execution.harnessConfiguration?.complete?.agentAuthored === true,

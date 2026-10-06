@@ -3,7 +3,7 @@ import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { startGraphOperationRecorder } from "../desktop/main/services/graph-operation-recorder.mjs";
 import { GraphCompleteRuntimeService } from "../desktop/main/services/graphcomplete-runtime.mjs";
@@ -12,6 +12,7 @@ const resources = [];
 const directories = [];
 
 afterEach(async () => {
+  vi.unstubAllEnvs();
   for (const resource of resources.splice(0).reverse()) await resource.close();
   for (const directory of directories.splice(0)) await rm(directory, { recursive: true, force: true });
 });
@@ -636,4 +637,67 @@ it("preserves bounded asset request/response parity without widening ordinary gr
   await expect(jsonRequest(`${recorder.url}/api/graph/visual-assets/operations`, {
     method: "POST", body: { bytesBase64: "x".repeat(12 * 1024 * 1024) },
   })).resolves.toMatchObject({ status: 502 });
+});
+
+
+it("captures caught compiler failures and server origins once without preserving authored text", async () => {
+  const { RelayerGraphClient, NodeObject, html, css } = await import("../packages/graph-client/src/index.ts");
+  const { authoringErrorsFromOperations } = await import("../desktop/eval-main/authoring-errors.mjs");
+  const upstream = await startUpstream();
+  const recorder = await startGraphOperationRecorder({ upstreamUrl: upstream.url }); resources.push(recorder);
+  const token = "compiler-diagnostic-secret"; await bindCapability(recorder.url, token);
+  const client = new RelayerGraphClient({ url: recorder.url, token, nodeId: 17, authoringErrors: true });
+  const broken = new NodeObject("info", "Private authored title", "Private authored prose", "concept", "broken");
+  broken.detailAuthoring.setComponent("main", html`<p>Private authored prose</p>`, css`p { cursor: pointer; }`);
+  await expect(client.checkpointNodeDetail(broken)).rejects.toThrow();
+  // Same defect in a fresh attempt is another failure.
+  await expect(client.checkpointNodeDetail(broken)).rejects.toThrow();
+  // A checkpoint joining a failed submit sees the same compiler-origin incident.
+  const submission = client.submitNode(broken);
+  const joinedCheckpoint = client.checkpointNodeDetail(broken);
+  await expect(submission).rejects.toThrow();
+  await expect(joinedCheckpoint).rejects.toThrow();
+  // Server failures are already origins, so the client must not emit a duplicate.
+  await expect(client.createEdge(1, 2, "edge")).rejects.toThrow();
+  await new Promise((resolve) => setTimeout(resolve, 100));
+  const target = await createCandidateTraceDirectory(); await recorder.exportInteraction(17, target);
+  const text = await readFile(join(target, "graph-operations.jsonl"), "utf8");
+  const records = text.trim().split("\n").map(JSON.parse);
+  expect(authoringErrorsFromOperations(records)).toMatchObject({ observed: 4, total: null, byCause: { compiler: 3, server_rejection: 1 } });
+  expect(text).not.toContain(token); expect(text).not.toContain("Private authored");
+  expect(records.filter((record) => record.authoringError).every((record) => record.authoringError.codes.includes("unsafe_css"))).toBe(true);
+  expect((await jsonRequest(`${recorder.url}/api/graph/authoring-errors`, { method: "POST", token: "wrong", body: {} })).status).toBe(401);
+});
+
+
+it("diagnostic overflow cannot truncate graph proof", async () => {
+  const upstream = await startUpstream();
+  const recorder = await startGraphOperationRecorder({ upstreamUrl: upstream.url, maxEventsPerInteraction: 1, maxAuthoringDiagnosticsPerInteraction: 1 });
+  resources.push(recorder); const token = "bounded-diagnostics"; await bindCapability(recorder.url, token);
+  for (const id of ["00000000-0000-0000-0000-000000000001", "00000000-0000-0000-0000-000000000002"]) {
+    await jsonRequest(`${recorder.url}/api/graph/authoring-errors`, { method: "POST", token,
+      body: { schemaVersion: 1, id, phase: "compiler", codes: ["unsafe_css"] } });
+  }
+  await jsonRequest(`${recorder.url}/api/graph/nodes`, { method: "POST", token, body: { clientKey: "valid" } });
+  const target = await createCandidateTraceDirectory(); const descriptor = await recorder.exportInteraction(17, target);
+  expect(descriptor).toMatchObject({ status: "complete", promotable: true, truncated: false, eventCount: 2, authoringDiagnosticsDiscarded: 1 });
+  const lines = (await readFile(join(target, "graph-operations.jsonl"), "utf8")).trim().split("\n").map(JSON.parse);
+  expect(lines.at(-1)).toMatchObject({ path: "/api/graph/nodes", status: 201 });
+});
+
+
+it("captures a caught template failure before any graph method is called", async () => {
+  const { html } = await import("../packages/graph-client/src/index.ts");
+  const upstream = await startUpstream(); const recorder = await startGraphOperationRecorder({ upstreamUrl: upstream.url }); resources.push(recorder);
+  const token = "standalone-template-secret"; await bindCapability(recorder.url, token);
+  vi.stubEnv("RELAYER_GRAPH_URL", recorder.url); vi.stubEnv("RELAYER_GRAPH_TOKEN", token);
+  vi.stubEnv("RELAYER_NODE_ID", "17"); vi.stubEnv("RELAYER_GRAPH_AUTHORING_ERRORS", "1");
+  expect(() => html`<section>${html`<p>Nested private prose</p>`}</section>`).toThrow();
+  await new Promise((resolve) => setTimeout(resolve, 100));
+  const target = await createCandidateTraceDirectory(); await recorder.exportInteraction(17, target);
+  const text = await readFile(join(target, "graph-operations.jsonl"), "utf8");
+  const events = text.trim().split("\n").map(JSON.parse);
+  expect(events).toHaveLength(1);
+  expect(events[0]).toMatchObject({ authoringError: { phase: "compiler", codes: ["detail_template_nested"] } });
+  expect(text).not.toContain("Nested private prose"); expect(text).not.toContain(token);
 });

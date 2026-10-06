@@ -1004,6 +1004,13 @@ describe("Relayer Eval application service", () => {
       referenceActionId: expect.any(Number),
     });
     expect(execution.turns[1].caseEvidence).not.toHaveProperty("anchor");
+    expect(execution.turns.map((turn) => turn.authoringErrors)).toEqual([
+      expect.objectContaining({ observed: 0, total: null, coverage: "partial" }),
+      expect.objectContaining({ observed: 0, total: null, coverage: "partial" }),
+    ]);
+    const persisted = JSON.parse(await readFile(join(dataDirectory, "eval-data", "test-runs.json"), "utf8"));
+    expect(JSON.stringify(persisted)).toContain('"authoringErrors"');
+
     const secondTrace = await evalService.candidateTraceContext(
       execution.id,
       execution.turns[1].interactionId,

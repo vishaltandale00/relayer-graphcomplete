@@ -214,6 +214,8 @@ export interface InteractionInputNode {
 }
 
 export interface GraphCapability {
+  /** Optional diagnostic capture; never graph authority. */
+  readonly authoringErrors?: boolean;
   readonly url: string;
   readonly token: string;
   readonly nodeId: GraphId;

@@ -554,6 +554,8 @@ export class CodexBasicHarness implements Harness {
     // authoring path now that graph execution uses the zero-argument launcher.
     delete environment.RELAYER_GRAPH_AUTHORING_NODE;
     environment.RELAYER_GRAPH_URL = graph.url;
+    delete environment.RELAYER_GRAPH_AUTHORING_ERRORS;
+    if (graph.authoringErrors) environment.RELAYER_GRAPH_AUTHORING_ERRORS = "1";
     environment.RELAYER_GRAPH_TOKEN = graph.token;
     environment.RELAYER_NODE_ID = String(graph.nodeId);
     delete environment.RELAYER_GRAPH_PREVIEW_DIR;

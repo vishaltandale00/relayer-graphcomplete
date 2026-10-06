@@ -182,7 +182,8 @@ function withCompletion(receipt, response) {
 }
 
 function sanitizeReceipt(method, path, status, request, response, knownSecrets) {
-  const receipt = { schemaVersion: 1, method, path, status };
+  const codesAtOrigin = errorCodes(response);
+  const receipt = { schemaVersion: 1, method, path, status, ...(codesAtOrigin.length ? { errorCodes: codesAtOrigin } : {}) };
   if (method === "POST" && path === "/api/graph/nodes") return withRecord(receipt, "node", response?.node);
   if (method === "POST" && path === "/api/graph/edges") return withRecord(receipt, "edge", response?.edge);
   if (method === "POST" && path === "/api/graph/layers") return withRecord(receipt, "layer", response?.layer);
@@ -242,6 +243,7 @@ async function atomicWrite(path, content) {
 export async function startGraphOperationRecorder({
   upstreamUrl,
   maxEventsPerInteraction = DEFAULT_MAX_EVENTS_PER_INTERACTION,
+  maxAuthoringDiagnosticsPerInteraction = 1_000,
   maxBytesPerInteraction = DEFAULT_MAX_BYTES_PER_INTERACTION,
   settleTimeoutMs = DEFAULT_SETTLE_TIMEOUT_MS,
 } = {}) {
@@ -250,7 +252,7 @@ export async function startGraphOperationRecorder({
     || upstream.pathname !== "/" || upstream.search || upstream.hash || upstream.username || upstream.password) {
     throw new Error("Graph operation recorder upstream must be an authenticated 127.0.0.1 HTTP origin.");
   }
-  if (!positiveInteger(maxEventsPerInteraction) || !positiveInteger(maxBytesPerInteraction)
+  if (!positiveInteger(maxAuthoringDiagnosticsPerInteraction) || !positiveInteger(maxEventsPerInteraction) || !positiveInteger(maxBytesPerInteraction)
     || !positiveInteger(settleTimeoutMs)) {
     throw new Error("Graph operation recorder bounds must be positive integers.");
   }
@@ -267,7 +269,7 @@ export async function startGraphOperationRecorder({
   const stateFor = (interactionNodeId) => {
     let state = interactions.get(interactionNodeId);
     if (state === undefined) {
-      state = { events: [], byteLength: 0, discardedEvents: 0, discardedBytes: 0, pending: new Map() };
+      state = { events: [], graphEventCount: 0, diagnosticEventCount: 0, diagnosticBytes: 0, diagnosticDiscarded: 0, byteLength: 0, discardedEvents: 0, discardedBytes: 0, pending: new Map() };
       interactions.set(interactionNodeId, state);
     }
     return state;
@@ -282,12 +284,23 @@ export async function startGraphOperationRecorder({
     };
     const bytes = Buffer.from(`${JSON.stringify(event)}\n`);
     const state = stateFor(interactionNodeId);
-    if (state.events.length >= maxEventsPerInteraction || state.byteLength + bytes.byteLength > maxBytesPerInteraction) {
+    if (receipt.authoringError !== undefined) {
+      if (state.diagnosticEventCount >= maxAuthoringDiagnosticsPerInteraction || state.diagnosticBytes + bytes.byteLength > 256 * 1024) {
+        state.diagnosticDiscarded += 1;
+        return;
+      }
+      state.events.push(event);
+      state.diagnosticEventCount += 1;
+      state.diagnosticBytes += bytes.byteLength;
+      return;
+    }
+    if (state.graphEventCount >= maxEventsPerInteraction || state.byteLength + bytes.byteLength > maxBytesPerInteraction) {
       state.discardedEvents += 1;
       state.discardedBytes += bytes.byteLength;
       return;
     }
     state.events.push(event);
+    state.graphEventCount += 1;
     state.byteLength += bytes.byteLength;
   };
   const replaceCapabilityOwner = (token, interactionNodeId) => {
@@ -331,6 +344,23 @@ export async function startGraphOperationRecorder({
       const requestToken = bearerToken(request.headers.authorization);
       if (requestToken !== undefined) knownSecrets.add(requestToken);
       const interactionNodeId = requestToken === undefined ? undefined : capabilityOwners.get(requestToken);
+      if (requestUrl.pathname === "/api/graph/authoring-errors") {
+        const diagnostic = requestValue;
+        const valid = method === "POST" && isObject(diagnostic)
+          && Object.keys(diagnostic).every((key) => ["schemaVersion", "id", "phase", "codes"].includes(key))
+          && diagnostic.schemaVersion === 1 && typeof diagnostic.id === "string"
+          && /^[0-9a-f-]{36}$/.test(diagnostic.id) && ["client", "compiler"].includes(diagnostic.phase)
+          && Array.isArray(diagnostic.codes) && diagnostic.codes.length > 0 && diagnostic.codes.length <= 16
+          && diagnostic.codes.every((code) => typeof code === "string" && /^[a-z][a-z0-9_]{0,63}$/.test(code));
+        const status = interactionNodeId === undefined ? 401 : valid ? 202 : 400;
+        if (status === 202) record(interactionNodeId, {
+          schemaVersion: 1, method, path: requestUrl.pathname, status,
+          authoringError: { id: diagnostic.id, phase: diagnostic.phase, codes: scrubKnownSecrets([...new Set(diagnostic.codes)], knownSecrets) },
+        });
+        response.writeHead(status, { "content-type": "application/json" });
+        response.end(JSON.stringify({ recorded: status === 202 }));
+        return;
+      }
       if (requestUrl.pathname.startsWith("/api/graph/") && interactionNodeId !== undefined) {
         const state = stateFor(interactionNodeId);
         let resolveActivity;
@@ -450,6 +480,7 @@ export async function startGraphOperationRecorder({
         byteLength: eventsBytes.byteLength,
         eventCount: state.events.length,
         truncated,
+        ...(state.diagnosticDiscarded ? { authoringDiagnosticsDiscarded: state.diagnosticDiscarded } : {}),
         ...(truncated ? {
           discardedEvents: state.discardedEvents,
           discardedBytes: state.discardedBytes,
