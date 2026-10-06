@@ -31,9 +31,22 @@ missing dependency. This uses Microsoft's documented application-local deploymen
 
 ## Repeatable existing-VM command
 
-The existing private Windows 11 VM has Node 22.23.2, Rust, Git, native Strawberry Perl, CMake and VS2022
+The existing private Windows 11 VM has Node 22.23.2, Rust, Git, native Strawberry Perl, Python 3.13.12, CMake and VS2022
 Build Tools in `RelayerDevWorkspace` and `C:\RelayerBuildTools2022`. The portable Perl archive includes CMake 3.29 and its module tree; retain both when extracting it. The versioned
-`windows-dev-environment.cmd` initializes only the build subprocess environment and preflights the selected CMake module tree and Ninja before dispatching compilation.
+`windows-dev-environment.cmd` initializes only the build subprocess environment and preflights the selected CMake module tree, Ninja and Python before dispatching compilation.
+Python's official x64 embeddable ZIP is pinned to SHA-256
+`76f238f606250c87c6beac75dccd35ee99070a13490555936abb6cb64ecce3d0`
+([publisher release](https://www.python.org/downloads/release/python-31312/)).
+It belongs only to the build workspace, not the installed app. The entire Python
+runtime and ccache executable participate in compiled-native identity. A changed
+generator invalidates Ladybug outputs while retaining independently verified
+source/static OpenSSL preparation. A separate attempted-compiler identity is
+recorded before Cargo, so failures after Ladybug finishes cannot admit stale
+objects on a later generator change. Compiler/SDK or producer changes invalidate
+the whole Cargo target; generator-only changes invalidate Ladybug. Unknown old
+Cargo workspaces start with invalidation, while verified preparation remains.
+Ambient ccache overrides are rejected, and
+this Dev route disables its object cache so Cargo/Ninja own incremental reuse.
 The source archive currently starts at `3c641e1c2fbb58e4973475819a5c5c93dddd79c0`.
 From the Mac checkout:
 

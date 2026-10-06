@@ -1,7 +1,7 @@
 import { spawn, execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { appendFile, lstat, mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
-import { join, resolve } from 'node:path';
+import { appendFile, lstat, mkdir, readFile, readdir, rename, writeFile } from 'node:fs/promises';
+import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { preparePinnedLadybugForPackaging, requireLadybugDistributionLicenseReady, withPinnedLadybugPackagingEnvironment } from './pinned-ladybug-build.mjs';
 const sha = bytes => createHash('sha256').update(bytes).digest('hex');
@@ -23,12 +23,29 @@ export async function digestWindowsDevInputs(root, paths) {
   for (const path of [...paths].sort()) await visit(path);
   return sha(JSON.stringify(files));
 }
+export function windowsDevNativeBuildIdentity(preparationIdentity, generators, orchestrationDigest) {
+  return sha(JSON.stringify({ preparationIdentity, generators, orchestrationDigest }));
+}
+export async function beginWindowsDevNativeAttempt({ root, nativeIdentity, preparationIdentity, orchestrationDigest, execute, options }) {
+  const path = join(root, 'native-attempt.json');
+  let previous;
+  try { previous = JSON.parse(await readFile(path, 'utf8')); } catch (error) { if (error.code !== 'ENOENT') throw error; }
+  const mode = previous?.nativeIdentity === nativeIdentity ? 'reuse'
+    : previous?.preparationIdentity === preparationIdentity && previous?.orchestrationDigest === orchestrationDigest ? 'ladybug-only' : 'all-native';
+  if (mode !== 'reuse') await execute('cargo', ['clean', ...(mode === 'ladybug-only' ? ['-p', 'lbug'] : []), '--release', '--target', 'x86_64-pc-windows-msvc'], options);
+  // Commit only after invalidation succeeds, before Cargo can produce outputs.
+  // Failed Cargo attempts keep this identity; the success marker stays separate.
+  const temporary = `${path}.tmp`;
+  await writeFile(temporary, JSON.stringify({ schema: 'windows-dev-native-attempt/v1', nativeIdentity, preparationIdentity, orchestrationDigest, at: new Date().toISOString() }));
+  await rename(temporary, path);
+  return mode;
+}
 export async function windowsDevLoop({ repositoryRoot = resolve(import.meta.dirname, '../..'), environment = process.env,
   rust = false, allowCold = false, execute = run, command = (name, args) => execFileSync(name, args, { env: environment, encoding: 'utf8' }).trim(),
   platform = process.platform, prepareLadybug = preparePinnedLadybugForPackaging, now = () => performance.now() } = {}) {
   if (platform !== 'win32') throw new Error('Run desktop:dev:windows in the initialized Windows compiler workspace; the Mac sync command is desktop:sync:windows.');
   if (environment.RELAYER_DESKTOP_RELEASE || environment.RUSTFLAGS || environment.CARGO_ENCODED_RUSTFLAGS || environment.RUSTC_WRAPPER || environment.RUSTC_WORKSPACE_WRAPPER) throw new Error('Dev loop rejects release authority and custom compiler flags/wrappers.');
-  const unsupported = Object.keys(environment).filter(name => /^(RUSTC$|RUSTDOC$|CC$|CC_|CXX|CPP|CFLAGS|CXXFLAGS|AR$|AR_|LD$|LD_|LDFLAGS|CARGO_BUILD_|CARGO_TARGET_|CARGO_PROFILE_|CMAKE_|SDKROOT$|C_INCLUDE_PATH$|CPLUS_INCLUDE_PATH$|OBJC_INCLUDE_PATH$|CPATH$|LIBRARY_PATH$|DYLD|PKG_CONFIG|SOURCE_DATE_EPOCH$|OPENSSL_|LBUG_)/i.test(name) && environment[name]);
+  const unsupported = Object.keys(environment).filter(name => /^(RUSTC$|RUSTDOC$|CC$|CC_|CXX|CPP|CFLAGS|CXXFLAGS|AR$|AR_|LD$|LD_|LDFLAGS|CARGO_BUILD_|CARGO_TARGET_|CARGO_PROFILE_|CMAKE_|CCACHE_|SDKROOT$|C_INCLUDE_PATH$|CPLUS_INCLUDE_PATH$|OBJC_INCLUDE_PATH$|CPATH$|LIBRARY_PATH$|DYLD|PKG_CONFIG|SOURCE_DATE_EPOCH$|OPENSSL_|LBUG_)/i.test(name) && environment[name]);
   if (unsupported.length) throw new Error(`Unsupported native build inputs: ${unsupported.join(', ')}`);
   const root = 'C:\\RelayerDev', target = join(root, 'cargo-target');
   await mkdir(root, { recursive: true });
@@ -36,7 +53,7 @@ export async function windowsDevLoop({ repositoryRoot = resolve(import.meta.dirn
   if (!environment.RELAYER_DEV_LOOP_ID || lease.id !== environment.RELAYER_DEV_LOOP_ID || lease.phase !== 'building' || lease.pid !== process.pid) throw new Error('Use the serialized desktop:dev:windows command.');
   const started = now(), stages = [], receipt = { schema: 'windows-dev-loop/v1', scope: 'unsigned-development', startedAt: new Date().toISOString(), stages, rust, sourceDigest: environment.RELAYER_DEV_SOURCE_DIGEST };
   async function stage(name, operation) { const start = now(); try { return await operation(); } finally { stages.push({ name, seconds: (now() - start) / 1000 }); } }
-  const runtimePaths = ['crates', 'Cargo.lock', 'Cargo.toml', '.cargo', 'docs/graph-query-v1.md', 'docs/icon-catalog.json', 'fixtures/graph-query-v1', 'vendor/ladybug', 'scripts/prepare-ladybug-source.mjs', 'scripts/verify-ladybug-native-receipts.mjs', 'desktop/packaging/pinned-ladybug-build.mjs', 'desktop/packaging/build-cache.mjs', 'desktop/packaging/windows-native.mjs', 'desktop/shared/target.mjs', 'scripts/ci/packaging-input-contract.json'];
+  const runtimePaths = ['desktop/packaging/windows-dev.mjs', 'scripts/windows-dev-environment.cmd', 'scripts/windows-dev-preflight.cmake', 'crates', 'Cargo.lock', 'Cargo.toml', '.cargo', 'docs/graph-query-v1.md', 'docs/icon-catalog.json', 'fixtures/graph-query-v1', 'vendor/ladybug', 'scripts/prepare-ladybug-source.mjs', 'scripts/verify-ladybug-native-receipts.mjs', 'desktop/packaging/pinned-ladybug-build.mjs', 'desktop/packaging/build-cache.mjs', 'desktop/packaging/windows-native.mjs', 'desktop/shared/target.mjs', 'scripts/ci/packaging-input-contract.json'];
   const runtimeDigest = await digestWindowsDevInputs(repositoryRoot, runtimePaths);
   const marker = join(root, 'native-state.json'); let previous;
   try { previous = JSON.parse(await readFile(marker, 'utf8')); } catch (error) { if (error.code !== 'ENOENT') throw error; }
@@ -51,19 +68,33 @@ export async function windowsDevLoop({ repositoryRoot = resolve(import.meta.dirn
         const path = command('where.exe', [tool]).split(/\r?\n/)[0]; tools[tool] = { path, sha256: sha(await readFile(path)) };
       }
       const nativeInputs = await digestWindowsDevInputs(repositoryRoot, ['vendor/ladybug', 'scripts/prepare-ladybug-source.mjs', 'scripts/verify-ladybug-native-receipts.mjs', 'desktop/packaging/pinned-ladybug-build.mjs', 'desktop/packaging/build-cache.mjs', 'scripts/ci/packaging-input-contract.json']);
-      const identity = sha(JSON.stringify({ repositoryRoot, target: 'windows-x64', tools, nativeInputs, rustVersion: command('rustc', ['-vV']), cargoVersion: command('cargo', ['-vV']), sdk: environment.WindowsSDKVersion, sdkDirectory: environment.WindowsSdkDir, compilerEnvironment: Object.fromEntries(["CL", "_CL_", "LINK", "_LINK_", "INCLUDE", "LIB", "LIBPATH", "VCINSTALLDIR", "VCToolsInstallDir"].map(key => [key, environment[key] ?? null])) }));
+      const preparationIdentity = sha(JSON.stringify({ repositoryRoot, target: 'windows-x64', tools, nativeInputs, rustVersion: command('rustc', ['-vV']), cargoVersion: command('cargo', ['-vV']), sdk: environment.WindowsSDKVersion, sdkDirectory: environment.WindowsSdkDir, compilerEnvironment: Object.fromEntries(["CL", "_CL_", "LINK", "_LINK_", "INCLUDE", "LIB", "LIBPATH", "VCINSTALLDIR", "VCToolsInstallDir"].map(key => [key, environment[key] ?? null])) }));
+      // Python and ccache affect Ladybug compilation, but do not prepare its
+      // source tree or static OpenSSL. Preserve that verified prefix when only
+      // generators change; invalidate the compiled Ladybug outputs separately.
+      const generators = {};
+      for (const tool of ['python.exe', 'ccache.exe']) {
+        const path = command('where.exe', [tool]).split(/\r?\n/)[0];
+        generators[tool] = { path, sha256: sha(await readFile(path)) };
+        if (tool === 'python.exe') generators.pythonRuntime = await digestWindowsDevInputs(dirname(path), ['.']);
+      }
+      command('python', ['-c', "import sys; assert (3,9) <= sys.version_info[:2] < (4,0); import json,sysconfig; print('native-python-ok')"]);
+      const orchestrationDigest = await digestWindowsDevInputs(repositoryRoot, ['desktop/packaging/windows-dev.mjs', 'scripts/windows-dev-environment.cmd', 'scripts/windows-dev-preflight.cmake']);
+      const identity = windowsDevNativeBuildIdentity(preparationIdentity, generators, orchestrationDigest);
+      receipt.preparationIdentity = preparationIdentity;
       receipt.nativeIdentity = identity;
       receipt.cacheDecision = previous?.nativeIdentity === identity ? 'warm local Cargo workspace; native inputs reverified' : 'no compatible local cache; checked trusted release caches separately; local cold build required';
       if (previous?.nativeIdentity !== identity && !allowCold) throw new Error('Cold native build required. Inspect verified cache availability, then rerun with --rust --allow-cold.');
       await stage('license', () => requireLadybugDistributionLicenseReady());
       await stage('Cargo fetch', () => execute('cargo', ['fetch', '--locked', '--target', 'x86_64-pc-windows-msvc'], { cwd: repositoryRoot, env: environment }));
-      const buildEnvironment = { ...environment, CARGO_TARGET_DIR: target, CARGO_PROFILE_RELEASE_DEBUG: '1', CARGO_PROFILE_RELEASE_INCREMENTAL: 'true' };
+      const buildEnvironment = { ...environment, CCACHE_DISABLE: '1', CARGO_TARGET_DIR: target, CARGO_PROFILE_RELEASE_DEBUG: '1', CARGO_PROFILE_RELEASE_INCREMENTAL: 'true' };
+      receipt.nativeTransition = await stage('native cache transition', () => beginWindowsDevNativeAttempt({ root, nativeIdentity: identity, preparationIdentity, orchestrationDigest, execute, options: { cwd: repositoryRoot, env: buildEnvironment } }));
       await withPinnedLadybugPackagingEnvironment({ environment: buildEnvironment, target: { key: 'windows-x64', rustTarget: 'x86_64-pc-windows-msvc' },
-        prepareLadybug: options => stage('verified native preparation', () => prepareLadybug({ ...options, cache: { root: join(root, 'native-cache'), native: identity } })),
+        prepareLadybug: options => stage('verified native preparation', () => prepareLadybug({ ...options, cache: { root: join(root, 'native-cache'), native: preparationIdentity } })),
       }, (env, integrity) => stage('Cargo release', () => execute('cargo', ['build', '--release', '-p', 'relayer-app-server', '-p', 'relayer-graph-server', '--target', 'x86_64-pc-windows-msvc', ...integrity], { cwd: repositoryRoot, env })));
       const files = {};
       for (const name of ['relayer-app-server.exe', 'relayer-graph-server.exe']) files[name] = sha(await readFile(join(target, 'x86_64-pc-windows-msvc/release', name)));
-      await writeFile(marker, JSON.stringify({ nativeIdentity: identity, runtimeDigest, files }, null, 2));
+      await writeFile(marker, JSON.stringify({ nativeIdentity: identity, preparationIdentity, runtimeDigest, files }, null, 2));
     } else {
       if (previous?.runtimeDigest !== runtimeDigest) throw new Error('Rust source changed or no local native build exists: run --rust first.');
       for (const [name, digest] of Object.entries(previous.files)) if (sha(await readFile(join(target, 'x86_64-pc-windows-msvc/release', name))) !== digest) throw new Error(`Local native output changed: ${name}`);

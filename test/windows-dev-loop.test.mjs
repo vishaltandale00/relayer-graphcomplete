@@ -2,7 +2,7 @@ import { expect, it } from 'vitest';
 import { mkdtemp, rm, writeFile, symlink } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { digestWindowsDevInputs, windowsDevLoop } from '../desktop/packaging/windows-dev.mjs';
+import { digestWindowsDevInputs, windowsDevLoop, windowsDevNativeBuildIdentity, beginWindowsDevNativeAttempt } from '../desktop/packaging/windows-dev.mjs';
 it('detects real Rust input changes and rejects source symlinks', async () => {
   const root = await mkdtemp(join(tmpdir(), 'win-dev-inputs-'));
   try {
@@ -51,5 +51,41 @@ it('allows exactly one build to claim a source-sync lease and retains it on reje
     expect(JSON.parse(await readFile(join(root, 'active-loop.json'), 'utf8'))).toMatchObject({ id: 'sync-1', phase: 'building', pid: process.pid });
     await winner.release();
     const next = await claimWindowsDevLease({ root }); await next.release();
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+it('invalidates compiled native identity for generator changes while preserving its preparation identity', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'win-dev-generator-'));
+  try {
+    await writeFile(join(root, 'python313.zip'), 'original stdlib');
+    const preparationIdentity = 'a'.repeat(64);
+    const first = windowsDevNativeBuildIdentity(preparationIdentity, { python: await digestWindowsDevInputs(root, ['.']) }, 'orchestration');
+    await writeFile(join(root, 'python313.zip'), 'changed stdlib');
+    const next = windowsDevNativeBuildIdentity(preparationIdentity, { python: await digestWindowsDevInputs(root, ['.']) }, 'orchestration');
+    expect(next).not.toBe(first);
+    expect(windowsDevNativeBuildIdentity(preparationIdentity, { python: await digestWindowsDevInputs(root, ['.']) }, 'changed orchestration')).not.toBe(next);
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+it('retains failed-attempt identity and scopes invalidation before admitting new Cargo outputs', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'win-native-attempt-'));
+  const { readFile } = await import('node:fs/promises');
+  const calls = [];
+  const begin = (nativeIdentity, preparationIdentity = 'prep', orchestrationDigest = 'producer', execute = async (_, args) => { calls.push(args); }) => beginWindowsDevNativeAttempt({ root, nativeIdentity, preparationIdentity, orchestrationDigest, execute, options: {} });
+  try {
+    expect(await begin('first')).toBe('all-native');
+    // Simulate Cargo failing after Ladybug finished: no success marker exists.
+    expect(await begin('first')).toBe('reuse');
+    expect(calls).toHaveLength(1);
+    expect(await begin('python-changed')).toBe('ladybug-only');
+    expect(calls.at(-1)).toContain('lbug');
+    const old = await readFile(join(root, 'native-attempt.json'), 'utf8');
+    await expect(begin('compiler-changed', 'new-prep', 'producer', async () => { throw Error('cleanup failed'); })).rejects.toThrow('cleanup failed');
+    expect(await readFile(join(root, 'native-attempt.json'), 'utf8')).toBe(old);
+    expect(await begin('compiler-changed', 'new-prep')).toBe('all-native');
+    expect(calls.at(-1)).not.toContain('-p');
+    expect(await begin('producer-changed', 'new-prep', 'new-producer')).toBe('all-native');
+    expect(calls.at(-1)).not.toContain('-p');
+    expect(JSON.parse(await readFile(join(root, 'native-attempt.json'), 'utf8')).nativeIdentity).toBe('producer-changed');
   } finally { await rm(root, { recursive: true, force: true }); }
 });
