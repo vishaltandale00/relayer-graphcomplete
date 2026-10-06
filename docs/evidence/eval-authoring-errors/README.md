@@ -48,9 +48,10 @@ Cargo revalidates current source and all required tests run freshly. That clone
 is not a sealed runtime artifact or test evidence. No prebuilt runtime receipt
 was adopted. Source compilation remains the runtime authority.
 
-## Actual results
+## Implementation snapshot results
 
-Final executable/test/PRD source digest (17 files, sorted path + NUL + bytes + NUL):
+These results apply to implementation commit `09b144d88d9015a0bdb69c95a6a09cac6a24c964`,
+before integration with publication timing. Executable/test/PRD source digest (17 files, sorted path + NUL + bytes + NUL):
 `854010b76f49e1441d542741c41a0fcd7c77a3a9910e11a034f04aa1b86c6e2b`.
 Evidence prose is excluded from this digest.
 
@@ -138,3 +139,51 @@ This establishes capture of these five targeted failures through a live model
 and persisted Eval turn. It is not a general recall estimate, natural-error
 baseline, or proof of exhaustive coverage. Python, unknown methods, older clients
 and lost diagnostic delivery remain the declared gaps.
+
+## Integration with main — 2026-10-06
+
+Integrated publication-timing PR #687 from main commit
+`de686561c465f1ed6c4afc6ac9fb59291861bb56`. The two overlapping service and
+dossier seams preserve both metrics: both transient maps are cleaned up after
+persistence, and both dossier sections remain visible. Recorder timing/control
+receipts and authoring diagnostics retain their respective integrity boundaries.
+
+Additional checkpoints use existing production journeys: the caught-error recorder
+fixture confirms diagnostic origins do not inflate timing's rejected-write count;
+the browser dossier checks both metric sections. No tests were removed.
+Required integration verification was the six mapped focused suites, a fresh full
+`npm run check`, `npm run build`, compiled-runtime proof, the browser runner, and
+refreshed adversarial review. No new live inference or release proof was required.
+
+Exact integrated executable/test/PRD digest (17 paths relative to the main commit
+above, sorted path + NUL + bytes + NUL; evidence excluded):
+`de7f8363a3c3739b43f872f8c5f7117dd0411ec2af735d55bcd84b8b7c131e4e`.
+
+| Actual integration checkpoint | Result |
+| --- | --- |
+| Six focused metric, recorder, timing, model and Eval persistence suites | 57 tests passed |
+| `npm run check`, pinned Node 22.23.2 | Passed: native fmt/clippy/workspace/crash tests, package checks, 290 Vitest files / 3,624 tests passed (1 file / 3 tests skipped), 2 secret-boundary tests, 68 Python tests, receipt integrity and PRD readability |
+| `npm run build`, pinned Node 22.23.2 | Passed: both native runtime binaries, root TypeScript and all workspace packages |
+| `npm run test:eval-compiled-runtime`, pinned Node 22.23.2 | All 4 tests passed |
+| `npm run test:eval-web`, pinned Node 22.23.2 | All declared chapters passed, including both dossier metrics, startup/reopen, review authority, evaluator release, actor dispatch/input, calibration and human persistence |
+
+Preserved failure: the first integration aggregate run failed the unchanged native
+`environment::tests::command_runner_enforces_start_timeout_and_output_bounds`
+fixture under overlapping verification load (356 other app-server tests passed).
+The identical fixture passed in isolation. A fresh full run with
+`RUST_TEST_THREADS=4` and `VITEST_MAX_WORKERS=3` passed; test cases and time limits
+were unchanged. The verified Ladybug bundle and private warm native target were
+reused; no cold provisioning was performed. Log hashes are retained in
+[integration verification receipts](integration-verification.json).
+
+Adversarial assertion: reviewer `/root/design_authority_review`; exact integrated
+17-file digest above; scope both capture/persistence/cleanup/projection/rendering
+paths, origin counting, diagnostic-budget independence, timing rejection exclusion,
+partial/unknown coverage, and evidence source qualification; verdict **PASS**, no
+unresolved findings. The reviewer independently ran four focused suites with
+38 passing tests on this exact digest, including the cross-metric assertion.
+Aggregate, build and browser results are separate local proofs. This assertion
+expires after an included-source change.
+
+The live probe remains evidence for production commit `09b144d88d9015a0bdb69c95a6a09cac6a24c964`.
+It is not a new live run of the integrated source or a natural-error baseline.

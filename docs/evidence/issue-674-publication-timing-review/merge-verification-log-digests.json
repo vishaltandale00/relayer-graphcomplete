@@ -1,0 +1,27 @@
+{
+  "check": {
+    "sha256": "ca65c9247c655d894a4dbc26eae9e804ddba1b582d039c46990a5a2c53e08705",
+    "result": "failed: unrelated public-share 10000-layer timeout",
+    "localLog": "/tmp/pr677-merge-check.log"
+  },
+  "check-bounded": {
+    "sha256": "62ff219cec947684401b22a21c42df1c04387b46db06b8bb438fbd6e7b093180",
+    "result": "passed",
+    "localLog": "/tmp/pr677-merge-check-bounded.log"
+  },
+  "build": {
+    "sha256": "c6f58a77299caced23b271a1fc02a1b23635de03716ffe77755897b28da61831",
+    "result": "passed",
+    "localLog": "/tmp/pr677-merge-build.log"
+  },
+  "browser": {
+    "sha256": "f746713839c90f903bee8390c7fff5033a8fc46ded8d0e5c98bc4f4953e7c3eb",
+    "result": "passed",
+    "localLog": "/tmp/pr677-merge-browser.log"
+  },
+  "compiled": {
+    "sha256": "f1d6b36f5ce5e84aac03bd3ccc558fa3a0229bc1c9484db0c5b00e9efc6725d5",
+    "result": "passed",
+    "localLog": "/tmp/pr677-merge-compiled.log"
+  }
+}

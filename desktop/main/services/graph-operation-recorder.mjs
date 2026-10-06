@@ -197,6 +197,20 @@ function sanitizeReceipt(method, path, status, request, response, knownSecrets) 
   if (method === "POST" && path === "/api/graph/submit" && status >= 200 && status < 300) {
     return withCompletion(receipt, response);
   }
+  if (method === "POST" && path === "/api/graph/current/transitions" && status >= 200 && status < 300) {
+    const kind = request?.transition?.kind;
+    const lifecycle = { advance: "active", return: "succeeded", stop: "stopped" }[kind];
+    if (lifecycle !== undefined && response?.lifecycle === lifecycle && positiveInteger(response.completionId)) {
+      return {
+        ...receipt,
+        transitionKind: kind,
+        completionNodeId: response.completionId,
+        completionLifecycle: lifecycle,
+        ...(positiveInteger(response.currentLayerId) ? { completionCurrentLayerId: response.currentLayerId } : {}),
+        ...(positiveInteger(response.finalLayerId) ? { completionRootLayerId: response.finalLayerId } : {}),
+      };
+    }
+  }
   const withRequest = method === "POST" && path === "/api/graph/search"
     ? withSearchRequest(receipt, request, knownSecrets)
     : receipt;

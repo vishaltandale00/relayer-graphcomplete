@@ -870,6 +870,16 @@ describe("Relayer Eval application service", () => {
       status: "complete",
       completionBrokerAvailable: true,
     });
+    const temporalTrace = await evalService.candidateTraceContext(control.id, control.turns[0].interactionId);
+    const transitions = temporalTrace.graphOperations.filter((operation) => operation.path === "/api/graph/current/transitions" && operation.status === 200);
+    expect(transitions.map((operation) => operation.transitionKind)).toEqual(["advance", "return"]);
+    expect(control.turns[0].timing.firstGraphAt).toBe(transitions[0].observedAt);
+    expect(control.turns[0].timing.acceptedAt).toBe(transitions[1].observedAt);
+    await evalService.persistTail;
+    const temporalReopened = new EvalService({ stateFile: evalService.stateFile, productSession, configurationPaths: evalService.configurationPaths });
+    await temporalReopened.open();
+    expect(temporalReopened.getRun(completed.id).executions.find((execution) => execution.id === control.id).turns[0].timing)
+      .toEqual(control.turns[0].timing);
     expect(control.semanticChildren).toHaveLength(1);
     expect(control.checks).toEqual(expect.arrayContaining([
       expect.objectContaining({ name: "turn-1:visual-node-detail:authored-output", passed: true }),
@@ -1555,6 +1565,18 @@ describe("Relayer Eval application service", () => {
       personalPresentationVersionId: selected.turns[0].candidateTrace.personalPresentationVersionId,
       ref: selected.turns[0].candidateTrace.ref,
     });
+    // Time to first graph is read from the real trace: the fixture publishes through a terminal
+    // submit, so first graph and accepted coincide, and a fixture harness runs no stdin programs.
+    expect(bundle.run.executions[0].turns[0].timing).toMatchObject({
+      schemaVersion: 1, graphWriteRejections: 0, programRuns: null,
+    });
+    expect(bundle.run.executions[0].turns[0].timing.acceptedSeconds).toBeGreaterThanOrEqual(0);
+    expect(bundle.run.executions[0].turns[0].timing.firstGraphAt).toBe(bundle.run.executions[0].turns[0].timing.acceptedAt);
+    await evalService.persistTail;
+    const reopened = new EvalService({ stateFile: evalService.stateFile, productSession, configurationPaths: evalService.configurationPaths });
+    await reopened.open();
+    expect(reopened.getRun(completed.id).executions[0].turns[0].timing)
+      .toEqual(bundle.run.executions[0].turns[0].timing);
     const context = evalService.reviewContext(selected.id);
     expect(context).toMatchObject({
       runId: completed.id,
@@ -1876,6 +1898,48 @@ describe("Relayer Eval application service", () => {
       ["read-only-workspace", "independent-reproduction"],
     ]);
     expect(autonomousCompleted.executions.every((execution) => execution.presentationGrade.status === "unjudged")).toBe(true);
+
+    // Exercise independent artifact failures through production capture, not only the directory reader.
+    const originalExporter = evalService.candidateTraceExporter;
+    for (const failure of ["ledger-partial", "events-corrupt"]) {
+      evalService.candidateTraceExporter = async (interactionId, targetDirectory, correlation) => {
+        const descriptor = await originalExporter(interactionId, targetDirectory, correlation);
+        if (failure === "events-corrupt") {
+          await writeFile(join(targetDirectory, "events.jsonl"), "corrupt\n");
+          return descriptor;
+        }
+        // The exporter fixture supplies a failed native command absent from the graph ledger.
+        const eventsPath = join(targetDirectory, "events.jsonl");
+        const bytes = (await readFile(eventsPath, "utf8")) + JSON.stringify({ type: "provider.event",
+          data: { method: "item/completed", params: { item: { type: "commandExecution",
+            command: "RELAYER_GRAPH_PROGRAM", exitCode: 1 } } } }) + "\n";
+        const updated = { ...descriptor, byteLength: Buffer.byteLength(bytes), eventCount: descriptor.eventCount + 1,
+          sha256: `sha256:${createHash("sha256").update(bytes).digest("hex")}`,
+          coverage: { ...descriptor.coverage, toolCalls: "full" },
+          graphOperations: { ...descriptor.graphOperations, status: "partial", truncated: true } };
+        const manifestPath = join(targetDirectory, "manifest.json");
+        const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
+        manifest.achievedCoverage.toolCalls = "full";
+        Object.assign(manifest.artifacts.events, { sha256: updated.sha256, byteLength: updated.byteLength, eventCount: updated.eventCount });
+        manifest.artifacts.graphOperations = updated.graphOperations;
+        await writeFile(eventsPath, bytes);
+        await writeFile(manifestPath, JSON.stringify(manifest));
+        return { ...updated, status: "partial" };
+      };
+      const failureRun = await evalService.createRun({ testCaseIds: ["empty-project.task-system.two-turn"],
+        harnessConfigurationNames: ["fixture-task-system"], judgeConfigurationName: "deterministic-graph-contract" });
+      const failureCompleted = await waitForCompletedRun(evalService, failureRun.id);
+      const turn = failureCompleted.executions[0].turns[0];
+      expect(turn.candidateTrace.status).toBe("failed");
+      if (failure === "ledger-partial") {
+        expect(turn.timing).toMatchObject({ acceptedSeconds: null, graphWriteRejections: null, programRuns: { failed: 1 } });
+      } else {
+        expect(turn.timing.acceptedSeconds).toBeGreaterThanOrEqual(0);
+        expect(turn.timing.programRuns).toBeNull();
+      }
+    }
+    evalService.candidateTraceExporter = originalExporter;
+
   }, 45_000);
 });
 

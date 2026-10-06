@@ -143,6 +143,7 @@ try {
   assert.equal(await reliability.locator(".finding-row").count(), 2);
   assert.ok((await reliability.textContent()).includes("Total: unknown"));
   assert.ok((await reliability.textContent()).includes("0 observed"));
+  await observer.getByRole("heading", { name: "Send to backend publication, per turn" }).waitFor();
   const reviewUrl = await rpc(host.url, "openReview", [execution.id]);
   const secondReviewUrl = await rpc(host.url, "openReview", [execution.id]);
   assert.notEqual(new URL(secondReviewUrl).origin, new URL(reviewUrl).origin);

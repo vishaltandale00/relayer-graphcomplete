@@ -52,6 +52,13 @@ async function startUpstream({ holdNodeResponse = false } = {}) {
       response.end(JSON.stringify({ revoked: 1 }));
       return;
     }
+    if (request.url === "/api/graph/current/transitions" && request.method === "POST") {
+      const kind = body.transition.kind;
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(JSON.stringify({ completionId: 17, lifecycle: { advance: "active", return: "succeeded", stop: "stopped" }[kind],
+        currentLayerId: 9, finalLayerId: kind === "return" ? 9 : null, privateField: "private response" }));
+      return;
+    }
     if (request.url === "/api/graph/nodes" && request.method === "POST") {
       resolveNodeStarted();
       if (holdNodeResponse) await nodeResponseReleased;
@@ -170,6 +177,25 @@ function rawTargetRequest(origin, target) {
 }
 
 describe("desktop graph-operation recorder", () => {
+  it("exports closed transition outcomes without stop reasons or request payloads", async () => {
+    const upstream = await startUpstream();
+    const recorder = await startGraphOperationRecorder({ upstreamUrl: upstream.url });
+    resources.push(recorder);
+    await bindCapability(recorder.url, "transition-token");
+    for (const kind of ["advance", "return", "stop"]) {
+      await jsonRequest(`${recorder.url}/api/graph/current/transitions`, { method: "POST", token: "transition-token",
+        body: { transition: { kind, reason: "private reason" } } });
+    }
+    const target = await createCandidateTraceDirectory();
+    await recorder.exportInteraction(17, target);
+    const text = await readFile(join(target, "graph-operations.jsonl"), "utf8");
+    const records = text.trim().split("\n").map(JSON.parse);
+    expect(records.map((record) => record.transitionKind)).toEqual(["advance", "return", "stop"]);
+    expect(records[1]).toMatchObject({ completionLifecycle: "succeeded", completionRootLayerId: 9 });
+    expect(text).not.toContain("private");
+    expect(text).not.toContain("transition-token");
+  });
+
   it("attributes provider-neutral graph receipts and sequences them by completed response", async () => {
     const upstream = await startUpstream();
     const recorder = await startGraphOperationRecorder({ upstreamUrl: upstream.url });
@@ -643,6 +669,7 @@ it("preserves bounded asset request/response parity without widening ordinary gr
 it("captures caught compiler failures and server origins once without preserving authored text", async () => {
   const { RelayerGraphClient, NodeObject, html, css } = await import("../packages/graph-client/src/index.ts");
   const { authoringErrorsFromOperations } = await import("../desktop/eval-main/authoring-errors.mjs");
+  const { graphTimingFromTrace } = await import("../desktop/eval-main/graph-timing.mjs");
   const upstream = await startUpstream();
   const recorder = await startGraphOperationRecorder({ upstreamUrl: upstream.url }); resources.push(recorder);
   const token = "compiler-diagnostic-secret"; await bindCapability(recorder.url, token);
@@ -664,6 +691,7 @@ it("captures caught compiler failures and server origins once without preserving
   const text = await readFile(join(target, "graph-operations.jsonl"), "utf8");
   const records = text.trim().split("\n").map(JSON.parse);
   expect(authoringErrorsFromOperations(records)).toMatchObject({ observed: 4, total: null, byCause: { compiler: 3, server_rejection: 1 } });
+  expect(graphTimingFromTrace({ sentAt: records[0].observedAt, graphOperations: records, ledgerComplete: true })).toMatchObject({ graphWriteRejections: 1 });
   expect(text).not.toContain(token); expect(text).not.toContain("Private authored");
   expect(records.filter((record) => record.authoringError).every((record) => record.authoringError.codes.includes("unsafe_css"))).toBe(true);
   expect((await jsonRequest(`${recorder.url}/api/graph/authoring-errors`, { method: "POST", token: "wrong", body: {} })).status).toBe(401);

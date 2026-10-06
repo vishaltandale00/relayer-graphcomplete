@@ -270,9 +270,13 @@ describe("Eval dashboard run presentation", () => {
         evidenceRefs: ["judge.json"],
       },
       threadIds: [41],
-      turns: [{ threadId: 41, interactionId: 51, status: "accepted", candidateTrace: { status: "complete" }, judgeResults: [{ status: "completed" }] }],
+      turns: [{
+        threadId: 41, interactionId: 51, status: "accepted", candidateTrace: { status: "complete" }, judgeResults: [{ status: "completed" }],
+        timing: { schemaVersion: 1, firstGraphSeconds: 70, acceptedSeconds: 100.3, graphWriteRejections: 2, programRuns: { programs: 1, patches: 2, failed: 1 } },
+      }],
     };
     expect(projectExecutionDossier(run, execution)).toMatchObject({
+      timing: [{ turnIndex: 0, firstGraph: "70 s", accepted: "100.3 s", rejections: 2, programs: "1 program, 2 patches, 1 failed" }],
       case: { name: "Fresh feature", prompt: "Add saved filters.", repository: "example/repo", commit: "abc123" },
       harness: { name: "codex-basic", implementation: "codex.basic", digest: "sha256:harness" },
       substance: {
@@ -297,6 +301,10 @@ describe("Eval dashboard run presentation", () => {
       },
       actions: { traceable: true, judgeReviewable: true, workspaceReviewable: true, annotationExportable: true },
     });
+    const withoutTrace = projectExecutionDossier(run, { ...execution, turns: [{ ...execution.turns[0], timing: null }] });
+    expect(withoutTrace.timing).toEqual([]);
+    const fixtureHarness = projectExecutionDossier(run, { ...execution, turns: [{ ...execution.turns[0], timing: { schemaVersion: 1, firstGraphSeconds: null, acceptedSeconds: 3.2, graphWriteRejections: 0, programRuns: null } }] });
+    expect(fixtureHarness.timing).toEqual([{ turnIndex: 0, firstGraph: "—", accepted: "3.2 s", rejections: 0, programs: "unavailable" }]);
   });
 
   it("projects legacy executions without manufacturing numeric scores", () => {
