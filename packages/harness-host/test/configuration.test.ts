@@ -4,6 +4,7 @@ import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import {
+  canResumeHarnessExecutionConfiguration,
   digestHarnessConfiguration,
   harnessAllowsModel,
   loadHarnessConfiguration,
@@ -37,6 +38,36 @@ describe("harness configuration", () => {
     expect(sameHarnessExecutionConfiguration(enabled, omitted)).toBe(false);
     expect(() => parseHarnessConfiguration({ ...base, graphCapabilityProfile: { search: "disabled", preview: "on" } }))
       .toThrow("graphCapabilityProfile.preview");
+  });
+
+  it("allows only the compatible Claude preview addition when resuming a session", () => {
+    const previous = parseHarnessConfiguration({
+      schemaVersion: 1, name: "claude-basic", implementation: "claude.basic",
+      implementationVersion: 1, revision: 3, permissionBindings,
+      executionAccessContracts: ["managed-runtime@1"],
+      graphCapabilityProfile: { search: "query-v1" }, settings: {},
+    });
+    const current = parseHarnessConfiguration({
+      ...previous, revision: 4, graphCapabilityProfile: { search: "query-v1", preview: "enabled" },
+    });
+    expect(canResumeHarnessExecutionConfiguration(previous, current)).toBe(true);
+    expect(canResumeHarnessExecutionConfiguration(current, previous)).toBe(false);
+    expect(sameHarnessExecutionConfiguration(previous, current)).toBe(false);
+    expect(digestHarnessConfiguration(previous)).not.toBe(digestHarnessConfiguration(current));
+    for (const changed of [
+      { ...current, name: "another-harness" },
+      { ...current, implementationVersion: 2 },
+      { ...current, settings: { execution: "changed" } },
+      { ...current, permissionBindings: { ask: { changed: true }, auto: {}, full: {} } },
+      { ...current, executionAccessContracts: ["secret@1" as const] },
+      { ...current, complete: { agentAuthored: true } },
+      { ...current, graphCapabilityProfile: { search: "disabled" as const, preview: "enabled" as const } },
+    ]) expect(canResumeHarnessExecutionConfiguration(previous, changed)).toBe(false);
+    for (const implementation of ["codex.basic", "prime.agent", "test"]) {
+      expect(canResumeHarnessExecutionConfiguration(
+        { ...previous, implementation }, { ...current, implementation },
+      )).toBe(false);
+    }
   });
 
   it("defaults graph search authority off and admits only the versioned query-v1 profile", () => {

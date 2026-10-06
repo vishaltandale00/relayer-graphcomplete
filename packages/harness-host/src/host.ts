@@ -29,6 +29,7 @@ import {
   harnessAllowsModel,
   resolveGraphCapabilityProfile,
   sameHarnessExecutionConfiguration,
+  canResumeHarnessExecutionConfiguration,
 } from "./configuration.js";
 import { resolveHarnessFactory } from "./registry.js";
 import {
@@ -508,7 +509,7 @@ export class HarnessHost {
     const live = this.sessions.get(descriptor.threadId);
     if (live !== undefined) {
       await this.withSessionLock(live, async () => {
-        if (!sameHarnessExecutionConfiguration(live.descriptor.configuration, descriptor.configuration)
+        if (!canResumeHarnessExecutionConfiguration(live.descriptor.configuration, descriptor.configuration)
           || live.descriptor.permissionProfileId !== descriptor.permissionProfileId
           || live.descriptor.workingDirectory !== descriptor.workingDirectory) {
           throw new Error(`Thread ${descriptor.threadId} is already pinned to harness configuration ${live.descriptor.configuration.name}`);
@@ -525,7 +526,7 @@ export class HarnessHost {
     const prior = this.saved.get(descriptor.threadId);
     const priorUpgrade = prior !== undefined
       && productCodexUpgradeMatches(prior.configuration, descriptor.configuration);
-    const priorMatches = prior !== undefined && (sameHarnessExecutionConfiguration(prior.configuration, descriptor.configuration)
+    const priorMatches = prior !== undefined && (canResumeHarnessExecutionConfiguration(prior.configuration, descriptor.configuration)
       || priorUpgrade);
     if (prior !== undefined && (!priorMatches
       || prior.permissionProfileId !== descriptor.permissionProfileId
