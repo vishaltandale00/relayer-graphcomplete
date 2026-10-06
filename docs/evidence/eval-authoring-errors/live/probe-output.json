@@ -1,0 +1,38 @@
+{
+  "probe": {
+    "diagnosticsEnabled": true,
+    "failures": [
+      {
+        "label": "client-missing-edge-arguments",
+        "name": "Error",
+        "codes": []
+      },
+      {
+        "label": "compiler-nested-template",
+        "name": "TypeError",
+        "codes": []
+      },
+      {
+        "label": "compiler-checkpoint-1",
+        "name": "DetailCompilationError",
+        "codes": [
+          "unsafe_css"
+        ]
+      },
+      {
+        "label": "compiler-checkpoint-2",
+        "name": "DetailCompilationError",
+        "codes": [
+          "unsafe_css"
+        ]
+      },
+      {
+        "label": "server-invalid-node",
+        "status": 422
+      }
+    ],
+    "excludedReadStatus": 404
+  },
+  "exitCode": 0,
+  "status": "completed"
+}

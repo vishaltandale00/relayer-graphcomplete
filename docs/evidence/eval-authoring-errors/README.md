@@ -10,7 +10,8 @@ older or pinned clients, and diagnostic delivery loss remain coverage gaps.
 
 Metrics do not alter graph acceptance, task/graph grades, or promotion rules.
 Diagnostics have independent event/byte budgets. Their overflow cannot truncate
-ordinary graph proof. No test is deleted. No paid inference is used.
+ordinary graph proof. No test is deleted. No paid inference is used in the
+deterministic suite.
 
 ## Changed executable seams and checkpoints
 
@@ -31,7 +32,8 @@ ordinary graph proof. No test is deleted. No paid inference is used.
 
 Run the mapped focused suites during editing, then `npm run check`, `npm run build`,
 `npm run test:eval-compiled-runtime`, and `npm run test:eval-web` for the shared
-runtime/dashboard changes. No signed/release/paid proof is applicable.
+runtime/dashboard changes. No signed/release proof is applicable. The default
+suite uses no paid inference; the live probe below ran after explicit user authorization.
 Use an adversarial source review and bind its final assertion to the PR's exact
 workspace digest. Future source changes invalidate that assertion.
 
@@ -82,5 +84,57 @@ polling closed its human-task form; one final unchanged browser rerun passed all
 declared chapters after the aggregate check finished. The final-source Node 25
 browser run also passed all chapters.
 
-No live or paid inference, signed/release proof, exhaustive-error coverage,
-performance gain, or task/graph quality improvement is claimed.
+No signed/release proof, exhaustive-error coverage, performance gain, or
+task/graph quality improvement is claimed.
+
+## Live capture probe — 2026-10-06
+
+User-authorized live execution used the connected Codex subscription,
+`gpt-6-luna`, and the checksum-validated cached `codex@0.159.3` managed runtime.
+The tested production source is commit `09b144d88d9015a0bdb69c95a6a09cac6a24c964`.
+An isolated profile cloned the existing authenticated Eval setup; the original
+profile was not edited. One root turn ran, with no delegated model children and
+the deterministic graph-contract judge.
+
+This was a deliberate capture probe, not the ordinary task-quality benchmark.
+A preamble supplied a Node program that caught known failures before completing
+the built-in one-turn task. The local runner changed only this experiment's
+task input. The production Codex harness, product runtime, operation recorder,
+metric computation and Eval persistence were unchanged.
+
+| Known origin | Expected | Recorded |
+| --- | --- | --- |
+| Missing client edge arguments | 1 client | 1 client (`client_validation`) |
+| Nested template caught before a graph method | 1 compiler | 1 compiler (`detail_template_nested`) |
+| Forbidden CSS in two separate checkpoint attempts | 2 compiler | 2 compiler (`unsafe_css`) |
+| Malformed node write rejected by the real graph server | 1 server rejection | 1 server rejection (HTTP 422) |
+| Failed ordinary read | Excluded | Excluded (HTTP 404) |
+
+All **5/5 planned authoring-error origins were captured**, with no duplicate or
+unexpected counted origins. The probe program exited **0** despite catching its
+errors. The model then produced an accepted graph; the Eval run passed and
+persisted `observed: 5`, `{ client: 1, compiler: 3, server_rejection: 1 }`,
+`coverage: partial`, and `total: null`.
+
+The complete candidate trace contains 169 events. The untruncated graph ledger
+contains 19 receipts; its digest, byte length and event count match the exported
+descriptor. The private trace confirms the probe ran once, diagnostics were
+enabled, and the five labeled outcomes agree with the ledger. An additional
+ordinary output-read 404 was also excluded. Successful submission remains HTTP 200.
+
+[Live receipt](live/receipt.json), [origin ledger](live/graph-operations.jsonl),
+[captured probe output](live/probe-output.json), and
+[portable probe program](live/probe-program.mjs) retain the comparison and hashes.
+The portable program normalizes only its client-module import; the receipt also
+records the exact executed-program hash and complete private trace digest. Raw
+provider trace and full prompt remain in the isolated local evidence profile.
+
+Two setup attempts stopped before inference: the first lacked the required
+macOS target key; the second guard incorrectly expected an adapter ID on the
+model-selection object. Supplying the actual target and checking the connected
+provider definition repaired the local runner. Production code did not change.
+
+This establishes capture of these five targeted failures through a live model
+and persisted Eval turn. It is not a general recall estimate, natural-error
+baseline, or proof of exhaustive coverage. Python, unknown methods, older clients
+and lost diagnostic delivery remain the declared gaps.

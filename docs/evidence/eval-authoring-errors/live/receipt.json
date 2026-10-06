@@ -1,0 +1,124 @@
+{
+  "schemaVersion": 1,
+  "kind": "live_authoring_error_capture_probe",
+  "sourceCommit": "09b144d88d9015a0bdb69c95a6a09cac6a24c964",
+  "runId": "run-2026-10-06T15-25-22-130Z-0f9857f5",
+  "executionId": "2f305587-f906-44e3-8698-6f67c5d07471",
+  "interactionId": 5,
+  "graphNodeId": 52,
+  "baseCaseId": "empty-project.task-system.single-turn",
+  "standardBenchmark": false,
+  "taskChange": "Local fault-injection preamble prepended to the ordinary one-turn task. Production harness, product, recorder, metric and persistence unchanged.",
+  "providerAdapter": "codex-subscription",
+  "model": "gpt-6-luna",
+  "managedRuntimeRecipe": "codex@0.159.3",
+  "managedRuntimeRecipeDigest": "29659085218721d89db0861758112ed446853ac478247866a1534ead0d725f51",
+  "runtimeCacheValidated": true,
+  "status": "passed",
+  "turnStatus": "accepted",
+  "probe": {
+    "probe": {
+      "diagnosticsEnabled": true,
+      "failures": [
+        {
+          "label": "client-missing-edge-arguments",
+          "name": "Error",
+          "codes": []
+        },
+        {
+          "label": "compiler-nested-template",
+          "name": "TypeError",
+          "codes": []
+        },
+        {
+          "label": "compiler-checkpoint-1",
+          "name": "DetailCompilationError",
+          "codes": [
+            "unsafe_css"
+          ]
+        },
+        {
+          "label": "compiler-checkpoint-2",
+          "name": "DetailCompilationError",
+          "codes": [
+            "unsafe_css"
+          ]
+        },
+        {
+          "label": "server-invalid-node",
+          "status": 422
+        }
+      ],
+      "excludedReadStatus": 404
+    },
+    "exitCode": 0,
+    "status": "completed"
+  },
+  "expectedInjections": 5,
+  "observedMatchedInjections": 5,
+  "unexpectedCountedOrigins": 0,
+  "authoringErrors": {
+    "schemaVersion": 1,
+    "coverage": "partial",
+    "total": null,
+    "observed": 5,
+    "byCause": {
+      "client": 1,
+      "compiler": 3,
+      "server_rejection": 1
+    },
+    "reasons": [
+      "client_capture_not_exhaustive"
+    ]
+  },
+  "candidateTrace": {
+    "status": "complete",
+    "sha256": "sha256:e2b027151260d4d8d5ed3604e0d0f1483a82596a691efc27829003b1fd344743",
+    "byteLength": 258952,
+    "eventCount": 169,
+    "coverage": {
+      "prompt": "full",
+      "messages": "full",
+      "reasoningSummaries": "full",
+      "modelCalls": "full",
+      "toolCalls": "full",
+      "usage": "full",
+      "childStreams": "none",
+      "nativeArtifacts": "none"
+    },
+    "redactionCount": 24
+  },
+  "graphOperations": {
+    "status": "complete",
+    "promotable": true,
+    "format": "relayer-graph-operations-v1",
+    "ref": "graph-operations.jsonl",
+    "sha256": "sha256:5e323c5c9839e0df568d5c823cf3f9ab8c1b9d4f1c5232535839a6a6eddfc133",
+    "byteLength": 3839,
+    "eventCount": 19,
+    "truncated": false
+  },
+  "promptSha256": "sha256:543a3f6a65c3d5611cfd17d43f1b0fb8ffe023f6778f6e4493c3b71fa43ce734",
+  "executedProbeSha256": "sha256:6c5a75fe784b1271918be5ff35bfcb93347e2bab1d1bef4e1b63c01759d78413",
+  "graphClientBundleSha256": "sha256:2a86d7ac5f3507dbcbb4c1db1571d6fadc72a7cf2a077cb2966247f6286e9663",
+  "publishedArtifacts": {
+    "graph-operations.jsonl": {
+      "sha256": "sha256:5e323c5c9839e0df568d5c823cf3f9ab8c1b9d4f1c5232535839a6a6eddfc133",
+      "byteLength": 3839
+    },
+    "probe-output.json": {
+      "sha256": "sha256:5f5917ce7ad81bb43b295475d4a83626114d5e44de0b1a2ba0c7d2cc65d7d0f1",
+      "byteLength": 757
+    },
+    "probe-program.mjs": {
+      "sha256": "sha256:500997bf106c99224cde0e51e2adfdf555d94150f6408a2ed8392dd4e6d3e572",
+      "byteLength": 1562
+    }
+  },
+  "privateEvidenceDirectory": "/Users/vishal/.relayer/eval-authoring-errors-686-live-20261006/authoring-error-probe",
+  "limitations": [
+    "Targeted fault injection, not a measured natural-error baseline or general recall estimate.",
+    "Capture remains partial and exact total null.",
+    "Private complete native trace retained locally; only closed-field ledger and probe evidence are published."
+  ]
+}
