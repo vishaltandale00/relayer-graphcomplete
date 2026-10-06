@@ -329,6 +329,7 @@ export class GraphCompleteRuntimeService {
     codexBasicClientModuleUrl,
     codexBrowserMcpRuntime,
     graphAuthoringLauncherPath,
+    graphAuthoringNodePath,
     codexPathOverride,
     resolveCodexRuntime,
     resolveClaudeRuntime,
@@ -362,6 +363,7 @@ export class GraphCompleteRuntimeService {
     this.codexBasicClientModuleUrl = codexBasicClientModuleUrl;
     this.codexBrowserMcpRuntime = codexBrowserMcpRuntime;
     this.graphAuthoringLauncherPath = graphAuthoringLauncherPath;
+    this.graphAuthoringNodePath = graphAuthoringNodePath;
     this.codexPathOverride = codexPathOverride;
     this.resolveCodexRuntime = resolveCodexRuntime;
     this.resolveClaudeRuntime = resolveClaudeRuntime;
@@ -559,13 +561,17 @@ export class GraphCompleteRuntimeService {
           ...(this.resolvePrimeRuntime ? {
             "prime.agent": createPrimeAgentFactory({ resolvePrimeRuntime: this.resolvePrimeRuntime }),
           } : {}),
-          ...(this.resolveClaudeRuntime ? {
-            "claude.basic": createClaudeBasicFactory({ resolveClaudeRuntime: this.resolveClaudeRuntime }),
+          ...(this.resolveClaudeRuntime || this.graphAuthoringNodePath ? {
+            "claude.basic": createClaudeBasicFactory({ resolveClaudeRuntime: this.resolveClaudeRuntime,
+              ...(this.codexBasicClientModuleUrl ? { clientModuleUrl: this.codexBasicClientModuleUrl } : {}),
+              ...(this.graphAuthoringNodePath ? { graphAuthoringNodePath: this.graphAuthoringNodePath } : {}),
+            }),
           } : {}),
-          ...(this.codexBasicClientModuleUrl || this.codexBrowserMcpRuntime || this.graphAuthoringLauncherPath || this.codexPathOverride || this.resolveCodexRuntime ? {
+          ...(this.codexBasicClientModuleUrl || this.codexBrowserMcpRuntime || this.graphAuthoringNodePath || this.graphAuthoringLauncherPath || this.codexPathOverride || this.resolveCodexRuntime ? {
             "codex.basic": createCodexBasicFactory({
               ...(this.codexBasicClientModuleUrl ? { clientModuleUrl: this.codexBasicClientModuleUrl } : {}),
               ...(this.codexBrowserMcpRuntime ? { browserMcpRuntime: this.codexBrowserMcpRuntime } : {}),
+              ...(this.graphAuthoringNodePath ? { graphAuthoringNodePath: this.graphAuthoringNodePath } : {}),
               ...(this.graphAuthoringLauncherPath ? { graphAuthoringLauncherPath: this.graphAuthoringLauncherPath } : {}),
               ...(this.codexPathOverride ? { codexPathOverride: this.codexPathOverride } : {}),
               ...(this.resolveCodexRuntime ? { resolveCodexRuntime: this.resolveCodexRuntime } : {}),

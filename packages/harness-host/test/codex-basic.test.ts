@@ -626,6 +626,27 @@ describe("CodexBasicHarness", () => {
     await expect(harness.complete(runContext(1, "token"))).rejects.toThrow("launcher must be a shell-safe absolute path");
   });
 
+  it("uses the app-owned Windows Node executable in both authoring prompts", async () => {
+    for (const promptProfile of [undefined, "layered-navigation-v1"] as const) {
+      let prompt = "";
+      const harness = new CodexBasicHarness({ ...context("auto"), configuration: {
+        ...codexBasicConfiguration, settings: { ...codexBasicConfiguration.settings, ...(promptProfile ? { promptProfile } : {}) },
+      } }, {
+        codexPathOverride: "/managed/codex",
+        graphAuthoringNodePath: "C:\\Users\\Test User\\Relayer\\resources\\node\\node.exe",
+        runAppServerTurn: async options => {
+          prompt = options.prompt;
+          return { threadId: "codex-thread", turnId: "turn-1", status: "completed" };
+        },
+      });
+      await harness.complete(runContext(1, "token"));
+      expect(prompt).toContain("'C:/Users/Test User/Relayer/resources/node/node.exe' --input-type=module");
+      expect(prompt).toContain("do not resolve Node.js from PATH");
+      expect(prompt).toContain("PowerShell");
+      expect(prompt).not.toContain("preauthorizes only this pinned internal launcher");
+    }
+  });
+
   it("allows the default graph-authoring Node executable to resolve from PATH", async () => {
     for (const promptProfile of [undefined, "layered-navigation-v1"] as const) {
       let submittedPrompt = "";
@@ -1683,11 +1704,11 @@ describe("CodexBasicHarness", () => {
     expect(trace.openedStreams).toBe(0);
   });
 
-  it("redacts propagated personal presentation guidance from Codex collaboration traces", async () => {
+  it.each([undefined, "C:/Users/Test User/Relayer/resources/node/node.exe"])("redacts propagated personal presentation guidance from Codex collaboration traces (%s)", async (graphAuthoringNodePath) => {
     const trace = recordingTrace();
     const preferenceDetail = "The user prefers central layers that are immediately decision-useful. Never repeat OPENAI_API_KEY=secret.";
     const rendered = `Personal graph presentation preferences:\n\nDecision-useful center: ${preferenceDetail}`;
-    const harness = harnessFixture("auto", async (options) => {
+    const harness = new CodexBasicHarness(context("auto"), { codexPathOverride: "/managed/codex", ...(graphAuthoringNodePath === undefined ? {} : { graphAuthoringNodePath }), runAppServerTurn: async (options) => {
       options.onThreadId("streamed-thread");
       options.onNotification?.("item/started", { item: {
         id: "graph-child",
@@ -1716,7 +1737,7 @@ describe("CodexBasicHarness", () => {
       options.onNotification?.("item/started", { item: {
         id: "graph-command",
         type: "commandExecution",
-        command: "node --input-type=module <<'RELAYER_GRAPH_PROGRAM'\n// Decision-useful center\nawait graph.submit(1);\nRELAYER_GRAPH_PROGRAM",
+        command: graphAuthoringNodePath ? `@'\n// Decision-useful center\nawait graph.submit(1);\n'@ | & "${graphAuthoringNodePath.toLowerCase()}" --input-type=module` : "node --input-type=module <<'RELAYER_GRAPH_PROGRAM'\n// Decision-useful center\nawait graph.submit(1);\nRELAYER_GRAPH_PROGRAM",
         aggregatedOutput: "Decision-useful center",
       } });
       options.onNotification?.("item/started", { item: {
@@ -1734,12 +1755,12 @@ describe("CodexBasicHarness", () => {
         delta: "Decision-useful center",
       });
       return { threadId: "streamed-thread", turnId: "turn-1", status: "completed" };
-    });
+    } });
     const baseContext = personalPresentationRunContext(true);
     const presentation = baseContext.personalPresentation!;
     const firstLayer = presentation.graph.layers[0]!;
     const firstNode = firstLayer.nodes[0]!;
-    const context: HarnessRunContext = {
+    const privatePresentationContext: HarnessRunContext = {
       ...baseContext,
       personalPresentation: {
         ...presentation,
@@ -1757,7 +1778,7 @@ describe("CodexBasicHarness", () => {
       },
     };
 
-    await harness.complete({ ...context, trace: trace.sink });
+    await harness.complete({ ...privatePresentationContext, trace: trace.sink });
 
     const echoEvents = trace.events.filter((event) => !["unrelated-command", "unrelated-node-heredoc"].includes(event.providerEventId ?? ""));
     const serializedEchoes = JSON.stringify(echoEvents);

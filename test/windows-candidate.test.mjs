@@ -101,10 +101,20 @@ describe("independent Windows candidate", () => {
       const builder = createDesktopBuilderConfig(f.contract, {
         environment: { RELAYER_CARGO_TARGET_DIR: join(f.repositoryRoot, "target") }, argv: [],
       });
+      const nodeInput = join(f.repositoryRoot, "node-input");
+      const crtInput = join(f.repositoryRoot, "crt-input");
+      await mkdir(nodeInput); await mkdir(crtInput);
+      await writeFile(join(nodeInput, "node.exe"), "official-node-fixture");
+      await writeFile(join(nodeInput, "LICENSE"), "full-node-license-fixture");
+      await writeFile(join(nodeInput, "provenance.json"), "{}");
+      await writeFile(join(crtInput, "vcruntime140.dll"), "microsoft-signed-crt-fixture");
+      await writeFile(join(crtInput, "provenance.json"), "{}");
+      builder.extraResources.find(item => item.to === "node").from = nodeInput;
+      builder.extraResources.find(item => item.to === "bin" && item.filter?.includes("*.dll")).from = crtInput;
       const matchers = getFileMatchers(builder, "extraResources", resources, {
         macroExpander: value => value, customBuildOptions: builder.win,
         globalOutDir: appOutDir, defaultSrc: f.repositoryRoot,
-      }).filter(matcher => matcher.from.startsWith(join(f.repositoryRoot, "target")));
+      }).filter(matcher => [join(f.repositoryRoot, "target"), nodeInput, crtInput].some(prefix => matcher.from.startsWith(prefix)));
       const signed = [];
       const signingPackager = {
         platformSpecificBuildOptions: builder.win,
@@ -117,14 +127,18 @@ describe("independent Windows candidate", () => {
       const transformer = WinPackager.prototype.createTransformerForExtraFiles.call(signingPackager, { appOutDir });
       await copyFiles(matchers, transformer);
       const executables = ["relayer-app-server.exe", "relayer-graph-server.exe"];
-      expect(signed.sort()).toEqual(executables.map(name => join(resources, "bin", name)).sort());
-      expect((await readdir(join(resources, "bin"))).sort()).toEqual(executables.sort());
+      expect(signed.sort()).toEqual([...executables.map(name => join(resources, "bin", name)), join(resources, "node", "node.exe")].sort());
+      expect(await readFile(join(nodeInput, "node.exe"), "utf8")).toBe("official-node-fixture");
+      expect(await readFile(join(resources, "node", "node.exe"), "utf8")).toBe("official-node-fixture\nsigned fixture");
+      expect(await readFile(join(resources, "bin", "vcruntime140.dll"), "utf8")).toBe("microsoft-signed-crt-fixture");
+      expect((await readdir(join(resources, "bin"))).sort()).toEqual([...executables, "vcruntime140.dll", "provenance.json"].sort());
       for (const name of f.names) {
         expect(await readFile(join(f.directory, name), "utf8")).toBe(`native fixture: ${name}`);
       }
       for (const name of executables) {
         expect(await readFile(join(resources, "bin", name), "utf8")).toBe(`native fixture: ${name}\nsigned fixture`);
       }
+      await rm(resources, { recursive: true, force: true });
       signingPackager.signIf = async () => { throw Error("signing rejected"); };
       await expect(copyFiles(matchers, transformer)).rejects.toThrow("signing rejected");
     } finally { await rm(f.repositoryRoot, { recursive: true, force: true }); }

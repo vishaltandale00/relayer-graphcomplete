@@ -1,3 +1,4 @@
+import { packagedWindowsNodePath } from "../shared/windows-node-runtime.mjs";
 import { createSharePreviewCapture } from "./services/share-preview-capture.mjs";
 import { createElectronDraftPreviewRenderer } from "./services/draft-preview-renderer.mjs";
 import { app, BrowserWindow, dialog, ipcMain, nativeTheme, session, safeStorage, shell } from "electron";
@@ -209,6 +210,7 @@ if (primaryInstance) {
     app.quit();
   };
   const graphRuntime = createDesktopGraphRuntime({
+    ...(app.isPackaged && process.platform === "win32" ? { graphAuthoringNodePath: await packagedWindowsNodePath(process.resourcesPath) } : {}),
     userDataDirectory: userDataPath,
     graphServerBinary: relayerGraphServerBinary,
     configurationPaths: [...new Set([

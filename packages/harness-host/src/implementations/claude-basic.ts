@@ -72,6 +72,7 @@ export interface ClaudeBasicDependencies {
   readonly loadSdk?: (moduleUrl: string) => Promise<ClaudeSdkModule>;
   readonly clientModuleUrl?: string;
   readonly completeModuleUrl?: string;
+  readonly graphAuthoringNodePath?: string;
   readonly platform?: NodeJS.Platform;
   readonly resolveClaudeRuntime?: () => Promise<ClaudeRuntimeDescriptor>;
 }
@@ -313,6 +314,7 @@ export class ClaudeBasicHarness implements Harness {
       "Claude",
       includePersonalPresentation,
       this.context.configuration.graphCapabilityProfile?.search === "query-v1",
+      this.dependencies.graphAuthoringNodePath,
     );
   }
 }

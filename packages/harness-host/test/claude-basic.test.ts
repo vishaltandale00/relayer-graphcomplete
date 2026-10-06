@@ -170,6 +170,20 @@ function personalPresentationRunContext(
   };
 }
 
+it("uses packaged Windows Node through Claude's Bash without granting launcher escalation", async () => {
+  let prompt = "";
+  const harness = new ClaudeBasicHarness(factoryContext("acceptEdits"), {
+    browserSdk: browserSdk(), platform: "win32",
+    graphAuthoringNodePath: "C:\\Users\\Test User\\Relayer\\resources\\node\\node.exe",
+    query: sdkQuery([{ type: "system", subtype: "init", session_id: "session-1" }, { type: "result", subtype: "success", result: "done", session_id: "session-1" }], input => { prompt = input.prompt; }),
+  });
+  await harness.complete(runContext(managedAccess()));
+  expect(prompt).toContain("Run exactly 'C:/Users/Test User/Relayer/resources/node/node.exe' --input-type=module");
+  expect(prompt).toContain("do not resolve Node.js from PATH");
+  expect(prompt).not.toContain("preauthorizes only this pinned internal launcher");
+  expect(prompt).not.toContain("& \"C:/");
+});
+
 describe("ClaudeBasicHarness", () => {
   it("maps product approval modes onto supported Claude SDK permission modes", () => {
     expect(claudePermissionMode("ask")).toBe("default");

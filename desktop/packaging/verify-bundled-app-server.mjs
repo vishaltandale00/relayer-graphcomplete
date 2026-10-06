@@ -1,3 +1,4 @@
+import { verifyPackagedWindowsAppRuntime } from "./windows-app-runtime.mjs";
 import { verifyWindowsNativeExecutable } from "./windows-native.mjs";
 import { provePackagedLadybugLifecycle } from "../../scripts/capture-ladybug-packaged-lifecycle.mjs";
 import { execFile } from "node:child_process";
@@ -57,6 +58,7 @@ export async function verifyBundledAppServer(
     verifyGraphServer = verifyPackagedMacOSGraphServer,
     verifyNotices = verifyPackagedLadybugNotices,
     verifyWindowsNative = verifyWindowsNativeExecutable,
+    verifyWindowsAppRuntime = verifyPackagedWindowsAppRuntime,
     proveWindowsLifecycle = provePackagedLadybugLifecycle,
     readSharpPackage = (path) => extractFile(join(resourcesPathFor(appPath, platform), "app.asar"), asarEntryPath(path, platform)),
     primeAgentTargetKey = `${platform}-${expectedArchitecture === "x86_64" ? "x64" : expectedArchitecture}`,
@@ -110,6 +112,7 @@ export async function verifyBundledAppServer(
     await verifyGraphServer(graphBinaryPath, { execute });
   }
   if (platform === "win32") {
+    await verifyWindowsAppRuntime(resourcesPath, { execute });
     for (const executable of [binaryPath, graphBinaryPath]) await verifyWindowsNative(executable);
     await proveWindowsLifecycle(graphBinaryPath, { commandTimeout: 30_000 });
     architectures = "x86_64";

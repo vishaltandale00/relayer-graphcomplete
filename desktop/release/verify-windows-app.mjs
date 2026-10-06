@@ -65,6 +65,7 @@ export async function verifyWindowsSignatures({ paths, publisherName, environmen
 export function windowsApplicationExecutables(appOutDir) {
   return [
     join(appOutDir, "Relayer.exe"),
+    join(appOutDir, "resources", "node", "node.exe"),
     join(appOutDir, "resources", "bin", "relayer-app-server.exe"),
     join(appOutDir, "resources", "bin", "relayer-graph-server.exe"),
   ];

@@ -1,3 +1,4 @@
+import { appOwnedNodeCommand, appOwnedNodeInstructions } from "./graph-authoring-command.js";
 import { threadIconGuidance } from "./thread-icon-guidance.js";
 import { type GraphCapability, type GraphNode } from "@relayer/graph-client";
 import { createHash, randomUUID } from "node:crypto";
@@ -48,7 +49,7 @@ const ATTACHED_NAVIGATION_GUIDANCE = "Gated attached navigation: the server may 
 export const CODEX_BASIC_KEY = "codex.basic";
 
 const SAFE_SUBPROCESS_ENVIRONMENT = new Set([
-  "PATH", "PATHEXT", "SystemRoot", "SYSTEMROOT", "WINDIR", "ComSpec", "COMSPEC",
+  "PATH", "Path", "PATHEXT", "SystemRoot", "SYSTEMROOT", "WINDIR", "ComSpec", "COMSPEC",
   "TMPDIR", "TEMP", "TMP", "LANG", "LC_ALL", "LC_CTYPE", "TERM", "SHELL",
 ]);
 const CODEX_MANAGED_RUNTIME_ENVIRONMENT = new Set([
@@ -142,6 +143,7 @@ export interface CodexBasicDependencies {
   readonly clientModuleUrl?: string;
   readonly completeModuleUrl?: string;
   readonly graphAuthoringLauncherPath?: string;
+  readonly graphAuthoringNodePath?: string;
   readonly codexPathOverride?: string;
   readonly browserMcpRuntime?: {
     readonly executable: string;
@@ -184,6 +186,7 @@ interface ResolvedCodexPermission {
 interface CodexTraceState {
   readonly collaborationSpans: Map<string, HarnessTraceSpan>;
   readonly graphAuthoringCommandIds: Set<string>;
+  readonly graphAuthoringNodePath?: string;
   readonly fallbackGraphAuthoringEnabled: boolean;
 }
 
@@ -381,6 +384,7 @@ export class CodexBasicHarness implements Harness {
     const traceState: CodexTraceState = {
       collaborationSpans: new Map(),
       graphAuthoringCommandIds: new Set(),
+      ...(this.dependencies.graphAuthoringNodePath ? { graphAuthoringNodePath: this.dependencies.graphAuthoringNodePath.replaceAll("\\", "/") } : {}),
       fallbackGraphAuthoringEnabled: this.dependencies.graphAuthoringLauncherPath === undefined,
     };
     // The host's per-turn force-stop kills this turn's app-server process group, exactly as a
@@ -553,6 +557,8 @@ export class CodexBasicHarness implements Harness {
     // Never let a stale parent environment silently restore that broader
     // authoring path now that graph execution uses the zero-argument launcher.
     delete environment.RELAYER_GRAPH_AUTHORING_NODE;
+    // Windows environment keys are case-insensitive; keep only one PATH alias.
+    if (environment.Path !== undefined) { environment.PATH = environment.Path; delete environment.Path; }
     environment.RELAYER_GRAPH_URL = graph.url;
     delete environment.RELAYER_GRAPH_AUTHORING_ERRORS;
     if (graph.authoringErrors) environment.RELAYER_GRAPH_AUTHORING_ERRORS = "1";
@@ -752,7 +758,7 @@ ${ATTACHED_NAVIGATION_GUIDANCE}
 For a full Node Detail replacement accompanying an authorized addition, first call await graph.getNodePresentation(nodeId) to read the current node, revision, and actions. Author a complete compiled NodeObject presentation with the persistent node's existing clientKey, preserving every existing action binding and adding usable controls for the new actions. Call await graph.replaceNodePresentation(nodeId, revision, presentationBuilder); this stages presentation only, not the builder's title/detail. Retain original action clientKey, kind, and sourceLayer provenance when rebuilding controls; new actions with omitted provenance must omit it in their bindings too. On stale_presentation_revision, reread and repair the full presentation against the current actions. Do not synthesize supplemental controls. If retained rich HTML cannot expose a new action, provide an explicit full replacement before submitting.
 
 
-Use executable JavaScript and the Relayer graph client. Do not return a JSON graph in chat. Run exactly ${launcher}${launcherArgumentsClause}, including the displayed double quotes, and pass the program through standard input using a shell-native single-quoted here-document delimited by exactly RELAYER_GRAPH_PROGRAM;${launcherClause} never place authored graph code in a --eval argument, and do not create a script in either the project checkout or a temporary directory. ${this.dependencies.graphAuthoringLauncherPath ? "Request Codex sandbox escalation for this exact launcher command; Relayer preauthorizes only this pinned internal launcher, which applies its own narrower graph sandbox." : ""} The quoted here-document must prevent the provider shell from expanding environment variables in the program. Import from:
+Use executable JavaScript and the Relayer graph client. Do not return a JSON graph in chat. ${this.dependencies.graphAuthoringNodePath ? appOwnedNodeInstructions(this.dependencies.graphAuthoringNodePath) + " Import from:" : `Run exactly ${launcher}${launcherArgumentsClause}, including the displayed double quotes, and pass the program through standard input using a shell-native single-quoted here-document delimited by exactly RELAYER_GRAPH_PROGRAM;${launcherClause} never place authored graph code in a --eval argument, and do not create a script in either the project checkout or a temporary directory. ${this.dependencies.graphAuthoringLauncherPath ? "Request Codex sandbox escalation for this exact launcher command; Relayer preauthorizes only this pinned internal launcher, which applies its own narrower graph sandbox." : ""} The quoted here-document must prevent the provider shell from expanding environment variables in the program. Import from:`}
 ${this.clientModuleUrl}
 ${pinnedExecutionClause}
 
@@ -805,10 +811,15 @@ ${graphProgramRepairGuidance(programEditsAvailable(context, this.dependencies.gr
       "Codex",
       includePersonalPresentation,
       this.context.configuration.graphCapabilityProfile?.search === "query-v1",
+      this.dependencies.graphAuthoringNodePath,
     );
   }
 
   private graphAuthoringCommand(): string {
+    if (this.dependencies.graphAuthoringNodePath !== undefined) {
+      if (this.dependencies.graphAuthoringLauncherPath !== undefined) throw new Error("Graph authoring cannot use both Node and the restricted launcher.");
+      return appOwnedNodeCommand(this.dependencies.graphAuthoringNodePath);
+    }
     return graphAuthoringCommand(this.dependencies.graphAuthoringLauncherPath);
   }
 
@@ -837,6 +848,7 @@ export function buildLayeredNavigationPrompt(
   nativeAgentLabelOrGraphSearchEnabled: string | boolean = "Codex",
   explicitIncludePersonalPresentation = true,
   explicitGraphSearchEnabled = false,
+  graphAuthoringNodePath?: string,
 ): string {
   const completeModuleUrl = typeof completeModuleUrlOrIncludePersonalPresentation === "string"
     ? completeModuleUrlOrIncludePersonalPresentation
@@ -855,7 +867,10 @@ export function buildLayeredNavigationPrompt(
   const normalizedInput = context
     ? renderInteractionInput(context.interactionInput)
     : `Interaction:\n- id: ${interactionNode.id}\n- title: ${interactionNode.title}\n- detail: ${interactionNode.detail}`;
-  const authoringInstructions = graphAuthoringLauncherPath === undefined
+  if (graphAuthoringNodePath !== undefined && graphAuthoringLauncherPath !== undefined) throw new Error("Graph authoring cannot use both Node and the restricted launcher.");
+  const authoringInstructions = graphAuthoringNodePath !== undefined
+    ? `${appOwnedNodeInstructions(graphAuthoringNodePath, nativeAgentLabel === "Claude" ? "bash" : "powershell")} Import RelayerGraphClient, NodeObject, EdgeObject, and LayerObject from:\n${clientModuleUrl}\nThen use RelayerGraphClient.fromEnv(). Submit each referenced object before using it. Keep clientKey values stable when repairing rejected submissions. The final call must be await graph.submit(${interactionNode.id}); call it only after the full response has been authored.`
+    : graphAuthoringLauncherPath === undefined
     ? `Run exactly node --input-type=module with no additional arguments and pass the program through standard input using a shell-native single-quoted here-document delimited by exactly RELAYER_GRAPH_PROGRAM; never place authored graph code in a --eval argument, and do not create a script in either the project checkout or a temporary directory. The quoted here-document must prevent the provider shell from expanding environment variables in the program. Import RelayerGraphClient, NodeObject, EdgeObject, and LayerObject from:\n${clientModuleUrl}\nThen use RelayerGraphClient.fromEnv(). Author in whatever order fits the task. Keep each object's generated clientKey stable when retrying the same rejected submit; create a new object only for a genuinely new graph record. Submit each referenced object before using it. The final graph call must be await graph.submit(${interactionNode.id}); call it only after the full response has been authored.`
     : `Run exactly ${graphAuthoringCommand(graphAuthoringLauncherPath)} with no arguments, including the displayed double quotes, and pass the program through standard input using a shell-native single-quoted here-document delimited by exactly RELAYER_GRAPH_PROGRAM; do not resolve the launcher or Node.js from PATH, never place authored graph code in a --eval argument, and do not create a script in either the project checkout or a temporary directory. Request Codex sandbox escalation for this exact launcher command; Relayer preauthorizes only this pinned internal launcher, which applies its own narrower graph sandbox. The quoted here-document must prevent the provider shell from expanding environment variables in the program. Import from:\n${clientModuleUrl}\n${pinnedExecutionClause(graphAuthoringLauncherPath)}`;
   const graphSearchGuidance = graphSearchEnabled ? `
@@ -1076,7 +1091,8 @@ function rememberGraphAuthoringCommand(state: CodexTraceState, params: unknown):
       ? item.commandActions.flatMap((action) => isRecord(action) ? [action.command] : [])
       : []),
   ];
-  if (commands.some((command) => pinnedGraphAuthoringLauncher(command) !== undefined
+  if (commands.some((command) => (typeof command === "string" && state.graphAuthoringNodePath !== undefined && command.replaceAll("\\", "/").replaceAll("''", "'").toLowerCase().includes(state.graphAuthoringNodePath.toLowerCase()) && command.includes("--input-type=module"))
+    || pinnedGraphAuthoringLauncher(command) !== undefined
     || (state.fallbackGraphAuthoringEnabled && isFallbackGraphAuthoringCommand(command)))) {
     state.graphAuthoringCommandIds.add(id);
   }

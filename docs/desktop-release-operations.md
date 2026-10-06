@@ -297,3 +297,11 @@ Promotion revalidates the committed evidence, immutable Preview receipt, histori
 See [the Windows cache contract](agents/ci.md#windows-release-native-build-reuse) and [checkpoint ledger](evidence/windows-native-cache/README.md). A new manual dispatch is the supported signing fix loop: compatible native binaries can be restored from an earlier successful native job even when later signing failed. Rerunning only failed package jobs cannot adopt a previous attempt's artifact; dispatch a new run or rerun all required jobs. Never weaken the attempt binding.
 
 The optional `force_native_rebuild` dispatch input bypasses binary reuse while retaining dependency/preparation/compiler acceleration, so the fallback can be measured. Record actual compiler statistics and stage durations. A cache hit or fixture pass alone does not establish a latency gain, signing success, installation, or release acceptance.
+
+## Windows first-install gate before tester distribution
+
+The separate [Windows development and first-install procedure](windows-development.md)
+qualifies a self-contained signed installer before tester distribution. It does
+not require publishing a feed or substitute for the existing Preview-to-Stable
+upgrade canary. Keep the exact installer hash, source and successful workflow
+run/attempt bound to its `windows-first-install/v1` evidence.

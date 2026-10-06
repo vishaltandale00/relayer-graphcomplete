@@ -99,7 +99,11 @@
     "evidence:edge-shapes": "RELAYER_CAPTURE_EDGE_SHAPE_EVIDENCE=1 electron scripts/capture-edge-shape-evidence.mjs",
     "evidence:agent-preview": "electron scripts/capture-agent-preview-evidence.mjs",
     "evidence:agent-preview:live": "node scripts/run-agent-preview-live.mjs",
-    "evidence:thread-archive": "electron scripts/capture-thread-archive-evidence.mjs"
+    "evidence:thread-archive": "electron scripts/capture-thread-archive-evidence.mjs",
+    "desktop:dev:windows": "node scripts/run-windows-dev-loop.mjs",
+    "desktop:status:windows": "node scripts/windows-dev-status.mjs",
+    "desktop:sync:windows": "node scripts/windows-dev-sync.mjs",
+    "desktop:qualify:windows-install": "node desktop/release/windows-first-install.mjs"
   },
   "devDependencies": {
     "@actions/cache": "6.2.0",
@@ -116,6 +120,7 @@
     "tar": "7.5.22",
     "typescript": "^5.9.2",
     "vitest": "^4.1.9",
-    "yaml": "2.9.0"
+    "yaml": "2.9.0",
+    "extract-zip": "2.0.1"
   }
 }

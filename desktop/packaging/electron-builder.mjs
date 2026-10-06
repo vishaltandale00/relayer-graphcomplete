@@ -1,3 +1,4 @@
+import { prepareWindowsAppRuntime, windowsAppRuntimeRoot } from "./windows-app-runtime.mjs";
 import { resolve } from "node:path";
 import { PACKAGED_PROVIDER_MODULES } from "../main/providers/provider-adapter-registry.mjs";
 
@@ -80,6 +81,10 @@ export function createDesktopBuilderConfig(
       ...PACKAGED_PROVIDER_MODULES.map((modulePath) => `main/${modulePath}`),
     ],
     extraResources: [
+      ...(target.platform === "win32" ? [
+        { from: resolve(windowsAppRuntimeRoot(repositoryRoot), "node"), to: "node", filter: ["node.exe", "LICENSE", "provenance.json"] },
+        { from: resolve(windowsAppRuntimeRoot(repositoryRoot), "crt"), to: "bin", filter: ["*.dll", "provenance.json"] },
+      ] : []),
       // electron-builder applies its Windows signing transformer to directory
       // copies only. Filter these copies so both service EXEs are signed in the
       // package without modifying the sealed native inputs or copying PDBs.
@@ -149,5 +154,7 @@ export function createDesktopBuilderConfig(
 }
 
 export default async function desktopBuilderConfig() {
-  return createDesktopBuilderConfig(await loadDesktopReleaseContract({ desktopRoot }));
+  const contract = await loadDesktopReleaseContract({ desktopRoot });
+  if (contract.platform === "win32") await prepareWindowsAppRuntime({ repositoryRoot });
+  return createDesktopBuilderConfig(contract);
 }

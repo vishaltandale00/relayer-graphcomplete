@@ -352,9 +352,10 @@ describe("desktop skeleton", () => {
       expect(target).not.toHaveProperty("codexVendor");
     }
     const windowsExecutables = windowsApplicationExecutables("C:/Relayer");
-    expect(windowsExecutables).toHaveLength(3);
+    expect(windowsExecutables).toHaveLength(4);
     expect(windowsExecutables).toEqual(expect.arrayContaining([
       expect.stringMatching(/Relayer\.exe$/),
+      expect.stringMatching(/node\.exe$/),
       expect.stringMatching(/relayer-app-server\.exe$/),
       expect.stringMatching(/relayer-graph-server\.exe$/),
     ]));
@@ -3168,6 +3169,7 @@ describe("desktop skeleton", () => {
         readSharpPackage,
         platform: "win32",
         execute: async () => { throw new Error("lipo must not run for Windows"); },
+        verifyWindowsAppRuntime: async () => {},
         verifyWindowsNative: async (path) => { windowsChecks.push(path); },
         proveWindowsLifecycle: async (path) => { windowsChecks.push(path); },
         listPackageEntries: () => packagedRuntimeEntries().map((entry) => `\\${entry.replaceAll("/", "\\")}`),
