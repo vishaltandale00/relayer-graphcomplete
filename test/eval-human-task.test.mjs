@@ -8,7 +8,7 @@ import { createHumanTaskSurface } from "../desktop/eval-main/web-host.mjs";
 
 const cleanups = [];
 afterEach(async () => { for (const cleanup of cleanups.splice(0).reverse()) await cleanup(); });
-async function fixture({ steps = 1 } = {}) {
+async function fixture({ steps = 1, simulated = false } = {}) {
   const dir = await mkdtemp(join(tmpdir(), "human-eval-")); cleanups.push(() => rm(dir, { recursive: true, force: true }));
   const threads = new Map();
   const calls = [];
@@ -51,7 +51,7 @@ async function fixture({ steps = 1 } = {}) {
     annotationSnapshotLoader: async (threadIds) => ({ threadIds, annotations: [] }),
   };
   const tasks = await new HumanTaskService(options).open();
-  const session = await tasks.create({ testCaseId: "case", harnessConfigurationName: "fixture", maxCompletions: 2, endpoint: "A working artifact" });
+  const session = await tasks.create({ testCaseId: "case", harnessConfigurationName: "fixture", maxCompletions: 2, endpoint: "A working artifact", ...(simulated ? { mode: "simulated", actor: {} } : {}) });
   return { tasks, session, threads, calls, options, reject: () => { reject = true; }, failTransport: () => { transportFailure = true; }, failServer: () => { serverFailure = true; }, replayInvoke: () => { replayInvoke = true; }, failExport: () => { exportFailure = true; } };
 }
 
@@ -561,4 +561,32 @@ it("only the versioned participant-stop contract permits a judged unfinished sto
   await expect(f.tasks.finish(id, { ...input, reason: "endpoint_reached" })).rejects.toThrow("completion judgment");
   const finished = await f.tasks.finish(id, input);
   expect(finished.termination).toMatchObject({ reason: "satisfied", endpointAttainment: "not_claimed", success: null, completionJudgeEventId: input.completionJudgeEventId, actorClaim: { endpointStatus: "incomplete", remainingWork: "User thinks work remains" } });
+});
+
+
+it("attributes participant context writes to the actor session while rejecting evaluator and foreign authority", async () => {
+  const { tasks, session, calls, options } = await fixture({ simulated: true });
+  const surface = await createHumanTaskSurface({ tasks, sessionId: session.id, productSession: options.productSession, actor: true });
+  cleanups.push(() => surface.close());
+  const headers = { Authorization: `Bearer ${new URL(surface.url).hash.slice(1)}`, "Content-Type": "application/json" };
+  const write = (path, method, body = {}) => fetch(surface.origin + path, { method, headers, body: JSON.stringify(body) });
+  for (const [path, method] of [
+    ["/api/threads/1/context-drafts/note", "PUT"],
+    ["/api/threads/1/context-drafts/note/confirm?expectedRevision=1", "POST"],
+    ["/api/threads/1/context-confirmations/1", "DELETE"],
+  ]) expect((await write(path, method, { text: "participant decision", participant: { sessionId: "forged" } })).status).toBe(200);
+  const events = tasks.get(session.id).events.filter(event => event.kind === "product_action");
+  expect(events).toHaveLength(3);
+  expect(events.every(event => event.participant.kind === "simulated_user" && event.participant.sessionId === session.id)).toBe(true);
+  const forwarded = calls.length;
+  for (const [path, method] of [["/api/threads/2/context-drafts/note", "PUT"], ["/api/threads/2/context-drafts/note/confirm?expectedRevision=1", "POST"], ["/api/threads/1/annotations", "POST"], ["/api/internal/annotation-sessions", "POST"], ["/eval-api/grade", "POST"], ["/eval-api/annotate", "POST"], ["/eval-api/finish", "POST"]]) {
+    expect((await write(path, method)).status, path).toBe(403);
+  }
+  expect(calls).toHaveLength(forwarded);
+  await tasks.interruptActor(session.id, "actor_cancelled");
+  expect((await write("/api/threads/1/context-drafts/note", "PUT")).status).toBe(403);
+  const exported = await tasks.export(session.id);
+  const reopened = await new HumanTaskService(options).open();
+  expect(reopened.get(session.id).events.filter(event => event.kind === "product_action")).toEqual(events);
+  expect(exported.bundle.session.annotations).toEqual([]);
 });

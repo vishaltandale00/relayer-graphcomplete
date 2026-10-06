@@ -280,7 +280,9 @@ export class HumanTaskService {
         }
         session.completions++;
       }
-      const event = this.event(session, starts ? "submission" : "product_action", { threadId: session.currentThreadId, path, method, request: body, outcome: "pending" });
+      const event = this.event(session, starts ? "submission" : "product_action", { threadId: session.currentThreadId, path, method, request: body, outcome: "pending",
+        ...(session.mode === "simulated" ? { participant: { kind: "simulated_user", sessionId: session.id } } : {}),
+      });
       try { await this.persist(); }
       catch (error) {
         // Nothing has reached product execution: a failed reservation grants no
