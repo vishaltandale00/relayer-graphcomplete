@@ -12,7 +12,7 @@ const developmentMetadata = createDesktopBuilderConfig(resolveDesktopReleaseCont
   environment: { RELAYER_DESKTOP_TARGET: "windows-x64" },
   version: "0.2.0",
   sourceCommit: "3c641e1c2fbb58e4973475819a5c5c93dddd79c0",
-})).extraMetadata;
+}), { environment: { CI: "true" }, argv: ["--dir"] }).extraMetadata;
 
 describe("share-service endpoint authority", () => {
   it("starts the real unsigned package with the fixed production origin and no override authority", () => {

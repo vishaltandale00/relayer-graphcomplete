@@ -32,8 +32,8 @@ missing dependency. This uses Microsoft's documented application-local deploymen
 ## Repeatable existing-VM command
 
 The existing private Windows 11 VM has Node 22.23.2, Rust, Git, native Strawberry Perl, CMake and VS2022
-Build Tools in `RelayerDevWorkspace` and `C:\RelayerBuildTools2022`. The versioned
-`windows-dev-environment.cmd` initializes only the build subprocess environment.
+Build Tools in `RelayerDevWorkspace` and `C:\RelayerBuildTools2022`. The portable Perl archive includes CMake 3.29 and its module tree; retain both when extracting it. The versioned
+`windows-dev-environment.cmd` initializes only the build subprocess environment and preflights the selected CMake module tree and Ninja before dispatching compilation.
 The source archive currently starts at `3c641e1c2fbb58e4973475819a5c5c93dddd79c0`.
 From the Mac checkout:
 

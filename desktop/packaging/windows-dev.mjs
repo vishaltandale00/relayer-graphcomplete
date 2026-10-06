@@ -47,7 +47,7 @@ export async function windowsDevLoop({ repositoryRoot = resolve(import.meta.dirn
       // Git's MSYS Perl cannot configure the native MSVC OpenSSL target.
       command('perl', ['-e', "die qq(Native Windows Perl required) unless $^O eq 'MSWin32'; require IPC::Cmd; print qq(native-perl-ok)"]);
       const tools = {};
-      for (const tool of ['cl.exe', 'link.exe', 'nmake.exe', 'perl.exe', 'cmake.exe', 'rustc.exe', 'cargo.exe']) {
+      for (const tool of ['cl.exe', 'link.exe', 'nmake.exe', 'perl.exe', 'cmake.exe', 'ninja.exe', 'rustc.exe', 'cargo.exe']) {
         const path = command('where.exe', [tool]).split(/\r?\n/)[0]; tools[tool] = { path, sha256: sha(await readFile(path)) };
       }
       const nativeInputs = await digestWindowsDevInputs(repositoryRoot, ['vendor/ladybug', 'scripts/prepare-ladybug-source.mjs', 'scripts/verify-ladybug-native-receipts.mjs', 'desktop/packaging/pinned-ladybug-build.mjs', 'desktop/packaging/build-cache.mjs', 'scripts/ci/packaging-input-contract.json']);

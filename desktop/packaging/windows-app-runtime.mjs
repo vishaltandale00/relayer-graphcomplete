@@ -41,12 +41,18 @@ export async function prepareWindowsNodeRuntime({ repositoryRoot, download = url
     await rename(staged, destination); return destination;
   } finally { await rm(temporary, { recursive: true, force: true }); await rm(staged, { recursive: true, force: true }); }
 }
+export async function resolveWindowsCrtRedistSource(prefix) {
+  const architectureRoot = join(prefix, 'x64');
+  const candidates = (await readdir(architectureRoot, { withFileTypes: true })).filter(entry => /^Microsoft\.VC\d+\.CRT$/i.test(entry.name));
+  if (candidates.length !== 1 || !candidates[0].isDirectory() || candidates[0].isSymbolicLink()) throw new Error('Initialized MSVC toolchain must supply exactly one regular x64 CRT redistribution directory.');
+  return join(architectureRoot, candidates[0].name);
+}
 export async function prepareWindowsCrtRuntime({ repositoryRoot, environment = process.env, execute = executeDefault } = {}) {
   // Use only the redistribution directory belonging to the initialized MSVC
   // toolchain, never DLLs found on PATH or in System32. Preserve Microsoft signatures.
   const prefix = environment.VCToolsRedistDir;
   if (!prefix) throw new Error('Windows app-local CRT packaging requires VCToolsRedistDir from the initialized MSVC toolchain.');
-  const source = join(prefix, 'x64', 'Microsoft.VC143.CRT');
+  const source = await resolveWindowsCrtRedistSource(prefix);
   const names = (await readdir(source)).filter(name => /^[a-z0-9_]+\.dll$/i.test(name)).sort();
   for (const name of ['msvcp140.dll', 'vcruntime140.dll', 'vcruntime140_1.dll']) if (!names.includes(name)) throw new Error(`MSVC redistribution input missing ${name}`);
   const paths = names.map(name => join(source, name));

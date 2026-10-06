@@ -9,3 +9,8 @@ set "PATH=%relayerDevWorkspace%\Perl\perl\bin;%relayerDevWorkspace%\Perl\c\bin;%
 call C:\RelayerBuildTools2022\VC\Auxiliary\Build\vcvars64.bat
 if errorlevel 1 exit /b %errorlevel%
 cd /d "%relayerDevCheckout%"
+
+cmake -P "%relayerDevCheckout%\scripts\windows-dev-preflight.cmake"
+if errorlevel 1 exit /b %errorlevel%
+ninja --version
+if errorlevel 1 exit /b %errorlevel%

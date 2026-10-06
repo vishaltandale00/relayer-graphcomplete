@@ -3,11 +3,11 @@ import { createDesktopBuilderConfig } from '../desktop/packaging/electron-builde
 import { resolveDesktopReleaseContract } from '../desktop/release/contract.mjs';
 it('packages app-owned Node and app-local VC runtime for Windows only', () => {
   const windows = resolveDesktopReleaseContract({ environment: { RELAYER_DESKTOP_TARGET: 'windows-x64' }, version: '0.2.0', sourceCommit: 'a'.repeat(40) });
-  const resources = createDesktopBuilderConfig(windows).extraResources;
+  const resources = createDesktopBuilderConfig(windows, { environment: { CI: "true" }, argv: ["--dir"] }).extraResources;
   expect(resources.find(entry => entry.to === 'node')?.filter).toContain('node.exe');
   expect(resources.find(entry => entry.to === 'bin' && entry.filter?.includes('*.dll'))).toBeDefined();
   const mac = resolveDesktopReleaseContract({ environment: { RELAYER_DESKTOP_TARGET: 'macos-arm64' }, version: '0.2.0', sourceCommit: 'a'.repeat(40) });
-  expect(createDesktopBuilderConfig(mac).extraResources.some(entry => entry.to === 'node')).toBe(false);
+  expect(createDesktopBuilderConfig(mac, { environment: { CI: "true" }, argv: ["--dir"] }).extraResources.some(entry => entry.to === 'node')).toBe(false);
 });
 import { mkdtemp, mkdir, rm, writeFile, symlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -36,5 +36,19 @@ it('fails closed for corrupted cached Node and never repairs it by downloading s
     expect(downloaded).toBe(false);
     await rm(join(directory, 'node.exe')); await symlink(join(root, 'elsewhere'), join(directory, 'node.exe'));
     await expect(packagedWindowsNodePath(windowsAppRuntimeRoot(root))).rejects.toThrow('missing or invalid');
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+import { resolveWindowsCrtRedistSource } from '../desktop/packaging/windows-app-runtime.mjs';
+it('selects the initialized toolchain CRT across VS generations and rejects ambiguous directories', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'win-crt-generation-'));
+  try {
+    await mkdir(join(root, 'x64/Microsoft.VC143.CRT'), { recursive: true });
+    expect(await resolveWindowsCrtRedistSource(root)).toBe(join(root, 'x64/Microsoft.VC143.CRT'));
+    await rm(join(root, 'x64/Microsoft.VC143.CRT'), { recursive: true });
+    await mkdir(join(root, 'x64/Microsoft.VC145.CRT'));
+    expect(await resolveWindowsCrtRedistSource(root)).toBe(join(root, 'x64/Microsoft.VC145.CRT'));
+    await mkdir(join(root, 'x64/Microsoft.VC143.CRT'));
+    await expect(resolveWindowsCrtRedistSource(root)).rejects.toThrow('exactly one');
   } finally { await rm(root, { recursive: true, force: true }); }
 });
