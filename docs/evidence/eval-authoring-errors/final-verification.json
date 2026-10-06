@@ -1,0 +1,44 @@
+{
+  "sourceDigest": "e2083e3ff90538b749cd920d70212a11b8a1bebf666dfd5edddd16e0014f9268",
+  "sourceDigestDefinition": "19 sorted changed paths relative to main de686561c465f1ed6c4afc6ac9fb59291861bb56, excluding docs/evidence/: path UTF-8 + NUL + file bytes + NUL",
+  "node": "22.23.2",
+  "historicalFocusedDigest": "f853259dcb9de185f3670e45e892522e01844334a838cf1afc67f01b7c4005b3",
+  "logs": [
+    {
+      "checkpoint": "historical-pre-envelope-focused",
+      "exitCode": 0,
+      "bytes": 14591,
+      "sha256": "347bf0eb19bb279970b3f344da14f6f3bf807af74a05addc0fe12ed0ac7ed88e"
+    },
+    {
+      "checkpoint": "final-warm",
+      "exitCode": 0,
+      "bytes": 256,
+      "sha256": "8100a5347403472d0df9cbbfbe4c3e4d306a2af92dcac0a368a89a39fbce567e"
+    },
+    {
+      "checkpoint": "final-check",
+      "exitCode": 0,
+      "bytes": 126639,
+      "sha256": "ed8a66076e30067780f47c8fda1e857f56f093c1e2a4951076948d23f5865dee"
+    },
+    {
+      "checkpoint": "final-build",
+      "exitCode": 0,
+      "bytes": 2040,
+      "sha256": "9e0c14d74e4e29174cd4cebe235eed0fe49f5c51b427b7455b93a74099329017"
+    },
+    {
+      "checkpoint": "final-compiled-runtime",
+      "exitCode": 0,
+      "bytes": 377,
+      "sha256": "b85fc89c0b2ed394b4c545dcb424e5507e9f6a33a4eba7c4e3404e615ea5dabc"
+    },
+    {
+      "checkpoint": "final-eval-web",
+      "exitCode": 0,
+      "bytes": 4328,
+      "sha256": "f746713839c90f903bee8390c7fff5033a8fc46ded8d0e5c98bc4f4953e7c3eb"
+    }
+  ]
+}

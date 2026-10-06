@@ -144,6 +144,28 @@ try {
   assert.ok((await reliability.textContent()).includes("Total: unknown"));
   assert.ok((await reliability.textContent()).includes("0 observed"));
   await observer.getByRole("heading", { name: "Send to backend publication, per turn" }).waitFor();
+  // Historical child evidence exercises the production dossier without new inference.
+  const childMetrics = await browser.newPage();
+  await childMetrics.route("**/eval-api/listRuns", async (route) => {
+    const response = await route.fetch();
+    const runs = await response.json();
+    const fixtureExecution = runs.find((entry) => entry.id === run.id).executions.find((entry) => entry.id === execution.id);
+    fixtureExecution.semanticChildren = [
+      { interactionId: 9001, sourceInteractionId: execution.turns[0].interactionId, sourceActionId: 77,
+        authoringErrors: { schemaVersion: 1, observed: 2, total: null, coverage: "partial", byCause: { compiler: 2 }, reasons: [] } },
+      { interactionId: 9002, sourceInteractionId: execution.turns[1].interactionId, sourceActionId: 78 },
+    ];
+    await route.fulfill({ response, json: runs });
+  });
+  await childMetrics.goto(host.url);
+  await childMetrics.locator(`[data-execution-detail="${execution.id}"]`).click();
+  const childReliability = childMetrics.locator(".dossier-block").filter({ has: childMetrics.getByRole("heading", { name: "Authoring errors per turn" }) });
+  await childReliability.getByText("Child completion 9001: 2 observed", { exact: true }).waitFor();
+  await childReliability.getByText("Child completion 9002: Not recorded", { exact: true }).waitFor();
+  assert.equal(await childReliability.locator(".finding-row").count(), 4);
+  assert.ok((await childReliability.textContent()).includes(`From turn ${execution.turns[0].interactionId} · action 77`));
+  assert.equal(await childReliability.getByText("0 observed", { exact: false }).count(), 2);
+  await childMetrics.close();
   const reviewUrl = await rpc(host.url, "openReview", [execution.id]);
   const secondReviewUrl = await rpc(host.url, "openReview", [execution.id]);
   assert.notEqual(new URL(secondReviewUrl).origin, new URL(reviewUrl).origin);

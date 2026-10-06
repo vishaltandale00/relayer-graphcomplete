@@ -17,7 +17,7 @@ afterEach(async () => {
   for (const directory of directories.splice(0)) await rm(directory, { recursive: true, force: true });
 });
 
-async function startUpstream({ holdNodeResponse = false } = {}) {
+async function startUpstream({ holdNodeResponse = false, rejectVisualAssetOperations = false } = {}) {
   let resolveSlowSearchStarted;
   const slowSearchStarted = new Promise((resolve) => { resolveSlowSearchStarted = resolve; });
   let resolveNodeStarted;
@@ -32,6 +32,11 @@ async function startUpstream({ holdNodeResponse = false } = {}) {
     if ((request.url === "/api/graph/visual-assets/operations"
       || request.url === "/api/control/visual-assets/imports/validate"
       || request.url === "/api/control/conversation-import-stages/test/visual-asset-contents") && request.method === "POST") {
+      if (rejectVisualAssetOperations && request.url === "/api/graph/visual-assets/operations") {
+        response.writeHead(422, { "content-type": "application/json" });
+        response.end(JSON.stringify({ error: { code: "invalid_request" } }));
+        return;
+      }
       response.writeHead(200, { "content-type": "application/json" });
       response.end(JSON.stringify(body));
       return;
@@ -728,4 +733,36 @@ it("captures a caught template failure before any graph method is called", async
   expect(events).toHaveLength(1);
   expect(events[0]).toMatchObject({ authoringError: { phase: "compiler", codes: ["detail_template_nested"] } });
   expect(text).not.toContain("Nested private prose"); expect(text).not.toContain(token);
+});
+
+it("counts visual-asset mutations while excluding multiplexed reads and retaining only known kinds", async () => {
+  const { authoringErrorsFromOperations } = await import("../desktop/eval-main/authoring-errors.mjs");
+  const upstream = await startUpstream({ rejectVisualAssetOperations: true });
+  const recorder = await startGraphOperationRecorder({ upstreamUrl: upstream.url }); resources.push(recorder);
+  const token = "asset-authoring-secret"; await bindCapability(recorder.url, token);
+  const writes = ["add", "create-tag", "move-tag", "associate", "organize", "archive"];
+  const reads = ["list-assets", "list-tags", "list-registries", "find", "inspect", "download"];
+  const { RelayerGraphClient } = await import("../packages/graph-client/src/index.ts");
+  const assets = new RelayerGraphClient({ url: recorder.url, token, nodeId: 17 }).visualAssets;
+  const scope = { kind: "thread", threadId: 17 };
+  for (const attempt of [
+    () => assets.add({ scope, name: "private asset name", file: { name: "private file", mediaType: "image/png", read: async () => Buffer.from("private bytes") } }),
+    () => assets.createTag({ scope, name: "private tag" }),
+    () => assets.moveTag({ scope, tagId: "private tag", parentTagId: null }),
+    () => assets.associate({ scope, assetId: "private asset" }),
+    () => assets.organize({ scope, assetId: "private asset", addTagIds: [], removeTagIds: [] }),
+    () => assets.archive("private asset", scope),
+    () => assets.listAssets({ scope }), () => assets.listTags({ scope }),
+    () => assets.listRegistries({ scope }), () => assets.find({ scope, tagId: "private tag" }),
+    () => assets.inspect("private asset", scope), () => assets.download("private asset", scope),
+  ]) await expect(attempt()).rejects.toThrow();
+  for (const body of [{ operation: { kind: "private-unknown-kind" } }, { kind: "add" }]) {
+    expect(await jsonRequest(`${recorder.url}/api/graph/visual-assets/operations`, { method: "POST", token, body })).toMatchObject({ status: 422 });
+  }
+  const target = await createCandidateTraceDirectory(); await recorder.exportInteraction(17, target);
+  const text = await readFile(join(target, "graph-operations.jsonl"), "utf8");
+  const records = text.trim().split("\n").map(JSON.parse);
+  expect(records.map((record) => record.visualAssetOperationKind)).toEqual([...writes, ...reads, undefined, undefined]);
+  expect(authoringErrorsFromOperations(records)).toMatchObject({ observed: 6, total: null, byCause: { server_rejection: 6 } });
+  for (const privateValue of [token, "private asset name", "private bytes", "private-unknown-kind"]) expect(text).not.toContain(privateValue);
 });

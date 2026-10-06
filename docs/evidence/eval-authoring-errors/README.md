@@ -140,8 +140,9 @@ and persisted Eval turn. It is not a general recall estimate, natural-error
 baseline, or proof of exhaustive coverage. Python, unknown methods, older clients
 and lost diagnostic delivery remain the declared gaps.
 
-## Integration with main — 2026-10-06
+## Initial integration snapshot — 2026-10-06
 
+These results apply to commit `ec20187eb88fc3bd3e5a275f76e0cdd326fe7a06`.
 Integrated publication-timing PR #687 from main commit
 `de686561c465f1ed6c4afc6ac9fb59291861bb56`. The two overlapping service and
 dossier seams preserve both metrics: both transient maps are cleaned up after
@@ -187,3 +188,57 @@ expires after an included-source change.
 
 The live probe remains evidence for production commit `09b144d88d9015a0bdb69c95a6a09cac6a24c964`.
 It is not a new live run of the integrated source or a natural-error baseline.
+
+## Review follow-up — 2026-10-06
+
+GitHub blocked merge on four unresolved review threads despite passing CI. All
+four map to the existing PRD §9.4 measurement promise; they require no new product
+decision or graph authority. The executable seams and checkpoints are:
+
+| Changed seam / boundary | Production checkpoint |
+| --- | --- |
+| Visual-asset POST mutation classification | Real `RelayerGraphClient.visualAssets` sends all six mutations and six reads through the recorder; rejected mutations count, POST reads do not; unknown nested kinds and top-level spoofing stay unclassified |
+| Sanitized operation discriminator | The same recorder fixture retains only known kinds and excludes asset names, bytes, tag names and capability tokens |
+| Independent evidence extraction before provider validation | Existing real Eval artifact-failure journey preserves a partial metric with corrupt provider events while capture stays failed/non-promotable; foreign ledger receipts stay unavailable |
+| Pinned launcher clean environment | Existing real macOS launcher fixture receives the trusted `RELAYER_GRAPH_AUTHORING_ERRORS` opt-in, catches unsafe-CSS compilation and records one origin while inherited provider secrets and unauthorized egress remain excluded |
+| Child dossier projection and rendering | Metric projection fixture distinguishes root/child identities, counts and provenance; legacy child evidence is unavailable; browser fixture renders separate child rows without changing root counts |
+
+No test was deleted. Required verification remains the full check/build, compiled
+runtime and browser runner, with refreshed source review. No new inference or
+release proof applies. Native and TypeScript sources are unchanged.
+
+A refreshed reviewer found that the first visual-asset fix read a top-level kind,
+while the production client sends `operation.kind`. The initial manual fixture
+masked this mismatch. The corrected recorder reads the real envelope, and the
+replacement fixture calls the real public client. The initial 180-test focused
+pass is historical proof for its pre-repair source, not proof of the final asset
+path. The final warm metric/recorder/dashboard suites passed all 33 tests.
+
+Final 19-file executable/test/PRD digest, sorted paths relative to main
+`de686561c465f1ed6c4afc6ac9fb59291861bb56` + NUL + bytes + NUL, evidence excluded:
+`e2083e3ff90538b749cd920d70212a11b8a1bebf666dfd5edddd16e0014f9268`.
+
+Adversarial assertion: reviewer `/root/design_authority_review`; all 19 paths at
+the exact digest above; scope all four review repairs plus origin counting,
+privacy/authority, independent budgets, unknown coverage and timing separation;
+verdict **PASS**, no unresolved findings. Reviewer independently ran 33 tests in
+three lightweight suites on this exact digest. Full-check/build/browser/compiled
+runtime proof is separate. Included-source changes invalidate this assertion.
+
+Actual final verification with pinned Node 22.23.2 and the same private verified
+native setup:
+
+| Final checkpoint | Result |
+| --- | --- |
+| Warm metric/recorder/dashboard suites | 33 tests passed on final digest |
+| `npm run check` | Passed: native workspace/crash tests, fmt/clippy, package checks, 290 Vitest files / 3,625 tests passed (1 file / 3 tests skipped), 2 secret-boundary tests, 68 Python tests, receipt integrity and PRD readability |
+| `npm run build` | Passed native runtimes and all TypeScript packages |
+| `npm run test:eval-compiled-runtime` | All 4 tests passed |
+| `npm run test:eval-web` | All declared chapters passed, including both metric sections, distinct root/child counts, parent provenance, unavailable legacy child evidence, process reopen and review authority |
+
+The final asset-envelope edit preceded the aggregate's JavaScript prerequisites
+and test chapter; native/Rust and TypeScript sources stayed unchanged during that
+run. The independent final warm suites and review also observe the repaired
+source. Log hashes are in [final verification receipts](final-verification.json).
+Historical proof above remains bound to its recorded snapshots. No new live
+inference ran; exhaustive coverage and task/graph-quality improvement remain unclaimed.

@@ -184,6 +184,15 @@ function withCompletion(receipt, response) {
 function sanitizeReceipt(method, path, status, request, response, knownSecrets) {
   const codesAtOrigin = errorCodes(response);
   const receipt = { schemaVersion: 1, method, path, status, ...(codesAtOrigin.length ? { errorCodes: codesAtOrigin } : {}) };
+  if (method === "POST" && path === "/api/graph/visual-assets/operations") {
+    const kind = request?.operation?.kind;
+    return {
+      ...receipt,
+      ...(["add", "create-tag", "move-tag", "associate", "organize", "archive",
+        "list-assets", "list-tags", "list-registries", "find", "inspect", "download"].includes(kind)
+        ? { visualAssetOperationKind: kind } : {}),
+    };
+  }
   if (method === "POST" && path === "/api/graph/nodes") return withRecord(receipt, "node", response?.node);
   if (method === "POST" && path === "/api/graph/edges") return withRecord(receipt, "edge", response?.edge);
   if (method === "POST" && path === "/api/graph/layers") return withRecord(receipt, "layer", response?.layer);

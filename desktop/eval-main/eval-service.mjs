@@ -3165,6 +3165,12 @@ export class EvalService {
           await new Promise((wait) => setTimeout(wait, 50));
         }
       }
+      execution.authoringErrorMetrics ||= {};
+      try {
+        execution.authoringErrorMetrics[String(interaction.id)] = await authoringErrorsFromTraceDirectory(targetDirectory, descriptor, interaction.graphNodeId);
+      } catch {
+        execution.authoringErrorMetrics[String(interaction.id)] = unavailableAuthoringErrors("ledger_invalid_or_unreadable");
+      }
       execution.graphTimings ||= {};
       execution.graphTimings[String(interaction.id)] = await graphTimingFromTraceDirectory(targetDirectory, interaction.createdAt, descriptor, {
         interactionNodeId: interaction.graphNodeId, productInteractionId: interaction.id, correlation,
@@ -3179,12 +3185,6 @@ export class EvalService {
             || execution.testCaseId === RECURSIVE_GRAPH_MEMORY_CASE_ID,
         },
       );
-      execution.authoringErrorMetrics ||= {};
-      try {
-        execution.authoringErrorMetrics[String(interaction.id)] = await authoringErrorsFromTraceDirectory(targetDirectory, descriptor, interaction.graphNodeId);
-      } catch {
-        execution.authoringErrorMetrics[String(interaction.id)] = unavailableAuthoringErrors("ledger_invalid_or_unreadable");
-      }
       execution.candidateTraceCaptures ||= {};
       execution.candidateTraceCaptures[String(interaction.id)] = {
         ...copy(descriptor),

@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 
 const WRITE = /^\/api\/graph\/(?:nodes|edges|layers|actions|submit|current\/transitions)(?:\/|$)/;
+const ASSET_WRITES = new Set(["add", "create-tag", "move-tag", "associate", "organize", "archive"]);
 export function unavailableAuthoringErrors(reason = "not_recorded") {
   return { schemaVersion: 1, coverage: "unavailable", total: null, observed: null, byCause: {}, reasons: [reason] };
 }
@@ -18,7 +19,8 @@ export function authoringErrorsFromOperations(operations, { complete = true } = 
     if (operation.path === "/api/graph/authoring-errors" && operation.status === 202 && operation.authoringError) {
       key = `client:${operation.authoringError.id}`;
       cause = operation.authoringError.phase;
-    } else if (operation.method === "POST" && WRITE.test(operation.path) && operation.status >= 400 && operation.status < 500 && ![401, 408, 429].includes(operation.status)) {
+    } else if ((operation.method === "POST" && (WRITE.test(operation.path)
+      || (operation.path === "/api/graph/visual-assets/operations" && ASSET_WRITES.has(operation.visualAssetOperationKind)))) && operation.status >= 400 && operation.status < 500 && ![401, 408, 429].includes(operation.status)) {
       key = `server:${operation.sequence}`;
       cause = "server_rejection";
     } else continue;

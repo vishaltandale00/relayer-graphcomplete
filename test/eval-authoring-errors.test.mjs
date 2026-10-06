@@ -35,8 +35,16 @@ it("validates persisted evidence, rejects tampering and foreign turns, and proje
   const metric = await authoringErrorsFromTraceDirectory(folder, descriptor, 17);
   expect(metric.observed).toBe(1);
   await expect(authoringErrorsFromTraceDirectory(folder, descriptor, 18)).rejects.toThrow("invalid receipt");
-  const dossier = projectExecutionDossier({}, { turns: [{ interactionId: 1, authoringErrors: metric }, { interactionId: 2 }] });
-  expect(dossier.authoringErrors).toMatchObject([{ interactionId: 1, observed: 1, total: null }, { interactionId: 2, observed: null, coverage: "unavailable" }]);
+  const dossier = projectExecutionDossier({}, { turns: [{ interactionId: 1, authoringErrors: metric }, { interactionId: 2 }], semanticChildren: [
+    { interactionId: 3, sourceInteractionId: 1, sourceActionId: 77, authoringErrors: { ...metric, observed: 2, byCause: { compiler: 2 } } },
+    { interactionId: 4, sourceInteractionId: 2, sourceActionId: 78 },
+  ] });
+  expect(dossier.authoringErrors).toMatchObject([
+    { kind: "turn", interactionId: 1, observed: 1, total: null },
+    { kind: "turn", interactionId: 2, observed: null, coverage: "unavailable" },
+    { kind: "child", interactionId: 3, sourceInteractionId: 1, sourceActionId: 77, observed: 2, total: null },
+    { kind: "child", interactionId: 4, sourceInteractionId: 2, sourceActionId: 78, observed: null, coverage: "unavailable" },
+  ]);
   await writeFile(join(folder, "graph-operations.jsonl"), "tampered");
   await expect(authoringErrorsFromTraceDirectory(folder, descriptor, 17)).rejects.toThrow("digest");
   expect(await authoringErrorsFromTraceDirectory(folder, {}, 17)).toMatchObject({ observed: null, coverage: "unavailable" });

@@ -308,8 +308,13 @@ export function projectExecutionDossier(run, execution) {
         : asArray(presentation.layers).flatMap((layer) => asArray(layer?.evidenceRefs)))
         .map(evidenceRefLabel),
     },
-    authoringErrors: asArray(execution.turns).map((turn) => ({
+    authoringErrors: [
+      ...asArray(execution.turns).map((turn) => ({ ...turn, kind: "turn" })),
+      ...semanticChildren.map((child) => ({ ...child, kind: "child" })),
+    ].map((turn) => ({
+      kind: turn.kind,
       interactionId: turn.interactionId,
+      ...(turn.kind === "child" ? { sourceInteractionId: turn.sourceInteractionId, sourceActionId: turn.sourceActionId } : {}),
       ...(turn.authoringErrors ?? { schemaVersion: 1, coverage: "unavailable", total: null, observed: null, byCause: {}, reasons: ["not_recorded"] }),
     })),
     recursiveComplete: {
