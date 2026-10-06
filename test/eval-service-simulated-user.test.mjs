@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+import { projectExecutionDossier } from "../desktop/eval-renderer/run-model.js";
 import { CalibrationService } from "../desktop/eval-main/calibration-service.mjs";
 import { SetupRegistry } from "../desktop/eval-main/setup-registry.mjs";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
@@ -275,6 +277,42 @@ describe("EvalService simulated-user result persistence", () => {
     expect(JSON.stringify(completed)).toContain("model selection changed between product turns");
     expect(product.mock.calls.filter(([url, options]) => options?.method === "POST"
       && /^\/api\/threads\/[^/]+\/interactions$/.test(new URL(url).pathname))).toHaveLength(0);
+  });
+
+  it("retains earlier captured authoring metrics when later preparation fails and the run reopens", async () => {
+    const { stateFile } = await testPaths();
+    globalThis.fetch = fakeAcceptedProduct();
+    const options = { stateFile, productSession: productSession(),
+      configurationPaths: [join(repositoryRoot, "harnesses", "codex-basic.yaml")], targetKey: "macos-arm64",
+      selectModel: vi.fn().mockResolvedValueOnce({ familyId: 17, providerId: "openrouter-work", modelId: "first" })
+        .mockResolvedValueOnce({ familyId: 17, providerId: "openrouter-work", modelId: "second" }),
+      candidateTraceExporter: async (_interactionId, directory) => {
+        const bytes = Buffer.from(`${JSON.stringify({ schemaVersion: 1, interactionNodeId: 1, sequence: 1,
+          method: "POST", path: "/api/graph/nodes", status: 422 })}\n`);
+        await mkdir(directory, { recursive: true }); await writeFile(join(directory, "graph-operations.jsonl"), bytes);
+        // The metric is independently valid; missing provider proof still leaves the trace failed.
+        return { graphOperations: { format: "relayer-graph-operations-v1", ref: "graph-operations.jsonl", byteLength: bytes.length,
+          sha256: `sha256:${createHash("sha256").update(bytes).digest("hex")}`, eventCount: 1, status: "complete", truncated: false } };
+      },
+    };
+    const service = await new EvalService(options).open();
+    const created = await service.createRun({ testCaseIds: ["empty-project.task-system.two-turn"],
+      harnessConfigurationNames: ["codex-basic"], judgeConfigurationName: "deterministic-graph-contract" });
+    const failed = await waitForCompletedRun(service, created.id);
+    expect(failed.executions[0].status).toBe("error");
+    expect(JSON.stringify(failed)).toContain("model selection changed between product turns");
+    await waitForPersistedRun(stateFile, created.id);
+    const reopened = await new EvalService(options).open();
+    const run = reopened.listRuns().find((run) => run.id === created.id);
+    const execution = run.executions[0];
+    expect(execution.status).toBe("error");
+    expect(execution.turns).toEqual([]);
+    expect(execution.candidateTraceCaptures["interaction-1"]).toMatchObject({ status: "failed", promotable: false });
+    const dossier = projectExecutionDossier(run, execution);
+    expect(dossier.authoringErrors).toEqual([expect.objectContaining({ kind: "captured", interactionId: "interaction-1",
+      observed: 1, total: null, coverage: "partial", byCause: { server_rejection: 1 } })]);
+    expect(dossier.authoringErrors[0]).not.toHaveProperty("sourceInteractionId");
+    expect(dossier.substance.score).toBeNull();
   });
 
   it("pins a connected default model when a Claude matrix cell creates its thread", async () => {

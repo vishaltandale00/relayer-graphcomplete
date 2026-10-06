@@ -150,6 +150,7 @@ try {
     const response = await route.fetch();
     const runs = await response.json();
     const fixtureExecution = runs.find((entry) => entry.id === run.id).executions.find((entry) => entry.id === execution.id);
+    fixtureExecution.authoringErrorMetrics = { 9003: { schemaVersion: 1, observed: 1, total: null, coverage: "partial", byCause: { server_rejection: 1 }, reasons: [] } };
     fixtureExecution.semanticChildren = [
       { interactionId: 9001, sourceInteractionId: execution.turns[0].interactionId, sourceActionId: 77,
         authoringErrors: { schemaVersion: 1, observed: 2, total: null, coverage: "partial", byCause: { compiler: 2 }, reasons: [] } },
@@ -162,7 +163,8 @@ try {
   const childReliability = childMetrics.locator(".dossier-block").filter({ has: childMetrics.getByRole("heading", { name: "Authoring errors per turn" }) });
   await childReliability.getByText("Child completion 9001: 2 observed", { exact: true }).waitFor();
   await childReliability.getByText("Child completion 9002: Not recorded", { exact: true }).waitFor();
-  assert.equal(await childReliability.locator(".finding-row").count(), 4);
+  await childReliability.getByText("Captured completion 9003: 1 observed", { exact: true }).waitFor();
+  assert.equal(await childReliability.locator(".finding-row").count(), 5);
   assert.ok((await childReliability.textContent()).includes(`From turn ${execution.turns[0].interactionId} · action 77`));
   assert.equal(await childReliability.getByText("0 observed", { exact: false }).count(), 2);
   await childMetrics.close();

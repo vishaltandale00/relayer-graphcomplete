@@ -29,7 +29,7 @@ export function authoringErrorsFromOperations(operations, { complete = true } = 
     observed += 1;
     byCause[cause] = (byCause[cause] ?? 0) + 1;
   }
-  // v1 is explicitly a lower bound: unknown methods, Python pre-transport validation,
+  // V1 client reports are unattested. Coverage omits unknown methods, Python pre-transport validation,
   // older/pinned clients, and lost diagnostic delivery are not proven covered.
   return { schemaVersion: 1, coverage: "partial", total: null, observed, byCause,
     reasons: ["client_capture_not_exhaustive", ...(complete ? [] : ["ledger_truncated"])] };

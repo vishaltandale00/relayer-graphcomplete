@@ -787,3 +787,77 @@ it("captures recursive preparation and icon-write origins without counting reads
   expect(graphTimingFromTrace({ sentAt: records[0].observedAt, graphOperations: records, ledgerComplete: true })).toMatchObject({ graphWriteRejections: 0 });
   expect(text).not.toContain(token); expect(text).not.toContain("private icon proposal");
 });
+
+
+it.each([false, true])("settles partially transmitted diagnostics independently of graph proof (timeout=%s)", async (timeout) => {
+  const upstream = await startUpstream();
+  const recorder = await startGraphOperationRecorder({ upstreamUrl: upstream.url, settleTimeoutMs: timeout ? 30 : 1_000 });
+  resources.push(recorder);
+  const token = "partial-body-diagnostic";
+  await bindCapability(recorder.url, token);
+  const body = JSON.stringify({ schemaVersion: 1, id: "00000000-0000-0000-0000-000000000001", phase: "compiler", codes: ["unsafe_css"] });
+  const request = httpRequest(`${recorder.url}/api/graph/authoring-errors`, { method: "POST", headers: {
+    authorization: `Bearer ${token}`, "content-type": "application/json", "content-length": Buffer.byteLength(body), expect: "100-continue",
+  } });
+  const response = new Promise((resolve) => {
+    request.on("response", (response) => { response.resume(); response.on("end", () => resolve(response.statusCode)); });
+    request.on("error", () => resolve("aborted"));
+  });
+  const started = new Promise((resolve) => request.once("continue", resolve));
+  request.flushHeaders();
+  await started; // Server has entered the real request handler, before the body can finish.
+  request.write(body.slice(0, 10));
+  const target = await createCandidateTraceDirectory();
+  const exportWork = recorder.exportInteraction(17, target);
+  if (!timeout) request.end(body.slice(10));
+  const descriptor = await exportWork;
+  expect(await response).toBe(timeout ? "aborted" : 202);
+  expect(descriptor).toMatchObject({ status: "complete", promotable: true, truncated: false, eventCount: timeout ? 0 : 1 });
+  if (timeout) expect(descriptor.authoringDiagnosticsDiscarded).toBe(1);
+  else expect(descriptor.authoringDiagnosticsDiscarded).toBeUndefined();
+});
+
+it("restricts candidate-supplied diagnostic codes and authenticates completion attribution", async () => {
+  const upstream = await startUpstream();
+  const recorder = await startGraphOperationRecorder({ upstreamUrl: upstream.url }); resources.push(recorder);
+  const token = "private_identifier_text"; await bindCapability(recorder.url, token);
+  const diagnostic = { schemaVersion: 1, id: "00000000-0000-0000-0000-000000000001", phase: "compiler", codes: ["unsafe_css"] };
+  for (const body of [{ ...diagnostic, codes: ["private_authored_prose"] }, { ...diagnostic, codes: [token] },
+    { ...diagnostic, phase: "server" }, { ...diagnostic, interactionNodeId: 99 }, { ...diagnostic, phase: "client" }]) {
+    expect((await jsonRequest(`${recorder.url}/api/graph/authoring-errors`, { method: "POST", token, body })).status).toBe(400);
+  }
+  expect((await jsonRequest(`${recorder.url}/api/graph/authoring-errors`, { method: "POST", token: "foreign", body: diagnostic })).status).toBe(401);
+  const { reportAuthoringError } = await import("../packages/graph-client/src/authoring-errors.ts");
+  // An unsupported compiler issue must become a fixed fallback, even if it resembles a safe identifier.
+  const fetchOriginal = globalThis.fetch;
+  let settled;
+  const sent = new Promise((resolve) => { settled = resolve; });
+  vi.stubGlobal("fetch", async (...args) => { const response = await fetchOriginal(...args); settled(response.status); return response; });
+  try {
+    reportAuthoringError({ url: recorder.url, token, nodeId: 17, authoringErrors: true }, new Error("private prose"), ["private_authored_prose"]);
+    expect(await sent).toBe(202);
+  } finally { vi.stubGlobal("fetch", fetchOriginal); }
+  const target = await createCandidateTraceDirectory(); await recorder.exportInteraction(17, target);
+  const text = await readFile(join(target, "graph-operations.jsonl"), "utf8");
+  const record = JSON.parse(text.trim());
+  expect(record).toMatchObject({ interactionNodeId: 17, authoringError: { phase: "compiler", codes: ["compiler_validation"] } });
+  expect(text).not.toContain("private");
+});
+
+
+it("bounds an attributed graph request stalled before its body finishes", async () => {
+  const upstream = await startUpstream();
+  const recorder = await startGraphOperationRecorder({ upstreamUrl: upstream.url, settleTimeoutMs: 30 }); resources.push(recorder);
+  const token = "stalled-graph-body"; await bindCapability(recorder.url, token);
+  const request = httpRequest(`${recorder.url}/api/graph/nodes`, { method: "POST", headers: {
+    authorization: `Bearer ${token}`, "content-length": 100, expect: "100-continue",
+  } });
+  const aborted = new Promise((resolve) => request.once("error", resolve));
+  const started = new Promise((resolve) => request.once("continue", resolve));
+  request.flushHeaders(); await started; request.write("{");
+  const target = await createCandidateTraceDirectory();
+  const descriptor = await recorder.exportInteraction(17, target);
+  await aborted;
+  expect(descriptor).toMatchObject({ status: "partial", promotable: false, truncated: true, eventCount: 0, discardedEvents: 1 });
+  expect(descriptor.authoringDiagnosticsDiscarded).toBeUndefined();
+});

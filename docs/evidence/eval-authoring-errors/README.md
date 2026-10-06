@@ -20,7 +20,7 @@ deterministic suite.
 | JS client construction, bound private methods, single-flight and original errors | `test/eval-authoring-errors.test.mjs`; existing graph-client objects/ownership suites; packaged detail suite |
 | Compiler-origin and caught nested-template diagnostics, per-attempt deduplication | real recorder/client/compiler journey in `test/graph-operation-recorder.test.mjs` |
 | Completion diagnostic opt-in and Codex/Claude environment propagation | host, Codex and Claude provider fixture suites |
-| Recorder token-owned attribution, closed diagnostic fields, credential/content exclusion | real recorder journey and existing recorder boundary fixtures |
+| Recorder token-owned attribution, closed diagnostic fields, SDK payload sanitization (unattested reports; see trust checkpoint below) | real recorder journey and existing recorder boundary fixtures |
 | Independent diagnostic budgets and preserved graph proof | diagnostic-overflow recorder fixture |
 | Write error-code preservation, server origins, repeated attempts, infrastructure/read exclusion | recorder journey plus `test/eval-authoring-errors.test.mjs` |
 | Ledger digest, byte/event counts, interaction identity, missing/legacy/truncated coverage | `test/eval-authoring-errors.test.mjs` |
@@ -343,3 +343,42 @@ The executable source stayed unchanged throughout these commands. Log hashes
 are in [public-write verification receipts](public-write-verification.json).
 Historical receipts above do not substitute for these final checks. No new live
 inference, exhaustive-error coverage, optimization efficacy or quality gain is claimed.
+
+## Diagnostic settlement, trust, and interrupted-run checkpoints
+
+The approved V1 metric uses **unattested client reports**. A graph token binds a request to its completion; it does not attest that a client/compiler incident really occurred. Server write rejections remain independently recorded transport observations. The SDK sends only a fixed vocabulary, mapping unsupported compiler codes to `compiler_validation`; the recorder rejects arbitrary identifier-shaped codes, extra fields, unsupported phases, and invalid authentication. This closes arbitrary prose in the `codes` field. It does not eliminate candidate-controlled UUID, count, timing, or order channels, and the combined count is not tamper-proof evidence or an unconditional lower bound against a malicious candidate. Isolation and reporter-only authority would require a separately approved execution contract. None of these diagnostics changes acceptance, scores, or graph trace validity.
+
+Changed seams and checkpoints:
+
+- Recorder request registration and export settlement: register authenticated graph and diagnostic requests before reading their bodies. Real HTTP `100-continue` fixtures hold the body across export without fixed sleeps, proving capture before sealing, diagnostic-only timeout omissions, and bounded ordinary graph-body failure. Diagnostic omissions leave graph proof complete/promotable; ordinary graph omissions still fail partial. The existing hung-upstream test protects the distinct outbound timeout boundary.
+- Reporter and recorder diagnostic vocabulary: a real SDK-to-recorder fixture proves fixed compiler fallback, rejected prose/token codes, phase/field closure, and graph-token completion attribution. This is attribution and sanitization proof, not attestation.
+- Dossier projection: known root and child rows reconcile persisted metrics without duplicates. Unmatched captured entries display as `Captured completion`, with no guessed parent or turn identity. A real two-turn EvalService run captures its first metric, fails later model preparation, persists, and reopens with the earlier count and failed trace still visible. The production browser fixture displays the unmatched captured row alongside root and child rows.
+
+The initial focused run caught a regression where timeout cancellation closed a fully received graph request before its existing 502 response could be delivered. Cancellation now destroys inbound requests only when their body is incomplete; fully received requests preserve the original upstream abort/502 behavior. The failing run is retained at `/tmp/eval-errors-686-settlement-focused.log`; final verification is recorded separately below.
+
+### Final settlement snapshot results
+
+All results below apply to the exact 22-file executable/test/PRD digest
+`d9d9404e471e742da18fcb935e1608beefbe1602139aae16adcd17febd5e8c0d`,
+relative to main `d9fc380c6172651482e44f2b916d160bf97ba368`.
+Sorted path + NUL + bytes + NUL defines the digest; `docs/evidence/` is excluded.
+No included source changed during the final checks.
+
+| Actual checkpoint | Result |
+| --- | --- |
+| Focused metric/recorder/dashboard suites | 39 tests passed, including real partially transmitted diagnostic and graph requests |
+| `npm run check` | Passed: native workspace/crash tests, package checks, 292 Vitest files / 3,659 tests passed (1 file / 3 tests skipped), 2 secret-boundary tests, 68 Python tests, receipt integrity, PRD readability |
+| `npm run build` | Passed: native runtimes and TypeScript workspace packages |
+| `npm run test:eval-compiled-runtime` | All 4 tests passed |
+| `npm run test:eval-web` | All declared chapters passed, including root/child/captured metric rows, unknown totals, failure/reopen display, timing, and review authority |
+
+Log hashes/lengths and exact source identity are retained in
+`settlement-verification.json`. No new live or paid inference ran.
+
+Adversarial assertion: reviewer `/root/design_authority_review`; exact digest
+above; all 22 changed executable/test/PRD paths reviewed, including settlement,
+closed codes, unattested authority, failure/reopen reconciliation, and secondary
+ordinary graph-body cancellation; verdict **PASS**, no unresolved findings.
+Independent verification: 4 suites / 74 tests passed. Browser additions were
+source-reviewed; the actual browser runner above is separate evidence. This
+assertion is invalidated by an included-source change.

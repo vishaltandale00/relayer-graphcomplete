@@ -292,7 +292,7 @@ export async function startGraphOperationRecorder({
   const stateFor = (interactionNodeId) => {
     let state = interactions.get(interactionNodeId);
     if (state === undefined) {
-      state = { events: [], graphEventCount: 0, diagnosticEventCount: 0, diagnosticBytes: 0, diagnosticDiscarded: 0, byteLength: 0, discardedEvents: 0, discardedBytes: 0, pending: new Map() };
+      state = { events: [], graphEventCount: 0, diagnosticEventCount: 0, diagnosticBytes: 0, diagnosticDiscarded: 0, byteLength: 0, discardedEvents: 0, discardedBytes: 0, pending: new Map(), pendingDiagnostics: new Map() };
       interactions.set(interactionNodeId, state);
     }
     return state;
@@ -361,12 +361,23 @@ export async function startGraphOperationRecorder({
       if (requestUrl.origin !== upstream.origin) {
         throw new InvalidGraphOperationTargetError("Graph operation recorder request target escaped its upstream origin.");
       }
-      const bodyLimit = proxyBodyLimit(method, requestUrl.pathname);
-      const requestBody = await readBoundedBody(request, bodyLimit);
-      const requestValue = parseJsonObject(requestBody);
       const requestToken = bearerToken(request.headers.authorization);
       if (requestToken !== undefined) knownSecrets.add(requestToken);
       const interactionNodeId = requestToken === undefined ? undefined : capabilityOwners.get(requestToken);
+      if (requestUrl.pathname.startsWith("/api/graph/") && interactionNodeId !== undefined) {
+        const state = stateFor(interactionNodeId);
+        const pending = requestUrl.pathname === "/api/graph/authoring-errors" ? state.pendingDiagnostics : state.pending;
+        let resolveActivity;
+        const activity = new Promise((resolve) => { resolveActivity = resolve; });
+        pending.set(activity, () => {
+          controller.abort(new Error("Graph operation export settlement timed out."));
+          if (!request.complete) { request.destroy(); response.destroy(); }
+        });
+        releaseActivity = () => { pending.delete(activity); resolveActivity(); };
+      }
+      const bodyLimit = proxyBodyLimit(method, requestUrl.pathname);
+      const requestBody = await readBoundedBody(request, bodyLimit);
+      const requestValue = parseJsonObject(requestBody);
       if (requestUrl.pathname === "/api/graph/authoring-errors") {
         const diagnostic = requestValue;
         const valid = method === "POST" && isObject(diagnostic)
@@ -374,7 +385,9 @@ export async function startGraphOperationRecorder({
           && diagnostic.schemaVersion === 1 && typeof diagnostic.id === "string"
           && /^[0-9a-f-]{36}$/.test(diagnostic.id) && ["client", "compiler"].includes(diagnostic.phase)
           && Array.isArray(diagnostic.codes) && diagnostic.codes.length > 0 && diagnostic.codes.length <= 16
-          && diagnostic.codes.every((code) => typeof code === "string" && /^[a-z][a-z0-9_]{0,63}$/.test(code));
+          && diagnostic.codes.every((code) => (diagnostic.phase === "client"
+            ? ["invalid_arguments", "client_validation"]
+            : ["compiler_validation", "unsafe_css", "detail_template_nested"]).includes(code));
         const status = interactionNodeId === undefined ? 401 : valid ? 202 : 400;
         if (status === 202) record(interactionNodeId, {
           schemaVersion: 1, method, path: requestUrl.pathname, status,
@@ -383,16 +396,6 @@ export async function startGraphOperationRecorder({
         response.writeHead(status, { "content-type": "application/json" });
         response.end(JSON.stringify({ recorded: status === 202 }));
         return;
-      }
-      if (requestUrl.pathname.startsWith("/api/graph/") && interactionNodeId !== undefined) {
-        const state = stateFor(interactionNodeId);
-        let resolveActivity;
-        const activity = new Promise((resolve) => { resolveActivity = resolve; });
-        state.pending.set(activity, controller);
-        releaseActivity = () => {
-          state.pending.delete(activity);
-          resolveActivity();
-        };
       }
       const headers = new Headers();
       for (const name of ["accept", "authorization", "content-type"]) {
@@ -477,18 +480,18 @@ export async function startGraphOperationRecorder({
     async exportInteraction(interactionNodeId, targetDirectory) {
       if (!positiveInteger(interactionNodeId)) throw new Error("Graph operation export needs a positive interaction node ID.");
       const state = stateFor(interactionNodeId);
-      while (state.pending.size > 0) {
+      while (state.pending.size + state.pendingDiagnostics.size > 0) {
         let timeout;
         const settled = await Promise.race([
-          Promise.allSettled([...state.pending.keys()]).then(() => true),
+          Promise.allSettled([...state.pending.keys(), ...state.pendingDiagnostics.keys()]).then(() => true),
           new Promise((resolve) => { timeout = setTimeout(() => resolve(false), settleTimeoutMs); }),
         ]);
         clearTimeout(timeout);
         if (!settled) {
-          const timedOut = [...state.pending.values()];
-          state.discardedEvents += timedOut.length;
-          for (const controller of timedOut) controller.abort(new Error("Graph operation export settlement timed out."));
-          await Promise.allSettled([...state.pending.keys()]);
+          state.discardedEvents += state.pending.size;
+          state.diagnosticDiscarded += state.pendingDiagnostics.size;
+          for (const cancel of [...state.pending.values(), ...state.pendingDiagnostics.values()]) cancel();
+          await Promise.allSettled([...state.pending.keys(), ...state.pendingDiagnostics.keys()]);
         }
       }
       exportedInteractions.add(interactionNodeId);

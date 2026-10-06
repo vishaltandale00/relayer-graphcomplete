@@ -368,3 +368,17 @@ describe("Eval dashboard run presentation", () => {
     expect(dossier.actions.traceable).toBe(true);
   });
 });
+
+
+it("reconciles persisted metrics without duplicating root or child rows or guessing captured identities", () => {
+  const metric = { schemaVersion: 1, observed: 2, total: null, coverage: "partial", byCause: { compiler: 2 }, reasons: [] };
+  const dossier = projectExecutionDossier({ kind: "local-eval" }, {
+    turns: [{ interactionId: 10 }], semanticChildren: [{ interactionId: 11, sourceInteractionId: 10, sourceActionId: 77 }],
+    authoringErrorMetrics: { 10: metric, 11: metric, 12: metric }, status: "interrupted",
+  });
+  expect(dossier.authoringErrors).toHaveLength(3);
+  expect(dossier.authoringErrors.map(({ kind, observed }) => ({ kind, observed }))).toEqual([
+    { kind: "turn", observed: 2 }, { kind: "child", observed: 2 }, { kind: "captured", observed: 2 },
+  ]);
+  expect(dossier.authoringErrors[2]).not.toHaveProperty("sourceInteractionId");
+});

@@ -2,7 +2,8 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import { randomUUID } from "node:crypto";
 import type { GraphCapability } from "./types.js";
 
-// Diagnostics contain no arguments, authored text, stacks, or credentials.
+// Client reports are unattested; the graph token establishes attribution, not incident truth.
+// The SDK sends fixed codes rather than arguments, authored text, stacks, or credentials.
 const reported = new WeakMap<object, string>();
 const originErrors = new WeakSet<object>();
 const pending = new Set<Promise<void>>();
@@ -16,7 +17,10 @@ export function reportAuthoringError(scope: GraphCapability, error: unknown, com
   if (!scope.authoringErrors || !(error instanceof Error) || transportErrors.has(error)) return;
   try {
     const issues = compilerCodes?.map((code) => ({ code })) ?? (error as Error & { issues?: readonly { code: string }[] }).issues;
-    const codes = issues?.map((issue) => issue.code) ?? [error instanceof TypeError ? "invalid_arguments" : "client_validation"];
+    const codes = issues === undefined
+      ? [error instanceof TypeError ? "invalid_arguments" : "client_validation"]
+      : issues.map((issue) => ["unsafe_css", "detail_template_nested"].includes(issue.code) ? issue.code : "compiler_validation");
+    if (codes.length === 0) codes.push("compiler_validation");
     const incidents = scopes.getStore()?.reported ?? reported;
     let id = incidents.get(error);
     if (id !== undefined) return;
