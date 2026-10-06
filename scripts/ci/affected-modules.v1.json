@@ -96,6 +96,9 @@
     { "exact": "docs/graph-query-v1.md", "package": "relayer-graph-core" }
   ],
   "npmOwners": [
+    { "exact": "docs/windows-development.md", "package": "relayer-desktop", "packaging": true },
+    { "exact": "scripts/windows-dev-sync.mjs", "package": "relayer-desktop", "packaging": true },
+    { "exact": "scripts/run-windows-dev-loop.mjs", "package": "relayer-desktop", "packaging": true },
     { "prefix": "packages/eval-runner/", "package": "@relayer/eval-runner", "vitestFiles": ["packages/eval-runner/test", "test/eval-app-integration.test.mjs", "test/eval-task-actor.test.mjs", "test/eval-task-actor-errors.test.mjs"] },
     { "prefix": "packages/visual-assets/", "package": "@relayer/visual-assets", "vitestFiles": ["packages/visual-assets/test"] },
     {

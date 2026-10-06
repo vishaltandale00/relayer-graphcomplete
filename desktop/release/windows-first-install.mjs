@@ -6,6 +6,43 @@ import { DESKTOP_RELEASE, desktopReleaseTarget } from './contract.mjs';
 import { isNumericVersion } from './numeric-version.mjs';
 const sha = bytes => createHash('sha256').update(bytes).digest('hex');
 const windows = desktopReleaseTarget('windows-x64');
+// The pinned electron-builder NSIS UUID.v5 production identity. The deterministic
+// fixture compares this to the real builder implementation, not an invented key.
+export const WINDOWS_NSIS_INSTALLATION = Object.freeze({
+  guid: '84f14565-3886-5a18-8e80-eb3a9f9c3c18',
+  installKey: 'Software\\84f14565-3886-5a18-8e80-eb3a9f9c3c18',
+  uninstallKey: 'Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\84f14565-3886-5a18-8e80-eb3a9f9c3c18',
+});
+const windowsPath = value => typeof value === 'string' && win32.isAbsolute(value) ? win32.resolve(value).toLowerCase() : null;
+export function validateCollectedWindowsInstallEnvironment(preflight, runtime) {
+  const identity = preflight.identity, installation = preflight.installation;
+  if (preflight.userDataAbsent !== true || identity?.ordinaryUser !== true || identity.authenticated !== true || identity.administratorGroupMember !== false
+    || !/^S-1-(?:\d+-)+\d+$/.test(identity.sid ?? '') || ['S-1-5-18', 'S-1-5-19', 'S-1-5-20'].includes(identity.sid) || !identity.name
+    || !windowsPath(identity.userProfile) || !windowsPath(identity.appDataDirectory)
+    || windowsPath(preflight.freshProfile) !== windowsPath(win32.join(identity.appDataDirectory, 'Relayer'))
+    || runtime.identity?.sid !== identity.sid || runtime.identity?.name !== identity.name || runtime.identity?.ordinaryUser !== true
+    || runtime.identity?.authenticated !== true || runtime.identity?.administratorGroupMember !== false
+    || windowsPath(runtime.freshProfile) !== windowsPath(preflight.freshProfile)
+    || windowsPath(runtime.identity?.userProfile) !== windowsPath(identity.userProfile)) throw new Error('Collected first-install identity is not the same fresh ordinary Windows user.');
+  const appDirectory = windowsPath(installation?.appDirectory);
+  if (!appDirectory || !windowsPath(runtime.installedExecutable) || win32.basename(runtime.installedExecutable).toLowerCase() !== 'relayer.exe'
+    || appDirectory !== windowsPath(win32.dirname(runtime.installedExecutable)) || !Array.isArray(installation.directories)
+    || installation.directories.some(item => !windowsPath(item.path) || item.absent !== true)) throw new Error('Entire installed application directory was not absent before installation.');
+  const expectedDirectories = [appDirectory];
+  for (const parent of [identity.localAppDataDirectory && win32.join(identity.localAppDataDirectory, 'Programs'), identity.programFilesDirectory, identity.programFilesX86Directory]) {
+    if (!windowsPath(parent)) throw new Error('Standard Windows installation locations were not inspected.');
+    for (const name of ['Relayer', 'relayer-desktop']) expectedDirectories.push(windowsPath(win32.join(parent, name)));
+  }
+  const checkedDirectories = new Set(installation.directories.map(item => windowsPath(item.path)));
+  if (expectedDirectories.some(path => !checkedDirectories.has(path))) throw new Error('Standard Windows installation locations were not inspected.');
+  const checks = installation.registryChecks;
+  if (!Array.isArray(checks) || checks.length !== 4 || !Array.isArray(installation.registrations) || installation.registrations.length !== 0) throw new Error('Existing or uninspected NSIS product registration.');
+  for (const hive of ['CurrentUser', 'LocalMachine']) for (const view of ['Registry32', 'Registry64']) {
+    const matching = checks.filter(item => item.hive === hive && item.view === view);
+    if (matching.length !== 1 || matching[0].checked !== true || matching[0].installKey !== WINDOWS_NSIS_INSTALLATION.installKey
+      || matching[0].uninstallKey !== WINDOWS_NSIS_INSTALLATION.uninstallKey) throw new Error('Existing or uninspected NSIS product registration.');
+  }
+}
 export function validateWindowsFirstInstall({ receipt, installerName, installerSha256, observations }) {
   const artifacts = receipt?.artifacts?.filter(item => item.name.endsWith('.exe'));
   if (receipt?.schemaVersion !== 2 || receipt.product !== DESKTOP_RELEASE.productName || receipt.appId !== DESKTOP_RELEASE.productionAppId
@@ -73,8 +110,23 @@ export async function createWindowsFirstInstallEvidence({ releaseReceiptPath, in
     || runtime.nodeVersion !== `v${observations.runtime?.nodeVersion}` || runtime.unicodeStdinPreserved !== true
     || JSON.stringify(runtime.crtLoadedModules) !== JSON.stringify(observations.runtime?.crtLoadedModules)
     || JSON.stringify(runtime.signatures) !== JSON.stringify(observations.signatures)) throw new Error('Collected installed runtime differs from observations.');
+  validateCollectedWindowsInstallEnvironment(preflight, runtime);
+  const expectedUserProfile = windowsPath(runtime.identity.userProfile);
+  const providerHome = windowsPath(authoring.providerHome), rollout = windowsPath(authoring.rolloutPath);
+  const defaultHome = windowsPath(win32.join(runtime.identity.userProfile, '.codex'));
+  const legacyHome = windowsPath(win32.join(runtime.freshProfile, 'codex-home'));
+  const providerRoot = windowsPath(win32.join(runtime.freshProfile, 'provider-runtimes'));
+  const providerRelative = providerHome && win32.relative(providerRoot, providerHome).split(win32.sep);
+  const supportedHome = authoring.providerHomeKind === 'codex-default' && providerHome === defaultHome
+    || authoring.providerHomeKind === 'codex-legacy' && providerHome === legacyHome
+    || authoring.providerHomeKind === 'codex-provider' && providerRelative?.length === 2 && /^[a-z0-9][a-z0-9._-]*$/i.test(providerRelative[0]) && providerRelative[0] !== '..' && providerRelative[1] === 'codex-home';
+  if (authoring.userSid !== runtime.identity.sid || windowsPath(authoring.userProfile) !== expectedUserProfile
+    || authoring.installedRuntimeSha256 !== observations.evidence.find(item => item.role === 'runtime').sha256 || !supportedHome || !rollout
+    || !rollout.startsWith(`${win32.join(providerHome, 'sessions')}\\`)) throw new Error('Live authoring belongs to a different Windows user or unsupported provider home.');
   const expectedNode = win32.resolve(win32.dirname(runtime.installedExecutable ?? ''), 'resources/node/node.exe').toLowerCase();
-  if (authoring.schema !== 'windows-live-authoring-runtime/v1' || authoring.interactionNodeId !== observations.live?.interactionNodeId || authoring.exitCode !== 0
+  if (authoring.schema !== 'windows-live-authoring-runtime/v2' || authoring.interactionNodeId !== observations.live?.interactionNodeId || authoring.finalLayerId !== observations.live?.finalLayerId || authoring.exitCode !== 0
+    || authoring.submission?.nodeId !== authoring.interactionNodeId || authoring.submission?.rootLayerId !== authoring.finalLayerId
+    || !Number.isSafeInteger(authoring.submission?.rootActionId) || authoring.submission.rootActionId <= 0 || !/^[a-f0-9]{64}$/.test(authoring.submission?.resultSha256 ?? '') || authoring.parserVersion !== '5.9.3'
     || typeof authoring.nodePath !== 'string' || win32.resolve(authoring.nodePath).toLowerCase() !== expectedNode
     || typeof authoring.userDataDirectory !== 'string' || win32.resolve(authoring.userDataDirectory).toLowerCase() !== win32.resolve(observations.freshProfile.path).toLowerCase()
     || !/^[a-f0-9]{64}$/.test(authoring.commandSha256 ?? '') || !/^[a-f0-9]{64}$/.test(authoring.rolloutSha256 ?? '') || !authoring.callId

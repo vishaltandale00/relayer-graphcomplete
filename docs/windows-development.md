@@ -55,6 +55,9 @@ From the Mac checkout:
 npm run desktop:sync:windows -- --base 3c641e1c2fbb58e4973475819a5c5c93dddd79c0 --plan
 # First native build, after inspecting compatible trusted caches.
 npm run desktop:sync:windows -- --base 3c641e1c2fbb58e4973475819a5c5c93dddd79c0 --rust --allow-cold
+# Migrate an existing partial-state workspace: audit all base/acknowledged bytes,
+# then apply current deltas; retain Cargo objects and verified preparation.
+npm run desktop:sync:windows -- --base 3c641e1c2fbb58e4973475819a5c5c93dddd79c0 --audit-source --sync-only
 # Observe the lease, last result and active compiler processes.
 npm run desktop:status:windows
 # Reconcile only after a lost transfer acknowledgement; verifies remote bytes.
@@ -69,16 +72,48 @@ npm run desktop:sync:windows -- --base 3c641e1c2fbb58e4973475819a5c5c93dddd79c0
 
 The command uses the existing Azure CLI login and VM; it creates no cloud
 resources. It excludes credentials, dotenv files, .git, dependencies, native
-outputs and application data. All remote old hashes are checked before writes.
-Directory symlinks, duplicate/case-alias paths, unmanaged deletions and changed
-remote source are rejected. Changed files have rollback copies. The Mac retains
-an acknowledged per-file state so subsequent transfers contain deltas. Stage new source
+outputs and application data. Version 2 audits the complete trusted tracked
+manifest, including unchanged Git-base files, before writes. Its before-state
+contains every acknowledged prior byte and absent new path; its current state
+contains every tracked file and deletion. Credential-handling source modules
+remain included; credential data and dotenv files are excluded. Directory
+symlinks, duplicate/case-alias paths, unmanaged deletions and changed remote
+source are rejected. A source-tree inventory also rejects unreviewed extra files
+that packaging globs or module loading could consume. The explicit exceptions
+are the fixed root dependency/generated directories (`node_modules`, `target`,
+`dist`, `.relayer`, coverage), desktop outputs, the four known package output
+roots and named renderer/agent-resource output directories, logs, local credential
+data and PRD annotations. Arbitrary source subdirectories named `dist`, `target`
+or `node_modules` receive no exception. Tracked files
+always remain audited inside those paths; arbitrary ignored source files do not
+gain an exception from `.gitignore`. Generated outputs remain governed by locked
+dependency preparation and package qualification. Changed files and the previous source-state record have
+rollback copies. The Mac retains the complete acknowledged manifest while
+subsequent transfers contain only changed file contents plus compressed hashes. Stage new source
 files with `git add` before syncing; arbitrary untracked files are never uploaded.
 A Mac lock serializes sync-state writes; a VM lease holds the source and build
 outputs exclusively through dependency installation, packaging and the final receipt. Deltas
 above 4 MiB require artifact staging instead of unlimited Run Command payloads.
 Dependency installation has its own success marker bound to the lockfile and Node
 version. Failed setup is retried even when the source delta is unchanged.
+
+Legacy partial manifests fail closed. After the active build finishes, use the
+explicit `--audit-source --sync-only` command above with the original VM base.
+It overlays the old acknowledged deltas onto the trusted Git baseline, audits
+every remote byte before applying current Mac deltas, and retains the old Mac
+state plus the remote prior record. Hidden unchanged-file mismatches stop before
+writes and name the path; inspect and restore only that source from its known
+commit/receipt, then audit again. Do not discard the Cargo target or native cache.
+Old partial plans cannot be resumed or reconciled as qualified source. Once the
+v2 audit is acknowledged, a normal `--rust` loop preserves its compiler identity.
+
+Dispatch and resume independently audit the full current manifest before
+executing the remote driver. Reconciliation rechecks that same complete retained
+identity before advancing Mac state. The Windows wrapper requires the acknowledged `--sync-id` and v2 state. It
+binds that state to the full digest and baseline identity retained in its source
+lease, then checks all tracked bytes before dependencies and again after
+packaging. A standalone invocation without an acknowledged sync fails closed. The source digest identifies the complete tracked
+manifest, not merely the transferred paths. Untracked files are never uploaded.
 
 Native preparation and Cargo outputs use the fixed short `C:\RelayerDev` prefix,
 avoiding path-length failures and source-directory moves. Cache identity binds
@@ -101,29 +136,45 @@ optimization if measurements justify it.
 
 ## First-install qualification
 
-Use a fresh ordinary Windows user with no pre-existing Relayer installation or
-application data. Keep the compiler user's workspace separate. Do not remove
+Use a fresh ordinary Windows user with no pre-existing production Relayer installation or
+application data. Run the inspection in that user's session; administrator-group
+members and service identities, including Azure Run Command SYSTEM, fail qualification.
+Keep the compiler user's workspace separate. Do not remove
 another user's application data. Preserve the immutable successful candidate
 run/attempt, artifact ID/ZIP hash, sealed release receipt and installer hash.
 
 1. Run `desktop/release/inspect-windows-first-install.ps1 -Phase prepare` with
    explicit installer, release receipt, intended installed executable, fresh user
    data and evidence directory. It checks the exact installer hash and sealed
-   publisher signature, and rejects an existing install/profile.
+   publisher signature, and records the actual Windows SID/profile. The entire intended
+   application directory and user-data directory must be absent, not only Relayer.exe.
+   It also checks default per-user/machine production directories and the pinned
+   NSIS install/uninstall keys in both HKCU/HKLM registry views, including legacy
+   production uninstall display names. Existing directories or registrations fail
+   first-install qualification; do not erase them to make the check pass.
 2. Install through the normal interactive installer as the fresh ordinary user.
    Launch normally with external Node absent from PATH and development overrides
    cleared. Record the real installed path and packaged version/source metadata.
 3. Run the inspection script with `-Phase installed`. It verifies all five
    Relayer-signed files and compares installed application files byte-for-byte
-   against the exact NSIS installer payload using the locked `7zip-bin` tool, exercises the bundled Node with Unicode stdin, and records
-   the DLL paths actually loaded by the running Rust services. System VC-runtime
+   against the exact NSIS installer payload using the pinned electron-builder 7zip toolset, exercises the bundled Node with Unicode stdin, and records
+   the DLL paths actually loaded by the running Rust services. The recorded identity
+   must match the prepare SID and profile. System VC-runtime
    origins fail the gate.
 4. Connect the live provider; complete `Why the sky is blue?`; inspect the graph
    and navigation. Collect the exact completion state using the installed Node:
    `node.exe desktop/release/collect-windows-install-state.mjs <graph.sqlite3> <interaction-id> <new-output.json>`.
-   Collect sanitized proof from the actual native Codex rollout in this fresh profile:
-   `node.exe desktop/release/collect-windows-authoring-runtime.mjs <rollout.jsonl> <fresh-user-data> <installed-Relayer.exe> <interaction-id> <runtime-observation-timestamp> <new-authoring.json>`.
-   This checks the successful app-owned Node invocation and retains hashes, paths and call IDs only. The operator maps the chosen rollout to the live interaction; the gate binds that ID, fresh profile, installed Node path and chronology.
+   Collect sanitized proof from the actual native Codex rollout:
+   `node.exe collect-windows-authoring-runtime.mjs <rollout.jsonl> <installed.json> <observed-interaction-id> <observed-final-layer-id> <runtime-observation-timestamp> <new-authoring.json>`.
+   Use the installed bundled Node to run this helper. It derives identity and paths from
+   the real installed inspection, then derives the interaction and final layer from
+   the successful `graph.submit` API result. CLI IDs are expectations, never labels
+   copied onto a generic Node probe. It retains hashes, paths, SID and call IDs only.
+   Normal API-provider Codex sessions can live in the QA user's `.codex/sessions`;
+   managed subscription/provider homes can live under Relayer app data. The helper
+   recognizes these existing routes, binds them to the measured QA SID/profile and
+   installed runtime receipt, and rejects another user's or an unsupported home.
+   Do not set a development `CODEX_HOME` override merely to obtain proof.
    Save screenshots/video and the sanitized authoring-runtime record; do not copy
    credentials, raw provider rollouts or private application databases.
 5. Close cleanly, launch the installed shortcut, reopen the same persisted graph,
@@ -135,6 +186,72 @@ run/attempt, artifact ID/ZIP hash, sealed release receipt and installer hash.
    environment, signatures, runtime, live acceptance, reopen or retained evidence
    withholds the gate. The command rehashes evidence files and refuses to overwrite
    an existing gate result.
+
+### Qualification helper staging and native submission proof
+
+Stage qualification helpers from the exact reviewed checkout after its locked
+`npm ci`. They are QA tooling; TypeScript is not added to the application.
+The authoring collector parses JavaScript without evaluating it and requires
+TypeScript **5.9.3**, authenticated by the existing lockfile integrity:
+`sha512-jl1vZzPDinLr9eUt3J/t7V6FgNEw9QjvBPdysz9KfQDD41fQrC2Y4vKQdiaUpFT4bXlb1RHhLpp8wtm6M5TgSw==`.
+Copy these release helpers into the ordinary user's QA tools directory:
+`inspect-windows-first-install.ps1`, `read-windows-install-metadata.mjs`,
+`collect-windows-installer-files.mjs`, `collect-windows-install-state.mjs`,
+and `collect-windows-authoring-runtime.mjs`. Alongside them, stage the unchanged
+locked `node_modules/typescript/package.json`, `lib/typescript.js`, `LICENSE.txt`
+and `ThirdPartyNoticeText.txt`, retaining the same package directory structure.
+Retain their SHA-256 file inventory with the helper/source receipt. For example,
+from the already authenticated checkout:
+
+```powershell
+$qaTools=Join-Path $env:USERPROFILE 'RelayerQualificationTools'
+$ts=Join-Path $qaTools 'node_modules\typescript'
+New-Item -ItemType Directory -Path (Join-Path $ts 'lib') -Force | Out-Null
+foreach($name in @('package.json','LICENSE.txt','ThirdPartyNoticeText.txt')) {
+  Copy-Item -LiteralPath (Join-Path $checkout ('node_modules\typescript\'+$name)) -Destination $ts
+}
+Copy-Item -LiteralPath (Join-Path $checkout 'node_modules\typescript\lib\typescript.js') -Destination (Join-Path $ts 'lib')
+```
+
+The remaining installed-app checks run with `resources/node/node.exe`; they need
+no external Node installation or compiler PATH. Missing/wrong parser inputs stop
+collection. The pinned electron-builder 26.15.3 toolset remains required for installer payload comparison. Resolve its `app-builder-lib/out/toolsets/7zip.js` `getPath7za()` with `ELECTRON_BUILDER_7ZIP_PATH` unset. The Windows x64 `7zip@1.0.0` archive is authenticated against SHA-256 `be071f15bd6da2f78fe81c6ddef2009b0c4d8a51f36b780cb806c7e6df95e1b3`; retain the resolved executable hash with the helper inventory.
+
+Provide proof-specific guidance through the normal supported model request/context:
+author the graph drafts using earlier commands, then run a separate minimal final
+submission through the exact installed app-owned Node. The qualifying JavaScript
+contains only the displayed installed graph-client import, `const graph =
+RelayerGraphClient.fromEnv()`, an awaited `graph.submit` with the **actual positive
+literal interaction ID**, and JSON printing of that returned API object. Example
+shape (replace the path and `123` with the real prompt's values):
+
+```javascript
+import { RelayerGraphClient } from 'file:///C:/actual-installed-app/resources/graph-client/index.js';
+const graph = RelayerGraphClient.fromEnv();
+const result = await graph.submit(123);
+console.log(JSON.stringify(result));
+```
+
+Pipe that program using the native single-quoted PowerShell here-string to the
+exact single-quoted `resources/node/node.exe --input-type=module` command, doubling
+apostrophes in its literal path. The entire PowerShell command contains only that
+pipeline, optionally preceded by fixed `$OutputEncoding` and
+`[Console]::OutputEncoding` UTF-8 assignments; surrounding or trailing commands
+cannot qualify. The parser accepts this small final-submit grammar; extra mutation/authoring statements, probes,
+caller-fabricated result objects and generic success text cannot qualify. This
+changes the qualification guidance, not the application's recursion or scheduler.
+
+For a native custom `exec` wrapper, preserve the complete inner command result:
+use exactly `const r = await tools.exec_command({cmd: <static literal command>,
+shell: "powershell", max_output_tokens: 20000, yield_time_ms: 30000}); text(r);`.
+A static literal includes an ordinary quoted string or a template without
+interpolation. The paired native output must retain `exit_code: 0` and its complete
+stdout JSON API result. `text(r.output)` discards the inner exit status and fails
+the gate even when the outer script says completed. Direct native function-call
+output must similarly retain its single successful status header and final stdout.
+Both formats must return the actual accepted completion's node/root-layer IDs,
+which are matched to the observed persisted graph. Earlier Dev videos or truncated,
+status-discarding rollouts remain non-certifying; rerun the real installed scenario.
 
 A `windows-first-install/v1` PASS qualifies only those exact installer bytes and
 observations. It is not an updater canary, Preview publication, Stable promotion,
@@ -156,7 +273,7 @@ isolation. No graph lifecycle or provider recursion policy is changed.
 | Provider PATH/private trace | Codex environment and private-presentation trace tests | No external Node and no credential expansion |
 | Desktop factory composition | Harness runtime integration and required `npm run check` fallback | Installed app invokes the owned runtime |
 | Local Rust cache and outputs | Dev input change/symlink tests; flags/platform rejection | Cold and changed-source warm timings, verified native preparation |
-| Source delta mutation | Real subprocess delta, old-hash rejection, backup and parent-symlink escape tests | Acknowledged VM delta and source digest |
+| Complete tracked-source identity and delta mutation | Real Git-baseline/subprocess fixtures cover unchanged-file tampering, extra unreviewed source, deletion, local/remote parent symlinks, explicit partial-state migration, retained rollback, recovery and lease-bound wrapper verification | Actual full-baseline VM audit, acknowledged v2 source digest, then changed-source warm build |
 | Installer evidence authority | First-install validator rejects missing or mismatched source/runtime/acceptance/reopen/evidence | Actual signed installation, DLL origins, accepted graph, clean shutdown and reopen |
 | Sealed evidence files | Evidence hashes rechecked, output written once | Retained screenshots/video/runtime/persistence hashes |
 

@@ -84,6 +84,23 @@ function fullPlanWithoutDiff() {
 // Each case spawns the planner as a subprocess, and the full-plan cases also
 // run cargo metadata; the default 5s per-test budget races CI runner load.
 describe("affected-module plan v1", { timeout: 30_000 }, () => {
+  test("maps Windows development and qualification operations to the desktop portfolio without admitting adjacent unknown paths", () => {
+    for (const path of ["docs/windows-development.md", "scripts/windows-dev-sync.mjs", "scripts/run-windows-dev-loop.mjs"]) {
+      const result = plan(path);
+      expect(result.mode).toBe("affected");
+      expect(result.reasons).toEqual([`${path}: mapped`]);
+      expect(result.npmWorkspaces).toContain("relayer-desktop");
+      expect(result.npmBuildWorkspaces).toEqual(expect.arrayContaining(["@relayer/graph-client", "@relayer/harness-host", "@relayer/visual-assets", "relayer-desktop"]));
+      expect(result.vitestFiles).toEqual(expect.arrayContaining(["test", "packages"]));
+      expect(result.rootTypeScript).toBe(true);
+      expect(result.chapters).toMatchObject({ typescript: true, vitest: true, packaging: true });
+    }
+    for (const path of ["docs/windows-development-unknown.md", "scripts/windows-dev-sync-unknown.mjs", "scripts/run-windows-dev-loop-unknown.mjs"]) {
+      const result = plan(path);
+      expect(result.mode).toBe("full");
+      expect(result.reasons).toContain(`${path}: unmapped path`);
+    }
+  });
   test("maps the Windows Authenticode runtime and early probe to signature and workflow checkpoints", () => {
     for (const path of ["desktop/release/verify-windows-app.mjs", "scripts/check-windows-signature-runtime.mjs"]) {
       const result = plan(path);
