@@ -47,7 +47,7 @@ function Read-InstallationRegistrations {
       try {
         foreach($keyPath in @($nsisInstallKey,$nsisUninstallKey)) {
           $key=$base.OpenSubKey($keyPath)
-          if ($key) { try { $registrations+=[PSCustomObject]@{hive=$hive;view=$view;key=$keyPath;kind='production-nsis';installLocation=$key.GetValue('InstallLocation')} } finally { $key.Dispose() } }
+          if ($key) { try { $registrations+=[PSCustomObject]@{hive=$hive;view=$view;key=$keyPath;kind='production-nsis';installLocation=$key.GetValue('InstallLocation');displayName=$key.GetValue('DisplayName');displayVersion=$key.GetValue('DisplayVersion');uninstallString=$key.GetValue('UninstallString')} } finally { $key.Dispose() } }
         }
         # Earlier production identities can have another GUID. The pinned
         # builder writes DisplayName as productName + numeric version.
@@ -59,7 +59,7 @@ function Read-InstallationRegistrations {
               if (!$entry) { continue }
               try {
                 $display=[string]$entry.GetValue('DisplayName')
-                if ($display -match '^Relayer(?:$|\s+\d+(?:\.\d+)*\b)') { $registrations+=[PSCustomObject]@{hive=$hive;view=$view;key="Software\Microsoft\Windows\CurrentVersion\Uninstall\$name";kind='production-display-name';displayName=$display;installLocation=$entry.GetValue('InstallLocation')} }
+                if ($display -match '^Relayer(?:$|\s+\d+(?:\.\d+)*\b)') { $registrations+=[PSCustomObject]@{hive=$hive;view=$view;key="Software\Microsoft\Windows\CurrentVersion\Uninstall\$name";kind='production-display-name';displayName=$display;displayVersion=$entry.GetValue('DisplayVersion');uninstallString=$entry.GetValue('UninstallString');installLocation=$entry.GetValue('InstallLocation')} }
               } finally { $entry.Dispose() }
             }
           } finally { $uninstall.Dispose() }
@@ -75,6 +75,7 @@ $InstalledExecutable=[IO.Path]::GetFullPath($InstalledExecutable)
 $FreshUserData=[IO.Path]::GetFullPath($FreshUserData)
 if ([IO.Path]::GetFileName($InstalledExecutable) -ne 'Relayer.exe') { throw 'Explicit production Relayer.exe install path required' }
 $app=[IO.Path]::GetDirectoryName($InstalledExecutable)
+if ($app -ne [IO.Path]::GetFullPath((Join-Path $identity.localAppDataDirectory 'Programs\relayer-desktop'))) { throw 'Expected default one-click per-user production install directory required' }
 $EvidenceDirectory=[IO.Path]::GetFullPath($EvidenceDirectory)
 New-Item -ItemType Directory -Path $EvidenceDirectory -Force | Out-Null
 $out=Join-Path $EvidenceDirectory "$Phase.json"
@@ -96,6 +97,11 @@ if ($Phase -eq 'prepare') {
   Write-Output 'Installer identity verified. Install interactively in the fresh ordinary-user account; this is not a gate pass.'
   exit
 }
+$registry=Read-InstallationRegistrations
+$install=@($registry.registrations | Where-Object { $_.kind -eq 'production-nsis' -and $_.hive -eq 'CurrentUser' -and $_.view -eq 'Registry64' -and $_.key -eq $nsisInstallKey })
+$uninstall=@($registry.registrations | Where-Object { $_.kind -eq 'production-nsis' -and $_.hive -eq 'CurrentUser' -and $_.view -eq 'Registry64' -and $_.key -eq $nsisUninstallKey })
+$expectedUninstall='"'+(Join-Path $app 'Uninstall Relayer.exe')+'" /currentuser'
+if ($install.Count -ne 1 -or $uninstall.Count -ne 1 -or $install[0].installLocation -ne $app -or $uninstall[0].displayName -ne ('Relayer '+$receipt.version) -or $uninstall[0].displayVersion -ne $receipt.version -or $uninstall[0].uninstallString -ne $expectedUninstall) { throw 'Expected current-user x64 NSIS install and uninstall registration not bound to this installed candidate' }
 $signatures+=Read-Signature $InstalledExecutable 'electron'
 $signatures+=Read-Signature (Join-Path $app 'resources\bin\relayer-app-server.exe') 'app-server'
 $signatures+=Read-Signature (Join-Path $app 'resources\bin\relayer-graph-server.exe') 'graph-server'
@@ -129,5 +135,5 @@ $OutputEncoding=[System.Text.UTF8Encoding]::new($false)
 $sample=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('Y2Fmw6kg5rGJ5a2XIPCfjKTvuI8='))
 $stdinProof=('console.log('+($sample | ConvertTo-Json -Compress)+')') | & $node --input-type=module
 if ($LASTEXITCODE -ne 0 -or $stdinProof -ne $sample) { throw 'Unicode Node stdin roundtrip failed' }
-[IO.File]::WriteAllText($out, ([PSCustomObject]@{schema='windows-first-install-runtime/v1';at=[DateTime]::UtcNow.ToString('o');installedExecutable=$InstalledExecutable;freshProfile=$FreshUserData;identity=$identity;sourceCommit=$metadata.sourceCommit;version=$metadata.version;nodeVersion=$version;unicodeStdinPreserved=$true;crtLoadedModules=$modules;signatures=$signatures} | ConvertTo-Json -Depth 8), [Text.UTF8Encoding]::new($false))
+[IO.File]::WriteAllText($out, ([PSCustomObject]@{schema='windows-first-install-runtime/v1';at=[DateTime]::UtcNow.ToString('o');installedExecutable=$InstalledExecutable;freshProfile=$FreshUserData;identity=$identity;sourceCommit=$metadata.sourceCommit;version=$metadata.version;nodeVersion=$version;unicodeStdinPreserved=$true;crtLoadedModules=$modules;installation=@{appDirectory=$app;registryChecks=$registry.checks;registrations=$registry.registrations};signatures=$signatures} | ConvertTo-Json -Depth 8), [Text.UTF8Encoding]::new($false))
 Write-Output 'Installed signatures and actual local CRT loads captured. Live graph, navigation, shutdown and reopen evidence remain required.'

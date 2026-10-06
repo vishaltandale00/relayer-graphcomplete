@@ -58,8 +58,14 @@ export function ignoredWindowsGeneratedPath(name) {
   for (const pkg of ['graph-client', 'harness-host', 'visual-assets', 'eval-runner'])
     for (const output of ['dist', 'node_modules']) roots.push(`packages/${pkg}/${output}`);
   return roots.some(prefix => name === prefix || name.startsWith(`${prefix}/`))
-    || /(?:^|\/)\.DS_Store$|\.log$/i.test(name)
+    || name === '.DS_Store'
     || ['docs/prd/comments.json', 'docs/prd/annotations.json'].includes(name);
+}
+// These operator files are outside the desktop package tree and native source.
+// Credential-shaped names inside shipped/build inputs receive no exception.
+export function ignoredWindowsLocalDataPath(name) {
+  return ['.env', '.env.local', '.env.example', 'live-run.local.json'].includes(name)
+    || /^[^/\\]+\.log$/i.test(name);
 }
 export function verifyWindowsSourceInventory({ fs, path, root, state }) {
   const expected=new Set(Object.entries(state).filter(([,hash])=>hash!==null).map(([name])=>name)), parents=new Set();
@@ -68,7 +74,7 @@ export function verifyWindowsSourceInventory({ fs, path, root, state }) {
     const directory=relative?path.join(root,...relative.split('/')):root;
     for(const entry of fs.readdirSync(directory,{withFileTypes:true})){
       const name=relative?`${relative}/${entry.name}`:entry.name;
-      if(!expected.has(name)&&!parents.has(name)&&((entry.isFile()&&excludedWindowsCredentialPath(name))||ignoredWindowsGeneratedPath(name)))continue;
+      if(!expected.has(name)&&!parents.has(name)&&((entry.isFile()&&ignoredWindowsLocalDataPath(name))||ignoredWindowsGeneratedPath(name)))continue;
       if(entry.isSymbolicLink())throw new Error(`Source inventory symlink: ${name}`);
       if(entry.isDirectory())visit(name);
       else if(!entry.isFile()||!expected.has(name))throw new Error(`Unexpected unreviewed source: ${name}`);
@@ -114,6 +120,7 @@ const safeWindowsSyncPath=${safeWindowsSyncPath.toString()};
 const validateWindowsSourceManifest=${validateWindowsSourceManifest.toString()};
 const windowsSourceFilePath=${windowsSourceFilePath.toString()};
 const ignoredWindowsGeneratedPath=${ignoredWindowsGeneratedPath.toString()};
+const ignoredWindowsLocalDataPath=${ignoredWindowsLocalDataPath.toString()};
 const verifyWindowsSourceInventory=${verifyWindowsSourceInventory.toString()};
 const verifyWindowsManifestFiles=${verifyWindowsManifestFiles.toString()};
 const verifyWindowsFullSourceState=${verifyWindowsFullSourceState.toString()};

@@ -23,7 +23,7 @@ function fixture() {
     runtime: { nodeVersion: '22.23.2', appOwnedNodeExecuted: true, unicodeStdinPreserved: true, crtLoadedModules: ['msvcp140.dll', 'vcruntime140.dll', 'vcruntime140_1.dll'].map(name => ({ name, fromAppDirectory: true })) },
     live: { provider: 'openrouter', model: 'openai/gpt-6-luna', prompt: 'Why the sky is blue?', lifecycle: 'succeeded', interactionNodeId: 32, currentLayerId: 10, finalLayerId: 10, visibleGraph: true, navigationWorked: true },
     reopen: { cleanShutdown: true, sameProfile: true, interactionNodeId: 32, finalLayerId: 10, visibleGraph: true, followupLifecycle: 'succeeded', followupInteractionNodeId: 33 },
-    evidence: ['installed-launch', 'accepted-graph', 'reopened-graph', 'video', 'runtime', 'metadata', 'preflight', 'persistence', 'reopen-persistence', 'followup-persistence', 'installer-payload', 'live-authoring-runtime'].map(role => ({ role, sha256: digest })) };
+    evidence: ['installed-launch', 'accepted-graph', 'reopened-graph', 'video', 'runtime', 'metadata', 'preflight', 'persistence', 'reopen-persistence', 'followup-persistence', 'installer-payload', 'live-authoring-runtime', 'shutdown-processes'].map(role => ({ role, sha256: digest })) };
   return { receipt, observations, installerName: receipt.artifacts[0].name, installerSha256: digest };
 }
 function collectedInstallEnvironment() {
@@ -35,12 +35,21 @@ function collectedInstallEnvironment() {
   for (const parent of [`${identity.localAppDataDirectory}/Programs`, identity.programFilesDirectory, identity.programFilesX86Directory]) for (const name of ['Relayer', 'relayer-desktop']) directories.push(`${parent}/${name}`);
   const registryChecks = ['CurrentUser', 'LocalMachine'].flatMap(hive => ['Registry32', 'Registry64'].map(view => ({ hive, view, checked: true, installKey: WINDOWS_NSIS_INSTALLATION.installKey, uninstallKey: WINDOWS_NSIS_INSTALLATION.uninstallKey })));
   return { preflight: { freshProfile, userDataAbsent: true, identity, installation: { appDirectory, directories: [...new Set(directories)].map(path => ({ path, absent: true })), registryChecks, registrations: [] } },
-    runtime: { identity: structuredClone(identity), freshProfile, installedExecutable: `${appDirectory}/Relayer.exe` } };
+    runtime: { version: '0.2.0', identity: structuredClone(identity), freshProfile, installedExecutable: `${appDirectory}/Relayer.exe`, installation: { appDirectory, registryChecks: structuredClone(registryChecks), registrations: [
+      {kind:'production-nsis',hive:'CurrentUser',view:'Registry64',key:WINDOWS_NSIS_INSTALLATION.installKey,installLocation:appDirectory},
+      {kind:'production-nsis',hive:'CurrentUser',view:'Registry64',key:WINDOWS_NSIS_INSTALLATION.uninstallKey,displayName:'Relayer 0.2.0',displayVersion:'0.2.0',uninstallString:`"${appDirectory}/Uninstall Relayer.exe" /currentuser`}
+    ] } } };
 }
 import { UUID } from 'builder-util-runtime';
+import { getWindowsInstallationDirName } from 'app-builder-lib/out/targets/targetUtil.js';
 it('binds fresh installation proof to the real NSIS identity, all registry views, full directories and ordinary user', () => {
+  expect(getWindowsInstallationDirName({ productFilename: 'Relayer', sanitizedName: 'relayer-desktop' }, false)).toBe(WINDOWS_NSIS_INSTALLATION.defaultDirectoryName);
   expect(WINDOWS_NSIS_INSTALLATION.guid).toBe(UUID.v5('ai.relayer.desktop', UUID.parse('50e065bc-3134-11e6-9bab-38c9862bdaf3')));
   const clean = collectedInstallEnvironment(); expect(() => validateCollectedWindowsInstallEnvironment(clean.preflight, clean.runtime)).not.toThrow();
+  // HKCU shared views and the uninstall enumeration retain the same real key
+  // through more than one read; these are not different installations.
+  const shared=structuredClone(clean);shared.runtime.installation.registrations.push(...shared.runtime.installation.registrations.map(item=>({...item,view:'Registry32'})), {...shared.runtime.installation.registrations[1],kind:'production-display-name'});
+  expect(()=>validateCollectedWindowsInstallEnvironment(shared.preflight,shared.runtime)).not.toThrow();
   const changes = [
     fixture => { fixture.preflight.installation.directories[0].absent = false; }, // Remnant directory with no Relayer.exe still fails.
     fixture => { fixture.preflight.installation.registrations.push({ hive: 'LocalMachine', view: 'Registry32', key: WINDOWS_NSIS_INSTALLATION.uninstallKey }); },
@@ -49,6 +58,12 @@ it('binds fresh installation proof to the real NSIS identity, all registry views
     fixture => { fixture.runtime.identity.sid = 'S-1-5-21-100-200-300-1002'; },
     fixture => { fixture.preflight.installation.directories.pop(); },
     fixture => { fixture.preflight.userDataAbsent = false; },
+    fixture => { fixture.runtime.installation.registrations = []; }, // Extracted payload without running NSIS.
+    fixture => { fixture.runtime.installation.registrations[0].installLocation = 'C:/OtherApp'; },
+    fixture => { fixture.runtime.installation.registrations[1].displayVersion = '0.1.0'; },
+    fixture => { fixture.runtime.installation.registrations[1].uninstallString = '"C:/OtherApp/Uninstall Relayer.exe" /currentuser'; },
+    fixture => { fixture.runtime.installation.registrations[0].hive = 'LocalMachine'; },
+
   ];
   for (const change of changes) { const fixture = collectedInstallEnvironment(); change(fixture); expect(() => validateCollectedWindowsInstallEnvironment(fixture.preflight, fixture.runtime)).toThrow(); }
 });
@@ -92,16 +107,26 @@ it('rejects a contradictory retained persistence record even when every file has
       preflight: { schema: 'windows-first-install-preflight/v1', at: '2026-10-06T10:00:00Z', sourceCommit: source, version: '0.2.0', emptyBeforeInstall: true, freshProfile: f.observations.freshProfile.path, workflowRunId: '123', workflowRunAttempt: '1' },
       metadata: { schema: 'windows-installed-metadata/v1', sourceCommit: source, version: '0.2.0', target: 'windows-x64', channel: 'preview', artifactMode: 'release' },
       runtime: { installedExecutable: 'C:/Users/InstallerTest/AppData/Local/Programs/Relayer/Relayer.exe', schema: 'windows-first-install-runtime/v1', at: '2026-10-06T10:01:00Z', sourceCommit: source, version: '0.2.0', nodeVersion: 'v22.23.2', unicodeStdinPreserved: true, crtLoadedModules: f.observations.runtime.crtLoadedModules, signatures: f.observations.signatures },
-      persistence: { schema: 'windows-installed-completion/v1', databasePath: `${f.observations.freshProfile.path}/graphcomplete-runtime/graph.sqlite3`, observedAt: '2026-10-06T10:02:00Z', interaction_node_id: 32, lifecycle: 'failed', current_layer_id: 10, final_layer_id: 10 },
-      'reopen-persistence': { schema: 'windows-installed-completion/v1', databasePath: `${f.observations.freshProfile.path}/graphcomplete-runtime/graph.sqlite3`, observedAt: '2026-10-06T10:03:00Z', interaction_node_id: 32, lifecycle: 'succeeded', current_layer_id: 10, final_layer_id: 10 },
-      'followup-persistence': { schema: 'windows-installed-completion/v1', databasePath: `${f.observations.freshProfile.path}/graphcomplete-runtime/graph.sqlite3`, observedAt: '2026-10-06T10:04:00Z', interaction_node_id: 33, lifecycle: 'succeeded', current_layer_id: 11, final_layer_id: 11 },
+      persistence: { schema: 'windows-installed-completion/v2', databasePath: `${f.observations.freshProfile.path}/graphcomplete-runtime/graph.sqlite3`, observedAt: '2026-10-06T10:02:00Z', interaction_node_id: 32, lifecycle: 'failed', current_layer_id: 10, final_layer_id: 10 },
+      'reopen-persistence': { schema: 'windows-installed-completion/v2', databasePath: `${f.observations.freshProfile.path}/graphcomplete-runtime/graph.sqlite3`, observedAt: '2026-10-06T10:03:00Z', interaction_node_id: 32, lifecycle: 'succeeded', current_layer_id: 10, final_layer_id: 10 },
+      'followup-persistence': { schema: 'windows-installed-completion/v2', databasePath: `${f.observations.freshProfile.path}/graphcomplete-runtime/graph.sqlite3`, observedAt: '2026-10-06T10:04:00Z', interaction_node_id: 33, lifecycle: 'succeeded', current_layer_id: 11, final_layer_id: 11 },
     };
     const fresh = collectedInstallEnvironment();
     Object.assign(records.preflight, fresh.preflight); Object.assign(records.runtime, fresh.runtime);
     records['live-authoring-runtime'] = { schema: 'windows-live-authoring-runtime/v2', interactionNodeId: 32, finalLayerId: 10, parserVersion: '5.9.3', submission: { nodeId: 32, rootLayerId: 10, rootActionId: 10, resultSha256: digest }, userSid: fresh.runtime.identity.sid, userProfile: fresh.runtime.identity.userProfile, providerHome: `${fresh.runtime.identity.userProfile}/.codex`, providerHomeKind: 'codex-default', rolloutPath: `${fresh.runtime.identity.userProfile}/.codex/sessions/run.jsonl`, userDataDirectory: f.observations.freshProfile.path,
       nodePath: 'C:/Users/InstallerTest/AppData/Local/Programs/relayer-desktop/resources/node/node.exe', exitCode: 0, observedAt: '2026-10-06T10:01:30Z', commandSha256: digest, rolloutSha256: digest, callId: 'authoring-call' };
-    records['installer-payload'] = { schema: 'windows-installer-payload/v1', installerSha256: installerHash, metadata: records.metadata, files: ['Relayer.exe', 'resources/bin/relayer-app-server.exe', 'resources/bin/relayer-graph-server.exe', 'resources/node/node.exe'].map(path => ({ path, candidateSha256: digest, installedSha256: digest })) };
+    records['installer-payload'] = { schema: 'windows-installer-payload/v2', installedRoot: fresh.runtime.installation.appDirectory, installerSha256: installerHash, metadata: records.metadata, files: ['Relayer.exe', 'resources/bin/relayer-app-server.exe', 'resources/bin/relayer-graph-server.exe', 'resources/node/node.exe'].map(path => ({ path, candidateSha256: digest, installedSha256: digest })) };
     records['live-authoring-runtime'].installedRuntimeSha256 = createHash('sha256').update(JSON.stringify(records.runtime)).digest('hex');
+    const runtimeHash = records['live-authoring-runtime'].installedRuntimeSha256;
+    const generation = (pid, createdAt, observedAt, state = 'running') => ({schema:'windows-installed-processes/v1',state,observedAt,installedRoot:fresh.runtime.installation.appDirectory,freshProfile:fresh.runtime.freshProfile,userSid:fresh.runtime.identity.sid,installedRuntimeSha256:runtimeHash,
+      processes: state === 'stopped' ? [] : ['electron','app-server','graph-server'].map((role,index)=>({role,pid:pid+index,parentPid:index ? pid : 1,createdAt,path:role==='electron'?fresh.runtime.installedExecutable:`${fresh.runtime.installation.appDirectory}/resources/bin/relayer-${role}.exe`,userSid:fresh.runtime.identity.sid,sha256:digest}))});
+    for (const [role,id] of [['persistence',32],['reopen-persistence',32],['followup-persistence',33]]) {
+      const record = records[role]; record.productDatabasePath = `${fresh.runtime.freshProfile}/product-data/product.sqlite3`;
+      record.interaction={interactionId:id,threadId:2,graphNodeId:id,prompt:'Why the sky is blue?',completionStatus:'succeeded',providerId:'qa-custom-provider',modelId:'openai/gpt-6-luna',adapterId:'openrouter',definitionAdapterId:'openrouter',providerKind:'openrouter',attemptProviderId:'qa-custom-provider',attemptModelId:'openai/gpt-6-luna',attemptOutcome:'accepted'};
+      record.processGeneration=generation(role==='persistence'?100:200,role==='persistence'?'2026-10-06T10:00:30Z':'2026-10-06T10:02:40Z',record.observedAt);
+    }
+    records['shutdown-processes']=generation(0,'','2026-10-06T10:02:30Z','stopped');
+
     for (const item of f.observations.evidence) {
       item.path = join(root, `${item.role}.json`); const bytes = Buffer.from(JSON.stringify(records[item.role] ?? { syntheticUiFixture: item.role }));
       await writeFile(item.path, bytes); item.sha256 = createHash('sha256').update(bytes).digest('hex');
@@ -118,6 +143,24 @@ it('rejects a contradictory retained persistence record even when every file has
     const record = f.observations.evidence.find(item => item.role === 'persistence'), corrected = JSON.stringify(records.persistence);
     await writeFile(record.path, corrected); record.sha256 = createHash('sha256').update(corrected).digest('hex');
     await writeFile(observationsPath, JSON.stringify(f.observations));
+    const mutateRecord = async (role, mutate) => {
+      const saved=structuredClone(records[role]); mutate(records[role]);
+      const item=f.observations.evidence.find(item=>item.role===role), bytes=JSON.stringify(records[role]);
+      await writeFile(item.path,bytes);item.sha256=createHash('sha256').update(bytes).digest('hex');await writeFile(observationsPath,JSON.stringify(f.observations));
+      await expect(createWindowsFirstInstallEvidence({ releaseReceiptPath: receiptPath, installerPath: installer, observationsPath, outputPath: join(root, 'reject.json') })).rejects.toThrow();
+      records[role]=saved;const restored=JSON.stringify(saved);await writeFile(item.path,restored);item.sha256=createHash('sha256').update(restored).digest('hex');await writeFile(observationsPath,JSON.stringify(f.observations));
+    };
+    await mutateRecord('installer-payload',record=>{record.installedRoot='C:/CleanExtraction';});
+    await mutateRecord('persistence',record=>{record.interaction.prompt='A different question';});
+    await mutateRecord('persistence',record=>{record.interaction.providerKind='other';});
+    await mutateRecord('persistence',record=>{record.interaction.modelId=record.interaction.attemptModelId='wrong-model';});
+    await mutateRecord('reopen-persistence',record=>{record.processGeneration=structuredClone(records.persistence.processGeneration);record.processGeneration.observedAt=record.observedAt;});
+    await mutateRecord('reopen-persistence',record=>{record.processGeneration.processes[1].parentPid=999;});
+    await mutateRecord('reopen-persistence',record=>{record.processGeneration.processes[1].path='C:/OtherApp/relayer-app-server.exe';});
+    await mutateRecord('reopen-persistence',record=>{record.processGeneration.processes[1].userSid='S-1-5-21-999-999-999-1001';});
+    await mutateRecord('reopen-persistence',record=>{record.processGeneration.processes[1].sha256='c'.repeat(64);});
+    await mutateRecord('shutdown-processes',record=>{record.processes=structuredClone(records.persistence.processGeneration.processes);});
+    await mutateRecord('shutdown-processes',record=>{record.observedAt='2026-10-06T10:03:30Z';});
     expect(await createWindowsFirstInstallEvidence({ releaseReceiptPath: receiptPath, installerPath: installer, observationsPath, outputPath: join(root, 'gate.json') })).toMatchObject({ result: 'passed' });
     await expect(createWindowsFirstInstallEvidence({ releaseReceiptPath: receiptPath, installerPath: installer, observationsPath, outputPath: join(root, 'gate.json') })).rejects.toMatchObject({ code: 'EEXIST' });
   } finally { await rm(root, { recursive: true, force: true }); }
@@ -141,8 +184,9 @@ it('compares the complete extracted installer payload to installed bytes and rej
       else await cp(candidate, output, { recursive: true });
     };
     const result = await collectWindowsInstallerFiles({ installer, sevenZip: 'fixture-7z', installedRoot: installed, execute });
-    expect(result).toMatchObject({ schema: 'windows-installer-payload/v1', metadata: { sourceCommit: source, version: '0.2.0' } });
+    expect(result).toMatchObject({ schema: 'windows-installer-payload/v2', metadata: { sourceCommit: source, version: '0.2.0' } });
     expect(result.files).toHaveLength(6);
+    expect(result.installedRoot).toBe(await realpath(installed));
     await writeFile(join(installed, 'resources/node/node.exe'), 'changed installed Node');
     await expect(collectWindowsInstallerFiles({ installer, sevenZip: 'fixture-7z', installedRoot: installed, execute })).rejects.toThrow('differs from exact installer payload');
   } finally { await rm(root, { recursive: true, force: true }); }
@@ -234,4 +278,45 @@ it('binds real graph-client submission output to the exact owned command, observ
     const foreignRollout = join(root, 'another-user/.codex/sessions/rollout.jsonl'); await mkdir(join(root, 'another-user/.codex/sessions'), { recursive: true }); await cp(rollout, foreignRollout);
     await expect(collectWindowsAuthoringRuntime({ ...options, rolloutPath: foreignRollout })).rejects.toThrow('outside');
   } finally { await new Promise(resolve => server.close(resolve)); await rm(root, { recursive: true, force: true }); }
+});
+
+import { DatabaseSync } from 'node:sqlite';
+import { readdir } from 'node:fs/promises';
+import { collectWindowsInstallState } from '../desktop/release/collect-windows-install-state.mjs';
+it('collects actual product interaction and latest accepted attempt from migrated SQLite and binds a measured process generation', async () => {
+  const root=await mkdtemp(join(tmpdir(),'win-installer-state-')), profile=join(root,'qa/Relayer');
+  await mkdir(join(profile,'product-data'),{recursive:true});await mkdir(join(profile,'graphcomplete-runtime'));
+  const productPath=join(profile,'product-data/product.sqlite3'), graphPath=join(profile,'graphcomplete-runtime/graph.sqlite3');
+  const product=new DatabaseSync(productPath), graph=new DatabaseSync(graphPath);
+  try {
+    // Use the production product migrations, including real provider definition
+    // and attempt receipts; never export the DB or credential-reference column.
+    const migrations=new URL('../crates/relayer-app-server/src/storage/sqlite/migrations/',import.meta.url);
+    for(const name of (await readdir(migrations)).sort()) if(name.endsWith('.sql')) product.exec(await readFile(new URL(name,migrations),'utf8'));
+    product.exec(`INSERT INTO threads(id,title,created_at,updated_at) VALUES(2,'sky','1','1');
+      INSERT INTO model_providers(id,label,connected,refreshed_at,adapter_id,access_contract,endpoint,credential_reference) VALUES('qa-custom-provider','My API',1,'1','openrouter','secret@1','https://openrouter.ai/api/v1/','never-export-this-reference');
+      INSERT INTO interactions(id,thread_id,sequence,text,created_at,graph_node_id,completion_status,model_provider_id,provider_model_id) VALUES(100,2,1,'Why the sky is blue?','1',32,'succeeded','qa-custom-provider','openai/gpt-6-luna');
+      INSERT INTO interaction_attempts(id,interaction_id,attempt_number,started_at,finished_at,family_id,family_revision,harness_configuration_name,harness_configuration_revision,harness_configuration_digest,provider_id,adapter_id,adapter_implementation_version,model_id,access_contract,outcome)
+      VALUES(10,100,1,'1','2',1,1,'codex-basic',1,'fixture','qa-custom-provider','openrouter',2,'openai/gpt-6-luna','secret@1','accepted');`);
+    const temporal=await readFile(new URL('../crates/relayer-graph-core/src/storage/sqlite/migrations/0011_temporal_completions.sql',import.meta.url),'utf8');
+    graph.exec('CREATE TABLE nodes(id INTEGER PRIMARY KEY);CREATE TABLE layers(id INTEGER PRIMARY KEY);INSERT INTO nodes VALUES(32);INSERT INTO layers VALUES(10);'+temporal.slice(temporal.indexOf('CREATE TABLE completion_states'),temporal.indexOf('CREATE TABLE current_revisions')));
+    graph.exec("INSERT INTO completion_states(interaction_node_id,lifecycle,head_revision,current_layer_id,final_layer_id) VALUES(32,'succeeded',1,10,10)");
+    const runtime=collectedInstallEnvironment().runtime;runtime.schema='windows-first-install-runtime/v1';runtime.freshProfile=profile;
+    const runtimeInspectionPath=join(root,'runtime.json');await writeFile(runtimeInspectionPath,JSON.stringify(runtime));
+    let generation=100,calls=0;
+    const inspectProcesses=async(_runtime,state)=>{calls++;return {schema:'windows-installed-processes/v1',state,userSid:runtime.identity.sid,installedRoot:runtime.installation.appDirectory,freshProfile:profile,observedAt:new Date().toISOString(),processes:state==='stopped'?[]:['electron','app-server','graph-server'].map((role,index)=>({role,pid:generation+index,createdAt:'2026-10-06T10:00:00Z'}))};};
+    const options={runtimeInspectionPath,interactionNodeId:32,inspectProcesses};
+    const record=await collectWindowsInstallState(options);
+    expect(record).toMatchObject({schema:'windows-installed-completion/v2',interaction_node_id:32,lifecycle:'succeeded',databasePath:await realpath(graphPath),productDatabasePath:await realpath(productPath),interaction:{interactionId:100,graphNodeId:32,providerId:'qa-custom-provider',providerKind:'openrouter',modelId:'openai/gpt-6-luna',prompt:'Why the sky is blue?',attemptOutcome:'accepted'}});
+    expect(JSON.stringify(record)).not.toContain('never-export-this-reference');expect(JSON.stringify(record)).not.toContain('https://');expect(calls).toBe(2);
+    product.exec("UPDATE model_providers SET endpoint='https://other-provider.example/v1'");
+    expect((await collectWindowsInstallState(options)).interaction.providerKind).toBe('other');
+    product.exec("UPDATE model_providers SET endpoint='https://openrouter.ai/api/v1'");
+    const changing=async(runtime,state)=>{const snapshot=await inspectProcesses(runtime,state);generation++;return snapshot;};
+    await expect(collectWindowsInstallState({...options,inspectProcesses:changing})).rejects.toThrow('generation changed');
+    product.exec("INSERT INTO interaction_attempts(id,interaction_id,attempt_number,started_at,finished_at,family_id,family_revision,harness_configuration_name,harness_configuration_revision,harness_configuration_digest,provider_id,adapter_id,adapter_implementation_version,model_id,access_contract,outcome) VALUES(11,100,2,'3','4',1,1,'codex-basic',1,'fixture','qa-custom-provider','openrouter',2,'wrong-model','secret@1','accepted')");
+    await expect(collectWindowsInstallState(options)).rejects.toThrow('execution attempt disagree');
+    const stopped=await collectWindowsInstallState({...options,state:'stopped'});expect(stopped).toMatchObject({schema:'windows-installed-processes/v1',state:'stopped',processes:[]});
+    await expect(collectWindowsInstallState({...options,state:'stopped',inspectProcesses:async()=>({...stopped,processes:[{pid:100}]})})).rejects.toThrow('checkpoint is incomplete');
+  } finally { product.close();graph.close();await rm(root,{recursive:true,force:true}); }
 });

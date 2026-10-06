@@ -157,3 +157,24 @@ it('rejects extra unreviewed build sources while permitting explicit generated/d
     await f.apply(next);
   }finally{await rm(f.root,{recursive:true,force:true});}
 });
+
+
+it('keeps only root-local credential and log exceptions outside packaged and native source inputs', async () => {
+  const f = await fixture();
+  try {
+    const { plan } = await createWindowsSourceDelta({ repositoryRoot: f.local, baseCommit: f.baseCommit });
+    await writeFile(join(f.remote, '.env.local'), 'FAKE_PRIVATE_KEY=fixture');
+    await writeFile(join(f.remote, 'live-run.local.json'), '{"fixture":"private"}');
+    await writeFile(join(f.remote, 'build.log'), 'root operator log');
+    await f.apply(plan);
+    const previous = await f.state();
+    const next = (await createWindowsSourceDelta({ repositoryRoot: f.local, baseCommit: f.baseCommit, previous })).plan;
+    for (const name of ['desktop/auth.json', 'desktop/key.pem', 'desktop/private.log', 'desktop/.env.local', 'src/build.log', 'src/auth.json']) {
+      await writeFile(join(f.remote, name), 'unreviewed private fixture');
+      await expect(f.apply(next)).rejects.toThrow(`Unexpected unreviewed source: ${name}`);
+      expect(() => verifyWindowsDevSource(f.remote, previous, previous)).toThrow(`Unexpected unreviewed source: ${name}`);
+      await rm(join(f.remote, name));
+    }
+    await f.apply(next);
+  } finally { await rm(f.root, { recursive: true, force: true }); }
+});

@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { lstat, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
+import { lstat, mkdtemp, readFile, readdir, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { promisify } from 'node:util';
@@ -17,6 +17,7 @@ async function filesBelow(root, prefix = '') {
   return files;
 }
 export async function collectWindowsInstallerFiles({ installer, sevenZip, installedRoot, execute = executeDefault }) {
+  installedRoot = await realpath(installedRoot);
   const temporary = await mkdtemp(join(tmpdir(), 'relayer-installer-inventory-'));
   try {
     const outer = join(temporary, 'installer'), payload = join(temporary, 'application');
@@ -33,7 +34,7 @@ export async function collectWindowsInstallerFiles({ installer, sevenZip, instal
       files.push({ path: name, candidateSha256, installedSha256 });
     }
     for (const name of ['Relayer.exe', 'resources/app.asar', 'resources/node/node.exe', 'resources/bin/relayer-app-server.exe', 'resources/bin/relayer-graph-server.exe']) if (!files.some(file => file.path === name)) throw new Error(`Required installer payload file missing: ${name}`);
-    return { schema: 'windows-installer-payload/v1', installerSha256: sha(await readFile(installer)), metadata: await readInstalledWindowsMetadata(join(payload, 'resources/app.asar')), files };
+    return { schema: 'windows-installer-payload/v2', installedRoot, installerSha256: sha(await readFile(installer)), metadata: await readInstalledWindowsMetadata(join(payload, 'resources/app.asar')), files };
   } finally { await rm(temporary, { recursive: true, force: true }); }
 }
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

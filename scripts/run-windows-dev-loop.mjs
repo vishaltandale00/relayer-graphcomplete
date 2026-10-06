@@ -1,23 +1,92 @@
 import { spawn } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
-import { appendFile, mkdir, open, readFile, rm, writeFile } from 'node:fs/promises';
-import { resolve, join } from 'node:path';
+import { appendFile, lstat, mkdir, open, readFile, readdir, readlink, realpath, rm, writeFile } from 'node:fs/promises';
+import { dirname, relative, resolve, join, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { verifyWindowsDevSource } from './windows-dev-sync.mjs';
 const sha = bytes => createHash('sha256').update(bytes).digest('hex');
 function run(command, args, options) {
   return new Promise((accept, reject) => { const child = spawn(command, args, { ...options, stdio: 'inherit' }); child.once('error', reject); child.once('exit', code => code === 0 ? accept() : reject(new Error(`${command} exited ${code}`))); });
 }
+// npm workspaces are deliberate links into the separately audited source tree.
+// Their generated dist files are rebuilt by prepare:desktop-runtime, not adopted
+// as immutable registry dependencies. Every ordinary installed file is hashed.
+export async function inventoryWindowsDevDependencies({ repositoryRoot, lockfile }) {
+  const root = resolve(repositoryRoot), canonicalRoot = await realpath(root);
+  const packages = JSON.parse(lockfile).packages ?? {}, roots = new Set(['node_modules']);
+  const inside = path => path === canonicalRoot || path.startsWith(canonicalRoot + sep);
+  for (const name of Object.keys(packages)) {
+    if (name.includes('\\') || name.startsWith('/') || name.split('/').some(part => part === '..' || part === '.')) throw Error('Unsafe locked dependency path.');
+    const index = name.indexOf('/node_modules/');
+    if (index >= 0) roots.add(name.slice(0, index) + '/node_modules');
+  }
+  const records = [], files = [];
+  async function visit(name) {
+    const directory = join(root, ...name.split('/'));
+    const info = await lstat(directory);
+    if (!info.isDirectory() || info.isSymbolicLink() || !inside(await realpath(directory))) throw Error(`Unsafe installed dependency directory: ${name}`);
+    records.push([name, 'directory']);
+    for (const entry of (await readdir(directory, { withFileTypes: true })).sort((a, b) => a.name.localeCompare(b.name))) {
+      const child = `${name}/${entry.name}`, path = join(directory, entry.name);
+      if (entry.isSymbolicLink()) {
+        const target = resolve(dirname(path), await readlink(path));
+        const actual = await realpath(target);
+        if (!inside(actual)) throw Error(`Installed dependency link escapes repository: ${child}`);
+        const workspace = packages[child];
+        if (workspace?.link === true) {
+          if (typeof workspace.resolved !== 'string' || workspace.resolved.includes('\\') || workspace.resolved.split('/').includes('..')) throw Error(`Unsafe locked workspace link: ${child}`);
+          const expected = await realpath(resolve(root, workspace.resolved));
+          if (!inside(expected) || actual !== expected) throw Error(`Installed workspace link differs from lock: ${child}`);
+        } else {
+          const moduleRoots = [...roots].map(name => join(root, ...name.split('/')));
+          if (!moduleRoots.some(directory => actual.startsWith(directory + sep))) throw Error(`Unreviewed installed dependency link: ${child}`);
+        }
+        records.push([child, 'link', relative(canonicalRoot, actual).split(sep).join('/')]);
+      } else if (entry.isDirectory()) await visit(child);
+      else if (entry.isFile()) files.push([child, path]);
+      else throw Error(`Unsupported installed dependency entry: ${child}`);
+    }
+  }
+  for (const name of [...roots].sort()) {
+    try { await lstat(join(root, ...name.split('/'))); }
+    catch (error) { if (error.code === 'ENOENT' && name !== 'node_modules') continue; throw error; }
+    await visit(name);
+  }
+  // Bound reads on the small VM: hashing cannot create an unbounded file/open or
+  // memory queue. Symlinks are validated as links and never read as file bytes.
+  let next = 0;
+  await Promise.all(Array.from({ length: Math.min(8, files.length) }, async () => {
+    while (next < files.length) {
+      const [name, path] = files[next++], info = await lstat(path);
+      if (!info.isFile() || info.isSymbolicLink()) throw Error(`Installed dependency changed during audit: ${name}`);
+      records.push([name, 'file', sha(await readFile(path))]);
+    }
+  }));
+  records.sort((a, b) => a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0);
+  if (!records.some(([name, kind]) => name === 'node_modules/.package-lock.json' && kind === 'file')) throw Error('Installed npm lock inventory missing.');
+  return { sha256: sha(JSON.stringify(records)), files: files.length, entries: records.length };
+}
 export async function ensureWindowsDevDependencies({ repositoryRoot, environment = process.env, execute = run } = {}) {
   const lockfile = await readFile(join(repositoryRoot, 'package-lock.json'));
   const digest = sha(lockfile), marker = join(repositoryRoot, '.relayer/npm-dependencies.json');
-  let previous; try { previous = JSON.parse(await readFile(marker, 'utf8')); } catch (error) { if (error.code !== 'ENOENT') throw error; }
-  let installed = false; try { await readFile(join(repositoryRoot, 'node_modules/.package-lock.json')); installed = true; } catch (error) { if (error.code !== 'ENOENT') throw error; }
-  if (installed && previous?.lockSha256 === digest && previous.nodeVersion === process.version) return { mode: 'verified dependency hit', lockSha256: digest };
+  let previous;
+  try {
+    const info = await lstat(marker);
+    if (info.isFile() && !info.isSymbolicLink()) previous = JSON.parse(await readFile(marker, 'utf8'));
+  } catch (error) { if (error.code !== 'ENOENT' && !(error instanceof SyntaxError)) throw error; }
+  if (previous?.schema === 'windows-dev-dependencies/v2' && previous.lockSha256 === digest
+    && previous.nodeVersion === process.version && previous.platform === process.platform && previous.architecture === process.arch) {
+    try {
+      const inventory = await inventoryWindowsDevDependencies({ repositoryRoot, lockfile });
+      if (inventory.sha256 === previous.inventory?.sha256) return { mode: 'verified dependency hit', lockSha256: digest, inventory };
+    } catch { /* Missing, changed or unsafe installed inputs require a locked restore. */ }
+  }
   await mkdir(join(repositoryRoot, '.relayer'), { recursive: true }); await rm(marker, { force: true });
   await execute(environment.ComSpec || 'cmd.exe', ['/d', '/s', '/c', 'npm.cmd ci --ignore-scripts'], { cwd: repositoryRoot, env: environment });
-  await writeFile(marker, JSON.stringify({ schema: 'windows-dev-dependencies/v1', lockSha256: digest, nodeVersion: process.version }));
-  return { mode: 'installed locked dependencies', lockSha256: digest };
+  const inventory = await inventoryWindowsDevDependencies({ repositoryRoot, lockfile });
+  await writeFile(marker, JSON.stringify({ schema: 'windows-dev-dependencies/v2', lockSha256: digest, nodeVersion: process.version,
+    platform: process.platform, architecture: process.arch, inventory }));
+  return { mode: 'installed locked dependencies', lockSha256: digest, inventory };
 }
 // A second exclusive file serializes dispatch claims as well as source writes.
 // The sync-ready lease remains present until the winning build finishes.

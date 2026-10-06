@@ -38,11 +38,17 @@ Python's official x64 embeddable ZIP is pinned to SHA-256
 `76f238f606250c87c6beac75dccd35ee99070a13490555936abb6cb64ecce3d0`
 ([publisher release](https://www.python.org/downloads/release/python-31312/)).
 It belongs only to the build workspace, not the installed app. The entire Python
-runtime and ccache executable participate in compiled-native identity. A changed
+runtime, ccache executable, selected CMake executable and its actual CMAKE_ROOT
+module/runtime tree participate in compiled-native identity. CMake metadata
+probes use temporary scratch outside the audited source tree. A changed
 generator invalidates Ladybug outputs while retaining independently verified
 source/static OpenSSL preparation. A separate attempted-compiler identity is
 recorded before Cargo, so failures after Ladybug finishes cannot admit stale
-objects on a later generator change. Compiler/SDK or producer changes invalidate
+objects on a later generator change. Non-reuse transitions remove the previous
+success record before Cargo cleanup; a failed cleanup leaves no JS-only success
+and the next attempt repeats required cleanup. JS-only packaging requires matching
+attempt/success identities and rehashes both fixed-target native executables.
+An inherited conflicting Rust target is rejected. Compiler/SDK or producer changes invalidate
 the whole Cargo target; generator-only changes invalidate Ladybug. Unknown old
 Cargo workspaces start with invalidation, while verified preparation remains.
 Ambient ccache overrides are rejected, and
@@ -82,8 +88,9 @@ source are rejected. A source-tree inventory also rejects unreviewed extra files
 that packaging globs or module loading could consume. The explicit exceptions
 are the fixed root dependency/generated directories (`node_modules`, `target`,
 `dist`, `.relayer`, coverage), desktop outputs, the four known package output
-roots and named renderer/agent-resource output directories, logs, local credential
-data and PRD annotations. Arbitrary source subdirectories named `dist`, `target`
+roots and named renderer/agent-resource output directories, root-only local
+logs/dotenv data and PRD annotations. Credential-shaped files or logs inside
+the desktop/native source tree receive no exception. Arbitrary source subdirectories named `dist`, `target`
 or `node_modules` receive no exception. Tracked files
 always remain audited inside those paths; arbitrary ignored source files do not
 gain an exception from `.gitignore`. Generated outputs remain governed by locked
@@ -94,8 +101,15 @@ files with `git add` before syncing; arbitrary untracked files are never uploade
 A Mac lock serializes sync-state writes; a VM lease holds the source and build
 outputs exclusively through dependency installation, packaging and the final receipt. Deltas
 above 4 MiB require artifact staging instead of unlimited Run Command payloads.
-Dependency installation has its own success marker bound to the lockfile and Node
-version. Failed setup is retried even when the source delta is unchanged.
+Dependency installation has a v2 success marker bound to the lockfile, Node
+version, platform/architecture and the actual installed dependency inventory.
+Every reuse hashes installed files with bounded workers and checks directory/link
+identity, including nested dependency roots from the lockfile. Workspace links
+must match their locked source targets; generated workspace outputs are rebuilt
+separately. Missing, changed, unsafe or legacy dependency state runs locked
+`npm ci --ignore-scripts`; the marker is removed before restoration and sealed
+only after successful installation and inventory. Failed setup is retried even
+when the source delta is unchanged.
 
 Legacy partial manifests fail closed. After the active build finishes, use the
 explicit `--audit-source --sync-only` command above with the original VM base.
@@ -157,13 +171,23 @@ run/attempt, artifact ID/ZIP hash, sealed release receipt and installer hash.
    cleared. Record the real installed path and packaged version/source metadata.
 3. Run the inspection script with `-Phase installed`. It verifies all five
    Relayer-signed files and compares installed application files byte-for-byte
-   against the exact NSIS installer payload using the pinned electron-builder 7zip toolset, exercises the bundled Node with Unicode stdin, and records
+   against the exact NSIS installer payload using the pinned electron-builder 7zip toolset.
+   The payload inventory records its canonical installed root and must match the
+   launched executable. The script also requires the expected per-user HKCU
+   64-bit NSIS install/uninstall registrations, exact version and uninstaller,
+   while rejecting unexpected machine/legacy registration. The locked one-click
+   default is `%LOCALAPPDATA%\Programs\relayer-desktop`. It exercises the bundled Node with Unicode stdin and records
    the DLL paths actually loaded by the running Rust services. The recorded identity
    must match the prepare SID and profile. System VC-runtime
    origins fail the gate.
 4. Connect the live provider; complete `Why the sky is blue?`; inspect the graph
    and navigation. Collect the exact completion state using the installed Node:
-   `node.exe desktop/release/collect-windows-install-state.mjs <graph.sqlite3> <interaction-id> <new-output.json>`.
+   `node.exe desktop/release/collect-windows-install-state.mjs <installed-runtime.json> <interaction-id> <new-output.json>`.
+   The v2 record reads both actual production databases, joins the latest accepted
+   execution attempt and binds the exact prompt, provider, model, node and thread.
+   Operator labels do not establish live-provider use. It samples actual ordinary-user
+   Electron/Rust process IDs, creation times, image hashes and parentage before
+   and after the database read; a changing generation rejects collection.
    Collect sanitized proof from the actual native Codex rollout:
    `node.exe collect-windows-authoring-runtime.mjs <rollout.jsonl> <installed.json> <observed-interaction-id> <observed-final-layer-id> <runtime-observation-timestamp> <new-authoring.json>`.
    Use the installed bundled Node to run this helper. It derives identity and paths from
@@ -177,8 +201,12 @@ run/attempt, artifact ID/ZIP hash, sealed release receipt and installer hash.
    Do not set a development `CODEX_HOME` override merely to obtain proof.
    Save screenshots/video and the sanitized authoring-runtime record; do not copy
    credentials, raw provider rollouts or private application databases.
-5. Close cleanly, launch the installed shortcut, reopen the same persisted graph,
-   and complete a follow-up. Save a separate reopen record for the original completion and another exact
+5. Close cleanly and collect the separate `shutdown-processes` evidence with
+   `node.exe collect-windows-install-state.mjs <installed-runtime.json> --stopped <new-shutdown.json>`.
+   It requires zero candidate processes. Then launch the installed shortcut,
+   reopen the same persisted graph and complete a follow-up. Reopen must have
+   newly created Electron/Rust processes after that stopped checkpoint; follow-up
+   must retain the reopened generation and thread. Save a separate reopen record for the original completion and another exact
    state record for the accepted follow-up, plus UI evidence.
 6. Assemble `windows-first-install-observations/v1` from those actual records and
    operator UI observations. Run `npm run desktop:qualify:windows-install --
@@ -197,7 +225,7 @@ TypeScript **5.9.3**, authenticated by the existing lockfile integrity:
 Copy these release helpers into the ordinary user's QA tools directory:
 `inspect-windows-first-install.ps1`, `read-windows-install-metadata.mjs`,
 `collect-windows-installer-files.mjs`, `collect-windows-install-state.mjs`,
-and `collect-windows-authoring-runtime.mjs`. Alongside them, stage the unchanged
+`collect-windows-install-processes.ps1`, and `collect-windows-authoring-runtime.mjs`. Alongside them, stage the unchanged
 locked `node_modules/typescript/package.json`, `lib/typescript.js`, `LICENSE.txt`
 and `ThirdPartyNoticeText.txt`, retaining the same package directory structure.
 Retain their SHA-256 file inventory with the helper/source receipt. For example,
@@ -217,8 +245,8 @@ The remaining installed-app checks run with `resources/node/node.exe`; they need
 no external Node installation or compiler PATH. Missing/wrong parser inputs stop
 collection. The pinned electron-builder 26.15.3 toolset remains required for installer payload comparison. Resolve its `app-builder-lib/out/toolsets/7zip.js` `getPath7za()` with `ELECTRON_BUILDER_7ZIP_PATH` unset. The Windows x64 `7zip@1.0.0` archive is authenticated against SHA-256 `be071f15bd6da2f78fe81c6ddef2009b0c4d8a51f36b780cb806c7e6df95e1b3`; retain the resolved executable hash with the helper inventory.
 
-Provide proof-specific guidance through the normal supported model request/context:
-author the graph drafts using earlier commands, then run a separate minimal final
+Keep the question exactly `Why the sky is blue?`; provide proof-specific guidance
+through the separate normal supported request context. Author the graph drafts using earlier commands, then run a separate minimal final
 submission through the exact installed app-owned Node. The qualifying JavaScript
 contains only the displayed installed graph-client import, `const graph =
 RelayerGraphClient.fromEnv()`, an awaited `graph.submit` with the **actual positive
