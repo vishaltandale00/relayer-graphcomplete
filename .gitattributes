@@ -20,3 +20,8 @@ scripts/capture-ladybug-packaged-lifecycle.mjs text eol=lf
 scripts/prepare-ladybug-source.mjs text eol=lf
 vendor/ladybug/source-build-manifest.json text eol=lf
 vendor/ladybug/notices/** -text
+
+# Reviewed native configuration hashes must survive Windows checkout unchanged.
+.cargo/config.toml text eol=lf
+crates/relayer-graph-core/build.rs text eol=lf
+crates/relayer-graph-server/src/search_index/store.rs text eol=lf

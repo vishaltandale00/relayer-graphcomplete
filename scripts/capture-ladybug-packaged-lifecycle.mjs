@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import { execFile, spawn as spawnProcess } from "node:child_process";
 import { createHash } from "node:crypto";
 import { createInterface } from "node:readline";
-import { cp, mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
+import { cp, mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, isAbsolute, join, relative, resolve, sep, win32 as win32Path } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -29,6 +29,7 @@ export const RECEIPT_INPUT_PATHS = [
   "crates/relayer-graph-server/build.rs",
   "crates/relayer-graph-server/build_support/openssl_link.rs",
   "crates/relayer-graph-server/src/main.rs",
+  "crates/relayer-graph-server/src/search_index/store.rs",
   "desktop/packaging/build-development.mjs",
   "desktop/packaging/pinned-ladybug-build.mjs",
   "desktop/packaging/electron-builder.mjs",
@@ -406,10 +407,54 @@ export async function validatePreparedLadybugSource({ sourceOutput, manifest, ta
   };
 }
 
+// Exercise the desktop's ordinary startup path, including SQLite and the
+// derived index's StoreLayout. The engine-only qualification flag bypasses it.
+export async function proveNormalGraphServerStartup(executable, { spawn = spawnProcess, commandTimeout = 15_000 } = {}) {
+  const profile = await mkdtemp(join(tmpdir(), "relayer-normal-startup-"));
+  const database = join(profile, "graph.sqlite3");
+  let firstPointer;
+  try {
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      const child = spawn(executable, ["--database", database, "--port", "0"], { stdio: ["pipe", "pipe", "pipe"] });
+      const exit = observeExit(child);
+      const lines = createInterface({ input: child.stdout });
+      let stderr = "";
+      child.stderr.on("data", chunk => { stderr = (stderr + chunk).slice(-16_384); });
+      child.stdin.on("error", error => { stderr = (stderr + error.message).slice(-16_384); });
+      try {
+        child.stdin.write("normal-startup-proof-control-token-00000000\n");
+        const ready = await nextJsonLineBounded(lines[Symbol.asyncIterator](), child, exit, "ordinary graph-server startup", commandTimeout);
+        assert.equal(ready.ready, true);
+        const url = new URL(ready.url);
+        assert.equal(url.hostname, "127.0.0.1");
+        assert.equal(url.protocol, "http:");
+        child.stdin.end();
+        await waitForExit(exit, "ordinary graph-server shutdown", commandTimeout);
+        const pointer = await readFile(`${database}.ladybug/active`, "utf8");
+        assert.match(pointer.trim(), /^generation-[0-9]+-[0-9]+$/u);
+        await stat(join(`${database}.ladybug`, "generations", pointer.trim(), "store"));
+        if (attempt === 0) firstPointer = pointer;
+        else assert.equal(pointer, firstPointer, "ordinary restart unexpectedly replaced the persisted generation");
+      } catch (error) {
+        throw new Error(`ordinary graph-server startup/reopen failed: ${error.message}\n${stderr}`, { cause: error });
+      } finally {
+        lines.close();
+        await cleanupChild(child, exit, "ordinary graph-server");
+      }
+    }
+    return { normalStartupCreated: true, normalStartupReopened: true, normalStartupGenerationRetained: true };
+  } finally {
+    await rm(profile, { recursive: true, force: true });
+  }
+}
+
 export async function provePackagedLadybugLifecycle(
   executable,
   { execute = execFileAsync, spawn = spawnProcess, commandTimeout = 5_000 } = {},
 ) {
+  const normalStartup = process.platform === "win32"
+    ? await proveNormalGraphServerStartup(executable, { spawn, commandTimeout })
+    : {};
   const profile = await mkdtemp(join(tmpdir(), "relayer-ladybug-packaged-"));
   const database = join(profile, "ladybug");
   const args = ["--database", database, "--ladybug-qualification"];
@@ -470,6 +515,7 @@ export async function provePackagedLadybugLifecycle(
       throw new Error("packaged graph server did not reopen after clean holder shutdown");
     }
     return {
+      ...normalStartup,
       cleanProfileCreated: true,
       lockContentionRejected: true,
       cleanShutdown: true,
@@ -484,11 +530,28 @@ export async function provePackagedLadybugLifecycle(
   }
 }
 
+export async function preserveQualifiedDevelopmentApplication({ appPath, destination, binary, binarySha256 }) {
+  // Own a new empty directory, so preexisting files can never contaminate the
+  // qualified development application. Existing destinations fail untouched.
+  await mkdir(destination);
+  try {
+    for (const entry of await readdir(appPath)) {
+      await cp(join(appPath, entry), join(destination, entry), { recursive: true, errorOnExist: true, force: false });
+    }
+    const copiedBinary = join(destination, ...binary.split("/"));
+    assert.equal(await sha256File(copiedBinary), binarySha256, "copied development graph server differs from qualified bytes");
+  } catch (error) {
+    await rm(destination, { recursive: true, force: true });
+    throw error;
+  }
+}
+
 export async function captureLadybugPackagedLifecycle({
   sourceOutput,
   sourceCommit,
   environment = process.env,
   buildDesktop,
+  applicationOutput,
 } = {}) {
   if (!sourceOutput) throw new Error("Ladybug packaged capture requires a prepared source directory");
   if (!/^[0-9a-f]{40}$/u.test(sourceCommit || "")) {
@@ -661,6 +724,18 @@ export async function captureLadybugPackagedLifecycle({
     [expectedArchitecture],
     `packaged graph server architecture differs from ${target.key}`,
   );
+  if (target.platform === "win32") {
+    const layoutTests = await execFileAsync("cargo", ["test", "--release", "-p", "relayer-graph-server", "--lib", "layout_tests", "--target", target.rustTarget, "--locked", "--offline"], {
+      cwd: checkout,
+      env: { ...buildEnvironment, CARGO_TARGET_DIR: cargoTarget },
+      timeout: 300_000,
+      maxBuffer: 10 * 1024 * 1024,
+    });
+    for (const scenario of ["generation_publication_replacement_and_retention_preserve_bytes", "legacy_snapshot_flushes_copies_without_changing_original_bytes"]) {
+      assert.ok(layoutTests.stdout.includes(`test search_index::store::layout_tests::${scenario} ... ok`), `Windows layout checkpoint did not pass: ${scenario}`);
+    }
+    console.log(layoutTests.stdout.trim());
+  }
   const lifecycleTimeoutMs = qualificationLifecycleTimeout(target);
   const lifecycle = await provePackagedLadybugLifecycle(executable, { commandTimeout: lifecycleTimeoutMs });
   const inputSha256 = Object.fromEntries(await Promise.all(RECEIPT_INPUT_PATHS.map(async (path) => {
@@ -698,6 +773,11 @@ export async function captureLadybugPackagedLifecycle({
     ...lifecycle,
     limitations: packagedQualificationLimitations(environment, target, process.arch),
   };
+    if (applicationOutput) {
+      // Development bytes only: preserve the qualified application for VM tests
+      // before removing the isolated checkout. Never publish or seal this copy.
+      await preserveQualifiedDevelopmentApplication({ appPath, destination: resolve(applicationOutput), binary, binarySha256 });
+    }
     return result;
   } catch (error) {
     primaryError = error;
@@ -717,7 +797,7 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
   if (!options["source-output"] || !options["source-commit"]) {
     throw new Error(
       "usage: capture-ladybug-packaged-lifecycle.mjs --source-output <prepared-directory> "
-      + "--source-commit <40-hex> [--receipt-output <path>]",
+      + "--source-commit <40-hex> [--receipt-output <path>] [--application-output <new-directory>]",
     );
   }
   if (options.application) {
@@ -726,6 +806,7 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
   const receipt = await captureLadybugPackagedLifecycle({
     sourceOutput: options["source-output"],
     sourceCommit: options["source-commit"],
+    applicationOutput: options["application-output"],
   });
   const receiptJson = `${JSON.stringify(receipt, null, 2)}\n`;
   if (options["receipt-output"]) await writeFile(resolve(options["receipt-output"]), receiptJson);

@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { mkdtemp, mkdir, readFile, readdir, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, win32 } from "node:path";
@@ -232,13 +233,15 @@ describe("independent Windows candidate", () => {
     } finally { await rm(root, { recursive: true, force: true }); }
   });
 
-  it("checks out canonical generated query contracts with Windows line ending conversion enabled", async () => {
+  it("checks out generated contracts and reviewed native inputs with Windows line ending conversion enabled", async () => {
     const root = await mkdtemp(join(tmpdir(), "windows-contract-checkout-"));
     const generated = "packages/graph-client/src/query-errors.generated.ts";
     const python = "python/relayer-graph/src/relayer_graph/query_errors_generated.py";
     const generator = "packages/graph-client/scripts/generate-query-errors.mjs";
+    const { reviewedBuildConfiguration } = JSON.parse(await readFile(new URL("../scripts/ci/packaging-input-contract.json", import.meta.url), "utf8"));
+    const reviewed = Object.keys(reviewedBuildConfiguration);
     try {
-      for (const file of [".gitattributes", generated, python, generator, "docs/graph-query-v1-errors.json", "crates/relayer-graph-core/src/query/error.rs"]) {
+      for (const file of [".gitattributes", generated, python, generator, "docs/graph-query-v1-errors.json", "crates/relayer-graph-core/src/query/error.rs", ...reviewed]) {
         await mkdir(dirname(join(root, file)), { recursive: true });
         await writeFile(join(root, file), await readFile(new URL(`../${file}`, import.meta.url)));
       }
@@ -249,7 +252,12 @@ describe("independent Windows candidate", () => {
       await git("-c", "user.name=Qualification fixture", "-c", "user.email=fixture@example.invalid", "commit", "--quiet", "-m", "canonical source");
       await rm(join(root, generated));
       await rm(join(root, python));
-      await git("checkout", "--", generated, python);
+      for (const file of reviewed) await rm(join(root, file));
+      await git("checkout", "--", generated, python, ...reviewed);
+      for (const file of reviewed) {
+        const bytes = await readFile(join(root, file));
+        expect(createHash("sha256").update(bytes).digest("hex"), file).toBe(reviewedBuildConfiguration[file]);
+      }
       await execFileAsync(process.execPath, [join(root, generator), "--check"], { cwd: root });
     } finally { await rm(root, { recursive: true, force: true }); }
   });

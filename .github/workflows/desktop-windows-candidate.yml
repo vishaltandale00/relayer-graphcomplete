@@ -105,7 +105,7 @@ jobs:
         if: ${{ github.event_name == 'pull_request' }}
       - name: Verify unsigned package and native lifecycle
         shell: pwsh
-        run: node scripts/capture-ladybug-packaged-lifecycle.mjs --source-output "$env:RUNNER_TEMP/ladybug-prepared" --source-commit "${{ github.sha }}" --receipt-output "$env:RUNNER_TEMP/windows-native-receipt.json"
+        run: node scripts/capture-ladybug-packaged-lifecycle.mjs --source-output "$env:RUNNER_TEMP/ladybug-prepared" --source-commit "${{ github.sha }}" --receipt-output "$env:RUNNER_TEMP/windows-native-receipt.json" --application-output "$env:RUNNER_TEMP/windows-development-application"
         if: ${{ github.event_name == 'pull_request' }}
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
@@ -113,6 +113,14 @@ jobs:
           path: ${{ runner.temp }}/windows-native-receipt.json
           if-no-files-found: error
           retention-days: 90
+        if: ${{ github.event_name == 'pull_request' }}
+      - name: Preserve qualified development app for interactive Windows tests
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: windows-development-application-${{ github.sha }}
+          path: ${{ runner.temp }}/windows-development-application
+          if-no-files-found: error
+          retention-days: 7
         if: ${{ github.event_name == 'pull_request' }}
       - name: Identify Windows native build inputs
         id: native-plan

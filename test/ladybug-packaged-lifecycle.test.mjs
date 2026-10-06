@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { execFile } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -13,6 +13,8 @@ import { verifyWindowsNativeExecutable } from "../desktop/packaging/windows-nati
 import { verifyPackagedMacOSGraphServer } from "../desktop/packaging/verify-bundled-app-server.mjs";
 import {
   RECEIPT_INPUT_PATHS,
+  proveNormalGraphServerStartup,
+  preserveQualifiedDevelopmentApplication,
   assertCaptureInputsMatchSourceCommit,
   captureLadybugPackagedLifecycle,
   inspectPortableExecutable,
@@ -816,4 +818,64 @@ describe("Ladybug packaged lifecycle qualification", () => {
       await rm(root, { recursive: true, force: true });
     }
   });
+});
+
+
+it("ordinary-startup proof observes real child readiness, shutdown and generation reuse, and rejects startup failure or replacement", async () => {
+  const root = await mkdtemp(join(tmpdir(), "normal-startup-runner-"));
+  const fixture = join(root, "graph-server-fixture.cjs");
+  try {
+    // A real child and filesystem exercise the runner's failure boundary; the
+    // separately named Windows build checkpoint runs the real Rust executable.
+    await writeFile(fixture, `
+      const fs = require('node:fs');
+      const path = require('node:path');
+      const args = process.argv.slice(2);
+      const db = args[args.indexOf('--database') + 1];
+      const mode = process.env.RELAYER_STARTUP_FIXTURE_MODE;
+      process.stdin.once('data', () => {
+        if (mode === 'fail') { console.error('fixture failure before readiness'); process.exit(1); }
+        const root = db + '.ladybug';
+        const pointer = path.join(root, 'active');
+        let name = fs.existsSync(pointer) ? fs.readFileSync(pointer, 'utf8') : 'generation-1-1';
+        if (mode === 'replace' && fs.existsSync(pointer)) name = 'generation-1-2';
+        fs.mkdirSync(path.join(root, 'generations', name), {recursive:true});
+        fs.writeFileSync(path.join(root, 'generations', name, 'store'), 'persisted');
+        fs.writeFileSync(pointer, name);
+        console.log(JSON.stringify({ready:true, url:'http://127.0.0.1:54321'}));
+      });
+      process.stdin.on('end', () => process.exit(0));
+    `);
+    const launch = mode => (_executable, args, options) => spawn(process.execPath, [fixture, ...args], {
+      ...options, env: { ...process.env, RELAYER_STARTUP_FIXTURE_MODE: mode },
+    });
+    expect(await proveNormalGraphServerStartup("fixture", { spawn: launch("pass") })).toEqual({
+      normalStartupCreated: true, normalStartupReopened: true, normalStartupGenerationRetained: true,
+    });
+    await expect(proveNormalGraphServerStartup("fixture", { spawn: launch("fail") })).rejects.toThrow("fixture failure before readiness");
+    await expect(proveNormalGraphServerStartup("fixture", { spawn: launch("replace") })).rejects.toThrow("unexpectedly replaced");
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+
+it("preserves qualified application bytes in a new directory and rejects stale destinations or a changed server", async () => {
+  const root = await mkdtemp(join(tmpdir(), "qualified-development-copy-"));
+  const appPath = join(root, "source");
+  const destination = join(root, "copy");
+  try {
+    await mkdir(join(appPath, "resources", "bin"), { recursive: true });
+    await writeFile(join(appPath, "resources", "bin", "relayer-graph-server.exe"), "qualified binary");
+    await writeFile(join(appPath, "Relayer Dev.exe"), "development shell");
+    const binary = "resources/bin/relayer-graph-server.exe";
+    const binarySha256 = await sha256File(join(appPath, ...binary.split("/")));
+    await preserveQualifiedDevelopmentApplication({ appPath, destination, binary, binarySha256 });
+    expect(await readFile(join(destination, "Relayer Dev.exe"), "utf8")).toBe("development shell");
+    expect(await sha256File(join(destination, ...binary.split("/")))).toBe(binarySha256);
+    await writeFile(join(destination, "stale.txt"), "preserved");
+    await expect(preserveQualifiedDevelopmentApplication({ appPath, destination, binary, binarySha256 })).rejects.toMatchObject({ code: "EEXIST" });
+    expect(await readFile(join(destination, "stale.txt"), "utf8")).toBe("preserved");
+    const invalid = join(root, "invalid");
+    await expect(preserveQualifiedDevelopmentApplication({ appPath, destination: invalid, binary, binarySha256: "0".repeat(64) })).rejects.toThrow("differs from qualified bytes");
+    await expect(readFile(join(invalid, "Relayer Dev.exe"))).rejects.toMatchObject({ code: "ENOENT" });
+  } finally { await rm(root, { recursive: true, force: true }); }
 });

@@ -35,7 +35,7 @@ async function outputs(directory) {
   for (const name of WINDOWS_NATIVE_FILES) await writeFile(join(directory, name), name.endsWith(".exe") ? executable() : `MSF fixture ${name}`);
 }
 function proof(binarySha256) { return { scope: "windows-release-profile-packaged-lifecycle/v1", sourceCommit: source, profile: WINDOWS_NATIVE_PROFILE,
-  buildMode: "fresh-cargo-release-build", binarySha256, cleanProfileCreated: true, lockContentionRejected: true, cleanShutdown: true, restartReopenedPersistedMarker: true, storageVersion: 42 }; }
+  buildMode: "fresh-cargo-release-build", binarySha256, normalStartupCreated: true, normalStartupReopened: true, normalStartupGenerationRetained: true, cleanProfileCreated: true, lockContentionRejected: true, cleanShutdown: true, restartReopenedPersistedMarker: true, storageVersion: 42 }; }
 async function fixture() {
   const root = await temporary(); const output = join(root, "native"); await outputs(output);
   const binarySha256 = Object.fromEntries(await Promise.all(["relayer-app-server.exe", "relayer-graph-server.exe"].map(async name => [name, hash(await readFile(join(output, name)))])));
@@ -86,6 +86,10 @@ test("PDB mismatch and failed lifecycle cannot supply a qualified native bundle"
   const mismatched = async (name) => ({ stdout: `GUID: ${guid}\nAge: ${name === "llvm-readobj" ? 3 : 4}\n` });
   await expect(verifyWindowsNativeBundle({ directory: f.bundle.directory, identity, producer, capture: mismatched })).rejects.toThrow("PDB identity");
   const manifest = { ...f.bundle.manifest, qualification: { ...f.bundle.manifest.qualification, restartReopenedPersistedMarker: false } };
+  const omittedStartup = structuredClone(f.bundle.manifest);
+  delete omittedStartup.qualification.normalStartupReopened;
+  await writeFile(join(f.bundle.directory, "manifest.json"), JSON.stringify(omittedStartup));
+  await expect(verifyWindowsNativeBundle({ directory: f.bundle.directory, identity, producer, capture })).rejects.toThrow("normalStartupReopened");
   await writeFile(join(f.bundle.directory, "manifest.json"), JSON.stringify(manifest));
   await expect(verifyWindowsNativeBundle({ directory: f.bundle.directory, identity, producer, capture })).rejects.toThrow();
 });
@@ -219,6 +223,14 @@ test("Windows workflow builds in unprivileged qualification, adopts before login
   for (const value of ["TEMP=$env:RUNNER_TEMP", "TMP=$env:RUNNER_TEMP", "SCCACHE_DIR=$env:RUNNER_TEMP/rwc"]) {
     expect(initialize.run).toContain(`"${value}" >> $env:GITHUB_ENV`);
   }
+  const qualification = workflow.jobs.qualify.steps;
+  const captureIndex = qualification.findIndex(step => step.name === "Verify unsigned package and native lifecycle");
+  expect(qualification[captureIndex].run).toContain('--application-output "$env:RUNNER_TEMP/windows-development-application"');
+  const developmentIndex = qualification.findIndex(step => step.name === "Preserve qualified development app for interactive Windows tests");
+  expect(developmentIndex).toBeGreaterThan(captureIndex);
+  expect(qualification[developmentIndex].if).toBe("${{ github.event_name == 'pull_request' }}");
+  expect(qualification[developmentIndex].with.path).toBe("${{ runner.temp }}/windows-development-application");
+  expect(qualification[developmentIndex].with["if-no-files-found"]).toBe("error");
   const steps = workflow.jobs.package.steps;
   const adopt = steps.findIndex(step => step.run === "node desktop/release/windows-native-build.mjs adopt");
   expect(adopt).toBeGreaterThan(-1); expect(steps.findIndex(step => step.uses?.startsWith("azure/login@"))).toBeGreaterThan(adopt);

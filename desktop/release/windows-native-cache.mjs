@@ -73,6 +73,9 @@ export async function verifyWindowsNativeBundle({ directory, identity, producer,
   assert.deepEqual(await inventory(payload), manifest.files, "native payload hashes differ");
   assert.deepEqual(await validateWindowsNativePayload(payload, verification), manifest.debugIds);
   const proof = manifest.qualification;
+  for (const boundary of ["normalStartupCreated", "normalStartupReopened", "normalStartupGenerationRetained"]) {
+    assert.equal(proof?.[boundary], true, `Windows native qualification omitted ${boundary}`);
+  }
   assert.equal(proof?.sourceCommit, producer.sourceCommit);
   assert.equal(proof?.scope, "windows-release-profile-packaged-lifecycle/v1");
   assert.deepEqual(proof?.profile, WINDOWS_NATIVE_PROFILE);

@@ -117,7 +117,7 @@ impl StoreLayout {
             }
             let target = generation.join(format!("store{suffix}"));
             fs::copy(entry.path(), &target)?;
-            fs::File::open(target)?.sync_all()?;
+            sync_file(&target)?;
         }
         sync_directory(&generation)?;
         Ok(Some(generation))
@@ -260,7 +260,7 @@ fn copy_generation(source: &Path, destination: &Path) -> Result<()> {
             copy_generation(&entry.path(), &target)?;
         } else if kind.is_file() {
             fs::copy(entry.path(), &target)?;
-            fs::File::open(target)?.sync_all()?;
+            sync_file(&target)?;
         } else {
             return Err(anyhow!(
                 "Ladybug generation contains an unsupported file type"
@@ -282,7 +282,7 @@ fn sync_tree(path: &Path) -> Result<()> {
         if kind.is_dir() {
             sync_tree(&entry.path())?;
         } else if kind.is_file() {
-            fs::File::open(entry.path())?.sync_all()?;
+            sync_file(&entry.path())?;
         } else {
             return Err(anyhow!(
                 "Ladybug generation contains an unsupported file type"
@@ -316,9 +316,35 @@ fn ensure_plain_directory(path: &Path) -> Result<()> {
     Ok(())
 }
 
+fn sync_file(path: &Path) -> Result<()> {
+    let mut options = OpenOptions::new();
+    // FlushFileBuffers needs GENERIC_WRITE. Opening an existing file for write
+    // without create/truncate preserves its contents and propagates failures.
+    #[cfg(windows)]
+    options.write(true);
+    #[cfg(not(windows))]
+    options.read(true);
+    options.open(path)?.sync_all()?;
+    Ok(())
+}
+
 fn sync_directory(path: &Path) -> Result<()> {
     ensure_plain_directory(path)?;
-    fs::File::open(path)?.sync_all()?;
+    let mut options = OpenOptions::new();
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt;
+        // Windows needs both a directory handle and write access to flush it.
+        // OPEN_REPARSE_POINT prevents following a substituted junction/symlink.
+        const FILE_FLAG_BACKUP_SEMANTICS: u32 = 0x0200_0000;
+        const FILE_FLAG_OPEN_REPARSE_POINT: u32 = 0x0020_0000;
+        options
+            .write(true)
+            .custom_flags(FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT);
+    }
+    #[cfg(not(windows))]
+    options.read(true);
+    options.open(path)?.sync_all()?;
     Ok(())
 }
 
@@ -703,4 +729,55 @@ pub fn reset_endpoint_index_rows_for_test() {
 #[cfg(feature = "crash-test-support")]
 pub fn endpoint_index_rows_for_test() -> u64 {
     ENDPOINT_INDEX_ROWS.load(AtomicOrdering::Relaxed)
+}
+
+#[cfg(test)]
+mod layout_tests {
+    use super::*;
+
+    #[test]
+    fn generation_publication_replacement_and_retention_preserve_bytes() {
+        let temporary = tempfile::tempdir().unwrap();
+        let layout = StoreLayout::beside(&temporary.path().join("graph.sqlite3"));
+        let first = layout.create_generation().unwrap();
+        fs::create_dir(first.join("nested")).unwrap();
+        fs::write(first.join("store"), b"first store bytes").unwrap();
+        fs::write(first.join("nested/sidecar"), b"nested bytes").unwrap();
+        layout.publish(&first).unwrap();
+        assert_eq!(layout.active_generation().unwrap(), Some(first.clone()));
+        let second = layout.create_generation().unwrap();
+        fs::write(second.join("store"), b"replacement bytes").unwrap();
+        layout.publish(&second).unwrap();
+        assert_eq!(layout.active_generation().unwrap(), Some(second));
+        layout.retain_previous(&first, true).unwrap();
+        let name = first.file_name().unwrap();
+        for root in [layout.quarantine(), layout.rollback()] {
+            assert_eq!(
+                fs::read(root.join(name).join("store")).unwrap(),
+                b"first store bytes"
+            );
+            assert_eq!(
+                fs::read(root.join(name).join("nested/sidecar")).unwrap(),
+                b"nested bytes"
+            );
+        }
+        // Failed validation must preserve the successfully published pointer.
+        let pointer = fs::read(layout.active()).unwrap();
+        assert!(layout.publish(temporary.path()).is_err());
+        assert_eq!(fs::read(layout.active()).unwrap(), pointer);
+    }
+
+    #[test]
+    fn legacy_snapshot_flushes_copies_without_changing_original_bytes() {
+        let temporary = tempfile::tempdir().unwrap();
+        let layout = StoreLayout::beside(&temporary.path().join("graph.sqlite3"));
+        fs::create_dir_all(layout.root()).unwrap();
+        let bytes = [0xff, 0xfe, 0x00, 0x01];
+        fs::write(layout.active(), bytes).unwrap();
+        fs::write(layout.root().join("active.wal"), b"wal bytes").unwrap();
+        let copied = layout.snapshot_legacy_active().unwrap().unwrap();
+        assert_eq!(fs::read(copied.join("store")).unwrap(), bytes);
+        assert_eq!(fs::read(copied.join("store.wal")).unwrap(), b"wal bytes");
+        assert_eq!(fs::read(layout.active()).unwrap(), bytes);
+    }
 }
