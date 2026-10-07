@@ -40,9 +40,9 @@ describe("harness configuration", () => {
       .toThrow("graphCapabilityProfile.preview");
   });
 
-  it("allows only the compatible Claude preview addition when resuming a session", () => {
+  it.each(["claude.basic", "codex.basic", "prime.agent"])("allows only the compatible %s preview addition when resuming a session", (implementation) => {
     const previous = parseHarnessConfiguration({
-      schemaVersion: 1, name: "claude-basic", implementation: "claude.basic",
+      schemaVersion: 1, name: "fixture-basic", implementation,
       implementationVersion: 1, revision: 3, permissionBindings,
       executionAccessContracts: ["managed-runtime@1"],
       graphCapabilityProfile: { search: "query-v1" }, settings: {},
@@ -56,6 +56,7 @@ describe("harness configuration", () => {
     expect(digestHarnessConfiguration(previous)).not.toBe(digestHarnessConfiguration(current));
     for (const changed of [
       { ...current, name: "another-harness" },
+      { ...current, implementation: "another-implementation" },
       { ...current, implementationVersion: 2 },
       { ...current, settings: { execution: "changed" } },
       { ...current, permissionBindings: { ask: { changed: true }, auto: {}, full: {} } },
@@ -63,7 +64,7 @@ describe("harness configuration", () => {
       { ...current, complete: { agentAuthored: true } },
       { ...current, graphCapabilityProfile: { search: "disabled" as const, preview: "enabled" as const } },
     ]) expect(canResumeHarnessExecutionConfiguration(previous, changed)).toBe(false);
-    for (const implementation of ["codex.basic", "prime.agent", "test"]) {
+    for (const implementation of ["test", "unsupported"]) {
       expect(canResumeHarnessExecutionConfiguration(
         { ...previous, implementation }, { ...current, implementation },
       )).toBe(false);

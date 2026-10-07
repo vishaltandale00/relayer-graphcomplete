@@ -299,7 +299,7 @@ export function sameHarnessExecutionConfiguration(
   });
 }
 
-/** Claude's preview tool is bound anew for each completion, outside native resume state. */
+/** Supported adapters bind previews anew for each completion, outside native resume state. */
 export function canResumeHarnessExecutionConfiguration(
   previous: HarnessConfiguration,
   current: HarnessConfiguration,
@@ -307,7 +307,8 @@ export function canResumeHarnessExecutionConfiguration(
   if (sameHarnessExecutionConfiguration(previous, current)) return true;
   const previousProfile = resolveGraphCapabilityProfile(previous);
   const currentProfile = resolveGraphCapabilityProfile(current);
-  if (previous.implementation !== "claude.basic" || current.implementation !== "claude.basic"
+  if (!["claude.basic", "codex.basic", "prime.agent"].includes(previous.implementation)
+    || previous.implementation !== current.implementation
     || previousProfile.preview === "enabled" || currentProfile.preview !== "enabled") return false;
   const { preview: _previousPreview, ...previousWithoutPreview } = previousProfile;
   const { preview: _currentPreview, ...currentWithoutPreview } = currentProfile;
