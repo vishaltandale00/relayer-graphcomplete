@@ -247,7 +247,7 @@ describe("Eval managed Codex runtime", () => {
           policyId: "codex-default-family",
           policyVersion: 2,
         },
-        members: [{ position: 0, providerId: "codex", modelId: "gpt-5.6-sol" }],
+        members: [{ position: 0, providerId: "codex", modelId: "gpt-5.6-sol", roles: [{ name: "orchestrator" }] }],
       }),
     ]);
   });

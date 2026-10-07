@@ -113,7 +113,7 @@ impl SqliteProductStore {
             }
             let existing = interaction_from_row(&row)?;
             if let Some(requested) = model_selection
-                && existing.model_selection.as_ref() != Some(requested)
+                && existing.model_selection.as_ref().is_none_or(|selected| selected.family_id != requested.family_id)
             {
                 return Err(StorageError::IncompatibleSchema(
                     "interaction input identity was reused with a different model selection"
@@ -224,7 +224,7 @@ impl SqliteProductStore {
         } else {
             None
         };
-        let model_selection = match model_selection {
+        let mut model_selection = match model_selection {
             Some(value) => Some(value.clone()),
             None => sqlx::query(super::LATEST_HUMAN_TURN_MODEL)
                 .bind(thread_id.value())
@@ -235,6 +235,15 @@ impl SqliteProductStore {
                 .flatten(),
         };
         if let Some(selection) = model_selection.as_ref() {
+            let (_, route) =
+                super::catalog::resolve_execution_model_plan_on(&mut tx, &harness_id, selection)
+                    .await?;
+            model_selection = Some(InteractionModelSelection {
+                family_id: route.family_id,
+                provider_id: route.provider_id,
+                model_id: route.model_id,
+            });
+            let selection = model_selection.as_ref().expect("resolved family");
             let command = ValidateModelSelectionCommand {
                 harness_id,
                 family_id: selection.family_id,

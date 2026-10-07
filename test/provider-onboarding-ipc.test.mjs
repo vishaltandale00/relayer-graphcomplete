@@ -328,7 +328,7 @@ describe("provider onboarding IPC hard gate", () => {
     const fetch = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(new Response(JSON.stringify({
       complete: true,
       defaults: { providerId: "anthropic-work", harnessId: "claude-basic", familyId: 12 },
-      resolution: { familyId: 12, familyRevision: 3, resolvableMembers: [{ providerId: "anthropic-work", modelId: "claude-sonnet", position: 0 }] },
+      resolution: { familyId: 12, familyRevision: 3, resolvableMembers: [{ providerId: "anthropic-work", modelId: "claude-sonnet", position: 0, roles: [{ name: "orchestrator" }] }] },
     }), { status: 200, headers: { "Content-Type": "application/json" } }));
     await expect(service.validateProviderOnboarding()).resolves.toBe(true);
     expect(fetch.mock.calls[0][0].pathname).toBe("/api/provider-onboarding/status");

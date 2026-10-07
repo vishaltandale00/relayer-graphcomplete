@@ -1203,9 +1203,11 @@ fn admitted_model_plan_is_an_immutable_non_secret_export_snapshot() {
     };
     turn.completion.attempt_admission_id = Some("admission-1".into());
     let mut plan = ExportAdmittedExecutionModelPlan {
+        schema_version: 1,
         family_id: 1,
         family_revision: 4,
         orchestrator: ExportAdmittedExecutionModelRoute {
+            roles: None,
             provider_id: "codex".into(),
             adapter_id: "openai-api".into(),
             access_contract: "secret@1".into(),
@@ -1213,6 +1215,7 @@ fn admitted_model_plan_is_an_immutable_non_secret_export_snapshot() {
             adapter_implementation_version: "7".into(),
         },
         roster: vec![ExportAdmittedExecutionModelRoute {
+            roles: None,
             provider_id: "codex".into(),
             adapter_id: "openai-api".into(),
             access_contract: "secret@1".into(),
@@ -1246,6 +1249,7 @@ fn admitted_model_plan_requires_its_selected_family_and_orchestrator() {
     };
     turn.completion.attempt_admission_id = Some("admission-1".into());
     let route = ExportAdmittedExecutionModelRoute {
+        roles: None,
         provider_id: "codex".into(),
         adapter_id: "openai-api".into(),
         access_contract: "secret@1".into(),
@@ -1253,6 +1257,7 @@ fn admitted_model_plan_requires_its_selected_family_and_orchestrator() {
         adapter_implementation_version: "7".into(),
     };
     let mut plan = ExportAdmittedExecutionModelPlan {
+        schema_version: 1,
         family_id: 1,
         family_revision: 4,
         orchestrator: route.clone(),
@@ -2365,5 +2370,63 @@ fn edge_routes_export_with_their_edge_and_reject_invalid_portable_routes() {
         ),
     ] {
         assert_rejected_with_parity(&routed(invalid), code);
+    }
+}
+
+#[test]
+fn role_bearing_and_historical_plans_roundtrip_with_versioned_integrity() {
+    for (version, bytes) in [
+        (
+            1,
+            include_str!("../../../test/fixtures/model-family-roles/admitted-plan-v1.json"),
+        ),
+        (
+            2,
+            include_str!("../../../test/fixtures/model-family-roles/admitted-plan-v2.json"),
+        ),
+    ] {
+        let plan: ExportAdmittedExecutionModelPlan = serde_json::from_str(bytes).unwrap();
+        assert_eq!(plan.schema_version, version);
+        assert_eq!(admitted_model_plan_digest(&plan).unwrap(), plan.digest);
+        let mut fixture = records();
+        let ConversationExportRecord::Turn(turn) = &mut fixture[1] else {
+            unreachable!()
+        };
+        turn.completion.attempt_admission_id = Some("family-role-admission".into());
+        turn.completion.model_selection = Some(ExportModelSelection {
+            provider_id: plan.orchestrator.provider_id.clone(),
+            model_id: plan.orchestrator.model_id.clone(),
+            model_family_id: plan.family_id,
+        });
+        turn.completion.admitted_model_plan = Some(plan);
+        validate_export_records(&fixture).unwrap();
+        let jsonl = fixture
+            .iter()
+            .map(|record| serde_json::to_string(record).unwrap())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert_eq!(decode_export_jsonl(jsonl.as_bytes()).unwrap(), fixture);
+        if version == 2 {
+            let mut tampered = fixture.clone();
+            let ConversationExportRecord::Turn(turn) = &mut tampered[1] else {
+                unreachable!()
+            };
+            turn.completion.admitted_model_plan.as_mut().unwrap().roster[0]
+                .roles
+                .as_mut()
+                .unwrap()[1]
+                .description = Some("Altered specialist judgment".into());
+            assert_rejected_with_parity(&tampered, "admitted_model_plan_digest_mismatch");
+            for malformed_version in [1, 3] {
+                let mut malformed = fixture.clone();
+                let ConversationExportRecord::Turn(turn) = &mut malformed[1] else {
+                    unreachable!()
+                };
+                let plan = turn.completion.admitted_model_plan.as_mut().unwrap();
+                plan.schema_version = malformed_version;
+                plan.digest = admitted_model_plan_digest(plan).unwrap();
+                assert_rejected_with_parity(&malformed, "admitted_model_plan_roles_invalid");
+            }
+        }
     }
 }

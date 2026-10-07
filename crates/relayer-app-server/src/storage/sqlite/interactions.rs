@@ -278,7 +278,7 @@ impl SqliteProductStore {
                 ));
             }
         }
-        let model_selection = match model_selection {
+        let mut model_selection = match model_selection {
             Some(selection) => Some(selection.clone()),
             None => sqlx::query(super::LATEST_HUMAN_TURN_MODEL)
                 .bind(thread_id.value())
@@ -290,6 +290,15 @@ impl SqliteProductStore {
                 .flatten(),
         };
         if let Some(selection) = model_selection.as_ref() {
+            let (_, route) =
+                catalog::resolve_execution_model_plan_on(&mut transaction, &harness_id, selection)
+                    .await?;
+            model_selection = Some(InteractionModelSelection {
+                family_id: route.family_id,
+                provider_id: route.provider_id,
+                model_id: route.model_id,
+            });
+            let selection = model_selection.as_ref().expect("resolved family selection");
             let command = ValidateModelSelectionCommand {
                 harness_id: harness_id.clone(),
                 family_id: selection.family_id,
@@ -608,14 +617,6 @@ impl SqliteProductStore {
                     .try_get::<Option<String>, _>("input_digest")?
                     .as_deref()
                     == Some(input.input_digest)
-                && retry_row
-                    .try_get::<Option<String>, _>("model_provider_id")?
-                    .as_deref()
-                    == Some(model_selection.provider_id.as_str())
-                && retry_row
-                    .try_get::<Option<String>, _>("provider_model_id")?
-                    .as_deref()
-                    == Some(model_selection.model_id.as_str())
                 && retry_row.try_get::<Option<i64>, _>("model_family_id")?
                     == Some(model_selection.family_id.value())
                 && retry_row
@@ -659,6 +660,18 @@ impl SqliteProductStore {
                 ),
             ));
         }
+        let (_, route) = catalog::resolve_execution_model_plan_on(
+            &mut transaction,
+            harness_configuration_name,
+            model_selection,
+        )
+        .await?;
+        let resolved_selection = InteractionModelSelection {
+            family_id: route.family_id,
+            provider_id: route.provider_id,
+            model_id: route.model_id,
+        };
+        let model_selection = &resolved_selection;
         let command = ValidateModelSelectionCommand {
             harness_id: harness_configuration_name.to_owned(),
             family_id: model_selection.family_id,
@@ -1107,6 +1120,7 @@ mod tests {
         let second_model = selection("second-model");
         let thread = store
             .insert_thread_with_initial_interaction(NewThreadRecord {
+                required_provider_adapter_id: None,
                 icon_selection_eligible: true,
                 title: "Atomic inheritance",
                 project_id: None,
@@ -1142,7 +1156,7 @@ mod tests {
 
         assert_eq!(explicit.sequence, 2);
         assert_eq!(inherited.sequence, 3);
-        assert_eq!(inherited.model_selection, Some(second_model));
+        assert_eq!(inherited.model_selection, Some(first_model));
         store.pool.close().await;
     }
 
@@ -1163,6 +1177,7 @@ mod tests {
 
         let thread = store
             .insert_thread_with_initial_interaction(NewThreadRecord {
+                required_provider_adapter_id: None,
                 icon_selection_eligible: true,
                 title: "Last-known catalog thread",
                 project_id: None,
@@ -1196,6 +1211,7 @@ mod tests {
         let first_model = selection("first-model");
         let thread = store
             .insert_thread_with_initial_interaction(NewThreadRecord {
+                required_provider_adapter_id: None,
                 icon_selection_eligible: true,
                 title: "Retry in place",
                 project_id: None,
@@ -1294,7 +1310,7 @@ mod tests {
         assert_eq!(interaction.id, thread.root_interaction_id);
         assert_eq!(interaction.text, "Edited prompt");
         assert_eq!(interaction.completion_status, "submitted");
-        assert_eq!(interaction.model_selection, Some(next_model));
+        assert_eq!(interaction.model_selection, Some(first_model));
         assert_eq!(
             store
                 .interaction_input(thread.root_interaction_id)
@@ -1415,6 +1431,7 @@ mod tests {
         let model = selection("first-model");
         let thread = store
             .insert_thread_with_initial_interaction(NewThreadRecord {
+                required_provider_adapter_id: None,
                 icon_selection_eligible: true,
                 title: "Human turn gate",
                 project_id: None,
@@ -1538,7 +1555,7 @@ mod tests {
             .await
             .unwrap();
         for (position, model_id) in ["first-model", "second-model"].iter().enumerate() {
-            sqlx::query("INSERT INTO model_family_members(family_id,position,provider_id,model_id) VALUES (1,?1,'codex',?2)")
+            sqlx::query("INSERT INTO model_family_members(family_id,position,provider_id,model_id,roles_json) VALUES (1,?1,'codex',?2,CASE WHEN ?1=0 THEN json_array(json_object('name','orchestrator')) ELSE '[]' END)")
                 .bind(position as i64)
                 .bind(model_id)
                 .execute(&store.pool)

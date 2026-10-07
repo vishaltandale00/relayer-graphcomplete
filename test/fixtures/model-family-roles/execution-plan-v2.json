@@ -1,0 +1,44 @@
+{
+  "schemaVersion": 2,
+  "familyId": 17,
+  "familyRevision": 4,
+  "orchestrator": {
+    "providerId": "openai-work",
+    "adapterId": "openai-api",
+    "accessContract": "api-key@1",
+    "modelId": "gpt-5.6-sol",
+    "roles": [
+      {
+        "name": "orchestrator"
+      },
+      {
+        "name": "coding",
+        "description": "Implementation and debugging"
+      }
+    ]
+  },
+  "roster": [
+    {
+      "providerId": "openai-work",
+      "adapterId": "openai-api",
+      "accessContract": "api-key@1",
+      "modelId": "gpt-5.6-sol",
+      "roles": [
+        {
+          "name": "orchestrator"
+        },
+        {
+          "name": "coding",
+          "description": "Implementation and debugging"
+        }
+      ]
+    },
+    {
+      "providerId": "openai-personal",
+      "adapterId": "openai-api",
+      "accessContract": "api-key@1",
+      "modelId": "gpt-5.6-luna",
+      "roles": []
+    }
+  ]
+}

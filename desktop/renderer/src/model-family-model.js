@@ -55,7 +55,7 @@ export function copySystemFamily(family, sequence = Date.now()) {
     kind: "custom",
     enabled: true,
     draft: true,
-    models: family.models.map((member) => ({ ...member })).slice(0, MAX_MODELS_PER_FAMILY),
+    models: family.models.map((member) => ({ ...member, roles: structuredClone(member.roles ?? []) })).slice(0, MAX_MODELS_PER_FAMILY),
   };
 }
 
@@ -100,6 +100,7 @@ export function modelMember(provider, model) {
   const hidden = model.visible === false;
   const unavailable = model.available === false;
   return {
+    roles: [],
     providerId: provider.id,
     providerLabel: provider.label,
     modelId: model.id,
@@ -135,6 +136,20 @@ export function validateCustomFamily(family, families = []) {
     });
     if (duplicate) errors.models = "Each provider model can appear only once.";
   }
+  if (!errors.models && family.models.filter((member) => member.roles?.some((role) => role.name === "orchestrator")).length !== 1) {
+    errors.roles = "Choose exactly one orchestrator.";
+  }
+  for (const member of family.models) {
+    const names = new Set();
+    if ((member.roles ?? []).length > 32 || (member.roles ?? []).some((role) => {
+      const name = role.name.trim();
+      if (!name || [...name].length > 80 || names.has(name.toLowerCase())
+        || (name.toLowerCase() === "orchestrator" && name !== "orchestrator")
+        || [...(role.description ?? "")].length > 240) return true;
+      names.add(name.toLowerCase());
+      return false;
+    })) errors.roles = "Use unique role names and short descriptions. The reserved role is orchestrator.";
+  }
   return errors;
 }
 
@@ -149,6 +164,7 @@ export function moveItem(items, fromIndex, toIndex) {
 
 export function replaceMemberProvider(member, provider, model) {
   return model ? modelMember(provider, model) : {
+    roles: [],
     providerId: provider.id,
     providerLabel: provider.label,
     modelId: "",
@@ -201,6 +217,12 @@ export function defaultFamilyRecoveryPresentation(settings) {
       busyName: modelSetup.busyName,
     };
   }
+  if (!modelSetup.providerLabel) return {
+    ...common,
+    action: "families",
+    actionLabel: "Open Model Families",
+    actionName: modelSetup.actionName,
+  };
   // A disconnected provider is reconnected from its card under Providers.
   return {
     ...common,

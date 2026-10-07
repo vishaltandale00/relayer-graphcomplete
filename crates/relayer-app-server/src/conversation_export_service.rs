@@ -1460,9 +1460,11 @@ fn export_turn(
                         .and_then(|attempt| {
                             attempt.admitted_plan.as_ref().map(|plan| {
                                 ExportAdmittedExecutionModelPlan {
+                                    schema_version: plan.schema_version,
                                     family_id: plan.family_id.value(),
                                     family_revision: plan.family_revision,
                                     orchestrator: ExportAdmittedExecutionModelRoute {
+                                        roles: plan.orchestrator.roles.as_ref().map(|roles| roles.iter().map(|role| crate::conversation_export::ExportModelRole { name: role.name.clone(), description: role.description.clone() }).collect()),
                                         provider_id: plan.orchestrator.provider_id.as_str().into(),
                                         adapter_id: plan.orchestrator.adapter_id.clone(),
                                         access_contract: plan.orchestrator.access_contract.clone(),
@@ -1476,6 +1478,7 @@ fn export_turn(
                                         .roster
                                         .iter()
                                         .map(|route| ExportAdmittedExecutionModelRoute {
+                                            roles: route.roles.as_ref().map(|roles| roles.iter().map(|role| crate::conversation_export::ExportModelRole { name: role.name.clone(), description: role.description.clone() }).collect()),
                                             provider_id: route.provider_id.as_str().into(),
                                             adapter_id: route.adapter_id.clone(),
                                             access_contract: route.access_contract.clone(),

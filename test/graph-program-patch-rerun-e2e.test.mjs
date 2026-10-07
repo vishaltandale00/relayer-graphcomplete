@@ -131,7 +131,7 @@ it.each(["repair", "lost-ack", "after-accept"])("preserves named repair and acce
     systemFamily: { key: "codex", name: "Codex", modelIds: ["fixture-model"] },
   });
   const project = await request(session, "/api/projects", { path: projectPath });
-  const family = await request(session, "/api/model-families", { name: "Fixture", enabled: true, members: [{ providerId: "codex", modelId: "fixture-model" }] });
+  const family = await request(session, "/api/model-families", { name: "Fixture", enabled: true, members: [{ providerId: "codex", modelId: "fixture-model", roles: [{ name: "orchestrator" }] }] });
   const thread = await request(session, "/api/threads", {
     title: "Patch rerun", initialMessage: "Answer with a patched program", projectId: project.id,
     permissionProfileId: "auto", harnessId: "fixture-patch-rerun",

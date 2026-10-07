@@ -17,7 +17,6 @@ use relayer_graph_core::{
     ThreadId as GraphThreadId,
 };
 use relayer_graph_server::ServerState as GraphServerState;
-use serde::Serialize;
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
@@ -5044,7 +5043,7 @@ async fn product_model_selection_is_validated_inherited_transported_and_auditabl
             Some(json!({
                 "name": "Runtime contract models",
                 "members": [
-                    { "providerId": "codex", "modelId": "test-model" },
+                    { "providerId": "codex", "modelId": "test-model", "roles": [{ "name": "orchestrator" }] },
                     { "providerId": "codex", "modelId": "second-model" },
                     { "providerId": "codex", "modelId": "broken-model" },
                     { "providerId": "codex", "modelId": "retryable-model" }
@@ -5081,17 +5080,14 @@ async fn product_model_selection_is_validated_inherited_transported_and_auditabl
             Some(json!({
                 "initialMessage": "Still do not create",
                 "harnessId": "codex-basic",
-                "modelSelection": model_selection(family_id, "missing-model")
+                "modelSelection": model_selection(999999, "missing-model")
             })),
             true,
         ))
         .await
         .unwrap();
     assert_eq!(invalid.status(), StatusCode::UNPROCESSABLE_ENTITY);
-    assert_eq!(
-        response_json(invalid).await["code"],
-        "model_selection_unknown"
-    );
+    assert_eq!(response_json(invalid).await["code"], "model_family_removed");
     let empty_state = response_json(
         app.clone()
             .oneshot(api_request("GET", "/api/state", None, true))
@@ -5110,7 +5106,7 @@ async fn product_model_selection_is_validated_inherited_transported_and_auditabl
                 "title": "Model transport",
                 "initialMessage": "First",
                 "harnessId": "codex-basic",
-                "modelSelection": model_selection(family_id, "test-model")
+                "modelSelection": { "familyId": family_id }
             })),
             true,
         ))
@@ -5140,6 +5136,7 @@ async fn product_model_selection_is_validated_inherited_transported_and_auditabl
     );
     wait_for_interaction_count_and_terminal(&app, thread_id, 2).await;
 
+    designate_test_orchestrator(&app, family_id, "second-model").await;
     let changed = app
         .clone()
         .oneshot(api_request(
@@ -5202,7 +5199,7 @@ async fn product_model_selection_is_validated_inherited_transported_and_auditabl
             &format!("/api/threads/{thread_id}/interactions"),
             Some(json!({
                 "text": "Must not persist",
-                "modelSelection": model_selection(family_id, "missing-model")
+                "modelSelection": model_selection(999999, "missing-model")
             })),
             true,
         ))
@@ -5210,6 +5207,7 @@ async fn product_model_selection_is_validated_inherited_transported_and_auditabl
         .unwrap();
     assert_eq!(invalid_follow_up.status(), StatusCode::UNPROCESSABLE_ENTITY);
 
+    designate_test_orchestrator(&app, family_id, "broken-model").await;
     let failed = app
         .clone()
         .oneshot(api_request(
@@ -5260,6 +5258,7 @@ async fn product_model_selection_is_validated_inherited_transported_and_auditabl
         ]
     );
 
+    designate_test_orchestrator(&app, family_id, "retryable-model").await;
     let retryable = app
         .clone()
         .oneshot(api_request(
@@ -5324,6 +5323,7 @@ async fn product_model_selection_is_validated_inherited_transported_and_auditabl
         .unwrap();
     pool.close().await;
 
+    designate_test_orchestrator(&app, family_id, "second-model").await;
     let mut latest_attempt_id = attempt_id;
     for cycle in 1..=2 {
         let failed_retry = app
@@ -8737,7 +8737,7 @@ async fn seed_explicit_test_model_default(database: &Path, thread_id: i64) {
         .await
         .unwrap()
         .last_insert_rowid();
-    sqlx::query("INSERT INTO model_family_members(family_id,position,provider_id,model_id) VALUES (?1,0,'codex','test-model')")
+    sqlx::query("INSERT INTO model_family_members(family_id,position,provider_id,model_id,roles_json) VALUES (?1,0,'codex','test-model',json_array(json_object('name','orchestrator')))")
         .bind(family_id)
         .execute(&pool)
         .await
@@ -9135,6 +9135,24 @@ fn provider_publish_request(body: Value) -> Request<Body> {
         .unwrap()
 }
 
+async fn designate_test_orchestrator(app: &Router, family_id: i64, orchestrator: &str) {
+    let members = ["test-model", "second-model", "broken-model", "retryable-model"].into_iter().map(|model| json!({
+        "providerId": "codex", "modelId": model,
+        "roles": if model == orchestrator { json!([{"name":"orchestrator"}]) } else { json!([]) }
+    })).collect::<Vec<_>>();
+    let response = app
+        .clone()
+        .oneshot(api_request(
+            "PUT",
+            &format!("/api/model-families/{family_id}"),
+            Some(json!({"name":"Runtime contract models","enabled":true,"members":members})),
+            true,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+}
+
 fn model_selection(family_id: i64, model_id: &str) -> Value {
     json!({
         "familyId": family_id,
@@ -9228,50 +9246,17 @@ fn test_execution_admission(body: &Value, lease_id: &str, version: &str) -> Valu
     policy_hasher.update(b"relayer.harness-policy.v1\0");
     policy_hasher.update(policy_bytes);
     let harness_policy_digest = format!("sha256:{:x}", policy_hasher.finalize());
-    #[derive(Serialize)]
-    #[serde(rename_all = "camelCase")]
-    struct Route {
-        provider_id: Value,
-        adapter_id: Value,
-        access_contract: Value,
-        model_id: Value,
-        adapter_implementation_version: String,
+    let mut admitted_plan = body["modelPlan"].clone();
+    admitted_plan["orchestrator"]["adapterImplementationVersion"] = json!(version);
+    for route in admitted_plan["roster"].as_array_mut().unwrap() {
+        route["adapterImplementationVersion"] = json!(version);
     }
-    let versioned = |route: &Value| Route {
-        provider_id: route["providerId"].clone(),
-        adapter_id: route["adapterId"].clone(),
-        access_contract: route["accessContract"].clone(),
-        model_id: route["modelId"].clone(),
-        adapter_implementation_version: version.into(),
-    };
-    let plan = &body["modelPlan"];
-    #[derive(Serialize)]
-    #[serde(rename_all = "camelCase")]
-    struct Unsigned<'a> {
-        family_id: &'a Value,
-        family_revision: &'a Value,
-        orchestrator: Route,
-        roster: Vec<Route>,
-        harness_policy_digest: &'a str,
-    }
-    let unsigned = Unsigned {
-        family_id: &plan["familyId"],
-        family_revision: &plan["familyRevision"],
-        orchestrator: versioned(&plan["orchestrator"]),
-        roster: plan["roster"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .map(versioned)
-            .collect(),
-        harness_policy_digest: &harness_policy_digest,
-    };
-    let mut plan_hasher = Sha256::new();
-    plan_hasher.update(b"relayer.harness-model-plan.v1\0");
-    plan_hasher.update(serde_json::to_vec(&unsigned).unwrap());
-    let digest = format!("sha256:{:x}", plan_hasher.finalize());
-    let mut admitted_plan = serde_json::to_value(&unsigned).unwrap();
-    admitted_plan["digest"] = Value::String(digest);
+    admitted_plan["harnessPolicyDigest"] = json!(harness_policy_digest);
+    admitted_plan["digest"] = json!("");
+    let mut admitted_plan: relayer_app_server::conversation_export::ExportAdmittedExecutionModelPlan = serde_json::from_value(admitted_plan).unwrap();
+    admitted_plan.digest =
+        relayer_app_server::conversation_export::admitted_model_plan_digest(&admitted_plan)
+            .unwrap();
     json!({
         "executionLeaseId": lease_id,
         "adapterImplementationVersion": version,
@@ -9721,7 +9706,7 @@ async fn run_turn_whose_outcome_is_not_persisted(ending: UnpersistedTurnEnding) 
             "/api/model-families",
             Some(json!({
                 "name": "Quarantined lease models",
-                "members": [{ "providerId": "codex", "modelId": "test-model" }]
+                "members": [{ "providerId": "codex", "modelId": "test-model", "roles": [{ "name": "orchestrator" }] }]
             })),
             true,
         ))

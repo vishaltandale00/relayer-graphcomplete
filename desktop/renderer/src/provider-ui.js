@@ -164,6 +164,7 @@ export function onboardingFamilyOptionsMarkup(harness, intent = {}) {
       const key = `${model.providerId}\0${model.modelId}`;
       return `<label><input type="checkbox" data-onboarding-member-provider="${escapeHtmlAttribute(model.providerId)}" data-onboarding-member-model="${escapeHtmlAttribute(model.modelId)}" ${selectedMembers.has(key) ? "checked" : ""} /><span><strong>${escapeHtml(model.label)}</strong><small>${escapeHtml(model.modelId)}</small></span></label>`;
     }).join("")}</fieldset>
+    <fieldset><legend>Choose the orchestrator</legend>${(intent.members ?? []).map((member) => `<label><input type="radio" name="onboarding-orchestrator" data-onboarding-orchestrator-provider="${escapeHtmlAttribute(member.providerId)}" data-onboarding-orchestrator-model="${escapeHtmlAttribute(member.modelId)}" ${member.roles?.some((role) => role.name === "orchestrator") ? "checked" : ""} />${escapeHtml(member.modelId)}</label>`).join("")}</fieldset>
   </div>` : "";
   return `<div class="onboarding-choice-group" role="radiogroup" aria-label="Default model family">${groupedChoices}</div>${createFields}${onboardingReason(harness?.blockingReason)}`;
 }

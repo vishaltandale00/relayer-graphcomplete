@@ -65,7 +65,7 @@ function hydrateMember(member) {
     available: false,
     unavailableReason: "This model is no longer in the provider catalog.",
   };
-  return modelMember(owner, model);
+  return { ...modelMember(owner, model), roles: structuredClone(member.roles ?? []) };
 }
 
 function normalizeSettings(response) {
@@ -109,6 +109,7 @@ function familyPayload(family) {
     members: family.models.map((member) => ({
       providerId: member.providerId,
       modelId: member.modelId,
+      roles: structuredClone(member.roles ?? []),
     })),
   };
 }
@@ -159,7 +160,7 @@ export async function refreshModelSettings({ preserveIndex = true, preserveEdit 
   settings.families = preserved.families;
   for (const index of preserved.preservedIndexes) {
     settings.families[index].models = settings.families[index].models
-      .map((member) => hydrateMember({ providerId: member.providerId, modelId: member.modelId }));
+      .map((member) => hydrateMember(member));
   }
   const preservedVisibleIndex = settings.families.findIndex((family) => (
     String(family.id) === String(previousFamilyId)
@@ -182,7 +183,7 @@ function harnessOptions(recovery) {
   const selected = settings.harnesses.find((harness) => harness.id === settings.defaults.harnessId);
   // While the default family needs model setup, the server refuses a harness change, so the
   // saved harness is shown as it is rather than as unavailable.
-  if (recovery) {
+  if (recovery && recovery.action !== "families") {
     return `<option value="${escapeHtmlAttribute(settings.defaults.harnessId)}" selected>${escapeHtml(selected?.label ?? settings.defaults.harnessId)}</option>`;
   }
   const invalidDefault = defaultHarnessIsSelectable(settings, settings.defaults.harnessId)
@@ -248,6 +249,7 @@ function memberReadOnly(member, index) {
     <span class="member-order">${index + 1}</span>
     <span class="member-provider">${escapeHtml(member.providerLabel)}</span>
     <strong>${escapeHtml(member.modelLabel)}</strong>
+    <span class="member-roles">${(member.roles ?? []).map((role) => `<span title="${escapeHtmlAttribute(role.description ?? "")}">${escapeHtml(role.name)}</span>`).join(" · ")}</span>
     ${unavailable ? `<span class="member-error">${escapeHtml(member.unavailableReason || "Unavailable")}</span>` : ""}
   </li>`;
 }
@@ -263,6 +265,11 @@ function memberEditor(member, index, count) {
       <button type="button" class="icon-button" data-member-down="${index}" title="Move down" aria-label="Move model ${index + 1} down" ${savingFamily || index === count - 1 ? "disabled" : ""}>↓</button>
       <button type="button" class="icon-button" data-member-remove="${index}" title="Remove" aria-label="Remove model ${index + 1}" ${savingFamily ? "disabled" : ""}>×</button>
     </span>
+    <div class="member-role-editor">
+      <label><input type="radio" name="family-orchestrator" data-member-orchestrator="${index}" ${member.roles?.some((role) => role.name === "orchestrator") ? "checked" : ""} ${savingFamily ? "disabled" : ""} /> Orchestrator</label>
+      ${(member.roles ?? []).map((role, roleIndex) => role.name === "orchestrator" ? "" : `<div class="member-specialist-role"><input aria-label="Specialist role for model ${index + 1}" data-role-name="${index}:${roleIndex}" maxlength="80" value="${escapeHtmlAttribute(role.name)}" ${savingFamily ? "disabled" : ""} /><input aria-label="Role description for model ${index + 1}" data-role-description="${index}:${roleIndex}" maxlength="240" placeholder="Short description (optional)" value="${escapeHtmlAttribute(role.description ?? "")}" ${savingFamily ? "disabled" : ""} /><button type="button" data-role-remove="${index}:${roleIndex}" aria-label="Remove specialist role" ${savingFamily ? "disabled" : ""}>×</button></div>`).join("")}
+      <button type="button" class="secondary" data-role-add="${index}" ${savingFamily ? "disabled" : ""}>Add specialist role</button>
+    </div>
     ${reason ? `<span class="member-error">${escapeHtml(reason)}</span>` : ""}
   </li>`;
 }
@@ -277,6 +284,8 @@ function familyEditor(family) {
     ${errors.name ? `<div class="field-error">${escapeHtml(errors.name)}</div>` : ""}
     <ol class="family-members family-member-editors">${family.models.map((member, index) => memberEditor(member, index, family.models.length)).join("")}</ol>
     ${errors.models ? `<div class="field-error">${escapeHtml(errors.models)}</div>` : ""}
+    ${errors.roles ? `<div class="field-error" role="alert">${escapeHtml(errors.roles)}</div>` : ""}
+    <p class="family-role-help">The orchestrator starts each execution. Specialist labels help it choose models through the harness's native tools. Labels do not grant permissions or require delegation.</p>
     <div class="family-editor-actions">
       <button type="button" class="secondary" id="addFamilyModel" ${savingFamily || family.models.length >= MAX_MODELS_PER_FAMILY || !nextAvailableMember(family) ? "disabled" : ""}>＋ Add model</button>
       <span class="push"></span>
@@ -314,13 +323,13 @@ function render() {
   const recovery = defaultFamilyRecoveryPresentation(settings);
   $("#defaultHarnessSelect").innerHTML = harnessOptions(recovery);
   $("#defaultProviderSelect").innerHTML = defaultProviderOptions();
-  $("#defaultHarnessSelect").disabled = savingDefaults || Boolean(recovery);
+  $("#defaultHarnessSelect").disabled = savingDefaults || Boolean(recovery && recovery.action !== "families");
   $("#defaultProviderSelect").disabled = savingDefaults;
   const providerHint = defaultProviderHint(defaultProviderChoices(settings), settings.defaults?.providerId);
   $("#defaultProviderHint").textContent = providerHint ?? "";
   $("#defaultProviderHint").classList.toggle("hidden", !providerHint);
   $("#defaultFamilyRecovery").classList.toggle("hidden", !recovery);
-  const canAct = recovery?.action === "providers" || Boolean(providerModelsRefreshAction());
+  const canAct = ["providers", "families"].includes(recovery?.action) || Boolean(providerModelsRefreshAction());
   const busy = refreshingDefaultFamily && recovery?.action === "refresh";
   // Only the message text is a live region; it changes only when the recovery does.
   const title = recovery?.title ?? "";
@@ -506,6 +515,37 @@ function bindEditorEvents(family) {
     const member = nextAvailableMember(current);
     if (member && current.models.length < MAX_MODELS_PER_FAMILY) current.models.push(member);
   });
+  $$('[data-member-orchestrator]').forEach((input) => {
+    input.onchange = () => updateCurrentFamily((current) => {
+      current.models.forEach((member, index) => {
+        member.roles = (member.roles ?? []).filter((role) => role.name !== "orchestrator");
+        if (index === Number(input.dataset.memberOrchestrator)) member.roles.unshift({ name: "orchestrator" });
+      });
+    });
+  });
+  $$('[data-role-add]').forEach((button) => {
+    button.onclick = () => updateCurrentFamily((current) => {
+      const member = current.models[Number(button.dataset.roleAdd)];
+      member.roles ??= [];
+      member.roles.push({ name: "" });
+    });
+  });
+  $$('[data-role-remove]').forEach((button) => {
+    button.onclick = () => updateCurrentFamily((current) => {
+      const [member, role] = button.dataset.roleRemove.split(":").map(Number);
+      current.models[member].roles.splice(role, 1);
+    });
+  });
+  for (const [attribute, field] of [["roleName", "name"], ["roleDescription", "description"]]) {
+    const selector = attribute === "roleName" ? '[data-role-name]' : '[data-role-description]';
+    $$(selector).forEach((input) => {
+      input.oninput = () => {
+        const [member, role] = input.dataset[attribute].split(":").map(Number);
+        const value = input.value.trim();
+        family.models[member].roles[role][field] = field === "description" && !value ? undefined : value;
+      };
+    });
+  }
   $$('[data-member-provider]').forEach((select) => {
     select.onchange = () => updateCurrentFamily((current) => {
       const index = Number(select.dataset.memberProvider);
@@ -609,6 +649,13 @@ async function refreshDefaultFamilyModels() {
   const recovery = defaultFamilyRecoveryPresentation(settings);
   if (!recovery || refreshingDefaultFamily || savingDefaults) return;
   // A disconnected provider is reconnected from its card under Providers.
+  if (recovery.action === "families") {
+    const index = settings.families.findIndex((family) => String(family.id) === String(settings.defaults?.familyId));
+    if (index >= 0) chooseFamily(index);
+    $("#familyCarousel")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    $('[data-family-edit="' + index + '"]')?.focus();
+    return;
+  }
   if (recovery.action === "providers") {
     const providersTab = $('[data-settings-tab="providers"]');
     providersTab?.click();

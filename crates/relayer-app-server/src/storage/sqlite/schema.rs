@@ -323,6 +323,7 @@ const MODEL_FAMILY_MEMBER_COLUMNS: &[(&str, &str, bool, i64)] = &[
     ("position", "INTEGER", true, 2),
     ("provider_id", "TEXT", true, 0),
     ("model_id", "TEXT", true, 0),
+    ("roles_json", "TEXT", true, 0),
 ];
 const PRODUCT_MODEL_PREFERENCE_COLUMNS: &[(&str, &str, bool, i64)] = &[
     ("singleton", "INTEGER", true, 1),
@@ -452,6 +453,24 @@ pub(super) async fn validate(pool: &SqlitePool) -> Result<(), StorageError> {
     validate_foreign_key(
         pool,
         "thread_creation_requests",
+        "thread_id",
+        "threads",
+        "id",
+        "CASCADE",
+    )
+    .await?;
+    validate_columns(
+        pool,
+        "thread_execution_constraints",
+        &[
+            ("thread_id", "INTEGER", false, 1),
+            ("required_provider_adapter_id", "TEXT", true, 0),
+        ],
+    )
+    .await?;
+    validate_foreign_key(
+        pool,
+        "thread_execution_constraints",
         "thread_id",
         "threads",
         "id",

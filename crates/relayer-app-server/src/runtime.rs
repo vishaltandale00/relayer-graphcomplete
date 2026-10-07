@@ -2661,7 +2661,8 @@ fn validate_admitted_plan(
     harness_policy: &ExecutionHarnessPolicy,
     admitted: &AdmittedExecutionModelPlan,
 ) -> Result<(), RuntimeError> {
-    if admitted.family_id != requested.family_id
+    if admitted.schema_version != requested.schema_version
+        || admitted.family_id != requested.family_id
         || admitted.family_revision != requested.family_revision
         || admitted.roster.len() != requested.roster.len()
     {
@@ -2672,7 +2673,8 @@ fn validate_admitted_plan(
     let route_matches =
         |requested: &crate::product::ExecutionModelRoute,
          admitted: &crate::product::AdmittedExecutionModelRoute| {
-            requested.provider_id == admitted.provider_id
+            requested.roles == admitted.roles
+                && requested.provider_id == admitted.provider_id
                 && requested.adapter_id == admitted.adapter_id
                 && requested.access_contract == admitted.access_contract
                 && requested.model_id == admitted.model_id
@@ -2713,13 +2715,17 @@ pub(crate) fn admitted_model_plan_digest(
     #[derive(Serialize)]
     #[serde(rename_all = "camelCase")]
     struct UnsignedPlan<'a> {
+        #[serde(skip_serializing_if = "crate::product::is_legacy_plan_version")]
+        schema_version: u32,
         family_id: crate::product::ModelFamilyId,
         family_revision: i64,
         orchestrator: &'a crate::product::AdmittedExecutionModelRoute,
         roster: &'a [crate::product::AdmittedExecutionModelRoute],
         harness_policy_digest: &'a str,
     }
+    validate_plan_roles(admitted)?;
     let unsigned = UnsignedPlan {
+        schema_version: admitted.schema_version,
         family_id: admitted.family_id,
         family_revision: admitted.family_revision,
         orchestrator: &admitted.orchestrator,
@@ -2727,9 +2733,47 @@ pub(crate) fn admitted_model_plan_digest(
         harness_policy_digest: &admitted.harness_policy_digest,
     };
     let mut plan_hasher = Sha256::new();
-    plan_hasher.update(b"relayer.harness-model-plan.v1\0");
-    plan_hasher.update(serde_json::to_vec(&unsigned)?);
+    if admitted.schema_version == 1 {
+        plan_hasher.update(b"relayer.harness-model-plan.v1\0");
+        plan_hasher.update(serde_json::to_vec(&unsigned)?);
+    } else {
+        plan_hasher.update(b"relayer.harness-model-plan.v2\0");
+        plan_hasher.update(serde_json::to_vec(&unsigned)?);
+    }
     Ok(format!("sha256:{:x}", plan_hasher.finalize()))
+}
+
+fn validate_plan_roles(plan: &AdmittedExecutionModelPlan) -> Result<(), RuntimeError> {
+    let invalid = || {
+        RuntimeError::Protocol("invalid model-plan role version or orchestrator membership".into())
+    };
+    match plan.schema_version {
+        1 if plan.orchestrator.roles.is_none()
+            && plan.roster.iter().all(|route| route.roles.is_none()) =>
+        {
+            Ok(())
+        }
+        2 => {
+            for route in std::iter::once(&plan.orchestrator).chain(&plan.roster) {
+                crate::product::validate_roles(route.roles.as_deref().ok_or_else(invalid)?)
+                    .map_err(|_| invalid())?;
+            }
+            let orchestrators =
+                plan.roster
+                    .iter()
+                    .filter(|route| {
+                        route.roles.as_ref().is_some_and(|roles| {
+                            roles.iter().any(|role| role.name == "orchestrator")
+                        })
+                    })
+                    .collect::<Vec<_>>();
+            if orchestrators.len() != 1 || orchestrators[0] != &plan.orchestrator {
+                return Err(invalid());
+            }
+            Ok(())
+        }
+        _ => Err(invalid()),
+    }
 }
 
 fn harness_policy_digest(harness_policy: &ExecutionHarnessPolicy) -> Result<String, RuntimeError> {
@@ -2945,9 +2989,12 @@ mod tests {
     use super::{
         CONTROL_REQUEST_TIMEOUT, CompleteInteraction, GraphCapabilityProfile,
         HarnessCompleteConfiguration, HarnessConfiguration, PreparedInteraction,
-        PreparedInvocation, RuntimeClient, RuntimeError,
+        PreparedInvocation, RuntimeClient, RuntimeError, admitted_model_plan_digest,
     };
-    use crate::{permissions::PermissionProfile, product::ExecutionHarnessPolicy};
+    use crate::{
+        permissions::PermissionProfile,
+        product::{AdmittedExecutionModelPlan, ExecutionHarnessPolicy},
+    };
     use axum::{
         Json, Router,
         http::{HeaderMap, StatusCode, Uri},
@@ -3064,6 +3111,43 @@ mod tests {
             let mut malformed = base.clone();
             malformed["complete"] = complete;
             assert!(serde_json::from_value::<HarnessConfiguration>(malformed).is_err());
+        }
+    }
+
+    #[test]
+    fn family_role_fixtures_bind_versions_and_exact_roles() {
+        for bytes in [
+            include_str!("../../../test/fixtures/model-family-roles/admitted-plan-v1.json"),
+            include_str!("../../../test/fixtures/model-family-roles/admitted-plan-v2.json"),
+        ] {
+            let mut raw: serde_json::Value = serde_json::from_str(bytes).unwrap();
+            raw["orchestrator"]["roles"] = serde_json::Value::Null;
+            assert!(serde_json::from_value::<AdmittedExecutionModelPlan>(raw.clone()).is_err());
+            if raw["schemaVersion"] == 2 {
+                let mut raw: serde_json::Value = serde_json::from_str(bytes).unwrap();
+                raw["orchestrator"]["roles"][0]["description"] = serde_json::Value::Null;
+                assert!(serde_json::from_value::<AdmittedExecutionModelPlan>(raw.clone()).is_err());
+            }
+            let plan: AdmittedExecutionModelPlan = serde_json::from_str(bytes).unwrap();
+            assert_eq!(admitted_model_plan_digest(&plan).unwrap(), plan.digest);
+            let exported: crate::conversation_export::ExportAdmittedExecutionModelPlan =
+                serde_json::from_str(bytes).unwrap();
+            assert_eq!(
+                crate::conversation_export::admitted_model_plan_digest(&exported).unwrap(),
+                plan.digest
+            );
+            if plan.schema_version == 2 {
+                let mut tampered = plan.clone();
+                tampered.roster[1]
+                    .roles
+                    .as_mut()
+                    .unwrap()
+                    .push(crate::product::ModelFamilyRole::orchestrator());
+                assert!(admitted_model_plan_digest(&tampered).is_err());
+                let mut legacy = plan;
+                legacy.schema_version = 1;
+                assert!(admitted_model_plan_digest(&legacy).is_err());
+            }
         }
     }
 

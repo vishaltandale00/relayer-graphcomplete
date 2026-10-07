@@ -32,7 +32,7 @@ function harnessFor(settings, harnessId) {
 export function modelPickerModelSetup(settings, selection) {
   if (!settings || pickerSelectionIsAvailable(settings, selection)) return null;
   const compatibility = settings.conversationCompatibility;
-  const setup = familyModelSetup(settings, selection?.familyId ?? settings.defaults?.familyId);
+  const setup = familyModelSetup(settings, selection?.familyId ?? settings.defaults?.familyId, selection?.harnessId ?? settings.defaults?.harnessId);
   if (compatibility?.status === "blocked") return null;
   if (compatibility?.status === "compatible" && (
     setup?.providerId !== compatibility.providerId
@@ -70,10 +70,10 @@ export function modelPickerMemberIsSelected(familyId, selection, member) {
 export function modelPickerMarkup({ mode = "new" } = {}) {
   const safeMode = mode === "ongoing" ? "ongoing" : "new";
   return `<div class="model-control model-control-${safeMode}" data-model-picker="${safeMode}">
-    <button type="button" class="model-button" data-model-picker-trigger aria-haspopup="dialog" aria-expanded="false" title="Choose model"><span aria-hidden="true">✦</span><span data-model-picker-label>Model</span><span aria-hidden="true">⌄</span></button>
+    <button type="button" class="model-button" data-model-picker-trigger aria-haspopup="dialog" aria-expanded="false" title="Choose model family"><span aria-hidden="true">✦</span><span data-model-picker-label>Model</span><span aria-hidden="true">⌄</span></button>
     <div class="model-picker-popover hidden" data-model-picker-popover role="dialog" aria-label="Model and harness picker">
       <div class="model-picker-tabs" role="tablist" aria-label="Model picker sections">
-        <button type="button" role="tab" data-model-picker-tab="model" aria-selected="true">Model</button>
+        <button type="button" role="tab" data-model-picker-tab="model" aria-selected="true">Family</button>
         <button type="button" role="tab" data-model-picker-tab="advanced" aria-selected="false">Advanced</button>
       </div>
       <section class="model-picker-panel" data-model-picker-panel="model" role="tabpanel"></section>
@@ -136,7 +136,7 @@ export function modelSelectionLabels(settings, selection) {
     family: family?.name ?? null,
     provider: providerLabel,
     model: modelLabel,
-    compact: family ? `${family.name} · ${modelLabel}` : `${providerLabel} · ${modelLabel}`,
+    compact: family ? family.name : `${providerLabel} · ${modelLabel}`,
   };
 }
 
@@ -239,7 +239,7 @@ export function createModelPicker({
     panel.querySelector("[data-model-family]").onchange = (event) => {
       onUserTakeover();
       const nextFamily = families.find((family) => String(family.id) === event.target.value);
-      const member = nextFamily?.availableMembers[0];
+      const member = nextFamily?.orchestrator;
       if (!member) return;
       commit({
         harnessId: selectedHarnessId(),
@@ -247,7 +247,7 @@ export function createModelPicker({
         providerId: member.providerId,
         modelId: member.modelId,
       });
-      requestAnimationFrame(() => root.querySelector("[data-model-family]")?.focus());
+      close({ returnFocus: true });
     };
   }
 
@@ -329,27 +329,8 @@ export function createModelPicker({
       return;
     }
     panel.innerHTML = `<label class="model-family-field"><span>Family</span><select data-model-family aria-label="Model family">${familyOptions(families, selectedFamily)}</select></label>
-      <div class="model-option-list" role="radiogroup" aria-label="Models in ${escapeHtmlAttribute(selectedFamily.name)}">${selectedFamily.availableMembers.map((member) => {
-        const model = modelFor(currentSettings, member.providerId, member.modelId);
-        const provider = currentSettings.providers.find((item) => item.id === member.providerId);
-        const checked = modelPickerMemberIsSelected(selectedFamily.id, currentSelection, member);
-        return `<button type="button" role="radio" aria-checked="${checked}" data-model-option data-provider-id="${escapeHtmlAttribute(member.providerId)}" data-model-id="${escapeHtmlAttribute(member.modelId)}"><span><strong>${escapeHtml(model?.label ?? member.modelId)}</strong><small>${escapeHtml(provider?.label ?? member.providerId)}</small></span><i aria-hidden="true">${checked ? "✓" : ""}</i></button>`;
-      }).join("")}</div>`;
+      <p class="model-family-orchestrator">Orchestrator: ${escapeHtml(modelFor(currentSettings, selectedFamily.orchestrator.providerId, selectedFamily.orchestrator.modelId)?.label ?? selectedFamily.orchestrator.modelId)}</p>`;
     bindFamilyChange(panel, families);
-    panel.querySelectorAll("[data-model-option]").forEach((button) => {
-      button.onclick = () => {
-        onUserTakeover();
-        const providerId = button.dataset.providerId;
-        const modelId = button.dataset.modelId;
-        commit({
-          harnessId: selectedHarnessId(),
-          familyId: selectedFamily.id,
-          providerId,
-          modelId,
-        });
-        close({ returnFocus: true });
-      };
-    });
   }
 
   function renderAdvancedPanel() {
@@ -438,10 +419,10 @@ export function createModelPicker({
       : false;
     const modelSetup = ready ? null : modelPickerModelSetup(currentSettings, currentSelection);
     triggerLabel.textContent = labels?.compact
-      ?? (configurationOwnedModel ? "Harness default" : modelSetup?.label ?? (hasAvailableModels ? "Choose model" : "Set up models"));
+      ?? (configurationOwnedModel ? "Harness default" : modelSetup?.label ?? (hasAvailableModels ? "Choose family" : "Set up models"));
     trigger.title = labels
       ? `Model: ${labels.compact}`
-      : (configurationOwnedModel ? "Model set by harness configuration" : modelSetup?.message ?? "Choose an available model");
+      : (configurationOwnedModel ? "Model set by harness configuration" : modelSetup?.message ?? "Choose an available family");
     trigger.disabled = disabled;
     root.querySelectorAll("[data-model-picker-tab]").forEach((tab) => {
       const selected = tab.dataset.modelPickerTab === activeTab;

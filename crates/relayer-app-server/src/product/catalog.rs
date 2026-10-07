@@ -393,8 +393,48 @@ impl ModelFamilyKind {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct ModelFamilyRole {
+    pub(crate) name: String,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_present_optional"
+    )]
+    pub(crate) description: Option<String>,
+}
+
+impl ModelFamilyRole {
+    pub(crate) fn orchestrator() -> Self {
+        Self {
+            name: "orchestrator".into(),
+            description: None,
+        }
+    }
+}
+
+pub(crate) fn deserialize_present_optional<'de, D, T>(
+    deserializer: D,
+) -> Result<Option<T>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: serde::Deserialize<'de>,
+{
+    T::deserialize(deserializer).map(Some)
+}
+
+pub(crate) fn legacy_plan_version() -> u32 {
+    1
+}
+pub(crate) fn is_legacy_plan_version(version: &u32) -> bool {
+    *version == 1
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct ModelFamilyMember {
+    #[serde(default)]
+    pub(crate) roles: Vec<ModelFamilyRole>,
     pub(crate) provider_id: ProviderId,
     pub(crate) model_id: String,
     #[serde(default)]
@@ -603,6 +643,12 @@ pub(crate) struct ExecutionModelSelection {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct ExecutionModelRoute {
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_present_optional"
+    )]
+    pub(crate) roles: Option<Vec<ModelFamilyRole>>,
     pub(crate) provider_id: ProviderId,
     pub(crate) adapter_id: String,
     pub(crate) access_contract: String,
@@ -612,6 +658,11 @@ pub(crate) struct ExecutionModelRoute {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct ExecutionModelPlan {
+    #[serde(
+        default = "legacy_plan_version",
+        skip_serializing_if = "is_legacy_plan_version"
+    )]
+    pub(crate) schema_version: u32,
     pub(crate) family_id: ModelFamilyId,
     pub(crate) family_revision: i64,
     pub(crate) orchestrator: ExecutionModelRoute,
@@ -621,6 +672,12 @@ pub(crate) struct ExecutionModelPlan {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct AdmittedExecutionModelRoute {
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_present_optional"
+    )]
+    pub(crate) roles: Option<Vec<ModelFamilyRole>>,
     pub(crate) provider_id: ProviderId,
     pub(crate) adapter_id: String,
     pub(crate) access_contract: String,
@@ -631,6 +688,11 @@ pub(crate) struct AdmittedExecutionModelRoute {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct AdmittedExecutionModelPlan {
+    #[serde(
+        default = "legacy_plan_version",
+        skip_serializing_if = "is_legacy_plan_version"
+    )]
+    pub(crate) schema_version: u32,
     pub(crate) family_id: ModelFamilyId,
     pub(crate) family_revision: i64,
     pub(crate) orchestrator: AdmittedExecutionModelRoute,
@@ -751,6 +813,34 @@ impl CatalogError {
     }
 }
 
+pub(crate) fn validate_roles(roles: &[ModelFamilyRole]) -> Result<(), CatalogError> {
+    if roles.len() > 32 {
+        return Err(CatalogError::invalid(
+            "model_family_roles_invalid",
+            "A model can carry at most 32 roles.",
+        ));
+    }
+    let mut names = HashSet::new();
+    for role in roles {
+        if role.name.is_empty()
+            || role.name != role.name.trim()
+            || role.name.chars().count() > 80
+            || (role.name.eq_ignore_ascii_case("orchestrator") && role.name != "orchestrator")
+            || !names.insert(role.name.to_lowercase())
+            || role
+                .description
+                .as_ref()
+                .is_some_and(|description| description.chars().count() > 240)
+        {
+            return Err(CatalogError::invalid(
+                "model_family_roles_invalid",
+                "Roles require unique names of 1–80 characters and optional descriptions of at most 240 characters. The reserved name is orchestrator.",
+            ));
+        }
+    }
+    Ok(())
+}
+
 pub(crate) fn validate_family(
     name: &str,
     members: &[ModelFamilyMember],
@@ -782,6 +872,7 @@ pub(crate) fn validate_family(
     }
     let mut unique = HashSet::new();
     for member in members {
+        validate_roles(&member.roles)?;
         validate_stable_id(member.provider_id.as_str(), "providerId")?;
         validate_stable_id(&member.model_id, "modelId")?;
         if !unique.insert((member.provider_id.as_str(), member.model_id.as_str())) {
@@ -790,6 +881,17 @@ pub(crate) fn validate_family(
                 "model family cannot contain the same provider model twice",
             ));
         }
+    }
+    if members
+        .iter()
+        .filter(|member| member.roles.iter().any(|role| role.name == "orchestrator"))
+        .count()
+        != 1
+    {
+        return Err(CatalogError::invalid(
+            "model_family_orchestrator_required",
+            "Choose exactly one orchestrator for the family.",
+        ));
     }
     Ok(name.to_owned())
 }
@@ -823,6 +925,11 @@ mod tests {
 
     fn member(provider: &str, model: &str) -> ModelFamilyMember {
         ModelFamilyMember {
+            roles: if provider == "codex" {
+                vec![ModelFamilyRole::orchestrator()]
+            } else {
+                Vec::new()
+            },
             provider_id: ProviderId::parse(provider).unwrap(),
             model_id: model.into(),
             position: 0,

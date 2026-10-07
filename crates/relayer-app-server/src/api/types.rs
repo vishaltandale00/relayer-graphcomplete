@@ -718,9 +718,11 @@ mod tests {
                 effect_boundary: "none".into(),
                 attempt_admission_id: Some("admission-44".into()),
                 admitted_plan: Some(AdmittedExecutionModelPlan {
+                    schema_version: 1,
                     family_id: ModelFamilyId::from_database(12),
                     family_revision: 3,
                     orchestrator: AdmittedExecutionModelRoute {
+                        roles: None,
                         provider_id: ProviderId::from_database("openai-work".into()),
                         adapter_id: "openai-api".into(),
                         access_contract: "secret@1".into(),

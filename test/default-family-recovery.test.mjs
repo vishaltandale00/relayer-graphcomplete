@@ -56,7 +56,7 @@ function restored() {
     position: 0,
     revision: 1,
     managedPolicy: { providerId: "codex", policyId: "codex-default-family", policyVersion: 1 },
-    members: [{ providerId: "codex", modelId: "gpt-5.6-sol", position: 0 }],
+    members: [{ providerId: "codex", modelId: "gpt-5.6-sol", position: 0, roles: [{ name: "orchestrator" }] }],
   });
   return settings;
 }
@@ -266,7 +266,7 @@ describe("default family that needs model setup (PROV-008)", () => {
     pending.resolve();
     await vi.waitFor(() => expect(root.querySelector("[data-model-picker-refresh]")).toBeNull());
     expect(picker.isReady()).toBe(true);
-    expect(root.ownerDocument.activeElement).toBe(root.querySelector("[data-model-option]"));
+    expect(root.ownerDocument.activeElement).toBe(root.querySelector("[data-model-family]"));
     picker.dispose();
   });
 
@@ -560,18 +560,20 @@ describe("Settings default section recovery (PROV-008)", () => {
   });
 });
 
-// A model click completes the picker interaction even when its radio is already checked.
-describe("model selection dismissal", () => {
+// Committing a family closes the picker and restores focus in both composers.
+describe("family selection dismissal", () => {
   it.each([
     ["new", true], ["new", false], ["ongoing", true], ["ongoing", false],
   ])("closes the %s picker when already-selected=%s", (mode, alreadySelected) => {
     const settings = restored();
-    settings.families[0].members.push({ providerId: "codex", modelId: "gpt-5.4", position: 1 });
+    settings.families.push({ ...structuredClone(settings.families[0]), id: 3, name: "Another family", position: 2 });
     const { root, picker, document } = mountPicker(settings, { mode, pinnedHarnessId: settings.defaults.harnessId });
     root.querySelector("[data-model-picker-trigger]").click();
-    const option = root.querySelector(`[data-model-option][aria-checked="${alreadySelected}"]`);
-    expect(option).not.toBeNull();
-    option.click();
+    const select = root.querySelector("[data-model-family]");
+    expect(root.querySelector("[data-model-option]")).toBeNull();
+    select.value = alreadySelected ? "1" : "3";
+    select.dispatchEvent(new document.defaultView.Event("change"));
+    expect(picker.getSelection().familyId).toBe(alreadySelected ? 1 : 3);
     expect(root.querySelector("[data-model-picker-popover]").classList.contains("hidden")).toBe(true);
     expect(document.activeElement).toBe(root.querySelector("[data-model-picker-trigger]"));
     picker.dispose();

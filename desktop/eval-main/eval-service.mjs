@@ -257,8 +257,6 @@ export function evalModelSelectionRequest(selectedModel, productModelSelection =
   return selectedModel === null || !productModelSelection ? {} : {
     modelSelection: {
       familyId: selectedModel.familyId,
-      providerId: selectedModel.providerId,
-      modelId: selectedModel.modelId,
     },
   };
 }
@@ -2543,6 +2541,7 @@ export class EvalService {
         if (route?.providerAdapterId !== "codex-subscription") throw new Error("External interactive tasks currently require the Codex subscription; API spending is not authorized.");
         const selected = route.selectedModel;
         const productRoute = route.productModelSelection === true
+          && Number.isSafeInteger(selected?.familyId) && selected.familyId > 0
           && typeof selected?.providerId === "string" && selected.providerId.trim() !== ""
           && typeof selected?.modelId === "string" && selected.modelId.trim() !== "";
         const configuredRoute = route.productModelSelection === false && selected === null
@@ -2577,15 +2576,40 @@ export class EvalService {
     if (canonicalJson(prepared.execution.catalogIdentity) !== canonicalJson(this.externalCatalog.identity)) throw new Error("External task catalog identity changed.");
   }
 
+  async assertHumanTaskExecution(prepared) {
+    try {
+      const execution = prepared.execution;
+      if (execution.liveAuthorization?.billingMode !== "subscription-only"
+        || execution.harnessConfiguration.implementation.startsWith("fixture.")) return;
+      const starting = execution.pinnedModelResolution ?? execution.modelResolution;
+      if (!starting || (starting.productModelSelection && (!Number.isSafeInteger(starting.selectedModel?.familyId) || starting.selectedModel.familyId < 1))) throw new Error("External interactive task has no retained execution family.");
+      if (typeof this.validateLiveCredential !== "function") throw new Error("External interactive task has no trusted credential validator.");
+      const route = await this.validateLiveCredential(execution.harnessConfiguration,
+        "connected-product-provider", starting?.productModelSelection
+          ? { familyId: starting.selectedModel?.familyId } : {});
+      if (route?.providerAdapterId !== "codex-subscription") throw new Error("External interactive tasks currently require the Codex subscription; API spending is not authorized.");
+      if (route.productModelSelection !== starting?.productModelSelection
+        || (starting.productModelSelection
+          ? route.selectedModel?.familyId !== starting.selectedModel?.familyId
+          : route.configurationModel !== starting.configurationModel)) {
+        throw new Error("External interactive task execution family or configuration route changed.");
+      }
+    } catch (error) {
+      error.code = "eval_execution_not_authorized";
+      throw error;
+    }
+  }
+
   async createHumanTaskThread(prepared, step, { signal } = {}) {
     await abortable(signal, () => this.assertHumanTaskCatalog(prepared));
     const item = prepared.plan[step];
     if (!item) throw new Error("Unknown case step.");
-    // A session's first route owns every case thread, including persisted sessions
+    // Retain the starting family and audit route, including persisted sessions
     // written before pinnedModelResolution was introduced.
     if (prepared.execution.pinnedModelResolution === undefined && prepared.execution.modelResolution !== undefined) {
       prepared.execution.pinnedModelResolution = copy(prepared.execution.modelResolution);
     }
+    await abortable(signal, () => this.assertHumanTaskExecution(prepared));
     const thread = await this.#createProductThread({
       execution: prepared.execution, title: `${prepared.name} · human · ${item.name}`,
       prompt: item.prompts[0], projectId: prepared.execution.projectId ?? null,
@@ -2741,7 +2765,7 @@ export class EvalService {
     const configurationOwned = execution.pinnedModelResolution === undefined && this.selectModel
       && harnessUsesConfigurationModel(await this.#productRequest("/api/model-settings"), execution.harnessConfigurationName);
     if (execution.pinnedModelResolution !== undefined) {
-      // The treatment cell or human session retains its exact starting route.
+      // The treatment cell or human session retains its starting family and audit route.
     } else if (configurationOwned) {
       selectedModel = null;
       productModelSelection = false;
@@ -2807,6 +2831,7 @@ export class EvalService {
         harnessConfigurationName: execution.harnessConfigurationName,
         permissionProfileId,
         ...evalModelSelectionRequest(selectedModel, productModelSelection),
+        ...(productModelSelection && execution.liveAuthorization?.billingMode === "subscription-only" && !execution.harnessConfiguration.implementation.startsWith("fixture.") ? { requiredProviderAdapterId: "codex-subscription" } : {}),
         ...(projectId === null ? {} : { projectId }),
       },
     });
@@ -2828,7 +2853,7 @@ export class EvalService {
         || execution.harnessConfiguration.implementation === "prime.agent")) {
         const nextSelection = await (this.selectModel ?? this.selectPrimeModel)(execution.harnessConfigurationName);
         if (!sameJson(evalModelSelectionRequest(nextSelection), evalModelSelectionRequest(selectedModel))) {
-          throw new Error("Eval model selection changed between product turns.");
+          throw new Error("Eval family selection changed between product turns.");
         }
       }
       const interaction = await this.#productRequest(`/api/threads/${thread.id}/interactions`, {
@@ -3263,7 +3288,14 @@ export class EvalService {
       ...(options.body ? { body: JSON.stringify(options.body) } : {}),
     });
     const value = await response.json().catch(() => ({}));
-    if (!response.ok) throw new Error(value?.error || `Product request failed (${response.status}).`);
+    if (!response.ok) {
+      const error = new Error(value?.error || `Product request failed (${response.status}).`);
+      // This exact transactional creation refusal proves no thread was inserted.
+      // Other response/transport failures retain unknown-dispatch semantics.
+      if (path === "/api/threads" && options.method === "POST" && response.status === 422
+        && value?.code === "execution_provider_not_authorized") error.code = "eval_execution_not_authorized";
+      throw error;
+    }
     return value;
   }
 

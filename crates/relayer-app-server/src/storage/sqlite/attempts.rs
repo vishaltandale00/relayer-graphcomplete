@@ -168,6 +168,18 @@ impl SqliteProductStore {
             &selection,
         )
         .await?;
+        let required_adapter: Option<String> = sqlx::query_scalar("SELECT required_provider_adapter_id FROM thread_execution_constraints WHERE thread_id=?1")
+            .bind(thread_id).fetch_optional(&mut *transaction).await?;
+        if required_adapter
+            .as_deref()
+            .is_some_and(|required| required != admitted.adapter_id)
+        {
+            return Err(crate::product::CatalogError::invalid(
+                "execution_provider_not_authorized",
+                "This task requires the Codex subscription; API spending is not authorized.",
+            )
+            .into());
+        }
         if current_plan != receipt.model_plan {
             return Err(StorageError::IncompatibleSchema(
                 "the model family plan changed between resolution and atomic attempt admission"
@@ -180,7 +192,9 @@ impl SqliteProductStore {
                     .into(),
             ));
         }
-        if receipt.admitted_plan.family_id != receipt.model_plan.family_id
+        if receipt.admitted_plan.schema_version != receipt.model_plan.schema_version
+            || receipt.admitted_plan.orchestrator.roles != receipt.model_plan.orchestrator.roles
+            || receipt.admitted_plan.family_id != receipt.model_plan.family_id
             || receipt.admitted_plan.family_revision != receipt.model_plan.family_revision
             || receipt.admitted_plan.orchestrator.provider_id
                 != receipt.model_plan.orchestrator.provider_id
@@ -197,7 +211,8 @@ impl SqliteProductStore {
                 .iter()
                 .zip(&receipt.model_plan.roster)
                 .all(|(admitted, planned)| {
-                    admitted.provider_id == planned.provider_id
+                    admitted.roles == planned.roles
+                        && admitted.provider_id == planned.provider_id
                         && admitted.adapter_id == planned.adapter_id
                         && admitted.access_contract == planned.access_contract
                         && admitted.model_id == planned.model_id
@@ -205,6 +220,13 @@ impl SqliteProductStore {
         {
             return Err(StorageError::IncompatibleSchema(
                 "the provider broker admitted a different model family plan".into(),
+            ));
+        }
+        let verified_digest = crate::runtime::admitted_model_plan_digest(&receipt.admitted_plan)
+            .map_err(|error| StorageError::IncompatibleSchema(error.to_string()))?;
+        if receipt.admitted_plan.digest != verified_digest {
+            return Err(StorageError::IncompatibleSchema(
+                "invalid admitted model-plan digest".into(),
             ));
         }
         let (harness_revision, harness_digest): (i64, String) = sqlx::query_as(
@@ -233,6 +255,8 @@ impl SqliteProductStore {
             .bind(&receipt.route.access_contract).bind(&receipt.attempt_admission_id).bind(admitted_plan_json)
             .bind(&receipt.admitted_plan.digest).bind(receipt.execution_lease_id)
             .execute(&mut *transaction).await?.last_insert_rowid();
+        sqlx::query("UPDATE interactions SET model_provider_id=?1,provider_model_id=?2,model_family_id=?3 WHERE id=?4")
+            .bind(receipt.route.provider_id.as_str()).bind(&receipt.route.model_id).bind(receipt.route.family_id.value()).bind(receipt.interaction_id.value()).execute(&mut *transaction).await?;
         transaction.commit().await?;
         Ok(id)
     }
@@ -561,22 +585,26 @@ mod tests {
 
     fn plans(route: &ExecutionModelSelection) -> (ExecutionModelPlan, AdmittedExecutionModelPlan) {
         let member = ExecutionModelRoute {
+            roles: Some(vec![crate::product::ModelFamilyRole::orchestrator()]),
             provider_id: route.provider_id.clone(),
             adapter_id: route.adapter_id.clone(),
             access_contract: route.access_contract.clone(),
             model_id: route.model_id.clone(),
         };
-        (
+        let mut result = (
             ExecutionModelPlan {
+                schema_version: 2,
                 family_id: route.family_id,
                 family_revision: 1,
                 orchestrator: member.clone(),
                 roster: vec![member],
             },
             AdmittedExecutionModelPlan {
+                schema_version: 2,
                 family_id: route.family_id,
                 family_revision: 1,
                 orchestrator: AdmittedExecutionModelRoute {
+                    roles: Some(vec![crate::product::ModelFamilyRole::orchestrator()]),
                     provider_id: route.provider_id.clone(),
                     adapter_id: route.adapter_id.clone(),
                     access_contract: route.access_contract.clone(),
@@ -584,6 +612,7 @@ mod tests {
                     adapter_implementation_version: "1".into(),
                 },
                 roster: vec![AdmittedExecutionModelRoute {
+                    roles: Some(vec![crate::product::ModelFamilyRole::orchestrator()]),
                     provider_id: route.provider_id.clone(),
                     adapter_id: route.adapter_id.clone(),
                     access_contract: route.access_contract.clone(),
@@ -593,7 +622,9 @@ mod tests {
                 harness_policy_digest: "sha256:test-policy".into(),
                 digest: "sha256:test-plan".into(),
             },
-        )
+        );
+        result.1.digest = crate::runtime::admitted_model_plan_digest(&result.1).unwrap();
+        result
     }
 
     /// The returned directory owns the database and its WAL sidecars; keep it alive for as
@@ -623,7 +654,7 @@ mod tests {
             .execute(&store.pool).await.expect("model");
         let family_id = sqlx::query("INSERT INTO model_families(name,kind,system_key,enabled,position) VALUES ('Test','custom',NULL,1,0)")
             .execute(&store.pool).await.expect("family").last_insert_rowid();
-        sqlx::query("INSERT INTO model_family_members(family_id,position,provider_id,model_id) VALUES (?1,0,'codex','gpt-test')")
+        sqlx::query("INSERT INTO model_family_members(family_id,position,provider_id,model_id,roles_json) VALUES (?1,0,'codex','gpt-test',json_array(json_object('name','orchestrator')))")
             .bind(family_id).execute(&store.pool).await.expect("member");
         let thread_id =
             sqlx::query("INSERT INTO threads(title,created_at,updated_at) VALUES ('Test','1','1')")
@@ -645,6 +676,375 @@ mod tests {
                 model_id: "gpt-test".into(),
             },
         )
+    }
+
+    fn admit_snapshot(plan: &ExecutionModelPlan) -> AdmittedExecutionModelPlan {
+        let route = |route: &ExecutionModelRoute| AdmittedExecutionModelRoute {
+            roles: route.roles.clone(),
+            provider_id: route.provider_id.clone(),
+            adapter_id: route.adapter_id.clone(),
+            access_contract: route.access_contract.clone(),
+            model_id: route.model_id.clone(),
+            adapter_implementation_version: "1".into(),
+        };
+        let mut admitted = AdmittedExecutionModelPlan {
+            schema_version: plan.schema_version,
+            family_id: plan.family_id,
+            family_revision: plan.family_revision,
+            orchestrator: route(&plan.orchestrator),
+            roster: plan.roster.iter().map(route).collect(),
+            harness_policy_digest: "sha256:policy".into(),
+            digest: String::new(),
+        };
+        admitted.digest = crate::runtime::admitted_model_plan_digest(&admitted).unwrap();
+        admitted
+    }
+
+    #[tokio::test]
+    async fn persisted_subscription_constraint_rejects_current_api_plan_at_atomic_admission() {
+        let (directory, store, _, initial_route) = seeded_store().await;
+        let selection = InteractionModelSelection {
+            family_id: initial_route.family_id,
+            provider_id: initial_route.provider_id.clone(),
+            model_id: initial_route.model_id.clone(),
+        };
+        let thread = store
+            .insert_thread_with_initial_interaction(crate::storage::NewThreadRecord {
+                required_provider_adapter_id: Some("codex-subscription"),
+                icon_selection_eligible: false,
+                title: "Subscription task",
+                project_id: None,
+                initial_message: "Continue",
+                harness_configuration_name: "codex-basic",
+                permission_profile_id: "auto",
+                model_selection: Some(&selection),
+                timestamp: "2",
+            })
+            .await
+            .unwrap();
+        store.pool.close().await;
+        let store = SqliteProductStore::open(directory.path().join("product.sqlite"))
+            .await
+            .unwrap();
+        sqlx::query("UPDATE interactions SET completion_status='running' WHERE id=?1")
+            .bind(thread.root_interaction_id.value())
+            .execute(&store.pool)
+            .await
+            .unwrap();
+        sqlx::query("INSERT INTO model_providers(id,label,connected,refreshed_at,adapter_id,access_contract,lifecycle_state) VALUES ('api','API',1,'1','openai-api','secret@1','active')").execute(&store.pool).await.unwrap();
+        sqlx::query("INSERT INTO provider_models(provider_id,model_id,label,provider_order,visible,available,provider_default,metadata_json) VALUES ('api','api-model','API model',0,1,1,1,'{}')").execute(&store.pool).await.unwrap();
+        sqlx::query(
+            "DELETE FROM harness_model_rules WHERE harness_configuration_name='codex-basic'",
+        )
+        .execute(&store.pool)
+        .await
+        .unwrap();
+        sqlx::query("UPDATE product_harnesses SET model_rules_present=1,execution_access_contracts_json='[\"managed-runtime@1\",\"secret@1\"]' WHERE configuration_name='codex-basic'").execute(&store.pool).await.unwrap();
+        let service = ProductService::new(store.clone(), true);
+        service
+            .update_model_family(crate::product::UpdateModelFamilyCommand {
+                id: selection.family_id,
+                name: None,
+                enabled: true,
+                members: Some(vec![crate::product::ModelFamilyMember {
+                    provider_id: ProviderId::from_database("api".into()),
+                    model_id: "api-model".into(),
+                    position: 0,
+                    roles: vec![crate::product::ModelFamilyRole::orchestrator()],
+                }]),
+            })
+            .await
+            .unwrap();
+        let (plan, route) = store
+            .resolve_execution_model_plan("codex-basic", &selection)
+            .await
+            .unwrap();
+        assert_eq!(route.adapter_id, "openai-api");
+        let mut admission = receipt(thread.root_interaction_id, &route);
+        admission.admitted_plan = admit_snapshot(&plan);
+        admission.model_plan = plan;
+        assert!(
+            store
+                .begin_interaction_attempt(admission, "3")
+                .await
+                .unwrap_err()
+                .to_string()
+                .contains("API spending is not authorized")
+        );
+        let count: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM interaction_attempts WHERE interaction_id=?1")
+                .bind(thread.root_interaction_id.value())
+                .fetch_one(&store.pool)
+                .await
+                .unwrap();
+        assert_eq!(count, 0);
+        // Semantic children share the immutable thread constraint, even when a
+        // newly resolved child plan explicitly selects the current API family.
+        sqlx::query("UPDATE interactions SET completion_status='accepted',graph_node_id=100,harness_configuration_name='codex-basic' WHERE id=?1").bind(thread.root_interaction_id.value()).execute(&store.pool).await.unwrap();
+        let child = match store
+            .insert_recursive_action_invocation(thread.root_interaction_id, 41, "Child")
+            .await
+            .unwrap()
+        {
+            crate::storage::ActionInvocationInsertOutcome::Created { interaction, .. } => {
+                interaction
+            }
+            _ => unreachable!(),
+        };
+        sqlx::query("UPDATE interactions SET completion_status='running' WHERE id=?1")
+            .bind(child.id.value())
+            .execute(&store.pool)
+            .await
+            .unwrap();
+        let (plan, route) = store
+            .resolve_execution_model_plan("codex-basic", child.model_selection.as_ref().unwrap())
+            .await
+            .unwrap();
+        let mut admission = receipt(child.id, &route);
+        admission.admitted_plan = admit_snapshot(&plan);
+        admission.model_plan = plan;
+        assert!(
+            store
+                .begin_interaction_attempt(admission, "3")
+                .await
+                .unwrap_err()
+                .to_string()
+                .contains("API spending is not authorized")
+        );
+        sqlx::query("UPDATE interactions SET completion_status='running' WHERE id=?1")
+            .bind(thread.root_interaction_id.value())
+            .execute(&store.pool)
+            .await
+            .unwrap();
+        service
+            .update_model_family(crate::product::UpdateModelFamilyCommand {
+                id: selection.family_id,
+                name: None,
+                enabled: true,
+                members: Some(vec![crate::product::ModelFamilyMember {
+                    provider_id: selection.provider_id.clone(),
+                    model_id: selection.model_id.clone(),
+                    position: 0,
+                    roles: vec![crate::product::ModelFamilyRole::orchestrator()],
+                }]),
+            })
+            .await
+            .unwrap();
+        let (plan, route) = store
+            .resolve_execution_model_plan("codex-basic", &selection)
+            .await
+            .unwrap();
+        let mut admission = receipt(thread.root_interaction_id, &route);
+        admission.admitted_plan = admit_snapshot(&plan);
+        admission.model_plan = plan;
+        store
+            .begin_interaction_attempt(admission, "4")
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn family_roles_save_reopen_future_root_and_child_use_designated_orchestrator() {
+        let (directory, store, historical, old_route) = seeded_store().await;
+        sqlx::query("INSERT INTO provider_models(provider_id,model_id,label,provider_order,visible,available,provider_default,metadata_json) VALUES ('codex','new-root','New root',1,1,1,0,'{}'),('codex','offline-specialist','Offline',2,1,0,0,'{}')").execute(&store.pool).await.unwrap();
+        let service = ProductService::new(store.clone(), true);
+        let mut members = store
+            .get_model_family(old_route.family_id)
+            .await
+            .unwrap()
+            .unwrap()
+            .members;
+        members[0].roles = vec![crate::product::ModelFamilyRole {
+            name: "research".into(),
+            description: Some("Source discovery".into()),
+        }];
+        members.push(crate::product::ModelFamilyMember {
+            roles: vec![
+                crate::product::ModelFamilyRole::orchestrator(),
+                crate::product::ModelFamilyRole {
+                    name: "coding".into(),
+                    description: None,
+                },
+            ],
+            provider_id: old_route.provider_id.clone(),
+            model_id: "new-root".into(),
+            position: 1,
+        });
+        members.push(crate::product::ModelFamilyMember {
+            roles: vec![],
+            provider_id: old_route.provider_id.clone(),
+            model_id: "offline-specialist".into(),
+            position: 2,
+        });
+        let saved = service
+            .update_model_family(crate::product::UpdateModelFamilyCommand {
+                id: old_route.family_id,
+                name: Some("Roles".into()),
+                enabled: true,
+                members: Some(members.clone()),
+            })
+            .await
+            .unwrap();
+        assert_eq!(saved.members, members);
+        assert_eq!(saved.revision, 2);
+        let mut invalid = members.clone();
+        invalid[0]
+            .roles
+            .push(crate::product::ModelFamilyRole::orchestrator());
+        assert!(
+            service
+                .update_model_family(crate::product::UpdateModelFamilyCommand {
+                    id: old_route.family_id,
+                    name: None,
+                    enabled: true,
+                    members: Some(invalid)
+                })
+                .await
+                .is_err()
+        );
+        sqlx::query("UPDATE provider_models SET available=0 WHERE model_id='gpt-test'")
+            .execute(&store.pool)
+            .await
+            .unwrap();
+        sqlx::query("UPDATE interactions SET completion_status='accepted',graph_node_id=100,harness_configuration_name='codex-basic' WHERE id=?1").bind(historical.value()).execute(&store.pool).await.unwrap();
+        let thread_id: i64 = sqlx::query_scalar("SELECT thread_id FROM interactions WHERE id=?1")
+            .bind(historical.value())
+            .fetch_one(&store.pool)
+            .await
+            .unwrap();
+        let followup = store
+            .insert_interaction(
+                ThreadId::from_database(thread_id),
+                "Next turn",
+                None,
+                true,
+                true,
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            followup.model_selection.as_ref().unwrap().model_id,
+            "new-root"
+        );
+        let child = match store
+            .insert_recursive_action_invocation(historical, 41, "Child")
+            .await
+            .unwrap()
+        {
+            crate::storage::ActionInvocationInsertOutcome::Created { interaction, .. } => {
+                interaction
+            }
+            _ => unreachable!(),
+        };
+        assert_eq!(child.model_selection.as_ref().unwrap().model_id, "new-root");
+        assert_eq!(
+            store
+                .get_interaction(historical)
+                .await
+                .unwrap()
+                .unwrap()
+                .model_selection
+                .as_ref()
+                .unwrap()
+                .model_id,
+            "gpt-test"
+        );
+        let (plan, route) = store
+            .resolve_execution_model_plan("codex-basic", child.model_selection.as_ref().unwrap())
+            .await
+            .unwrap();
+        assert_eq!(plan.roster.len(), 1); // Both unavailable specialists were omitted.
+        assert_eq!(plan.orchestrator.roles.as_ref().unwrap().len(), 2);
+        sqlx::query("UPDATE interactions SET completion_status='running' WHERE id=?1")
+            .bind(child.id.value())
+            .execute(&store.pool)
+            .await
+            .unwrap();
+        let mut attempt = receipt(child.id, &route);
+        attempt.model_plan = plan.clone();
+        attempt.admitted_plan = admit_snapshot(&plan);
+        let mut tampered = BeginInteractionAttempt {
+            model_plan: attempt.model_plan.clone(),
+            admitted_plan: attempt.admitted_plan.clone(),
+            ..receipt(child.id, &route)
+        };
+        tampered.admitted_plan.roster[0].roles.as_mut().unwrap()[1].name = "changed".into();
+        tampered.admitted_plan.orchestrator.roles.as_mut().unwrap()[1].name = "changed".into();
+        tampered.admitted_plan.digest =
+            crate::runtime::admitted_model_plan_digest(&tampered.admitted_plan).unwrap();
+        assert!(
+            store
+                .begin_interaction_attempt(tampered, "10")
+                .await
+                .is_err()
+        );
+        store
+            .begin_interaction_attempt(attempt, "11")
+            .await
+            .unwrap();
+        members[1].roles[1].description = Some("Next execution only".into());
+        service
+            .update_model_family(crate::product::UpdateModelFamilyCommand {
+                id: old_route.family_id,
+                name: None,
+                enabled: true,
+                members: Some(members.clone()),
+            })
+            .await
+            .unwrap();
+        let frozen = store
+            .get_interaction(child.id)
+            .await
+            .unwrap()
+            .unwrap()
+            .latest_attempt
+            .unwrap()
+            .admitted_plan
+            .unwrap();
+        assert_eq!(frozen.family_revision, 2);
+        assert_eq!(
+            frozen.orchestrator.roles.as_ref().unwrap()[1].description,
+            None
+        );
+        sqlx::query("UPDATE provider_models SET available=0 WHERE model_id='new-root'")
+            .execute(&store.pool)
+            .await
+            .unwrap();
+        assert!(
+            store
+                .resolve_execution_model_plan(
+                    "codex-basic",
+                    child.model_selection.as_ref().unwrap()
+                )
+                .await
+                .unwrap_err()
+                .to_string()
+                .contains("family orchestrator")
+        );
+        store.pool.close().await;
+        let reopened = SqliteProductStore::open(directory.path().join("product.sqlite"))
+            .await
+            .unwrap();
+        assert_eq!(
+            reopened
+                .get_model_family(old_route.family_id)
+                .await
+                .unwrap()
+                .unwrap()
+                .members,
+            members
+        );
+        assert_eq!(
+            reopened
+                .get_interaction(child.id)
+                .await
+                .unwrap()
+                .unwrap()
+                .latest_attempt
+                .unwrap()
+                .admitted_plan,
+            Some(frozen)
+        );
     }
 
     #[tokio::test]
@@ -672,6 +1072,15 @@ mod tests {
             .unwrap();
         assert_eq!(projection.status, "blocked");
         assert!(projection.provider_id.is_none());
+    }
+
+    async fn foreign_family(store: &SqliteProductStore) -> ModelFamilyId {
+        sqlx::query("INSERT INTO model_providers(id,label,connected,refreshed_at,adapter_id,access_contract) VALUES ('foreign','Foreign',1,'1','codex-subscription','managed-runtime@1')").execute(&store.pool).await.unwrap();
+        sqlx::query("INSERT INTO provider_models(provider_id,model_id,label,provider_order,visible,available,provider_default) VALUES ('foreign','foreign-model','Foreign',0,1,1,1)").execute(&store.pool).await.unwrap();
+        sqlx::query("INSERT INTO harness_provider_compatibility(harness_configuration_name,provider_id,all_models) VALUES ('codex-basic','foreign',1)").execute(&store.pool).await.unwrap();
+        let family = sqlx::query("INSERT INTO model_families(name,kind,system_key,enabled,position) VALUES ('Foreign','custom',NULL,1,1)").execute(&store.pool).await.unwrap().last_insert_rowid();
+        sqlx::query("INSERT INTO model_family_members(family_id,position,provider_id,model_id,roles_json) VALUES (?1,0,'foreign','foreign-model',json_array(json_object('name','orchestrator')))").bind(family).execute(&store.pool).await.unwrap();
+        ModelFamilyId::from_database(family)
     }
 
     #[tokio::test]
@@ -727,7 +1136,7 @@ mod tests {
             submitted_input_draft_revision: None,
         };
         let foreign = crate::product::InteractionModelSelection {
-            family_id: route.family_id,
+            family_id: foreign_family(&store).await,
             provider_id: ProviderId::from_database("foreign".into()),
             model_id: "foreign-model".into(),
         };
@@ -788,7 +1197,7 @@ mod tests {
         assert_eq!(owner.status, "compatible");
         assert_eq!(owner.provider_id.as_deref(), Some("codex"));
         let foreign = crate::product::InteractionModelSelection {
-            family_id: route.family_id,
+            family_id: foreign_family(&store).await,
             provider_id: ProviderId::from_database("foreign".into()),
             model_id: "foreign-model".into(),
         };
@@ -942,7 +1351,10 @@ mod tests {
         assert!(!recorded.3.contains("do-not-persist"));
         assert!(!recorded.3.contains("credential"));
         assert!(!recorded.3.contains("endpoint"));
-        assert_eq!(recorded.4, "sha256:test-plan");
+        assert_eq!(
+            recorded.4,
+            receipt(interaction_id, &route).admitted_plan.digest
+        );
         assert_eq!(recorded.5, "lease-test");
         assert_eq!(recorded.6, None);
         assert!(store.execution_lease_debt(attempt).await.unwrap().is_none());
@@ -1701,13 +2113,15 @@ mod tests {
             provider_id: ProviderId::from_database("openai-work".into()),
             model_id: "gpt-offline".into(),
         };
-        assert!(
+        assert_eq!(
             store
                 .resolve_execution_model_plan("codex-basic", &unavailable)
                 .await
-                .unwrap_err()
-                .to_string()
-                .contains("unavailable")
+                .unwrap()
+                .0
+                .orchestrator
+                .model_id,
+            "gpt-test"
         );
 
         store
@@ -1754,13 +2168,15 @@ mod tests {
             provider_id: ProviderId::from_database("openai-work".into()),
             model_id: "gpt-second".into(),
         };
-        assert!(
+        assert_eq!(
             store
                 .resolve_execution_model_plan("codex-basic", &denied)
                 .await
-                .unwrap_err()
-                .to_string()
-                .contains("No available models for this harness")
+                .unwrap()
+                .0
+                .orchestrator
+                .model_id,
+            "gpt-test"
         );
     }
 

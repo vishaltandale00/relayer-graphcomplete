@@ -28,6 +28,7 @@ pub(crate) struct CreateProjectCommand {
 
 #[derive(Debug)]
 pub(crate) struct CreateThreadCommand {
+    pub(crate) required_provider_adapter_id: Option<String>,
     pub(crate) icon_selection_eligible: bool,
     pub(crate) title: Option<String>,
     pub(crate) project_id: Option<ProjectId>,
@@ -880,12 +881,22 @@ impl ProductService {
         &self,
         command: ValidateModelSelectionCommand,
     ) -> Result<ModelSelection, ProductError> {
-        self.storage.validate_model_selection(&command).await?;
+        let (_, route) = self
+            .storage
+            .resolve_execution_model_plan(
+                &command.harness_id,
+                &InteractionModelSelection {
+                    family_id: command.family_id,
+                    provider_id: command.provider_id,
+                    model_id: command.model_id,
+                },
+            )
+            .await?;
         Ok(ModelSelection {
             harness_id: command.harness_id,
-            family_id: command.family_id,
-            provider_id: command.provider_id,
-            model_id: command.model_id,
+            family_id: route.family_id,
+            provider_id: route.provider_id,
+            model_id: route.model_id,
         })
     }
 
@@ -910,8 +921,9 @@ impl ProductService {
         selection: &InteractionModelSelection,
     ) -> Result<super::ExecutionModelSelection, ProductError> {
         self.storage
-            .validate_execution_model_selection(harness_id, selection)
+            .resolve_execution_model_plan(harness_id, selection)
             .await
+            .map(|(_, route)| route)
             .map_err(Into::into)
     }
 
@@ -939,7 +951,11 @@ impl ProductService {
             .iter()
             .filter(move |family| family.id == default_id && family.enabled);
         for family in families {
-            for member in &family.members {
+            for member in family
+                .members
+                .iter()
+                .filter(|member| member.roles.iter().any(|role| role.name == "orchestrator"))
+            {
                 let command = ValidateModelSelectionCommand {
                     harness_id: harness_id.to_owned(),
                     family_id: family.id,
@@ -1272,7 +1288,7 @@ impl ProductService {
 
     pub(crate) async fn create_thread_with_expected_checkout(
         &self,
-        command: CreateThreadCommand,
+        mut command: CreateThreadCommand,
         working_directory: Option<&str>,
         creation_request_id: Option<&str>,
         expected_checkout: Option<&super::ExpectedCheckout>,
@@ -1366,11 +1382,14 @@ impl ProductService {
         let message = required(&command.initial_message, "initialMessage")?;
         match command.model_selection.as_ref() {
             Some(selection) => {
-                self.validate_interaction_model_selection(
-                    &command.harness_configuration_name,
-                    selection,
-                )
-                .await?;
+                let (_, route) = self
+                    .resolve_execution_model_plan(&command.harness_configuration_name, selection)
+                    .await?;
+                command.model_selection = Some(InteractionModelSelection {
+                    family_id: route.family_id,
+                    provider_id: route.provider_id,
+                    model_id: route.model_id,
+                });
             }
             None if self.runtime_available && !command.allow_unselected_model => {
                 return Err(CatalogError::invalid(
@@ -1416,10 +1435,15 @@ impl ProductService {
             }
         }
         let context_json = checkout_context.as_ref().map(serde_json::Value::to_string);
-        let payload=serde_json::json!({"title":title,"projectId":command.project_id.map(ProjectId::value),"initialMessage":message,"harness":command.harness_configuration_name,"permission":command.permission_profile_id,"workingDirectory":directory,"modelSelection":command.model_selection}).to_string();
+        let mut payload = serde_json::json!({"title":title,"projectId":command.project_id.map(ProjectId::value),"initialMessage":message,"harness":command.harness_configuration_name,"permission":command.permission_profile_id,"workingDirectory":directory,"modelSelection":command.model_selection.as_ref().map(|selection| serde_json::json!({"familyId":selection.family_id}))});
+        if let Some(required) = command.required_provider_adapter_id.as_ref() {
+            payload["requiredProviderAdapterId"] = serde_json::json!(required);
+        }
+        let payload = payload.to_string();
         self.storage
             .insert_thread_with_creation_request(
                 NewThreadRecord {
+                    required_provider_adapter_id: command.required_provider_adapter_id.as_deref(),
                     icon_selection_eligible: command.icon_selection_eligible,
                     title: &title,
                     project_id: command.project_id,
@@ -3149,6 +3173,7 @@ mod tests {
             .unwrap();
         let thread = storage
             .insert_thread_with_initial_interaction(NewThreadRecord {
+                required_provider_adapter_id: None,
                 icon_selection_eligible: true,
                 title: "Replay input authority",
                 project_id: None,
@@ -3267,6 +3292,7 @@ mod tests {
 
         let empty_thread = storage
             .insert_thread_with_initial_interaction(NewThreadRecord {
+                required_provider_adapter_id: None,
                 icon_selection_eligible: true,
                 title: "Empty replay input authority",
                 project_id: None,
@@ -3370,6 +3396,7 @@ mod tests {
 
         let omitted_thread = storage
             .insert_thread_with_initial_interaction(NewThreadRecord {
+                required_provider_adapter_id: None,
                 icon_selection_eligible: true,
                 title: "Omitted replay input authority",
                 project_id: None,
@@ -4040,6 +4067,7 @@ mod tests {
                 name: "Saved models".into(),
                 enabled: true,
                 members: vec![ModelFamilyMember {
+                    roles: vec![crate::product::ModelFamilyRole::orchestrator()],
                     provider_id: snapshot.provider_id.clone(),
                     model_id: "gpt-6-sol".into(),
                     position: 0,
@@ -4112,14 +4140,12 @@ mod tests {
             )
             .await
             .unwrap();
-        assert_eq!(
+        assert!(
             service
                 .first_available_model("codex-basic")
                 .await
                 .unwrap()
-                .unwrap()
-                .model_id,
-            "gpt-6-astra"
+                .is_none()
         );
     }
 
@@ -4136,6 +4162,7 @@ mod tests {
                 name: "My models".into(),
                 enabled: true,
                 members: vec![ModelFamilyMember {
+                    roles: vec![crate::product::ModelFamilyRole::orchestrator()],
                     provider_id: ProviderId::parse("onboarding-codex").unwrap(),
                     model_id: "second".into(),
                     position: 0,
