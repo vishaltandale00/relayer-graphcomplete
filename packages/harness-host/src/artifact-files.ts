@@ -3,7 +3,7 @@
 // resolve an artifact's paths inside the thread folder and fingerprint them.
 import { createHash } from "node:crypto";
 import { createReadStream } from "node:fs";
-import { lstat, readdir, realpath, stat } from "node:fs/promises";
+import { lstat, readdir, readlink, realpath, stat } from "node:fs/promises";
 import { join, relative, resolve, sep } from "node:path";
 
 const EXTENSIONS: Readonly<Record<string, readonly string[]>> = {
@@ -69,7 +69,12 @@ async function hashFile(path: string, hash: ReturnType<typeof createHash>): Prom
   });
 }
 
-/** sha256 of one file, or of every file under a folder (relative path, NUL, bytes; sorted). */
+/**
+ * sha256 of one file, or of every entry under a site root in sorted order. Each entry
+ * is framed: its kind, its relative path, then a link's target or a file's length and
+ * bytes, so two different trees never share hash input and retargeting a link inside
+ * the root counts as a change. Desktop recomputes drift with this same function.
+ */
 export async function fingerprintPath(path: string): Promise<string> {
   const hash = createHash("sha256");
   const info = await stat(path);
@@ -77,32 +82,41 @@ export async function fingerprintPath(path: string): Promise<string> {
     await hashFile(path, hash);
     return `sha256:${hash.digest("hex")}`;
   }
-  const files: string[] = [];
+  const entries: { readonly rel: string; readonly full: string; readonly link?: string; readonly size?: number }[] = [];
   let bytes = 0;
+  const tooLarge = () => new ArtifactFileError(
+    "artifact_too_large",
+    "The site root holds more than 5,000 files or 2 GB. Point root at the built site folder, not the whole project.",
+    "artifact.source.root",
+  );
   async function walk(folder: string): Promise<void> {
-    const entries = (await readdir(folder, { withFileTypes: true })).sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
-    for (const entry of entries) {
+    const listed = (await readdir(folder, { withFileTypes: true })).sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+    for (const entry of listed) {
       const full = join(folder, entry.name);
-      if (entry.isDirectory()) {
+      const rel = relative(path, full).split(sep).join("/");
+      if (entry.isSymbolicLink()) {
+        entries.push({ rel, full, link: await readlink(full) });
+      } else if (entry.isDirectory()) {
         await walk(full);
+        continue;
       } else if (entry.isFile()) {
-        files.push(full);
-        bytes += (await lstat(full)).size;
-        if (files.length > MAX_SITE_FILES || bytes > MAX_SITE_BYTES) {
-          throw new ArtifactFileError(
-            "artifact_too_large",
-            "The site root holds more than 5,000 files or 2 GB. Point root at the built site folder, not the whole project.",
-            "artifact.source.root",
-          );
-        }
+        const size = (await lstat(full)).size;
+        bytes += size;
+        entries.push({ rel, full, size });
+      } else {
+        continue;
       }
+      if (entries.length > MAX_SITE_FILES || bytes > MAX_SITE_BYTES) throw tooLarge();
     }
   }
   await walk(path);
-  for (const file of files) {
-    hash.update(relative(path, file).split(sep).join("/"));
-    hash.update("\0");
-    await hashFile(file, hash);
+  for (const entry of entries) {
+    if (entry.link !== undefined) {
+      hash.update(`L\0${entry.rel}\0${entry.link}\0`);
+    } else {
+      hash.update(`F\0${entry.rel}\0${entry.size}\0`);
+      await hashFile(entry.full, hash);
+    }
   }
   return `sha256:${hash.digest("hex")}`;
 }

@@ -198,6 +198,9 @@ describe("shares and Eval (ART-008)", () => {
     await viewer.open({ threadId: 1, node: node({ kind: "url", source: { url: "https://example.com/" } }, "Deployed site") });
     const frame = document.querySelector("iframe.artifact-frame");
     expect(frame.getAttribute("src")).toBe("https://example.com/");
+    // Review #9 and #20: routes resolve against the base, and the scheme is case-insensitive.
+    await viewer.open({ threadId: 1, node: node({ kind: "url", source: { url: "HTTPS://example.com/app/" }, part: { route: "/pricing" } }, "Deployed site") });
+    expect(document.querySelector("iframe.artifact-frame").getAttribute("src")).toBe("https://example.com/pricing");
     expect(frame.getAttribute("sandbox")).toBe("allow-scripts allow-same-origin allow-forms");
     await viewer.open({ threadId: 1, node: node(site) });
     expect(document.querySelector("iframe")).toBe(null);

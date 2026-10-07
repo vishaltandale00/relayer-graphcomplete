@@ -127,6 +127,24 @@ struct PlacementRow {
 }
 
 impl<'connection> LayerTable<'connection> {
+    /// Another live artifact layer that already shows this node, other than the
+    /// layer being written (same owner and client key).
+    pub(crate) async fn other_artifact_layer_for(
+        &mut self,
+        node: NodeId,
+        owner: NodeId,
+        client_key: &str,
+    ) -> Result<Option<i64>, GraphError> {
+        Ok(sqlx::query_scalar::<_, i64>(
+            "SELECT l.id FROM layer_nodes ln JOIN layers l ON l.id=ln.layer_id WHERE ln.node_id=?1 AND l.renderer='artifact' AND l.state<>'stopped' AND NOT (l.owner_interaction_id=?2 AND l.client_key=?3) LIMIT 1",
+        )
+        .bind(node.value())
+        .bind(owner.value())
+        .bind(client_key)
+        .fetch_optional(&mut *self.connection)
+        .await?)
+    }
+
     pub(crate) fn new(connection: &'connection mut SqliteConnection) -> Self {
         Self { connection }
     }

@@ -41,8 +41,9 @@ async function renderArtifactPreview(browser, { artifact, folder, rendererDirect
   try {
     await context.route("**/*", async (route) => {
       const requested = route.request().url();
+      // A deployed site or web app may load its own CDN assets; local files load nothing else.
+      if (plan.kind === "url" || plan.kind === "app") return route.continue();
       if (new URL(requested).origin !== allowed) return route.abort();
-      if (plan.kind === "url") return route.continue();
       const response = await handler(new Request(requested.replace(ARTIFACT_ORIGIN, scheme), { headers: route.request().headers() }));
       return route.fulfill({ status: response.status, headers: Object.fromEntries(response.headers), body: Buffer.from(await response.arrayBuffer()) });
     });

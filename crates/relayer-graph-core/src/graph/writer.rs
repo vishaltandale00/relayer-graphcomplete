@@ -470,6 +470,21 @@ impl GraphWriter {
             );
         }
         crate::artifact::validate_layer_renderer(renderer, &nodes, edges.len())?;
+        // Two views of one artifact are two nodes: a node lives in one artifact layer.
+        if renderer == Some(crate::artifact::ARTIFACT_RENDERER)
+            && let Some(other) = LayerTable::new(&mut transaction)
+                .other_artifact_layer_for(nodes[0].id, self.scope.root_node_id, &draft.client_key)
+                .await?
+        {
+            return Err(GraphError::validation(
+                "artifact_node_in_another_layer",
+                "nodes",
+                format!(
+                    "Node {} already has artifact layer {other}. Show another view of the same file as a new artifact node in its own layer.",
+                    nodes[0].id
+                ),
+            ));
+        }
         LayerCandidate {
             draft,
             nodes,

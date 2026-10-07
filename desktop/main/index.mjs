@@ -707,7 +707,7 @@ if (primaryInstance) {
     app.on("activate", async () => {
       if (BrowserWindow.getAllWindows().length === 0) {
         mainWindow = await createWindow(await productServer.start());
-        mainWindow.on("closed", () => { mainWindow = undefined; });
+        mainWindow.on("closed", () => { artifactViewer.close(); mainWindow = undefined; });
       } else {
         primaryInstance.presentPrimaryWindow();
       }

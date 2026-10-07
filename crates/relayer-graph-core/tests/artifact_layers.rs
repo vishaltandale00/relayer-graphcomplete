@@ -443,6 +443,14 @@ async fn server_invokes_and_starting_state_are_checked() {
             "artifact_server_invalid",
         ),
         (
+            json!({"kind": "url", "source": {"url": "https://:"}}),
+            "artifact_url_invalid",
+        ),
+        (
+            json!({"kind": "url", "source": {"url": "https://example.com:99999/"}}),
+            "artifact_url_invalid",
+        ),
+        (
             json!({"kind": "url", "source": {"url": "https://example.com/"}, "part": {"route": "/\\evil.example"}}),
             "artifact_part_invalid",
         ),
@@ -453,4 +461,32 @@ async fn server_invokes_and_starting_state_are_checked() {
             .unwrap_err();
         assert_eq!(code(error), expected, "case {index}: {artifact}");
     }
+}
+
+/// Review #4 and #17: a node lives in one artifact layer, and acceptance pins only
+/// artifact nodes that a live layer still shows.
+#[tokio::test]
+async fn an_artifact_node_has_one_live_artifact_layer() {
+    let (_database, _interaction, writer) = setup().await;
+    let site = artifact_node(&writer, "site", &website()).await.unwrap();
+    let viewer = writer
+        .submit_layer_with_renderer(&layer_draft("viewer", &[site.id]), Some("artifact"))
+        .await
+        .unwrap();
+    writer
+        .submit_layer_with_renderer(&layer_draft("viewer", &[site.id]), Some("artifact"))
+        .await
+        .expect("resubmitting the same layer is allowed");
+    let second = writer
+        .submit_layer_with_renderer(&layer_draft("second-viewer", &[site.id]), Some("artifact"))
+        .await
+        .unwrap_err();
+    assert_eq!(code(second), "artifact_node_in_another_layer");
+
+    assert_eq!(writer.draft_artifacts().await.unwrap().len(), 1);
+    writer.discard_layer(viewer.id).await.unwrap();
+    assert!(
+        writer.draft_artifacts().await.unwrap().is_empty(),
+        "a node whose layer was discarded is not accepted, so it is not fingerprinted"
+    );
 }

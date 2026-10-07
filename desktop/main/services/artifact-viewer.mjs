@@ -8,7 +8,8 @@ import { mkdir, readFile, realpath, stat, writeFile } from "node:fs/promises";
 import { basename, dirname, extname, join, relative, resolve, sep } from "node:path";
 import { Readable } from "node:stream";
 
-import { fingerprintPath } from "./artifact-fingerprint.mjs";
+// The host's own fingerprint, so drift is computed exactly as acceptance pinned it.
+import { fingerprintPath } from "@relayer/harness-host";
 
 export const ARTIFACT_SCHEME = "relayer-artifact";
 const ORIGIN = `${ARTIFACT_SCHEME}://view`;
@@ -46,6 +47,11 @@ function routePath(route) {
  * What one artifact needs to be served: the folder files may come from, the
  * entry inside it, and the URL the view opens. Pure, so it is testable without Electron.
  */
+/** How recent the user's own input must be for the page to open their browser. */
+const USER_GESTURE_MS = 2_000;
+/** Distinct page errors reported per open. */
+const MAX_PAGE_ERRORS = 50;
+
 /** A blank page at the artifact's own origin, where its starting state is written before it loads. */
 const SEED_PATH = "/__relayer/seed";
 
@@ -177,7 +183,10 @@ export function createArtifactRequestHandler({ getPlan, markedPath }) {
       try {
         real = await realpath(wanted);
       } catch {
-        return new Response("Not found", { status: 404 });
+        // A single-page site's client route (/pricing) is not a file: serve its entry.
+        if (plan.kind !== "website" || extname(decoded) !== "") return new Response("Not found", { status: 404 });
+        real = await realpath(resolve(root, plan.entry)).catch(() => null);
+        if (real === null) return new Response("Not found", { status: 404 });
       }
       // A folder link serves its index.html, as a web server would.
       if (inside(root, real) && (await stat(real)).isDirectory()) real = await realpath(join(real, "index.html")).catch(() => real);
@@ -195,7 +204,14 @@ export async function artifactFileStatus(plan, accepted) {
   try {
     const rootOrFile = plan.kind === "website" ? plan.folder : plan.file;
     await stat(plan.file);
-    const current = await fingerprintPath(await realpath(rootOrFile));
+    let current;
+    try {
+      current = await fingerprintPath(await realpath(rootOrFile));
+    } catch (error) {
+      // A site root that grew past the host's bounds is shown, but not hashed in main.
+      if (error?.code === "artifact_too_large") return { state: "unchecked" };
+      throw error;
+    }
     return { state: typeof accepted === "string" && accepted !== current ? "changed" : "ok", current };
   } catch {
     return { state: "missing" };
@@ -478,48 +494,67 @@ export function createArtifactViewerService({
       throw error;
     }
     const contents = view.webContents;
+    // Events reach the renderer only while this view is the one shown; a closed view's
+    // late load failure or console output never lands on the next artifact.
+    const emit = (event) => { if (current?.view === view) send(event); };
+    // The page opens the user's browser only for the user's own click or key press,
+    // never by redirecting or assigning location on its own.
+    let lastUserInput = 0;
+    contents.on("input-event", (_event, input) => {
+      if (["mouseDown", "keyDown", "rawKeyDown"].includes(input.type)) lastUserInput = Date.now();
+    });
     const leave = (url) => {
       try {
         const target = new URL(url);
-        if (target.protocol === "http:" || target.protocol === "https:") void shell.openExternal(target.href);
+        if (target.protocol !== "http:" && target.protocol !== "https:") return;
+        if (Date.now() - lastUserInput > USER_GESTURE_MS) {
+          emit({ type: "external-blocked", url: target.href });
+          return;
+        }
+        void shell.openExternal(target.href);
+        emit({ type: "external", url: target.href });
       } catch {}
     };
     contents.setWindowOpenHandler(({ url }) => {
       leave(url);
-      send({ type: "external", url });
       return { action: "deny" };
     });
     const guard = (event, url) => {
       if (staysOnArtifact(plan, url)) return;
       event.preventDefault();
       leave(url);
-      send({ type: "external", url });
     };
     contents.on("will-navigate", guard);
     contents.on("will-redirect", guard);
     contents.on("will-attach-webview", (event) => event.preventDefault());
+    // A page can log errors without end; report each distinct one, up to a bound.
+    const reportedErrors = new Set();
     contents.on("console-message", (event) => {
       const level = event.level ?? event.params?.level;
-      if (level === "error") send({ type: "page-error", message: String(event.message ?? "").slice(0, 500) });
+      if (level !== "error" || reportedErrors.size >= MAX_PAGE_ERRORS) return;
+      const message = String(event.message ?? "").slice(0, 500);
+      if (reportedErrors.has(message)) return;
+      reportedErrors.add(message);
+      emit({ type: "page-error", message });
     });
     contents.on("did-fail-load", (_event, code, description, url, isMainFrame) => {
-      if (isMainFrame && code !== -3) send({ type: "load-failed", message: `${description} (${url})` });
+      if (isMainFrame && code !== -3) emit({ type: "load-failed", message: `${description} (${url})` });
     });
-    contents.on("did-navigate-in-page", (_event, url) => send({ type: "address", url }));
-    contents.on("did-navigate", (_event, url) => send({ type: "address", url }));
+    contents.on("did-navigate-in-page", (_event, url) => emit({ type: "address", url }));
+    contents.on("did-navigate", (_event, url) => emit({ type: "address", url }));
     contents.on("before-input-event", (event, input) => {
       if (input.type === "keyDown" && input.key === "Escape") {
         event.preventDefault();
-        send({ type: "escape" });
+        emit({ type: "escape" });
       }
     });
-    contents.on("render-process-gone", () => send({ type: "load-failed", message: "The artifact stopped responding." }));
+    contents.on("render-process-gone", () => emit({ type: "load-failed", message: "The artifact stopped responding." }));
     current = { view, plan, partition, serverKey };
     window.contentView.addChildView(view);
     setBounds(bounds);
     view.setBackgroundColor("#1c1d1f");
-    await applySeed(contents, plan, artifact.seed).catch((error) => send({ type: "load-failed", message: `The starting state could not be applied: ${error.message}` }));
-    await contents.loadURL(plan.url).catch((error) => send({ type: "load-failed", message: error.message }));
+    await applySeed(contents, plan, artifact.seed).catch((error) => emit({ type: "load-failed", message: `The starting state could not be applied: ${error.message}` }));
+    await contents.loadURL(plan.url).catch((error) => emit({ type: "load-failed", message: error.message }));
     return { status, address: plan.address };
   }
 

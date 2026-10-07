@@ -259,7 +259,13 @@ async function run(window) {
   check("ART-006 hovering the strip brings the toolbar back", revealed === true && stripRegion !== "drag", `revealed=${revealed} strip app-region=${stripRegion || "none"}`);
   say("Links out of the artifact open in the browser, not in Relayer");
   await hold(1200);
-  await view.webContents.executeJavaScript(`document.querySelector("#instagram").click()`);
+  // A page cannot open the browser by itself; only the user's own click does.
+  await view.webContents.executeJavaScript(`location.href = "https://example.org/"`).catch(() => {});
+  const blocked = await waitFor("blocked badge", () => js(window, `document.querySelector('[data-badge="external"]')?.textContent ?? null`), 5_000).catch(() => null);
+  check("Review #13 the page cannot open a site by itself", blocked === "Blocked the page from opening a site by itself" && !external.some((entry) => entry.url?.includes("example.org")), String(blocked));
+  const link = await view.webContents.executeJavaScript(`(() => { document.querySelector("#instagram").scrollIntoView({ block: "center" }); const box = document.querySelector("#instagram").getBoundingClientRect(); return { x: Math.round(box.left + box.width / 2), y: Math.round(box.top + box.height / 2) }; })()`);
+  view.webContents.sendInputEvent({ type: "mouseDown", x: link.x, y: link.y, button: "left", clickCount: 1 });
+  view.webContents.sendInputEvent({ type: "mouseUp", x: link.x, y: link.y, button: "left", clickCount: 1 });
   await waitFor("external link", () => external.some((entry) => entry.url?.startsWith("https://www.instagram.com")));
   check("PRD 6.6.4 external link leaves the artifact", view.webContents.getURL().startsWith("relayer-artifact://view/"), JSON.stringify(external.at(-1)));
   await hold(2500);

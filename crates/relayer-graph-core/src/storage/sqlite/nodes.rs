@@ -556,7 +556,9 @@ impl<'connection> NodeTable<'connection> {
         owner: NodeId,
     ) -> Result<Vec<(NodeId, serde_json::Value)>, GraphError> {
         let rows = sqlx::query_as::<_, (i64, String)>(
-            "SELECT id,artifact FROM nodes WHERE owner_interaction_id=?1 AND state='draft' AND artifact IS NOT NULL ORDER BY id",
+            // Only nodes a live layer still shows: a node whose layer was discarded is
+            // not accepted, so its files need not exist.
+            "SELECT id,artifact FROM nodes WHERE owner_interaction_id=?1 AND state='draft' AND artifact IS NOT NULL AND EXISTS (SELECT 1 FROM layer_nodes ln JOIN layers l ON l.id=ln.layer_id WHERE ln.node_id=nodes.id AND l.state<>'stopped') ORDER BY id",
         )
         .bind(owner.value())
         .fetch_all(&mut *self.connection)

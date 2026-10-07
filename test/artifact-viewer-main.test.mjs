@@ -5,8 +5,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
-import { fingerprintPath as hostFingerprint } from "../packages/harness-host/dist/artifact-files.js";
-import { fingerprintPath } from "../desktop/main/services/artifact-fingerprint.mjs";
+import { fingerprintPath } from "@relayer/harness-host";
 import { artifactFileStatus, artifactViewPlan, createArtifactRequestHandler } from "../desktop/main/services/artifact-viewer.mjs";
 import { draftPreviewArtifact } from "../desktop/main/services/draft-preview-renderer.mjs";
 import { createPlaywrightDraftPreviewRenderer } from "../desktop/eval-main/draft-preview-renderer.mjs";
@@ -70,18 +69,30 @@ describe("the artifact scheme (PRD 6.6.4)", () => {
     expect((await get("/linked.txt")).status).toBe(404);
     expect((await get("/../docs/brand-guide.md")).status).toBe(404);
     expect((await get("/styles.css")).status).toBe(200);
+    // Review #14: a single-page site's client route serves its entry; a missing asset does not.
+    const route = await get("/pricing");
+    expect(route.status).toBe(200);
+    expect(await route.text()).toContain("<html");
+    expect((await get("/missing.css")).status).toBe(404);
   });
 });
 
 describe("drift since acceptance (ART-004)", () => {
-  it("matches the host's fingerprint, then reports changed and missing files", async () => {
+  it("reports changed and missing files, link retargets included", async () => {
     const accepted = await fingerprintPath(join(folder, "site"));
-    expect(accepted).toBe(await hostFingerprint(join(folder, "site")));
-    expect(await fingerprintPath(join(folder, "brand", "hero.png"))).toBe(await hostFingerprint(join(folder, "brand", "hero.png")));
     const plan = artifactViewPlan(site, folder);
     expect((await artifactFileStatus(plan, accepted)).state).toBe("ok");
     await appendFile(join(folder, "site", "styles.css"), "\n/* edited */\n");
     expect((await artifactFileStatus(plan, accepted)).state).toBe("changed");
+    // Review #6: retargeting a link inside the root is a change too.
+    const before = await fingerprintPath(join(folder, "site"));
+    await symlink("styles.css", join(folder, "site", "theme.css"));
+    const linked = await fingerprintPath(join(folder, "site"));
+    expect(linked).not.toBe(before);
+    await rm(join(folder, "site", "theme.css"));
+    await symlink("app.js", join(folder, "site", "theme.css"));
+    expect(await fingerprintPath(join(folder, "site"))).not.toBe(linked);
+    await rm(join(folder, "site", "theme.css"));
     const image = artifactViewPlan({ kind: "image", source: { file: "brand/missing.png" } }, folder);
     expect((await artifactFileStatus(image, undefined)).state).toBe("missing");
   });

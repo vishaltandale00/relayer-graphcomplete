@@ -727,18 +727,17 @@ impl crate::GraphDatabase {
                         .bind(owner).bind(&edge.id).execute(&mut *tx).await?;
                     edge_ids.insert(edge.id.clone(), result.last_insert_rowid());
                 }
-                if resolved
-                    .layer
-                    .renderer
-                    .as_deref()
-                    .is_some_and(|renderer| renderer != crate::artifact::ARTIFACT_RENDERER)
-                {
-                    return Err(GraphError::validation(
-                        "layer_renderer_unsupported",
-                        "renderer",
-                        "Imported layer names an unknown renderer.",
-                    ));
-                }
+                // An imported graph obeys the same artifact-layer rules as a live one.
+                let members = resolved
+                    .nodes
+                    .iter()
+                    .map(|node| (node.id.clone(), node.artifact.is_some()))
+                    .collect::<Vec<_>>();
+                crate::artifact::validate_renderer_members(
+                    resolved.layer.renderer.as_deref(),
+                    &members,
+                    resolved.edges.len(),
+                )?;
                 let result = sqlx::query("INSERT INTO layers(project_id,thread_id,layout_schema_version,state,owner_interaction_id,client_key,default_node_id,layout_edge_shape,layout_edge_routes,renderer) VALUES (?1,?2,?3,'accepted',?4,?5,?6,?7,?8,?9)")
                     .bind(metadata.project_id.map(ProjectId::value)).bind(metadata.thread_id.value())
                     .bind(resolved.layer.layout.as_ref().map(|layout| i64::from(layout.version)))

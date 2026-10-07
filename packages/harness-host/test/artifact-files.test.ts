@@ -4,7 +4,7 @@ import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { ArtifactFileError, checkArtifactFiles } from "../src/artifact-files.js";
+import { ArtifactFileError, checkArtifactFiles, fingerprintPath } from "../src/artifact-files.js";
 
 let root: string;
 let thread: string;
@@ -64,5 +64,22 @@ describe("checkArtifactFiles", () => {
     expect((await rejection({ kind: "markdown", source: { file: "docs/notes.txt" } })).code).toBe("artifact_type_unsupported");
     expect((await rejection({ kind: "website", source: { file: "site/index.html", root: "docs" } })).code).toBe("artifact_entry_outside_root");
     expect((await rejection({ kind: "url", source: { url: "https://example.com" } })).code).toBe("artifact_invalid");
+  });
+});
+
+describe("site fingerprints", () => {
+  it("frame each entry so different trees never share hash input", async () => {
+    const root = await mkdtemp(join(tmpdir(), "relayer-fingerprint-"));
+    try {
+      await mkdir(join(root, "one"));
+      await writeFile(join(root, "one", "a"), "b");
+      await writeFile(join(root, "one", "c"), "");
+      await mkdir(join(root, "two"));
+      await writeFile(join(root, "two", "a"), "");
+      await writeFile(join(root, "two", "bc"), "");
+      expect(await fingerprintPath(join(root, "one"))).not.toBe(await fingerprintPath(join(root, "two")));
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
   });
 });

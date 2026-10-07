@@ -3188,6 +3188,8 @@ async fn transition_current(
             input.operation_key
         );
         let mut generation = gate.lock().await;
+        // Publishing drafts is acceptance too: pin artifact fingerprints first (PRD 6.6.5).
+        pin_artifact_fingerprints(&state, authority, *generation).await?;
         *generation = visual_assets_lifecycle(
             &state,
             authority.node_id,
@@ -3220,6 +3222,11 @@ async fn transition_current(
             }
         }
     }
+    // Advance publishes drafts as well; hold the gate so no node write lands between
+    // the fingerprint pin and the transition.
+    let gate = completion_asset_gate(&state, authority.node_id)?;
+    let generation = gate.lock().await;
+    pin_artifact_fingerprints(&state, authority, *generation).await?;
     Ok(Json(
         state
             .graph

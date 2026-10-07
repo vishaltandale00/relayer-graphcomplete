@@ -138,6 +138,19 @@ fn validate_url_allowing(value: &Value, path: &str, https: bool) -> Result<(), G
             },
         ));
     }
+    // A real parse catches what the scheme check cannot: an empty host or an invalid port.
+    let parsed = url::Url::parse(text).ok().filter(|parsed| {
+        parsed.username().is_empty()
+            && parsed.password().is_none()
+            && parsed.host_str().is_some_and(|host| !host.is_empty())
+    });
+    if parsed.is_none() {
+        return Err(issue(
+            "artifact_url_invalid",
+            path,
+            "Give a complete URL with a host, such as https://example.com/ or http://127.0.0.1:5173/.",
+        ));
+    }
     if text.len() > MAX_ROUTE_BYTES || text.chars().any(char::is_whitespace) {
         return Err(issue(
             "artifact_url_invalid",
@@ -538,29 +551,42 @@ pub(crate) fn validate_layer_renderer(
     nodes: &[GraphNode],
     edge_count: usize,
 ) -> Result<(), GraphError> {
+    let members = nodes
+        .iter()
+        .map(|node| (node.id.to_string(), node.artifact.is_some()))
+        .collect::<Vec<_>>();
+    validate_renderer_members(renderer, &members, edge_count)
+}
+
+/// The same rules for any layer's members, given each node's id and whether it has
+/// artifact details; conversation import checks imported layers with it.
+pub(crate) fn validate_renderer_members(
+    renderer: Option<&str>,
+    members: &[(String, bool)],
+    edge_count: usize,
+) -> Result<(), GraphError> {
     match renderer {
         None => {
-            if let Some(node) = nodes.iter().find(|node| node.artifact.is_some()) {
+            if let Some((id, _)) = members.iter().find(|(_, artifact)| *artifact) {
                 return Err(GraphError::validation_issues(vec![ValidationIssue::new(
                     "artifact_node_outside_artifact_layer",
                     "renderer",
                     format!(
-                        "Node {} has artifact details. Put it alone in a layer whose renderer is \"artifact\", and open that layer with a navigate action.",
-                        node.id
+                        "Node {id} has artifact details. Put it alone in a layer whose renderer is \"artifact\", and open that layer with a navigate action."
                     ),
                 )]));
             }
             Ok(())
         }
         Some(ARTIFACT_RENDERER) => {
-            if nodes.len() != 1 || nodes[0].artifact.is_none() {
+            if members.len() != 1 || !members[0].1 {
                 return Err(issue(
                     "artifact_layer_member_count",
                     "nodes",
                     format!(
                         "An artifact layer holds exactly one node with artifact details; this one has {} node(s){}.",
-                        nodes.len(),
-                        if nodes.len() == 1 {
+                        members.len(),
+                        if members.len() == 1 {
                             " without artifact details"
                         } else {
                             ""

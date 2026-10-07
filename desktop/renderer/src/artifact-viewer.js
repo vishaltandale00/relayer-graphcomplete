@@ -21,6 +21,14 @@ export function artifactLayerNode(layer) {
 
 const addressedByUrl = (kind) => kind === "url" || kind === "app";
 
+/** A deployed site's address with its route, resolved as the native viewer resolves it. */
+function frameAddress(artifact) {
+  const base = String(artifact.source?.url ?? "");
+  const route = String(artifact.part?.route ?? "");
+  if (!route) return base;
+  try { return route.startsWith("/") ? new URL(route, base).href : `${base}${route}`; } catch { return base; }
+}
+
 export function artifactAddress(artifact) {
   if (addressedByUrl(artifact?.kind)) return `${String(artifact.source?.url ?? "")}${artifact.kind === "app" ? artifact.part?.route ?? "" : ""}`;
   const file = String(artifact?.source?.file ?? "");
@@ -87,6 +95,9 @@ export function createArtifactViewer({ root = document.body, native = null, onAd
     current.overlay.classList.remove("artifact-toolbar-hidden");
     placeView();
     clearTimeout(hideTimer);
+    // Without a native view a framed site can take keyboard focus and swallow Escape,
+    // so the toolbar and its Graph button stay in view there.
+    if (!native) return;
     hideTimer = setTimeout(() => {
       if (!current) return;
       if (current.noting || current.toolbar.contains(document.activeElement)) return showToolbar();
@@ -136,6 +147,7 @@ export function createArtifactViewer({ root = document.body, native = null, onAd
       current.address.textContent = address;
       current.strip.textContent = address;
     } else if (event?.type === "page-error") {
+      if (current.errors.length >= 50 || current.errors.includes(event.message)) return;
       current.errors.push(event.message);
       setBadge("errors", `${current.errors.length} page error${current.errors.length === 1 ? "" : "s"}`, "artifact-badge-error");
       const badge = current.badges.querySelector('[data-badge="errors"]');
@@ -157,8 +169,8 @@ export function createArtifactViewer({ root = document.body, native = null, onAd
     } else if (event?.type === "server-log" && current.starting && current.log) {
       current.log.textContent = `${current.log.textContent}${event.text}`.slice(-20_000);
       current.log.scrollTop = current.log.scrollHeight;
-    } else if (event?.type === "external") {
-      setBadge("external", "Opened a link in your browser");
+    } else if (event?.type === "external" || event?.type === "external-blocked") {
+      setBadge("external", event.type === "external" ? "Opened a link in your browser" : "Blocked the page from opening a site by itself");
       setTimeout(() => setBadge("external", null), 3500);
     }
   }
@@ -262,7 +274,7 @@ export function createArtifactViewer({ root = document.body, native = null, onAd
     const artifact = node.artifact;
     const kindLabel = KIND_LABELS[artifact.kind] ?? "Artifact";
     // Only an https site can play without Relayer; shares and Eval show nothing of a local path.
-    const liveSite = artifact.kind === "url" && /^https:\/\//u.test(artifactAddress(artifact));
+    const liveSite = artifact.kind === "url" && (() => { try { return new URL(artifactAddress(artifact)).protocol === "https:"; } catch { return false; } })();
     const shown = native || liveSite ? artifactAddress(artifact) : node.title;
     const address = element("span", { class: "artifact-address-text", text: shown });
     const strip = element("div", { class: "artifact-strip-text", text: shown });
@@ -313,7 +325,7 @@ export function createArtifactViewer({ root = document.body, native = null, onAd
       if (liveSite && liveUrls) {
         (device ?? stage).append(element("iframe", {
           class: "artifact-frame",
-          src: artifactAddress(artifact) + (artifact.part?.route ?? ""),
+          src: frameAddress(artifact),
           title: node.title,
           sandbox: "allow-scripts allow-same-origin allow-forms",
           allow: "camera 'none'; microphone 'none'; geolocation 'none'",
@@ -396,6 +408,10 @@ export function createArtifactViewer({ root = document.body, native = null, onAd
     current.card.hidden = true;
     current.nativeOpen = true;
     placeView();
+    if (result?.status?.state === "unchecked") {
+      setBadge("changed", "Too large to check for changes", "artifact-badge-warning");
+      current.badges.querySelector('[data-badge="changed"]').title = "The site root now holds more than 5,000 files or 2 GB, so Relayer did not compare it with what was accepted.";
+    }
     if (result?.status?.state === "changed") {
       setBadge("changed", "Changed since this was accepted", "artifact-badge-warning");
       current.badges.querySelector('[data-badge="changed"]').title = "The file was edited after this answer was accepted. The viewer shows the current file.";

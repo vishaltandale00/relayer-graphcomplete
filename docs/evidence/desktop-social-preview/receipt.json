@@ -5,15 +5,15 @@
     "desktop/main/services/share-publish-coordinator.mjs": "f722b04879f31c2ab210c6e1eb2a8bf686af37bea6689cff9f6c4d143728abed",
     "desktop/main/services/share-publish-attempt-store.mjs": "55d555b3e1decc8c543356f66be0c4c1605c7f60dc593287fb84ecd93fb2f7ff",
     "desktop/main/services/share-service-client.mjs": "f30067b00bdb02ac64fbcfc932bafe02428cefd38ef094baa9abf51f5748c501",
-    "desktop/main/index.mjs": "c93d39d72155784ab12eed4e0cf7f91ff53602872e5b6a2dee79736e7efc09c7",
+    "desktop/main/index.mjs": "dc4af6dbfc014dc12e82ea38cb8c45180321131aba08967a69bf89c26df165ce",
     "contracts/share-service-v1/contract.json": "7407c99d32fb04a62ab958257be5525dc3451adc9899d600e07de730dccc89ff",
     "scripts/capture-share-preview-evidence.mjs": "4510e3a54f6b658c2df86b1a06afc8ca2428a36693a93648786bd4e075327562",
     "test/fixtures/social-preview.jsonl": "ff4a4545de49ccc20562f2f763b6a120d87fa37f7703a994abeb71b219a405aa",
-    "desktop/shared/telemetry-module-inventory.mjs": "d5727c997d0d596fc03c3bd780f42a8f942ca35e9f46f2a3eb48c41602135a08"
+    "desktop/shared/telemetry-module-inventory.mjs": "936de8e7c98457fd79cd639ba155f83ca9df408788a3d16ba77331b1eb1aeef6"
   },
   "rendererArtifact": {
     "directory": "desktop/renderer",
-    "digest": "460f1206ddfcbe30013aff90e8ac0aa481e3901667c04d92ddd14a1016cf209f",
+    "digest": "abdae283ede9643e2412db744e6302f0259ce1d941ba616fc361430d93cfea9d",
     "files": {
       "assets/relayer-logo.svg": {
         "bytes": 509,
@@ -76,8 +76,8 @@
         "sha256": "f1b0d76178c7de024d14a191930f2e419e1a7e9c9396626d56ad45b58a9a4ecf"
       },
       "src/artifact-viewer.js": {
-        "bytes": 20312,
-        "sha256": "9ee0a15e7bb1521d79299e4a6e8ee5b2216b7875c9d5e16c5a3d8b60298d8467"
+        "bytes": 21416,
+        "sha256": "00a79c37ecfd5ae95b14523d696eae219f04774548699d05ecd6d941811e4a6e"
       },
       "src/auth.js": {
         "bytes": 17998,
