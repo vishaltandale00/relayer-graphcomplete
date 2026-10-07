@@ -106,3 +106,79 @@ cached response). `guidance-verification.json` preserves earlier failed attempts
 and exact local log digests; final full check uses four Rust test threads after
 an unchanged timing fixture failed under load and passed alone. No test scope
 was narrowed. `guidance-review.json` records the renewed exact-source review.
+
+
+## Named-field guidance live matrix (2026-10-07)
+
+Required plan: repeat both H3 coding tasks three times with codex-basic/gpt-6-luna
+and simulated-user gpt-5.6-sol/high; preserve all six original attempts, failures,
+partial captures and unavailable scores. Attest runtime/configuration and compiled
+SDK/harness bytes before inference, then recheck them at collection finalization.
+
+Actual execution: all six original candidates are terminal against commit
+`57e5d1b9fa011b78c344537787d5f1f81c3fd8f7`, tree
+`5b317aa94b81a84f3dafc938c9b69391e99ef5f1`, with the same 26-file reviewed digest
+above. All 50 pinned runtime/configuration/compiled files remained unchanged.
+Actual production attempt records verify gpt-6-luna/codex-subscription for all six
+root interactions. All six executable traces invoke scoped authoring; all five
+accepted root snapshots have scoped layer/node identities. There are no injected
+or replacement candidates.
+
+Resulting evidence is in `live-verification.json`, including hashes of the private
+immutable state, ledgers, summaries, native judge diagnostics, accepted snapshots,
+helper programs and model-route receipts. The immediate-before matrix is commit
+`a12216c74dd202a9379a7fad13335c79112cfb57`, frozen summary SHA-256
+`c8269972cdd77743bb205e0d272efffbdafbeee6a06c5701336c42d07500c0ea`.
+
+| Observation | Immediate before | Guidance fixes |
+| --- | --- | --- |
+| Recorded authoring incidents | 8 server/icon rejections | 5 compiler binding incidents |
+| Mandatory coding-task gate passes | 5/6 | 5/6 |
+| Accepted graph attempts | 5/6 | 5/6 |
+| Completed graph scores | 2/6: repair 3/8, investigation 2/8 | 2/6: repair 3/8, investigation 2/8 |
+| Repair first backend publication median | 89.3 s (3 samples) | 114 s (3 samples) |
+| Investigation first backend publication median | 136.45 s (2 samples, 1 missing) | 92.8 s (2 samples, 1 missing) |
+
+The specific unsupported-icon failures did not recur. The recorded 8-to-5 change
+is not proof of fewer total authoring failures: three supported-client validation
+failures in instrumented scoped node/action methods have no matching diagnostic
+receipt. Eleven failed graph-authoring commands are supplemental; they are not
+added to or substituted for metric 2. They include those three validation failures,
+five compiler failures and three ordinary repair-script failures.
+
+A separate local fake-server reproduction retained the original error in ten
+cases: all five uncaught synchronous failures exited before delivering a report;
+all five caught failures with a 300 ms settling window delivered one client
+validation report each. It used Node 25.9.0, differing from the live Node 24.1.0;
+it establishes a process-termination loss mode, not the exact live cause. No
+production capture behavior was changed during this matrix. Remaining control
+errors omit the required gc binding syntax or capability key; the existing real
+SDK-to-Rust bound-control journey passes, but the JS extension guidance needs a
+complete runnable control example.
+
+Failures remain explicit: the first investigation ended without acceptance after
+local API and repair errors. The third repair committed only the implementation,
+missing the required regression test. Three accepted graphs have partial judge
+reviews; one third-repair judge was deliberately stopped with SIGTERM after over
+88,000 completion events and repeated rejected action-ID guesses, retained as
+partial without replacement. The other two partial judges naturally ended without
+finalizing coverage. Missing reviews are unavailable, never zero scores.
+
+Configuration/case/judge/presentation pins match the immediate-before collection,
+but profile and family do not: an isolated profile protects another active Prime
+eval, and a new single-member family pins Luna after startup advanced the curated
+default. Shared account/runtime load, the judge intervention, tiny sample size,
+partial/unattested client capture, absent qualitative task ratings, and backend
+rather than renderer timing prevent causal improvement or broad nonregression
+claims. The older baseline (6/6 task gates and accepted graphs, 4/6 graph reviews)
+is preserved as secondary historical context in the receipt. The PR remains draft.
+
+
+Final adversarial assertion: `/root/design_authority_review` passed evidence
+fidelity for the exact source and live receipt above (SHA-256
+`2e976b9852fbf4130141de5c974bd49978eb444b90b7ffd887171abbc2fbc00e`).
+The reviewer independently verified 30 helper/private receipts, 50 runtime pins,
+63 judge artifact receipts, 14 passing gate references, six actual candidate
+routes and five accepted snapshots. No unresolved receipt blockers remain.
+`live-review.json` records the assertion and substantive limitations; source or
+receipt changes invalidate it. This is not a nonregression certification.
