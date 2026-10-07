@@ -31,6 +31,8 @@ missing dependency. This uses Microsoft's documented application-local deploymen
 
 ## Repeatable existing-VM command
 
+Windows native development requires CMake 3.25 or newer for the owned embedded-debug policy. `npm run doctor:dev` rejects older Windows CMake before compilation; the upstream Ladybug project still declares its CMake 3.15 policy floor.
+
 The existing private Windows 11 VM has Node 22.23.2, Rust, Git, native Strawberry Perl, Python 3.13.12, CMake and VS2022
 Build Tools in `RelayerDevWorkspace` and `C:\RelayerBuildTools2022`. The portable Perl archive includes CMake 3.29 and its module tree; retain both when extracting it. The versioned
 `windows-dev-environment.cmd` initializes only the build subprocess environment and preflights the selected CMake module tree, Ninja and Python before dispatching compilation.
@@ -300,7 +302,7 @@ isolation. No graph lifecycle or provider recursion policy is changed.
 | Codex/Claude authoring dependency | Both native harness tests, command Unicode/interpolation tests | Exact native PowerShell Unicode stdin and live app-owned command |
 | Provider PATH/private trace | Codex environment and private-presentation trace tests | No external Node and no credential expansion |
 | Desktop factory composition | Harness runtime integration and required `npm run check` fallback | Installed app invokes the owned runtime |
-| Windows C++ debug information and cache authority | `ladybug-source-build.test.mjs` checks the owned Windows-only environment; `windows-native-cache.test.mjs` rejects unreviewed toolchain bytes and invalidates admitted changes; packaged receipt/LF checks include the toolchain | `node scripts/check-windows-rust-symbols.mjs` compiles C/C++ with Ladybug's CMake 3.15 policy floor and requires `/Z7` without `/Zi` before long builds; linked EXE/PDB verification and packaged lifecycle remain required |
+| Windows C++ debug information and cache authority | `developer-prerequisites.test.mjs` rejects Windows CMake below 3.25 while preserving Unix 3.15 support; `ladybug-source-build.test.mjs` checks the owned Windows-only environment; `windows-native-cache.test.mjs` rejects unreviewed toolchain bytes and invalidates admitted changes; packaged receipt/LF checks include the toolchain | `node scripts/check-windows-rust-symbols.mjs` compiles C/C++ with Ladybug's CMake 3.15 policy floor and requires `/Z7` without `/Zi` before long builds; linked EXE/PDB verification and packaged lifecycle remain required |
 | Local Rust cache and outputs | Dev input change/symlink tests; flags/platform rejection | Cold and changed-source warm timings, verified native preparation |
 | Complete tracked-source identity and delta mutation | Real Git-baseline/subprocess fixtures cover unchanged-file tampering, extra unreviewed source, deletion, local/remote parent symlinks, explicit partial-state migration, retained rollback, recovery and lease-bound wrapper verification | Actual full-baseline VM audit, acknowledged v2 source digest, then changed-source warm build |
 | Optional Git folder inspection and project Send | `worktree-service.test.mjs` and Rust `missing_git_admits_plain_folder_send_but_not_repository_markers`: isolated missing-Git processes permit unmarked ordinary folders through project/thread creation; marked, nested and linked paths retain inspection errors | Normal folder picker and successful Send with no Git on PATH in the exact signed installation |

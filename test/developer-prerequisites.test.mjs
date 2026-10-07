@@ -34,6 +34,20 @@ describe("developer prerequisite doctor", () => {
     expect(passingReport("win32").ok).toBe(true);
   });
 
+  it("requires the owned Windows debug-policy CMake floor without raising Unix prerequisites", () => {
+    for (const version of ["3.15.0", "3.24.9"]) {
+      const report = evaluateDeveloperPrerequisites({ ...passingInput("win32"), cmakeVersion: `cmake version ${version}` });
+      expect(report.ok).toBe(false);
+      expect(report.checks.filter(({ passed }) => !passed)).toMatchObject([
+        { name: "CMake", detail: expect.stringContaining("requires 3.25.0") },
+      ]);
+    }
+    expect(evaluateDeveloperPrerequisites({ ...passingInput("win32"), cmakeVersion: "cmake version 3.25.0" }).ok).toBe(true);
+    for (const platform of ["darwin", "linux"]) {
+      expect(evaluateDeveloperPrerequisites({ ...passingInput(platform), cmakeVersion: "cmake version 3.15.0" }).ok).toBe(true);
+    }
+  });
+
   it("reports low disk without blocking the doctor", () => {
     const report = evaluateDeveloperPrerequisites({
       ...passingInput(),
