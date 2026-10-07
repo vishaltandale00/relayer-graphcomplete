@@ -1,0 +1,71 @@
+{
+  "schemaVersion": 1,
+  "format": "relayer-harness-trace-v1",
+  "traceId": "d39e4bad-1d13-4269-97c9-e6d42eba9208",
+  "createdAt": "2026-10-05T18:39:05.957Z",
+  "completedAt": "2026-10-05T18:41:20.509Z",
+  "status": "complete",
+  "terminalReason": null,
+  "implementation": "codex.basic",
+  "configurationName": "codex-basic",
+  "threadId": 12,
+  "interactionNodeId": 124,
+  "productInteractionId": 12,
+  "personalPresentationVersionId": 15,
+  "personalPresentationVersionKey": "personal-presentation-v4",
+  "declaredCoverage": {
+    "prompt": "full",
+    "messages": "full",
+    "reasoningSummaries": "full",
+    "modelCalls": "full",
+    "toolCalls": "full",
+    "usage": "full",
+    "childStreams": "none",
+    "nativeArtifacts": "none"
+  },
+  "achievedCoverage": {
+    "prompt": "full",
+    "messages": "full",
+    "reasoningSummaries": "full",
+    "modelCalls": "full",
+    "toolCalls": "full",
+    "usage": "full",
+    "childStreams": "none",
+    "nativeArtifacts": "none"
+  },
+  "policy": {
+    "mode": "required",
+    "requiredFeatures": {},
+    "includeNativeArtifacts": false,
+    "maxBytesPerTurn": 10485760,
+    "maxEventsPerTurn": 50000
+  },
+  "redactionPolicyVersion": 1,
+  "redactionCount": 71,
+  "truncation": null,
+  "artifacts": {
+    "events": {
+      "ref": "events.jsonl",
+      "sha256": "sha256:d0d605559335a5f50561d744d4095382da34a9c5c274bccba707121314f830fd",
+      "byteLength": 484774,
+      "eventCount": 200
+    },
+    "attachments": [],
+    "graphOperations": {
+      "status": "complete",
+      "promotable": true,
+      "format": "relayer-graph-operations-v1",
+      "ref": "graph-operations.jsonl",
+      "sha256": "sha256:7b8fec40d021f970d3c11ea12cc1f1221e2e3122eac98d7833922e15376ca0e0",
+      "byteLength": 11199,
+      "eventCount": 51,
+      "truncated": false
+    }
+  },
+  "correlation": {
+    "runId": "run-2026-10-05T18-39-05-307Z-0edae7a8",
+    "executionId": "a310e7e5-bec8-4ec1-b0b3-2af96c508490",
+    "interactionId": "12",
+    "harnessConfigurationName": "codex-basic"
+  }
+}

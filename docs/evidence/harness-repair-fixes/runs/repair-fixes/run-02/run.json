@@ -1,0 +1,19 @@
+{
+  "label": "repair-fixes",
+  "index": 2,
+  "startedAt": "2026-10-05T18:32:40.271Z",
+  "finishedAt": "2026-10-05T18:36:10.808Z",
+  "runId": "run-2026-10-05T18-32-40-273Z-2f662549",
+  "runStatus": "passed",
+  "case": "empty-project.hierarchical-overview.single-turn",
+  "harness": "codex-basic",
+  "judge": "deterministic-graph-contract",
+  "modelSelection": {
+    "familyId": 2,
+    "providerId": "codex",
+    "modelId": "gpt-6.1-sol"
+  },
+  "turnStatus": "accepted",
+  "executionError": null,
+  "checks": []
+}
