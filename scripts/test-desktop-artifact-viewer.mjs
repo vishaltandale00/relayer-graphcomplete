@@ -13,7 +13,7 @@ import sharp from "sharp";
 
 import { createViewerRecorder } from "./artifact-viewer-video.mjs";
 
-import { artifactViewerFixtureFactory } from "@relayer/eval-runner";
+import { artifactViewerFixtureFactory, ORDER_DESK_PORT } from "@relayer/eval-runner";
 import { GraphCompleteRuntimeService } from "../desktop/main/services/graphcomplete-runtime.mjs";
 import { RelayerAppServerService } from "../desktop/main/services/relayer-app-server.mjs";
 import { ModelCatalogService } from "../desktop/main/models/model-catalog-service.mjs";
@@ -209,8 +209,10 @@ async function run(window) {
   const folder = (await request(`/api/threads/${thread.id}/artifact-folder`)).folder;
   // ART-005: the agent saw each artifact before acceptance.
   const previews = JSON.parse(await readFile(join(output, "agent-previews", "previews.json"), "utf8"));
-  const unrendered = previews.filter((preview) => preview.status !== "rendered" && preview.status !== "cached");
-  check("ART-005 agent previews of artifact layers", previews.length === 11 && unrendered.length === 0, `${previews.length - unrendered.length}/${previews.length} rendered${unrendered.length ? `; not: ${unrendered.map((preview) => `${preview.key}=${preview.status}`).join(", ")}` : ""}`);
+  // A web app's preview is advisory: before the user approves it, its server is not running.
+  const filePreviews = previews.filter((preview) => !preview.key.startsWith("order-desk"));
+  const unrendered = filePreviews.filter((preview) => preview.status !== "rendered" && preview.status !== "cached");
+  check("ART-005 agent previews of artifact layers", filePreviews.length === 11 && unrendered.length === 0, `${filePreviews.length - unrendered.length}/${filePreviews.length} rendered${unrendered.length ? `; not: ${unrendered.map((preview) => `${preview.key}=${preview.status}`).join(", ")}` : ""}`);
   await waitFor("graph", () => js(window, `document.querySelectorAll("[data-node]").length >= 5`));
   await sleep(600);
   say("The answer is a graph; each node links to what the agent made");
@@ -223,13 +225,16 @@ async function run(window) {
   let view = await viewerLoaded(window);
   await sleep(500);
   check("ART-007 website", view.webContents.getURL().startsWith("relayer-artifact://view/index.html"), view.webContents.getURL());
-  const badges = await js(window, `[...document.querySelectorAll("[data-badge]")].map((badge) => badge.textContent).join(", ")`);
+  const badges = await js(window, `[...document.querySelectorAll("[data-badge]")].map((badge) => badge.title ? badge.textContent + " (" + badge.title + ")" : badge.textContent).join(", ")`);
   check("ART-004 acceptance pins the edited site", badges === "", `badges on first open: "${badges}" (the fixture edited the site after submitting its node)`);
   const strip = await js(window, `document.querySelector(".artifact-strip-text")?.textContent`);
   check("ART-006 address strip", strip === "site/index.html", strip);
   const toolbarItems = await js(window, `[...document.querySelectorAll(".artifact-toolbar button")].map((b) => b.getAttribute("aria-label") || b.textContent.trim())`);
   check("ART-006 no actions in viewer", toolbarItems.join(",") === "Graph,More", toolbarItems.join(", "));
-  await view.webContents.executeJavaScript(`localStorage.setItem("probe", "first-open")`);
+  // ART-010: the seeded cart is there on first open; the page then empties it.
+  const seededCart = await view.webContents.executeJavaScript(`document.querySelector("#cartCount").textContent`);
+  check("ART-010 starting state applied", seededCart === "1", `cart count on open: ${seededCart}`);
+  await view.webContents.executeJavaScript(`localStorage.setItem("probe", "first-open"); localStorage.setItem("tidewater.cart", "[]")`);
   await shot(window, "01-website");
   say("The toolbar slides away after 3 seconds; the address strip stays");
   await sleep(3400);
@@ -251,6 +256,8 @@ async function run(window) {
   view = await viewerLoaded(window);
   const reopened = await view.webContents.executeJavaScript(`localStorage.getItem("probe")`);
   check("PRD 6.6.4 nothing persists between opens", reopened === null, `probe after reopen: ${reopened}`);
+  const resetCart = await view.webContents.executeJavaScript(`document.querySelector("#cartCount").textContent`);
+  check("ART-010 starting state resets on every open", resetCart === "1", `cart count after the page emptied it and the site reopened: ${resetCart}`);
   const probe = await view.webContents.executeJavaScript(`(async () => {
     const api = await fetch(${JSON.stringify(new URL("/api/threads", productSession.origin).href)}, { credentials: "include" }).then((r) => "read " + r.status, (e) => "blocked (" + e.name + ")");
     return { api, cookie: document.cookie, desktopBridge: typeof window.relayerDesktop, topLevel: window.top === window && window.opener === null, origin: location.origin };
@@ -383,6 +390,45 @@ async function run(window) {
   await js(window, `document.querySelector(".artifact-card-action")?.click()`);
   const drafted = await waitFor("chat draft", () => js(window, `document.querySelector("#threadPrompt")?.value.includes("is no longer in the thread folder") ? true : null`), 5_000).catch(() => false);
   check("PRD 6.6.5 Add to chat", drafted === true, `composer drafted: ${drafted}`);
+
+  // ART-009: a web app starts from its server invoke after one approval, then is reused.
+  await js(window, `document.querySelector("#threadPrompt") && (document.querySelector("#threadPrompt").value = "")`);
+  say("A web app: Relayer asks once per thread before running its start command");
+  await openArtifact(window, "Order desk", "Open the order desk");
+  const asked = await waitFor("approval card", () => js(window, `document.querySelector(".artifact-card:not([hidden]) h2")?.textContent === "Start this web app?" ? document.querySelector(".artifact-card-command").textContent : null`), 15_000).catch(() => null);
+  check("ART-009 asks before the first run", asked === `node app/server.mjs ${ORDER_DESK_PORT}` && artifactView(window) === null, String(asked));
+  await hold(2500);
+  await shot(window, "14-app-approval");
+  say("Run starts it in the thread folder, confined to it, and the viewer opens it with its starting state");
+  await js(window, `document.querySelector(".artifact-card-action").click()`);
+  view = await waitFor("app view", () => {
+    const candidate = artifactView(window);
+    return candidate && !candidate.webContents.isLoading() && candidate.webContents.getURL().startsWith(`http://127.0.0.1:${ORDER_DESK_PORT}/`) ? candidate : null;
+  }, 30_000);
+  const app = await waitFor("app page", () => view.webContents.executeJavaScript(`(() => { const server = document.querySelector("#server").textContent; return server ? { member: document.querySelector("#member").textContent, count: document.querySelector("#count").textContent, server } : null; })()`), 10_000);
+  check("ART-009 starts the app", app.server.startsWith("Served by process"), app.server);
+  check("ART-010 web app cookies and storage seeded", app.member === "Signed in as Robin" && app.count === "1 open order", `${app.member}; ${app.count}`);
+  await hold(3000);
+  await shot(window, "15-app-running");
+  await closeViewer(window);
+  say("Reopening reuses the running server: no second approval, the same process");
+  await openArtifact(window, "Order desk", "Open the order desk");
+  view = await waitFor("app view again", () => {
+    const candidate = artifactView(window);
+    return candidate && !candidate.webContents.isLoading() && candidate.webContents.getURL().startsWith(`http://127.0.0.1:${ORDER_DESK_PORT}/`) ? candidate : null;
+  }, 15_000);
+  const again = await waitFor("app page again", () => view.webContents.executeJavaScript(`document.querySelector("#server").textContent || null`), 10_000);
+  check("ART-009 reuses the server without asking again", again === app.server, `${again} (first open: ${app.server})`);
+  await hold(2500);
+  await closeViewer(window);
+  say("A start command that fails shows its log, with Retry and Add to chat");
+  await openArtifact(window, "Order desk", "Broken build");
+  await waitFor("broken approval", () => js(window, `document.querySelector(".artifact-card:not([hidden]) h2")?.textContent === "Start this web app?"`), 15_000);
+  await js(window, `document.querySelector(".artifact-card-action").click()`);
+  const failure = await waitFor("failure card", () => js(window, `document.querySelector(".artifact-card:not([hidden]) h2")?.textContent === "The app did not start" ? { log: document.querySelector(".artifact-card-log")?.textContent ?? "", actions: [...document.querySelectorAll(".artifact-card-actions button")].map((b) => b.textContent) } : null`), 30_000).catch(() => null);
+  check("ART-009 reports a failed start with its log", /Cannot find module/u.test(failure?.log ?? "") && failure.actions.join(",") === "Retry,Add to chat", JSON.stringify({ actions: failure?.actions, log: failure?.log.slice(0, 160) }));
+  await hold(3000);
+  await shot(window, "16-app-failed");
 
   await hold(3000);
   if (recorder) await recorder.stop();

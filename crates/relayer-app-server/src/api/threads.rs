@@ -412,7 +412,11 @@ pub(super) async fn artifact_folder(
         .await?
         .thread;
     let folder = thread_working_directory(&state, &thread).await?;
-    Ok(Json(serde_json::json!({ "folder": folder })))
+    // A web app's server invoke runs under the thread's permission profile (PRD 6.6.6).
+    Ok(Json(serde_json::json!({
+        "folder": folder,
+        "permissionProfileId": thread.permission_profile_id,
+    })))
 }
 
 pub(super) async fn export(

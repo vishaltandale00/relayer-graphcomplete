@@ -42,12 +42,14 @@ interface Group {
 }
 
 const site = { file: "site/index.html", root: "site" } as const;
+/** The fixture web app's port; the broken build points one above it. */
+export const ORDER_DESK_PORT = 41731;
 
 export const ARTIFACT_VIEWER_FIXTURE_GROUPS: readonly Group[] = [
   {
     key: "website", icon: "globe", title: "Landing page", detail: "The Tidewater site in `site/`: home, menu and subscriptions.",
     views: [
-      { key: "site", icon: "globe", title: "Landing page", detail: "The whole site at desktop width.", label: "Open the site", artifact: { kind: "website", source: site } },
+      { key: "site", icon: "globe", title: "Landing page", detail: "The whole site at desktop width, with a cart already started.", label: "Open the site", artifact: { kind: "website", source: site, seed: { localStorage: { "tidewater.cart": JSON.stringify([{ name: "Harbour Espresso", price: 4, qty: 2 }]) } } } },
       { key: "site-phone", icon: "smartphone", title: "Pricing on a phone", detail: "The subscriptions section at phone width.", label: "Pricing on a phone", artifact: { kind: "website", source: site, part: { route: "#pricing" }, viewport: "phone" } },
     ],
   },
@@ -71,6 +73,13 @@ export const ARTIFACT_VIEWER_FIXTURE_GROUPS: readonly Group[] = [
       { key: "hero", icon: "image", title: "Hero image", detail: "The 1600 by 900 hero.", label: "Hero image", artifact: { kind: "image", source: { file: "brand/hero.png" } } },
       { key: "guide", icon: "book-open", title: "Brand guide", detail: "Voice, colour, logo and packaging rules.", label: "Brand guide", artifact: { kind: "markdown", source: { file: "docs/brand-guide.md" } } },
       { key: "guide-colour", icon: "palette", title: "Brand colours", detail: "The colour section.", label: "Colours", artifact: { kind: "markdown", source: { file: "docs/brand-guide.md" }, part: { heading: "Colour" } } },
+    ],
+  },
+  {
+    key: "desk", icon: "server", title: "Order desk", detail: "The café's order app, started from the thread folder when opened.",
+    views: [
+      { key: "order-desk", icon: "server", title: "Order desk", detail: "The running app, signed in as a test member.", label: "Open the order desk", artifact: { kind: "app", source: { url: `http://127.0.0.1:${ORDER_DESK_PORT}/` }, server: { command: `node app/server.mjs ${ORDER_DESK_PORT}`, idleTimeoutMinutes: 1 }, seed: { localStorage: { "tidewater.orders": JSON.stringify(["Kelp Cold Brew"]) }, cookies: [{ name: "tw_member", value: "Robin" }] } } },
+      { key: "order-desk-broken", icon: "triangle-alert", title: "Order desk (broken build)", detail: "A start command that fails.", label: "Broken build", artifact: { kind: "app", source: { url: `http://127.0.0.1:${ORDER_DESK_PORT + 1}/` }, server: { command: "node app/missing-server.mjs" } } },
     ],
   },
   {
@@ -114,7 +123,7 @@ class ArtifactViewerFixtureHarness implements Harness {
       await graph.createEdge(edge);
       edges.push(edge);
     }
-    const spots = [[0.5, 0.2], [0.2, 0.75], [0.4, 0.85], [0.6, 0.85], [0.8, 0.75]] as const;
+    const spots = [[0.5, 0.2], [0.15, 0.7], [0.32, 0.85], [0.5, 0.88], [0.68, 0.85], [0.85, 0.7]] as const;
     const root = new LayerObject(
       groups.map(({ node }) => node),
       edges,
@@ -122,7 +131,7 @@ class ArtifactViewerFixtureHarness implements Harness {
       "launch-kit",
       hub!.node,
     );
-    await graph.submitLayer(root);
+    await graph.submitLayer(root, { sizeJustification: "One launch kit: each artifact family sits beside the others so the user can pick any of them." });
     for (const { node, group } of groups) {
       for (const view of group.views) {
         const artifactNode = new NodeObject(view.icon, view.title, view.detail, "artifact", view.key);

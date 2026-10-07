@@ -121,6 +121,7 @@ export const APPROVED_TELEMETRY_MODULES = Object.freeze({
     "desktop/main/providers/provider-retry.mjs",
     "desktop/main/providers/provider-runtime-state.mjs",
     "desktop/main/services/artifact-fingerprint.mjs",
+    "desktop/main/services/artifact-server.mjs",
     "desktop/main/services/artifact-viewer.mjs",
     "desktop/main/services/authenticated-error-capability-bootstrap.mjs",
     "desktop/main/services/authenticated-error-gateway.mjs",

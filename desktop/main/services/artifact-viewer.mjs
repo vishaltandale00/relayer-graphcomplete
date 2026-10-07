@@ -45,14 +45,20 @@ function routePath(route) {
  * What one artifact needs to be served: the folder files may come from, the
  * entry inside it, and the URL the view opens. Pure, so it is testable without Electron.
  */
+/** A blank page at the artifact's own origin, where its starting state is written before it loads. */
+const SEED_PATH = "/__relayer/seed";
+
 /** Encode each path segment, so `?`, `#` and `%` in file names stay part of the path. */
 const encodePath = (path) => path.split("/").map(encodeURIComponent).join("/");
 /** JSON that is safe inside an inline script. */
 const scriptJson = (value) => JSON.stringify(value).replace(/</gu, "\\u003c");
 
+/** Deployed sites and web apps are addressed by URL; every other kind is a file in the thread folder. */
+export const addressedByUrl = (kind) => kind === "url" || kind === "app";
+
 export function artifactViewPlan(artifact, threadFolder) {
   const kind = artifact?.kind;
-  if (kind === "url") {
+  if (addressedByUrl(kind)) {
     const base = String(artifact.source?.url ?? "");
     const route = routePath(artifact.part?.route);
     const url = route === "" ? base : route.startsWith("/") ? new URL(route, base).href : `${base}${route}`;
@@ -147,6 +153,9 @@ export function createArtifactRequestHandler({ getPlan, markedPath }) {
       const plan = getPlan();
       const url = new URL(request.url);
       if (plan === null || url.host !== "view") return new Response("Not found", { status: 404 });
+      if (url.pathname === SEED_PATH) {
+        return new Response("<!doctype html><title></title>", { headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" } });
+      }
       if (url.pathname === "/__relayer/marked.js") {
         return new Response(await readFile(markedPath), { headers: { "Content-Type": "text/javascript" } });
       }
@@ -179,7 +188,7 @@ export function createArtifactRequestHandler({ getPlan, markedPath }) {
 
 /** Whether the viewer should report this file artifact as missing or changed since acceptance. */
 export async function artifactFileStatus(plan, accepted) {
-  if (plan.kind === "url") return { state: "ok" };
+  if (addressedByUrl(plan.kind)) return { state: "ok" };
   try {
     const rootOrFile = plan.kind === "website" ? plan.folder : plan.file;
     await stat(plan.file);
@@ -230,8 +239,8 @@ function artifactWebPreferences(plan, partition, devTools = false) {
 
 /** Whether a navigation stays on the artifact: its own site, or the artifact scheme. */
 function staysOnArtifact(plan, url) {
-  const allowedOrigin = plan.kind === "url" ? new URL(plan.url).origin : ORIGIN;
-  try { return new URL(url).origin === allowedOrigin || (plan.kind !== "url" && url.startsWith(`${ORIGIN}/`)); } catch { return false; }
+  const allowedOrigin = addressedByUrl(plan.kind) ? new URL(plan.url).origin : ORIGIN;
+  try { return new URL(url).origin === allowedOrigin || (!addressedByUrl(plan.kind) && url.startsWith(`${ORIGIN}/`)); } catch { return false; }
 }
 
 /** Screen sizes a website or URL may ask for; the renderer's device frame uses the same. */
@@ -259,13 +268,13 @@ export function createArtifactPreviewCapture({ BrowserWindow, session, rendererD
   const capture = async ({ artifact, folder, size }) => {
     const ses = session.fromPartition(partition, { cache: false });
     hardenArtifactSession(ses, { getPlan: () => plan, rendererDirectory });
-    if (artifact?.kind !== "url" && typeof folder !== "string") throw new Error("The artifact's thread folder is unknown.");
+    if (!addressedByUrl(artifact?.kind) && typeof folder !== "string") throw new Error("The artifact's thread folder is unknown.");
     plan = artifactViewPlan(artifact, folder);
-    if (plan.kind !== "url" && !(await stat(plan.file).then((info) => info.isFile(), () => false))) throw new Error("The artifact file is missing.");
+    if (!addressedByUrl(plan.kind) && !(await stat(plan.file).then((info) => info.isFile(), () => false))) throw new Error("The artifact file is missing.");
     await clearSession(ses);
     // Like graph previews, a file artifact's preview loads nothing from the network.
     ses.webRequest.onBeforeRequest((details, callback) => callback({
-      cancel: plan !== null && plan.kind !== "url" && /^(https?|wss?|ftp):/u.test(details.url),
+      cancel: plan !== null && !addressedByUrl(plan.kind) && /^(https?|wss?|ftp):/u.test(details.url),
     }));
     const viewport = artifactPreviewSize(artifact, size);
     const window = new BrowserWindow({
@@ -316,12 +325,40 @@ export function createArtifactPreviewCapture({ BrowserWindow, session, rendererD
   };
 }
 
+/**
+ * Starting state (PRD 6.6.7). The view's storage was just cleared; write the seed at
+ * the artifact's origin before its own scripts run. Cookies need an http origin, so
+ * only web apps take them.
+ */
+async function applySeed(contents, plan, seed) {
+  if (!seed) return;
+  // Node gives custom schemes an opaque origin, so file kinds name the viewer's own.
+  const origin = addressedByUrl(plan.kind) ? new URL(plan.url).origin : ORIGIN;
+  if (addressedByUrl(plan.kind)) {
+    for (const cookie of seed.cookies ?? []) {
+      await contents.session.cookies.set({ url: `${origin}/`, name: cookie.name, value: cookie.value, path: cookie.path ?? "/" });
+    }
+  }
+  const entries = Object.entries(seed.localStorage ?? {});
+  if (entries.length === 0) return;
+  const blank = `${origin}${SEED_PATH}`;
+  // A web app's server never sees the seed page: this one load is answered here.
+  if (addressedByUrl(plan.kind)) contents.session.protocol.handle("http", () => new Response("<!doctype html><title></title>", { headers: { "Content-Type": "text/html" } }));
+  try {
+    await contents.loadURL(blank);
+  } finally {
+    if (addressedByUrl(plan.kind)) contents.session.protocol.unhandle("http");
+  }
+  await contents.executeJavaScript(`(() => { for (const [key, value] of ${scriptJson(entries)}) localStorage.setItem(key, value); })()`);
+}
+
 export function createArtifactViewerService({
   WebContentsView,
   session,
   shell,
   getWindow,
-  resolveThreadFolder,
+  resolveThread,
+  serverRunner = null,
   rendererDirectory,
   devTools = false,
 }) {
@@ -331,6 +368,8 @@ export function createArtifactViewerService({
   let latest = 0;
 
   const send = (event) => {
+    // The seed page is an implementation detail; the address never shows it.
+    if (event.type === "address" && new URL(event.url, ORIGIN).pathname === SEED_PATH) return;
     try { getWindow()?.webContents.send("relayer:artifact-viewer-event", event); } catch {}
   };
 
@@ -350,6 +389,8 @@ export function createArtifactViewerService({
     latest += 1;
     const view = current?.view;
     if (current) plans.delete(current.partition);
+    // A web app's server starts its idle timer once no viewer shows it.
+    if (current?.serverKey) serverRunner?.release(current.serverKey);
     current = null;
     if (!view) return;
     const ses = view.webContents.session;
@@ -358,7 +399,7 @@ export function createArtifactViewerService({
     void clearSession(ses).catch(() => {});
   }
 
-  async function open({ threadId, nodeId, artifact, bounds }) {
+  async function open({ threadId, nodeId, artifact, bounds, approveServer = false }) {
     if (!Number.isSafeInteger(threadId) || threadId < 1 || !Number.isSafeInteger(nodeId) || nodeId < 1) {
       throw new TypeError("The artifact viewer needs a thread and node.");
     }
@@ -366,15 +407,32 @@ export function createArtifactViewerService({
     const token = latest;
     const window = getWindow();
     if (!window) throw new Error("The Relayer window is not open.");
-    const threadFolder = artifact?.kind === "url" ? null : await resolveThreadFolder(threadId);
-    const plan = artifactViewPlan(artifact, threadFolder);
+    const thread = artifact?.kind === "url" ? null : await resolveThread(threadId);
+    const plan = artifactViewPlan(artifact, thread?.folder ?? null);
     const status = await artifactFileStatus(plan, artifact.fingerprint);
     const partition = partitionFor(threadId, nodeId);
     if (token !== latest) return { status: { state: "superseded" }, address: plan.address };
     if (status.state === "missing") return { status, address: plan.address };
+    let serverKey = null;
+    if (plan.kind === "app") {
+      if (!serverRunner) return { status: { state: "server-failed", log: "Web apps need Relayer Desktop." }, address: plan.address };
+      send({ type: "server-starting", command: artifact.server.command });
+      const server = await serverRunner.ensure({
+        threadId, nodeId, folder: thread.folder, permissionProfileId: thread.permissionProfileId,
+        server: artifact.server, sourceUrl: artifact.source.url, approve: approveServer,
+        onLog: (text) => send({ type: "server-log", text }),
+      });
+      if (server.state === "approval-required") return { status: { state: "approval-required", command: server.command, permissionProfileId: server.permissionProfileId }, address: plan.address };
+      if (server.state === "failed") return { status: { state: "server-failed", log: server.log }, address: plan.address };
+      serverKey = server.key;
+      if (token !== latest) { serverRunner.release(serverKey); return { status: { state: "superseded" }, address: plan.address }; }
+    }
     plans.set(partition, plan);
     await prepareSession(partition);
-    if (token !== latest) return { status: { state: "superseded" }, address: plan.address };
+    if (token !== latest) {
+      if (serverKey) serverRunner.release(serverKey);
+      return { status: { state: "superseded" }, address: plan.address };
+    }
     const view = new WebContentsView({ webPreferences: artifactWebPreferences(plan, partition, devTools) });
     const contents = view.webContents;
     const leave = (url) => {
@@ -413,10 +471,11 @@ export function createArtifactViewerService({
       }
     });
     contents.on("render-process-gone", () => send({ type: "load-failed", message: "The artifact stopped responding." }));
-    current = { view, plan, partition };
+    current = { view, plan, partition, serverKey };
     window.contentView.addChildView(view);
     setBounds(bounds);
     view.setBackgroundColor("#1c1d1f");
+    await applySeed(contents, plan, artifact.seed).catch((error) => send({ type: "load-failed", message: `The starting state could not be applied: ${error.message}` }));
     await contents.loadURL(plan.url).catch((error) => send({ type: "load-failed", message: error.message }));
     return { status, address: plan.address };
   }
@@ -436,7 +495,7 @@ export function createArtifactViewerService({
   async function openExternally() {
     if (!current) return false;
     const { plan } = current;
-    if (plan.kind === "url") {
+    if (addressedByUrl(plan.kind)) {
       await shell.openExternal(plan.url);
       return true;
     }

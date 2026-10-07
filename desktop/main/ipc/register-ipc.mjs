@@ -447,8 +447,9 @@ export function registerArtifactViewerIpc({ ipcMain, Menu, viewer, getWindow }) 
   };
   ipcMain.handle("relayer:artifact-viewer-open", async (event, request) => {
     fromMainWindow(event);
-    const { threadId, nodeId, artifact, bounds } = request ?? {};
-    return viewer.open({ threadId, nodeId, artifact, bounds });
+    const { threadId, nodeId, artifact, bounds, approveServer } = request ?? {};
+    // approveServer is the user's Run click on a web app's approval card (PRD 6.6.6).
+    return viewer.open({ threadId, nodeId, artifact, bounds, approveServer: approveServer === true });
   });
   ipcMain.handle("relayer:artifact-viewer-bounds", (event, bounds) => {
     fromMainWindow(event);

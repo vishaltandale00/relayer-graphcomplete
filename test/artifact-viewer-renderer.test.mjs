@@ -90,9 +90,46 @@ describe("the desktop viewer (ART-006)", () => {
     native.open.mockResolvedValueOnce({ status: { state: "missing" } });
     await viewer.open({ threadId: 1, node: node(site) });
     expect(text(".artifact-card h2")).toBe("This file is no longer in the thread folder");
+    expect(document.querySelector(".artifact-card").textContent).not.toContain("null");
     document.querySelector(".artifact-card-action").click();
     expect(onAddToChat).toHaveBeenLastCalledWith(expect.stringContaining("is no longer in the thread folder"));
     expect(viewer.isOpen()).toBe(false);
+  });
+});
+
+describe("web apps (ART-009)", () => {
+  const app = { kind: "app", source: { url: "http://127.0.0.1:5173/" }, server: { command: "npm run dev" } };
+
+  it("asks before the first run, then opens with the user's approval", async () => {
+    const native = fakeNative({ state: "approval-required", command: "npm run dev", permissionProfileId: "auto" });
+    const viewer = createArtifactViewer({ root: document.body, native });
+    await viewer.open({ threadId: 1, node: node(app, "Order desk") });
+    expect(text(".artifact-card h2")).toBe("Start this web app?");
+    expect(text(".artifact-card-command")).toBe("npm run dev");
+    expect(text(".artifact-card-note")).toContain("only inside the thread folder");
+    native.open.mockResolvedValueOnce({ status: { state: "ok" } });
+    document.querySelector(".artifact-card-action").click();
+    await vi.waitFor(() => expect(native.open).toHaveBeenLastCalledWith(expect.objectContaining({ approveServer: true })));
+    await vi.waitFor(() => expect(document.querySelector(".artifact-card").hidden).toBe(true));
+  });
+
+  it("shows the start log live, and a failure with Retry and Add to chat", async () => {
+    const native = fakeNative({ state: "server-failed", log: "Error: Cannot find module 'vite'" });
+    const onAddToChat = vi.fn();
+    const viewer = createArtifactViewer({ root: document.body, native, onAddToChat });
+    let finish;
+    native.open.mockImplementationOnce(() => new Promise((done) => { finish = done; }));
+    const opening = viewer.open({ threadId: 1, node: node(app, "Order desk") });
+    native.emit({ type: "server-starting", command: "npm run dev" });
+    native.emit({ type: "server-log", text: "> vite\n" });
+    expect(text(".artifact-card h2")).toBe("Starting the app");
+    expect(text(".artifact-card-log")).toBe("> vite\n");
+    finish({ status: { state: "server-failed", log: "Error: Cannot find module 'vite'" } });
+    await opening;
+    expect(text(".artifact-card h2")).toBe("The app did not start");
+    expect([...document.querySelectorAll(".artifact-card-actions button")].map((button) => button.textContent)).toEqual(["Retry", "Add to chat"]);
+    document.querySelectorAll(".artifact-card-actions button")[1].click();
+    expect(onAddToChat).toHaveBeenCalledWith(expect.stringContaining("Cannot find module 'vite'"));
   });
 });
 

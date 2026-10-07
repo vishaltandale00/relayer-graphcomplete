@@ -6,7 +6,7 @@
 import { createRelayerIcon } from "./product-workspace/icons.js";
 
 const KIND_LABELS = Object.freeze({
-  website: "Website", pdf: "PDF", video: "Video", image: "Image", markdown: "Markdown", url: "Deployed site",
+  website: "Website", pdf: "PDF", video: "Video", image: "Image", markdown: "Markdown", url: "Deployed site", app: "Web app",
 });
 const STRIP_HEIGHT = 26;
 const TOOLBAR_HEIGHT = 46;
@@ -19,8 +19,10 @@ export function artifactLayerNode(layer) {
   return node && typeof node.artifact === "object" && node.artifact !== null ? node : null;
 }
 
+const addressedByUrl = (kind) => kind === "url" || kind === "app";
+
 export function artifactAddress(artifact) {
-  if (artifact?.kind === "url") return String(artifact.source?.url ?? "");
+  if (addressedByUrl(artifact?.kind)) return `${String(artifact.source?.url ?? "")}${artifact.kind === "app" ? artifact.part?.route ?? "" : ""}`;
   const file = String(artifact?.source?.file ?? "");
   const route = artifact?.part?.route ?? "";
   const part = artifact?.part ?? {};
@@ -93,14 +95,19 @@ export function createArtifactViewer({ root = document.body, native = null, onAd
     badge.textContent = label;
   }
 
-  function showCard({ icon, title, body, note, action }) {
-    current.card.replaceChildren(
+  function showCard({ icon, title, body, code = null, note, log = null, action, actions = action ? [action] : [] }) {
+    current.log = log === null ? null : element("pre", { class: "artifact-card-log", text: log });
+    current.card.replaceChildren(...[
       iconFor(icon),
       element("h2", { text: title }),
-      element("p", { text: body }),
+      body ? element("p", { text: body }) : null,
+      code ? element("code", { class: "artifact-card-command", text: code }) : null,
       note ? element("p", { class: "artifact-card-note", text: note }) : null,
-      action ? element("button", { type: "button", class: "artifact-card-action", text: action.label, onclick: action.run }) : null,
-    );
+      current.log,
+      actions.some(Boolean) ? element("div", { class: "artifact-card-actions" }, actions.filter(Boolean).map((item, index) => (
+        element("button", { type: "button", class: index === 0 ? "artifact-card-action" : "artifact-card-action artifact-card-secondary", text: item.label, onclick: item.run })
+      ))) : null,
+    ].filter(Boolean));
     current.card.hidden = false;
   }
 
@@ -133,6 +140,11 @@ export function createArtifactViewer({ root = document.body, native = null, onAd
     } else if (event?.type === "load-failed") {
       setBadge("load", "Did not load", "artifact-badge-error");
       current.badges.querySelector('[data-badge="load"]').title = event.message ?? "";
+    } else if (event?.type === "server-starting") {
+      showCard({ icon: "loader", title: "Starting the app", code: event.command, note: "Running in the thread folder. The log appears below.", log: "" });
+    } else if (event?.type === "server-log" && current.log) {
+      current.log.textContent = `${current.log.textContent}${event.text}`.slice(-20_000);
+      current.log.scrollTop = current.log.scrollHeight;
     } else if (event?.type === "external") {
       setBadge("external", "Opened a link in your browser");
       setTimeout(() => setBadge("external", null), 3500);
@@ -161,7 +173,7 @@ export function createArtifactViewer({ root = document.body, native = null, onAd
     close();
   }
 
-  async function open({ threadId, node }) {
+  async function open({ threadId, node, approveServer = false }) {
     close();
     const artifact = node.artifact;
     const kindLabel = KIND_LABELS[artifact.kind] ?? "Artifact";
@@ -177,14 +189,14 @@ export function createArtifactViewer({ root = document.body, native = null, onAd
     const toolbar = element("header", { class: "artifact-toolbar", role: "toolbar", "aria-label": "Artifact viewer" },
       back,
       element("div", { class: "artifact-title" }, iconFor(node.icon || "file"), element("b", { text: node.title }), element("small", { text: kindLabel })),
-      native || liveSite ? element("div", { class: "artifact-address", title: "Where this artifact comes from" }, iconFor(artifact.kind === "url" ? "lock" : "file"), address) : null,
+      native || liveSite ? element("div", { class: "artifact-address", title: "Where this artifact comes from" }, iconFor(artifact.kind === "url" ? "lock" : artifact.kind === "app" ? "server" : "file"), address) : null,
       badges,
       element("span", { class: "artifact-spacer" }),
       native ? more : null);
     const stripRow = element("div", { class: "artifact-strip", title: "Move the pointer here for the toolbar · Esc returns to the graph" }, strip);
     const stage = element("div", { class: "artifact-stage" });
     // A website or URL may ask for a phone or tablet screen; the view then sits in a device-sized frame.
-    const viewport = ["website", "url"].includes(artifact.kind) ? VIEWPORTS[artifact.viewport] : undefined;
+    const viewport = ["website", "url", "app"].includes(artifact.kind) ? VIEWPORTS[artifact.viewport] : undefined;
     const device = viewport ? element("div", { class: `artifact-device artifact-device-${artifact.viewport}` }) : null;
     // The renderer CSP blocks style attributes; CSSOM properties are allowed.
     if (device) Object.assign(device.style, { width: `${viewport[0]}px`, height: `${viewport[1]}px` });
@@ -243,7 +255,7 @@ export function createArtifactViewer({ root = document.body, native = null, onAd
     const opening = current;
     let result;
     try {
-      result = await native.open({ threadId: Number(threadId), nodeId: Number(node.id), artifact, bounds: stageBounds(device ?? stage) });
+      result = await native.open({ threadId: Number(threadId), nodeId: Number(node.id), artifact, bounds: stageBounds(device ?? stage), approveServer });
     } catch (error) {
       if (current !== opening) return;
       showCard({ icon: "triangle-alert", title: "This artifact could not open", body: String(error?.message ?? error) });
@@ -251,6 +263,36 @@ export function createArtifactViewer({ root = document.body, native = null, onAd
     }
     // A newer open or a close overtook this one; main has already dropped its view.
     if (current !== opening || result?.status?.state === "superseded") return;
+    // A web app's server invoke (PRD 6.6.6): approve once per thread, or see why it failed.
+    if (result?.status?.state === "approval-required") {
+      const confined = result.status.permissionProfileId !== "full";
+      showCard({
+        icon: "server",
+        title: "Start this web app?",
+        body: `${node.title} runs from the thread folder with:`,
+        code: result.status.command,
+        note: `${confined ? "It can write only inside the thread folder." : "This thread has full access, so the command is not confined."} Relayer asks once per thread, and stops a server it started after it sits unused.`,
+        actions: [
+          { label: "Run", run: () => void open({ threadId, node, approveServer: true }) },
+          { label: "Cancel", run: () => close() },
+        ],
+      });
+      return;
+    }
+    if (result?.status?.state === "server-failed") {
+      const log = String(result.status.log ?? "");
+      showCard({
+        icon: "triangle-alert",
+        title: "The app did not start",
+        code: artifact.server?.command ?? null,
+        log,
+        actions: [
+          { label: "Retry", run: () => void open({ threadId, node }) },
+          addToChat(`The web app "${node.title}" did not start. Its log:\n${log.slice(-4000)}`),
+        ],
+      });
+      return;
+    }
     if (result?.status?.state === "missing") {
       showCard({
         icon: "file-x",
@@ -261,6 +303,7 @@ export function createArtifactViewer({ root = document.body, native = null, onAd
       });
       return;
     }
+    current.card.hidden = true;
     current.nativeOpen = true;
     placeView();
     if (result?.status?.state === "changed") {
