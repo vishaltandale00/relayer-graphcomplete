@@ -1,4 +1,6 @@
 export * from "./client.js";
+export { GraphAuthoringValidationError, GraphAuthoringWriteError } from "./scoped-authoring.js";
+export type { ScopedGraphAuthoring, ScopedAuthoringLayer, GraphWriteResult, AuthoringNodeFields, AuthoringActionFields, AuthoringLayoutOptions, CompletedAuthoringWrite, FailedAuthoringWrite } from "./scoped-authoring.js";
 export {
   DETAIL_AUTHORING_LIMITS,
   DetailCompilationError,

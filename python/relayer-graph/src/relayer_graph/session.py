@@ -81,6 +81,11 @@ class GraphSession(RelayerGraphClient):
             message = result.get("message", "Visual authoring failed")
             if result.get("issues"):
                 message += "\n" + json.dumps(result["issues"], ensure_ascii=False)
+            status = result.get("httpStatus")
+            if type(status) is int:
+                error = _graph_error(status, {"error": result.get("error")})
+                error.details = result
+                raise error
             raise ValidationError(message, status=422, details=result)
         return result["value"]
 
@@ -95,20 +100,24 @@ class GraphSession(RelayerGraphClient):
         payload["replacement"] = {"nodeId": _node_id(node), "expectedRevision": expected_revision}
         await self._visual_authoring("replace", presentation, payload)
 
-    async def submit_node(self, node: NodeObject) -> GraphNode:
+    def _capture_node_payload(self, node: NodeObject) -> Any:
         key = node.detail_authoring
         submission = self._visual_submissions.get(key)
         if submission is not None:
-            # Recheck the exact owner and scope against the frozen envelope, not
-            # mutable fields that cannot change the already registered request.
+            key._bind(node, self.url, self.node_id, captured_key=submission.payload["node"]["clientKey"])
+            return submission.payload
+        if key._finalizing:
+            raise ValueError("detail_finalization_in_progress")
+        return self._visual_payload("submit", node)
+
+    async def _submit_captured_node(self, node: NodeObject, key: NodeDetailAuthoring, payload: Any) -> GraphNode:
+        submission = self._visual_submissions.get(key)
+        if submission is not None:
             key._bind(node, self.url, self.node_id, captured_key=submission.payload["node"]["clientKey"])
             if submission.task is not None:
                 return await asyncio.shield(submission.task)
         else:
-            self.bind_node(node)
-            if key._finalizing:
-                raise ValueError("detail_finalization_in_progress")
-            submission = _VisualSubmission(self._visual_payload("submit", node))
+            submission = _VisualSubmission(payload)
             self._visual_submissions[key] = submission
         key._finalizing = True
 

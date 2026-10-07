@@ -65,3 +65,10 @@ from .icon_discovery import GraphIcons, IconDiscoveryItem
 __all__ += ["ImageIcon", "GraphIcon", "image_icon", "image_icon_detail", "symbol_icon_detail"]
 from .preview import GraphPreview
 __all__ += ["GraphPreview"]
+
+from .scoped_authoring import (ScopedGraphAuthoring, ScopedAuthoringLayer, GraphWriteResult,
+                              GraphAuthoringValidationError, GraphAuthoringWriteError,
+                              CompletedAuthoringWrite, FailedAuthoringWrite)
+__all__ += ["ScopedGraphAuthoring", "ScopedAuthoringLayer", "GraphWriteResult",
+            "GraphAuthoringValidationError", "GraphAuthoringWriteError",
+            "CompletedAuthoringWrite", "FailedAuthoringWrite"]

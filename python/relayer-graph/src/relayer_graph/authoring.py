@@ -9,7 +9,7 @@ import os
 import socket
 import uuid
 from dataclasses import dataclass, field, replace
-from typing import Any, Literal, Mapping, Sequence, TypedDict
+from typing import Any, Awaitable, Callable, Literal, Mapping, Sequence, TYPE_CHECKING, TypedDict
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
@@ -24,6 +24,10 @@ from .icon_discovery import GraphIcons
 from .query import GraphSearchRequest, GraphSearchResult
 from .query_errors_generated import (GRAPH_QUERY_CONTRACT_VERSION,
                                      GRAPH_QUERY_ERROR_PHASES)
+
+
+if TYPE_CHECKING:
+    from .scoped_authoring import ScopedGraphAuthoring
 
 
 @dataclass(frozen=True, slots=True)
@@ -336,6 +340,36 @@ def _route_payload(route: EdgeRouteObject) -> dict[str, Any]:
         ]
     return payload
 
+class _CapturedNodeWrite:
+    """Reserve a captured program without starting transport or bypassing the client."""
+    def __init__(self, submit: Callable[[], Awaitable[GraphNode]], release: Callable[[], None], client_key: str) -> None:
+        self.client_key = client_key
+        self._submit = submit
+        self._release = release
+        self._task: asyncio.Task[None] | None = None
+        self._future: asyncio.Future[GraphNode] = asyncio.get_running_loop().create_future()
+        self._future.add_done_callback(lambda done: None if done.cancelled() else done.exception())
+
+    async def run(self) -> GraphNode:
+        if self._task is None and not self._future.done():
+            async def execute() -> None:
+                try:
+                    self._future.set_result(await self._submit())
+                except BaseException as error:
+                    self._release()
+                    self._future.set_exception(error)
+            self._task = asyncio.create_task(execute())
+        return await asyncio.shield(self._future)
+
+    async def wait(self) -> GraphNode:
+        return await asyncio.shield(self._future)
+
+    def cancel(self) -> None:
+        if self._task is None and not self._future.done():
+            self._release()
+            self._future.set_exception(ConfigurationError("Captured node write was not scheduled because the scoped write failed"))
+
+
 class RelayerGraphClient:
     def __init__(self, url: str, token: str, node_id: int, *, timeout: float = 30.0,
                  preview_directory: str | None = None) -> None:
@@ -348,6 +382,9 @@ class RelayerGraphClient:
         self.preview_directory = preview_directory
         self.visual_assets = GraphVisualAssets(self)
         self.icons = GraphIcons(self)
+        self._captured_nodes: dict[NodeDetailAuthoring, _CapturedNodeWrite] = {}
+        self._scoped_identities: dict[str, str] = {}
+        self._scoped_writes: set[str] = set()
 
     async def __aenter__(self) -> "RelayerGraphClient":
         return self
@@ -384,14 +421,42 @@ class RelayerGraphClient:
         node.detail_authoring._bind(node, self.url, self.node_id)
         return node
 
-    async def submit_node(self, node: NodeObject) -> GraphNode:
+    def authoring(self, snapshot_key: str) -> ScopedGraphAuthoring:
+        """Assemble one named draft snapshot; write does not publish or accept it."""
+        from .scoped_authoring import ScopedGraphAuthoring
+        return ScopedGraphAuthoring(self, snapshot_key)
+
+    def _capture_node_payload(self, node: NodeObject) -> Any:
         self.bind_node(node)
         if node.detail_authoring._components or node.detail_authoring._cleared:
             raise ConfigurationError("Visual details require GraphSession.current() in Prime")
-        value = await self._request("POST", "/api/graph/nodes", {
+        return json.loads(json.dumps({
             "clientKey": node.client_key, "kind": node.kind, "icon": node.icon,
             "title": node.title, "detail": node.detail,
-        })
+        }))
+
+    def _capture_node_write(self, node: NodeObject) -> _CapturedNodeWrite:
+        key = node.detail_authoring
+        existing = self._captured_nodes.get(key)
+        if existing is not None:
+            key._bind(node, self.url, self.node_id, captured_key=existing.client_key)
+            return existing
+        payload = self._capture_node_payload(node)
+        def release() -> None:
+            if self._captured_nodes.get(key) is captured:
+                self._captured_nodes.pop(key, None)
+        captured = _CapturedNodeWrite(lambda: self._submit_captured_node(node, key, payload), release,
+                                      payload.get("node", payload)["clientKey"])
+        self._captured_nodes[key] = captured
+        return captured
+
+    async def submit_node(self, node: NodeObject) -> GraphNode:
+        existing = self._captured_nodes.get(node.detail_authoring)
+        captured = self._capture_node_write(node)
+        return await (captured.wait() if existing is not None else captured.run())
+
+    async def _submit_captured_node(self, node: NodeObject, key: NodeDetailAuthoring, payload: Any) -> GraphNode:
+        value = await self._request("POST", "/api/graph/nodes", payload)
         node.ref = GraphNode.from_dict(value["node"])
         return self._with_preview(node.ref, value.get("preview"), f"node-{node.ref.id}")
 
@@ -480,6 +545,9 @@ class RelayerGraphClient:
         return await self._request("POST", "/api/graph/actions", payload)
 
     async def add_action(self, source: NodeReference, action: Any) -> Mapping[str, Any]:
+        return await self._add_captured_action(source, action, action)
+
+    async def _add_captured_action(self, source: NodeReference, original: Any, action: Any) -> Mapping[str, Any]:
         presentation = {"variant": action.variant, "icon": action.icon, "description": action.description}
         common = {"source_layer": action.source_layer, "client_key": action.client_key, **presentation}
         if action.kind == "navigate":
