@@ -422,6 +422,22 @@ async fn server_invokes_and_starting_state_are_checked() {
             json!({"kind": "website", "source": {"file": "site/index.html", "root": "site"}, "seed": {"cookies": [{"name": "a", "value": "b"}]}, "fingerprint": FINGERPRINT}),
             "artifact_seed_invalid",
         ),
+        (
+            app(json!({"server": {"command": "npm run dev\u{202E}ved nur mpn"}})),
+            "artifact_server_invalid",
+        ),
+        (
+            app(json!({"server": {"command": "npm\trun dev"}})),
+            "artifact_server_invalid",
+        ),
+        (
+            app(json!({"part": {"route": "//evil.example/x"}})),
+            "artifact_part_invalid",
+        ),
+        (
+            json!({"kind": "url", "source": {"url": "https://example.com/"}, "part": {"route": "/\\evil.example"}}),
+            "artifact_part_invalid",
+        ),
     ];
     for (index, (artifact, expected)) in cases.into_iter().enumerate() {
         let error = artifact_node(&writer, &format!("case-{index}"), &artifact)

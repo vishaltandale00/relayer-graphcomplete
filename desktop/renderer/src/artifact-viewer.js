@@ -153,7 +153,8 @@ export function createArtifactViewer({ root = document.body, native = null, onAd
       current.badges.querySelector('[data-badge="load"]').title = event.message ?? "";
     } else if (event?.type === "server-starting") {
       showCard({ icon: "loader", title: "Starting the app", code: event.command, note: "Running in the thread folder. The log appears below.", log: "" });
-    } else if (event?.type === "server-log" && current.log) {
+      current.starting = true;
+    } else if (event?.type === "server-log" && current.starting && current.log) {
       current.log.textContent = `${current.log.textContent}${event.text}`.slice(-20_000);
       current.log.scrollTop = current.log.scrollHeight;
     } else if (event?.type === "external") {
@@ -205,8 +206,9 @@ export function createArtifactViewer({ root = document.body, native = null, onAd
   /** Annotate (PRD 6.6.8): freeze the view on a screenshot, pause media, and take notes. */
   async function beginNote() {
     const viewing = current;
-    if (!viewing?.nativeOpen || viewing.noting) return;
-    const context = await native.beginNote().catch(() => null);
+    if (!viewing?.nativeOpen || viewing.noting || viewing.notePending) return;
+    viewing.notePending = true;
+    const context = await native.beginNote().catch(() => null).finally(() => { viewing.notePending = false; });
     if (current !== viewing) return;
     if (!context) {
       setBadge("note", "This view could not be captured", "artifact-badge-warning");
@@ -344,11 +346,13 @@ export function createArtifactViewer({ root = document.body, native = null, onAd
       result = await native.open({ threadId: Number(threadId), nodeId: Number(node.id), artifact, bounds: stageBounds(device ?? stage), approveServer });
     } catch (error) {
       if (current !== opening) return;
+      current.starting = false;
       showCard({ icon: "triangle-alert", title: "This artifact could not open", body: String(error?.message ?? error) });
       return;
     }
     // A newer open or a close overtook this one; main has already dropped its view.
     if (current !== opening || result?.status?.state === "superseded") return;
+    current.starting = false;
     // A web app's server invoke (PRD 6.6.6): approve once per thread, or see why it failed.
     if (result?.status?.state === "approval-required") {
       const confined = result.status.permissionProfileId !== "full";
@@ -359,7 +363,7 @@ export function createArtifactViewer({ root = document.body, native = null, onAd
         code: result.status.command,
         note: `${confined ? "It can write only inside the thread folder." : "This thread has full access, so the command is not confined."} Relayer asks once per thread, and stops a server it started after it sits unused.`,
         actions: [
-          { label: "Run", run: () => void open({ threadId, node, approveServer: true }) },
+          { label: "Run", run: () => void open({ threadId, node, target, approveServer: true }) },
           { label: "Cancel", run: () => close() },
         ],
       });
@@ -373,7 +377,7 @@ export function createArtifactViewer({ root = document.body, native = null, onAd
         code: artifact.server?.command ?? null,
         log,
         actions: [
-          { label: "Retry", run: () => void open({ threadId, node }) },
+          { label: "Retry", run: () => void open({ threadId, node, target }) },
           addToChat(`The web app "${node.title}" did not start. Its log:\n${log.slice(-4000)}`),
         ],
       });

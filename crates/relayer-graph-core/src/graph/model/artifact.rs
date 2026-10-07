@@ -167,9 +167,14 @@ fn validate_server(value: &Value) -> Result<(), GraphError> {
         .get("command")
         .and_then(Value::as_str)
         .unwrap_or_default();
-    if command.trim().is_empty()
-        || command.len() > MAX_COMMAND_BYTES
-        || command.contains(['\0', '\n', '\r'])
+    // The approval card shows this exact string, so nothing in it may hide or reorder
+    // text: no control, format or bidi characters, and no whitespace but a plain space.
+    let hidden = |c: char| {
+        c.is_control()
+            || (c.is_whitespace() && c != ' ')
+            || matches!(c, '\u{200B}'..='\u{200F}' | '\u{202A}'..='\u{202E}' | '\u{2060}'..='\u{206F}' | '\u{FEFF}')
+    };
+    if command.trim().is_empty() || command.len() > MAX_COMMAND_BYTES || command.chars().any(hidden)
     {
         return Err(issue(
             "artifact_server_invalid",
@@ -283,7 +288,10 @@ fn validate_part(kind: &str, part: &Map<String, Value>) -> Result<(), GraphError
     keys_within(part, allowed, "artifact.part")?;
     if let Some(route) = part.get("route") {
         let route = route.as_str().unwrap_or_default();
+        // `//host` and `/\host` would leave the artifact's own address.
         if !(route.starts_with('/') || route.starts_with('#') || route.starts_with('?'))
+            || route.starts_with("//")
+            || route.starts_with("/\\")
             || route.len() > MAX_ROUTE_BYTES
         {
             return Err(issue(

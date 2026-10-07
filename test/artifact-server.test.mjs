@@ -101,6 +101,39 @@ describe("the server invoke (ART-009)", () => {
     await expect(stat(outside)).rejects.toThrow();
   });
 
+  it("starts one server when two opens overlap", async () => {
+    const { folder, runner } = await setup();
+    const port = await freePort();
+    const url = `http://127.0.0.1:${port}/`;
+    const request = { threadId: 11, nodeId: 3, folder, permissionProfileId: "auto", approve: true, server: { command: `node app/server.mjs ${port}` }, sourceUrl: url };
+    const [first, second] = await Promise.all([runner.ensure(request), runner.ensure(request)]);
+    expect([first.state, second.state]).toEqual(["ready", "ready"]);
+    expect(runner.running()).toHaveLength(1);
+    runner.stopAll();
+    expect(await until(async () => !(await answers(url)))).toBe(true);
+  });
+
+  it("shows another thread's server on the same address as a conflict, not as this app", async () => {
+    const { folder, runner } = await setup();
+    const port = await freePort();
+    const url = `http://127.0.0.1:${port}/`;
+    expect((await runner.ensure({ threadId: 12, nodeId: 3, folder, permissionProfileId: "auto", approve: true, server: { command: `node app/server.mjs ${port}` }, sourceUrl: url })).state).toBe("ready");
+    const other = await runner.ensure({ threadId: 13, nodeId: 3, folder, permissionProfileId: "auto", approve: true, server: { command: `node app/server.mjs ${port}` }, sourceUrl: url });
+    expect(other.state).toBe("failed");
+    expect(other.log).toContain("Another thread's app is already serving");
+  });
+
+  it.runIf(process.platform === "darwin")("keeps confined commands from writing through system services", async () => {
+    const { folder, runner } = await setup();
+    const domain = `ai.relayer.sandbox-probe-${process.pid}`;
+    const result = await runner.ensure({
+      threadId: 14, nodeId: 3, folder, permissionProfileId: "auto", approve: true, sourceUrl: `http://127.0.0.1:${await freePort()}/`,
+      server: { command: `defaults write ${domain} probe -string x; echo "defaults exit $?"; exit 1` },
+    });
+    expect(result.log).toMatch(/defaults exit [1-9]/u);
+    await expect(stat(join(homedir(), "Library", "Preferences", `${domain}.plist`))).rejects.toThrow();
+  });
+
   it("refuses to run a confined command where it cannot be confined", async () => {
     const { folder, runner } = await setup({ platform: "linux" });
     const result = await runner.ensure({ threadId: 7, nodeId: 3, folder, permissionProfileId: "auto", approve: true, server: { command: "npm run dev" }, sourceUrl: `http://127.0.0.1:${await freePort()}/` });

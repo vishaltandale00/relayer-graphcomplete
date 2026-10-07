@@ -28,7 +28,12 @@ export function serverSandboxProfile({ folder, temporary }) {
     "(version 1)",
     "(allow default)",
     "(deny file-write*)",
-    `(allow file-write* (subpath ${quote(folder)}) (subpath ${quote(temporary)}) (subpath "/private/var/folders") (literal "/dev/null") (literal "/dev/zero") (regex #"^/dev/tty") (subpath "/dev/fd"))`,
+    `(allow file-write* (subpath ${quote(folder)}) (subpath ${quote(temporary)}) (literal "/dev/null") (literal "/dev/zero") (regex #"^/dev/tty") (subpath "/dev/fd"))`,
+    // System services write for the caller; deny the ones that would carry writes or
+    // launches outside the sandbox: preferences, Launch Services, Apple Events and launchd jobs.
+    '(deny mach-lookup (global-name "com.apple.cfprefsd.daemon") (global-name "com.apple.cfprefsd.agent") (global-name "com.apple.coreservices.launchservicesd") (global-name "com.apple.lsd.mapdb") (global-name "com.apple.lsd.modifydb"))',
+    "(deny appleevent-send)",
+    '(deny process-exec (literal "/bin/launchctl") (literal "/usr/bin/open") (literal "/usr/bin/osascript") (literal "/usr/bin/defaults"))',
   ].join("\n");
 }
 
@@ -50,6 +55,8 @@ export function createArtifactServerRunner({
   minuteMs = 60_000,
 } = {}) {
   const servers = new Map();
+  // One start per server at a time; a second open waits for it instead of starting another.
+  const starting = new Map();
   let grants = null;
 
   async function loadGrants() {
@@ -78,29 +85,34 @@ export function createArtifactServerRunner({
     }
   }
 
+  /** The command runs in its own process group; stop every process it started, even after the shell exits. */
+  function killGroup(child) {
+    if (!child?.pid) return;
+    try { process.kill(-child.pid, "SIGTERM"); } catch {}
+    setTimeout(() => { try { process.kill(-child.pid, "SIGKILL"); } catch {} }, 3000).unref?.();
+  }
+
   function stop(key) {
     const server = servers.get(key);
     if (!server) return;
     servers.delete(key);
     clearTimeout(server.idleTimer);
-    if (server.child.exitCode === null && server.child.signalCode === null) {
-      // The command runs in its own process group; stop every process it started.
-      try { process.kill(-server.child.pid, "SIGTERM"); } catch {}
-      setTimeout(() => { try { process.kill(-server.child.pid, "SIGKILL"); } catch {} }, 3000).unref?.();
-    }
+    killGroup(server.child);
   }
 
   async function launch({ key, folder, permissionProfileId, command, readyUrl, idleMinutes, onLog }) {
     const env = Object.fromEntries(Object.entries(environment).filter(([name]) => !SECRET_ENV.test(name) && !name.startsWith("RELAYER_")));
-    let file = "/bin/sh";
-    let args = ["-c", command];
+    // A login shell finds the user's tools (npm, node) even when Relayer was opened from Finder.
+    env.PATH = [env.PATH, "/opt/homebrew/bin", "/usr/local/bin"].filter(Boolean).join(":");
+    const shell = platform === "darwin" ? ["/bin/zsh", "-lc", command] : ["/bin/sh", "-c", command];
+    let [file, ...args] = shell;
     if (permissionProfileId !== "full") {
       if (platform !== "darwin") {
         return { state: "failed", log: "This thread's permission profile confines commands, and Relayer can confine a server only on macOS. Use the Full access profile to run it here." };
       }
       const profile = serverSandboxProfile({ folder: await realpath(folder), temporary: await realpath(tmpdir()) });
       file = "/usr/bin/sandbox-exec";
-      args = ["-p", profile, "/bin/sh", "-c", command];
+      args = ["-p", profile, ...shell];
     }
     const child = spawn(file, args, { cwd: folder, env, detached: true, stdio: ["ignore", "pipe", "pipe"] });
     const server = { child, log: "", readyUrl, idleMinutes, viewers: 0, idleTimer: null };
@@ -120,12 +132,14 @@ export function createArtifactServerRunner({
     while (Date.now() < deadline) {
       const ended = await Promise.race([exited, new Promise((done) => setTimeout(() => done(null), READY_POLL_MS))]);
       if (ended) {
-        servers.delete(key);
+        if (servers.get(key) === server) servers.delete(key);
+        killGroup(child);
         return { state: "failed", log: `${server.log}\nThe command exited${ended.code === null ? ` (${ended.signal})` : ` with code ${ended.code}`} before ${readyUrl} answered.`.trim() };
       }
       if (await answers(readyUrl)) return { state: "ready", started: true };
     }
-    stop(key);
+    if (servers.get(key) === server) stop(key);
+    else killGroup(child);
     return { state: "failed", log: `${server.log}\nNo answer from ${readyUrl} after ${Math.round(startupTimeoutMs / 1000)} s.`.trim() };
   }
 
@@ -138,20 +152,31 @@ export function createArtifactServerRunner({
       const command = String(server.command);
       const readyUrl = readyUrlOf(server, sourceUrl);
       const key = `${threadId}:${commandDigest(command)}`;
+      // Another thread's app on the same address is a different app; never show it here.
+      const origin = new URL(readyUrl).origin;
+      if ([...servers.entries()].some(([other, entry]) => other !== key && new URL(entry.readyUrl).origin === origin)) {
+        return { state: "failed", log: `Another thread's app is already serving ${origin}. Close it there, or give this app another port.` };
+      }
+      await starting.get(key)?.catch(() => {});
       const running = servers.get(key);
-      if (running) {
+      if (running && await answers(readyUrl)) {
         clearTimeout(running.idleTimer);
         running.viewers += 1;
-        if (await answers(readyUrl)) return { state: "ready", started: false, key };
+        return { state: "ready", started: false, key };
       }
       // A server the user or another tool started is used as it is, and never stopped.
       if (!running && await answers(readyUrl)) return { state: "ready", started: false, key: null };
       if (approving) await approve(threadId, command);
       if (!(await approved(threadId, command))) return { state: "approval-required", command, folder, permissionProfileId };
-      if (running) stop(key);
-      const result = await launch({ key, folder, permissionProfileId, command, readyUrl, idleMinutes: server.idleTimeoutMinutes ?? DEFAULT_IDLE_MINUTES, onLog });
-      if (result.state === "ready") servers.get(key).viewers += 1;
-      return { ...result, key: result.state === "ready" ? key : null };
+      if (starting.has(key)) return this.ensure({ threadId, nodeId, folder, permissionProfileId, server, sourceUrl, onLog });
+      if (servers.get(key)) stop(key);
+      const launching = launch({ key, folder, permissionProfileId, command, readyUrl, idleMinutes: server.idleTimeoutMinutes ?? DEFAULT_IDLE_MINUTES, onLog });
+      starting.set(key, launching);
+      let result;
+      try { result = await launching; } finally { if (starting.get(key) === launching) starting.delete(key); }
+      const started = servers.get(key);
+      if (result.state === "ready" && started) started.viewers += 1;
+      return { ...result, key: result.state === "ready" && started ? key : null };
     },
 
     /** A viewer stopped showing the server; start its idle timer when none still does. */

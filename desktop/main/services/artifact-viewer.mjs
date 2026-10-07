@@ -63,6 +63,8 @@ export function artifactViewPlan(artifact, threadFolder) {
     const base = String(artifact.source?.url ?? "");
     const route = routePath(artifact.part?.route);
     const url = route === "" ? base : route.startsWith("/") ? new URL(route, base).href : `${base}${route}`;
+    // A route opens a place in the artifact, never another site.
+    if (new URL(url).origin !== new URL(base).origin) throw new TypeError("An artifact route must stay on the artifact's own address.");
     return Object.freeze({ kind, url, address: url, folder: null, entry: null });
   }
   if (!FILE_KINDS.has(kind)) throw new TypeError(`Unsupported artifact kind: ${kind}`);
@@ -359,18 +361,31 @@ async function applySeed(contents, plan, seed) {
  * the result is display text only.
  */
 const NOTE_LOCATION_SCRIPT = `(() => {
-  const time = (s) => Math.floor(s / 60) + ":" + String(Math.floor(s % 60)).padStart(2, "0");
   const video = document.querySelector("video");
-  if (video && location.pathname.startsWith("/__relayer/view")) return "at " + time(video.currentTime);
   const doc = document.querySelector("#doc");
-  if (doc) {
-    const headings = [...doc.querySelectorAll("h1,h2,h3,h4")].filter((h) => h.getBoundingClientRect().top <= 80);
-    return headings.length ? "under “" + headings.at(-1).textContent.trim() + "”" : "at the top";
-  }
-  if (document.querySelector("#picture")) return "the whole image";
-  const place = location.pathname + location.search + location.hash;
-  return "at " + place + (scrollY > 0 ? ", scrolled " + Math.round(scrollY) + " px" : "");
+  const headings = doc ? [...doc.querySelectorAll("h1,h2,h3,h4")].filter((h) => h.getBoundingClientRect().top <= 80) : [];
+  return { time: video ? video.currentTime : null, heading: headings.at(-1)?.textContent ?? null, scroll: scrollY };
 })()`;
+
+/**
+ * The page reports only numbers and, for Markdown, the heading in view; the address comes
+ * from the view itself. Agents read this as the user's words, so the page cannot write it.
+ */
+function noteLocation(plan, reported, url) {
+  const time = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
+  const seconds = Number(reported?.time);
+  const scroll = Math.max(0, Math.round(Number(reported?.scroll) || 0));
+  if (plan.kind === "video") return Number.isFinite(seconds) ? `at ${time(seconds)}` : "in the video";
+  if (plan.kind === "image") return "the whole image";
+  if (plan.kind === "pdf") return `in ${basename(plan.file)}${/#page=(\d+)/u.test(url) ? `, page ${url.match(/#page=(\d+)/u)[1]}` : ""}`;
+  if (plan.kind === "markdown") {
+    const heading = String(reported?.heading ?? "").replace(/\s+/gu, " ").trim().slice(0, 80);
+    return heading ? `under “${heading}”` : "at the top";
+  }
+  let place = url;
+  try { const parsed = new URL(url); place = `${parsed.pathname}${parsed.search}${parsed.hash}`; } catch {}
+  return `at ${place.slice(0, 160)}${scroll > 0 ? `, scrolled ${scroll} px` : ""}`;
+}
 
 export function createArtifactViewerService({
   WebContentsView,
@@ -454,7 +469,13 @@ export function createArtifactViewerService({
       if (serverKey) serverRunner.release(serverKey);
       return { status: { state: "superseded" }, address: plan.address };
     }
-    const view = new WebContentsView({ webPreferences: artifactWebPreferences(plan, partition, devTools) });
+    let view;
+    try {
+      view = new WebContentsView({ webPreferences: artifactWebPreferences(plan, partition, devTools) });
+    } catch (error) {
+      if (serverKey) serverRunner.release(serverKey);
+      throw error;
+    }
     const contents = view.webContents;
     const leave = (url) => {
       try {
@@ -506,8 +527,10 @@ export function createArtifactViewerService({
    * pause playing media. The live view hides behind the captured image until endNote.
    */
   async function beginNote() {
-    if (!current?.view || !notesDirectory) return null;
-    const contents = current.view.webContents;
+    // Pin the view: the user may close or switch artifacts while the capture runs.
+    const viewing = current;
+    if (!viewing?.view || !notesDirectory) return null;
+    const contents = viewing.view.webContents;
     await contents.executeJavaScript(`window.__relayerNotePaused = [...document.querySelectorAll("video,audio")].filter((m) => !m.paused); window.__relayerNotePaused.forEach((m) => m.pause());`).catch(() => {});
     // A capture can stall while Chromium paints no frames; never leave the viewer waiting.
     const bounded = (promise) => Promise.race([promise, new Promise((_, reject) => setTimeout(() => reject(new Error("The view could not be captured.")), 5_000))]);
@@ -519,23 +542,24 @@ export function createArtifactViewerService({
     } catch {
       // capturePage needs a presented surface; the DevTools protocol does not.
       const attached = contents.debugger.isAttached();
-      if (!attached) contents.debugger.attach("1.3");
       try {
+        if (!attached) contents.debugger.attach("1.3");
         png = Buffer.from((await bounded(contents.debugger.sendCommand("Page.captureScreenshot", { format: "png" }))).data, "base64");
       } catch (error) {
         await endNote();
         throw error;
       } finally {
-        if (!attached) contents.debugger.detach();
+        if (!attached && contents.debugger.isAttached()) contents.debugger.detach();
       }
     }
+    if (current !== viewing) return null;
     const digest = createHash("sha256").update(png).digest("hex");
     await mkdir(notesDirectory, { recursive: true });
     await writeFile(join(notesDirectory, `${digest}.png`), png, { mode: 0o600 });
-    let where = await contents.executeJavaScript(NOTE_LOCATION_SCRIPT).catch(() => null);
-    if (current.plan.kind === "pdf") where = `in ${basename(current.plan.file)}${/#page=(\d+)/u.test(contents.getURL()) ? `, page ${contents.getURL().match(/#page=(\d+)/u)[1]}` : ""}`;
-    current.view.setVisible(false);
-    return { location: String(where ?? "").slice(0, 200), digest, screenshot: `data:image/png;base64,${png.toString("base64")}` };
+    const reported = await contents.executeJavaScript(NOTE_LOCATION_SCRIPT).catch(() => null);
+    if (current !== viewing) return null;
+    viewing.view.setVisible(false);
+    return { location: noteLocation(viewing.plan, reported, contents.getURL()), digest, screenshot: `data:image/png;base64,${png.toString("base64")}` };
   }
 
   async function endNote() {

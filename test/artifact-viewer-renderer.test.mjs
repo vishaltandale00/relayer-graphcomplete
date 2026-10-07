@@ -104,8 +104,10 @@ describe("web apps (ART-009)", () => {
 
   it("asks before the first run, then opens with the user's approval", async () => {
     const native = fakeNative({ state: "approval-required", command: "npm run dev", permissionProfileId: "auto" });
-    const viewer = createArtifactViewer({ root: document.body, native });
-    await viewer.open({ threadId: 1, node: node(app, "Order desk") });
+    const notes = { list: vi.fn(async () => []), add: vi.fn(), remove: vi.fn() };
+    const viewer = createArtifactViewer({ root: document.body, native, notes });
+    const target = { nodeId: 27, sourceInteractionNodeId: 5, sourceLayerId: 9 };
+    await viewer.open({ threadId: 1, node: node(app, "Order desk"), target });
     expect(text(".artifact-card h2")).toBe("Start this web app?");
     expect(text(".artifact-card-command")).toBe("npm run dev");
     expect(text(".artifact-card-note")).toContain("only inside the thread folder");
@@ -113,6 +115,8 @@ describe("web apps (ART-009)", () => {
     document.querySelector(".artifact-card-action").click();
     await vi.waitFor(() => expect(native.open).toHaveBeenLastCalledWith(expect.objectContaining({ approveServer: true })));
     await vi.waitFor(() => expect(document.querySelector(".artifact-card").hidden).toBe(true));
+    // The approved open keeps its chat target, so Annotate stays available.
+    expect(document.querySelector('[aria-label="Annotate"]')).not.toBe(null);
   });
 
   it("shows the start log live, and a failure with Retry and Add to chat", async () => {
