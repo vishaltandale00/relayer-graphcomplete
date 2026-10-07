@@ -1,0 +1,8 @@
+
+ RUN  v4.1.10 /Users/vishaltandale/.codex/worktrees/provider-composer-shortcuts/relayer-graphcomplete
+
+
+ Test Files  2 passed (2)
+      Tests  55 passed (55)
+   Start at  22:17:35
+   Duration  5.78s (transform 546ms, setup 0ms, import 1.09s, tests 5.87s, environment 0ms)

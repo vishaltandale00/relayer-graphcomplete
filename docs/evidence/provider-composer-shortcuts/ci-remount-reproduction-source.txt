@@ -1,0 +1,28 @@
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { AuthoredInputSendWorld } from './support/authored-input-send-trace-adapter.mjs';
+let world;
+let digestSpy;
+afterEach(() => { digestSpy?.mockRestore(); world?.dispose(); world = null; });
+describe('PR692 controlled Node Detail integrity latency', () => {
+  for (const waitForMount of [false, true]) {
+    it(waitForMount ? 'waits for actual input mount' : 'reproduces missing input after event-loop spins', async () => {
+      world = await new AuthoredInputSendWorld().ready();
+      for (const step of [['Type', 1], ['Commit']]) await world.apply(step);
+      const subtle = world.window.crypto.subtle;
+      const digest = subtle.digest.bind(subtle);
+      digestSpy = vi.spyOn(subtle, 'digest').mockImplementation(async (...args) => {
+        for (let turn = 0; turn < 250; turn += 1) await new Promise(resolve => setImmediate(resolve));
+        return digest(...args);
+      });
+      await world.newerTurnArrives();
+      for (const step of [['CommitFails'], ['CommitReturns']]) await world.apply(step);
+      if (waitForMount) await world.openNode(7, 'Your answer');
+      else {
+        await world.click('[data-node="7"]');
+        await world.settled();
+      }
+      expect(digestSpy).toHaveBeenCalled();
+      expect(world.input?.getAttribute('aria-invalid')).toBe('true');
+    });
+  }
+});

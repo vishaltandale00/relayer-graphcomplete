@@ -1,0 +1,40 @@
+Log excerpt normalization: ANSI color codes and trailing whitespace removed.
+PR #692; run 37560566389, attempt 1; head 4ff6e6ee86e748a193934347259896ef0fd5e216; job 112596751622
+ FAIL   isolated  test/authored-input-send-traces.test.mjs > An answer that failed while its Node Detail was replaced > shows the failure again when the input is shown
+Fresh deterministic Vitest portfolio	Run fresh Vitest and secret-boundary tests	2026-10-07T02:13:33.5396095Z AssertionError: expected undefined to be 'true' // Object.is equality
+Fresh deterministic Vitest portfolio	Run fresh Vitest and secret-boundary tests	2026-10-07T02:13:33.5396766Z
+Fresh deterministic Vitest portfolio	Run fresh Vitest and secret-boundary tests	2026-10-07T02:13:33.5397023Z - Expected:
+Fresh deterministic Vitest portfolio	Run fresh Vitest and secret-boundary tests	2026-10-07T02:13:33.5397417Z "true"
+Fresh deterministic Vitest portfolio	Run fresh Vitest and secret-boundary tests	2026-10-07T02:13:33.5397611Z
+Fresh deterministic Vitest portfolio	Run fresh Vitest and secret-boundary tests	2026-10-07T02:13:33.5397841Z + Received:
+Fresh deterministic Vitest portfolio	Run fresh Vitest and secret-boundary tests	2026-10-07T02:13:33.5398226Z undefined
+Fresh deterministic Vitest portfolio	Run fresh Vitest and secret-boundary tests	2026-10-07T02:13:33.5398412Z
+Fresh deterministic Vitest portfolio	Run fresh Vitest and secret-boundary tests	2026-10-07T02:13:33.5399342Z  ❯ test/authored-input-send-traces.test.mjs:335:55
+Fresh deterministic Vitest portfolio	Run fresh Vitest and secret-boundary tests	2026-10-07T02:13:33.5490466Z     333|     await world.click('[data-node="7"]');
+Fresh deterministic Vitest portfolio	Run fresh Vitest and secret-boundary tests	2026-10-07T02:13:33.5492030Z     334|     await world.settled();
+Fresh deterministic Vitest portfolio	Run fresh Vitest and secret-boundary tests	2026-10-07T02:13:33.5494235Z     335|     expect(world.input?.getAttribute("aria-invalid")).toBe("true");
+Fresh deterministic Vitest portfolio	Run fresh Vitest and secret-boundary tests	2026-10-07T02:13:33.5496065Z        |                                                       ^
+Fresh deterministic Vitest portfolio	Run fresh Vitest and secret-boundary tests	2026-10-07T02:13:33.5497057Z     336|   });
+Fresh deterministic Vitest portfolio	Run fresh Vitest and secret-boundary tests	2026-10-07T02:13:33.5497864Z     337| });
+Fresh deterministic Vitest portfolio	Run fresh Vitest and secret-boundary tests	2026-10-07T02:13:33.5498199Z
+Fresh deterministic Vitest portfolio	Run fresh Vitest and secret-boundary tests	2026-10-07T02:13:33.5498444Z
+Fresh deterministic Vitest portfolio	Run fresh Vitest and secret-boundary tests	2026-10-07T02:13:33.5499313Z ⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+Fresh deterministic Vitest portfolio	Run fresh Vitest and secret-boundary tests	2026-10-07T02:13:33.5499941Z
+Fresh deterministic Vitest portfolio	Run fresh Vitest and secret-boundary tests	2026-10-07T02:13:33.5534974Z  Test Files  1 failed | 296 passed | 1 skipped (298)
+Fresh deterministic Vitest portfolio	Run fresh Vitest and secret-boundary tests	2026-10-07T02:13:33.5590636Z       Tests  1 failed | 3694 passed | 27 skipped (3722)
+Fresh deterministic Vitest portfolio	Run fresh Vitest and secret-boundary tests	2026-10-07T02:13:33.5609849Z    Start at  02:10:27
+Fresh deterministic Vitest portfolio	Run fresh Vitest and secret-boundary tests	2026-10-07T02:13:33.5620908Z    Duration  185.87s (transform 15.09s, setup 0ms, import 80.63s, tests 405.78s, environment 44ms)
+Fresh deterministic Vitest portfolio	Run fresh Vitest and secret-boundary tests	2026-10-07T02:13:33.5621684Z
+Fresh deterministic Vitest portfolio	Run fresh Vitest and secret-boundary tests	2026-10-07T02:13:33.5621696Z
+Fresh deterministic Vitest portfolio	Run fresh Vitest and secret-boundary tests	2026-10-07T02:13:33.5654409Z ##[error]AssertionError: expected undefined to be 'true' // Object.is equality
+Fresh deterministic Vitest portfolio	Run fresh Vitest and secret-boundary tests
+Fresh deterministic Vitest portfolio	Run fresh Vitest and secret-boundary tests	- Expected:
+Fresh deterministic Vitest portfolio	Run fresh Vitest and secret-boundary tests	"true"
+Fresh deterministic Vitest portfolio	Run fresh Vitest and secret-boundary tests
+Fresh deterministic Vitest portfolio	Run fresh Vitest and secret-boundary tests	+ Received:
+Fresh deterministic Vitest portfolio	Run fresh Vitest and secret-boundary tests	undefined
+Fresh deterministic Vitest portfolio	Run fresh Vitest and secret-boundary tests
+Fresh deterministic Vitest portfolio	Run fresh Vitest and secret-boundary tests	 ❯ test/authored-input-send-traces.test.mjs:335:55
+Fresh deterministic Vitest portfolio	Run fresh Vitest and secret-boundary tests
+Fresh deterministic Vitest portfolio	Run fresh Vitest and secret-boundary tests
+Fresh deterministic Vitest portfolio	Run fresh Vitest and secret-boundary tests	2026-10-07T02:13:33.7001239Z ##[error]Process completed with exit code 1.

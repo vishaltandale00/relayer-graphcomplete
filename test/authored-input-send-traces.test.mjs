@@ -330,8 +330,7 @@ describe("An answer that failed while its Node Detail was replaced", () => {
     for (const step of [["Type", 1], ["Commit"]]) await world.apply(step);
     await world.newerTurnArrives();
     for (const step of [["CommitFails"], ["CommitReturns"]]) await world.apply(step);
-    await world.click('[data-node="7"]');
-    await world.settled();
+    await world.openNode(7, "Your answer");
     expect(world.input?.getAttribute("aria-invalid")).toBe("true");
   });
 });

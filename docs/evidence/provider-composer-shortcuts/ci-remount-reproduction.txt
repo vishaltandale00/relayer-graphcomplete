@@ -1,0 +1,32 @@
+
+ RUN  v4.1.10 /Users/vishaltandale/.codex/worktrees/provider-composer-shortcuts/relayer-graphcomplete
+
+ ❯ |isolated| test/provider-composer-ci-repro.test.mjs (2 tests | 1 failed) 98ms
+     × reproduces missing input after event-loop spins 56ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  |isolated| test/provider-composer-ci-repro.test.mjs > PR692 controlled Node Detail integrity latency > reproduces missing input after event-loop spins
+AssertionError: expected undefined to be 'true' // Object.is equality
+
+- Expected:
+"true"
+
++ Received:
+undefined
+
+ ❯ test/provider-composer-ci-repro.test.mjs:25:57
+     23|       }
+     24|       expect(digestSpy).toHaveBeenCalled();
+     25|       expect(world.input?.getAttribute('aria-invalid')).toBe('true');
+       |                                                         ^
+     26|     });
+     27|   }
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 1 passed (2)
+   Start at  22:17:04
+   Duration  670ms (transform 270ms, setup 0ms, import 497ms, tests 98ms, environment 0ms)

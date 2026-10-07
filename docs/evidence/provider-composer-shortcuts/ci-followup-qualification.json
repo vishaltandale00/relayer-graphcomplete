@@ -1,0 +1,34 @@
+{
+  "schemaVersion": 1,
+  "priorCommit": "4ff6e6ee86e748a193934347259896ef0fd5e216",
+  "scopedSourceDigest": "c844e06e692eb21ddc765f542f6ab9552e1388313bba24b7132540704cb682e0",
+  "unchangedTenFileDigest": "f1b0fd13b2d2efbb4ceb9e970f58c9689aabcfa2ef0f402c1224570498c38d4d",
+  "nodeVersion": "22.23.2",
+  "requiredBuildExitCode": 0,
+  "requiredCheckExitCode": 0,
+  "javascript": {
+    "passed": 3719,
+    "skipped": 3
+  },
+  "secretBoundaryPassed": 2,
+  "pythonPassed": 68,
+  "focusedPassed": 55,
+  "firstHostedCI": {
+    "runId": 37560566389,
+    "attempt": 1,
+    "head": "4ff6e6ee86e748a193934347259896ef0fd5e216",
+    "result": "failure",
+    "failedScenario": "authored-input remount input absent before integrity verification finishes",
+    "unchangedSourceRetry": false
+  },
+  "testRepair": "Await existing mounted+enabled input predicate; retain aria-invalid true assertion.",
+  "productionChanged": false,
+  "testsAddedOrDeleted": false,
+  "nativeProjectRestartCheckpoint": "failed on both prior source and unchanged base; unwaived",
+  "logNormalization": "Only trailing empty lines removed.",
+  "logsSha256": {
+    "ci-followup-build.txt": "500ae728795e516c090179238a9ed55fe0a87e5cb6de5cd4ef99b053302a171a",
+    "ci-followup-check.txt": "e6dd278054fc8c01cc7247e0395bfd3458e619ad934167b496ab431e4413c0da",
+    "ci-followup-focused.txt": "245737409ecb8173e2cbba3183a7d9aac3bd0fa4ba2be63d0ecf21a60e06b8e6"
+  }
+}
