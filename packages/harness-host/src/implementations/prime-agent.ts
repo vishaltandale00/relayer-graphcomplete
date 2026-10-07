@@ -1,3 +1,4 @@
+import { modelFamilyGuidance } from "./model-family-guidance.js";
 import { threadIconGuidance } from "./thread-icon-guidance.js";
 import { PrimeVisualAuthoring, submitPrimeLayer } from "./prime-visual-authoring.js";
 import { Buffer } from "node:buffer";
@@ -1124,7 +1125,7 @@ ${GRAPH_PRESENTATION_GUIDANCE}
 ${threadIconGuidance(context, "python")}
 ${PRIME_VISUAL_GUIDANCE}
 ${primeVisualExample(interaction.id)}
-${CURRENT_WORKSPACE_GUIDANCE}${includePersonalPresentation ? personalPresentationPrompt(context) : ""}
+${CURRENT_WORKSPACE_GUIDANCE}${modelFamilyGuidance(context, "Prime", (route) => `${nativePrimeProviderId(route)}/${route.modelId}`)}${includePersonalPresentation ? personalPresentationPrompt(context) : ""}
 
 Current interaction node: ${interaction.id}
 Normalized interaction input:
@@ -1168,7 +1169,7 @@ ${GRAPH_PRESENTATION_GUIDANCE}
 ${threadIconGuidance(context, "python")}
 ${PRIME_VISUAL_GUIDANCE}
 ${primeVisualExample(interaction.id)}
-${CURRENT_WORKSPACE_GUIDANCE}${includePersonalPresentation ? personalPresentationPrompt(context) : ""}
+${CURRENT_WORKSPACE_GUIDANCE}${modelFamilyGuidance(context, "Prime", (route) => `${nativePrimeProviderId(route)}/${route.modelId}`)}${includePersonalPresentation ? personalPresentationPrompt(context) : ""}
 
 Current interaction node: ${interaction.id}
 Normalized interaction input:

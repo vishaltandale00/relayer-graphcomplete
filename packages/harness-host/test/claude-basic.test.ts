@@ -1,4 +1,5 @@
 import { execFileSync } from "node:child_process";
+import { familyData, withFamilyRoles } from "./model-family-fixture.js";
 import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -185,6 +186,29 @@ it("uses packaged Windows Node through Claude's Bash without granting launcher e
 });
 
 describe("ClaudeBasicHarness", () => {
+  it.each(["subscription", "api"])("delivers roles and exact %s model selectors in root and invoked SDK queries", async (mode) => {
+    const calls: Parameters<ClaudeSdkQuery>[0][] = [];
+    const harness = new ClaudeBasicHarness(factoryContext("acceptEdits"), { browserSdk: browserSdk(),
+      query: sdkQuery([{ type: "system", subtype: "init", session_id: "family-session" },
+        { type: "result", subtype: "success", result: "done", session_id: "family-session" }], input => calls.push(input)) });
+    const baseline = runContext(mode === "api" ? secretAccess() : managedAccess());
+    const turn = withFamilyRoles({ ...baseline, model: { ...baseline.model!, modelId: mode === "api" ? "claude-sonnet-5-5" : "sonnet" } });
+    await harness.complete(turn);
+    await harness.complete({ ...turn, origin: { kind: "invoke", sourceCompletionId: 1, actionId: 12 } });
+    expect(calls).toHaveLength(2);
+    for (const call of calls) {
+      const data = familyData(call.prompt);
+      expect(data.roster.map(route => route.roles)).toEqual(turn.modelPlan!.roster.map(route => route.roles));
+      expect(data.orchestrator.native.selector).toBe(turn.model!.modelId);
+      expect(data.roster[2]!.native).toEqual({ routing: "metadata-only" });
+      expect(call.options.model).toBe(turn.model!.modelId);
+      expect(call.options.permissionMode).toBe("acceptEdits");
+      expect(call.options).not.toHaveProperty("agents");
+      expect(JSON.stringify(call)).not.toContain("foreign-secret");
+      if (mode === "api") expect(call.options.env.ANTHROPIC_API_KEY).toBe("secret");
+    }
+    expect(calls[1]!.options.resume).toBeUndefined();
+  });
   it("maps product approval modes onto supported Claude SDK permission modes", () => {
     expect(claudePermissionMode("ask")).toBe("default");
     expect(claudePermissionMode("auto")).toBe("acceptEdits");
