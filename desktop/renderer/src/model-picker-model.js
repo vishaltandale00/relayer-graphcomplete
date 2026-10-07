@@ -30,11 +30,26 @@ export function isModelSelectionCatalogError(error) {
 // selection, and the action that restores it (PROV-008). The server's reason follows the
 // provider: while it is connected, Refresh models can restore the family; once it disconnects,
 // only a reconnect in Settings can. Null for any other family.
-export function familyModelSetup(settings, familyId) {
+export function familyModelSetup(settings, familyId, harnessId = settings?.defaults?.harnessId) {
   if (familyId == null) return null;
   const recovery = [settings?.defaultFamilyRecovery, ...(settings?.familiesNeedingModelSetup ?? [])]
     .find((candidate) => candidate?.reason && String(candidate.familyId) === String(familyId));
-  if (!recovery) return null;
+  if (!recovery) {
+    const family = settings?.families?.find((item) => String(item.id) === String(familyId));
+    if (!family || !family.enabled) return null;
+    if (availableOrchestrator(settings, family, harnessId)) return null;
+    const orchestrator = familyOrchestrator(family);
+    return {
+      familyId: family.id,
+      familyName: family.name,
+      providerId: orchestrator?.providerId,
+      action: "settings",
+      label: "Orchestrator unavailable",
+      message: `${family.name} cannot run because its orchestrator is unavailable or incompatible. Reconnect its provider or choose an available orchestrator in Settings.`,
+      actionLabel: "Open Settings",
+      actionName: `Configure ${family.name} in Settings`,
+    };
+  }
   const provider = settings.providers?.find((item) => String(item.id) === String(recovery.providerId));
   const providerLabel = provider?.label ?? recovery.providerId;
   const identity = {
@@ -65,8 +80,8 @@ export function familyModelSetup(settings, familyId) {
   };
 }
 
-export function defaultFamilyModelSetup(settings) {
-  return familyModelSetup(settings, settings?.defaults?.familyId);
+export function defaultFamilyModelSetup(settings, harnessId = settings?.defaults?.harnessId) {
+  return familyModelSetup(settings, settings?.defaults?.familyId, harnessId);
 }
 
 // An automatic caller's default selection. While the default family recovers, the refusal carries
@@ -80,9 +95,9 @@ export function requireDefaultModelSelection(selection, settings, missingMessage
 export function defaultFamilyRecoveryError(settings) {
   const recovery = settings?.defaultFamilyRecovery;
   const modelSetup = defaultFamilyModelSetup(settings);
-  if (!recovery || !modelSetup) return null;
+  if (!modelSetup) return null;
   const error = new Error(`The default model family is unavailable. ${modelSetup.message}`);
-  error.code = recovery.reason.code;
+  error.code = recovery?.reason?.code ?? "model_family_unresolvable";
   return error;
 }
 
@@ -147,10 +162,20 @@ export function availableFamilyMembers(settings, family, harnessId) {
       const provider = settings.providers.find((item) => item.id === member.providerId);
       if (!harnessSupportsModel(harness, provider, member.modelId)) return false;
       const model = providerModel(settings, member.providerId, member.modelId);
-      return provider?.connected !== false
-        && model?.visible !== false
+      return Boolean(provider && model) && provider.connected !== false
+        && model.visible !== false
         && model?.available !== false;
     });
+}
+
+export function familyOrchestrator(family) {
+  const orchestrators = (family?.members ?? []).filter((member) => member.roles?.some((role) => role.name === "orchestrator"));
+  return orchestrators.length === 1 ? orchestrators[0] : null;
+}
+
+function availableOrchestrator(settings, family, harnessId) {
+  const orchestrator = familyOrchestrator(family);
+  return orchestrator && availableFamilyMembers(settings, family, harnessId).find((member) => member.providerId === orchestrator.providerId && member.modelId === orchestrator.modelId);
 }
 
 export function availablePickerFamilies(settings, harnessId) {
@@ -160,18 +185,20 @@ export function availablePickerFamilies(settings, harnessId) {
     .map((family) => ({
       ...family,
       availableMembers: availableFamilyMembers(settings, family, harnessId),
+      orchestrator: availableOrchestrator(settings, family, harnessId),
     }))
-    .filter((family) => family.availableMembers.length > 0);
+    .filter((family) => family.orchestrator);
 }
 
 // Automatic selection resolves the default family. While that family is in recovery it refuses,
 // rather than running another family the user did not choose (PROV-008).
 export function firstAvailableSelection(settings, harnessId) {
-  if (defaultFamilyModelSetup(settings)) return null;
+  if (defaultFamilyModelSetup(settings, harnessId)) return null;
   const families = availablePickerFamilies(settings, harnessId);
-  const family = families.find((item) => String(item.id) === String(settings.defaults?.familyId))
-    ?? families[0];
-  const member = family?.availableMembers[0];
+  const family = settings.defaults?.familyId != null
+    ? families.find((item) => String(item.id) === String(settings.defaults.familyId))
+    : families[0];
+  const member = family?.orchestrator;
   if (!family || !member) return null;
   return {
     harnessId,
@@ -192,16 +219,8 @@ export function normalizePickerSelection(settings, candidate) {
     ? null
     : families.find((item) => String(item.id) === String(requestedFamilyId));
   if (requestedFamilyId != null && !requestedFamily) return null;
-  const hasExplicitModel = candidate?.familyId != null
-    && typeof candidate?.providerId === "string"
-    && typeof candidate?.modelId === "string";
-  if (hasExplicitModel && !requestedFamily) return null;
   const family = requestedFamily ?? families[0];
-  const requestedMember = family.availableMembers.find((item) => (
-    item.providerId === candidate?.providerId && item.modelId === candidate?.modelId
-  ));
-  if (hasExplicitModel && !requestedMember) return null;
-  const member = requestedMember ?? family.availableMembers[0];
+  const member = family.orchestrator;
   return {
     harnessId,
     familyId: family.id,
@@ -289,11 +308,7 @@ export function resolveUnsentModelIntent(settings, candidate) {
     String(item.id) === String(candidate.familyId) && item.enabled
   ));
   if (!family) return { selection: null, blockedFamilyId: candidate.familyId };
-  const availableMembers = availableFamilyMembers(settings, family, harnessId);
-  const exact = availableMembers.find((member) => (
-    member.providerId === candidate.providerId && member.modelId === candidate.modelId
-  ));
-  const member = exact ?? availableMembers[0];
+  const member = availableOrchestrator(settings, family, harnessId);
   if (!member) return { selection: null, blockedFamilyId: family.id };
   return {
     selection: {
@@ -342,8 +357,6 @@ export function pickerSelectionPayload(selection) {
     harnessId: selection.harnessId,
     modelSelection: {
       familyId: selection.familyId,
-      providerId: selection.providerId,
-      modelId: selection.modelId,
     },
   };
 }

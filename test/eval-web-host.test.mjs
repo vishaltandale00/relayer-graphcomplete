@@ -183,7 +183,7 @@ describe("Eval localhost authority", () => {
     expect(seen).toEqual([]);
     for (const [path, method, value] of [
       ["/api/model-settings", "GET"],
-      ["/api/model-families", "POST", { name: "Chosen", enabled: true, members: [{ providerId: "chosen", modelId: "test-model" }] }],
+      ["/api/model-families", "POST", { name: "Chosen", enabled: true, members: [{ providerId: "chosen", modelId: "test-model", roles: [{ name: "orchestrator" }] }] }],
       ["/api/model-settings/defaults", "PUT", { harnessId: "codex-basic", familyId: 1, providerId: "chosen", modelId: "test-model" }],
       ["/api/harness-configurations/codex-basic/model-rules", "PUT", { allow: ["test-*"], deny: [] }],
     ]) {

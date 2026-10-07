@@ -1360,7 +1360,7 @@ async fn project_harness_usability_on(
     harnesses: &mut [ProductHarness],
 ) -> Result<(), StorageError> {
     let routes = sqlx::query(
-        "SELECT f.id,p.id,p.adapter_id,p.access_contract,m.model_id FROM model_families f JOIN model_family_members fm ON fm.family_id=f.id JOIN model_providers p ON p.id=fm.provider_id JOIN provider_models m ON m.provider_id=p.id AND m.model_id=fm.model_id WHERE f.lifecycle_state='active' AND f.enabled=1 AND p.lifecycle_state='active' AND p.connected=1 AND m.visible=1 AND m.available=1 ORDER BY f.position,f.id,fm.position",
+        "SELECT f.id,p.id,p.adapter_id,p.access_contract,m.model_id FROM model_families f JOIN model_family_members fm ON fm.family_id=f.id JOIN model_providers p ON p.id=fm.provider_id JOIN provider_models m ON m.provider_id=p.id AND m.model_id=fm.model_id WHERE f.lifecycle_state='active' AND f.enabled=1 AND EXISTS(SELECT 1 FROM json_each(fm.roles_json) role WHERE json_extract(role.value,'$.name')='orchestrator') AND p.lifecycle_state='active' AND p.connected=1 AND m.visible=1 AND m.available=1 ORDER BY f.position,f.id,fm.position",
     )
     .fetch_all(&mut *connection)
     .await?;
@@ -1534,7 +1534,9 @@ async fn provider_onboarding_projection_on(
                     break;
                 }
             }
-            if exact_provider_member_resolves {
+            if exact_provider_member_resolves
+                && family_resolves_on(connection, &harness.id, family.id).await?
+            {
                 let choice = ProviderOnboardingFamily {
                     id: family.id,
                     name: family.name.clone(),
@@ -1553,27 +1555,31 @@ async fn provider_onboarding_projection_on(
             .filter(|policy| crate::product::applies_to_adapter(policy, &adapter_id))
             .cloned()
             .or_else(|| crate::product::fallback_for_adapter(&adapter_id));
-        let managed_family_candidate = managed_family_policy
-            .as_ref()
-            .and_then(|policy| {
-                crate::product::derive_managed_family_members(policy, &snapshot)
-                    .ok()
-                    .filter(|members| !members.is_empty())
-                    .map(|members| ProviderOnboardingManagedFamily {
-                        provider_id: provider_id.clone(),
-                        policy_id: policy.id.clone(),
-                        policy_version: policy.version,
-                        name: format!("{} defaults", snapshot.label),
-                        members,
-                    })
-            })
-            .filter(|candidate| {
-                candidate.members.iter().any(|member| {
-                    eligible_models.iter().any(|model| {
+        let mut managed_family_candidate = managed_family_policy.as_ref().and_then(|policy| {
+            crate::product::derive_managed_family_members(policy, &snapshot)
+                .ok()
+                .filter(|members| !members.is_empty())
+                .map(|members| ProviderOnboardingManagedFamily {
+                    provider_id: provider_id.clone(),
+                    policy_id: policy.id.clone(),
+                    policy_version: policy.version,
+                    name: format!("{} defaults", snapshot.label),
+                    members,
+                })
+        });
+        if let Some(candidate) = &mut managed_family_candidate {
+            let existing: Vec<(String,String,String)> = sqlx::query_as("SELECT member.provider_id,member.model_id,member.roles_json FROM model_family_members member JOIN model_families family ON family.id=member.family_id WHERE family.managed_provider_id=?1 AND family.policy_id=?2 AND family.policy_version=?3 ORDER BY member.position")
+                .bind(provider_id.as_str()).bind(&candidate.policy_id).bind(candidate.policy_version).fetch_all(&mut *connection).await?;
+            retain_unavailable_managed_orchestrator(&mut candidate.members, &existing, &snapshot);
+            if !candidate.members.iter().any(|member| {
+                member.roles.iter().any(|role| role.name == "orchestrator")
+                    && eligible_models.iter().any(|model| {
                         model.provider_id == member.provider_id && model.model_id == member.model_id
                     })
-                })
-            });
+            }) {
+                managed_family_candidate = None;
+            }
+        }
         let incompatibility_reason = if !permission_available_harnesses.contains(&harness.id) {
             Some(UnavailableReason {
                 code: "harness_permission_unavailable".into(),
@@ -1798,15 +1804,15 @@ async fn onboarding_resolution_on(
             "The selected family is unavailable.",
         ))
     })?;
-    let members: Vec<(String, String, i64)> = sqlx::query_as(
-        "SELECT provider_id,model_id,position FROM model_family_members WHERE family_id=?1 ORDER BY position",
+    let members: Vec<(String, String, i64, String)> = sqlx::query_as(
+        "SELECT provider_id,model_id,position,roles_json FROM model_family_members WHERE family_id=?1 ORDER BY position",
     )
     .bind(family_id.value())
     .fetch_all(&mut *connection)
     .await?;
     let mut resolvable_members = Vec::new();
     let mut onboarding_provider_resolves = false;
-    for (provider_id, model_id, position) in members {
+    for (provider_id, model_id, position, roles_json) in members {
         let provider_id = ProviderId::from_database(provider_id);
         let validation = ValidateModelSelectionCommand {
             harness_id: harness_id.into(),
@@ -1820,13 +1826,18 @@ async fn onboarding_resolution_on(
         {
             onboarding_provider_resolves |= provider_id == *onboarding_provider_id;
             resolvable_members.push(ModelFamilyMember {
+                roles: serde_json::from_str(&roles_json)
+                    .map_err(|error| StorageError::Serialization(error.to_string()))?,
                 provider_id,
                 model_id,
                 position: position as usize,
             });
         }
     }
-    if resolvable_members.is_empty() || !onboarding_provider_resolves {
+    if !family_resolves_on(connection, harness_id, family_id).await?
+        || resolvable_members.is_empty()
+        || !onboarding_provider_resolves
+    {
         return Err(StorageError::Catalog(CatalogError::invalid(
             "onboarding_family_unresolvable",
             "The family must contain a currently resolvable model from the connected provider.",
@@ -2046,8 +2057,62 @@ pub(super) async fn resolve_execution_model_plan_on(
     harness_id: &str,
     selection: &crate::product::InteractionModelSelection,
 ) -> Result<(ExecutionModelPlan, crate::product::ExecutionModelSelection), StorageError> {
-    let orchestrator =
-        validate_execution_model_selection_on(connection, harness_id, selection).await?;
+    if let Some((code, message)) = family_recovery_on(connection, selection.family_id).await? {
+        return Err(StorageError::Catalog(CatalogError::selection(
+            code,
+            message,
+            &ValidateModelSelectionCommand {
+                harness_id: harness_id.into(),
+                family_id: selection.family_id,
+                provider_id: selection.provider_id.clone(),
+                model_id: selection.model_id.clone(),
+            },
+        )));
+    }
+    let family = load_family(connection, selection.family_id)
+        .await?
+        .ok_or_else(|| {
+            StorageError::Catalog(CatalogError::invalid(
+                "model_family_removed",
+                "The selected model family no longer exists.",
+            ))
+        })?;
+    if let Err(error) = validate_family(&family.name, &family.members) {
+        return Err(StorageError::Catalog(error));
+    }
+    let orchestrator_member = family
+        .members
+        .iter()
+        .find(|member| member.roles.iter().any(|role| role.name == "orchestrator"))
+        .expect("validated orchestrator");
+    let selected = crate::product::InteractionModelSelection {
+        family_id: selection.family_id,
+        provider_id: orchestrator_member.provider_id.clone(),
+        model_id: orchestrator_member.model_id.clone(),
+    };
+    let orchestrator = match validate_execution_model_selection_on(
+        connection, harness_id, &selected,
+    )
+    .await
+    {
+        Ok(route) => route,
+        Err(StorageError::Catalog(error)) => {
+            return Err(StorageError::Catalog(CatalogError::selection(
+                error.code(),
+                format!(
+                    "The family orchestrator {} is unavailable or incompatible: {} Reconnect its provider or choose an available orchestrator in a custom family in Settings.",
+                    selected.model_id, error
+                ),
+                &ValidateModelSelectionCommand {
+                    harness_id: harness_id.into(),
+                    family_id: selected.family_id,
+                    provider_id: selected.provider_id.clone(),
+                    model_id: selected.model_id.clone(),
+                },
+            )));
+        }
+        Err(error) => return Err(error),
+    };
     let family_revision: i64 = sqlx::query_scalar(
         "SELECT revision FROM model_families WHERE id=?1 AND enabled=1 AND lifecycle_state='active'",
     )
@@ -2066,21 +2131,18 @@ pub(super) async fn resolve_execution_model_plan_on(
             },
         ))
     })?;
-    let members: Vec<(String, String)> = sqlx::query_as(
-        "SELECT provider_id,model_id FROM model_family_members WHERE family_id=?1 ORDER BY position",
-    )
-    .bind(selection.family_id.value())
-    .fetch_all(&mut *connection)
-    .await?;
-    let mut roster = Vec::with_capacity(members.len());
-    for (provider_id, model_id) in members {
+    let mut roster = Vec::with_capacity(family.members.len());
+    for family_member in &family.members {
+        let provider_id = family_member.provider_id.clone();
+        let model_id = family_member.model_id.clone();
         let member = crate::product::InteractionModelSelection {
             family_id: selection.family_id,
-            provider_id: ProviderId::from_database(provider_id),
+            provider_id,
             model_id,
         };
         match validate_execution_model_selection_on(connection, harness_id, &member).await {
             Ok(route) => roster.push(ExecutionModelRoute {
+                roles: Some(family_member.roles.clone()),
                 provider_id: route.provider_id,
                 adapter_id: route.adapter_id,
                 access_contract: route.access_contract,
@@ -2091,6 +2153,7 @@ pub(super) async fn resolve_execution_model_plan_on(
         }
     }
     let orchestrator_route = ExecutionModelRoute {
+        roles: Some(orchestrator_member.roles.clone()),
         provider_id: orchestrator.provider_id.clone(),
         adapter_id: orchestrator.adapter_id.clone(),
         access_contract: orchestrator.access_contract.clone(),
@@ -2110,6 +2173,7 @@ pub(super) async fn resolve_execution_model_plan_on(
     }
     Ok((
         ExecutionModelPlan {
+            schema_version: 2,
             family_id: selection.family_id,
             family_revision,
             orchestrator: orchestrator_route,
@@ -2268,7 +2332,7 @@ async fn family_resolves_on(
     family_id: ModelFamilyId,
 ) -> Result<bool, StorageError> {
     let candidates = sqlx::query_as::<_, (String, String)>(
-        "SELECT provider_id,model_id FROM model_family_members WHERE family_id=?1 ORDER BY position",
+        "SELECT provider_id,model_id FROM model_family_members WHERE family_id=?1 AND EXISTS(SELECT 1 FROM json_each(roles_json) role WHERE json_extract(role.value,'$.name')='orchestrator') ORDER BY position",
     )
     .bind(family_id.value())
     .fetch_all(&mut *connection)
@@ -2672,7 +2736,7 @@ async fn load_family(
         return Ok(None);
     };
     let members = sqlx::query(
-        "SELECT provider_id,model_id,position FROM model_family_members WHERE family_id=?1 ORDER BY position",
+        "SELECT provider_id,model_id,position,roles_json FROM model_family_members WHERE family_id=?1 ORDER BY position",
     )
     .bind(id.value())
     .fetch_all(&mut *connection)
@@ -2680,6 +2744,7 @@ async fn load_family(
     .into_iter()
     .map(|member| {
         Ok(ModelFamilyMember {
+            roles: serde_json::from_str(&member.try_get::<String, _>(3)?).map_err(|error| StorageError::Serialization(error.to_string()))?,
             provider_id: ProviderId::from_database(member.try_get(0)?),
             model_id: member.try_get(1)?,
             position: member.try_get::<i64, _>(2)? as usize,
@@ -2717,6 +2782,40 @@ async fn load_family(
     }))
 }
 
+// Catalog filtering must not turn a specialist into the established orchestrator.
+fn retain_unavailable_managed_orchestrator(
+    members: &mut Vec<ModelFamilyMember>,
+    existing: &[(String, String, String)],
+    snapshot: &ProviderCatalogSnapshot,
+) {
+    if let Some((provider_id, model_id, _)) = existing.iter().find(|(_, _, roles)| {
+        serde_json::from_str::<Vec<crate::product::ModelFamilyRole>>(roles)
+            .is_ok_and(|roles| roles.iter().any(|role| role.name == "orchestrator"))
+    }) && !snapshot
+        .models
+        .iter()
+        .any(|model| model.id == *model_id && model.visible && model.available)
+    {
+        members.retain(|member| {
+            member.provider_id.as_str() != provider_id || member.model_id != *model_id
+        });
+        members.insert(
+            0,
+            ModelFamilyMember {
+                provider_id: ProviderId::from_database(provider_id.clone()),
+                model_id: model_id.clone(),
+                position: 0,
+                roles: Vec::new(),
+            },
+        );
+        members.truncate(crate::product::MAX_MODELS_PER_FAMILY);
+        for (position, member) in members.iter_mut().enumerate() {
+            member.position = position;
+        }
+        crate::product::assign_managed_orchestrator(members);
+    }
+}
+
 async fn replace_system_family(
     connection: &mut SqliteConnection,
     snapshot: &ProviderCatalogSnapshot,
@@ -2724,16 +2823,18 @@ async fn replace_system_family(
     policy: &FamilyPolicyReference,
     reconcile_managed_default: bool,
 ) -> Result<ModelFamilyId, StorageError> {
-    let members = system_family
+    let mut members = system_family
         .model_ids
         .iter()
         .enumerate()
         .map(|(position, model_id)| ModelFamilyMember {
+            roles: Vec::new(),
             provider_id: snapshot.provider_id.clone(),
             model_id: model_id.clone(),
             position,
         })
         .collect::<Vec<_>>();
+    crate::product::assign_managed_orchestrator(&mut members);
     validate_family(&system_family.name, &members).map_err(StorageError::Catalog)?;
     let key = format!(
         "{}:{}@{}",
@@ -2780,12 +2881,14 @@ async fn replace_system_family(
     .await?;
     let id = match family_id {
         Some(id) => {
-            let existing = sqlx::query_as::<_, (String, String)>(
-                "SELECT provider_id,model_id FROM model_family_members WHERE family_id=?1 ORDER BY position",
+            let existing = sqlx::query_as::<_, (String, String, String)>(
+                "SELECT provider_id,model_id,roles_json FROM model_family_members WHERE family_id=?1 ORDER BY position",
             )
             .bind(id)
             .fetch_all(&mut *connection)
             .await?;
+            retain_unavailable_managed_orchestrator(&mut members, &existing, snapshot);
+            validate_family(&system_family.name, &members).map_err(StorageError::Catalog)?;
             let changed = existing
                 != members
                     .iter()
@@ -2793,6 +2896,7 @@ async fn replace_system_family(
                         (
                             member.provider_id.as_str().to_owned(),
                             member.model_id.clone(),
+                            serde_json::to_string(&member.roles).expect("family roles serialize"),
                         )
                     })
                     .collect::<Vec<_>>();
@@ -2897,12 +3001,13 @@ async fn replace_family_members(
         .await?;
     for (position, member) in members.iter().enumerate() {
         sqlx::query(
-            "INSERT INTO model_family_members(family_id,position,provider_id,model_id) VALUES (?1,?2,?3,?4)",
+            "INSERT INTO model_family_members(family_id,position,provider_id,model_id,roles_json) VALUES (?1,?2,?3,?4,?5)",
         )
         .bind(family_id.value())
         .bind(position as i64)
         .bind(member.provider_id.as_str())
         .bind(&member.model_id)
+        .bind(serde_json::to_string(&member.roles).map_err(|error| StorageError::Serialization(error.to_string()))?)
         .execute(&mut *connection)
         .await?;
     }
@@ -3010,7 +3115,7 @@ async fn guard_provider_removal(
     let mut preserves_default_family = defaults.1.is_none();
     if let Some(family_id) = defaults.1 {
         let remaining: Vec<(String, String)> = sqlx::query_as(
-            "SELECT provider_id,model_id FROM model_family_members WHERE family_id=?1 AND provider_id!=?2 ORDER BY position",
+            "SELECT provider_id,model_id FROM model_family_members WHERE family_id=?1 AND provider_id!=?2 AND EXISTS(SELECT 1 FROM json_each(roles_json) role WHERE json_extract(role.value,'$.name')='orchestrator') ORDER BY position",
         )
         .bind(family_id)
         .bind(provider_id)
@@ -4894,6 +4999,186 @@ mod provider_definition_tests {
     }
 
     #[tokio::test]
+    async fn managed_api_and_router_refresh_retains_unavailable_or_missing_orchestrator() {
+        for (adapter, policy_id, first, second) in [
+            (
+                "openai-api",
+                "provider-default-family",
+                "gpt-5.6-sol",
+                "gpt-5.6-luna",
+            ),
+            (
+                "anthropic-api",
+                "provider-default-family",
+                "claude-a",
+                "claude-b",
+            ),
+            (
+                "claude-subscription",
+                "claude-default-family",
+                "claude-a",
+                "claude-b",
+            ),
+            (
+                "openrouter",
+                "openrouter-default-family",
+                "deepseek/deepseek-v4-pro-0813",
+                "qwen/qwen3.8-max",
+            ),
+            (
+                "vercel-ai-router",
+                "vercel-ai-router-default-family",
+                "deepseek/deepseek-v4-pro-0813",
+                "alibaba/qwen3.8-max",
+            ),
+            (
+                "openrouter",
+                "prime-default-family",
+                "qwen/qwen3.8-max",
+                "deepseek/deepseek-v4-pro-0813",
+            ),
+        ] {
+            let directory = tempfile::tempdir().unwrap();
+            let store = SqliteProductStore::open(directory.path().join("product.sqlite"))
+                .await
+                .unwrap();
+            let mut provider = definition("work");
+            provider.adapter_id = adapter.into();
+            let contract = if adapter == "claude-subscription" {
+                "managed-runtime@1"
+            } else {
+                "secret@1"
+            };
+            provider.access_contract = contract.into();
+            if adapter == "claude-subscription" {
+                provider.endpoint = None;
+                provider.credential_reference = None;
+            }
+            store
+                .sync_provider_definitions(&[provider.clone()])
+                .await
+                .unwrap();
+            store
+                .initialize_model_catalog(
+                    "codex-basic",
+                    &[RuntimeProductHarness {
+                        runtime_available: true,
+                        execution_access_contracts: vec![contract.into()],
+                        family_policy: Some(FamilyPolicyReference {
+                            id: policy_id.into(),
+                            version: 1,
+                        }),
+                        ..runtime_harness("codex-basic")
+                    }],
+                )
+                .await
+                .unwrap();
+            let policy = FamilyPolicyReference {
+                id: policy_id.into(),
+                version: 1,
+            };
+            let mut snapshot = ProviderCatalogSnapshot {
+                provider_id: provider.id.clone(),
+                label: "Work".into(),
+                connected: true,
+                unavailable_reason: None,
+                models: [first, second]
+                    .into_iter()
+                    .enumerate()
+                    .map(|(order, id)| crate::product::CatalogModelSnapshot {
+                        id: id.into(),
+                        label: id.into(),
+                        order,
+                        visible: true,
+                        available: true,
+                        unavailable_reason: None,
+                        provider_default: order == 0,
+                        replacement_model_id: None,
+                        metadata: serde_json::json!({}),
+                    })
+                    .collect(),
+                system_family: None,
+            };
+            for phase in 0..3 {
+                if phase == 1 {
+                    snapshot.models[0].available = false;
+                }
+                if phase == 2 {
+                    snapshot.models.remove(0);
+                }
+                let derived =
+                    crate::product::derive_managed_family_members(&policy, &snapshot).unwrap();
+                snapshot.system_family = Some(SystemFamilySnapshot {
+                    key: "ignored".into(),
+                    name: "Work defaults".into(),
+                    model_ids: derived.into_iter().map(|m| m.model_id).collect(),
+                });
+                store
+                    .publish_provider_catalog(
+                        &snapshot,
+                        ProviderConnectionStamp::refresh(1),
+                        Some(&policy),
+                        "1",
+                    )
+                    .await
+                    .unwrap();
+                let family = store
+                    .load_model_settings()
+                    .await
+                    .unwrap()
+                    .families
+                    .into_iter()
+                    .find(|f| f.managed_policy.is_some())
+                    .unwrap();
+                assert_eq!(
+                    family.members[0].model_id, first,
+                    "{adapter}/{policy_id} phase {phase}"
+                );
+                assert_eq!(
+                    family.members[0].roles,
+                    vec![crate::product::ModelFamilyRole::orchestrator()]
+                );
+                assert!(family.members[1].roles.is_empty());
+                if phase > 0 {
+                    let projection = store
+                        .provider_onboarding_projection(
+                            &provider.id,
+                            "codex-basic",
+                            &HashSet::from(["codex-basic".into()]),
+                        )
+                        .await
+                        .unwrap();
+                    assert!(
+                        projection
+                            .harnesses
+                            .iter()
+                            .find(|h| h.id == "codex-basic")
+                            .unwrap()
+                            .managed_family_candidate
+                            .is_none(),
+                        "{adapter}/{policy_id} candidate must not replace orchestrator"
+                    );
+                    let error = store
+                        .resolve_execution_model_plan(
+                            "codex-basic",
+                            &crate::product::InteractionModelSelection {
+                                family_id: family.id,
+                                provider_id: provider.id.clone(),
+                                model_id: second.into(),
+                            },
+                        )
+                        .await
+                        .unwrap_err();
+                    assert!(
+                        error.to_string().contains("orchestrator"),
+                        "{adapter}/{policy_id}: {error}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[tokio::test]
     async fn managed_catalog_refresh_preserves_a_separately_chosen_default_provider() {
         let temporary = tempfile::Builder::new()
             .prefix("relayer-explicit-provider-")
@@ -5351,6 +5636,7 @@ mod provider_definition_tests {
                     family: ProviderOnboardingFamilyIntent::Create {
                         name: "Work default".into(),
                         members: vec![ModelFamilyMember {
+                            roles: vec![crate::product::ModelFamilyRole::orchestrator()],
                             provider_id: provider_id.clone(),
                             model_id: "gpt-work".into(),
                             position: 0,
@@ -5400,6 +5686,7 @@ mod provider_definition_tests {
                     family: ProviderOnboardingFamilyIntent::Create {
                         name: "Must not persist".into(),
                         members: vec![ModelFamilyMember {
+                            roles: vec![crate::product::ModelFamilyRole::orchestrator()],
                             provider_id: ProviderId::parse("work-openai").unwrap(),
                             model_id: "gpt-work".into(),
                             position: 0,
@@ -5585,6 +5872,7 @@ mod provider_definition_tests {
                     family: ProviderOnboardingFamilyIntent::Create {
                         name: "Work models".into(),
                         members: vec![ModelFamilyMember {
+                            roles: vec![crate::product::ModelFamilyRole::orchestrator()],
                             provider_id: provider_id.clone(),
                             model_id: "gpt-work".into(),
                             position: 0,
@@ -5621,6 +5909,65 @@ mod provider_definition_tests {
     }
 
     #[tokio::test]
+    async fn onboarding_and_usability_never_substitute_an_available_specialist() {
+        let (_directory, store, provider_id) = onboarding_store().await;
+        sqlx::query("INSERT INTO provider_models(provider_id,model_id,label,provider_order,visible,available,provider_default) VALUES (?1,'gpt-specialist','Specialist',1,1,1,0)").bind(provider_id.as_str()).execute(&store.pool).await.unwrap();
+        let family = store
+            .create_model_family(&crate::product::CreateModelFamilyCommand {
+                name: "Roles".into(),
+                enabled: true,
+                members: vec![
+                    ModelFamilyMember {
+                        provider_id: provider_id.clone(),
+                        model_id: "gpt-work".into(),
+                        position: 0,
+                        roles: vec![crate::product::ModelFamilyRole::orchestrator()],
+                    },
+                    ModelFamilyMember {
+                        provider_id: provider_id.clone(),
+                        model_id: "gpt-specialist".into(),
+                        position: 1,
+                        roles: vec![],
+                    },
+                ],
+            })
+            .await
+            .unwrap();
+        sqlx::query(
+            "UPDATE provider_models SET available=0 WHERE provider_id=?1 AND model_id='gpt-work'",
+        )
+        .bind(provider_id.as_str())
+        .execute(&store.pool)
+        .await
+        .unwrap();
+        let settings = store.load_model_settings().await.unwrap();
+        assert!(
+            !settings
+                .harnesses
+                .iter()
+                .find(|h| h.id == "codex-basic")
+                .unwrap()
+                .usable_family_ids
+                .contains(&family.id)
+        );
+        let allowed = HashSet::from(["codex-basic".to_owned()]);
+        let projection = store
+            .provider_onboarding_projection(&provider_id, "codex-basic", &allowed)
+            .await
+            .unwrap();
+        assert!(
+            !projection
+                .harnesses
+                .iter()
+                .flat_map(|h| h
+                    .existing_custom_families
+                    .iter()
+                    .chain(&h.existing_managed_families))
+                .any(|f| f.id == family.id)
+        );
+    }
+
+    #[tokio::test]
     async fn configuration_owned_harness_can_become_default_with_a_saved_family() {
         let (_directory, store, provider_id) = onboarding_store().await;
         let allowed = HashSet::from(["codex-basic".to_owned()]);
@@ -5637,6 +5984,7 @@ mod provider_definition_tests {
                     family: ProviderOnboardingFamilyIntent::Create {
                         name: "Work models".into(),
                         members: vec![ModelFamilyMember {
+                            roles: vec![crate::product::ModelFamilyRole::orchestrator()],
                             provider_id,
                             model_id: "gpt-work".into(),
                             position: 0,

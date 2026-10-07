@@ -27,27 +27,36 @@
         {
           "modelId": "gpt-5.6-sol",
           "position": 0,
-          "providerId": "work"
+          "providerId": "work",
+          "roles": [
+            {
+              "name": "orchestrator"
+            }
+          ]
         },
         {
           "modelId": "gpt-5.6-terra",
           "position": 1,
-          "providerId": "work"
+          "providerId": "work",
+          "roles": []
         },
         {
           "modelId": "gpt-5.6-luna",
           "position": 2,
-          "providerId": "work"
+          "providerId": "work",
+          "roles": []
         },
         {
           "modelId": "gpt-daybreak-blue-latest",
           "position": 3,
-          "providerId": "work"
+          "providerId": "work",
+          "roles": []
         },
         {
           "modelId": "gpt-5.5",
           "position": 4,
-          "providerId": "work"
+          "providerId": "work",
+          "roles": []
         }
       ],
       "name": "Work defaults",
@@ -63,7 +72,12 @@
         {
           "modelId": "gpt-5.6-sol",
           "position": 0,
-          "providerId": "codex"
+          "providerId": "codex",
+          "roles": [
+            {
+              "name": "orchestrator"
+            }
+          ]
         }
       ],
       "name": "hidden",

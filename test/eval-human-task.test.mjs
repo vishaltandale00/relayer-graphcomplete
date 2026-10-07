@@ -84,16 +84,59 @@ it("preserves a multi-step human trajectory through reopen, anchored annotations
 
 it("serializes Send and invoke against the final budget slot and does not count drafting", async () => {
   const { tasks, session, calls } = await fixture();
-  await expect(tasks.write(session.id, "/api/threads/1/interactions", "POST", { text: "Refine", modelSelection: { providerId: "forged" } })).rejects.toThrow("starting model");
+  await expect(tasks.write(session.id, "/api/threads/1/interactions", "POST", { text: "Refine", modelSelection: { providerId: "forged" } })).rejects.toThrow("starting family");
   const results = await Promise.allSettled([
-    tasks.write(session.id, "/api/threads/1/interactions", "POST", { text: "Refine" }),
+    tasks.write(session.id, "/api/threads/1/interactions", "POST", { text: "Refine", modelSelection: { familyId: 1, providerId: "old-provider", modelId: "old-model" } }),
     tasks.write(session.id, "/api/threads/1/interactions/10/actions/22/invoke", "POST", {}),
   ]);
   expect(results.map((result) => result.status)).toEqual(["fulfilled", "rejected"]);
   expect(tasks.get(session.id).completions).toBe(2);
   const sent = calls.find((call) => call.method === "POST");
-  expect(JSON.parse(sent.body).modelSelection.providerId).toBe("pinned");
+  expect(JSON.parse(sent.body).modelSelection).toEqual({ familyId: 1 });
   expect(sent.headers.Cookie).toBe("control=secret");
+});
+
+it.each(["create", "nextStep"])("refuses opening %s before reservation, step mutation or product dispatch", async (operation) => {
+  const f = await fixture({ steps: 2 });
+  f.options.evalService.assertHumanTaskExecution = async () => { throw new Error("API spending is not authorized"); };
+  const dispatch = vi.spyOn(f.options.evalService, "createHumanTaskThread");
+  const before = f.tasks.get(f.session.id);
+  await expect(operation === "create" ? f.tasks.create({ maxCompletions: 3, endpoint: "A result" }) : f.tasks.nextStep(f.session.id)).rejects.toThrow("API spending is not authorized");
+  expect(dispatch).not.toHaveBeenCalled();
+  if (operation === "create") {
+    expect(f.tasks.list()[0]).toMatchObject({ status: "failed", completions: 0, termination: { reason: "preparation_failed" } });
+    expect(f.tasks.get(f.tasks.list()[0].id).events.some((event) => event.kind === "submission")).toBe(false);
+  } else {
+    expect(f.tasks.get(f.session.id)).toMatchObject({ status: "active", step: before.step, completions: before.completions, stepChecks: before.stepChecks, events: before.events });
+  }
+});
+
+it("preserves the step if consent changes while the prior step is graded", async () => {
+  const f = await fixture({ steps: 2 });
+  f.options.evalService.assertHumanTaskExecution = vi.fn().mockResolvedValueOnce(undefined)
+    .mockRejectedValueOnce(Object.assign(new Error("API spending is not authorized"), { code: "eval_execution_not_authorized" }));
+  const dispatch = vi.spyOn(f.options.evalService, "createHumanTaskThread");
+  const before = f.tasks.get(f.session.id);
+  await expect(f.tasks.nextStep(f.session.id)).rejects.toThrow("API spending is not authorized");
+  expect(dispatch).not.toHaveBeenCalled();
+  expect(f.tasks.get(f.session.id)).toMatchObject({ status: "active", step: before.step, completions: before.completions, stepChecks: before.stepChecks, events: before.events });
+});
+
+it("refunds a typed consent refusal detected after reservation without claiming an unknown dispatch", async () => {
+  const f = await fixture({ steps: 2 });
+  f.options.evalService.createHumanTaskThread = async () => { throw Object.assign(new Error("API spending is not authorized"), { code: "eval_execution_not_authorized" }); };
+  await expect(f.tasks.nextStep(f.session.id)).rejects.toThrow("API spending is not authorized");
+  expect(f.tasks.get(f.session.id)).toMatchObject({ status: "active", step: 0, completions: 1, stepChecks: [] });
+  expect(f.tasks.get(f.session.id).events.at(-1)).toMatchObject({ kind: "submission", outcome: "refused_before_dispatch" });
+});
+
+it.each(["/api/threads/1/interactions", "/api/threads/1/interactions/10/retry"])("rechecks execution consent before %s without spending or dispatching", async (path) => {
+  const f = await fixture();
+  f.options.evalService.assertHumanTaskExecution = async () => { throw new Error("API spending is not authorized"); };
+  const before = f.tasks.get(f.session.id);
+  await expect(f.tasks.write(f.session.id, path, "POST", { text: "Refine", attemptId: 91, modelSelection: { familyId: 1 } })).rejects.toThrow("API spending is not authorized");
+  expect(f.tasks.get(f.session.id)).toMatchObject({ completions: before.completions, events: before.events });
+  expect(f.calls.some((call) => call.method === "POST")).toBe(false);
 });
 
 it("refuses finishing or another completion during active work, and distinguishes rejected and unknown writes", async () => {
@@ -288,7 +331,7 @@ it("records an ambiguous opening dispatch as interrupted with its reserved budge
   expect(f.tasks.list()[0]).toMatchObject({ status: "interrupted", completions: 1, termination: { reason: "product_write_unknown", success: null } });
 });
 
-it("admits scoped retries of failed unsent attempts with a pinned model and spent budget", async () => {
+it("admits scoped retries of failed unsent attempts with a retained family and spent budget", async () => {
   const f = await fixture();
   f.threads.get(1)[0] = { id: 10, completionStatus: "not_started", latestAttempt: { id: 91, outcome: "model_failed" } };
   const fetchImpl = f.tasks.fetchImpl;
@@ -299,10 +342,10 @@ it("admits scoped retries of failed unsent attempts with a pinned model and spen
     return Promise.resolve(Response.json(interaction));
   };
   await expect(f.tasks.write(f.session.id, "/api/threads/2/interactions/10/retry", "POST", { attemptId: 91 })).rejects.toThrow("outside");
-  await expect(f.tasks.write(f.session.id, "/api/threads/1/interactions/10/retry", "POST", { attemptId: 91, modelSelection: { providerId: "other" } })).rejects.toThrow("starting model");
+  await expect(f.tasks.write(f.session.id, "/api/threads/1/interactions/10/retry", "POST", { attemptId: 91, modelSelection: { providerId: "other" } })).rejects.toThrow("starting family");
   expect((await f.tasks.write(f.session.id, "/api/threads/1/interactions/10/retry", "POST", { attemptId: 91 })).status).toBe(200);
   expect(f.tasks.get(f.session.id).completions).toBe(2);
-  expect(f.tasks.get(f.session.id).events.at(-1).request.modelSelection.providerId).toBe("pinned");
+  expect(f.tasks.get(f.session.id).events.at(-1).request.modelSelection).toEqual({ familyId: 1 });
   f.tasks.find(f.session.id).events[0].at = new Date(1000).toISOString();
   const submission = f.tasks.get(f.session.id).events.at(-1);
   await f.tasks.observe(f.session.id, { threadId: 1, turnId: 10, graphVisible: true, content: "Retried graph", observedAt: Date.parse(submission.at) + 100 });
@@ -358,13 +401,13 @@ it("does not include frozen evidence in list summaries", async () => {
 });
 
 
-it("validates only the task model using semantic write authority without spending a completion", async () => {
+it("validates only the task family using semantic write authority without spending a completion", async () => {
   const f = await fixture();
   const model = { harnessId: "fixture", familyId: 1, providerId: "pinned", modelId: "model" };
   expect((await f.tasks.write(f.session.id, "/api/model-selection/validate", "POST", model)).status).toBe(200);
   expect(f.calls.at(-1).headers.Cookie).toBe("control=secret");
   expect(f.tasks.get(f.session.id).completions).toBe(1);
-  await expect(f.tasks.write(f.session.id, "/api/model-selection/validate", "POST", { ...model, providerId: "other" })).rejects.toThrow("starting model");
+  await expect(f.tasks.write(f.session.id, "/api/model-selection/validate", "POST", { ...model, familyId: 2 })).rejects.toThrow("starting family");
   await expect(f.tasks.write(f.session.id, "/api/model-selection/validate", "POST", { ...model, harnessId: "other" })).rejects.toThrow("starting harness");
 });
 

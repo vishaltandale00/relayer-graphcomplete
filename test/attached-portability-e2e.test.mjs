@@ -63,7 +63,7 @@ it("preserves accepted attached navigation, converted invokes, rich controls and
     models: [{ id: "fixture-model", label: "Fixture", order: 0, visible: true, available: true, providerDefault: true, metadata: {} }],
     systemFamily: { key: "codex", name: "Codex", modelIds: ["fixture-model"] } });
   const project = await request(session, "/api/projects", { path: projectPath });
-  const family = await request(session, "/api/model-families", { name: "Fixture", enabled: true, members: [{ providerId: "codex", modelId: "fixture-model" }] });
+  const family = await request(session, "/api/model-families", { name: "Fixture", enabled: true, members: [{ providerId: "codex", modelId: "fixture-model", roles: [{ name: "orchestrator" }] }] });
   const modelSelection = { familyId: family.id, providerId: "codex", modelId: "fixture-model" };
   const thread = await request(session, "/api/threads", { title: "Attached portability", initialMessage: "SOURCE", projectId: project.id,
     permissionProfileId: "auto", harnessId: "fixture-attached-portability", modelSelection });

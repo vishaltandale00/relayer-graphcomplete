@@ -143,6 +143,7 @@ function focusRequiredOnboardingChoice() {
   else if (!onboardingFamilyIntent) target = $("#onboardingFamilyOptions [role=radio]");
   else if (onboardingFamilyIntent.kind === "create" && !onboardingFamilyIntent.name?.trim()) target = $("#onboardingFamilyName");
   else if (onboardingFamilyIntent.kind === "create" && !onboardingFamilyIntent.members?.length) target = $(".onboarding-model-members input");
+  if (!target && onboardingFamilyIntent?.kind === "create") target = $("[data-onboarding-orchestrator-model]");
   (target ?? $("#authStatus"))?.focus();
 }
 
@@ -193,11 +194,20 @@ function bindOnboardingChoices({ focus } = {}) {
   });
   $$('[data-onboarding-member-model]', $("#onboardingFamilyOptions")).forEach((input) => {
     input.onchange = () => {
-      const member = { providerId: input.dataset.onboardingMemberProvider, modelId: input.dataset.onboardingMemberModel };
+      const member = { providerId: input.dataset.onboardingMemberProvider, modelId: input.dataset.onboardingMemberModel, roles: [] };
       const key = ({ providerId, modelId }) => `${providerId}\0${modelId}`;
       onboardingFamilyIntent.members = input.checked
         ? [...onboardingFamilyIntent.members.filter((value) => key(value) !== key(member)), member]
         : onboardingFamilyIntent.members.filter((value) => key(value) !== key(member));
+      renderOnboardingChoices();
+    };
+  });
+  $$('[data-onboarding-orchestrator-model]', $("#onboardingFamilyOptions")).forEach((input) => {
+    input.onchange = () => {
+      onboardingFamilyIntent.members.forEach((member) => {
+        member.roles = (member.roles ?? []).filter((role) => role.name !== "orchestrator");
+        if (member.providerId === input.dataset.onboardingOrchestratorProvider && member.modelId === input.dataset.onboardingOrchestratorModel) member.roles.unshift({ name: "orchestrator" });
+      });
       $("#finishProviderSetup").disabled = !finishIntentValid();
     };
   });

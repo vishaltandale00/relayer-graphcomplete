@@ -134,7 +134,7 @@ describe("model family settings model", () => {
       id: "cross-provider",
       name: "Coding",
       models: [
-        { providerId: "codex", modelId: "shared-name" },
+        { providerId: "codex", modelId: "shared-name", roles: [{ name: "orchestrator" }] },
         { providerId: "future-provider", modelId: "shared-name" },
       ],
     })).toEqual({});

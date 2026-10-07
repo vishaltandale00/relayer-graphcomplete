@@ -49,12 +49,12 @@ function settings() {
         enabled: true,
         position: 0,
         members: [
-          { providerId: "codex", modelId: "one", position: 0 },
-          { providerId: "codex", modelId: "two", position: 1 },
-          { providerId: "future", modelId: "three", position: 2 },
+          { providerId: "codex", modelId: "one", position: 0, roles: [{ name: "orchestrator" }] },
+          { providerId: "codex", modelId: "two", position: 1, roles: [] },
+          { providerId: "future", modelId: "three", position: 2, roles: [] },
         ],
       },
-      { id: 2, name: "Hidden family", enabled: false, position: 1, members: [{ providerId: "codex", modelId: "one", position: 0 }] },
+      { id: 2, name: "Hidden family", enabled: false, position: 1, members: [{ providerId: "codex", modelId: "one", position: 0, roles: [{ name: "orchestrator" }] }] },
     ],
   };
 }
@@ -82,7 +82,7 @@ describe("composer model picker selection", () => {
     const families = availablePickerFamilies(catalog, "codex-basic");
     expect(families.map(({ id }) => id)).toEqual([1]);
     expect(families[0].availableMembers).toEqual([
-      { providerId: "codex", modelId: "one", position: 0 },
+      { providerId: "codex", modelId: "one", position: 0, roles: [{ name: "orchestrator" }] },
     ]);
     expect(firstAvailableSelection(catalog, "codex-basic")).toEqual({
       harnessId: "codex-basic",
@@ -127,8 +127,8 @@ describe("composer model picker selection", () => {
     });
     catalog.harnesses[0].compatibleProviderIds.push("second-provider");
     catalog.families[0].members = [
-      { providerId: "second-provider", modelId: "preferred-first", position: 0 },
-      { providerId: "codex", modelId: "one", position: 1 },
+      { providerId: "second-provider", modelId: "preferred-first", position: 0, roles: [{ name: "orchestrator" }] },
+      { providerId: "codex", modelId: "one", position: 1, roles: [] },
     ];
     expect(firstAvailableSelection(catalog, "codex-basic")).toMatchObject({
       providerId: "second-provider",
@@ -144,9 +144,8 @@ describe("composer model picker selection", () => {
       preferredModelId: "two",
     }];
     catalog.providers[0].models[1].available = true;
-    expect(availablePickerFamilies(catalog, "codex-basic")[0].availableMembers).toEqual([
-      { providerId: "codex", modelId: "two", position: 1 },
-    ]);
+    // The designated orchestrator is incompatible; an available specialist cannot replace it.
+    expect(availablePickerFamilies(catalog, "codex-basic")).toEqual([]);
   });
 
   it("does not make Prime selectable when its model rules match no available family member", () => {
@@ -183,7 +182,7 @@ describe("composer model picker selection", () => {
       name: "OpenRouter",
       enabled: true,
       position: 2,
-      members: [{ providerId: "router", modelId: "qwen", position: 0 }],
+      members: [{ providerId: "router", modelId: "qwen", position: 0, roles: [{ name: "orchestrator" }] }],
     });
     catalog.harnesses.push({
       id: "prime-agent-basic",
@@ -213,12 +212,12 @@ describe("composer model picker selection", () => {
       enabled: true,
       position: 2,
       members: [
-        { providerId: "codex", modelId: "one", position: 0 },
-        { providerId: "codex", modelId: "two", position: 1 },
+        { providerId: "codex", modelId: "one", position: 0, roles: [{ name: "orchestrator" }] },
+        { providerId: "codex", modelId: "two", position: 1, roles: [] },
       ],
     });
     catalog.families[0].members = [
-      { providerId: "codex", modelId: "one", position: 0 },
+      { providerId: "codex", modelId: "one", position: 0, roles: [{ name: "orchestrator" }] },
     ];
     catalog.harnesses[0].modelCompatibility = [{
       providerId: "codex",
@@ -240,7 +239,7 @@ describe("composer model picker selection", () => {
       });
   });
 
-  it("inherits an available prior model and reselects within its family when stale", () => {
+  it("inherits a prior family and resolves its designated orchestrator", () => {
     const catalog = settings();
     expect(selectionForInteraction(catalog, "codex-basic", {
       modelSelection: { familyId: 1, providerId: "codex", modelId: "one" },
@@ -250,7 +249,7 @@ describe("composer model picker selection", () => {
       modelProviderId: "codex",
       providerModelId: "two",
     });
-    expect(stale).toMatchObject({ familyId: 1, providerId: "codex", modelId: "two" });
+    expect(stale).toMatchObject({ familyId: 1, providerId: "codex", modelId: "one" });
     expect(selectionForNextInteraction(catalog, "codex-basic", {
       modelSelection: { familyId: 1, providerId: "codex", modelId: "two" },
     })).toEqual({
@@ -259,8 +258,8 @@ describe("composer model picker selection", () => {
       providerId: "codex",
       modelId: "one",
     });
-    expect(pickerSelectionIsAvailable(catalog, stale)).toBe(false);
-    expect(normalizePickerSelection(catalog, stale)).toBeNull();
+    expect(pickerSelectionIsAvailable(catalog, stale)).toBe(true);
+    expect(normalizePickerSelection(catalog, stale)).toMatchObject({ modelId: "one" });
   });
 
   it("preserves a removed family as blocked intent until the user explicitly chooses again", () => {
@@ -270,7 +269,7 @@ describe("composer model picker selection", () => {
       name: "Replacement",
       enabled: true,
       position: 0,
-      members: [{ providerId: "codex", modelId: "one", position: 0 }],
+      members: [{ providerId: "codex", modelId: "one", position: 0, roles: [{ name: "orchestrator" }] }],
     }];
     const blocked = selectionForNextInteraction(catalog, "codex-basic", {
       modelSelection: { familyId: 99, providerId: "codex", modelId: "removed" },
@@ -377,7 +376,7 @@ describe("composer model picker selection", () => {
       name: "Configured default",
       enabled: true,
       position: 2,
-      members: [{ providerId: "codex", modelId: "one", position: 0 }],
+      members: [{ providerId: "codex", modelId: "one", position: 0, roles: [{ name: "orchestrator" }] }],
     });
     catalog.defaults.familyId = 3;
     const candidate = modelPickerContextCandidate({
@@ -404,26 +403,44 @@ describe("composer model picker selection", () => {
       modelId: "one",
     })).toEqual({
       harnessId: "codex-basic",
-      modelSelection: {
-        familyId: 1,
-        providerId: "codex",
-        modelId: "one",
-      },
+      modelSelection: { familyId: 1 },
     });
   });
 });
 
 describe("legacy conversation compatibility", () => {
-  it("filters foreign choices and rejects a stale selection without blocking same-provider models", () => {
+  it("resolves historical choices to the designated route within conversation compatibility", () => {
     const catalog = settings();
     catalog.conversationCompatibility = { status: "compatible", providerId: "codex", harnessId: "codex-basic" };
     catalog.providers[1].connected = true;
     catalog.harnesses[0].compatibleProviderIds.push("future");
     expect(availablePickerFamilies(catalog, "codex-basic")[0].availableMembers.map(m => m.providerId)).toEqual(["codex"]);
-    expect(pickerSelectionIsAvailable(catalog, { harnessId: "codex-basic", familyId: 1, providerId: "future", modelId: "three" })).toBe(false);
+    expect(pickerSelectionIsAvailable(catalog, { harnessId: "codex-basic", familyId: 1, providerId: "future", modelId: "three" })).toBe(true);
     expect(pickerSelectionIsAvailable(catalog, { harnessId: "codex-basic", familyId: 1, providerId: "codex", modelId: "one" })).toBe(true);
     expect(availablePickerFamilies(catalog, "cooked")).toEqual([]);
     catalog.conversationCompatibility = { status: "blocked", message: "History ownership cannot be verified." };
     expect(availablePickerFamilies(catalog, "codex-basic")).toEqual([]);
   });
+});
+
+it("blocks unavailable orchestrators without choosing a specialist or another family", () => {
+  const catalog = settings();
+  catalog.defaults.familyId = 1;
+  catalog.providers[0].models[0].available = false;
+  catalog.providers[0].models[1].available = true;
+  catalog.families.push({ ...structuredClone(catalog.families[0]), id: 3, members: [{ providerId: "codex", modelId: "two", position: 0, roles: [{ name: "orchestrator" }] }] });
+  expect(firstAvailableSelection(catalog, "codex-basic")).toBeNull();
+  expect(normalizePickerSelection(catalog, { harnessId: "codex-basic", familyId: 1, providerId: "codex", modelId: "two" })).toBeNull();
+  expect(modelPickerFamilyPresentation(catalog, "codex-basic", { harnessId: "codex-basic", familyId: 1 })).toMatchObject({ selectedFamily: null, modelSetup: { action: "settings", label: "Orchestrator unavailable" } });
+});
+
+it("judges the designated orchestrator against the requested harness", () => {
+  const catalog = settings();
+  catalog.defaults.familyId = 1;
+  catalog.defaults.harnessId = "cooked";
+  expect(firstAvailableSelection(catalog, "codex-basic")).toMatchObject({ familyId: 1, modelId: "one" });
+  catalog.defaults.harnessId = "codex-basic";
+  expect(firstAvailableSelection(catalog, "cooked")).toBeNull();
+  catalog.providers[0].models = [];
+  expect(firstAvailableSelection(catalog, "codex-basic")).toBeNull();
 });

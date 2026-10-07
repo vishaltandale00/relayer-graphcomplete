@@ -46,7 +46,7 @@ async function setup({ missingModel = false, rejectValidation = false, connectio
       }] });
       if (path === "/api/model-families") { families.push({ id: 42, ...body }); return Response.json({ id: 42 }); }
       if (path === "/api/model-selection/validate") return rejectValidation || unavailableHarnesses.has(body.harnessId)
-        ? Response.json({ error: profile.apiKey }, { status: 400 }) : Response.json(body);
+        ? Response.json({ error: profile.apiKey }, { status: 400 }) : Response.json({ ...body, providerId: "eval-openrouter", modelId: models[0] });
       throw new Error(`Unexpected request ${path}`);
     },
   });
@@ -58,8 +58,8 @@ it("pins the explicit roster through product validation without persisting provi
   await provider.start(profile);
   const selected = await provider.select("prime-agent-basic");
   expect(selected).toEqual({ harnessId: "prime-agent-basic", familyId: 42, providerId: "eval-openrouter", modelId: models[0] });
-  expect(requests.find(({ path }) => path === "/api/model-families").body.members).toEqual(models.map((modelId) => ({ providerId: "eval-openrouter", modelId })));
-  expect(requests.filter(({ path }) => path === "/api/model-selection/validate").map(({ body }) => body.modelId)).toEqual([...models, ...models]);
+  expect(requests.find(({ path }) => path === "/api/model-families").body.members).toEqual(models.map((modelId, index) => ({ providerId: "eval-openrouter", modelId, roles: index === 0 ? [{ name: "orchestrator" }] : [] })));
+  expect(requests.filter(({ path }) => path === "/api/model-selection/validate").map(({ body }) => body)).toEqual([{ harnessId: "prime-agent-basic", familyId: 42 }, { harnessId: "prime-agent-basic", familyId: 42 }]);
   expect(JSON.stringify(requests)).not.toContain(profile.apiKey);
   await expect(readFile(join(directory, "provider-credentials.json"))).rejects.toMatchObject({ code: "ENOENT" });
   expect(await provider.acquireExecution("eval-openrouter")).toBe(lease);
@@ -139,7 +139,7 @@ it.each([false, true])("uses production provider composition and credential reop
       const body = options.body ? JSON.parse(options.body) : undefined;
       if (path === "/api/model-settings") return Response.json({ families, providers: catalog ? [{ ...catalog, id: catalog.providerId }] : [] });
       if (path === "/api/model-families") { families.push({ id: 12, ...body }); return Response.json(families[0]); }
-      if (path === "/api/model-selection/validate") return readiness ? Response.json(body) : Response.json({}, { status: 409 });
+      if (path === "/api/model-selection/validate") return readiness ? Response.json({ ...body, providerId: "eval-openrouter", modelId: models[0] }) : Response.json({}, { status: 409 });
       throw new Error("Unexpected product request");
     },
   });

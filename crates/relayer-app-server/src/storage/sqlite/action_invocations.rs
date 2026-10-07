@@ -350,7 +350,7 @@ impl SqliteProductStore {
                 "Recursive Complete requires an active or accepted graph-bound source completion.",
             )));
         }
-        let model_selection = match (model_provider_id, provider_model_id, model_family_id) {
+        let mut model_selection = match (model_provider_id, provider_model_id, model_family_id) {
             (Some(provider_id), Some(model_id), Some(family_id)) if family_id > 0 => {
                 Some(InteractionModelSelection {
                     family_id: ModelFamilyId::from_database(family_id),
@@ -370,12 +370,14 @@ impl SqliteProductStore {
             }
         };
         if let Some(selection) = model_selection.as_ref() {
-            catalog::validate_execution_model_selection_on(
-                &mut transaction,
-                &harness_id,
-                selection,
-            )
-            .await?;
+            let (_, route) =
+                catalog::resolve_execution_model_plan_on(&mut transaction, &harness_id, selection)
+                    .await?;
+            model_selection = Some(InteractionModelSelection {
+                family_id: route.family_id,
+                provider_id: route.provider_id,
+                model_id: route.model_id,
+            });
         }
         let previous_timestamp: String =
             sqlx::query_scalar("SELECT updated_at FROM threads WHERE id=?1")
@@ -622,6 +624,7 @@ mod tests {
         };
         let thread = store
             .insert_thread_with_initial_interaction(NewThreadRecord {
+                required_provider_adapter_id: None,
                 icon_selection_eligible: true,
                 title: "Action source",
                 project_id: None,
@@ -769,6 +772,7 @@ mod tests {
         };
         let thread = store
             .insert_thread_with_initial_interaction(NewThreadRecord {
+                required_provider_adapter_id: None,
                 icon_selection_eligible: true,
                 title: "Active recursive source",
                 project_id: None,
@@ -879,6 +883,7 @@ mod tests {
 
         let legacy_thread = store
             .insert_thread_with_initial_interaction(NewThreadRecord {
+                required_provider_adapter_id: None,
                 icon_selection_eligible: true,
                 title: "Legacy recursive source",
                 project_id: None,
@@ -949,6 +954,7 @@ mod tests {
         for timestamp in ["2", "3"] {
             let thread = store
                 .insert_thread_with_initial_interaction(NewThreadRecord {
+                    required_provider_adapter_id: None,
                     icon_selection_eligible: true,
                     title: "Reused action source",
                     project_id: Some(project.id),
@@ -1041,6 +1047,7 @@ mod tests {
         for timestamp in ["1", "2"] {
             let thread = store
                 .insert_thread_with_initial_interaction(NewThreadRecord {
+                    required_provider_adapter_id: None,
                     icon_selection_eligible: true,
                     title: "Standalone source",
                     project_id: None,
@@ -1092,6 +1099,7 @@ mod tests {
         };
         let thread = store
             .insert_thread_with_initial_interaction(NewThreadRecord {
+                required_provider_adapter_id: None,
                 icon_selection_eligible: true,
                 title: "Recoverable invoke",
                 project_id: None,
@@ -1165,6 +1173,7 @@ mod tests {
         let store = SqliteProductStore::open(&path).await.unwrap();
         let thread = store
             .insert_thread_with_initial_interaction(NewThreadRecord {
+                required_provider_adapter_id: None,
                 icon_selection_eligible: true,
                 title: "Legacy source",
                 project_id: None,
@@ -1214,6 +1223,7 @@ mod tests {
         let store = SqliteProductStore::open(&path).await.unwrap();
         let thread = store
             .insert_thread_with_initial_interaction(NewThreadRecord {
+                required_provider_adapter_id: None,
                 icon_selection_eligible: true,
                 title: "Configuration-owned source",
                 project_id: None,
@@ -1257,7 +1267,7 @@ mod tests {
             .execute(&store.pool)
             .await
             .unwrap();
-        sqlx::query("INSERT INTO model_family_members(family_id,position,provider_id,model_id) VALUES (2,0,'codex','test-model')")
+        sqlx::query("INSERT INTO model_family_members(family_id,position,provider_id,model_id,roles_json) VALUES (2,0,'codex','test-model',json_array(json_object('name','orchestrator')))")
             .execute(&store.pool)
             .await
             .unwrap();
@@ -1268,6 +1278,7 @@ mod tests {
         };
         let thread = store
             .insert_thread_with_initial_interaction(NewThreadRecord {
+                required_provider_adapter_id: None,
                 icon_selection_eligible: true,
                 title: "Historical source",
                 project_id: None,
@@ -1316,6 +1327,7 @@ mod tests {
         };
         let thread = store
             .insert_thread_with_initial_interaction(NewThreadRecord {
+                required_provider_adapter_id: None,
                 icon_selection_eligible: true,
                 title: "Historical hidden model",
                 project_id: None,
@@ -1379,6 +1391,7 @@ mod tests {
         };
         let thread = store
             .insert_thread_with_initial_interaction(NewThreadRecord {
+                required_provider_adapter_id: None,
                 icon_selection_eligible: true,
                 title: "Stale source",
                 project_id: None,
@@ -1421,6 +1434,7 @@ mod tests {
         };
         let thread = store
             .insert_thread_with_initial_interaction(NewThreadRecord {
+                required_provider_adapter_id: None,
                 icon_selection_eligible: true,
                 title: "Action source",
                 project_id: None,
@@ -1469,6 +1483,7 @@ mod tests {
         };
         let thread = store
             .insert_thread_with_initial_interaction(NewThreadRecord {
+                required_provider_adapter_id: None,
                 icon_selection_eligible: true,
                 title: "Historical hidden model",
                 project_id: None,
@@ -1515,6 +1530,7 @@ mod tests {
         seed_test_model_selection(&store).await;
         let thread = store
             .insert_thread_with_initial_interaction(NewThreadRecord {
+                required_provider_adapter_id: None,
                 icon_selection_eligible: true,
                 title: "Marking",
                 project_id: None,
@@ -1604,6 +1620,7 @@ mod tests {
         };
         let thread = store
             .insert_thread_with_initial_interaction(NewThreadRecord {
+                required_provider_adapter_id: None,
                 icon_selection_eligible: true,
                 title: "Legacy child",
                 project_id: None,
@@ -1710,7 +1727,7 @@ mod tests {
             .execute(&store.pool)
             .await
             .unwrap();
-        sqlx::query("INSERT INTO model_family_members(family_id,position,provider_id,model_id) VALUES (1,0,'codex','test-model')")
+        sqlx::query("INSERT INTO model_family_members(family_id,position,provider_id,model_id,roles_json) VALUES (1,0,'codex','test-model',json_array(json_object('name','orchestrator')))")
             .execute(&store.pool)
             .await
             .unwrap();

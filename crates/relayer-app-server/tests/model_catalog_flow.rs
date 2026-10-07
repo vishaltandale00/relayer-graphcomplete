@@ -10,6 +10,243 @@ use std::path::Path;
 use tower::ServiceExt;
 
 #[tokio::test]
+async fn subscription_authority_refuses_family_change_between_validation_and_creation() {
+    let directory = tempfile::tempdir().unwrap();
+    let database = directory.path().join("product.sqlite3");
+    let app = open_app(&database, directory.path()).await;
+    configure_codex_policy(&database).await;
+    let pool = sqlite_pool(&database).await;
+    sqlx::query("INSERT INTO model_providers(id,label,connected,refreshed_at,adapter_id,access_contract,connection_generation,lifecycle_state) VALUES ('api','API',0,'1','openai-api','secret@1',1,'active')").execute(&pool).await.unwrap();
+    pool.close().await;
+    for provider in ["codex", "api"] {
+        let mut snapshot = provider_snapshot_for(provider, provider, None);
+        snapshot["adapterId"] = json!(if provider == "codex" {
+            "codex-subscription"
+        } else {
+            "openai-api"
+        });
+        snapshot["accessContract"] = json!(if provider == "codex" {
+            "managed-runtime@1"
+        } else {
+            "secret@1"
+        });
+        assert_eq!(
+            app.clone()
+                .oneshot(bearer_request(
+                    "PUT",
+                    "/api/internal/provider-catalog",
+                    Some(snapshot)
+                ))
+                .await
+                .unwrap()
+                .status(),
+            StatusCode::NO_CONTENT
+        );
+    }
+    let pool = sqlite_pool(&database).await;
+    sqlx::query("UPDATE product_harnesses SET available=1,unavailable_reason_code=NULL,unavailable_reason_message=NULL,model_rules_present=1,execution_access_contracts_json='[\"managed-runtime@1\",\"secret@1\"]' WHERE configuration_name='codex-basic'").execute(&pool).await.unwrap();
+    sqlx::query("DELETE FROM harness_model_rules WHERE harness_configuration_name='codex-basic'")
+        .execute(&pool)
+        .await
+        .unwrap();
+    let member = |provider| json!({ "providerId": provider, "modelId": "gpt-5.6-sol", "roles": [{ "name": "orchestrator" }] });
+    let family = response_json(
+        app.clone()
+            .oneshot(cookie_request(
+                "POST",
+                "/api/model-families",
+                Some(
+                    json!({"name":"Authorized family","enabled":true,"members":[member("codex")]}),
+                ),
+            ))
+            .await
+            .unwrap(),
+    )
+    .await;
+    let id = family["id"].as_i64().unwrap();
+    let validated = response_json(
+        app.clone()
+            .oneshot(cookie_request(
+                "POST",
+                "/api/model-selection/validate",
+                Some(json!({"harnessId":"codex-basic","familyId":id})),
+            ))
+            .await
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(validated["providerId"], "codex");
+    // Pause after credential/route validation; another control client edits through the real API.
+    let changed = app
+        .clone()
+        .oneshot(cookie_request(
+            "PUT",
+            &format!("/api/model-families/{id}"),
+            Some(json!({"enabled":true,"members":[member("api")]})),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(changed.status(), StatusCode::OK);
+    let before: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM threads")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    let request = json!({"creationRequestId":"subscription-task", "initialMessage":"Authorized task", "harnessId":"codex-basic", "modelSelection":{"familyId":id},"requiredProviderAdapterId":"codex-subscription"});
+    let refused = app
+        .clone()
+        .oneshot(cookie_request(
+            "POST",
+            "/api/threads",
+            Some(request.clone()),
+        ))
+        .await
+        .unwrap();
+    let status = refused.status();
+    let error = response_json(refused).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{error}");
+    assert_eq!(error["code"], "execution_provider_not_authorized");
+    let threads: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM threads")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(threads, before);
+    assert_eq!(
+        app.clone()
+            .oneshot(cookie_request(
+                "PUT",
+                &format!("/api/model-families/{id}"),
+                Some(json!({"enabled":true,"members":[member("codex")]}))
+            ))
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::OK
+    );
+    let created = app
+        .clone()
+        .oneshot(cookie_request(
+            "POST",
+            "/api/threads",
+            Some(request.clone()),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(created.status(), StatusCode::CREATED);
+    let created = response_json(created).await;
+    let replay = response_json(
+        app.clone()
+            .oneshot(cookie_request(
+                "POST",
+                "/api/threads",
+                Some(request.clone()),
+            ))
+            .await
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(
+        replay["id"].as_i64().unwrap(),
+        created["id"].as_i64().unwrap()
+    );
+    let mut unconstrained = request;
+    unconstrained
+        .as_object_mut()
+        .unwrap()
+        .remove("requiredProviderAdapterId");
+    assert_eq!(
+        app.clone()
+            .oneshot(cookie_request("POST", "/api/threads", Some(unconstrained)))
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::CONFLICT
+    );
+    let constraints: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM thread_execution_constraints")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(constraints, 1);
+    pool.close().await;
+}
+
+#[tokio::test]
+async fn managed_refresh_keeps_unavailable_orchestrator_and_family_only_requests_refuse() {
+    let directory = tempfile::tempdir().unwrap();
+    let database = directory.path().join("product.sqlite3");
+    let app = open_app(&database, directory.path()).await;
+    configure_codex_policy(&database).await;
+    let publish = app
+        .clone()
+        .oneshot(bearer_request(
+            "PUT",
+            "/api/internal/provider-catalog",
+            Some(provider_snapshot(None)),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(publish.status(), StatusCode::NO_CONTENT);
+    let pool = sqlite_pool(&database).await;
+    sqlx::query("UPDATE product_harnesses SET available=1,unavailable_reason_code=NULL,unavailable_reason_message=NULL WHERE configuration_name='codex-basic'").execute(&pool).await.unwrap();
+    pool.close().await;
+    let before = response_json(
+        app.clone()
+            .oneshot(cookie_request("GET", "/api/model-settings", None))
+            .await
+            .unwrap(),
+    )
+    .await;
+    let family = before["families"][0]["id"].as_i64().unwrap();
+    let revision = before["families"][0]["revision"].as_i64().unwrap();
+    let publish = app
+        .clone()
+        .oneshot(bearer_request(
+            "PUT",
+            "/api/internal/provider-catalog",
+            Some(provider_snapshot(Some("gpt-5.6-sol"))),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(publish.status(), StatusCode::NO_CONTENT);
+    let after = response_json(
+        app.clone()
+            .oneshot(cookie_request("GET", "/api/model-settings", None))
+            .await
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(after["families"][0]["id"], family);
+    assert_eq!(after["families"][0]["revision"], revision);
+    assert_eq!(
+        after["families"][0]["members"][0]["roles"],
+        json!([{"name":"orchestrator"}])
+    );
+    assert_eq!(after["families"][0]["members"][1]["roles"], json!([]));
+    for model_fields in [
+        json!({}),
+        json!({"providerId":"codex","modelId":"gpt-5.6-terra"}),
+    ] {
+        let mut request = json!({"harnessId":"codex-basic","familyId":family});
+        request
+            .as_object_mut()
+            .unwrap()
+            .extend(model_fields.as_object().unwrap().clone());
+        let refused = app
+            .clone()
+            .oneshot(cookie_request(
+                "POST",
+                "/api/model-selection/validate",
+                Some(request),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(refused.status(), StatusCode::UNPROCESSABLE_ENTITY);
+        let refused = response_json(refused).await;
+        assert_eq!(refused["code"], "model_unavailable");
+        assert!(refused["error"].as_str().unwrap().contains("orchestrator"));
+    }
+}
+
+#[tokio::test]
 async fn default_selection_uses_family_and_member_order_not_harness_preference() {
     let temporary = tempfile::Builder::new()
         .prefix("relayer-model-order-")
@@ -69,7 +306,7 @@ async fn default_selection_uses_family_and_member_order_not_harness_preference()
                 Some(json!({
                     "name": "First family",
                     "members": [
-                        { "providerId": "codex", "modelId": "gpt-5.6-sol" },
+                        { "providerId": "codex", "modelId": "gpt-5.6-sol", "roles": [{ "name": "orchestrator" }] },
                         { "providerId": "codex", "modelId": "gpt-5.6-terra" }
                     ]
                 })),
@@ -193,7 +430,7 @@ async fn model_catalog_families_defaults_and_selection_are_typed_and_durable() {
             Some(json!({
                 "name": "Focused",
                 "members": [
-                    { "providerId": "codex", "modelId": "gpt-5.6-sol" },
+                    { "providerId": "codex", "modelId": "gpt-5.6-sol", "roles": [{ "name": "orchestrator" }] },
                     { "providerId": "codex", "modelId": "gpt-5.6-terra" }
                 ]
             })),
@@ -212,7 +449,7 @@ async fn model_catalog_families_defaults_and_selection_are_typed_and_durable() {
             "/api/model-families",
             Some(json!({
                 "name": "focused",
-                "members": [{ "providerId": "codex", "modelId": "gpt-5.6-sol" }]
+                "members": [{ "providerId": "codex", "modelId": "gpt-5.6-sol", "roles": [{ "name": "orchestrator" }] }]
             })),
         ))
         .await
@@ -231,7 +468,7 @@ async fn model_catalog_families_defaults_and_selection_are_typed_and_durable() {
             Some(json!({
                 "name": "Duplicate",
                 "members": [
-                    { "providerId": "codex", "modelId": "gpt-5.6-sol" },
+                    { "providerId": "codex", "modelId": "gpt-5.6-sol", "roles": [{ "name": "orchestrator" }] },
                     { "providerId": "codex", "modelId": "gpt-5.6-sol" }
                 ]
             })),
@@ -273,7 +510,7 @@ async fn model_catalog_families_defaults_and_selection_are_typed_and_durable() {
             Some(json!({
                 "name": "Changed",
                 "enabled": true,
-                "members": [{ "providerId": "codex", "modelId": "gpt-5.6-sol" }]
+                "members": [{ "providerId": "codex", "modelId": "gpt-5.6-sol", "roles": [{ "name": "orchestrator" }] }]
             })),
         ))
         .await
@@ -364,9 +601,10 @@ async fn model_catalog_families_defaults_and_selection_are_typed_and_durable() {
         ))
         .await
         .unwrap();
+    assert_eq!(outside_harness_subset.status(), StatusCode::OK);
     assert_eq!(
-        response_json(outside_harness_subset).await["code"],
-        "harness_model_incompatible"
+        response_json(outside_harness_subset).await["modelId"],
+        "gpt-5.6-sol"
     );
 
     let defaults = app
@@ -822,7 +1060,7 @@ async fn a_default_family_without_eligible_models_needs_model_setup_until_a_refr
             Some(json!({
                 "name": "hidden",
                 "enabled": false,
-                "members": [{ "providerId": "codex", "modelId": "gpt-5.6-sol" }],
+                "members": [{ "providerId": "codex", "modelId": "gpt-5.6-sol", "roles": [{ "name": "orchestrator" }] }],
             })),
         )
         .await,
@@ -1136,7 +1374,7 @@ async fn a_disabled_managed_family_stays_disabled_through_a_zero_eligible_refres
             "/api/model-families",
             Some(json!({
                 "name": "short-lived",
-                "members": [{ "providerId": "codex", "modelId": "gpt-5.6-sol" }],
+                "members": [{ "providerId": "codex", "modelId": "gpt-5.6-sol", "roles": [{ "name": "orchestrator" }] }],
             })),
         )
         .await,

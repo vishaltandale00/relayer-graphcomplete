@@ -59,6 +59,7 @@ fn sign_admission(body: &Value) -> Value {
         serde_json::from_value(body["modelPlan"].clone()).unwrap();
     let admit =
         |route: &crate::product::ExecutionModelRoute| crate::product::AdmittedExecutionModelRoute {
+            roles: route.roles.clone(),
             provider_id: route.provider_id.clone(),
             adapter_id: route.adapter_id.clone(),
             access_contract: route.access_contract.clone(),
@@ -66,6 +67,7 @@ fn sign_admission(body: &Value) -> Value {
             adapter_implementation_version: "1".into(),
         };
     let mut admitted = crate::product::AdmittedExecutionModelPlan {
+        schema_version: plan.schema_version,
         family_id: plan.family_id,
         family_revision: plan.family_revision,
         orchestrator: admit(&plan.orchestrator),
@@ -202,6 +204,7 @@ impl World {
         let product = ProductService::new(SqliteProductStore::open(&database).await.unwrap(), true);
         let thread = product
             .create_thread(CreateThreadCommand {
+                required_provider_adapter_id: None,
                 icon_selection_eligible: true,
                 title: None,
                 project_id: None,
@@ -377,7 +380,7 @@ impl World {
                 "INSERT INTO provider_models(provider_id,model_id,label,provider_order,visible,available,provider_default,metadata_json) VALUES ('codex','test-model','Test model',0,1,1,1,'{}')",
                 "UPDATE product_harnesses SET available=1,unavailable_reason_code=NULL,unavailable_reason_message=NULL WHERE configuration_name='codex-basic'",
                 "INSERT INTO model_families(id,name,kind,system_key,enabled,position) VALUES (1,'Codex','system','codex',1,0)",
-                "INSERT INTO model_family_members(family_id,position,provider_id,model_id) VALUES (1,0,'codex','test-model')",
+                "INSERT INTO model_family_members(family_id,position,provider_id,model_id,roles_json) VALUES (1,0,'codex','test-model',json_array(json_object('name','orchestrator')))",
             ] {
                 sqlx::query(statement).execute(&pool).await.unwrap();
             }

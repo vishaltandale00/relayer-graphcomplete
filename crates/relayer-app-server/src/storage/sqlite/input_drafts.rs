@@ -292,6 +292,7 @@ mod tests {
         let store = SqliteProductStore::open(&path).await.unwrap();
         let thread = store
             .insert_thread_with_initial_interaction(NewThreadRecord {
+                required_provider_adapter_id: None,
                 icon_selection_eligible: true,
                 title: "Inputs",
                 project_id: None,
@@ -392,6 +393,7 @@ mod tests {
             .unwrap();
         let thread = store
             .insert_thread_with_initial_interaction(NewThreadRecord {
+                required_provider_adapter_id: None,
                 icon_selection_eligible: true,
                 title: "Restore identical input",
                 project_id: None,
@@ -508,6 +510,7 @@ mod tests {
             .unwrap();
         let thread = store
             .insert_thread_with_initial_interaction(NewThreadRecord {
+                required_provider_adapter_id: None,
                 icon_selection_eligible: true,
                 title: "Crash safe input",
                 project_id: None,

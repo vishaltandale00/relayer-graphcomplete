@@ -18,6 +18,78 @@ mod tests {
     use std::borrow::Cow;
 
     #[tokio::test]
+    async fn schema_42_roles_backfill_family_order_without_rewriting_history() {
+        let file = tempfile::NamedTempFile::new().unwrap();
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect(&format!("sqlite://{}", file.path().display()))
+            .await
+            .unwrap();
+        Migrator {
+            migrations: Cow::Owned(
+                MIGRATOR
+                    .iter()
+                    .filter(|m| m.version < 43)
+                    .cloned()
+                    .collect(),
+            ),
+            ..Migrator::DEFAULT
+        }
+        .run(&pool)
+        .await
+        .unwrap();
+        for statement in [
+            "UPDATE model_providers SET connected=1,unavailable_reason_code=NULL,unavailable_reason_message=NULL WHERE id='codex'",
+            "INSERT INTO provider_models(provider_id,model_id,label,provider_order,visible,available,provider_default) VALUES ('codex','offline','Offline',0,1,0,1),('codex','ready','Ready',1,1,1,0)",
+            "INSERT INTO model_families(id,name,kind,enabled,position,revision) VALUES (17,'Existing','custom',1,0,4)",
+            "INSERT INTO model_family_members(family_id,position,provider_id,model_id) VALUES (17,0,'codex','offline'),(17,1,'codex','ready')",
+            "UPDATE product_model_preferences SET default_family_id=17",
+            "INSERT INTO threads(id,title,created_at,updated_at,harness_configuration_name,permission_profile_id) VALUES (1,'Historical','1','1','codex-basic','auto')",
+            "INSERT INTO interactions(id,thread_id,sequence,text,created_at,graph_node_id,completion_status,permission_profile_id,model_provider_id,provider_model_id,model_family_id) VALUES (1,1,1,'Historical','1',42,'accepted','auto','codex','offline',17)",
+        ] {
+            sqlx::query(statement).execute(&pool).await.unwrap();
+        }
+        pool.close().await;
+        for _ in 0..2 {
+            let store = SqliteProductStore::open(file.path()).await.unwrap();
+            let members: Vec<(String,String)> = sqlx::query_as("SELECT model_id,roles_json FROM model_family_members WHERE family_id=17 ORDER BY position").fetch_all(&store.pool).await.unwrap();
+            assert_eq!(
+                members,
+                vec![
+                    ("offline".into(), r#"[{"name":"orchestrator"}]"#.into()),
+                    ("ready".into(), "[]".into())
+                ]
+            );
+            assert_eq!(
+                sqlx::query_scalar::<_, i64>("SELECT revision FROM model_families WHERE id=17")
+                    .fetch_one(&store.pool)
+                    .await
+                    .unwrap(),
+                5
+            );
+            assert_eq!(
+                sqlx::query_scalar::<_, i64>(
+                    "SELECT default_family_id FROM product_model_preferences"
+                )
+                .fetch_one(&store.pool)
+                .await
+                .unwrap(),
+                17
+            );
+            assert_eq!(
+                sqlx::query_scalar::<_, String>(
+                    "SELECT provider_model_id FROM interactions WHERE id=1"
+                )
+                .fetch_one(&store.pool)
+                .await
+                .unwrap(),
+                "offline"
+            );
+            store.pool.close().await;
+        }
+    }
+
+    #[tokio::test]
     async fn schema_39_thread_icons_never_backfill_legacy_threads() {
         let temporary = tempfile::tempdir().unwrap();
         let file = tempfile::NamedTempFile::new_in(temporary.path()).unwrap();
@@ -57,7 +129,7 @@ mod tests {
         .fetch_all(&store.pool)
         .await
         .unwrap();
-        assert_eq!(versions, [40, 41, 42]);
+        assert_eq!(versions, [40, 41, 42, 43]);
         assert!(
             store
                 .recover_interaction_accepted(
@@ -181,6 +253,7 @@ mod tests {
         }
         let new_thread = store
             .insert_thread_with_initial_interaction(crate::storage::NewThreadRecord {
+                required_provider_adapter_id: None,
                 icon_selection_eligible: true,
                 title: "Current",
                 project_id: None,
@@ -357,6 +430,7 @@ mod tests {
         );
         let upgraded_thread_turn = store
             .insert_thread_with_initial_interaction(crate::storage::NewThreadRecord {
+                required_provider_adapter_id: None,
                 icon_selection_eligible: true,
                 title: "After upgrade",
                 project_id: None,

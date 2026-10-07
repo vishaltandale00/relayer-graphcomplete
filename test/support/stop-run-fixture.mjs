@@ -178,7 +178,7 @@ export async function stopRunFixture() {
   await product.seedProviderCatalog({ providerId: "fixture-openai", adapterId: "openai-api", adapterImplementationVersion: "2", accessContract: "secret@1", label: "Deterministic provider", connected: true,
     models: [{ id: "gpt-fixture", label: "Fixture", order: 0, visible: true, available: true, providerDefault: true, metadata: {} }],
   });
-  const family = await request("/api/model-families", { method: "POST", body: JSON.stringify({ name: "Deterministic models", enabled: true, members: [{ providerId: "fixture-openai", modelId: "gpt-fixture" }] }) });
+  const family = await request("/api/model-families", { method: "POST", body: JSON.stringify({ name: "Deterministic models", enabled: true, members: [{ providerId: "fixture-openai", modelId: "gpt-fixture", roles: [{ name: "orchestrator" }] }] }) });
   const modelSelection = { familyId: family.id, providerId: "fixture-openai", modelId: "gpt-fixture" };
   return { directory, get session() { return session; }, runtimeSession, runtime, get product() { return product; }, controls, request, modelSelection,
     async restartProduct() {

@@ -106,7 +106,10 @@ try {
   page.on("pageerror", (error) => pageErrors.push(error.message));
   await page.goto(host.url);
   await page.locator("#emptyNewRun").click();
-  await page.locator('input[name="cases"]').first().waitFor();
+  await page.locator('input[name="cases"]').first().waitFor().catch(async (error) => {
+    console.error("Case picker diagnostic", JSON.stringify({ pageErrors, body: await page.locator("body").innerText() }));
+    throw error;
+  });
   const catalog = await rpc(host.url, "catalog", []);
   if (process.env.RELAYER_EVAL_REQUIRE_EXTERNAL_CATALOG === "1") {
     assert.ok(catalog.suites.length > 0, "configured external catalog exposes a suite");
@@ -300,6 +303,14 @@ try {
     models: [{ id: "fixture-model", label: "Fixture model", order: 0, visible: true, available: true, providerDefault: true, metadata: {} }],
     systemFamily: { key: "codex", name: "Fixture Codex", modelIds: ["fixture-model"] },
   });
+  // Settings proved a different family. Explicitly select this execution fixture;
+  // family-only resolution must never fall back from that saved default.
+  const controlHeaders = { Cookie: `${productSession.cookie.name}=${productSession.cookie.value}` };
+  const fixtureSettings = await (await fetch(new URL("/api/model-settings", productSession.origin), { headers: controlHeaders })).json();
+  const fixtureFamily = fixtureSettings.families.find((family) => family.members.some((member) => member.providerId === "codex" && member.roles.some((role) => role.name === "orchestrator")));
+  assert.ok(fixtureFamily);
+  const fixtureDefaults = await fetch(new URL("/api/model-settings/defaults", productSession.origin), { method: "PUT", headers: { ...controlHeaders, "Content-Type": "application/json" }, body: JSON.stringify({ familyId: fixtureFamily.id, harnessId: "fixture-task-system", providerId: "codex" }) });
+  assert.equal(fixtureDefaults.status, 200);
   const humanProof = await proveHumanTask({ browser, service, productSession, data });
   await proveTaskActor({ browser, service, productSession, data });
   await proveTaskActorInputs({ browser, service, productSession, data });
@@ -453,6 +464,7 @@ async function proveProductionSettings({ browser, product, productSession, runti
   await page.locator("#newModelFamily").click();
   await page.locator("#familyNameInput").fill("My eval models");
   assert.equal(await page.locator('[data-member-model="0"]').inputValue(), "fixture-model");
+  await page.locator('[data-member-orchestrator="0"]').check();
   await page.locator("#saveFamilyEdit").click();
   await until(async () => (await productSettings()).families.some((family) => family.name === "My eval models"), "custom family persisted through production API");
   const customFamily = (await productSettings()).families.find((family) => family.name === "My eval models");
@@ -1178,7 +1190,8 @@ async function proveHumanTask({ browser, service, productSession, data }) {
   await dashboard.goto(host.url);
   // Keep a completed run polling while Human Grader is open, as in the child host.
   const run = await service.createRun(selection);
-  await until(() => service.getRun(run.id).status === "passed", "shared dashboard completed run");
+  const sharedRun = await until(() => { const value = service.getRun(run.id); return ["passed", "failed", "error", "interrupted"].includes(value.status) ? value : null; }, "shared dashboard completed run").catch((error) => { console.error(JSON.stringify(service.getRun(run.id))); throw error; });
+  assert.equal(sharedRun.status, "passed", JSON.stringify(sharedRun));
   try {
     // Human task slice: the production composer remains writable under separate
     // scope; evidence is captured without paid inference or an alternate renderer.
@@ -1217,7 +1230,7 @@ async function proveHumanTask({ browser, service, productSession, data }) {
     const modelValidation = await humanPage.evaluate(async (selection) => {
       const response = await fetch("/api/model-selection/validate", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ harnessId: "fixture-task-system", ...selection }) });
       return { status: response.status, body: await response.json() };
-    }, pinnedModel);
+    }, { familyId: pinnedModel.familyId });
     assert.equal(modelValidation.status, 200, "validation must reach the product resolver with scoped control authority: " + JSON.stringify(modelValidation));
     await humanPage.locator(".graph-node").first().click();
     await humanPage.locator("#annotationComment").fill("This node helped me understand the task.");

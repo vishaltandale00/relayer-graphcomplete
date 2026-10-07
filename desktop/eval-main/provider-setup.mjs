@@ -224,9 +224,9 @@ export function createEvalProviderSetup({ userDataDirectory, productServer, prod
         } else await composition.modelCatalog.refresh("eval-openrouter", "explicit");
         const settings = await request("/api/model-settings");
         const name = "Eval Prime pinned models";
-        const members = profile.modelIds.map((modelId) => ({ providerId: "eval-openrouter", modelId }));
+        const members = profile.modelIds.map((modelId, index) => ({ providerId: "eval-openrouter", modelId, roles: index === 0 ? [{ name: "orchestrator" }] : [] }));
         const existing = settings.families?.find((family) => family.name === name);
-        if (existing && JSON.stringify(existing.members.map(({ providerId, modelId }) => ({ providerId, modelId }))) !== JSON.stringify(members)) {
+        if (existing && JSON.stringify(existing.members.map(({ providerId, modelId, roles }) => ({ providerId, modelId, roles }))) !== JSON.stringify(members)) {
           throw new Error("The existing Prime model family differs from the requested profile.");
         }
         const family = existing ?? await request("/api/model-families", { method: "POST", body: { name, enabled: true, members } });

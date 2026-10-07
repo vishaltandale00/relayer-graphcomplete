@@ -591,6 +591,7 @@ async function recordBrowserFlow(url, directory, profile) {
       await caption("2 · Confirm a compatible harness and explicitly create a family");
       await click('[data-onboarding-family-kind="create"]');
       await click('[data-onboarding-member-model="gpt-5.2-mini"]');
+      await click('[data-onboarding-orchestrator-model="gpt-5.2-mini"]');
       await click("#finishProviderSetup");
       await waitFor(`(() => {
         const accountStep = document.querySelector('#desktopAccountOnboarding');
@@ -702,7 +703,7 @@ async function recordBrowserFlow(url, directory, profile) {
       await waitFor(`(() => {
         const picker = document.querySelector('[data-model-picker="new"]');
         return picker?.querySelector('[data-model-family]')?.value === '21'
-          && picker.querySelector('[data-model-option][data-provider-id="openai-work"][data-model-id="gpt-5.2-mini"]')?.getAttribute('aria-checked') === 'true';
+          && picker.querySelector('[data-model-picker-label]')?.textContent === 'OpenAI Work default';
       })()`, "onboarded family available in chat before opening Settings");
 
       await caption("5 · Add and sign out a managed subscription");
@@ -740,23 +741,15 @@ async function recordBrowserFlow(url, directory, profile) {
       await click('[data-model-picker="ongoing"] [data-model-picker-trigger]');
       await waitFor(`(() => {
         const picker = document.querySelector('[data-model-picker="ongoing"]');
-        return picker?.querySelector('[data-model-picker-label]')?.textContent === 'Choose model'
-          && picker.querySelector('[data-model-family]')
-          && [...picker.querySelectorAll('[data-model-option]')].every((option) => option.getAttribute('aria-checked') === 'false');
-      })()`, "invalid prior family requires explicit model choice", 8_000, `(() => {
-        const picker = document.querySelector('[data-model-picker="ongoing"]');
-        return {
-          label: picker?.querySelector('[data-model-picker-label]')?.textContent,
-          family: picker?.querySelector('[data-model-family]')?.value,
-          options: [...(picker?.querySelectorAll('[data-model-option]') ?? [])].map((option) => ({
-            providerId: option.dataset.providerId,
-            modelId: option.dataset.modelId,
-            checked: option.getAttribute('aria-checked'),
-          })),
-        };
+        return picker?.querySelector('[data-model-picker-label]')?.textContent === 'Choose family'
+          && picker.querySelector('[data-model-family]');
+      })()`, "invalid prior family requires explicit family choice");
+      await evaluate(`(() => {
+        const family = document.querySelector('[data-model-picker="ongoing"] [data-model-family]');
+        family.value = '11';
+        family.dispatchEvent(new Event('change', { bubbles: true }));
       })()`);
-      await click('[data-model-picker="ongoing"] [data-model-option][data-provider-id="codex"][data-model-id="gpt-5.6-sol"]');
-      await waitFor("document.querySelector('[data-model-picker=\"ongoing\"] [data-model-option][data-provider-id=\"codex\"][data-model-id=\"gpt-5.6-sol\"]')?.getAttribute('aria-checked') === 'true'", "explicit retry model selection");
+      await waitFor("document.querySelector('[data-model-picker=\"ongoing\"] [data-model-picker-label]')?.textContent === 'Work coding'", "explicit retry family selection");
       await click("#sendInteraction");
       await waitFor("document.querySelector('#composerRetryMessage').classList.contains('hidden') && document.querySelector('#threadPrompt').value === ''", "same-turn retry submission");
       await caption("Complete · The retry was admitted without creating a new turn");
@@ -842,8 +835,8 @@ const modelSettings = (scene) => ({
       position: 0,
       revision: 3,
       members: [
-        { providerId: "openai-work", modelId: "gpt-5.2", position: 0 },
-        { providerId: "codex", modelId: "gpt-5.6-sol", position: 1 },
+        { providerId: "openai-work", modelId: "gpt-5.2", position: 0, roles: [{ name: "orchestrator" }] },
+        { providerId: "codex", modelId: "gpt-5.6-sol", position: 1, roles: [] },
       ],
     },
     {
@@ -853,7 +846,7 @@ const modelSettings = (scene) => ({
       enabled: true,
       position: 1,
       revision: 1,
-      members: [{ providerId: "openai-work", modelId: "gpt-5.2-mini", position: 0 }],
+      members: [{ providerId: "openai-work", modelId: "gpt-5.2-mini", position: 0, roles: [{ name: "orchestrator" }] }],
     },
     ...(scene === "flow" && flowState.family ? [flowState.family] : []),
   ],
@@ -1321,10 +1314,9 @@ try {
       join(browserProfile, "interactive-flow"),
     );
     if (motionFrameCount < 60) throw new Error(`Interactive evidence recording is unexpectedly short (${motionFrameCount} frames).`);
-    if (flowState.retryRequest?.modelSelection?.providerId !== "codex"
-      || flowState.retryRequest?.modelSelection?.modelId !== "gpt-5.6-sol"
+    if (JSON.stringify(flowState.retryRequest?.modelSelection) !== JSON.stringify({ familyId: 11 })
       || !flowState.retryRequest?.text?.includes("verify retry safety")) {
-      throw new Error(`Interactive retry did not preserve the edited prompt and explicit model selection: ${JSON.stringify(flowState.retryRequest)}`);
+      throw new Error(`Interactive retry did not preserve the edited prompt and explicit family selection: ${JSON.stringify(flowState.retryRequest)}`);
     }
   }
   if (requestedScene) {

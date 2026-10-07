@@ -1,5 +1,5 @@
 use super::{SqliteProductStore, catalog};
-use crate::product::{InteractionId, ProjectId, Thread, ThreadId, ValidateModelSelectionCommand};
+use crate::product::{InteractionId, ProjectId, Thread, ThreadId};
 use crate::storage::{NewThreadRecord, StorageError};
 use sqlx::{Row, SqliteConnection, sqlite::SqliteRow};
 
@@ -112,6 +112,23 @@ impl SqliteProductStore {
         checkout_context: Option<&str>,
         creation_request: Option<(&str, &str)>,
     ) -> Result<(Thread, bool), StorageError> {
+        if record
+            .required_provider_adapter_id
+            .is_some_and(|id| id != "codex-subscription")
+        {
+            return Err(crate::product::CatalogError::invalid(
+                "execution_constraint_invalid",
+                "The required provider adapter is unsupported.",
+            )
+            .into());
+        }
+        if record.required_provider_adapter_id.is_some() && record.model_selection.is_none() {
+            return Err(crate::product::CatalogError::invalid(
+                "execution_constraint_requires_route",
+                "A constrained task requires a product family route.",
+            )
+            .into());
+        }
         let mut transaction = self.pool.begin_with("BEGIN IMMEDIATE").await?;
         if let Some((request_id, payload)) = creation_request
             && let Some(row) = sqlx::query(
@@ -134,15 +151,28 @@ impl SqliteProductStore {
             return Ok((thread, false));
         }
 
-        if let Some(selection) = record.model_selection {
-            let command = ValidateModelSelectionCommand {
-                harness_id: record.harness_configuration_name.to_owned(),
-                family_id: selection.family_id,
-                provider_id: selection.provider_id.clone(),
-                model_id: selection.model_id.clone(),
-            };
-            catalog::validate_model_selection_on(&mut transaction, &command).await?;
-        }
+        let resolved_model_selection = match record.model_selection {
+            Some(selection) => {
+                let (_, route) = catalog::resolve_execution_model_plan_on(
+                    &mut transaction,
+                    record.harness_configuration_name,
+                    selection,
+                )
+                .await?;
+                if record
+                    .required_provider_adapter_id
+                    .is_some_and(|required| required != route.adapter_id)
+                {
+                    return Err(crate::product::CatalogError::invalid("execution_provider_not_authorized", "This task requires the Codex subscription; API spending is not authorized.").into());
+                }
+                Some(crate::product::InteractionModelSelection {
+                    family_id: route.family_id,
+                    provider_id: route.provider_id,
+                    model_id: route.model_id,
+                })
+            }
+            None => None,
+        };
         let thread = sqlx::query(
             "INSERT INTO threads(title,project_id,created_at,updated_at,harness_configuration_name,permission_profile_id,personal_presentation_version_key,working_directory,checkout_context_json,icon_selection_eligible) VALUES (?1,?2,?3,?3,?4,?5,?6,COALESCE(?7,(SELECT path FROM projects WHERE id=?2)),?8,?9)",
         )
@@ -158,6 +188,11 @@ impl SqliteProductStore {
         .execute(&mut *transaction)
         .await?;
         let thread_id = ThreadId::from_database(thread.last_insert_rowid());
+        if let Some(required) = record.required_provider_adapter_id {
+            sqlx::query("INSERT INTO thread_execution_constraints(thread_id,required_provider_adapter_id) VALUES (?1,?2)")
+                .bind(thread_id.value()).bind(required).execute(&mut *transaction).await?;
+        }
+
         sqlx::query(
             "INSERT INTO interactions(thread_id,sequence,text,created_at,permission_profile_id,model_provider_id,provider_model_id,model_family_id) VALUES (?1,1,?2,?3,?4,?5,?6,?7)",
         )
@@ -165,9 +200,9 @@ impl SqliteProductStore {
         .bind(record.initial_message)
         .bind(record.timestamp)
         .bind(record.permission_profile_id)
-        .bind(record.model_selection.map(|selection| selection.provider_id.as_str()))
-        .bind(record.model_selection.map(|selection| selection.model_id.as_str()))
-        .bind(record.model_selection.map(|selection| selection.family_id.value()))
+        .bind(resolved_model_selection.as_ref().map(|selection| selection.provider_id.as_str()))
+        .bind(resolved_model_selection.as_ref().map(|selection| selection.model_id.as_str()))
+        .bind(resolved_model_selection.as_ref().map(|selection| selection.family_id.value()))
         .execute(&mut *transaction)
         .await?;
         if let Some((request_id, payload)) = creation_request {
@@ -288,6 +323,7 @@ mod icon_tests {
     async fn create(store: &SqliteProductStore, eligible: bool) -> Thread {
         store
             .insert_thread_with_initial_interaction(NewThreadRecord {
+                required_provider_adapter_id: None,
                 icon_selection_eligible: eligible,
                 title: "Learn Rust",
                 project_id: None,
@@ -444,6 +480,7 @@ mod tests {
         for project_id in [None, Some(project.id)] {
             let thread = store
                 .insert_thread_with_initial_interaction(NewThreadRecord {
+                    required_provider_adapter_id: None,
                     icon_selection_eligible: true,
                     title: "Archive fixture",
                     project_id,
@@ -543,6 +580,7 @@ mod tests {
             .unwrap();
         let thread = store
             .insert_thread_with_initial_interaction(NewThreadRecord {
+                required_provider_adapter_id: None,
                 icon_selection_eligible: true,
                 title: "Race fixture",
                 project_id: None,
@@ -664,6 +702,7 @@ mod tests {
             .unwrap();
         let thread = store
             .insert_thread_with_initial_interaction(NewThreadRecord {
+                required_provider_adapter_id: None,
                 icon_selection_eligible: true,
                 title: "Thread",
                 project_id: None,

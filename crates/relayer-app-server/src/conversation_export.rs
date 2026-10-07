@@ -271,8 +271,26 @@ pub struct ExportCompletionReceipt {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ExportModelRole {
+    pub name: String,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "crate::product::deserialize_present_optional"
+    )]
+    pub description: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ExportAdmittedExecutionModelRoute {
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "crate::product::deserialize_present_optional"
+    )]
+    pub roles: Option<Vec<ExportModelRole>>,
     pub provider_id: String,
     pub adapter_id: String,
     pub access_contract: String,
@@ -283,6 +301,11 @@ pub struct ExportAdmittedExecutionModelRoute {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ExportAdmittedExecutionModelPlan {
+    #[serde(
+        default = "crate::product::legacy_plan_version",
+        skip_serializing_if = "crate::product::is_legacy_plan_version"
+    )]
+    pub schema_version: u32,
     pub family_id: i64,
     pub family_revision: i64,
     pub orchestrator: ExportAdmittedExecutionModelRoute,
@@ -294,6 +317,8 @@ pub struct ExportAdmittedExecutionModelPlan {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct UnsignedExportAdmittedExecutionModelPlan<'a> {
+    #[serde(skip_serializing_if = "crate::product::is_legacy_plan_version")]
+    schema_version: u32,
     family_id: i64,
     family_revision: i64,
     orchestrator: &'a ExportAdmittedExecutionModelRoute,
@@ -305,6 +330,7 @@ pub fn admitted_model_plan_digest(
     plan: &ExportAdmittedExecutionModelPlan,
 ) -> Result<String, serde_json::Error> {
     let unsigned = UnsignedExportAdmittedExecutionModelPlan {
+        schema_version: plan.schema_version,
         family_id: plan.family_id,
         family_revision: plan.family_revision,
         orchestrator: &plan.orchestrator,
@@ -312,8 +338,13 @@ pub fn admitted_model_plan_digest(
         harness_policy_digest: &plan.harness_policy_digest,
     };
     let mut hasher = Sha256::new();
-    hasher.update(b"relayer.harness-model-plan.v1\0");
-    hasher.update(serde_json::to_vec(&unsigned)?);
+    if plan.schema_version == 1 {
+        hasher.update(b"relayer.harness-model-plan.v1\0");
+        hasher.update(serde_json::to_vec(&unsigned)?);
+    } else {
+        hasher.update(b"relayer.harness-model-plan.v2\0");
+        hasher.update(serde_json::to_vec(&unsigned)?);
+    }
     Ok(format!("sha256:{:x}", hasher.finalize()))
 }
 
@@ -1797,6 +1828,49 @@ fn validate_turn(
                 "admitted_model_plan_digest_mismatch",
                 format!("{path}.completion.admittedModelPlan.digest"),
                 "Admitted model plan digest does not match its immutable snapshot.",
+            ));
+        }
+        let roles_valid = match plan.schema_version {
+            1 => {
+                plan.orchestrator.roles.is_none()
+                    && plan.roster.iter().all(|route| route.roles.is_none())
+            }
+            2 => {
+                let all_valid =
+                    std::iter::once(&plan.orchestrator)
+                        .chain(&plan.roster)
+                        .all(|route| {
+                            route.roles.as_ref().is_some_and(|roles| {
+                                crate::product::validate_roles(
+                                    &roles
+                                        .iter()
+                                        .map(|role| crate::product::ModelFamilyRole {
+                                            name: role.name.clone(),
+                                            description: role.description.clone(),
+                                        })
+                                        .collect::<Vec<_>>(),
+                                )
+                                .is_ok()
+                            })
+                        });
+                let orchestrators = plan
+                    .roster
+                    .iter()
+                    .filter(|route| {
+                        route.roles.as_ref().is_some_and(|roles| {
+                            roles.iter().any(|role| role.name == "orchestrator")
+                        })
+                    })
+                    .collect::<Vec<_>>();
+                all_valid && orchestrators.len() == 1 && orchestrators[0] == &plan.orchestrator
+            }
+            _ => false,
+        };
+        if !roles_valid {
+            return Err(ExportValidationError::new(
+                "admitted_model_plan_roles_invalid",
+                format!("{path}.completion.admittedModelPlan"),
+                "Model-plan version and role membership must agree with exactly one designated orchestrator.",
             ));
         }
         if !plan.roster.contains(&plan.orchestrator) {

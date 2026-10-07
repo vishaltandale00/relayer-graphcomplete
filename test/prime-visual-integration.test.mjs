@@ -43,7 +43,7 @@ it.each(["prime-agent-basic", "prime-agent-deep"])("%s accepts Python authored a
       models: [{ id: 'fixture-model', label: 'Fixture', order: 0, visible: true, available: true, providerDefault: true, metadata: {} }],
       systemFamily: { key: 'fixture', name: 'Fixture', modelIds: ['fixture-model'] },
     });
-    const family = await request(session, '/api/model-families', { method: 'POST', body: JSON.stringify({ name: 'Fixture', enabled: true, members: [{ providerId: 'openai-work', modelId: 'fixture-model' }] }) });
+    const family = await request(session, '/api/model-families', { method: 'POST', body: JSON.stringify({ name: 'Fixture', enabled: true, members: [{ providerId: 'openai-work', modelId: 'fixture-model', roles: [{ name: "orchestrator" }] }] }) });
     const thread = await request(session, '/api/threads', { method: 'POST', body: JSON.stringify({ title: 'Prime visual proof', initialMessage: 'Show a visual answer', permissionProfileId: 'full', harnessId: harnessId, modelSelection: { familyId: family.id, providerId: 'openai-work', modelId: 'fixture-model' } }) });
     let detail;
     for (let attempt = 0; attempt < 200; attempt++) {

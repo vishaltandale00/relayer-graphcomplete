@@ -157,9 +157,9 @@ describe("provider and harness renderer markup", () => {
   it("separates existing, managed, and custom family choices without silently checking a model", () => {
     const harness = {
       label: "Universal",
-      existingCustomFamilies: [{ id: 12, name: "Work", members: [{ providerId: "work", modelId: "large" }] }],
+      existingCustomFamilies: [{ id: 12, name: "Work", members: [{ providerId: "work", modelId: "large", roles: [{ name: "orchestrator" }] }] }],
       existingManagedFamilies: [],
-      managedFamilyCandidate: { name: "Provider defaults", members: [{ providerId: "work", modelId: "large" }] },
+      managedFamilyCandidate: { name: "Provider defaults", members: [{ providerId: "work", modelId: "large", roles: [{ name: "orchestrator" }] }] },
       eligibleModels: [
         { providerId: "work", modelId: "large", label: "Large" },
         { providerId: "work", modelId: "small", label: "Small" },
@@ -282,7 +282,7 @@ describe("provider and harness renderer markup", () => {
         id: 1,
         name: "Codex models",
         enabled: true,
-        members: [{ providerId: "codex-work", modelId: "gpt-5.6", position: 0 }],
+        members: [{ providerId: "codex-work", modelId: "gpt-5.6", position: 0, roles: [{ name: "orchestrator" }] }],
       }],
       harnesses: [{
         id: "codex-basic",

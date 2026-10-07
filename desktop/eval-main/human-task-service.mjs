@@ -190,6 +190,7 @@ export class HumanTaskService {
     });
   }
   async startThread(session, { signal } = {}) {
+    await abortable(signal, () => this.evalService.assertHumanTaskExecution?.(session.prepared));
     if (session.completions >= session.maxCompletions) throw failure("Completion limit reached.", 409);
     // Reserve durably before calling a product API; an ambiguous transport failure
     // never refunds authority or silently replays a possibly started completion.
@@ -200,7 +201,15 @@ export class HumanTaskService {
       session.completions--; submission.outcome = "cancelled_before_dispatch";
       await this.persist(); signal.throwIfAborted();
     }
-    const thread = await this.evalService.createHumanTaskThread(session.prepared, session.step, { signal });
+    let thread;
+    try { thread = await this.evalService.createHumanTaskThread(session.prepared, session.step, { signal }); }
+    catch (error) {
+      if (error.code === "eval_execution_not_authorized") {
+        session.completions--; submission.outcome = "refused_before_dispatch";
+        await this.persist();
+      }
+      throw error;
+    }
     submission.interactionId = thread.rootInteractionId;
     submission.threadId = thread.id;
     session.threadIds.push(thread.id);
@@ -216,6 +225,7 @@ export class HumanTaskService {
       if (session.step + 1 >= session.prepared.plan.length) throw failure("No further case step.");
       await this.settled(session, { signal });
       if (session.completions >= session.maxCompletions) throw failure("Completion limit reached.", 409);
+      await abortable(signal, () => this.evalService.assertHumanTaskExecution?.(session.prepared));
       const checks = await abortable(signal, () => this.evalService.gradeHumanTaskStep(session.prepared, session.step, { signal }));
       signal?.throwIfAborted();
       const previousStep = session.step;
@@ -224,7 +234,7 @@ export class HumanTaskService {
       session.step++;
       try { await this.startThread(session, { signal }); }
       catch (error) {
-        if (session.events.at(-1)?.outcome === "cancelled_before_dispatch") {
+        if (error.code === "eval_execution_not_authorized" || ["cancelled_before_dispatch", "refused_before_dispatch"].includes(session.events.at(-1)?.outcome)) {
           session.step = previousStep; session.stepChecks.length = previousChecks;
           await this.persist(); throw error;
         }
@@ -245,7 +255,7 @@ export class HumanTaskService {
       if (method === "POST" && pathname === "/api/model-selection/validate") {
         const selected = session.prepared.execution.modelResolution?.selectedModel;
         if (body?.harnessId && body.harnessId !== session.prepared.execution.harnessConfigurationName) throw failure("This task uses its starting harness.", 403);
-        if (selected && ["familyId", "providerId", "modelId"].some((key) => body?.[key] !== undefined && body[key] !== selected[key])) throw failure("This task uses its starting model.", 403);
+        if (selected && body?.familyId !== undefined && body.familyId !== selected.familyId) throw failure("This task uses its starting family.", 403);
         const response = await this.upstream(path, { method, body, signal }, true);
         return { status: response.status, contentType: response.headers.get("content-type"), bytes: await response.text() };
       }
@@ -266,14 +276,15 @@ export class HumanTaskService {
       const previousEventCount = session.events.length;
       if (starts) {
         await abortable(signal, () => this.evalService.assertHumanTaskCatalog?.(session.prepared));
+        await abortable(signal, () => this.evalService.assertHumanTaskExecution?.(session.prepared));
         if (session.completions >= session.maxCompletions) throw failure("Completion limit reached. Finish this task session.", 409);
         if (route === "/interactions" || retries) {
           const selection = session.prepared.execution.modelResolution;
           body = { ...body };
           const pinned = selection.productModelSelection && selection.selectedModel
-            ? Object.fromEntries(["familyId", "providerId", "modelId"].map((key) => [key, selection.selectedModel[key]])) : null;
+            ? { familyId: selection.selectedModel.familyId } : null;
           if (body.modelSelection && JSON.stringify(body.modelSelection) !== JSON.stringify(pinned)) {
-            if (!pinned || ["familyId", "providerId", "modelId"].some((key) => body.modelSelection[key] !== pinned[key])) throw failure("This task uses its starting model. Start another session to change models.");
+            if (!pinned || body.modelSelection.familyId !== pinned.familyId) throw failure("This task uses its starting family. Start another session to change families.");
           }
           delete body.modelSelection;
           if (pinned) body.modelSelection = pinned;

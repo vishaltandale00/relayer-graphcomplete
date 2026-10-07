@@ -7,7 +7,7 @@ import { EvalService } from "../desktop/eval-main/eval-service.mjs";
 const directories = [];
 afterEach(async () => { vi.unstubAllGlobals(); for (const directory of directories.splice(0)) await rm(directory, { recursive: true, force: true }); });
 
-it.each([false, true])("pins the human session route across case threads (configuration-owned: %s)", async (configurationOwned) => {
+it.each([false, true])("retains the human session family across case threads (configuration-owned: %s)", async (configurationOwned) => {
   const directory = await mkdtemp(join(tmpdir(), "human-model-pin-")); directories.push(directory);
   const harnessId = configurationOwned ? "codex-layered-navigation-luna" : "codex-basic";
   const first = { harnessId, familyId: 1, providerId: "work", modelId: "first" };
@@ -34,7 +34,7 @@ it.each([false, true])("pins the human session route across case threads (config
   await service.createHumanTaskThread(persisted, 1);
   expect(requests).toHaveLength(2);
   expect(requests.map(({ modelSelection }) => modelSelection)).toEqual(configurationOwned ? [undefined, undefined] : [
-    { familyId: 1, providerId: "work", modelId: "first" }, { familyId: 1, providerId: "work", modelId: "first" },
+    { familyId: 1 }, { familyId: 1 },
   ]);
   expect(selectModel).toHaveBeenCalledTimes(configurationOwned ? 0 : 1);
   expect(persisted.execution.modelResolution).toEqual(prepared.execution.pinnedModelResolution);
