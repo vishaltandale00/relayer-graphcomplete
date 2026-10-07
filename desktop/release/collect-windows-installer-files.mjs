@@ -6,6 +6,7 @@ import { join, resolve } from 'node:path';
 import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import { readInstalledWindowsMetadata } from './read-windows-install-metadata.mjs';
+const requiredPayloadFiles = ['Relayer.exe', 'resources/app.asar', 'resources/node/node.exe', 'resources/bin/relayer-app-server.exe', 'resources/bin/relayer-graph-server.exe'];
 const sha = bytes => createHash('sha256').update(bytes).digest('hex'), executeDefault = promisify(execFile);
 async function filesBelow(root, prefix = '') {
   const files = [];
@@ -20,11 +21,20 @@ export async function collectWindowsInstallerFiles({ installer, sevenZip, instal
   installedRoot = await realpath(installedRoot);
   const temporary = await mkdtemp(join(tmpdir(), 'relayer-installer-inventory-'));
   try {
-    const outer = join(temporary, 'installer'), payload = join(temporary, 'application');
+    const outer = join(temporary, 'installer');
+    let payload;
     await execute(sevenZip, ['x', installer, `-o${outer}`, '-y'], { maxBuffer: 1024 * 1024 });
-    const packages = (await filesBelow(outer)).filter(name => /(?:^|\/)app-64\.7z$/i.test(name));
-    if (packages.length !== 1) throw new Error('Installer must contain exactly one Windows x64 app-64.7z payload.');
-    await execute(sevenZip, ['x', join(outer, packages[0]), `-o${payload}`, '-y'], { maxBuffer: 1024 * 1024 });
+    const extractedFiles = await filesBelow(outer);
+    const packages = extractedFiles.filter(name => /(?:^|\/)app-64\.7z$/i.test(name));
+    // Full 7-Zip exposes the NSIS container; the pinned Windows 7za can open
+    // its embedded 7z directly. Accept either complete representation, never
+    // a mixed/partial application root or multiple competing payloads.
+    const appRootFiles = requiredPayloadFiles.filter(name => extractedFiles.includes(name));
+    if (packages.length === 0 && appRootFiles.length === requiredPayloadFiles.length) payload = outer;
+    else if (packages.length === 1 && appRootFiles.length === 0) {
+      payload = join(temporary, 'application');
+      await execute(sevenZip, ['x', join(outer, packages[0]), `-o${payload}`, '-y'], { maxBuffer: 1024 * 1024 });
+    } else throw new Error('Installer extraction must have one nested x64 payload or one complete direct application root; ambiguous or incomplete layouts fail.');
     const files = [];
     for (const name of await filesBelow(payload)) {
       const candidate = await readFile(join(payload, name)), installedPath = join(installedRoot, name);
@@ -33,7 +43,7 @@ export async function collectWindowsInstallerFiles({ installer, sevenZip, instal
       if (candidateSha256 !== installedSha256) throw new Error(`Installed file differs from exact installer payload: ${name}`);
       files.push({ path: name, candidateSha256, installedSha256 });
     }
-    for (const name of ['Relayer.exe', 'resources/app.asar', 'resources/node/node.exe', 'resources/bin/relayer-app-server.exe', 'resources/bin/relayer-graph-server.exe']) if (!files.some(file => file.path === name)) throw new Error(`Required installer payload file missing: ${name}`);
+    for (const name of requiredPayloadFiles) if (!files.some(file => file.path === name)) throw new Error(`Required installer payload file missing: ${name}`);
     return { schema: 'windows-installer-payload/v2', installedRoot, installerSha256: sha(await readFile(installer)), metadata: await readInstalledWindowsMetadata(join(payload, 'resources/app.asar')), files };
   } finally { await rm(temporary, { recursive: true, force: true }); }
 }

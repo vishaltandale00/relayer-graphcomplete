@@ -64,14 +64,19 @@ async function exists(target) {
     }
 }
 async function hasGitMarker(target) {
-    for (let current = path.resolve(target);;) {
-        if (await exists(path.join(current, '.git')))
-            return true;
-        const parent = path.dirname(current);
-        if (parent === current)
-            return false;
-        current = parent;
+    // Follow the selected folder's canonical location as well as its displayed
+    // path, so missing Git cannot downgrade a linked repository to a plain folder.
+    for (const start of new Set([path.resolve(target), await realpath(target)])) {
+        for (let current = start;;) {
+            if (await exists(path.join(current, '.git')))
+                return true;
+            const parent = path.dirname(current);
+            if (parent === current)
+                break;
+            current = parent;
+        }
     }
+    return false;
 }
 export async function inspectFolder(folder) {
     const opened = path.resolve(folder);
@@ -90,8 +95,10 @@ export async function inspectFolder(folder) {
         root = (await git(opened, ['rev-parse', '--show-toplevel'])).trim();
     }
     catch (error) {
-        // Only Git's explicit non-repository result without an ancestor marker is non-Git.
-        if (error.cause?.code !== 'ENOENT' && /not a git repository/i.test(error.cause?.stderr || '') && !(await hasGitMarker(opened)))
+        // Git is optional for ordinary folders. A missing executable may use
+        // that path only without a repository marker; all marked-repository and
+        // other inspection failures remain blocked for explicit recovery.
+        if ((error.cause?.code === 'ENOENT' || /not a git repository/i.test(error.cause?.stderr || '')) && !(await hasGitMarker(opened)))
             return {
                 path: opened, git: false
             };

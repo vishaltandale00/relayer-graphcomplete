@@ -178,17 +178,32 @@ it('compares the complete extracted installer payload to installed bytes and rej
     await writeFile(installer, 'NSIS extraction fixture'); await cp(candidate, installed, { recursive: true });
     // Only the external decompressor is substituted; production inventory,
     // ASAR reading and all installed-file comparisons run against real files.
+    let layout = 'nested', extractions = 0;
     const execute = async (_tool, args) => {
+      extractions++;
       const output = args.find(arg => arg.startsWith('-o')).slice(2);
-      if (args[1] === installer) { await mkdir(output); await writeFile(join(output, 'app-64.7z'), 'payload fixture'); }
-      else await cp(candidate, output, { recursive: true });
+      if (args[1] !== installer) { await cp(candidate, output, { recursive: true }); return; }
+      if (['direct', 'mixed', 'partial'].includes(layout)) {
+        await cp(candidate, output, { recursive: true });
+        if (layout === 'mixed') await writeFile(join(output, 'app-64.7z'), 'second representation');
+        if (layout === 'partial') await rm(join(output, 'resources/node/node.exe'));
+      } else {
+        await mkdir(output); await writeFile(join(output, 'app-64.7z'), 'payload fixture');
+        if (layout === 'multiple') { await mkdir(join(output, 'other')); await writeFile(join(output, 'other/app-64.7z'), 'competing payload'); }
+      }
     };
-    const result = await collectWindowsInstallerFiles({ installer, sevenZip: 'fixture-7z', installedRoot: installed, execute });
-    expect(result).toMatchObject({ schema: 'windows-installer-payload/v2', metadata: { sourceCommit: source, version: '0.2.0' } });
-    expect(result.files).toHaveLength(6);
-    expect(result.installedRoot).toBe(await realpath(installed));
+    const collect = () => collectWindowsInstallerFiles({ installer, sevenZip: 'fixture-7z', installedRoot: installed, execute });
+    for (layout of ['nested', 'direct']) {
+      extractions = 0;
+      const result = await collect();
+      expect(result).toMatchObject({ schema: 'windows-installer-payload/v2', metadata: { sourceCommit: source, version: '0.2.0' } });
+      expect(result.files).toHaveLength(6);
+      expect(result.installedRoot).toBe(await realpath(installed));
+      expect(extractions).toBe(layout === 'nested' ? 2 : 1);
+    }
+    for (layout of ['mixed', 'partial', 'multiple']) await expect(collect()).rejects.toThrow('ambiguous or incomplete');
     await writeFile(join(installed, 'resources/node/node.exe'), 'changed installed Node');
-    await expect(collectWindowsInstallerFiles({ installer, sevenZip: 'fixture-7z', installedRoot: installed, execute })).rejects.toThrow('differs from exact installer payload');
+    for (layout of ['nested', 'direct']) await expect(collect()).rejects.toThrow('differs from exact installer payload');
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 

@@ -106,6 +106,33 @@ describe('real Git worktree lifecycle', () => {
             code: 'folder-unavailable'
         });
     });
+    test('missing Git permits ordinary folders while marked and linked repositories stay blocked', async () => {
+        const { root, repo } = await fixture();
+        const ordinary = path.join(root, 'ordinary');
+        const linked = path.join(root, 'linked-repository');
+        await mkdir(ordinary);
+        await symlink(repo, linked, 'junction');
+        const folders = { ordinary, marked: repo, nested: path.join(repo, 'frontend'), linked };
+        const moduleUrl = new URL('../desktop/main/services/worktree-service.mjs', import.meta.url).href;
+        const program = `import { inspectFolder } from ${JSON.stringify(moduleUrl)};
+const observations = {};
+for (const [name, folder] of Object.entries(${JSON.stringify(folders)})) {
+  try { observations[name] = await inspectFolder(folder); }
+  catch (error) { observations[name] = { code: error.code, causeCode: error.cause?.code }; }
+}
+console.log(JSON.stringify(observations));`;
+        // A separate process observes the actual missing-executable boundary without
+        // changing shared test-worker PATH or replacing the production Git seam.
+        const environment = Object.fromEntries(Object.entries(process.env).filter(([key]) => key.toLowerCase() !== 'path'));
+        environment.PATH = '';
+        const observed = JSON.parse(execFileSync(process.execPath, ['--input-type=module', '--eval', program], {
+            cwd: root, env: environment, encoding: 'utf8', timeout: 5000,
+        }));
+        expect(observed.ordinary).toEqual({ path: ordinary, git: false });
+        for (const name of ['marked', 'nested', 'linked']) {
+            expect(observed[name]).toEqual({ code: 'git-inspection-failed', causeCode: 'ENOENT' });
+        }
+    });
     test('validates exact checkout/subfolder and requires acknowledgment of changed commits', async () => {
         const { root, repo } = await fixture();
         const info = await inspectFolder(repo);
