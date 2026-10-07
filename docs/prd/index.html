@@ -2221,6 +2221,23 @@ GET  /api/graph/nodes/:id/output
 <li><strong>PREV-004:</strong> <code>npm run evidence:agent-preview</code> captures real Electron images in both themes and checks isolation and cleanup.</li>
 <li><strong>PREV-005:</strong> The opt-in live run proves a real model received a layer image and its turn was accepted. It makes no quality claim.</li>
 </ul>
+<h3>11.11 Artifact layers</h3>
+<ul>
+<li>A layer may carry <code>renderer</code>. Absent means the graph renderer. <code>artifact</code> is the only other value now; the set can grow.</li>
+<li>A node may carry <code>artifact</code>. It is valid only as the single member of an <code>artifact</code> layer.</li>
+<li><code>artifact.kind</code> and <code>artifact.source</code> are required. <code>part</code>, <code>viewport</code>, <code>state</code> and the server invoke are optional per kind.</li>
+<li>File sources are relative paths. A website names its entry file and site root; the entry must sit inside the root.</li>
+<li>Graph-core validates shape and kind. It has no filesystem, so the harness host checks paths and files.</li>
+<li>The host resolves each path inside the session&#39;s working directory, following links. Outside, missing or unsupported files reject.</li>
+<li>Rejections are repairable validation issues, like other <code>submitNode</code> and <code>submitLayer</code> errors.</li>
+<li>Acceptance asks the host for each file artifact&#39;s fingerprint and pins it. A failed fingerprint fails acceptance, like a failed asset pin.</li>
+<li>The server invoke (P2) is an invoke action with <code>invoke: &quot;server&quot;</code>. It never calls Complete.</li>
+<li>When previews are on, <code>submitLayer</code> for an artifact layer returns a PNG of the viewer showing that artifact.</li>
+<li>The TypeScript and Python clients expose <code>artifact</code> on node objects and <code>renderer</code> on layer objects.</li>
+<li>Conversation export, import and shared snapshots carry both fields unchanged. Shared snapshots omit annotation screenshots, as section 6.6.8 says.</li>
+<li>Codex, Claude and Prime guidance explains when to make an artifact layer, the kinds and parts, and that seeds are test-only.</li>
+</ul>
+
 <h2 data-prd-layer="Contracts" data-prd-order="12">12. Complete and harness-host contract</h2>
 <h3>12.1 Canonical input and accepted output</h3>
 <pre><code class="language-ts">type CompleteInputGraph = NodeReference;
@@ -2799,6 +2816,136 @@ settings:
 <tr><td>Clean dependency and packaging verification</td><td>CI planner and chapter-runner tests include visual-assets before harness-host. Desktop packaging tests check entry points against the installed Sharp package.</td></tr>
 </tbody>
 </table>
+<h3>6.6 Artifact viewer</h3>
+<section class="capability-summary" aria-label="Artifact viewer summary">
+<p><strong>User goal:</strong> See what the agent built inside Relayer, without leaving the app.</p>
+<p><strong>Product rule:</strong> An artifact is an accepted node. Its layer says to read it in the artifact viewer.</p>
+<p><strong>Observable result:</strong> Opening an artifact shows it live and full screen, with notes the user can send back.</p>
+<p><strong>Acceptance:</strong> The viewer shows the accepted artifact and says when it changed. It never runs agent code with Relayer&#39;s authority.</p>
+</section>
+<p>Issue <a href="https://github.com/vishaltandale00/relayer-graphcomplete/issues/684">#684</a> holds the design record. Branch <code>claude/relayer-artifact-viewer-acfefa</code> holds the throwaway prototype and its case matrix. <a href="../decisions/0014-artifact-layer-renderer.md">ADR 0014</a> records the architecture.</p>
+<h4>6.6.1 Artifacts in the graph</h4>
+<ul>
+<li>An artifact is a node with artifact details. A layer whose renderer is <code>artifact</code> holds exactly one such node.</li>
+<li>The node holds everything about the content: source, kind, the part to show, starting state, screen size and fingerprint.</li>
+<li>The layer only says which renderer reads its node. Two views of one artifact are two nodes in two layers.</li>
+<li>The artifact node appears only in its artifact layer. Ordinary navigate actions elsewhere in the graph open that layer.</li>
+<li>An artifact node may carry navigate actions and references. They appear in the graph&#39;s Node Details, never inside the viewer.</li>
+<li>Draft, accepted and stopped states apply as for any layer. Users only ever open accepted artifact layers.</li>
+</ul>
+<h4>6.6.2 The viewer</h4>
+<ul>
+<li>Opening an artifact layer replaces the whole window with the viewer. Esc or <strong>Graph</strong> returns to the graph where the user was.</li>
+<li>A slim strip at the top always shows the address or file path. Content cannot hide it or draw over it.</li>
+<li>The toolbar appears when the pointer reaches that strip and hides again after about three seconds.</li>
+<li>The toolbar holds <strong>Graph</strong>, the title and kind, the address, <strong>Annotate</strong> as an icon, and <strong>⋯</strong>.</li>
+<li><strong>⋯ › Open externally</strong> opens a URL or app in the user&#39;s browser and a file in its default app.</li>
+<li>The viewer shows no node description, actions or references.</li>
+</ul>
+<h4>6.6.3 Kinds and parts</h4>
+<table>
+<thead><tr><th>Kind</th><th>Source</th><th>Part the node can ask for</th></tr></thead>
+<tbody>
+<tr><td>Website</td><td>An entry <code>.html</code> file and its site root folder</td><td>A route, including query and fragment</td></tr>
+<tr><td>Web app (P2)</td><td>A loopback ready URL, started by the server invoke</td><td>A route</td></tr>
+<tr><td>Deployed site</td><td>An <code>https</code> URL</td><td>A route</td></tr>
+<tr><td>PDF</td><td><code>.pdf</code></td><td>A page</td></tr>
+<tr><td>Video</td><td><code>.mp4</code>, <code>.webm</code> or <code>.mov</code></td><td>The whole video, or a start and end time</td></tr>
+<tr><td>Image</td><td><code>.png</code>, <code>.jpg</code>, <code>.gif</code>, <code>.webp</code> or <code>.svg</code></td><td>The whole image</td></tr>
+<tr><td>Markdown</td><td><code>.md</code></td><td>A heading</td></tr>
+<tr><td>Office (P3)</td><td><code>.docx</code>, <code>.xlsx</code> or <code>.pptx</code></td><td>The whole document, or a slide</td></tr>
+</tbody>
+</table>
+<ul>
+<li>A website or app can also ask for a screen size: desktop, tablet or phone.</li>
+<li>A part opens the artifact at that place. The user can still move anywhere in it.</li>
+<li>A video segment stops at its end until the user chooses to play the whole video.</li>
+</ul>
+<h4>6.6.4 Isolation</h4>
+<ul>
+<li>Each artifact node renders in its own isolated browser view, with its own storage. Nothing persists between opens.</li>
+<li>Artifact content cannot reach Relayer&#39;s API, login, cookies or IPC, or another artifact&#39;s storage.</li>
+<li>Popups, downloads and device permissions are refused. Camera, microphone, location and notifications are never granted.</li>
+<li>A link to another site opens in the user&#39;s browser. The artifact stays where it was.</li>
+<li>Websites may load internet resources such as fonts. Deployed sites must use <code>https</code>. Plain <code>http</code> is allowed only for loopback addresses.</li>
+<li>Local files are served from the thread folder only. Video and audio support seeking.</li>
+</ul>
+<h4>6.6.5 After acceptance</h4>
+<ul>
+<li>Acceptance pins a fingerprint of the file, or of every file under a site root. URLs and apps have none.</li>
+<li>When the fingerprint no longer matches, the viewer shows <strong>Changed since this was accepted</strong>. It still shows the current file.</li>
+<li>A file missing after acceptance shows a card saying so, with <strong>Add to chat</strong>. No agent turn starts by itself.</li>
+<li>Page script errors appear as a count in the toolbar, with <strong>Add to chat</strong>. They never block viewing.</li>
+</ul>
+<h4>6.6.6 Web apps and the server invoke (P2)</h4>
+<ul>
+<li>An app artifact&#39;s node carries one server invoke. It names a start command, a loopback ready URL and an idle timeout.</li>
+<li>Opening the viewer runs the server invoke deterministically. No model runs, and no turn or graph record is created.</li>
+<li>If the ready URL answers, the viewer uses that server. Otherwise Relayer runs the command in the thread folder and waits.</li>
+<li>The first run of a command in a thread asks the user for approval. Later runs reuse that approval.</li>
+<li>The command runs under the thread&#39;s sandbox and permission profile.</li>
+<li>While starting, the viewer shows the command and its log. A failure shows the log, <strong>Retry</strong> and <strong>Add log to chat</strong>.</li>
+<li>A server Relayer started stops after its idle timeout once no viewer shows it. The default is one hour.</li>
+<li>Relayer never stops a server it did not start.</li>
+</ul>
+<h4>6.6.7 Starting state (P2)</h4>
+<ul>
+<li>A website or app node may seed local storage and cookies for its own origin.</li>
+<li>Every open clears the artifact&#39;s storage and applies the seed again, so each open starts the same way.</li>
+<li>Agent guidance says seeds hold test values only. Seeds are stored in the graph and exported with it.</li>
+</ul>
+<h4>6.6.8 Annotations (P2)</h4>
+<ul>
+<li><strong>Annotate</strong> opens a small panel below its icon. It lists notes already in the chat draft, each with remove.</li>
+<li>The panel shows where the user is, a screenshot of the current view, and a note field. Enter adds the note.</li>
+<li>Where the user is means the page, the video time, the route and scroll position, the heading or the slide.</li>
+<li>Playing video and audio pause while the panel is open and resume when it closes.</li>
+<li>Notes join the thread&#39;s one chat draft. The user sends them from the thread composer after leaving the viewer.</li>
+<li>Sending creates one interaction that refers to the artifact node and carries every note with its screenshot.</li>
+<li>Notes are not graph comments. Existing Comments stay private and are never sent to the agent.</li>
+<li>Conversation export keeps note screenshots. Shared snapshots omit them and keep each note&#39;s text and location.</li>
+</ul>
+<h4>6.6.9 Office documents (P3)</h4>
+<ul>
+<li>Word and Excel render in the viewer with their own renderers. PowerPoint renders slides, but charts may draw wrongly.</li>
+<li>Agent guidance says to save calculated values in spreadsheets. Totals otherwise render blank.</li>
+<li>Agent guidance says to export a PDF next to any deck with charts, and to point the artifact at the PDF.</li>
+<li>P3 ships only after the PowerPoint renderer&#39;s licence is cleared, or a replacement renders the same fixture deck.</li>
+</ul>
+<h4>6.6.10 Share and Eval</h4>
+<ul>
+<li>In a shared snapshot, a deployed <code>https</code> artifact plays live. Any other artifact shows a card saying where it can be viewed.</li>
+<li>That card never shows a local path, folder name or loopback address.</li>
+<li>Eval renders artifact layers with the same viewer. Imported conversations show the same card when files are absent.</li>
+</ul>
+<h4>6.6.11 Delivery</h4>
+<ul>
+<li><strong>P1:</strong> artifact layers, integrity checks, fingerprints, agent previews, the viewer, websites, PDF, video, images, Markdown and <code>https</code> sites.</li>
+<li><strong>P2:</strong> web apps and the server invoke, starting state, and annotations.</li>
+<li><strong>P3:</strong> Word, Excel and PowerPoint.</li>
+<li>A surface that does not know the <code>artifact</code> renderer shows the layer as an ordinary one-node graph.</li>
+</ul>
+<h4>6.6.12 Artifact viewer checkpoints</h4>
+<table>
+<thead><tr><th>Checkpoint</th><th>Promise or boundary</th><th>Smallest deterministic proof</th></tr></thead>
+<tbody>
+<tr><td><code>ART-001</code></td><td>An <code>artifact</code> layer has exactly one member node with valid artifact details.</td><td>Graph-core write tests: wrong counts and missing details reject with repairable issues.</td></tr>
+<tr><td><code>ART-002</code></td><td>Paths stay inside the thread folder, links included. Missing files and unsupported kinds reject.</td><td>Harness-host artifact-file tests with real files, links and an outside folder.</td></tr>
+<tr><td><code>ART-003</code></td><td>Artifact content has no Relayer authority and no cross-artifact storage.</td><td>Electron viewer test: API fetch, parent access and another artifact&#39;s storage all fail.</td></tr>
+<tr><td><code>ART-004</code></td><td>Acceptance pins fingerprints. The viewer reports drift and missing files.</td><td>Graph-core acceptance test, plus a viewer test that edits and deletes a fixture file.</td></tr>
+<tr><td><code>ART-005</code></td><td>Agents see their artifact before acceptance. The image is advisory.</td><td>Graph-server preview tests and the <code>fixture.artifact-preview</code> Eval fixture.</td></tr>
+<tr><td><code>ART-006</code></td><td>Viewer chrome: the address is always visible and Esc returns. No actions or description; Open externally sits under ⋯.</td><td>Renderer tests on the production viewer module.</td></tr>
+<tr><td><code>ART-007</code></td><td>Parts open where asked: page, time range, route, heading and screen size.</td><td>Viewer test against the fixture thread, one case per kind.</td></tr>
+<tr><td><code>ART-008</code></td><td>In Share and Eval, <code>https</code> plays and others show the card with no local path.</td><td><code>public-share-viewer</code> and Eval review tests.</td></tr>
+<tr><td><code>ART-009</code> (P2)</td><td>The server invoke reuses, asks once, starts, reports failure, stops when idle and records nothing.</td><td>App-server process tests with a fixture app and a failing app.</td></tr>
+<tr><td><code>ART-010</code> (P2)</td><td>Starting state resets on every open.</td><td>Viewer test that changes storage, reopens and reads the seed.</td></tr>
+<tr><td><code>ART-011</code> (P2)</td><td>Notes collect, pause media, and send as one interaction with screenshots.</td><td>Viewer and composer tests, and an interaction persistence test.</td></tr>
+<tr><td><code>ART-012</code> (P3)</td><td>Office kinds render. Guidance covers calculated values and decks with charts.</td><td>Viewer tests on the fixture documents, and guidance assertions.</td></tr>
+</tbody>
+</table>
+<p><code>npm run test:desktop:artifact-viewer</code> is the heavy entry point. It drives the fixture thread through real Electron and saves evidence.</p>
+<p>A checkpoint definition is not a passing evidence claim. Each phase records its changed seams, exact tests, heavy gates and source identity.</p>
+
 <h2 data-prd-layer="Evidence" data-prd-order="15.4">15D. Basic Complete evaluation evidence</h2>
 <p>The first evaluation is one fixed two-interaction case. Its name is <code>empty-project.task-system.two-turn</code>. It proves the smallest real conversation path through all runtime components. These components include the graph engine, client, harness host, Codex session, Complete boundary, evaluator, judge, and renderer.</p>
 <p>The second interaction receives a new canonical interaction node and capability token. It reuses the same harness object and provider thread. The case has no existing codebase, grounding requirement, graph search, or subagent dependency.</p>
