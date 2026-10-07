@@ -8,9 +8,13 @@ const roots = [];
 const git = (cwd, ...args) => execFileSync('git', ['-C', cwd, ...args], {
     encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe']
 }).trim();
-async function fixture() {
+async function temporaryRoot() {
     const root = await realpath(await mkdtemp(path.join(os.tmpdir(), 'relayer-worktrees-')));
     roots.push(root);
+    return root;
+}
+async function fixture() {
+    const root = await temporaryRoot();
     const repo = path.join(root, 'repo');
     await mkdir(repo);
     git(repo, 'init', '-b', 'main');
@@ -92,7 +96,7 @@ describe('real Git worktree lifecycle', () => {
         });
     });
     test('nonGit differs from malformed Git and missing folders', async () => {
-        const { root } = await fixture();
+        const root = await temporaryRoot();
         const ordinary = path.join(root, 'ordinary');
         await mkdir(ordinary);
         expect(await inspectFolder(ordinary)).toEqual({
