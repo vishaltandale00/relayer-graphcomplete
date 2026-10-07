@@ -153,8 +153,12 @@ export function createArtifactServerRunner({
       const readyUrl = readyUrlOf(server, sourceUrl);
       const key = `${threadId}:${commandDigest(command)}`;
       // Another thread's app on the same address is a different app; never show it here.
+      // This thread's own earlier server there (a revised command, or one that died) is replaced.
       const origin = new URL(readyUrl).origin;
-      if ([...servers.entries()].some(([other, entry]) => other !== key && new URL(entry.readyUrl).origin === origin)) {
+      for (const [other, entry] of [...servers.entries()]) {
+        if (other === key || new URL(entry.readyUrl).origin !== origin) continue;
+        const exited = entry.child.exitCode !== null || entry.child.signalCode !== null;
+        if (exited || other.startsWith(`${threadId}:`)) { stop(other); continue; }
         return { state: "failed", log: `Another thread's app is already serving ${origin}. Close it there, or give this app another port.` };
       }
       await starting.get(key)?.catch(() => {});

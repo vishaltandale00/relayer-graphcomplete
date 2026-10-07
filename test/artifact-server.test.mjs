@@ -123,6 +123,17 @@ describe("the server invoke (ART-009)", () => {
     expect(other.log).toContain("Another thread's app is already serving");
   });
 
+  it("replaces the same thread's earlier server when its command changes", async () => {
+    const { folder, runner } = await setup();
+    const port = await freePort();
+    const url = `http://127.0.0.1:${port}/`;
+    const request = { threadId: 15, nodeId: 3, folder, permissionProfileId: "auto", approve: true, sourceUrl: url };
+    expect((await runner.ensure({ ...request, server: { command: `node app/server.mjs ${port}` } })).state).toBe("ready");
+    const revised = await runner.ensure({ ...request, server: { command: `node ./app/server.mjs ${port}` } });
+    expect(revised.state).toBe("ready");
+    expect(runner.running()).toHaveLength(1);
+  });
+
   it.runIf(process.platform === "darwin")("keeps confined commands from writing through system services", async () => {
     const { folder, runner } = await setup();
     const domain = `ai.relayer.sandbox-probe-${process.pid}`;

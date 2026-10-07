@@ -435,6 +435,14 @@ async fn server_invokes_and_starting_state_are_checked() {
             "artifact_part_invalid",
         ),
         (
+            app(json!({"part": {"route": "/\t/evil.example/x"}})),
+            "artifact_part_invalid",
+        ),
+        (
+            app(json!({"server": {"command": "npm run dev\u{061C}"}})),
+            "artifact_server_invalid",
+        ),
+        (
             json!({"kind": "url", "source": {"url": "https://example.com/"}, "part": {"route": "/\\evil.example"}}),
             "artifact_part_invalid",
         ),

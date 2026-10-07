@@ -172,7 +172,17 @@ fn validate_server(value: &Value) -> Result<(), GraphError> {
     let hidden = |c: char| {
         c.is_control()
             || (c.is_whitespace() && c != ' ')
-            || matches!(c, '\u{200B}'..='\u{200F}' | '\u{202A}'..='\u{202E}' | '\u{2060}'..='\u{206F}' | '\u{FEFF}')
+            || matches!(
+                c,
+                '\u{00AD}'
+                    | '\u{061C}'
+                    | '\u{180E}'
+                    | '\u{200B}'..='\u{200F}'
+                    | '\u{202A}'..='\u{202E}'
+                    | '\u{2060}'..='\u{206F}'
+                    | '\u{FEFF}'
+                    | '\u{E0000}'..='\u{E007F}'
+            )
     };
     if command.trim().is_empty() || command.len() > MAX_COMMAND_BYTES || command.chars().any(hidden)
     {
@@ -291,6 +301,7 @@ fn validate_part(kind: &str, part: &Map<String, Value>) -> Result<(), GraphError
         // `//host` and `/\host` would leave the artifact's own address.
         if !(route.starts_with('/') || route.starts_with('#') || route.starts_with('?'))
             || route.starts_with("//")
+            || route.chars().any(char::is_whitespace)
             || route.starts_with("/\\")
             || route.len() > MAX_ROUTE_BYTES
         {

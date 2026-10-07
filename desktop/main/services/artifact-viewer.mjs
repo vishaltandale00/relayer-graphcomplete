@@ -369,7 +369,7 @@ const NOTE_LOCATION_SCRIPT = `(() => {
 
 /**
  * The page reports only numbers and, for Markdown, the heading in view; the address comes
- * from the view itself. Agents read this as the user's words, so the page cannot write it.
+ * from the view itself. A site can still choose its own path and hash, so both are bounded.
  */
 function noteLocation(plan, reported, url) {
   const time = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
@@ -456,7 +456,8 @@ export function createArtifactViewerService({
       const server = await serverRunner.ensure({
         threadId, nodeId, folder: thread.folder, permissionProfileId: thread.permissionProfileId,
         server: artifact.server, sourceUrl: artifact.source.url, approve: approveServer,
-        onLog: (text) => send({ type: "server-log", text }),
+        // A server keeps logging after this open; only this open's starting card shows it.
+        onLog: (text) => { if (token === latest) send({ type: "server-log", text }); },
       });
       if (server.state === "approval-required") return { status: { state: "approval-required", command: server.command, permissionProfileId: server.permissionProfileId }, address: plan.address };
       if (server.state === "failed") return { status: { state: "server-failed", log: server.log }, address: plan.address };
