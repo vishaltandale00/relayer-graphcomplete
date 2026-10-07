@@ -13,6 +13,8 @@ import { registerDesktopIpc } from "../desktop/main/ipc/register-ipc.mjs";
 
 const directories = [];
 const servers = [];
+const services = [];
+const releaseGates = [];
 
 function base64url(value) {
   return Buffer.from(value).toString("base64url");
@@ -39,6 +41,40 @@ async function listen(server, host = "127.0.0.1", port = 0) {
   });
   servers.push(server);
   return server.address().port;
+}
+
+function accountService(options) {
+  const service = createDesktopAccountService(options);
+  services.push(service);
+  return service;
+}
+
+async function closeServer(server) {
+  if (!server.listening) return;
+  await new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+}
+
+async function closeServices() {
+  const outcomes = await Promise.allSettled(services.splice(0).map((service) => service.close()));
+  const errors = outcomes.filter(({ status }) => status === "rejected").map(({ reason }) => reason);
+  if (errors.length) throw new AggregateError(errors, "Account fixture service cleanup failed.");
+}
+
+async function callbackPorts({ occupiedChannel } = {}) {
+  const reservations = [];
+  const candidates = [];
+  // Hold reservations together so pools are disjoint. Keep the registered
+  // product ports out of the fixture's ephemeral namespace.
+  while (candidates.length < 6) {
+    const server = createServer();
+    const port = await listen(server);
+    reservations.push({ server, port });
+    if (!Object.values(DESKTOP_ACCOUNT_PORTS).flat().includes(port)) candidates.push(port);
+  }
+  const portsByChannel = { stable: candidates.slice(0, 3), preview: candidates.slice(3) };
+  await Promise.all(reservations.filter(({ port }) => !portsByChannel[occupiedChannel]?.includes(port))
+    .map(({ server }) => closeServer(server)));
+  return portsByChannel;
 }
 
 async function fakeAuth0({ clientId = "desktop-client", tokenHandler } = {}) {
@@ -84,11 +120,12 @@ async function fakeAuth0({ clientId = "desktop-client", tokenHandler } = {}) {
   return { issuer, clientId, requests, privateKey };
 }
 
-async function fixture({ auth0, channel = "stable", portsByChannel, openExternal, now = () => 1_900_000_000_000, timeoutMs = 2_000, beforeCredentialCommit, telemetry, emit, presentWindow } = {}) {
+async function fixture({ auth0, channel = "stable", portsByChannel, registeredPorts = false, openExternal, now = () => 1_900_000_000_000, timeoutMs = 2_000, beforeCredentialCommit, telemetry, emit, presentWindow } = {}) {
   const directory = await mkdtemp(join(tmpdir(), "relayer-account-"));
   directories.push(directory);
   const encrypted = [];
-  const service = createDesktopAccountService({
+  if (!registeredPorts) portsByChannel ??= await callbackPorts();
+  const service = accountService({
     channel,
     portsByChannel,
     credentialPath: join(directory, "account.json"),
@@ -111,7 +148,7 @@ async function fixture({ auth0, channel = "stable", portsByChannel, openExternal
     emit,
     presentWindow,
   });
-  return { directory, service, encrypted };
+  return { directory, service, encrypted, portsByChannel };
 }
 
 async function callbackFromLauncher(url, overrides = {}) {
@@ -155,16 +192,71 @@ function rawCallback(url, { method = "GET", host, path } = {}) {
 }
 
 afterEach(async () => {
-  await Promise.allSettled(servers.splice(0).map((server) => new Promise((resolve) => server.close(resolve))));
-  await Promise.all(directories.splice(0).map((directory) => rm(directory, { recursive: true, force: true })));
+  for (const release of releaseGates.splice(0)) release();
+  const errors = [];
+  try { await closeServices(); } catch (error) { errors.push(error); }
+  for (const cleanup of [
+    () => servers.splice(0).map((server) => closeServer(server)),
+    () => directories.splice(0).map((directory) => rm(directory, { recursive: true, force: true })),
+  ]) {
+    const outcomes = await Promise.allSettled(cleanup());
+    errors.push(...outcomes.filter(({ status }) => status === "rejected").map(({ reason }) => reason));
+  }
+  if (errors.length) throw new AggregateError(errors, "Account fixture cleanup failed.");
 });
 
 describe.sequential("desktop direct Auth0 account authority", () => {
+  it("keeps registered defaults and never falls back to Stable from an exhausted Preview pool", async () => {
+    expect(DESKTOP_ACCOUNT_PORTS).toEqual({ stable: [49152, 49153, 49154], preview: [49155, 49156, 49157] });
+    const auth0 = await fakeAuth0();
+    const portsByChannel = await callbackPorts({ occupiedChannel: "preview" });
+    const openExternal = vi.fn();
+    // A real available Stable socket makes cross-channel fallback observable.
+    const stableProbe = createServer();
+    await listen(stableProbe, "127.0.0.1", portsByChannel.stable[0]);
+    await closeServer(stableProbe);
+    const { service } = await fixture({ auth0, channel: "preview", portsByChannel, openExternal });
+    await service.start();
+    await expect(service.login()).resolves.toEqual({ status: "error", channel: "preview", reason: "authentication-failed" });
+    expect(openExternal).not.toHaveBeenCalled();
+  });
+
+  it("an uninjected service uses only the registered pool when every Stable port is occupied", async () => {
+    const auth0 = await fakeAuth0();
+    for (const port of DESKTOP_ACCOUNT_PORTS.stable) {
+      const blocker = createServer();
+      try { await listen(blocker, "127.0.0.1", port); }
+      catch (error) {
+        // The external contention regression may already own the first port.
+        // A different bind error is a real fixture failure, never a skip.
+        if (error.code !== "EADDRINUSE") throw error;
+      }
+    }
+    const openExternal = vi.fn();
+    const { service } = await fixture({ auth0, registeredPorts: true, openExternal });
+    await service.start();
+    await expect(service.login()).resolves.toEqual({ status: "error", channel: "stable", reason: "authentication-failed" });
+    expect(openExternal).not.toHaveBeenCalled();
+  });
+
+  it("fixture teardown releases a pending callback listener before fake endpoints close", async () => {
+    const auth0 = await fakeAuth0();
+    let launchUrl;
+    const { service } = await fixture({ auth0, openExternal: async (value) => { launchUrl = value; } });
+    await service.start();
+    await service.login();
+    const callbackPort = Number(new URL(new URL(launchUrl).searchParams.get("redirect_uri")).port);
+    // Exercise the teardown owner with no successful callback or explicit close.
+    await closeServices();
+    const replacement = createServer();
+    await expect(listen(replacement, "127.0.0.1", callbackPort)).resolves.toBe(callbackPort);
+  });
+
   it("binds a channel callback before browser launch and exchanges one valid callback with PKCE", async () => {
     const auth0 = await fakeAuth0();
     let boundDuringOpen = false;
     let launchUrl;
-    const { service, directory, encrypted } = await fixture({
+    const { service, directory, encrypted, portsByChannel } = await fixture({
       auth0,
       openExternal: vi.fn(async (value) => {
         launchUrl = value;
@@ -183,7 +275,7 @@ describe.sequential("desktop direct Auth0 account authority", () => {
     const launcher = new URL(launchUrl);
     expect(launcher.origin + launcher.pathname).toBe("https://app.relayerlabs.ai/desktop/login");
     expect(launcher.searchParams.get("channel")).toBe("stable");
-    expect(new URL(launcher.searchParams.get("redirect_uri")).port).toBe("49152");
+    expect(portsByChannel.stable).toContain(Number(new URL(launcher.searchParams.get("redirect_uri")).port));
     expect(launcher.searchParams.get("state")).toMatch(/^[A-Za-z0-9_-]{43,256}$/);
     expect(launcher.searchParams.get("code_challenge")).toMatch(/^[A-Za-z0-9_-]{43}$/);
 
@@ -199,7 +291,7 @@ describe.sequential("desktop direct Auth0 account authority", () => {
       grant_type: "authorization_code",
       client_id: "desktop-client",
       code: "authorization-code",
-      redirect_uri: "http://127.0.0.1:49152/auth/callback",
+      redirect_uri: launcher.searchParams.get("redirect_uri"),
     });
     const verifier = tokenRequest.body.get("code_verifier");
     expect(createHash("sha256").update(verifier).digest("base64url"))
@@ -298,7 +390,7 @@ describe.sequential("desktop direct Auth0 account authority", () => {
     let releaseProjection;
     let projectionStarted;
     const projecting = new Promise((resolve) => { projectionStarted = resolve; });
-    const projection = new Promise((resolve) => { releaseProjection = resolve; });
+    const projection = new Promise((resolve) => { releaseProjection = resolve; releaseGates.push(resolve); });
     let blockProjection = false;
     const auth0 = await fakeAuth0({ tokenHandler: ({ issuer, privateKey }) => ({ json: {
       token_type: "Bearer", expires_in: 120, refresh_token: "rotated-refresh-token",
@@ -397,18 +489,21 @@ describe.sequential("desktop direct Auth0 account authority", () => {
 
   it("falls through occupied ports only inside the selected channel pool", async () => {
     const auth0 = await fakeAuth0();
+    const portsByChannel = await callbackPorts();
     const blocker = createServer();
-    await listen(blocker, "127.0.0.1", DESKTOP_ACCOUNT_PORTS.preview[0]);
+    await listen(blocker, "127.0.0.1", portsByChannel.preview[0]);
     let launchUrl;
     const { service } = await fixture({
       auth0,
       channel: "preview",
+      portsByChannel,
       openExternal: async (value) => { launchUrl = value; },
     });
     await service.start();
     await service.login();
-    expect(new URL(new URL(launchUrl).searchParams.get("redirect_uri")).port).toBe("49156");
-    expect(launchUrl).not.toContain("49152");
+    const callbackPort = Number(new URL(new URL(launchUrl).searchParams.get("redirect_uri")).port);
+    expect(portsByChannel.preview.slice(1)).toContain(callbackPort);
+    expect(portsByChannel.stable).not.toContain(callbackPort);
     await service.logout();
     await service.close();
   });
@@ -416,11 +511,11 @@ describe.sequential("desktop direct Auth0 account authority", () => {
   it("switches authoritative channel pools and preserves a verified account", async () => {
     const auth0 = await fakeAuth0();
     let launchUrl;
-    const { service } = await fixture({ auth0, openExternal: async (value) => { launchUrl = value; } });
+    const { service, portsByChannel } = await fixture({ auth0, openExternal: async (value) => { launchUrl = value; } });
     await service.start();
     await expect(service.setChannel("preview")).resolves.toEqual({ status: "signed-out", channel: "preview" });
     await service.login();
-    expect(new URL(new URL(launchUrl).searchParams.get("redirect_uri")).port).toBe("49155");
+    expect(portsByChannel.preview).toContain(Number(new URL(new URL(launchUrl).searchParams.get("redirect_uri")).port));
     await callbackFromLauncher(launchUrl);
     await service.waitForIdle();
     await expect(service.setChannel("stable")).resolves.toEqual({
@@ -428,7 +523,7 @@ describe.sequential("desktop direct Auth0 account authority", () => {
     });
     expect(service.telemetryIdentity()).toMatchObject({ subject: "auth0|person" });
     await service.login();
-    expect(new URL(new URL(launchUrl).searchParams.get("redirect_uri")).port).toBe("49152");
+    expect(portsByChannel.stable).toContain(Number(new URL(new URL(launchUrl).searchParams.get("redirect_uri")).port));
     await service.logout();
     await service.close();
   });
@@ -439,7 +534,7 @@ describe.sequential("desktop direct Auth0 account authority", () => {
     let enterFirst;
     let releaseFirst;
     const firstEntered = new Promise((resolve) => { enterFirst = resolve; });
-    const firstGate = new Promise((resolve) => { releaseFirst = resolve; });
+    const firstGate = new Promise((resolve) => { releaseFirst = resolve; releaseGates.push(resolve); });
     const { service } = await fixture({
       auth0,
       openExternal: async (value) => {
@@ -455,8 +550,8 @@ describe.sequential("desktop direct Auth0 account authority", () => {
     await firstEntered;
     const second = service.login();
     await new Promise((resolve) => setImmediate(resolve));
-    expect(launches).toHaveLength(1);
-    releaseFirst();
+    try { expect(launches).toHaveLength(1); }
+    finally { releaseFirst(); }
     await first;
     await second;
     expect(launches).toHaveLength(2);
@@ -474,8 +569,8 @@ describe.sequential("desktop direct Auth0 account authority", () => {
     let enterLaunch;
     let releaseLaunch;
     const launchEntered = new Promise((resolve) => { enterLaunch = resolve; });
-    const launchGate = new Promise((resolve) => { releaseLaunch = resolve; });
-    const { service } = await fixture({
+    const launchGate = new Promise((resolve) => { releaseLaunch = resolve; releaseGates.push(resolve); });
+    const { service, portsByChannel } = await fixture({
       auth0,
       openExternal: async (value) => {
         launches.push(value);
@@ -490,13 +585,13 @@ describe.sequential("desktop direct Auth0 account authority", () => {
     await launchEntered;
     const switchChannel = service.setChannel("preview");
     await new Promise((resolve) => setImmediate(resolve));
-    await expect(service.account()).resolves.toEqual({ status: "signing-in", channel: "stable" });
-    releaseLaunch();
+    try { await expect(service.account()).resolves.toEqual({ status: "signing-in", channel: "stable" }); }
+    finally { releaseLaunch(); }
     await login;
     await expect(switchChannel).resolves.toEqual({ status: "signed-out", channel: "preview" });
     await expect(callbackFromLauncher(launches[0])).rejects.toThrow();
     await service.login();
-    expect(new URL(new URL(launches[1]).searchParams.get("redirect_uri")).port).toBe("49155");
+    expect(portsByChannel.preview).toContain(Number(new URL(new URL(launches[1]).searchParams.get("redirect_uri")).port));
     await service.logout();
     await service.close();
   });
@@ -632,7 +727,7 @@ describe.sequential("desktop direct Auth0 account authority", () => {
   it("cannot commit a code exchange after logout invalidates its generation", async () => {
     let releaseExchange;
     const auth0 = await fakeAuth0({ tokenHandler: async () => {
-      await new Promise((resolve) => { releaseExchange = resolve; });
+      await new Promise((resolve) => { releaseExchange = resolve; releaseGates.push(resolve); });
       return undefined;
     } });
     let launchUrl;
@@ -660,7 +755,7 @@ describe.sequential("desktop direct Auth0 account authority", () => {
       openExternal: async (value) => { launchUrl = value; },
       beforeCredentialCommit: async () => {
         enteredCommit();
-        await new Promise((resolve) => { releaseCommit = resolve; });
+        await new Promise((resolve) => { releaseCommit = resolve; releaseGates.push(resolve); });
       },
     });
     await service.start();
@@ -722,7 +817,7 @@ describe.sequential("desktop direct Auth0 account authority", () => {
     await first.service.waitForIdle();
     await first.service.close();
 
-    const second = createDesktopAccountService({
+    const second = accountService({
       channel: "stable",
       credentialPath: join(first.directory, "account.json"),
       auth0: { issuer: auth0.issuer, clientId: auth0.clientId },
@@ -764,7 +859,7 @@ describe.sequential("desktop direct Auth0 account authority", () => {
     await first.service.waitForIdle();
     await first.service.close();
 
-    const second = createDesktopAccountService({
+    const second = accountService({
       channel: "stable", credentialPath: join(first.directory, "account.json"),
       auth0: { issuer: auth0.issuer, clientId: auth0.clientId },
       launcherUrl: "https://app.relayerlabs.ai/desktop/login",
@@ -813,7 +908,7 @@ describe.sequential("desktop direct Auth0 account authority", () => {
     revokeServer.removeAllListeners("request");
     revokeServer.on("request", (request, response) => {
       if (request.url === "/oauth/revoke") {
-        new Promise((resolve) => { releaseRevoke = resolve; }).then(() => { response.statusCode = 200; response.end(); });
+        new Promise((resolve) => { releaseRevoke = resolve; releaseGates.push(resolve); }).then(() => { response.statusCode = 200; response.end(); });
         return;
       }
       originalListeners[0](request, response);
