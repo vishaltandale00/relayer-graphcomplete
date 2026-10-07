@@ -1,5 +1,6 @@
 import { NativeExecutionCancelled } from "./completion-execution.js";
 import { ArtifactFileError, checkArtifactFiles } from "./artifact-files.js";
+import { withArtifactNoteScreenshots } from "./artifact-notes.js";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { mkdir, mkdtemp, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
@@ -242,6 +243,8 @@ export interface HarnessHostOptions {
     readonly generation: number;
     readonly library: FileVisualAssetsLibrary;
   };
+  /** Where the desktop keeps artifact note screenshots, named by digest (PRD 6.6.8). */
+  readonly artifactNotesDirectory?: string;
   /** The render bridge the graph server calls for draft previews (PRD §11.10). */
   readonly draftPreviews?: {
     readonly token: string;
@@ -1363,7 +1366,7 @@ export class HarnessHost {
         ...(traceContext?.threadIconSelection === undefined ? {} : { threadIconSelection: traceContext.threadIconSelection }),
         ...(traceContext?.nativeHistoryAnchor === undefined ? {} : { nativeHistoryAnchor: traceContext.nativeHistoryAnchor }),
         inputGraph: interaction,
-        interactionInput,
+        interactionInput: await withArtifactNoteScreenshots(interactionInput, this.options.artifactNotesDirectory, programDirectory),
         ...(personalPresentation === undefined ? {} : { personalPresentation }),
         graph: scope,
         ...(completionBroker === undefined ? {} : { completionBroker }),

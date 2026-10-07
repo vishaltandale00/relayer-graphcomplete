@@ -51,11 +51,22 @@ function iconFor(name) {
   try { return createRelayerIcon(name); } catch { return element("span", { "aria-hidden": "true" }); }
 }
 
+/** A note's text in the chat draft: what the user wrote, where, and its screenshot (PRD 6.6.8). */
+export function artifactNoteText({ text, location, digest }) {
+  return `${text.trim()}\n— ${location}${digest ? ` · screenshot sha256:${digest}` : ""}`;
+}
+
+/** Show a note without its screenshot reference. */
+export function artifactNoteLabel(annotation) {
+  return String(annotation).replace(/ · screenshot sha256:[0-9a-f]{64}$/u, "");
+}
+
 /**
  * Create one viewer for a document. `native` is window.relayerDesktop.artifactViewer
- * when available. `onAddToChat(text)` puts a message in the thread composer.
+ * when available. `onAddToChat(text)` puts a message in the thread composer. `notes`
+ * lists, adds and removes the artifact notes in the thread's chat draft.
  */
-export function createArtifactViewer({ root = document.body, native = null, onAddToChat = null, onClose = () => {}, liveUrls = true } = {}) {
+export function createArtifactViewer({ root = document.body, native = null, onAddToChat = null, onClose = () => {}, liveUrls = true, notes = null } = {}) {
   let current = null;
   let unsubscribe = () => {};
   let hideTimer = null;
@@ -78,7 +89,7 @@ export function createArtifactViewer({ root = document.body, native = null, onAd
     clearTimeout(hideTimer);
     hideTimer = setTimeout(() => {
       if (!current) return;
-      if (current.toolbar.contains(document.activeElement)) return showToolbar();
+      if (current.noting || current.toolbar.contains(document.activeElement)) return showToolbar();
       current.overlay.classList.add("artifact-toolbar-hidden");
       placeView();
     }, TOOLBAR_HIDE_MS);
@@ -160,20 +171,91 @@ export function createArtifactViewer({ root = document.body, native = null, onAd
     unsubscribe();
     unsubscribe = () => {};
     document.removeEventListener("keydown", onKeyDown, true);
+    if (closing.noting) void native?.endNote?.();
     // Always tell main, so an open still in flight there is dropped too.
     if (native) void native.close();
     closing.overlay.remove();
-    onClose();
+    onClose(closing.threadId);
   }
 
   function onKeyDown(event) {
     if (event.key !== "Escape" || !current) return;
     event.preventDefault();
     event.stopPropagation();
-    close();
+    // Esc closes the Annotate panel first, then the viewer.
+    if (current.noting) void endNote();
+    else close();
   }
 
-  async function open({ threadId, node, approveServer = false }) {
+  async function renderNoteList() {
+    const viewing = current;
+    const list = viewing?.notePanel?.querySelector(".artifact-note-list");
+    if (!list) return;
+    const existing = await notes.list({ threadId: viewing.threadId, node: viewing.node }).catch(() => []);
+    if (current !== viewing) return;
+    list.replaceChildren(...existing.map((note) => element("li", {},
+      element("span", { text: artifactNoteLabel(note.text) }),
+      element("button", { type: "button", class: "artifact-note-remove", title: "Remove from the chat draft", "aria-label": "Remove note", onclick: async () => {
+        await notes.remove({ threadId: viewing.threadId, note });
+        await renderNoteList();
+      } }, "×"))));
+    viewing.notePanel.querySelector(".artifact-note-count").textContent = existing.length ? `${existing.length} in the chat draft` : "";
+  }
+
+  /** Annotate (PRD 6.6.8): freeze the view on a screenshot, pause media, and take notes. */
+  async function beginNote() {
+    const viewing = current;
+    if (!viewing?.nativeOpen || viewing.noting) return;
+    const context = await native.beginNote().catch(() => null);
+    if (current !== viewing) return;
+    if (!context) {
+      setBadge("note", "This view could not be captured", "artifact-badge-warning");
+      setTimeout(() => setBadge("note", null), 3500);
+      return;
+    }
+    viewing.noting = context;
+    viewing.annotate.setAttribute("aria-pressed", "true");
+    viewing.freeze = element("img", { class: "artifact-freeze", src: context.screenshot, alt: "" });
+    (viewing.device ?? viewing.stage).append(viewing.freeze);
+    const field = element("textarea", { class: "artifact-note-field", rows: "3", placeholder: "Write a note. Enter adds it to the chat; Shift+Enter starts a new line." });
+    field.addEventListener("keydown", async (event) => {
+      if (event.key !== "Enter" || event.shiftKey || !field.value.trim()) return;
+      event.preventDefault();
+      const text = artifactNoteText({ text: field.value, location: context.location, digest: context.digest });
+      field.disabled = true;
+      try {
+        await notes.add({ threadId: viewing.threadId, node: viewing.node, target: viewing.target, text });
+        field.value = "";
+        await renderNoteList();
+      } finally {
+        field.disabled = false;
+        field.focus();
+      }
+    });
+    viewing.notePanel = element("section", { class: "artifact-note-panel", role: "dialog", "aria-label": "Annotate" },
+      element("header", {}, element("b", { text: "Notes for the chat" }), element("small", { class: "artifact-note-count" })),
+      element("ul", { class: "artifact-note-list" }),
+      element("p", { class: "artifact-note-where", text: `Where: ${context.location || "this view"}` }),
+      element("img", { class: "artifact-note-shot", src: context.screenshot, alt: "Screenshot of this view" }),
+      field,
+      element("p", { class: "artifact-card-note", text: "Notes wait in the chat draft. Send them from the thread when you leave the viewer." }));
+    viewing.overlay.append(viewing.notePanel);
+    showToolbar();
+    field.focus();
+    await renderNoteList();
+  }
+
+  async function endNote() {
+    const viewing = current;
+    if (!viewing?.noting) return;
+    viewing.noting = null;
+    viewing.annotate.setAttribute("aria-pressed", "false");
+    viewing.notePanel?.remove();
+    viewing.freeze?.remove();
+    await native.endNote();
+  }
+
+  async function open({ threadId, node, target = null, approveServer = false }) {
     close();
     const artifact = node.artifact;
     const kindLabel = KIND_LABELS[artifact.kind] ?? "Artifact";
@@ -186,12 +268,14 @@ export function createArtifactViewer({ root = document.body, native = null, onAd
     const back = element("button", { type: "button", class: "artifact-tool", title: "Back to the graph (Esc)", onclick: () => close() },
       iconFor("arrow-left"), element("span", { text: "Graph" }));
     const more = element("button", { type: "button", class: "artifact-tool artifact-icon-tool", title: "More", "aria-label": "More" }, iconFor("ellipsis"));
+    const annotate = element("button", { type: "button", class: "artifact-tool artifact-icon-tool", title: "Annotate", "aria-label": "Annotate", "aria-pressed": "false" }, iconFor("message-square-plus"));
     const toolbar = element("header", { class: "artifact-toolbar", role: "toolbar", "aria-label": "Artifact viewer" },
       back,
       element("div", { class: "artifact-title" }, iconFor(node.icon || "file"), element("b", { text: node.title }), element("small", { text: kindLabel })),
       native || liveSite ? element("div", { class: "artifact-address", title: "Where this artifact comes from" }, iconFor(artifact.kind === "url" ? "lock" : artifact.kind === "app" ? "server" : "file"), address) : null,
       badges,
       element("span", { class: "artifact-spacer" }),
+      native && notes && target ? annotate : null,
       native ? more : null);
     const stripRow = element("div", { class: "artifact-strip", title: "Move the pointer here for the toolbar · Esc returns to the graph" }, strip);
     const stage = element("div", { class: "artifact-stage" });
@@ -206,6 +290,7 @@ export function createArtifactViewer({ root = document.body, native = null, onAd
       stripRow, toolbar, stage, card);
     current = {
       overlay, toolbar, stage, device, card, badges, address, strip, artifact, title: node.title, errors: [], nativeOpen: false,
+      threadId, node, target, annotate, noting: null, notePanel: null, freeze: null,
       fileAddress: (url) => {
         try {
           const parsed = new URL(url);
@@ -248,6 +333,7 @@ export function createArtifactViewer({ root = document.body, native = null, onAd
     unsubscribe = native.onEvent(onEvent);
     resizeObserver = new ResizeObserver(() => placeView());
     resizeObserver.observe(stage);
+    annotate.onclick = () => void (current?.noting ? endNote() : beginNote());
     more.onclick = () => {
       const rect = more.getBoundingClientRect();
       void native.showMenu({ x: rect.left, y: rect.bottom + 4 });

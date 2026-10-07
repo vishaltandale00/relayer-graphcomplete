@@ -3,7 +3,8 @@
 // come from the thread folder through the `relayer-artifact:` scheme, which serves
 // only paths inside the artifact's folder and answers byte ranges for media.
 import { createReadStream } from "node:fs";
-import { readFile, realpath, stat } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { mkdir, readFile, realpath, stat, writeFile } from "node:fs/promises";
 import { basename, dirname, extname, join, relative, resolve, sep } from "node:path";
 import { Readable } from "node:stream";
 
@@ -352,6 +353,25 @@ async function applySeed(contents, plan, seed) {
   await contents.executeJavaScript(`(() => { for (const [key, value] of ${scriptJson(entries)}) localStorage.setItem(key, value); })()`);
 }
 
+/**
+ * Where the user is in an artifact, for a note (PRD 6.6.8): the route and scroll
+ * position, the video time, or the heading in view. Runs in the artifact's page;
+ * the result is display text only.
+ */
+const NOTE_LOCATION_SCRIPT = `(() => {
+  const time = (s) => Math.floor(s / 60) + ":" + String(Math.floor(s % 60)).padStart(2, "0");
+  const video = document.querySelector("video");
+  if (video && location.pathname.startsWith("/__relayer/view")) return "at " + time(video.currentTime);
+  const doc = document.querySelector("#doc");
+  if (doc) {
+    const headings = [...doc.querySelectorAll("h1,h2,h3,h4")].filter((h) => h.getBoundingClientRect().top <= 80);
+    return headings.length ? "under “" + headings.at(-1).textContent.trim() + "”" : "at the top";
+  }
+  if (document.querySelector("#picture")) return "the whole image";
+  const place = location.pathname + location.search + location.hash;
+  return "at " + place + (scrollY > 0 ? ", scrolled " + Math.round(scrollY) + " px" : "");
+})()`;
+
 export function createArtifactViewerService({
   WebContentsView,
   session,
@@ -360,6 +380,7 @@ export function createArtifactViewerService({
   resolveThread,
   serverRunner = null,
   rendererDirectory,
+  notesDirectory = null,
   devTools = false,
 }) {
   const plans = new Map();
@@ -480,6 +501,49 @@ export function createArtifactViewerService({
     return { status, address: plan.address };
   }
 
+  /**
+   * Start a note (PRD 6.6.8): capture what the user sees, say where they are, and
+   * pause playing media. The live view hides behind the captured image until endNote.
+   */
+  async function beginNote() {
+    if (!current?.view || !notesDirectory) return null;
+    const contents = current.view.webContents;
+    await contents.executeJavaScript(`window.__relayerNotePaused = [...document.querySelectorAll("video,audio")].filter((m) => !m.paused); window.__relayerNotePaused.forEach((m) => m.pause());`).catch(() => {});
+    // A capture can stall while Chromium paints no frames; never leave the viewer waiting.
+    const bounded = (promise) => Promise.race([promise, new Promise((_, reject) => setTimeout(() => reject(new Error("The view could not be captured.")), 5_000))]);
+    let png;
+    try {
+      let image = await bounded(contents.capturePage());
+      if (image.getSize().width > 1440) image = image.resize({ width: 1440, quality: "best" });
+      png = image.toPNG();
+    } catch {
+      // capturePage needs a presented surface; the DevTools protocol does not.
+      const attached = contents.debugger.isAttached();
+      if (!attached) contents.debugger.attach("1.3");
+      try {
+        png = Buffer.from((await bounded(contents.debugger.sendCommand("Page.captureScreenshot", { format: "png" }))).data, "base64");
+      } catch (error) {
+        await endNote();
+        throw error;
+      } finally {
+        if (!attached) contents.debugger.detach();
+      }
+    }
+    const digest = createHash("sha256").update(png).digest("hex");
+    await mkdir(notesDirectory, { recursive: true });
+    await writeFile(join(notesDirectory, `${digest}.png`), png, { mode: 0o600 });
+    let where = await contents.executeJavaScript(NOTE_LOCATION_SCRIPT).catch(() => null);
+    if (current.plan.kind === "pdf") where = `in ${basename(current.plan.file)}${/#page=(\d+)/u.test(contents.getURL()) ? `, page ${contents.getURL().match(/#page=(\d+)/u)[1]}` : ""}`;
+    current.view.setVisible(false);
+    return { location: String(where ?? "").slice(0, 200), digest, screenshot: `data:image/png;base64,${png.toString("base64")}` };
+  }
+
+  async function endNote() {
+    if (!current?.view) return;
+    current.view.setVisible(true);
+    await current.view.webContents.executeJavaScript(`(window.__relayerNotePaused || []).forEach((m) => m.play().catch(() => {})); window.__relayerNotePaused = [];`).catch(() => {});
+  }
+
   function setBounds(bounds) {
     if (!current) return;
     const valid = bounds && ["x", "y", "width", "height"].every((key) => Number.isFinite(bounds[key]) && bounds[key] >= 0);
@@ -506,7 +570,7 @@ export function createArtifactViewerService({
     return error === "";
   }
 
-  return Object.freeze({ open, close, setBounds, openExternally, isOpen: () => current !== null, currentPlan: () => current?.plan ?? null, currentContents: () => current?.view.webContents ?? null });
+  return Object.freeze({ open, close, setBounds, openExternally, beginNote, endNote, isOpen: () => current !== null, currentPlan: () => current?.plan ?? null, currentContents: () => current?.view.webContents ?? null });
 }
 
 export const artifactViewerTesting = Object.freeze({ viewerPage, ORIGIN, basename });

@@ -118,15 +118,23 @@ function compose(window) {
 async function composeNow(window) {
   const base = (await window.webContents.capturePage()).toPNG();
   const view = artifactView(window);
-  if (!view) return base;
+  // While Annotate is open the view hides behind its screenshot; show the page as it is.
+  if (!view || !view.getVisible()) return base;
   const bounds = view.getBounds();
   const contents = view.webContents;
   if (!contents.debugger.isAttached()) {
     contents.setBackgroundThrottling(false);
     contents.debugger.attach("1.3");
   }
-  // A view that was just placed or resized can refuse one capture; retry briefly.
-  const { data } = await waitFor("view capture", () => contents.debugger.sendCommand("Page.captureScreenshot", { format: "png" }), 5_000);
+  // A view that was just placed can refuse a capture, or never answer while Chromium
+  // paints no frames; retry with a bound on each attempt, then show the window alone.
+  const attempt = () => Promise.race([
+    contents.debugger.sendCommand("Page.captureScreenshot", { format: "png" }),
+    new Promise((_, reject) => setTimeout(() => reject(new Error("capture timed out")), 2_000)),
+  ]);
+  const captured = await waitFor("view capture", attempt, 8_000).catch(() => null);
+  if (!captured) return base;
+  const { data } = captured;
   const scale = (await sharp(base).metadata()).width / window.getContentBounds().width;
   const place = (value) => Math.round(value * scale);
   const content = await sharp(Buffer.from(data, "base64")).resize(place(bounds.width), place(bounds.height), { fit: "fill" }).png().toBuffer();
@@ -230,7 +238,7 @@ async function run(window) {
   const strip = await js(window, `document.querySelector(".artifact-strip-text")?.textContent`);
   check("ART-006 address strip", strip === "site/index.html", strip);
   const toolbarItems = await js(window, `[...document.querySelectorAll(".artifact-toolbar button")].map((b) => b.getAttribute("aria-label") || b.textContent.trim())`);
-  check("ART-006 no actions in viewer", toolbarItems.join(",") === "Graph,More", toolbarItems.join(", "));
+  check("ART-006 no actions in viewer", toolbarItems.join(",") === "Graph,Annotate,More", toolbarItems.join(", "));
   // ART-010: the seeded cart is there on first open; the page then empties it.
   const seededCart = await view.webContents.executeJavaScript(`document.querySelector("#cartCount").textContent`);
   check("ART-010 starting state applied", seededCart === "1", `cart count on open: ${seededCart}`);
@@ -429,6 +437,48 @@ async function run(window) {
   check("ART-009 reports a failed start with its log", /Cannot find module/u.test(failure?.log ?? "") && failure.actions.join(",") === "Retry,Add to chat", JSON.stringify({ actions: failure?.actions, log: failure?.log.slice(0, 160) }));
   await hold(3000);
   await shot(window, "16-app-failed");
+  await js(window, `document.querySelector(".artifact-card-actions button:last-child")?.blur()`);
+  await js(window, `document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }))`);
+  await waitFor("viewer closed", () => js(window, `document.querySelector(".artifact-viewer") === null`));
+
+  // ART-011: notes freeze the view and pause media, join the chat draft, and send as one interaction.
+  say("Annotate: the view freezes on a screenshot and the video pauses while you write");
+  await openArtifact(window, "Promo video", "Ship chapter");
+  view = await viewerLoaded(window);
+  await view.webContents.executeJavaScript(`document.querySelector("video").play()`);
+  await sleep(1500);
+  await js(window, `document.querySelector('[aria-label="Annotate"]').click()`);
+  await waitFor("note panel", () => js(window, `!!document.querySelector(".artifact-note-panel .artifact-note-field")`), 15_000);
+  const frozen = { paused: await view.webContents.executeJavaScript(`document.querySelector("video").paused`), hidden: !view.getVisible(), where: await js(window, `document.querySelector(".artifact-note-where").textContent`) };
+  check("ART-011 Annotate freezes the view and pauses media", frozen.paused && frozen.hidden && /^Where: at 0:1\d$/u.test(frozen.where), JSON.stringify(frozen));
+  say("Enter adds the note to the thread's chat draft");
+  await js(window, `(() => { const field = document.querySelector(".artifact-note-field"); field.value = "The logo flickers in this shot"; field.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true })); })()`);
+  await waitFor("note listed", () => js(window, `document.querySelectorAll(".artifact-note-list li").length === 1`), 15_000);
+  await hold(2500);
+  await shot(window, "17-annotate");
+  await js(window, `document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }))`);
+  await waitFor("panel closed", () => js(window, `document.querySelector(".artifact-note-panel") === null`));
+  const resumed = await waitFor("media resumed", () => view.webContents.executeJavaScript(`document.querySelector("video").paused ? null : true`), 5_000).catch(() => false);
+  check("ART-011 media resumes when the panel closes", resumed === true && view.getVisible(), `playing=${resumed} visible=${view.getVisible()}`);
+  await closeViewer(window);
+  say("Back in the thread, the note waits as a chip; Send delivers it as one interaction");
+  const chip = await waitFor("note chip", () => js(window, `[...document.querySelectorAll(".composer-context-pill")].map((pill) => pill.textContent.trim()).find((label) => label.includes("Ship chapter")) ?? null`), 15_000).catch(() => null);
+  check("ART-011 notes join the chat draft", chip !== null, String(chip));
+  await hold(2000);
+  await shot(window, "18-note-in-composer");
+  await js(window, `(() => { const prompt = document.querySelector("#threadPrompt"); prompt.value = "Please fix what I noted."; prompt.dispatchEvent(new Event("input", { bubbles: true })); })()`);
+  await waitFor("send enabled", () => js(window, `document.querySelector("#sendInteraction").disabled ? null : true`), 15_000);
+  await js(window, `document.querySelector("#sendInteraction").click()`);
+  const sent = await waitFor("follow-up accepted", async () => {
+    const detail = await request(`/api/threads/${thread.id}`);
+    const last = detail.interactions.at(-1);
+    return detail.interactions.length === 2 && last.completionStatus === "accepted" ? last : null;
+  }, 90_000);
+  const annotations = sent.contexts?.flatMap((context) => context.annotations ?? []) ?? [];
+  check("ART-011 one interaction carries the note with where and its screenshot", annotations.length === 1 && /^The logo flickers in this shot\n— at 0:1\d · screenshot sha256:[0-9a-f]{64}$/u.test(annotations[0]), JSON.stringify(annotations));
+  const received = JSON.parse(await readFile(join(output, "agent-previews", `input-${sent.graphNodeId}.json`), "utf8"));
+  check("ART-011 the agent can open the note's screenshot", received.length === 1 && received[0].png === true, JSON.stringify(received));
+  await hold(2500);
 
   await hold(3000);
   if (recorder) await recorder.stop();

@@ -165,6 +165,7 @@ export const APPROVED_TELEMETRY_MODULES = Object.freeze({
     "packages/harness-host/dist/approval-coordinator.js",
     "packages/harness-host/dist/approval.js",
     "packages/harness-host/dist/artifact-files.js",
+    "packages/harness-host/dist/artifact-notes.js",
     "packages/harness-host/dist/completion-execution.js",
     "packages/harness-host/dist/configuration.js",
     "packages/harness-host/dist/host.js",

@@ -2,7 +2,7 @@
 import { Window } from "happy-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { artifactAddress, artifactLayerNode, createArtifactViewer } from "../desktop/renderer/src/artifact-viewer.js";
+import { artifactAddress, artifactLayerNode, artifactNoteLabel, artifactNoteText, createArtifactViewer } from "../desktop/renderer/src/artifact-viewer.js";
 
 const site = { kind: "website", source: { file: "site/index.html", root: "site" }, part: { route: "#pricing" }, fingerprint: "sha256:a" };
 const node = (artifact, title = "Landing page") => ({ id: 27, icon: "globe", title, detail: "The whole site.", artifact });
@@ -25,6 +25,8 @@ function fakeNative(status = { state: "ok" }) {
     setBounds: vi.fn(async () => {}),
     close: vi.fn(async () => {}),
     showMenu: vi.fn(async () => {}),
+    beginNote: vi.fn(async () => ({ location: "at 0:12", digest: "c".repeat(64), screenshot: "data:image/png;base64,AAAA" })),
+    endNote: vi.fn(async () => {}),
     onEvent: (callback) => { listener = callback; return () => { listener = () => {}; }; },
     emit: (event) => listener(event),
   };
@@ -130,6 +132,59 @@ describe("web apps (ART-009)", () => {
     expect([...document.querySelectorAll(".artifact-card-actions button")].map((button) => button.textContent)).toEqual(["Retry", "Add to chat"]);
     document.querySelectorAll(".artifact-card-actions button")[1].click();
     expect(onAddToChat).toHaveBeenCalledWith(expect.stringContaining("Cannot find module 'vite'"));
+  });
+});
+
+describe("Annotate (ART-011)", () => {
+  const video = { kind: "video", source: { file: "media/promo.mp4" }, fingerprint: "sha256:a" };
+  const target = { nodeId: 27, sourceInteractionNodeId: 5, sourceLayerId: 9 };
+
+  function fakeNotes() {
+    const stored = [];
+    return {
+      stored,
+      list: vi.fn(async () => stored.map((text, index) => ({ id: String(index), text }))),
+      add: vi.fn(async ({ text }) => { stored.push(text); }),
+      remove: vi.fn(async ({ note }) => { stored.splice(Number(note.id), 1); }),
+    };
+  }
+
+  it("freezes the view, pauses media and adds notes with where and a screenshot to the chat draft", async () => {
+    const native = fakeNative();
+    const notes = fakeNotes();
+    const onClose = vi.fn();
+    const viewer = createArtifactViewer({ root: document.body, native, notes, onClose });
+    await viewer.open({ threadId: 3, node: node(video, "Promo video"), target });
+    const tools = [...document.querySelectorAll(".artifact-toolbar button")].map((button) => button.getAttribute("aria-label") || button.textContent.trim());
+    expect(tools).toEqual(["Graph", "Annotate", "More"]);
+    document.querySelector('[aria-label="Annotate"]').click();
+    await vi.waitFor(() => expect(document.querySelector(".artifact-note-panel")).toBeTruthy());
+    expect(native.beginNote).toHaveBeenCalledOnce();
+    expect(document.querySelector(".artifact-freeze").getAttribute("src")).toBe("data:image/png;base64,AAAA");
+    expect(text(".artifact-note-where")).toBe("Where: at 0:12");
+    const field = document.querySelector(".artifact-note-field");
+    field.value = "The logo flickers here";
+    field.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    await vi.waitFor(() => expect(notes.add).toHaveBeenCalledOnce());
+    expect(notes.add).toHaveBeenCalledWith(expect.objectContaining({ threadId: 3, target, text: `The logo flickers here\n— at 0:12 · screenshot sha256:${"c".repeat(64)}` }));
+    await vi.waitFor(() => expect(text(".artifact-note-list li span")).toBe("The logo flickers here\n— at 0:12"));
+    expect(text(".artifact-note-count")).toBe("1 in the chat draft");
+    document.querySelector(".artifact-note-remove").click();
+    await vi.waitFor(() => expect(document.querySelectorAll(".artifact-note-list li")).toHaveLength(0));
+
+    document.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    await vi.waitFor(() => expect(native.endNote).toHaveBeenCalledOnce());
+    expect(document.querySelector(".artifact-note-panel")).toBe(null);
+    expect(viewer.isOpen()).toBe(true);
+    document.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    expect(viewer.isOpen()).toBe(false);
+    expect(onClose).toHaveBeenCalledWith(3);
+  });
+
+  it("formats a note for the agent and shows it without the screenshot reference", () => {
+    const note = artifactNoteText({ text: "  Too dark ", location: "under “Colour”", digest: "d".repeat(64) });
+    expect(note).toBe(`Too dark\n— under “Colour” · screenshot sha256:${"d".repeat(64)}`);
+    expect(artifactNoteLabel(note)).toBe("Too dark\n— under “Colour”");
   });
 });
 

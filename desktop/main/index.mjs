@@ -231,6 +231,7 @@ if (primaryInstance) {
       diagnostics: primeAgentRuntime.diagnostics,
     })),
     codexBasicClientModuleUrl: graphClientModuleUrl,
+    artifactNotesDirectory: join(userDataPath, "artifact-notes"),
     draftPreviewRenderer: createElectronDraftPreviewRenderer({
       BrowserWindow,
       session,
@@ -685,7 +686,7 @@ if (primaryInstance) {
         exit: (code) => app.exit(code),
       }),
     });
-    artifactServers = createArtifactServerRunner({ grantsPath: join(app.getPath("userData"), "artifact-server-approvals.json") });
+    artifactServers = createArtifactServerRunner({ grantsPath: join(userDataPath, "artifact-server-approvals.json") });
     // app.exit() skips the quit events; a server Relayer started never outlives it.
     process.once("exit", () => artifactServers?.stopAll());
     const artifactViewer = createArtifactViewerService({
@@ -695,6 +696,7 @@ if (primaryInstance) {
       getWindow: () => mainWindow,
       resolveThread: (threadId) => productServer.artifactFolder(threadId),
       serverRunner: artifactServers,
+      notesDirectory: join(userDataPath, "artifact-notes"),
       rendererDirectory,
       devTools: !app.isPackaged,
     });

@@ -5,7 +5,7 @@
 // script error, and a deployed https site. No model runs.
 import { EdgeObject, LayerLayoutObject, LayerObject, NodeObject, NodePlacementObject, RelayerGraphClient, type ArtifactDetails } from "@relayer/graph-client";
 import { renderInteractionInput, type Harness, type HarnessConfiguration, type HarnessFactory, type HarnessFactoryContext, type HarnessRunContext, type HarnessSessionState, type HarnessTraceSupport } from "@relayer/harness-host";
-import { appendFile, copyFile, cp, mkdir, writeFile } from "node:fs/promises";
+import { appendFile, copyFile, cp, mkdir, readFile, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -105,11 +105,35 @@ class ArtifactViewerFixtureHarness implements Harness {
   async complete(context: HarnessRunContext): Promise<void> {
     const graph = new RelayerGraphClient(context.graph.acquireCapability());
     context.trace.emit({ type: "prompt", data: { text: renderInteractionInput(context.interactionInput), kind: "fixture-input" } });
-    await cp(artifactViewerFixtureFolder(), this.context.workingDirectory, { recursive: true, force: true });
     // ART-005: each artifact layer's advisory preview. Evidence runs may keep the images.
     const previews: { key: string; status: string; width: number | undefined; height: number | undefined }[] = [];
     const previewEvidence = process.env.RELAYER_ARTIFACT_PREVIEW_DIR;
     if (previewEvidence) await mkdir(previewEvidence, { recursive: true });
+    // ART-011: what the agent receives for artifact notes, screenshot files included.
+    if (previewEvidence && context.interactionInput.contexts.length) {
+      // The turn folder holding the screenshots is removed after the turn, so look now.
+      const screenshots = await Promise.all(context.interactionInput.contexts.flatMap((item) => item.annotations).map(async (note) => {
+        const file = /screenshot (\/\S+\.png)/u.exec(note)?.[1];
+        const head = file ? await readFile(file).then((bytes) => bytes.subarray(0, 4).toString("hex"), () => null) : null;
+        return { note, file, png: head === "89504e47" };
+      }));
+      await writeFile(join(previewEvidence, `input-${context.inputGraph.id}.json`), JSON.stringify(screenshots, null, 2));
+    }
+    // A follow-up that carries artifact notes gets a short answer that links back from
+    // each noted artifact, as the attached-navigation contract asks.
+    if (context.interactionInput.contexts.length) {
+      const answer = new NodeObject("message-square", "Notes received", "Each note arrived with where it was written and a screenshot.", "concept", "notes-received");
+      await graph.submitNode(answer);
+      const response = new LayerObject([answer], [], new LayerLayoutObject([new NodePlacementObject(answer, 0.5, 0.5)], "default"), "notes-response", answer);
+      await graph.submitLayer(response);
+      for (const [index, item] of context.interactionInput.contexts.entries()) {
+        await graph.addAction(item.targetNode.id, { kind: "navigate", relation: "expand", label: "See the reply", target: response, clientKey: `reply-${index}` });
+      }
+      await graph.addAction(context.inputGraph.id, { kind: "navigate", relation: "expand", label: "Notes received", target: response, clientKey: "response" });
+      await graph.submit(context.inputGraph.id);
+      return;
+    }
+    await cp(artifactViewerFixtureFolder(), this.context.workingDirectory, { recursive: true, force: true });
     const groups: { node: NodeObject; group: Group }[] = [];
     for (const group of ARTIFACT_VIEWER_FIXTURE_GROUPS) {
       const node = new NodeObject(group.icon, group.title, group.detail, "concept", group.key);

@@ -28,9 +28,12 @@ its portability. Agent-made content must never run with Relayer's authority.
    through a host bridge operation, as visual-asset preparation already does.
    Rejections are repairable validation issues; a failed fingerprint fails
    acceptance like a failed asset pin.
-4. **The server invoke is deterministic.** Web apps start through an invoke
-   action with `invoke: "server"`. It runs a declared command under the thread's
-   sandbox and permission profile, never a model, and leaves no graph record.
+4. **The server invoke is deterministic.** An app artifact's details carry its
+   server invoke: a start command, a loopback ready URL and an idle timeout.
+   Desktop main runs it under the thread's permission profile, never a model,
+   and leaves no graph record. On macOS a Seatbelt profile confines Ask and Auto
+   threads to writing in the thread folder. Approvals are kept per thread and
+   command in the desktop profile.
 5. **Unknown renderers fall back.** A surface that does not know a layer's
    renderer draws it as an ordinary graph, so older readers stay correct.
 

@@ -455,6 +455,14 @@ export function registerArtifactViewerIpc({ ipcMain, Menu, viewer, getWindow }) 
     fromMainWindow(event);
     viewer.setBounds(bounds);
   });
+  ipcMain.handle("relayer:artifact-viewer-note-begin", (event) => {
+    fromMainWindow(event);
+    return viewer.beginNote();
+  });
+  ipcMain.handle("relayer:artifact-viewer-note-end", (event) => {
+    fromMainWindow(event);
+    return viewer.endNote();
+  });
   ipcMain.handle("relayer:artifact-viewer-close", (event) => {
     fromMainWindow(event);
     viewer.close();
