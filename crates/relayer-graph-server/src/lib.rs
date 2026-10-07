@@ -2463,10 +2463,10 @@ async fn pin_artifact_fingerprints(
     else {
         return Ok(());
     };
-    let Ok(drafts) = writer.draft_artifacts().await else {
+    if writer.require_active_authority().await.is_err() {
         return Ok(());
-    };
-    for (node_id, artifact) in drafts {
+    }
+    for (node_id, artifact) in writer.draft_artifacts().await? {
         let kind = artifact["kind"].as_str().unwrap_or_default();
         if !relayer_graph_core::artifact::is_file_artifact_kind(kind) {
             continue;
@@ -2485,6 +2485,10 @@ async fn pin_artifact_fingerprints(
 /// Acceptance checks every draft artifact node, so a failure says which one: the agent
 /// can restore the file, or resubmit the node without artifact details.
 fn name_artifact_node(mut error: ApiError, node_id: NodeId) -> ApiError {
+    // Only file issues are the agent's to repair; an unavailable host is not.
+    if error.0 != StatusCode::UNPROCESSABLE_ENTITY {
+        return error;
+    }
     let prefix = format!("Node {node_id}: ", node_id = node_id.value());
     let suffix = " Restore the file, or resubmit the node without artifact details if it is no longer shown.";
     if let Some(message) = error.1.pointer_mut("/error/message") {

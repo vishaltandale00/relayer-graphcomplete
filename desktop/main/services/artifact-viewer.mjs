@@ -112,6 +112,7 @@ document.getElementById("whole")?.addEventListener("click",(event)=>{event.preve
 for(const h of doc.querySelectorAll("h1,h2,h3,h4"))h.id=h.textContent.toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/^-|-$/g,"");
 const heading=${scriptJson(query.get("heading") ?? "")};
 if(heading){const want=heading.toLowerCase();const target=[...doc.querySelectorAll("h1,h2,h3,h4")].find((h)=>h.textContent.trim().toLowerCase()===want||h.id===want);target?.scrollIntoView();}
+document.addEventListener("click",(event)=>{const link=event.target.closest?.('a[href^="#"]');if(!link)return;event.preventDefault();document.getElementById(decodeURIComponent(link.getAttribute("href").slice(1)))?.scrollIntoView();});
 }).catch((error)=>{doc.textContent=error.message;console.error(error.message);});</script></body>`);
   }
   return shell(`<p class="center">Unsupported artifact.</p>`);
@@ -370,8 +371,8 @@ export function createArtifactViewerService({
     const status = await artifactFileStatus(plan, artifact.fingerprint);
     const partition = partitionFor(threadId, nodeId);
     if (token !== latest) return { status: { state: "superseded" }, address: plan.address };
-    plans.set(partition, plan);
     if (status.state === "missing") return { status, address: plan.address };
+    plans.set(partition, plan);
     await prepareSession(partition);
     if (token !== latest) return { status: { state: "superseded" }, address: plan.address };
     const view = new WebContentsView({ webPreferences: artifactWebPreferences(plan, partition, devTools) });
