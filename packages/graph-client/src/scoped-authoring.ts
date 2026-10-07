@@ -283,12 +283,11 @@ export class ScopedAuthoringLayer {
     if (declaration.nodes.has(key))
       invalid(`Duplicate node ${path(declaration.name, "nodes", key)}.`);
     const values = data(fields);
-    if (
-      Object.keys(values).some(
-        (field) => !["icon", "title", "detail", "kind"].includes(field),
-      )
-    )
-      invalid("Unknown node field.");
+    const unknownField = Object.keys(values).find(
+      (field) => !["icon", "title", "detail", "kind"].includes(field),
+    );
+    if (unknownField !== undefined)
+      invalid(`Unknown node field ${JSON.stringify(unknownField.slice(0, 128))}. Use layer.node(localKey, { icon, title, detail }) with optional kind; the scoped API supplies clientKey and ref.`);
     if (
       typeof values.title !== "string" ||
       typeof values.detail !== "string" ||
@@ -377,14 +376,9 @@ export class ScopedAuthoringLayer {
     )
       invalid("An action needs its exact declared owning node in this layer.");
     const values = data(fields);
-    if (
-      ["sourceLayer", "clientKey", "ref"].some((field) =>
-        Object.hasOwn(values, field),
-      )
-    )
-      invalid(
-        "The scoped module supplies action identity and source provenance.",
-      );
+    const reservedFields = ["sourceLayer", "clientKey", "ref"].filter((field) => Object.hasOwn(values, field));
+    if (reservedFields.length > 0)
+      invalid(`Remove ${reservedFields.join(", ")} from layer.action(localKey, sourceNode, fields). The scoped module supplies action identity and source provenance; pass the returned action unchanged to detailCapability.`);
     const action = {
       ...values,
       ...(values.kind === "navigate"

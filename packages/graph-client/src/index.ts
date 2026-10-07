@@ -41,3 +41,5 @@ export * from "./image-icons.js";
 export * from "./icon-discovery.js";
 
 export * from "./image-icon-detail.js";
+
+export { flushAuthoringErrors } from "./authoring-errors.js";

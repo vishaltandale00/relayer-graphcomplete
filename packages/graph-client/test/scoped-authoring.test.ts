@@ -61,6 +61,17 @@ const client = () =>
   });
 
 describe("scoped graph authoring", () => {
+  it("explains rejected node and action identity fields while keeping the draft repairable", () => {
+    const layer = client().authoring("repair").layer("answer");
+    expect(() => layer.node("finding", Object.assign({ icon: "info", title: "Finding", detail: "Evidence" }, { clientKey: "extra" })))
+      .toThrow('Unknown node field "clientKey". Use layer.node(localKey, { icon, title, detail }) with optional kind');
+    const node = layer.node("finding", { icon: "info", title: "Finding", detail: "Evidence" });
+    expect(() => layer.action("next", node, Object.assign({ kind: "invoke" as const, label: "Next", interactionText: "Next" }, { sourceLayer: layer.object, clientKey: "extra" })))
+      .toThrow("Remove sourceLayer, clientKey from layer.action(localKey, sourceNode, fields)");
+    const action = layer.action("next", node, { kind: "invoke", label: "Next", interactionText: "Next" });
+    expect(action.sourceLayer).toBe(layer.object);
+  });
+
   afterEach(() => vi.unstubAllGlobals());
   it("captures a bound two-layer program before queued transport and preserves all selected aliases", async () => {
     const fixture = wire();

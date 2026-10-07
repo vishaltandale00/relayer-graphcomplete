@@ -296,9 +296,14 @@ describe("replay-safe graph authoring", () => {
         RELAYER_NODE_ID: String(recipeInteraction.node.id),
       });
     const recipeLayerId = Number(recipeResult.match(/RECIPE:(\d+)/)[1]);
-    expect(await controlRead(server.url, token,
-      `/api/control/interactions/${recipeInteraction.node.id}/layers/${recipeLayerId}`))
-      .toMatchObject({ layer: { state: "accepted" }, nodes: [{ icon: "info", authoredDetail: { components: [{ id: "main" }] } }] });
+    const recipeAccepted = await controlRead(server.url, token,
+      `/api/control/interactions/${recipeInteraction.node.id}/layers/${recipeLayerId}`);
+    expect(recipeAccepted).toMatchObject({ layer: { state: "accepted" }, nodes: [{ icon: "info", authoredDetail: { components: [{ id: "main" }] } }], actions: [expect.objectContaining({ relation: "expand", state: "accepted" })] });
+    const mounts = recipeAccepted.nodes[0].authoredDetail.mounts;
+    expect(mounts).toHaveLength(1);
+    expect(mounts[0]).toMatchObject({ capability: { kind: "expand", action: { clientKey: recipeAccepted.actions[0].clientKey } } });
+    expect((await controlRead(server.url, token,
+      `/api/control/interactions/${recipeInteraction.node.id}/layers/${recipeAccepted.actions[0].targetLayerId}`)).layer.state).toBe("accepted");
 
     const foreignInteraction = await controlRequest(
       server.url,

@@ -5,7 +5,7 @@ import { connect } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
-import type { InteractionInput, ResolvedPersonalPresentation } from "@relayer/graph-client";
+import { RelayerGraphClient, type InteractionInput, type ResolvedPersonalPresentation } from "@relayer/graph-client";
 import { HarnessExecutionFailure, HarnessHost, startHarnessHost, type HarnessInvokedCompletion } from "../src/host.js";
 import { nativeExecutionHandle } from "../src/completion-execution.js";
 import { PrimeAgentHarness } from "../src/implementations/prime-agent.js";
@@ -98,6 +98,54 @@ const legacyConfiguration = (configuration: HarnessConfiguration) => {
 };
 
 describe("HarnessHost", () => {
+  it.each(["accepted", "failed", "cancelled"])("drains child diagnostics before cleanup on %s completion without changing the outcome", async (outcome) => {
+    const directory = await mkdtemp(join(tmpdir(), "relayer-diagnostic-drain-"));
+    let programDirectory = "";
+    let diagnosticRequests = 0;
+    let accepted = false;
+    const delivered: unknown[] = [];
+    const controller = new AbortController();
+    vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.endsWith("/authoring-errors")) {
+        diagnosticRequests += 1;
+        if (diagnosticRequests === 1) throw new Error("child transport lost before exit");
+        expect((await stat(programDirectory)).isDirectory()).toBe(true);
+        expect(init?.headers).toMatchObject({ authorization: "Bearer token" });
+        delivered.push(JSON.parse(String(init?.body)));
+        return new Response("{}", { status: 202 });
+      }
+      if (url.endsWith("/output")) return accepted
+        ? new Response(JSON.stringify(completion))
+        : new Response(JSON.stringify({ error: { code: "completion_not_found" } }), { status: 404 });
+      return graphReadResponse(url);
+    }));
+    const host = new HarnessHost({
+      stateFile: join(directory, "sessions.json"), controlToken: "control",
+      implementations: { test: () => ({ async complete(context) {
+        const capability = context.graph.acquireCapability();
+        programDirectory = capability.programDirectory!;
+        const layer = new RelayerGraphClient(capability).authoring("fixture").layer("answer");
+        let original: unknown;
+        try { layer.node("answer", Object.assign({ icon: "info", title: "Answer", detail: "Detail" }, { clientKey: "invalid" })); }
+        catch (error) { original = error; }
+        if (outcome === "accepted") accepted = true;
+        if (outcome === "failed") throw original;
+        if (outcome === "cancelled") { controller.abort(new Error("fixture cancelled")); throw controller.signal.reason; }
+      }, state: emptyState }) },
+    });
+    try {
+      await host.initialize();
+      await host.createSession({ threadId: 1, permissionProfileId: "auto", configuration: testConfiguration, workingDirectory: directory });
+      const completing = host.complete(1, 1, graph(), undefined, controller.signal, { productInteractionId: 29 });
+      if (outcome === "accepted") await expect(completing).resolves.toMatchObject({ output: completion });
+      else await expect(completing).rejects.toThrow(outcome === "failed" ? 'Unknown node field "clientKey"' : "cancelled");
+      expect(delivered).toEqual([expect.objectContaining({ phase: "client", codes: ["client_validation"] })]);
+      await expect(stat(programDirectory)).rejects.toMatchObject({ code: "ENOENT" });
+    } finally {
+      await host.close(); vi.unstubAllGlobals(); await rm(directory, { recursive: true, force: true });
+    }
+  });
+
   it("rejects broker authority and invoke-origin execution when the pinned configuration disables agent-authored Complete", async () => {
     const directory = await mkdtemp(join(tmpdir(), "relayer-complete-authority-"));
     let calls = 0;

@@ -25,19 +25,26 @@ export function scopedAuthoringRecipeJs(interactionNodeId: number, clientModuleU
 The following runnable example demonstrates mechanics only. Replace its content and choose the topology, layout and controls for the task.
 
 \`\`\`javascript
-import { RelayerGraphClient, html, css, detailAuthoringReference } from ${JSON.stringify(clientModuleUrl)};
+import { RelayerGraphClient, html, css, detailCapability, detailAuthoringReference } from ${JSON.stringify(clientModuleUrl)};
 const graph = RelayerGraphClient.fromEnv();
 // Inspect detailAuthoringReference() when consulting the compiler constraints.
 const author = graph.authoring("response-v1");
 const layer = author.layer("answer");
+const childLayer = author.layer("details");
 const node = layer.node("finding", { icon: "info", title: "Answer", detail: "Replace with the supported answer." });
-node.detailAuthoring.setComponent("main", html\`<section><h2>Answer</h2><p>Replace with the supported answer.</p></section>\`, css\`section { display: grid; gap: 0.75rem; background-color: transparent; }\`);
+const child = childLayer.node("detail", { icon: "info", title: "Details", detail: "Replace with useful depth." });
+// Declare the action before binding it. The scoped API supplies identity and source layer.
+const expand = layer.action("details", node, { kind: "navigate", relation: "expand", label: "Details", target: childLayer });
+const sharedStyles = css\`section { display: grid; gap: 0.75rem; background-color: transparent; }\`;
+node.detailAuthoring.setComponent("main", html\`<section><h2>Answer</h2><p>Replace with the supported answer.</p><button gc=\${detailCapability.expand("details-control", expand)}>Details</button></section>\`, sharedStyles);
+child.detailAuthoring.setComponent("main", html\`<section><h2>Supporting evidence</h2><p>Explain the evidence behind the answer.</p></section>\`, sharedStyles);
 layer.layout([[node, 0.5, 0.5]], { edgeShape: "default", defaultNode: node });
+childLayer.layout([[child, 0.5, 0.5]], { edgeShape: "default", defaultNode: child });
 const written = await author.write(layer);
 await graph.addAction(${interactionNodeId}, { kind: "navigate", relation: "expand", label: "Answer", target: written.rootLayer, clientKey: "root-response" });
 await graph.submit(${interactionNodeId});
 \`\`\`
-Add a connection with layer.edge("connection", first, second). Declare node controls before write with layer.action("details", node, { kind: "navigate", relation: "expand", label: "Details", target: childLayer }); bind that same returned action with detailCapability.expand. For references use relation: "reference" and detailCapability.reference; for follow-ups use kind: "invoke", interactionText, and detailCapability.invoke. The containing layer and action keys are supplied by the scoped API. Set each selected layer's layout explicitly, including routes or sizeJustification when needed. For specialized low-level calls, layer.object is the actual LayerObject. Accepted-node additions and replacements still use their existing authorized low-level APIs and presentation revisions.`;
+Add a connection with layer.edge("connection", first, second). Declare node controls before write with layer.action("details", node, { kind: "navigate", relation: "expand", label: "Details", target: childLayer }); bind that same returned action with detailCapability.expand("stable-control-key", action) in an unquoted gc= template interpolation, as shown above. The key and action are both required. For references use relation: "reference" and detailCapability.reference; for follow-ups use kind: "invoke", interactionText, and detailCapability.invoke. layer.node(localKey, fields) accepts only icon, title, detail, and optional kind: do not pass clientKey or ref in fields. layer.action(localKey, sourceNode, fields) supplies sourceLayer, clientKey, and ref: do not author these fields. Declare actions before binding them, and reuse the returned action without cloning or adding identity fields. Set each selected layer's layout explicitly, including routes or sizeJustification when needed, with layer.layout(...); written.rootLayer is available only after author.write(...), and has no .layer wrapper. For specialized low-level calls, layer.object is the actual LayerObject. Accepted-node additions and replacements still use their existing authorized low-level APIs and presentation revisions.`;
 }
 
 export function scopedAuthoringRecipePython(interactionNodeId: number): string {
@@ -63,5 +70,5 @@ written = await author.write(layer)
 await graph.add_navigate_action(${interactionNodeId}, "Answer", written.root_layer, relation="expand", client_key="root-response")
 await graph.submit(${interactionNodeId})
 \`\`\`
-Add connections with layer.edge("connection", first, second). Declare controls before write with layer.action("details", node, kind="navigate", relation="expand", label="Details", target=child_layer), then bind that same returned action with action_capability. Use relation="reference" for evidence and kind="invoke", interaction_text="..." for follow-ups. The scoped API supplies source_layer and keys. Set every selected layer's layout explicitly. layer.object exposes the actual LayerObject for specialized operations. Accepted-node additions and presentation replacement retain their existing grants and revisions.`;
+Add connections with layer.edge("connection", first, second). Declare controls before write with layer.action("details", node, kind="navigate", relation="expand", label="Details", target=child_layer), then bind that same returned action with action_capability. Use relation="reference" for evidence and kind="invoke", interaction_text="..." for follow-ups. Node fields are icon, title, detail, and optional kind; do not supply client_key or ref. The scoped API supplies action source_layer and identity; do not pass source_layer, client_key, or ref into layer.action. Declare actions before binding them. Set every selected layer's layout explicitly. layer.object exposes the actual LayerObject for specialized operations. Accepted-node additions and presentation replacement retain their existing grants and revisions.`;
 }

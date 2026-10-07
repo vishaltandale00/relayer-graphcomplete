@@ -182,3 +182,59 @@ The reviewer independently verified 30 helper/private receipts, 50 runtime pins,
 routes and five accepted snapshots. No unresolved receipt blockers remain.
 `live-review.json` records the assertion and substantive limitations; source or
 receipt changes invalidate it. This is not a nonregression certification.
+
+
+## Diagnostic delivery and control guidance follow-up
+
+The six-attempt live run above remains historical evidence for commit
+`57e5d1b9fa011b78c344537787d5f1f81c3fd8f7`. It is not evidence for this follow-up.
+PRD §9.4 already authorizes partial, unattested origin measurement. PRD §6.2 and
+§11 and ADR 0005 own compiled controls and scoped graph acceptance. No product
+meaning, judge rubric, graph authority, compiler acceptance rule or metric total
+is changed. No test is removed and no inference enters the default suite.
+
+| Changed executable seam / checkpoint | Smallest production observation |
+| --- | --- |
+| SDK origin reporting persists bounded fixed-code diagnostics before synchronous throw; environment-only compiler origin preserves its program folder | `test/eval-authoring-error-delivery.test.mjs`: real built SDK subprocesses fail on node, action and nested template; exit 1/original error, sanitized spool and recorder metric |
+| Host drains before folder removal and before caller revokes capability/exports receipts, without rewriting accepted/failure/cancellation | Same subprocess fixture through real HarnessHost + recorder; `packages/harness-host/test/host.test.ts` accepted/failed/cancelled cleanup journey |
+| Recorder HTTP and spool replay share one incident ID, deduplicate before independent diagnostic budget, preserve partial/unknown totals | Delivery fixtures exercise both arrival orders and a one-origin budget; existing recorder overflow, token attribution and metric tests remain distinct |
+| Spooled files have bounded slots/actual reads, reject unknown codes/fields and symlinks; unavailable transport, removed folder and opt-out preserve outcomes | Delivery suite malformed/oversized/symlink, one-deadline failure, saturation/opt-out/removal fixtures |
+| Node/action field rejection remains strict and repairable with actionable bounded feedback | `packages/graph-client/test/scoped-authoring.test.ts` rejected fields then correct declarations under the same keys |
+| Delivered JavaScript recipe declares and binds exact scoped action with stable control key and gc interpolation; child closure accepts | `test/graph-authoring-replay.test.mjs` executes the exact recipe through packaged SDK and real Rust acceptance; provider prompt composition suites retain delivery |
+
+Required plan: focused in-process/real subprocess fixtures, then `npm run check`,
+`npm run build`, `npm run test:eval-compiled-runtime`, `npm run test:eval-web`,
+`npm run test:eval-graph-preview`, and refreshed adversarial review. The JavaScript
+recipe is exercised by the real Rust replay journey. Unavailable/pinned clients,
+Python local validation, restrictive launchers without a host program folder,
+spool saturation, host crash and transport loss remain partial capture. Spool
+ownership attributes reports to one turn; it cannot attest incident truth.
+
+Actual final-source evidence: `delivery-verification.json` records full check
+passed (Rust/Clippy/crash; 3,732 Vitest tests, 3 skipped; secret boundary 2/2;
+Python 74/74; receipt/readability), build passed, compiled-runtime 4/4, all
+browser chapters passed, and PREV-003 rendered three real PNGs plus a cached
+response. The tested ten-path digest is
+`de363d143720b0ed5068db7e699bec069b756787c6d686bb2e7dfaefacecd3f3`.
+`delivery-review.json` records adversarial source/mapping PASS with no blockers
+at that exact digest; aggregate and live execution were not independently rerun
+by that review. Source changes invalidate the assertion.
+
+Earlier failures remain explicit. The first full check found a new host fixture
+calling the wrong overload; the fixture was corrected. The next aggregate had
+one existing Lantern quartet recursive graph-memory failure while 3,731 tests
+passed. That unchanged scenario passed in isolation, and the final full check
+passed with one Vitest worker and four Rust test threads. The aggregate cause
+remains unproven; this does not certify absence of regressions. An earlier browser
+proof lost the task form after catalog refresh; its unchanged retry and the final
+source proof passed. Initial drain placement delayed access release under the
+force-stop fixture; the final host releases access before draining. Normal turns
+return immediately when no first spool slot exists. No tests were deleted.
+
+Trusted Ladybug cache verification checked platform, Rust version, source and
+artifact hashes; the first verifier invocation omitted required platform flags
+and was corrected. Warm private native artifacts accelerated compilation, with
+fresh required tests. Logs are locally retained by byte hash in the receipt.
+The upcoming live matrix uses the same two H3 tasks, three original attempts each,
+Luna on codex-basic and the pinned simulated-user judge in a fresh isolated
+profile. No injected failures or replacement candidates are planned.
