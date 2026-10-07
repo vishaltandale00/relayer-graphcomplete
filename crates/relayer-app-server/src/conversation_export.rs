@@ -369,6 +369,9 @@ pub struct ExportLayer {
     pub edges: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub layout: Option<ExportLayerLayout>,
+    /// Which renderer reads the layer (PRD 11.11); absent for a graph.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub renderer: Option<String>,
     pub state: ExportRecordState,
 }
 
@@ -431,6 +434,9 @@ pub struct ExportNode {
     pub authored_detail_omitted: Option<ExportAuthoredDetailOmission>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub authored_detail_assets: Vec<ExportVisualAssetAssociation>,
+    /// Artifact details (PRD 11.11): relative paths or a URL, never absolute paths.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub artifact: Option<serde_json::Value>,
     pub state: ExportRecordState,
 }
 
@@ -941,6 +947,7 @@ impl ConversationExportValidator {
                 authored_detail: None,
                 authored_detail_omitted: None,
                 authored_detail_assets: Vec::new(),
+                artifact: None,
                 state: context.target.state,
             };
             register_node_definition(

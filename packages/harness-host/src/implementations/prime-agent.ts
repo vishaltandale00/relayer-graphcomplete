@@ -30,6 +30,7 @@ import type {
   JsonObject,
 } from "../types.js";
 import { CURRENT_WORKSPACE_GUIDANCE, GRAPH_PRESENTATION_GUIDANCE, NODE_ICON_GUIDANCE } from "./graph-presentation-guidance.js";
+import { ARTIFACT_LAYER_GUIDANCE_PYTHON } from "./artifact-layer-guidance.js";
 import { LAYER_EDGE_SHAPE_GUIDANCE } from "./layer-edge-shape-guidance.js";
 import {
   personalPresentationNativeInstructions,
@@ -1153,6 +1154,8 @@ ${PYTHON_GRAPH_AUTHORING_RULES}
 Import NodePlacementObject and LayerLayoutObject from relayer_graph. Every new layer requires a version-1 LayerLayoutObject(placements, edge_shape, edge_routes=()) with exactly one NodePlacementObject(node, x, y) per member node. Coordinates are normalized numbers from 0 through 1 and express semantic relative position independently of the viewport. Place a one-node layer at (0.5, 0.5). Keep flow or time moving consistently, anchor hierarchy with a parent or summary, group related nodes, align comparisons, and avoid accidental overlap or edge crossings. Do not derive coordinates from pixels, window size, or inspector state.
 ${LAYER_EDGE_SHAPE_GUIDANCE}
 
+${ARTIFACT_LAYER_GUIDANCE_PYTHON}
+
 Finish the root execution only by calling:
 
 await graph.submit(${interaction.id})
@@ -1210,6 +1213,8 @@ Layers normally contain 1 to 5 nodes. A layer may contain 6 to 8 nodes only when
 
 Import NodePlacementObject and LayerLayoutObject from relayer_graph. Every new root, expansion, and reference layer requires a version-1 LayerLayoutObject(placements, edge_shape, edge_routes=()) with exactly one NodePlacementObject(node, x, y) per member node. Coordinates are normalized numbers from 0 through 1 and express semantic relative position independently of the viewport. Place a one-node layer at (0.5, 0.5). Keep flow or time moving consistently, use a parent or summary node to anchor hierarchy, group related nodes spatially, align comparisons deliberately, and avoid accidental overlap or edge crossings where a clearer arrangement is available. Do not use pixels, window size, or inspector state. Example: layout = LayerLayoutObject((NodePlacementObject(first, 0.25, 0.5), NodePlacementObject(second, 0.75, 0.5)), "elbow-horizontal"); layer = LayerObject((first, second), (edge,), layout, client_key="response-layer"). A routed loop-back: LayerLayoutObject(placements, "elbow-horizontal", (EdgeRouteObject(loop_back, ends=(EdgeEndObject(last, "top"), EdgeEndObject(first, "top")), waypoints=((0.9, 0.1), (0.1, 0.1))),)); import EdgeRouteObject and EdgeEndObject from relayer_graph.
 ${LAYER_EDGE_SHAPE_GUIDANCE}
+
+${ARTIFACT_LAYER_GUIDANCE_PYTHON}
 
 Layer edges are exactly what the user sees and are undirected. Give every node useful markdown detail.
 

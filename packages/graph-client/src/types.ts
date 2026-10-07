@@ -9,6 +9,43 @@ export interface CompletionInputGraph {
 }
 export type RecordState = "draft" | "accepted" | "stopped";
 
+/** What an artifact node shows in the artifact viewer (PRD 6.6, 11.11). */
+export type ArtifactKind = "website" | "pdf" | "video" | "image" | "markdown" | "url";
+export type ArtifactViewport = "desktop" | "tablet" | "phone";
+
+export type ArtifactSource =
+  /** A website: the entry file and the site root folder it loads from, both relative to the thread folder. */
+  | { readonly file: string; readonly root: string }
+  /** A PDF, video, image or Markdown file relative to the thread folder. */
+  | { readonly file: string }
+  /** A deployed https URL (or http on localhost). */
+  | { readonly url: string };
+
+export interface ArtifactPart {
+  /** website/url: a route such as "/pricing", "#/cart" or "?plan=regular". */
+  readonly route?: string;
+  /** pdf: the page to open at, from 1. */
+  readonly page?: number;
+  /** video: a segment in seconds; playback stops at end until the user plays the whole video. */
+  readonly start?: number;
+  readonly end?: number;
+  /** markdown: the heading text to open at. */
+  readonly heading?: string;
+}
+
+export interface ArtifactDetails {
+  readonly kind: ArtifactKind;
+  readonly source: ArtifactSource;
+  readonly part?: ArtifactPart;
+  /** website/url only. */
+  readonly viewport?: ArtifactViewport;
+  /** Set by Relayer when a file artifact is submitted; never author it. */
+  readonly fingerprint?: string;
+}
+
+/** Which renderer reads a layer. Absent means the graph. */
+export type LayerRenderer = "artifact";
+
 export interface GraphNode {
   readonly id: GraphId;
   /** Stable author-assigned identity; absent only in projections written before client keys were exposed. */
@@ -19,6 +56,8 @@ export interface GraphNode {
   readonly title: string;
   readonly detail: string;
   readonly authoredDetail?: CompiledNodeDetail;
+  /** Present only on the single node of an artifact layer. */
+  readonly artifact?: ArtifactDetails;
   readonly state: RecordState;
 }
 
@@ -60,6 +99,8 @@ export interface GraphLayer {
   readonly edges: readonly GraphId[];
   /** Null or absent only for accepted layers created before authored layouts were introduced. */
   readonly layout?: LayerLayout | null;
+  /** "artifact": the viewer reads this layer's single node. Absent: a graph. */
+  readonly renderer?: LayerRenderer;
   readonly state: RecordState;
 }
 

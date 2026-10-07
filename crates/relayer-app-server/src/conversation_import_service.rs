@@ -487,6 +487,7 @@ fn import_turn(turn: ConversationExportTurn) -> ImportedTurn {
                     detail: context.target.detail,
                     authored_detail: None,
                     authored_detail_omitted: false,
+                    artifact: None,
                     authored_detail_assets: context
                         .target
                         .icon_asset
@@ -584,6 +585,7 @@ fn import_turn(turn: ConversationExportTurn) -> ImportedTurn {
                                     .collect(),
                             }
                         }),
+                        renderer: resolved.layer.renderer,
                     },
                     nodes: resolved
                         .nodes
@@ -609,6 +611,7 @@ fn import_turn(turn: ConversationExportTurn) -> ImportedTurn {
                                     provenance_file_name: asset.provenance.file_name,
                                 })
                                 .collect(),
+                            artifact: node.artifact,
                         })
                         .collect(),
                     edges: resolved

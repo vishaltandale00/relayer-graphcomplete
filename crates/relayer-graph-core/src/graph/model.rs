@@ -1,4 +1,5 @@
 mod action;
+pub mod artifact;
 mod context;
 mod current;
 mod edge;

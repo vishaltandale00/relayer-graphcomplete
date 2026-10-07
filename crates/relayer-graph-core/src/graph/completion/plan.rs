@@ -373,6 +373,12 @@ impl CompletionPlan {
             }
 
             let resolved = layers::resolve(&mut *connection, scope, layer_id, false).await?;
+            // A node may be resubmitted after its layer: re-check the renderer rule.
+            crate::artifact::validate_layer_renderer(
+                record.layer.renderer.as_deref(),
+                &resolved.nodes,
+                resolved.edges.len(),
+            )?;
             validate_connected(&record.layer.nodes, &resolved.edges)?;
             if let Some(layout) = &record.layer.layout {
                 validate_edge_route_ends(layout, &resolved.edges)?;

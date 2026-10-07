@@ -194,6 +194,7 @@ fn imported_conversation(interaction_node_id: &str) -> ImportedConversation {
                             edge_shape: None,
                             edge_routes: Vec::new(),
                         }),
+                        renderer: None,
                     },
                     nodes: vec![ImportedNode {
                         id: "node-1".into(),
@@ -205,6 +206,7 @@ fn imported_conversation(interaction_node_id: &str) -> ImportedConversation {
                         authored_detail: None,
                         authored_detail_omitted: false,
                         authored_detail_assets: Vec::new(),
+                        artifact: None,
                     }],
                     edges: vec![],
                     actions: vec![],
@@ -286,6 +288,7 @@ fn imported_invoke_conversation() -> ImportedConversation {
                     nodes: vec!["node-1".into()],
                     edges: vec![],
                     layout: None,
+                    renderer: None,
                 },
                 nodes: vec![ImportedNode {
                     id: "node-1".into(),
@@ -297,6 +300,7 @@ fn imported_invoke_conversation() -> ImportedConversation {
                     authored_detail: None,
                     authored_detail_omitted: false,
                     authored_detail_assets: Vec::new(),
+                    artifact: None,
                 }],
                 edges: vec![],
                 actions: vec![ImportedAction {
@@ -357,6 +361,7 @@ fn imported_invoke_conversation() -> ImportedConversation {
                     nodes: vec!["node-2".into()],
                     edges: vec![],
                     layout: None,
+                    renderer: None,
                 },
                 nodes: vec![ImportedNode {
                     id: "node-2".into(),
@@ -368,6 +373,7 @@ fn imported_invoke_conversation() -> ImportedConversation {
                     authored_detail: None,
                     authored_detail_omitted: false,
                     authored_detail_assets: Vec::new(),
+                    artifact: None,
                 }],
                 edges: vec![],
                 actions: vec![],
@@ -593,6 +599,7 @@ async fn imported_context_snapshots_deduplicate_and_remain_inert_on_nonaccepted_
         authored_detail: None,
         authored_detail_omitted: false,
         authored_detail_assets: Vec::new(),
+        artifact: None,
     };
     input.turns[0].interaction_node_id = Some("interaction-1".into());
     input.turns[0].contexts = vec![ImportedInteractionContext {
@@ -846,6 +853,7 @@ async fn imported_submitted_input_provenance_must_be_one_exact_accepted_occurren
         authored_detail: None,
         authored_detail_omitted: false,
         authored_detail_assets: Vec::new(),
+        artifact: None,
     });
     // Two input actions, both genuinely authored by node-1.
     for id in ["input-action-1", "input-action-2"] {

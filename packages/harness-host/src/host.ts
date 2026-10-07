@@ -1,4 +1,5 @@
 import { NativeExecutionCancelled } from "./completion-execution.js";
+import { ArtifactFileError, checkArtifactFiles } from "./artifact-files.js";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { mkdir, mkdtemp, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
@@ -403,6 +404,17 @@ export class HarnessHost {
         return { valid: true };
       }
       throw new VisualAssetsError("visual_assets_control_operation_invalid", "Control authority may validate imports only");
+    }
+    if (request.operation.kind === "check-artifact") {
+      // Artifact files live in the session's working directory, not the asset library.
+      operationScope(request);
+      const session = this.sessions.get(request.authority.scope.threadId);
+      if (session === undefined) throw new VisualAssetsError("completion_inactive", "Artifact checks need an active session");
+      const result = await checkArtifactFiles(session.descriptor.workingDirectory, request.operation.artifact);
+      if (isCurrent !== undefined && !isCurrent()) {
+        throw new VisualAssetsError("completion_inactive", "Visual asset completion authority is no longer active");
+      }
+      return result;
     }
     await bridge.library.authorizeScope(request.authority.scope, isCurrent);
     if (isCurrent !== undefined && !isCurrent()) {
@@ -1949,6 +1961,9 @@ async function route(host: HarnessHost, options: HarnessHostOptions, request: In
       try {
         return reply(response, 200, { result: await host.visualAssetOperation(await body(request)) });
       } catch (error) {
+        if (error instanceof ArtifactFileError) {
+          return reply(response, 400, { error: { code: error.code, path: error.path, message: error.message } });
+        }
         const code = error instanceof VisualAssetsError ? error.code : "visual_assets_operation_failed";
         const status = code === "completion_inactive" ? 409 : 400;
         return reply(response, status, { error: { code, message: errorMessage(error) } });
@@ -2269,7 +2284,8 @@ function operationScope(request: VisualBridgeRequest): VisualAssetScope {
   if (!READ_ONLY_VISUAL_OPERATIONS.has(request.operation.kind)
     && !MUTATING_VISUAL_OPERATIONS.has(request.operation.kind)
     && request.operation.kind !== "prepare-detail"
-    && request.operation.kind !== "prepare-icon") {
+    && request.operation.kind !== "prepare-icon"
+    && request.operation.kind !== "check-artifact") {
     throw new VisualAssetsError("visual_assets_operation_unsupported", `Unsupported visual asset operation: ${request.operation.kind}`);
   }
   return scope;

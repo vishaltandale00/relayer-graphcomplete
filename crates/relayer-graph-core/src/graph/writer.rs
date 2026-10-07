@@ -163,6 +163,24 @@ impl GraphWriter {
         prepared_assets: Option<&[PreparedDetailAsset]>,
         prepared_icon: Option<&PreparedDetailAsset>,
     ) -> Result<GraphNode, GraphError> {
+        self.submit_node_with_artifact(draft, authored_detail, prepared_assets, prepared_icon, None)
+            .await
+    }
+
+    /// Submit a node that may carry artifact details (PRD 11.11). File artifacts
+    /// must already carry the host's fingerprint; graph-core has no filesystem.
+    /// Each submission sets the node's artifact: `None` leaves it without one.
+    pub async fn submit_node_with_artifact(
+        &self,
+        draft: &NodeDraft,
+        authored_detail: AuthoredDetailUpdate<'_>,
+        prepared_assets: Option<&[PreparedDetailAsset]>,
+        prepared_icon: Option<&PreparedDetailAsset>,
+        artifact: Option<&serde_json::Value>,
+    ) -> Result<GraphNode, GraphError> {
+        if let Some(artifact) = artifact {
+            crate::artifact::validate_artifact(artifact, true)?;
+        }
         validate_prepared_icon(&draft.icon, prepared_icon)?;
         if let AuthoredDetailUpdate::Replace(package) = authored_detail {
             validate_authored_detail(package)?;
@@ -220,13 +238,13 @@ impl GraphWriter {
         let node = match existing {
             Some(record) if record.node.state == RecordState::Draft => {
                 nodes
-                    .update_draft(record.node.id, draft, authored_detail)
+                    .update_draft(record.node.id, draft, authored_detail, artifact)
                     .await?
             }
             Some(_) => unreachable!("accepted nodes returned above"),
             None => {
                 nodes
-                    .insert_draft(&self.scope, draft, authored_detail.replacement())
+                    .insert_draft(&self.scope, draft, authored_detail.replacement(), artifact)
                     .await?
             }
         };
@@ -377,6 +395,16 @@ impl GraphWriter {
     }
 
     pub async fn submit_layer(&self, draft: &LayerDraft) -> Result<GraphLayer, GraphError> {
+        self.submit_layer_with_renderer(draft, None).await
+    }
+
+    /// Submit a layer read by `renderer` (absent: the graph). An `artifact` layer
+    /// holds exactly one node with artifact details (PRD 11.11).
+    pub async fn submit_layer_with_renderer(
+        &self,
+        draft: &LayerDraft,
+        renderer: Option<&str>,
+    ) -> Result<GraphLayer, GraphError> {
         let mut transaction = self.database.storage.begin_write().await?;
         self.ensure_writable(&mut transaction).await?;
         let mut nodes = Vec::with_capacity(draft.nodes.len());
@@ -395,6 +423,7 @@ impl GraphWriter {
                     .await?,
             );
         }
+        crate::artifact::validate_layer_renderer(renderer, &nodes, edges.len())?;
         LayerCandidate {
             draft,
             nodes,
@@ -402,7 +431,7 @@ impl GraphWriter {
         }
         .validate()?;
         let layer = LayerTable::new(&mut transaction)
-            .upsert_draft(&self.scope, draft)
+            .upsert_draft(&self.scope, draft, renderer)
             .await?;
         transaction.commit().await?;
         Ok(layer)

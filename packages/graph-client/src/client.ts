@@ -9,7 +9,7 @@ import { applyAcceptedNodeResponse } from "./node-response.js";
 import { EdgeObject, LayerObject, NodeObject, actionId, edgeId, layerId, nodeId, type ActionObject, type ActionReference, type EdgeReference, type LayerReference, type NodeReference } from "./objects.js";
 import { GRAPH_QUERY_CONTRACT_VERSION } from "./query-errors.generated.js";
 import { GraphQueryError, isGraphQueryErrorBody, type GraphQueryErrorBody, type GraphSearchOptions, type GraphSearchRequest, type GraphSearchResult } from "./query.js";
-import { GraphApiError, type CompletionInputGraph, type CompletionOutput, type CompletionState, type CurrentTransitionReceipt, type GraphAction, type GraphApiErrorBody, type GraphCapability, type GraphEdge, type GraphId, type GraphLayer, type GraphNode, type InteractionInput, type ResolvedLayer, type ResolvedPersonalPresentation, type StopReason } from "./types.js";
+import { GraphApiError, type ArtifactDetails, type CompletionInputGraph, type CompletionOutput, type CompletionState, type CurrentTransitionReceipt, type GraphAction, type GraphApiErrorBody, type GraphCapability, type GraphEdge, type GraphId, type GraphLayer, type GraphNode, type InteractionInput, type ResolvedLayer, type ResolvedPersonalPresentation, type StopReason } from "./types.js";
 import { GraphIcons } from "./icon-discovery.js";
 import { materializeGraphPreview, type GraphPreview } from "./preview.js";
 import { rememberGraphProgram } from "./program.js";
@@ -146,6 +146,7 @@ export class RelayerGraphClient {
           title: envelope.title,
           detail: envelope.detail,
           ...(submitsPackage ? { authoredDetail } : clearsPackage ? { authoredDetail: null } : {}),
+          ...(envelope.artifact === undefined ? {} : { artifact: envelope.artifact }),
         }),
       });
       const accepted = validatedSubmittedNodeResponse(
@@ -259,6 +260,7 @@ export class RelayerGraphClient {
       method: "POST",
       body: JSON.stringify({
         clientKey: layer.clientKey,
+        ...(layer.renderer === undefined ? {} : { renderer: layer.renderer }),
         nodes: layer.nodes.map(nodeId),
         defaultNodeId: layer.defaultNode == null ? undefined : nodeId(layer.defaultNode),
         edges: layer.edges.map(edgeId),
@@ -468,11 +470,27 @@ interface NodeSubmissionEnvelope {
   readonly icon: GraphIcon;
   readonly title: string;
   readonly detail: string;
+  readonly artifact: ArtifactDetails | undefined;
 }
 
 const NODE_ENVELOPE_FIELDS = Object.freeze([
-  "icon", "title", "detail", "kind", "clientKey", "detailAuthoring", "ref",
+  "icon", "title", "detail", "kind", "clientKey", "detailAuthoring", "artifact", "ref",
 ] as const);
+
+/** A deep, frozen plain-JSON copy of the author's artifact details. */
+function snapshotArtifact(value: unknown): ArtifactDetails | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return invalidNodeSubmissionEnvelope();
+  const copy = JSON.parse(JSON.stringify(value)) as ArtifactDetails;
+  const freeze = (item: unknown): void => {
+    if (typeof item === "object" && item !== null) {
+      Object.freeze(item);
+      for (const child of Object.values(item)) freeze(child);
+    }
+  };
+  freeze(copy);
+  return copy;
+}
 
 function materializeNodeSubmissionEnvelope(node: NodeObject): NodeSubmissionEnvelope {
   try {
@@ -509,7 +527,8 @@ function materializeNodeSubmissionEnvelope(node: NodeObject): NodeSubmissionEnve
     }
     const owner = Object.freeze({ object: node, clientKey });
     const pinnedIcon = typeof icon === "string" ? icon : Object.freeze({ ...icon });
-    return Object.freeze({ owner, detailAuthoring, clientKey, kind, icon: pinnedIcon, title, detail });
+    const artifact = snapshotArtifact(values.get("artifact"));
+    return Object.freeze({ owner, detailAuthoring, clientKey, kind, icon: pinnedIcon, title, detail, artifact });
   } catch (error) {
     if (error instanceof DetailCompilationError) throw error;
     return invalidNodeSubmissionEnvelope();
@@ -555,7 +574,7 @@ function validatedSubmittedNodeResponse(
     const candidate = snapshotNodeResponseRecord(
       envelope.values.node,
       GRAPH_NODE_KEYS,
-      ["authoredDetail", "clientKey", "leasedActionId"],
+      ["artifact", "authoredDetail", "clientKey", "leasedActionId"],
       "node",
       "Node must use the exact ordinary GraphNode data shape",
     );
@@ -614,6 +633,7 @@ function validatedSubmittedNodeResponse(
       title,
       detail,
       ...(acceptedAuthoredDetail === undefined ? {} : { authoredDetail: acceptedAuthoredDetail }),
+      ...(candidate.optionalFields.has("artifact") ? { artifact: snapshotArtifact(fields.artifact) as ArtifactDetails } : {}),
       state: fields.state,
     });
   } catch (error) {

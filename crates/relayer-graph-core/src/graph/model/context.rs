@@ -111,6 +111,7 @@ mod tests {
             title: "Question".into(),
             detail: "Compare these".into(),
             authored_detail: None,
+            artifact: None,
             state: RecordState::Accepted,
         });
 

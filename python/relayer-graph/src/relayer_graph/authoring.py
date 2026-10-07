@@ -37,6 +37,8 @@ class GraphNode:
     leased_action_id: int | None = None
     authored_detail: Mapping[str, Any] | None = None
     preview: GraphPreview | None = None
+    # Present only on the single node of an artifact layer (PRD 11.11).
+    artifact: Mapping[str, Any] | None = None
 
     @classmethod
     def from_dict(cls, value: Mapping[str, Any]) -> "GraphNode":
@@ -44,7 +46,7 @@ class GraphNode:
         return cls(int(value["id"]), str(value["kind"]), value["icon"],
                    str(value["title"]), str(value["detail"]), str(value["state"]),
                    None if leased_action_id is None else int(leased_action_id),
-                   value.get("authoredDetail"))
+                   value.get("authoredDetail"), artifact=value.get("artifact"))
 
 
 @dataclass(frozen=True, slots=True)
@@ -195,6 +197,8 @@ class GraphLayer:
     layout: LayerLayout | None = None
     default_node_id: int | None = None
     preview: GraphPreview | None = None
+    # "artifact" when the artifact viewer reads this layer's single node.
+    renderer: str | None = None
 
     @classmethod
     def from_dict(cls, value: Mapping[str, Any]) -> "GraphLayer":
@@ -204,6 +208,7 @@ class GraphLayer:
             tuple(map(int, value["edges"])), str(value["state"]),
             None if layout is None else LayerLayout.from_dict(layout),
             None if value.get("defaultNodeId") is None else int(value["defaultNodeId"]),
+            renderer=value.get("renderer"),
         )
 
 
@@ -220,6 +225,9 @@ class NodeObject(_WeakNode):
     client_key: str = field(default_factory=lambda: str(uuid.uuid4()))
     ref: GraphNode | None = field(default=None, init=False)
     detail_authoring: NodeDetailAuthoring = field(init=False)
+    # Artifact details: set these to make this node something the user opens in the
+    # artifact viewer. Put it alone in a layer from LayerObject.for_artifact(node).
+    artifact: Mapping[str, Any] | None = field(default=None, kw_only=True)
 
     def __post_init__(self) -> None:
         self.detail_authoring = _create_owned_authoring(self)
@@ -276,6 +284,14 @@ class LayerObject:
     client_key: str = field(default_factory=lambda: str(uuid.uuid4()))
     default_node: "NodeReference | None" = None
     ref: GraphLayer | None = field(default=None, init=False)
+    # Absent: a graph. "artifact": the artifact viewer reads this layer's single node.
+    renderer: Literal["artifact"] | None = None
+
+    @classmethod
+    def for_artifact(cls, node: "NodeReference", client_key: str | None = None) -> "LayerObject":
+        """A layer the artifact viewer reads: exactly one node that carries ``artifact`` details."""
+        return cls([node], [], LayerLayoutObject([NodePlacementObject(node, 0.5, 0.5)], "default"),
+                   client_key or str(uuid.uuid4()), node, renderer="artifact")
 
 
 NodeReference = int | GraphNode | NodeObject
@@ -316,6 +332,7 @@ def _layer_payload(layer: LayerObject, size_justification: str | None) -> dict[s
                if layer.layout.edge_routes else {}),
         },
         "sizeJustification": size_justification,
+        **({"renderer": layer.renderer} if layer.renderer is not None else {}),
     }
 
 
@@ -391,6 +408,7 @@ class RelayerGraphClient:
         value = await self._request("POST", "/api/graph/nodes", {
             "clientKey": node.client_key, "kind": node.kind, "icon": node.icon,
             "title": node.title, "detail": node.detail,
+            **({"artifact": dict(node.artifact)} if node.artifact is not None else {}),
         })
         node.ref = GraphNode.from_dict(value["node"])
         return self._with_preview(node.ref, value.get("preview"), f"node-{node.ref.id}")

@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { assetRef, DetailCompilationError, GraphApiError, css, detailCapability, html, LayerLayoutObject, LayerObject, NodeObject, NodePlacementObject, RelayerGraphClient, type ActionObject, type EdgeRouteObject, type EdgeShape, type GraphCapability, type NodeSide } from "@relayer/graph-client";
+import { assetRef, DetailCompilationError, GraphApiError, css, detailCapability, html, LayerLayoutObject, LayerObject, NodeObject, NodePlacementObject, RelayerGraphClient, type ActionObject, type ArtifactDetails, type EdgeRouteObject, type EdgeShape, type GraphCapability, type NodeSide } from "@relayer/graph-client";
 
 const identity = z.string().min(1).max(128).refine((value) => value === value.trim() && !value.includes("\0") && Buffer.byteLength(value) <= 128, "Identity must be trimmed, NUL-free, and at most 128 UTF-8 bytes");
 const layer = z.object({ clientKey: identity, nodes: z.array(identity).max(8) }).strict();
@@ -21,7 +21,8 @@ const request = z.object({
   version: z.literal(1), objectId: identity, token: z.string(), nodeId: z.number().int().positive(),
   operation: z.enum(["checkpoint", "submit", "replace"]),
   replacement: z.object({ nodeId: z.number().int().positive(), expectedRevision: z.number().int().nonnegative() }).strict().optional(),
-  node: z.object({ clientKey: identity, icon: z.string(), title: z.string(), detail: z.string(), kind: z.string() }).strict(),
+  // Artifact details are shape-checked by graph-core; this boundary only bounds and forwards them.
+  node: z.object({ clientKey: identity, icon: z.string(), title: z.string(), detail: z.string(), kind: z.string(), artifact: z.record(z.string(), z.unknown()).optional() }).strict(),
   detail: z.object({ clear: z.boolean(), components: z.array(z.object({ id: identity, markup: template, styles: z.string() }).strict()).max(64) }).strict(),
 }).strict();
 
@@ -60,6 +61,7 @@ export class PrimeVisualAuthoring {
       return this.submit(existing, active, signal);
     }
     const node = new NodeObject(input.node.icon, input.node.title, input.node.detail, input.node.kind, input.node.clientKey);
+    if (input.node.artifact !== undefined) node.artifact = input.node.artifact as unknown as ArtifactDetails;
     const makeLayer = (value: z.infer<typeof layer>): LayerObject => new LayerObject(
       value.nodes.map((key) => key === node.clientKey ? node : new NodeObject("", "", "", "concept", key)),
       [], new LayerLayoutObject([], "default"), value.clientKey,
@@ -169,6 +171,7 @@ const layerRequest = z.object({
       edgeRoutes: z.array(layerRoute).max(512).optional(),
     }).strict(),
     sizeJustification: z.string().nullable().optional(),
+    renderer: z.literal("artifact").optional(),
   }).strict(),
 }).strict();
 
@@ -214,6 +217,7 @@ export async function submitPrimeLayer(
     ),
     layer.clientKey,
     layer.defaultNodeId ?? undefined,
+    layer.renderer,
   );
   try {
     const value = await new RelayerGraphClient(capability, { beforeRequest: active, signal })

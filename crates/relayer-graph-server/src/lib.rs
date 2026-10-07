@@ -2289,6 +2289,9 @@ struct SubmitNodeRequest {
     /// clears it, and a package replaces it.
     #[serde(default, deserialize_with = "deserialize_nullable_authored_detail")]
     authored_detail: Option<Option<Value>>,
+    /// Artifact details (PRD 11.11). Each submission sets them; absent means none.
+    #[serde(default)]
+    artifact: Option<Value>,
 }
 
 fn deserialize_nullable_authored_detail<'de, D>(
@@ -2334,6 +2337,17 @@ async fn submit_node(
             prepare_detail_assets(&state, &writer, authority, asset_generation, package).await?,
         );
     }
+    let mut artifact = input.artifact.clone();
+    if let Some(artifact) = artifact.as_mut() {
+        relayer_graph_core::artifact::validate_artifact(artifact, false)?;
+        let kind = artifact["kind"].as_str().unwrap_or_default().to_owned();
+        if relayer_graph_core::artifact::is_file_artifact_kind(&kind) {
+            let fingerprint =
+                check_artifact_files(&state, &writer, authority, asset_generation, artifact)
+                    .await?;
+            artifact["fingerprint"] = Value::String(fingerprint);
+        }
+    }
     let mut draft = input.draft.clone();
     let prepared_icon = prepare_image_icon(
         &state,
@@ -2344,11 +2358,12 @@ async fn submit_node(
     )
     .await?;
     let node = writer
-        .submit_node_with_prepared_visual_assets(
+        .submit_node_with_artifact(
             &draft,
             input.authored_detail_update(),
             prepared_assets.as_deref(),
             prepared_icon.as_ref(),
+            artifact.as_ref(),
         )
         .await?;
     drop(asset_generation_guard);
@@ -2361,6 +2376,74 @@ async fn submit_node(
         )
         .await;
     Ok(with_preview(json!({"node": node}), preview))
+}
+
+/// Ask the harness host, which owns the session's working directory, to resolve an
+/// artifact's files inside the thread folder and fingerprint them (ADR 0014).
+async fn check_artifact_files(
+    state: &ServerState,
+    writer: &GraphWriter,
+    authority: RuntimeAuthority,
+    asset_generation: u64,
+    artifact: &Value,
+) -> Result<String, ApiError> {
+    writer.require_active_authority().await?;
+    let bridge = state
+        .visual_assets_bridge
+        .lock()
+        .expect("visual-assets bridge mutex poisoned")
+        .clone()
+        .ok_or_else(ApiError::artifact_files_unavailable)?;
+    let (project_id, thread_id) = writer.authority_scope();
+    let scope = project_id.map_or_else(
+        || json!({"kind":"thread","threadId":thread_id.value()}),
+        |id| json!({"kind":"project","projectId":id.value(),"threadId":thread_id.value()}),
+    );
+    let response = state
+        .http_client
+        .post(format!("{}/visual-assets/operations", bridge.url))
+        .bearer_auth(&bridge.token)
+        .json(&json!({
+            "version":1,
+            "generation":bridge.generation,
+            "assetGeneration":asset_generation,
+            "authority":{"kind":"completion","interactionNodeId":authority.node_id.value(),"scope":scope},
+            "operation":{"kind":"check-artifact","scope":{"kind":"thread","threadId":thread_id.value()},"artifact":artifact},
+        }))
+        .send()
+        .await
+        .map_err(|_| ApiError::artifact_files_unavailable())?;
+    let status = response.status();
+    let body: Value = response
+        .json()
+        .await
+        .map_err(|_| ApiError::artifact_files_unavailable())?;
+    writer.require_active_authority().await?;
+    if !status.is_success() {
+        let code = body
+            .pointer("/error/code")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        if code.starts_with("artifact_") {
+            let message = body
+                .pointer("/error/message")
+                .and_then(Value::as_str)
+                .unwrap_or(code);
+            let path = body
+                .pointer("/error/path")
+                .and_then(Value::as_str)
+                .unwrap_or("artifact.source.file");
+            return Err(ApiError(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                json!({"error":{"code":code,"path":path,"message":message,"issues":[{"code":code,"path":path,"message":message}]}}),
+            ));
+        }
+        return Err(ApiError(status, body));
+    }
+    body.pointer("/result/fingerprint")
+        .and_then(Value::as_str)
+        .map(str::to_owned)
+        .ok_or_else(ApiError::artifact_files_unavailable)
 }
 
 async fn prepare_image_icon(
@@ -2658,12 +2741,15 @@ async fn submit_layer(
     Json(input): Json<LayerDraftRequest>,
 ) -> Result<Json<Value>, ApiError> {
     let authority = session(&state, &headers)?;
+    let renderer = input.renderer.clone();
     let input = LayerDraft::from(input);
     let writer = state
         .graph
         .writer_for_completion_authority(authority.node_id, authority.epoch)
         .await?;
-    let layer = writer.submit_layer(&input).await?;
+    let layer = writer
+        .submit_layer_with_renderer(&input, renderer.as_deref())
+        .await?;
     let preview = state
         .draft_previews
         .preview(
@@ -2687,6 +2773,9 @@ struct LayerDraftRequest {
     layout: Option<LayerLayoutRequest>,
     #[serde(default)]
     size_justification: Option<String>,
+    /// Which renderer reads the layer (PRD 11.11): absent for a graph, or "artifact".
+    #[serde(default)]
+    renderer: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -3146,6 +3235,12 @@ fn session_for_token(state: &ServerState, token: &str) -> Result<RuntimeAuthorit
 
 pub struct ApiError(StatusCode, Value);
 impl ApiError {
+    fn artifact_files_unavailable() -> Self {
+        Self(
+            StatusCode::SERVICE_UNAVAILABLE,
+            json!({"error":{"code":"artifact_files_unavailable","message":"Relayer cannot check artifact files right now. Try submitting the node again."}}),
+        )
+    }
     fn visual_assets_unavailable() -> Self {
         Self(
             StatusCode::SERVICE_UNAVAILABLE,
