@@ -436,3 +436,35 @@ export function registerWorktreeIpc({ ipcMain, worktrees }) {
     });
   }
 }
+
+// The artifact viewer (PRD 6.6). Only the main window may drive it; agent content
+// in the viewer itself has no preload and so cannot reach these channels.
+export function registerArtifactViewerIpc({ ipcMain, Menu, viewer, getWindow }) {
+  const fromMainWindow = (event) => {
+    const window = getWindow();
+    if (!window || event.sender !== window.webContents) throw new Error("The artifact viewer belongs to the Relayer window.");
+    return window;
+  };
+  ipcMain.handle("relayer:artifact-viewer-open", async (event, request) => {
+    fromMainWindow(event);
+    const { threadId, nodeId, artifact, bounds } = request ?? {};
+    return viewer.open({ threadId, nodeId, artifact, bounds });
+  });
+  ipcMain.handle("relayer:artifact-viewer-bounds", (event, bounds) => {
+    fromMainWindow(event);
+    viewer.setBounds(bounds);
+  });
+  ipcMain.handle("relayer:artifact-viewer-close", (event) => {
+    fromMainWindow(event);
+    viewer.close();
+  });
+  ipcMain.handle("relayer:artifact-viewer-menu", (event, position) => {
+    const window = fromMainWindow(event);
+    const menu = Menu.buildFromTemplate([
+      { label: "Open externally", click: () => { void viewer.openExternally(); } },
+    ]);
+    const x = Number.isFinite(position?.x) ? Math.round(position.x) : undefined;
+    const y = Number.isFinite(position?.y) ? Math.round(position.y) : undefined;
+    menu.popup({ window, ...(x === undefined || y === undefined ? {} : { x, y }) });
+  });
+}

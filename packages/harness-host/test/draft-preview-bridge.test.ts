@@ -108,8 +108,9 @@ describe("draft preview render bridge", () => {
     expect(folderExisted).toBe(true);
     expect(unauthorized).toBe(401);
     expect(rendered).toEqual({ result: { pngBase64: Buffer.from(PNG).toString("base64"), width: 1176, height: 812 } });
+    // The thread folder rides along so an artifact layer can render its files (PRD 6.6).
     expect(renderer.render).toHaveBeenCalledWith({
-      interactionNodeId: 1, fingerprint: "sha256:abc", snapshot: { version: 1, target: { kind: "layer", layerId: 3 } },
+      interactionNodeId: 1, fingerprint: "sha256:abc", snapshot: { version: 1, target: { kind: "layer", layerId: 3 } }, workingDirectory: directory,
     });
     await expect(stat(folder!)).rejects.toThrow();
     expect(programFolderExisted).toBe(true);

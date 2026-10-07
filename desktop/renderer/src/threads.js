@@ -4,6 +4,7 @@ import { checkoutController, setCheckoutSubmitting } from "./checkout.js";
 import { isResolvedInvokeAction } from "./product-workspace/node-detail-runtime.js";
 import { preferredLayerNode, rememberedLayerSelection, rememberLayerSelection } from "./product-workspace/layer-selection.js";
 import { request } from "./api.js";
+import { artifactLayerNode, createArtifactViewer } from "./artifact-viewer.js";
 import {
   actionWasInvoked,
   visibleLayerAfterRefresh,
@@ -1053,6 +1054,21 @@ export async function decideApproval(requestId, decision) {
   }
 }
 
+let sharedArtifactViewer = null;
+function artifactViewer() {
+  sharedArtifactViewer ??= createArtifactViewer({
+    native: window.relayerDesktop?.artifactViewer ?? null,
+    onAddToChat: (text) => {
+      const prompt = $("#threadPrompt");
+      if (!prompt) return;
+      prompt.value = prompt.value ? `${prompt.value}\n\n${text}` : text;
+      prompt.dispatchEvent(new Event("input", { bubbles: true }));
+      prompt.focus();
+    },
+  });
+  return sharedArtifactViewer;
+}
+
 export async function navigateLayer(layerId, navigation = {}) {
   cancelAutomaticTurn();
   if (!viewState.currentThreadId || !viewState.currentInteractionId) return;
@@ -1090,6 +1106,12 @@ export async function navigateLayer(layerId, navigation = {}) {
       layerId: appState.visibleLayer?.layer?.id,
     });
     if (!ownedNavigation) return;
+    // An artifact layer opens full screen in the artifact viewer, not the graph (PRD 6.6).
+    const artifactNode = artifactLayerNode(layer);
+    if (artifactNode !== null) {
+      artifactViewer().open({ threadId: pendingNavigation.threadId, node: artifactNode });
+      return;
+    }
     const layerPath = navigation.restore
       ? pendingNavigation.layerPath.slice(0, navigation.pathIndex + 1)
       : appendLayerPath(pendingNavigation.layerPath, navigation.action, navigation.sourceNode);

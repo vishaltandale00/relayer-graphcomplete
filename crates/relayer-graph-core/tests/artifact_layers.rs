@@ -198,6 +198,14 @@ async fn artifact_details_are_checked_before_any_write() {
             "artifact_path_outside_thread",
         ),
         (
+            json!({"kind":"url","source":{"url":"http://localhost:@example.com/"}}),
+            "artifact_url_scheme",
+        ),
+        (
+            json!({"kind":"url","source":{"url":"http://localhost.example.com/"}}),
+            "artifact_url_scheme",
+        ),
+        (
             json!({"kind":"pdf","source":{"file":"/etc/report.pdf"},"fingerprint":FINGERPRINT}),
             "artifact_path_not_relative",
         ),
@@ -264,4 +272,48 @@ async fn acceptance_rechecks_a_node_resubmitted_after_its_layer() {
     writer.submit_node(&node_draft("site")).await.unwrap();
     let error = writer.complete(interaction.id).await.unwrap_err();
     assert_eq!(code(error), "artifact_layer_member_count");
+}
+
+/// ART-004: acceptance, not submission, pins the fingerprint.
+#[tokio::test]
+async fn acceptance_pins_the_fingerprint_taken_just_before_it() {
+    let (_database, interaction, writer) = setup().await;
+    let overview = plain_node(&writer, "overview").await;
+    let root = writer
+        .submit_layer(&layer_draft("root", &[overview.id]))
+        .await
+        .unwrap();
+    let site = artifact_node(&writer, "landing-page", &website())
+        .await
+        .unwrap();
+    let viewer = writer
+        .submit_layer_with_renderer(&layer_draft("viewer", &[site.id]), Some("artifact"))
+        .await
+        .unwrap();
+    navigate(&writer, "response", &interaction, None, &root).await;
+    navigate(&writer, "open-site", &overview, Some(&root), &viewer).await;
+
+    let drafts = writer.draft_artifacts().await.unwrap();
+    assert_eq!(drafts, vec![(site.id, website())]);
+    let edited = "sha256:fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210";
+    let malformed = writer
+        .pin_artifact_fingerprint(site.id, "md5:abc")
+        .await
+        .unwrap_err();
+    assert_eq!(code(malformed), "artifact_fingerprint_missing");
+    writer
+        .pin_artifact_fingerprint(site.id, edited)
+        .await
+        .unwrap();
+    writer.complete(interaction.id).await.unwrap();
+
+    let accepted = writer.get_layer(viewer.id).await.unwrap().nodes.remove(0);
+    assert_eq!(accepted.artifact.as_ref().unwrap()["fingerprint"], edited);
+    assert!(
+        writer
+            .draft_artifacts()
+            .await
+            .unwrap_or_default()
+            .is_empty()
+    );
 }

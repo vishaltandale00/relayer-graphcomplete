@@ -275,6 +275,8 @@ export class HarnessHost {
   private readonly traceStore: HarnessTraceStore | undefined;
   /** Active completions with preview support, keyed by interaction node, for trace metadata. */
   private readonly previewTraces = new Map<number, HarnessTraceSink>();
+  /** Each previewing run's thread folder, so artifact layers render their files. */
+  private readonly previewFolders = new Map<number, string>();
 
   constructor(private readonly options: HarnessHostOptions) {
     this.traceStore = options.trace === undefined ? undefined : new HarnessTraceStore(options.trace);
@@ -292,7 +294,8 @@ export class HarnessHost {
     const started = Date.now();
     const target = request.snapshot.target as JsonObject;
     try {
-      const image = await renderer.render(request);
+      const workingDirectory = this.previewFolders.get(request.interactionNodeId);
+      const image = await renderer.render(workingDirectory === undefined ? request : { ...request, workingDirectory });
       if (!isPng(image.png) || !positiveInteger(image.width) || !positiveInteger(image.height)) {
         throw new Error("Draft preview renderer returned an invalid image");
       }
@@ -1284,7 +1287,10 @@ export class HarnessHost {
       ...(previewDirectory === undefined ? {} : { previewDirectory }),
       ...(traceContext === undefined ? {} : { authoringErrors: true }),
     });
-    if (previewDirectory !== undefined) this.previewTraces.set(interactionNodeId, traceSink);
+    if (previewDirectory !== undefined) {
+      this.previewTraces.set(interactionNodeId, traceSink);
+      this.previewFolders.set(interactionNodeId, session.descriptor.workingDirectory);
+    }
     const observedTrace = new EffectObservingTraceSink(traceSink);
     let completionError: HarnessExecutionFailure | undefined;
     let accessLease: HarnessExecutionAccessLease | undefined;
@@ -1387,6 +1393,7 @@ export class HarnessHost {
       scope.close();
       if (previewDirectory !== undefined) {
         this.previewTraces.delete(interactionNodeId);
+        this.previewFolders.delete(interactionNodeId);
         // Preview images are transient: they never outlive the turn.
         await rm(previewDirectory, { recursive: true, force: true }).catch(() => undefined);
       }

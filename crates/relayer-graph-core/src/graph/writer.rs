@@ -270,6 +270,52 @@ impl GraphWriter {
         Ok(node)
     }
 
+    /// This interaction's draft nodes with artifact details, for the host to
+    /// fingerprint again just before acceptance (ADR 0014).
+    pub async fn draft_artifacts(&self) -> Result<Vec<(NodeId, serde_json::Value)>, GraphError> {
+        let mut transaction = self.database.storage.begin_read().await?;
+        self.scope
+            .require_active_authority(&mut transaction)
+            .await?;
+        let artifacts = NodeTable::new(&mut transaction)
+            .draft_artifacts(self.scope.root_node_id)
+            .await?;
+        transaction.commit().await?;
+        Ok(artifacts)
+    }
+
+    /// Pins the fingerprint the host took just before acceptance on a draft
+    /// artifact node. Acceptance, not submission, decides what was accepted.
+    pub async fn pin_artifact_fingerprint(
+        &self,
+        node: NodeId,
+        fingerprint: &str,
+    ) -> Result<(), GraphError> {
+        let mut transaction = self.database.storage.begin_write().await?;
+        self.ensure_writable(&mut transaction).await?;
+        let mut nodes = NodeTable::new(&mut transaction);
+        let mut artifact = nodes
+            .record(node)
+            .await?
+            .filter(|record| record.owner == Some(self.scope.root_node_id))
+            .and_then(|record| record.node.artifact)
+            .ok_or_else(|| GraphError::NotFound(format!("draft artifact node {node}")))?;
+        artifact["fingerprint"] = serde_json::Value::String(fingerprint.to_owned());
+        crate::artifact::validate_artifact(&artifact, true)?;
+        if !nodes
+            .set_draft_artifact(node, self.scope.root_node_id, &artifact)
+            .await?
+        {
+            return Err(GraphError::validation(
+                "immutable_node",
+                "node",
+                "This node was already accepted. Create a new node and connect it to the old node instead of editing history.",
+            ));
+        }
+        transaction.commit().await?;
+        Ok(())
+    }
+
     pub async fn get_node_presentation(
         &self,
         node: NodeId,

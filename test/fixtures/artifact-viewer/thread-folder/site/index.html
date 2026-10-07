@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Tidewater Coffee</title>
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+  <header class="nav">
+    <a class="brand" href="#/"><img src="./logo.svg" alt="" width="28" height="28">Tidewater</a>
+    <nav>
+      <a href="#/">Home</a>
+      <a href="#/menu">Menu</a>
+      <a href="#/cart" class="cart-link">Cart <span id="cartCount">0</span></a>
+    </nav>
+  </header>
+
+  <main id="route-home" class="route">
+    <section class="hero" id="hero">
+      <p class="eyebrow">Small-batch roasting · Since 2019</p>
+      <h1>Coffee that tastes like the coast.</h1>
+      <p class="lede">Single-origin beans, roasted every Tuesday on the harbour and delivered while they still sing.</p>
+      <div class="cta-row"><a class="cta" href="#/menu">See the menu</a><a class="ghost" href="#pricing">Subscriptions</a></div>
+    </section>
+    <section class="features" id="story">
+      <article><h3>Roasted weekly</h3><p>Every bag ships within 72 hours of roasting.</p></article>
+      <article><h3>Traceable farms</h3><p>We publish the price we pay every grower.</p></article>
+      <article><h3>Plastic-free</h3><p>Compostable bags and paper tape, always.</p></article>
+    </section>
+    <section class="pricing" id="pricing">
+      <h2>Subscriptions</h2>
+      <div class="plans">
+        <article><h3>Taster</h3><p class="price">$14<small>/mo</small></p><p>One 250 g bag, rotating origin.</p></article>
+        <article class="featured"><h3>Regular</h3><p class="price">$26<small>/mo</small></p><p>Two bags, choose roast level.</p></article>
+        <article><h3>Café</h3><p class="price">$89<small>/mo</small></p><p>2 kg wholesale, free grinder service.</p></article>
+      </div>
+    </section>
+    <footer id="contact"><p>12 Wharf Street · hello@tidewater.example · <a id="instagram" href="https://www.instagram.com/">Instagram</a></p></footer>
+  </main>
+
+  <main id="route-menu" class="route" hidden>
+    <section class="menu">
+      <h2>Menu</h2>
+      <ul id="menuList"></ul>
+    </section>
+  </main>
+
+  <main id="route-cart" class="route" hidden>
+    <section class="cart">
+      <h2>Your cart</h2>
+      <p id="memberGreeting" class="member"></p>
+      <ul id="cartList"></ul>
+      <p id="cartTotal" class="total"></p>
+    </section>
+  </main>
+
+  <script src="./app.js"></script>
+</body>
+</html>

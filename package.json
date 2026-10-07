@@ -46,6 +46,7 @@
     "test:desktop:stop": "npm run build && electron scripts/test-desktop-stop.mjs",
     "test:desktop:interaction-graph-layout": "node scripts/test-interaction-graph-layout.mjs",
     "test:desktop:first-message": "npm run build && electron scripts/test-desktop-first-message.mjs",
+    "test:desktop:artifact-viewer": "npm run build && electron scripts/test-desktop-artifact-viewer.mjs",
     "test:desktop:project-new-thread": "npm run build && node scripts/run-project-new-thread-test.mjs",
     "test:desktop:context-draft-warning": "npm run build && node scripts/run-context-draft-warning-test.mjs",
     "test:desktop:interaction-context": "npm run build && node scripts/run-interaction-context-lifecycle-test.mjs",

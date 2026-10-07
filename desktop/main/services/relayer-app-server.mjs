@@ -477,6 +477,19 @@ export class RelayerAppServerService {
     });
   }
 
+  /** The thread folder the artifact viewer serves files from (PRD 6.6.4). */
+  async artifactFolder(threadId) {
+    if (!Number.isSafeInteger(threadId) || threadId <= 0) throw new TypeError("Artifact folders need a positive thread ID.");
+    const session = await this.start();
+    const response = await fetch(new URL(`/api/threads/${threadId}/artifact-folder`, session.origin), {
+      headers: { Cookie: `${session.cookie.name}=${session.cookie.value}` },
+    });
+    if (!response.ok) throw new Error(`Relayer could not find the thread folder (${response.status}).`);
+    const body = await response.json();
+    if (typeof body?.folder !== "string" || body.folder === "") throw new Error("Relayer returned no thread folder.");
+    return body.folder;
+  }
+
   async exportConversation(threadId, { signal } = {}) {
     if (!Number.isSafeInteger(threadId) || threadId <= 0) {
       throw new Error("Conversation export requires a positive thread ID.");

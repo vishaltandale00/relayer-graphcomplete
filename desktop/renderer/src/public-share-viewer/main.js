@@ -1,5 +1,6 @@
 import { createProductWorkspace, loadDesignFonts } from "../product-workspace/index.js";
 import { createPublicViewerAdapter } from "./adapter.js";
+import { artifactLayerNode, createArtifactViewer } from "../artifact-viewer.js";
 import { parsePublicSnapshot } from "./snapshot.js";
 
 // Public viewer boundary inventory: there is intentionally no fetch,
@@ -156,6 +157,7 @@ export function bootPublicViewer({
   let workspace;
   let stopEmbedLayout = () => {};
   let stopEmbedReading = () => {};
+  let artifactViewer = null;
   try {
     const snapshot = parsePublicSnapshot(snapshotLiteral(documentRef));
     const adapter = createPublicViewerAdapter(snapshot);
@@ -202,6 +204,13 @@ export function bootPublicViewer({
       onSubmitInteraction: async () => false,
       onOpenSettings: () => {},
       onNavigateLayer: async (layerId, navigation) => {
+        // Artifact layers open as a card here; deployed https sites play in a sandboxed frame (PRD 6.6.10).
+        const artifactNode = artifactLayerNode(snapshot.layerFor(adapter.selection.currentInteractionId, layerId));
+        if (artifactNode !== null) {
+          artifactViewer ??= createArtifactViewer({ root: documentRef.body, native: null });
+          await artifactViewer.open({ threadId: adapter.thread.id, node: artifactNode });
+          return false;
+        }
         const changed = await adapter.navigateLayer(layerId, navigation);
         if (changed) render();
         return changed;

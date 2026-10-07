@@ -96,14 +96,13 @@ pub fn validate_relative_path(value: &Value, path: &str) -> Result<String, Graph
 fn validate_url(value: &Value, path: &str) -> Result<(), GraphError> {
     let text = value.as_str().unwrap_or_default();
     let lower = text.to_ascii_lowercase();
-    let loopback = ["http://localhost", "http://127.0.0.1"]
-        .iter()
-        .any(|prefix| {
-            lower == *prefix
-                || lower.starts_with(&format!("{prefix}:"))
-                || lower.starts_with(&format!("{prefix}/"))
-        });
-    if !(lower.starts_with("https://") && text.len() > "https://".len()) && !loopback {
+    // The authority is everything between `://` and the path; userinfo is never allowed,
+    // so `http://localhost:@example.com/` cannot pass as loopback.
+    let (scheme, rest) = lower.split_once("://").unwrap_or_default();
+    let authority = rest.split(['/', '?', '#']).next().unwrap_or_default();
+    let host = authority.split(':').next().unwrap_or_default();
+    let loopback = scheme == "http" && matches!(host, "localhost" | "127.0.0.1");
+    if authority.contains('@') || authority.is_empty() || !(scheme == "https" || loopback) {
         return Err(issue(
             "artifact_url_scheme",
             path,

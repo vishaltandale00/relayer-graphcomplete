@@ -2446,6 +2446,70 @@ async fn check_artifact_files(
         .ok_or_else(ApiError::artifact_files_unavailable)
 }
 
+/// Acceptance pins each file artifact's fingerprint (PRD 6.6.5): a file the
+/// agent edited after submitting its node is pinned as it is accepted. A file
+/// that is gone or moved outside the folder fails acceptance with the host's issue.
+async fn pin_artifact_fingerprints(
+    state: &ServerState,
+    authority: RuntimeAuthority,
+    asset_generation: u64,
+) -> Result<(), ApiError> {
+    // An inactive authority is reported by the pause and acceptance that follow,
+    // exactly as for a run without artifacts.
+    let Ok(writer) = state
+        .graph
+        .writer_for_completion_authority(authority.node_id, authority.epoch)
+        .await
+    else {
+        return Ok(());
+    };
+    let Ok(drafts) = writer.draft_artifacts().await else {
+        return Ok(());
+    };
+    for (node_id, artifact) in drafts {
+        let kind = artifact["kind"].as_str().unwrap_or_default();
+        if !relayer_graph_core::artifact::is_file_artifact_kind(kind) {
+            continue;
+        }
+        let fingerprint =
+            check_artifact_files(state, &writer, authority, asset_generation, &artifact)
+                .await
+                .map_err(|error| name_artifact_node(error, node_id))?;
+        writer
+            .pin_artifact_fingerprint(node_id, &fingerprint)
+            .await?;
+    }
+    Ok(())
+}
+
+/// Acceptance checks every draft artifact node, so a failure says which one: the agent
+/// can restore the file, or resubmit the node without artifact details.
+fn name_artifact_node(mut error: ApiError, node_id: NodeId) -> ApiError {
+    let prefix = format!("Node {node_id}: ", node_id = node_id.value());
+    let suffix = " Restore the file, or resubmit the node without artifact details if it is no longer shown.";
+    if let Some(message) = error.1.pointer_mut("/error/message") {
+        *message = Value::String(format!(
+            "{prefix}{}{suffix}",
+            message.as_str().unwrap_or_default()
+        ));
+    }
+    if let Some(issues) = error
+        .1
+        .pointer_mut("/error/issues")
+        .and_then(Value::as_array_mut)
+    {
+        for issue in issues {
+            if let Some(message) = issue.get_mut("message") {
+                *message = Value::String(format!(
+                    "{prefix}{}{suffix}",
+                    message.as_str().unwrap_or_default()
+                ));
+            }
+        }
+    }
+    error
+}
+
 async fn prepare_image_icon(
     state: &ServerState,
     writer: &GraphWriter,
@@ -3028,6 +3092,9 @@ async fn submit_completion(
     let authority = session(&state, &headers)?;
     let gate = completion_asset_gate(&state, authority.node_id)?;
     let mut generation = gate.lock().await;
+    // Before the asset pause: the host still answers file checks, and the gate
+    // keeps node writes out until acceptance.
+    pin_artifact_fingerprints(&state, authority, *generation).await?;
     let barrier = format!("complete-{}", authority.node_id.value());
     *generation = visual_assets_lifecycle(
         &state,

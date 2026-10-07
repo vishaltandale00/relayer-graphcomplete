@@ -40,6 +40,8 @@ its portability. Agent-made content must never run with Relayer's authority.
 - Graph records stay portable: export, import and shared snapshots carry the
   new fields unchanged. Shared snapshots omit annotation screenshots.
 - Fingerprints make drift visible without copying large files into storage.
+- Artifact partitions are persistent and cleared on every open and close.
+  Chromium's PDF viewer does not start in an in-memory session.
 - Office rendering depends on third-party renderers; P3 is gated on the
   PowerPoint renderer's licence.
 

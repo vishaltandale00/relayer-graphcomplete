@@ -45,7 +45,7 @@ export async function serveEvalSurface(handle) {
     response.setHeader("Cache-Control", "no-store");
     response.setHeader("Referrer-Policy", "no-referrer");
     response.setHeader("X-Content-Type-Options", "nosniff");
-    response.setHeader("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; frame-src 'self' blob:; frame-ancestors 'none'");
+    response.setHeader("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; frame-src 'self' blob: https:; frame-ancestors 'none'");
     try {
       if (request.headers.host !== new URL(origin).host) throw fail(403, "Unexpected host.");
       if (request.headers.origin && request.headers.origin !== origin) throw fail(403, "Unexpected origin.");

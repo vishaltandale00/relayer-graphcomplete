@@ -550,6 +550,46 @@ impl<'connection> NodeTable<'connection> {
             .ok_or_else(|| GraphError::NotFound(format!("node {id}")))
     }
 
+    /// Draft nodes an interaction owns that carry artifact details.
+    pub(crate) async fn draft_artifacts(
+        &mut self,
+        owner: NodeId,
+    ) -> Result<Vec<(NodeId, serde_json::Value)>, GraphError> {
+        let rows = sqlx::query_as::<_, (i64, String)>(
+            "SELECT id,artifact FROM nodes WHERE owner_interaction_id=?1 AND state='draft' AND artifact IS NOT NULL ORDER BY id",
+        )
+        .bind(owner.value())
+        .fetch_all(&mut *self.connection)
+        .await?;
+        rows.into_iter()
+            .map(|(id, artifact)| {
+                let id = NodeId::new(id)
+                    .ok_or_else(|| GraphError::Internal(format!("invalid node id {id}")))?;
+                let artifact = serde_json::from_str(&artifact).map_err(|error| {
+                    GraphError::Internal(format!("node {id} artifact is not JSON: {error}"))
+                })?;
+                Ok((id, artifact))
+            })
+            .collect()
+    }
+
+    pub(crate) async fn set_draft_artifact(
+        &mut self,
+        id: NodeId,
+        owner: NodeId,
+        artifact: &serde_json::Value,
+    ) -> Result<bool, GraphError> {
+        let updated = sqlx::query(
+            "UPDATE nodes SET artifact=?3 WHERE id=?1 AND owner_interaction_id=?2 AND state='draft'",
+        )
+        .bind(id.value())
+        .bind(owner.value())
+        .bind(serde_json::to_string(artifact).expect("serde_json::Value must serialize"))
+        .execute(&mut *self.connection)
+        .await?;
+        Ok(updated.rows_affected() == 1)
+    }
+
     pub(crate) async fn neighbors(
         &mut self,
         scope: &InteractionScope,
