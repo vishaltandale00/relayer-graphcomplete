@@ -24,6 +24,28 @@ fn git_command(directory: &Path) -> std::process::Command {
     command
 }
 
+fn unmarked_plain_folder(path: &Path) -> std::io::Result<bool> {
+    let displayed = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        std::env::current_dir()?.join(path)
+    };
+    let canonical = std::fs::canonicalize(path)?;
+    if !canonical.is_dir() {
+        return Ok(false);
+    }
+    for root in [displayed.as_path(), canonical.as_path()] {
+        for ancestor in root.ancestors() {
+            match std::fs::symlink_metadata(ancestor.join(".git")) {
+                Ok(_) => return Ok(false),
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Err(error) => return Err(error),
+            }
+        }
+    }
+    Ok(true)
+}
+
 pub(super) async fn git_identity(path: &Path) -> Result<Option<GitIdentity>, ProductError> {
     let directory = path.to_path_buf();
     let output = tokio::task::spawn_blocking(move || {
@@ -37,18 +59,33 @@ pub(super) async fn git_identity(path: &Path) -> Result<Option<GitIdentity>, Pro
             .output()
     })
     .await
-    .map_err(|e| ProductError::Invalid(format!("Git inspection task failed: {e}")))?
-    .map_err(|e| ProductError::Invalid(format!("Git inspection unavailable: {e}")))?;
-    if !output.status.success() {
-        let error = String::from_utf8_lossy(&output.stderr);
-        if error.contains("not a git repository") {
-            // A broken .git marker is an inspection failure, never a non-Git folder.
-            if !path
-                .ancestors()
-                .any(|ancestor| std::fs::symlink_metadata(ancestor.join(".git")).is_ok())
+    .map_err(|e| ProductError::Invalid(format!("Git inspection task failed: {e}")))?;
+    let output = match output {
+        Ok(output) => output,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            if unmarked_plain_folder(path)
+                .map_err(|e| ProductError::Invalid(format!("Folder inspection unavailable: {e}")))?
             {
                 return Ok(None);
             }
+            return Err(ProductError::Invalid(format!(
+                "Git inspection unavailable: {error}"
+            )));
+        }
+        Err(error) => {
+            return Err(ProductError::Invalid(format!(
+                "Git inspection unavailable: {error}"
+            )));
+        }
+    };
+    if !output.status.success() {
+        let error = String::from_utf8_lossy(&output.stderr);
+        // Broken markers and inaccessible metadata remain inspection failures.
+        if error.contains("not a git repository")
+            && unmarked_plain_folder(path)
+                .map_err(|e| ProductError::Invalid(format!("Folder inspection unavailable: {e}")))?
+        {
+            return Ok(None);
         }
         return Err(ProductError::Invalid(
             "Git repository inspection failed".into(),
@@ -297,6 +334,123 @@ mod tests {
             permission_profile_id: "full".into(),
             model_selection: None,
             allow_unselected_model: true,
+        }
+    }
+
+    #[tokio::test]
+    async fn missing_git_admits_plain_folder_send_but_not_repository_markers() {
+        const CHILD: &str = "RELAYER_TEST_MISSING_GIT_FOLDER";
+        if std::env::var_os(CHILD).is_some_and(|value| value == "relative") {
+            assert_eq!(std::env::var_os("PATH").unwrap(), "");
+            assert!(git_identity(Path::new("alias")).await.is_err());
+            return;
+        }
+        if std::env::var_os(CHILD).is_none() {
+            let test_name = format!(
+                "{}::missing_git_admits_plain_folder_send_but_not_repository_markers",
+                module_path!().split_once("::").unwrap().1
+            );
+            let output = std::process::Command::new(std::env::current_exe().unwrap())
+                .args(["--exact", &test_name, "--nocapture", "--test-threads=1"])
+                .env(CHILD, "1")
+                .env("PATH", "")
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "{}{}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+            assert!(String::from_utf8_lossy(&output.stdout).contains("1 passed"));
+            return;
+        }
+        assert_eq!(std::env::var_os("PATH").unwrap(), "");
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().canonicalize().unwrap();
+        let plain = root.join("plain");
+        std::fs::create_dir(&plain).unwrap();
+        assert!(git_identity(&plain).await.unwrap().is_none());
+        let database = root.join("product.db");
+        let service =
+            ProductService::new(SqliteProductStore::open(&database).await.unwrap(), false);
+        let project = service
+            .create_project(CreateProjectCommand {
+                path: plain.to_str().unwrap().into(),
+                name: None,
+                reuse_existing: true,
+            })
+            .await
+            .unwrap()
+            .project;
+        let thread = service
+            .create_thread_in_directory(command(project.id), Some(plain.to_str().unwrap()))
+            .await
+            .unwrap();
+        assert_eq!(thread.project_id, Some(project.id));
+        assert!(thread.checkout_context.is_none());
+        std::fs::write(plain.join(".git"), "gitdir: missing").unwrap();
+        assert!(git_identity(&plain).await.is_err());
+        let nested = plain.join("nested");
+        std::fs::create_dir(&nested).unwrap();
+        assert!(git_identity(&nested).await.is_err());
+        #[cfg(unix)]
+        {
+            let separate = root.join("separate");
+            std::fs::create_dir(&separate).unwrap();
+            let displayed = plain.join("alias");
+            std::os::unix::fs::symlink(&separate, &displayed).unwrap();
+            assert!(git_identity(&displayed).await.is_err());
+            assert!(
+                service
+                    .create_project(CreateProjectCommand {
+                        path: displayed.to_str().unwrap().into(),
+                        name: None,
+                        reuse_existing: true,
+                    })
+                    .await
+                    .is_err()
+            );
+            let separate_project = service
+                .create_project(CreateProjectCommand {
+                    path: separate.to_str().unwrap().into(),
+                    name: None,
+                    reuse_existing: true,
+                })
+                .await
+                .unwrap()
+                .project;
+            assert!(
+                service
+                    .create_thread_in_directory(
+                        command(separate_project.id),
+                        Some(displayed.to_str().unwrap()),
+                    )
+                    .await
+                    .is_err()
+            );
+            let linked = root.join("linked");
+            std::os::unix::fs::symlink(&nested, &linked).unwrap();
+            assert!(git_identity(&linked).await.is_err());
+            let dangling = root.join("dangling");
+            std::fs::create_dir(&dangling).unwrap();
+            std::os::unix::fs::symlink(dangling.join("missing"), dangling.join(".git")).unwrap();
+            assert!(git_identity(&dangling).await.is_err());
+            let relative_cwd = plain.join("relative-cwd");
+            std::fs::create_dir(&relative_cwd).unwrap();
+            std::os::unix::fs::symlink(&separate, relative_cwd.join("alias")).unwrap();
+            let test_name = format!(
+                "{}::missing_git_admits_plain_folder_send_but_not_repository_markers",
+                module_path!().split_once("::").unwrap().1
+            );
+            let status = std::process::Command::new(std::env::current_exe().unwrap())
+                .args(["--exact", &test_name, "--nocapture", "--test-threads=1"])
+                .env(CHILD, "relative")
+                .env("PATH", "")
+                .current_dir(relative_cwd)
+                .status()
+                .unwrap();
+            assert!(status.success());
         }
     }
 

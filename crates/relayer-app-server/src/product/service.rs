@@ -1080,7 +1080,7 @@ impl ProductService {
                 canonical_path.display()
             )));
         }
-        let git = super::work_context::git_identity(&canonical_path).await?;
+        let git = super::work_context::git_identity(std::path::Path::new(supplied_path)).await?;
         let canonical_path = if let Some(identity) = git.as_ref() {
             if !separate_subfolder {
                 self.consolidate_projects().await?;
@@ -1327,7 +1327,10 @@ impl ProductService {
             let project_path = std::path::Path::new(&project.path);
             match (
                 super::work_context::git_identity(project_path).await?,
-                super::work_context::git_identity(std::path::Path::new(selected)).await?,
+                super::work_context::git_identity(std::path::Path::new(
+                    working_directory.unwrap_or(selected),
+                ))
+                .await?,
             ) {
                 (Some(project_git), Some(selected_git))
                     if project_git.common == selected_git.common =>

@@ -33,7 +33,7 @@ export async function collectWindowsInstallState({ runtimeInspectionPath, intera
     if (!completion || rows.length !== 1) throw new Error('One actual product interaction and graph completion must match the observed node.');
     const { definitionEndpoint, ...interaction } = rows[0];
     interaction.providerKind = ['openrouter', 'openai-api'].includes(interaction.definitionAdapterId) && typeof definitionEndpoint === 'string' && definitionEndpoint.replace(/\/+$/, '') === 'https://openrouter.ai/api/v1' ? 'openrouter' : 'other';
-    if (interaction.completionStatus !== 'succeeded' || interaction.attemptOutcome !== 'accepted' || interaction.adapterId !== interaction.definitionAdapterId || interaction.providerId !== interaction.attemptProviderId || interaction.modelId !== interaction.attemptModelId) throw new Error('Persisted interaction and accepted execution attempt disagree.');
+    if (interaction.completionStatus !== 'accepted' || interaction.attemptOutcome !== 'accepted' || interaction.adapterId !== interaction.definitionAdapterId || interaction.providerId !== interaction.attemptProviderId || interaction.modelId !== interaction.attemptModelId) throw new Error('Persisted interaction and accepted execution attempt disagree.');
     const after = await inspectProcesses(runtime, 'running');
     if (generationKey(before) !== generationKey(after)) throw new Error('Candidate app generation changed during persisted-state collection.');
     after.installedRuntimeSha256 = sha(runtimeBytes);

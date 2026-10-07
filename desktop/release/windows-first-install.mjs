@@ -176,7 +176,7 @@ export async function createWindowsFirstInstallEvidence({ releaseReceiptPath, in
   for (const state of [liveState, reopenedState, followupState]) {
     const interaction = state.interaction;
     if (!interaction || interaction.graphNodeId !== state.interaction_node_id || !Number.isSafeInteger(interaction.interactionId) || interaction.interactionId <= 0 || !Number.isSafeInteger(interaction.threadId) || interaction.threadId <= 0
-      || interaction.completionStatus !== 'succeeded' || interaction.attemptOutcome !== 'accepted' || interaction.providerId !== interaction.attemptProviderId || interaction.modelId !== interaction.attemptModelId || interaction.adapterId !== interaction.definitionAdapterId
+      || interaction.completionStatus !== 'accepted' || interaction.attemptOutcome !== 'accepted' || interaction.providerId !== interaction.attemptProviderId || interaction.modelId !== interaction.attemptModelId || interaction.adapterId !== interaction.definitionAdapterId
       || windowsPath(state.productDatabasePath) !== windowsPath(win32.join(runtime.freshProfile, 'product-data/product.sqlite3')) || !(Date.parse(state.processGeneration.observedAt) <= Date.parse(state.observedAt))) throw new Error('Actual persisted product interaction or process generation is unbound.');
   }
   if (liveState.interaction.providerKind !== observations.live.provider || liveState.interaction.modelId !== observations.live.model || liveState.interaction.prompt !== observations.live.prompt

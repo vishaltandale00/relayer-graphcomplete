@@ -122,7 +122,7 @@ it('rejects a contradictory retained persistence record even when every file has
       processes: state === 'stopped' ? [] : ['electron','app-server','graph-server'].map((role,index)=>({role,pid:pid+index,parentPid:index ? pid : 1,createdAt,path:role==='electron'?fresh.runtime.installedExecutable:`${fresh.runtime.installation.appDirectory}/resources/bin/relayer-${role}.exe`,userSid:fresh.runtime.identity.sid,sha256:digest}))});
     for (const [role,id] of [['persistence',32],['reopen-persistence',32],['followup-persistence',33]]) {
       const record = records[role]; record.productDatabasePath = `${fresh.runtime.freshProfile}/product-data/product.sqlite3`;
-      record.interaction={interactionId:id,threadId:2,graphNodeId:id,prompt:'Why the sky is blue?',completionStatus:'succeeded',providerId:'qa-custom-provider',modelId:'openai/gpt-6-luna',adapterId:'openrouter',definitionAdapterId:'openrouter',providerKind:'openrouter',attemptProviderId:'qa-custom-provider',attemptModelId:'openai/gpt-6-luna',attemptOutcome:'accepted'};
+      record.interaction={interactionId:id,threadId:2,graphNodeId:id,prompt:'Why the sky is blue?',completionStatus:'accepted',providerId:'qa-custom-provider',modelId:'openai/gpt-6-luna',adapterId:'openrouter',definitionAdapterId:'openrouter',providerKind:'openrouter',attemptProviderId:'qa-custom-provider',attemptModelId:'openai/gpt-6-luna',attemptOutcome:'accepted'};
       record.processGeneration=generation(role==='persistence'?100:200,role==='persistence'?'2026-10-06T10:00:30Z':'2026-10-06T10:02:40Z',record.observedAt);
     }
     records['shutdown-processes']=generation(0,'','2026-10-06T10:02:30Z','stopped');
@@ -153,6 +153,9 @@ it('rejects a contradictory retained persistence record even when every file has
     await mutateRecord('installer-payload',record=>{record.installedRoot='C:/CleanExtraction';});
     await mutateRecord('persistence',record=>{record.interaction.prompt='A different question';});
     await mutateRecord('persistence',record=>{record.interaction.providerKind='other';});
+    for (const completionStatus of ['running','submitted','failed','stopped','succeeded']) {
+      await mutateRecord('persistence',record=>{record.interaction.completionStatus=completionStatus;});
+    }
     await mutateRecord('persistence',record=>{record.interaction.modelId=record.interaction.attemptModelId='wrong-model';});
     await mutateRecord('reopen-persistence',record=>{record.processGeneration=structuredClone(records.persistence.processGeneration);record.processGeneration.observedAt=record.observedAt;});
     await mutateRecord('reopen-persistence',record=>{record.processGeneration.processes[1].parentPid=999;});
@@ -310,7 +313,7 @@ it('collects actual product interaction and latest accepted attempt from migrate
     for(const name of (await readdir(migrations)).sort()) if(name.endsWith('.sql')) product.exec(await readFile(new URL(name,migrations),'utf8'));
     product.exec(`INSERT INTO threads(id,title,created_at,updated_at) VALUES(2,'sky','1','1');
       INSERT INTO model_providers(id,label,connected,refreshed_at,adapter_id,access_contract,endpoint,credential_reference) VALUES('qa-custom-provider','My API',1,'1','openrouter','secret@1','https://openrouter.ai/api/v1/','never-export-this-reference');
-      INSERT INTO interactions(id,thread_id,sequence,text,created_at,graph_node_id,completion_status,model_provider_id,provider_model_id) VALUES(100,2,1,'Why the sky is blue?','1',32,'succeeded','qa-custom-provider','openai/gpt-6-luna');
+      INSERT INTO interactions(id,thread_id,sequence,text,created_at,graph_node_id,completion_status,model_provider_id,provider_model_id) VALUES(100,2,1,'Why the sky is blue?','1',32,'accepted','qa-custom-provider','openai/gpt-6-luna');
       INSERT INTO interaction_attempts(id,interaction_id,attempt_number,started_at,finished_at,family_id,family_revision,harness_configuration_name,harness_configuration_revision,harness_configuration_digest,provider_id,adapter_id,adapter_implementation_version,model_id,access_contract,outcome)
       VALUES(10,100,1,'1','2',1,1,'codex-basic',1,'fixture','qa-custom-provider','openrouter',2,'openai/gpt-6-luna','secret@1','accepted');`);
     const temporal=await readFile(new URL('../crates/relayer-graph-core/src/storage/sqlite/migrations/0011_temporal_completions.sql',import.meta.url),'utf8');
@@ -322,8 +325,13 @@ it('collects actual product interaction and latest accepted attempt from migrate
     const inspectProcesses=async(_runtime,state)=>{calls++;return {schema:'windows-installed-processes/v1',state,userSid:runtime.identity.sid,installedRoot:runtime.installation.appDirectory,freshProfile:profile,observedAt:new Date().toISOString(),processes:state==='stopped'?[]:['electron','app-server','graph-server'].map((role,index)=>({role,pid:generation+index,createdAt:'2026-10-06T10:00:00Z'}))};};
     const options={runtimeInspectionPath,interactionNodeId:32,inspectProcesses};
     const record=await collectWindowsInstallState(options);
-    expect(record).toMatchObject({schema:'windows-installed-completion/v2',interaction_node_id:32,lifecycle:'succeeded',databasePath:await realpath(graphPath),productDatabasePath:await realpath(productPath),interaction:{interactionId:100,graphNodeId:32,providerId:'qa-custom-provider',providerKind:'openrouter',modelId:'openai/gpt-6-luna',prompt:'Why the sky is blue?',attemptOutcome:'accepted'}});
+    expect(record).toMatchObject({schema:'windows-installed-completion/v2',interaction_node_id:32,lifecycle:'succeeded',databasePath:await realpath(graphPath),productDatabasePath:await realpath(productPath),interaction:{interactionId:100,graphNodeId:32,providerId:'qa-custom-provider',providerKind:'openrouter',modelId:'openai/gpt-6-luna',prompt:'Why the sky is blue?',completionStatus:'accepted',attemptOutcome:'accepted'}});
     expect(JSON.stringify(record)).not.toContain('never-export-this-reference');expect(JSON.stringify(record)).not.toContain('https://');expect(calls).toBe(2);
+    for (const completionStatus of ['running','submitted','failed','stopped','succeeded']) {
+      product.prepare('UPDATE interactions SET completion_status=?').run(completionStatus);
+      await expect(collectWindowsInstallState(options)).rejects.toThrow('execution attempt disagree');
+    }
+    product.exec("UPDATE interactions SET completion_status='accepted'");
     product.exec("UPDATE model_providers SET endpoint='https://other-provider.example/v1'");
     expect((await collectWindowsInstallState(options)).interaction.providerKind).toBe('other');
     product.exec("UPDATE model_providers SET endpoint='https://openrouter.ai/api/v1'");
