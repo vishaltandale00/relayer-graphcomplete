@@ -258,6 +258,7 @@ describe("Ladybug packaged lifecycle qualification", () => {
     // must stay in the authenticated set.
     expect(RECEIPT_INPUT_PATHS).toContain(".gitattributes");
     expect(RECEIPT_INPUT_PATHS).toContain("desktop/packaging/pinned-ladybug-build.mjs");
+    expect(RECEIPT_INPUT_PATHS).toContain("desktop/packaging/windows-ladybug-toolchain.cmake");
     expect(RECEIPT_INPUT_PATHS).toContain("crates/relayer-graph-server/build.rs");
     expect(RECEIPT_INPUT_PATHS).toContain("crates/relayer-graph-server/build_support/openssl_link.rs");
     expect(new Set(RECEIPT_INPUT_PATHS).size).toBe(RECEIPT_INPUT_PATHS.length);
@@ -269,21 +270,21 @@ describe("Ladybug packaged lifecycle qualification", () => {
     }
   });
 
-  it("rejects a packaging helper that differs from the authenticated source commit", async () => {
+  it.each(["desktop/packaging/pinned-ladybug-build.mjs", "desktop/packaging/windows-ladybug-toolchain.cmake"])("rejects source input drift for %s", async (changedPath) => {
     const root = await mkdtemp(join(tmpdir(), "relayer-ladybug-input-mismatch-"));
     try {
       for (const path of RECEIPT_INPUT_PATHS) {
         await mkdir(dirname(join(root, path)), { recursive: true });
         await writeFile(
           join(root, path),
-          path === "desktop/packaging/pinned-ladybug-build.mjs" ? "working helper" : "committed input",
+          path === changedPath ? "working helper" : "committed input",
         );
       }
       await expect(assertCaptureInputsMatchSourceCommit({
         sourceCommit: "a".repeat(40),
         repositoryRoot: root,
         readCommittedInput: async () => Buffer.from("committed input"),
-      })).rejects.toThrow("desktop/packaging/pinned-ladybug-build.mjs differs from the exact source commit");
+      })).rejects.toThrow(`${changedPath} differs from the exact source commit`);
     } finally {
       await rm(root, { recursive: true, force: true });
     }
@@ -749,31 +750,47 @@ describe("Ladybug packaged lifecycle qualification", () => {
     expect(prepareCalls).toBe(1);
   });
 
-  it("rejects prepared environments or static archives that differ from recomputed inputs", async () => {
+  it.each(["aarch64-apple-darwin", "x86_64-pc-windows-msvc"])("rejects prepared environment or archive drift for %s", async (target) => {
     const root = await mkdtemp(join(tmpdir(), "relayer-ladybug-capture-test-"));
     try {
       const manifest = await loadLadybugSourceManifest();
+      const checkout = join(root, "source");
+      const toolchain = "desktop/packaging/windows-ladybug-toolchain.cmake";
+      const ownedToolchain = join(checkout, toolchain);
+      const outerToolchain = join(root, "outer", toolchain);
+      const reviewedToolchain = await readFile(join(import.meta.dirname, "..", toolchain));
+      for (const path of [ownedToolchain, outerToolchain]) {
+        await mkdir(dirname(path), { recursive: true });
+        await writeFile(path, reviewedToolchain);
+      }
+      const suffix = target.endsWith("windows-msvc") ? ".lib" : ".a";
       const ladybugCore = join(root, "lbug-0.18.0", "lbug-src");
       await mkdir(ladybugCore, { recursive: true });
       await writeFile(join(ladybugCore, "reviewed.cpp"), "reviewed Ladybug core");
       manifest.core.embeddedTreeSha256 = await digestLadybugSourceTree(ladybugCore);
       const lib = join(root, "openssl-prefix", "lib");
       await mkdir(lib, { recursive: true });
-      await writeFile(join(lib, "libssl.a"), "reviewed ssl");
-      await writeFile(join(lib, "libcrypto.a"), "reviewed crypto");
+      await writeFile(join(lib, `libssl${suffix}`), "reviewed ssl");
+      await writeFile(join(lib, `libcrypto${suffix}`), "reviewed crypto");
       await writeFile(join(root, "source-receipt.json"), "{}\n");
       const environment = createLadybugCargoEnvironment({
         manifest,
         outputDirectory: root,
-        target: "aarch64-apple-darwin",
+        target,
+        sourceRepositoryRoot: checkout,
       });
+      if (target.endsWith("windows-msvc")) {
+        expect(environment.CMAKE_TOOLCHAIN_FILE).toBe(ownedToolchain);
+        await writeFile(outerToolchain, "mutated outer policy");
+        expect(await readFile(environment.CMAKE_TOOLCHAIN_FILE)).toEqual(reviewedToolchain);
+      }
       const receipt = {
         schemaVersion: 1,
-        target: "aarch64-apple-darwin",
+        target,
         cargoArguments: ["build", "--locked", "--offline"],
         environment,
         environmentMustBeUnset: manifest.build.environmentMustBeUnset,
-        artifacts: await Promise.all(["libssl.a", "libcrypto.a"].map(async (file) => ({
+        artifacts: await Promise.all([`libssl${suffix}`, `libcrypto${suffix}`].map(async (file) => ({
           file: `openssl-prefix/lib/${file}`,
           sha256: await sha256File(join(lib, file)),
         }))),
@@ -783,14 +800,25 @@ describe("Ladybug packaged lifecycle qualification", () => {
       await expect(validatePreparedLadybugSource({
         sourceOutput: root,
         manifest,
-        target: "aarch64-apple-darwin",
+        target,
+        sourceRepositoryRoot: checkout,
       })).resolves.toMatchObject({ cargoEnvironment: receipt });
+
+      if (target.endsWith("windows-msvc")) {
+        receipt.environment.CMAKE_TOOLCHAIN_FILE = outerToolchain;
+        await writeFile(join(root, "cargo-build-env.json"), `${JSON.stringify(receipt)}\n`);
+        await expect(validatePreparedLadybugSource({ sourceOutput: root, manifest, target, sourceRepositoryRoot: checkout }))
+          .rejects.toThrow("recomputed pinned paths");
+        receipt.environment.CMAKE_TOOLCHAIN_FILE = ownedToolchain;
+        await writeFile(join(root, "cargo-build-env.json"), `${JSON.stringify(receipt)}\n`);
+      }
 
       await writeFile(join(ladybugCore, "reviewed.cpp"), "mutated Ladybug core");
       await expect(validatePreparedLadybugSource({
         sourceOutput: root,
         manifest,
-        target: "aarch64-apple-darwin",
+        target,
+        sourceRepositoryRoot: checkout,
       })).rejects.toThrow("differs from the reviewed source tree");
       await writeFile(join(ladybugCore, "reviewed.cpp"), "reviewed Ladybug core");
 
@@ -799,20 +827,23 @@ describe("Ladybug packaged lifecycle qualification", () => {
       await expect(validatePreparedLadybugSource({
         sourceOutput: root,
         manifest,
-        target: "aarch64-apple-darwin",
+        target,
+        sourceRepositoryRoot: checkout,
       })).rejects.toThrow("recomputed pinned paths");
 
       receipt.environment = createLadybugCargoEnvironment({
         manifest,
         outputDirectory: root,
-        target: "aarch64-apple-darwin",
+        target,
+        sourceRepositoryRoot: checkout,
       });
       await writeFile(join(root, "cargo-build-env.json"), `${JSON.stringify(receipt)}\n`);
-      await writeFile(join(lib, "libssl.a"), "ambient replacement");
+      await writeFile(join(lib, `libssl${suffix}`), "ambient replacement");
       await expect(validatePreparedLadybugSource({
         sourceOutput: root,
         manifest,
-        target: "aarch64-apple-darwin",
+        target,
+        sourceRepositoryRoot: checkout,
       })).rejects.toThrow("differs from its prepared digest");
     } finally {
       await rm(root, { recursive: true, force: true });

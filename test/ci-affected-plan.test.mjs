@@ -101,6 +101,15 @@ describe("affected-module plan v1", { timeout: 30_000 }, () => {
       expect(result.reasons).toContain(`${path}: unmapped path`);
     }
   });
+  test("maps the developer doctor to its platform prerequisite boundary without admitting adjacent scripts", () => {
+    const result = plan("scripts/doctor-dev.mjs");
+    expect(result.mode).toBe("affected");
+    expect(result.vitestFiles).toContain("test/developer-prerequisites.test.mjs");
+    expect(result.chapters.vitest).toBe(true);
+    const adjacent = plan("scripts/doctor-dev-unknown.mjs");
+    expect(adjacent.mode).toBe("full");
+    expect(adjacent.reasons).toContain("scripts/doctor-dev-unknown.mjs: unmapped path");
+  });
   test("maps the Windows Authenticode runtime and early probe to signature and workflow checkpoints", () => {
     for (const path of ["desktop/release/verify-windows-app.mjs", "scripts/check-windows-signature-runtime.mjs"]) {
       const result = plan(path);

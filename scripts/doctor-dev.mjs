@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 export const REQUIRED_RUST_TOOLCHAIN = "1.98.0";
 export const MINIMUM_NODE_VERSION = "22.8.0";
 export const MINIMUM_CMAKE_VERSION = "3.15.0";
+export const MINIMUM_WINDOWS_CMAKE_VERSION = "3.25.0";
 export const ADVISORY_FREE_BYTES = 10n * 1024n * 1024n * 1024n;
 const VISUAL_STUDIO_GENERATOR = /Visual Studio \d+(?: \d{4})?/u;
 
@@ -67,12 +68,13 @@ export function evaluateDeveloperPrerequisites({
     "Use the Rust toolchain selected by rust-toolchain.toml.",
   ));
 
+  const minimumCmakeVersion = platform === "win32" ? MINIMUM_WINDOWS_CMAKE_VERSION : MINIMUM_CMAKE_VERSION;
   const cmakeParts = versionParts(cmakeVersion);
   checks.push(check(
     "CMake",
-    cmakeParts !== null && compareVersions(cmakeParts, versionParts(MINIMUM_CMAKE_VERSION)) >= 0,
+    cmakeParts !== null && compareVersions(cmakeParts, versionParts(minimumCmakeVersion)) >= 0,
     cmakeVersion
-      ? `found ${cmakeVersion}; requires ${MINIMUM_CMAKE_VERSION} or newer (4.4.3 is the known-good local version)`
+      ? `found ${cmakeVersion}; requires ${minimumCmakeVersion} or newer (4.4.3 is the known-good local version)`
       : "cmake is not available",
     "Install CMake and make it available on PATH.",
   ));

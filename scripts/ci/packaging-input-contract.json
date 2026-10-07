@@ -3,6 +3,7 @@
   "reviewedBuildConfiguration": {
     ".cargo/config.toml": "4ee7c847c82351d888471dc77e4c874f540ef777074c543ebca20afc403fc3c3",
     "crates/relayer-graph-core/build.rs": "46fdafb8659046f718fceb2615dd97a68adb5cea4fdb332dfac60590d1991551",
-    "crates/relayer-graph-server/build.rs": "8b71b5f0c811b4b037d843c540c589ff4f9b950bb27ef7daa16d548e0ca966c2"
+    "crates/relayer-graph-server/build.rs": "8b71b5f0c811b4b037d843c540c589ff4f9b950bb27ef7daa16d548e0ca966c2",
+    "desktop/packaging/windows-ladybug-toolchain.cmake": "944fdf036c7c657da534319240017195ef0bd8f7a308499189128de34a7e8949"
   }
 }

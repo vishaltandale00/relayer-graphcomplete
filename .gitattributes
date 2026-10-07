@@ -25,3 +25,4 @@ vendor/ladybug/notices/** -text
 .cargo/config.toml text eol=lf
 crates/relayer-graph-core/build.rs text eol=lf
 crates/relayer-graph-server/src/search_index/store.rs text eol=lf
+desktop/packaging/windows-ladybug-toolchain.cmake text eol=lf
