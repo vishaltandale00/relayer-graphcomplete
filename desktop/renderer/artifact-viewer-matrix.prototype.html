@@ -1,0 +1,41 @@
+<!doctype html>
+<!-- PROTOTYPE — throwaway (issue #684). Case matrix for the artifact viewer prototype. -->
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Artifact viewer · case matrix</title>
+  <script src="./theme-bootstrap.js"></script>
+  <link rel="stylesheet" href="./styles.css">
+  <link rel="stylesheet" href="./artifact-viewer-prototype/matrix.css">
+</head>
+<body class="matrix-page">
+  <main class="mx">
+    <header class="mx-head">
+      <p class="mx-kicker">Issue #684 · prototype · throwaway</p>
+      <h1>Artifact viewer — case matrix</h1>
+      <p class="mx-lede">Every promise and boundary from the spec, driven against the fixture thread <b>Tidewater launch kit</b>. Each row links into the prototype at that exact case. <b>Observed</b> comes from the capture runner; mark your own verdict with the buttons on the right.</p>
+      <div class="mx-summary" id="summary"></div>
+      <nav class="mx-nav" id="nav"></nav>
+    </header>
+    <section class="mx-live" id="processes">
+      <div>
+        <h2>Live: server invoke processes</h2>
+        <p class="mx-muted" id="idleNote"></p>
+        <table class="mx-proc"><thead><tr><th>Artifact</th><th>Command</th><th>Started by</th><th>Status</th><th>Idle stop in</th><th></th></tr></thead><tbody id="procRows"></tbody></table>
+      </div>
+      <div class="mx-controls">
+        <h2>Fixture controls</h2>
+        <button type="button" id="touchSite">Edit site/styles.css (toggle)</button>
+        <button type="button" id="resetApprovals">Forget command approvals</button>
+        <a href="/artifact-viewer.prototype.html">Open the prototype ↗</a>
+        <p class="mx-muted" id="controlNote"></p>
+      </div>
+    </section>
+    <section id="groups"></section>
+    <section class="mx-findings" id="findings"></section>
+  </main>
+  <div class="mx-lightbox" id="lightbox" hidden><img alt=""><p></p></div>
+  <script type="module" src="./artifact-viewer-prototype/matrix.js"></script>
+</body>
+</html>

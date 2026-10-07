@@ -69,6 +69,8 @@
     "prd:check-readability": "node docs/prd/check-readability.mjs",
     "desktop:dev": "npm run build && electron desktop/main/index.mjs",
     "prototype:project-row-hover": "open desktop/renderer/project-row-hover.prototype.html",
+    "prototype:artifact-viewer": "npm run prepare:renderer && node scripts/prototype-artifact-viewer.mjs",
+    "prototype:artifact-viewer:capture": "node scripts/fixtures/artifact-viewer-prototype/capture-cases.mjs",
     "predesktop:dev:prime": "npm run build",
     "desktop:dev:prime": "node scripts/run-prime-desktop.mjs",
     "eval-app:dev": "node desktop/eval-main/index.mjs",

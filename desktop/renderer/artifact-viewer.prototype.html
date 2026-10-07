@@ -1,0 +1,40 @@
+<!doctype html>
+<!-- PROTOTYPE — throwaway (issue #684). Four chat-input placements for the full-screen
+     artifact viewer, switchable with ?variant=A|B|C|D, mounted on the real ProductWorkspace
+     against a fixture thread. Run with: npm run prototype:artifact-viewer -->
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Artifact viewer prototype · Relayer</title>
+  <script src="./theme-bootstrap.js"></script>
+  <link rel="stylesheet" href="./styles.css">
+  <link rel="stylesheet" href="./artifact-viewer-prototype/prototype.css">
+</head>
+<body class="artifact-prototype">
+  <div class="app-shell" id="appShell">
+    <aside class="sidebar">
+      <div class="sidebar-title"><span class="logo" aria-hidden="true"></span><strong>Relayer</strong></div>
+      <div class="sidebar-content">
+        <button class="new-thread-button" type="button" disabled><span>＋</span> New thread</button>
+        <div class="side-section">
+          <div class="section-label">Projects</div>
+          <div class="entry-list">
+            <div class="entry active proto-entry"><span class="entry-icon" aria-hidden="true">▣</span><span>tidewater-launch</span></div>
+            <div class="entry proto-entry proto-entry-thread"><span>Tidewater launch kit</span></div>
+          </div>
+        </div>
+      </div>
+    </aside>
+    <main class="main-area">
+      <section id="workspaceHost" class="proto-workspace-host">
+        <section class="thread-view" id="threadView"></section>
+      </section>
+    </main>
+  </div>
+  <div id="artifactViewerRoot"></div>
+  <script src="./vendor/lucide.min.js"></script>
+  <script src="./vendor/marked.umd.js"></script>
+  <script type="module" src="./artifact-viewer-prototype/main.js"></script>
+</body>
+</html>
