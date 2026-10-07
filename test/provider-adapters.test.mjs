@@ -987,16 +987,11 @@ describe("managed subscription isolation", () => {
       expect(first.kind).toBe("lease");
       await first.lease.release();
 
-      const targetLease = operationName === "reconnect"
-        ? await service.acquireExecution("managed-repair")
-        : null;
-      finishPreparation();
-      if (targetLease) {
-        await expect(repairing).rejects.toThrow("interactions are running");
-        await targetLease.release();
-      } else {
-        await expect(repairing).resolves.toBeDefined();
+      if (operationName === "reconnect") {
+        await expect(service.acquireExecution("managed-repair")).rejects.toThrow("sign-in is pending");
       }
+      finishPreparation();
+      await expect(repairing).resolves.toBeDefined();
       await service.close();
     },
   );
@@ -1029,9 +1024,9 @@ describe("managed subscription isolation", () => {
     expect(closed).toBe(false);
     finishPreparation();
 
-    await expect(reconnecting).rejects.toThrow("shutting down");
+    await expect(reconnecting).resolves.toMatchObject({ status: "pending" });
     await closing;
-    expect(login).not.toHaveBeenCalled();
+    expect(login).toHaveBeenCalledOnce();
     expect(closeRuntime).toHaveBeenCalledOnce();
   });
 

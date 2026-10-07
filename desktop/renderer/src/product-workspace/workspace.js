@@ -3279,9 +3279,17 @@ export function createProductWorkspace({
     confirm.title = "Confirm";
     confirm.setAttribute("aria-label", "Confirm annotation");
     confirm.disabled = presentation.confirmDisabled || !String(contextEditor.value).trim();
+    let focusComposerAfterConfirmation = false;
+    bindComposerKeydown(textarea, () => {
+      if (confirm.disabled) return;
+      focusComposerAfterConfirmation = true;
+      confirm.click();
+    });
     confirm.onclick = async () => {
       if (annotationStagingDisabled()) return;
       const confirmingEditor = contextEditor;
+      const keyboardConfirmation = focusComposerAfterConfirmation;
+      focusComposerAfterConfirmation = false;
       const endResolution = beginEditorResolution(confirmingEditor);
       try {
         clearContextEditorError(confirmingEditor);
@@ -3298,6 +3306,13 @@ export function createProductWorkspace({
           if (contextConfirmationDestination(getThread()?.id, threadId) === "current") {
             applyConfirmedContextDraft(confirmation);
             closeDurableEditor(threadId, confirmingEditor.draftId);
+            // Chromium blurs a textarea when confirmation disables it. Keep keyboard
+            // focus unless the user moved to another control while the request ran.
+            if (keyboardConfirmation && (
+              graphDocument.activeElement === textarea || graphDocument.activeElement === graphDocument.body
+            )) {
+              $("#threadPrompt").focus({ preventScroll: true });
+            }
           }
         }
       } catch (confirmError) {
@@ -3306,6 +3321,11 @@ export function createProductWorkspace({
         endResolution();
       }
       renderComposerContexts();
+      if (keyboardConfirmation && contextEditor === confirmingEditor
+        && textarea.isConnected && !textarea.disabled
+        && graphDocument.activeElement === graphDocument.body) {
+        textarea.focus({ preventScroll: true });
+      }
     };
 
     textarea.oninput = () => {

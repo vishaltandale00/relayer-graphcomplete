@@ -488,6 +488,16 @@ async function run() {
   await waitForAcceptedInteractions(siblingThread.id, 1);
   await openThreadWindow(thread.id);
 
+  await click("#threadView [data-model-picker-trigger]");
+  await waitFor("selected model in ongoing picker", () => evaluate(
+    `Boolean(document.querySelector('#threadView [data-model-option][aria-checked="true"]'))`,
+  ));
+  await click('#threadView [data-model-option][aria-checked="true"]');
+  await waitFor("selected model click closes picker and returns focus", () => evaluate(`
+    document.querySelector('#threadView [data-model-picker-popover]')?.classList.contains('hidden')
+      && document.activeElement === document.querySelector('#threadView [data-model-picker-trigger]')
+  `));
+
   await stageContext(INITIAL_EDITOR_VALUE);
   await waitFor("initial node draft save", async () => {
     const response = await productRequest(`/api/threads/${thread.id}/context-drafts`);
@@ -908,8 +918,13 @@ async function run() {
   })()`));
   window.webContents.session.webRequest.onBeforeRequest(confirmFailureFilter, null);
   if (!rejectedConfirm) throw new Error("The one-shot confirmation interceptor did not reject the request.");
-  await click("[aria-label='Confirm annotation']");
+  await evaluate("document.querySelector('#contextAnnotationEditor').focus()");
+  window.webContents.sendInputEvent({ type: "keyDown", keyCode: "Enter" });
+  window.webContents.sendInputEvent({ type: "keyUp", keyCode: "Enter" });
   await assertCollapsedPill();
+  await waitFor("annotation Enter returns focus to composer", () => evaluate(
+    "document.activeElement === document.querySelector('#threadPrompt')",
+  ));
   const confirmedState = await productRequest(`/api/threads/${thread.id}/context-drafts`);
   if (confirmedState.drafts?.length !== 0
     || confirmedState.confirmations?.length !== 1
@@ -1061,8 +1076,13 @@ async function run() {
   })) throw new Error(`Restart reopened context UI or lost historical context: ${JSON.stringify(restartedContext)}`);
 
   await stageContext(FAILED_ANNOTATION);
-  await click("[aria-label='Confirm annotation']");
+  await evaluate("document.querySelector('#contextAnnotationEditor').focus()");
+  window.webContents.sendInputEvent({ type: "keyDown", keyCode: "Enter" });
+  window.webContents.sendInputEvent({ type: "keyUp", keyCode: "Enter" });
   await assertCollapsedPill();
+  await waitFor("second annotation Enter returns focus to composer", () => evaluate(
+    "document.activeElement === document.querySelector('#threadPrompt')",
+  ));
   await setValue("#threadPrompt", FAILED_MESSAGE);
   let rejected = false;
   const requestFilter = { urls: ["<all_urls>"] };
@@ -1075,7 +1095,8 @@ async function run() {
     if (matching) rejected = true;
     callback(matching ? { cancel: true } : {});
   });
-  await click("#sendInteraction");
+  window.webContents.sendInputEvent({ type: "keyDown", keyCode: "Enter" });
+  window.webContents.sendInputEvent({ type: "keyUp", keyCode: "Enter" });
   await waitFor("failed send to restore composition", () => evaluate(`(() => (
     !document.querySelector('#threadPrompt')?.disabled
       && document.querySelector('#toast')?.textContent

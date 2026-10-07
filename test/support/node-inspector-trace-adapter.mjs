@@ -104,7 +104,7 @@ const AUTHORED_DETAIL = compiledPackage({
 });
 
 export class NodeInspectorWorld {
-  constructor() {
+  constructor({ onSubmitInteraction = async () => {} } = {}) {
     this.window = new Window({ url: "http://127.0.0.1:3000" });
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
     this.pendingDigests = 0;
@@ -174,6 +174,7 @@ export class NodeInspectorWorld {
       },
       showThread: () => {},
       showEmpty: () => {},
+      onSubmitInteraction,
       resolveNodeDetailAsset: (_asset, { node }) => {
         const request = { node: specNode(node.id), response: deferred(), slot: null };
         world.assets.push(request);

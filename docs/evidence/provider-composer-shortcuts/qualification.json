@@ -1,0 +1,58 @@
+{
+  "schemaVersion": 1,
+  "baseCommit": "32e313213fe4355efabf3ec61cea2991eb145d71",
+  "scopedSourceDigest": "f1b0fd13b2d2efbb4ceb9e970f58c9689aabcfa2ef0f402c1224570498c38d4d",
+  "nodeVersion": "22.23.2",
+  "requiredCommands": [
+    {
+      "command": "npm run build",
+      "exitCode": 0,
+      "log": "build.txt"
+    },
+    {
+      "command": "npm run check",
+      "exitCode": 0,
+      "log": "check.txt",
+      "javascript": {
+        "passed": 3719,
+        "skipped": 3
+      },
+      "secretBoundaryPassed": 2,
+      "pythonPassed": 68
+    }
+  ],
+  "nativeScenarios": [
+    {
+      "command": "node scripts/run-interaction-context-lifecycle-test.mjs",
+      "innerPassed": true,
+      "paidInferenceCalls": 0,
+      "log": "interaction-context.txt"
+    },
+    {
+      "command": "node scripts/run-node-input-actions-test.mjs",
+      "innerPassed": true,
+      "paidInferenceCalls": 0,
+      "log": "node-input.txt"
+    },
+    {
+      "command": "node scripts/run-project-new-thread-test.mjs",
+      "innerPassed": false,
+      "unchangedBaseReproduced": true,
+      "unresolvedCheckpoint": "pending draft restoration after restart",
+      "log": "project-failure.txt",
+      "baselineLog": "project-baseline.txt"
+    }
+  ],
+  "firstFullCheck": {
+    "exitCode": 1,
+    "javascriptPassed": 3718,
+    "failure": "source-bound annotation receipt stale; real capture regenerated before rerun"
+  },
+  "logsSha256": {
+    "build.txt": "cb936774390cd44b1c0ed3d127f7f8e33ad1d2ffa87f66a71a7a68ac1b23c5bc",
+    "check.txt": "0f98c5318902746803890bc97335448c8414c03b6df550a7a01dbc363a9c3d9d",
+    "interaction-context.txt": "ef737f708b62972905bac8c202af2e8914147dcb320cad9a6e07e2db4b774104",
+    "node-input.txt": "e0b761303a5ba0ff8a19b8048e04ed30121acd07da181b65cdb44a1c29eeb90d"
+  },
+  "logNormalization": "Build log has trailing empty lines removed; other output is preserved."
+}

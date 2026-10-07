@@ -1,0 +1,14 @@
+{
+  "passed": false,
+  "checkpoint": "pending draft after app restart",
+  "driverLine": 610,
+  "sameFailureAsChangedSource": true,
+  "wrapperExitCode": 1,
+  "childExitCode": 0,
+  "passMarkerPresent": false,
+  "nodeVersion": "22.23.2",
+  "log": "/private/tmp/provider-composer-main-project-baseline.log",
+  "logSha256": "a57e6d6db9ad446bf6e353e8ef7cb2bb1871446f6bfb10242812d07b6c510d2d",
+  "sourceIdentity": "/private/tmp/provider-composer-main-baseline-c8xj5sb2/source-identity.json",
+  "scope": "HEAD renderer/preload baseline with three production fix files restored; current isolated-root graph/app binaries and unchanged native project scenario"
+}

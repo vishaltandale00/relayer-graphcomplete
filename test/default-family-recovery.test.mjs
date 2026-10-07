@@ -559,3 +559,21 @@ describe("Settings default section recovery (PROV-008)", () => {
     expect(document.activeElement).toBe(providersTab);
   });
 });
+
+// A model click completes the picker interaction even when its radio is already checked.
+describe("model selection dismissal", () => {
+  it.each([
+    ["new", true], ["new", false], ["ongoing", true], ["ongoing", false],
+  ])("closes the %s picker when already-selected=%s", (mode, alreadySelected) => {
+    const settings = restored();
+    settings.families[0].members.push({ providerId: "codex", modelId: "gpt-5.4", position: 1 });
+    const { root, picker, document } = mountPicker(settings, { mode, pinnedHarnessId: settings.defaults.harnessId });
+    root.querySelector("[data-model-picker-trigger]").click();
+    const option = root.querySelector(`[data-model-option][aria-checked="${alreadySelected}"]`);
+    expect(option).not.toBeNull();
+    option.click();
+    expect(root.querySelector("[data-model-picker-popover]").classList.contains("hidden")).toBe(true);
+    expect(document.activeElement).toBe(root.querySelector("[data-model-picker-trigger]"));
+    picker.dispose();
+  });
+});

@@ -1465,3 +1465,79 @@ describe("PROV-007: connect is all-or-nothing", () => {
     }
   });
 });
+
+// Login on the installed runtime must not wait for an upgrade's setup probe.
+describe("reconnect setup overlap", () => {
+  it("returns browser login while setup is held and publishes nothing until setup finishes", async () => {
+    const world = managedWorld();
+    const server = productServer([managedDefinition]);
+    const setup = deferred();
+    const started = deferred();
+    const composition = compose({ registry: world.registry, server,
+      prepareRuntime: async () => { started.resolve(); await setup.promise; },
+    });
+    let reconnecting;
+    try {
+      await composition.start();
+      const published = server.published.length;
+      reconnecting = composition.providerDefinitions.reconnect(managedDefinition.id);
+      reconnecting.catch(() => undefined);
+      await started.promise;
+      await vi.waitFor(() => expect(world.runtimes[0].credentials.login).toHaveBeenCalledOnce(), { timeout: 200 });
+      const pending = await reconnecting;
+      expect(pending.status).toBe("pending");
+      world.account = "connected";
+      expect((await composition.providerDefinitions.completeConnection(pending.connectionId)).status).toBe("pending");
+      expect(server.published).toHaveLength(published);
+      setup.resolve();
+      await vi.waitFor(async () => expect((await composition.providerDefinitions.completeConnection(pending.connectionId)).status).toBe("connected"));
+    } finally { setup.resolve(); await reconnecting?.catch(() => undefined); await composition.close(); }
+  });
+});
+
+describe("reconnect setup failure boundaries", () => {
+  it.each([false, true])("keeps setup failure inert after cancellation=%s", async (cancel) => {
+    const world = managedWorld();
+    const server = productServer([managedDefinition]);
+    const setup = deferred();
+    const composition = compose({ registry: world.registry, server, removeRuntimeState: world.removeRuntimeState,
+      prepareRuntime: () => setup.promise,
+    });
+    try {
+      await composition.start();
+      const pending = await composition.providerDefinitions.reconnect(managedDefinition.id);
+      if (cancel) {
+        await composition.providerDefinitions.cancelConnection(pending.connectionId);
+        expect(server.connected(managedDefinition.id)).toBe(false);
+      }
+      setup.reject(new Error("setup failed"));
+      await new Promise((resolve) => setImmediate(resolve));
+      await expect(composition.providerDefinitions.completeConnection(pending.connectionId))
+        .rejects.toThrow(cancel ? "Unknown pending" : "setup failed");
+      expect(server.connected(managedDefinition.id)).toBe(false);
+      expect(world.homeWipes).toBe(1);
+    } finally { setup.resolve(); await composition.close(); }
+  });
+
+  it("waits for installation before starting login when activation failed", async () => {
+    const world = managedWorld();
+    world.activationFails = true;
+    const server = productServer([managedDefinition]);
+    const setup = deferred();
+    const started = deferred();
+    const composition = compose({ registry: world.registry, server,
+      prepareRuntime: async () => { started.resolve(); await setup.promise; world.activationFails = false; },
+    });
+    let reconnecting;
+    try {
+      await composition.start();
+      reconnecting = composition.providerDefinitions.reconnect(managedDefinition.id);
+      reconnecting.catch(() => undefined);
+      await started.promise;
+      expect(world.runtimes).toHaveLength(0);
+      setup.resolve();
+      expect((await reconnecting).status).toBe("pending");
+      expect(world.runtimes[0].credentials.login).toHaveBeenCalledOnce();
+    } finally { setup.resolve(); await reconnecting?.catch(() => undefined); await composition.close(); }
+  });
+});

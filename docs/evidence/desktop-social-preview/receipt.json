@@ -13,7 +13,7 @@
   },
   "rendererArtifact": {
     "directory": "desktop/renderer",
-    "digest": "25667f6a9fa45ceb756b94e6af8d8c297ab2002229a34fb13d22b13e0a2d2e22",
+    "digest": "44a96a882e48a595bfc720e0f6d9896ab98a3bcc37e3576c1e9cfbcabc4e0bec",
     "files": {
       "assets/relayer-logo.svg": {
         "bytes": 509,
@@ -168,8 +168,8 @@
         "sha256": "ce90a85ee2d9c360eca78c0241e8524d72ad2202452a6b0cdb03c8ef0f1ae463"
       },
       "src/model-picker.js": {
-        "bytes": 26808,
-        "sha256": "11b2000a7c39d8b858ddae68ab01512054de2b8632d9fd29785ea100956fe702"
+        "bytes": 26594,
+        "sha256": "0b4ebf8d93f96479224b9899d3f13b76a546be5db76111a548cbb7b1f70ea6da"
       },
       "src/model-settings-api.js": {
         "bytes": 2103,
@@ -280,8 +280,8 @@
         "sha256": "8e5d307f95b1863fb995606ca32a832de088916716c39476f9d31f2174de002d"
       },
       "src/product-workspace/workspace.js": {
-        "bytes": 268435,
-        "sha256": "dd84e7bedaf283613e66df0d0e0d5f8c12985b2355629f799d0eecb0bc6a6eba"
+        "bytes": 269413,
+        "sha256": "9217435fcad6e4679e5bb42390112e7a095fa488134ef650140437f18885a965"
       },
       "src/project-composer-navigation.js": {
         "bytes": 282,

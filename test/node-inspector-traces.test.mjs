@@ -1,6 +1,6 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   NodeInspectorWorld,
@@ -194,5 +194,60 @@ describe("A request waiting for a resolving draft", () => {
     world.workspace.render();
     await world.apply(["DiscardReturns", "ok"], quietModel, quietModel);
     expect(await back).toBe(false);
+  });
+});
+
+// Plain Enter follows the same durable confirmation seam as the checkmark.
+describe("annotation keyboard confirmation", () => {
+  it.each([false, true])("confirms with Enter and preserves Send admission while running=%s", async (running) => {
+    const send = vi.fn(async () => {});
+    world = await new NodeInspectorWorld({ onSubmitInteraction: send }).ready();
+    world.state.conversationCompatibility = { threadId: 3, status: "unrestricted", harnessId: "fixture" };
+    world.workspace.render();
+    const quiet = { slots: {} };
+    const trace = traces.find((candidate) => candidate.scenario === "inspector-close-during-flush");
+    const annotated = trace.steps.findIndex(({ action }) => action?.[0] === "Annotate");
+    for (let index = 1; index <= annotated; index += 1) {
+      await world.apply(trace.steps[index].action, trace.steps[index - 1].state, trace.steps[index].state);
+    }
+    await world.apply(["EditDraft"], quiet, quiet);
+    await world.apply(["Autosave"], quiet, quiet);
+    if (running) {
+      world.state.interactions.push({ id: 6, threadId: 3, sequence: 2, text: "Continue", completionStatus: "running" });
+      world.workspace.render();
+    }
+    const editor = world.window.document.querySelector("#contextAnnotationEditor");
+    editor.focus();
+    for (const options of [{ shiftKey: true }, { isComposing: true }, { repeat: true }]) {
+      editor.dispatchEvent(new world.window.KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true, ...options }));
+      expect(world.confirms).toHaveLength(0);
+    }
+    const event = new world.window.KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true });
+    editor.dispatchEvent(event);
+    expect(event.defaultPrevented).toBe(true);
+    // Chromium blurs when the pending confirmation disables the editor.
+    world.window.document.body.tabIndex = -1;
+    world.window.document.body.focus();
+    expect(world.window.document.activeElement).toBe(world.window.document.body);
+    await world.apply(["ConfirmReturns", "ok"], quiet, quiet);
+    expect(world.window.document.querySelector("#nodeContextDock").classList.contains("hidden")).toBe(true);
+    const prompt = world.window.document.querySelector("#threadPrompt");
+    expect(prompt.disabled).toBe(running);
+    if (!running) expect(world.window.document.activeElement).toBe(prompt);
+    expect(send).not.toHaveBeenCalled();
+    if (running) {
+      prompt.dispatchEvent(new world.window.KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+      for (let turn = 0; turn < 40; turn += 1) await new Promise((resolve) => setImmediate(resolve));
+      expect(send).not.toHaveBeenCalled();
+      world.state.interactions.at(-1).completionStatus = "accepted";
+      world.workspace.render();
+      expect(prompt.disabled).toBe(false);
+      expect(send).not.toHaveBeenCalled();
+      prompt.focus();
+    }
+    prompt.dispatchEvent(new world.window.KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+    for (let turn = 0; turn < 40; turn += 1) await new Promise((resolve) => setImmediate(resolve));
+    expect(send).toHaveBeenCalledOnce();
+    expect(send.mock.calls[0][2][0].annotations).toEqual(["x"]);
   });
 });

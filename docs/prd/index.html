@@ -799,7 +799,7 @@ interface CompletionTerminalError extends Error {
 <li>A cancel keeps only a sign-in that exists. When the account reads signed out, there is nothing to keep. A check that cannot answer in time leaves the outcome unknown.</li>
 <li>A sign-out the app server confirmed during the reconnect is the exception. That sign-out stands, and the reconnect's sign-in is removed.</li>
 <li>Recovery never uses the runtime a pending reconnect is signing in. Until that reconnect settles, recovery reports the provider unavailable.</li>
-<li>No catalog refresh starts or publishes while a reconnect is pending. That includes preparing its runtime and starting its sign-in.</li>
+<li>No catalog refresh starts or publishes while a reconnect is pending. That includes preparing its runtime and starting its sign-in. When an installed runtime is available, reconnect starts browser sign-in in parallel with runtime setup. It returns the login handoff while setup runs. The connection remains pending until setup succeeds and authentication is confirmed; setup failure follows reconnect failure recovery. A missing runtime is installed before its native login starts. Cancellation and sign-out remain available while setup runs.</li>
 <li>Sign-out records the disconnected state itself. It does not wait for a catalog refresh.</li>
 <li>A refused sign-out or reconnect rereads the generation first. Sign-out then retries once; a refused reconnect fails, and the next one starts current.</li>
 <li><strong>PROV-007:</strong> Connect is all-or-nothing. A catalog adapter, credential or managed family exists for a provider only once its definition is saved. A failed or cancelled connect leaves none of them. Nothing publishes for a provider before its definition exists.</li>
@@ -960,7 +960,7 @@ type InteractionModelBinding = {
   modelId: string;
 };
 </code></pre>
-<p>The harness binding is written when the thread&#39;s root interaction is created and is inherited by every interaction in that thread. The model picker remains available in the composer and may change before any interaction. Every submitted interaction records the exact provider, credential reference, and model used for that call.</p>
+<p>The harness binding is written when the thread&#39;s root interaction is created and is inherited by every interaction in that thread. The model picker remains available in the composer and may change before any interaction. Selecting a model closes the picker and returns focus to its trigger, including when the selected model is already active. Every submitted interaction records the exact provider, credential reference, and model used for that call.</p>
 <h3>2.7 Product requirements</h3>
 <ul>
 <li><strong>AGT-001:</strong> Agent-provider login remains independent from the optional Relayer account. No avatar or cloud-sync promise appears in V1.</li>
@@ -2497,6 +2497,7 @@ settings:
 <li>the dock contains one multiline field plus <code>×</code> and <code>✓</code>;</li>
 <li><code>×</code> immediately discards the selected node&#39;s unconfirmed draft;</li>
 <li><code>✓</code> confirms one separate ordered annotation and closes the dock;</li>
+<li>plain <code>Enter</code> durably confirms the annotation. Success focuses the available follow-up composer; a second <code>Enter</code> sends it. Confirmation during a running response preserves the annotation until Send becomes available. <code>Shift+Enter</code> inserts a newline. IME composition and held-key repeats do not confirm or send. Failed confirmation keeps the editor open;</li>
 <li>each node retains its own occurrence-bound unconfirmed draft;</li>
 <li>switching nodes saves the current value and hides the dock for a node without a draft;</li>
 <li>selecting a drafted node restores the same text and open editor;</li>

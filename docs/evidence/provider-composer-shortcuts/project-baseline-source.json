@@ -1,0 +1,11 @@
+{
+  "head": "32e313213fe4355efabf3ec61cea2991eb145d71",
+  "restoredSources": {
+    "desktop/main/providers/provider-definition-service.mjs": "6f1df1f906be50df9913035cda90c045fd663f0f5260349efebca8a24e84b476",
+    "desktop/renderer/src/model-picker.js": "11b2000a7c39d8b858ddae68ab01512054de2b8632d9fd29785ea100956fe702",
+    "desktop/renderer/src/product-workspace/workspace.js": "dd84e7bedaf283613e66df0d0e0d5f8c12985b2355629f799d0eecb0bc6a6eba"
+  },
+  "driverSha256": "6c8f2b33802c7b9d2e2c541ff2acd3e92e95afa0344b1699eaba79610959f9fc",
+  "baselineDesktop": "/private/tmp/provider-composer-main-baseline-c8xj5sb2/desktop",
+  "note": "Current main project proof with absolute imports; only webDirectory and desktopDirectory routed to temp renderer/preload; scoped3production files restored to HEAD"
+}

@@ -347,11 +347,7 @@ export function createModelPicker({
           providerId,
           modelId,
         });
-        requestAnimationFrame(() => [...root.querySelectorAll("[data-model-option]")]
-          .find((candidate) => (
-            candidate.dataset.providerId === providerId
-            && candidate.dataset.modelId === modelId
-          ))?.focus());
+        close({ returnFocus: true });
       };
     });
   }

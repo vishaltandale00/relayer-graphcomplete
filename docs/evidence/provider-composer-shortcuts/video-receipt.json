@@ -1,0 +1,94 @@
+{
+  "passed": true,
+  "kind": "real Electron interaction recording",
+  "paidInferenceCalls": 0,
+  "providerBoundary": "synthetic native credentials and held runtime setup; production ProviderDefinitionService and settings controller",
+  "graphBoundary": "real graph/app servers with deterministic task-system harness",
+  "frames": 243,
+  "fps": 8,
+  "durationSeconds": 30.375,
+  "checkpoints": [
+    {
+      "atSeconds": 0,
+      "title": "1 / Model picker closes on every model click",
+      "detail": "Real desktop UI · deterministic fixtures · no paid inference"
+    },
+    {
+      "atSeconds": 3.5,
+      "title": "Click the already-selected model",
+      "detail": "The picker closes and focus returns to its button."
+    },
+    {
+      "atSeconds": 7.625,
+      "title": "Choose a different model",
+      "detail": "Changing the model also dismisses the picker."
+    },
+    {
+      "atSeconds": 9.25,
+      "title": "2 / Enter confirms an annotation",
+      "detail": "Add context to a graph node, then press Enter."
+    },
+    {
+      "atSeconds": 12.625,
+      "title": "Press Enter once → annotation confirmed",
+      "detail": "The editor closes. Focus moves to the follow-up composer."
+    },
+    {
+      "atSeconds": 15.875,
+      "title": "Press Enter again → send annotation",
+      "detail": "No message text is required when an annotation is attached."
+    },
+    {
+      "atSeconds": 20.125,
+      "title": "3 / Reconnect starts login alongside setup",
+      "detail": "Controlled provider boundary · actual reconnect service and settings UI"
+    },
+    {
+      "atSeconds": 22.5,
+      "title": "Setup is running + login has already started",
+      "detail": "The browser-login handoff returned without waiting for setup."
+    },
+    {
+      "atSeconds": 24.5,
+      "title": "Login finished; setup is still running",
+      "detail": "Connection remains pending until both steps succeed."
+    },
+    {
+      "atSeconds": 27.875,
+      "title": "Setup finished → provider reconnected",
+      "detail": "Login and setup overlap; connection completes after both."
+    }
+  ],
+  "events": [
+    {
+      "event": "setup started",
+      "atSeconds": 22.5
+    },
+    {
+      "event": "login started",
+      "atSeconds": 22.5
+    },
+    {
+      "event": "login handoff returned while setup held",
+      "atSeconds": 22.5
+    },
+    {
+      "event": "user login completed",
+      "atSeconds": 24.5
+    },
+    {
+      "event": "setup completed",
+      "atSeconds": 27
+    },
+    {
+      "event": "catalog published",
+      "atSeconds": 27.75
+    }
+  ],
+  "sourceFiles": {
+    "desktop/main/providers/provider-definition-service.mjs": "10a03579aecfc5e671e3c3eb961fe3ddcc9ceaa790ee81281d1f636c8b5b1726",
+    "desktop/renderer/src/model-picker.js": "0b4ebf8d93f96479224b9899d3f13b76a546be5db76111a548cbb7b1f70ea6da",
+    "desktop/renderer/src/product-workspace/workspace.js": "9217435fcad6e4679e5bb42390112e7a095fa488134ef650140437f18885a965"
+  },
+  "videoSha256": "44a80a763e20866827edfe12f08f2fa0a5014d77dd4eda4f84ec7d1880c38dd5"
+}

@@ -1,0 +1,45 @@
+Starting isolated project-row New Thread test...
+Error occurred in handler for 'relayer:composer-drafts-write': TypeError: Composer drafts exceed the local persistence limit.
+    at normalizeComposerDrafts (file:///Users/vishaltandale/.codex/worktrees/provider-composer-shortcuts/relayer-graphcomplete/desktop/main/ipc/register-ipc.mjs:106:11)
+    at file:///Users/vishaltandale/.codex/worktrees/provider-composer-shortcuts/relayer-graphcomplete/desktop/main/ipc/register-ipc.mjs:117:28
+    at Session.<anonymous> (node:electron/js2c/browser_init:2:114940)
+    at Session.emit (node:events:509:28)
+Error occurred in handler for 'relayer:workspace-layout-read': Error: No handler registered for 'relayer:workspace-layout-read'
+    at Session.<anonymous> (node:electron/js2c/browser_init:2:115037)
+    at Session.emit (node:events:509:28)
+Error occurred in handler for 'relayer:share-pending': Error: No handler registered for 'relayer:share-pending'
+    at Session.<anonymous> (node:electron/js2c/browser_init:2:115037)
+    at Session.emit (node:events:509:28)
+Error occurred in handler for 'relayer:share-pending': Error: No handler registered for 'relayer:share-pending'
+    at Session.<anonymous> (node:electron/js2c/browser_init:2:115037)
+    at Session.emit (node:events:509:28)
+Error occurred in handler for 'relayer:share-pending': Error: No handler registered for 'relayer:share-pending'
+    at Session.<anonymous> (node:electron/js2c/browser_init:2:115037)
+    at Session.emit (node:events:509:28)
+Error occurred in handler for 'relayer:workspace-layout-read': Error: No handler registered for 'relayer:workspace-layout-read'
+    at Session.<anonymous> (node:electron/js2c/browser_init:2:115037)
+    at Session.emit (node:events:509:28)
+Error occurred in handler for 'relayer:share-pending': Error: No handler registered for 'relayer:share-pending'
+    at Session.<anonymous> (node:electron/js2c/browser_init:2:115037)
+    at Session.emit (node:events:509:28)
+Error occurred in handler for 'relayer:share-pending': Error: No handler registered for 'relayer:share-pending'
+    at Session.<anonymous> (node:electron/js2c/browser_init:2:115037)
+    at Session.emit (node:events:509:28)
+Error occurred in handler for 'relayer:share-pending': Error: No handler registered for 'relayer:share-pending'
+    at Session.<anonymous> (node:electron/js2c/browser_init:2:115037)
+    at Session.emit (node:events:509:28)
+Error occurred in handler for 'relayer:share-pending': Error: No handler registered for 'relayer:share-pending'
+    at Session.<anonymous> (node:electron/js2c/browser_init:2:115037)
+    at Session.emit (node:events:509:28)
+Error: Timed out waiting for the pending draft after app restart.
+    at waitFor (file:///Users/vishaltandale/.codex/worktrees/provider-composer-shortcuts/relayer-graphcomplete/scripts/test-desktop-project-new-thread.mjs:104:9)
+    at async run (file:///Users/vishaltandale/.codex/worktrees/provider-composer-shortcuts/relayer-graphcomplete/scripts/test-desktop-project-new-thread.mjs:610:3)
+file:///Users/vishaltandale/.codex/worktrees/provider-composer-shortcuts/relayer-graphcomplete/scripts/run-project-new-thread-test.mjs:48
+  throw new Error(`Project New Thread Electron smoke failed: ${JSON.stringify({
+        ^
+
+Error: Project New Thread Electron smoke failed: {"exit":{"code":0,"signal":null},"result":null,"passMarkerPresent":false}
+    at file:///Users/vishaltandale/.codex/worktrees/provider-composer-shortcuts/relayer-graphcomplete/scripts/run-project-new-thread-test.mjs:48:9
+    at process.processTicksAndRejections (node:internal/process/task_queues:103:5)
+
+Node.js v22.23.2

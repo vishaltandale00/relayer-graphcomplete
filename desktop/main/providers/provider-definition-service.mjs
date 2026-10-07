@@ -543,6 +543,12 @@ export class ProviderDefinitionService {
         }).catch(() => undefined);
         return settle(cause);
       };
+      // Never hold the provider queue behind setup: cancellation and sign-out must work
+      // while an installer/probe runs. Its outcome cannot publish a connected catalog.
+      if (pending.preparation && !pending.preparation.settled) return stillPending("runtime-preparing");
+      if (pending.preparation?.failed) {
+        throw await settleFailedCheck(pending.preparation.error, "managed_provider_reconnect_failed");
+      }
       let account;
       try {
         account = await pending.runtime.credentials.account({ signal });
@@ -933,11 +939,25 @@ export class ProviderDefinitionService {
       beginPreparation();
       return definition;
     });
-    await this.prepareRuntime(Object.freeze({
-      harnessId: null,
-      adapterId: preparedDefinition.adapterId,
-      providerDefinition: preparedDefinition,
-    }));
+    // An installed adapter can start browser login while its update/repair probe runs.
+    // Missing runtimes still need installation before their native login can start.
+    const preparation = { settled: false, failed: false, error: null };
+    const preparingRuntime = this.#trackLifecycle(Promise.resolve().then(() => {
+      signal?.throwIfAborted();
+      if (this.closing) throw new Error("Provider setup is shutting down.");
+      return this.prepareRuntime(Object.freeze({
+        harnessId: null,
+        adapterId: preparedDefinition.adapterId,
+        providerDefinition: preparedDefinition,
+      }));
+    }).then(
+      () => { preparation.settled = true; },
+      (error) => { preparation.error = error; preparation.failed = true; preparation.settled = true; },
+    ));
+    if (!this.runtimes.has(id)) {
+      await preparingRuntime;
+      if (preparation.failed) throw preparation.error;
+    }
     signal?.throwIfAborted();
     if (this.closing) throw new Error("Provider setup is shutting down.");
     return this.#serialized(async () => {
@@ -977,6 +997,7 @@ export class ProviderDefinitionService {
         login,
         reconnect: true,
         createdRuntime,
+        preparation,
         generation: this.connectionGeneration(id),
         baselineRead,
         // A sign-out the app server answered while this reconnect is pending: it refuses it.
@@ -1012,7 +1033,9 @@ export class ProviderDefinitionService {
       if (!definition || definition.lifecycleState !== "active") throw new Error("Provider is unavailable for new interactions.");
       // A pending reconnect owns the runtime it is signing in, and settling that reconnect may
       // close it and wipe the provider home. The turn is refused until it settles (PROV-004).
-      if (this.pendingConnections.has(id)) throw new Error("Provider sign-in is pending.");
+      if (this.pendingConnections.has(id) || this.reconnectPreparations.has(id)) {
+        throw new Error("Provider sign-in is pending.");
+      }
       // Signed out locally while the app server may still read it connected.
       if (this.unrecordedSignOuts.has(id)) throw new Error("Provider is signed out.");
       const runtime = await this.#runtimeFor(definition);
