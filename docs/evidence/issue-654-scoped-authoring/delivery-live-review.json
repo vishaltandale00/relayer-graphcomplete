@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "reviewer": "/root/design_authority_review",
+  "sourceCommit": "b3e9a1602894aab3efc283174064fc63644b83da",
+  "sourceManifest": "delivery-source-snapshot.json",
+  "sourceSha256": "de363d143720b0ed5068db7e699bec069b756787c6d686bb2e7dfaefacecd3f3",
+  "receipt": "delivery-live-verification.json",
+  "receiptSha256": "22b3284caf5c094dc28aba9a7fc28a1d01cb67ee71ceb2fde077ae06da118ad2",
+  "receiptBytes": 34720,
+  "reviewedScope": "Source/receipt binding, private/helper hashes, declared runtime/config/SDK pins, six ledgers, actual product routes, accepted scoped snapshots, task gate evidence, judge configuration/review/coverage/screenshots, supplemental command failures and Node24 delivery proof; README claim mapping.",
+  "verdict": "pass",
+  "independentlyVerified": {
+    "helperAndPrivateReceipts": 31,
+    "declaredArtifactPins": 50,
+    "judgeArtifacts": 93,
+    "pngTiles": 33,
+    "ledgers": 6,
+    "candidateRoutes": 6,
+    "acceptedScopedSnapshots": 6,
+    "passingMandatoryGateRecords": 15
+  },
+  "agreedResults": {
+    "mandatoryTaskGatesPassedAttempts": 6,
+    "acceptedGraphAttempts": 6,
+    "completedGraphReviews": 5,
+    "observedAuthoringIncidents": 5,
+    "judgeProcessesSignalled": 0
+  },
+  "unresolvedFindings": [],
+  "limits": "Evidence fidelity only; paid/heavy suites not independently rerun. Final graph judge stays partial/unavailable and eval failed. Host Node excluded from pre-run pins. Changed capture coverage, isolated profile/new family, tiny related samples, absent qualitative task ratings and incomplete graph review prevent total-error, causal, broad quality, speed or nonregression certification. Source or receipt changes invalidate this assertion."
+}

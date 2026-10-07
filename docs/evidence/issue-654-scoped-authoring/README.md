@@ -235,6 +235,70 @@ Trusted Ladybug cache verification checked platform, Rust version, source and
 artifact hashes; the first verifier invocation omitted required platform flags
 and was corrected. Warm private native artifacts accelerated compilation, with
 fresh required tests. Logs are locally retained by byte hash in the receipt.
-The upcoming live matrix uses the same two H3 tasks, three original attempts each,
-Luna on codex-basic and the pinned simulated-user judge in a fresh isolated
-profile. No injected failures or replacement candidates are planned.
+The live plan used the same two H3 tasks, three original attempts each, Luna on
+codex-basic and the pinned simulated-user judge in a fresh isolated profile.
+All six original attempts were retained without injected errors or replacements.
+
+
+## Delivery follow-up live results
+
+`delivery-live-verification.json` records the six original attempts on implementation
+commit `b3e9a1602894aab3efc283174064fc63644b83da`, ten-path digest
+`de363d143720b0ed5068db7e699bec069b756787c6d686bb2e7dfaefacecd3f3`.
+The receipt SHA-256 is
+`22b3284caf5c094dc28aba9a7fc28a1d01cb67ee71ceb2fde077ae06da118ad2`
+(34,720 bytes). Clean source and 50 declared native/config/compiled artifacts were
+attested before inference and rechecked after all attempts became terminal.
+Actual product attempt records verify Luna/subscription routes for all six.
+All six recorded command traces use scoped authoring; all six accepted outputs
+have scoped identities. Host Node is excluded from those pre-run artifact pins:
+its current launch version is 22.23.2, and the previous host version is unavailable.
+Failure outputs show Node 24.1.0 in both collections; missing version output is
+unknown. The nine delivery fixtures additionally pass under Node 24.1.0 on the
+same source, without inference or live-profile writes.
+
+| Observation | Immediate-before guidance matrix | Delivery/control follow-up |
+| --- | --- | --- |
+| Mandatory task gates passed | 5/6 | 6/6 |
+| Accepted graphs | 5/6 | 6/6 |
+| Observed authoring incidents | 5 compiler; three local validation incidents missed | 5: one compiler, four server rejections |
+| Completed graph scores | 2/6: repair 3/8, investigation 2/8 | 5/6: repair 4, 3, 4; investigation 4, 3; all /8 |
+| Repair first backend publication median | 114 s (N=3) | 98 s (N=3) |
+| Investigation first backend publication median | 92.8 s (N=2, one missing) | 86.5 s (N=3) |
+
+The five current origins are CSS interpolation, unsupported icon, disconnected
+layer, expansion cycle and mixed target relations. Each is present in the verified
+production ledger. No scoped node/action validation or control-binding failure is
+visible in these six command traces; therefore live proof did not exercise those
+specific fatal origins. Real subprocess fixtures verify their capture through
+host cleanup and recorder on Node 22 and 24. Observed counts remain partial with
+unknown total. Capture changed between matrices, so equal recorded counts do not
+establish equal total errors or improvement. Seven failed graph-program commands
+remain supplemental: five SDK/server origins and two ambiguous program-edit
+failures. Ordinary program-edit failures are outside this origin metric.
+
+Five eval executions passed; the last investigation is marked failed solely
+because its native judge ended without `submitReview` finalizing coverage. Its
+accepted graph and all task gates passed. The missing layer/node/turn review stays
+partial and its score unavailable. No judge was stopped: a proposed first-judge
+stop was rejected by the active-target guard after that judge completed naturally.
+The previous matrix includes one manual SIGTERM, making intervention protocols
+different. No failed or partial attempt was replaced. All six task grades lack
+qualitative outcome ratings, which remain unavailable rather than zero.
+
+Case, harness, judge and presentation pins match the previous collection. Profile
+and family differ: the isolated copy uses family 7 to preserve the same Luna route.
+Shared load, six related samples, partial/unattested capture, absent qualitative
+task ratings, incomplete graph review, unpinned host Node and backend-only timing
+prevent causal, speed, broad quality or nonregression certification. Deterministic
+checks and the hosted `check` passed for implementation head `b3e9a160`; a later
+evidence-only commit does not change executable bytes. The PR remains draft.
+
+
+Final live evidence assertion: `/root/design_authority_review` PASS at the exact
+implementation digest and receipt above, with no receipt blockers. The reviewer
+independently verified 31 private/helper receipts, 50 declared artifact pins,
+93 judge artifacts, 33 PNG tiles, six ledgers/routes/scoped snapshots and 15 passing
+mandatory gate records with their verifier references. `delivery-live-review.json`
+records scope, identities and limits. This is evidence fidelity rather than a
+nonregression certification; source or receipt changes invalidate the assertion.
