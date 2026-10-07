@@ -236,6 +236,14 @@ async function run(window) {
   const hidden = await js(window, `document.querySelector(".artifact-viewer").classList.contains("artifact-toolbar-hidden")`);
   check("ART-006 toolbar hides, strip stays", hidden && await js(window, `document.querySelector(".artifact-strip").offsetHeight > 0`), `hidden=${hidden}`);
   await shot(window, "02-website-toolbar-hidden");
+  // The pointer reaching the strip brings the toolbar back. A drag region would swallow
+  // that event on macOS, and synthetic input skips the OS hit test, so check both.
+  const stripRegion = await js(window, `getComputedStyle(document.querySelector(".artifact-strip")).getPropertyValue("-webkit-app-region") || getComputedStyle(document.querySelector(".artifact-strip")).getPropertyValue("app-region")`);
+  const stripBox = await js(window, `(() => { const r = document.querySelector(".artifact-strip").getBoundingClientRect(); return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) }; })()`);
+  window.webContents.sendInputEvent({ type: "mouseMove", x: stripBox.x, y: stripBox.y + 30 });
+  window.webContents.sendInputEvent({ type: "mouseMove", x: stripBox.x, y: stripBox.y });
+  const revealed = await waitFor("toolbar revealed", () => js(window, `document.querySelector(".artifact-viewer").classList.contains("artifact-toolbar-hidden") ? null : true`), 3_000).catch(() => false);
+  check("ART-006 hovering the strip brings the toolbar back", revealed === true && stripRegion !== "drag", `revealed=${revealed} strip app-region=${stripRegion || "none"}`);
   say("Links out of the artifact open in the browser, not in Relayer");
   await hold(1200);
   await view.webContents.executeJavaScript(`document.querySelector("#instagram").click()`);
