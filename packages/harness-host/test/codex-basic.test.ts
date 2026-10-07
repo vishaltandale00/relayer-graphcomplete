@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { familyData, withFamilyRoles } from "./model-family-fixture.js";
 import { mkdtemp, readFile, rm, unlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -37,6 +38,35 @@ const codexBasicConfiguration: HarnessConfiguration = {
 };
 
 describe("CodexBasicHarness", () => {
+  it.each(["basic", "layered-navigation-v1"])("delivers roles without cross-provider credential routing in root and invoked %s turns", async (promptProfile) => {
+    const calls: CodexAppServerTurnOptions[] = [];
+    const harness = new CodexBasicHarness({ ...context("auto"), configuration: { ...codexBasicConfiguration,
+      settings: { ...codexBasicConfiguration.settings, ...(promptProfile === "basic" ? {} : { promptProfile }) } } }, {
+      codexPathOverride: "/managed/codex",
+      runAppServerTurn: async options => {
+        calls.push(options); options.onThreadId(`thread-${calls.length}`);
+        await options.onTurnId?.(`thread-${calls.length}`, `turn-${calls.length}`);
+        return { threadId: `thread-${calls.length}`, turnId: `turn-${calls.length}`, status: "completed" };
+      },
+    });
+    const turn = withFamilyRoles({ ...runContext(11, "token"), model: { providerId: "openai-work", adapterId: "openai-api", modelId: "gpt-root" },
+      access: { kind: "secret", providerId: "openai-work", adapterId: "openai-api", contract: "secret@1",
+        adapterImplementationVersion: "2", endpoint: "https://root.test/v1", fields: { "api-key": "root-secret" } } });
+    await harness.complete(turn);
+    await harness.complete({ ...turn, origin: { kind: "invoke", sourceCompletionId: 1, actionId: 12 } });
+    expect(calls).toHaveLength(2);
+    for (const call of calls) {
+      const data = familyData(call.prompt);
+      expect(data.roster.map(route => route.roles)).toEqual(turn.modelPlan!.roster.map(route => route.roles));
+      expect(data.orchestrator.native).toEqual({ selector: "gpt-root", routing: "current-provider-model-selector" });
+      expect(data.roster[2]!.native).toEqual({ routing: "metadata-only" });
+      expect(call.threadParams.model).toBe("gpt-root");
+      expect(call.turnParams.model).toBe("gpt-root");
+      expect(call.environment.OPENAI_API_KEY).toBe("root-secret");
+      expect(JSON.stringify(call)).not.toContain("foreign-secret");
+      expect(call.threadParams.approvalPolicy).toBe("on-request");
+    }
+  });
   it("renders V1 after generic guidance and leaves neutral V0 at baseline", () => {
     const baseline = buildLayeredNavigationPrompt(runContext(1, "token"), "@relayer/graph-client");
     const brokerAuthorized = buildLayeredNavigationPrompt({

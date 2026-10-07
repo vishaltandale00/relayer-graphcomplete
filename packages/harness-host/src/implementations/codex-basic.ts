@@ -1,3 +1,4 @@
+import { modelFamilyGuidance } from "./model-family-guidance.js";
 import { appOwnedNodeCommand, appOwnedNodeInstructions } from "./graph-authoring-command.js";
 import { threadIconGuidance } from "./thread-icon-guidance.js";
 import { type GraphCapability, type GraphNode } from "@relayer/graph-client";
@@ -746,7 +747,7 @@ ${GRAPH_PRESENTATION_GUIDANCE}
 ${threadIconGuidance(context, "javascript")}
 ${CODEX_VISUAL_GUIDANCE}
 ${CODEX_ASSET_GUIDANCE}
-${CURRENT_WORKSPACE_GUIDANCE}${includePersonalPresentation ? personalPresentationPrompt(context) : ""}
+${CURRENT_WORKSPACE_GUIDANCE}${modelFamilyGuidance(context, "Codex")}${includePersonalPresentation ? personalPresentationPrompt(context) : ""}
 
 Current interaction node: ${interactionNode.id}
 Normalized interaction input:
@@ -903,7 +904,7 @@ ${GRAPH_PRESENTATION_GUIDANCE}
 ${threadIconGuidance(context, "javascript")}
 ${CODEX_VISUAL_GUIDANCE}
 ${CODEX_ASSET_GUIDANCE}
-${CURRENT_WORKSPACE_GUIDANCE}${includePersonalPresentation && context !== undefined ? personalPresentationPrompt(context) : ""}
+${CURRENT_WORKSPACE_GUIDANCE}${modelFamilyGuidance(context, nativeAgentLabel === "Claude" ? "Claude" : "Codex")}${includePersonalPresentation && context !== undefined ? personalPresentationPrompt(context) : ""}
 
 Current interaction node: ${interactionNode.id}
 Normalized interaction input:

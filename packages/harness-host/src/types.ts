@@ -337,16 +337,24 @@ export interface HarnessExecutionAccessLease {
 }
 
 /** One currently resolvable model-family member. Array order is family order. */
+export interface HarnessModelRole {
+  readonly name: string;
+  readonly description?: string;
+}
+
 export interface HarnessModelRoute {
   /** Exact user-owned provider definition. */
   readonly providerId: string;
   readonly adapterId: string;
   readonly accessContract: string;
   readonly modelId: string;
+  /** Absent only on legacy v1 plans. Role-bearing plans use the v2 digest domain. */
+  readonly roles?: readonly HarnessModelRole[];
 }
 
 /** Non-secret product-resolved input to execution admission. */
 export interface HarnessModelPlan {
+  readonly schemaVersion?: 2;
   readonly familyId: number;
   readonly familyRevision: number;
   readonly orchestrator: HarnessModelRoute;
@@ -359,6 +367,7 @@ export interface HarnessAdmittedModelRoute extends HarnessModelRoute {
 
 /** Immutable plan returned by admission and passed to the selected harness. */
 export interface HarnessAdmittedModelPlan {
+  readonly schemaVersion?: 2;
   readonly familyId: number;
   readonly familyRevision: number;
   readonly orchestrator: HarnessAdmittedModelRoute;

@@ -9,7 +9,7 @@
     "contracts/share-service-v1/contract.json": "7407c99d32fb04a62ab958257be5525dc3451adc9899d600e07de730dccc89ff",
     "scripts/capture-share-preview-evidence.mjs": "4510e3a54f6b658c2df86b1a06afc8ca2428a36693a93648786bd4e075327562",
     "test/fixtures/social-preview.jsonl": "ff4a4545de49ccc20562f2f763b6a120d87fa37f7703a994abeb71b219a405aa",
-    "desktop/shared/telemetry-module-inventory.mjs": "6800385e38f8334445639384b0c46879552ebaa11c348e54f8cfe5a2883a9907"
+    "desktop/shared/telemetry-module-inventory.mjs": "0d4c17775a1c8ff4afd0bedcce83ee9edf5299643ac599ee6a7c414a6255a934"
   },
   "rendererArtifact": {
     "directory": "desktop/renderer",
@@ -404,13 +404,13 @@
   "captures": [
     {
       "theme": "light",
-      "sha256": "a8077468198b281a0dad0799786177b2d771f6cc2a5b27a32e1f520d3e0e2dd2",
-      "bytes": 68432
+      "sha256": "0d64e23622f8e4d9dbe46907c8a02a46e8e53bd4dce236d38acce53bbaaf1979",
+      "bytes": 68977
     },
     {
       "theme": "dark",
-      "sha256": "13b4e25984fbd66f4c257eb7b0dc5dd85f366287d19aaff58b8c46482e2774bd",
-      "bytes": 65629
+      "sha256": "ef5bd275a7732cdcd8186e9d85bf76d3f872c9416d1dce7d661d52ee87dcf2c9",
+      "bytes": 62710
     }
   ],
   "platform": "macOS ARM64",

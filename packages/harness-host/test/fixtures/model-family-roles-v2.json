@@ -1,0 +1,115 @@
+{
+  "inputPlan": {
+    "schemaVersion": 2,
+    "familyId": 17,
+    "familyRevision": 4,
+    "orchestrator": {
+      "providerId": "openai-work",
+      "adapterId": "openai-api",
+      "accessContract": "secret@1",
+      "modelId": "gpt-5.6-sol",
+      "roles": [
+        {
+          "name": "orchestrator"
+        },
+        {
+          "name": "coding",
+          "description": "Implementation and debugging"
+        }
+      ]
+    },
+    "roster": [
+      {
+        "providerId": "openai-work",
+        "adapterId": "openai-api",
+        "accessContract": "secret@1",
+        "modelId": "gpt-5.6-sol",
+        "roles": [
+          {
+            "name": "orchestrator"
+          },
+          {
+            "name": "coding",
+            "description": "Implementation and debugging"
+          }
+        ]
+      },
+      {
+        "providerId": "openai-personal",
+        "adapterId": "openai-api",
+        "accessContract": "secret@1",
+        "modelId": "gpt-5.6-luna",
+        "roles": []
+      }
+    ]
+  },
+  "policy": {
+    "configurationRevision": 2,
+    "configurationDigest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "executionAccessContracts": [
+      "secret@1"
+    ],
+    "modelRules": {
+      "allow": [
+        {
+          "adapterId": "openai-api",
+          "modelIdRegex": ".*"
+        }
+      ],
+      "deny": []
+    }
+  },
+  "adapterImplementationVersions": {
+    "openai-work": "2",
+    "openai-personal": "2"
+  },
+  "expectedAdmittedPlan": {
+    "schemaVersion": 2,
+    "familyId": 17,
+    "familyRevision": 4,
+    "orchestrator": {
+      "roles": [
+        {
+          "name": "orchestrator"
+        },
+        {
+          "name": "coding",
+          "description": "Implementation and debugging"
+        }
+      ],
+      "providerId": "openai-work",
+      "adapterId": "openai-api",
+      "accessContract": "secret@1",
+      "modelId": "gpt-5.6-sol",
+      "adapterImplementationVersion": "2"
+    },
+    "roster": [
+      {
+        "roles": [
+          {
+            "name": "orchestrator"
+          },
+          {
+            "name": "coding",
+            "description": "Implementation and debugging"
+          }
+        ],
+        "providerId": "openai-work",
+        "adapterId": "openai-api",
+        "accessContract": "secret@1",
+        "modelId": "gpt-5.6-sol",
+        "adapterImplementationVersion": "2"
+      },
+      {
+        "roles": [],
+        "providerId": "openai-personal",
+        "adapterId": "openai-api",
+        "accessContract": "secret@1",
+        "modelId": "gpt-5.6-luna",
+        "adapterImplementationVersion": "2"
+      }
+    ],
+    "harnessPolicyDigest": "sha256:42dbefda6229c224e16fd67cc8ba3e558d132c7737ac01e9530833e7af8271dd",
+    "digest": "sha256:63d22057682b4daf4d87b4f281f9c0a8d64115233470a57d3507d237133b8310"
+  }
+}
