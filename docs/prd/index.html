@@ -2884,13 +2884,14 @@ settings:
 <li>If the ready URL answers, the viewer uses that server. Otherwise Relayer runs the command in the thread folder and waits.</li>
 <li>The first run of a command in a thread asks the user for approval. Later runs reuse that approval.</li>
 <li>The command runs under the thread&#39;s sandbox and permission profile.</li>
+<li>On macOS, Ask and Auto threads let the command write only in the thread folder and temporary space. Elsewhere it runs only with Full access.</li>
 <li>While starting, the viewer shows the command and its log. A failure shows the log, <strong>Retry</strong> and <strong>Add log to chat</strong>.</li>
 <li>A server Relayer started stops after its idle timeout once no viewer shows it. The default is one hour.</li>
 <li>Relayer never stops a server it did not start.</li>
 </ul>
 <h4>6.6.7 Starting state (P2)</h4>
 <ul>
-<li>A website or app node may seed local storage and cookies for its own origin.</li>
+<li>A website or app node may seed local storage for its own origin. A web app may also seed cookies.</li>
 <li>Every open clears the artifact&#39;s storage and applies the seed again, so each open starts the same way.</li>
 <li>Agent guidance says seeds hold test values only. Seeds are stored in the graph and exported with it.</li>
 </ul>
@@ -2902,8 +2903,9 @@ settings:
 <li>Playing video and audio pause while the panel is open and resume when it closes.</li>
 <li>Notes join the thread&#39;s one chat draft. The user sends them from the thread composer after leaving the viewer.</li>
 <li>Sending creates one interaction that refers to the artifact node and carries every note with its screenshot.</li>
+<li>Each note is an annotation on the artifact node that names its screenshot. Relayer keeps the image, and the agent opens it as a file.</li>
 <li>Notes are not graph comments. Existing Comments stay private and are never sent to the agent.</li>
-<li>Conversation export keeps note screenshots. Shared snapshots omit them and keep each note&#39;s text and location.</li>
+<li>Conversation export and shared snapshots keep each note&#39;s text and location. Exporting the screenshots themselves is a follow-up (decision 2026-10-07).</li>
 </ul>
 <h4>6.6.9 Office documents (P3)</h4>
 <ul>
@@ -2937,9 +2939,9 @@ settings:
 <tr><td><code>ART-006</code></td><td>Viewer chrome: the address is always visible and Esc returns. No actions or description; Open externally sits under ⋯.</td><td>Renderer tests on the production viewer module.</td></tr>
 <tr><td><code>ART-007</code></td><td>Parts open where asked: page, time range, route, heading and screen size.</td><td>Viewer test against the fixture thread, one case per kind.</td></tr>
 <tr><td><code>ART-008</code></td><td>In Share and Eval, <code>https</code> plays and others show the card with no local path.</td><td><code>public-share-viewer</code> and Eval review tests.</td></tr>
-<tr><td><code>ART-009</code> (P2)</td><td>The server invoke reuses, asks once, starts, reports failure, stops when idle and records nothing.</td><td>App-server process tests with a fixture app and a failing app.</td></tr>
+<tr><td><code>ART-009</code> (P2)</td><td>The server invoke reuses, asks once, starts, reports failure, stops when idle and records nothing.</td><td>Desktop server-invoke process tests with a fixture app and a failing app, and the desktop run.</td></tr>
 <tr><td><code>ART-010</code> (P2)</td><td>Starting state resets on every open.</td><td>Viewer test that changes storage, reopens and reads the seed.</td></tr>
-<tr><td><code>ART-011</code> (P2)</td><td>Notes collect, pause media, and send as one interaction with screenshots.</td><td>Viewer and composer tests, and an interaction persistence test.</td></tr>
+<tr><td><code>ART-011</code> (P2)</td><td>Notes collect, pause media, and send as one interaction with screenshots.</td><td>Renderer viewer tests, the harness-host screenshot test, and the desktop run, which sends a note and checks the agent can open its screenshot.</td></tr>
 <tr><td><code>ART-012</code> (P3)</td><td>Office kinds render. Guidance covers calculated values and decks with charts.</td><td>Viewer tests on the fixture documents, and guidance assertions.</td></tr>
 </tbody>
 </table>

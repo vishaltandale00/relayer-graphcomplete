@@ -5,7 +5,7 @@
 // script error, and a deployed https site. No model runs.
 import { EdgeObject, LayerLayoutObject, LayerObject, NodeObject, NodePlacementObject, RelayerGraphClient, type ArtifactDetails } from "@relayer/graph-client";
 import { renderInteractionInput, type Harness, type HarnessConfiguration, type HarnessFactory, type HarnessFactoryContext, type HarnessRunContext, type HarnessSessionState, type HarnessTraceSupport } from "@relayer/harness-host";
-import { appendFile, copyFile, cp, mkdir, writeFile } from "node:fs/promises";
+import { appendFile, copyFile, cp, mkdir, readFile, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -42,12 +42,14 @@ interface Group {
 }
 
 const site = { file: "site/index.html", root: "site" } as const;
+/** The fixture web app's port; the broken build points one above it. */
+export const ORDER_DESK_PORT = 41731;
 
 export const ARTIFACT_VIEWER_FIXTURE_GROUPS: readonly Group[] = [
   {
     key: "website", icon: "globe", title: "Landing page", detail: "The Tidewater site in `site/`: home, menu and subscriptions.",
     views: [
-      { key: "site", icon: "globe", title: "Landing page", detail: "The whole site at desktop width.", label: "Open the site", artifact: { kind: "website", source: site } },
+      { key: "site", icon: "globe", title: "Landing page", detail: "The whole site at desktop width, with a cart already started.", label: "Open the site", artifact: { kind: "website", source: site, seed: { localStorage: { "tidewater.cart": JSON.stringify([{ name: "Harbour Espresso", price: 4, qty: 2 }]) } } } },
       { key: "site-phone", icon: "smartphone", title: "Pricing on a phone", detail: "The subscriptions section at phone width.", label: "Pricing on a phone", artifact: { kind: "website", source: site, part: { route: "#pricing" }, viewport: "phone" } },
     ],
   },
@@ -74,6 +76,13 @@ export const ARTIFACT_VIEWER_FIXTURE_GROUPS: readonly Group[] = [
     ],
   },
   {
+    key: "desk", icon: "server", title: "Order desk", detail: "The café's order app, started from the thread folder when opened.",
+    views: [
+      { key: "order-desk", icon: "server", title: "Order desk", detail: "The running app, signed in as a test member.", label: "Open the order desk", artifact: { kind: "app", source: { url: `http://127.0.0.1:${ORDER_DESK_PORT}/` }, server: { command: `node app/server.mjs ${ORDER_DESK_PORT}`, idleTimeoutMinutes: 1 }, seed: { localStorage: { "tidewater.orders": JSON.stringify(["Kelp Cold Brew"]) }, cookies: [{ name: "tw_member", value: "Robin" }] } } },
+      { key: "order-desk-broken", icon: "triangle-alert", title: "Order desk (broken build)", detail: "A start command that fails.", label: "Broken build", artifact: { kind: "app", source: { url: `http://127.0.0.1:${ORDER_DESK_PORT + 1}/` }, server: { command: "node app/missing-server.mjs" } } },
+    ],
+  },
+  {
     key: "checks", icon: "triangle-alert", title: "Things to check", detail: "A menu board whose script fails, and the deployed preview.",
     views: [
       { key: "menu-board", icon: "triangle-alert", title: "Menu board", detail: "Its specials script throws.", label: "Menu board", artifact: { kind: "website", source: { file: "site-broken/index.html", root: "site-broken" } } },
@@ -96,11 +105,35 @@ class ArtifactViewerFixtureHarness implements Harness {
   async complete(context: HarnessRunContext): Promise<void> {
     const graph = new RelayerGraphClient(context.graph.acquireCapability());
     context.trace.emit({ type: "prompt", data: { text: renderInteractionInput(context.interactionInput), kind: "fixture-input" } });
-    await cp(artifactViewerFixtureFolder(), this.context.workingDirectory, { recursive: true, force: true });
     // ART-005: each artifact layer's advisory preview. Evidence runs may keep the images.
     const previews: { key: string; status: string; width: number | undefined; height: number | undefined }[] = [];
     const previewEvidence = process.env.RELAYER_ARTIFACT_PREVIEW_DIR;
     if (previewEvidence) await mkdir(previewEvidence, { recursive: true });
+    // ART-011: what the agent receives for artifact notes, screenshot files included.
+    if (previewEvidence && context.interactionInput.contexts.length) {
+      // The turn folder holding the screenshots is removed after the turn, so look now.
+      const screenshots = await Promise.all(context.interactionInput.contexts.flatMap((item) => item.annotations).map(async (note) => {
+        const file = /screenshot (\/\S+\.png)/u.exec(note)?.[1];
+        const head = file ? await readFile(file).then((bytes) => bytes.subarray(0, 4).toString("hex"), () => null) : null;
+        return { note, file, png: head === "89504e47" };
+      }));
+      await writeFile(join(previewEvidence, `input-${context.inputGraph.id}.json`), JSON.stringify(screenshots, null, 2));
+    }
+    // A follow-up that carries artifact notes gets a short answer that links back from
+    // each noted artifact, as the attached-navigation contract asks.
+    if (context.interactionInput.contexts.length) {
+      const answer = new NodeObject("message-square", "Notes received", "Each note arrived with where it was written and a screenshot.", "concept", "notes-received");
+      await graph.submitNode(answer);
+      const response = new LayerObject([answer], [], new LayerLayoutObject([new NodePlacementObject(answer, 0.5, 0.5)], "default"), "notes-response", answer);
+      await graph.submitLayer(response);
+      for (const [index, item] of context.interactionInput.contexts.entries()) {
+        await graph.addAction(item.targetNode.id, { kind: "navigate", relation: "expand", label: "See the reply", target: response, clientKey: `reply-${index}` });
+      }
+      await graph.addAction(context.inputGraph.id, { kind: "navigate", relation: "expand", label: "Notes received", target: response, clientKey: "response" });
+      await graph.submit(context.inputGraph.id);
+      return;
+    }
+    await cp(artifactViewerFixtureFolder(), this.context.workingDirectory, { recursive: true, force: true });
     const groups: { node: NodeObject; group: Group }[] = [];
     for (const group of ARTIFACT_VIEWER_FIXTURE_GROUPS) {
       const node = new NodeObject(group.icon, group.title, group.detail, "concept", group.key);
@@ -114,7 +147,7 @@ class ArtifactViewerFixtureHarness implements Harness {
       await graph.createEdge(edge);
       edges.push(edge);
     }
-    const spots = [[0.5, 0.2], [0.2, 0.75], [0.4, 0.85], [0.6, 0.85], [0.8, 0.75]] as const;
+    const spots = [[0.5, 0.2], [0.15, 0.7], [0.32, 0.85], [0.5, 0.88], [0.68, 0.85], [0.85, 0.7]] as const;
     const root = new LayerObject(
       groups.map(({ node }) => node),
       edges,
@@ -122,7 +155,7 @@ class ArtifactViewerFixtureHarness implements Harness {
       "launch-kit",
       hub!.node,
     );
-    await graph.submitLayer(root);
+    await graph.submitLayer(root, { sizeJustification: "One launch kit: each artifact family sits beside the others so the user can pick any of them." });
     for (const { node, group } of groups) {
       for (const view of group.views) {
         const artifactNode = new NodeObject(view.icon, view.title, view.detail, "artifact", view.key);

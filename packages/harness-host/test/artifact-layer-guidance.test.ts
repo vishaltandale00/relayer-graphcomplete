@@ -1,4 +1,5 @@
-// PRD 11.11: Codex, Claude and Prime guidance explains artifact layers.
+// PRD 11.11 and 6.6.6-6.6.7: Codex, Claude and Prime guidance explains artifact layers,
+// web apps with their server invoke, and starting state.
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -13,10 +14,12 @@ describe("artifact layer guidance", () => {
   ])("teaches the %s client to author and open an artifact layer", (_language, guidance, layer, artifact) => {
     expect(guidance).toContain(layer);
     expect(guidance).toContain(artifact);
-    for (const kind of ["website", "pdf", "video", "image", "markdown", "url"]) expect(guidance).toContain(`"${kind}"`);
+    for (const kind of ["website", "pdf", "video", "image", "markdown", "url", "app"]) expect(guidance).toContain(`"${kind}"`);
     expect(guidance).toContain("relative to the thread folder and must stay inside it");
     expect(guidance).toContain("never put an artifact node in a graph layer");
-    expect(guidance).toContain("resubmit the node after any later edit");
+    expect(guidance).toContain("again when your answer is accepted");
+    expect(guidance).toContain("approves it once per thread");
+    expect(guidance).toContain("Seeds hold test values only");
   });
 
   it("reaches every product harness prompt and the Python skill", async () => {
@@ -28,5 +31,6 @@ describe("artifact layer guidance", () => {
     expect(prime.match(/\$\{ARTIFACT_LAYER_GUIDANCE_PYTHON\}/gu)).toHaveLength(2);
     expect(claude).toContain("buildLayeredNavigationPrompt");
     expect(skill).toContain("LayerObject.for_artifact(site");
+    expect(skill).toContain('"kind": "app"');
   });
 });

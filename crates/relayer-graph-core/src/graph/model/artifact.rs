@@ -11,8 +11,8 @@ use crate::{GraphError, GraphNode, ValidationIssue};
 /// The only non-default layer renderer.
 pub const ARTIFACT_RENDERER: &str = "artifact";
 
-/// Kinds a node may declare in this release (P1).
-pub const ARTIFACT_KINDS: &[&str] = &["website", "pdf", "video", "image", "markdown", "url"];
+/// Kinds a node may declare: P1 files and URLs, and P2 web apps started by a server invoke.
+pub const ARTIFACT_KINDS: &[&str] = &["website", "pdf", "video", "image", "markdown", "url", "app"];
 
 /// File extensions each file kind accepts, lowercase and with the dot.
 pub fn artifact_extensions(kind: &str) -> &'static [&'static str] {
@@ -34,6 +34,19 @@ pub fn is_file_artifact_kind(kind: &str) -> bool {
 const VIEWPORTS: &[&str] = &["desktop", "tablet", "phone"];
 const MAX_PATH_BYTES: usize = 512;
 const MAX_ROUTE_BYTES: usize = 2048;
+const MAX_COMMAND_BYTES: usize = 1024;
+const DEFAULT_IDLE_MINUTES: u64 = 60;
+const MAX_IDLE_MINUTES: u64 = 24 * 60;
+const MAX_SEED_BYTES: usize = 16 * 1024;
+const MAX_SEED_ENTRIES: usize = 64;
+
+/// The idle timeout a server invoke uses when the node names none (PRD 6.6.6).
+pub fn server_idle_minutes(server: &Value) -> u64 {
+    server
+        .get("idleTimeoutMinutes")
+        .and_then(Value::as_u64)
+        .unwrap_or(DEFAULT_IDLE_MINUTES)
+}
 
 fn issue(code: &'static str, path: &str, message: impl Into<String>) -> GraphError {
     GraphError::validation(code, path, message)
@@ -94,6 +107,15 @@ pub fn validate_relative_path(value: &Value, path: &str) -> Result<String, Graph
 }
 
 fn validate_url(value: &Value, path: &str) -> Result<(), GraphError> {
+    validate_url_allowing(value, path, true)
+}
+
+/// A web app runs on this machine, so its address must be loopback http.
+fn validate_loopback_url(value: &Value, path: &str) -> Result<(), GraphError> {
+    validate_url_allowing(value, path, false)
+}
+
+fn validate_url_allowing(value: &Value, path: &str, https: bool) -> Result<(), GraphError> {
     let text = value.as_str().unwrap_or_default();
     let lower = text.to_ascii_lowercase();
     // The authority is everything between `://` and the path; userinfo is never allowed,
@@ -102,11 +124,18 @@ fn validate_url(value: &Value, path: &str) -> Result<(), GraphError> {
     let authority = rest.split(['/', '?', '#']).next().unwrap_or_default();
     let host = authority.split(':').next().unwrap_or_default();
     let loopback = scheme == "http" && matches!(host, "localhost" | "127.0.0.1");
-    if authority.contains('@') || authority.is_empty() || !(scheme == "https" || loopback) {
+    if authority.contains('@')
+        || authority.is_empty()
+        || !((https && scheme == "https") || loopback)
+    {
         return Err(issue(
             "artifact_url_scheme",
             path,
-            "Use an https URL, or plain http only for localhost or 127.0.0.1.",
+            if https {
+                "Use an https URL, or plain http only for localhost or 127.0.0.1."
+            } else {
+                "A web app's address is plain http on localhost or 127.0.0.1, such as http://127.0.0.1:5173/."
+            },
         ));
     }
     if text.len() > MAX_ROUTE_BYTES || text.chars().any(char::is_whitespace) {
@@ -119,9 +148,148 @@ fn validate_url(value: &Value, path: &str) -> Result<(), GraphError> {
     Ok(())
 }
 
+/// The server invoke (PRD 6.6.6): a start command run in the thread folder, the
+/// loopback address that answers once it is ready, and an idle timeout in minutes.
+fn validate_server(value: &Value) -> Result<(), GraphError> {
+    let server = value.as_object().ok_or_else(|| {
+        issue(
+            "artifact_server_invalid",
+            "artifact.server",
+            "artifact.server must be an object with a command.",
+        )
+    })?;
+    keys_within(
+        server,
+        &["command", "readyUrl", "idleTimeoutMinutes"],
+        "artifact.server",
+    )?;
+    let command = server
+        .get("command")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    // The approval card shows this exact string, so nothing in it may hide or reorder
+    // text: no control, format or bidi characters, and no whitespace but a plain space.
+    let hidden = |c: char| {
+        c.is_control()
+            || (c.is_whitespace() && c != ' ')
+            || matches!(
+                c,
+                '\u{00AD}'
+                    | '\u{061C}'
+                    | '\u{180E}'
+                    | '\u{200B}'..='\u{200F}'
+                    | '\u{202A}'..='\u{202E}'
+                    | '\u{2060}'..='\u{206F}'
+                    | '\u{FEFF}'
+                    | '\u{E0000}'..='\u{E007F}'
+            )
+    };
+    if command.trim().is_empty() || command.len() > MAX_COMMAND_BYTES || command.chars().any(hidden)
+    {
+        return Err(issue(
+            "artifact_server_invalid",
+            "artifact.server.command",
+            "Give one shell command line that starts the app in the thread folder, such as npm run dev.",
+        ));
+    }
+    if let Some(ready) = server.get("readyUrl") {
+        validate_loopback_url(ready, "artifact.server.readyUrl")?;
+    }
+    if let Some(minutes) = server.get("idleTimeoutMinutes")
+        && !minutes
+            .as_u64()
+            .is_some_and(|minutes| (1..=MAX_IDLE_MINUTES).contains(&minutes))
+    {
+        return Err(issue(
+            "artifact_server_invalid",
+            "artifact.server.idleTimeoutMinutes",
+            "The idle timeout is a whole number of minutes from 1 to 1440 (default 60).",
+        ));
+    }
+    Ok(())
+}
+
+/// Starting state (PRD 6.6.7): local storage, and for web apps cookies, for the artifact's
+/// own origin. A website is served from Relayer's own scheme, which takes no cookies.
+fn validate_seed(kind: &str, value: &Value) -> Result<(), GraphError> {
+    let seed = value.as_object().ok_or_else(|| {
+        issue(
+            "artifact_seed_invalid",
+            "artifact.seed",
+            "artifact.seed must be an object with localStorage and/or cookies.",
+        )
+    })?;
+    keys_within(seed, &["localStorage", "cookies"], "artifact.seed")?;
+    if serde_json::to_vec(value).map_or(usize::MAX, |bytes| bytes.len()) > MAX_SEED_BYTES {
+        return Err(issue(
+            "artifact_seed_invalid",
+            "artifact.seed",
+            "A starting state is at most 16 KiB. Keep test values small.",
+        ));
+    }
+    if let Some(storage) = seed.get("localStorage") {
+        let entries = storage.as_object().filter(|entries| {
+            entries.len() <= MAX_SEED_ENTRIES && entries.values().all(Value::is_string)
+        });
+        if entries.is_none() {
+            return Err(issue(
+                "artifact_seed_invalid",
+                "artifact.seed.localStorage",
+                "localStorage is an object of at most 64 string values, such as {\"cart\": \"[]\"}.",
+            ));
+        }
+    }
+    if let Some(cookies) = seed.get("cookies") {
+        if kind != "app" {
+            return Err(issue(
+                "artifact_seed_invalid",
+                "artifact.seed.cookies",
+                "Only web apps take seeded cookies; a website can seed localStorage.",
+            ));
+        }
+        let valid = cookies.as_array().is_some_and(|cookies| {
+            cookies.len() <= MAX_SEED_ENTRIES
+                && cookies.iter().all(|cookie| {
+                    let Some(cookie) = cookie.as_object() else {
+                        return false;
+                    };
+                    let name = cookie
+                        .get("name")
+                        .and_then(Value::as_str)
+                        .unwrap_or_default();
+                    let text = |key: &str| {
+                        cookie.get(key).is_none_or(|value| {
+                            value
+                                .as_str()
+                                .is_some_and(|text| !text.contains([';', '\n', '\r', '\0']))
+                        })
+                    };
+                    cookie
+                        .keys()
+                        .all(|key| matches!(key.as_str(), "name" | "value" | "path"))
+                        && !name.is_empty()
+                        && name
+                            .bytes()
+                            .all(|b| b.is_ascii_alphanumeric() || b"-_.".contains(&b))
+                        && cookie.get("value").is_some_and(Value::is_string)
+                        && text("value")
+                        && text("path")
+                })
+        });
+        if !valid {
+            return Err(issue(
+                "artifact_seed_invalid",
+                "artifact.seed.cookies",
+                "cookies is a list of at most 64 {name, value, path?} objects; names use letters, digits, -, _ and .",
+            ));
+        }
+    }
+    Ok(())
+}
+
 fn validate_part(kind: &str, part: &Map<String, Value>) -> Result<(), GraphError> {
     let allowed: &[&str] = match kind {
-        "website" | "url" => &["route"],
+        "website" | "url" | "app" => &["route"],
         "pdf" => &["page"],
         "video" => &["start", "end"],
         "markdown" => &["heading"],
@@ -130,7 +298,11 @@ fn validate_part(kind: &str, part: &Map<String, Value>) -> Result<(), GraphError
     keys_within(part, allowed, "artifact.part")?;
     if let Some(route) = part.get("route") {
         let route = route.as_str().unwrap_or_default();
+        // `//host` and `/\host` would leave the artifact's own address.
         if !(route.starts_with('/') || route.starts_with('#') || route.starts_with('?'))
+            || route.starts_with("//")
+            || route.chars().any(char::is_whitespace)
+            || route.starts_with("/\\")
             || route.len() > MAX_ROUTE_BYTES
         {
             return Err(issue(
@@ -186,7 +358,15 @@ pub fn validate_artifact(value: &Value, require_fingerprint: bool) -> Result<(),
     })?;
     keys_within(
         object,
-        &["kind", "source", "part", "viewport", "fingerprint"],
+        &[
+            "kind",
+            "source",
+            "part",
+            "viewport",
+            "fingerprint",
+            "server",
+            "seed",
+        ],
         "artifact",
     )?;
     let kind = object
@@ -216,6 +396,12 @@ pub fn validate_artifact(value: &Value, require_fingerprint: bool) -> Result<(),
     if kind == "url" {
         keys_within(source, &["url"], "artifact.source")?;
         validate_url(
+            source.get("url").unwrap_or(&Value::Null),
+            "artifact.source.url",
+        )?;
+    } else if kind == "app" {
+        keys_within(source, &["url"], "artifact.source")?;
+        validate_loopback_url(
             source.get("url").unwrap_or(&Value::Null),
             "artifact.source.url",
         )?;
@@ -277,8 +463,36 @@ pub fn validate_artifact(value: &Value, require_fingerprint: bool) -> Result<(),
         })?;
         validate_part(kind, part)?;
     }
+    match (kind, object.get("server")) {
+        ("app", Some(server)) => validate_server(server)?,
+        ("app", None) => {
+            return Err(issue(
+                "artifact_server_required",
+                "artifact.server",
+                "A web app names its server invoke: the command that starts it, such as {\"command\": \"npm run dev\"}.",
+            ));
+        }
+        (_, Some(_)) => {
+            return Err(issue(
+                "artifact_field_unknown",
+                "artifact.server",
+                "Only web apps (kind app) take a server invoke.",
+            ));
+        }
+        (_, None) => {}
+    }
+    if let Some(seed) = object.get("seed") {
+        if !matches!(kind, "website" | "app") {
+            return Err(issue(
+                "artifact_field_unknown",
+                "artifact.seed",
+                "Only websites and web apps take a starting state.",
+            ));
+        }
+        validate_seed(kind, seed)?;
+    }
     if let Some(viewport) = object.get("viewport")
-        && (!matches!(kind, "website" | "url")
+        && (!matches!(kind, "website" | "url" | "app")
             || !viewport
                 .as_str()
                 .is_some_and(|value| VIEWPORTS.contains(&value)))
@@ -286,7 +500,7 @@ pub fn validate_artifact(value: &Value, require_fingerprint: bool) -> Result<(),
         return Err(issue(
             "artifact_viewport_invalid",
             "artifact.viewport",
-            "Only websites and URLs take a viewport: desktop, tablet or phone.",
+            "Only websites, web apps and URLs take a viewport: desktop, tablet or phone.",
         ));
     }
     let fingerprint = object.get("fingerprint");
@@ -311,7 +525,7 @@ pub fn validate_artifact(value: &Value, require_fingerprint: bool) -> Result<(),
         return Err(issue(
             "artifact_field_unknown",
             "artifact.fingerprint",
-            "URL artifacts carry no fingerprint.",
+            "URL and web app artifacts carry no fingerprint.",
         ));
     }
     Ok(())

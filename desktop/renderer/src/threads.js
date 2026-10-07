@@ -5,6 +5,7 @@ import { isResolvedInvokeAction } from "./product-workspace/node-detail-runtime.
 import { preferredLayerNode, rememberedLayerSelection, rememberLayerSelection } from "./product-workspace/layer-selection.js";
 import { request } from "./api.js";
 import { artifactLayerNode, createArtifactViewer } from "./artifact-viewer.js";
+import { createNodeContextDraftApi } from "./node-context-drafts.js";
 import {
   actionWasInvoked,
   visibleLayerAfterRefresh,
@@ -1055,9 +1056,37 @@ export async function decideApproval(requestId, decision) {
 }
 
 let sharedArtifactViewer = null;
+// Artifact notes are confirmed node contexts on the artifact node, so they join the
+// thread's one chat draft and send as one interaction (PRD 6.6.8).
+const artifactNoteApi = createNodeContextDraftApi();
+const artifactNotes = Object.freeze({
+  async list({ threadId, node }) {
+    const response = await artifactNoteApi.list(threadId);
+    return (response?.confirmations ?? [])
+      .filter((confirmation) => String(confirmation.target?.nodeId) === String(node.id))
+      .map((confirmation) => ({ id: String(confirmation.draftId), text: confirmation.annotation, confirmation }));
+  },
+  async add({ threadId, node, target, text }) {
+    const draft = {
+      id: globalThis.crypto.randomUUID(),
+      target,
+      targetNode: { id: node.id, kind: node.kind, icon: node.icon, title: node.title, detail: node.detail, state: node.state || "accepted" },
+      text,
+      revision: null,
+    };
+    const saved = await artifactNoteApi.save(threadId, draft);
+    await artifactNoteApi.confirm(threadId, { id: draft.id, revision: saved.revision });
+  },
+  remove: ({ threadId, note }) => artifactNoteApi.dismissConfirmation(threadId, note.confirmation),
+});
+
 function artifactViewer() {
   sharedArtifactViewer ??= createArtifactViewer({
     native: window.relayerDesktop?.artifactViewer ?? null,
+    notes: artifactNotes,
+    onClose: (threadId) => {
+      if (threadId != null) void import("./graph.js").then(({ reloadComposerContexts }) => reloadComposerContexts(threadId)).catch(() => {});
+    },
     onAddToChat: (text) => {
       const prompt = $("#threadPrompt");
       if (!prompt) return;
@@ -1109,7 +1138,12 @@ export async function navigateLayer(layerId, navigation = {}) {
     // An artifact layer opens full screen in the artifact viewer, not the graph (PRD 6.6).
     const artifactNode = artifactLayerNode(layer);
     if (artifactNode !== null) {
-      artifactViewer().open({ threadId: pendingNavigation.threadId, node: artifactNode });
+      const interaction = appState.interactions.find((candidate) => String(candidate.id) === String(pendingNavigation.interactionId));
+      artifactViewer().open({
+        threadId: pendingNavigation.threadId,
+        node: artifactNode,
+        target: interaction?.graphNodeId == null ? null : { nodeId: artifactNode.id, sourceInteractionNodeId: interaction.graphNodeId, sourceLayerId: layer.layer.id },
+      });
       return;
     }
     const layerPath = navigation.restore

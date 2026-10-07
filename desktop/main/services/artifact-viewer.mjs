@@ -3,7 +3,8 @@
 // come from the thread folder through the `relayer-artifact:` scheme, which serves
 // only paths inside the artifact's folder and answers byte ranges for media.
 import { createReadStream } from "node:fs";
-import { readFile, realpath, stat } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { mkdir, readFile, realpath, stat, writeFile } from "node:fs/promises";
 import { basename, dirname, extname, join, relative, resolve, sep } from "node:path";
 import { Readable } from "node:stream";
 
@@ -45,17 +46,25 @@ function routePath(route) {
  * What one artifact needs to be served: the folder files may come from, the
  * entry inside it, and the URL the view opens. Pure, so it is testable without Electron.
  */
+/** A blank page at the artifact's own origin, where its starting state is written before it loads. */
+const SEED_PATH = "/__relayer/seed";
+
 /** Encode each path segment, so `?`, `#` and `%` in file names stay part of the path. */
 const encodePath = (path) => path.split("/").map(encodeURIComponent).join("/");
 /** JSON that is safe inside an inline script. */
 const scriptJson = (value) => JSON.stringify(value).replace(/</gu, "\\u003c");
 
+/** Deployed sites and web apps are addressed by URL; every other kind is a file in the thread folder. */
+export const addressedByUrl = (kind) => kind === "url" || kind === "app";
+
 export function artifactViewPlan(artifact, threadFolder) {
   const kind = artifact?.kind;
-  if (kind === "url") {
+  if (addressedByUrl(kind)) {
     const base = String(artifact.source?.url ?? "");
     const route = routePath(artifact.part?.route);
     const url = route === "" ? base : route.startsWith("/") ? new URL(route, base).href : `${base}${route}`;
+    // A route opens a place in the artifact, never another site.
+    if (new URL(url).origin !== new URL(base).origin) throw new TypeError("An artifact route must stay on the artifact's own address.");
     return Object.freeze({ kind, url, address: url, folder: null, entry: null });
   }
   if (!FILE_KINDS.has(kind)) throw new TypeError(`Unsupported artifact kind: ${kind}`);
@@ -147,6 +156,9 @@ export function createArtifactRequestHandler({ getPlan, markedPath }) {
       const plan = getPlan();
       const url = new URL(request.url);
       if (plan === null || url.host !== "view") return new Response("Not found", { status: 404 });
+      if (url.pathname === SEED_PATH) {
+        return new Response("<!doctype html><title></title>", { headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" } });
+      }
       if (url.pathname === "/__relayer/marked.js") {
         return new Response(await readFile(markedPath), { headers: { "Content-Type": "text/javascript" } });
       }
@@ -179,7 +191,7 @@ export function createArtifactRequestHandler({ getPlan, markedPath }) {
 
 /** Whether the viewer should report this file artifact as missing or changed since acceptance. */
 export async function artifactFileStatus(plan, accepted) {
-  if (plan.kind === "url") return { state: "ok" };
+  if (addressedByUrl(plan.kind)) return { state: "ok" };
   try {
     const rootOrFile = plan.kind === "website" ? plan.folder : plan.file;
     await stat(plan.file);
@@ -230,8 +242,8 @@ function artifactWebPreferences(plan, partition, devTools = false) {
 
 /** Whether a navigation stays on the artifact: its own site, or the artifact scheme. */
 function staysOnArtifact(plan, url) {
-  const allowedOrigin = plan.kind === "url" ? new URL(plan.url).origin : ORIGIN;
-  try { return new URL(url).origin === allowedOrigin || (plan.kind !== "url" && url.startsWith(`${ORIGIN}/`)); } catch { return false; }
+  const allowedOrigin = addressedByUrl(plan.kind) ? new URL(plan.url).origin : ORIGIN;
+  try { return new URL(url).origin === allowedOrigin || (!addressedByUrl(plan.kind) && url.startsWith(`${ORIGIN}/`)); } catch { return false; }
 }
 
 /** Screen sizes a website or URL may ask for; the renderer's device frame uses the same. */
@@ -259,13 +271,13 @@ export function createArtifactPreviewCapture({ BrowserWindow, session, rendererD
   const capture = async ({ artifact, folder, size }) => {
     const ses = session.fromPartition(partition, { cache: false });
     hardenArtifactSession(ses, { getPlan: () => plan, rendererDirectory });
-    if (artifact?.kind !== "url" && typeof folder !== "string") throw new Error("The artifact's thread folder is unknown.");
+    if (!addressedByUrl(artifact?.kind) && typeof folder !== "string") throw new Error("The artifact's thread folder is unknown.");
     plan = artifactViewPlan(artifact, folder);
-    if (plan.kind !== "url" && !(await stat(plan.file).then((info) => info.isFile(), () => false))) throw new Error("The artifact file is missing.");
+    if (!addressedByUrl(plan.kind) && !(await stat(plan.file).then((info) => info.isFile(), () => false))) throw new Error("The artifact file is missing.");
     await clearSession(ses);
     // Like graph previews, a file artifact's preview loads nothing from the network.
     ses.webRequest.onBeforeRequest((details, callback) => callback({
-      cancel: plan !== null && plan.kind !== "url" && /^(https?|wss?|ftp):/u.test(details.url),
+      cancel: plan !== null && !addressedByUrl(plan.kind) && /^(https?|wss?|ftp):/u.test(details.url),
     }));
     const viewport = artifactPreviewSize(artifact, size);
     const window = new BrowserWindow({
@@ -316,13 +328,74 @@ export function createArtifactPreviewCapture({ BrowserWindow, session, rendererD
   };
 }
 
+/**
+ * Starting state (PRD 6.6.7). The view's storage was just cleared; write the seed at
+ * the artifact's origin before its own scripts run. Cookies need an http origin, so
+ * only web apps take them.
+ */
+async function applySeed(contents, plan, seed) {
+  if (!seed) return;
+  // Node gives custom schemes an opaque origin, so file kinds name the viewer's own.
+  const origin = addressedByUrl(plan.kind) ? new URL(plan.url).origin : ORIGIN;
+  if (addressedByUrl(plan.kind)) {
+    for (const cookie of seed.cookies ?? []) {
+      await contents.session.cookies.set({ url: `${origin}/`, name: cookie.name, value: cookie.value, path: cookie.path ?? "/" });
+    }
+  }
+  const entries = Object.entries(seed.localStorage ?? {});
+  if (entries.length === 0) return;
+  const blank = `${origin}${SEED_PATH}`;
+  // A web app's server never sees the seed page: this one load is answered here.
+  if (addressedByUrl(plan.kind)) contents.session.protocol.handle("http", () => new Response("<!doctype html><title></title>", { headers: { "Content-Type": "text/html" } }));
+  try {
+    await contents.loadURL(blank);
+  } finally {
+    if (addressedByUrl(plan.kind)) contents.session.protocol.unhandle("http");
+  }
+  await contents.executeJavaScript(`(() => { for (const [key, value] of ${scriptJson(entries)}) localStorage.setItem(key, value); })()`);
+}
+
+/**
+ * Where the user is in an artifact, for a note (PRD 6.6.8): the route and scroll
+ * position, the video time, or the heading in view. Runs in the artifact's page;
+ * the result is display text only.
+ */
+const NOTE_LOCATION_SCRIPT = `(() => {
+  const video = document.querySelector("video");
+  const doc = document.querySelector("#doc");
+  const headings = doc ? [...doc.querySelectorAll("h1,h2,h3,h4")].filter((h) => h.getBoundingClientRect().top <= 80) : [];
+  return { time: video ? video.currentTime : null, heading: headings.at(-1)?.textContent ?? null, scroll: scrollY };
+})()`;
+
+/**
+ * The page reports only numbers and, for Markdown, the heading in view; the address comes
+ * from the view itself. A site can still choose its own path and hash, so both are bounded.
+ */
+function noteLocation(plan, reported, url) {
+  const time = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
+  const seconds = Number(reported?.time);
+  const scroll = Math.max(0, Math.round(Number(reported?.scroll) || 0));
+  if (plan.kind === "video") return Number.isFinite(seconds) ? `at ${time(seconds)}` : "in the video";
+  if (plan.kind === "image") return "the whole image";
+  if (plan.kind === "pdf") return `in ${basename(plan.file)}${/#page=(\d+)/u.test(url) ? `, page ${url.match(/#page=(\d+)/u)[1]}` : ""}`;
+  if (plan.kind === "markdown") {
+    const heading = String(reported?.heading ?? "").replace(/\s+/gu, " ").trim().slice(0, 80);
+    return heading ? `under “${heading}”` : "at the top";
+  }
+  let place = url;
+  try { const parsed = new URL(url); place = `${parsed.pathname}${parsed.search}${parsed.hash}`; } catch {}
+  return `at ${place.slice(0, 160)}${scroll > 0 ? `, scrolled ${scroll} px` : ""}`;
+}
+
 export function createArtifactViewerService({
   WebContentsView,
   session,
   shell,
   getWindow,
-  resolveThreadFolder,
+  resolveThread,
+  serverRunner = null,
   rendererDirectory,
+  notesDirectory = null,
   devTools = false,
 }) {
   const plans = new Map();
@@ -331,6 +404,8 @@ export function createArtifactViewerService({
   let latest = 0;
 
   const send = (event) => {
+    // The seed page is an implementation detail; the address never shows it.
+    if (event.type === "address" && new URL(event.url, ORIGIN).pathname === SEED_PATH) return;
     try { getWindow()?.webContents.send("relayer:artifact-viewer-event", event); } catch {}
   };
 
@@ -350,6 +425,8 @@ export function createArtifactViewerService({
     latest += 1;
     const view = current?.view;
     if (current) plans.delete(current.partition);
+    // A web app's server starts its idle timer once no viewer shows it.
+    if (current?.serverKey) serverRunner?.release(current.serverKey);
     current = null;
     if (!view) return;
     const ses = view.webContents.session;
@@ -358,7 +435,7 @@ export function createArtifactViewerService({
     void clearSession(ses).catch(() => {});
   }
 
-  async function open({ threadId, nodeId, artifact, bounds }) {
+  async function open({ threadId, nodeId, artifact, bounds, approveServer = false }) {
     if (!Number.isSafeInteger(threadId) || threadId < 1 || !Number.isSafeInteger(nodeId) || nodeId < 1) {
       throw new TypeError("The artifact viewer needs a thread and node.");
     }
@@ -366,16 +443,40 @@ export function createArtifactViewerService({
     const token = latest;
     const window = getWindow();
     if (!window) throw new Error("The Relayer window is not open.");
-    const threadFolder = artifact?.kind === "url" ? null : await resolveThreadFolder(threadId);
-    const plan = artifactViewPlan(artifact, threadFolder);
+    const thread = artifact?.kind === "url" ? null : await resolveThread(threadId);
+    const plan = artifactViewPlan(artifact, thread?.folder ?? null);
     const status = await artifactFileStatus(plan, artifact.fingerprint);
     const partition = partitionFor(threadId, nodeId);
     if (token !== latest) return { status: { state: "superseded" }, address: plan.address };
     if (status.state === "missing") return { status, address: plan.address };
+    let serverKey = null;
+    if (plan.kind === "app") {
+      if (!serverRunner) return { status: { state: "server-failed", log: "Web apps need Relayer Desktop." }, address: plan.address };
+      send({ type: "server-starting", command: artifact.server.command });
+      const server = await serverRunner.ensure({
+        threadId, nodeId, folder: thread.folder, permissionProfileId: thread.permissionProfileId,
+        server: artifact.server, sourceUrl: artifact.source.url, approve: approveServer,
+        // A server keeps logging after this open; only this open's starting card shows it.
+        onLog: (text) => { if (token === latest) send({ type: "server-log", text }); },
+      });
+      if (server.state === "approval-required") return { status: { state: "approval-required", command: server.command, permissionProfileId: server.permissionProfileId }, address: plan.address };
+      if (server.state === "failed") return { status: { state: "server-failed", log: server.log }, address: plan.address };
+      serverKey = server.key;
+      if (token !== latest) { serverRunner.release(serverKey); return { status: { state: "superseded" }, address: plan.address }; }
+    }
     plans.set(partition, plan);
     await prepareSession(partition);
-    if (token !== latest) return { status: { state: "superseded" }, address: plan.address };
-    const view = new WebContentsView({ webPreferences: artifactWebPreferences(plan, partition, devTools) });
+    if (token !== latest) {
+      if (serverKey) serverRunner.release(serverKey);
+      return { status: { state: "superseded" }, address: plan.address };
+    }
+    let view;
+    try {
+      view = new WebContentsView({ webPreferences: artifactWebPreferences(plan, partition, devTools) });
+    } catch (error) {
+      if (serverKey) serverRunner.release(serverKey);
+      throw error;
+    }
     const contents = view.webContents;
     const leave = (url) => {
       try {
@@ -413,12 +514,59 @@ export function createArtifactViewerService({
       }
     });
     contents.on("render-process-gone", () => send({ type: "load-failed", message: "The artifact stopped responding." }));
-    current = { view, plan, partition };
+    current = { view, plan, partition, serverKey };
     window.contentView.addChildView(view);
     setBounds(bounds);
     view.setBackgroundColor("#1c1d1f");
+    await applySeed(contents, plan, artifact.seed).catch((error) => send({ type: "load-failed", message: `The starting state could not be applied: ${error.message}` }));
     await contents.loadURL(plan.url).catch((error) => send({ type: "load-failed", message: error.message }));
     return { status, address: plan.address };
+  }
+
+  /**
+   * Start a note (PRD 6.6.8): capture what the user sees, say where they are, and
+   * pause playing media. The live view hides behind the captured image until endNote.
+   */
+  async function beginNote() {
+    // Pin the view: the user may close or switch artifacts while the capture runs.
+    const viewing = current;
+    if (!viewing?.view || !notesDirectory) return null;
+    const contents = viewing.view.webContents;
+    await contents.executeJavaScript(`window.__relayerNotePaused = [...document.querySelectorAll("video,audio")].filter((m) => !m.paused); window.__relayerNotePaused.forEach((m) => m.pause());`).catch(() => {});
+    // A capture can stall while Chromium paints no frames; never leave the viewer waiting.
+    const bounded = (promise) => Promise.race([promise, new Promise((_, reject) => setTimeout(() => reject(new Error("The view could not be captured.")), 5_000))]);
+    let png;
+    try {
+      let image = await bounded(contents.capturePage());
+      if (image.getSize().width > 1440) image = image.resize({ width: 1440, quality: "best" });
+      png = image.toPNG();
+    } catch {
+      // capturePage needs a presented surface; the DevTools protocol does not.
+      const attached = contents.debugger.isAttached();
+      try {
+        if (!attached) contents.debugger.attach("1.3");
+        png = Buffer.from((await bounded(contents.debugger.sendCommand("Page.captureScreenshot", { format: "png" }))).data, "base64");
+      } catch (error) {
+        await endNote();
+        throw error;
+      } finally {
+        if (!attached && contents.debugger.isAttached()) contents.debugger.detach();
+      }
+    }
+    if (current !== viewing) return null;
+    const digest = createHash("sha256").update(png).digest("hex");
+    await mkdir(notesDirectory, { recursive: true });
+    await writeFile(join(notesDirectory, `${digest}.png`), png, { mode: 0o600 });
+    const reported = await contents.executeJavaScript(NOTE_LOCATION_SCRIPT).catch(() => null);
+    if (current !== viewing) return null;
+    viewing.view.setVisible(false);
+    return { location: noteLocation(viewing.plan, reported, contents.getURL()), digest, screenshot: `data:image/png;base64,${png.toString("base64")}` };
+  }
+
+  async function endNote() {
+    if (!current?.view) return;
+    current.view.setVisible(true);
+    await current.view.webContents.executeJavaScript(`(window.__relayerNotePaused || []).forEach((m) => m.play().catch(() => {})); window.__relayerNotePaused = [];`).catch(() => {});
   }
 
   function setBounds(bounds) {
@@ -436,7 +584,7 @@ export function createArtifactViewerService({
   async function openExternally() {
     if (!current) return false;
     const { plan } = current;
-    if (plan.kind === "url") {
+    if (addressedByUrl(plan.kind)) {
       await shell.openExternal(plan.url);
       return true;
     }
@@ -447,7 +595,7 @@ export function createArtifactViewerService({
     return error === "";
   }
 
-  return Object.freeze({ open, close, setBounds, openExternally, isOpen: () => current !== null, currentPlan: () => current?.plan ?? null, currentContents: () => current?.view.webContents ?? null });
+  return Object.freeze({ open, close, setBounds, openExternally, beginNote, endNote, isOpen: () => current !== null, currentPlan: () => current?.plan ?? null, currentContents: () => current?.view.webContents ?? null });
 }
 
 export const artifactViewerTesting = Object.freeze({ viewerPage, ORIGIN, basename });

@@ -317,3 +317,140 @@ async fn acceptance_pins_the_fingerprint_taken_just_before_it() {
             .is_empty()
     );
 }
+
+/// P2: a web app carries its server invoke and starting state (PRD 6.6.6, 6.6.7).
+#[tokio::test]
+async fn a_web_app_carries_its_server_invoke_and_starting_state() {
+    let (_database, interaction, writer) = setup().await;
+    let overview = plain_node(&writer, "overview").await;
+    let root = writer
+        .submit_layer(&layer_draft("root", &[overview.id]))
+        .await
+        .unwrap();
+    let app = json!({
+        "kind": "app",
+        "source": {"url": "http://127.0.0.1:5173/"},
+        "part": {"route": "/checkout"},
+        "server": {"command": "npm run dev", "readyUrl": "http://127.0.0.1:5173/health", "idleTimeoutMinutes": 30},
+        "seed": {"localStorage": {"cart": "[\"latte\"]"}, "cookies": [{"name": "session", "value": "test-user"}]},
+    });
+    let node = artifact_node(&writer, "checkout-app", &app).await.unwrap();
+    let viewer = writer
+        .submit_layer_with_renderer(
+            &layer_draft("checkout-viewer", &[node.id]),
+            Some("artifact"),
+        )
+        .await
+        .unwrap();
+    navigate(&writer, "response", &interaction, None, &root).await;
+    navigate(&writer, "open-app", &overview, Some(&root), &viewer).await;
+    writer.complete(interaction.id).await.unwrap();
+    let accepted = writer.get_layer(viewer.id).await.unwrap().nodes.remove(0);
+    assert_eq!(accepted.artifact.as_ref(), Some(&app));
+    assert_eq!(artifact::server_idle_minutes(&app["server"]), 30);
+    assert_eq!(
+        artifact::server_idle_minutes(&json!({"command": "npm start"})),
+        60
+    );
+}
+
+#[tokio::test]
+async fn server_invokes_and_starting_state_are_checked() {
+    let (_database, _interaction, writer) = setup().await;
+    let app = |extra: Value| {
+        let mut value = json!({"kind": "app", "source": {"url": "http://localhost:3000/"}, "server": {"command": "npm run dev"}});
+        value
+            .as_object_mut()
+            .unwrap()
+            .extend(extra.as_object().unwrap().clone());
+        value
+    };
+    let cases = [
+        (
+            json!({"kind": "app", "source": {"url": "http://localhost:3000/"}}),
+            "artifact_server_required",
+        ),
+        (
+            app(json!({"source": {"url": "https://example.com/"}})),
+            "artifact_url_scheme",
+        ),
+        (
+            app(json!({"server": {"command": "  "}})),
+            "artifact_server_invalid",
+        ),
+        (
+            app(json!({"server": {"command": "npm run dev\nrm -rf ~"}})),
+            "artifact_server_invalid",
+        ),
+        (
+            app(json!({"server": {"command": "npm run dev", "idleTimeoutMinutes": 0}})),
+            "artifact_server_invalid",
+        ),
+        (
+            app(json!({"server": {"command": "npm run dev", "readyUrl": "https://example.com/"}})),
+            "artifact_url_scheme",
+        ),
+        (
+            app(json!({"server": {"command": "npm run dev", "shell": "zsh"}})),
+            "artifact_field_unknown",
+        ),
+        (
+            json!({"kind": "url", "source": {"url": "https://example.com/"}, "server": {"command": "x"}}),
+            "artifact_field_unknown",
+        ),
+        (
+            json!({"kind": "pdf", "source": {"file": "a.pdf"}, "seed": {"localStorage": {}}, "fingerprint": FINGERPRINT}),
+            "artifact_field_unknown",
+        ),
+        (
+            app(json!({"seed": {"localStorage": {"count": 3}}})),
+            "artifact_seed_invalid",
+        ),
+        (
+            app(json!({"seed": {"cookies": [{"name": "a;b", "value": "x"}]}})),
+            "artifact_seed_invalid",
+        ),
+        (
+            app(json!({"seed": {"cookies": [{"name": "a", "value": "x; Domain=evil"}]}})),
+            "artifact_seed_invalid",
+        ),
+        (
+            app(json!({"seed": {"localStorage": {"blob": "x".repeat(17 * 1024)}}})),
+            "artifact_seed_invalid",
+        ),
+        (
+            json!({"kind": "website", "source": {"file": "site/index.html", "root": "site"}, "seed": {"cookies": [{"name": "a", "value": "b"}]}, "fingerprint": FINGERPRINT}),
+            "artifact_seed_invalid",
+        ),
+        (
+            app(json!({"server": {"command": "npm run dev\u{202E}ved nur mpn"}})),
+            "artifact_server_invalid",
+        ),
+        (
+            app(json!({"server": {"command": "npm\trun dev"}})),
+            "artifact_server_invalid",
+        ),
+        (
+            app(json!({"part": {"route": "//evil.example/x"}})),
+            "artifact_part_invalid",
+        ),
+        (
+            app(json!({"part": {"route": "/\t/evil.example/x"}})),
+            "artifact_part_invalid",
+        ),
+        (
+            app(json!({"server": {"command": "npm run dev\u{061C}"}})),
+            "artifact_server_invalid",
+        ),
+        (
+            json!({"kind": "url", "source": {"url": "https://example.com/"}, "part": {"route": "/\\evil.example"}}),
+            "artifact_part_invalid",
+        ),
+    ];
+    for (index, (artifact, expected)) in cases.into_iter().enumerate() {
+        let error = artifact_node(&writer, &format!("case-{index}"), &artifact)
+            .await
+            .unwrap_err();
+        assert_eq!(code(error), expected, "case {index}: {artifact}");
+    }
+}

@@ -10,7 +10,7 @@ export interface CompletionInputGraph {
 export type RecordState = "draft" | "accepted" | "stopped";
 
 /** What an artifact node shows in the artifact viewer (PRD 6.6, 11.11). */
-export type ArtifactKind = "website" | "pdf" | "video" | "image" | "markdown" | "url";
+export type ArtifactKind = "website" | "pdf" | "video" | "image" | "markdown" | "url" | "app";
 export type ArtifactViewport = "desktop" | "tablet" | "phone";
 
 export type ArtifactSource =
@@ -18,8 +18,24 @@ export type ArtifactSource =
   | { readonly file: string; readonly root: string }
   /** A PDF, video, image or Markdown file relative to the thread folder. */
   | { readonly file: string }
-  /** A deployed https URL (or http on localhost). */
+  /** A deployed https URL (or http on localhost), or a web app's loopback address. */
   | { readonly url: string };
+
+/** A web app's server invoke: the command that starts it in the thread folder (PRD 6.6.6). */
+export interface ArtifactServer {
+  readonly command: string;
+  /** The loopback URL that answers once the app is ready; defaults to the source URL. */
+  readonly readyUrl?: string;
+  /** Minutes without a viewer before a server Relayer started stops; default 60. */
+  readonly idleTimeoutMinutes?: number;
+}
+
+/** Starting state applied on every open: test values only (PRD 6.6.7). */
+export interface ArtifactSeed {
+  readonly localStorage?: Readonly<Record<string, string>>;
+  /** Web apps only. */
+  readonly cookies?: readonly { readonly name: string; readonly value: string; readonly path?: string }[];
+}
 
 export interface ArtifactPart {
   /** website/url: a route such as "/pricing", "#/cart" or "?plan=regular". */
@@ -37,8 +53,12 @@ export interface ArtifactDetails {
   readonly kind: ArtifactKind;
   readonly source: ArtifactSource;
   readonly part?: ArtifactPart;
-  /** website/url only. */
+  /** website/url/app only. */
   readonly viewport?: ArtifactViewport;
+  /** app only, and required there. */
+  readonly server?: ArtifactServer;
+  /** website/app only. */
+  readonly seed?: ArtifactSeed;
   /** Set by Relayer when a file artifact is submitted; never author it. */
   readonly fingerprint?: string;
 }

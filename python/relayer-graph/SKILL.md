@@ -128,9 +128,23 @@ end seconds for a video segment, or a heading for Markdown. A viewport
 ("desktop", "tablet", "phone") applies to websites and URLs only. Show two views
 of one artifact as two artifact nodes, each in its own artifact layer. An
 artifact layer holds exactly that one node and no edges; never put an artifact
-node in a graph layer. Relayer fingerprints the files when you submit the node,
-so finish the files first and resubmit the node after any later edit. Make
-artifact layers only for things the user should look at.
+node in a graph layer. Relayer fingerprints the files when you submit the node
+and again when your answer is accepted. Make artifact layers only for things the
+user should look at.
+
+A web app you can run, such as a dev server, is kind "app": `source.url` is its
+loopback address, and `server` names the command that starts it in the thread
+folder. Relayer reuses a server that already answers, or runs the command after
+the user approves it once per thread. A website or web app may set a starting
+state that Relayer applies on every open; web apps may also seed cookies. Seeds
+hold test values only, never real credentials or personal data.
+
+```python
+app = NodeObject("server", "Order desk", "The running checkout app.", client_key="order-desk")
+app.artifact = {"kind": "app", "source": {"url": "http://127.0.0.1:5173/"},
+                "server": {"command": "npm run dev", "idleTimeoutMinutes": 60},
+                "seed": {"localStorage": {"cart": "[]"}, "cookies": [{"name": "session", "value": "demo-user"}]}}
+```
 
 ```python
 from relayer_graph import EdgeEndObject, EdgeRouteObject
