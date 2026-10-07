@@ -74,7 +74,7 @@ try {
           if (/\.debug\$T/u.test(headers)) throw new Error(`Embedded CodeView type section in ${path}`);
           const bytes = await readFile(path);
           objects.push({ name: entry.name, codeViewSymbolsPresent: /\.debug\$S/u.test(headers), codeViewTypesPresent: false, size: bytes.length, sha256: createHash("sha256").update(bytes).digest("hex") });
-        } else if (/^vc.*\.pdb$/iu.test(entry.name)) throw new Error(`Shared compiler PDB in ${path}`);
+        } else if (/\.pdb$/iu.test(entry.name)) throw new Error(`Shared compiler PDB in ${path}`);
       }
     }
     // CMake compiler-identification objects have their own diagnostic flags.
