@@ -10,6 +10,12 @@ import { fingerprintPath } from "../desktop/main/services/artifact-fingerprint.m
 import { artifactFileStatus, artifactViewPlan, createArtifactRequestHandler } from "../desktop/main/services/artifact-viewer.mjs";
 import { draftPreviewArtifact } from "../desktop/main/services/draft-preview-renderer.mjs";
 import { createPlaywrightDraftPreviewRenderer } from "../desktop/eval-main/draft-preview-renderer.mjs";
+import { existsSync } from "node:fs";
+import { chromium } from "playwright";
+
+// Eval renders previews in Playwright's headless Chromium. The default CI Vitest job
+// installs no browser, so this check runs where one is installed, as browser scripts do.
+const headlessChromium = existsSync(chromium.executablePath());
 
 const root = resolve(import.meta.dirname, "..");
 const fixture = join(root, "test", "fixtures", "artifact-viewer", "thread-folder");
@@ -90,7 +96,7 @@ describe("agent previews of artifact layers (ART-005)", () => {
     expect(draftPreviewArtifact({ ...layer(site), target: { kind: "node", nodeId: 3 } })).toBe(null);
   });
 
-  it("renders the artifact itself in Eval's headless Chromium, at its screen size", async () => {
+  it.runIf(headlessChromium)("renders the artifact itself in Eval's headless Chromium, at its screen size", async () => {
     const renderer = createPlaywrightDraftPreviewRenderer({ rendererDirectory: join(root, "desktop", "renderer") });
     try {
       const guide = await renderer.render({ snapshot: layer({ kind: "markdown", source: { file: "docs/brand-guide.md" }, part: { heading: "Colour" } }), workingDirectory: folder });
