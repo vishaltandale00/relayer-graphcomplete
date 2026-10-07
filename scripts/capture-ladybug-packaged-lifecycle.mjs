@@ -35,6 +35,7 @@ export const RECEIPT_INPUT_PATHS = [
   "desktop/packaging/electron-builder.mjs",
   "desktop/packaging/verify-bundled-app-server.mjs",
   "desktop/packaging/windows-native.mjs",
+  "desktop/packaging/windows-ladybug-toolchain.cmake",
   "desktop/release/version.mjs",
   "desktop/windows-version.json",
   "desktop/shared/target.mjs",

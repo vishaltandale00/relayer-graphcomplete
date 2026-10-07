@@ -304,6 +304,11 @@ export function createLadybugCargoEnvironment({ manifest, outputDirectory, targe
     PKG_CONFIG_LIBDIR: resolve(libraryDirectory, "pkgconfig"),
     PKG_CONFIG_PATH: resolve(libraryDirectory, "pkgconfig"),
   };
+  if (target === "x86_64-pc-windows-msvc") {
+    environment.CMAKE_TOOLCHAIN_FILE = resolve(
+      repositoryRoot, "desktop/packaging/windows-ladybug-toolchain.cmake",
+    );
+  }
   if (target.endsWith("-apple-darwin")) {
     environment.MACOSX_DEPLOYMENT_TARGET = manifest.build.minimumMacOSVersion;
   }
