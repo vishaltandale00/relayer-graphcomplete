@@ -6,7 +6,7 @@ Authority: PRD §11.1–11.6 (model-authored layers/layout, navigation and immut
 accepted graph), §11.10 (advisory draft previews), ADR0005 (native recursion and
 navigation), ADR0008 temporal current, and issue #654's scoped library proposal.
 This is client assembly and bounded transport over existing graph semantics.
-No prompt, renderer, acceptance, current-transition or recursion behavior changes.
+The first slice changed no prompt, renderer, acceptance, current-transition or recursion behavior. The follow-up below adopts its API in harness guidance.
 No tests are deleted.
 
 Changed seams and their deterministic checkpoints:
@@ -39,7 +39,7 @@ acceleration does not replace any checks.
 ## Limits
 
 This slice omits `publishCurrent`/`finish`, their freshness/unknown-outcome guards,
-and harness prompt adoption. Shared-process arbitrary low-level overlap and
+and their publication recipes. Harness prompt adoption is covered below. Shared-process arbitrary low-level overlap and
 cross-process replay are not guaranteed by the scoped writer. Existing Rust
 validation still applies. The named first-useful-graph-after-paint rubric and
 rendered performance entry point remain undefined, so performance proof is
@@ -70,3 +70,39 @@ Adversarial reviewer `/root/design_authority_review` passed all 20 named files a
 the checkpoint map with no unresolved findings, independently running scoped TS
 6/6 and Python 74/74. The assertion is in `review.json`; source edits invalidate
 it. Heavy proofs were source-reviewed, not independently rerun by that reviewer.
+
+## Follow-up: named-field guidance and repair feedback
+
+Required plan: PRD compiler §6.2/CSS guidance, §11.1–11.6 authority and explicit
+acceptance, §11.10 advisory previews, §9.4 origin measurement; ADR0005/0008.
+No compiler allowlist, metric, presentation pin, recursion, task or judge changes.
+
+| Changed executable seam / checkpoint | Production observation |
+| --- | --- |
+| Codex flat and layered / shared Claude, Prime and graph-authoring child guidance prefer named fields; exact import and root acceptance remain explicit | Provider composition tests, including historical presentation redaction; execute the exact delivered JS/Python recipes via canonical SDK/Prime bridge -> Rust in `test/graph-authoring-replay.test.mjs` |
+| Generated CSS reference and complete allowed CSS rules reach authoring without a second compiler or Python API | JS recipe imports the packaged export and points to the shared generated reference; Prime prompt compares the existing shared embedded JSON against the compiler function; both delivered recipes compile and accept |
+| Local invalid-icon feedback identifies the frozen attempted field, retains server status/code/path/issues and metric origin | `objects.test.ts` reproduces positional misuse with live-builder mutation during transport; existing packaged/compiler and `eval-authoring-errors.test.mjs` cover origin exclusion/dedup |
+| Exact-match edits retain fail-closed validation, exact supplied import URL, graph-only fresh repair after known rejection, and unknown-outcome reconciliation | `program.test.ts` executes patch successes/missing/ambiguous cases; composed prompt checks matching/import/fallback/unknown branches and restricted-launcher availability |
+| Existing accepted-node additions/replacements retain grants and revisions | Unchanged attached-navigation guidance and provider grant/presentation tests in full check; no new accepted mutation API |
+
+No tests are deleted. Positional recipe assertions now observe the named-field
+recipe at the same provider-delivery boundary; real execution covers assembly,
+compilation, write ordering and acceptance. Old source receipts above remain
+historical. New source edits invalidate their certification for this follow-up.
+
+Required handoff: warm relevant tests, `npm run check`, `npm run build`, compiled
+runtime and graph-preview entry points. Authorized live proof: both H3 coding
+cases, three original attempts each, fixed candidate/judge settings. Record source
+and actual SDK/harness/runtime hashes before the matrix, inspect scoped API
+adoption, preserve all failures and unavailable graph reviews, compare against
+both the immediate previous matrix and the older baseline with limits stated.
+
+Follow-up actual execution: final reviewed source digest
+`144fb0723490d5b2fe6ccd0f150a33298bab3e39b4fda3ab4b33ba2399e25d1b`
+passed full check (298 Vitest files / 3,719 tests; one file / three tests skipped;
+secret boundary 2/2; Python 74/74; Rust/Clippy/crash checks, receipt lint and PRD
+readability), build, compiled-runtime 4/4, and PREV-003 (three real PNGs plus
+cached response). `guidance-verification.json` preserves earlier failed attempts
+and exact local log digests; final full check uses four Rust test threads after
+an unchanged timing fixture failed under load and passed alone. No test scope
+was narrowed. `guidance-review.json` records the renewed exact-source review.

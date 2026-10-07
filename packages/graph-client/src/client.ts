@@ -207,6 +207,11 @@ export class RelayerGraphClient {
       applyAcceptedNodeResponse(envelope.owner.object, accepted);
       return this.withPreview(accepted, (body as { preview?: unknown }).preview, `node-${accepted.id}`);
     } catch (error) {
+      if (error instanceof GraphApiError && error.code === "unsupported_icon" && error.path === "icon" && typeof envelope.icon === "string") {
+        // Enrich the same origin error from the frozen request, never the live builder.
+        const icon = JSON.stringify(envelope.icon.slice(0, 128));
+        error.message += ` Rejected node.icon = ${icon}. NodeObject takes icon as its first argument and kind as its fourth argument. Prefer named fields: layer.node("finding", { icon: "bug", title: "Finding", detail: "Evidence" }). Choose a supported icon using graph.icons.discover({ query: "finding", kind: "symbols" }).`;
+      }
       if (authoredDetail === undefined) acceptedDetail.reject(error);
       else acceptedDetail.resolve(authoredDetail);
       throw error;

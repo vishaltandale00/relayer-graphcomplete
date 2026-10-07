@@ -1,3 +1,5 @@
+import { scopedAuthoringRecipeJs, scopedAuthoringRecipePython } from "../packages/harness-host/dist/implementations/graph-presentation-guidance.js";
+import { pathToFileURL } from "node:url";
 import { spawn } from "node:child_process";
 import { createServer } from "node:http";
 import {
@@ -281,6 +283,23 @@ describe("replay-safe graph authoring", () => {
       );
     }
 
+    // Execute the exact primary recipe delivered to Codex/Claude, including its import.
+    const recipeInteraction = await controlRequest(server.url, token, "/api/control/interactions", {
+      projectId: 41, threadId: 75, text: "Delivered JS recipe",
+    });
+    const recipe = scopedAuthoringRecipeJs(recipeInteraction.node.id,
+      pathToFileURL(join(repositoryRoot, "packages/graph-client/dist/index.js")).href)
+      .match(/```javascript\n([\s\S]*?)\n```/)[1];
+    const recipeResult = await runRecipeProcess(process.execPath, ["--input-type=module"],
+      recipe + '\nconsole.log("RECIPE:" + written.rootLayer.id);', {
+        RELAYER_GRAPH_URL: server.url, RELAYER_GRAPH_TOKEN: recipeInteraction.graphToken,
+        RELAYER_NODE_ID: String(recipeInteraction.node.id),
+      });
+    const recipeLayerId = Number(recipeResult.match(/RECIPE:(\d+)/)[1]);
+    expect(await controlRead(server.url, token,
+      `/api/control/interactions/${recipeInteraction.node.id}/layers/${recipeLayerId}`))
+      .toMatchObject({ layer: { state: "accepted" }, nodes: [{ icon: "info", authoredDetail: { components: [{ id: "main" }] } }] });
+
     const foreignInteraction = await controlRequest(
       server.url,
       token,
@@ -346,7 +365,7 @@ describe("replay-safe graph authoring", () => {
         ],
       },
     );
-    const capability = {
+    let capability = {
       url: server.url,
       token: pythonInteraction.graphToken,
       nodeId: pythonInteraction.node.id,
@@ -358,6 +377,7 @@ describe("replay-safe graph authoring", () => {
         for await (const chunk of request) chunks.push(chunk);
         const { method, payload } = JSON.parse(Buffer.concat(chunks));
         const value =
+          method === "relayer.graph.current" ? capability :
           method === "relayer.graph.visual-authoring"
             ? await bridge.execute(
                 payload,
@@ -405,6 +425,25 @@ describe("replay-safe graph authoring", () => {
       expect(result.reusedId).toBe(a.ref.id);
       expect(result.mounts).toBe(1);
       expect(result.layers).toBe(3);
+      const pyRecipeInteraction = await controlRequest(server.url, token, "/api/control/interactions", {
+        projectId: 41, threadId: 76, text: "Delivered Python recipe",
+      });
+      capability = { url: server.url, token: pyRecipeInteraction.graphToken, nodeId: pyRecipeInteraction.node.id };
+      const pyRecipe = scopedAuthoringRecipePython(capability.nodeId).match(/```python\n([\s\S]*?)\n```/)[1];
+      const pyProgram = SCOPED_PYTHON.split("async def main():")[0]
+        .replace("host_request(method, payload)", "host_request(method, payload=None)")
+        + "async def main():\n" + pyRecipe.split("\n").map(line => "    " + line).join("\n")
+        + '\n    print("RECIPE:" + str(written.root_layer.id))\nasyncio.run(main())';
+      const pyOutput = await runRecipeProcess("python3", ["-c", pyProgram], undefined, {
+        PYTHONPATH: join(repositoryRoot, "python/relayer-graph/src"),
+        SCOPED_HOST: `http://127.0.0.1:${host.address().port}`,
+        SCOPED_CAPABILITY: JSON.stringify(capability),
+      });
+      const pyLayerId = Number(pyOutput.match(/RECIPE:(\d+)/)[1]);
+      expect(await controlRead(server.url, token,
+        `/api/control/interactions/${capability.nodeId}/layers/${pyLayerId}`))
+        .toMatchObject({ layer: { state: "accepted" }, nodes: [{ icon: "info", authoredDetail: { components: [{ id: "main" }] } }] });
+
     } finally {
       await new Promise((resolve) => host.close(resolve));
     }
@@ -630,3 +669,15 @@ async def main():
         'mounts':len(answer['authoredDetail']['mounts']),'layers':len(written.layers)}))
 asyncio.run(main())
 `;
+
+async function runRecipeProcess(command, args, stdin, environment) {
+  const child = spawn(command, args, { env: { ...process.env, ...environment }, stdio: ["pipe", "pipe", "pipe"] });
+  processes.push(child);
+  let stdout = "", stderr = "";
+  child.stdout.on("data", bytes => { stdout += bytes; });
+  child.stderr.on("data", bytes => { stderr += bytes; });
+  child.stdin.end(stdin);
+  const code = await new Promise((resolve, reject) => { child.once("error", reject); child.once("exit", resolve); });
+  expect(code, stderr).toBe(0);
+  return stdout;
+}

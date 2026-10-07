@@ -1,3 +1,4 @@
+import { detailAuthoringReference } from "@relayer/graph-client";
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from "node:fs/promises";
@@ -751,7 +752,7 @@ describe("PrimeAgentHarness", () => {
     expect(prompts[0]!.text).toContain("Finish the root execution only by calling:\n\nawait graph.submit(11)");
     expect(prompts[0]!.text).toContain("exactly one new root navigate action");
     expect(prompts[0]!.text).toContain("add_navigate_action(node, \"View evidence\"");
-    expect(prompts[0]!.text).toContain("explicit descriptive client_key");
+    expect(prompts[0]!.text).toContain("Keep snapshot and local keys stable");
     expect(prompts[0]!.text).toContain("rerun the same authoring code with the same client_key values");
     expect(prompts[0]!.text).toContain("Do not add fake navigation");
     expect(prompts[0]!.text).toContain("await graph.discard_layer(layer)");
@@ -1885,8 +1886,8 @@ describe("PrimeAgentHarness", () => {
     expectGraphPresentationGuidance(prompt);
     expectGraphAuthoringRules(prompt);
     expect(prompt).toContain("A flat answer is valid");
-    expect(prompt).toContain("Author in whatever order fits the task");
-    expect(prompt).toContain("final graph call must be await graph.submit(11)");
+    expect(prompt).toContain("writer persists drafts");
+    expect(prompt).toContain("final acceptance requires await graph.submit(11)");
     expect(prompt).toContain("await graph.get_node(11)");
     expect(prompt).toContain("await graph.get_neighbors(11)");
     expect(prompt).toContain("ordinary graph.submit(11) automatically fulfills any lease");
@@ -1895,7 +1896,9 @@ describe("PrimeAgentHarness", () => {
     expect(prompt).toContain("Never mention or expose the size justification");
     expect(prompt).toContain("Every new root, expansion, and reference layer requires a version-1 LayerLayoutObject");
     expect(prompt).toContain("align comparisons deliberately");
-    expect(prompt).toContain('NodeObject("info", "Summary", "...", client_key="summary-node")');
+    expect(prompt).toContain('layer.node("finding", icon="info", title="Answer", detail="Replace with the supported answer.")');
+    expect(prompt).toContain(JSON.stringify(detailAuthoringReference()));
+    expect(prompt).toContain("Give graph-authoring RLM children this recipe");
     expect(prompt).not.toContain('NodeObject("lightbulb"');
     expect(prompt).toContain('client_key="root-response"');
     expect(prompt).toContain('"Key findings", root_layer, relation="expand", client_key="root-response", icon="search"');
@@ -1965,7 +1968,7 @@ describe("PrimeAgentHarness", () => {
       expect(prompt).toContain("await graph.checkpoint_node_detail(node)");
       expect(prompt).toContain("graph.bind_node");
       expect(prompt).toContain("do not copy a whole explanation across siblings");
-      expect(prompt).toContain("shared_styles");
+      expect(prompt).toContain("background-color: transparent");
       expect(prompt).toContain("await graph.submit(11)");
       expect(prompt).not.toMatch(/detailAuthoring|checkpointNodeDetail|detailCapability|html`/);
       const tool = trace.events.find((event) => event.type === "tool.call.started");

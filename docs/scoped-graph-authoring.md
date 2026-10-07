@@ -103,6 +103,22 @@ Python cancellation drains started writes before releasing identity claims.
 `write` returns draft records and preserves advisory preview metadata; it does
 not accept or publish. `publishCurrent` and `finish` belong to a later slice with
 freshness, frozen retry, and unknown-outcome guards. Existing current transitions
-and acceptance APIs remain explicit. Harness prompt adoption and a first useful
-graph speed/quality experiment are also separate work. No speed improvement is
+and acceptance APIs remain explicit. Codex, shared Claude, and Prime now receive a runnable named-field recipe.
+JavaScript authoring can consult the exported `detailAuthoringReference()` before
+styling; Prime receives the same generated reference in its recipe. A first useful
+graph speed/quality experiment remains separate work. No speed improvement is
 claimed by this SDK change.
+
+## Repair feedback and executable recipes
+
+A rejected string node icon retains the server status, code, path, issues, and
+origin error. Its local SDK message identifies the captured `node.icon` value
+(bounded to 128 characters), explains the positional constructor, and points to
+named fields and supported-icon discovery. It reads no live builder or arbitrary
+icon object. Error measurement and compiler constraints remain unchanged.
+
+Harness recipes preserve the exact supplied SDK URL and shell quoting. A saved
+program edit must still match once. After a known graph rejection, an unpatchable
+program may be reconstructed as a fresh graph-only draft with the same snapshot
+and keys. Successful workspace effects are not replayed. Unknown submission
+outcomes remain for host reconciliation; a fresh draft is not an automatic retry.
