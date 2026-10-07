@@ -45,6 +45,9 @@ describe("artifact view plans (ART-007)", () => {
     expect(plan({ kind: "markdown", source: { file: "docs/brand-guide.md" }, part: { heading: "Colour" } }))
       .toBe("relayer-artifact://view/__relayer/view?kind=markdown&file=brand-guide.md&heading=Colour");
     expect(plan({ kind: "url", source: { url: "https://example.com/" } })).toBe("https://example.com/");
+    // Review: `?` and `#` parts replace the base's own query and fragment.
+    expect(plan({ kind: "url", source: { url: "https://example.com/app?old=1#top" }, part: { route: "?new=2" } })).toBe("https://example.com/app?new=2#top");
+    expect(plan({ kind: "url", source: { url: "https://example.com/app#top" }, part: { route: "#plans" } })).toBe("https://example.com/app#plans");
   });
 });
 

@@ -1187,7 +1187,9 @@ describe("artifact layers in a shared snapshot (ART-008)", () => {
       await vi.waitFor(() => expect(windowRef.document.querySelector(".artifact-viewer iframe")).toBeTruthy());
       expect(windowRef.document.querySelector(".artifact-viewer iframe").getAttribute("src")).toBe("https://example.com/");
       expect(publicViewerCsp()).toContain("frame-src https:");
+      // Disposing the share viewer closes an open artifact overlay too.
       viewer.dispose();
+      expect(windowRef.document.querySelector(".artifact-viewer")).toBeNull();
     } finally {
       Object.assign(globalThis, previous);
       await windowRef.close();

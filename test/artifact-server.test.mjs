@@ -27,7 +27,7 @@ async function setup(options = {}) {
   const folder = join(directory, "thread");
   await cp(fixture, folder, { recursive: true });
   const runner = createArtifactServerRunner({ grantsPath: join(directory, "grants.json"), startupTimeoutMs: 15_000, ...options });
-  cleanup.push(async () => { runner.stopAll(); await rm(directory, { recursive: true, force: true }); });
+  cleanup.push(async () => { await runner.stopAll(); await rm(directory, { recursive: true, force: true }); });
   return { directory, folder, runner };
 }
 
@@ -143,6 +143,20 @@ describe("the server invoke (ART-009)", () => {
     });
     expect(result.log).toMatch(/defaults exit [1-9]/u);
     await expect(stat(join(homedir(), "Library", "Preferences", `${domain}.plist`))).rejects.toThrow();
+  });
+
+  it("starts Full access servers on Windows with its own shell", async () => {
+    const calls = [];
+    const { EventEmitter } = await import("node:events");
+    const spawn = (file, args) => {
+      calls.push({ file, args });
+      const child = Object.assign(new EventEmitter(), { pid: 1234, exitCode: null, signalCode: null, stdout: new EventEmitter(), stderr: new EventEmitter() });
+      setTimeout(() => { child.exitCode = 1; child.emit("exit", 1, null); }, 10);
+      return child;
+    };
+    const { folder, runner } = await setup({ platform: "win32", spawn, environment: { ComSpec: "C:\\Windows\\System32\\cmd.exe" } });
+    await runner.ensure({ threadId: 16, nodeId: 3, folder, permissionProfileId: "full", approve: true, server: { command: "npm run dev" }, sourceUrl: `http://127.0.0.1:${await freePort()}/` });
+    expect(calls[0]).toEqual({ file: "C:\\Windows\\System32\\cmd.exe", args: ["/d", "/s", "/c", "npm run dev"] });
   });
 
   it("refuses to run a confined command where it cannot be confined", async () => {

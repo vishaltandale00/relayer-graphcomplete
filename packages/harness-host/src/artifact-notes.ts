@@ -6,15 +6,15 @@ import { copyFile, mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import type { InteractionInput } from "@relayer/graph-client";
 
-const SCREENSHOT = /screenshot sha256:([0-9a-f]{64})/gu;
-const NAMES_SCREENSHOT = /screenshot sha256:[0-9a-f]{64}/u;
+// Only the suffix the viewer writes: "\n— <where> · screenshot sha256:<digest>" at the end.
+const SCREENSHOT = /(\n— [^\n]* · )screenshot sha256:([0-9a-f]{64})$/u;
 
 export async function withArtifactNoteScreenshots(
   input: InteractionInput,
   notesDirectory: string | undefined,
   turnDirectory: string,
 ): Promise<InteractionInput> {
-  if (notesDirectory === undefined || !input.contexts.some((context) => context.annotations.some((note) => NAMES_SCREENSHOT.test(note)))) return input;
+  if (notesDirectory === undefined || !input.contexts.some((context) => context.annotations.some((note) => SCREENSHOT.test(note)))) return input;
   const folder = join(turnDirectory, "artifact-notes");
   await mkdir(folder, { recursive: true, mode: 0o700 });
   const copied = new Map<string, string | null>();
@@ -28,12 +28,10 @@ export async function withArtifactNoteScreenshots(
   const contexts = await Promise.all(input.contexts.map(async (context) => ({
     ...context,
     annotations: await Promise.all(context.annotations.map(async (note) => {
-      let rewritten = note;
-      for (const [marker, digest] of note.matchAll(SCREENSHOT)) {
-        const file = await fileFor(digest!);
-        rewritten = rewritten.replace(marker, file === null ? "screenshot unavailable" : `screenshot ${file}`);
-      }
-      return rewritten;
+      const match = SCREENSHOT.exec(note);
+      if (!match) return note;
+      const file = await fileFor(match[2]!);
+      return note.replace(SCREENSHOT, `$1${file === null ? "screenshot unavailable" : `screenshot ${file}`}`);
     })),
   })));
   return { ...input, contexts };

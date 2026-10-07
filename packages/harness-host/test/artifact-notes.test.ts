@@ -27,8 +27,11 @@ describe("artifact note screenshots", () => {
       `The price is wrong\n— at /#pricing · screenshot sha256:${digest}`,
       `Too dark\n— at 0:12 · screenshot sha256:${missing}`,
       "A plain annotation",
+      `An ordinary note quoting screenshot sha256:${digest} mid-sentence.`,
     ]), notes, turn);
-    const [first, second, plain] = result.contexts[0]!.annotations;
+    const [first, second, plain, quoted] = result.contexts[0]!.annotations;
+    // Only the suffix the viewer writes is rewritten.
+    expect(quoted).toBe(`An ordinary note quoting screenshot sha256:${digest} mid-sentence.`);
     const file = join(turn, "artifact-notes", `${digest}.png`);
     expect(first).toBe(`The price is wrong\n— at /#pricing · screenshot ${file}`);
     expect(await readFile(file)).toEqual(PNG);

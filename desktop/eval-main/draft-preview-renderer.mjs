@@ -22,6 +22,9 @@ import {
   frameDraftPreview,
 } from "../main/services/draft-preview-renderer.mjs";
 
+/** The largest single file an Eval artifact preview buffers. */
+const MAX_PREVIEW_RESOURCE_BYTES = 64 * 1024 * 1024;
+
 /** Headless Chromium has no custom schemes, so artifact files are routed from this origin. */
 const ARTIFACT_ORIGIN = "https://artifact.relayer.invalid";
 
@@ -45,6 +48,11 @@ async function renderArtifactPreview(browser, { artifact, folder, rendererDirect
       if (plan.kind === "url" || plan.kind === "app") return route.continue();
       if (new URL(requested).origin !== allowed) return route.abort();
       const response = await handler(new Request(requested.replace(ARTIFACT_ORIGIN, scheme), { headers: route.request().headers() }));
+      // A preview never buffers a huge file; it fails that one request instead.
+      if (Number(response.headers.get("content-length") ?? 0) > MAX_PREVIEW_RESOURCE_BYTES) {
+        await response.body?.cancel().catch(() => {});
+        return route.abort();
+      }
       return route.fulfill({ status: response.status, headers: Object.fromEntries(response.headers), body: Buffer.from(await response.arrayBuffer()) });
     });
     const page = await context.newPage();

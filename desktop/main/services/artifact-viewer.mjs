@@ -68,7 +68,11 @@ export function artifactViewPlan(artifact, threadFolder) {
   if (addressedByUrl(kind)) {
     const base = String(artifact.source?.url ?? "");
     const route = routePath(artifact.part?.route);
-    const url = route === "" ? base : route.startsWith("/") ? new URL(route, base).href : `${base}${route}`;
+    // A `?` or `#` part replaces the base's own query or fragment; a path resolves against it.
+    const parsed = new URL(base);
+    if (route.startsWith("?")) parsed.search = route;
+    else if (route.startsWith("#")) parsed.hash = route;
+    const url = route === "" ? base : route.startsWith("/") ? new URL(route, base).href : parsed.href;
     // A route opens a place in the artifact, never another site.
     if (new URL(url).origin !== new URL(base).origin) throw new TypeError("An artifact route must stay on the artifact's own address.");
     return Object.freeze({ kind, url, address: url, folder: null, entry: null });
@@ -204,6 +208,8 @@ export async function artifactFileStatus(plan, accepted) {
   try {
     const rootOrFile = plan.kind === "website" ? plan.folder : plan.file;
     await stat(plan.file);
+    // A file or root swapped for a link out of the thread folder is unavailable, not hashed.
+    if (!inside(await realpath(plan.thread), await realpath(rootOrFile))) return { state: "missing" };
     let current;
     try {
       current = await fingerprintPath(await realpath(rootOrFile));
@@ -267,7 +273,7 @@ const ARTIFACT_VIEWPORTS = Object.freeze({ phone: { width: 390, height: 844 }, t
 
 /** The preview's size: the device a site asks for, otherwise the graph frame. */
 export function artifactPreviewSize(artifact, size) {
-  return ["website", "url"].includes(artifact?.kind) ? ARTIFACT_VIEWPORTS[artifact.viewport] ?? size : size;
+  return ["website", "url", "app"].includes(artifact?.kind) ? ARTIFACT_VIEWPORTS[artifact.viewport] ?? size : size;
 }
 
 /** How long a loaded artifact settles before capture: PDFs and video paint late. */
@@ -570,29 +576,34 @@ export function createArtifactViewerService({
     await contents.executeJavaScript(`window.__relayerNotePaused = [...document.querySelectorAll("video,audio")].filter((m) => !m.paused); window.__relayerNotePaused.forEach((m) => m.pause());`).catch(() => {});
     // A capture can stall while Chromium paints no frames; never leave the viewer waiting.
     const bounded = (promise) => Promise.race([promise, new Promise((_, reject) => setTimeout(() => reject(new Error("The view could not be captured.")), 5_000))]);
+    // Anything that fails after the pause must resume the media it paused.
     let png;
+    let digest;
+    let reported;
     try {
-      let image = await bounded(contents.capturePage());
-      if (image.getSize().width > 1440) image = image.resize({ width: 1440, quality: "best" });
-      png = image.toPNG();
-    } catch {
-      // capturePage needs a presented surface; the DevTools protocol does not.
-      const attached = contents.debugger.isAttached();
       try {
-        if (!attached) contents.debugger.attach("1.3");
-        png = Buffer.from((await bounded(contents.debugger.sendCommand("Page.captureScreenshot", { format: "png" }))).data, "base64");
-      } catch (error) {
-        await endNote();
-        throw error;
-      } finally {
-        if (!attached && contents.debugger.isAttached()) contents.debugger.detach();
+        let image = await bounded(contents.capturePage());
+        if (image.getSize().width > 1440) image = image.resize({ width: 1440, quality: "best" });
+        png = image.toPNG();
+      } catch {
+        // capturePage needs a presented surface; the DevTools protocol does not.
+        const attached = contents.debugger.isAttached();
+        try {
+          if (!attached) contents.debugger.attach("1.3");
+          png = Buffer.from((await bounded(contents.debugger.sendCommand("Page.captureScreenshot", { format: "png" }))).data, "base64");
+        } finally {
+          if (!attached && contents.debugger.isAttached()) contents.debugger.detach();
+        }
       }
+      if (current !== viewing) return null;
+      digest = createHash("sha256").update(png).digest("hex");
+      await mkdir(notesDirectory, { recursive: true });
+      await writeFile(join(notesDirectory, `${digest}.png`), png, { mode: 0o600 });
+      reported = await contents.executeJavaScript(NOTE_LOCATION_SCRIPT).catch(() => null);
+    } catch (error) {
+      if (current === viewing) await endNote();
+      throw error;
     }
-    if (current !== viewing) return null;
-    const digest = createHash("sha256").update(png).digest("hex");
-    await mkdir(notesDirectory, { recursive: true });
-    await writeFile(join(notesDirectory, `${digest}.png`), png, { mode: 0o600 });
-    const reported = await contents.executeJavaScript(NOTE_LOCATION_SCRIPT).catch(() => null);
     if (current !== viewing) return null;
     viewing.view.setVisible(false);
     return { location: noteLocation(viewing.plan, reported, contents.getURL()), digest, screenshot: `data:image/png;base64,${png.toString("base64")}` };

@@ -1438,6 +1438,8 @@ fn register_node_definition(
             &value.title,
             &value.detail,
             value.state,
+            // Artifact details are immutable node content too.
+            &value.artifact,
         ))
         .map_err(|error| {
             ExportValidationError::new(code, path, format!("Could not fingerprint {id}: {error}."))

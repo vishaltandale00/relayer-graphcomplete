@@ -1075,7 +1075,16 @@ const artifactNotes = Object.freeze({
       revision: null,
     };
     const saved = await artifactNoteApi.save(threadId, draft);
-    await artifactNoteApi.confirm(threadId, { id: draft.id, revision: saved.revision });
+    try {
+      await artifactNoteApi.confirm(threadId, { id: draft.id, revision: saved.revision });
+    } catch (error) {
+      // The confirm may have committed with its response lost; never confirm a duplicate.
+      const listed = await artifactNoteApi.list(threadId).catch(() => null);
+      if (!listed?.confirmations?.some((confirmation) => String(confirmation.draftId) === draft.id)) throw error;
+    }
+    // The composer has the note before the panel shows it, so an immediate Send includes it.
+    const { reloadComposerContexts } = await import("./graph.js");
+    await reloadComposerContexts(threadId);
   },
   remove: ({ threadId, note }) => artifactNoteApi.dismissConfirmation(threadId, note.confirmation),
 });

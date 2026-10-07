@@ -270,13 +270,18 @@ fn validate_seed(kind: &str, value: &Value) -> Result<(), GraphError> {
                         .get("name")
                         .and_then(Value::as_str)
                         .unwrap_or_default();
+                    // Values Chromium sets as given: no control characters or `;`, and an
+                    // absolute path when one is named.
                     let text = |key: &str| {
                         cookie.get(key).is_none_or(|value| {
-                            value
-                                .as_str()
-                                .is_some_and(|text| !text.contains([';', '\n', '\r', '\0']))
+                            value.as_str().is_some_and(|text| {
+                                !text.contains(';') && !text.chars().any(char::is_control)
+                            })
                         })
                     };
+                    let path = cookie
+                        .get("path")
+                        .is_none_or(|path| path.as_str().is_some_and(|path| path.starts_with('/')));
                     cookie
                         .keys()
                         .all(|key| matches!(key.as_str(), "name" | "value" | "path"))
@@ -287,6 +292,7 @@ fn validate_seed(kind: &str, value: &Value) -> Result<(), GraphError> {
                         && cookie.get("value").is_some_and(Value::is_string)
                         && text("value")
                         && text("path")
+                        && path
                 })
         });
         if !valid {

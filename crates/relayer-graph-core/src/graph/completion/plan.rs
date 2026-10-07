@@ -363,6 +363,14 @@ impl CompletionPlan {
                     "draft layer {layer_id} belongs to another interaction"
                 )));
             }
+            // The answer opens on a graph; an artifact is opened from a node in it (PRD 6.6.1).
+            if layer_id == self.root_layer && record.layer.renderer.is_some() {
+                return Err(GraphError::validation(
+                    "artifact_layer_as_response",
+                    "rootAction.targetLayerId",
+                    "The answer's root layer must be a graph. Put an ordinary node in it and open the artifact layer from that node with a navigate action.",
+                ));
+            }
             validate_authored_layout(
                 record.layer.layout.as_ref(),
                 &record.layer.nodes,

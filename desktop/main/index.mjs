@@ -416,7 +416,7 @@ if (primaryInstance) {
       // Provider admission closes first, so no turn takes provider access while shutdown
       // awaits the app server; the provider teardown below would close it underneath (PROV-004).
       providerComposition?.beginShutdown();
-      artifactServers?.stopAll();
+      await artifactServers?.stopAll();
       updater.stopPolling();
       // No post-upgrade preparation outlives shutdown: stop the step, cancel any installer
       // operation it started, and let it settle before the services it uses close.
@@ -688,7 +688,7 @@ if (primaryInstance) {
     });
     artifactServers = createArtifactServerRunner({ grantsPath: join(userDataPath, "artifact-server-approvals.json") });
     // app.exit() skips the quit events; a server Relayer started never outlives it.
-    process.once("exit", () => artifactServers?.stopAll());
+    process.once("exit", () => artifactServers?.killAllNow());
     const artifactViewer = createArtifactViewerService({
       WebContentsView,
       session,

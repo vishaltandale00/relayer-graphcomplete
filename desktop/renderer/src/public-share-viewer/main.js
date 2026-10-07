@@ -158,6 +158,8 @@ export function bootPublicViewer({
   let stopEmbedLayout = () => {};
   let stopEmbedReading = () => {};
   let artifactViewer = null;
+  // The artifact overlay lives under body, outside the host; every teardown closes it.
+  const closeArtifactViewer = () => { try { artifactViewer?.close(); } catch {} };
   try {
     const snapshot = parsePublicSnapshot(snapshotLiteral(documentRef));
     const adapter = createPublicViewerAdapter(snapshot);
@@ -252,6 +254,7 @@ export function bootPublicViewer({
       workspace,
       render,
       dispose() {
+        closeArtifactViewer();
         linkObserver?.disconnect();
         stopEmbedLayout();
         stopEmbedReading();
@@ -262,6 +265,7 @@ export function bootPublicViewer({
       },
     });
   } catch (error) {
+    closeArtifactViewer();
     workspace?.dispose();
     stopEmbedLayout();
     stopEmbedReading();

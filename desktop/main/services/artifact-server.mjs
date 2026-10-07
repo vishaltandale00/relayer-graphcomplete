@@ -85,26 +85,40 @@ export function createArtifactServerRunner({
     }
   }
 
-  /** The command runs in its own process group; stop every process it started, even after the shell exits. */
-  function killGroup(child) {
-    if (!child?.pid) return;
-    try { process.kill(-child.pid, "SIGTERM"); } catch {}
-    setTimeout(() => { try { process.kill(-child.pid, "SIGKILL"); } catch {} }, 3000).unref?.();
+  /**
+   * The command runs in its own process group; stop every process it started, even after
+   * the shell exits. Resolves once the group is gone, forcing it after a grace period.
+   */
+  function killGroup(child, { graceMs = 3000 } = {}) {
+    if (!child?.pid) return Promise.resolve();
+    const signal = (name) => { try { process.kill(platform === "win32" ? child.pid : -child.pid, name); return true; } catch { return false; } };
+    if (!signal("SIGTERM")) return Promise.resolve();
+    return new Promise((done) => {
+      const deadline = Date.now() + graceMs;
+      const poll = () => {
+        if (!signal(0)) return done();
+        if (Date.now() >= deadline) { signal("SIGKILL"); return done(); }
+        setTimeout(poll, 100).unref?.();
+      };
+      poll();
+    });
   }
 
   function stop(key) {
     const server = servers.get(key);
-    if (!server) return;
+    if (!server) return Promise.resolve();
     servers.delete(key);
     clearTimeout(server.idleTimer);
-    killGroup(server.child);
+    return killGroup(server.child);
   }
 
   async function launch({ key, folder, permissionProfileId, command, readyUrl, idleMinutes, onLog }) {
     const env = Object.fromEntries(Object.entries(environment).filter(([name]) => !SECRET_ENV.test(name) && !name.startsWith("RELAYER_")));
     // A login shell finds the user's tools (npm, node) even when Relayer was opened from Finder.
     env.PATH = [env.PATH, "/opt/homebrew/bin", "/usr/local/bin"].filter(Boolean).join(":");
-    const shell = platform === "darwin" ? ["/bin/zsh", "-lc", command] : ["/bin/sh", "-c", command];
+    const shell = platform === "darwin" ? ["/bin/zsh", "-lc", command]
+      : platform === "win32" ? [environment.ComSpec || "cmd.exe", "/d", "/s", "/c", command]
+        : ["/bin/sh", "-c", command];
     let [file, ...args] = shell;
     if (permissionProfileId !== "full") {
       if (platform !== "darwin") {
@@ -194,9 +208,17 @@ export function createArtifactServerRunner({
       server.idleTimer.unref?.();
     },
 
-    /** Stop every server Relayer started, when the app quits. */
+    /** Stop every server Relayer started when the app quits, waiting for each to exit. */
     stopAll() {
-      for (const key of [...servers.keys()]) stop(key);
+      return Promise.all([...servers.keys()].map((key) => stop(key)));
+    },
+
+    /** On process exit nothing can wait: kill every group at once. */
+    killAllNow() {
+      for (const server of servers.values()) {
+        try { process.kill(platform === "win32" ? server.child.pid : -server.child.pid, "SIGKILL"); } catch {}
+      }
+      servers.clear();
     },
 
     running: () => [...servers.keys()],

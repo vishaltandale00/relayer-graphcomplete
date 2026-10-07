@@ -262,12 +262,18 @@ async fn artifact_details_are_checked_before_any_write() {
 #[tokio::test]
 async fn acceptance_rechecks_a_node_resubmitted_after_its_layer() {
     let (_database, interaction, writer) = setup().await;
+    let overview = plain_node(&writer, "overview").await;
+    let root = writer
+        .submit_layer(&layer_draft("root", &[overview.id]))
+        .await
+        .unwrap();
     let site = artifact_node(&writer, "site", &website()).await.unwrap();
     let viewer = writer
         .submit_layer_with_renderer(&layer_draft("viewer", &[site.id]), Some("artifact"))
         .await
         .unwrap();
-    navigate(&writer, "response", &interaction, None, &viewer).await;
+    navigate(&writer, "response", &interaction, None, &root).await;
+    navigate(&writer, "open-site", &overview, Some(&root), &viewer).await;
     // The same node comes back without artifact details.
     writer.submit_node(&node_draft("site")).await.unwrap();
     let error = writer.complete(interaction.id).await.unwrap_err();
@@ -447,6 +453,14 @@ async fn server_invokes_and_starting_state_are_checked() {
             "artifact_url_invalid",
         ),
         (
+            app(json!({"seed": {"cookies": [{"name": "a", "value": "x\ty"}]}})),
+            "artifact_seed_invalid",
+        ),
+        (
+            app(json!({"seed": {"cookies": [{"name": "a", "value": "x", "path": "relative"}]}})),
+            "artifact_seed_invalid",
+        ),
+        (
             json!({"kind": "url", "source": {"url": "https://example.com:99999/"}}),
             "artifact_url_invalid",
         ),
@@ -489,4 +503,18 @@ async fn an_artifact_node_has_one_live_artifact_layer() {
         writer.draft_artifacts().await.unwrap().is_empty(),
         "a node whose layer was discarded is not accepted, so it is not fingerprinted"
     );
+}
+
+/// Review: the answer opens on a graph; an artifact layer cannot be the response root.
+#[tokio::test]
+async fn an_artifact_layer_cannot_be_the_response_root() {
+    let (_database, interaction, writer) = setup().await;
+    let site = artifact_node(&writer, "site", &website()).await.unwrap();
+    let viewer = writer
+        .submit_layer_with_renderer(&layer_draft("viewer", &[site.id]), Some("artifact"))
+        .await
+        .unwrap();
+    navigate(&writer, "response", &interaction, None, &viewer).await;
+    let error = writer.complete(interaction.id).await.unwrap_err();
+    assert_eq!(code(error), "artifact_layer_as_response");
 }

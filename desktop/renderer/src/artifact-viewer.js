@@ -26,7 +26,12 @@ function frameAddress(artifact) {
   const base = String(artifact.source?.url ?? "");
   const route = String(artifact.part?.route ?? "");
   if (!route) return base;
-  try { return route.startsWith("/") ? new URL(route, base).href : `${base}${route}`; } catch { return base; }
+  try {
+    const url = route.startsWith("/") ? new URL(route, base) : new URL(base);
+    if (route.startsWith("?")) url.search = route;
+    if (route.startsWith("#")) url.hash = route;
+    return url.href;
+  } catch { return base; }
 }
 
 export function artifactAddress(artifact) {
@@ -142,8 +147,8 @@ export function createArtifactViewer({ root = document.body, native = null, onAd
     if (!current) return;
     if (event?.type === "escape") close();
     // Only sites navigate; other kinds keep the address of the file they show.
-    else if (event?.type === "address" && typeof event.url === "string" && ["website", "url"].includes(current.artifact.kind)) {
-      const address = current.artifact.kind === "url" ? event.url : current.fileAddress(event.url);
+    else if (event?.type === "address" && typeof event.url === "string" && ["website", "url", "app"].includes(current.artifact.kind)) {
+      const address = addressedByUrl(current.artifact.kind) ? event.url : current.fileAddress(event.url);
       current.address.textContent = address;
       current.strip.textContent = address;
     } else if (event?.type === "page-error") {
