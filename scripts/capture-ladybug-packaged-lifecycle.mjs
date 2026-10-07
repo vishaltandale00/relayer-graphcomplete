@@ -341,7 +341,7 @@ function resolveContainedFile(root, path, label) {
   return resolved;
 }
 
-export async function validatePreparedLadybugSource({ sourceOutput, manifest, target }) {
+export async function validatePreparedLadybugSource({ sourceOutput, manifest, target, sourceRepositoryRoot }) {
   const root = resolve(sourceOutput);
   const sourceReceiptPath = resolve(root, "source-receipt.json");
   const cargoEnvironmentPath = resolve(root, "cargo-build-env.json");
@@ -351,6 +351,7 @@ export async function validatePreparedLadybugSource({ sourceOutput, manifest, ta
     manifest,
     outputDirectory: root,
     target,
+    sourceRepositoryRoot,
   });
   assert.equal(cargoEnvironment.schemaVersion, 1, "unsupported Ladybug Cargo environment receipt");
   assert.equal(cargoEnvironment.target, target, "Ladybug Cargo environment targets the wrong runtime");
@@ -575,6 +576,7 @@ export async function captureLadybugPackagedLifecycle({
   }
   const qualificationRoot = await mkdtemp(qualificationBuildTempPrefix(environment, target.platform));
   const preparedSource = join(qualificationRoot, "prepared-source");
+  const checkout = join(qualificationRoot, "source");
   let sourceReceipt;
   let sourceEnvironment;
   let preparedReceiptSha256;
@@ -587,6 +589,7 @@ export async function captureLadybugPackagedLifecycle({
       manifest,
       outputDirectory: preparedSource,
       target: target.rustTarget,
+      sourceRepositoryRoot: checkout,
     });
     await writeFile(copiedCargoEnvironmentPath, `${JSON.stringify(copiedCargoEnvironment, null, 2)}\n`);
     ({
@@ -598,6 +601,7 @@ export async function captureLadybugPackagedLifecycle({
       sourceOutput: preparedSource,
       manifest,
       target: target.rustTarget,
+      sourceRepositoryRoot: checkout,
     }));
     if (
       sourceReceipt.sources?.find((source) => source.id === "rust-binding")?.sha256 !== manifest.rustBinding.sha256
@@ -624,7 +628,6 @@ export async function captureLadybugPackagedLifecycle({
   };
   for (const name of manifest.build.environmentMustBeUnset) delete buildEnvironment[name];
   buildEnvironment.LBUG_BUILD_FROM_SOURCE = "1";
-  const checkout = join(qualificationRoot, "source");
   const cargoTarget = join(qualificationRoot, "cargo-target");
   let checkoutAdded = false;
   let primaryError;
@@ -634,6 +637,7 @@ export async function captureLadybugPackagedLifecycle({
     const { stdout: checkoutStatus } = await execFileAsync("git", ["status", "--porcelain"], { cwd: checkout });
     if (checkoutStatus !== "") throw new Error("detached qualification checkout is not clean");
     await assertCaptureInputsMatchSourceCommit({ sourceCommit });
+    await assertCaptureInputsMatchSourceCommit({ sourceCommit, repositoryRoot: checkout });
     const npmCommand = npmCommandForPlatform();
     await execFileAsync(npmCommand.executable, [
       ...npmCommand.prefixArgs,
@@ -739,6 +743,7 @@ export async function captureLadybugPackagedLifecycle({
   }
   const lifecycleTimeoutMs = qualificationLifecycleTimeout(target);
   const lifecycle = await provePackagedLadybugLifecycle(executable, { commandTimeout: lifecycleTimeoutMs });
+  await assertCaptureInputsMatchSourceCommit({ sourceCommit, repositoryRoot: checkout });
   const inputSha256 = Object.fromEntries(await Promise.all(RECEIPT_INPUT_PATHS.map(async (path) => {
     const { stdout } = await execFileAsync("git", ["show", `${sourceCommit}:${path}`], {
       encoding: "buffer",
