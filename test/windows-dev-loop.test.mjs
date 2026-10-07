@@ -2,7 +2,7 @@ import { expect, it } from 'vitest';
 import { mkdtemp, rm, writeFile, symlink, mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { digestWindowsDevInputs, windowsDevLoop, windowsDevNativeBuildIdentity, beginWindowsDevNativeAttempt, verifyWindowsDevNativeOutputs, windowsDevCMakeGeneratorIdentity } from '../desktop/packaging/windows-dev.mjs';
+import { digestWindowsDevInputs, WINDOWS_DEV_RUNTIME_INPUT_PATHS, WINDOWS_DEV_NATIVE_INPUT_PATHS, windowsDevLoop, windowsDevNativeBuildIdentity, beginWindowsDevNativeAttempt, verifyWindowsDevNativeOutputs, windowsDevCMakeGeneratorIdentity } from '../desktop/packaging/windows-dev.mjs';
 it('detects real Rust input changes and rejects source symlinks', async () => {
   const root = await mkdtemp(join(tmpdir(), 'win-dev-inputs-'));
   try {
@@ -181,5 +181,21 @@ it('refuses old successful executables after a failed generator transition until
     await expect(verify()).resolves.toMatchObject({ nativeIdentity: next });
     await writeFile(join(target, 'x86_64-pc-windows-msvc/release/relayer-app-server.exe'), 'corrupted');
     await expect(verify()).rejects.toThrow('Local native output changed');
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+// Dev output reuse and native preparation have separate identities; both must
+// include the CMake file that changes effective C++ compilation.
+it('invalidates both Dev input identities when the owned Ladybug toolchain changes', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'win-dev-toolchain-'));
+  try {
+    const path = join(root, 'desktop/packaging/windows-ladybug-toolchain.cmake');
+    await mkdir(join(root, 'desktop/packaging'), { recursive: true });
+    await writeFile(path, 'reviewed Embedded debug format');
+    const before = await Promise.all([WINDOWS_DEV_RUNTIME_INPUT_PATHS, WINDOWS_DEV_NATIVE_INPUT_PATHS].map(paths => digestWindowsDevInputs(root, paths)));
+    await writeFile(path, 'changed debug format');
+    const after = await Promise.all([WINDOWS_DEV_RUNTIME_INPUT_PATHS, WINDOWS_DEV_NATIVE_INPUT_PATHS].map(paths => digestWindowsDevInputs(root, paths)));
+    expect(after[0]).not.toBe(before[0]);
+    expect(after[1]).not.toBe(before[1]);
   } finally { await rm(root, { recursive: true, force: true }); }
 });

@@ -4,6 +4,8 @@ import { appendFile, lstat, mkdir, mkdtemp, readFile, readdir, rename, rm, write
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { preparePinnedLadybugForPackaging, requireLadybugDistributionLicenseReady, withPinnedLadybugPackagingEnvironment } from './pinned-ladybug-build.mjs';
+export const WINDOWS_DEV_RUNTIME_INPUT_PATHS = ['desktop/packaging/windows-dev.mjs', 'scripts/windows-dev-environment.cmd', 'scripts/windows-dev-preflight.cmake', 'crates', 'Cargo.lock', 'Cargo.toml', '.cargo', 'docs/graph-query-v1.md', 'docs/icon-catalog.json', 'fixtures/graph-query-v1', 'vendor/ladybug', 'scripts/prepare-ladybug-source.mjs', 'desktop/packaging/windows-ladybug-toolchain.cmake', 'scripts/verify-ladybug-native-receipts.mjs', 'desktop/packaging/pinned-ladybug-build.mjs', 'desktop/packaging/build-cache.mjs', 'desktop/packaging/windows-native.mjs', 'desktop/shared/target.mjs', 'scripts/ci/packaging-input-contract.json'];
+export const WINDOWS_DEV_NATIVE_INPUT_PATHS = ['vendor/ladybug', 'scripts/prepare-ladybug-source.mjs', 'desktop/packaging/windows-ladybug-toolchain.cmake', 'scripts/verify-ladybug-native-receipts.mjs', 'desktop/packaging/pinned-ladybug-build.mjs', 'desktop/packaging/build-cache.mjs', 'scripts/ci/packaging-input-contract.json'];
 const sha = bytes => createHash('sha256').update(bytes).digest('hex');
 function run(command, args, options) {
   return new Promise((accept, reject) => {
@@ -89,8 +91,8 @@ export async function windowsDevLoop({ repositoryRoot = resolve(import.meta.dirn
   if (!environment.RELAYER_DEV_LOOP_ID || lease.id !== environment.RELAYER_DEV_LOOP_ID || lease.phase !== 'building' || lease.pid !== process.pid) throw new Error('Use the serialized desktop:dev:windows command.');
   const started = now(), stages = [], receipt = { schema: 'windows-dev-loop/v1', scope: 'unsigned-development', startedAt: new Date().toISOString(), stages, rust, sourceDigest: environment.RELAYER_DEV_SOURCE_DIGEST };
   async function stage(name, operation) { const start = now(); try { return await operation(); } finally { stages.push({ name, seconds: (now() - start) / 1000 }); } }
-  const runtimePaths = ['desktop/packaging/windows-dev.mjs', 'scripts/windows-dev-environment.cmd', 'scripts/windows-dev-preflight.cmake', 'crates', 'Cargo.lock', 'Cargo.toml', '.cargo', 'docs/graph-query-v1.md', 'docs/icon-catalog.json', 'fixtures/graph-query-v1', 'vendor/ladybug', 'scripts/prepare-ladybug-source.mjs', 'scripts/verify-ladybug-native-receipts.mjs', 'desktop/packaging/pinned-ladybug-build.mjs', 'desktop/packaging/build-cache.mjs', 'desktop/packaging/windows-native.mjs', 'desktop/shared/target.mjs', 'scripts/ci/packaging-input-contract.json'];
-  const runtimeDigest = await digestWindowsDevInputs(repositoryRoot, runtimePaths);
+
+  const runtimeDigest = await digestWindowsDevInputs(repositoryRoot, WINDOWS_DEV_RUNTIME_INPUT_PATHS);
   const marker = join(root, 'native-state.json'); let previous;
   try { previous = JSON.parse(await readFile(marker, 'utf8')); } catch (error) { if (error.code !== 'ENOENT') throw error; }
   try {
@@ -103,7 +105,7 @@ export async function windowsDevLoop({ repositoryRoot = resolve(import.meta.dirn
       for (const tool of ['cl.exe', 'link.exe', 'nmake.exe', 'perl.exe', 'cmake.exe', 'ninja.exe', 'rustc.exe', 'cargo.exe']) {
         const path = command('where.exe', [tool]).split(/\r?\n/)[0]; tools[tool] = { path, sha256: sha(await readFile(path)) };
       }
-      const nativeInputs = await digestWindowsDevInputs(repositoryRoot, ['vendor/ladybug', 'scripts/prepare-ladybug-source.mjs', 'scripts/verify-ladybug-native-receipts.mjs', 'desktop/packaging/pinned-ladybug-build.mjs', 'desktop/packaging/build-cache.mjs', 'scripts/ci/packaging-input-contract.json']);
+      const nativeInputs = await digestWindowsDevInputs(repositoryRoot, WINDOWS_DEV_NATIVE_INPUT_PATHS);
       const preparationIdentity = sha(JSON.stringify({ repositoryRoot, target: 'windows-x64', tools, nativeInputs, rustVersion: command('rustc', ['-vV']), cargoVersion: command('cargo', ['-vV']), sdk: environment.WindowsSDKVersion, sdkDirectory: environment.WindowsSdkDir, compilerEnvironment: Object.fromEntries(["CL", "_CL_", "LINK", "_LINK_", "INCLUDE", "LIB", "LIBPATH", "VCINSTALLDIR", "VCToolsInstallDir"].map(key => [key, environment[key] ?? null])) }));
       // CMake modules, Python and ccache affect Ladybug compilation, but do not prepare its
       // source tree or static OpenSSL. Preserve that verified prefix when only

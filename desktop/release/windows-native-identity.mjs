@@ -12,7 +12,7 @@ export const WINDOWS_NATIVE_PROFILE = Object.freeze({ target: "x86_64-pc-windows
 
 // These are compilation inputs, not the renderer, release version or current
 // source commit. A compatible binary hit still requires fresh consumer proof.
-const nativePaths = ["vendor/ladybug", "scripts/prepare-ladybug-source.mjs", "scripts/verify-ladybug-native-receipts.mjs", "desktop/packaging/pinned-ladybug-build.mjs", "desktop/packaging/build-cache.mjs", "desktop/packaging/windows-native.mjs", "desktop/shared/target.mjs", "scripts/ci/packaging-input-contract.json", "desktop/release/windows-native-build.mjs", "desktop/release/windows-native-identity.mjs"];
+const nativePaths = ["vendor/ladybug", "scripts/prepare-ladybug-source.mjs", "scripts/verify-ladybug-native-receipts.mjs", "desktop/packaging/pinned-ladybug-build.mjs", "desktop/packaging/build-cache.mjs", "desktop/packaging/windows-native.mjs", "desktop/packaging/windows-ladybug-toolchain.cmake", "desktop/shared/target.mjs", "scripts/ci/packaging-input-contract.json", "desktop/release/windows-native-build.mjs", "desktop/release/windows-native-identity.mjs"];
 const runtimePaths = ["crates", "Cargo.toml", "Cargo.lock", ".cargo", "docs/graph-query-v1.md", "docs/icon-catalog.json", "fixtures/graph-query-v1", "desktop/release/build-native-release.mjs"];
 
 function normalizeEnvironment(environment) {
@@ -46,6 +46,7 @@ export async function windowsNativeIdentity({ repositoryRoot, environment = proc
   const contract = JSON.parse(await readFile(join(root, "scripts/ci/packaging-input-contract.json"), "utf8"));
   if (contract.version !== 1 || !contract.reviewedBuildConfiguration) throw Error("unreviewed native input contract");
   const reviewed = contract.reviewedBuildConfiguration;
+  if (!reviewed["desktop/packaging/windows-ladybug-toolchain.cmake"]) throw Error("unreviewed Windows Ladybug toolchain");
   for (const [path, expected] of Object.entries(reviewed)) {
     if (hash(await readFile(join(root, path))) !== expected) throw Error(`unreviewed native build configuration: ${path}`);
   }

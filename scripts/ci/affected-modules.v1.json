@@ -162,6 +162,7 @@
     {"exact": "desktop/release/windows-native-cache.mjs", "chapters": ["vitest", "packaging"], "vitestFiles": ["test/windows-native-cache.test.mjs", "test/windows-candidate.test.mjs", "test/signed-native-cache.test.mjs", "test/desktop-telemetry-release-artifacts.test.mjs"]},
     {"exact": "desktop/release/windows-native-identity.mjs", "chapters": ["vitest", "packaging"], "vitestFiles": ["test/windows-native-cache.test.mjs", "test/windows-candidate.test.mjs", "test/signed-native-cache.test.mjs", "test/desktop-telemetry-release-artifacts.test.mjs"]},
     { "exact": "desktop/release/verify-windows-app.mjs", "chapters": ["vitest", "packaging"], "vitestFiles": ["test/desktop-shell.test.mjs", "test/windows-candidate.test.mjs"] },
+    { "exact": "scripts/doctor-dev.mjs", "chapters": ["vitest"], "vitestFiles": ["test/developer-prerequisites.test.mjs"] },
     { "exact": "scripts/check-windows-signature-runtime.mjs", "chapters": ["vitest", "packaging"], "vitestFiles": ["test/desktop-shell.test.mjs", "test/windows-candidate.test.mjs"] },
     { "exact": "desktop/release/windows-rust-debug.mjs", "chapters": ["vitest", "packaging"], "vitestFiles": ["test/windows-candidate.test.mjs", "test/desktop-telemetry-release-artifacts.test.mjs"] },
     { "exact": "desktop/release/windows-native-handoff.mjs", "chapters": ["vitest", "packaging"], "vitestFiles": ["test/windows-candidate.test.mjs", "test/desktop-telemetry-release-artifacts.test.mjs"] },

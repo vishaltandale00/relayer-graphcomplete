@@ -125,6 +125,7 @@ describe("pinned Ladybug source build", () => {
       OPENSSL_STATIC: "1",
       OPENSSL_USE_STATIC_LIBS: "TRUE",
     });
+    expect(environment).not.toHaveProperty("CMAKE_TOOLCHAIN_FILE");
     expect(environment).not.toHaveProperty("LBUG_SHARED");
     expect(environment).not.toHaveProperty("LBUG_OPENSSL_STATIC_ROOT");
     expect(createLadybugCargoEnvironment({
@@ -134,6 +135,7 @@ describe("pinned Ladybug source build", () => {
     })).toMatchObject({
       LBUG_VERSION: "0.18.0",
       LIBRARY_PATH: "/tmp/reviewed-ladybug-stage/openssl-prefix/lib",
+      CMAKE_TOOLCHAIN_FILE: join(import.meta.dirname, "../desktop/packaging/windows-ladybug-toolchain.cmake"),
     });
   });
 

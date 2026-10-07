@@ -285,7 +285,7 @@ function targetConfiguration(manifest, target) {
   return configuration;
 }
 
-export function createLadybugCargoEnvironment({ manifest, outputDirectory, target }) {
+export function createLadybugCargoEnvironment({ manifest, outputDirectory, target, sourceRepositoryRoot = repositoryRoot }) {
   targetConfiguration(manifest, target);
   const bindingDirectory = resolve(outputDirectory, "lbug-0.18.0");
   const opensslPrefix = resolve(outputDirectory, "openssl-prefix");
@@ -304,6 +304,11 @@ export function createLadybugCargoEnvironment({ manifest, outputDirectory, targe
     PKG_CONFIG_LIBDIR: resolve(libraryDirectory, "pkgconfig"),
     PKG_CONFIG_PATH: resolve(libraryDirectory, "pkgconfig"),
   };
+  if (target === "x86_64-pc-windows-msvc") {
+    environment.CMAKE_TOOLCHAIN_FILE = resolve(
+      sourceRepositoryRoot, "desktop/packaging/windows-ladybug-toolchain.cmake",
+    );
+  }
   if (target.endsWith("-apple-darwin")) {
     environment.MACOSX_DEPLOYMENT_TARGET = manifest.build.minimumMacOSVersion;
   }
