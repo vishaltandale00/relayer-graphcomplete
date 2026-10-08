@@ -1,3 +1,4 @@
+import { createArtifactPreviewCapture } from "./artifact-viewer.mjs";
 import { createIsolatedPageCapture } from "./isolated-page-capture.mjs";
 
 /**
@@ -64,9 +65,17 @@ export function draftPreviewStepScript(step) {
   })()`;
 }
 
+/** The artifact an artifact layer's preview shows, or null for a graph layer (PRD 6.6). */
+export function draftPreviewArtifact(snapshot) {
+  if (snapshot?.target?.kind !== "layer" || snapshot.layer?.renderer !== "artifact") return null;
+  const artifact = snapshot.nodes?.[0]?.artifact;
+  return artifact && typeof artifact === "object" ? artifact : null;
+}
+
 /**
  * Desktop render bridge (PRD §11.10): renders the agent's draft in an isolated
- * hidden window, in the user's light or dark theme at render time.
+ * hidden window, in the user's light or dark theme at render time. An artifact
+ * layer shows the artifact itself, as the viewer will (ART-005).
  */
 export function createElectronDraftPreviewRenderer({ BrowserWindow, session, rendererDirectory, getTheme }) {
   const capture = createIsolatedPageCapture({
@@ -75,8 +84,11 @@ export function createElectronDraftPreviewRenderer({ BrowserWindow, session, ren
     rendererDirectory,
     partition: "draft-preview-capture",
   });
+  const captureArtifact = createArtifactPreviewCapture({ BrowserWindow, session, rendererDirectory, maxBytes: DRAFT_PREVIEW_MAX_BYTES });
   return {
-    async render({ snapshot }) {
+    async render({ snapshot, workingDirectory }) {
+      const artifact = draftPreviewArtifact(snapshot);
+      if (artifact) return captureArtifact({ artifact, folder: workingDirectory, size: DRAFT_PREVIEW_FRAMES.layer });
       const frame = draftPreviewFrame(snapshot);
       const theme = getTheme();
       return capture({

@@ -163,6 +163,24 @@ impl GraphWriter {
         prepared_assets: Option<&[PreparedDetailAsset]>,
         prepared_icon: Option<&PreparedDetailAsset>,
     ) -> Result<GraphNode, GraphError> {
+        self.submit_node_with_artifact(draft, authored_detail, prepared_assets, prepared_icon, None)
+            .await
+    }
+
+    /// Submit a node that may carry artifact details (PRD 11.11). File artifacts
+    /// must already carry the host's fingerprint; graph-core has no filesystem.
+    /// Each submission sets the node's artifact: `None` leaves it without one.
+    pub async fn submit_node_with_artifact(
+        &self,
+        draft: &NodeDraft,
+        authored_detail: AuthoredDetailUpdate<'_>,
+        prepared_assets: Option<&[PreparedDetailAsset]>,
+        prepared_icon: Option<&PreparedDetailAsset>,
+        artifact: Option<&serde_json::Value>,
+    ) -> Result<GraphNode, GraphError> {
+        if let Some(artifact) = artifact {
+            crate::artifact::validate_artifact(artifact, true)?;
+        }
         validate_prepared_icon(&draft.icon, prepared_icon)?;
         if let AuthoredDetailUpdate::Replace(package) = authored_detail {
             validate_authored_detail(package)?;
@@ -220,13 +238,13 @@ impl GraphWriter {
         let node = match existing {
             Some(record) if record.node.state == RecordState::Draft => {
                 nodes
-                    .update_draft(record.node.id, draft, authored_detail)
+                    .update_draft(record.node.id, draft, authored_detail, artifact)
                     .await?
             }
             Some(_) => unreachable!("accepted nodes returned above"),
             None => {
                 nodes
-                    .insert_draft(&self.scope, draft, authored_detail.replacement())
+                    .insert_draft(&self.scope, draft, authored_detail.replacement(), artifact)
                     .await?
             }
         };
@@ -250,6 +268,86 @@ impl GraphWriter {
         }
         transaction.commit().await?;
         Ok(node)
+    }
+
+    /// The draft artifact nodes a publish would accept, for the host to fingerprint just
+    /// before it: the whole answer for completion (`None`), or the target layer's closure
+    /// for an advance or return. A plan that cannot be built yet selects nothing; the
+    /// publish itself then reports why.
+    pub async fn draft_artifacts_for(
+        &self,
+        transition: Option<&CurrentTransition>,
+    ) -> Result<Vec<(NodeId, serde_json::Value)>, GraphError> {
+        let mut transaction = self.database.storage.begin_read().await?;
+        self.scope
+            .require_active_authority(&mut transaction)
+            .await?;
+        let plan = match transition {
+            None => completion::CompletionPlan::build(&mut transaction, &self.scope).await,
+            Some(
+                CurrentTransition::Advance { layer_id } | CurrentTransition::Return { layer_id },
+            ) => {
+                completion::CompletionPlan::build_current(&mut transaction, &self.scope, *layer_id)
+                    .await
+            }
+            Some(_) => return Ok(Vec::new()),
+        };
+        let Ok(plan) = plan else {
+            return Ok(Vec::new());
+        };
+        let artifacts = NodeTable::new(&mut transaction)
+            .draft_artifacts(self.scope.root_node_id)
+            .await?
+            .into_iter()
+            .filter(|(id, _)| plan.nodes.contains(id))
+            .collect();
+        transaction.commit().await?;
+        Ok(artifacts)
+    }
+
+    /// This interaction's draft nodes with artifact details that a live layer shows.
+    pub async fn draft_artifacts(&self) -> Result<Vec<(NodeId, serde_json::Value)>, GraphError> {
+        let mut transaction = self.database.storage.begin_read().await?;
+        self.scope
+            .require_active_authority(&mut transaction)
+            .await?;
+        let artifacts = NodeTable::new(&mut transaction)
+            .draft_artifacts(self.scope.root_node_id)
+            .await?;
+        transaction.commit().await?;
+        Ok(artifacts)
+    }
+
+    /// Pins the fingerprint the host took just before acceptance on a draft
+    /// artifact node. Acceptance, not submission, decides what was accepted.
+    pub async fn pin_artifact_fingerprint(
+        &self,
+        node: NodeId,
+        fingerprint: &str,
+    ) -> Result<(), GraphError> {
+        let mut transaction = self.database.storage.begin_write().await?;
+        self.ensure_writable(&mut transaction).await?;
+        let mut nodes = NodeTable::new(&mut transaction);
+        let mut artifact = nodes
+            .record(node)
+            .await?
+            .filter(|record| record.owner == Some(self.scope.root_node_id))
+            .and_then(|record| record.node.artifact)
+            .ok_or_else(|| GraphError::NotFound(format!("draft artifact node {node}")))?;
+        artifact["fingerprint"] = serde_json::Value::String(fingerprint.to_owned());
+        crate::artifact::validate_artifact(&artifact, true)?;
+        if !nodes
+            .set_draft_artifact(node, self.scope.root_node_id, &artifact)
+            .await?
+        {
+            return Err(GraphError::validation(
+                "immutable_node",
+                "node",
+                "This node was already accepted. Create a new node and connect it to the old node instead of editing history.",
+            ));
+        }
+        transaction.commit().await?;
+        Ok(())
     }
 
     pub async fn get_node_presentation(
@@ -377,6 +475,16 @@ impl GraphWriter {
     }
 
     pub async fn submit_layer(&self, draft: &LayerDraft) -> Result<GraphLayer, GraphError> {
+        self.submit_layer_with_renderer(draft, None).await
+    }
+
+    /// Submit a layer read by `renderer` (absent: the graph). An `artifact` layer
+    /// holds exactly one node with artifact details (PRD 11.11).
+    pub async fn submit_layer_with_renderer(
+        &self,
+        draft: &LayerDraft,
+        renderer: Option<&str>,
+    ) -> Result<GraphLayer, GraphError> {
         let mut transaction = self.database.storage.begin_write().await?;
         self.ensure_writable(&mut transaction).await?;
         let mut nodes = Vec::with_capacity(draft.nodes.len());
@@ -395,6 +503,22 @@ impl GraphWriter {
                     .await?,
             );
         }
+        crate::artifact::validate_layer_renderer(renderer, &nodes, edges.len())?;
+        // Two views of one artifact are two nodes: a node lives in one artifact layer.
+        if renderer == Some(crate::artifact::ARTIFACT_RENDERER)
+            && let Some(other) = LayerTable::new(&mut transaction)
+                .other_artifact_layer_for(nodes[0].id, self.scope.root_node_id, &draft.client_key)
+                .await?
+        {
+            return Err(GraphError::validation(
+                "artifact_node_in_another_layer",
+                "nodes",
+                format!(
+                    "Node {} already has artifact layer {other}. Show another view of the same file as a new artifact node in its own layer.",
+                    nodes[0].id
+                ),
+            ));
+        }
         LayerCandidate {
             draft,
             nodes,
@@ -402,7 +526,7 @@ impl GraphWriter {
         }
         .validate()?;
         let layer = LayerTable::new(&mut transaction)
-            .upsert_draft(&self.scope, draft)
+            .upsert_draft(&self.scope, draft, renderer)
             .await?;
         transaction.commit().await?;
         Ok(layer)

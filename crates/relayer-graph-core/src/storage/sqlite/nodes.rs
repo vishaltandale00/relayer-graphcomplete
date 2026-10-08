@@ -30,6 +30,7 @@ struct NodeRow {
     title: String,
     detail: String,
     authored_detail: Option<String>,
+    artifact: Option<String>,
     state: String,
     owner_interaction_id: Option<i64>,
 }
@@ -125,6 +126,7 @@ impl<'connection> NodeTable<'connection> {
             title: canonical_text.clone(),
             detail: canonical_text,
             authored_detail: None,
+            artifact: None,
             state: RecordState::Accepted,
         })
     }
@@ -137,7 +139,7 @@ impl<'connection> NodeTable<'connection> {
         input_digest: &str,
     ) -> Result<Option<GraphNode>, GraphError> {
         let row = sqlx::query_as::<_, NodeRow>(
-            "SELECT id,COALESCE((SELECT k.client_key FROM imported_node_client_keys k WHERE k.node_id=nodes.id),client_key) AS client_key,leased_action_id,kind,icon,title,detail,authored_detail,state,owner_interaction_id FROM nodes WHERE thread_id=?1 AND input_identity=?2",
+            "SELECT id,COALESCE((SELECT k.client_key FROM imported_node_client_keys k WHERE k.node_id=nodes.id),client_key) AS client_key,leased_action_id,kind,icon,title,detail,authored_detail,artifact,state,owner_interaction_id FROM nodes WHERE thread_id=?1 AND input_identity=?2",
         ).bind(thread_id.value()).bind(input_identity).fetch_optional(&mut *self.connection).await?;
         let Some(row) = row else {
             return Ok(None);
@@ -209,7 +211,7 @@ impl<'connection> NodeTable<'connection> {
             return Ok(None);
         };
         let node = self.fetch_optional(
-            "SELECT id,COALESCE((SELECT k.client_key FROM imported_node_client_keys k WHERE k.node_id=nodes.id),client_key) AS client_key,leased_action_id,kind,icon,title,detail,authored_detail,state,owner_interaction_id FROM nodes WHERE leased_action_id=?1",
+            "SELECT id,COALESCE((SELECT k.client_key FROM imported_node_client_keys k WHERE k.node_id=nodes.id),client_key) AS client_key,leased_action_id,kind,icon,title,detail,authored_detail,artifact,state,owner_interaction_id FROM nodes WHERE leased_action_id=?1",
             action_id.value(),
             None,
         )
@@ -417,7 +419,7 @@ impl<'connection> NodeTable<'connection> {
         client_key: &str,
     ) -> Result<Option<NodeRecord>, GraphError> {
         self.fetch_optional(
-            "SELECT id,COALESCE((SELECT k.client_key FROM imported_node_client_keys k WHERE k.node_id=nodes.id),client_key) AS client_key,leased_action_id,kind,icon,title,detail,authored_detail,state,owner_interaction_id FROM nodes WHERE owner_interaction_id=?1 AND client_key=?2",
+            "SELECT id,COALESCE((SELECT k.client_key FROM imported_node_client_keys k WHERE k.node_id=nodes.id),client_key) AS client_key,leased_action_id,kind,icon,title,detail,authored_detail,artifact,state,owner_interaction_id FROM nodes WHERE owner_interaction_id=?1 AND client_key=?2",
             owner.value(),
             Some(client_key),
         )
@@ -430,7 +432,7 @@ impl<'connection> NodeTable<'connection> {
         id: NodeId,
     ) -> Result<GraphNode, GraphError> {
         let row = sqlx::query_as::<_, NodeRow>(
-            "SELECT id,COALESCE((SELECT k.client_key FROM imported_node_client_keys k WHERE k.node_id=nodes.id),client_key) AS client_key,leased_action_id,kind,icon,title,detail,authored_detail,state,owner_interaction_id FROM nodes WHERE id=?1 AND ((?2 IS NOT NULL AND project_id=?2) OR (?2 IS NULL AND project_id IS NULL AND thread_id=?3))",
+            "SELECT id,COALESCE((SELECT k.client_key FROM imported_node_client_keys k WHERE k.node_id=nodes.id),client_key) AS client_key,leased_action_id,kind,icon,title,detail,authored_detail,artifact,state,owner_interaction_id FROM nodes WHERE id=?1 AND ((?2 IS NOT NULL AND project_id=?2) OR (?2 IS NULL AND project_id IS NULL AND thread_id=?3))",
         )
         .bind(id.value())
         .bind(scope.project_id.map(ProjectId::value))
@@ -467,7 +469,7 @@ impl<'connection> NodeTable<'connection> {
 
     pub(crate) async fn record(&mut self, id: NodeId) -> Result<Option<NodeRecord>, GraphError> {
         self.fetch_optional(
-            "SELECT id,COALESCE((SELECT k.client_key FROM imported_node_client_keys k WHERE k.node_id=nodes.id),client_key) AS client_key,leased_action_id,kind,icon,title,detail,authored_detail,state,owner_interaction_id FROM nodes WHERE id=?1",
+            "SELECT id,COALESCE((SELECT k.client_key FROM imported_node_client_keys k WHERE k.node_id=nodes.id),client_key) AS client_key,leased_action_id,kind,icon,title,detail,authored_detail,artifact,state,owner_interaction_id FROM nodes WHERE id=?1",
             id.value(),
             None,
         )
@@ -479,13 +481,18 @@ impl<'connection> NodeTable<'connection> {
         scope: &InteractionScope,
         draft: &NodeDraft,
         authored_detail: Option<&serde_json::Value>,
+        artifact: Option<&serde_json::Value>,
     ) -> Result<GraphNode, GraphError> {
         let authored_detail = authored_detail
             .map(serde_json::to_string)
             .transpose()
             .expect("serde_json::Value must serialize");
+        let artifact_text = artifact
+            .map(serde_json::to_string)
+            .transpose()
+            .expect("serde_json::Value must serialize");
         let result = sqlx::query(
-            "INSERT INTO nodes(project_id,thread_id,kind,icon,title,detail,authored_detail,state,owner_interaction_id,client_key) VALUES (?1,?2,?3,?4,?5,?6,?7,'draft',?8,?9)",
+            "INSERT INTO nodes(project_id,thread_id,kind,icon,title,detail,authored_detail,state,owner_interaction_id,client_key,artifact) VALUES (?1,?2,?3,?4,?5,?6,?7,'draft',?8,?9,?10)",
         )
         .bind(scope.project_id.map(ProjectId::value))
         .bind(scope.thread_id.value())
@@ -496,12 +503,14 @@ impl<'connection> NodeTable<'connection> {
         .bind(&authored_detail)
         .bind(scope.root_node_id.value())
         .bind(&draft.client_key)
+        .bind(&artifact_text)
         .execute(&mut *self.connection)
         .await?;
         Ok(draft_node(
             valid_node_id(result.last_insert_rowid())?,
             draft,
             authored_detail.as_deref(),
+            artifact.cloned(),
         ))
     }
 
@@ -510,7 +519,12 @@ impl<'connection> NodeTable<'connection> {
         id: NodeId,
         draft: &NodeDraft,
         authored_detail: AuthoredDetailUpdate<'_>,
+        artifact: Option<&serde_json::Value>,
     ) -> Result<GraphNode, GraphError> {
+        let artifact = artifact
+            .map(serde_json::to_string)
+            .transpose()
+            .expect("serde_json::Value must serialize");
         let retain = matches!(authored_detail, AuthoredDetailUpdate::Retain);
         let replacement = authored_detail
             .replacement()
@@ -518,7 +532,7 @@ impl<'connection> NodeTable<'connection> {
             .transpose()
             .expect("serde_json::Value must serialize");
         sqlx::query(
-            "UPDATE nodes SET kind=?1,icon=?2,title=?3,detail=?4,authored_detail=CASE WHEN ?5 THEN authored_detail ELSE ?6 END WHERE id=?7",
+            "UPDATE nodes SET kind=?1,icon=?2,title=?3,detail=?4,authored_detail=CASE WHEN ?5 THEN authored_detail ELSE ?6 END,artifact=?8 WHERE id=?7",
         )
         .bind(&draft.kind)
         .bind(&draft.icon)
@@ -527,12 +541,55 @@ impl<'connection> NodeTable<'connection> {
         .bind(retain)
         .bind(&replacement)
         .bind(id.value())
+        .bind(&artifact)
         .execute(&mut *self.connection)
         .await?;
         self.record(id)
             .await?
             .map(|record| record.node)
             .ok_or_else(|| GraphError::NotFound(format!("node {id}")))
+    }
+
+    /// Draft nodes an interaction owns that carry artifact details.
+    pub(crate) async fn draft_artifacts(
+        &mut self,
+        owner: NodeId,
+    ) -> Result<Vec<(NodeId, serde_json::Value)>, GraphError> {
+        let rows = sqlx::query_as::<_, (i64, String)>(
+            // Only nodes a live layer still shows: a node whose layer was discarded is
+            // not accepted, so its files need not exist.
+            "SELECT id,artifact FROM nodes WHERE owner_interaction_id=?1 AND state='draft' AND artifact IS NOT NULL AND EXISTS (SELECT 1 FROM layer_nodes ln JOIN layers l ON l.id=ln.layer_id WHERE ln.node_id=nodes.id AND l.state<>'stopped') ORDER BY id",
+        )
+        .bind(owner.value())
+        .fetch_all(&mut *self.connection)
+        .await?;
+        rows.into_iter()
+            .map(|(id, artifact)| {
+                let id = NodeId::new(id)
+                    .ok_or_else(|| GraphError::Internal(format!("invalid node id {id}")))?;
+                let artifact = serde_json::from_str(&artifact).map_err(|error| {
+                    GraphError::Internal(format!("node {id} artifact is not JSON: {error}"))
+                })?;
+                Ok((id, artifact))
+            })
+            .collect()
+    }
+
+    pub(crate) async fn set_draft_artifact(
+        &mut self,
+        id: NodeId,
+        owner: NodeId,
+        artifact: &serde_json::Value,
+    ) -> Result<bool, GraphError> {
+        let updated = sqlx::query(
+            "UPDATE nodes SET artifact=?3 WHERE id=?1 AND owner_interaction_id=?2 AND state='draft'",
+        )
+        .bind(id.value())
+        .bind(owner.value())
+        .bind(serde_json::to_string(artifact).expect("serde_json::Value must serialize"))
+        .execute(&mut *self.connection)
+        .await?;
+        Ok(updated.rows_affected() == 1)
     }
 
     pub(crate) async fn neighbors(
@@ -542,7 +599,7 @@ impl<'connection> NodeTable<'connection> {
     ) -> Result<Vec<GraphNode>, GraphError> {
         let rows = sqlx::query_as::<_, NodeRow>(
             r#"
-            SELECT n.id,COALESCE((SELECT k.client_key FROM imported_node_client_keys k WHERE k.node_id=n.id),n.client_key) AS client_key,n.leased_action_id,n.kind,n.icon,n.title,n.detail,n.authored_detail,n.state,n.owner_interaction_id
+            SELECT n.id,COALESCE((SELECT k.client_key FROM imported_node_client_keys k WHERE k.node_id=n.id),n.client_key) AS client_key,n.leased_action_id,n.kind,n.icon,n.title,n.detail,n.authored_detail,n.artifact,n.state,n.owner_interaction_id
             FROM edges e
             JOIN nodes n ON n.id = CASE WHEN e.left_id = ?1 THEN e.right_id ELSE e.left_id END
             WHERE e.state='accepted'
@@ -565,7 +622,7 @@ impl<'connection> NodeTable<'connection> {
         let derived = sqlx::query_as::<_, NodeRow>(
             r#"
             SELECT source.id,COALESCE((SELECT k.client_key FROM imported_node_client_keys k WHERE k.node_id=source.id),source.client_key) AS client_key,source.leased_action_id,source.kind,source.icon,source.title,
-                   source.detail,source.authored_detail,source.state,source.owner_interaction_id
+                   source.detail,source.authored_detail,source.artifact,source.state,source.owner_interaction_id
             FROM nodes interaction
             JOIN actions leased ON leased.id=interaction.leased_action_id
             JOIN nodes source ON source.id=leased.source_node_id
@@ -654,6 +711,13 @@ impl TryFrom<NodeRow> for NodeRecord {
                             "stored authored Node Detail is invalid JSON: {error}"
                         ))
                     })?,
+                artifact: row
+                    .artifact
+                    .map(|value| serde_json::from_str(&value))
+                    .transpose()
+                    .map_err(|error| {
+                        GraphError::Internal(format!("stored artifact is invalid JSON: {error}"))
+                    })?,
                 state: RecordState::parse(&row.state)?,
             },
             owner: row.owner_interaction_id.map(valid_node_id).transpose()?,
@@ -661,7 +725,12 @@ impl TryFrom<NodeRow> for NodeRecord {
     }
 }
 
-fn draft_node(id: NodeId, draft: &NodeDraft, authored_detail: Option<&str>) -> GraphNode {
+fn draft_node(
+    id: NodeId,
+    draft: &NodeDraft,
+    authored_detail: Option<&str>,
+    artifact: Option<serde_json::Value>,
+) -> GraphNode {
     GraphNode {
         id,
         client_key: Some(draft.client_key.clone()),
@@ -674,6 +743,7 @@ fn draft_node(id: NodeId, draft: &NodeDraft, authored_detail: Option<&str>) -> G
             .map(serde_json::from_str)
             .transpose()
             .expect("serialized authored detail must deserialize"),
+        artifact,
         state: RecordState::Draft,
     }
 }

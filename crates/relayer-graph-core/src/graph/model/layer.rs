@@ -19,6 +19,10 @@ pub struct GraphLayer {
     pub edges: Vec<EdgeId>,
     #[serde(default)]
     pub layout: Option<LayerLayout>,
+    /// Which renderer reads this layer. Absent means the graph; `artifact` means
+    /// the artifact viewer reads its single node (PRD 11.11).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub renderer: Option<String>,
     pub state: RecordState,
 }
 

@@ -1,6 +1,7 @@
 mod accept;
 mod current;
 mod plan;
+pub(crate) use plan::CompletionPlan;
 
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};

@@ -347,6 +347,7 @@ mod tests {
                 title: "Explain the queue".into(),
                 detail: "Explain the queue".into(),
                 authored_detail: None,
+                artifact: None,
                 state: RecordState::Accepted,
             },
             root_action: Some(GraphAction {

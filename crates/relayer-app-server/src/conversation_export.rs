@@ -369,6 +369,9 @@ pub struct ExportLayer {
     pub edges: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub layout: Option<ExportLayerLayout>,
+    /// Which renderer reads the layer (PRD 11.11); absent for a graph.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub renderer: Option<String>,
     pub state: ExportRecordState,
 }
 
@@ -431,6 +434,9 @@ pub struct ExportNode {
     pub authored_detail_omitted: Option<ExportAuthoredDetailOmission>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub authored_detail_assets: Vec<ExportVisualAssetAssociation>,
+    /// Artifact details (PRD 11.11): relative paths or a URL, never absolute paths.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub artifact: Option<serde_json::Value>,
     pub state: ExportRecordState,
 }
 
@@ -941,6 +947,7 @@ impl ConversationExportValidator {
                 authored_detail: None,
                 authored_detail_omitted: None,
                 authored_detail_assets: Vec::new(),
+                artifact: None,
                 state: context.target.state,
             };
             register_node_definition(
@@ -1412,6 +1419,9 @@ fn register_immutable_view_records(
 #[derive(Clone, Copy)]
 struct NodeDefinitionDigest {
     base: [u8; 32],
+    /// Artifact details are immutable too, but a context target's snapshot omits them,
+    /// so two copies conflict only when both carry them.
+    artifact: Option<[u8; 32]>,
     authored_detail: Option<[u8; 32]>,
     authored_detail_assets: Option<[u8; 32]>,
 }
@@ -1447,6 +1457,16 @@ fn register_node_definition(
         .map_err(|error| {
             ExportValidationError::new(code, path, format!("Could not fingerprint {id}: {error}."))
         })?;
+    let artifact = value
+        .artifact
+        .as_ref()
+        .map(|artifact| {
+            serde_json::to_vec(artifact).map(|bytes| <[u8; 32]>::from(Sha256::digest(bytes)))
+        })
+        .transpose()
+        .map_err(|error| {
+            ExportValidationError::new(code, path, format!("Could not fingerprint {id}: {error}."))
+        })?;
     let authored_detail_assets = if value.authored_detail_assets.is_empty() {
         None
     } else {
@@ -1465,6 +1485,7 @@ fn register_node_definition(
     };
     if let Some(existing) = definitions.get_mut(id) {
         if existing.base != base
+            || existing.artifact.is_some() && artifact.is_some() && existing.artifact != artifact
             || existing.authored_detail_assets.is_some()
                 && authored_detail_assets.is_some()
                 && existing.authored_detail_assets != authored_detail_assets
@@ -1481,6 +1502,9 @@ fn register_node_definition(
         if existing.authored_detail.is_none() {
             existing.authored_detail = authored_detail;
         }
+        if existing.artifact.is_none() {
+            existing.artifact = artifact;
+        }
         if existing.authored_detail_assets.is_none() {
             existing.authored_detail_assets = authored_detail_assets;
         }
@@ -1489,6 +1513,7 @@ fn register_node_definition(
             id.to_owned(),
             NodeDefinitionDigest {
                 base,
+                artifact,
                 authored_detail,
                 authored_detail_assets,
             },

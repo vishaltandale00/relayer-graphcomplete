@@ -3,11 +3,17 @@ import { randomUUID } from "node:crypto";
 import { createOwnedNodeDetailAuthoring, NodeDetailAuthoring } from "./detail.js";
 import type { EdgeShape, NodeSide } from "./edge-shapes.js";
 import { acceptedNodeResponse } from "./node-response.js";
-import type { GraphAction, GraphEdge, GraphId, GraphLayer, GraphNode, InputControl, InputOption, NavigateRelation } from "./types.js";
+import type { ArtifactDetails, GraphAction, GraphEdge, GraphId, GraphLayer, GraphNode, InputControl, InputOption, LayerRenderer, NavigateRelation } from "./types.js";
 
 export class NodeObject {
   readonly clientKey: string;
   readonly detailAuthoring: NodeDetailAuthoring;
+  /**
+   * Artifact details: set these to make this node something the user opens in
+   * the artifact viewer. Such a node must be the only node of a layer created
+   * with `LayerObject.forArtifact(node)`.
+   */
+  artifact: ArtifactDetails | undefined = undefined;
   declare readonly ref: GraphNode | undefined;
 
   constructor(
@@ -85,8 +91,22 @@ export class LayerObject {
     public layout: LayerLayoutObject,
     clientKey: string = randomUUID(),
     public defaultNode?: NodeReference,
+    /** Absent: a graph. "artifact": the artifact viewer reads this layer's single node. */
+    public renderer?: LayerRenderer,
   ) {
     this.clientKey = clientKey;
+  }
+
+  /** A layer the artifact viewer reads: exactly one node that carries `artifact` details. */
+  static forArtifact(node: NodeReference, clientKey: string = randomUUID()): LayerObject {
+    return new LayerObject(
+      [node],
+      [],
+      new LayerLayoutObject([new NodePlacementObject(node, 0.5, 0.5)], "default"),
+      clientKey,
+      node,
+      "artifact",
+    );
   }
 }
 

@@ -134,6 +134,11 @@ function workspace() {
   return productWorkspace;
 }
 
+/** Refresh the composer's attached contexts after artifact notes changed them. */
+export function reloadComposerContexts(threadId) {
+  return productWorkspace?.reloadConfirmedContexts?.(threadId) ?? Promise.resolve();
+}
+
 export function renderThread() {
   workspace().render();
   onboardingTutorialController()?.syncWorkspace();

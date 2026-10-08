@@ -1,4 +1,6 @@
 import { NativeExecutionCancelled } from "./completion-execution.js";
+import { ArtifactFileError, checkArtifactFiles } from "./artifact-files.js";
+import { withArtifactNoteScreenshots } from "./artifact-notes.js";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { mkdir, mkdtemp, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
@@ -241,6 +243,8 @@ export interface HarnessHostOptions {
     readonly generation: number;
     readonly library: FileVisualAssetsLibrary;
   };
+  /** Where the desktop keeps artifact note screenshots, named by digest (PRD 6.6.8). */
+  readonly artifactNotesDirectory?: string;
   /** The render bridge the graph server calls for draft previews (PRD §11.10). */
   readonly draftPreviews?: {
     readonly token: string;
@@ -274,6 +278,8 @@ export class HarnessHost {
   private readonly traceStore: HarnessTraceStore | undefined;
   /** Active completions with preview support, keyed by interaction node, for trace metadata. */
   private readonly previewTraces = new Map<number, HarnessTraceSink>();
+  /** Each previewing run's thread folder, so artifact layers render their files. */
+  private readonly previewFolders = new Map<number, string>();
 
   constructor(private readonly options: HarnessHostOptions) {
     this.traceStore = options.trace === undefined ? undefined : new HarnessTraceStore(options.trace);
@@ -291,7 +297,8 @@ export class HarnessHost {
     const started = Date.now();
     const target = request.snapshot.target as JsonObject;
     try {
-      const image = await renderer.render(request);
+      const workingDirectory = this.previewFolders.get(request.interactionNodeId);
+      const image = await renderer.render(workingDirectory === undefined ? request : { ...request, workingDirectory });
       if (!isPng(image.png) || !positiveInteger(image.width) || !positiveInteger(image.height)) {
         throw new Error("Draft preview renderer returned an invalid image");
       }
@@ -403,6 +410,17 @@ export class HarnessHost {
         return { valid: true };
       }
       throw new VisualAssetsError("visual_assets_control_operation_invalid", "Control authority may validate imports only");
+    }
+    if (request.operation.kind === "check-artifact") {
+      // Artifact files live in the session's working directory, not the asset library.
+      operationScope(request);
+      const session = this.sessions.get(request.authority.scope.threadId);
+      if (session === undefined) throw new VisualAssetsError("completion_inactive", "Artifact checks need an active session");
+      const result = await checkArtifactFiles(session.descriptor.workingDirectory, request.operation.artifact);
+      if (isCurrent !== undefined && !isCurrent()) {
+        throw new VisualAssetsError("completion_inactive", "Visual asset completion authority is no longer active");
+      }
+      return result;
     }
     await bridge.library.authorizeScope(request.authority.scope, isCurrent);
     if (isCurrent !== undefined && !isCurrent()) {
@@ -1272,7 +1290,10 @@ export class HarnessHost {
       ...(previewDirectory === undefined ? {} : { previewDirectory }),
       ...(traceContext === undefined ? {} : { authoringErrors: true }),
     });
-    if (previewDirectory !== undefined) this.previewTraces.set(interactionNodeId, traceSink);
+    if (previewDirectory !== undefined) {
+      this.previewTraces.set(interactionNodeId, traceSink);
+      this.previewFolders.set(interactionNodeId, session.descriptor.workingDirectory);
+    }
     const observedTrace = new EffectObservingTraceSink(traceSink);
     let completionError: HarnessExecutionFailure | undefined;
     let accessLease: HarnessExecutionAccessLease | undefined;
@@ -1345,7 +1366,7 @@ export class HarnessHost {
         ...(traceContext?.threadIconSelection === undefined ? {} : { threadIconSelection: traceContext.threadIconSelection }),
         ...(traceContext?.nativeHistoryAnchor === undefined ? {} : { nativeHistoryAnchor: traceContext.nativeHistoryAnchor }),
         inputGraph: interaction,
-        interactionInput,
+        interactionInput: await withArtifactNoteScreenshots(interactionInput, this.options.artifactNotesDirectory, programDirectory),
         ...(personalPresentation === undefined ? {} : { personalPresentation }),
         graph: scope,
         ...(completionBroker === undefined ? {} : { completionBroker }),
@@ -1375,6 +1396,7 @@ export class HarnessHost {
       scope.close();
       if (previewDirectory !== undefined) {
         this.previewTraces.delete(interactionNodeId);
+        this.previewFolders.delete(interactionNodeId);
         // Preview images are transient: they never outlive the turn.
         await rm(previewDirectory, { recursive: true, force: true }).catch(() => undefined);
       }
@@ -1952,6 +1974,9 @@ async function route(host: HarnessHost, options: HarnessHostOptions, request: In
       try {
         return reply(response, 200, { result: await host.visualAssetOperation(await body(request)) });
       } catch (error) {
+        if (error instanceof ArtifactFileError) {
+          return reply(response, 400, { error: { code: error.code, path: error.path, message: error.message } });
+        }
         const code = error instanceof VisualAssetsError ? error.code : "visual_assets_operation_failed";
         const status = code === "completion_inactive" ? 409 : 400;
         return reply(response, status, { error: { code, message: errorMessage(error) } });
@@ -2272,7 +2297,8 @@ function operationScope(request: VisualBridgeRequest): VisualAssetScope {
   if (!READ_ONLY_VISUAL_OPERATIONS.has(request.operation.kind)
     && !MUTATING_VISUAL_OPERATIONS.has(request.operation.kind)
     && request.operation.kind !== "prepare-detail"
-    && request.operation.kind !== "prepare-icon") {
+    && request.operation.kind !== "prepare-icon"
+    && request.operation.kind !== "check-artifact") {
     throw new VisualAssetsError("visual_assets_operation_unsupported", `Unsupported visual asset operation: ${request.operation.kind}`);
   }
   return scope;

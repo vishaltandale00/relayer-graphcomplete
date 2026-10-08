@@ -139,6 +139,8 @@ pub struct ImportedLayer {
     pub edges: Vec<String>,
     #[serde(default)]
     pub layout: Option<ImportedLayerLayout>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub renderer: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -203,6 +205,8 @@ pub struct ImportedNode {
     pub authored_detail_omitted: bool,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub authored_detail_assets: Vec<ImportedDetailAsset>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub artifact: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -655,10 +659,19 @@ impl crate::GraphDatabase {
             } else {
                 node.detail
             };
-            let result = sqlx::query("INSERT INTO nodes(project_id,thread_id,kind,icon,title,detail,authored_detail,state,owner_interaction_id,client_key) VALUES (?1,?2,?3,?4,?5,?6,?7,'accepted',?8,?9)")
+            if let Some(artifact) = &node.artifact {
+                crate::artifact::validate_artifact(artifact, true)?;
+            }
+            let artifact = node
+                .artifact
+                .as_ref()
+                .map(serde_json::to_string)
+                .transpose()
+                .map_err(|error| GraphError::Internal(error.to_string()))?;
+            let result = sqlx::query("INSERT INTO nodes(project_id,thread_id,kind,icon,title,detail,authored_detail,state,owner_interaction_id,client_key,artifact) VALUES (?1,?2,?3,?4,?5,?6,?7,'accepted',?8,?9,?10)")
                 .bind(metadata.project_id.map(ProjectId::value)).bind(metadata.thread_id.value()).bind(node.kind).bind(node.icon)
                 .bind(node.title).bind(detail).bind(authored_detail).bind(owner)
-                .bind(&portable_id).execute(&mut *tx).await?;
+                .bind(&portable_id).bind(artifact).execute(&mut *tx).await?;
             let node_id =
                 NodeId::new(result.last_insert_rowid()).expect("inserted node ID is positive");
             sqlx::query("INSERT INTO imported_node_client_keys(node_id,import_id,client_key) VALUES (?1,?2,?3)")
@@ -690,6 +703,8 @@ impl crate::GraphDatabase {
 
         let mut edge_ids = HashMap::<String, i64>::new();
         let mut layer_ids = HashMap::<String, i64>::new();
+        // Two artifact views are two nodes: an artifact node appears in one imported layer.
+        let mut artifact_layer_of = HashMap::<String, String>::new();
         let mut seen_layers = HashSet::new();
         for position in 0..turn_count {
             let turn = load_turn(&mut tx, import_id, position).await?;
@@ -714,13 +729,51 @@ impl crate::GraphDatabase {
                         .bind(owner).bind(&edge.id).execute(&mut *tx).await?;
                     edge_ids.insert(edge.id.clone(), result.last_insert_rowid());
                 }
-                let result = sqlx::query("INSERT INTO layers(project_id,thread_id,layout_schema_version,state,owner_interaction_id,client_key,default_node_id,layout_edge_shape,layout_edge_routes) VALUES (?1,?2,?3,'accepted',?4,?5,?6,?7,?8)")
+                // An imported graph obeys the same artifact-layer rules as a live one.
+                let members = resolved
+                    .nodes
+                    .iter()
+                    .map(|node| (node.id.clone(), node.artifact.is_some()))
+                    .collect::<Vec<_>>();
+                crate::artifact::validate_renderer_members(
+                    resolved.layer.renderer.as_deref(),
+                    &members,
+                    resolved.edges.len(),
+                )?;
+                // The answer opens on a graph, never on an artifact (PRD 6.6.1).
+                if resolved.layer.id == view.root_layer_id && resolved.layer.renderer.is_some() {
+                    return Err(GraphError::validation(
+                        "artifact_layer_as_response",
+                        "rootLayerId",
+                        format!(
+                            "Imported layer {} is an answer's root layer, which must be a graph.",
+                            resolved.layer.id
+                        ),
+                    ));
+                }
+                for (node, _) in members.iter().filter(|(_, artifact)| *artifact) {
+                    if let Some(other) =
+                        artifact_layer_of.insert(node.clone(), resolved.layer.id.clone())
+                        && other != resolved.layer.id
+                    {
+                        return Err(GraphError::validation(
+                            "artifact_node_in_another_layer",
+                            "layers",
+                            format!(
+                                "Imported artifact node {node} appears in layers {other} and {}.",
+                                resolved.layer.id
+                            ),
+                        ));
+                    }
+                }
+                let result = sqlx::query("INSERT INTO layers(project_id,thread_id,layout_schema_version,state,owner_interaction_id,client_key,default_node_id,layout_edge_shape,layout_edge_routes,renderer) VALUES (?1,?2,?3,'accepted',?4,?5,?6,?7,?8,?9)")
                     .bind(metadata.project_id.map(ProjectId::value)).bind(metadata.thread_id.value())
                     .bind(resolved.layer.layout.as_ref().map(|layout| i64::from(layout.version)))
                     .bind(owner).bind(&resolved.layer.id)
                     .bind(resolved.layer.default_node_id.as_ref().map(|id| node_ids[id]))
                     .bind(resolved.layer.layout.as_ref().and_then(|layout| layout.edge_shape.as_deref()))
                     .bind(imported_routes(resolved.layer.layout.as_ref(), &node_ids, &edge_ids)?)
+                    .bind(resolved.layer.renderer.as_deref())
                     .execute(&mut *tx).await?;
                 let layer_id = result.last_insert_rowid();
                 sqlx::query("INSERT INTO imported_layer_client_keys(layer_id,import_id,client_key) VALUES (?1,?2,?3)")
@@ -1708,6 +1761,9 @@ fn register_imported_node(
         let existing_client_key = existing.client_key.take();
         let incoming_authored_detail = node.authored_detail.take();
         let existing_authored_detail = existing.authored_detail.take();
+        // Context snapshots omit artifact details too; the accepted view's copy carries them.
+        let incoming_artifact = node.artifact.take();
+        let existing_artifact = existing.artifact.take();
         let incoming_assets = std::mem::take(&mut node.authored_detail_assets);
         let existing_assets = std::mem::take(&mut existing.authored_detail_assets);
         // Context snapshots omit authored keys, packages and omission markers.
@@ -1725,9 +1781,14 @@ fn register_imported_node(
                 (&existing_authored_detail, &incoming_authored_detail),
                 (Some(left), Some(right)) if left != right
             )
+            || matches!(
+                (&existing_artifact, &incoming_artifact),
+                (Some(left), Some(right)) if left != right
+            )
         {
             existing.client_key = existing_client_key;
             existing.authored_detail = existing_authored_detail;
+            existing.artifact = existing_artifact;
             existing.authored_detail_omitted = existing_omitted;
             existing.authored_detail_assets = existing_assets;
             return Err(GraphError::Internal(
@@ -1736,6 +1797,7 @@ fn register_imported_node(
         }
         existing.client_key = existing_client_key.or(incoming_client_key);
         existing.authored_detail = existing_authored_detail.or(incoming_authored_detail);
+        existing.artifact = existing_artifact.or(incoming_artifact);
         existing.authored_detail_assets = existing_assets;
         for incoming in incoming_assets {
             if !existing

@@ -116,6 +116,7 @@ struct LayerRow {
     layout_schema_version: Option<i64>,
     layout_edge_shape: Option<String>,
     layout_edge_routes: Option<String>,
+    renderer: Option<String>,
 }
 
 #[derive(FromRow)]
@@ -126,6 +127,24 @@ struct PlacementRow {
 }
 
 impl<'connection> LayerTable<'connection> {
+    /// Another live artifact layer that already shows this node, other than the
+    /// layer being written (same owner and client key).
+    pub(crate) async fn other_artifact_layer_for(
+        &mut self,
+        node: NodeId,
+        owner: NodeId,
+        client_key: &str,
+    ) -> Result<Option<i64>, GraphError> {
+        Ok(sqlx::query_scalar::<_, i64>(
+            "SELECT l.id FROM layer_nodes ln JOIN layers l ON l.id=ln.layer_id WHERE ln.node_id=?1 AND l.renderer='artifact' AND l.state<>'stopped' AND NOT (l.owner_interaction_id=?2 AND l.client_key=?3) LIMIT 1",
+        )
+        .bind(node.value())
+        .bind(owner.value())
+        .bind(client_key)
+        .fetch_optional(&mut *self.connection)
+        .await?)
+    }
+
     pub(crate) fn new(connection: &'connection mut SqliteConnection) -> Self {
         Self { connection }
     }
@@ -136,7 +155,7 @@ impl<'connection> LayerTable<'connection> {
         id: LayerId,
     ) -> Result<Option<LayerRecord>, GraphError> {
         let row = sqlx::query_as::<_, LayerRow>(
-            "SELECT id,COALESCE((SELECT k.client_key FROM imported_layer_client_keys k WHERE k.layer_id=layers.id),client_key) AS client_key,state,owner_interaction_id,layout_schema_version,layout_edge_shape,layout_edge_routes,default_node_id FROM layers WHERE id=?1 AND NOT EXISTS(SELECT 1 FROM imported_provenance_layers p WHERE p.layer_id=layers.id) AND ((?2 IS NOT NULL AND project_id=?2) OR (?2 IS NULL AND project_id IS NULL AND thread_id=?3))",
+            "SELECT id,COALESCE((SELECT k.client_key FROM imported_layer_client_keys k WHERE k.layer_id=layers.id),client_key) AS client_key,state,owner_interaction_id,layout_schema_version,layout_edge_shape,layout_edge_routes,default_node_id,renderer FROM layers WHERE id=?1 AND NOT EXISTS(SELECT 1 FROM imported_provenance_layers p WHERE p.layer_id=layers.id) AND ((?2 IS NOT NULL AND project_id=?2) OR (?2 IS NULL AND project_id IS NULL AND thread_id=?3))",
         )
         .bind(id.value())
         .bind(scope.project_id.map(ProjectId::value))
@@ -196,6 +215,7 @@ impl<'connection> LayerTable<'connection> {
                 nodes,
                 edges,
                 layout,
+                renderer: row.renderer,
                 state: RecordState::parse(&row.state)?,
             },
             owner: valid_node_id(row.owner_interaction_id)?,
@@ -311,6 +331,7 @@ impl<'connection> LayerTable<'connection> {
         &mut self,
         scope: &InteractionScope,
         draft: &LayerDraft,
+        renderer: Option<&str>,
     ) -> Result<GraphLayer, GraphError> {
         let id = match self
             .by_owner_and_key(scope.root_node_id, &draft.client_key)
@@ -326,13 +347,14 @@ impl<'connection> LayerTable<'connection> {
                     .execute(&mut *self.connection)
                     .await?;
                 sqlx::query(
-                    "UPDATE layers SET layout_schema_version=?1,default_node_id=?3,layout_edge_shape=?4,layout_edge_routes=?5 WHERE id=?2",
+                    "UPDATE layers SET layout_schema_version=?1,default_node_id=?3,layout_edge_shape=?4,layout_edge_routes=?5,renderer=?6 WHERE id=?2",
                 )
                 .bind(layout(draft)?.version as i64)
                 .bind(id.value())
                 .bind(draft.default_node_id.map(NodeId::value))
                 .bind(layout(draft)?.edge_shape.as_deref())
                 .bind(stored_routes(layout(draft)?)?)
+                .bind(renderer)
                 .execute(&mut *self.connection)
                 .await?;
                 id
@@ -353,7 +375,7 @@ impl<'connection> LayerTable<'connection> {
             }
             None => {
                 let result = sqlx::query(
-                    "INSERT INTO layers(project_id,thread_id,state,owner_interaction_id,client_key,layout_schema_version,default_node_id,layout_edge_shape,layout_edge_routes) VALUES (?1,?2,'draft',?3,?4,?5,?6,?7,?8)",
+                    "INSERT INTO layers(project_id,thread_id,state,owner_interaction_id,client_key,layout_schema_version,default_node_id,layout_edge_shape,layout_edge_routes,renderer) VALUES (?1,?2,'draft',?3,?4,?5,?6,?7,?8,?9)",
                 )
                 .bind(scope.project_id.map(ProjectId::value))
                 .bind(scope.thread_id.value())
@@ -363,6 +385,7 @@ impl<'connection> LayerTable<'connection> {
                 .bind(draft.default_node_id.map(NodeId::value))
                 .bind(layout(draft)?.edge_shape.as_deref())
                 .bind(stored_routes(layout(draft)?)?)
+                .bind(renderer)
                 .execute(&mut *self.connection)
                 .await?;
                 valid_layer_id(result.last_insert_rowid())?
@@ -403,6 +426,7 @@ impl<'connection> LayerTable<'connection> {
             nodes: draft.nodes.clone(),
             edges: draft.edges.clone(),
             layout: draft.layout.clone(),
+            renderer: renderer.map(str::to_owned),
             state: RecordState::Draft,
         })
     }

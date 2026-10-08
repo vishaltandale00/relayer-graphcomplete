@@ -398,6 +398,27 @@ pub(super) async fn get(
     Ok(Json(response))
 }
 
+/// The folder an artifact viewer reads files from (PRD 6.6.4): the thread's
+/// working directory. Desktop main uses it to serve thread-folder artifacts.
+pub(super) async fn artifact_folder(
+    State(state): State<ApiState>,
+    headers: HeaderMap,
+    Path(id): Path<i64>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    authorize_write(&state, &headers)?;
+    let thread = state
+        .product
+        .get_thread(ThreadId::try_from(id)?)
+        .await?
+        .thread;
+    let folder = thread_working_directory(&state, &thread).await?;
+    // A web app's server invoke runs under the thread's permission profile (PRD 6.6.6).
+    Ok(Json(serde_json::json!({
+        "folder": folder,
+        "permissionProfileId": thread.permission_profile_id,
+    })))
+}
+
 pub(super) async fn export(
     State(state): State<ApiState>,
     headers: HeaderMap,

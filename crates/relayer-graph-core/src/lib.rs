@@ -36,6 +36,7 @@ pub use graph::{
     map_authored_detail_actions, normalize_icon_name, publication_targets, resolve_icon_name,
 };
 
+pub use graph::artifact;
 pub use graph::{ImageIcon, image_icon};
 
 pub use graph::{icon_serde, optional_icon_serde};

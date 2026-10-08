@@ -441,6 +441,7 @@ mod tests {
                 edges: vec![],
                 layout: None,
                 state: ExportRecordState::Accepted,
+                renderer: None,
             },
             nodes: vec![ExportNode {
                 id: node_id.into(),
@@ -453,6 +454,7 @@ mod tests {
                 authored_detail_omitted: None,
                 authored_detail_assets: Vec::new(),
                 state: ExportRecordState::Accepted,
+                artifact: None,
             }],
             edges: vec![],
             actions,

@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Tidewater menu board</title>
+  <style>
+    body { margin: 0; font: 18px/1.5 system-ui, sans-serif; background: #10302f; color: #eaf4f2; display: grid; place-items: center; min-height: 100vh; }
+    main { width: min(640px, 92vw); }
+    h1 { font-size: 44px; margin: 0 0 12px; }
+    li { display: flex; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid #2a5452; list-style: none; }
+    ul { padding: 0; }
+    .empty { color: #f3c9a8; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Menu board</h1>
+    <ul id="board"><li class="empty">Loading today's specials…</li></ul>
+  </main>
+  <script>
+    // The agent's bug: specials is undefined, so the board never fills in.
+    const specials = window.TIDEWATER_SPECIALS;
+    document.querySelector("#board").innerHTML = specials.map((item) => `<li>${item}</li>`).join("");
+  </script>
+</body>
+</html>

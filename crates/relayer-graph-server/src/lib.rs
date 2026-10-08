@@ -2289,6 +2289,9 @@ struct SubmitNodeRequest {
     /// clears it, and a package replaces it.
     #[serde(default, deserialize_with = "deserialize_nullable_authored_detail")]
     authored_detail: Option<Option<Value>>,
+    /// Artifact details (PRD 11.11). Each submission sets them; absent means none.
+    #[serde(default)]
+    artifact: Option<Value>,
 }
 
 fn deserialize_nullable_authored_detail<'de, D>(
@@ -2334,6 +2337,17 @@ async fn submit_node(
             prepare_detail_assets(&state, &writer, authority, asset_generation, package).await?,
         );
     }
+    let mut artifact = input.artifact.clone();
+    if let Some(artifact) = artifact.as_mut() {
+        relayer_graph_core::artifact::validate_artifact(artifact, false)?;
+        let kind = artifact["kind"].as_str().unwrap_or_default().to_owned();
+        if relayer_graph_core::artifact::is_file_artifact_kind(&kind) {
+            let fingerprint =
+                check_artifact_files(&state, &writer, authority, asset_generation, artifact)
+                    .await?;
+            artifact["fingerprint"] = Value::String(fingerprint);
+        }
+    }
     let mut draft = input.draft.clone();
     let prepared_icon = prepare_image_icon(
         &state,
@@ -2344,11 +2358,12 @@ async fn submit_node(
     )
     .await?;
     let node = writer
-        .submit_node_with_prepared_visual_assets(
+        .submit_node_with_artifact(
             &draft,
             input.authored_detail_update(),
             prepared_assets.as_deref(),
             prepared_icon.as_ref(),
+            artifact.as_ref(),
         )
         .await?;
     drop(asset_generation_guard);
@@ -2361,6 +2376,143 @@ async fn submit_node(
         )
         .await;
     Ok(with_preview(json!({"node": node}), preview))
+}
+
+/// Ask the harness host, which owns the session's working directory, to resolve an
+/// artifact's files inside the thread folder and fingerprint them (ADR 0014).
+async fn check_artifact_files(
+    state: &ServerState,
+    writer: &GraphWriter,
+    authority: RuntimeAuthority,
+    asset_generation: u64,
+    artifact: &Value,
+) -> Result<String, ApiError> {
+    writer.require_active_authority().await?;
+    let bridge = state
+        .visual_assets_bridge
+        .lock()
+        .expect("visual-assets bridge mutex poisoned")
+        .clone()
+        .ok_or_else(ApiError::artifact_files_unavailable)?;
+    let (project_id, thread_id) = writer.authority_scope();
+    let scope = project_id.map_or_else(
+        || json!({"kind":"thread","threadId":thread_id.value()}),
+        |id| json!({"kind":"project","projectId":id.value(),"threadId":thread_id.value()}),
+    );
+    let response = state
+        .http_client
+        .post(format!("{}/visual-assets/operations", bridge.url))
+        .bearer_auth(&bridge.token)
+        .json(&json!({
+            "version":1,
+            "generation":bridge.generation,
+            "assetGeneration":asset_generation,
+            "authority":{"kind":"completion","interactionNodeId":authority.node_id.value(),"scope":scope},
+            "operation":{"kind":"check-artifact","scope":{"kind":"thread","threadId":thread_id.value()},"artifact":artifact},
+        }))
+        .send()
+        .await
+        .map_err(|_| ApiError::artifact_files_unavailable())?;
+    let status = response.status();
+    let body: Value = response
+        .json()
+        .await
+        .map_err(|_| ApiError::artifact_files_unavailable())?;
+    writer.require_active_authority().await?;
+    if !status.is_success() {
+        let code = body
+            .pointer("/error/code")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        if code.starts_with("artifact_") {
+            let message = body
+                .pointer("/error/message")
+                .and_then(Value::as_str)
+                .unwrap_or(code);
+            let path = body
+                .pointer("/error/path")
+                .and_then(Value::as_str)
+                .unwrap_or("artifact.source.file");
+            return Err(ApiError(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                json!({"error":{"code":code,"path":path,"message":message,"issues":[{"code":code,"path":path,"message":message}]}}),
+            ));
+        }
+        return Err(ApiError(status, body));
+    }
+    body.pointer("/result/fingerprint")
+        .and_then(Value::as_str)
+        .map(str::to_owned)
+        .ok_or_else(ApiError::artifact_files_unavailable)
+}
+
+/// Acceptance pins each file artifact's fingerprint (PRD 6.6.5): a file the
+/// agent edited after submitting its node is pinned as it is accepted. A file
+/// that is gone or moved outside the folder fails acceptance with the host's issue.
+async fn pin_artifact_fingerprints(
+    state: &ServerState,
+    authority: RuntimeAuthority,
+    asset_generation: u64,
+    transition: Option<&relayer_graph_core::CurrentTransition>,
+) -> Result<(), ApiError> {
+    // An inactive authority is reported by the pause and acceptance that follow,
+    // exactly as for a run without artifacts.
+    let Ok(writer) = state
+        .graph
+        .writer_for_completion_authority(authority.node_id, authority.epoch)
+        .await
+    else {
+        return Ok(());
+    };
+    if writer.require_active_authority().await.is_err() {
+        return Ok(());
+    }
+    for (node_id, artifact) in writer.draft_artifacts_for(transition).await? {
+        let kind = artifact["kind"].as_str().unwrap_or_default();
+        if !relayer_graph_core::artifact::is_file_artifact_kind(kind) {
+            continue;
+        }
+        let fingerprint =
+            check_artifact_files(state, &writer, authority, asset_generation, &artifact)
+                .await
+                .map_err(|error| name_artifact_node(error, node_id))?;
+        writer
+            .pin_artifact_fingerprint(node_id, &fingerprint)
+            .await?;
+    }
+    Ok(())
+}
+
+/// Acceptance checks every draft artifact node, so a failure says which one: the agent
+/// can restore the file, or resubmit the node without artifact details.
+fn name_artifact_node(mut error: ApiError, node_id: NodeId) -> ApiError {
+    // Only file issues are the agent's to repair; an unavailable host is not.
+    if error.0 != StatusCode::UNPROCESSABLE_ENTITY {
+        return error;
+    }
+    let prefix = format!("Node {node_id}: ", node_id = node_id.value());
+    let suffix = " Restore the file, or resubmit the node without artifact details if it is no longer shown.";
+    if let Some(message) = error.1.pointer_mut("/error/message") {
+        *message = Value::String(format!(
+            "{prefix}{}{suffix}",
+            message.as_str().unwrap_or_default()
+        ));
+    }
+    if let Some(issues) = error
+        .1
+        .pointer_mut("/error/issues")
+        .and_then(Value::as_array_mut)
+    {
+        for issue in issues {
+            if let Some(message) = issue.get_mut("message") {
+                *message = Value::String(format!(
+                    "{prefix}{}{suffix}",
+                    message.as_str().unwrap_or_default()
+                ));
+            }
+        }
+    }
+    error
 }
 
 async fn prepare_image_icon(
@@ -2658,12 +2810,20 @@ async fn submit_layer(
     Json(input): Json<LayerDraftRequest>,
 ) -> Result<Json<Value>, ApiError> {
     let authority = session(&state, &headers)?;
+    let renderer = input.renderer.clone();
     let input = LayerDraft::from(input);
     let writer = state
         .graph
         .writer_for_completion_authority(authority.node_id, authority.epoch)
         .await?;
-    let layer = writer.submit_layer(&input).await?;
+    // A layer write changes which artifacts the answer reaches; acceptance pins their
+    // fingerprints under this gate, so no layer changes between the pin and acceptance.
+    let gate = completion_asset_gate(&state, authority.node_id)?;
+    let writing = gate.lock().await;
+    let layer = writer
+        .submit_layer_with_renderer(&input, renderer.as_deref())
+        .await?;
+    drop(writing);
     let preview = state
         .draft_previews
         .preview(
@@ -2687,6 +2847,9 @@ struct LayerDraftRequest {
     layout: Option<LayerLayoutRequest>,
     #[serde(default)]
     size_justification: Option<String>,
+    /// Which renderer reads the layer (PRD 11.11): absent for a graph, or "artifact".
+    #[serde(default)]
+    renderer: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -2829,6 +2992,9 @@ async fn discard_layer(
     Path(id): Path<LayerId>,
 ) -> Result<Json<Value>, ApiError> {
     let authority = session(&state, &headers)?;
+    // Discarding a layer changes the answer's artifacts too (see submit_layer).
+    let gate = completion_asset_gate(&state, authority.node_id)?;
+    let _writing = gate.lock().await;
     let layer = state
         .graph
         .writer_for_completion_authority(authority.node_id, authority.epoch)
@@ -2939,6 +3105,9 @@ async fn submit_completion(
     let authority = session(&state, &headers)?;
     let gate = completion_asset_gate(&state, authority.node_id)?;
     let mut generation = gate.lock().await;
+    // Before the asset pause: the host still answers file checks, and the gate
+    // keeps node writes out until acceptance.
+    pin_artifact_fingerprints(&state, authority, *generation, None).await?;
     let barrier = format!("complete-{}", authority.node_id.value());
     *generation = visual_assets_lifecycle(
         &state,
@@ -3028,6 +3197,11 @@ async fn transition_current(
             input.operation_key
         );
         let mut generation = gate.lock().await;
+        // Return publishes drafts, so it pins first (PRD 6.6.5); Stop and Fail publish none.
+        if matches!(input.transition, CurrentTransition::Return { .. }) {
+            pin_artifact_fingerprints(&state, authority, *generation, Some(&input.transition))
+                .await?;
+        }
         *generation = visual_assets_lifecycle(
             &state,
             authority.node_id,
@@ -3060,6 +3234,11 @@ async fn transition_current(
             }
         }
     }
+    // Advance publishes drafts as well; hold the gate so no node write lands between
+    // the fingerprint pin and the transition.
+    let gate = completion_asset_gate(&state, authority.node_id)?;
+    let generation = gate.lock().await;
+    pin_artifact_fingerprints(&state, authority, *generation, Some(&input.transition)).await?;
     Ok(Json(
         state
             .graph
@@ -3146,6 +3325,12 @@ fn session_for_token(state: &ServerState, token: &str) -> Result<RuntimeAuthorit
 
 pub struct ApiError(StatusCode, Value);
 impl ApiError {
+    fn artifact_files_unavailable() -> Self {
+        Self(
+            StatusCode::SERVICE_UNAVAILABLE,
+            json!({"error":{"code":"artifact_files_unavailable","message":"Relayer cannot check artifact files right now. Try submitting the node again."}}),
+        )
+    }
     fn visual_assets_unavailable() -> Self {
         Self(
             StatusCode::SERVICE_UNAVAILABLE,

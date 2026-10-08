@@ -1,7 +1,7 @@
 import { packagedWindowsNodePath } from "../shared/windows-node-runtime.mjs";
 import { createSharePreviewCapture } from "./services/share-preview-capture.mjs";
 import { createElectronDraftPreviewRenderer } from "./services/draft-preview-renderer.mjs";
-import { app, BrowserWindow, dialog, ipcMain, nativeTheme, session, safeStorage, shell } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, Menu, nativeTheme, protocol, session, safeStorage, shell, WebContentsView } from "electron";
 import electronUpdater from "electron-updater";
 import { readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
@@ -23,7 +23,9 @@ import {
   createEncryptedCredentialStore,
 } from "./providers/provider-definition-store.mjs";
 import { createWorktreeService } from "./services/worktree-service.mjs";
-import { registerDesktopIpc } from "./ipc/register-ipc.mjs";
+import { registerArtifactViewerIpc, registerDesktopIpc } from "./ipc/register-ipc.mjs";
+import { createArtifactViewerService, registerArtifactScheme } from "./services/artifact-viewer.mjs";
+import { createArtifactServerRunner } from "./services/artifact-server.mjs";
 import { createConversationExportService } from "./services/conversation-export.mjs";
 import { createSharePublishCoordinator } from "./services/share-publish-coordinator.mjs";
 import { createSharePublishAttemptStore } from "./services/share-publish-attempt-store.mjs";
@@ -104,6 +106,8 @@ const desktopVersion = app.isPackaged ? app.getVersion() : (metadata.version || 
 app.setName(metadata.relayerProductName || "Relayer Dev");
 
 const userDataPath = app.getPath("userData");
+// Artifact content is served through its own scheme on isolated partitions (ADR 0014).
+registerArtifactScheme(protocol);
 const providerRuntimeRoot = join(userDataPath, "provider-runtimes");
 const primeAppRoot = app.isPackaged ? app.getAppPath() : repositoryRoot;
 const primePythonClientRoot = app.isPackaged
@@ -191,6 +195,8 @@ const defaultHarnessConfiguration = resolveDesktopHarnessConfiguration({
 if (defaultHarnessConfiguration.startsWith("prime-agent-")) requirePrimeAgentRuntime(primeAgentRuntime);
 
 let mainWindow;
+// Web app servers Relayer started for the artifact viewer (PRD 6.6.6); stopped on quit.
+let artifactServers = null;
 const primaryInstance = claimPrimaryDesktopInstance({ app, getWindow: () => mainWindow });
 
 if (primaryInstance) {
@@ -225,6 +231,7 @@ if (primaryInstance) {
       diagnostics: primeAgentRuntime.diagnostics,
     })),
     codexBasicClientModuleUrl: graphClientModuleUrl,
+    artifactNotesDirectory: join(userDataPath, "artifact-notes"),
     draftPreviewRenderer: createElectronDraftPreviewRenderer({
       BrowserWindow,
       session,
@@ -409,6 +416,7 @@ if (primaryInstance) {
       // Provider admission closes first, so no turn takes provider access while shutdown
       // awaits the app server; the provider teardown below would close it underneath (PROV-004).
       providerComposition?.beginShutdown();
+      await artifactServers?.stopAll();
       updater.stopPolling();
       // No post-upgrade preparation outlives shutdown: stop the step, cancel any installer
       // operation it started, and let it settle before the services it uses close.
@@ -678,13 +686,28 @@ if (primaryInstance) {
         exit: (code) => app.exit(code),
       }),
     });
+    artifactServers = createArtifactServerRunner({ grantsPath: join(userDataPath, "artifact-server-approvals.json") });
+    // app.exit() skips the quit events; a server Relayer started never outlives it.
+    process.once("exit", () => artifactServers?.killAllNow());
+    const artifactViewer = createArtifactViewerService({
+      WebContentsView,
+      session,
+      shell,
+      getWindow: () => mainWindow,
+      resolveThread: (threadId) => productServer.artifactFolder(threadId),
+      serverRunner: artifactServers,
+      notesDirectory: join(userDataPath, "artifact-notes"),
+      rendererDirectory,
+      devTools: !app.isPackaged,
+    });
+    registerArtifactViewerIpc({ ipcMain, Menu, viewer: artifactViewer, getWindow: () => mainWindow });
     mainWindow = await createWindow(productSession);
     primaryInstance.presentPendingWindow();
-    mainWindow.on("closed", () => { mainWindow = undefined; });
+    mainWindow.on("closed", () => { artifactViewer.close(); mainWindow = undefined; });
     app.on("activate", async () => {
       if (BrowserWindow.getAllWindows().length === 0) {
         mainWindow = await createWindow(await productServer.start());
-        mainWindow.on("closed", () => { mainWindow = undefined; });
+        mainWindow.on("closed", () => { artifactViewer.close(); mainWindow = undefined; });
       } else {
         primaryInstance.presentPrimaryWindow();
       }

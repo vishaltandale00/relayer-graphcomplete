@@ -61,7 +61,8 @@ class GraphSession(RelayerGraphClient):
             "version": 1, "objectId": node.detail_authoring._object_id, "token": self.token, "nodeId": self.node_id,
             "operation": operation,
             "node": {"clientKey": node.client_key, "icon": node.icon,
-                     "title": node.title, "detail": node.detail, "kind": node.kind},
+                     "title": node.title, "detail": node.detail, "kind": node.kind,
+                     **({"artifact": node.artifact} if node.artifact is not None else {})},
             "detail": node.detail_authoring.to_wire(node),
         }))
         return payload
