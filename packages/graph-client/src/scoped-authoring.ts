@@ -19,11 +19,13 @@ import {
 import type { EdgeShape } from "./edge-shapes.js";
 import {
   GraphApiError,
+  type ArtifactDetails,
   type GraphAction,
   type GraphCapability,
   type GraphEdge,
   type GraphLayer,
   type GraphNode,
+  type LayerRenderer,
 } from "./types.js";
 
 /** Private client seam: a captured node still uses the client's compiler and retry state. */
@@ -54,6 +56,8 @@ export interface AuthoringNodeFields {
   readonly title: string;
   readonly detail: string;
   readonly kind?: string;
+  /** Artifact details; declare artifact nodes with `layer.artifactNode`. */
+  readonly artifact?: ArtifactDetails;
 }
 export type AuthoringActionFields =
   | (Omit<
@@ -284,10 +288,10 @@ export class ScopedAuthoringLayer {
       invalid(`Duplicate node ${path(declaration.name, "nodes", key)}.`);
     const values = data(fields);
     const unknownField = Object.keys(values).find(
-      (field) => !["icon", "title", "detail", "kind"].includes(field),
+      (field) => !["icon", "title", "detail", "kind", "artifact"].includes(field),
     );
     if (unknownField !== undefined)
-      invalid(`Unknown node field ${JSON.stringify(unknownField.slice(0, 128))}. Use layer.node(localKey, { icon, title, detail }) with optional kind; the scoped API supplies clientKey and ref.`);
+      invalid(`Unknown node field ${JSON.stringify(unknownField.slice(0, 128))}. Use layer.node(localKey, { icon, title, detail }) with optional kind and artifact; the scoped API supplies clientKey and ref.`);
     if (
       typeof values.title !== "string" ||
       typeof values.detail !== "string" ||
@@ -301,9 +305,24 @@ export class ScopedAuthoringLayer {
       values.kind,
       identity(this.#owner.snapshotKey, declaration.name, "n", key),
     );
+    // The client snapshots and checks artifact details at capture, as on the direct path.
+    if (values.artifact !== undefined) node.artifact = values.artifact as ArtifactDetails;
     declaration.nodes.set(key, node);
     declaration.members.push(node);
     declaration.object.nodes = [...declaration.members];
+    return node;
+  }
+  /**
+   * Makes this an artifact layer holding one artifact node, like
+   * `LayerObject.forArtifact`: centered, default, and read by the artifact viewer.
+   */
+  artifactNode(
+    localKey: string,
+    fields: AuthoringNodeFields & { readonly artifact: ArtifactDetails },
+  ): NodeObject {
+    const node = this.node(localKey, fields);
+    this.#declaration.object.renderer = "artifact";
+    this.layout([[node, 0.5, 0.5]], { edgeShape: "default", defaultNode: node });
     return node;
   }
   include(record: GraphNode | GraphEdge): void {
@@ -424,6 +443,7 @@ interface CapturedLayer {
   readonly layout: LayerLayoutObject;
   readonly defaultNode?: NodeReference | undefined;
   readonly sizeJustification?: string | undefined;
+  readonly renderer?: LayerRenderer | undefined;
 }
 
 export class ScopedGraphAuthoring {
@@ -621,6 +641,7 @@ export class ScopedGraphAuthoring {
           layout: new LayerLayoutObject(placements, layout.edgeShape, routes),
           defaultNode: declaration.object.defaultNode,
           sizeJustification: declaration.sizeJustification,
+          renderer: declaration.object.renderer,
         });
         for (const [key, node] of declaration.nodes)
           if (
@@ -809,6 +830,7 @@ export class ScopedGraphAuthoring {
                   capture.defaultNode === undefined
                     ? undefined
                     : nodeRef(capture.defaultNode),
+                  capture.renderer,
                 ),
                 capture.sizeJustification === undefined
                   ? {}

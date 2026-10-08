@@ -56,6 +56,27 @@ continue to require `GraphSession`. A layer's `.object` is the actual containing
 the client captures its fields privately for transport. No alternate compiler or
 public compiled-package submission API is introduced.
 
+## Artifact layers
+
+An artifact layer (PRD §6.6, §11.11, ADR 0014) holds exactly one artifact node and
+no edges. `layer.artifactNode(localKey, fields)` / `layer.artifact_node(local_key, ...)`
+is the scoped equivalent of `LayerObject.forArtifact` / `LayerObject.for_artifact`:
+it declares the layer's one node with its `artifact` details, centers it, makes it
+the default node, and sets the layer's `artifact` renderer. Target the layer from
+an ordinary node's navigate action.
+
+```ts
+const viewer = author.layer("site-viewer");
+viewer.artifactNode("site", {icon:"globe",title:"Landing page",detail:"Check pricing on a phone",
+  artifact:{kind:"website",source:{file:"site/index.html",root:"site"},viewport:"phone"}});
+answer.action("open-site", finding, {kind:"navigate",relation:"expand",label:"Open the site",target:viewer});
+```
+
+`layer.node` also accepts optional `artifact` details. The scoped API adds no
+local artifact checks: the client captures the details as on the direct path,
+and graph-core rejects malformed artifacts or artifact layers with repairable
+issues reported at the node or layer path.
+
 ## Identity and repair
 
 Names are nonempty, trimmed, NUL-free Unicode strings. Keys are the versioned

@@ -6,7 +6,7 @@ import base64
 import json
 import math
 from dataclasses import dataclass, replace
-from typing import Any, Callable, Awaitable, Sequence
+from typing import Any, Callable, Awaitable, Mapping, Sequence
 
 from .actions import ActionObject
 from .authoring import (EdgeEndObject, EdgeObject, EdgeRouteObject, GraphEdge,
@@ -113,16 +113,26 @@ class ScopedAuthoringLayer:
                                   _identity(owner.snapshot_key, key, "l", ""))
 
     def node(self, local_key: str, *, icon: Any, title: str, detail: str,
-             kind: str = "concept") -> NodeObject:
+             kind: str = "concept", artifact: Mapping[str, Any] | None = None) -> NodeObject:
         key = _name(local_key)
         if key in self._nodes:
             raise GraphAuthoringValidationError("Duplicate node " + _path(self._key, "nodes", key))
         if any(type(value) is not str for value in (title, detail, kind)):
             raise GraphAuthoringValidationError("Node title, detail, and kind must be strings")
-        node = NodeObject(icon, title, detail, kind, _identity(self._owner.snapshot_key, self._key, "n", key))
+        # The client captures artifact details at write, as on the direct path.
+        node = NodeObject(icon, title, detail, kind, _identity(self._owner.snapshot_key, self._key, "n", key),
+                          artifact=artifact)
         self._nodes[key] = node
         self._members.append(node)
         self.object.nodes = list(self._members)
+        return node
+
+    def artifact_node(self, local_key: str, *, icon: Any, title: str, detail: str,
+                      artifact: Mapping[str, Any], kind: str = "concept") -> NodeObject:
+        """Make this an artifact layer holding one artifact node, like LayerObject.for_artifact."""
+        node = self.node(local_key, icon=icon, title=title, detail=detail, kind=kind, artifact=artifact)
+        self.object.renderer = "artifact"
+        self.layout([(node, 0.5, 0.5)], edge_shape="default", default_node=node)
         return node
 
     def include(self, record: GraphNode | GraphEdge) -> None:
@@ -247,7 +257,7 @@ class ScopedGraphAuthoring:
                     routes.append(EdgeRouteObject(route.edge, route.shape, ends, _copy(route.waypoints)))
                 captured = LayerObject(list(layer._members), list(layer._connections),
                                        LayerLayoutObject(placements, layer.object.layout.edge_shape, routes),
-                                       layer.object.client_key, layer.object.default_node)
+                                       layer.object.client_key, layer.object.default_node, renderer=layer.object.renderer)
                 layers.append((layer, captured, layer._size_justification))
                 for key, node in layer._nodes.items():
                     if node.client_key != _identity(self.snapshot_key, layer._key, "n", key):
@@ -319,7 +329,8 @@ class ScopedGraphAuthoring:
                             route.waypoints) for route in captured.layout.edge_routes])
                     result = await self._client.submit_layer(LayerObject([node_ref(node) for node in captured.nodes],
                         [edge_ref(edge) for edge in captured.edges], layout, captured.client_key,
-                        None if captured.default_node is None else node_ref(captured.default_node)), size_justification=justification)
+                        None if captured.default_node is None else node_ref(captured.default_node), renderer=captured.renderer),
+                        size_justification=justification)
                     layer_results[id(layer.object)] = result
                     layer.object.ref = result
                     return result
