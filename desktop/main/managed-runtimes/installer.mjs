@@ -15,6 +15,7 @@ import {
 } from "node:fs/promises";
 import { dirname, isAbsolute, join, posix, relative, resolve, sep } from "node:path";
 import { Transform } from "node:stream";
+import { setTimeout as delay } from "node:timers/promises";
 import { pipeline } from "node:stream/promises";
 import semver from "semver";
 import { x as extractTar } from "tar";
@@ -579,6 +580,7 @@ export function createManagedRuntimeInstaller({
   resolveRecipe = resolveManagedRuntimeRecipe,
   assembleRecipe = async () => {},
   testOnlyLegacyMinimumVersionResolution = false,
+  renameInstallation = rename,
   removeDirectory = rm,
   removeInactiveInstallation = (path) => removeDirectory(path, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 }),
   removeAbandonedStaging = (path) => removeDirectory(path, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 }),
@@ -588,6 +590,7 @@ export function createManagedRuntimeInstaller({
   const target = managedRuntimeTarget({ platform, architecture });
   if (typeof root !== "string" || root.trim() === "") throw new Error("Managed runtime root is required.");
   if (typeof fetch !== "function" || typeof downloadArtifactFile !== "function" || typeof extract !== "function"
+    || typeof renameInstallation !== "function"
     || typeof removeDirectory !== "function" || typeof removeInactiveInstallation !== "function"
     || typeof removeAbandonedStaging !== "function" || typeof readPruneDirectory !== "function"
     || typeof resolveRecipe !== "function" || typeof assembleRecipe !== "function"
@@ -599,6 +602,29 @@ export function createManagedRuntimeInstaller({
   const operations = new Map();
   const pendingOperations = new Map();
   const activationOperations = new Map();
+
+  async function promoteInstallation(source, destination, signal) {
+    // Only immutable staging promotion may retry. Never copy over an existing
+    // generation, alter permissions, or retry active/pending pointer writes.
+    for (let attempt = 0; ; attempt += 1) {
+      signal.throwIfAborted();
+      try {
+        await renameInstallation(source, destination);
+        return;
+      } catch (error) {
+        signal.throwIfAborted();
+        if (platform !== "win32" || !["EPERM", "EACCES", "EBUSY"].includes(error?.code) || attempt >= 6) {
+          throw error;
+        }
+        try {
+          await delay(Math.min(50 * 2 ** attempt, 500), undefined, { signal });
+        } catch (error) {
+          signal.throwIfAborted();
+          throw error;
+        }
+      }
+    }
+  }
 
   async function installed(runtimeId, minimumVersion) {
     if (!RUNTIME_IDS.has(runtimeId)) throw new Error(`Unknown managed runtime: ${runtimeId}.`);
@@ -693,7 +719,7 @@ export function createManagedRuntimeInstaller({
         installation,
       });
       await mkdir(join(base, "installations"), { recursive: true });
-      await rename(stagedInstallation, finalInstallation);
+      await promoteInstallation(stagedInstallation, finalInstallation, signal);
       moved = true;
       await createPrivateStateRoot(base, installation);
       const receipt = {
@@ -898,7 +924,7 @@ export function createManagedRuntimeInstaller({
         installation,
       });
       await mkdir(join(base, "installations"), { recursive: true });
-      await rename(stagedInstallation, finalInstallation);
+      await promoteInstallation(stagedInstallation, finalInstallation, signal);
       moved = true;
       await createPrivateStateRoot(base, installation);
       const receipt = {
@@ -926,6 +952,7 @@ export function createManagedRuntimeInstaller({
         moduleRelativePath: resolved.moduleRelativePath,
         artifacts: resolved.artifacts,
       };
+      signal.throwIfAborted();
       await atomicWriteJson(pendingPath(appVersion, runtimeId), receipt);
       pendingCommitted = true;
       if (

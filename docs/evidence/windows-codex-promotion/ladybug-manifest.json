@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "kind": "lbug-prebuilt",
+  "sourceCommit": "677035322f33ee61327f0737d50b4db8e91e8ae9",
+  "platform": "macos-arm64",
+  "rustcRelease": "1.98.0",
+  "cargoLockSha256": "83e8d4708f40f698ee161bb6178f0fe4f58a67284e30a36450799acd3d735b98",
+  "lbugVersion": "0.18.0",
+  "lbugFeatures": [],
+  "cargoProfile": "debug",
+  "library": {
+    "name": "liblbug.a",
+    "sha256": "67928c1b4bccf26e78f288a747433e1b6f2076c906428545f14163e30ea36669",
+    "sizeBytes": 459258608,
+    "stripped": true
+  },
+  "contentsSha256": "f8a05f72c5384dd937f092aa24cc8ba74d359f3d8c58428b47a5c4694ece8aef"
+}
