@@ -496,4 +496,88 @@ describe("authenticated desktop error gateway", () => {
     await reopened.gateway.close();
   });
 
+  it("admits startup failure only through its verified main-only capability and closed privacy corpus", async () => {
+    const privacy = JSON.parse(await readFile(new URL("./fixtures/telemetry-privacy-v1.json", import.meta.url), "utf8"));
+    const { gateway, send, queuePath } = await fixture();
+    expect(gateway.issueStartupFailureReporter({ generation: 1 })).toBeNull();
+    await expect(access(queuePath)).rejects.toMatchObject({ code: "ENOENT" });
+    await gateway.transitionIdentity({ generation: 1, subject: "auth0|startup" });
+    expect(gateway.issueStartupFailureReporter({ generation: 2 })).toBeNull();
+    const reporter = gateway.issueStartupFailureReporter({ generation: 1 });
+    const ordinary = gateway.issueReporter({ component: "electron-main", processGeneration: 1 });
+    for (const record of privacy.startupFailurePositiveCases) {
+      await expect(ordinary.report(record)).resolves.toEqual({ accepted: false, reason: "invalid-record" });
+    }
+    for (const forbidden of privacy.startupFailureForbiddenCases) {
+      await expect(reporter.report({ ...privacy.startupFailurePositiveCases[3], [forbidden.field]: forbidden.value }))
+        .resolves.toEqual({ accepted: false, reason: "invalid-record" });
+    }
+    await expect(reporter.report(privacy.startupFailurePositiveCases[3])).resolves.toEqual({ accepted: true, delivery: "sent" });
+    const second = gateway.issueStartupFailureReporter({ generation: 1 });
+    await expect(second.report(privacy.startupFailurePositiveCases[0])).resolves.toEqual({ accepted: true, delivery: "deduplicated" });
+    expect(send).toHaveBeenCalledOnce();
+    expect(send).toHaveBeenCalledWith(expect.objectContaining({
+      code: "electron_main.startup_failure", operation: "startup", message: "Relayer could not start.",
+      startupStage: "window-load", networkCode: "ERR_FAILED", exceptionClass: null,
+    }));
+    await gateway.transitionIdentity(null);
+    await expect(reporter.report(privacy.startupFailurePositiveCases[0])).resolves.toEqual({ accepted: false, reason: "stale-capability" });
+    await gateway.close();
+  });
+
+  it("reopens an encrypted startup event only after fresh same-account verification", async () => {
+    const first = await fixture({ send: vi.fn(async () => { throw new Error("offline"); }) });
+    await first.gateway.transitionIdentity({ generation: 1, subject: "auth0|same" });
+    const record = { code: "electron_main.startup_failure", startupStage: "window-load", networkCode: "ERR_FAILED", frames: [] };
+    await expect(first.gateway.issueStartupFailureReporter({ generation: 1 }).report(record))
+      .resolves.toEqual({ accepted: true, delivery: "queued" });
+    const queued = await queuedRecords(first.queuePath, first.decrypt);
+    expect(queued).toHaveLength(1);
+    expect((await readFile(first.queuePath, "utf8"))).not.toContain("startup_failure");
+    await first.gateway.close();
+    const reopened = await fixture({ existingQueuePath: first.queuePath });
+    expect(reopened.send).not.toHaveBeenCalled();
+    await reopened.gateway.transitionIdentity({ generation: 2, subject: "auth0|same" });
+    expect(reopened.send.mock.calls.map(([event]) => event)).toEqual(queued.map(({ event }) => event));
+    await expect(access(first.queuePath)).rejects.toMatchObject({ code: "ENOENT" });
+    await reopened.gateway.close();
+  });
+
+  it.each(["identity", "reporter"])("never queues a startup failure revoked during transport by %s", async (revocation) => {
+    let rejectSend;
+    let startedSend;
+    const started = new Promise((resolve) => { startedSend = resolve; });
+    const send = vi.fn(() => new Promise((_resolve, reject) => { rejectSend = reject; startedSend(); }));
+    const { gateway, queuePath } = await fixture({ send });
+    await gateway.transitionIdentity({ generation: 1, subject: "auth0|startup" });
+    const reporter = gateway.issueStartupFailureReporter({ generation: 1 });
+    const delivery = reporter.report({ code: "electron_main.startup_failure", startupStage: "initialization", networkCode: null, frames: [] });
+    await started;
+    const revoked = revocation === "identity" ? gateway.retireIdentity() : Promise.resolve(reporter.revoke());
+    rejectSend(new Error("offline"));
+    await expect(delivery).resolves.toEqual({ accepted: false, reason: "stale-capability" });
+    await revoked;
+    await expect(access(queuePath)).rejects.toMatchObject({ code: "ENOENT" });
+    await gateway.close();
+  });
+
+  it("never writes a deferred startup record if the reporting deadline revokes during encryption", async () => {
+    let finishEncryption;
+    let startedEncryption;
+    const started = new Promise((resolve) => { startedEncryption = resolve; });
+    const { gateway, queuePath } = await fixture({
+      send: vi.fn(async () => { throw new Error("offline"); }),
+      encrypt: () => new Promise((resolve) => { finishEncryption = resolve; startedEncryption(); }),
+    });
+    await gateway.transitionIdentity({ generation: 1, subject: "auth0|startup" });
+    const reporter = gateway.issueStartupFailureReporter({ generation: 1 });
+    const delivery = reporter.report({ code: "electron_main.startup_failure", startupStage: "window-load", networkCode: "ERR_FAILED", frames: [] });
+    await started;
+    reporter.revoke();
+    finishEncryption("sealed-late-record");
+    await expect(delivery).resolves.toEqual({ accepted: false, reason: "stale-capability" });
+    await expect(access(queuePath)).rejects.toMatchObject({ code: "ENOENT" });
+    await gateway.close();
+  });
+
 });

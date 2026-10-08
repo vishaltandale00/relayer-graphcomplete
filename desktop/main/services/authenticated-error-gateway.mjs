@@ -6,6 +6,7 @@ import { isApprovedTelemetryModule } from "../../shared/telemetry-module-invento
 import { exactKeys, validSourcePosition } from "../../shared/telemetry-validation.mjs";
 
 import { validShareHttpStatus, validShareNetworkCode } from "./share-error-diagnostics.mjs";
+import { validStartupStage, validStartupNetworkCode } from "./startup-error-diagnostics.mjs";
 
 const COMPONENTS = new Set([
   "renderer",
@@ -171,6 +172,24 @@ function validateShareFailureRecord(record) {
   });
 }
 
+function validateStartupFailureRecord(record) {
+  if (!exactKeys(record, ["code", "startupStage", "networkCode", "frames"])
+    || record.code !== "electron_main.startup_failure"
+    || !validStartupStage(record.startupStage)
+    || !validStartupNetworkCode(record.networkCode)
+    || !Array.isArray(record.frames) || record.frames.length > 32
+    || record.frames.some((frame) => !validFrame(frame, "electron-main"))) return null;
+  return Object.freeze({
+    code: record.code,
+    operation: "startup",
+    message: "Relayer could not start.",
+    exceptionClass: null,
+    startupStage: record.startupStage,
+    networkCode: record.networkCode,
+    frames: Object.freeze(record.frames.map((frame) => Object.freeze({ ...frame }))),
+  });
+}
+
 function pseudonym(subject) {
   return createHash("sha256")
     .update("graphcomplete-sentry-user-v1\0", "utf8")
@@ -187,10 +206,19 @@ function validateEvent(event) {
     "attemptReferenceId", "failureStage", "snapshotBytes",
   ]);
   if ((!exactKeys(event, ordinaryKeys) && !exactKeys(event, shareKeys)
-    && !exactKeys(event, shareKeys.concat(["httpStatus", "networkCode"])))
+    && !exactKeys(event, shareKeys.concat(["httpStatus", "networkCode"]))
+    && !exactKeys(event, ordinaryKeys.concat(["startupStage", "networkCode"])))
     || !exactKeys(event.user, ["id"])
     || !/^[a-f0-9]{64}$/u.test(event.user.id)) return false;
   if (![event.release, event.environment, event.os, event.architecture].every((value) => typeof value === "string" && value.length > 0)) return false;
+  if (Object.hasOwn(event, "startupStage")) {
+    const sanitized = validateStartupFailureRecord({
+      code: event.code, startupStage: event.startupStage, networkCode: event.networkCode, frames: event.frames,
+    });
+    return event.component === "electron-main" && sanitized !== null
+      && event.operation === sanitized.operation && event.message === sanitized.message
+      && event.exceptionClass === null;
+  }
   if (event.component === "electron-main" && Object.hasOwn(event, "attemptReferenceId")) {
     const sanitized = validateShareFailureRecord({
       code: event.code,
@@ -254,6 +282,7 @@ export function createAuthenticatedErrorGateway({
   const reporterByComponent = new Map();
   const latestProcessGenerationByComponent = new Map();
   let handledShareFailureKeys = new Set();
+  const reportedStartupGenerations = new Set();
   let operationQueue = Promise.resolve();
 
   function serialize(operation) {
@@ -307,11 +336,12 @@ export function createAuthenticatedErrorGateway({
     }
   }
 
-  async function saveQueue(inputRecords) {
+  async function saveQueue(inputRecords, stillAuthorized = () => true) {
     let records = inputRecords.slice(-MAX_QUEUE_RECORDS);
     let sealed = null;
     while (records.length > 0) {
       sealed = await encrypt(JSON.stringify({ version: QUEUE_VERSION, records }));
+      if (!stillAuthorized()) return null;
       if (typeof sealed !== "string") throw new Error("Queue encryption returned an invalid value.");
       if (Buffer.byteLength(sealed, "utf8") <= MAX_ENCRYPTED_QUEUE_BYTES) break;
       records = records.slice(1);
@@ -321,7 +351,9 @@ export function createAuthenticatedErrorGateway({
       await clearQueue();
       return false;
     }
+    if (!stillAuthorized()) return null;
     await mkdir(dirname(queuePath), { recursive: true, mode: 0o700 });
+    if (!stillAuthorized()) return null;
     const temporaryPath = `${queuePath}.${process.pid}.${Buffer.from(randomBytes(12)).toString("base64url")}.tmp`;
     try {
       await writeFile(temporaryPath, `${JSON.stringify({ version: QUEUE_VERSION, sealed })}\n`, {
@@ -329,7 +361,12 @@ export function createAuthenticatedErrorGateway({
         mode: 0o600,
         flag: "wx",
       });
+      if (!stillAuthorized()) return null;
       await rename(temporaryPath, queuePath);
+      if (!stillAuthorized()) {
+        await clearQueue();
+        return null;
+      }
     } finally {
       await rm(temporaryPath, { force: true });
     }
@@ -416,6 +453,8 @@ export function createAuthenticatedErrorGateway({
         await transport.send(event);
         return Object.freeze({ accepted: true, delivery: "sent" });
       } catch {
+        const authorized = () => !closed && identity === boundIdentity && stillAuthorized();
+        if (!authorized()) return Object.freeze({ accepted: false, reason: "stale-capability" });
         try {
           const records = freshRecords(await loadQueue())
             .filter((queued) => queued.accountId === boundIdentity.userId);
@@ -425,7 +464,9 @@ export function createAuthenticatedErrorGateway({
             occurredAt: now(),
             event,
           });
-          const persisted = await saveQueue(records);
+          if (!authorized()) return Object.freeze({ accepted: false, reason: "stale-capability" });
+          const persisted = await saveQueue(records, authorized);
+          if (persisted === null) return Object.freeze({ accepted: false, reason: "stale-capability" });
           return Object.freeze({ accepted: true, delivery: persisted ? "queued" : "dropped" });
         } catch {
           return Object.freeze({ accepted: true, delivery: "dropped" });
@@ -566,6 +607,37 @@ export function createAuthenticatedErrorGateway({
           reporters.delete(state);
           if (reporterByComponent.get(component) === state) reporterByComponent.delete(component);
         },
+      });
+    },
+
+    issueStartupFailureReporter({ generation } = {}) {
+      if (closed || identity === null) return null;
+      if (!Number.isSafeInteger(generation) || generation < 1) {
+        throw new TypeError("Startup failure reporter identity is invalid.");
+      }
+      if (identity.generation !== generation) return null;
+      const boundIdentity = identity;
+      const state = { active: true };
+      reporters.add(state);
+      return Object.freeze({
+        async report(record) {
+          if (closed || !state.active || identity !== boundIdentity) {
+            return Object.freeze({ accepted: false, reason: "stale-capability" });
+          }
+          const sanitized = validateStartupFailureRecord(record);
+          if (!sanitized) return Object.freeze({ accepted: false, reason: "invalid-record" });
+          if (reportedStartupGenerations.has(generation)) {
+            return Object.freeze({ accepted: true, delivery: "deduplicated" });
+          }
+          reportedStartupGenerations.add(generation);
+          const event = Object.freeze({
+            ...transportProjection(boundIdentity), component: "electron-main", ...sanitized,
+          });
+          const result = await deliver(boundIdentity, event, () => state.active);
+          if (!result.accepted) reportedStartupGenerations.delete(generation);
+          return result;
+        },
+        revoke() { state.active = false; reporters.delete(state); },
       });
     },
 

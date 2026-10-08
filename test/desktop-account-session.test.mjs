@@ -9,6 +9,9 @@ import {
   createDesktopAccountService,
   DESKTOP_ACCOUNT_PORTS,
 } from "../desktop/main/services/desktop-account-service.mjs";
+import { createAuthenticatedErrorGateway } from "../desktop/main/services/authenticated-error-gateway.mjs";
+import { claimPrimaryDesktopInstance } from "../desktop/main/single-instance.mjs";
+import { recoverDesktopStartupFailure } from "../desktop/main/services/startup-failure-recovery.mjs";
 import { registerDesktopIpc } from "../desktop/main/ipc/register-ipc.mjs";
 
 const directories = [];
@@ -206,6 +209,122 @@ afterEach(async () => {
 });
 
 describe.sequential("desktop direct Auth0 account authority", () => {
+  it("a rejected browser callback presents the active native recovery window", async () => {
+    const auth0 = await fakeAuth0();
+    const recoveryWindow = { isMinimized: () => true, restore: vi.fn(), show: vi.fn(), focus: vi.fn() };
+    const primary = claimPrimaryDesktopInstance({
+      app: { requestSingleInstanceLock: () => true, on: vi.fn() }, getWindow: () => recoveryWindow,
+    });
+    let launchUrl;
+    const { service } = await fixture({ auth0, openExternal: async (value) => { launchUrl = value; },
+      presentWindow: () => primary.presentPrimaryWindow() });
+    await service.start();
+    await service.login();
+    await cancellationFromLauncher(launchUrl);
+    await service.waitForIdle();
+    expect(recoveryWindow.restore).toHaveBeenCalledOnce();
+    expect(recoveryWindow.show).toHaveBeenCalledOnce();
+    expect(recoveryWindow.focus).toHaveBeenCalledOnce();
+  });
+
+
+  it.each(["cancel", "timeout"])("%s after credential commit removes that attempt before restart", async (mode) => {
+    const auth0 = await fakeAuth0();
+    let launchUrl;
+    let releaseProjection;
+    const projected = new Promise((resolve) => { releaseProjection = resolve; });
+    const gatewayDirectory = await mkdtemp(join(tmpdir(), "relayer-cancel-authority-"));
+    directories.push(gatewayDirectory);
+    const gateway = createAuthenticatedErrorGateway({ queuePath: join(gatewayDirectory, "queue.json"),
+      release: "cancel-test", environment: "preview", os: "windows", architecture: "x64",
+      encrypt: async (value) => value, decrypt: async (value) => value,
+      transport: { enable: async () => {}, disable: async () => {}, send: async () => {} },
+    });
+    const emittedAuthorities = [];
+    const telemetry = {
+      transitionIdentity: vi.fn(async (identity) => { await gateway.transitionIdentity(identity); if (identity) await projected; }),
+      retireIdentity: () => gateway.retireIdentity(),
+    };
+    const { service, directory, portsByChannel } = await fixture({ auth0, telemetry,
+      openExternal: async (value) => { launchUrl = value; },
+      emit: (state) => {
+        if (["signed-out", "error"].includes(state.status)) {
+          emittedAuthorities.push(gateway.issueReporter({ component: "electron-main", processGeneration: 1 }));
+        }
+      },
+    });
+    await service.start();
+    await service.login();
+    await callbackFromLauncher(launchUrl);
+    await vi.waitFor(() => expect(telemetry.transitionIdentity).toHaveBeenCalledWith(expect.objectContaining({ subject: "auth0|person" })));
+    expect(JSON.parse(await readFile(join(directory, "account.json"), "utf8")).sealed).toBeDefined();
+    await service.cancelLogin({ timedOut: mode === "timeout" });
+    expect(emittedAuthorities).toEqual([null]);
+    releaseProjection();
+    await service.waitForIdle();
+    await service.close();
+    await expect(readFile(join(directory, "account.json"))).rejects.toMatchObject({ code: "ENOENT" });
+    const reopened = accountService({ channel: "stable", portsByChannel, credentialPath: join(directory, "account.json"),
+      auth0: { issuer: auth0.issuer, clientId: auth0.clientId }, launcherUrl: "https://app.relayerlabs.ai/desktop/login",
+      encrypt: async (value) => Buffer.from(`sealed:${value}`).toString("base64"),
+      decrypt: async (value) => Buffer.from(value, "base64").toString().slice(7), openExternal: async () => {},
+    });
+    expect(await reopened.start()).toMatchObject({ status: "signed-out" });
+    expect(reopened.telemetryIdentity()).toBeNull();
+    await gateway.close();
+  });
+
+
+  it("native recovery waits for the real verified Auth0 callback before shutdown and restart", async () => {
+    const auth0 = await fakeAuth0();
+    let launchUrl;
+    let releaseProgress;
+    const progress = new Promise((resolve) => { releaseProgress = resolve; });
+    const { service } = await fixture({ auth0, openExternal: async (value) => { launchUrl = value; } });
+    const accountStartup = service.start();
+    const calls = [];
+    let dialogs = 0;
+    const recovery = recoverDesktopStartupFailure({
+      error: new Error("ERR_FAILED (-2) loading private local workspace"), startupStage: "window-load",
+      account: service, accountStartup,
+      showDialog: (options) => {
+        if (++dialogs === 1) return Promise.resolve({ response: 1 });
+        options.signal.addEventListener("abort", () => releaseProgress({ response: 0 }), { once: true });
+        return progress;
+      },
+      shutdown: async () => { calls.push("shutdown"); await service.close(); },
+      relaunch: () => calls.push("relaunch"), exit: () => calls.push("exit"),
+    });
+    await vi.waitFor(() => expect(launchUrl).toBeDefined());
+    expect(calls).toEqual([]);
+    expect(await service.account()).toMatchObject({ status: "signing-in" });
+    await callbackFromLauncher(launchUrl);
+    await recovery;
+    expect(calls).toEqual(["shutdown", "relaunch", "exit"]);
+    expect(dialogs).toBe(2);
+  });
+
+  it("native cancellation retires a callback while the browser launcher is still pending", async () => {
+    const auth0 = await fakeAuth0();
+    let launchUrl;
+    let releaseLaunch;
+    const launch = new Promise((resolve) => { releaseLaunch = resolve; });
+    const { service, directory } = await fixture({ auth0, openExternal: async (value) => { launchUrl = value; await launch; } });
+    await service.start();
+    const controller = new AbortController();
+    const login = service.login({ signal: controller.signal });
+    await vi.waitFor(() => expect(launchUrl).toBeDefined());
+    controller.abort();
+    await vi.waitFor(async () => expect(await service.account()).toMatchObject({ status: "signed-out" }));
+    await expect(callbackFromLauncher(launchUrl)).rejects.toThrow();
+    releaseLaunch();
+    await login;
+    expect(service.telemetryIdentity()).toBeNull();
+    await expect(readFile(join(directory, "account.json"))).rejects.toMatchObject({ code: "ENOENT" });
+    expect(auth0.requests.filter(({ url }) => url === "/oauth/token")).toHaveLength(0);
+  });
+
+
   it("keeps registered defaults and never falls back to Stable from an exhausted Preview pool", async () => {
     expect(DESKTOP_ACCOUNT_PORTS).toEqual({ stable: [49152, 49153, 49154], preview: [49155, 49156, 49157] });
     const auth0 = await fakeAuth0();

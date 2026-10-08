@@ -1,6 +1,6 @@
 # ADR 0009: Authenticated desktop error reporting
 
-Status: accepted; share-service network scope and planned oversize-failure exception amended by [ADR 0011](0011-shared-thread-snapshot-service.md)
+Status: accepted; handled fatal desktop startup extension approved; share-service network scope and planned oversize-failure exception amended by [ADR 0011](0011-shared-thread-snapshot-service.md)
 
 ## Context
 
@@ -82,6 +82,44 @@ entries still require the existing same-account, release, and platform checks;
 this does not introduce cross-release replay. Deduplication still uses account/reference/stage/code, and the
 share attempt store never persists diagnostic stacks or raw exceptions.
 
+### Narrow handled fatal startup exception
+
+`electron_main.startup_failure` is the second closed handled-error exception.
+Only Electron main can issue its generation-bound reporter. It admits a code-owned
+fatal message, a closed startup stage (`initialization`, `runtime-start`,
+`product-server-start`, or `window-load`), a null or allowlisted network code,
+and approved application frames. The allowlist lives in
+`desktop/main/services/startup-error-diagnostics.mjs`. Main retains release,
+environment, platform, architecture, and pseudonymous identity ownership.
+Raw URLs, messages, logs, tokens, user paths, and all other fields remain forbidden.
+Sentry receives a fatal event with frames in oldest-to-newest order.
+
+One 2.5-second startup budget covers only the existing saved-login verification,
+child/runtime attribution, and delivery attempt. Main admits only the verified
+saved identity still current after those waits. Signed-out, uncertain, unavailable,
+cancelled, revoked, or timed-out identity leaves no request and no deferred record.
+A late verification cannot start reporting after that budget. Reporting ends before
+native recovery sign-in; the original prelogin failure is never uploaded after login.
+An admitted child/runtime event suppresses the corresponding main failure, including
+cleanup wrappers. Main deduplicates one startup event per verified generation for
+the process lifetime. Authenticated offline delivery uses the existing encrypted
+queue and same-account revalidation. Revocation is checked again during persistence.
+
+Native recovery does not require the failed product renderer or reporting authority.
+It offers Retry, Sign in and retry when the account service exists, and Quit.
+Retry shuts down services and relaunches a clean process. Login returning after
+browser launch is insufficient: main waits for `waitForIdle()` and a current
+verified signed-in identity before restart. A native waiting dialog permits Cancel
+sign-in or Quit; a two-minute deadline, cancellation, failed verification, or
+revocation retires the callback and cannot trigger a late relaunch. Cancellation
+also removes any credential committed by that exact unfinished attempt, so retry
+cannot restore a cancelled callback. Browser callbacks present the active native
+recovery window even when there is no product window. Recovery never
+reinitializes the failed services in the same process. Shutdown receives ten seconds
+before process exit. On macOS a renderer-free native BaseWindow parents the dialogs
+so they stay asynchronous and cancellable. Actual packaged platform behavior remains
+a release-candidate gate, including Windows x64.
+
 The accepted record contains only stable failure code or sanitized class, a
 code-owned message, approved frames, fixed component and operation identifiers,
 sealed release identity, main-owned environment, OS, architecture, and the derived
@@ -146,6 +184,6 @@ unsigned development package cannot satisfy it.
 - The bounded queue has deterministic retention, overflow, corruption, and account-
   replacement behavior.
 - V1 excludes handled terminal operation failures except the exact shared-thread
-  publication and unexpected-deletion codes named above.
+  publication, unexpected-deletion, and handled fatal startup codes named above.
 - Default verification remains deterministic, local, and free of paid inference.
 - Packaged and symbolication claims are release-candidate and target-specific.

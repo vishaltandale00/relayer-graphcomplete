@@ -42,6 +42,7 @@ export async function createDesktopAuthenticatedErrorReporting({
   return Object.freeze({
     account,
     issueReporter: (identity) => gateway.issueReporter(identity),
+    issueStartupFailureReporter: (identity) => gateway.issueStartupFailureReporter(identity),
     issueHandledShareFailureReporter: (identity) => gateway.issueHandledShareFailureReporter(identity),
     issueCapability: (identity) => receiver?.issue(identity) ?? null,
     reportHandledShareFailure: (record) => gateway.reportHandledShareFailure(record),

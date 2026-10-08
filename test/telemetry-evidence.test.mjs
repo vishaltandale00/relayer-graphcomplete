@@ -10,7 +10,7 @@ import {
 } from "../scripts/run-telemetry-evidence.mjs";
 
 describe("deterministic telemetry evidence portfolio", () => {
-  it("proves five component and handled-share contracts at the local gateway and records native process proof as not run", async () => {
+  it("proves five component, handled-share, and fatal startup contracts at the local gateway and records native process proof as not run", async () => {
     const directory = await mkdtemp(join(tmpdir(), "telemetry-evidence-test-"));
     const outputPath = join(directory, "evidence.json");
     try {
@@ -27,12 +27,12 @@ describe("deterministic telemetry evidence portfolio", () => {
         liveSentry: false,
         network: "loopback-only",
       });
-      expect(artifact.checkpoints.positive).toHaveLength(10);
-      expect(artifact.checkpoints.privacy).toHaveLength(176);
+      expect(artifact.checkpoints.positive).toHaveLength(14);
+      expect(artifact.checkpoints.privacy).toHaveLength(208);
       expect(artifact.checkpoints.privacy.every((item) => item.rejected)).toBe(true);
       expect(artifact.checkpoints.adapterPrivacy).toHaveLength(99);
       expect(artifact.checkpoints.adapterPrivacy.every((item) => item.crossed === false)).toBe(true);
-      expect(artifact.checkpoints.outbound.requestCount).toBe(10);
+      expect(artifact.checkpoints.outbound.requestCount).toBe(14);
       expect(artifact.checkpoints.outbound.forbiddenQueuePersistence).toBe(false);
       expect(artifact.checkpoints.releaseSymbols).toMatchObject({
         status: "not-run",
@@ -72,6 +72,8 @@ describe("deterministic telemetry evidence portfolio", () => {
     expect(invocations[1][1]).toContain("test/desktop-telemetry-release-artifacts.test.mjs");
     expect(invocations[1][1]).toContain("test/signed-native-cache.test.mjs");
     expect(invocations[1][1]).toContain("test/share-error-diagnostics.test.mjs");
+    expect(invocations[1][1]).toContain("test/startup-error-diagnostics.test.mjs");
+    expect(invocations[1][1]).toContain("test/desktop-startup-failure-recovery.test.mjs");
     expect(result).toMatchObject({
       status: "pass",
       fidelity: "deterministic-adapters-and-shared-rust-seam",

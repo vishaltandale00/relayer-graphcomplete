@@ -1,7 +1,8 @@
+import { completeDesktopStartupWindow, recoverDesktopStartupFailure } from "./services/startup-failure-recovery.mjs";
 import { packagedWindowsNodePath } from "../shared/windows-node-runtime.mjs";
 import { createSharePreviewCapture } from "./services/share-preview-capture.mjs";
 import { createElectronDraftPreviewRenderer } from "./services/draft-preview-renderer.mjs";
-import { app, BrowserWindow, dialog, ipcMain, Menu, nativeTheme, protocol, session, safeStorage, shell, WebContentsView } from "electron";
+import { app, BaseWindow, BrowserWindow, dialog, ipcMain, Menu, nativeTheme, protocol, session, safeStorage, shell, WebContentsView } from "electron";
 import electronUpdater from "electron-updater";
 import { readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
@@ -195,9 +196,10 @@ const defaultHarnessConfiguration = resolveDesktopHarnessConfiguration({
 if (defaultHarnessConfiguration.startsWith("prime-agent-")) requirePrimeAgentRuntime(primeAgentRuntime);
 
 let mainWindow;
+let startupRecoveryWindow;
 // Web app servers Relayer started for the artifact viewer (PRD 6.6.6); stopped on quit.
 let artifactServers = null;
-const primaryInstance = claimPrimaryDesktopInstance({ app, getWindow: () => mainWindow });
+const primaryInstance = claimPrimaryDesktopInstance({ app, getWindow: () => startupRecoveryWindow ?? mainWindow });
 
 if (primaryInstance) {
   const settings = createSettingsStore(userDataPath);
@@ -211,9 +213,11 @@ if (primaryInstance) {
     authenticatedErrorReporting?.issueCapability({ component, processGeneration }) ?? null
   );
   let fatalShutdownRequested = false;
-  const requestFatalShutdown = () => {
+  let fatalStartupReport;
+  const requestFatalShutdown = (report) => {
     fatalShutdownRequested = true;
-    app.quit();
+    if (startupInProgress) fatalStartupReport = report;
+    if (!startupInProgress) app.quit();
   };
   const graphRuntime = createDesktopGraphRuntime({
     ...(app.isPackaged && process.platform === "win32" ? { graphAuthoringNodePath: await packagedWindowsNodePath(process.resourcesPath) } : {}),
@@ -247,12 +251,12 @@ if (primaryInstance) {
     acknowledgeUnknownProviderRelease: () => providerSetup?.finalizeDrainedRemovals(),
     issueErrorReporter,
     issueErrorCapability,
-    onUnexpectedStop: () => {
-      dialog.showErrorBox(
+    onUnexpectedStop: (_event, report) => {
+      if (!startupInProgress) dialog.showErrorBox(
         "Relayer graph service stopped",
         "Relayer needs to close because its local graph service stopped. Reopen the app to continue.",
       );
-      requestFatalShutdown();
+      requestFatalShutdown(report);
     },
     resolveCodexRuntime: async () => managedRuntimeDescriptor(await managedRuntimeResolver.get(
       managedRuntimeRequirementForHarness("codex.basic").recipeId,
@@ -289,6 +293,11 @@ if (primaryInstance) {
   let providerSetup;
   let providerComposition;
   let accountService;
+  let accountStartup;
+  let startupStage = "initialization";
+  let startupInProgress = true;
+  let startupRecoveryActive = false;
+  const startupRecoveryCancellation = new AbortController();
   const accountTelemetry = createDesktopAccountTelemetry({
     getReporting: () => authenticatedErrorReporting,
     refreshChildren: async () => {
@@ -473,7 +482,7 @@ if (primaryInstance) {
     electronMainErrorAdapter = installElectronMainErrorAdapter({ issueErrorReporter });
     accountService = createAccountService(channel);
     if (channel === "preview") updater.setChannel("preview");
-    void accountService.start().catch((error) => console.error("Optional desktop account initialization failed:", error));
+    accountStartup = accountService.start().catch((error) => console.error("Optional desktop account initialization failed:", error));
     const activation = await managedRuntimeInstaller.activatePendingAppUpdate(desktopVersion);
     // Runtimes this update changed: a new recipe activated, or activation failed. Startup
     // tells the app server, which withholds their old ready and marks them due.
@@ -502,6 +511,7 @@ if (primaryInstance) {
         "One or more leftover Codex API-key auth files could not be removed.",
       ));
     }
+    startupStage = "runtime-start";
     const runtimeSession = await graphRuntime.start();
     productServer = new RelayerAppServerService({
       userDataDirectory: userDataPath,
@@ -517,17 +527,19 @@ if (primaryInstance) {
         platform: process.platform,
         architecture: process.arch,
       },
-      onUnexpectedStop: () => {
-        dialog.showErrorBox(
+      onUnexpectedStop: (_event, report) => {
+        if (!startupInProgress) dialog.showErrorBox(
           "Relayer app server stopped",
           "Relayer needs to close because its local product service stopped. Reopen the app to continue.",
         );
-        requestFatalShutdown();
+        requestFatalShutdown(report);
       },
       issueErrorReporter,
       issueErrorCapability,
     });
+    startupStage = "product-server-start";
     const productSession = await productServer.start();
+    startupStage = "initialization";
     const modelAvailability = createModelAvailabilityPublisher({
       publishReadiness: (updates) => productServer.publishHarnessReadiness(updates),
       publishCatalog: (snapshot, options) => productServer.publishProviderCatalog(snapshot, options),
@@ -701,7 +713,11 @@ if (primaryInstance) {
       devTools: !app.isPackaged,
     });
     registerArtifactViewerIpc({ ipcMain, Menu, viewer: artifactViewer, getWindow: () => mainWindow });
-    mainWindow = await createWindow(productSession);
+    startupStage = "window-load";
+    mainWindow = await completeDesktopStartupWindow({
+      createWindow, productSession, hasFatalServiceFailure: () => fatalShutdownRequested,
+    });
+    startupInProgress = false;
     primaryInstance.presentPendingWindow();
     mainWindow.on("closed", () => { artifactViewer.close(); mainWindow = undefined; });
     app.on("activate", async () => {
@@ -712,15 +728,40 @@ if (primaryInstance) {
         primaryInstance.presentPrimaryWindow();
       }
     });
-  }).catch((error) => {
+  }).catch(async (error) => {
+    startupRecoveryActive = true;
+    fatalShutdownRequested = true;
     console.error("Relayer startup failed:", error);
-    dialog.showErrorBox("Relayer could not start", error.message);
-    app.quit();
+    // BaseWindow has no renderer. macOS requires a visible native parent for
+    // cancellable message boxes; the failed product renderer is never involved.
+    startupRecoveryWindow = new BaseWindow({ width: 480, height: 240, title: "Relayer", resizable: false });
+    primaryInstance.presentPrimaryWindow();
+    startupRecoveryWindow.on("close", (event) => { event.preventDefault(); startupRecoveryCancellation.abort(); });
+    try {
+      await recoverDesktopStartupFailure({
+        error, startupStage, accountStartup, account: accountService, reporting: authenticatedErrorReporting,
+        priorReport: fatalStartupReport,
+        showDialog: (options) => dialog.showMessageBox(startupRecoveryWindow, options),
+        shutdown: shutdownServices,
+        relaunch: () => app.relaunch(),
+        exit: (code) => { shutdownComplete = true; app.exit(code); },
+        signal: startupRecoveryCancellation.signal,
+      });
+    } catch (recoveryError) {
+      console.error("Relayer startup recovery failed:", recoveryError);
+      await settleShutdownWithin({ shutdown: shutdownServices, budgetMs: 10_000 });
+      shutdownComplete = true;
+      app.exit(1);
+    } finally {
+      if (!startupRecoveryWindow.isDestroyed()) startupRecoveryWindow.destroy();
+      startupRecoveryWindow = undefined;
+    }
   });
 
-  app.on("window-all-closed", () => { if (process.platform !== "darwin") app.quit(); });
+  app.on("window-all-closed", () => { if (!startupInProgress && !startupRecoveryActive && process.platform !== "darwin") app.quit(); });
   app.on("before-quit", (event) => {
     if (shutdownComplete) return;
+    if (startupRecoveryActive) { event.preventDefault(); startupRecoveryCancellation.abort(); return; }
     event.preventDefault();
     if (quitFlowPromise) return;
     quitFlowPromise = (async () => {

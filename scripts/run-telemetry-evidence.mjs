@@ -62,6 +62,8 @@ const productionPortfolioFiles = Object.freeze([
   "test/desktop-telemetry-module-inventory.test.mjs",
   "test/sentry-error-transport.test.mjs",
   "test/share-error-diagnostics.test.mjs",
+  "test/startup-error-diagnostics.test.mjs",
+  "test/desktop-startup-failure-recovery.test.mjs",
   "test/share-publish-coordinator.test.mjs",
   "test/share-service-client.test.mjs",
 ]);
@@ -369,10 +371,28 @@ export async function runTelemetryEvidence({
       negativeResults.push({ component: "electron-main", fixture: `share-${forbidden.field}`, rejected: true });
     }
 
-    invariant(sink.requests.length === 10, "privacy rejection or duplicate created an outbound request");
+    for (const [index, fixture] of corpus.startupFailurePositiveCases.entries()) {
+      await reporting.account.transitionIdentity({ generation: index + 2, subject: "auth0|telemetry-evidence-subject" });
+      const reporter = reporting.issueStartupFailureReporter({ generation: index + 2 });
+      invariant(reporter !== null, "main startup authority was not issued");
+      for (const forbidden of corpus.startupFailureForbiddenCases) {
+        const result = await reporter.report({ ...fixture, [forbidden.field]: structuredClone(forbidden.value) });
+        invariant(result.accepted === false && result.reason === "invalid-record", `startup ${forbidden.field} crossed the privacy boundary`);
+        negativeResults.push({ component: "electron-main", fixture: `startup-${forbidden.field}`, rejected: true });
+      }
+      const result = await reporter.report(fixture);
+      invariant(result.accepted === true, "approved startup fixture was rejected");
+      const duplicate = await reporter.report(fixture);
+      invariant(duplicate.delivery === "deduplicated", "startup duplicate was admitted");
+      positiveResults.push({ component: "electron-main", seam: "main-owned-startup-reporter", code: fixture.code, accepted: true });
+      reporter.revoke();
+    }
+    invariant(sink.requests.length === 14, "privacy rejection or duplicate created an outbound request");
     const outbound = sink.requests.map(parseEvent);
     invariant(new Set(outbound.map((event) => event.tags.component)).size === 5, "outbound envelopes do not cover five components");
     invariant(outbound.filter((event) => ["share-publication", "share-deletion"].includes(event.tags.operation)).length === 5, "outbound envelopes do not cover handled share failures");
+    invariant(outbound.filter((event) => event.level === "fatal" && event.tags.failure_code === "electron_main.startup_failure").length === 4,
+      "startup fatal events did not reach the SDK loopback sink");
     const diagnosticEvent = outbound.find((event) => event.tags.failure_code === "share.service_failed");
     invariant(diagnosticEvent.tags.http_status === "503" && diagnosticEvent.tags.network_code === "none", "share HTTP diagnostics did not reach Sentry");
     invariant(diagnosticEvent.exception.values[0].stacktrace.frames.some((frame) => frame.filename === "desktop/main/services/share-service-client.mjs"), "share frames did not reach Sentry");

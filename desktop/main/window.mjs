@@ -105,15 +105,21 @@ export function createWindowFactory({
       openSafeExternal(url);
       return { action: "deny" };
     });
-    await window.webContents.session.cookies.set({
-      url: productSession.origin,
-      name: productSession.cookie.name,
-      value: productSession.cookie.value,
-      httpOnly: true,
-      sameSite: "strict",
-      secure: false,
-    });
-    await window.loadURL(productOrigin);
+    try {
+      await window.webContents.session.cookies.set({
+        url: productSession.origin,
+        name: productSession.cookie.name,
+        value: productSession.cookie.value,
+        httpOnly: true,
+        sameSite: "strict",
+        secure: false,
+      });
+      await window.loadURL(productOrigin);
+    } catch (error) {
+      revokeReporter(reporterState);
+      window.destroy();
+      throw error;
+    }
     if (updater.status().phase !== "development") {
       // The updater owns both scheduled discoveries, so the launch check takes
       // the same in-flight guard as the poll and fires once per process.
