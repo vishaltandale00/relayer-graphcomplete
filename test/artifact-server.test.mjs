@@ -9,6 +9,9 @@ import { afterEach, describe, expect, it } from "vitest";
 import { createArtifactServerRunner } from "../desktop/main/services/artifact-server.mjs";
 
 const fixture = resolve(import.meta.dirname, "fixtures", "artifact-viewer", "thread-folder");
+// Relayer confines Ask and Auto commands only on macOS and refuses them elsewhere, so
+// the lifecycle tests run confined there and with Full access on other platforms.
+const PROFILE = process.platform === "darwin" ? "auto" : "full";
 const cleanup = [];
 afterEach(async () => {
   for (const step of cleanup.splice(0).reverse()) await step();
@@ -44,7 +47,7 @@ describe("the server invoke (ART-009)", () => {
     const port = await freePort();
     const url = `http://127.0.0.1:${port}/`;
     const server = { command: `node app/server.mjs ${port}` };
-    const request = { threadId: 7, nodeId: 3, folder, permissionProfileId: "auto", server, sourceUrl: url };
+    const request = { threadId: 7, nodeId: 3, folder, permissionProfileId: PROFILE, server, sourceUrl: url };
 
     expect(await runner.ensure(request)).toMatchObject({ state: "approval-required", command: server.command });
     expect(await answers(url)).toBe(false);
@@ -69,7 +72,7 @@ describe("the server invoke (ART-009)", () => {
     await new Promise((done) => outside.listen(0, "127.0.0.1", done));
     cleanup.push(() => new Promise((done) => outside.close(done)));
     const url = `http://127.0.0.1:${outside.address().port}/`;
-    const result = await runner.ensure({ threadId: 7, nodeId: 3, folder, permissionProfileId: "auto", server: { command: "npm run dev" }, sourceUrl: url });
+    const result = await runner.ensure({ threadId: 7, nodeId: 3, folder, permissionProfileId: PROFILE, server: { command: "npm run dev" }, sourceUrl: url });
     expect(result).toEqual({ state: "ready", started: false, key: null });
     runner.release(result.key);
     runner.stopAll();
@@ -80,7 +83,7 @@ describe("the server invoke (ART-009)", () => {
     const { folder, runner } = await setup();
     const port = await freePort();
     const result = await runner.ensure({
-      threadId: 7, nodeId: 4, folder, permissionProfileId: "auto", approve: true,
+      threadId: 7, nodeId: 4, folder, permissionProfileId: PROFILE, approve: true,
       server: { command: "node -e \"console.error('boom: missing config'); process.exit(3)\"" }, sourceUrl: `http://127.0.0.1:${port}/`,
     });
     expect(result.state).toBe("failed");
@@ -105,7 +108,7 @@ describe("the server invoke (ART-009)", () => {
     const { folder, runner } = await setup();
     const port = await freePort();
     const url = `http://127.0.0.1:${port}/`;
-    const request = { threadId: 11, nodeId: 3, folder, permissionProfileId: "auto", approve: true, server: { command: `node app/server.mjs ${port}` }, sourceUrl: url };
+    const request = { threadId: 11, nodeId: 3, folder, permissionProfileId: PROFILE, approve: true, server: { command: `node app/server.mjs ${port}` }, sourceUrl: url };
     const [first, second] = await Promise.all([runner.ensure(request), runner.ensure(request)]);
     expect([first.state, second.state]).toEqual(["ready", "ready"]);
     expect(runner.running()).toHaveLength(1);
@@ -117,8 +120,8 @@ describe("the server invoke (ART-009)", () => {
     const { folder, runner } = await setup();
     const port = await freePort();
     const url = `http://127.0.0.1:${port}/`;
-    expect((await runner.ensure({ threadId: 12, nodeId: 3, folder, permissionProfileId: "auto", approve: true, server: { command: `node app/server.mjs ${port}` }, sourceUrl: url })).state).toBe("ready");
-    const other = await runner.ensure({ threadId: 13, nodeId: 3, folder, permissionProfileId: "auto", approve: true, server: { command: `node app/server.mjs ${port}` }, sourceUrl: url });
+    expect((await runner.ensure({ threadId: 12, nodeId: 3, folder, permissionProfileId: PROFILE, approve: true, server: { command: `node app/server.mjs ${port}` }, sourceUrl: url })).state).toBe("ready");
+    const other = await runner.ensure({ threadId: 13, nodeId: 3, folder, permissionProfileId: PROFILE, approve: true, server: { command: `node app/server.mjs ${port}` }, sourceUrl: url });
     expect(other.state).toBe("failed");
     expect(other.log).toContain("Another thread's app is already serving");
   });
@@ -126,8 +129,8 @@ describe("the server invoke (ART-009)", () => {
   it("treats localhost and 127.0.0.1 on one port as the same server", async () => {
     const { folder, runner } = await setup();
     const port = await freePort();
-    expect((await runner.ensure({ threadId: 17, nodeId: 3, folder, permissionProfileId: "auto", approve: true, server: { command: `node app/server.mjs ${port}` }, sourceUrl: `http://127.0.0.1:${port}/` })).state).toBe("ready");
-    const alias = await runner.ensure({ threadId: 18, nodeId: 3, folder, permissionProfileId: "auto", approve: true, server: { command: "npm run dev" }, sourceUrl: `http://localhost:${port}/` });
+    expect((await runner.ensure({ threadId: 17, nodeId: 3, folder, permissionProfileId: PROFILE, approve: true, server: { command: `node app/server.mjs ${port}` }, sourceUrl: `http://127.0.0.1:${port}/` })).state).toBe("ready");
+    const alias = await runner.ensure({ threadId: 18, nodeId: 3, folder, permissionProfileId: PROFILE, approve: true, server: { command: "npm run dev" }, sourceUrl: `http://localhost:${port}/` });
     expect(alias.state).toBe("failed");
     expect(alias.log).toContain("Another thread's app is already serving");
   });
@@ -136,7 +139,7 @@ describe("the server invoke (ART-009)", () => {
     const { folder, runner } = await setup();
     const port = await freePort();
     const url = `http://127.0.0.1:${port}/`;
-    const request = { threadId: 15, nodeId: 3, folder, permissionProfileId: "auto", approve: true, sourceUrl: url };
+    const request = { threadId: 15, nodeId: 3, folder, permissionProfileId: PROFILE, approve: true, sourceUrl: url };
     expect((await runner.ensure({ ...request, server: { command: `node app/server.mjs ${port}` } })).state).toBe("ready");
     const revised = await runner.ensure({ ...request, server: { command: `node ./app/server.mjs ${port}` } });
     expect(revised.state).toBe("ready");
@@ -171,7 +174,7 @@ describe("the server invoke (ART-009)", () => {
   it("gives commands only a shell's environment, never the desktop's credentials", async () => {
     const { folder, runner } = await setup({ environment: { ...process.env, GITHUB_PAT: "ghp_secret", DATABASE_URL: "postgres://u:p@h/db", SSH_AUTH_SOCK: "/tmp/agent.sock" } });
     const result = await runner.ensure({
-      threadId: 19, nodeId: 3, folder, permissionProfileId: "auto", approve: true, sourceUrl: `http://127.0.0.1:${await freePort()}/`,
+      threadId: 19, nodeId: 3, folder, permissionProfileId: PROFILE, approve: true, sourceUrl: `http://127.0.0.1:${await freePort()}/`,
       server: { command: "node -e \"console.log('leaked=' + [process.env.GITHUB_PAT, process.env.DATABASE_URL, process.env.SSH_AUTH_SOCK].filter(Boolean).length); process.exit(1)\"" },
     });
     expect(result.log).toContain("leaked=0");
@@ -188,7 +191,7 @@ describe("the server invoke (ART-009)", () => {
     const { folder, runner } = await setup({ minuteMs: 300 });
     const port = await freePort();
     const url = `http://127.0.0.1:${port}/`;
-    const request = { threadId: 9, nodeId: 3, folder, permissionProfileId: "auto", approve: true, server: { command: `node app/server.mjs ${port}`, idleTimeoutMinutes: 1 }, sourceUrl: url };
+    const request = { threadId: 9, nodeId: 3, folder, permissionProfileId: PROFILE, approve: true, server: { command: `node app/server.mjs ${port}`, idleTimeoutMinutes: 1 }, sourceUrl: url };
     const first = await runner.ensure(request);
     const second = await runner.ensure(request);
     runner.release(first.key);
