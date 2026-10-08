@@ -1,0 +1,19 @@
+{
+  "algorithm": "sha256(sorted UTF-8 path + NUL + contents + NUL)",
+  "paths": [
+    "desktop/eval-main/configuration-paths.mjs",
+    "desktop/eval-main/current-communication-frontier-cases.mjs",
+    "desktop/eval-main/eval-service.mjs",
+    "desktop/eval-main/index.mjs",
+    "harnesses/codex-eval-current-frontier-a.yaml",
+    "harnesses/codex-eval-current-frontier-b.yaml",
+    "harnesses/codex-eval-current-frontier-c.yaml",
+    "harnesses/codex-eval-current-frontier-d.yaml",
+    "packages/harness-host/src/implementations/codex-basic.ts",
+    "packages/harness-host/src/implementations/graph-presentation-guidance.ts",
+    "packages/harness-host/test/codex-basic.test.ts",
+    "test/eval-configuration-paths.test.mjs",
+    "test/recursive-complete-e2e.test.mjs"
+  ],
+  "sha256": "41f2ceb78631701762269f4d32a26eed29eee5ab4db5e07fbe5926592d9ecc7f"
+}

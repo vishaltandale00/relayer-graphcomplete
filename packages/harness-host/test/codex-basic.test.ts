@@ -832,6 +832,47 @@ describe("CodexBasicHarness", () => {
     expect(prompts[0]).not.toContain(factors[0]);
   });
 
+  it.each(["basic", "layered-navigation-multi-agent-v1"])("delivers independent frontier contracts through actual %s turns", async (promptProfile) => {
+    const prompts: string[] = [];
+    for (const factor of [undefined, "communication-contract", "publish-observe-continue", "decision-triggers"] as const) {
+      const harness = new CodexBasicHarness({
+        ...context("auto"),
+        configuration: { ...codexBasicConfiguration, settings: {
+          ...codexBasicConfiguration.settings, ...(promptProfile === "basic" ? {} : { promptProfile }),
+          ...(factor === undefined ? {} : { currentCommunicationGuidance: factor }),
+        } },
+      }, { codexPathOverride: "/managed/codex", runAppServerTurn: async (options) => {
+        prompts.push(options.prompt);
+        options.onThreadId("frontier-thread");
+        return { threadId: "frontier-thread", turnId: "turn-1", status: "completed" };
+      } });
+      await harness.complete({ ...runContext(1, "token"), completionBroker: {
+        url: "http://127.0.0.1:43125/api/completions", token: "fixture-broker-token-1234567890123456",
+      } });
+    }
+    expect(prompts[0]).toContain("Advancing is optional; final graph.submit remains required.");
+    expect(prompts[0]).not.toContain('graph.authoring("first-finding")');
+    for (const prompt of prompts.slice(1)) {
+      expect(prompt).not.toContain("Advancing is optional");
+      expect(prompt).not.toContain("After doing the underlying work, answer");
+      expect(prompt).not.toContain('graph.authoring("response-v1")');
+      expect(prompt).toContain('await graph.advanceCurrent(written.rootLayer, current.headRevision, "first-finding-publication")');
+      expect(prompt).toContain('graph.authoring("final-findings")');
+      expect(prompt).toContain("Register every action before publication");
+      expect(prompt).toContain("watchCompletions");
+      expect(prompt).toContain("read each changed current.currentLayerId with graph.getLayer");
+      expect(prompt).toContain('kind: "input", label: "Answer", control: "text", prompt: "A task-specific question"');
+      expect(prompt).toContain("input answers arrive through the next ordinary interaction");
+      expect(prompt).toContain("native helpers are not separate GraphComplete completions");
+      expect(prompt).not.toContain("fixture-broker-token");
+    }
+    const factors = ["Your current layer is how you explain the work", "Follow this publish, observe, continue sequence", "Advance your current when you establish"];
+    for (let index = 0; index < factors.length; index++) {
+      expect(prompts[index + 1]).toContain(factors[index]);
+      for (const other of factors.filter((_, factorIndex) => factorIndex !== index)) expect(prompts[index + 1]).not.toContain(other);
+    }
+  });
+
   it("delivers ordered normalized context and child re-read guidance without occurrence authority", async () => {
     let prompt = "";
     const harness = harnessFixture("auto", async (options) => {

@@ -1,0 +1,72 @@
+{
+  "sourceDigest": "41f2ceb78631701762269f4d32a26eed29eee5ab4db5e07fbe5926592d9ecc7f",
+  "plan": [
+    "npm run check",
+    "npm run build",
+    "npm run test:eval-compiled-runtime",
+    "npm run test:eval-web"
+  ],
+  "actual": {
+    "check": {
+      "status": "PASS",
+      "javascript": {
+        "filesPassed": 301,
+        "filesSkipped": 1,
+        "testsPassed": 3766,
+        "testsSkipped": 3
+      },
+      "nativeAndPython": "All reported batches passed; Python 74/74; secret boundary 2/2"
+    },
+    "build": {
+      "status": "PASS"
+    },
+    "compiledRuntime": {
+      "status": "PASS",
+      "testsPassed": 5
+    },
+    "browser": {
+      "status": "PASS",
+      "chapters": "All declared eval-web chapters passed, including production startup/restart, actor, calibration, input and judge capture"
+    },
+    "warm": {
+      "status": "PASS",
+      "testsPassed": 81
+    },
+    "recipe": "Actual generated recipe active revision1 \u2192 succeeded revision2 PASS; raw-ID navigation example and incorrect fixture assertion failures retained privately"
+  },
+  "logReceipts": {
+    "cache-verification": {
+      "sha256": "5c0116fb990f3a8b5d465f6e5ed10b2c2401750958155432cdfaa0ccdcacd276",
+      "bytes": 102
+    },
+    "warm-final": {
+      "sha256": "6622c8ef871f69f5a762cb83798a4ebaffead770977c5a885214b5104885ce50",
+      "bytes": 256
+    },
+    "recipe-runtime-final": {
+      "sha256": "027bcd224cb1a28007ca86e4249eae243233070689440fc008ff8aca58de5ba2",
+      "bytes": 266
+    },
+    "check": {
+      "sha256": "16f727cc4d585605ed339cfb886fa70cce28330d77f1be974b9cab765b0fc028",
+      "bytes": 126842
+    },
+    "build": {
+      "sha256": "d3d9f5d2108b97264c43e9fdfa10b074ef518d92194116ffdfbd7baf12382989",
+      "bytes": 2040
+    },
+    "compiled": {
+      "sha256": "73e238ba7dabf7d744a90d3cf6c358e81c862f5efcc20f4f490b06ed499aae2d",
+      "bytes": 376
+    },
+    "browser": {
+      "sha256": "f746713839c90f903bee8390c7fff5033a8fc46ded8d0e5c98bc4f4953e7c3eb",
+      "bytes": 4328
+    }
+  },
+  "context": {
+    "node": "22.23.2",
+    "ladybug": "Trusted lbug0.18 cache verified; no cold build",
+    "cargoTarget": "Warm isolated target"
+  }
+}

@@ -20,7 +20,8 @@ Use CSS custom properties and the listed properties/functions; allowed names sti
 Theme authoring: design readable light AND dark presentations in the same saved detail. Relayer owns the active theme; select it with [data-relayer-theme="light"] and [data-relayer-theme="dark"] in component CSS. The marker is on a runtime-owned inner scope, inside the protected detail host. For example, [data-relayer-theme="light"] .explanation { color: #182c34; background-color: #fafbf9; } and [data-relayer-theme="dark"] .explanation { color: #edf2f3; background-color: #121619; }. Relayer light uses pale neutral surfaces and dark text; dark uses charcoal surfaces and light text. These palette examples are guidance, not mandatory colors or a layout recipe. You control styling, layout, and visual composition. Cover text, surfaces, borders, chart marks and labels, controls, hover and keyboard focus with suitable contrast. Preserve meaning across modes, including semantic chart colors. Theme switching happens without generation or replacing controls. Keep each input/action on its existing stable capability mount and reposition/restyle it as needed; do not create duplicate inputs for the two themes. For different illustrations or static compositions, bind both variants as ordinary assets/content, give each a class, and use the theme selectors with display rules to show the matching variant. Share an asset across themes when it works in both. The theme marker is host-owned: do not author it into HTML or use operating-system prefers-color-scheme as the product theme. Missing theme-specific styles render the same authored presentation in both modes; they are not rejected or automatically recolored.`;
 
 /** Mechanics only: presentation and graph decomposition remain model decisions. */
-export function scopedAuthoringRecipeJs(interactionNodeId: number, clientModuleUrl: string): string {
+export function scopedAuthoringRecipeJs(interactionNodeId: number, clientModuleUrl: string, profile?: CurrentCommunicationGuidance): string {
+  if (isCurrentCommunicationFrontier(profile)) return currentCommunicationRecipeJs(interactionNodeId, clientModuleUrl);
   return `Use graph.authoring(snapshotKey) for new response drafts, with named node fields. Keep the snapshot and local keys stable when repairing a rejected draft; choose a new snapshot for a new accepted response. The writer handles dependency order and scoped client keys. It persists drafts; root attachment and acceptance remain explicit. Consult the compiler-generated Node Detail reference above before styling and after a CSS rejection; detailAuthoringReference() returns the same structured reference. Give graph-authoring native children this recipe and the exact supplied import URL.
 The following runnable example demonstrates mechanics only. Replace its content and choose the topology, layout and controls for the task.
 
@@ -74,12 +75,68 @@ Add connections with layer.edge("connection", first, second). Declare controls b
 }
 
 /** Opt-in prompt factors; the baseline adds no text or publication policy. */
-export type CurrentCommunicationGuidance = "communication" | "early-publication" | "meaningful-updates";
+export const CURRENT_COMMUNICATION_PROFILES = ["communication", "early-publication", "meaningful-updates", "communication-contract", "publish-observe-continue", "decision-triggers"] as const;
+export type CurrentCommunicationGuidance = typeof CURRENT_COMMUNICATION_PROFILES[number];
+
+export function isCurrentCommunicationFrontier(profile?: CurrentCommunicationGuidance): boolean {
+  return profile === "communication-contract" || profile === "publish-observe-continue" || profile === "decision-triggers";
+}
+
+export function currentWorkspaceGuidance(profile?: CurrentCommunicationGuidance): string {
+  if (!isCurrentCommunicationFrontier(profile)) return CURRENT_WORKSPACE_GUIDANCE;
+  return CURRENT_WORKSPACE_GUIDANCE
+    .replace("consider updating it as the work evolves, when the user would gain a more useful view rather than on every change", "advance it when the first useful finding or consequential question is ready, then when the user would gain a materially more useful view")
+    .replace("Advancing is optional; final graph.submit remains required.", "Publish useful working state before the work finishes; final graph.submit remains required. Do not fabricate findings or publish empty status merely to advance.");
+}
 
 export function currentCommunicationGuidance(profile?: CurrentCommunicationGuidance): string {
+  const frontier: Partial<Record<CurrentCommunicationGuidance, string>> = {
+    "communication-contract": "Your current layer is how you explain the work to the user while doing it. Once you have a useful finding, uncertainty, or question, publish it with graph.advanceCurrent and continue working. Update it when the user's understanding materially changes. When you call a subcompletion through complete(inputGraph), observe its current-pointer updates and read the graph they expose. Incorporate meaningful findings into your own current layer. Use current layers to ask consequential questions as they arise. Explain what decision depends on the answer and provide an appropriate input action.",
+    "publish-observe-continue": "Find initial evidence, author a small explanation, call graph.advanceCurrent, then continue investigating. When delegating through complete(inputGraph): launch the subcompletions, observe updates with watchCompletions, inspect each changed current layer, publish useful implications in your own current, then continue. When a decision needs user input: publish the question, relevant evidence, and useful answer controls before proceeding with work that depends on it. Continue independent work. Follow this publish, observe, continue sequence throughout the completion, and submit only when the work is done or needs the user's answer.",
+    "decision-triggers": "Advance your current when you establish the first task-specific finding worth showing; when new evidence changes your explanation or next step; when a subcompletion's current reveals a meaningful finding, uncertainty, or failure; or when a user decision would change what you do next. Observe subcompletions through watchCompletions and inspect their changed current layers before deciding whether to publish. Present questions with their consequences and useful answer controls. Publish task insight rather than tool narration; avoid empty progress updates.",
+  };
+  const treatment = profile === undefined ? undefined : frontier[profile];
+  if (treatment !== undefined) {
+    return "\n\n" + treatment + "\nSubcompletion guidance applies only when the completion broker is available and you choose semantic child work; native helpers are not separate GraphComplete completions. When using that broker, create watchCompletions(children), await watch.changes(), and read each changed current.currentLayerId with graph.getLayer when it is non-null. Read the published evidence, not only its revision or terminal status. Missing current or observation errors mean unknown work, not invented findings. Questions may be published during work, but input answers arrive through the next ordinary interaction, not an automatic resume of this running completion. Do independent work, then return a useful question layer if dependent work needs that answer; do not wait indefinitely or assume an answer.";
+  }
   if (profile === undefined) return "";
   const communication = "Your current layer is how you communicate with the user while working. Use it to give them insight into what you have learned, what remains uncertain, and what you are doing next.";
   const early = "Publish a useful current as soon as you have something meaningful to communicate. Continue working after publication; the whole investigation does not need to be finished first.";
   const updates = "Update current when a finding, uncertainty, decision, or change of direction materially changes the user's understanding. Let them follow the work and steer it.";
   return "\n\n" + [communication, ...(profile === "communication" ? [] : [early]), ...(profile === "meaningful-updates" ? [updates] : [])].join("\n");
+}
+
+function currentCommunicationRecipeJs(interactionNodeId: number, clientModuleUrl: string): string {
+  return `Use graph.authoring(snapshotKey) for new response drafts with stable local keys. Choose new snapshots for new accepted explanations. This runnable example shows early publication, further work, and final submission. Replace its placeholder evidence with actual task findings; do not publish an empty progress message.
+
+\`\`\`javascript
+import { RelayerGraphClient } from ${JSON.stringify(clientModuleUrl)};
+const graph = RelayerGraphClient.fromEnv();
+let current = await graph.getCurrent();
+const author = graph.authoring("first-finding");
+const layer = author.layer("finding");
+const finding = layer.node("finding", { icon: "info", title: "Initial finding", detail: "Replace with supported evidence, remaining uncertainty, and the next useful step." });
+if (current.currentLayerId != null) {
+  const prior = await graph.getLayer(current.currentLayerId);
+  layer.action("prior", finding, { kind: "navigate", relation: "reference", label: "Earlier findings", target: prior.layer });
+}
+layer.layout([[finding, 0.5, 0.5]], { edgeShape: "default", defaultNode: finding });
+const written = await author.write(layer);
+await graph.addAction(${interactionNodeId}, { kind: "navigate", relation: "expand", label: "Task findings", icon: "info", target: written.rootLayer, clientKey: "root-response" });
+await graph.advanceCurrent(written.rootLayer, current.headRevision, "first-finding-publication");
+// Continue the underlying work. Read evidence and observe any semantic children.
+// Publish further material findings or questions as new snapshots, preserving prior current.
+current = await graph.getCurrent();
+const finalAuthor = graph.authoring("final-findings");
+const finalLayer = finalAuthor.layer("summary");
+const summary = finalLayer.node("summary", { icon: "info", title: "Result", detail: "Replace with the completed result or the consequential question requiring the user's answer." });
+const prior = await graph.getLayer(current.currentLayerId);
+finalLayer.action("prior", summary, { kind: "navigate", relation: "reference", label: "Earlier findings", target: prior.layer });
+finalLayer.layout([[summary, 0.5, 0.5]], { edgeShape: "default", defaultNode: summary });
+const finalWritten = await finalAuthor.write(finalLayer);
+// Advance leaves the interaction's root response action draft; retarget that same stable action.
+await graph.addAction(${interactionNodeId}, { kind: "navigate", relation: "expand", label: "Task findings", icon: "info", target: finalWritten.rootLayer, clientKey: "root-response" });
+await graph.submit(${interactionNodeId});
+\`\`\`
+For real content, use the same scoped action and detailCapability binding APIs as the ordinary authoring contract. Register every action before publication. Accepted nodes and layers stay immutable. Each later current must retain navigation to the exact prior current. Refresh getCurrent after each successful advance; save each transition's layer, expected headRevision and stable operation key for exact retries. When asking a question, author an input action on its draft explanation node with layer.action("question", finding, { kind: "input", label: "Answer", control: "text", prompt: "A task-specific question" }), or an appropriate select control. Publishing the question does not consume the user's answer. A terminal submit ends all graph access.`;
 }

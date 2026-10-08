@@ -70,7 +70,8 @@ const evalTarget = evalRuntimeTarget({ environment: process.env });
 const permissionCatalogPath = join(repositoryRoot, "permissions", "desktop.json");
 const productRendererDirectory = join(desktopDirectory, "renderer");
 const evalRendererDirectory = join(desktopDirectory, "eval-renderer");
-const configurationPaths = evalHarnessConfigurationPaths({ harnessDirectory, targetKey: evalTarget.key, currentCommunicationAblation: process.env.RELAYER_EVAL_CURRENT_COMMUNICATION_ABLATION === "1" });
+const currentCommunicationFrontier = process.env.RELAYER_EVAL_CURRENT_COMMUNICATION_FRONTIER === "1";
+const configurationPaths = evalHarnessConfigurationPaths({ harnessDirectory, targetKey: evalTarget.key, currentCommunicationAblation: process.env.RELAYER_EVAL_CURRENT_COMMUNICATION_ABLATION === "1", currentCommunicationFrontier });
 // Only explicitly selected, commit-pinned developer catalogs execute here.
 const externalCatalog = process.env.RELAYER_EVAL_CATALOG_ROOT
   ? await loadExternalEvalCatalog({
@@ -242,6 +243,7 @@ async function start() {
   const setupRegistry = await new SetupRegistry({ stateFile: join(dirname(evalStateFile), "setup-revisions.json"),
     feedbackLoader: (ref) => { if (calibration?.isHeldOutFeedback(ref)) throw new Error("Held-out labels cannot motivate setup tuning."); return humanTasks.feedbackReference(ref); } }).open();
   evalService = await new EvalService({
+    currentCommunicationFrontier,
     setupRegistry,
     stateFile: evalStateFile,
     productSession,

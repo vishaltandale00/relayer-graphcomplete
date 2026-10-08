@@ -226,6 +226,43 @@ async function graphMetadata(runtimeSession, nodeId) {
 // real exported `complete(inputGraph)`, with no provider and no inference. Every earlier test
 // of this seam mocked the transport, which is why four separate defects survived in it.
 describe("recursive complete end to end", () => {
+  it("executes the frontier's actual early-publication recipe and preserves prior current at final submission", async () => {
+    const observed = {};
+    const stack = await startRecursiveStack(observed, { implementationFactory: () => ({
+      traceSupport: () => ({ prompt: "none", messages: "none", reasoningSummaries: "none", modelCalls: "none", toolCalls: "none", usage: "none", childStreams: "none", nativeArtifacts: "none" }),
+      state: () => ({}),
+      async complete(context) {
+        const { scopedAuthoringRecipeJs } = await import("../packages/harness-host/src/implementations/graph-presentation-guidance.ts");
+        const recipe = scopedAuthoringRecipeJs(context.inputGraph.id, "@relayer/graph-client", "publish-observe-continue");
+        const program = recipe.match(/```javascript\n([\s\S]*?)\n```/)[1]
+          .replace(/^import [^\n]+\n/, "")
+          .replace("RelayerGraphClient.fromEnv()", "RelayerGraphClient.fromEnv(environment)")
+          .replace("// Continue the underlying work.", "observed.advanced = await graph.getCurrent();\n// Continue the underlying work.");
+        const capability = context.graph.acquireCapability();
+        const environment = { RELAYER_GRAPH_URL: capability.url, RELAYER_GRAPH_TOKEN: capability.token, RELAYER_NODE_ID: String(context.inputGraph.id) };
+        const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
+        try {
+          await new AsyncFunction("RelayerGraphClient", "environment", "observed", program)(RelayerGraphClient, environment, observed);
+        } catch (error) { observed.errors = [String(error)]; throw error; }
+      },
+    }) });
+    const thread = await productRequest(stack.session, "/api/threads", {
+      method: "POST", body: JSON.stringify({ title: "Early findings recipe", initialMessage: "Show findings while working", harnessId: "fixture-recursive", permissionProfileId: "auto", modelSelection: stack.selection }),
+    });
+    const detail = await waitForStatus(stack.session, thread.id, 0, "accepted", observed);
+    expect(observed.advanced).toMatchObject({ lifecycle: "active", headRevision: 1 });
+    const completionId = detail.interactions[0].graphNodeId;
+    const response = await fetch(new URL(`/api/control/interactions/${completionId}/current`, stack.runtimeSession.graphUrl), {
+      headers: { authorization: `Bearer ${stack.runtimeSession.graphControlToken}` },
+    });
+    expect(response.ok).toBe(true);
+    const finalCurrent = await response.json();
+    expect(finalCurrent).toMatchObject({ lifecycle: "succeeded", headRevision: 2 });
+    expect(finalCurrent.currentLayerId).not.toBe(observed.advanced.currentLayerId);
+    expect(detail.interactions[0].completionOutput).toBeTruthy();
+  });
+
+
   it("provides broker authority only when temporal provider recursion is enabled", async () => {
     const enabled = {};
     const enabledStack = await startRecursiveStack(enabled, {

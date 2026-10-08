@@ -7,6 +7,7 @@ import {
   evalHarnessConfigurationPaths,
   evalRuntimeTarget,
 } from "../desktop/eval-main/configuration-paths.mjs";
+import { EvalService } from "../desktop/eval-main/eval-service.mjs";
 import { DEFAULT_DESKTOP_HARNESS_CONFIGURATION } from "../desktop/main/services/desktop-harness-configuration.mjs";
 
 const names = (paths) => paths.map((path) => basename(path));
@@ -31,6 +32,33 @@ describe("Eval harness configuration availability", () => {
     expect(normalized.every(configuration => JSON.stringify(configuration) === JSON.stringify(normalized[0]))).toBe(true);
     expect(configurations.map(configuration => configuration.settings.currentCommunicationGuidance)).toEqual([undefined, "communication", "early-publication", "meaningful-updates"]);
     expect(baseline.some(path => path.includes("current-communication"))).toBe(false);
+  });
+
+  it("opts into the independent frontier and its synthetic delegation case without changing defaults", async () => {
+    const common = { harnessDirectory: resolve(repositoryRoot, "harnesses"), packageAvailable: () => false, targetKey: "macos-arm64" };
+    const baseline = evalHarnessConfigurationPaths(common);
+    const selected = evalHarnessConfigurationPaths({ ...common, currentCommunicationFrontier: true });
+    const added = selected.filter(path => !baseline.includes(path));
+    expect(added.map(path => basename(path))).toEqual(["a", "b", "c", "d"].map(cell => `codex-eval-current-frontier-${cell}.yaml`));
+    const configurations = [...(await loadHarnessConfigurations(added)).values()];
+    const ordinary = (await loadHarnessConfigurations([resolve(repositoryRoot, "harnesses/codex-basic.yaml")])).get("codex-basic");
+    const normalize = ({ name, settings, ...rest }) => {
+      const { currentCommunicationGuidance, ...unchanged } = settings;
+      return { ...rest, settings: unchanged };
+    };
+    for (const configuration of configurations) expect(normalize(configuration)).toEqual(normalize(ordinary));
+    expect(configurations.map(configuration => configuration.settings.currentCommunicationGuidance)).toEqual([undefined, "communication-contract", "publish-observe-continue", "decision-triggers"]);
+    const service = enabled => new EvalService({ stateFile: "/unused/frontier-state.json", configurationPaths: [], productSession: {}, currentCommunicationFrontier: enabled });
+    const ordinaryCases = service(false).catalog().cases;
+    const probeCases = service(true).catalog().cases;
+    expect(probeCases.slice(0, -1)).toEqual(ordinaryCases);
+    expect(probeCases.at(-1)).toMatchObject({ id: "current-communication.semantic-delegation", defaultSelected: false });
+    expect(probeCases.at(-1).prompts[0]).toContain("separate GraphComplete complete(inputGraph) calls");
+    const startup = await readFile(new URL("../desktop/eval-main/index.mjs", import.meta.url), "utf8");
+    expect(startup).toContain('process.env.RELAYER_EVAL_CURRENT_COMMUNICATION_FRONTIER === "1"');
+    expect(startup).toContain("currentCommunicationFrontier,");
+    const packaging = await readFile(new URL("../desktop/packaging/electron-builder.mjs", import.meta.url), "utf8");
+    expect(packaging).not.toContain("codex-eval-current-frontier");
   });
 
   it("honors the explicit development target override", () => {

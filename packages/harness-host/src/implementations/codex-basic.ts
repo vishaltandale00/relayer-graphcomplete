@@ -12,7 +12,7 @@ import {
   type NativeSessionResetReason,
 } from "../native-session-reset.js";
 import { redactTraceData } from "../trace.js";
-import { CURRENT_WORKSPACE_GUIDANCE, currentCommunicationGuidance, type CurrentCommunicationGuidance, GRAPH_PRESENTATION_GUIDANCE, NODE_ICON_GUIDANCE, scopedAuthoringRecipeJs } from "./graph-presentation-guidance.js";
+import { CURRENT_COMMUNICATION_PROFILES, currentWorkspaceGuidance, isCurrentCommunicationFrontier, currentCommunicationGuidance, type CurrentCommunicationGuidance, GRAPH_PRESENTATION_GUIDANCE, NODE_ICON_GUIDANCE, scopedAuthoringRecipeJs } from "./graph-presentation-guidance.js";
 import { LAYER_EDGE_SHAPE_GUIDANCE } from "./layer-edge-shape-guidance.js";
 import {
   personalPresentationNativeInstructions,
@@ -741,13 +741,13 @@ Codex native subagents are available when useful. Subagents may directly author,
     const pinnedExecutionClause = this.pinnedExecutionClause();
     return `You are the basic Relayer graph harness. ${UNDERLYING_TASK_GUIDANCE}
 
-Answer the current user interaction by authoring and accepting a useful graph layer that truthfully presents the completed work or genuine blocker.
+${isCurrentCommunicationFrontier(this.resolved.settings.currentCommunicationGuidance) ? "Complete the task and publish useful findings, uncertainties, next steps, and consequential questions while doing the work. Return the completed result or genuine need for user input." : "Answer the current user interaction by authoring and accepting a useful graph layer that truthfully presents the completed work or genuine blocker."}
 
 ${GRAPH_PRESENTATION_GUIDANCE}
 ${threadIconGuidance(context, "javascript")}
 ${CODEX_VISUAL_GUIDANCE}
 ${CODEX_ASSET_GUIDANCE}
-${CURRENT_WORKSPACE_GUIDANCE}${currentCommunicationGuidance(this.resolved.settings.currentCommunicationGuidance)}${includePersonalPresentation ? personalPresentationPrompt(context) : ""}
+${currentWorkspaceGuidance(this.resolved.settings.currentCommunicationGuidance)}${currentCommunicationGuidance(this.resolved.settings.currentCommunicationGuidance)}${includePersonalPresentation ? personalPresentationPrompt(context) : ""}
 
 Current interaction node: ${interactionNode.id}
 Normalized interaction input:
@@ -763,7 +763,7 @@ Use executable JavaScript and the Relayer graph client. Do not return a JSON gra
 ${this.clientModuleUrl}
 ${pinnedExecutionClause}
 
-${scopedAuthoringRecipeJs(interactionNode.id, this.clientModuleUrl)}
+${scopedAuthoringRecipeJs(interactionNode.id, this.clientModuleUrl, this.resolved.settings.currentCommunicationGuidance)}
 
 ${currentWorkspaceMechanicsJs()}
 
@@ -892,13 +892,13 @@ Do not turn a node, relationship, path, list, record, or arbitrary string into a
     : "";
   return `You are the Relayer layered-navigation harness. ${UNDERLYING_TASK_GUIDANCE}
 
-After doing the underlying work, answer the current user interaction with a useful graph that truthfully presents the result, evidence, and limitations. A flat answer is valid. Add navigation only when opening it would materially improve understanding or support; apply that same test again inside every layer you author.
+${isCurrentCommunicationFrontier(communicationProfile) ? "Do the underlying work while publishing useful findings, uncertainties, next steps, and consequential questions through your current. Finish with a useful graph that truthfully presents the result, evidence, and limitations." : "After doing the underlying work, answer the current user interaction with a useful graph that truthfully presents the result, evidence, and limitations."} A flat answer is valid. Add navigation only when opening it would materially improve understanding or support; apply that same test again inside every layer you author.
 
 ${GRAPH_PRESENTATION_GUIDANCE}
 ${threadIconGuidance(context, "javascript")}
 ${CODEX_VISUAL_GUIDANCE}
 ${CODEX_ASSET_GUIDANCE}
-${CURRENT_WORKSPACE_GUIDANCE}${currentCommunicationGuidance(communicationProfile)}${includePersonalPresentation && context !== undefined ? personalPresentationPrompt(context) : ""}
+${currentWorkspaceGuidance(communicationProfile)}${currentCommunicationGuidance(communicationProfile)}${includePersonalPresentation && context !== undefined ? personalPresentationPrompt(context) : ""}
 
 Current interaction node: ${interactionNode.id}
 Normalized interaction input:
@@ -912,7 +912,7 @@ For a full Node Detail replacement accompanying an authorized addition, first ca
 
 Use executable JavaScript and the Relayer graph client. Do not return a JSON graph in chat. ${authoringInstructions}
 
-${scopedAuthoringRecipeJs(interactionNode.id, clientModuleUrl)}
+${scopedAuthoringRecipeJs(interactionNode.id, clientModuleUrl, communicationProfile)}
 
 ${currentWorkspaceMechanicsJs()}
 ${semanticCompletionGuidanceJs(context, completeModuleUrl, nativeAgentLabel)}
@@ -1419,7 +1419,7 @@ function parseCodexBasicConfiguration(context: HarnessFactoryContext): ResolvedC
   const skipGitRepoCheck = optionalBoolean(configuration.skipGitRepoCheck, "skipGitRepoCheck");
   const additionalDirectories = optionalStringArray(configuration.additionalDirectories, "additionalDirectories");
   const promptProfile = optionalEnum(configuration.promptProfile, ["layered-navigation-v1", "layered-navigation-multi-agent-v1"] as const, "promptProfile");
-  const communicationProfile = optionalEnum(configuration.currentCommunicationGuidance, ["communication", "early-publication", "meaningful-updates"] as const, "currentCommunicationGuidance");
+  const communicationProfile = optionalEnum(configuration.currentCommunicationGuidance, CURRENT_COMMUNICATION_PROFILES, "currentCommunicationGuidance");
   const rootSessionMode = optionalEnum(configuration.rootSessionMode, ["resume", "fresh"] as const, "rootSessionMode");
   optionalEnum(configuration.personalPresentationVersion, ["personal-presentation-v0", "personal-presentation-v1", "personal-presentation-v2", "personal-presentation-v3", "personal-presentation-v4"] as const, "personalPresentationVersion");
   const permission = parseCodexPermissionBinding(context.permissionProfileId, context.permissionBinding);

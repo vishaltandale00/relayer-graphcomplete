@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 1,
+  "reviewer": "/root/design_authority_review",
+  "sourceDigest": "41f2ceb78631701762269f4d32a26eed29eee5ab4db5e07fbe5926592d9ecc7f",
+  "scope": "13 changed executable/config/test paths: prompt isolation, baseline/default parity, catalog opt-in, real API/authority semantics, publication/child observation/questions; independent warm tests 81/81",
+  "verdict": "PASS",
+  "unresolvedSourceFindings": [],
+  "protocolSha256": "67a82f333abd243dc25d75972acf3aca817c55e8044b8682f97af46b34a551fd",
+  "limits": [
+    "Comparisons estimate combined revised mechanics plus each framing, not framing alone.",
+    "Child creation/watch/read/incorporation require separate evidence.",
+    "Single-run probes show exercised mechanisms, not comparative quality or spontaneous delegation.",
+    "Overview excludes inspector and cannot establish control usability or full interactive understanding.",
+    "Successful Advance, useful early content and material updates remain separate.",
+    "Full/heavy verification and live evidence not certified by this source review."
+  ],
+  "privateHelperReview": {
+    "reviewer": "/root/design_authority_review",
+    "verdict": "PASS conditional on successful qualified rater before dispatch",
+    "scope": "missing route/root coverage, first view and adjacent update missingness, native parser gaps, dispatch rater qualification",
+    "sha256": {
+      "run.mjs": "65c49c87809cac6a6a0b71f934cacd7de50355e45dc31d6d9d7da59790b52bed",
+      "seal.mjs": "b615ec791ec78ec915d270b3e37b17eb771a53f38453ff7674772f094d005a87",
+      "grade-first-views.mjs": "0e487f91fae0ffa6c9025d92228f039638f72da4552254f8e171d652db4f0926",
+      "native-proof.py": "1687d4b50606a944f16676eb55c0e2c28015218d92632fd11de487c9ca2f6eda"
+    },
+    "limits": [
+      "Sealing does not imply complete identity or measurement coverage.",
+      "Native call text does not prove successful reads or incorporation."
+    ]
+  }
+}

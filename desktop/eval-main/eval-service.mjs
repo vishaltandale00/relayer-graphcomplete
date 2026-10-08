@@ -1,6 +1,7 @@
 import { completionArtifactEvidence } from "./task-completion-artifacts.mjs";
 import { abortable } from "./abortable.mjs";
 import { interactiveTripCase } from "./interactive-trip-case.mjs";
+import { currentCommunicationFrontierCases } from "./current-communication-frontier-cases.mjs";
 import { evalSelectionRequiresLiveAuthorization, validateExternalLiveAuthorization } from "../eval-renderer/eval-live-authorization.js";
 import { createHash, randomUUID } from "node:crypto";
 import { execFile } from "node:child_process";
@@ -991,6 +992,7 @@ export class EvalService {
     calibrationFixtureMaterializer = materializeCalibrationFixture,
     calibrationWorkspaceGrader = gradeCalibrationWorkspace,
     externalCatalog = null,
+    currentCommunicationFrontier = false,
     acceptedTopologyBuilder = buildAcceptedReviewTopology,
     acceptedTopologyGrader = gradeAcceptedReviewTopology,
     candidateTraceExporter = null,
@@ -1021,12 +1023,13 @@ export class EvalService {
     this.calibrationFixtureMaterializer = calibrationFixtureMaterializer;
     this.calibrationWorkspaceGrader = calibrationWorkspaceGrader;
     this.externalCatalog = externalCatalog;
+    const baselineCases = currentCommunicationFrontierCases(evalCases, currentCommunicationFrontier);
     this.externalCases = new Map((externalCatalog?.cases ?? []).map((entry) => [entry.definition.id, entry]));
     if (this.externalCases.size !== (externalCatalog?.cases ?? []).length
-      || evalCases.some((entry) => this.externalCases.has(entry.id))) {
+      || baselineCases.some((entry) => this.externalCases.has(entry.id))) {
       throw new Error("External Eval catalog contains duplicate or built-in case IDs.");
     }
-    this.cases = Object.freeze([...evalCases, ...[...this.externalCases.values()].map((entry) => entry.definition)]);
+    this.cases = Object.freeze([...baselineCases, ...[...this.externalCases.values()].map((entry) => entry.definition)]);
     this.projectCaseIds = new Set([...projectCaseIds, ...this.externalCases.keys()]);
     this.unavailableCaseIds = new Set([...this.externalCases.values()]
       .filter((entry) => !entry.available).map((entry) => entry.definition.id));
