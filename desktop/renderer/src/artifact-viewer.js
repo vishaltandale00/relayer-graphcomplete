@@ -34,6 +34,20 @@ function frameAddress(artifact) {
   } catch { return base; }
 }
 
+const attribute = (value) => String(value).replace(/[&"<>]/gu, (character) => `&#${character.charCodeAt(0)};`);
+
+/**
+ * Without a native view, a deployed site plays in a sandboxed frame held by a small
+ * document whose policy frames only the site's own origin (PRD 6.6.10). The site can move
+ * between its own pages but never replace itself with another site under Relayer's address.
+ */
+export function artifactFrameDocument(url, title) {
+  return `<!doctype html><meta http-equiv="Content-Security-Policy" content="frame-src ${attribute(new URL(url).origin)}">`
+    + "<style>html,body{margin:0;height:100%;overflow:hidden}iframe{display:block;width:100%;height:100%;border:0;background:#fff}</style>"
+    + `<iframe src="${attribute(url)}" title="${attribute(title)}" sandbox="allow-scripts allow-same-origin allow-forms"`
+    + ` allow="camera 'none'; microphone 'none'; geolocation 'none'" referrerpolicy="no-referrer"></iframe>`;
+}
+
 export function artifactAddress(artifact) {
   if (addressedByUrl(artifact?.kind)) return frameAddress(artifact);
   const file = String(artifact?.source?.file ?? "");
@@ -90,9 +104,27 @@ export function createArtifactViewer({ root = document.body, native = null, onAd
     return { x: rect.left, y: rect.top, width: rect.width, height: rect.height };
   }
 
+  /**
+   * A phone or tablet keeps its screen size in CSS pixels; a window too small for it
+   * shows it scaled down. Returns the scale.
+   */
+  function fitDevice() {
+    const { device, viewport, stage } = current;
+    if (!device) return 1;
+    const rect = stage.getBoundingClientRect();
+    const fit = Math.min(1, (rect.width - 32) / viewport[0], (rect.height - 56) / viewport[1]);
+    const scale = fit > 0 ? fit : 1;
+    Object.assign(device.style, { width: `${viewport[0] * scale}px`, height: `${viewport[1] * scale}px` });
+    const frame = device.querySelector(".artifact-frame");
+    if (frame) Object.assign(frame.style, { flex: "none", width: `${viewport[0]}px`, height: `${viewport[1]}px`, transform: `scale(${scale})`, transformOrigin: "0 0" });
+    return scale;
+  }
+
   function placeView() {
-    if (!current?.nativeOpen) return;
-    void native.setBounds(stageBounds(current.device ?? current.stage));
+    if (!current) return;
+    const scale = fitDevice();
+    if (!current.nativeOpen) return;
+    void native.setBounds({ ...stageBounds(current.device ?? current.stage), scale });
   }
 
   function showToolbar() {
@@ -197,7 +229,7 @@ export function createArtifactViewer({ root = document.body, native = null, onAd
     unsubscribe();
     unsubscribe = () => {};
     document.removeEventListener("keydown", onKeyDown, true);
-    if (closing.noting) void native?.endNote?.({ kept: (closing.notesAdded ?? 0) > 0 });
+    if (closing.noting) void native?.endNote?.({ kept: closing.noting.sent > 0 });
     // Always tell main, so an open still in flight there is dropped too.
     if (native) void native.close();
     closing.overlay.remove();
@@ -240,6 +272,9 @@ export function createArtifactViewer({ root = document.body, native = null, onAd
       setTimeout(() => setBadge("note", null), 3500);
       return;
     }
+    // Notes sent from this session; a note counts once it is sent, so closing while its
+    // confirmation is in flight keeps the screenshot it points at.
+    context.sent = 0;
     viewing.noting = context;
     viewing.annotate.setAttribute("aria-pressed", "true");
     viewing.freeze = element("img", { class: "artifact-freeze", src: context.screenshot, alt: "" });
@@ -250,9 +285,9 @@ export function createArtifactViewer({ root = document.body, native = null, onAd
       event.preventDefault();
       const text = artifactNoteText({ text: field.value, location: context.location, digest: context.digest });
       field.disabled = true;
+      context.sent += 1;
       try {
         await notes.add({ threadId: viewing.threadId, node: viewing.node, target: viewing.target, text });
-        viewing.notesAdded = (viewing.notesAdded ?? 0) + 1;
         field.value = "";
         await renderNoteList();
       } finally {
@@ -275,14 +310,14 @@ export function createArtifactViewer({ root = document.body, native = null, onAd
 
   async function endNote() {
     const viewing = current;
-    if (!viewing?.noting) return;
+    const context = viewing?.noting;
+    if (!context) return;
     viewing.noting = null;
     viewing.annotate.setAttribute("aria-pressed", "false");
     viewing.notePanel?.remove();
     viewing.freeze?.remove();
     // A screenshot no note used is not kept.
-    await native.endNote({ kept: (viewing.notesAdded ?? 0) > 0 });
-    viewing.notesAdded = 0;
+    await native.endNote({ kept: context.sent > 0 });
   }
 
   async function open({ threadId, node, target = null, approveServer = false }) {
@@ -312,14 +347,12 @@ export function createArtifactViewer({ root = document.body, native = null, onAd
     // A website or URL may ask for a phone or tablet screen; the view then sits in a device-sized frame.
     const viewport = ["website", "url", "app"].includes(artifact.kind) ? VIEWPORTS[artifact.viewport] : undefined;
     const device = viewport ? element("div", { class: `artifact-device artifact-device-${artifact.viewport}` }) : null;
-    // The renderer CSP blocks style attributes; CSSOM properties are allowed.
-    if (device) Object.assign(device.style, { width: `${viewport[0]}px`, height: `${viewport[1]}px` });
     if (device) stage.append(device, element("span", { class: "artifact-device-label", text: `${artifact.viewport} · ${viewport[0]}×${viewport[1]}` }));
     const card = element("section", { class: "artifact-card", hidden: true, "aria-live": "polite" });
     const overlay = element("section", { class: "artifact-viewer", role: "dialog", "aria-modal": "true", "aria-label": `${node.title} (${kindLabel})`, tabindex: "-1" },
       stripRow, toolbar, stage, card);
     current = {
-      overlay, toolbar, stage, device, card, badges, address, strip, artifact, title: node.title, errors: [], nativeOpen: false,
+      overlay, toolbar, stage, device, viewport, card, badges, address, strip, artifact, title: node.title, errors: [], nativeOpen: false,
       threadId, node, target, annotate, noting: null, notePanel: null, freeze: null,
       fileAddress: (url) => {
         try {
@@ -335,17 +368,16 @@ export function createArtifactViewer({ root = document.body, native = null, onAd
     document.addEventListener("keydown", onKeyDown, true);
     // Focus the dialog, not a toolbar button, so the toolbar can hide; Tab reaches the tools.
     overlay.focus({ preventScroll: true });
+    resizeObserver = typeof ResizeObserver === "function" ? new ResizeObserver(() => placeView()) : null;
+    resizeObserver?.observe(stage);
     showToolbar();
 
     if (!native) {
       if (liveSite && liveUrls) {
         (device ?? stage).append(element("iframe", {
           class: "artifact-frame",
-          src: frameAddress(artifact),
+          srcdoc: artifactFrameDocument(frameAddress(artifact), node.title),
           title: node.title,
-          sandbox: "allow-scripts allow-same-origin allow-forms",
-          allow: "camera 'none'; microphone 'none'; geolocation 'none'",
-          referrerpolicy: "no-referrer",
         }));
       } else {
         showCard({
@@ -361,8 +393,6 @@ export function createArtifactViewer({ root = document.body, native = null, onAd
     }
 
     unsubscribe = native.onEvent(onEvent);
-    resizeObserver = new ResizeObserver(() => placeView());
-    resizeObserver.observe(stage);
     annotate.onclick = () => void (current?.noting ? endNote() : beginNote());
     more.onclick = () => {
       const rect = more.getBoundingClientRect();

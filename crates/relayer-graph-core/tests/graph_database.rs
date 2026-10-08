@@ -585,6 +585,77 @@ async fn imported_conversation_notes_an_authored_detail_the_export_omitted() {
     );
 }
 
+/// The answer graph from `imported_conversation` with a node that opens an artifact layer.
+fn imported_artifact_conversation() -> ImportedConversation {
+    let mut input = imported_conversation("interaction-1");
+    let view = input.turns[0].accepted_view.as_mut().unwrap();
+    view.layers[0].actions.push(ImportedAction {
+        id: "open-site".into(),
+        source_node_id: "node-1".into(),
+        source_layer_id: Some("layer-1".into()),
+        label: "Open the site".into(),
+        target_layer_id: Some("layer-site".into()),
+        ..view.root_action.clone()
+    });
+    let site = ImportedNode {
+        id: "node-site".into(),
+        title: "Landing page".into(),
+        artifact: Some(
+            serde_json::json!({"kind": "url", "source": {"url": "https://example.com/"}}),
+        ),
+        ..view.layers[0].nodes[0].clone()
+    };
+    view.layers.push(ImportedResolvedLayer {
+        layer: ImportedLayer {
+            default_node_id: None,
+            id: "layer-site".into(),
+            client_key: None,
+            nodes: vec!["node-site".into()],
+            edges: vec![],
+            layout: None,
+            renderer: Some("artifact".into()),
+        },
+        nodes: vec![site],
+        edges: vec![],
+        actions: vec![],
+    });
+    input
+}
+
+#[tokio::test]
+async fn imported_artifact_layers_keep_their_identity_and_never_answer_directly() {
+    // A note on an artifact makes it a context target; that copy carries no artifact details.
+    let mut input = imported_artifact_conversation();
+    let site = input.turns[0].accepted_view.as_ref().unwrap().layers[1].nodes[0].clone();
+    input.turns[0].contexts.push(ImportedInteractionContext {
+        id: "context-note".into(),
+        target: ImportedNode {
+            artifact: None,
+            ..site
+        },
+        source_interaction_node_id: "source-interaction".into(),
+        source_layer_id: "source-layer".into(),
+        annotations: vec!["The logo flickers here".into()],
+    });
+    let database = GraphDatabase::in_memory().await.unwrap();
+    database.import_accepted_conversation(&input).await.unwrap();
+
+    // The answer opens on a graph: an edited export cannot make the artifact its root.
+    let mut input = imported_artifact_conversation();
+    let view = input.turns[0].accepted_view.as_mut().unwrap();
+    view.root_layer_id = "layer-site".into();
+    view.root_action.target_layer_id = Some("layer-site".into());
+    let database = GraphDatabase::in_memory().await.unwrap();
+    match database
+        .import_accepted_conversation(&input)
+        .await
+        .unwrap_err()
+    {
+        GraphError::Validation { code, .. } => assert_eq!(code, "artifact_layer_as_response"),
+        other => panic!("expected a validation error, got {other:?}"),
+    }
+}
+
 #[tokio::test]
 async fn imported_context_snapshots_deduplicate_and_remain_inert_on_nonaccepted_turns() {
     let database = GraphDatabase::in_memory().await.unwrap();

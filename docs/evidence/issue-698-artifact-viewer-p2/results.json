@@ -1,5 +1,5 @@
 {
-  "at": "2026-10-07T16:35:45.364Z",
+  "at": "2026-10-08T01:04:39.617Z",
   "entryPoint": "desktop/main/index.mjs",
   "inference": false,
   "results": [
@@ -39,6 +39,21 @@
       "observed": "hidden=true"
     },
     {
+      "id": "ART-006 hovering the strip brings the toolbar back",
+      "ok": true,
+      "observed": "revealed=true strip app-region=no-drag"
+    },
+    {
+      "id": "PRD 6.6.4 the page cannot open the browser by itself",
+      "ok": true,
+      "observed": "Open example.org in your browser"
+    },
+    {
+      "id": "PRD 6.6.4 a link waits for the user's choice",
+      "ok": true,
+      "observed": "offered in the toolbar, not opened"
+    },
+    {
       "id": "PRD 6.6.4 external link leaves the artifact",
       "ok": true,
       "observed": "{\"kind\":\"url\",\"url\":\"https://www.instagram.com/\"}"
@@ -66,7 +81,7 @@
     {
       "id": "ART-007 route and phone viewport",
       "ok": true,
-      "observed": "{\"x\":525,\"y\":100,\"width\":390,\"height\":772,\"hash\":\"#pricing\"}"
+      "observed": "{\"width\":390,\"height\":844,\"hash\":\"#pricing\",\"shown\":{\"x\":542,\"y\":100,\"width\":357,\"height\":772}}"
     },
     {
       "id": "ART-003 no shared storage between artifacts",
@@ -141,7 +156,7 @@
     {
       "id": "ART-009 starts the app",
       "ok": true,
-      "observed": "Served by process 31177 since 2026-10-07T16:35:15.834Z"
+      "observed": "Served by process 78307 since 2026-10-08T01:04:03.381Z"
     },
     {
       "id": "ART-010 web app cookies and storage seeded",
@@ -151,7 +166,7 @@
     {
       "id": "ART-009 reuses the server without asking again",
       "ok": true,
-      "observed": "Served by process 31177 since 2026-10-07T16:35:15.834Z (first open: Served by process 31177 since 2026-10-07T16:35:15.834Z)"
+      "observed": "Served by process 78307 since 2026-10-08T01:04:03.381Z (first open: Served by process 78307 since 2026-10-08T01:04:03.381Z)"
     },
     {
       "id": "ART-009 reports a failed start with its log",
@@ -176,12 +191,17 @@
     {
       "id": "ART-011 one interaction carries the note with where and its screenshot",
       "ok": true,
-      "observed": "[\"The logo flickers in this shot\\n— at 0:11 · screenshot sha256:a1cb276dbe2c983c0c28b8a7d7fe0dbe7a12b89f5e1eea3938d08c0c94821798\"]"
+      "observed": "[\"The logo flickers in this shot\\n— at 0:11 · screenshot sha256:0e1a329881bd6a187368ea18d96b6ad0294c13b46cafcc037cfdedc1b98061f5\"]"
     },
     {
       "id": "ART-011 the agent can open the note's screenshot",
       "ok": true,
-      "observed": "[{\"note\":\"The logo flickers in this shot\\n— at 0:11 · screenshot /var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-graph-programs-SHpku3D-1vw9/artifact-notes/a1cb276dbe2c983c0c28b8a7d7fe0dbe7a12b89f5e1eea3938d08c0c94821798.png\",\"file\":\"/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-graph-programs-SHpku3D-1vw9/artifact-notes/a1cb276dbe2c983c0c28b8a7d7fe0dbe7a12b89f5e1eea3938d08c0c94821798.png\",\"png\":true}]"
+      "observed": "[{\"note\":\"The logo flickers in this shot\\n— at 0:11 · screenshot /var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-graph-programs-2hFeyKyv50l3/artifact-notes/0e1a329881bd6a187368ea18d96b6ad0294c13b46cafcc037cfdedc1b98061f5.png\",\"file\":\"/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-graph-programs-2hFeyKyv50l3/artifact-notes/0e1a329881bd6a187368ea18d96b6ad0294c13b46cafcc037cfdedc1b98061f5.png\",\"png\":true}]"
+    },
+    {
+      "id": "ART-011 export and share accept artifact nodes and their notes",
+      "ok": true,
+      "observed": "export 200, share 200"
     }
   ],
   "external": [

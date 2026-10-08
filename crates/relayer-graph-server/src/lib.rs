@@ -2816,9 +2816,14 @@ async fn submit_layer(
         .graph
         .writer_for_completion_authority(authority.node_id, authority.epoch)
         .await?;
+    // A layer write changes which artifacts the answer reaches; acceptance pins their
+    // fingerprints under this gate, so no layer changes between the pin and acceptance.
+    let gate = completion_asset_gate(&state, authority.node_id)?;
+    let writing = gate.lock().await;
     let layer = writer
         .submit_layer_with_renderer(&input, renderer.as_deref())
         .await?;
+    drop(writing);
     let preview = state
         .draft_previews
         .preview(
@@ -2987,6 +2992,9 @@ async fn discard_layer(
     Path(id): Path<LayerId>,
 ) -> Result<Json<Value>, ApiError> {
     let authority = session(&state, &headers)?;
+    // Discarding a layer changes the answer's artifacts too (see submit_layer).
+    let gate = completion_asset_gate(&state, authority.node_id)?;
+    let _writing = gate.lock().await;
     let layer = state
         .graph
         .writer_for_completion_authority(authority.node_id, authority.epoch)

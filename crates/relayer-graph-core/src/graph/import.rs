@@ -740,6 +740,17 @@ impl crate::GraphDatabase {
                     &members,
                     resolved.edges.len(),
                 )?;
+                // The answer opens on a graph, never on an artifact (PRD 6.6.1).
+                if resolved.layer.id == view.root_layer_id && resolved.layer.renderer.is_some() {
+                    return Err(GraphError::validation(
+                        "artifact_layer_as_response",
+                        "rootLayerId",
+                        format!(
+                            "Imported layer {} is an answer's root layer, which must be a graph.",
+                            resolved.layer.id
+                        ),
+                    ));
+                }
                 for (node, _) in members.iter().filter(|(_, artifact)| *artifact) {
                     if let Some(other) =
                         artifact_layer_of.insert(node.clone(), resolved.layer.id.clone())
@@ -1750,6 +1761,9 @@ fn register_imported_node(
         let existing_client_key = existing.client_key.take();
         let incoming_authored_detail = node.authored_detail.take();
         let existing_authored_detail = existing.authored_detail.take();
+        // Context snapshots omit artifact details too; the accepted view's copy carries them.
+        let incoming_artifact = node.artifact.take();
+        let existing_artifact = existing.artifact.take();
         let incoming_assets = std::mem::take(&mut node.authored_detail_assets);
         let existing_assets = std::mem::take(&mut existing.authored_detail_assets);
         // Context snapshots omit authored keys, packages and omission markers.
@@ -1767,9 +1781,14 @@ fn register_imported_node(
                 (&existing_authored_detail, &incoming_authored_detail),
                 (Some(left), Some(right)) if left != right
             )
+            || matches!(
+                (&existing_artifact, &incoming_artifact),
+                (Some(left), Some(right)) if left != right
+            )
         {
             existing.client_key = existing_client_key;
             existing.authored_detail = existing_authored_detail;
+            existing.artifact = existing_artifact;
             existing.authored_detail_omitted = existing_omitted;
             existing.authored_detail_assets = existing_assets;
             return Err(GraphError::Internal(
@@ -1778,6 +1797,7 @@ fn register_imported_node(
         }
         existing.client_key = existing_client_key.or(incoming_client_key);
         existing.authored_detail = existing_authored_detail.or(incoming_authored_detail);
+        existing.artifact = existing_artifact.or(incoming_artifact);
         existing.authored_detail_assets = existing_assets;
         for incoming in incoming_assets {
             if !existing

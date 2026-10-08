@@ -185,6 +185,21 @@ describe("Annotate (ART-011)", () => {
     expect(onClose).toHaveBeenCalledWith(3);
   });
 
+  it("keeps the screenshot of a note still being confirmed when the viewer closes", async () => {
+    const native = fakeNative();
+    const notes = { ...fakeNotes(), add: vi.fn(() => new Promise(() => {})) };
+    const viewer = createArtifactViewer({ root: document.body, native, notes });
+    await viewer.open({ threadId: 3, node: node(video, "Promo video"), target });
+    document.querySelector('[aria-label="Annotate"]').click();
+    await vi.waitFor(() => expect(document.querySelector(".artifact-note-field")).toBeTruthy());
+    const field = document.querySelector(".artifact-note-field");
+    field.value = "Too fast";
+    field.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    await vi.waitFor(() => expect(notes.add).toHaveBeenCalledOnce());
+    viewer.close();
+    expect(native.endNote).toHaveBeenCalledWith({ kept: true });
+  });
+
   it("formats a note for the agent and shows it without the screenshot reference", () => {
     const note = artifactNoteText({ text: "  Too dark ", location: "under “Colour”", digest: "d".repeat(64) });
     expect(note).toBe(`Too dark\n— under “Colour” · screenshot sha256:${"d".repeat(64)}`);
@@ -193,15 +208,20 @@ describe("Annotate (ART-011)", () => {
 });
 
 describe("shares and Eval (ART-008)", () => {
+  // The site plays in a sandboxed frame inside a document that frames only its origin.
+  const played = () => {
+    const held = new window.DOMParser().parseFromString(document.querySelector("iframe.artifact-frame").getAttribute("srcdoc"), "text/html");
+    const frame = held.querySelector("iframe");
+    return { src: frame.getAttribute("src"), sandbox: frame.getAttribute("sandbox"), policy: held.querySelector("meta").getAttribute("content") };
+  };
+
   it("play an https artifact in a sandboxed frame and show a card, with no path, for a local one", async () => {
     const viewer = createArtifactViewer({ root: document.body });
     await viewer.open({ threadId: 1, node: node({ kind: "url", source: { url: "https://example.com/" } }, "Deployed site") });
-    const frame = document.querySelector("iframe.artifact-frame");
-    expect(frame.getAttribute("src")).toBe("https://example.com/");
+    expect(played()).toEqual({ src: "https://example.com/", sandbox: "allow-scripts allow-same-origin allow-forms", policy: "frame-src https://example.com" });
     // Review #9 and #20: routes resolve against the base, and the scheme is case-insensitive.
     await viewer.open({ threadId: 1, node: node({ kind: "url", source: { url: "HTTPS://example.com/app/" }, part: { route: "/pricing" } }, "Deployed site") });
-    expect(document.querySelector("iframe.artifact-frame").getAttribute("src")).toBe("https://example.com/pricing");
-    expect(frame.getAttribute("sandbox")).toBe("allow-scripts allow-same-origin allow-forms");
+    expect(played().src).toBe("https://example.com/pricing");
     await viewer.open({ threadId: 1, node: node(site) });
     expect(document.querySelector("iframe")).toBe(null);
     expect(text(".artifact-card-note")).toBe("Available in Relayer on the machine that made it.");

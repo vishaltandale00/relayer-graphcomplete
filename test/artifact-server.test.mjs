@@ -1,7 +1,7 @@
 // ART-009: the server invoke reuses, asks once, starts, reports failure, stops when
 // idle and records nothing (PRD 6.6.6). Real processes against the fixture app.
 import { createServer } from "node:http";
-import { cp, mkdtemp, rm, stat } from "node:fs/promises";
+import { cp, mkdir, mkdtemp, rm, stat, writeFile } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -124,6 +124,10 @@ describe("the server invoke (ART-009)", () => {
     const other = await runner.ensure({ threadId: 13, nodeId: 3, folder, permissionProfileId: PROFILE, approve: true, server: { command: `node app/server.mjs ${port}` }, sourceUrl: url });
     expect(other.state).toBe("failed");
     expect(other.log).toContain("Another thread's app is already serving");
+    // Review: the address the app is shown at is held too, not only its ready URL.
+    const ready = `http://127.0.0.1:${await freePort()}/`;
+    const shown = await runner.ensure({ threadId: 14, nodeId: 3, folder, permissionProfileId: PROFILE, approve: true, server: { command: "npm run dev", readyUrl: ready }, sourceUrl: url });
+    expect(shown.log).toContain(`Another thread's app is already serving http://loopback:${port}`);
   });
 
   it("treats localhost and 127.0.0.1 on one port as the same server", async () => {
@@ -160,15 +164,18 @@ describe("the server invoke (ART-009)", () => {
   it("starts Full access servers on Windows with its own shell", async () => {
     const calls = [];
     const { EventEmitter } = await import("node:events");
-    const spawn = (file, args) => {
-      calls.push({ file, args });
+    const spawn = (file, args, options) => {
+      calls.push({ file, args, path: options.env.Path, keys: Object.keys(options.env) });
       const child = Object.assign(new EventEmitter(), { pid: 1234, exitCode: null, signalCode: null, stdout: new EventEmitter(), stderr: new EventEmitter() });
       setTimeout(() => { child.exitCode = 1; child.emit("exit", 1, null); }, 10);
       return child;
     };
-    const { folder, runner } = await setup({ platform: "win32", spawn, environment: { ComSpec: "C:\\Windows\\System32\\cmd.exe" } });
+    const { folder, runner } = await setup({ platform: "win32", spawn, environment: { ComSpec: "C:\\Windows\\System32\\cmd.exe", Path: "C:\\Windows;C:\\Program Files\\nodejs" } });
     await runner.ensure({ threadId: 16, nodeId: 3, folder, permissionProfileId: "full", approve: true, server: { command: "npm run dev" }, sourceUrl: `http://127.0.0.1:${await freePort()}/` });
-    expect(calls[0]).toEqual({ file: "C:\\Windows\\System32\\cmd.exe", args: ["/d", "/s", "/c", "npm run dev"] });
+    expect(calls[0]).toMatchObject({ file: "C:\\Windows\\System32\\cmd.exe", args: ["/d", "/s", "/c", "npm run dev"] });
+    // Review: Windows' own Path survives as it is, so ordinary commands resolve.
+    expect(calls[0].path).toBe("C:\\Windows;C:\\Program Files\\nodejs");
+    expect(calls[0].keys).not.toContain("PATH");
   });
 
   it("gives commands only a shell's environment, never the desktop's credentials", async () => {
@@ -178,6 +185,20 @@ describe("the server invoke (ART-009)", () => {
       server: { command: "node -e \"console.log('leaked=' + [process.env.GITHUB_PAT, process.env.DATABASE_URL, process.env.SSH_AUTH_SOCK].filter(Boolean).length); process.exit(1)\"" },
     });
     expect(result.log).toContain("leaked=0");
+  });
+
+  it.runIf(process.platform === "darwin")("takes only PATH from the user's login shell, never what else it exports", async () => {
+    const { directory, folder } = await setup();
+    const home = join(directory, "home");
+    await mkdir(join(home, "tools"), { recursive: true });
+    await writeFile(join(home, ".zprofile"), 'echo "profile noise"\nexport GITHUB_PAT=from-profile\nexport PATH="$HOME/tools:$PATH"\n');
+    const profiled = createArtifactServerRunner({ grantsPath: join(directory, "grants-2.json"), environment: { ...process.env, HOME: home } });
+    cleanup.push(() => profiled.stopAll());
+    const result = await profiled.ensure({
+      threadId: 20, nodeId: 3, folder, permissionProfileId: PROFILE, approve: true, sourceUrl: `http://127.0.0.1:${await freePort()}/`,
+      server: { command: "node -e \"console.log('token=' + (process.env.GITHUB_PAT ?? 'none') + ' tools=' + process.env.PATH.split(':').includes(process.env.HOME + '/tools')); process.exit(1)\"" },
+    });
+    expect(result.log).toContain("token=none tools=true");
   });
 
   it("refuses to run a confined command where it cannot be confined", async () => {

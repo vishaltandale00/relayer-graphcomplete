@@ -536,19 +536,32 @@ const NODE_ENVELOPE_FIELDS = Object.freeze([
   "icon", "title", "detail", "kind", "clientKey", "detailAuthoring", "artifact", "ref",
 ] as const);
 
-/** A deep, frozen plain-JSON copy of the author's artifact details. */
+/**
+ * A deep, frozen copy of the author's artifact details, read like the node envelope:
+ * ordinary own data properties of plain objects and arrays only. No accessor, proxy
+ * trap or toJSON runs, and a value that is not plain JSON is refused, never reshaped.
+ */
 function snapshotArtifact(value: unknown): ArtifactDetails | undefined {
   if (value === undefined) return undefined;
   if (typeof value !== "object" || value === null || Array.isArray(value)) return invalidNodeSubmissionEnvelope();
-  const copy = JSON.parse(JSON.stringify(value)) as ArtifactDetails;
-  const freeze = (item: unknown): void => {
-    if (typeof item === "object" && item !== null) {
-      Object.freeze(item);
-      for (const child of Object.values(item)) freeze(child);
-    }
-  };
-  freeze(copy);
-  return copy;
+  return snapshotPlainJson(value, 0) as ArtifactDetails;
+}
+
+function snapshotPlainJson(value: unknown, depth: number): unknown {
+  if (value === null || typeof value === "string" || typeof value === "boolean") return value;
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value !== "object" || depth > 32 || isProxy(value)) return invalidNodeSubmissionEnvelope();
+  const array = Array.isArray(value);
+  if (Object.getPrototypeOf(value) !== (array ? Array.prototype : Object.prototype)) return invalidNodeSubmissionEnvelope();
+  const descriptors = Object.getOwnPropertyDescriptors(value) as Record<PropertyKey, PropertyDescriptor>;
+  const copy: Record<string, unknown> = array ? [] as unknown as Record<string, unknown> : {};
+  for (const key of Reflect.ownKeys(descriptors)) {
+    if (array && key === "length") continue;
+    const descriptor = descriptors[key]!;
+    if (typeof key !== "string" || !("value" in descriptor) || descriptor.enumerable !== true) return invalidNodeSubmissionEnvelope();
+    copy[key] = snapshotPlainJson(descriptor.value, depth + 1);
+  }
+  return Object.freeze(copy);
 }
 
 function materializeNodeSubmissionEnvelope(node: NodeObject): NodeSubmissionEnvelope {

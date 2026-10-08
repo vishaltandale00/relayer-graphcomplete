@@ -122,8 +122,16 @@ fn validate_url_allowing(value: &Value, path: &str, https: bool) -> Result<(), G
     // so `http://localhost:@example.com/` cannot pass as loopback.
     let (scheme, rest) = lower.split_once("://").unwrap_or_default();
     let authority = rest.split(['/', '?', '#']).next().unwrap_or_default();
-    let host = authority.split(':').next().unwrap_or_default();
-    let loopback = scheme == "http" && matches!(host, "localhost" | "127.0.0.1");
+    // The parsed host decides loopback, so `[::1]` counts and `localhost.example.com` does not.
+    let loopback = scheme == "http"
+        && url::Url::parse(text)
+            .ok()
+            .is_some_and(|parsed| match parsed.host() {
+                Some(url::Host::Domain(domain)) => domain == "localhost",
+                Some(url::Host::Ipv4(address)) => address == std::net::Ipv4Addr::LOCALHOST,
+                Some(url::Host::Ipv6(address)) => address == std::net::Ipv6Addr::LOCALHOST,
+                None => false,
+            });
     if authority.contains('@')
         || authority.is_empty()
         || !((https && scheme == "https") || loopback)
@@ -132,9 +140,9 @@ fn validate_url_allowing(value: &Value, path: &str, https: bool) -> Result<(), G
             "artifact_url_scheme",
             path,
             if https {
-                "Use an https URL, or plain http only for localhost or 127.0.0.1."
+                "Use an https URL, or plain http only for localhost, 127.0.0.1 or [::1]."
             } else {
-                "A web app's address is plain http on localhost or 127.0.0.1, such as http://127.0.0.1:5173/."
+                "A web app's address is plain http on localhost, 127.0.0.1 or [::1], such as http://127.0.0.1:5173/."
             },
         ));
     }

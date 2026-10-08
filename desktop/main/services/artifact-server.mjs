@@ -3,18 +3,35 @@
 // node's command in the thread folder. No model runs and nothing is written to
 // the graph. The first run of a command in a thread needs the user's approval;
 // a server Relayer started stops once no viewer has shown it for its idle timeout.
-import { spawn as spawnProcess } from "node:child_process";
+import { execFile, spawn as spawnProcess } from "node:child_process";
 import { createHash } from "node:crypto";
 import { readFile, realpath, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
+
+import { withConventionalPathKey } from "../../shared/codex-runtime-environment.mjs";
 
 const LOG_LIMIT = 64 * 1024;
 const DEFAULT_IDLE_MINUTES = 60;
 const STARTUP_TIMEOUT_MS = 120_000;
 const READY_POLL_MS = 400;
 // An agent-declared command gets only what a shell needs, never the desktop's credentials,
-// tokens or agent sockets; its login shell sets up the user's own tool paths.
-const ALLOWED_ENV = new Set(["PATH", "HOME", "USER", "LOGNAME", "SHELL", "LANG", "TERM", "TMPDIR", "TZ", "SystemRoot", "ComSpec", "PATHEXT", "TEMP", "TMP", "USERPROFILE"]);
+// tokens or agent sockets. Names compare case-insensitively, as Windows names do.
+const ALLOWED_ENV = new Set(["path", "home", "user", "logname", "shell", "lang", "term", "tmpdir", "tz", "systemroot", "comspec", "pathext", "temp", "tmp", "userprofile"]);
+const PATH_MARKER = "__RELAYER_LOGIN_PATH__";
+
+/**
+ * The user's tool paths (npm, node) as their macOS login shell sets them, so a server
+ * starts even when Relayer was opened from Finder. Only PATH is taken: whatever else
+ * the user's startup files export never reaches the agent's command.
+ */
+export function loginShellPath(env) {
+  return new Promise((done) => {
+    execFile("/bin/zsh", ["-lc", `printf '\\n${PATH_MARKER}%s' "$PATH"`], { env, timeout: 5000 }, (error, stdout) => {
+      const path = error ? "" : String(stdout).split(PATH_MARKER).pop().trim();
+      done(path || null);
+    });
+  });
+}
 
 export const commandDigest = (command) => createHash("sha256").update(command).digest("hex");
 
@@ -59,6 +76,7 @@ export function createArtifactServerRunner({
   fetchImpl = globalThis.fetch,
   platform = process.platform,
   environment = process.env,
+  resolveLoginPath = loginShellPath,
   startupTimeoutMs = STARTUP_TIMEOUT_MS,
   minuteMs = 60_000,
 } = {}) {
@@ -66,6 +84,7 @@ export function createArtifactServerRunner({
   // One start per server at a time; a second open waits for it instead of starting another.
   const starting = new Map();
   let grants = null;
+  let loginPath = null;
 
   async function loadGrants() {
     if (grants) return grants;
@@ -120,13 +139,14 @@ export function createArtifactServerRunner({
     return killGroup(server.child);
   }
 
-  async function launch({ key, folder, permissionProfileId, command, readyUrl, idleMinutes, onLog }) {
-    const env = Object.fromEntries(Object.entries(environment).filter(([name]) => ALLOWED_ENV.has(name) || name.startsWith("LC_")));
-    // A login shell finds the user's tools (npm, node) even when Relayer was opened from Finder.
-    env.PATH = [env.PATH, "/opt/homebrew/bin", "/usr/local/bin"].filter(Boolean).join(":");
-    const shell = platform === "darwin" ? ["/bin/zsh", "-lc", command]
-      : platform === "win32" ? [environment.ComSpec || "cmd.exe", "/d", "/s", "/c", command]
-        : ["/bin/sh", "-c", command];
+  async function launch({ key, endpoints, folder, permissionProfileId, command, readyUrl, idleMinutes, onLog }) {
+    const env = withConventionalPathKey(Object.fromEntries(Object.entries(environment)
+      .filter(([name]) => ALLOWED_ENV.has(name.toLowerCase()) || name.startsWith("LC_"))), { platform });
+    if (platform === "darwin") {
+      loginPath ??= resolveLoginPath(env);
+      env.PATH = [(await loginPath) ?? env.PATH, "/opt/homebrew/bin", "/usr/local/bin"].filter(Boolean).join(":");
+    }
+    const shell = platform === "win32" ? [env.ComSpec || "cmd.exe", "/d", "/s", "/c", command] : ["/bin/sh", "-c", command];
     let [file, ...args] = shell;
     if (permissionProfileId !== "full") {
       if (platform !== "darwin") {
@@ -137,7 +157,7 @@ export function createArtifactServerRunner({
       args = ["-p", profile, ...shell];
     }
     const child = spawn(file, args, { cwd: folder, env, detached: true, stdio: ["ignore", "pipe", "pipe"] });
-    const server = { child, log: "", readyUrl, idleMinutes, viewers: 0, idleTimer: null };
+    const server = { child, log: "", endpoints, idleMinutes, viewers: 0, idleTimer: null };
     servers.set(key, server);
     // The log streams to the starting card only until startup ends; after that it is
     // kept (bounded) but no longer forwarded.
@@ -183,13 +203,15 @@ export function createArtifactServerRunner({
       const key = `${threadId}:${commandDigest(command)}`;
       // Another thread's app on the same address is a different app; never show it here.
       // This thread's own earlier server there (a revised command, or one that died) is replaced.
-      const origin = loopbackEndpoint(readyUrl);
+      // A server holds both the address it is shown at and the one it answers readiness on.
+      const endpoints = [...new Set([readyUrl, String(sourceUrl)].map(loopbackEndpoint))];
       for (const [other, entry] of [...servers.entries()]) {
-        if (other === key || loopbackEndpoint(entry.readyUrl) !== origin) continue;
+        const shared = entry.endpoints.find((endpoint) => endpoints.includes(endpoint));
+        if (other === key || !shared) continue;
         const exited = entry.child.exitCode !== null || entry.child.signalCode !== null;
         // Wait for it to go, so the replacement is never confused with the old server.
         if (exited || other.startsWith(`${threadId}:`)) { await stop(other); continue; }
-        return { state: "failed", log: `Another thread's app is already serving ${origin}. Close it there, or give this app another port.` };
+        return { state: "failed", log: `Another thread's app is already serving ${shared}. Close it there, or give this app another port.` };
       }
       await starting.get(key)?.catch(() => {});
       const running = servers.get(key);
@@ -204,7 +226,7 @@ export function createArtifactServerRunner({
       if (!(await approved(threadId, command))) return { state: "approval-required", command, folder, permissionProfileId };
       if (starting.has(key)) return this.ensure({ threadId, nodeId, folder, permissionProfileId, server, sourceUrl, onLog });
       if (servers.get(key)) await stop(key);
-      const launching = launch({ key, folder, permissionProfileId, command, readyUrl, idleMinutes: server.idleTimeoutMinutes ?? DEFAULT_IDLE_MINUTES, onLog });
+      const launching = launch({ key, endpoints, folder, permissionProfileId, command, readyUrl, idleMinutes: server.idleTimeoutMinutes ?? DEFAULT_IDLE_MINUTES, onLog });
       starting.set(key, launching);
       let result;
       try { result = await launching; } finally { if (starting.get(key) === launching) starting.delete(key); }

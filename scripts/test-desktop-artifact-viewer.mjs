@@ -297,8 +297,9 @@ async function run(window) {
   await openArtifact(window, "Landing page", "Pricing on a phone");
   view = await viewerLoaded(window);
   await sleep(500);
-  const phone = { ...view.getBounds(), hash: await view.webContents.executeJavaScript("location.hash") };
-  check("ART-007 route and phone viewport", phone.width === 390 && phone.hash === "#pricing", JSON.stringify(phone));
+  // The page sees the phone's full screen even when the window shows it scaled down.
+  const phone = await view.webContents.executeJavaScript("({ width: innerWidth, height: innerHeight, hash: location.hash })");
+  check("ART-007 route and phone viewport", phone.width === 390 && phone.height === 844 && phone.hash === "#pricing", JSON.stringify({ ...phone, shown: view.getBounds() }));
   const phoneStorage = view.webContents.session.getStoragePath();
   check("ART-003 no shared storage between artifacts", phoneStorage !== siteStorage && view.webContents.session !== window.webContents.session, `${siteStorage?.split("/").at(-1)} vs ${phoneStorage?.split("/").at(-1)}`);
   await shot(window, "03-website-phone");

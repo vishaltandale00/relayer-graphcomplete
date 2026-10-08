@@ -9,6 +9,7 @@ import { fingerprintPath } from "@relayer/harness-host";
 import { artifactFileStatus, artifactViewPlan, createArtifactRequestHandler } from "../desktop/main/services/artifact-viewer.mjs";
 import { draftPreviewArtifact } from "../desktop/main/services/draft-preview-renderer.mjs";
 import { createPlaywrightDraftPreviewRenderer } from "../desktop/eval-main/draft-preview-renderer.mjs";
+import { artifactFrameDocument } from "../desktop/renderer/src/artifact-viewer.js";
 import { existsSync } from "node:fs";
 import { chromium } from "playwright";
 
@@ -100,6 +101,29 @@ describe("drift since acceptance (ART-004)", () => {
     const image = artifactViewPlan({ kind: "image", source: { file: "brand/missing.png" } }, folder);
     expect((await artifactFileStatus(image, undefined)).state).toBe("missing");
   });
+});
+
+describe("deployed sites in a share or Eval frame (ART-008)", () => {
+  it.runIf(headlessChromium)("move between their own pages but never to another site", async () => {
+    const browser = await chromium.launch();
+    try {
+      const page = await browser.newPage();
+      const fetched = [];
+      // The share page's own policy frames any https site; the frame's document narrows it.
+      await page.route("https://share.example/**", (route) => route.fulfill({ contentType: "text/html", headers: { "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; frame-src https:" }, body: "<iframe></iframe>" }));
+      await page.route(/^https:\/\/(site|elsewhere)\.example\//u, (route) => {
+        fetched.push(route.request().url());
+        route.fulfill({ contentType: "text/html", body: '<script>setTimeout(() => { location.href = location.pathname === "/" ? "/pricing" : "https://elsewhere.example/"; }, 50)</script>' });
+      });
+      await page.goto("https://share.example/");
+      await page.locator("iframe").evaluate((frame, srcdoc) => { frame.srcdoc = srcdoc; }, artifactFrameDocument("https://site.example/", "Deployed site"));
+      await expect.poll(() => fetched, { timeout: 5000 }).toContain("https://site.example/pricing");
+      await page.waitForTimeout(500);
+      expect(fetched).toEqual(["https://site.example/", "https://site.example/pricing"]);
+    } finally {
+      await browser.close();
+    }
+  }, 30_000);
 });
 
 describe("agent previews of artifact layers (ART-005)", () => {

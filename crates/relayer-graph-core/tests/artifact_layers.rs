@@ -257,6 +257,9 @@ async fn artifact_details_are_checked_before_any_write() {
     assert!(artifact_node(&writer, "deployed", &url).await.is_ok());
     let loopback = json!({"kind":"url","source":{"url":"http://localhost:5173/"}});
     assert!(artifact_node(&writer, "local", &loopback).await.is_ok());
+    // Review: IPv6 loopback is loopback too.
+    let ipv6 = json!({"kind":"app","source":{"url":"http://[::1]:5173/"},"server":{"command":"npm run dev"}});
+    assert!(artifact_node(&writer, "local-ipv6", &ipv6).await.is_ok());
 }
 
 #[tokio::test]

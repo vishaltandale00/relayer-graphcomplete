@@ -27,6 +27,26 @@ describe("artifact nodes and layers", () => {
     expect(Object.isFrozen(accepted.artifact)).toBe(true);
   });
 
+  it("copies artifact details without running the author's code", async () => {
+    const fetch = vi.fn();
+    vi.stubGlobal("fetch", fetch);
+    const client = new RelayerGraphClient({ url: "http://127.0.0.1:1", token: "token", nodeId: 1 });
+    const ran = vi.fn(() => "/pricing");
+    const cases = [
+      { kind: "url", source: { url: "https://example.com/" }, part: { get route() { return ran(); } } },
+      { kind: "url", source: { url: "https://example.com/" }, part: { route: "/pricing", toJSON: () => ran() } },
+      { kind: "url", source: new Proxy({ url: "https://example.com/" }, { get: () => ran() }) },
+      { kind: "url", source: { url: "https://example.com/" }, seed: { localStorage: { at: new Date(0) } } },
+    ];
+    for (const artifact of cases) {
+      const node = new NodeObject("globe", "Deployed site", "The site", "concept", "deployed");
+      node.artifact = artifact as never;
+      await expect(client.submitNode(node)).rejects.toMatchObject({ issues: [expect.objectContaining({ code: "node_envelope_invalid" })] });
+    }
+    expect(ran).not.toHaveBeenCalled();
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
   it("omits artifact for ordinary nodes", async () => {
     const fetch = vi.fn(async (_url: string, init: RequestInit) => {
       const request = JSON.parse(String(init.body)) as Record<string, unknown>;

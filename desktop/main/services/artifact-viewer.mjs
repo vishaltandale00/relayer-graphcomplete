@@ -142,12 +142,16 @@ document.addEventListener("click",(event)=>{const link=event.target.closest?.('a
   return shell(`<p class="center">Unsupported artifact.</p>`);
 }
 
-async function respondWithFile(path, request) {
+async function respondWithFile(path, request, root) {
   // Open without following a link swapped in after the containment check, then stream
   // from that descriptor, never from the pathname again.
   const handle = await open(path, fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW);
   const info = await handle.stat();
-  if (!info.isFile()) {
+  // O_NOFOLLOW covers only the last name. The file opened must still be the one at this
+  // path inside the folder, so a parent folder swapped for a link meanwhile serves nothing.
+  const resolved = await realpath(path).catch(() => null);
+  const there = resolved && inside(root, resolved) ? await stat(resolved).catch(() => null) : null;
+  if (!info.isFile() || there?.dev !== info.dev || there?.ino !== info.ino) {
     await handle.close();
     return new Response("Not found", { status: 404 });
   }
@@ -209,7 +213,7 @@ export function createArtifactRequestHandler({ getPlan, markedPath }) {
       // A folder link serves its index.html, as a web server would.
       if (inside(root, real) && (await stat(real)).isDirectory()) real = await realpath(join(real, "index.html")).catch(() => real);
       if (!inside(root, real) || !(await stat(real)).isFile()) return new Response("Not found", { status: 404 });
-      return await respondWithFile(real, request);
+      return await respondWithFile(real, request, root);
     } catch {
       return new Response("Not found", { status: 404 });
     }
@@ -561,7 +565,11 @@ export function createArtifactViewerService({
       if (isMainFrame && code !== -3) emit({ type: "load-failed", message: `${description} (${url})` });
     });
     contents.on("did-navigate-in-page", (_event, url) => emit({ type: "address", url }));
-    contents.on("did-navigate", (_event, url) => emit({ type: "address", url }));
+    contents.on("did-navigate", (_event, url) => {
+      // Chromium keeps zoom per host; a new page keeps the device's scale.
+      if (current?.view === view) contents.setZoomFactor(current.zoom ?? 1);
+      emit({ type: "address", url });
+    });
     contents.on("before-input-event", (event, input) => {
       if (input.type === "keyDown" && input.key === "Escape") {
         event.preventDefault();
@@ -593,6 +601,7 @@ export function createArtifactViewerService({
     // Anything that fails after the pause must resume the media it paused.
     let png;
     let digest;
+    let created = false;
     let reported;
     try {
       try {
@@ -612,19 +621,21 @@ export function createArtifactViewerService({
       if (current !== viewing) return null;
       digest = createHash("sha256").update(png).digest("hex");
       await mkdir(notesDirectory, { recursive: true });
-      await writeFile(join(notesDirectory, `${digest}.png`), png, { mode: 0o600 });
+      // Screenshots are content-addressed: one an earlier note already holds stays its own.
+      await writeFile(join(notesDirectory, `${digest}.png`), png, { mode: 0o600, flag: "wx" })
+        .then(() => { created = true; }, (error) => { if (error.code !== "EEXIST") throw error; });
       reported = await contents.executeJavaScript(NOTE_LOCATION_SCRIPT).catch(() => null);
     } catch (error) {
       if (current === viewing) await endNote();
       throw error;
     }
     if (current !== viewing) return null;
-    viewing.noteDigest = digest;
+    viewing.noteDigest = created ? digest : null;
     viewing.view.setVisible(false);
     return { location: noteLocation(viewing.plan, reported, contents.getURL()), digest, screenshot: `data:image/png;base64,${png.toString("base64")}` };
   }
 
-  /** End a note session; a screenshot no note kept is deleted. */
+  /** End a note session; a screenshot this session wrote and no note kept is deleted. */
   async function endNote({ kept = true } = {}) {
     if (current?.noteDigest && !kept) await rm(join(notesDirectory, `${current.noteDigest}.png`), { force: true }).catch(() => {});
     if (current) current.noteDigest = null;
@@ -651,6 +662,9 @@ export function createArtifactViewerService({
       width: Math.max(1, Math.round(bounds.width)),
       height: Math.max(1, Math.round(bounds.height)),
     });
+    // A phone or tablet shown scaled down keeps its screen size in CSS pixels.
+    current.zoom = bounds.scale > 0 && bounds.scale <= 1 ? bounds.scale : 1;
+    current.view.webContents.setZoomFactor(current.zoom);
   }
 
   async function openExternally() {
