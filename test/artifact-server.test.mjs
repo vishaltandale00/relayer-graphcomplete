@@ -168,6 +168,15 @@ describe("the server invoke (ART-009)", () => {
     expect(calls[0]).toEqual({ file: "C:\\Windows\\System32\\cmd.exe", args: ["/d", "/s", "/c", "npm run dev"] });
   });
 
+  it("gives commands only a shell's environment, never the desktop's credentials", async () => {
+    const { folder, runner } = await setup({ environment: { ...process.env, GITHUB_PAT: "ghp_secret", DATABASE_URL: "postgres://u:p@h/db", SSH_AUTH_SOCK: "/tmp/agent.sock" } });
+    const result = await runner.ensure({
+      threadId: 19, nodeId: 3, folder, permissionProfileId: "auto", approve: true, sourceUrl: `http://127.0.0.1:${await freePort()}/`,
+      server: { command: "node -e \"console.log('leaked=' + [process.env.GITHUB_PAT, process.env.DATABASE_URL, process.env.SSH_AUTH_SOCK].filter(Boolean).length); process.exit(1)\"" },
+    });
+    expect(result.log).toContain("leaked=0");
+  });
+
   it("refuses to run a confined command where it cannot be confined", async () => {
     const { folder, runner } = await setup({ platform: "linux" });
     const result = await runner.ensure({ threadId: 7, nodeId: 3, folder, permissionProfileId: "auto", approve: true, server: { command: "npm run dev" }, sourceUrl: `http://127.0.0.1:${await freePort()}/` });

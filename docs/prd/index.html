@@ -2866,7 +2866,7 @@ settings:
 <li>Each artifact node renders in its own isolated browser view, with its own storage. Nothing persists between opens.</li>
 <li>Artifact content cannot reach Relayer&#39;s API, login, cookies or IPC, or another artifact&#39;s storage.</li>
 <li>Popups, downloads and device permissions are refused. Camera, microphone, location and notifications are never granted.</li>
-<li>A link to another site opens in the user&#39;s browser. The artifact stays where it was.</li>
+<li>A link to another site is offered in the toolbar, and one click opens it in the user&#39;s browser. The page cannot open the browser itself, and the artifact stays where it was.</li>
 <li>Websites may load internet resources such as fonts. Deployed sites must use <code>https</code>. Plain <code>http</code> is allowed only for loopback addresses.</li>
 <li>Local files are served from the thread folder only. Video and audio support seeking.</li>
 </ul>

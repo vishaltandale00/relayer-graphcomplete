@@ -44,6 +44,8 @@ async function renderArtifactPreview(browser, { artifact, folder, rendererDirect
   try {
     await context.route("**/*", async (route) => {
       const requested = route.request().url();
+      // Like the viewer, the page itself never navigates to another site.
+      if (route.request().isNavigationRequest() && new URL(requested).origin !== allowed) return route.abort();
       // A deployed site, web app or website may load internet assets such as fonts, as in the
       // viewer; a PDF, video, image or Markdown file loads nothing else.
       if (plan.kind === "url" || plan.kind === "app") return route.continue();

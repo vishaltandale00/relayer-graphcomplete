@@ -463,6 +463,10 @@ export function registerArtifactViewerIpc({ ipcMain, Menu, viewer, getWindow }) 
     fromMainWindow(event);
     return viewer.endNote({ kept: options?.kept !== false });
   });
+  ipcMain.handle("relayer:artifact-viewer-open-link", (event, url) => {
+    fromMainWindow(event);
+    return viewer.openLink(String(url ?? ""));
+  });
   ipcMain.handle("relayer:artifact-viewer-close", (event) => {
     fromMainWindow(event);
     viewer.close();

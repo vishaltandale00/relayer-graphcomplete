@@ -35,7 +35,7 @@ function frameAddress(artifact) {
 }
 
 export function artifactAddress(artifact) {
-  if (addressedByUrl(artifact?.kind)) return `${String(artifact.source?.url ?? "")}${artifact.kind === "app" ? artifact.part?.route ?? "" : ""}`;
+  if (addressedByUrl(artifact?.kind)) return frameAddress(artifact);
   const file = String(artifact?.source?.file ?? "");
   const route = artifact?.part?.route ?? "";
   const part = artifact?.part ?? {};
@@ -174,9 +174,17 @@ export function createArtifactViewer({ root = document.body, native = null, onAd
     } else if (event?.type === "server-log" && current.starting && current.log) {
       current.log.textContent = `${current.log.textContent}${event.text}`.slice(-20_000);
       current.log.scrollTop = current.log.scrollHeight;
-    } else if (event?.type === "external" || event?.type === "external-blocked") {
-      setBadge("external", event.type === "external" ? "Opened a link in your browser" : "Blocked the page from opening a site by itself");
-      setTimeout(() => setBadge("external", null), 3500);
+    } else if (event?.type === "external-request" && typeof event.url === "string") {
+      // The artifact asked to leave; only a click here opens the user's browser.
+      let host = event.url;
+      try { host = new URL(event.url).host; } catch {}
+      setBadge("external", `Open ${host} in your browser`);
+      const badge = current.badges.querySelector('[data-badge="external"]');
+      badge.title = event.url;
+      badge.setAttribute("role", "button");
+      badge.tabIndex = 0;
+      badge.onclick = () => { void native?.openLink?.(event.url); setBadge("external", null); };
+      showToolbar();
     }
   }
 

@@ -83,3 +83,19 @@ describe("site fingerprints", () => {
     }
   });
 });
+
+describe("links inside a site root", () => {
+  it("reject a nested link that leaves the site", async () => {
+    const base = await mkdtemp(join(tmpdir(), "relayer-site-link-"));
+    try {
+      await mkdir(join(base, "thread", "site"), { recursive: true });
+      await writeFile(join(base, "thread", "site", "index.html"), "<h1>Hi</h1>");
+      await writeFile(join(base, "secret.txt"), "outside");
+      await symlink(join(base, "secret.txt"), join(base, "thread", "site", "data.txt"));
+      await expect(checkArtifactFiles(join(base, "thread"), { kind: "website", source: { file: "site/index.html", root: "site" } }))
+        .rejects.toMatchObject({ code: "artifact_path_outside_thread" });
+    } finally {
+      await rm(base, { recursive: true, force: true });
+    }
+  });
+});

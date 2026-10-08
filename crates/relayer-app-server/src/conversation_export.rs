@@ -1419,6 +1419,9 @@ fn register_immutable_view_records(
 #[derive(Clone, Copy)]
 struct NodeDefinitionDigest {
     base: [u8; 32],
+    /// Artifact details are immutable too, but a context target's snapshot omits them,
+    /// so two copies conflict only when both carry them.
+    artifact: Option<[u8; 32]>,
     authored_detail: Option<[u8; 32]>,
     authored_detail_assets: Option<[u8; 32]>,
 }
@@ -1438,8 +1441,6 @@ fn register_node_definition(
             &value.title,
             &value.detail,
             value.state,
-            // Artifact details are immutable node content too.
-            &value.artifact,
         ))
         .map_err(|error| {
             ExportValidationError::new(code, path, format!("Could not fingerprint {id}: {error}."))
@@ -1451,6 +1452,16 @@ fn register_node_definition(
         .as_ref()
         .map(|detail| {
             serde_json::to_vec(detail).map(|bytes| <[u8; 32]>::from(Sha256::digest(bytes)))
+        })
+        .transpose()
+        .map_err(|error| {
+            ExportValidationError::new(code, path, format!("Could not fingerprint {id}: {error}."))
+        })?;
+    let artifact = value
+        .artifact
+        .as_ref()
+        .map(|artifact| {
+            serde_json::to_vec(artifact).map(|bytes| <[u8; 32]>::from(Sha256::digest(bytes)))
         })
         .transpose()
         .map_err(|error| {
@@ -1474,6 +1485,7 @@ fn register_node_definition(
     };
     if let Some(existing) = definitions.get_mut(id) {
         if existing.base != base
+            || existing.artifact.is_some() && artifact.is_some() && existing.artifact != artifact
             || existing.authored_detail_assets.is_some()
                 && authored_detail_assets.is_some()
                 && existing.authored_detail_assets != authored_detail_assets
@@ -1490,6 +1502,9 @@ fn register_node_definition(
         if existing.authored_detail.is_none() {
             existing.authored_detail = authored_detail;
         }
+        if existing.artifact.is_none() {
+            existing.artifact = artifact;
+        }
         if existing.authored_detail_assets.is_none() {
             existing.authored_detail_assets = authored_detail_assets;
         }
@@ -1498,6 +1513,7 @@ fn register_node_definition(
             id.to_owned(),
             NodeDefinitionDigest {
                 base,
+                artifact,
                 authored_detail,
                 authored_detail_assets,
             },

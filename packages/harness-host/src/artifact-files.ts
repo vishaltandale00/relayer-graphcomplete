@@ -85,6 +85,7 @@ export async function fingerprintPath(path: string): Promise<string> {
   const entries: { readonly rel: string; readonly full: string; readonly link?: string; readonly size?: number }[] = [];
   let bytes = 0;
   let visited = 0;
+  const rootReal = await realpath(path);
   const tooLarge = () => new ArtifactFileError(
     "artifact_too_large",
     "The site root holds more than 5,000 files or 2 GB. Point root at the built site folder, not the whole project.",
@@ -99,6 +100,15 @@ export async function fingerprintPath(path: string): Promise<string> {
       const full = join(folder, entry.name);
       const rel = relative(path, full).split(sep).join("/");
       if (entry.isSymbolicLink()) {
+        // A link inside the site must stay inside it; the viewer serves nothing outside.
+        const target = await realpath(full).catch(() => null);
+        if (target !== null && !inside(rootReal, target)) {
+          throw new ArtifactFileError(
+            "artifact_path_outside_thread",
+            `"${rel}" in the site root links outside it. Copy the file into the site instead.`,
+            "artifact.source.root",
+          );
+        }
         entries.push({ rel, full, link: await readlink(full) });
       } else if (entry.isDirectory()) {
         await walk(full);

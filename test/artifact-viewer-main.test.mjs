@@ -77,6 +77,7 @@ describe("the artifact scheme (PRD 6.6.4)", () => {
     expect(route.status).toBe(200);
     expect(await route.text()).toContain("<html");
     expect((await get("/missing.css")).status).toBe(404);
+    await rm(join(folder, "site", "linked.txt"));
   });
 });
 

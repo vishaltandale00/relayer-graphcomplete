@@ -261,11 +261,14 @@ async function run(window) {
   await hold(1200);
   // A page cannot open the browser by itself; only the user's own click does.
   await view.webContents.executeJavaScript(`location.href = "https://example.org/"`).catch(() => {});
-  const blocked = await waitFor("blocked badge", () => js(window, `document.querySelector('[data-badge="external"]')?.textContent ?? null`), 5_000).catch(() => null);
-  check("Review #13 the page cannot open a site by itself", blocked === "Blocked the page from opening a site by itself" && !external.some((entry) => entry.url?.includes("example.org")), String(blocked));
+  const offered = await waitFor("link offer", () => js(window, `document.querySelector('[data-badge="external"]')?.textContent ?? null`), 5_000).catch(() => null);
+  check("PRD 6.6.4 the page cannot open the browser by itself", offered === "Open example.org in your browser" && !external.some((entry) => entry.url?.includes("example.org")), String(offered));
   const link = await view.webContents.executeJavaScript(`(() => { document.querySelector("#instagram").scrollIntoView({ block: "center" }); const box = document.querySelector("#instagram").getBoundingClientRect(); return { x: Math.round(box.left + box.width / 2), y: Math.round(box.top + box.height / 2) }; })()`);
   view.webContents.sendInputEvent({ type: "mouseDown", x: link.x, y: link.y, button: "left", clickCount: 1 });
   view.webContents.sendInputEvent({ type: "mouseUp", x: link.x, y: link.y, button: "left", clickCount: 1 });
+  await waitFor("instagram offer", () => js(window, `document.querySelector('[data-badge="external"]')?.textContent === "Open www.instagram.com in your browser" ? true : null`), 5_000);
+  check("PRD 6.6.4 a link waits for the user's choice", !external.some((entry) => entry.url?.startsWith("https://www.instagram.com")), "offered in the toolbar, not opened");
+  await js(window, `document.querySelector('[data-badge="external"]').click()`);
   await waitFor("external link", () => external.some((entry) => entry.url?.startsWith("https://www.instagram.com")));
   check("PRD 6.6.4 external link leaves the artifact", view.webContents.getURL().startsWith("relayer-artifact://view/"), JSON.stringify(external.at(-1)));
   await hold(2500);
@@ -492,6 +495,12 @@ async function run(window) {
   check("ART-011 one interaction carries the note with where and its screenshot", annotations.length === 1 && /^The logo flickers in this shot\n— at 0:1\d · screenshot sha256:[0-9a-f]{64}$/u.test(annotations[0]), JSON.stringify(annotations));
   const received = JSON.parse(await readFile(join(output, "agent-previews", `input-${sent.graphNodeId}.json`), "utf8"));
   check("ART-011 the agent can open the note's screenshot", received.length === 1 && received[0].png === true, JSON.stringify(received));
+  // A sent note makes the artifact node a context target; exports and shares still validate.
+  const auth = { Cookie: `${productSession.cookie.name}=${productSession.cookie.value}`, "Content-Type": "application/json" };
+  const exported = await fetch(new URL(`/api/threads/${thread.id}/export`, productSession.origin), { headers: auth });
+  const shared = await fetch(new URL(`/api/threads/${thread.id}/share-export`, productSession.origin), { method: "POST", headers: auth, body: JSON.stringify({ title: "Tidewater launch kit" }) });
+  const exportText = exported.ok ? await exported.text() : await exported.text().then((body) => body.slice(0, 300));
+  check("ART-011 export and share accept artifact nodes and their notes", exported.ok && shared.ok && exportText.includes('"artifact"'), `export ${exported.status}, share ${shared.status}${exported.ok ? "" : `: ${exportText}`}`);
   await hold(2500);
 
   await hold(3000);

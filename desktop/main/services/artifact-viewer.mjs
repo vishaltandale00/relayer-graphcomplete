@@ -54,8 +54,6 @@ async function eachFrame(contents, script) {
   await Promise.all(contents.mainFrame.framesInSubtree.map((frame) => frame.executeJavaScript(script).catch(() => {})));
 }
 
-/** How recent the user's own input must be for the page to open their browser. */
-const USER_GESTURE_MS = 2_000;
 /** Distinct page errors reported per open. */
 const MAX_PAGE_ERRORS = 50;
 
@@ -527,22 +525,14 @@ export function createArtifactViewerService({
     // Events reach the renderer only while this view is the one shown; a closed view's
     // late load failure or console output never lands on the next artifact.
     const emit = (event) => { if (current?.view === view) send(event); };
-    // The page opens the user's browser only for the user's own click or key press,
-    // never by redirecting or assigning location on its own.
-    let lastUserInput = 0;
-    contents.on("input-event", (_event, input) => {
-      if (["mouseDown", "keyDown", "rawKeyDown"].includes(input.type)) lastUserInput = Date.now();
-    });
+    // The page never opens the user's browser itself. A link out only asks; Relayer's own
+    // toolbar then offers it, and the user's click there opens exactly that address.
     const leave = (url) => {
       try {
         const target = new URL(url);
         if (target.protocol !== "http:" && target.protocol !== "https:") return;
-        if (Date.now() - lastUserInput > USER_GESTURE_MS) {
-          emit({ type: "external-blocked", url: target.href });
-          return;
-        }
-        void shell.openExternal(target.href);
-        emit({ type: "external", url: target.href });
+        if (current?.view === view) current.pendingLink = target.href;
+        emit({ type: "external-request", url: target.href });
       } catch {}
     };
     contents.setWindowOpenHandler(({ url }) => {
@@ -643,6 +633,14 @@ export function createArtifactViewerService({
     await eachFrame(current.view.webContents, RESUME_MEDIA_SCRIPT);
   }
 
+  /** Open the link the artifact last asked for, after the user chose it in the toolbar. */
+  async function openLink(url) {
+    if (!current?.pendingLink || current.pendingLink !== url) return false;
+    current.pendingLink = null;
+    await shell.openExternal(url);
+    return true;
+  }
+
   function setBounds(bounds) {
     if (!current) return;
     const valid = bounds && ["x", "y", "width", "height"].every((key) => Number.isFinite(bounds[key]) && bounds[key] >= 0);
@@ -669,7 +667,7 @@ export function createArtifactViewerService({
     return error === "";
   }
 
-  return Object.freeze({ open, close, setBounds, openExternally, beginNote, endNote, isOpen: () => current !== null, currentPlan: () => current?.plan ?? null, currentContents: () => current?.view.webContents ?? null });
+  return Object.freeze({ open, close, setBounds, openExternally, openLink, beginNote, endNote, isOpen: () => current !== null, currentPlan: () => current?.plan ?? null, currentContents: () => current?.view.webContents ?? null });
 }
 
 export const artifactViewerTesting = Object.freeze({ viewerPage, ORIGIN, basename });

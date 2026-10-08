@@ -703,6 +703,8 @@ impl crate::GraphDatabase {
 
         let mut edge_ids = HashMap::<String, i64>::new();
         let mut layer_ids = HashMap::<String, i64>::new();
+        // Two artifact views are two nodes: an artifact node appears in one imported layer.
+        let mut artifact_layer_of = HashMap::<String, String>::new();
         let mut seen_layers = HashSet::new();
         for position in 0..turn_count {
             let turn = load_turn(&mut tx, import_id, position).await?;
@@ -738,6 +740,21 @@ impl crate::GraphDatabase {
                     &members,
                     resolved.edges.len(),
                 )?;
+                for (node, _) in members.iter().filter(|(_, artifact)| *artifact) {
+                    if let Some(other) =
+                        artifact_layer_of.insert(node.clone(), resolved.layer.id.clone())
+                        && other != resolved.layer.id
+                    {
+                        return Err(GraphError::validation(
+                            "artifact_node_in_another_layer",
+                            "layers",
+                            format!(
+                                "Imported artifact node {node} appears in layers {other} and {}.",
+                                resolved.layer.id
+                            ),
+                        ));
+                    }
+                }
                 let result = sqlx::query("INSERT INTO layers(project_id,thread_id,layout_schema_version,state,owner_interaction_id,client_key,default_node_id,layout_edge_shape,layout_edge_routes,renderer) VALUES (?1,?2,?3,'accepted',?4,?5,?6,?7,?8,?9)")
                     .bind(metadata.project_id.map(ProjectId::value)).bind(metadata.thread_id.value())
                     .bind(resolved.layer.layout.as_ref().map(|layout| i64::from(layout.version)))
