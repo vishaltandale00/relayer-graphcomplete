@@ -1,7 +1,7 @@
 {
-  "at": "2026-10-08T17:29:01.581Z",
+  "at": "2026-10-08T17:45:05.729Z",
   "source": {
-    "commit": "ca0abc5774e1fde199b7c230df761c7fac5932f8",
+    "commit": "11c51437791e5ec74c536d5de1aec4be8f18cbed",
     "clean": true
   },
   "entryPoint": "desktop/main/index.mjs",
@@ -180,7 +180,7 @@
     {
       "id": "ART-009 starts the app",
       "ok": true,
-      "observed": "Served by process 90426 since 2026-10-08T17:28:31.877Z"
+      "observed": "Served by process 48286 since 2026-10-08T17:44:29.745Z"
     },
     {
       "id": "ART-010 web app cookies and storage seeded",
@@ -190,7 +190,7 @@
     {
       "id": "ART-009 reuses the server without asking again",
       "ok": true,
-      "observed": "Served by process 90426 since 2026-10-08T17:28:31.877Z (first open: Served by process 90426 since 2026-10-08T17:28:31.877Z)"
+      "observed": "Served by process 48286 since 2026-10-08T17:44:29.745Z (first open: Served by process 48286 since 2026-10-08T17:44:29.745Z)"
     },
     {
       "id": "ART-009 reports a failed start with its log",
@@ -215,12 +215,12 @@
     {
       "id": "ART-011 one interaction carries the note with where and its screenshot",
       "ok": true,
-      "observed": "[\"The logo flickers in this shot\\n— at 0:11 · screenshot sha256:8648f2a55eebb108588e98effca7afc5698716c2ba6d327cac7fe552d1616f0d\"]"
+      "observed": "[\"The logo flickers in this shot\\n— at 0:11 · screenshot sha256:9c3f3e1d24e099765cf99974561088734af12cc4aeafb19d165c186761d1afc3\"]"
     },
     {
       "id": "ART-011 the agent can open the note's screenshot",
       "ok": true,
-      "observed": "[{\"note\":\"The logo flickers in this shot\\n— at 0:11 · screenshot /var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-graph-programs-DXkjmAHOPpC2/artifact-notes/8648f2a55eebb108588e98effca7afc5698716c2ba6d327cac7fe552d1616f0d.png\",\"file\":\"/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-graph-programs-DXkjmAHOPpC2/artifact-notes/8648f2a55eebb108588e98effca7afc5698716c2ba6d327cac7fe552d1616f0d.png\",\"png\":true}]"
+      "observed": "[{\"note\":\"The logo flickers in this shot\\n— at 0:11 · screenshot /var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-graph-programs-a7POx5NS4YEZ/artifact-notes/9c3f3e1d24e099765cf99974561088734af12cc4aeafb19d165c186761d1afc3.png\",\"file\":\"/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-graph-programs-a7POx5NS4YEZ/artifact-notes/9c3f3e1d24e099765cf99974561088734af12cc4aeafb19d165c186761d1afc3.png\",\"png\":true}]"
     },
     {
       "id": "ART-011 export and share accept artifact nodes and their notes",
