@@ -10,6 +10,11 @@ const SLIDE = { width: 960, height: 540 };
 const SHEET_LIMIT = { rows: 1000, columns: 100 };
 /** An Office file is a zip; one this large, or expanding past this, is not parsed in the view. */
 const ARCHIVE_LIMIT = { bytes: 50 * 1024 * 1024, expanded: 250 * 1024 * 1024 };
+/**
+ * The spreadsheet parser builds every cell of a sheet before the view clips it, so each
+ * worksheet part is capped too: 32 MB of XML is about a million cells.
+ */
+const WORKSHEET_LIMIT = 32 * 1024 * 1024;
 /** Word list bullets in the Symbol and Wingdings fonts, which browsers lack, as Unicode. */
 const SYMBOL_BULLETS = Object.freeze({ "\uF0B7": "\u2022", "\uF0A7": "\u25AA", "\uF0D8": "\u27A2", "\uF076": "\u2756", "\uF0FC": "\u2713", "\uF06E": "\u25A0", "\uF06C": "\u25CF" });
 
@@ -133,7 +138,7 @@ async function readBounded(response) {
  * parser may trust either; and each entry is inflated once, counting bytes, so a stream that
  * expands past its declared size is caught without ever holding more than one chunk.
  */
-async function checkArchive(bytes) {
+async function checkArchive(bytes, kind) {
   const tooLarge = () => { throw new Error("The file is too large to show here. Open it in its own app."); };
   const damaged = () => { throw new Error("This Office file is damaged."); };
   if (bytes.byteLength > ARCHIVE_LIMIT.bytes) tooLarge();
@@ -157,6 +162,8 @@ async function checkArchive(bytes) {
     const method = view.getUint16(at + 10, true);
     const compressed = view.getUint32(at + 20, true);
     const size = view.getUint32(at + 24, true);
+    const name = new TextDecoder().decode(new Uint8Array(bytes, at + 46, Math.min(view.getUint16(at + 28, true), bytes.byteLength - at - 46)));
+    if (kind === "xlsx" && /^xl\/worksheets\/[^/]+\.xml$/iu.test(name) && size > WORKSHEET_LIMIT) tooLarge();
     // 0xFFFFFFFF marks a ZIP64 size, which is over the limit anyway.
     expanded += size === 0xffffffff ? Infinity : size;
     if (expanded > ARCHIVE_LIMIT.expanded) tooLarge();
@@ -166,6 +173,8 @@ async function checkArchive(bytes) {
     const described = (view.getUint16(local + 6, true) & 0x8) !== 0;
     const localCompressed = view.getUint32(local + 18, true);
     const localSize = view.getUint32(local + 22, true);
+    // A parser may follow the local compression method, so it must be the central one.
+    if (view.getUint16(local + 8, true) !== method) damaged();
     if (!(described && localCompressed === 0 && localSize === 0) && (localCompressed !== compressed || localSize !== size)) damaged();
     // A ZIP64 extra field carries 64-bit sizes a parser may trust over the checked ones; an
     // Office file under the byte limit never needs one, so either header carrying it is refused.
@@ -213,7 +222,7 @@ async function render(kind, source, { slide } = {}) {
     const response = await fetch(source);
     if (!response.ok) throw new Error("The file is not in the thread folder.");
     const bytes = await readBounded(response);
-    await checkArchive(bytes);
+    await checkArchive(bytes, kind);
     const locate = kind === "docx" ? await renderWord(bytes, root)
       : kind === "xlsx" ? renderExcel(bytes, root)
         : kind === "pptx" ? await renderPowerPoint(bytes, root, slide)

@@ -260,21 +260,21 @@ describe("Office documents (ART-012)", () => {
     // Review: one deflated entry whose headers claim 16 bytes but whose stream expands to 4 MiB,
     // first with the local header telling the truth, then with both headers lying.
     const { deflateRawSync } = await import("node:zlib");
-    const zipOf = ({ central, local, data, localExtra = Buffer.alloc(0) }) => {
-      const name = Buffer.from("a");
+    const zipOf = ({ central, local, data, localExtra = Buffer.alloc(0), entry: entryName = "a", localMethod = 8 }) => {
+      const name = Buffer.from(entryName);
       const header = Buffer.alloc(30);
       header.writeUInt32LE(0x04034b50, 0);
-      header.writeUInt16LE(8, 8);
+      header.writeUInt16LE(localMethod, 8);
       header.writeUInt32LE(data.length, 18);
       header.writeUInt32LE(local, 22);
-      header.writeUInt16LE(1, 26);
+      header.writeUInt16LE(name.length, 26);
       header.writeUInt16LE(localExtra.length, 28);
       const entry = Buffer.alloc(46);
       entry.writeUInt32LE(0x02014b50, 0);
       entry.writeUInt16LE(8, 10);
       entry.writeUInt32LE(data.length, 20);
       entry.writeUInt32LE(central, 24);
-      entry.writeUInt16LE(1, 28);
+      entry.writeUInt16LE(name.length, 28);
       const directory = Buffer.concat([entry, name]);
       const offset = header.length + name.length + localExtra.length + data.length;
       const close = Buffer.alloc(22);
@@ -301,6 +301,13 @@ describe("Office documents (ART-012)", () => {
     zip64.writeBigUInt64LE(4n * 1024n ** 3n, 4);
     zip64.writeBigUInt64LE(BigInt(small.length), 12);
     await writeFile(join(folder, "docs", "zip64.xlsx"), zipOf({ central: 16, local: 16, data: small, localExtra: zip64 }));
+    // Review: an entry stored centrally but deflated locally, which a parser could inflate unchecked.
+    const storedCentrally = zipOf({ central: small.length, local: small.length, data: small, localMethod: 8 });
+    storedCentrally.writeUInt16LE(0, 30 + 1 + small.length + 10);
+    await writeFile(join(folder, "docs", "method.xlsx"), storedCentrally);
+    // Review: a worksheet part over 32 MB is refused before the parser builds its cells.
+    const sheetXml = deflateRawSync(Buffer.alloc(33 * 1024 * 1024, 0x20));
+    await writeFile(join(folder, "docs", "dense.xlsx"), zipOf({ central: 33 * 1024 * 1024, local: 33 * 1024 * 1024, data: sheetXml, entry: "xl/worksheets/sheet1.xml" }));
     // Without the extra field the same entry passes the archive check (and is just not a workbook).
     await writeFile(join(folder, "docs", "plain.xlsx"), zipOf({ central: 16, local: 16, data: small }));
     // Review: a file over the byte limit is refused before it is held whole.
@@ -321,7 +328,9 @@ describe("Office documents (ART-012)", () => {
       expect(await oversized.page.locator(".office-error").innerText()).toContain("too large to show here");
       const plain = await openInChromium(browser, { kind: "xlsx", source: { file: "docs/plain.xlsx" } }, { ready: "failed" });
       expect(await plain.page.locator(".office-error").innerText()).not.toContain("damaged");
-      for (const file of ["headers.xlsx", "stream.xlsx", "hidden.pptx", "zip64.xlsx"]) {
+      const dense = await openInChromium(browser, { kind: "xlsx", source: { file: "docs/dense.xlsx" } }, { ready: "failed" });
+      expect(await dense.page.locator(".office-error").innerText()).toContain("too large to show here");
+      for (const file of ["headers.xlsx", "stream.xlsx", "hidden.pptx", "zip64.xlsx", "method.xlsx"]) {
         const crafted = await openInChromium(browser, { kind: file.split(".").pop(), source: { file: `docs/${file}` } }, { ready: "failed" });
         expect(await crafted.page.locator(".office-error").innerText(), file).toContain("damaged");
       }
@@ -330,7 +339,7 @@ describe("Office documents (ART-012)", () => {
       expect((await deck.located()).slide).toBe(4);
     } finally {
       await browser.close();
-      for (const file of ["huge.xlsx", "wide.xlsx", "bomb.docx", "headers.xlsx", "stream.xlsx", "hidden.pptx", "zip64.xlsx", "plain.xlsx", "oversized.docx"]) await rm(join(folder, "docs", file), { force: true });
+      for (const file of ["huge.xlsx", "wide.xlsx", "bomb.docx", "headers.xlsx", "stream.xlsx", "hidden.pptx", "zip64.xlsx", "plain.xlsx", "method.xlsx", "dense.xlsx", "oversized.docx"]) await rm(join(folder, "docs", file), { force: true });
     }
   }, 30_000);
 });
