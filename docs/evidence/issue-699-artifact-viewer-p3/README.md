@@ -28,7 +28,7 @@ Agent previews of the three Office layers render through the same page (ART-005 
 
 ## Source identity
 
-The recorded run and `results.json` come from commit `2c522585` with a clean working tree: 44 checks passed, 0 failed. `results.json` records that commit and tree state itself (`source`); a later source change needs a new run.
+The recorded run and `results.json` come from commit `71eebb4e` with a clean working tree: 44 checks passed, 0 failed. `results.json` records that commit and tree state itself (`source`); a later source change needs a new run.
 
 ## Files
 
