@@ -1,6 +1,6 @@
 import { createHash, webcrypto } from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
-import { resolveAcceptedNodeDetailAsset } from "../desktop/renderer/src/node-detail-assets.js";
+import { resolveAcceptedNodeDetailAsset, resolveImportedInvocationAsset } from "../desktop/renderer/src/node-detail-assets.js";
 
 function fixture() {
   const bytes = Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"/>');
@@ -41,6 +41,31 @@ describe("accepted node detail asset delivery", () => {
   it("does not request bytes without graph authority", async () => {
     const { asset, context, dependencies } = fixture();
     await expect(resolveAcceptedNodeDetailAsset(asset, { ...context, interactionId: undefined }, dependencies)).rejects.toThrow();
+    expect(dependencies.request).not.toHaveBeenCalled();
+  });
+});
+
+
+describe("inert imported Current asset delivery", () => {
+  it.each(["valid", "wrong-node", "wrong-layer", "unowned-pin", "changed-bytes", "missing-content"])("resolves local exact pins with no native request (%s)", async corruption => {
+    const { asset, response, dependencies } = fixture();
+    const context = { nodeId: "node:current", layerId: "layer:current" };
+    const association = { assetId: asset.id, digestSha256: asset.digestSha256, mediaType: asset.mediaType, byteLength: response.byteLength };
+    const history = { inert: true, record: { current: { layers: [{ layer: { id: context.layerId }, nodes: [{ id: context.nodeId, authoredDetailAssets: [association] }], actions: [] }] } }, visualAssetContents: [structuredClone(response)] };
+    if (corruption === "wrong-node") context.nodeId = "node:other";
+    if (corruption === "wrong-layer") context.layerId = "layer:other";
+    if (corruption === "unowned-pin") association.assetId = "other-asset";
+    if (corruption === "changed-bytes") history.visualAssetContents[0].contentBase64 = Buffer.from("x".repeat(response.byteLength)).toString("base64");
+    if (corruption === "missing-content") history.visualAssetContents = [];
+    if (corruption === "valid") {
+      const result = await resolveImportedInvocationAsset(asset, history, context, dependencies);
+      expect(result.url).toBe("blob:accepted");
+      result.release(); result.release();
+      expect(dependencies.URL.revokeObjectURL).toHaveBeenCalledExactlyOnceWith("blob:accepted");
+    } else {
+      await expect(resolveImportedInvocationAsset(asset, history, context, dependencies)).rejects.toThrow();
+      expect(dependencies.URL.createObjectURL).not.toHaveBeenCalled();
+    }
     expect(dependencies.request).not.toHaveBeenCalled();
   });
 });

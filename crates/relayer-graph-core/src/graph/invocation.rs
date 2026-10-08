@@ -1,7 +1,7 @@
 use crate::storage::sqlite::{actions::ActionTable, nodes::NodeTable};
 use crate::{
     ActionId, ActionKind, CompletionState, GraphDatabase, GraphError, GraphNode, GraphWriter,
-    NodeId, RecordState, SubmittedInputDraft, interaction_input_authority_digest,
+    LayerId, NodeId, RecordState, SubmittedInputDraft, interaction_input_authority_digest,
 };
 use serde::{Deserialize, Serialize};
 
@@ -25,7 +25,7 @@ impl GraphWriter {
         action_id: ActionId,
         invocation_key: &str,
     ) -> Result<(GraphNode, GraphInvocation), GraphError> {
-        self.prepare_invocation(action_id, invocation_key, false, &[])
+        self.prepare_invocation(action_id, invocation_key, false, &[], None)
             .await
     }
     /// Trusted Product preparation after validating an accepted action occurrence.
@@ -44,13 +44,31 @@ impl GraphWriter {
         invocation_key: &str,
         submitted_inputs: &[SubmittedInputDraft],
     ) -> Result<(GraphNode, GraphInvocation), GraphError> {
+        self.prepare_user_invocation_in_layer(action_id, invocation_key, submitted_inputs, None)
+            .await
+    }
+    /// Freeze the accepted layer occurrence activated by the user, independently of
+    /// the callable's original authored source layer.
+    pub async fn prepare_user_invocation_in_layer(
+        &self,
+        action_id: ActionId,
+        invocation_key: &str,
+        submitted_inputs: &[SubmittedInputDraft],
+        presenting_layer: Option<LayerId>,
+    ) -> Result<(GraphNode, GraphInvocation), GraphError> {
         if self.scope.authority_epoch.is_some() || self.scope.read_only {
             return Err(GraphError::Forbidden(
                 "User invocation preparation requires trusted native control.".into(),
             ));
         }
-        self.prepare_invocation(action_id, invocation_key, true, submitted_inputs)
-            .await
+        self.prepare_invocation(
+            action_id,
+            invocation_key,
+            true,
+            submitted_inputs,
+            presenting_layer,
+        )
+        .await
     }
     async fn prepare_invocation(
         &self,
@@ -58,6 +76,7 @@ impl GraphWriter {
         invocation_key: &str,
         user_initiated: bool,
         submitted_inputs: &[SubmittedInputDraft],
+        presenting_layer: Option<LayerId>,
     ) -> Result<(GraphNode, GraphInvocation), GraphError> {
         if invocation_key.trim().is_empty() || invocation_key.len() > 256 {
             return Err(GraphError::validation(
@@ -89,7 +108,37 @@ impl GraphWriter {
             .await?
             .ok_or_else(|| GraphError::NotFound(format!("action {action_id}")))?
             .action;
+        let presenting_layer = presenting_layer.or(action.source_layer_id);
+        if user_initiated {
+            let closure = crate::graph::completion::read_accepted_closure_on(
+                &mut transaction,
+                &self.scope,
+                self.scope.root_node_id,
+            )
+            .await?
+            .ok_or_else(|| {
+                GraphError::Forbidden("User Invoke requires an accepted source response.".into())
+            })?;
+            if !closure.layers.iter().any(|layer| {
+                Some(layer.layer.id) == presenting_layer
+                    && layer.layer.state == RecordState::Accepted
+                    && layer
+                        .nodes
+                        .iter()
+                        .any(|node| node.id == action.source_node_id)
+            }) {
+                return Err(GraphError::validation(
+                    "invalid_invocation_presentation",
+                    "presentingLayerId",
+                    "Invoke must name an accepted presenting layer containing this callable in the source response.",
+                ));
+            }
+        }
         let mut snapshot_value = serde_json::json!({ "actionId": action.id, "sourceNodeId": action.source_node_id, "sourceLayerId": action.source_layer_id, "instruction": action.interaction_text, "label": action.label, "icon": action.icon, "description": action.description, "variant": action.variant });
+        snapshot_value["state"] = serde_json::json!(action.state);
+        snapshot_value["presentingLayerId"] = serde_json::json!(presenting_layer);
+        snapshot_value["activator"] =
+            serde_json::json!(if user_initiated { "human" } else { "agent" });
         if !action.input_action_ids.is_empty() {
             snapshot_value["inputActionIds"] = serde_json::json!(action.input_action_ids);
         }
@@ -128,8 +177,34 @@ impl GraphWriter {
             let stored_input_digest =
                 interaction_input_authority_digest(instruction, &stored_inputs)
                     .map_err(|error| GraphError::Internal(error.to_string()))?;
+            // Old immutable snapshots retain their exact historical omissions.
+            let mut stored_value: serde_json::Value = serde_json::from_str(&stored)
+                .map_err(|error| GraphError::Internal(error.to_string()))?;
+            let mut recovery_snapshot = snapshot_value.clone();
+            // Publication changes Draft to Accepted without changing the frozen callable.
+            stored_value.as_object_mut().unwrap().remove("state");
+            recovery_snapshot.as_object_mut().unwrap().remove("state");
+            // Recovery reads the original call; it cannot reassign its captured activator.
+            stored_value.as_object_mut().unwrap().remove("activator");
+            recovery_snapshot
+                .as_object_mut()
+                .unwrap()
+                .remove("activator");
+            if stored_value.get("presentingLayerId").is_none() {
+                if presenting_layer != action.source_layer_id {
+                    return Err(GraphError::validation(
+                        "invocation_key_conflict",
+                        "presentingLayerId",
+                        "Historical call provenance cannot be reassigned to another presenting layer.",
+                    ));
+                }
+                recovery_snapshot
+                    .as_object_mut()
+                    .unwrap()
+                    .remove("presentingLayerId");
+            }
             if existing.source_action_id != action_id
-                || stored != snapshot
+                || stored_value != recovery_snapshot
                 || stored_input_digest != input_digest
             {
                 return Err(GraphError::validation(

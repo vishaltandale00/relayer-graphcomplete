@@ -57,7 +57,7 @@ mod tests {
         .fetch_all(&store.pool)
         .await
         .unwrap();
-        assert_eq!(versions, [40, 41, 42, 43, 44]);
+        assert_eq!(versions, [40, 41, 42, 43, 44, 45, 46]);
         assert!(
             store
                 .recover_interaction_accepted(
@@ -590,6 +590,11 @@ mod tests {
             .await
             .unwrap();
         pool.execute("PRAGMA foreign_keys=OFF").await.unwrap();
+        // This trigger belongs to 0045's reservation shape, absent in the
+        // historical table we reconstruct. Reapply 0045 on normal reopen below.
+        pool.execute("DROP TRIGGER invocation_preexecution_inputs_restore")
+            .await
+            .unwrap();
         pool.execute("ALTER TABLE action_invocations RENAME TO action_invocations_with_lease")
             .await
             .unwrap();
@@ -646,10 +651,25 @@ mod tests {
             .execute(&pool)
             .await
             .unwrap();
+        sqlx::query("DELETE FROM _sqlx_migrations WHERE version=45")
+            .execute(&pool)
+            .await
+            .unwrap();
         pool.execute("PRAGMA foreign_keys=ON").await.unwrap();
         pool.close().await;
 
         let reopened = SqliteProductStore::open(&path).await.unwrap();
+        let restoration: String = sqlx::query_scalar("SELECT sql FROM sqlite_schema WHERE type='trigger' AND name='invocation_preexecution_inputs_restore'")
+            .fetch_one(&reopened.pool).await.unwrap();
+        assert!(restoration.contains("action_invocations ai"));
+        assert!(!restoration.contains("action_invocations_with_lease"));
+        let presenting: Vec<Option<i64>> = sqlx::query_scalar(
+            "SELECT presenting_layer_id FROM action_invocations ORDER BY result_interaction_id",
+        )
+        .fetch_all(&reopened.pool)
+        .await
+        .unwrap();
+        assert_eq!(presenting, vec![None, None, None]);
         let mappings: Vec<(i64, i64, i64, bool)> = sqlx::query_as(
             "SELECT source_interaction_id,action_id,result_interaction_id,authoritative FROM action_invocations ORDER BY result_interaction_id",
         )

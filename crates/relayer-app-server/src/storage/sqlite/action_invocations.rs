@@ -233,6 +233,8 @@ impl SqliteProductStore {
         let result = sqlx::query(
             "UPDATE interactions
              SET completion_status=CASE
+                   WHEN id IN (SELECT result_interaction_id FROM action_invocations WHERE prepared_graph_node_id IS NULL AND invocation_key!='legacy' AND authoritative=1)
+                     THEN 'not_started'
                    WHEN id IN (SELECT result_interaction_id FROM action_invocations WHERE graph_lease_required=1 AND authoritative=1)
                      THEN 'submitted'
                    ELSE 'failed'
@@ -301,7 +303,7 @@ impl SqliteProductStore {
             action,
             text,
             agent_invoked,
-            Some((node, invocation_key)),
+            Some((Some(node), invocation_key, None)),
             None,
         )
         .await
@@ -323,10 +325,95 @@ impl SqliteProductStore {
             action,
             text,
             false,
-            Some((node, invocation_key)),
+            Some((Some(node), invocation_key, None)),
             Some((revision, attachments)),
         )
         .await
+    }
+
+    /// Reserve admission and immutable arguments before the graph can spend a single-call Invoke.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) async fn reserve_user_action_invocation(
+        &self,
+        source: InteractionId,
+        action: i64,
+        text: &str,
+        key: &str,
+        presenting_layer: Option<i64>,
+        revision: Option<i64>,
+        attachments: &[crate::product::ActionInputAttachment],
+    ) -> Result<ActionInvocationInsertOutcome, StorageError> {
+        self.insert_action_invocation_with_mode(
+            source,
+            action,
+            text,
+            false,
+            Some((None, key, presenting_layer)),
+            Some((revision, attachments)),
+        )
+        .await
+    }
+
+    pub(crate) async fn reject_user_invocation_preparation(
+        &self,
+        result: InteractionId,
+        native_status: u16,
+        error: &str,
+    ) -> Result<(), StorageError> {
+        let mut transaction = self.pool.begin_with("BEGIN IMMEDIATE").await?;
+        let changed = sqlx::query("UPDATE interactions SET completion_status='failed',completion_error=?1 WHERE id=?2 AND completion_status IN ('not_started','submitted') AND graph_node_id IS NULL AND thread_id IN (SELECT id FROM threads WHERE conversation_import_id IS NULL) AND EXISTS(SELECT 1 FROM action_invocations ai JOIN invocation_input_submission_receipts r ON r.result_interaction_id=ai.result_interaction_id WHERE ai.result_interaction_id=?2 AND ai.authoritative=1 AND ai.agent_invoked=0 AND ai.invocation_key!='legacy' AND ai.prepared_graph_node_id IS NULL) AND NOT EXISTS(SELECT 1 FROM interaction_attempts WHERE interaction_id=?2) AND NOT EXISTS(SELECT 1 FROM completion_executions WHERE interaction_id=?2) AND NOT EXISTS(SELECT 1 FROM interaction_stop_requests WHERE interaction_id=?2)")
+            .bind(error).bind(result.value()).execute(&mut *transaction).await?;
+        if changed.rows_affected() != 1 {
+            return Err(StorageError::IncompatibleSchema(
+                "native preparation refusal is not an untouched user reservation".into(),
+            ));
+        }
+        sqlx::query("INSERT INTO invocation_preparation_refusals(result_interaction_id,native_status) VALUES (?1,?2)")
+            .bind(result.value()).bind(i64::from(native_status)).execute(&mut *transaction).await?;
+        transaction.commit().await?;
+        Ok(())
+    }
+
+    pub(crate) async fn user_invocation_preparation_rejected(
+        &self,
+        result: InteractionId,
+    ) -> Result<bool, StorageError> {
+        Ok(sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM invocation_preparation_refusals refusal JOIN interactions result ON result.id=refusal.result_interaction_id JOIN action_invocations ai ON ai.result_interaction_id=result.id JOIN invocation_input_submission_receipts r ON r.result_interaction_id=result.id WHERE result.id=?1 AND result.completion_status='failed' AND result.graph_node_id IS NULL AND ai.authoritative=1 AND ai.agent_invoked=0 AND ai.invocation_key!='legacy' AND ai.prepared_graph_node_id IS NULL AND NOT EXISTS(SELECT 1 FROM interaction_attempts WHERE interaction_id=?1) AND NOT EXISTS(SELECT 1 FROM completion_executions WHERE interaction_id=?1) AND NOT EXISTS(SELECT 1 FROM interaction_stop_requests WHERE interaction_id=?1))")
+            .bind(result.value()).fetch_one(&self.pool).await?)
+    }
+
+    pub(crate) async fn user_invocation_preparation_recoverable(
+        &self,
+        result: InteractionId,
+    ) -> Result<bool, StorageError> {
+        let mut connection = self.pool.acquire().await?;
+        user_preparation_recoverable_on(&mut connection, result).await
+    }
+
+    pub(crate) async fn user_invocation_reservation(
+        &self,
+        source: InteractionId,
+        action: i64,
+        key: Option<&str>,
+    ) -> Result<Option<(ActionInvocation, Interaction)>, StorageError> {
+        let mut connection = self.pool.acquire().await?;
+        let rows = sqlx::query("SELECT ai.source_interaction_id,ai.action_id,ai.result_interaction_id,ai.created_at,result.completion_status,ai.agent_invoked,(ai.prepared_graph_node_id IS NOT NULL) AS durable,ai.invocation_key FROM action_invocations ai JOIN interactions result ON result.id=ai.result_interaction_id WHERE ai.source_interaction_id=?1 AND ai.action_id=?2 AND ai.authoritative=1 AND ai.agent_invoked=0 AND ai.invocation_key!='legacy' AND (?3 IS NULL OR ai.invocation_key=?3) ORDER BY result.id")
+            .bind(source.value()).bind(action).bind(key).fetch_all(&mut *connection).await?;
+        for row in rows {
+            let result = InteractionId::from_database(row.try_get("result_interaction_id")?);
+            if key.is_some() || user_preparation_recoverable_on(&mut connection, result).await? {
+                return invocation_with_result(&mut connection, row).await;
+            }
+        }
+        Ok(None)
+    }
+
+    pub(crate) async fn invocation_presentation(
+        &self,
+        result: InteractionId,
+    ) -> Result<Option<i64>, StorageError> {
+        Ok(sqlx::query_scalar("SELECT presenting_layer_id FROM action_invocations WHERE result_interaction_id=?1 AND authoritative=1")
+            .bind(result.value()).fetch_optional(&self.pool).await?.flatten())
     }
 
     pub(crate) async fn prepared_invocation_node(
@@ -363,15 +450,16 @@ impl SqliteProductStore {
         action_id: i64,
         text: &str,
         recursive: bool,
-        prepared_call: Option<(i64, &str)>,
+        prepared_call: Option<(Option<i64>, &str, Option<i64>)>,
         submission: Option<(Option<i64>, &[crate::product::ActionInputAttachment])>,
     ) -> Result<ActionInvocationInsertOutcome, StorageError> {
         let mut transaction = self.pool.begin_with("BEGIN IMMEDIATE").await?;
-        let prepared_graph_node = prepared_call.map(|(node, _)| node);
-        let invocation_key = prepared_call.map(|(_, key)| key).unwrap_or("legacy");
-        let existing = if let Some(node) = prepared_graph_node {
-            let row = sqlx::query("SELECT ai.source_interaction_id,ai.action_id,ai.result_interaction_id,ai.created_at,result.completion_status,ai.agent_invoked,(ai.prepared_graph_node_id IS NOT NULL) AS durable,ai.invocation_key FROM action_invocations ai JOIN interactions result ON result.id=ai.result_interaction_id WHERE ai.prepared_graph_node_id=?1 AND ai.source_interaction_id=?2 AND ai.action_id=?3 AND ai.authoritative=1")
-                .bind(node).bind(source_interaction_id.value()).bind(action_id).fetch_optional(&mut *transaction).await?;
+        let prepared_graph_node = prepared_call.and_then(|(node, _, _)| node);
+        let invocation_key = prepared_call.map(|(_, key, _)| key).unwrap_or("legacy");
+        let presenting_layer = prepared_call.and_then(|(_, _, layer)| layer);
+        let existing = if prepared_call.is_some() {
+            let row = sqlx::query("SELECT ai.source_interaction_id,ai.action_id,ai.result_interaction_id,ai.created_at,result.completion_status,ai.agent_invoked,(ai.prepared_graph_node_id IS NOT NULL) AS durable,ai.invocation_key FROM action_invocations ai JOIN interactions result ON result.id=ai.result_interaction_id WHERE ai.invocation_key=?1 AND ai.source_interaction_id=?2 AND ai.action_id=?3 AND ai.authoritative=1")
+                .bind(invocation_key).bind(source_interaction_id.value()).bind(action_id).fetch_optional(&mut *transaction).await?;
             match row {
                 Some(row) => invocation_with_result(&mut transaction, row).await?,
                 None => None,
@@ -379,14 +467,69 @@ impl SqliteProductStore {
         } else {
             existing_for_action_scope(&mut transaction, source_interaction_id, action_id).await?
         };
-        if let Some((mut invocation, interaction)) = existing {
-            if prepared_graph_node.is_some()
+        if let Some((mut invocation, mut interaction)) = existing {
+            if prepared_call.is_some()
                 && (interaction.text != text || invocation.invocation_key != invocation_key)
             {
                 return Err(StorageError::Catalog(CatalogError::invalid(
                     "invocation_input_conflict",
                     "Invocation instruction changed.",
                 )));
+            }
+            if prepared_call.is_some()
+                && interaction.completion_status == "failed"
+                && user_preparation_recoverable_on(&mut transaction, interaction.id).await?
+            {
+                // Only an immutable model-admission receipt with no execution effect
+                // permits this preexecution recovery. Stopped and unknown failures stay terminal.
+                sqlx::query("UPDATE interactions SET completion_status='not_started',completion_error=NULL WHERE id=?1")
+                    .bind(interaction.id.value()).execute(&mut *transaction).await?;
+                interaction.completion_status = "not_started".into();
+                interaction.completion_error = None;
+            }
+            if prepared_call.is_some() {
+                let (stored_node, stored_layer): (Option<i64>, Option<i64>) = sqlx::query_as(
+                    "SELECT prepared_graph_node_id,presenting_layer_id FROM action_invocations WHERE result_interaction_id=?1",
+                ).bind(interaction.id.value()).fetch_one(&mut *transaction).await?;
+                if presenting_layer.is_some() && stored_layer != presenting_layer
+                    || prepared_graph_node.is_some()
+                        && stored_node.is_some()
+                        && stored_node != prepared_graph_node
+                {
+                    return Err(StorageError::Catalog(CatalogError::invalid(
+                        "invocation_input_conflict",
+                        "Invocation binding or presentation changed.",
+                    )));
+                }
+                if matches!(
+                    interaction.completion_status.as_str(),
+                    "not_started" | "submitted"
+                ) && let Some(node) = prepared_graph_node
+                {
+                    let receipt = sqlx::query("SELECT input_draft_revision,attachments_json FROM invocation_input_submission_receipts WHERE result_interaction_id=?1")
+                        .bind(interaction.id.value()).fetch_optional(&mut *transaction).await?;
+                    if let Some(receipt) = receipt {
+                        let attachments = super::input_drafts::submission_attachments(
+                            interaction.thread_id,
+                            receipt.try_get("input_draft_revision")?,
+                            &receipt.try_get::<String, _>("attachments_json")?,
+                        )?;
+                        super::input_drafts::consume_invocation_inputs_on(
+                            &mut transaction,
+                            interaction.thread_id,
+                            &attachments,
+                        )
+                        .await?;
+                    } else if stored_node.is_none() {
+                        return Err(StorageError::IncompatibleSchema(
+                            "Unbound user reservation requires its immutable submission receipt"
+                                .into(),
+                        ));
+                    }
+                    sqlx::query("UPDATE action_invocations SET prepared_graph_node_id=?1 WHERE result_interaction_id=?2 AND prepared_graph_node_id IS NULL")
+                        .bind(node).bind(interaction.id.value()).execute(&mut *transaction).await?;
+                    invocation.durable = true;
+                }
             }
             // An older build recorded an agent's child without the marker. An agent's retry of
             // the same recursive invocation marks it only on proof that no user created it: the
@@ -563,7 +706,7 @@ impl SqliteProductStore {
             .await?;
         }
         sqlx::query(
-            "INSERT INTO action_invocations(source_interaction_id,action_id,result_interaction_id,created_at,graph_lease_required,authoritative,agent_invoked,invocation_key,prepared_graph_node_id) VALUES (?1,?2,?3,?4,1,1,?5,?6,?7)",
+            "INSERT INTO action_invocations(source_interaction_id,action_id,result_interaction_id,created_at,graph_lease_required,authoritative,agent_invoked,invocation_key,prepared_graph_node_id,presenting_layer_id) VALUES (?1,?2,?3,?4,1,1,?5,?6,?7,?8)",
         )
         .bind(source_interaction_id.value())
         .bind(action_id)
@@ -572,11 +715,12 @@ impl SqliteProductStore {
         .bind(recursive)
         .bind(invocation_key)
         .bind(prepared_graph_node)
+        .bind(presenting_layer)
         .execute(&mut *transaction)
         .await?;
         if let Some((revision, attachments)) = submission {
             if recursive
-                || prepared_graph_node.is_none()
+                || prepared_call.is_none()
                 || attachments.iter().any(|input| input.thread_id != thread_id)
             {
                 return Err(StorageError::IncompatibleSchema(
@@ -585,6 +729,14 @@ impl SqliteProductStore {
             }
             sqlx::query("INSERT INTO invocation_input_submission_receipts(result_interaction_id,input_draft_revision,attachments_json) VALUES (?1,?2,?3)")
                 .bind(interaction.id.value()).bind(revision).bind(super::input_drafts::submission_json(attachments)?).execute(&mut *transaction).await?;
+            if prepared_graph_node.is_some() {
+                super::input_drafts::consume_invocation_inputs_on(
+                    &mut transaction,
+                    thread_id,
+                    attachments,
+                )
+                .await?;
+            }
         }
         sqlx::query("UPDATE threads SET updated_at=?1 WHERE id=?2")
             .bind(&timestamp)
@@ -731,6 +883,14 @@ fn invocation_from_row(row: &SqliteRow) -> Result<ActionInvocation, StorageError
     })
 }
 
+async fn user_preparation_recoverable_on(
+    connection: &mut SqliteConnection,
+    result: InteractionId,
+) -> Result<bool, StorageError> {
+    Ok(sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM action_invocations ai JOIN interactions result ON result.id=ai.result_interaction_id JOIN invocation_input_submission_receipts receipt ON receipt.result_interaction_id=result.id WHERE result.id=?1 AND ai.authoritative=1 AND ai.agent_invoked=0 AND ai.invocation_key!='legacy' AND result.graph_node_id IS NULL AND NOT EXISTS(SELECT 1 FROM interaction_stop_requests stop WHERE stop.interaction_id=result.id) AND NOT EXISTS(SELECT 1 FROM completion_executions e WHERE e.interaction_id=result.id) AND NOT EXISTS(SELECT 1 FROM interaction_attempts a WHERE a.interaction_id=result.id AND (a.outcome!='model_failed' OR a.effect_boundary!='none')) AND (result.completion_status IN ('not_started','submitted') OR result.completion_status='failed' AND ai.prepared_graph_node_id IS NOT NULL AND EXISTS(SELECT 1 FROM interaction_attempts a WHERE a.interaction_id=result.id AND a.outcome='model_failed' AND a.effect_boundary='none')))")
+        .bind(result.value()).fetch_one(connection).await?)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -794,12 +954,12 @@ mod tests {
             .await
             .unwrap();
         let created = store
-            .insert_user_durable_action_invocation_with_inputs(
+            .reserve_user_action_invocation(
                 thread.root_interaction_id,
                 41,
                 "Analyze",
-                101,
                 "first",
+                Some(200),
                 Some(first_draft.revision),
                 &first_draft.attachments,
             )
@@ -809,7 +969,51 @@ mod tests {
             ActionInvocationInsertOutcome::Created { interaction, .. } => interaction.id,
             _ => panic!("not created"),
         };
-        // Reopen sees the call and receipt together, not a gap where fresh epochs can be captured.
+        assert!(
+            store
+                .user_invocation_preparation_recoverable(result)
+                .await
+                .unwrap()
+        );
+        assert_eq!(
+            store.invocation_presentation(result).await.unwrap(),
+            Some(200)
+        );
+        // The reservation is visible before native preparation. A SQLite bind failure
+        // rolls back the captured-epoch deletion and retains the exact recovery key.
+        sqlx::query("CREATE TRIGGER fail_test_bind BEFORE UPDATE OF prepared_graph_node_id ON action_invocations WHEN NEW.prepared_graph_node_id IS NOT NULL BEGIN SELECT RAISE(ABORT,'test bind refusal'); END")
+            .execute(&store.pool).await.unwrap();
+        assert!(
+            store
+                .insert_user_durable_action_invocation_with_inputs(
+                    thread.root_interaction_id,
+                    41,
+                    "Analyze",
+                    101,
+                    "first",
+                    Some(first_draft.revision),
+                    &first_draft.attachments,
+                )
+                .await
+                .is_err()
+        );
+        assert_eq!(
+            store.action_input_draft(thread.id).await.unwrap(),
+            first_draft
+        );
+        assert!(
+            store
+                .user_invocation_reservation(thread.root_interaction_id, 41, None)
+                .await
+                .unwrap()
+                .is_some()
+        );
+        sqlx::query("DROP TRIGGER fail_test_bind")
+            .execute(&store.pool)
+            .await
+            .unwrap();
+        store.pool.close().await;
+        // Reopen sees the reservation and receipt together, before any native binding.
         drop(store);
         let store = SqliteProductStore::open(&path).await.unwrap();
         let receipt = store
@@ -821,6 +1025,87 @@ mod tests {
             receipt,
             (Some(first_draft.revision), first_draft.attachments.clone())
         );
+        let bound = store
+            .insert_user_durable_action_invocation_with_inputs(
+                thread.root_interaction_id,
+                41,
+                "Analyze",
+                101,
+                "first",
+                Some(first_draft.revision),
+                &first_draft.attachments,
+            )
+            .await
+            .unwrap();
+        assert!(
+            matches!(bound, ActionInvocationInsertOutcome::Existing { ref invocation, .. } if invocation.durable)
+        );
+        let consumed = store.action_input_draft(thread.id).await.unwrap();
+        assert!(consumed.attachments.is_empty());
+        assert_eq!(consumed.revision, first_draft.revision + 1);
+        // Exercise the production model-refusal record transition, which clears
+        // the prepared Product graph binding and returns this same call to unsent.
+        sqlx::query(
+            "UPDATE interactions SET completion_status='running',graph_node_id=101 WHERE id=?1",
+        )
+        .bind(result.value())
+        .execute(&store.pool)
+        .await
+        .unwrap();
+        store
+            .record_pre_execution_model_failure(
+                crate::product::PreExecutionModelFailure {
+                    interaction_id: result,
+                    harness_name: "codex-basic",
+                    selection: &selection,
+                    route: None,
+                    policy: None,
+                    adapter_version: None,
+                    failure_category: "model_unavailable",
+                    error: "fixture model admission refusal",
+                },
+                "3",
+            )
+            .await
+            .unwrap();
+        let refused = store.action_input_draft(thread.id).await.unwrap();
+        assert_eq!(refused.attachments.len(), 1);
+        assert_eq!(
+            refused.attachments[0].committed_at,
+            first_draft.attachments[0].committed_at
+        );
+        assert!(
+            store
+                .user_invocation_preparation_recoverable(result)
+                .await
+                .unwrap()
+        );
+        store
+            .reserve_user_action_invocation(
+                thread.root_interaction_id,
+                41,
+                "Analyze",
+                "first",
+                Some(200),
+                Some(first_draft.revision),
+                &first_draft.attachments,
+            )
+            .await
+            .unwrap();
+        store
+            .insert_user_durable_action_invocation_with_inputs(
+                thread.root_interaction_id,
+                41,
+                "Analyze",
+                101,
+                "first",
+                Some(first_draft.revision),
+                &first_draft.attachments,
+            )
+            .await
+            .unwrap();
+        let consumed = store.action_input_draft(thread.id).await.unwrap();
+        assert!(consumed.attachments.is_empty());
         let newer = store
             .commit_action_input_attachment(
                 thread.id,
@@ -830,7 +1115,7 @@ mod tests {
                     action: &action,
                     value: &value,
                 },
-                first_draft.revision,
+                consumed.revision,
             )
             .await
             .unwrap();
@@ -865,6 +1150,119 @@ mod tests {
                 .unwrap(),
             newer
         );
+        // A real no-effect model-admission receipt allows recovery of this exact
+        // bound key. An unrelated newer edit remains intact across refusal/rebind.
+        sqlx::query("UPDATE interactions SET completion_status='failed' WHERE id=?1")
+            .bind(result.value())
+            .execute(&store.pool)
+            .await
+            .unwrap();
+        assert!(
+            store
+                .user_invocation_preparation_recoverable(result)
+                .await
+                .unwrap()
+        );
+        assert_eq!(
+            store
+                .action_input_draft(thread.id)
+                .await
+                .unwrap()
+                .attachments,
+            newer.attachments
+        );
+        let restored = store
+            .reserve_user_action_invocation(
+                thread.root_interaction_id,
+                41,
+                "Analyze",
+                "first",
+                Some(200),
+                Some(first_draft.revision),
+                &first_draft.attachments,
+            )
+            .await
+            .unwrap();
+        assert!(
+            matches!(restored, ActionInvocationInsertOutcome::Existing { ref interaction, .. } if interaction.completion_status == "not_started")
+        );
+        store
+            .insert_user_durable_action_invocation_with_inputs(
+                thread.root_interaction_id,
+                41,
+                "Analyze",
+                101,
+                "first",
+                Some(first_draft.revision),
+                &first_draft.attachments,
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            store
+                .action_input_draft(thread.id)
+                .await
+                .unwrap()
+                .attachments,
+            newer.attachments
+        );
+        // Explicit stop is never reset, even though the prior receipt proves no effect.
+        sqlx::query("UPDATE interactions SET completion_status='stopped' WHERE id=?1")
+            .bind(result.value())
+            .execute(&store.pool)
+            .await
+            .unwrap();
+        assert!(
+            !store
+                .user_invocation_preparation_recoverable(result)
+                .await
+                .unwrap()
+        );
+        let stopped = store
+            .reserve_user_action_invocation(
+                thread.root_interaction_id,
+                41,
+                "Analyze",
+                "first",
+                Some(200),
+                Some(first_draft.revision),
+                &first_draft.attachments,
+            )
+            .await
+            .unwrap();
+        assert!(
+            matches!(stopped, ActionInvocationInsertOutcome::Existing { ref interaction, .. } if interaction.completion_status == "stopped")
+        );
+        // Any later unknown effect invalidates the preparation-only recovery proof.
+        sqlx::query("INSERT INTO interaction_attempts(interaction_id,attempt_number,started_at,finished_at,family_id,family_revision,harness_configuration_name,harness_configuration_revision,harness_configuration_digest,provider_id,adapter_id,adapter_implementation_version,model_id,access_contract,outcome,failure_category,effect_boundary) VALUES (?1,2,'4','5',1,1,'codex-basic',1,'sha256:old','codex','codex-subscription',1,'test-model','managed-runtime@1','execution_failed','application_restart','unknown')")
+            .bind(result.value()).execute(&store.pool).await.unwrap();
+        sqlx::query("UPDATE interactions SET completion_status='failed' WHERE id=?1")
+            .bind(result.value())
+            .execute(&store.pool)
+            .await
+            .unwrap();
+        assert!(
+            !store
+                .user_invocation_preparation_recoverable(result)
+                .await
+                .unwrap()
+        );
+        let unknown = store
+            .reserve_user_action_invocation(
+                thread.root_interaction_id,
+                41,
+                "Analyze",
+                "first",
+                Some(200),
+                Some(first_draft.revision),
+                &first_draft.attachments,
+            )
+            .await
+            .unwrap();
+        assert!(
+            matches!(unknown, ActionInvocationInsertOutcome::Existing { ref interaction, .. } if interaction.completion_status == "failed")
+        );
+        let newer = store.action_input_draft(thread.id).await.unwrap();
         mark_interaction_accepted_with_node(&store, result, 101).await;
         // Existing historical user calls have no receipt: a retry must never invent one.
         let historical = store

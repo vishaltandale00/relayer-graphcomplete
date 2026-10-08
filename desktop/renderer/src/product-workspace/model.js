@@ -29,9 +29,11 @@ export function workspaceTurns(state, thread) {
 
 /** The results an agent launched as semantic children. They are not human turns. */
 export function agentChildIds(state) {
-  return new Set((state.actionInvocations || [])
-    .filter((invocation) => invocation.agentInvoked === true)
-    .map((invocation) => String(invocation.resultInteractionId)));
+  return new Set([
+    ...(state.actionInvocations || []).filter(invocation => invocation.agentInvoked === true).map(invocation => String(invocation.resultInteractionId)),
+    ...(state.importedInvocationHistory || []).filter(history => history.inert === true && history.record?.activator === "agent")
+      .map(history => String(history.resultInteractionId)),
+  ]);
 }
 
 /**
@@ -41,7 +43,7 @@ export function agentChildIds(state) {
  */
 export function humanTurns(state, thread) {
   const children = agentChildIds(state);
-  return workspaceTurns(state, thread).filter((turn) => !children.has(String(turn.id)));
+  return workspaceTurns(state, thread).filter(turn => !turn.inertInvocationCurrent && !children.has(String(turn.id)));
 }
 
 function sameId(left, right) {

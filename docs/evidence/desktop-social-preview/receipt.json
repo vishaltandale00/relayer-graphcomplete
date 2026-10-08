@@ -13,7 +13,7 @@
   },
   "rendererArtifact": {
     "directory": "desktop/renderer",
-    "digest": "dfbb1c95a819395df96650ccb3e68727eb0bc31f6c9e37e188ea8803a839aee5",
+    "digest": "c0a199cf5dcb146c3189c68780a310c6097d53b33a1117de58e6f5ed0e661fe1",
     "files": {
       "assets/relayer-logo.svg": {
         "bytes": 509,
@@ -60,8 +60,8 @@
         "sha256": "9cf46ed5e5344d986747a7d8517577f4f85dd3bb64b727ed7f73881981dedb12"
       },
       "src/action-invocation-state.js": {
-        "bytes": 4487,
-        "sha256": "85574d803a0bd120a075a4aa4edfac90d2dcbb9ea330296d92e030283ea07c46"
+        "bytes": 5768,
+        "sha256": "81ab2c3afb5292ec3a6ea7584d5e5bf514d9725e34a1a7ed2c2ef17bbb40f7f2"
       },
       "src/annotation-api.js": {
         "bytes": 952,
@@ -124,8 +124,8 @@
         "sha256": "9813114cc78844ce28c8532ef4585262be1c915f8c5cfac53334b623e69b66a6"
       },
       "src/graph.js": {
-        "bytes": 6071,
-        "sha256": "493553b115afaa93946c784d26a48f7eac2263fc58941f51136e4a23b12fe9ca"
+        "bytes": 6639,
+        "sha256": "4b343b1b6815b42987674395d9edb0126aaae1d44feb55d92f065141e527aeeb"
       },
       "src/harness-settings-model.js": {
         "bytes": 1899,
@@ -196,8 +196,8 @@
         "sha256": "0f0db2a7a00c2bae2239b584d612e5ad21b161094b3e783879d3e7b4854f2c87"
       },
       "src/node-detail-assets.js": {
-        "bytes": 2227,
-        "sha256": "37c5622b6d8d3a19e4a43f680a69e04eb52d5e2a7bfabebc14325afba0f65f1f"
+        "bytes": 3489,
+        "sha256": "ea46ef2d431d7a0e3bb79156e638092ce31176594e723691d500dba9f5cbc3aa"
       },
       "src/node-input-controls.js": {
         "bytes": 18215,
@@ -268,8 +268,8 @@
         "sha256": "338cdd8855f3b40c4138d0245262c209554b26b94c1a4655598ce976fca5b90c"
       },
       "src/product-workspace/model.js": {
-        "bytes": 9650,
-        "sha256": "a3ab3a4867a11244442d001345c4ec2836f4572f693ad7b5118fa4a4fa0e7ccc"
+        "bytes": 9870,
+        "sha256": "e8a0f0115cd09963972f13dc8c7a50f25a9a8f3a2d385f8e7bba934e4e083462"
       },
       "src/product-workspace/node-detail-runtime.js": {
         "bytes": 30996,
@@ -288,8 +288,8 @@
         "sha256": "8e5d307f95b1863fb995606ca32a832de088916716c39476f9d31f2174de002d"
       },
       "src/product-workspace/workspace.js": {
-        "bytes": 298853,
-        "sha256": "28d47b582266ed416f7b59517b1e5f93b2669d92d2bc82d554b4833b96b64d4a"
+        "bytes": 303806,
+        "sha256": "ab169473d5e8e6ec04cc95420513606670c4938cf7d52fcf101307e53f931e1b"
       },
       "src/project-composer-navigation.js": {
         "bytes": 282,
@@ -324,16 +324,16 @@
         "sha256": "9189a49497d7987c38467574e8f4320109e34ab268c14fab65d46368c2c343b6"
       },
       "src/public-share-viewer/adapter.js": {
-        "bytes": 4655,
-        "sha256": "d0935c86c02000355628622fa456442cb0c2a8d9bc57f255b0b8a2aa2ef1c33d"
+        "bytes": 4757,
+        "sha256": "0d16e80ffb77eeedb058c46c75755050877475d87e6b690126fc273d4cff910a"
       },
       "src/public-share-viewer/main.js": {
-        "bytes": 11584,
-        "sha256": "1c139afe5b6ab2b50919bbd48f7dbe1654756fc2bdd9926951bdb1d0596053f2"
+        "bytes": 11770,
+        "sha256": "14f9e26730fb4028b8349517519881dbe62ff6798ea2aaad0f7c57a356073918"
       },
       "src/public-share-viewer/snapshot.js": {
-        "bytes": 73842,
-        "sha256": "7b725beda5cbe9db22208b27255f2a5f96b6973c1ef00c49916e5cd647cf2ca1"
+        "bytes": 78827,
+        "sha256": "080e0538a4a7796ac78dbaf42cc6cea1a6181928a84f82c454f1d327900774ed"
       },
       "src/public-share-viewer/template.js": {
         "bytes": 7378,
@@ -360,8 +360,8 @@
         "sha256": "ddd96da3ca35dfe455f9ce541eb746aee6a161e589376e741c7d254430508536"
       },
       "src/state.js": {
-        "bytes": 1453,
-        "sha256": "b573f6681ffa7b6aa563f1867fc87c74f2feaf6ce89fc7a86e9737edae53f1a4"
+        "bytes": 1486,
+        "sha256": "e7879f6681500ed8bc90aa069ddb8c3931afd42ae4dd8cd4d9acb21385d10ca8"
       },
       "src/thread-archive.js": {
         "bytes": 4672,
@@ -372,8 +372,8 @@
         "sha256": "6ecc188e2f85f1d507775cd5dc7cb077d1f85698cd5940c1b501e62bf71d45c1"
       },
       "src/threads.js": {
-        "bytes": 68873,
-        "sha256": "070859553f58ee7c5964df3baa7cc2661f424bfad40720a0f03153d5366708ab"
+        "bytes": 75644,
+        "sha256": "3e15c08997ea1520f2ed2ce54b8d0bd95d56a3955a6c27a87b7c2e1f0be6a037"
       },
       "src/ui.js": {
         "bytes": 2147,

@@ -1,0 +1,305 @@
+{
+  "schemaVersion": 1,
+  "date": "2026-10-08",
+  "reviewer": "/root/authority_review",
+  "reviewRole": "Implementing authority reviewer for assigned backend/native repairs; independently reviewed root/context/renderer seams. Context reviewer independently reviewed refusal marker and renderer follow-up; parent owns final source/PR qualification.",
+  "workspace": "/private/tmp/relayer-interactive-inputs-v1-merge",
+  "pullRequestNumber": 707,
+  "baselineHead": "2ad0b83726d839c3981b93cd56ec49cafdbb585f",
+  "sourceDigest": "5164c58b77c3bb7341a414ab2159a7d4ea9d10c0f1fe742d053e2b37fb94f946",
+  "digestMethod": "SHA256 of sorted relative UTF8 path + NUL + exact file bytes + NUL; receipt excluded",
+  "manifest": [
+    {
+      "path": "crates/relayer-app-server/src/api/conversation_imports.rs",
+      "sha256": "6edfec36e319aa958c6c8fc7f8134b8f8b0e3dafd186812fae25b380ab5f4988"
+    },
+    {
+      "path": "crates/relayer-app-server/src/api/input_drafts.rs",
+      "sha256": "86a91e9d37629dc94456eb5c92334b17d197abad7e71eacbcfd2273953e882ca"
+    },
+    {
+      "path": "crates/relayer-app-server/src/api/state.rs",
+      "sha256": "67e0c924b5884a893f3aa03ede6d64ea5c605221007ae7973acf14afd414485f"
+    },
+    {
+      "path": "crates/relayer-app-server/src/api/threads.rs",
+      "sha256": "85cbeee658a196e6740cf9bab2b27c537d0c43b543c09bb01bb76b36a20b2198"
+    },
+    {
+      "path": "crates/relayer-app-server/src/api/types.rs",
+      "sha256": "f18f7e190086605f1c979f93658c72d00fbfa1d6c8995823ce0a9cf2f62e0d09"
+    },
+    {
+      "path": "crates/relayer-app-server/src/app_server.rs",
+      "sha256": "2e310843d3d385363768aba3df1867c36420dc1f6a92b60ed76541c20fcd9680"
+    },
+    {
+      "path": "crates/relayer-app-server/src/conversation_export.rs",
+      "sha256": "735b984bd8706fbe07a141ce5e5cef5d1c7fb644eb04702917cd787357b807c1"
+    },
+    {
+      "path": "crates/relayer-app-server/src/conversation_export_service.rs",
+      "sha256": "e5d8d7421645bb396fa8616abea6bafbe3ffb4b7465d4129fd04a8a25f56deee"
+    },
+    {
+      "path": "crates/relayer-app-server/src/product/service.rs",
+      "sha256": "b8272b19f073f49323ae19090ef5bd117840245b35d24a4785d5840bd812ccc0"
+    },
+    {
+      "path": "crates/relayer-app-server/src/runtime.rs",
+      "sha256": "952e635554ec1150e0f03268cd797e2b98ea35e6eb1bf65d48bf511c92c40678"
+    },
+    {
+      "path": "crates/relayer-app-server/src/storage.rs",
+      "sha256": "2cbe0fb87f53a4c9176a2d24193efcdfa292e84ea882a306116e10c0b1ffefa5"
+    },
+    {
+      "path": "crates/relayer-app-server/src/storage/sqlite/action_invocations.rs",
+      "sha256": "67549f970dc3d6d9754643bf5a2131d920fdcbc389c260b9d69c69719eb8dda5"
+    },
+    {
+      "path": "crates/relayer-app-server/src/storage/sqlite/input_drafts.rs",
+      "sha256": "abe373fc7dcc1654bf90d0566026c2927d7727df816a94656a8c515deca5a930"
+    },
+    {
+      "path": "crates/relayer-app-server/src/storage/sqlite/interaction_contexts.rs",
+      "sha256": "6fb000ec08141ed10d6c140fb8f93558150c10d6db991569af326e7962e7fe59"
+    },
+    {
+      "path": "crates/relayer-app-server/src/storage/sqlite/interactions.rs",
+      "sha256": "545a533d7b64740516eede63313eb3ba3e5596a01f57188f863c3233c443d68c"
+    },
+    {
+      "path": "crates/relayer-app-server/src/storage/sqlite/migrations.rs",
+      "sha256": "107dbfc1ac30d5af01ad17bffd5f8cee23475c271f763881eabdf4b493299590"
+    },
+    {
+      "path": "crates/relayer-app-server/src/storage/sqlite/migrations/0045_invocation_preparation_reservations.sql",
+      "sha256": "fe57f990a5c0a2db53bad9b4149d0b91ba10df22e411f7794623d76593a99c34"
+    },
+    {
+      "path": "crates/relayer-app-server/src/storage/sqlite/migrations/0046_invocation_preparation_refusals.sql",
+      "sha256": "4baf94e8470f3c8223b90b6aef68fd6aa5c2b4846d5f4aa45b461be4ed1ffebf"
+    },
+    {
+      "path": "crates/relayer-app-server/src/storage/sqlite/schema.rs",
+      "sha256": "df90c8e5646d33acd8d3f325b4163ddbd2fa3a8e1bfe31e87781624e49fffc54"
+    },
+    {
+      "path": "crates/relayer-app-server/tests/product_persistence_flow.rs",
+      "sha256": "42fe5914da58db0f884b5d1c0efcf604622d7ab68352d31ed6176a67d00d8859"
+    },
+    {
+      "path": "crates/relayer-app-server/tests/support/completion_traces.rs",
+      "sha256": "43f15f63192f84d27347cdd11400f1bba43911d1819263dca26bd96cf8eb0fed"
+    },
+    {
+      "path": "crates/relayer-graph-core/src/graph/completion.rs",
+      "sha256": "4afabf1517c446882da24188b3cd228bcbd8818e2d9b36d9c9e59b30d141b198"
+    },
+    {
+      "path": "crates/relayer-graph-core/src/graph/database.rs",
+      "sha256": "38196cd3fa667c5f200eb591528e919dd485b807cc0bcde61b38637a367a6f88"
+    },
+    {
+      "path": "crates/relayer-graph-core/src/graph/import.rs",
+      "sha256": "dbd1065f5935c6b1ecfe31ea1073a19f76abd4249fafcaea0d7688193feb2eaf"
+    },
+    {
+      "path": "crates/relayer-graph-core/src/graph/invocation.rs",
+      "sha256": "872744ef3eb501bb9794c00eac09b178d88dc029eb9b0dabddaee42a9ed53b5b"
+    },
+    {
+      "path": "crates/relayer-graph-core/src/storage/sqlite/actions.rs",
+      "sha256": "7f51076996b8b4e88ae3ba11efa528c19bede7f1c5dcf4f48b07453d32b26d36"
+    },
+    {
+      "path": "crates/relayer-graph-core/tests/durable_invocations.rs",
+      "sha256": "15c2b5a26ff785c1ba86e56b587a8306086baa22595052cf63dc8b9dd2c33550"
+    },
+    {
+      "path": "crates/relayer-graph-server/src/lib.rs",
+      "sha256": "1e4ca5c947367d67fa2b1baf5494c1cd5ddb3b6589a91b1941b6bf64c13cd76f"
+    },
+    {
+      "path": "desktop/renderer/src/action-invocation-state.js",
+      "sha256": "81ab2c3afb5292ec3a6ea7584d5e5bf514d9725e34a1a7ed2c2ef17bbb40f7f2"
+    },
+    {
+      "path": "desktop/renderer/src/product-workspace/workspace.js",
+      "sha256": "ab169473d5e8e6ec04cc95420513606670c4938cf7d52fcf101307e53f931e1b"
+    },
+    {
+      "path": "desktop/renderer/src/threads.js",
+      "sha256": "3e15c08997ea1520f2ed2ce54b8d0bd95d56a3955a6c27a87b7c2e1f0be6a037"
+    },
+    {
+      "path": "docs/decisions/0015-sealed-completion-contract-and-invocations.md",
+      "sha256": "bcc37d822bb5a96f0e092a1ad6908b743acceb4e0932f4dce57e9272ebcba0a7"
+    },
+    {
+      "path": "docs/prd/index.html",
+      "sha256": "352d3992b3ea8f97c06ce17483a346eeb279640102a84f80728e5a968c13020b"
+    }
+  ],
+  "reviewedScope": "Assigned threads0,2,3,7,8; exact ordinary Send/retry subset and whole-Node Input consumer guard; inert imported history scope; deterministic native preparation refusal and renderer availability; native/local portable joins and true-legacy origin discriminator; final checkpoint/helper repairs. No blanket review claim for unrelated PR707 seams.",
+  "verdict": "No remaining blocking authority finding or consequential mapping gap in this reviewed scope at this exact workspace digest.",
+  "unresolvedFindings": [],
+  "dispositions": [
+    {
+      "threadIndex": 0,
+      "threadId": "PRRT_kwDOTyTfxM6qKRv_",
+      "url": "https://github.com/vishaltandale00/relayer-graphcomplete/pull/707#discussion_r4213727262",
+      "disposition": "repaired with realistic deterministic checkpoint",
+      "assertion": "Product reservation/admission before native prepare; exact pending key recovery survives actual restart and never routes through legacy child preparation."
+    },
+    {
+      "threadIndex": 2,
+      "threadId": "PRRT_kwDOTyTfxM6qKRwJ",
+      "url": "https://github.com/vishaltandale00/relayer-graphcomplete/pull/707#discussion_r4213727275",
+      "disposition": "repaired with realistic deterministic checkpoint",
+      "assertion": "Native-node Product binding and original captured-epoch cleanup are one transaction. Injected bind failure rolls back cleanup. Actual no-effect model admission returns unsent/graphNULL, restores captured inputs without overwriting newer edits, and preserves frozen key/arguments."
+    },
+    {
+      "threadIndex": 3,
+      "threadId": "PRRT_kwDOTyTfxM6qKRwP",
+      "url": "https://github.com/vishaltandale00/relayer-graphcomplete/pull/707#discussion_r4213727283",
+      "disposition": "repaired with realistic deterministic checkpoint",
+      "assertion": "Frozen actual presentingLayerId is distinct from definition sourceLayerId; trusted activator/capture state retained. Exact source/action/key/layer joins refuse reassignment. Saved Input occurrence and activation occurrence may differ on the same persistent Node."
+    },
+    {
+      "threadIndex": 7,
+      "threadId": "PRRT_kwDOTyTfxM6qKRwl",
+      "url": "https://github.com/vishaltandale00/relayer-graphcomplete/pull/707#discussion_r4213727313",
+      "disposition": "repaired with realistic deterministic checkpoint",
+      "assertion": "Native conversation inventory starts only from requested source completions and their native children; reused persistent Node does not seed foreign-thread calls. Real portable builder fixture proves bidirectional private argument/Current/key omission and exact authored/presenting provenance."
+    },
+    {
+      "threadIndex": 8,
+      "threadId": "PRRT_kwDOTyTfxM6qKRwo",
+      "url": "https://github.com/vishaltandale00/relayer-graphcomplete/pull/707#discussion_r4213727320",
+      "disposition": "repaired with realistic deterministic checkpoint",
+      "assertion": "Draft Invoke with more than one native call cannot downgrade to single. Effective new default false is guarded; historical accepted None remains unchanged/unknown, with reopen preservation."
+    }
+  ],
+  "checkpointAssertions": [
+    "Ordinary Send snapshots/consumes only the server-owned exact accepted ordinary occurrence subset; bound drafts remain scoped to Invoke. Product retry Some(empty) ignores pending bound answers; Some(ordinary) refuses recapture. Whole canonical Node consumer bindings include accepted Invokes omitted from reference-layer snapshots; historical None never becomes guessed repetition authority.",
+    "New Input commits require exact editable accepted occurrence in destination project/thread. Operator admission remains exact thread/occurrence scoped. Imported history stays in a separate inert projection; source joins verified against imported Product graph identity, local IDs unknown when unavailable; assets filtered to owned portable pins; native preparation/edits remain refused.",
+    "preparationRejected requires explicit persisted0046 deterministic status receipt, strict authoritative native inventory proof of no exact source/action/key call, and untouched authoritative user receipt with no native binding/graph/attempt/execution/stop. Omitted/503 inventory or absent source closure never certifies absence. Lost Product bind with existing native call never becomes a refusal marker.",
+    "Rejected exact key is immutable and cannot recover/rebind; corrected activation uses fresh key/current inputs. Unknown/transport/prepared/legacy/effect-bearing failures retain occupancy and exact-key conservative recovery semantics. Renderer ignores only the precise trusted rejected marker and never claims refusal as recovered execution/tutorial success.",
+    "Both portable legacy origin maps require invocation_key==legacy. Refused keyed Product turn remains User chronology, never fabricated Action origin. Lost binding and actual restored unsent graphNULL keep one exact frozen Kyoto native call graph-only; durable flag does not infer a Product result association. Hosted V4 still refuses explicitly.",
+    "Stale World seed legacy link removal is fixture-only: source graph was replaced; cleanup matches exact source/action/result/legacy key and rowsAffected1, retaining all tested keyed receipts/native calls and all ordering/admission/restart assertions. Final product header is typed valid persisted import data; scope fixture observes exactly requireEditable then includeConsumerState with same destination/thread/occurrence. Visual host helper only captures stderr while retaining readiness/failure behavior."
+  ],
+  "focusedVerification": [
+    {
+      "command": "cargo test -p relayer-app-server --lib api::threads::completion_traces::user_reservation_precedes_native_prepare_and_recovers_a_failed_bind -- --exact --nocapture",
+      "log": "/private/tmp/pr707-refusal-portable-export-checkpoint-4.log",
+      "logSha256": "73bd5ffab679f52b4d11596caa20b26000466dcc8b7964ffc66f161bb93eecda",
+      "passed": 1,
+      "failed": 0,
+      "scenarioSeconds": 0.29,
+      "qualification": "Final shared fixture SHA43f15f63192f84d27347cdd11400f1bba43911d1819263dca26bd96cf8eb0fed; real local native server/ProductSQLite; no inference.",
+      "paidInferenceCalls": 0
+    },
+    {
+      "command": "cargo test -p relayer-app-server --lib runtime::tests::accepted_graph_closures_client_preserves_missing_slots_and_rejects_mismatches -- --exact --nocapture",
+      "log": "/private/tmp/pr707-native-refusal-inventory-checkpoint.log",
+      "logSha256": "18c8560f8d789b4ab1635585199cadd194e633822ce2ee5f5268992dcd88b6f9",
+      "passed": 1,
+      "failed": 0,
+      "scenarioSeconds": 5.52,
+      "qualification": "Observed focused inner scenario; parent owns final whole-candidate check/build and source binding.",
+      "paidInferenceCalls": 0
+    },
+    {
+      "command": "cargo test -p relayer-app-server --lib storage::sqlite::action_invocations::tests -- --nocapture",
+      "log": "/private/tmp/pr707-native-preparation-refusal-storage.log",
+      "logSha256": "20b8b4634e6260c23b20f8362c600245e206ad9eb0f8a3f7290f179d525598fd",
+      "passed": 16,
+      "failed": 0,
+      "scenarioSeconds": 1.92,
+      "qualification": "Observed focused inner scenario; parent owns final whole-candidate check/build and source binding.",
+      "paidInferenceCalls": 0
+    },
+    {
+      "command": "cargo test -p relayer-app-server --lib storage::sqlite::migrations::tests -- --nocapture",
+      "log": "/private/tmp/pr707-native-preparation-refusal-migrations.log",
+      "logSha256": "1d323f80e0ed4a89e80ab48cc9099192cd2ca064e7fd12abe97c2f17bfdac236",
+      "passed": 9,
+      "failed": 0,
+      "scenarioSeconds": 1.13,
+      "qualification": "Observed focused inner scenario; parent owns final whole-candidate check/build and source binding.",
+      "paidInferenceCalls": 0
+    },
+    {
+      "command": "cargo test -p relayer-graph-core --test durable_invocations -- --nocapture",
+      "log": "/private/tmp/interactive-inputs-authority-native-checkpoints-final-2.log",
+      "logSha256": "d123f64e4f0c284afc4e286ae7e06fe1ce183f68fbe715f102f3993a46ad6030",
+      "passed": 9,
+      "failed": 0,
+      "scenarioSeconds": 0.91,
+      "qualification": "Retained earlier focused run of unchanged graph-core authority implementation/tests, independently inspected log; not a whole-candidate certificate.",
+      "paidInferenceCalls": 0
+    },
+    {
+      "command": "cargo test -p relayer-app-server --test product_persistence_flow conversation_export_uses_real_accepted_graph_and_rejects_read_only_authority -- --exact --nocapture",
+      "log": "/private/tmp/pr707-product-export-state-checkpoint-3.log",
+      "logSha256": "bb06dfb61cd49e58ab25fe3d8f9e2b005f32e92772f57696335ea577e5bc00f8",
+      "passed": 1,
+      "failed": 0,
+      "scenarioSeconds": 0.4,
+      "qualification": "Context reviewer run; exact current Product fixture SHA42fe5914da58db0f884b5d1c0efcf604622d7ab68352d31ed6176a67d00d8859; inspected code/log.",
+      "paidInferenceCalls": 0
+    },
+    {
+      "command": "cargo test -p relayer-app-server --test product_persistence_flow input_draft_commit_sends_the_destination_product_graph_scope -- --exact --nocapture",
+      "log": "/private/tmp/pr707-input-scope-flags-checkpoint.log",
+      "logSha256": "77430959c17b9d5736df6de584a207a971e1393b304a7937b4bc050168313639",
+      "passed": 1,
+      "failed": 0,
+      "scenarioSeconds": 27.61,
+      "qualification": "Parent run; inspected exact ordered destination-scoped requireEditable and includeConsumerState assertions/log; no inference.",
+      "paidInferenceCalls": 0
+    }
+  ],
+  "retainedMappingObservations": [
+    {
+      "checkpoint": "Real two-thread shared-Node portable builder isolation/authored-vs-presenting provenance",
+      "log": "/private/tmp/pr707-portable-shared-node-loopback-4.log",
+      "result": "1/1 pass0.19s; predates final independent refusal fixture additions to shared file; parent full check binds current final source."
+    },
+    {
+      "checkpoint": "Local V4 vs hosted refusal expectation repairs",
+      "log": "/private/tmp/pr707-export-capability-expectations-5.log",
+      "result": "4/4 pass6.02s; test boundaries retained and read-only reviewed, no test deletion; final global qualification separate."
+    },
+    {
+      "checkpoint": "Imported inert Current/native read-only/reopen",
+      "log": "/private/tmp/interactive-inputs-review-imported-current-7.log",
+      "result": "1/1 pass3.63s; parent-run mapping observation independently inspected."
+    },
+    {
+      "checkpoint": "Whole-Node hidden binding flags/edit refusal/recovery",
+      "log": "/private/tmp/interactive-inputs-review-exhausted-input-4.log",
+      "result": "1/1 pass0.18s; parent-run mapping observation independently inspected."
+    }
+  ],
+  "preservedFailures": [
+    "/private/tmp/pr707-native-preparation-refusal-checkpoint.log: fixture ApiError unwrap compile failure",
+    "/private/tmp/pr707-native-preparation-refusal-checkpoint-2.log: sandbox denied local listener; authorized loopback rerun passed",
+    "/private/tmp/pr707-refusal-portable-export-checkpoint-1.log: fixture missing share title compile failure",
+    "/private/tmp/pr707-refusal-portable-export-checkpoint-2.log: incorrect guessed Product result association after real graphNULL restoration; expectation corrected, native-only provenance preserved",
+    "/private/tmp/pr707-product-export-state-diagnosis-1.log: malformed historical fixture import header; repaired typed persisted header",
+    "/private/tmp/pr707-product-export-state-checkpoint-2.log: stale hosted success expectation; explicit hosted capability refusal retained",
+    "/private/tmp/interactive-inputs-postreview-check-2.log: items_after_test_module lint; helper moved without logic change",
+    "/private/tmp/interactive-inputs-postreview-check-3.log: six fixture failures; individually repaired with retained boundaries",
+    "/private/tmp/interactive-inputs-postreview-check-4.log:375pass1fail visual-host startup; stderr diagnostic added; whole-candidate rerun owned by parent"
+  ],
+  "verificationPlan": "Parent performs unified npm run check and npm run build on final frozen source, binds current PR commit/source, checks required CI/freshness before resolving review or merging. No additional parallel builds/tests requested by this receipt.",
+  "certification": "Scoped non-certifying workspace assertion until attached to PR707 and its exact current source verified. This is not final npm check/build, CI freshness, merge, live inference, human/video acceptance, hosted deployment, packaged/native release or complete product-stack certification.",
+  "sourceInvalidationRule": "Any byte change to a manifest file invalidates this assertion, including test-only edits. Outside-manifest changes are outside the claim; if they affect a reviewed boundary, widen/repeat review before using the assertion. Evidence-only edits do not alter the source digest.",
+  "priorAssertionsPreserved": {
+    "docs/evidence/issue-632-completion-contract/review-authority-2026-10-07.json": "9d8a66083257a97e05b1b401ce7a58db7c111333b9ae9445a60bebf40b07eaf4",
+    "docs/evidence/issue-632-completion-contract/review-authority-main-merge-2026-10-07.json": "886021c106ee5f2348e1515064cc0837d4bcb6e20848b16ea799518ec2c4ce9f"
+  }
+}

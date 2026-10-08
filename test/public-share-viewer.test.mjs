@@ -4,6 +4,7 @@ import { spawnSync } from "node:child_process";
 import { createHash, webcrypto } from "node:crypto";
 import { readFileSync } from "node:fs";
 
+import { humanTurns } from "../desktop/renderer/src/product-workspace/model.js";
 import { interactionGraph } from "../desktop/renderer/src/product-workspace/interaction-graph.js";
 import { createPublicViewerAdapter } from "../desktop/renderer/src/public-share-viewer/adapter.js";
 import { compiledNodeDetailCoversActions, resolveCompiledNodeDetailAction } from "../desktop/renderer/src/product-workspace/workspace.js";
@@ -177,7 +178,7 @@ function reusableInvocationRecords() {
   const makeCall = (id, turn, destination) => ({
     schemaVersion: 1, id,
     source: { interactionNodeId: "node:interaction", actionId: "action:invoke", parentNodeId: "node:root", layerId: "layer:root", instruction: "Continue", label: invoke.label,
-      description: null, icon: null, iconAsset: null, variant: "pill", inputActionIds: ["action:input"], inputBindingsDefined: true, parentTitle: "Node node:root", parentDetail: "Details for node:root", state: "accepted" },
+      description: null, icon: null, iconAsset: null, variant: "pill", inputActionIds: ["action:input"], inputBindingsDefined: true, parentTitle: "Node node:root", parentDetail: "Details for node:root", state: "accepted", captureState: "accepted" },
     childInteractionNodeId: turn.interactionNodeId, resultTurnId: turn.id, lifecycle: "succeeded", headRevision: 1, safeReason: null,
     currentLayerId: turn.acceptedView.rootLayerId, returnedLayerId: turn.acceptedView.rootLayerId,
     arguments: [{ source: { interactionNodeId: "node:interaction", layerId: "layer:root", actionId: "action:input", nodeId: "node:root" }, action: { control: "text", prompt: "Destination" }, value: { kind: "text", text: destination } }],
@@ -243,7 +244,8 @@ describe("V4 inert reusable Invocation snapshots", () => {
     const snapshot = parsePublicSnapshot(recordsJsonl(records));
     const uncalled = snapshot.state.actions.find(action => action.id === "action:uncalled");
     expect(snapshot.boundInputsForInvoke(uncalled)[0]).toMatchObject({ id: "action:input", sourceLayerId: "layer:outside-navigation", input: { control: "text", prompt: "Destination" } });
-    expect(snapshot.state.actions.some(action => action.id === input.id)).toBe(false);
+    expect(snapshot.state.actions.some(action => action.id === input.id)).toBe(true);
+    expect(snapshot.layerFor("turn:1", "layer:root").actions.some(action => action.id === input.id)).toBe(false);
     expect(snapshot.layerFor("turn:1", "layer:outside-navigation")).toBeNull();
     expect(snapshot.invocations[0].arguments[0].source.layerId).toBe("layer:another-presentation");
     delete input.sourceLayerId;
@@ -281,6 +283,7 @@ describe("V4 inert reusable Invocation snapshots", () => {
   it("preserves historical frozen arguments without synthesizing explicit bindings", () => {
     const records = reusableInvocationRecords();
     const call = records[0].invocations[0];
+    delete call.source.captureState;
     call.source.inputBindingsDefined = false;
     call.source.inputActionIds = [];
     const snapshot = parsePublicSnapshot(recordsJsonl(records));
@@ -297,6 +300,7 @@ describe("V4 inert reusable Invocation snapshots", () => {
 
   it("retains historical repeated canonical actions at distinct accepted occurrences", () => {
     const records = reusableInvocationRecords(), call = records[0].invocations[0];
+    delete call.source.captureState;
     call.source.inputBindingsDefined = false;
     call.source.inputActionIds = [];
     const second = structuredClone(call.arguments[0]);
@@ -336,7 +340,7 @@ describe("V4 inert reusable Invocation snapshots", () => {
     const records = reusableInvocationRecords();
     const active = structuredClone(records[0].invocations[0]);
     active.id = "invocation:active"; active.childInteractionNodeId = "node:active-child";
-    active.source.state = "draft"; active.source.actionId = "action:draft-call"; active.source.interactionNodeId = "node:unbound";
+    active.source.captureState = "draft"; active.source.state = "draft"; active.source.actionId = "action:draft-call"; active.source.interactionNodeId = "node:unbound";
     active.arguments[0].source.interactionNodeId = "node:unbound";
     active.resultTurnId = null; active.lifecycle = "active"; active.returnedLayerId = null;
     records[0].invocations.push(active);
@@ -349,7 +353,10 @@ describe("V4 inert reusable Invocation snapshots", () => {
 
   it("retains distinct capture-time definitions after an own-draft callable repair", () => {
     const records = reusableInvocationRecords();
+    records[0].invocations[0].source.captureState = "draft";
     records[0].invocations[0].source.state = "draft";
+    records[0].invocations[1].source.captureState = "draft";
+    records[0].invocations[1].source.state = "draft";
     records[0].invocations[1].source.instruction = "Repaired comparison instruction";
     records[0].invocations[1].source.parentNodeId = "node:repaired-parent";
     records[0].invocations[1].source.layerId = "layer:repaired-source";
@@ -362,6 +369,7 @@ describe("V4 inert reusable Invocation snapshots", () => {
     const records = reusableInvocationRecords(), call = records[0].invocations[0];
     call.arguments[0].source.nodeId = "node:wrong";
     expect(() => parsePublicSnapshot(recordsJsonl(records))).toThrow(expect.objectContaining({ code: "invocation_argument_source_mismatch" }));
+    delete call.source.captureState;
     call.source.inputBindingsDefined = false;
     call.source.inputActionIds = [];
     expect(parsePublicSnapshot(recordsJsonl(records)).invocations[0].arguments[0].source.nodeId).toBe("node:wrong");
@@ -380,9 +388,95 @@ describe("V4 inert reusable Invocation snapshots", () => {
     const argument = records[0].invocations[0].arguments[0];
     argument.action = { control: "multi_select", prompt: "Interests", options: [{ key: "food", label: "Food" }, { key: "art", label: "Art" }], minimumSelections: 1 };
     argument.value = { kind: "selected", selected: [{ key: "food", label: "Food" }] };
+    records[1].acceptedView.layers[0].actions.find(action => action.kind === "input").input = structuredClone(argument.action);
+    records[0].invocations[1].arguments[0].action = structuredClone(argument.action);
+    records[0].invocations[1].arguments[0].value = structuredClone(argument.value);
     expect(parsePublicSnapshot(recordsJsonl(records)).invocations[0].arguments[0].value.selected[0].label).toBe("Food");
     argument.value.selected[0].label = "Not the frozen label";
     expect(() => parsePublicSnapshot(recordsJsonl(records))).toThrow(expect.objectContaining({ code: "invocation_argument_value_invalid" }));
+  });
+
+  it.each(["prompt", "control", "source-node", "kind"])("rejects accepted frozen arguments contradicting canonical %s", corruption => {
+    const records = reusableInvocationRecords(), call = records[0].invocations[0];
+    const input = records[1].acceptedView.layers[0].actions.find(action => action.kind === "input");
+    if (corruption === "prompt") call.arguments[0].action.prompt = "Other question";
+    if (corruption === "control") {
+      call.arguments[0].action = { control: "single_select", prompt: "Destination", options: [{ key: "a", label: "A" }] };
+      call.arguments[0].value = { kind: "selected", selected: [{ key: "a", label: "A" }] };
+    }
+    if (corruption === "source-node") input.sourceNodeId = "node:nested";
+    if (corruption === "kind") { input.kind = "invoke"; input.interactionText = "Other"; delete input.input; }
+    expect(() => parsePublicSnapshot(recordsJsonl(records))).toThrow(PublicSnapshotError);
+    if (["prompt", "control"].includes(corruption)) {
+      delete call.source.captureState;
+      expect(parsePublicSnapshot(recordsJsonl(records)).invocations[0].arguments[0].action).toEqual(call.arguments[0].action);
+    }
+  });
+
+  it("retains trusted agent activator without counting its semantic child as a human turn", () => {
+    const records = reusableInvocationRecords();
+    records[0].invocations[0].activator = "agent";
+    records[0].invocations[1].activator = "human";
+    const snapshot = parsePublicSnapshot(recordsJsonl(records));
+    expect(snapshot.state.actionInvocations.map(call => call.agentInvoked)).toEqual([true, false]);
+    expect(humanTurns(snapshot.state, snapshot.thread).map(turn => turn.id)).toEqual(["turn:1", "turn:3"]);
+    records[0].invocations[0].activator = "unknown";
+    expect(() => parsePublicSnapshot(recordsJsonl(records))).toThrow(expect.objectContaining({ code: "invocation_activator_invalid" }));
+  });
+
+  it("rejects new undeclared capture arguments while retaining independent exact Input and Invoke occurrences", () => {
+    const records = reusableInvocationRecords(), call = records[0].invocations[0];
+    call.source.inputBindingsDefined = false;
+    call.source.inputActionIds = [];
+    expect(() => parsePublicSnapshot(recordsJsonl(records))).toThrow(expect.objectContaining({ code: "invocation_arguments_invalid" }));
+    delete call.source.captureState;
+    expect(parsePublicSnapshot(recordsJsonl(records)).invocations[0].arguments).toHaveLength(1);
+    call.source.inputBindingsDefined = true;
+    call.source.inputActionIds = ["action:input"];
+    call.source.presentingLayerId = "layer:other-presentation";
+    call.arguments[0].source.interactionNodeId = "node:input-presentation";
+    const snapshot = parsePublicSnapshot(recordsJsonl(records));
+    expect(snapshot.invocations[0].source.presentingLayerId).toBe("layer:other-presentation");
+    expect(snapshot.invocations[0].arguments[0].source).toMatchObject({
+      interactionNodeId: "node:input-presentation", layerId: "layer:root", nodeId: "node:root",
+    });
+    call.arguments[0].source.nodeId = "node:wrong-parent";
+    expect(() => parsePublicSnapshot(recordsJsonl(records))).toThrow(expect.objectContaining({ code: "invocation_argument_source_mismatch" }));
+  });
+
+  it.each(["active", "stopped", "failed"])("opens %s Current from its source in the actual public renderer without Return or execution", async lifecycle => {
+    const records = reusableInvocationRecords(), call = records[0].invocations[0];
+    call.lifecycle = lifecycle; call.resultTurnId = null; call.returnedLayerId = null;
+    call.safeReason = lifecycle === "active" ? null : "Safe terminal reason";
+    records[2].origin = { kind: "user" };
+    records[2].completion = { ...records[2].completion, status: "failed" };
+    records[2].acceptedView = null;
+    const windowRef = new Window({ url: "https://share.example.test" });
+    windowRef.document.write(renderPublicViewerTemplate({ snapshot: recordsJsonl(records) }));
+    vi.stubGlobal("window", windowRef);
+    vi.stubGlobal("document", windowRef.document);
+    vi.stubGlobal("DOMParser", windowRef.DOMParser);
+    vi.stubGlobal("lucide", { Circle: {}, createElement: () => windowRef.document.createElementNS("http://www.w3.org/2000/svg", "svg") });
+    vi.stubGlobal("marked", { parse: value => `<p>${value}</p>` });
+    let viewer;
+    try {
+      viewer = bootPublicViewer({ documentRef: windowRef.document, windowRef, onRenderError: error => { throw error; } });
+      expect(viewer).toBeTruthy();
+      windowRef.document.querySelector(".graph-node")?.click();
+      const currentButton = () => windowRef.document.querySelector('[data-invocation-result-interaction-id="current:invocation:lisbon"]');
+      await vi.waitFor(() => expect(currentButton()?.disabled).toBe(false));
+      expect(currentButton().textContent).toContain("Lisbon · Current");
+      expect(humanTurns(viewer.adapter.state, viewer.adapter.thread).map(turn => turn.id)).toEqual(["turn:1", "turn:3"]);
+      expect(viewer.adapter.state.actions.find(action => action.kind === "invoke").targetLayerId).toBeUndefined();
+      currentButton().click();
+      await vi.waitFor(() => expect(viewer.adapter.selection.currentInteractionId).toBe("current:invocation:lisbon"));
+      expect(viewer.adapter.state.visibleLayer.layer.id).toBe("layer:child");
+      expect(viewer.adapter.state.status).toBe(lifecycle === "active" ? "running" : lifecycle);
+      expect(viewer.adapter.selectTurnById("turn:1")).toBe(true);
+      viewer.render();
+      expect(viewer.adapter.state.visibleLayer.layer.id).toBe("layer:root");
+      await expect(viewer.adapter.onInvokeAction({ kind: "invoke" })).resolves.toBe(false);
+    } finally { viewer?.dispose(); vi.unstubAllGlobals(); await windowRef.happyDOM.close(); }
   });
 
   it("preserves explicit unavailable historical image pins without inventing replacement bytes", async () => {

@@ -1,3 +1,4 @@
+import { humanTurns } from "../desktop/renderer/src/product-workspace/model.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 let requestImplementation;
@@ -1100,7 +1101,7 @@ describe("workspace navigation integration", () => {
         }],
       } : state;
       if (path === "/api/threads/10/interactions/1/actions/6/invoke") {
-        expect(options).toEqual({ method: "POST", headers: { "Idempotency-Key": invocationKey }, body: JSON.stringify({ inputDraftRevision: 13 }) });
+        expect(options).toEqual({ method: "POST", headers: { "Idempotency-Key": invocationKey }, body: JSON.stringify({ inputDraftRevision: 13, presentingLayerId: 7 }) });
         posted = true;
         throw new Error("response lost");
       }
@@ -1119,7 +1120,105 @@ describe("workspace navigation integration", () => {
     expect(controller.appState.pendingActionInvocations).toEqual([]);
   });
 
-  it("retries a project-visible submitted invocation through the same source action", async () => {
+  it("retains a native preparation rejection and sends a corrected activation with a fresh key", async () => {
+    const root = rootLayer(7, 22);
+    const action = { id: 6, kind: "invoke", sourceNodeId: 22, reusable: false };
+    root.actions = [action];
+    const source = interaction(1, 10, root);
+    const refused = { sourceInteractionId: 1, actionId: 6, resultInteractionId: 2,
+      durable: false, reusable: false, invocationKey, resultCompletionStatus: "failed",
+      preparationRecoverable: false, preparationRejected: true };
+    const failed = { ...interaction(2, 10, null, 2), completionStatus: "failed", completionOutput: null };
+    const initial = productState([{ id: 10, title: "Correct a refused preparation" }], [source]);
+    const rejected = { ...initial, interactions: [source, failed], actionInvocations: [refused] };
+    const nextKey = "fresh-corrected-gesture";
+    const prepared = { ...refused, durable: true, invocationKey: nextKey, resultInteractionId: 3,
+      preparationRejected: false, resultCompletionStatus: "running" };
+    const running = { ...interaction(3, 10, null, 3), completionStatus: "running", completionOutput: null };
+    let attempts = 0;
+    requestImplementation = vi.fn(async (path, options) => {
+      if (path.startsWith("/api/state?threadId=10")) return attempts === 0 ? initial : attempts === 1 ? rejected
+        : { ...initial, interactions: [source, failed, running], actionInvocations: [refused, prepared] };
+      if (path.endsWith("/layers/7")) return root;
+      if (path === "/api/threads/10/interactions/1/actions/6/invoke") {
+        attempts += 1;
+        expect(options.headers["Idempotency-Key"]).toBe(attempts === 1 ? invocationKey : nextKey);
+        expect(JSON.parse(options.body)).toEqual({ inputDraftRevision: attempts === 1 ? 13 : 14, presentingLayerId: 7 });
+        if (attempts === 1) throw new Error("Native preparation rejected invalid arguments");
+        return { created: true, invocation: prepared, interaction: running };
+      }
+      throw new Error(`Unexpected request: ${path}`);
+    });
+    const controller = await loadModules();
+    const toast = { textContent: "", classList: { add: vi.fn(), remove: vi.fn() } };
+    document.querySelector = selector => selector === "#toast" ? toast : null;
+    await controller.loadThread(10);
+    expect(await controller.invokeAction(action, { inputDraftRevision: 13 })).toBeNull();
+    expect(toast.textContent).toBe("Native preparation rejected invalid arguments");
+    expect(controller.appState.actionInvocations).toEqual([refused]);
+    expect(controller.appState.pendingActionInvocations).toEqual([]);
+    expect(controller.viewState.currentInteractionId).toBe(1);
+    expect(tutorialActionSucceeded).not.toHaveBeenCalled();
+    vi.mocked(globalThis.crypto.randomUUID).mockReturnValue(nextKey);
+    await controller.invokeAction(action, { inputDraftRevision: 14 });
+    expect(attempts).toBe(2);
+    expect(controller.appState.actionInvocations).toEqual([refused, prepared]);
+    expect(controller.viewState.currentInteractionId).toBe(1);
+    expect(tutorialActionSucceeded).toHaveBeenCalledTimes(1);
+  });
+
+  it("reads imported Current and restores its local history without native requests or Invoke", async () => {
+    const sourceRoot = rootLayer(7, 22);
+    const source = interaction(1, 10, sourceRoot);
+    const imported = { id: 10, title: "Inert imported call", imported: true };
+    const currentLayer = { layer: { id: "layer:current" }, nodes: [{ id: "node:current", title: "Current draft", detail: "Read only" }], edges: [],
+      actions: [{ id: "action:detail", sourceNodeId: "node:current", kind: "navigate", relation: "reference", label: "Detail", targetLayerId: "layer:detail" }] };
+    const detailLayer = { layer: { id: "layer:detail" }, nodes: [{ id: "node:detail", title: "Current detail", detail: "Read only" }], edges: [], actions: [] };
+    const entry = { inert: true, threadId: 10, sourceInteractionId: 1, sourceNodeId: 22, resultInteractionId: null,
+      record: { id: "invocation:history", childInteractionNodeId: "node:child", lifecycle: "stopped", currentLayerId: "layer:current", returnedLayerId: null,
+        source: { label: "Explore" }, arguments: [], safeReason: "Stopped", current: { rootLayerId: "layer:current", layers: [currentLayer, detailLayer] } } };
+    const agentResult = interaction(2, 10, rootLayer(8, 23), 2);
+    const agentHistory = { ...entry, resultInteractionId: 2, record: { ...entry.record, id: "invocation:agent", activator: "agent", lifecycle: "succeeded", current: null } };
+    const state = { ...productState([imported], [source, agentResult]), importedInvocationHistory: [entry, agentHistory] };
+    requestImplementation = vi.fn(async path => {
+      if (path.startsWith("/api/state?threadId=10")) return state;
+      if (path.endsWith("/layers/7")) return sourceRoot;
+      throw new Error(`Unexpected native request: ${path}`);
+    });
+    const controller = await loadModules();
+    await controller.loadThread(10);
+    controller.viewState.mainView = "thread";
+    requestImplementation.mockClear();
+    expect(await controller.navigateImportedInvocationHistory(entry)).toBe(true);
+    expect(controller.viewState.currentInteractionId).toBe("current:invocation:history");
+    expect(controller.appState.status).toBe("stopped");
+    expect(controller.appState.actionInvocations).toEqual([]);
+    expect(humanTurns(controller.appState, imported).map(turn => turn.id)).toEqual([1]);
+    expect(String(location.href)).not.toContain("current%3A");
+    requestImplementation.mockClear();
+    await controller.refreshState(10);
+    expect(controller.viewState.currentInteractionId).toBe("current:invocation:history");
+    expect(controller.appState.visibleLayer.layer.id).toBe("layer:current");
+    expect(humanTurns(controller.appState, imported).map(turn => turn.id)).toEqual([1]);
+    expect(requestImplementation.mock.calls.every(([path]) => path.startsWith("/api/state?threadId=10") && !path.includes("current%3A"))).toBe(true);
+    requestImplementation.mockClear();
+    const currentAction = controller.appState.actions[0];
+    expect(await controller.navigateLayer("layer:detail", { action: currentAction, sourceNode: currentLayer.nodes[0] })).toBe(true);
+    expect(await controller.navigateLayer("layer:unknown")).toBe(false);
+    await controller.navigateHistory("back");
+    expect(controller.appState.visibleLayer.layer.id).toBe("layer:current");
+    await controller.navigateHistory("back");
+    expect(controller.viewState.currentInteractionId).toBe(1);
+    await controller.navigateHistory("forward");
+    expect(controller.appState.visibleLayer.layer.id).toBe("layer:current");
+    await controller.navigateHistory("forward");
+    expect(controller.appState.visibleLayer.layer.id).toBe("layer:detail");
+    expect(await controller.invokeAction({ id: "action:mutation", kind: "invoke" })).toBeNull();
+    expect(await controller.navigateImportedInvocationHistory({ record: { id: "invocation:forged" } })).toBe(false);
+    expect(requestImplementation).not.toHaveBeenCalled();
+  });
+
+  it.each([false, "reservation", "not_started", "submitted", "failed"])("recovers submitted invocation without replacing a durable key (durable=%s)", async (durable) => {
     vi.useFakeTimers();
     try {
       const root = rootLayer(101, 11);
@@ -1129,15 +1228,17 @@ describe("workspace navigation integration", () => {
         sourceNodeId: 11,
         targetLayerId: null,
         interactionText: "Resume the leased result",
+        ...(durable ? { reusable: false } : {}),
       };
       root.actions = [action];
       const source = interaction(1, 10, root);
       const submitted = productState([{ id: 10, title: "Recovery source" }], [source]);
       submitted.actionInvocations = [{
-        sourceInteractionId: 99,
+        sourceInteractionId: durable ? 1 : 99,
+        ...(durable ? { durable: durable !== "reservation", reusable: false, invocationKey: "saved-gesture", preparationRecoverable: true, presentingLayerId: 202 } : {}),
         actionId: 777,
         resultInteractionId: 100,
-        resultCompletionStatus: "submitted",
+        resultCompletionStatus: durable === "reservation" ? "not_started" : durable || "submitted",
       }];
       const running = productState([{ id: 10, title: "Recovery source" }], [source]);
       running.actionInvocations = [{
@@ -1149,7 +1250,7 @@ describe("workspace navigation integration", () => {
         if (path.startsWith("/api/state?threadId=10")) return retried ? running : submitted;
         if (path.endsWith("/layers/101")) return root;
         if (path === "/api/threads/10/interactions/1/actions/777/invoke") {
-          expect(options).toEqual({ method: "POST", headers: { "Idempotency-Key": invocationKey } });
+          expect(options).toEqual({ method: "POST", headers: { "Idempotency-Key": durable ? "saved-gesture" : invocationKey }, body: JSON.stringify({ presentingLayerId: durable ? 202 : 101 }) });
           retried = true;
           return {
             created: false,
@@ -1162,12 +1263,12 @@ describe("workspace navigation integration", () => {
       const controller = await loadModules();
 
       await controller.loadThread(10);
-      await controller.invokeAction(action);
+      await controller.invokeAction(action, { inputDraftRevision: durable ? 999 : undefined });
 
       expect(retried).toBe(true);
       expect(requestImplementation).toHaveBeenCalledWith(
         "/api/threads/10/interactions/1/actions/777/invoke",
-        { method: "POST", headers: { "Idempotency-Key": invocationKey } },
+        { method: "POST", headers: { "Idempotency-Key": durable ? "saved-gesture" : invocationKey }, body: JSON.stringify({ presentingLayerId: durable ? 202 : 101 }) },
       );
       expect(controller.appState.actionInvocations[0].resultCompletionStatus).toBe("running");
       expect(controller.viewState).toMatchObject({ currentThreadId: 10, currentInteractionId: 1 });
@@ -1218,7 +1319,7 @@ describe("workspace navigation integration", () => {
         if (path.startsWith("/api/state?threadId=10")) return invoked ? afterInvoke : beforeInvoke;
         if (path.endsWith("/layers/101")) return root;
         if (path === "/api/threads/10/interactions/1/actions/777/invoke") {
-          expect(options).toEqual({ method: "POST", headers: { "Idempotency-Key": invocationKey } });
+          expect(options).toEqual({ method: "POST", headers: { "Idempotency-Key": invocationKey }, body: JSON.stringify({ presentingLayerId: 101 }) });
           invoked = true;
           return {
             created: true,

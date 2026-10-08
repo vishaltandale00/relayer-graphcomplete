@@ -278,6 +278,11 @@ class ScopedGraphAuthoring:
                         if type(reference) is int and reference > 0:
                             inputs.append(reference)
                             continue
+                        if type(reference) is dict and "id" in reference:
+                            if reference.get("kind") != "input" or reference.get("state") != "accepted" or type(reference["id"]) is not int or reference["id"] < 1:
+                                raise GraphAuthoringValidationError("Invoke needs an explicit accepted Input action record")
+                            inputs.append(reference["id"])
+                            continue
                         declared = next(((owner, candidate) for owner, candidate in layer._actions.values() if candidate is reference), None)
                         if declared is None or declared[0] is not source or reference.kind != "input":
                             raise GraphAuthoringValidationError("Invoke Inputs must be declared on the same source Node and scoped Layer")

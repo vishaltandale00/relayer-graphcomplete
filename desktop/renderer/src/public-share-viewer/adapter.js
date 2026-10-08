@@ -52,7 +52,7 @@ export function createPublicViewerAdapter(snapshot) {
     state.visibleLayer = layer;
     state.nodes = layer?.nodes ? [...layer.nodes] : [];
     state.edges = layer?.edges ? [...layer.edges] : [];
-    state.actions = layer?.actions ? [...layer.actions] : [];
+    state.actions = snapshot.actionsForLayer(layer);
   }
 
   function selectTurnById(interactionId, { responseRoot = false } = {}) {
@@ -118,6 +118,7 @@ export function createPublicViewerAdapter(snapshot) {
     selectTurnById,
     navigateLayer,
     navigateResolvedInvoke,
+    navigateInvocationCurrent: async call => selectTurnById(call.resultInteractionId, { responseRoot: true }),
     onInvokeAction: async () => false,
     onSubmitInteraction: async () => false,
     onExportConversation: null,

@@ -85,39 +85,87 @@ pub(super) async fn composer_occurrences(
         .thread
         .project_id
         .map(|id| id.value());
-    let mut layers = std::collections::HashMap::new();
     for input in &draft.attachments {
-        runtime
-            .canonical_input_action_occurrence(project, draft.thread_id.value(), &input.occurrence)
-            .await?;
-        let key = (
-            input.occurrence.presenting_interaction_node_id.value(),
-            input.occurrence.presenting_layer_id.value(),
-        );
-        if let std::collections::hash_map::Entry::Vacant(entry) = layers.entry(key) {
-            let layer = runtime.get_layer(key.0, key.1).await?;
-            let actions: Vec<relayer_graph_core::GraphAction> = serde_json::from_value(
-                layer
-                    .get("actions")
-                    .cloned()
-                    .ok_or_else(|| ApiError::internal("accepted layer lost its actions"))?,
+        let consumers = runtime
+            .canonical_input_action_consumer_state(
+                project,
+                draft.thread_id.value(),
+                &input.occurrence,
             )
-            .map_err(|_| ApiError::internal("accepted layer actions are invalid"))?;
-            entry.insert(actions);
-        }
-        let bound = layers[&key].iter().any(|action| {
-            action.kind == relayer_graph_core::ActionKind::Invoke
-                && action.state == relayer_graph_core::RecordState::Accepted
-                && action.source_node_id.value() == input.source_node_id
-                && action
-                    .input_action_ids
-                    .contains(&input.occurrence.action_id)
-        });
-        if !bound {
+            .await?;
+        if consumers.composer_eligible {
             ordinary.push(input.occurrence.clone());
         }
     }
     Ok(ordinary)
+}
+
+/// Presentation-only admission flags use the same whole canonical Node binding
+/// inventory as commit refusal and composer scoping. They never alter stored
+/// accepted action definitions or grant execution authority.
+pub(super) async fn project_layer_input_availability(
+    state: &ApiState,
+    thread_id: ThreadId,
+    presenting_interaction: i64,
+    layer: &mut serde_json::Value,
+    deadline: tokio::time::Instant,
+) -> Result<(), ApiError> {
+    let Some(actions) = layer
+        .get_mut("actions")
+        .and_then(serde_json::Value::as_array_mut)
+    else {
+        return Ok(());
+    };
+    if !actions.iter().any(|action| action["kind"] == "input") {
+        return Ok(());
+    }
+    let thread = state.product.get_thread(thread_id).await?.thread;
+    let project = thread.project_id.map(|id| id.value());
+    let layer_id = layer["layer"]["id"].as_i64();
+    // Reborrow after reading immutable Layer identity.
+    let actions = layer["actions"].as_array_mut().unwrap();
+    for action in actions
+        .iter_mut()
+        .filter(|action| action["kind"] == "input")
+    {
+        let occurrence = match (
+            relayer_graph_core::NodeId::new(presenting_interaction),
+            layer_id.and_then(relayer_graph_core::LayerId::new),
+            action["id"]
+                .as_i64()
+                .and_then(relayer_graph_core::ActionId::new),
+        ) {
+            (Some(presenting_interaction_node_id), Some(presenting_layer_id), Some(action_id)) => {
+                relayer_graph_core::PresentingInputOccurrence {
+                    presenting_interaction_node_id,
+                    presenting_layer_id,
+                    action_id,
+                }
+            }
+            _ => {
+                action["inputCanAcceptAnswer"] = serde_json::json!(false);
+                continue;
+            }
+        };
+        let flags = match &state.runtime {
+            Some(runtime) if !thread.imported => tokio::time::timeout_at(
+                deadline,
+                runtime.canonical_input_action_consumer_state(
+                    project,
+                    thread_id.value(),
+                    &occurrence,
+                ),
+            )
+            .await
+            .ok()
+            .and_then(Result::ok),
+            _ => None,
+        };
+        // Unknown availability cannot invite an answer that may have no consumer.
+        action["inputCanAcceptAnswer"] =
+            serde_json::json!(flags.is_some_and(|state| state.editable));
+    }
+    Ok(())
 }
 
 pub(super) async fn scoped_response(
@@ -197,7 +245,7 @@ pub(super) async fn commit(
         .project_id
         .map(|project_id| project_id.value());
     let action = runtime
-        .canonical_input_action_occurrence(
+        .canonical_editable_input_action_occurrence(
             destination_project_id,
             thread_id.value(),
             &request.occurrence,

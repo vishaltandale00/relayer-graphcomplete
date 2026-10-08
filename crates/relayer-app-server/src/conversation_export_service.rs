@@ -57,6 +57,8 @@ pub(crate) enum ConversationExportBuildError {
     ShareTitleTooLong,
     #[error("share snapshot exceeds the {MAX_SHARE_SNAPSHOT_BYTES}-byte transport limit")]
     ShareSnapshotTooLarge { bytes: usize },
+    #[error("hosted reusable invocation portability is not qualified")]
+    ReusableInvocationPortabilityUnavailable,
 }
 
 fn is_converted_invoke(action: &GraphAction) -> bool {
@@ -235,6 +237,7 @@ async fn build_conversation_export_once(
         .iter()
         .filter(|invocation| {
             !invocation.durable
+                && invocation.invocation_key == "legacy"
                 && interaction_indexes.contains_key(&invocation.source_interaction_id)
                 && interaction_indexes.contains_key(&invocation.result_interaction_id)
         })
@@ -605,6 +608,7 @@ async fn build_share_conversation_export_once(
         .iter()
         .filter(|invocation| {
             !invocation.durable
+                && invocation.invocation_key == "legacy"
                 && selected_indexes.contains_key(&invocation.source_interaction_id)
                 && selected_indexes.contains_key(&invocation.result_interaction_id)
         })
@@ -632,6 +636,21 @@ async fn build_share_conversation_export_once(
         .collect::<Vec<_>>();
     let graph_bound_inputs =
         standalone_bound_inputs(graph_bound_inputs, closures.iter(), &graph_invocations);
+    // The deployed share service has not qualified the V4 capability. Local
+    // conversation exports remain available; public snapshots must not silently
+    // omit call history or send an unsupported format to the upload boundary.
+    if !graph_invocations.is_empty()
+        || !graph_bound_inputs.is_empty()
+        || closures
+            .iter()
+            .flat_map(|closure| {
+                std::iter::once(&closure.root_action)
+                    .chain(closure.layers.iter().flat_map(|layer| &layer.actions))
+            })
+            .any(|action| !action.input_action_ids.is_empty() || action.reusable.is_some())
+    {
+        return Err(ConversationExportBuildError::ReusableInvocationPortabilityUnavailable);
+    }
     let mut context_inputs = Vec::with_capacity(selected.len());
     let mut submitted_evidence = Vec::with_capacity(selected.len());
     let mut settled_attempt_outcomes = Vec::with_capacity(selected.len());
@@ -2345,6 +2364,11 @@ fn attach_invocation_inventory(
         inventory.push(ExportInvocation {
             schema_version: 1,
             id,
+            activator: frozen
+                .get("activator")
+                .cloned()
+                .map(serde_json::from_value)
+                .transpose()?,
             source: ExportInvocationSource {
                 interaction_node_id: ids.node(call.source_completion_id.value()),
                 action_id: ids.action(call.source_action_id.value()),
@@ -2353,6 +2377,15 @@ fn attach_invocation_inventory(
                     .get("sourceLayerId")
                     .and_then(serde_json::Value::as_i64)
                     .map(|layer| ids.layer(layer)),
+                presenting_layer_id: frozen
+                    .get("presentingLayerId")
+                    .and_then(serde_json::Value::as_i64)
+                    .map(|layer| ids.layer(layer)),
+                capture_state: frozen
+                    .get("state")
+                    .cloned()
+                    .map(serde_json::from_value)
+                    .transpose()?,
                 instruction: redactor.text(
                     call.action_snapshot
                         .get("instruction")
@@ -4643,7 +4676,7 @@ mod tests {
         use sha2::{Digest, Sha256};
         use std::sync::{
             Arc,
-            atomic::{AtomicUsize, Ordering},
+            atomic::{AtomicBool, AtomicUsize, Ordering},
         };
         let directory = tempfile::tempdir().unwrap();
         let database = directory.path().join("product.sqlite3");
@@ -4680,11 +4713,14 @@ mod tests {
         }
         let phase = Arc::new(AtomicUsize::new(0));
         let captures = Arc::new(AtomicUsize::new(0));
+        let requires_v4 = Arc::new(AtomicBool::new(false));
         let handler_phase = phase.clone();
         let handler_captures = captures.clone();
+        let handler_v4 = requires_v4.clone();
         let app = axum::Router::new().fallback(move |request: axum::extract::Request| {
             let phase = handler_phase.clone();
             let captures = handler_captures.clone();
+            let requires_v4 = handler_v4.clone();
             let snapshots = snapshots.clone();
             let payloads = payloads.clone();
             let interaction = interaction.clone();
@@ -4695,7 +4731,11 @@ mod tests {
                     "/api/control/interaction-features" => json!({"interactionGraph":false}),
                     "/api/control/accepted-closures" => {
                         captures.fetch_add(1, Ordering::SeqCst);
-                        json!({"closures":[snapshots[phase.load(Ordering::SeqCst)]]})
+                        let mut snapshot = snapshots[phase.load(Ordering::SeqCst)].clone();
+                        if requires_v4.load(Ordering::SeqCst) {
+                            snapshot["layers"][0]["actions"] = json!([{"id":2,"sourceNodeId":2,"sourceLayerId":1,"kind":"invoke","label":"Analyze","variant":"pill","interactionText":"Analyze","reusable":false,"state":"accepted"}]);
+                        }
+                        json!({"closures":[snapshot]})
                     }
                     "/api/control/interactions/1/input" => {
                         json!({"interaction":interaction,"contexts":[]})
@@ -4786,6 +4826,45 @@ mod tests {
                 !text.contains(&base64::engine::general_purpose::STANDARD.encode(b"before-race"))
             );
         }
+        requires_v4.store(true, Ordering::SeqCst);
+        let producer = crate::conversation_export::ExportProducer {
+            desktop_version: "test".into(),
+            build_commit: "test".into(),
+            platform: "test".into(),
+            architecture: "test".into(),
+        };
+        let local = super::build_conversation_export(
+            &product,
+            &runtime,
+            ThreadId::from_database(1),
+            producer.clone(),
+            "3".into(),
+        )
+        .await
+        .unwrap();
+        let records = crate::conversation_export::decode_export_jsonl(&local).unwrap();
+        let crate::conversation_export::ConversationExportRecord::Header(header) = &records[0]
+        else {
+            unreachable!()
+        };
+        assert_eq!(
+            header.export_version,
+            crate::conversation_export::EXPORT_VERSION_V4
+        );
+        let error = super::build_share_conversation_export(
+            &product,
+            &runtime,
+            ThreadId::from_database(1),
+            producer,
+            "3".into(),
+            "Snapshot",
+        )
+        .await
+        .unwrap_err();
+        assert!(matches!(
+            error,
+            super::ConversationExportBuildError::ReusableInvocationPortabilityUnavailable
+        ));
         server.abort();
     }
 

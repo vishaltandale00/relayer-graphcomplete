@@ -736,15 +736,18 @@ function validateInvocations(header, turns) {
   const ids = new Set(), children = new Set(), results = new Set();
   for (const [index, call] of calls.entries()) {
     const path = `header.invocations[${index}]`;
-    exactFields(call, ["schemaVersion", "id", "source", "childInteractionNodeId", "resultTurnId", "lifecycle", "headRevision", "currentLayerId", "returnedLayerId", "arguments", "current", "safeReason"], path);
+    exactFields(call, ["schemaVersion", "id", "source", "childInteractionNodeId", "resultTurnId", "lifecycle", "headRevision", "currentLayerId", "returnedLayerId", "arguments", "current", "safeReason", ...(Object.hasOwn(call, "activator") ? ["activator"] : [])], path);
+    if (Object.hasOwn(call, "activator") && !["human", "agent"].includes(call.activator)) fail("invocation_activator_invalid", path, "Invocation activator must retain trusted human or agent provenance.");
     requirePortableId(call.id, "invocation", `${path}.id`);
     requirePortableId(call.childInteractionNodeId, "node", `${path}.childInteractionNodeId`);
     const source = call.source;
-    exactFields(source, ["interactionNodeId", "actionId", "parentNodeId", "layerId", "instruction", "label", "description", "icon", "iconAsset", "variant", "inputActionIds", "inputBindingsDefined", "parentTitle", "parentDetail", "state", ...(Object.hasOwn(source, "iconAssetOmitted") ? ["iconAssetOmitted"] : []), ...(Object.hasOwn(source, "reusable") ? ["reusable"] : [])], `${path}.source`);
+    exactFields(source, ["interactionNodeId", "actionId", "parentNodeId", "layerId", "instruction", "label", "description", "icon", "iconAsset", "variant", "inputActionIds", "inputBindingsDefined", "parentTitle", "parentDetail", "state", ...(Object.hasOwn(source, "iconAssetOmitted") ? ["iconAssetOmitted"] : []), ...(Object.hasOwn(source, "reusable") ? ["reusable"] : []), ...(Object.hasOwn(source, "presentingLayerId") ? ["presentingLayerId"] : []), ...(Object.hasOwn(source, "captureState") ? ["captureState"] : [])], `${path}.source`);
+    if (Object.hasOwn(source, "captureState") && !["draft", "accepted"].includes(source.captureState)) fail("invocation_capture_state_invalid", path, "Captured source state must retain trusted draft or accepted provenance.");
     if (source.reusable != null && typeof source.reusable !== "boolean") fail("invoke_reusable_invalid", path, "Reuse is an explicit boolean Invoke policy.");
     for (const field of ["interactionNodeId", "parentNodeId"]) requirePortableId(source[field], "node", `${path}.source.${field}`);
     requirePortableId(source.actionId, "action", `${path}.source.actionId`);
     if (source.layerId != null) requirePortableId(source.layerId, "layer", `${path}.source.layerId`);
+    if (source.presentingLayerId != null) requirePortableId(source.presentingLayerId, "layer", `${path}.source.presentingLayerId`);
     for (const field of ["instruction", "label", "parentTitle", "parentDetail"]) requireString(source[field], `${path}.source.${field}`, { allowEmpty: field === "parentDetail" });
     if (source.description != null) requireString(source.description, `${path}.source.description`);
     if (source.icon != null) validatedIcon(source.icon, `${path}.source.icon`);
@@ -756,7 +759,8 @@ function validateInvocations(header, turns) {
       || !["active", "succeeded", "stopped", "failed"].includes(call.lifecycle)) fail("invocation_identity_invalid", path, "Invalid or repeated Invocation identity.");
     ids.add(call.id); children.add(call.childInteractionNodeId);
     requireInteger(call.headRevision, `${path}.headRevision`);
-    if (call.safeReason != null) requireString(call.safeReason, `${path}.safeReason`);
+    if (["failed", "stopped"].includes(call.lifecycle)) requireString(call.safeReason, `${path}.safeReason`);
+    else if (call.safeReason != null) fail("invocation_reason_invalid", path, "Active and succeeded calls cannot retain a terminal reason.");
     const bindings = requireArray(source.inputActionIds, `${path}.source.inputActionIds`);
     if (typeof source.inputBindingsDefined !== "boolean" || (!source.inputBindingsDefined && bindings.length)) fail("invocation_binding_invalid", path, "Historical undeclared bindings must remain explicitly absent.");
     if (new Set(bindings).size !== bindings.length || bindings.length > MAX_ACTIONS_PER_LAYER) fail("invocation_binding_duplicate", path, "Invalid input binding inventory.");
@@ -805,6 +809,7 @@ function validateInvocations(header, turns) {
           || selected.some(option => !options.some(accepted => stableJson(accepted) === stableJson(option)))) fail("invocation_argument_value_invalid", path, "Selections must exactly match frozen options.");
       }
     }
+    if (source.captureState != null && !source.inputBindingsDefined && argumentsList.length) fail("invocation_arguments_invalid", path, "New captures with undeclared bindings cannot carry arguments.");
     const argumentIds = argumentsList.map(argument => argument.source.actionId);
     if (source.inputBindingsDefined && (new Set(argumentIds).size !== argumentIds.length
       || stableJson([...argumentIds].sort()) !== stableJson([...bindings].sort()))) fail("invocation_arguments_invalid", path, "Arguments must exactly match declared captured bindings without repeated answers.");
@@ -813,7 +818,7 @@ function validateInvocations(header, turns) {
       const turn = turns.find(candidate => candidate.id === call.resultTurnId);
       if (results.has(call.resultTurnId) || !turn || turn.origin.kind !== "invocation" || turn.origin.invocationId !== call.id
         || turn.interactionNodeId !== call.childInteractionNodeId
-        || (turn.acceptedView && (call.lifecycle !== "succeeded" || turn.acceptedView.rootLayerId !== call.returnedLayerId))) fail("invocation_result_mismatch", path, "Result must retain its exact child, Invocation origin, and Returned layer.");
+        || (call.lifecycle === "succeeded" ? turn.completion.status !== "accepted" || !turn.acceptedView || turn.acceptedView.rootLayerId !== call.returnedLayerId : turn.acceptedView != null)) fail("invocation_result_mismatch", path, "Result must retain its exact child, Invocation origin, and Returned layer.");
       results.add(call.resultTurnId);
     }
   }
@@ -871,6 +876,18 @@ function validateBoundInputs(header, turns, invocations) {
     for (const id of invoke.inputActionIds ?? []) {
       const input = definitions.get(id);
       if (!input || input.kind !== "input" || input.sourceNodeId !== invoke.sourceNodeId) fail("bound_input_unresolved", "actions.inputActionIds", "An Invoke binding requires its exact same-Node canonical input definition.");
+    }
+  }
+  // Frozen answers are allowed to outlive definition inventory in legacy
+  // exports. When a canonical definition is included it must agree exactly.
+  for (const call of invocations) for (const argument of call.arguments) {
+    const input = definitions.get(argument.source.actionId);
+    if (!input || !call.source.inputBindingsDefined || call.source.captureState !== "accepted") continue;
+    const normalizedQuestion = question => ({ control: question.control, prompt: question.prompt,
+      options: question.options ?? [], minimumSelections: question.minimumSelections ?? null });
+    if (input.kind !== "input" || input.sourceNodeId !== argument.source.nodeId
+      || stableJson(normalizedQuestion(input.input)) !== stableJson(normalizedQuestion(argument.action))) {
+      fail("invocation_argument_definition_mismatch", "header.invocations.arguments", "Frozen answers must match their exact canonical Input definition.");
     }
   }
   return boundInputs;
@@ -966,9 +983,27 @@ function projectInteractionGraphs(interactions, turns, layersByTurn, exportVersi
   }
 }
 
+// Presentation only: caller must provide a validated portable Invocation record.
+// This helper creates no accepted Product turn, receipt, or mutation capability.
+export function inertInvocationCurrent(call, { threadId, id = `current:${call.id}`, sourceInteractionId, sequence = 0 } = {}) {
+  if (!call.current || call.lifecycle === "succeeded") return null;
+  const layerKeys = new Map(call.current.layers.map(layer => [layer.layer.id, layer.layer.clientKey]));
+  const layers = new Map(call.current.layers.map(layer => [layer.layer.id, normalizeLayer(layer, layerKeys, new Map())]));
+  return { interaction: { id, invocationId: call.id, inertInvocationCurrent: true, threadId,
+    invocationSourceInteractionId: sourceInteractionId, graphNodeId: call.childInteractionNodeId, sequence,
+    text: `${call.source.label} · Current`, completionStatus: call.lifecycle === "active" ? "running" : call.lifecycle,
+    completionOutput: { rootLayer: layers.get(call.currentLayerId) }, submittedInputs: cloneJson(call.arguments),
+    safeReason: call.safeReason,
+    interactionGraph: { enabled: true, complete: sourceInteractionId != null, sources: sourceInteractionId == null ? [] : [{
+      interactionId: sourceInteractionId, invocationActionId: call.source.actionId, contexts: [], message: call.source.label,
+    }] },
+  }, layers };
+}
+
 export function publicState(snapshot) {
   const thread = snapshot.thread;
   const acceptedInteractions = snapshot.interactions;
+  const currentInteractions = snapshot.currentInteractions ?? [];
   const first = acceptedInteractions[0];
   const project = snapshot.projectName
     ? { id: "export:project", name: snapshot.projectName }
@@ -976,11 +1011,17 @@ export function publicState(snapshot) {
   return {
     projects: project ? [project] : [],
     threads: [thread],
-    interactions: acceptedInteractions,
+    interactions: [...acceptedInteractions, ...currentInteractions],
     actionInvocations: (snapshot.invocations ?? []).flatMap(call => {
       const source = acceptedInteractions.find(candidate => candidate.graphNodeId === call.source.interactionNodeId);
       const result = snapshot.turns.find(candidate => candidate.id === call.resultTurnId);
-      return source && result ? [{ id: call.id, reusable: true, sourceInteractionId: source.id, actionId: call.source.actionId, resultInteractionId: result.id, resultCompletionStatus: result.completion.status }] : [];
+      const current = currentInteractions.find(candidate => candidate.invocationId === call.id);
+      return source ? [{ id: call.id, durable: true, reusable: call.source.reusable,
+        agentInvoked: call.activator === "agent", sourceInteractionId: source.id, actionId: call.source.actionId,
+        resultInteractionId: current?.id ?? result?.id ?? null,
+        resultCompletionStatus: result?.completion.status ?? current?.completionStatus ?? call.lifecycle,
+        currentOnly: Boolean(current), invocationId: call.id,
+      }] : [];
     }),
     pendingActionInvocations: [],
     approvals: [],
@@ -996,7 +1037,7 @@ export function publicState(snapshot) {
     currentInteractionId: first?.id ?? null,
     nodes: first?.completionOutput?.rootLayer?.nodes ?? [],
     edges: first?.completionOutput?.rootLayer?.edges ?? [],
-    actions: first?.completionOutput?.rootLayer?.actions ?? [],
+    actions: snapshot.actionsForLayer?.(first?.completionOutput?.rootLayer) ?? first?.completionOutput?.rootLayer?.actions ?? [],
     visibleLayer: first?.completionOutput?.rootLayer ?? null,
     status: first?.completionStatus ?? "idle",
     environment: project ? {
@@ -1137,6 +1178,10 @@ export function parseConversationExportSnapshot(input) {
     turns: turns.map(publicTurnRecord),
     acceptedTurns: acceptedTurns.map(publicTurnRecord),
     interactions,
+    currentInteractions: invocations.map(call => inertInvocationCurrent(call, { threadId,
+      sourceInteractionId: interactions.find(item => item.graphNodeId === call.source.interactionNodeId)?.id,
+      sequence: turns.find(turn => turn.interactionNodeId === call.source.interactionNodeId)?.sequence ?? 0,
+    })?.interaction).filter(Boolean),
     layersByTurn,
     thread,
     projectName,
@@ -1145,7 +1190,19 @@ export function parseConversationExportSnapshot(input) {
     assetContents: contentRecords.map(cloneJson),
     state: null,
     layerFor(turnId, layerId) {
-      return layersByTurn.get(String(turnId))?.get(String(layerId)) ?? null;
+      const current = this.currentInteractions.find(interaction => interaction.id === turnId);
+      return current ? this.invocationCurrentLayer(current.invocationId, layerId)
+        : layersByTurn.get(String(turnId))?.get(String(layerId)) ?? null;
+    },
+    actionsForLayer(layer) {
+      if (!layer) return [];
+      const actions = [...layer.actions];
+      for (const invoke of layer.actions.filter(action => action.kind === "invoke")) {
+        for (const input of this.boundInputsForInvoke(invoke)) if (input && !actions.some(action => action.id === input.id)) {
+          actions.push(...normalizeLayer({ layer: layer.layer, nodes: [], edges: [], actions: [input] }, layerKeys, new Map()).actions);
+        }
+      }
+      return actions;
     },
     invokeDestinationTurnId(actionId) {
       return invokeDestinationTurns.get(actionId) ?? null;

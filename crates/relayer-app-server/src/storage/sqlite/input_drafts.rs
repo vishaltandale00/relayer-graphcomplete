@@ -32,7 +32,7 @@ pub(super) fn submission_json(
     .map_err(|error| StorageError::Serialization(error.to_string()))
 }
 
-fn submission_attachments(
+pub(super) fn submission_attachments(
     thread_id: ThreadId,
     revision: Option<i64>,
     json: &str,
@@ -95,7 +95,7 @@ impl SqliteProductStore {
         action: i64,
         key: &str,
     ) -> Result<Option<(Option<i64>, Vec<ActionInputAttachment>)>, StorageError> {
-        let row = sqlx::query("SELECT receipt.input_draft_revision,receipt.attachments_json FROM invocation_input_submission_receipts receipt JOIN action_invocations ai ON ai.result_interaction_id=receipt.result_interaction_id JOIN interactions source ON source.id=ai.source_interaction_id JOIN threads t ON t.id=source.thread_id WHERE source.id=?1 AND source.thread_id=?2 AND ai.action_id=?3 AND ai.invocation_key=?4 AND ai.prepared_graph_node_id IS NOT NULL AND ai.authoritative=1 AND ai.agent_invoked=0 AND t.conversation_import_id IS NULL")
+        let row = sqlx::query("SELECT receipt.input_draft_revision,receipt.attachments_json FROM invocation_input_submission_receipts receipt JOIN action_invocations ai ON ai.result_interaction_id=receipt.result_interaction_id JOIN interactions source ON source.id=ai.source_interaction_id JOIN threads t ON t.id=source.thread_id WHERE source.id=?1 AND source.thread_id=?2 AND ai.action_id=?3 AND ai.invocation_key=?4 AND ai.authoritative=1 AND ai.agent_invoked=0 AND t.conversation_import_id IS NULL")
             .bind(source.value()).bind(thread_id.value()).bind(action).bind(key).fetch_optional(&self.pool).await?;
         row.map(|row| {
             let revision: Option<i64> = row.try_get("input_draft_revision")?;
@@ -112,49 +112,14 @@ impl SqliteProductStore {
     }
 
     /// Delete only the exact committed epochs frozen for this submission.
+    #[cfg(test)]
     pub(crate) async fn consume_invocation_inputs(
         &self,
         thread_id: ThreadId,
         attachments: &[ActionInputAttachment],
     ) -> Result<ActionInputDraft, StorageError> {
         let mut tx = self.pool.begin_with("BEGIN IMMEDIATE").await?;
-        let timestamp: String = sqlx::query_scalar(
-            "SELECT updated_at FROM threads WHERE id=?1 AND conversation_import_id IS NULL",
-        )
-        .bind(thread_id.value())
-        .fetch_optional(&mut *tx)
-        .await?
-        .ok_or_else(|| {
-            StorageError::IncompatibleSchema(
-                "Invocation input thread is missing or immutable".into(),
-            )
-        })?;
-        let mut changed = false;
-        for input in attachments {
-            if input.thread_id != thread_id {
-                return Err(StorageError::IncompatibleSchema(
-                    "Invocation input belongs to another thread".into(),
-                ));
-            }
-            let action = serde_json::to_string(&input.action)
-                .map_err(|error| StorageError::Serialization(error.to_string()))?;
-            let value = serde_json::to_string(&input.value)
-                .map_err(|error| StorageError::Serialization(error.to_string()))?;
-            let deleted = sqlx::query("DELETE FROM action_input_attachments WHERE thread_id=?1 AND presenting_interaction_node_id=?2 AND presenting_layer_id=?3 AND action_id=?4 AND source_node_id=?5 AND action_json=?6 AND value_json=?7 AND committed_at=?8")
-                .bind(thread_id.value()).bind(input.occurrence.presenting_interaction_node_id.value()).bind(input.occurrence.presenting_layer_id.value()).bind(input.occurrence.action_id.value()).bind(input.source_node_id).bind(action).bind(value).bind(&input.committed_at).execute(&mut *tx).await?;
-            changed |= deleted.rows_affected() > 0;
-        }
-        if changed {
-            let next = next_draft_timestamp(&mut tx, thread_id, &timestamp).await?;
-            sqlx::query("UPDATE action_input_drafts SET revision=revision+1,updated_at=?1 WHERE thread_id=?2")
-                .bind(next).bind(thread_id.value()).execute(&mut *tx).await?;
-        }
-        let header =
-            sqlx::query("SELECT revision,updated_at FROM action_input_drafts WHERE thread_id=?1")
-                .bind(thread_id.value())
-                .fetch_optional(&mut *tx)
-                .await?;
-        let draft = load_draft_after_header(&mut tx, thread_id, header).await?;
+        let draft = consume_invocation_inputs_on(&mut tx, thread_id, attachments).await?;
         tx.commit().await?;
         Ok(draft)
     }
@@ -442,6 +407,56 @@ fn input_draft_conflict(code: &'static str, message: &str) -> StorageError {
         code,
         message: message.into(),
     }
+}
+
+/// Runs inside the caller's submission transaction so binding and consumption
+/// cannot be separated by a process exit or a later SQLite failure.
+pub(super) async fn consume_invocation_inputs_on(
+    connection: &mut sqlx::SqliteConnection,
+    thread_id: ThreadId,
+    attachments: &[ActionInputAttachment],
+) -> Result<ActionInputDraft, StorageError> {
+    let timestamp: String = sqlx::query_scalar(
+        "SELECT updated_at FROM threads WHERE id=?1 AND conversation_import_id IS NULL",
+    )
+    .bind(thread_id.value())
+    .fetch_optional(&mut *connection)
+    .await?
+    .ok_or_else(|| {
+        StorageError::IncompatibleSchema("Invocation input thread is missing or immutable".into())
+    })?;
+    let mut changed = false;
+    for input in attachments {
+        if input.thread_id != thread_id {
+            return Err(StorageError::IncompatibleSchema(
+                "Invocation input belongs to another thread".into(),
+            ));
+        }
+        let action = serde_json::to_string(&input.action)
+            .map_err(|error| StorageError::Serialization(error.to_string()))?;
+        let value = serde_json::to_string(&input.value)
+            .map_err(|error| StorageError::Serialization(error.to_string()))?;
+        let deleted = sqlx::query("DELETE FROM action_input_attachments WHERE thread_id=?1 AND presenting_interaction_node_id=?2 AND presenting_layer_id=?3 AND action_id=?4 AND source_node_id=?5 AND action_json=?6 AND value_json=?7 AND committed_at=?8")
+                .bind(thread_id.value()).bind(input.occurrence.presenting_interaction_node_id.value()).bind(input.occurrence.presenting_layer_id.value()).bind(input.occurrence.action_id.value()).bind(input.source_node_id).bind(action).bind(value).bind(&input.committed_at).execute(&mut *connection).await?;
+        changed |= deleted.rows_affected() > 0;
+    }
+    if changed {
+        let next = next_draft_timestamp(&mut *connection, thread_id, &timestamp).await?;
+        sqlx::query(
+            "UPDATE action_input_drafts SET revision=revision+1,updated_at=?1 WHERE thread_id=?2",
+        )
+        .bind(next)
+        .bind(thread_id.value())
+        .execute(&mut *connection)
+        .await?;
+    }
+    let header =
+        sqlx::query("SELECT revision,updated_at FROM action_input_drafts WHERE thread_id=?1")
+            .bind(thread_id.value())
+            .fetch_optional(&mut *connection)
+            .await?;
+    let draft = load_draft_after_header(&mut *connection, thread_id, header).await?;
+    Ok(draft)
 }
 
 #[cfg(test)]

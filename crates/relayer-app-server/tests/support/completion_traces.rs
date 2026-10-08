@@ -1915,7 +1915,7 @@ async fn a_child_returned_while_its_provider_runs_exports_and_restarts_as_accept
     );
     // The replay keeps the parent graph current active so it can exercise recursive-child
     // lifecycle independently. Complete that already-product-accepted parent before asking the
-    // production share builder for every accepted closure.
+    // production local builder for every accepted closure.
     let root = world
         .product
         .get_interaction(world.thread.root_interaction_id)
@@ -1953,6 +1953,31 @@ async fn a_child_returned_while_its_provider_runs_exports_and_restarts_as_accept
         )
         .await
         .unwrap();
+    let export = crate::conversation_export_service::build_conversation_export(
+        &world.product,
+        &world.runtime,
+        world.thread.id,
+        world.state.export_producer.clone(),
+        "2026-01-01T00:00:00Z".into(),
+    )
+    .await
+    .unwrap();
+    let exported_child = export
+        .split(|byte| *byte == b'\n')
+        .filter(|line| !line.is_empty())
+        .map(|line| serde_json::from_slice::<ConversationExportRecord>(line).unwrap())
+        .find_map(|record| match record {
+            ConversationExportRecord::Turn(turn) if turn.text == "Child work" => Some(turn),
+            _ => None,
+        })
+        .expect("the accepted recursive child must be present in the local snapshot");
+    assert_eq!(
+        exported_child.completion.attempt_outcome,
+        Some(ExportAttemptOutcome::Accepted),
+        "the production local builder must project the settled outcome while the provider unwinds"
+    );
+    assert!(exported_child.completion.attempt_admission_id.is_some());
+    assert!(exported_child.completion.admitted_model_plan.is_some());
     let share = crate::conversation_export_service::build_share_conversation_export(
         &world.product,
         &world.runtime,
@@ -1961,24 +1986,8 @@ async fn a_child_returned_while_its_provider_runs_exports_and_restarts_as_accept
         "2026-01-01T00:00:00Z".into(),
         "Accepted recursive work",
     )
-    .await
-    .unwrap();
-    let shared_child = share
-        .split(|byte| *byte == b'\n')
-        .filter(|line| !line.is_empty())
-        .map(|line| serde_json::from_slice::<ConversationExportRecord>(line).unwrap())
-        .find_map(|record| match record {
-            ConversationExportRecord::Turn(turn) if turn.text == "Child work" => Some(turn),
-            _ => None,
-        })
-        .expect("the accepted recursive child must be present in the share snapshot");
-    assert_eq!(
-        shared_child.completion.attempt_outcome,
-        Some(ExportAttemptOutcome::Accepted),
-        "the production share builder must project the settled outcome while the provider unwinds"
-    );
-    assert!(shared_child.completion.attempt_admission_id.is_none());
-    assert!(shared_child.completion.admitted_model_plan.is_none());
+    .await;
+    assert!(matches!(share, Err(crate::conversation_export_service::ConversationExportBuildError::ReusableInvocationPortabilityUnavailable)), "Hosted V4 remains unqualified while local settled outcome stays exportable");
 
     // A running-but-unsettled snapshot never takes a decided outcome, even if the
     // execution settles between the two reads.
@@ -2627,6 +2636,7 @@ async fn a_users_invoke_does_not_run_an_agents_child() {
         world.invocation.source_action_id,
         "legacy-test-request",
         None,
+        None,
     )
     .await
     .unwrap_or_else(|error| panic!("invoke: {}", error.message()));
@@ -3006,9 +3016,18 @@ async fn v4_import_reexport_preserves_standalone_bound_input_image_without_layer
         "2026-10-04T00:00:00Z".into(),
         "Analysis",
     )
+    .await;
+    assert!(matches!(native_share, Err(crate::conversation_export_service::ConversationExportBuildError::ReusableInvocationPortabilityUnavailable)), "Standalone bound definitions require V4 even before a call, so hosted export must fail closed");
+    let native_export = crate::conversation_export_service::build_conversation_export(
+        &world.product,
+        &world.runtime,
+        thread.id,
+        world.state.export_producer.clone(),
+        "2026-10-04T00:00:00Z".into(),
+    )
     .await
     .unwrap();
-    let native_records = crate::conversation_export::decode_export_jsonl(&native_share).unwrap();
+    let native_records = crate::conversation_export::decode_export_jsonl(&native_export).unwrap();
     crate::conversation_export::validate_export_records(&native_records).unwrap();
     assert!(native_records.iter().any(|record| matches!(record, ConversationExportRecord::VisualAssetContent(bytes) if bytes.digest_sha256 == asset.digest_sha256)));
     world.finish().await;
@@ -3030,6 +3049,8 @@ async fn native_reusable_invocations_preserve_conversation_and_share_export_for_
         .unwrap();
     world.set_parent_status("accepted").await;
     let inspect = |bytes: Vec<u8>, expected: usize| {
+        let records = crate::conversation_export::decode_export_jsonl(&bytes).unwrap();
+        crate::conversation_export::validate_export_records(&records).unwrap();
         let text = String::from_utf8(bytes.clone()).unwrap();
         assert!(
             !text.contains("startup-call") && !text.contains("second-export-call"),
@@ -3118,7 +3139,7 @@ async fn native_reusable_invocations_preserve_conversation_and_share_export_for_
             "Analysis",
         )
         .await;
-        inspect(share.unwrap(), call_count);
+        assert!(matches!(share, Err(crate::conversation_export_service::ConversationExportBuildError::ReusableInvocationPortabilityUnavailable)), "Hosted V4 must refuse both one and multiple native calls");
         assert_eq!(
             source
                 .action_invocations(
@@ -3162,7 +3183,350 @@ async fn native_reusable_invocations_preserve_conversation_and_share_export_for_
         "Unbound analysis",
     )
     .await;
-    inspect(share.unwrap(), 2);
+    assert!(matches!(share, Err(crate::conversation_export_service::ConversationExportBuildError::ReusableInvocationPortabilityUnavailable)), "Graph-only calls still require V4 and cannot bypass hosted capability admission");
+    world.finish().await;
+}
+
+// The native inventory fixture alone cannot prove portable alias joins. Reuse the
+// accepted Node and its authored callable in another real Product thread, then
+// export each thread through the production builder with distinct arguments/Current.
+#[tokio::test]
+async fn portable_builder_isolates_shared_node_calls_and_preserves_selected_layer() {
+    use relayer_graph_core::{
+        InputAction, InputControl, PresentingInputOccurrence, SubmittedInputDraft,
+        SubmittedInputValue,
+    };
+    let world = World::build_mode("portable-shared-node", false, false, Some(true)).await;
+    let project = world
+        .product
+        .create_project(crate::product::CreateProjectCommand {
+            path: world.root.path().to_str().unwrap().into(),
+            name: Some("Shared fixture".into()),
+            reuse_existing: true,
+        })
+        .await
+        .unwrap()
+        .project;
+    let graph_project = Some(relayer_graph_core::ProjectId::new(project.id.value()).unwrap());
+    let mut roots = Vec::new();
+    for message in ["Private source thread", "Reference source thread"] {
+        let thread = world
+            .product
+            .create_thread(CreateThreadCommand {
+                icon_selection_eligible: true,
+                title: None,
+                project_id: Some(project.id),
+                initial_message: message.into(),
+                harness_configuration_name: HARNESS.into(),
+                personal_presentation_version_key: None,
+                permission_profile_id: "auto".into(),
+                model_selection: None,
+                allow_unselected_model: true,
+            })
+            .await
+            .unwrap();
+        let parent = world
+            .graph
+            .create_interaction(
+                graph_project,
+                ThreadId::new(thread.id.value()).unwrap(),
+                message,
+            )
+            .await
+            .unwrap();
+        roots.push((thread, parent));
+    }
+    let a = world
+        .graph
+        .writer_for_subgraph(roots[0].1.id)
+        .await
+        .unwrap();
+    let node = a
+        .submit_node(&NodeDraft {
+            client_key: "shared".into(),
+            kind: "concept".into(),
+            icon: "box".into(),
+            title: "Shared destination".into(),
+            detail: "Choose a destination".into(),
+        })
+        .await
+        .unwrap();
+    let layer = |key: &str, node_id| LayerDraft {
+        client_key: key.into(),
+        default_node_id: Some(node_id),
+        nodes: vec![node_id],
+        edges: vec![],
+        size_justification: None,
+        layout: Some(LayerLayout::v1(
+            vec![NodePlacement {
+                node_id,
+                x: 0.5,
+                y: 0.5,
+            }],
+            "default",
+        )),
+    };
+    let authored = a.submit_layer(&layer("authored", node.id)).await.unwrap();
+    let question = InputAction {
+        control: InputControl::Text,
+        prompt: "Destination".into(),
+        options: vec![],
+        minimum_selections: None,
+        unsupported_fields: Default::default(),
+    };
+    let mut definition = ActionDraft {
+        client_key: "destination".into(),
+        source_node_id: node.id,
+        source_layer_id: Some(authored.id),
+        kind: ActionKind::Input,
+        relation: None,
+        label: "Destination".into(),
+        variant: Default::default(),
+        icon: None,
+        description: None,
+        target_layer_id: None,
+        interaction_text: None,
+        reusable: None,
+        input_action_ids: vec![],
+        input: Some(question.clone()),
+    };
+    let input = a.add_action(&definition).await.unwrap();
+    definition.client_key = "research".into();
+    definition.kind = ActionKind::Invoke;
+    definition.input = None;
+    definition.interaction_text = Some("Research the destination".into());
+    definition.reusable = Some(true);
+    definition.input_action_ids = vec![input.id];
+    let invoke = a.add_action(&definition).await.unwrap();
+    let navigation = |key: &str, source, source_layer, target, relation| ActionDraft {
+        client_key: key.into(),
+        source_node_id: source,
+        source_layer_id: source_layer,
+        kind: ActionKind::Navigate,
+        relation: Some(relation),
+        label: "Response".into(),
+        variant: Default::default(),
+        icon: None,
+        description: None,
+        target_layer_id: Some(target),
+        interaction_text: None,
+        reusable: None,
+        input_action_ids: vec![],
+        input: None,
+    };
+    a.add_action(&navigation(
+        "response",
+        roots[0].1.id,
+        None,
+        authored.id,
+        NavigateRelation::Expand,
+    ))
+    .await
+    .unwrap();
+    a.complete(roots[0].1.id).await.unwrap();
+    let b = world
+        .graph
+        .writer_for_subgraph(roots[1].1.id)
+        .await
+        .unwrap();
+    let presented = b.submit_layer(&layer("reference", node.id)).await.unwrap();
+    b.add_action(&navigation(
+        "response",
+        roots[1].1.id,
+        None,
+        presented.id,
+        NavigateRelation::Expand,
+    ))
+    .await
+    .unwrap();
+    b.complete(roots[1].1.id).await.unwrap();
+    for (thread, parent) in &roots {
+        sqlx::query(
+            "UPDATE interactions SET graph_node_id=?1,completion_status='accepted' WHERE id=?2",
+        )
+        .bind(parent.id.value())
+        .bind(thread.root_interaction_id.value())
+        .execute(&world.pool)
+        .await
+        .unwrap();
+    }
+    // Both calls retain the accepted Input's original saved occurrence. The
+    // second Invoke activation independently selects its reference Layer B.
+    for (writer, presenting, key, value, title) in [
+        (
+            &a,
+            authored.id,
+            "private-call-key",
+            "PRIVATE_ARGUMENT",
+            "PRIVATE_CURRENT",
+        ),
+        (
+            &b,
+            presented.id,
+            "reference-call-key",
+            "Lisbon",
+            "Reference contribution",
+        ),
+    ] {
+        let argument = SubmittedInputDraft {
+            occurrence: PresentingInputOccurrence {
+                presenting_interaction_node_id: roots[0].1.id,
+                presenting_layer_id: authored.id,
+                action_id: input.id,
+            },
+            action: question.clone(),
+            value: SubmittedInputValue::Text { text: value.into() },
+        };
+        let (child, call) = writer
+            .prepare_user_invocation_in_layer(invoke.id, key, &[argument], Some(presenting))
+            .await
+            .unwrap();
+        assert_eq!(call.action_snapshot["sourceLayerId"], authored.id.value());
+        assert_eq!(
+            call.action_snapshot["presentingLayerId"],
+            presenting.value()
+        );
+        let child_writer = world.graph.writer_for_subgraph(child.id).await.unwrap();
+        let answer = child_writer
+            .submit_node(&NodeDraft {
+                client_key: "contribution".into(),
+                kind: "concept".into(),
+                icon: "box".into(),
+                title: title.into(),
+                detail: title.into(),
+            })
+            .await
+            .unwrap();
+        let current = child_writer
+            .submit_layer(&layer("current", answer.id))
+            .await
+            .unwrap();
+        child_writer
+            .add_action(&navigation(
+                "response",
+                child.id,
+                None,
+                current.id,
+                NavigateRelation::Expand,
+            ))
+            .await
+            .unwrap();
+        child_writer
+            .add_action(&navigation(
+                &format!("{key}-result"),
+                node.id,
+                Some(authored.id),
+                current.id,
+                NavigateRelation::Reference,
+            ))
+            .await
+            .unwrap();
+        child_writer
+            .transition_current(
+                0,
+                "publish",
+                CurrentTransition::Advance {
+                    layer_id: current.id,
+                },
+            )
+            .await
+            .unwrap();
+    }
+    for (index, expected_value, expected_title, forbidden) in [
+        (
+            0,
+            "PRIVATE_ARGUMENT",
+            "PRIVATE_CURRENT",
+            "Reference contribution",
+        ),
+        (1, "Lisbon", "Reference contribution", "PRIVATE_"),
+    ] {
+        let bytes = crate::conversation_export_service::build_conversation_export(
+            &world.product,
+            &world.runtime,
+            roots[index].0.id,
+            world.state.export_producer.clone(),
+            "2026-10-08T00:00:00Z".into(),
+        )
+        .await
+        .unwrap();
+        let text = String::from_utf8(bytes.clone()).unwrap();
+        assert!(
+            !text.contains(forbidden),
+            "a shared persistent Node must not bring another thread's arguments or Current into this export"
+        );
+        assert!(!text.contains("private-call-key") && !text.contains("reference-call-key"));
+        let records = crate::conversation_export::decode_export_jsonl(&bytes).unwrap();
+        crate::conversation_export::validate_export_records(&records).unwrap();
+        let ConversationExportRecord::Header(header) = &records[0] else {
+            panic!("header")
+        };
+        assert_eq!(
+            header.invocations.len(),
+            1,
+            "only the source completion's own call is portable"
+        );
+        let call = &header.invocations[0];
+        assert_eq!(
+            call.arguments[0].value,
+            crate::conversation_export::ExportSubmittedInputValue::Text {
+                text: expected_value.into()
+            }
+        );
+        assert_eq!(call.lifecycle, "active");
+        assert!(call.result_turn_id.is_none() && call.returned_layer_id.is_none());
+        assert!(
+            call.current
+                .as_ref()
+                .unwrap()
+                .layers
+                .iter()
+                .flat_map(|l| &l.nodes)
+                .any(|n| n.title == expected_title)
+        );
+        let source = records
+            .iter()
+            .find_map(|r| match r {
+                ConversationExportRecord::Turn(t) => Some(t),
+                _ => None,
+            })
+            .unwrap();
+        assert_eq!(
+            source.interaction_node_id.as_ref(),
+            Some(&call.source.interaction_node_id)
+        );
+        let root = source.accepted_view.as_ref().unwrap();
+        assert_eq!(
+            call.source.presenting_layer_id.as_ref(),
+            Some(&root.root_layer_id)
+        );
+        let canonical = root
+            .layers
+            .iter()
+            .flat_map(|l| &l.actions)
+            .find(|a| a.id == call.source.action_id)
+            .unwrap();
+        assert_eq!(canonical.source_layer_id, call.source.layer_id);
+        assert_eq!(canonical.source_node_id, call.source.parent_node_id);
+        if index == 1 {
+            assert_ne!(call.source.layer_id, call.source.presenting_layer_id);
+            assert!(
+                !root
+                    .layers
+                    .iter()
+                    .any(|l| Some(&l.layer.id) == call.source.layer_id.as_ref()),
+                "authored Layer A stays provenance; it is not invented as B's accepted closure"
+            );
+            assert_eq!(
+                call.arguments[0].source.layer_id,
+                call.source.layer_id.clone().unwrap()
+            );
+            assert_ne!(
+                call.arguments[0].source.interaction_node_id,
+                call.source.interaction_node_id
+            );
+        }
+    }
     world.finish().await;
 }
 
@@ -3315,9 +3679,10 @@ async fn native_call_export_preserves_stopped_and_failed_current_without_return_
             "2026-10-04T00:00:00Z".into(),
             "Retained analysis",
         )
-        .await
-        .unwrap();
-        for bytes in [ordinary, share] {
+        .await;
+        assert!(matches!(share, Err(crate::conversation_export_service::ConversationExportBuildError::ReusableInvocationPortabilityUnavailable)), "Stopped and failed Current snapshots remain local V4 while hosted publication is closed");
+        {
+            let bytes = ordinary;
             let records = crate::conversation_export::decode_export_jsonl(&bytes).unwrap();
             crate::conversation_export::validate_export_records(&records).unwrap();
             let ConversationExportRecord::Header(header) = &records[0] else {
@@ -3731,5 +4096,1142 @@ async fn the_broker_refuses_every_request_for_a_users_result() {
         state["life"], "active",
         "the user's run is untouched: {state}"
     );
+    world.finish().await;
+}
+
+#[tokio::test]
+async fn imported_current_call_history_is_projected_without_execution_authority() {
+    use crate::conversation_import_service::ConversationImportStager;
+    let world =
+        World::build_call_mode("inert-call-presentation", false, false, Some(true), true).await;
+    let (_assets_directory, _assets_host, assets_url, assets_token) =
+        crate::api::conversation_imports::tests::real_visual_assets_host();
+    reqwest::Client::new()
+        .put(format!(
+            "{}api/control/visual-assets/bridge",
+            world.graph_url
+        ))
+        .bearer_auth("graph-control")
+        .json(&serde_json::json!({"url":assets_url,"token":assets_token,"generation":1}))
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap();
+    use sha2::{Digest, Sha256};
+    let icon_bytes = b"<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 8 8\"><circle cx=\"4\" cy=\"4\" r=\"3\"/></svg>".to_vec();
+    let icon = relayer_graph_core::PreparedDetailAsset {
+        asset_id: "current-icon".into(),
+        digest_sha256: format!("{:x}", Sha256::digest(&icon_bytes)),
+        media_type: "image/svg+xml".into(),
+        byte_length: icon_bytes.len(),
+        content: icon_bytes.clone(),
+        provenance_source: "user".into(),
+        provenance_file_name: "current.svg".into(),
+    };
+    let source_id = NodeId::new(world.invocation.source_interaction_node_id).unwrap();
+    let source = world.graph.writer_for_subgraph(source_id).await.unwrap();
+    source.complete(source_id).await.unwrap();
+    world.set_parent_status("accepted").await;
+    let child = world
+        .graph
+        .writer_for_subgraph(NodeId::new(world.completion_id).unwrap())
+        .await
+        .unwrap();
+    let answer = child
+        .submit_node_with_prepared_visual_assets(&NodeDraft {
+            client_key: "current-answer".into(),
+            kind: "concept".into(),
+            icon: serde_json::json!({"kind":"image","assetId":icon.asset_id,"digestSha256":icon.digest_sha256,"mediaType":icon.media_type}).to_string(),
+            title: "Current contribution".into(),
+            detail: "Still working".into(),
+        }, relayer_graph_core::AuthoredDetailUpdate::Retain, None, Some(&icon))
+        .await
+        .unwrap();
+    let current = child
+        .submit_layer(&LayerDraft {
+            client_key: "current-answer".into(),
+            default_node_id: Some(answer.id),
+            nodes: vec![answer.id],
+            edges: vec![],
+            layout: Some(LayerLayout::v1(
+                vec![NodePlacement {
+                    node_id: answer.id,
+                    x: 0.5,
+                    y: 0.5,
+                }],
+                "default",
+            )),
+            size_justification: None,
+        })
+        .await
+        .unwrap();
+    child
+        .add_action(&ActionDraft {
+            client_key: "current-response".into(),
+            source_node_id: NodeId::new(world.completion_id).unwrap(),
+            source_layer_id: None,
+            kind: ActionKind::Navigate,
+            relation: Some(NavigateRelation::Expand),
+            label: "Response".into(),
+            variant: Default::default(),
+            icon: None,
+            description: None,
+            target_layer_id: Some(current.id),
+            interaction_text: None,
+            reusable: None,
+            input_action_ids: vec![],
+            input: None,
+        })
+        .await
+        .unwrap();
+    let prepared = world
+        .graph
+        .durable_invocation(NodeId::new(world.completion_id).unwrap())
+        .await
+        .unwrap()
+        .unwrap();
+    child
+        .add_action(&ActionDraft {
+            client_key: "source-current".into(),
+            source_node_id: prepared.parent_node_id,
+            source_layer_id: prepared.action_snapshot["sourceLayerId"]
+                .as_i64()
+                .and_then(relayer_graph_core::LayerId::new),
+            kind: ActionKind::Navigate,
+            relation: Some(NavigateRelation::Reference),
+            label: "Current contribution".into(),
+            variant: Default::default(),
+            icon: None,
+            description: None,
+            target_layer_id: Some(current.id),
+            interaction_text: None,
+            reusable: None,
+            input_action_ids: vec![],
+            input: None,
+        })
+        .await
+        .unwrap();
+    child
+        .transition_current(
+            0,
+            "current-only",
+            CurrentTransition::Advance {
+                layer_id: current.id,
+            },
+        )
+        .await
+        .unwrap();
+    let bytes = crate::conversation_export_service::build_conversation_export(
+        &world.product,
+        &world.runtime,
+        world.thread.id,
+        world.state.export_producer.clone(),
+        "2026-10-08T00:00:00Z".into(),
+    )
+    .await
+    .unwrap();
+    let records = crate::conversation_export::decode_export_jsonl(&bytes).unwrap();
+    let ConversationExportRecord::Header(header) = &records[0] else {
+        panic!("header")
+    };
+    assert_eq!(header.invocations.len(), 1);
+    let frozen = header.invocations[0].clone();
+    assert!(frozen.current.is_some());
+    assert!(frozen.result_turn_id.is_none());
+    assert_eq!(
+        frozen.activator,
+        Some(crate::conversation_export::ExportInvocationActivator::Agent)
+    );
+    assert_eq!(
+        frozen.source.capture_state,
+        Some(crate::conversation_export::ExportInvocationCaptureState::Accepted)
+    );
+    assert_eq!(frozen.source.presenting_layer_id, frozen.source.layer_id);
+    assert!(frozen.source.presenting_layer_id.is_some());
+    let mut stager = ConversationImportStager::begin(*header.clone(), &world.product)
+        .await
+        .unwrap();
+    for record in records.iter().skip(1) {
+        match record {
+            ConversationExportRecord::Turn(turn) => {
+                stager.push_turn(turn, &world.product).await.unwrap()
+            }
+            ConversationExportRecord::VisualAssetContent(content) => stager
+                .push_visual_asset_content(content, &world.product)
+                .await
+                .unwrap(),
+            _ => unreachable!(),
+        }
+    }
+    let receipt = stager
+        .finish("sha256:inert-call-history".into(), &world.product)
+        .await
+        .unwrap();
+    let imported = crate::conversation_import_service::materialize_and_publish_conversation(
+        &receipt.import_id,
+        &world.product,
+        &world.runtime,
+    )
+    .await
+    .unwrap();
+    let thread_id = crate::product::ThreadId::from_database(imported.thread_id);
+    let mut state = world.state.clone();
+    state.product = ProductService::new(
+        SqliteProductStore::open(&world.root.path().join("product.sqlite3"))
+            .await
+            .unwrap(),
+        true,
+    );
+    let history = serde_json::to_value(
+        project_imported_invocation_history(&state, thread_id)
+            .await
+            .unwrap_or_else(|error| panic!("history: {}", error.message())),
+    )
+    .unwrap();
+    assert_eq!(history[0]["inert"], true);
+    assert_eq!(history[0]["record"], serde_json::to_value(&frozen).unwrap());
+    assert_eq!(
+        history[0]["sourceInteractionId"],
+        imported.turns[0].interaction_id
+    );
+    assert!(history[0]["sourceNodeId"].as_i64().is_some());
+    assert_eq!(
+        history[0]["visualAssetContents"][0]["digestSha256"],
+        icon.digest_sha256
+    );
+    use base64::Engine as _;
+    assert_eq!(
+        history[0]["visualAssetContents"][0]["contentBase64"],
+        base64::engine::general_purpose::STANDARD.encode(&icon_bytes)
+    );
+    assert!(history[0]["resultInteractionId"].is_null());
+    let detail = state.product.get_thread(thread_id).await.unwrap();
+    assert!(detail.action_invocations.is_empty());
+    let source_graph = NodeId::new(imported.turns[0].graph_node_id.unwrap()).unwrap();
+    let writer = world.graph.writer_for_subgraph(source_graph).await.unwrap();
+    let layer = writer
+        .get_layer(
+            relayer_graph_core::LayerId::new(imported.turns[0].root_layer_id.unwrap()).unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(history[0]["sourceNodeId"], layer.nodes[0].id.value());
+    assert!(
+        project_imported_invocation_history(&state, world.thread.id)
+            .await
+            .unwrap_or_else(|error| panic!("other scope: {}", error.message()))
+            .is_empty()
+    );
+    let invoke = layer
+        .actions
+        .iter()
+        .find(|action| action.kind == ActionKind::Invoke)
+        .unwrap();
+    assert!(
+        writer
+            .prepare_user_invocation(invoke.id, "forbidden-import-activation")
+            .await
+            .is_err()
+    );
+    let headers =
+        HeaderMap::from_iter([(header::COOKIE, "relayer_control=control".parse().unwrap())]);
+    let response = get(
+        State(state.clone()),
+        headers.clone(),
+        Path(imported.thread_id),
+    )
+    .await
+    .unwrap_or_else(|error| panic!("thread detail: {}", error.message()));
+    let detail_json = serde_json::to_value(response.0).unwrap();
+    assert_eq!(detail_json["importedInvocationHistory"], history);
+    assert_eq!(detail_json["actionInvocations"], serde_json::json!([]));
+    let state_query: crate::api::state::StateQuery =
+        serde_json::from_value(serde_json::json!({ "threadId": imported.thread_id })).unwrap();
+    let response =
+        crate::api::state::product_state(State(state.clone()), headers, Query(state_query))
+            .await
+            .unwrap_or_else(|error| panic!("state: {}", error.message()));
+    let state_json = serde_json::to_value(response.0).unwrap();
+    assert_eq!(state_json["importedInvocationHistory"], history);
+    assert_eq!(state_json["actionInvocations"], serde_json::json!([]));
+    state.runtime = None;
+    let unknown = serde_json::to_value(
+        project_imported_invocation_history(&state, thread_id)
+            .await
+            .unwrap_or_else(|error| panic!("offline history: {}", error.message())),
+    )
+    .unwrap();
+    assert_eq!(unknown[0]["record"], serde_json::to_value(&frozen).unwrap());
+    assert!(unknown[0]["sourceNodeId"].is_null() && unknown[0]["sourceInteractionId"].is_null());
+
+    world.finish().await;
+}
+
+#[tokio::test]
+async fn bound_input_edits_stop_only_when_all_native_single_consumers_are_frozen() {
+    use relayer_graph_core::{
+        InputAction, InputControl, PresentingInputOccurrence, SubmittedInputDraft,
+        SubmittedInputValue,
+    };
+    let world = World::new("input-consumer-exhaustion", false).await;
+    let parent = world
+        .graph
+        .create_interaction(
+            None,
+            ThreadId::new(world.thread.id.value()).unwrap(),
+            "Two consumers",
+        )
+        .await
+        .unwrap();
+    let writer = world.graph.writer_for_subgraph(parent.id).await.unwrap();
+    let node = writer
+        .submit_node(&NodeDraft {
+            client_key: "shared-input-source".into(),
+            kind: "concept".into(),
+            icon: "box".into(),
+            title: "Trip".into(),
+            detail: "Shared destination".into(),
+        })
+        .await
+        .unwrap();
+    let layer = writer
+        .submit_layer(&LayerDraft {
+            client_key: "shared-input-layer".into(),
+            default_node_id: Some(node.id),
+            nodes: vec![node.id],
+            edges: vec![],
+            layout: Some(LayerLayout::v1(
+                vec![NodePlacement {
+                    node_id: node.id,
+                    x: 0.5,
+                    y: 0.5,
+                }],
+                "default",
+            )),
+            size_justification: None,
+        })
+        .await
+        .unwrap();
+    let question = InputAction {
+        control: InputControl::Text,
+        prompt: "Destination".into(),
+        options: vec![],
+        minimum_selections: None,
+        unsupported_fields: Default::default(),
+    };
+    let base = ActionDraft {
+        client_key: "destination".into(),
+        source_node_id: node.id,
+        source_layer_id: Some(layer.id),
+        kind: ActionKind::Input,
+        relation: None,
+        label: "Destination".into(),
+        variant: Default::default(),
+        icon: None,
+        description: None,
+        target_layer_id: None,
+        interaction_text: None,
+        reusable: None,
+        input_action_ids: vec![],
+        input: Some(question.clone()),
+    };
+    let field = writer.add_action(&base).await.unwrap();
+    let ordinary = writer
+        .add_action(&ActionDraft {
+            client_key: "notes".into(),
+            label: "Notes".into(),
+            ..base.clone()
+        })
+        .await
+        .unwrap();
+    let mut invokes = Vec::new();
+    for key in ["itinerary", "budget"] {
+        invokes.push(
+            writer
+                .add_action(&ActionDraft {
+                    client_key: key.into(),
+                    kind: ActionKind::Invoke,
+                    label: key.into(),
+                    interaction_text: Some(key.into()),
+                    reusable: Some(false),
+                    input_action_ids: vec![field.id],
+                    input: None,
+                    ..base.clone()
+                })
+                .await
+                .unwrap(),
+        );
+    }
+    writer
+        .add_action(&ActionDraft {
+            client_key: "response".into(),
+            source_node_id: parent.id,
+            source_layer_id: None,
+            kind: ActionKind::Navigate,
+            relation: Some(NavigateRelation::Expand),
+            label: "Response".into(),
+            target_layer_id: Some(layer.id),
+            input: None,
+            ..base
+        })
+        .await
+        .unwrap();
+    writer
+        .transition_current(
+            0,
+            "return",
+            CurrentTransition::Return { layer_id: layer.id },
+        )
+        .await
+        .unwrap();
+    // Reconstruct an older accepted Layer snapshot without the second global
+    // Node-owned Invoke. The callable and its immutable binding remain native.
+    let graph_pool = sqlx::SqlitePool::connect(&format!(
+        "sqlite://{}",
+        world.root.path().join("legacy-graph.sqlite3").display()
+    ))
+    .await
+    .unwrap();
+    sqlx::query("DELETE FROM layer_actions WHERE layer_id=?1 AND action_id=?2")
+        .bind(layer.id.value())
+        .bind(invokes[1].id.value())
+        .execute(&graph_pool)
+        .await
+        .unwrap();
+    graph_pool.close().await;
+    let occurrence = PresentingInputOccurrence {
+        presenting_interaction_node_id: parent.id,
+        presenting_layer_id: layer.id,
+        action_id: field.id,
+    };
+    let headers =
+        HeaderMap::from_iter([(header::COOKIE, "relayer_control=control".parse().unwrap())]);
+    let commit = |text: &str, revision: i64| {
+        serde_json::from_value::<crate::api::input_drafts::CommitActionInputRequest>(
+            serde_json::json!({
+                "occurrence": occurrence, "value":{"text":text}, "expectedRevision":revision,
+            }),
+        )
+        .unwrap()
+    };
+    let first = crate::api::input_drafts::commit(
+        State(world.state.clone()),
+        headers.clone(),
+        Path(world.thread.id.value()),
+        Json(commit("Lisbon", 0)),
+    )
+    .await
+    .unwrap_or_else(|error| panic!("initial commit: {}", error.message()));
+    assert_eq!(serde_json::to_value(first.0).unwrap()["revision"], 1);
+    let argument = SubmittedInputDraft {
+        occurrence: occurrence.clone(),
+        action: question,
+        value: SubmittedInputValue::Text {
+            text: "Lisbon".into(),
+        },
+    };
+    writer
+        .prepare_user_invocation_with_inputs(
+            invokes[0].id,
+            "itinerary-call",
+            std::slice::from_ref(&argument),
+        )
+        .await
+        .unwrap();
+    let flags = world
+        .runtime
+        .canonical_input_action_consumer_state(None, world.thread.id.value(), &occurrence)
+        .await
+        .unwrap();
+    assert!(
+        !flags.composer_eligible && flags.editable,
+        "hidden consumer keeps Invoke scope and editing available"
+    );
+    let mut presentation = world
+        .runtime
+        .get_layer(parent.id.value(), layer.id.value())
+        .await
+        .unwrap();
+    crate::api::input_drafts::project_layer_input_availability(
+        &world.state,
+        world.thread.id,
+        parent.id.value(),
+        &mut presentation,
+        crate::api::interaction_graph::projection_deadline(),
+    )
+    .await
+    .unwrap_or_else(|error| panic!("live availability: {}", error.message()));
+    assert_eq!(
+        presentation["actions"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|action| action["id"] == field.id.value())
+            .unwrap()["inputCanAcceptAnswer"],
+        true
+    );
+    let second = crate::api::input_drafts::commit(
+        State(world.state.clone()),
+        headers.clone(),
+        Path(world.thread.id.value()),
+        Json(commit("Porto", 1)),
+    )
+    .await
+    .unwrap_or_else(|error| panic!("shared commit: {}", error.message()));
+    assert_eq!(serde_json::to_value(second.0).unwrap()["revision"], 2);
+    writer
+        .prepare_user_invocation_with_inputs(
+            invokes[1].id,
+            "budget-call",
+            std::slice::from_ref(&argument),
+        )
+        .await
+        .unwrap();
+    crate::api::input_drafts::project_layer_input_availability(
+        &world.state,
+        world.thread.id,
+        parent.id.value(),
+        &mut presentation,
+        crate::api::interaction_graph::projection_deadline(),
+    )
+    .await
+    .unwrap_or_else(|error| panic!("used availability: {}", error.message()));
+    assert_eq!(
+        presentation["actions"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|action| action["id"] == field.id.value())
+            .unwrap()["inputCanAcceptAnswer"],
+        false
+    );
+    let error = match crate::api::input_drafts::commit(
+        State(world.state.clone()),
+        headers,
+        Path(world.thread.id.value()),
+        Json(commit("Lost answer", 2)),
+    )
+    .await
+    {
+        Err(error) => error,
+        Ok(_) => panic!("exhausted bound field accepted a new answer"),
+    };
+    let refused = axum::response::IntoResponse::into_response(error);
+    assert_eq!(refused.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    let body = axum::body::to_bytes(refused.into_body(), 8192)
+        .await
+        .unwrap();
+    let refusal: Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(refusal["error"]["code"], "input_consumers_exhausted");
+    let draft = world
+        .product
+        .action_input_draft(world.thread.id)
+        .await
+        .unwrap();
+    assert_eq!(draft.revision, 2);
+    assert_eq!(
+        draft.attachments[0].value,
+        crate::product::ActionInputValue::Text {
+            text: "Porto".into()
+        }
+    );
+    // Existing frozen arguments can still be read and recovered; unrelated
+    // ordinary Inputs remain usable after both consumers have their calls.
+    world
+        .runtime
+        .canonical_input_action_occurrence(None, world.thread.id.value(), &occurrence)
+        .await
+        .unwrap();
+    writer
+        .prepare_user_invocation_with_inputs(invokes[1].id, "budget-call", &[argument])
+        .await
+        .unwrap();
+    world
+        .runtime
+        .canonical_editable_input_action_occurrence(
+            None,
+            world.thread.id.value(),
+            &PresentingInputOccurrence {
+                action_id: ordinary.id,
+                ..occurrence
+            },
+        )
+        .await
+        .unwrap();
+    world.finish().await;
+}
+
+/// Both stores are real: Product admission happens before the single native call,
+/// and a crash-shaped bind failure recovers its frozen key before model admission.
+#[tokio::test]
+async fn user_reservation_precedes_native_prepare_and_recovers_a_failed_bind() {
+    use relayer_graph_core::{InputAction, InputControl, PresentingInputOccurrence};
+    async fn assert_reservation_export(
+        world: &World,
+        rejected_id: InteractionId,
+        pending_id: InteractionId,
+    ) {
+        let bytes = crate::conversation_export_service::build_conversation_export(
+            &world.product,
+            &world.runtime,
+            world.thread.id,
+            world.state.export_producer.clone(),
+            "2026-10-08T00:00:00Z".into(),
+        )
+        .await
+        .unwrap();
+        let records = crate::conversation_export::decode_export_jsonl(&bytes).unwrap();
+        crate::conversation_export::validate_export_records(&records).unwrap();
+        let ConversationExportRecord::Header(header) = &records[0] else {
+            panic!("header")
+        };
+        assert_eq!(
+            header.invocations.len(),
+            1,
+            "only the real corrected native call is portable"
+        );
+        assert_eq!(
+            header.invocations[0].arguments[0].value,
+            crate::conversation_export::ExportSubmittedInputValue::Text {
+                text: "Kyoto".into()
+            }
+        );
+        let rejected_sequence = world
+            .product
+            .get_interaction(rejected_id)
+            .await
+            .unwrap()
+            .sequence;
+        let pending_sequence = world
+            .product
+            .get_interaction(pending_id)
+            .await
+            .unwrap()
+            .sequence;
+        let rejected_turn = records
+            .iter()
+            .find_map(|record| match record {
+                ConversationExportRecord::Turn(turn)
+                    if turn.sequence == rejected_sequence as u32 =>
+                {
+                    Some(turn)
+                }
+                _ => None,
+            })
+            .unwrap();
+        assert_eq!(
+            rejected_turn.origin,
+            crate::conversation_export::ExportTurnOrigin::User,
+            "a refused keyed preparation is chronology, never a fabricated legacy Action call"
+        );
+        let pending_turn = records
+            .iter()
+            .find_map(|record| match record {
+                ConversationExportRecord::Turn(turn)
+                    if turn.sequence == pending_sequence as u32 =>
+                {
+                    Some(turn)
+                }
+                _ => None,
+            })
+            .unwrap();
+        assert!(
+            header.invocations[0].result_turn_id.is_none(),
+            "lost binding or restored unsent Product state preserves a graph-only native call"
+        );
+        assert_eq!(
+            pending_turn.origin,
+            crate::conversation_export::ExportTurnOrigin::User
+        );
+        let share = crate::conversation_export_service::build_share_conversation_export(
+            &world.product,
+            &world.runtime,
+            world.thread.id,
+            world.state.export_producer.clone(),
+            "2026-10-08T00:00:00Z".into(),
+            "Reservation chronology",
+        )
+        .await;
+        assert!(matches!(share, Err(crate::conversation_export_service::ConversationExportBuildError::ReusableInvocationPortabilityUnavailable)));
+    }
+    let world = World::new("user-reservation-order", true).await;
+    let parent = world
+        .graph
+        .create_interaction(
+            None,
+            ThreadId::new(world.thread.id.value()).unwrap(),
+            "Root",
+        )
+        .await
+        .unwrap();
+    let writer = world.graph.writer_for_subgraph(parent.id).await.unwrap();
+    let node = writer
+        .submit_node(&NodeDraft {
+            client_key: "reservation-source".into(),
+            kind: "concept".into(),
+            icon: "box".into(),
+            title: "Destination".into(),
+            detail: "Pick a trip".into(),
+        })
+        .await
+        .unwrap();
+    let layer = writer
+        .submit_layer(&LayerDraft {
+            client_key: "reservation-layer".into(),
+            default_node_id: Some(node.id),
+            nodes: vec![node.id],
+            edges: vec![],
+            layout: Some(LayerLayout::v1(
+                vec![NodePlacement {
+                    node_id: node.id,
+                    x: 0.5,
+                    y: 0.5,
+                }],
+                "default",
+            )),
+            size_justification: None,
+        })
+        .await
+        .unwrap();
+    let question = InputAction {
+        control: InputControl::Text,
+        prompt: "Destination".into(),
+        options: vec![],
+        minimum_selections: None,
+        unsupported_fields: Default::default(),
+    };
+    let mut definition = ActionDraft {
+        client_key: "destination".into(),
+        source_node_id: node.id,
+        source_layer_id: Some(layer.id),
+        kind: ActionKind::Input,
+        relation: None,
+        label: "Destination".into(),
+        variant: Default::default(),
+        icon: None,
+        description: None,
+        target_layer_id: None,
+        interaction_text: None,
+        reusable: None,
+        input_action_ids: vec![],
+        input: Some(question),
+    };
+    let field = writer.add_action(&definition).await.unwrap();
+    definition.client_key = "itinerary".into();
+    definition.kind = ActionKind::Invoke;
+    definition.input = None;
+    definition.interaction_text = Some("Plan the trip".into());
+    definition.input_action_ids = vec![field.id];
+    definition.reusable = Some(false);
+    let invoke = writer.add_action(&definition).await.unwrap();
+    definition.client_key = "response".into();
+    definition.source_node_id = parent.id;
+    definition.source_layer_id = None;
+    definition.kind = ActionKind::Navigate;
+    definition.relation = Some(NavigateRelation::Expand);
+    definition.target_layer_id = Some(layer.id);
+    definition.interaction_text = None;
+    definition.input_action_ids.clear();
+    definition.reusable = None;
+    writer.add_action(&definition).await.unwrap();
+    writer.complete(parent.id).await.unwrap();
+    let field = writer
+        .get_layer(layer.id)
+        .await
+        .unwrap()
+        .actions
+        .into_iter()
+        .find(|action| action.id == field.id)
+        .unwrap();
+    // Seed the accepted source in Product; the existing fixture child occupies
+    // the real thread's active-human-turn admission slot.
+    sqlx::query("UPDATE interactions SET graph_node_id=?1 WHERE id=?2")
+        .bind(parent.id.value())
+        .bind(world.thread.root_interaction_id.value())
+        .execute(&world.pool)
+        .await
+        .unwrap();
+    let occurrence = PresentingInputOccurrence {
+        presenting_interaction_node_id: parent.id,
+        presenting_layer_id: layer.id,
+        action_id: field.id,
+    };
+    // This fixture has no provider continuity receipt for its historical root;
+    // seed an ordinary unsent Product draft, which owns no graph or execution.
+    let busy = sqlx::query("INSERT INTO interactions(thread_id,sequence,text,created_at,completion_status,permission_profile_id) VALUES (?1,(SELECT COALESCE(MAX(sequence),0)+1 FROM interactions WHERE thread_id=?1),'Busy ordinary turn','1','not_started','auto')")
+        .bind(world.thread.id.value()).execute(&world.pool).await.unwrap().last_insert_rowid();
+    let draft = world
+        .product
+        .commit_action_input_attachment(
+            world.thread.id,
+            &occurrence,
+            &field,
+            &crate::product::ActionInputValue::Text {
+                text: "Kyoto".into(),
+            },
+            0,
+        )
+        .await
+        .unwrap();
+    let refused = invoke_action_with_authority(
+        &world.state,
+        world.thread.id.value(),
+        world.thread.root_interaction_id.value(),
+        invoke.id.value(),
+        "admission-refused",
+        Some(draft.revision),
+        Some(layer.id.value()),
+    )
+    .await;
+    let error = match refused {
+        Err(error) => error,
+        Ok(_) => panic!("active ordinary turn was admitted"),
+    };
+    assert_eq!(
+        error.message(),
+        "Wait for the active interaction to finish."
+    );
+    assert!(
+        world
+            .graph
+            .conversation_graph_snapshot(&[parent.id])
+            .await
+            .unwrap()
+            .invocations
+            .is_empty()
+    );
+    assert!(
+        world
+            .product
+            .user_invocation_reservation(
+                world.thread.root_interaction_id,
+                invoke.id.value(),
+                Some("admission-refused"),
+            )
+            .await
+            .unwrap()
+            .is_none()
+    );
+    assert_eq!(
+        world
+            .product
+            .action_input_draft(world.thread.id)
+            .await
+            .unwrap(),
+        draft
+    );
+    sqlx::query("UPDATE interactions SET completion_status='stopped' WHERE id=?1")
+        .bind(busy)
+        .execute(&world.pool)
+        .await
+        .unwrap();
+    // Missing connected arguments reach the real native preparation guard after
+    // Product reserves admission, but spend no native call and keep the draft.
+    assert!(
+        invoke_action_with_authority(
+            &world.state,
+            world.thread.id.value(),
+            world.thread.root_interaction_id.value(),
+            invoke.id.value(),
+            "missing-arguments",
+            None,
+            Some(layer.id.value()),
+        )
+        .await
+        .is_err()
+    );
+    let rejected = world
+        .product
+        .user_invocation_reservation(
+            world.thread.root_interaction_id,
+            invoke.id.value(),
+            Some("missing-arguments"),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(rejected.interaction.completion_status, "failed");
+    assert!(!rejected.invocation.durable);
+    assert!(
+        !world
+            .product
+            .user_invocation_preparation_recoverable(rejected.interaction.id)
+            .await
+            .unwrap()
+    );
+    assert!(
+        world
+            .product
+            .user_invocation_preparation_rejected(rejected.interaction.id)
+            .await
+            .unwrap()
+    );
+    let projected =
+        project_action_invocations(&world.state, std::slice::from_ref(&rejected.invocation))
+            .await
+            .unwrap_or_else(|error| panic!("refusal projection: {}", error.message()));
+    assert!(projected[0].preparation_rejected);
+    assert!(!projected[0].preparation_recoverable);
+    assert!(
+        world
+            .graph
+            .conversation_graph_snapshot(&[parent.id])
+            .await
+            .unwrap()
+            .invocations
+            .is_empty()
+    );
+    assert_eq!(
+        world
+            .product
+            .action_input_draft(world.thread.id)
+            .await
+            .unwrap(),
+        draft
+    );
+    world.restart().await;
+    assert!(
+        world
+            .product
+            .user_invocation_preparation_rejected(rejected.interaction.id)
+            .await
+            .unwrap()
+    );
+    let same_key = invoke_action_with_authority(
+        &world.state,
+        world.thread.id.value(),
+        world.thread.root_interaction_id.value(),
+        invoke.id.value(),
+        "missing-arguments",
+        Some(draft.revision),
+        Some(layer.id.value()),
+    )
+    .await;
+    assert_eq!(
+        same_key.err().unwrap().message(),
+        "Rejected invocation preparation requires a fresh key"
+    );
+    // A corrected fresh key is admitted. The following independent bind-fault
+    // boundary proves native preparation succeeded for that new key.
+    sqlx::query("CREATE TRIGGER fail_authority_bind BEFORE UPDATE OF prepared_graph_node_id ON action_invocations WHEN NEW.prepared_graph_node_id IS NOT NULL BEGIN SELECT RAISE(ABORT,'test bind failure'); END")
+        .execute(&world.pool).await.unwrap();
+    assert!(
+        invoke_action_with_authority(
+            &world.state,
+            world.thread.id.value(),
+            world.thread.root_interaction_id.value(),
+            invoke.id.value(),
+            "frozen-call",
+            Some(draft.revision),
+            Some(layer.id.value()),
+        )
+        .await
+        .is_err()
+    );
+    let pending = world
+        .product
+        .user_invocation_reservation(
+            world.thread.root_interaction_id,
+            invoke.id.value(),
+            Some("frozen-call"),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(!pending.invocation.durable);
+    assert!(
+        !world
+            .product
+            .user_invocation_preparation_rejected(pending.interaction.id)
+            .await
+            .unwrap()
+    );
+    assert!(
+        !world
+            .runtime
+            .native_invocation_key_absent(parent.id.value(), invoke.id.value(), "frozen-call")
+            .await
+            .unwrap(),
+        "a lost Product bind cannot be certified as a native refusal"
+    );
+    assert!(
+        world
+            .product
+            .user_invocation_preparation_recoverable(pending.interaction.id)
+            .await
+            .unwrap()
+    );
+    let inventory = world
+        .graph
+        .conversation_graph_snapshot(&[parent.id])
+        .await
+        .unwrap();
+    assert_eq!(inventory.invocations.len(), 1);
+    let native_child = inventory.invocations[0]
+        .invocation
+        .child_interaction_node_id;
+    assert_eq!(
+        inventory.invocations[0].invocation.invocation_key,
+        "frozen-call"
+    );
+    assert_eq!(
+        world
+            .product
+            .action_input_draft(world.thread.id)
+            .await
+            .unwrap(),
+        draft
+    );
+    // The World seed's legacy link points at the old root graph, which this
+    // fixture replaced above. Remove only that obsolete setup link; retain both
+    // tested keyed Product receipts and every actual native invocation.
+    let removed = sqlx::query("DELETE FROM action_invocations WHERE source_interaction_id=?1 AND action_id=?2 AND result_interaction_id=?3 AND invocation_key='legacy'")
+        .bind(world.thread.root_interaction_id.value())
+        .bind(world.invocation.source_action_id)
+        .bind(world.child.id.value())
+        .execute(&world.pool).await.unwrap();
+    assert_eq!(removed.rows_affected(), 1);
+    assert_reservation_export(&world, rejected.interaction.id, pending.interaction.id).await;
+    world.restart().await;
+    let restarted = world
+        .product
+        .user_invocation_reservation(
+            world.thread.root_interaction_id,
+            invoke.id.value(),
+            Some("frozen-call"),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(restarted.interaction.id, pending.interaction.id);
+    assert_eq!(restarted.interaction.completion_status, "not_started");
+    assert!(!restarted.invocation.durable);
+    assert_eq!(
+        world
+            .graph
+            .conversation_graph_snapshot(&[parent.id])
+            .await
+            .unwrap()
+            .invocations
+            .len(),
+        1
+    );
+    assert_eq!(
+        world
+            .product
+            .action_input_draft(world.thread.id)
+            .await
+            .unwrap(),
+        draft
+    );
+    sqlx::query("DROP TRIGGER fail_authority_bind")
+        .execute(&world.pool)
+        .await
+        .unwrap();
+    // This commit models an edit admitted before native preparation but persisted
+    // afterward. Recovery may consume only its original captured epoch.
+    let newer = world
+        .product
+        .commit_action_input_attachment(
+            world.thread.id,
+            &occurrence,
+            &field,
+            &crate::product::ActionInputValue::Text {
+                text: "Lisbon".into(),
+            },
+            draft.revision,
+        )
+        .await
+        .unwrap();
+    let mut state = world.state.clone();
+    state.interaction_execution = Some(crate::product::InteractionExecutionService::new(
+        world.product.clone(),
+        world.runtime.clone(),
+        state.permission_catalog.clone(),
+        state.standalone_workspaces_directory.clone(),
+        state.approval_decisions.clone(),
+        None,
+        state.completion_brokers.clone(),
+    ));
+    *world.harness.admission.lock().unwrap() = "fail";
+    // The existing fake host refuses session preparation before model execution.
+    // Use the normal execution service, with no provider inference endpoint.
+    let _handoff = invoke_action_with_authority(
+        &state,
+        world.thread.id.value(),
+        world.thread.root_interaction_id.value(),
+        invoke.id.value(),
+        "new-click-key",
+        Some(newer.revision),
+        Some(layer.id.value()),
+    )
+    .await
+    .unwrap_or_else(|error| panic!("recovery handoff: {}", error.message()));
+    let deadline = Instant::now() + Duration::from_secs(3);
+    loop {
+        let current = world
+            .product
+            .get_interaction(pending.interaction.id)
+            .await
+            .unwrap();
+        if current.completion_status == "not_started" && current.latest_attempt.is_some() {
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "preexecution refusal did not settle: {current:?}"
+        );
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    let rebound = world
+        .product
+        .user_invocation_reservation(
+            world.thread.root_interaction_id,
+            invoke.id.value(),
+            Some("frozen-call"),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(rebound.interaction.id, pending.interaction.id);
+    assert!(rebound.invocation.durable);
+    assert_eq!(rebound.interaction.completion_status, "not_started");
+    assert!(rebound.interaction.graph_node_id.is_none());
+    let attempt = rebound.interaction.latest_attempt.unwrap();
+    assert_eq!(attempt.outcome, "model_failed");
+    assert_eq!(attempt.effect_boundary, "none");
+    assert!(
+        world
+            .product
+            .user_invocation_preparation_recoverable(rebound.interaction.id)
+            .await
+            .unwrap()
+    );
+    assert_eq!(
+        world
+            .product
+            .action_input_draft(world.thread.id)
+            .await
+            .unwrap(),
+        newer
+    );
+    let inventory = world
+        .graph
+        .conversation_graph_snapshot(&[parent.id])
+        .await
+        .unwrap();
+    assert_eq!(inventory.invocations.len(), 1);
+    assert_eq!(
+        inventory.invocations[0]
+            .invocation
+            .child_interaction_node_id,
+        native_child
+    );
+    assert_eq!(
+        serde_json::to_value(&inventory.invocations[0].submitted_inputs[0].value).unwrap()["text"],
+        "Kyoto"
+    );
+    assert_reservation_export(&world, rejected.interaction.id, pending.interaction.id).await;
     world.finish().await;
 }

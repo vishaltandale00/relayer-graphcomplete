@@ -270,6 +270,10 @@ pub fn router(state: ServerState) -> Router {
             axum::routing::delete(remove_imported_conversation),
         )
         .route(
+            "/api/control/conversation-imports/{thread_id}/invocations",
+            get(imported_invocation_presentations),
+        )
+        .route(
             "/api/control/conversation-import-stages",
             post(begin_imported_conversation),
         )
@@ -1121,6 +1125,20 @@ impl Drop for CancelSearchOnDrop {
     }
 }
 
+async fn imported_invocation_presentations(
+    State(state): State<ServerState>,
+    headers: HeaderMap,
+    Path(thread_id): Path<ThreadId>,
+) -> Result<Json<Vec<Value>>, ApiError> {
+    require_bearer(&headers, &state.control_token)?;
+    Ok(Json(
+        state
+            .graph
+            .imported_invocation_presentations(thread_id)
+            .await?,
+    ))
+}
+
 async fn begin_imported_conversation(
     State(state): State<ServerState>,
     headers: HeaderMap,
@@ -1743,6 +1761,8 @@ async fn prepare_graph_completion(
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct PrepareUserInvocationRequest {
+    #[serde(default)]
+    presenting_layer_id: Option<LayerId>,
     source_interaction_node_id: NodeId,
     action_id: ActionId,
     invocation_key: String,
@@ -1761,10 +1781,11 @@ async fn prepare_user_invocation(
         .await?;
     accepted_action(&writer, input.action_id).await?;
     let (node, invocation) = writer
-        .prepare_user_invocation_with_inputs(
+        .prepare_user_invocation_in_layer(
             input.action_id,
             &input.invocation_key,
             &input.submitted_inputs,
+            input.presenting_layer_id,
         )
         .await?;
     Ok(Json(PrepareGraphCompletionResponse {
@@ -1856,6 +1877,10 @@ async fn canonical_context_occurrence(
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct CanonicalInputActionOccurrenceRequest {
+    #[serde(default)]
+    require_editable: bool,
+    #[serde(default)]
+    include_consumer_state: bool,
     destination_project_id: Option<ProjectId>,
     destination_thread_id: ThreadId,
     occurrence: relayer_graph_core::PresentingInputOccurrence,
@@ -1865,9 +1890,32 @@ async fn canonical_input_action_occurrence(
     State(state): State<ServerState>,
     headers: HeaderMap,
     Json(input): Json<CanonicalInputActionOccurrenceRequest>,
-) -> Result<Json<GraphAction>, ApiError> {
+) -> Result<Json<Value>, ApiError> {
     require_bearer(&headers, &state.control_token)?;
-    Ok(Json(
+    if input.include_consumer_state {
+        let (action, composer_eligible, editable) = state
+            .graph
+            .canonical_input_action_consumer_state(
+                input.destination_project_id,
+                input.destination_thread_id,
+                &input.occurrence,
+            )
+            .await?;
+        return Ok(Json(
+            json!({ "action": action, "composerEligible": composer_eligible, "editable": editable }),
+        ));
+    }
+
+    let action = if input.require_editable {
+        state
+            .graph
+            .canonical_editable_input_action_occurrence(
+                input.destination_project_id,
+                input.destination_thread_id,
+                &input.occurrence,
+            )
+            .await?
+    } else {
         state
             .graph
             .canonical_input_action_occurrence(
@@ -1875,8 +1923,9 @@ async fn canonical_input_action_occurrence(
                 input.destination_thread_id,
                 &input.occurrence,
             )
-            .await?,
-    ))
+            .await?
+    };
+    Ok(Json(json!(action)))
 }
 
 async fn interaction_metadata(

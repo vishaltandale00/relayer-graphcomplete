@@ -188,8 +188,19 @@ pub(super) async fn product_state(
     let invocations =
         super::threads::project_action_invocations(&state, &product_state.action_invocations)
             .await?;
+    let mut imported_history = Vec::new();
+    for view in product_state
+        .threads
+        .iter()
+        .filter(|view| view.thread.imported)
+    {
+        imported_history.extend(
+            super::threads::project_imported_invocation_history(&state, view.thread.id).await?,
+        );
+    }
     let response = ProductStateResponse::from(product_state)
         .with_action_invocations(invocations)
+        .with_imported_invocation_history(imported_history)
         .with_conversation_compatibility(compatibility)
         .with_interactions(interactions)
         .with_current_projection(current_projection)

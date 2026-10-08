@@ -314,7 +314,7 @@ async fn eval_input_operator_session_is_server_scoped_to_one_thread_and_occurren
                         "actionId": 301
                     })
                 );
-                axum::Json(json!({
+                let action = json!({
                     "id": 301,
                     "sourceNodeId": 401,
                     "sourceLayerId": 201,
@@ -324,7 +324,12 @@ async fn eval_input_operator_session_is_server_scoped_to_one_thread_and_occurren
                     "control": "text",
                     "prompt": "What constraint applies?",
                     "state": "accepted"
-                }))
+                });
+                axum::Json(if body["includeConsumerState"] == true {
+                    json!({"action":action,"composerEligible":true,"editable":true})
+                } else {
+                    action
+                })
             }),
         )
         .route(
@@ -1528,7 +1533,7 @@ async fn input_draft_commit_sends_the_destination_product_graph_scope() {
     )
     .await;
 
-    let observed = Arc::new(Mutex::new(None));
+    let observed = Arc::new(Mutex::new(Vec::<Value>::new()));
     let observed_request = observed.clone();
     let observed_interaction = Arc::new(Mutex::new(None));
     let observed_interaction_request = observed_interaction.clone();
@@ -1542,7 +1547,7 @@ async fn input_draft_commit_sends_the_destination_product_graph_scope() {
             axum::routing::post(move |axum::Json(body): axum::Json<Value>| {
                 let observed_request = observed_request.clone();
                 async move {
-                    *observed_request.lock().unwrap() = Some(body.clone());
+                    observed_request.lock().unwrap().push(body.clone());
                     let action_id = body["occurrence"]["actionId"].as_i64().unwrap();
                     let mut action = json!({
                         "id": action_id,
@@ -1570,7 +1575,7 @@ async fn input_draft_commit_sends_the_destination_product_graph_scope() {
                             {"key": "full", "label": "Full rollout"}
                         ]);
                     }
-                    axum::Json(action)
+                    axum::Json(if body["includeConsumerState"] == true { json!({"action":action,"composerEligible":true,"editable":true}) } else { action })
                 }
             }),
         )
@@ -1894,6 +1899,7 @@ async fn input_draft_commit_sends_the_destination_product_graph_scope() {
         "presentingLayerId": 201,
         "actionId": 301
     });
+    observed.lock().unwrap().clear();
     let committed = app
         .clone()
         .oneshot(api_request(
@@ -1910,12 +1916,21 @@ async fn input_draft_commit_sends_the_destination_product_graph_scope() {
         .unwrap();
     assert_eq!(committed.status(), StatusCode::OK);
     assert_eq!(
-        observed.lock().unwrap().clone().unwrap(),
-        json!({
-            "destinationProjectId": null,
-            "destinationThreadId": thread_id,
-            "occurrence": occurrence
-        })
+        observed.lock().unwrap().clone(),
+        vec![
+            json!({
+                "destinationProjectId": null,
+                "destinationThreadId": thread_id,
+                "occurrence": occurrence,
+                "requireEditable": true
+            }),
+            json!({
+                "destinationProjectId": null,
+                "destinationThreadId": thread_id,
+                "occurrence": occurrence,
+                "includeConsumerState": true
+            })
+        ]
     );
     let replaced = app
         .clone()
@@ -3152,7 +3167,38 @@ async fn conversation_export_uses_real_accepted_graph_and_rejects_read_only_auth
         .execute(&pool).await.unwrap();
     sqlx::query("INSERT INTO action_invocations(source_interaction_id,action_id,result_interaction_id,created_at) VALUES (10,999,11,'5')")
         .execute(&pool).await.unwrap();
-    sqlx::query("INSERT INTO conversation_imports(id,source_sha256,export_version,producer_json,header_json,state,created_at,published_at) VALUES ('import-state','sha256:imported',1,'{}','{}','published','6','6')")
+    // Published imports retain a typed portable header even when they have no
+    // invocation history. Workspace state projects all visible threads.
+    let imported_header = relayer_app_server::conversation_export::ConversationExportHeader {
+        export_version: 1,
+        exported_at: "6".into(),
+        producer: relayer_app_server::conversation_export::ExportProducer {
+            desktop_version: "0.2.12".into(),
+            build_commit: "test-commit".into(),
+            platform: "darwin".into(),
+            architecture: "arm64".into(),
+        },
+        conversation: relayer_app_server::conversation_export::ExportConversation {
+            id: "conversation-1".into(),
+            title: "Imported conversation".into(),
+            created_at: "6".into(),
+            project_name: None,
+            harness_configuration_name: "codex-basic".into(),
+            permission_profile_id: "auto".into(),
+        },
+        turns: vec![
+            relayer_app_server::conversation_export::ExportTurnManifestEntry {
+                id: "turn-1".into(),
+                sequence: 1,
+            },
+        ],
+        visual_asset_contents: vec![],
+        invocations: vec![],
+        bound_inputs: vec![],
+    };
+    sqlx::query("INSERT INTO conversation_imports(id,source_sha256,export_version,producer_json,header_json,state,created_at,published_at) VALUES ('import-state','sha256:imported',1,?1,?2,'published','6','6')")
+        .bind(serde_json::to_string(&imported_header.producer).unwrap())
+        .bind(serde_json::to_string(&imported_header).unwrap())
         .execute(&pool).await.unwrap();
     sqlx::query("INSERT INTO threads(id,title,project_id,created_at,updated_at,harness_configuration_name,permission_profile_id,conversation_import_id) VALUES (3,'Imported conversation',1,'6','6','codex-basic','auto','import-state')")
         .execute(&pool).await.unwrap();
@@ -3160,13 +3206,18 @@ async fn conversation_export_uses_real_accepted_graph_and_rejects_read_only_auth
         .execute(&pool).await.unwrap();
     pool.close().await;
 
-    let workspace_state = response_json(
-        app.clone()
-            .oneshot(api_request("GET", "/api/state?threadId=1", None, true))
-            .await
-            .unwrap(),
-    )
-    .await;
+    let workspace_response = app
+        .clone()
+        .oneshot(api_request("GET", "/api/state?threadId=1", None, true))
+        .await
+        .unwrap();
+    let workspace_status = workspace_response.status();
+    let workspace_state = response_json(workspace_response).await;
+    assert_eq!(
+        workspace_status,
+        StatusCode::OK,
+        "workspace state response: {workspace_state}"
+    );
     assert_eq!(
         workspace_state["actionInvocations"]
             .as_array()
@@ -3356,7 +3407,7 @@ async fn conversation_export_uses_real_accepted_graph_and_rejects_read_only_auth
     assert_eq!(forbidden.status(), StatusCode::FORBIDDEN);
 
     // Convert the real accepted invoke, retaining the durable Product origin row.
-    // V3 export and sharing preserve the exact resolved target and inert origin
+    // Local V4 export preserves the exact resolved target and inert origin
     // while the read-only export authorization check above remains enforced.
     graph_database
         .set_interaction_permissions_enabled(true)
@@ -3525,24 +3576,14 @@ async fn conversation_export_uses_real_accepted_graph_and_rejects_read_only_auth
         ))
         .await
         .unwrap();
-    assert_eq!(shared.status(), StatusCode::OK);
-    let shared_bytes = to_bytes(shared.into_body(), 16 * 1024 * 1024)
-        .await
-        .unwrap();
-    let shared_records = decode_export_jsonl(&shared_bytes).unwrap();
-    let ConversationExportRecord::Header(shared_header) = &shared_records[0] else {
-        panic!("missing shared header")
-    };
-    assert_eq!(shared_header.export_version, 4);
-    assert!(shared_records.iter().any(|record| match record {
-        ConversationExportRecord::Turn(turn) => turn.accepted_view.as_ref().is_some_and(|view| {
-            view.layers
-                .iter()
-                .flat_map(|layer| &layer.actions)
-                .any(|action| action.converted_from_invoke)
-        }),
-        _ => false,
-    }));
+    // The exact local conversion was asserted above. Its V4 format remains
+    // available locally while hosted capability admission must fail closed.
+    assert_eq!(shared.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    let shared_error = response_json(shared).await;
+    assert_eq!(
+        shared_error["code"],
+        "reusable_invocation_portability_unavailable"
+    );
 
     graph_task.abort();
     harness_task.abort();

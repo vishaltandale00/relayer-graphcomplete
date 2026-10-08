@@ -112,6 +112,32 @@ class ScopedAuthoringTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(invocation["sourceLayerId"], input_write["sourceLayerId"])
         self.assertFalse(invocation["reusable"])
 
+    async def test_scoped_accepted_input_record_uses_captured_canonical_id(self):
+        wire = Wire()
+        entered, release = asyncio.Event(), asyncio.Event()
+        async def request(method, path, body=None):
+            wire.requests.append((path, body))
+            if path.endswith("/nodes"):
+                entered.set()
+                await release.wait()
+            return wire.reply(path, body)
+        graph = RelayerGraphClient("http://graph.test", "token", 1)
+        graph._request = request
+        author = graph.authoring("accepted-input")
+        layer = author.layer("plan")
+        node = layer.node("plan", icon="compass", title="Plan", detail="Inputs")
+        accepted = {"id": 99, "kind": "input", "state": "accepted", "sourceNodeId": 10}
+        layer.action("analyze", node, kind="invoke", label="Analyze", interaction_text="Analyze", input_actions=(accepted,))
+        layer.layout([(node, .5, .5)], edge_shape="default")
+        pending = asyncio.create_task(author.write(layer))
+        await entered.wait()
+        accepted["id"] = 999
+        accepted["state"] = "draft"
+        release.set()
+        await pending
+        self.assertFalse(any(body.get("kind") == "input" for _, body in wire.requests))
+        self.assertEqual(next(body for _, body in wire.requests if body.get("kind") == "invoke")["inputActionIds"], [99])
+
     async def test_rejects_forged_cross_source_and_cross_layer_inputs_before_transport(self):
         for invalid_binding in ("forged", "cross-source", "cross-layer", "changed-layer"):
             with self.subTest(binding=invalid_binding):

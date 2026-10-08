@@ -1872,17 +1872,6 @@ impl ProductService {
             .await?)
     }
 
-    pub(crate) async fn consume_invocation_inputs(
-        &self,
-        thread: ThreadId,
-        attachments: &[super::ActionInputAttachment],
-    ) -> Result<super::ActionInputDraft, ProductError> {
-        Ok(self
-            .storage
-            .consume_invocation_inputs(thread, attachments)
-            .await?)
-    }
-
     pub(crate) async fn commit_action_input_attachment(
         &self,
         thread_id: ThreadId,
@@ -2082,6 +2071,120 @@ impl ProductService {
                 created: false,
             },
         })
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) async fn reserve_user_action_invocation(
+        &self,
+        source: InteractionId,
+        action: i64,
+        text: &str,
+        key: &str,
+        presenting_layer: Option<i64>,
+        revision: Option<i64>,
+        attachments: &[super::ActionInputAttachment],
+    ) -> Result<InvokeActionOutcome, ProductError> {
+        let source_row = self.get_interaction(source).await?;
+        if action <= 0
+            || key.trim().is_empty()
+            || key.len() > 256
+            || key == "legacy"
+            || presenting_layer.is_some_and(|id| id <= 0)
+            || self
+                .storage
+                .thread_is_imported(source_row.thread_id)
+                .await?
+        {
+            return Err(ProductError::Invalid(
+                "Invalid native invocation reservation.".into(),
+            ));
+        }
+        let outcome = self
+            .storage
+            .reserve_user_action_invocation(
+                source,
+                action,
+                required(text, "interactionText")?,
+                key,
+                presenting_layer,
+                revision,
+                attachments,
+            )
+            .await?;
+        Ok(match outcome {
+            ActionInvocationInsertOutcome::Created {
+                invocation,
+                interaction,
+            } => InvokeActionOutcome {
+                invocation,
+                interaction,
+                created: true,
+            },
+            ActionInvocationInsertOutcome::Existing {
+                invocation,
+                interaction,
+            } => InvokeActionOutcome {
+                invocation,
+                interaction,
+                created: false,
+            },
+        })
+    }
+
+    pub(crate) async fn user_invocation_reservation(
+        &self,
+        source: InteractionId,
+        action: i64,
+        key: Option<&str>,
+    ) -> Result<Option<InvokeActionOutcome>, ProductError> {
+        Ok(self
+            .storage
+            .user_invocation_reservation(source, action, key)
+            .await?
+            .map(|(invocation, interaction)| InvokeActionOutcome {
+                invocation,
+                interaction,
+                created: false,
+            }))
+    }
+
+    pub(crate) async fn reject_user_invocation_preparation(
+        &self,
+        result: InteractionId,
+        native_status: u16,
+        error: &str,
+    ) -> Result<(), ProductError> {
+        Ok(self
+            .storage
+            .reject_user_invocation_preparation(result, native_status, error)
+            .await?)
+    }
+
+    pub(crate) async fn user_invocation_preparation_rejected(
+        &self,
+        result: InteractionId,
+    ) -> Result<bool, ProductError> {
+        Ok(self
+            .storage
+            .user_invocation_preparation_rejected(result)
+            .await?)
+    }
+
+    pub(crate) async fn user_invocation_preparation_recoverable(
+        &self,
+        result: InteractionId,
+    ) -> Result<bool, ProductError> {
+        Ok(self
+            .storage
+            .user_invocation_preparation_recoverable(result)
+            .await?)
+    }
+
+    pub(crate) async fn invocation_presentation(
+        &self,
+        result: InteractionId,
+    ) -> Result<Option<i64>, ProductError> {
+        Ok(self.storage.invocation_presentation(result).await?)
     }
 
     pub(crate) async fn invoke_durable_action(

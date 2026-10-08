@@ -608,6 +608,22 @@ impl<'connection> ActionTable<'connection> {
         id: ActionId,
         draft: &ActionDraft,
     ) -> Result<GraphAction, GraphError> {
+        if draft.kind == ActionKind::Invoke
+            && !draft.reusable.unwrap_or(false)
+            && sqlx::query_scalar::<_, i64>(
+                "SELECT COUNT(*) FROM durable_invocations WHERE source_action_id=?1",
+            )
+            .bind(id.value())
+            .fetch_one(&mut *self.connection)
+            .await?
+                > 1
+        {
+            return Err(GraphError::validation(
+                "invoke_reuse_policy_conflict",
+                "reusable",
+                "This Invoke already has multiple calls and must retain reusable=true.",
+            ));
+        }
         sqlx::query("UPDATE actions SET source_node_id=?1,source_layer_id=?2,kind=?3,relation=?4,label=?5,variant=?6,icon=?7,description=?8,target_layer_id=?9,interaction_text=?10,reusable=?12 WHERE id=?11")
             .bind(draft.source_node_id.value())
             .bind(draft.source_layer_id.map(LayerId::value))

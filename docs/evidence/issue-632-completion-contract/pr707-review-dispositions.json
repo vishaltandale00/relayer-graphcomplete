@@ -1,0 +1,130 @@
+{
+  "schemaVersion": 1,
+  "pullRequestNumber": 707,
+  "baselineHead": "2ad0b83726d839c3981b93cd56ec49cafdbb585f",
+  "status": "review dispositions; final exact-source qualification linked separately",
+  "reviewThreads": [
+    {
+      "index": 0,
+      "threadId": "PRRT_kwDOTyTfxM6qKRv_",
+      "disposition": "Product reserves immutable receipt/key before native preparation; startup preserves trusted no-effect pending reservation for exact-key recovery. Deterministic native rejection records a guarded refusal only after authoritative inventory proves the exact key owns no call; corrected activation uses a fresh key.",
+      "checkpoint": "Real API user_reservation_precedes_native_prepare_and_recovers_a_failed_bind with bind fault, World.restart and host refusal; Product reservation tests; native preparation refusal and unavailable/missing/existing inventory checkpoints"
+    },
+    {
+      "index": 1,
+      "threadId": "PRRT_kwDOTyTfxM6qKRwD",
+      "disposition": "Authored fields register implicit occurrences, capture unblurred values and await only owned pending saves.",
+      "checkpoint": "invoke-input-bindings authored-unblurred/authored-pending/refusal/select matrix"
+    },
+    {
+      "index": 2,
+      "threadId": "PRRT_kwDOTyTfxM6qKRwJ",
+      "disposition": "Native child binding and captured epoch consumption use one Product transaction; failures roll back; no-effect refusal restores missing captured epochs without replacing newer edits.",
+      "checkpoint": "Product user_call_receipt_is_atomic_reopens_and_never_recaptures_retry_epochs and real API refusal"
+    },
+    {
+      "index": 3,
+      "threadId": "PRRT_kwDOTyTfxM6qKRwP",
+      "disposition": "Frozen actual presentingLayerId is validated and stored separately from authored sourceLayerId; saved Input occurrence remains independently exact.",
+      "checkpoint": "durable_invocations presenting occurrence tests and imported Current exact presentingLayer assertion"
+    },
+    {
+      "index": 4,
+      "threadId": "PRRT_kwDOTyTfxM6qKRwU",
+      "disposition": "Public Current without Return is projected as a synthetic read-only presentation.",
+      "checkpoint": "public-share-viewer active/stopped/failed Current production DOM matrix"
+    },
+    {
+      "index": 5,
+      "threadId": "PRRT_kwDOTyTfxM6qKRwa",
+      "disposition": "Standalone header.boundInputs join resolution without fabricated accepted Layer membership.",
+      "checkpoint": "public-share-viewer standalone-bound-definition rendering and validator matrix"
+    },
+    {
+      "index": 6,
+      "threadId": "PRRT_kwDOTyTfxM6qKRwf",
+      "disposition": "Scoped TypeScript/Python accept positive canonical persisted Input GraphAction IDs; local forged declarations still refuse.",
+      "checkpoint": "scoped-authoring and real Python scoped fixtures"
+    },
+    {
+      "index": 7,
+      "threadId": "PRRT_kwDOTyTfxM6qKRwl",
+      "disposition": "Export inventory filters requested source completion/thread even for reused persistent Nodes.",
+      "checkpoint": "Native durable_invocations cross-thread snapshot isolation plus real portable_builder_isolates_shared_node_calls_and_preserves_selected_layer with two conversations, distinct frozen answers/Current and independent saved Input/presenting Invoke Layers"
+    },
+    {
+      "index": 8,
+      "threadId": "PRRT_kwDOTyTfxM6qKRwo",
+      "disposition": "Reusable downgrade to single-call refuses multiple existing preparations, including omitted/default-false policy updates.",
+      "checkpoint": "durable_invocations reusable policy downgrade fixture"
+    },
+    {
+      "index": 9,
+      "threadId": "PRRT_kwDOTyTfxM6qKRws",
+      "disposition": "Separate inert imported history DTO preserves exact local source mapping, Current, activator, frozen arguments and verified pinned image bytes; no executable Product invocation rows.",
+      "checkpoint": "imported_current_call_history_is_projected_without_execution_authority plus mounted importedHistory, controller navigation and local asset matrix"
+    },
+    {
+      "index": 10,
+      "threadId": "PRRT_kwDOTyTfxM6qKRwv",
+      "disposition": "Visual numeric inputActions require the actual Input mount on the owning Node.",
+      "checkpoint": "graph-client detail/input declaration fixtures; Prime validates mounted Python Input references and reusable policy declarations through checkpoint/Submit reference compilation, and unmounted numeric Input bindings refuse before transport (native action admission covered separately)"
+    },
+    {
+      "index": 11,
+      "threadId": "PRRT_kwDOTyTfxM6qKRw3",
+      "disposition": "Only trusted preexecution preparationRecoverable calls use saved key/layer and omit new draft capture; stop/execution/unknown refusals remain terminal. A proven refused reservation remains inert and is never mistaken for recovered execution; it permits fresh corrected activation.",
+      "checkpoint": "real API restart/bind/no-effect fixture, storage trusted predicate cases, action-invocation-state and workspace-navigation recovery matrix; native-preparation-rejection API and mounted/controller fresh-key matrix"
+    },
+    {
+      "index": 12,
+      "threadId": "PRRT_kwDOTyTfxM6qKRw8",
+      "disposition": "Hosted V4 publication fails closed before serialization/upload using reusable_invocation_portability_unavailable; local inert V4 and legacy share remain available.",
+      "checkpoint": "production share-builder V4 refusal/legacy compatibility and API error fixture"
+    },
+    {
+      "index": 13,
+      "threadId": "PRRT_kwDOTyTfxM6qKRxA",
+      "disposition": "Proven accepted capture cross-checks standalone canonical Input kind, parent and question. Draft/historical captures remain inert and may precede later canonical repair.",
+      "checkpoint": "native conversation_export_contract standalone accepted mismatch/draft historical compatibility and public parity"
+    },
+    {
+      "index": 14,
+      "threadId": "PRRT_kwDOTyTfxM6qKRxG",
+      "disposition": "Succeeded call requires accepted result turn rooted at exact returnedLayerId.",
+      "checkpoint": "conversation_export_contract and public-share-viewer succeeded result refusal matrix"
+    },
+    {
+      "index": 15,
+      "threadId": "PRRT_kwDOTyTfxM6qKRxM",
+      "disposition": "Frozen activator human/agent survives export/import; agent semantic children are excluded from human/latest navigation; historical absent activator remains unknown.",
+      "checkpoint": "native frozen activator preservation and public/local imported model classification fixtures"
+    },
+    {
+      "index": 16,
+      "threadId": "PRRT_kwDOTyTfxM6qKiH4",
+      "disposition": "New provenance with undeclared bindings requires empty arguments; historical captureState absent remains inert/readable without invented binding authority.",
+      "checkpoint": "native/browser undeclared new capture refusal and historical legacy compatibility cases"
+    },
+    {
+      "index": 17,
+      "threadId": "PRRT_kwDOTyTfxM6qKiH8",
+      "disposition": "Stopped/failed require safeReason; active/succeeded forbid it, matching native lifecycle semantics.",
+      "checkpoint": "native/browser lifecycle-reason corruption matrix"
+    },
+    {
+      "index": 18,
+      "threadId": "PRRT_kwDOTyTfxM6qKiIC",
+      "disposition": "Browser now performs same accepted capture canonical Input comparison as native, including standalone records; draft/historical exception is explicit.",
+      "checkpoint": "public-share-viewer accepted source/kind/question corruption plus draft/historical matrix"
+    },
+    {
+      "index": 19,
+      "threadId": "PRRT_kwDOTyTfxM6qKiIG",
+      "disposition": "Canonical whole-Node consumers govern inputCanAcceptAnswer; a shared field remains editable until all explicit single consumers freeze; API refuses exhausted writes before draft mutation.",
+      "checkpoint": "bound_input_edits_stop_only_when_all_native_single_consumers_are_frozen with hidden historical consumer and renderer true/false matrix"
+    }
+  ],
+  "testDeletion": [],
+  "authority": "Metadata resolution after committed exact-source evidence; no merge approval, paid inference, hosted publication or release authority."
+}

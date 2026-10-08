@@ -65,6 +65,9 @@ pub struct ConversationExportHeader {
 pub struct ExportInvocation {
     pub schema_version: u32,
     pub id: String,
+    /// Captured native activation provenance; absence is unknown historical attribution.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub activator: Option<ExportInvocationActivator>,
     pub source: ExportInvocationSource,
     pub child_interaction_node_id: String,
     pub result_turn_id: Option<String>,
@@ -77,6 +80,20 @@ pub struct ExportInvocation {
     pub current: Option<ExportInvocationCurrent>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ExportInvocationActivator {
+    Human,
+    Agent,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ExportInvocationCaptureState {
+    Draft,
+    Accepted,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ExportInvocationSource {
@@ -84,6 +101,12 @@ pub struct ExportInvocationSource {
     pub action_id: String,
     pub parent_node_id: String,
     pub layer_id: Option<String>,
+    /// Exact occurrence selected at activation, distinct from the authored source Layer.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub presenting_layer_id: Option<String>,
+    /// Native state at freezing; older snapshots did not capture this provenance.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub capture_state: Option<ExportInvocationCaptureState>,
     pub instruction: String,
     pub label: String,
     pub description: Option<String>,
@@ -889,6 +912,10 @@ impl ConversationExportValidator {
             for argument in self
                 .invocations
                 .iter()
+                .filter(|call| {
+                    call.source.capture_state == Some(ExportInvocationCaptureState::Accepted)
+                        && call.source.input_bindings_defined
+                })
                 .flat_map(|call| &call.arguments)
                 .filter(|argument| argument.source.action_id == action.id)
             {
@@ -925,6 +952,9 @@ impl ConversationExportValidator {
                     )
                 })?;
             if call.result_turn_id.as_deref() != Some(turn.id.as_str())
+                || (call.lifecycle == "succeeded"
+                    && (turn.completion.status != ExportCompletionStatus::Accepted
+                        || turn.accepted_view.is_none()))
                 || turn.interaction_node_id.as_ref().or_else(|| {
                     turn.accepted_view
                         .as_ref()
@@ -1329,6 +1359,26 @@ impl ConversationExportValidator {
                     "header.boundInputs",
                     "Standalone Input source must be a Node in the captured graph.",
                 ));
+            }
+            for argument in self
+                .invocations
+                .iter()
+                .filter(|call| {
+                    call.source.capture_state == Some(ExportInvocationCaptureState::Accepted)
+                        && call.source.input_bindings_defined
+                })
+                .flat_map(|call| &call.arguments)
+                .filter(|argument| argument.source.action_id == input.id)
+            {
+                if input.source_node_id != argument.source.node_id
+                    || input.input.as_ref() != Some(&argument.action)
+                {
+                    return Err(ExportValidationError::new(
+                        "invocation_argument_snapshot_mismatch",
+                        "header.boundInputs",
+                        "Standalone Input must match its exact frozen argument source and question.",
+                    ));
+                }
             }
             let mut definition = input.clone();
             definition.icon_asset = None;
@@ -1891,6 +1941,9 @@ fn validate_invocation_inventory(
         if let Some(layer) = &call.source.layer_id {
             require_id(layer, "layer", &path)?;
         }
+        if let Some(layer) = &call.source.presenting_layer_id {
+            require_id(layer, "layer", &path)?;
+        }
         if call.schema_version != 1
             || !ids.insert(&call.id)
             || !children.insert(&call.child_interaction_node_id)
@@ -1928,6 +1981,18 @@ fn validate_invocation_inventory(
         }
         if let Some(reason) = &call.safe_reason {
             require_string(reason, &path)?;
+        }
+        if matches!(call.lifecycle.as_str(), "failed" | "stopped") != call.safe_reason.is_some()
+            || call
+                .safe_reason
+                .as_ref()
+                .is_some_and(|reason| reason.trim().is_empty())
+        {
+            return Err(ExportValidationError::new(
+                "invocation_lifecycle_reason_mismatch",
+                &path,
+                "Failed and stopped calls require a safe reason; active and succeeded calls omit it.",
+            ));
         }
         let bindings = call.source.input_action_ids.iter().collect::<HashSet<_>>();
         if bindings.len() != call.source.input_action_ids.len() {
@@ -2039,7 +2104,9 @@ fn validate_invocation_inventory(
                     .arguments
                     .iter()
                     .any(|argument| argument.source.node_id != call.source.parent_node_id)))
-            || (!call.source.input_bindings_defined && !bindings.is_empty())
+            || (!call.source.input_bindings_defined
+                && (!bindings.is_empty()
+                    || (call.source.capture_state.is_some() && !call.arguments.is_empty())))
         {
             return Err(ExportValidationError::new(
                 "invocation_argument_binding_mismatch",

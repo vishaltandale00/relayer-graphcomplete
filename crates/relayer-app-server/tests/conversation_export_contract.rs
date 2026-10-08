@@ -267,11 +267,14 @@ fn reusable_call(id: &str, child: &str) -> ExportInvocation {
     ExportInvocation {
         schema_version: 1,
         id: id.into(),
+        activator: None,
         source: ExportInvocationSource {
             interaction_node_id: "node:interaction-1".into(),
             action_id: "action:invoke-1".into(),
             parent_node_id: "node:1".into(),
             layer_id: Some("layer:1".into()),
+            presenting_layer_id: None,
+            capture_state: Some(ExportInvocationCaptureState::Accepted),
             instruction: "Continue".into(),
             label: "Follow up".into(),
             description: None,
@@ -309,6 +312,7 @@ fn v4_calls_preserve_distinct_identity_and_never_promote_retained_current_to_ret
     let first = reusable_call("invocation:1", "node:call-1");
     let mut second = reusable_call("invocation:2", "node:call-2");
     second.lifecycle = "stopped".into();
+    second.safe_reason = Some("cancelled".into());
     second.head_revision = 1;
     second.current_layer_id = Some(current.root_layer_id.clone());
     second.current = Some(ExportInvocationCurrent {
@@ -492,12 +496,41 @@ fn v4_arguments_must_exactly_answer_the_frozen_callable_bindings() {
     let ConversationExportRecord::Header(header) = &mut fixture[0] else {
         unreachable!()
     };
+    header.invocations[0].source.presenting_layer_id = Some("layer:1".into());
+    assert_validation_parity(&fixture);
+    for changed in ["layer", "interaction"] {
+        let mut saved_occurrence = fixture.clone();
+        let ConversationExportRecord::Header(header) = &mut saved_occurrence[0] else {
+            unreachable!()
+        };
+        if changed == "layer" {
+            header.invocations[0].arguments[0].source.layer_id = "layer:other".into();
+        } else {
+            header.invocations[0].arguments[0]
+                .source
+                .interaction_node_id = "node:other-interaction".into();
+        }
+        // The accepted Input answer may have been saved from another occurrence
+        // of this same Node before Invoke is activated from the current Layer.
+        assert_validation_parity(&saved_occurrence);
+    }
+    let ConversationExportRecord::Header(header) = &mut fixture[0] else {
+        unreachable!()
+    };
     header.invocations[0].source.input_action_ids.clear();
     assert_rejected_with_parity(&fixture, "invocation_argument_binding_mismatch");
     let ConversationExportRecord::Header(header) = &mut fixture[0] else {
         unreachable!()
     };
     header.invocations[0].source.input_bindings_defined = false;
+    // Genuine pre-binding sources froze occurrence-based arguments. Their inert
+    // history remains readable; omission cannot create native preparation authority.
+    assert_rejected_with_parity(&fixture, "invocation_argument_binding_mismatch");
+    let ConversationExportRecord::Header(header) = &mut fixture[0] else {
+        unreachable!()
+    };
+    header.invocations[0].source.capture_state = None;
+    header.invocations[0].source.presenting_layer_id = None;
     let mut second = header.invocations[0].arguments[0].clone();
     second.source.layer_id = "layer:historical-second-occurrence".into();
     header.invocations[0].arguments.push(second);
@@ -507,6 +540,231 @@ fn v4_arguments_must_exactly_answer_the_frozen_callable_bindings() {
     };
     header.invocations[0].arguments[1].source.layer_id = "layer:1".into();
     assert_rejected_with_parity(&fixture, "invocation_argument_duplicate");
+}
+
+#[test]
+fn v4_standalone_inputs_match_the_exact_frozen_argument_question_and_source() {
+    let mut fixture = records();
+    let ConversationExportRecord::Header(header) = &mut fixture[0] else {
+        unreachable!()
+    };
+    header.export_version = EXPORT_VERSION_V4;
+    let question = input("action:question", "node:1", "layer:1");
+    let mut call = reusable_call("invocation:1", "node:call-1");
+    call.source.input_action_ids = vec![question.id.clone()];
+    call.arguments.push(ExportInvocationArgument {
+        source: ExportInputSource {
+            interaction_node_id: "node:interaction-1".into(),
+            layer_id: "layer:1".into(),
+            action_id: question.id.clone(),
+            node_id: "node:1".into(),
+        },
+        action: question.input.clone().unwrap(),
+        value: ExportSubmittedInputValue::Text {
+            text: "Kyoto".into(),
+        },
+    });
+    header.bound_inputs = vec![question];
+    header.invocations = vec![call];
+    assert_validation_parity(&fixture);
+    for field in ["prompt", "source", "control"] {
+        let mut invalid = fixture.clone();
+        let ConversationExportRecord::Header(header) = &mut invalid[0] else {
+            unreachable!()
+        };
+        match field {
+            "prompt" => {
+                header.bound_inputs[0].input.as_mut().unwrap().prompt = "Different question".into()
+            }
+            "source" => {
+                header.bound_inputs[0].source_node_id = "node:2".into();
+                let ConversationExportRecord::Turn(turn) = &mut invalid[1] else {
+                    unreachable!()
+                };
+                let mut other = turn.accepted_view.as_ref().unwrap().layers[0].nodes[0].clone();
+                other.id = "node:2".into();
+                let layer = &mut turn.accepted_view.as_mut().unwrap().layers[0];
+                layer.layer.nodes.push(other.id.clone());
+                layer.nodes.push(other);
+                layer.layer.edges.push("edge:other-source".into());
+                layer.edges.push(ExportEdge {
+                    id: "edge:other-source".into(),
+                    endpoints: ["node:1".into(), "node:2".into()],
+                    state: ExportRecordState::Accepted,
+                });
+                layer.layer.layout = None;
+            }
+            _ => {
+                let question = header.bound_inputs[0].input.as_mut().unwrap();
+                question.control = ExportInputControl::SingleSelect;
+                question.options = vec![option("city", "Kyoto")];
+            }
+        }
+        assert_rejected_with_parity(&invalid, "invocation_argument_snapshot_mismatch");
+    }
+    for historical in [false, true] {
+        let mut prior = fixture.clone();
+        let ConversationExportRecord::Header(header) = &mut prior[0] else {
+            unreachable!()
+        };
+        header.bound_inputs[0].input.as_mut().unwrap().prompt = "Repaired parent question".into();
+        if historical {
+            header.invocations[0].source.input_action_ids.clear();
+            header.invocations[0].source.input_bindings_defined = false;
+            header.invocations[0].source.capture_state = None;
+        } else {
+            header.invocations[0].source.state = "draft".into();
+            header.invocations[0].source.capture_state = Some(ExportInvocationCaptureState::Draft);
+        }
+        assert_validation_parity(&prior);
+    }
+    // The same immutable-input boundary applies when the canonical definition is
+    // carried by an accepted Layer instead of the standalone inventory.
+    let mut mounted = fixture.clone();
+    let ConversationExportRecord::Header(header) = &mut mounted[0] else {
+        unreachable!()
+    };
+    let question = header.bound_inputs.remove(0);
+    let ConversationExportRecord::Turn(turn) = &mut mounted[1] else {
+        unreachable!()
+    };
+    turn.accepted_view.as_mut().unwrap().layers[0]
+        .actions
+        .push(question);
+    assert_validation_parity(&mounted);
+    let ConversationExportRecord::Turn(turn) = &mut mounted[1] else {
+        unreachable!()
+    };
+    turn.accepted_view.as_mut().unwrap().layers[0]
+        .actions
+        .last_mut()
+        .unwrap()
+        .input
+        .as_mut()
+        .unwrap()
+        .prompt = "Repaired question".into();
+    assert_rejected_with_parity(&mounted, "invocation_argument_snapshot_mismatch");
+    let ConversationExportRecord::Header(header) = &mut mounted[0] else {
+        unreachable!()
+    };
+    header.invocations[0].source.capture_state = Some(ExportInvocationCaptureState::Draft);
+    assert_validation_parity(&mounted);
+}
+
+#[test]
+fn v4_call_result_requires_an_accepted_turn_and_exact_returned_root() {
+    let mut fixture = records();
+    let mut view = accepted_view();
+    view.interaction_node_id = "node:call-1".into();
+    view.root_action.id = "action:call-root".into();
+    view.root_action.source_node_id = view.interaction_node_id.clone();
+    view.root_action.target_layer_id = Some("layer:call".into());
+    view.root_layer_id = "layer:call".into();
+    view.layers[0].layer.id = "layer:call".into();
+    view.layers[0].actions.clear();
+    let mut call = reusable_call("invocation:1", "node:call-1");
+    call.lifecycle = "succeeded".into();
+    call.result_turn_id = Some("turn:2".into());
+    call.head_revision = 1;
+    call.current_layer_id = Some(view.root_layer_id.clone());
+    call.returned_layer_id = Some(view.root_layer_id.clone());
+    call.current = Some(ExportInvocationCurrent {
+        root_layer_id: view.root_layer_id.clone(),
+        layers: view.layers.clone(),
+    });
+    let ConversationExportRecord::Header(header) = &mut fixture[0] else {
+        unreachable!()
+    };
+    header.export_version = EXPORT_VERSION_V4;
+    header.turns.push(ExportTurnManifestEntry {
+        id: "turn:2".into(),
+        sequence: 2,
+    });
+    header.invocations = vec![call];
+    fixture.push(ConversationExportRecord::Turn(Box::new(
+        ConversationExportTurn {
+            id: "turn:2".into(),
+            sequence: 2,
+            created_at: "2".into(),
+            text: "Continue".into(),
+            interaction_node_id: Some("node:call-1".into()),
+            origin: ExportTurnOrigin::Invocation {
+                invocation_id: "invocation:1".into(),
+            },
+            completion: receipt(ExportCompletionStatus::Accepted),
+            contexts: vec![],
+            submitted_inputs: vec![],
+            accepted_view: Some(view),
+        },
+    )));
+    assert_validation_parity(&fixture);
+    let mut wrong_root = fixture.clone();
+    let ConversationExportRecord::Header(header) = &mut wrong_root[0] else {
+        unreachable!()
+    };
+    let call = &mut header.invocations[0];
+    call.current_layer_id = Some("layer:other-return".into());
+    call.returned_layer_id = call.current_layer_id.clone();
+    let current = call.current.as_mut().unwrap();
+    current.root_layer_id = "layer:other-return".into();
+    current.layers[0].layer.id = "layer:other-return".into();
+    assert_rejected_with_parity(&wrong_root, "invocation_result_mismatch");
+    let ConversationExportRecord::Turn(turn) = &mut fixture[2] else {
+        unreachable!()
+    };
+    turn.completion = receipt(ExportCompletionStatus::Stopped);
+    turn.accepted_view = None;
+    assert_rejected_with_parity(&fixture, "invocation_result_mismatch");
+}
+
+#[test]
+fn v4_lifecycle_reason_and_captured_activation_provenance_roundtrip() {
+    let mut fixture = records();
+    let ConversationExportRecord::Header(header) = &mut fixture[0] else {
+        unreachable!()
+    };
+    header.export_version = EXPORT_VERSION_V4;
+    let mut call = reusable_call("invocation:1", "node:call-1");
+    call.activator = Some(ExportInvocationActivator::Agent);
+    call.source.presenting_layer_id = Some("layer:alternate-occurrence".into());
+    header.invocations = vec![call];
+    assert_validation_parity(&fixture);
+    let encoded = serde_json::to_string(&fixture[0]).unwrap();
+    assert_eq!(
+        serde_json::from_str::<ConversationExportRecord>(&encoded).unwrap(),
+        fixture[0]
+    );
+    assert!(encoded.contains("\"activator\":\"agent\""));
+    for field in ["activator", "captureState"] {
+        let mut invalid = serde_json::to_value(&fixture[0]).unwrap();
+        if field == "activator" {
+            invalid["invocations"][0][field] = "unknown".into();
+        } else {
+            invalid["invocations"][0]["source"][field] = "unknown".into();
+        }
+        assert!(serde_json::from_value::<ConversationExportRecord>(invalid).is_err());
+    }
+    for (lifecycle, reason) in [
+        ("active", Some("cancelled")),
+        ("stopped", None),
+        ("failed", None),
+        ("failed", Some("")),
+    ] {
+        let mut invalid = fixture.clone();
+        let ConversationExportRecord::Header(header) = &mut invalid[0] else {
+            unreachable!()
+        };
+        header.invocations[0].lifecycle = lifecycle.into();
+        header.invocations[0].safe_reason = reason.map(Into::into);
+        assert_rejected_with_parity(
+            &invalid,
+            if reason == Some("") {
+                "string_empty"
+            } else {
+                "invocation_lifecycle_reason_mismatch"
+            },
+        );
+    }
 }
 
 fn records_with_visual_assets(bytes: &[u8], asset_ids: &[&str]) -> Vec<ConversationExportRecord> {

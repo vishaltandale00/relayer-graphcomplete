@@ -224,6 +224,7 @@ const ACTION_INVOCATION_COLUMNS: &[(&str, &str, bool, i64)] = &[
     ("graph_failure_pending", "INTEGER", true, 0),
     ("invocation_key", "TEXT", true, 3),
     ("prepared_graph_node_id", "INTEGER", false, 0),
+    ("presenting_layer_id", "INTEGER", false, 0),
 ];
 const COMPLETION_EXECUTION_COLUMNS: &[(&str, &str, bool, i64)] = &[
     ("interaction_id", "INTEGER", true, 1),
@@ -496,6 +497,15 @@ pub(super) async fn validate(pool: &SqlitePool) -> Result<(), StorageError> {
     )
     .await?;
     validate_columns(pool, "interaction_attempts", INTERACTION_ATTEMPT_COLUMNS).await?;
+    validate_columns(
+        pool,
+        "invocation_preparation_refusals",
+        &[
+            ("result_interaction_id", "INTEGER", false, 1),
+            ("native_status", "INTEGER", true, 0),
+        ],
+    )
+    .await?;
     validate_columns(
         pool,
         "interaction_context_intents",
@@ -1164,7 +1174,7 @@ pub(super) async fn validate(pool: &SqlitePool) -> Result<(), StorageError> {
             FROM action_invocations ai
             JOIN interactions source ON source.id=ai.source_interaction_id
             JOIN threads thread ON thread.id=source.thread_id
-            WHERE ai.prepared_graph_node_id IS NULL
+            WHERE ai.prepared_graph_node_id IS NULL AND ai.invocation_key='legacy'
             GROUP BY CASE
                        WHEN thread.project_id IS NOT NULL THEN 'project:' || thread.project_id
                        ELSE 'thread:' || thread.id
@@ -1180,7 +1190,7 @@ pub(super) async fn validate(pool: &SqlitePool) -> Result<(), StorageError> {
             "a node-owned action must have exactly one authoritative invocation result in its project scope",
         ));
     }
-    let invalid_bound_invocation: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM action_invocations WHERE trim(invocation_key)='' OR (prepared_graph_node_id IS NOT NULL AND (prepared_graph_node_id<=0 OR authoritative!=1)) OR (prepared_graph_node_id IS NULL AND invocation_key!='legacy'))").fetch_one(pool).await?;
+    let invalid_bound_invocation: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM action_invocations WHERE trim(invocation_key)='' OR (prepared_graph_node_id IS NOT NULL AND (prepared_graph_node_id<=0 OR authoritative!=1)) OR (prepared_graph_node_id IS NULL AND invocation_key!='legacy' AND (authoritative!=1 OR agent_invoked!=0 OR NOT EXISTS(SELECT 1 FROM invocation_input_submission_receipts receipt WHERE receipt.result_interaction_id=action_invocations.result_interaction_id))))").fetch_one(pool).await?;
     if invalid_bound_invocation {
         return Err(incompatible("durable invocation identity is invalid"));
     }

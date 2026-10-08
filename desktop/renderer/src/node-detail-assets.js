@@ -13,6 +13,24 @@ export async function resolveAcceptedNodeDetailAsset(asset, context, dependencie
   }
   const read = dependencies.request ?? request;
   const response = await read(`/api/threads/${threadId}/interactions/${interactionId}/nodes/${nodeId}/detail-assets/${encodeURIComponent(asset.id)}?layerId=${layerId}`);
+  return resolvePinnedAssetBytes(asset, response, dependencies);
+}
+
+// Imported Current has only portable viewing identities. Its validated frozen
+// associations and retained bytes are resolved locally, never through native
+// accepted-node routes.
+export async function resolveImportedInvocationAsset(asset, history, { nodeId, layerId }, dependencies = {}) {
+  const layer = history?.inert === true && history.record?.current?.layers.find(layer => String(layer.layer.id) === String(layerId));
+  const node = layer?.nodes.find(node => String(node.id) === String(nodeId));
+  const association = node?.authoredDetailAssets?.find(pin => pin.assetId === asset?.id
+    && pin.digestSha256 === asset.digestSha256 && pin.mediaType === asset.mediaType);
+  const content = history?.visualAssetContents?.find(content => content.digestSha256 === asset?.digestSha256
+    && content.mediaType === asset.mediaType && content.byteLength === association?.byteLength);
+  if (!association || !content || !MEDIA_TYPES.has(asset.mediaType)) throw new Error("Visual asset is not pinned by this inert Current view.");
+  return resolvePinnedAssetBytes(asset, { ...content, assetId: asset.id }, dependencies);
+}
+
+async function resolvePinnedAssetBytes(asset, response, dependencies) {
   const encoded = response?.contentBase64;
   if (response?.assetId !== asset.id || response.digestSha256 !== asset.digestSha256
     || response.mediaType !== asset.mediaType

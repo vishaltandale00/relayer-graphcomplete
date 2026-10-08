@@ -1122,6 +1122,62 @@ impl GraphDatabase {
             .map_err(first_attachment_error)
     }
 
+    /// Trusted ownership and admission state for an exact accepted Input
+    /// occurrence. Invoke definitions belong to their Node, including reference
+    /// presentations that omit them from a historical Layer action snapshot.
+    pub async fn canonical_input_action_consumer_state(
+        &self,
+        destination_project_id: Option<crate::ProjectId>,
+        destination_thread_id: crate::ThreadId,
+        occurrence: &PresentingInputOccurrence,
+    ) -> Result<(crate::GraphAction, bool, bool), GraphError> {
+        let input = self
+            .canonical_input_action_occurrence(
+                destination_project_id,
+                destination_thread_id,
+                occurrence,
+            )
+            .await?;
+        let mut connection = self.storage.acquire().await?;
+        let consumers: Vec<(Option<bool>, bool)> = sqlx::query_as(
+            "SELECT a.reusable,EXISTS(SELECT 1 FROM durable_invocations calls WHERE calls.source_action_id=a.id)
+             FROM actions a JOIN invoke_input_bindings bindings ON bindings.invoke_action_id=a.id
+             WHERE bindings.input_action_id=?1 AND a.source_node_id=?2 AND a.kind='invoke' AND a.state='accepted'",
+        ).bind(input.id.value()).bind(input.source_node_id.value()).fetch_all(&mut *connection).await?;
+        let ordinary = consumers.is_empty();
+        // Historical None remains unknown and retains its native admission rule.
+        let editable = ordinary
+            || !consumers
+                .iter()
+                .all(|(reusable, has_call)| *reusable == Some(false) && *has_call);
+        Ok((input, ordinary, editable))
+    }
+
+    /// New drafts stop after all single consumers freeze. Existing frozen
+    /// arguments still use the read-only canonical occurrence boundary.
+    pub async fn canonical_editable_input_action_occurrence(
+        &self,
+        destination_project_id: Option<crate::ProjectId>,
+        destination_thread_id: crate::ThreadId,
+        occurrence: &PresentingInputOccurrence,
+    ) -> Result<crate::GraphAction, GraphError> {
+        let (input, _, editable) = self
+            .canonical_input_action_consumer_state(
+                destination_project_id,
+                destination_thread_id,
+                occurrence,
+            )
+            .await?;
+        if !editable {
+            return Err(GraphError::validation(
+                "input_consumers_exhausted",
+                "value",
+                "This Input belongs only to Invokes whose single calls are already frozen. Open their history or recover the existing call.",
+            ));
+        }
+        Ok(input)
+    }
+
     pub async fn close(&self) {
         self.storage.close().await;
     }

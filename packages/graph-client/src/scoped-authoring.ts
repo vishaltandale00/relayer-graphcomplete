@@ -699,6 +699,14 @@ export class ScopedGraphAuthoring {
               if (!Number.isSafeInteger(reference) || reference < 1) invalid("Input action ID must be positive.");
               return reference;
             }
+            if (typeof reference !== "object" || reference === null)
+              invalid("Invoke needs an Input declaration or accepted Input action record.");
+            const canonical = data(reference);
+            if (Object.hasOwn(canonical, "id")) {
+              if (canonical.kind !== "input" || canonical.state !== "accepted" || !Number.isSafeInteger(canonical.id) || Number(canonical.id) < 1)
+                invalid("Invoke needs an explicit accepted Input action record.");
+              return Number(canonical.id);
+            }
             const declared = [...declaration.actions.values()].find(candidate => candidate.action === reference);
             if (!declared || declared.source !== source || declared.action.kind !== "input")
               invalid("Invoke Inputs must be declared on the same source Node and scoped Layer.");

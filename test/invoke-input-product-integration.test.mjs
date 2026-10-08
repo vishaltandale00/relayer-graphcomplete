@@ -38,12 +38,18 @@ it("seals connected inputs, clears exact submissions, recovers their key, and pr
     await product.seedProviderCatalog({ providerId: "codex", label: "Fixture", connected: true, models: [{ id: "fixture-model", label: "Fixture", order: 0, visible: true, available: true, providerDefault: true, metadata: {} }] });
     const family = await request("/api/model-families", { method: "POST", body: JSON.stringify({ name: "Fixture", enabled: true, members: [{ providerId: "codex", modelId: "fixture-model" }] }) });
     const thread = await request("/api/threads", { method: "POST", body: JSON.stringify({ title: "Vacation inputs", initialMessage: "Choose a vacation destination", modelSelection: { familyId: family.id, providerId: "codex", modelId: "fixture-model" } }) });
-    const accepted = async (count) => {
+    const allowedRefusals = new Map();
+    const accepted = async (count, expectedIds = []) => {
       let detail;
       for (let attempt = 0; attempt < 100; attempt++) {
         detail = await request(`/api/threads/${thread.id}`);
-        if (detail.interactions.length >= count && detail.interactions.every((interaction) => interaction.completionStatus === "accepted")) return detail;
-        if (detail.interactions.some((interaction) => interaction.completionStatus === "failed")) throw new Error(JSON.stringify({ detail, observed }));
+        const unexpectedFailure = detail.interactions.find(interaction => interaction.completionStatus === "failed"
+          && !allowedRefusals.has(interaction.id));
+        if (unexpectedFailure || detail.interactions.length > count + allowedRefusals.size) throw new Error(JSON.stringify({ detail, observed }));
+        if (detail.interactions.length === count + allowedRefusals.size
+          && expectedIds.every(id => detail.interactions.some(interaction => interaction.id === id && interaction.completionStatus === "accepted"))
+          && detail.interactions.every(interaction => interaction.completionStatus === "accepted"
+            || (allowedRefusals.has(interaction.id) && interaction.completionStatus === "failed"))) return detail;
         await new Promise((resolve) => setTimeout(resolve, 40));
       }
       throw new Error(JSON.stringify({ detail, observed }));
@@ -55,7 +61,38 @@ it("seals connected inputs, clears exact submissions, recovers their key, and pr
     const consumers = layer.actions.filter((action) => action.kind === "invoke");
     expect(consumers.map((action) => action.inputActionIds)).toEqual([[destination.id], [destination.id]]);
     const invoke = (action, revision, key) => request(`/api/threads/${thread.id}/interactions/${parent.id}/actions/${action.id}/invoke`, { method: "POST", headers: { "Idempotency-Key": key }, body: JSON.stringify({ inputDraftRevision: revision }) });
-    await expect(invoke(consumers[0], 0, "missing")).rejects.toThrow();
+    const graphInventory = async () => {
+      const response = await fetch(new URL("/api/control/accepted-closures", productOptions.runtimeSession.graphUrl), {
+        method: "POST", headers: { Authorization: `Bearer ${productOptions.runtimeSession.graphControlToken}`, "content-type": "application/json" },
+        body: JSON.stringify({ interactionNodeIds: [parent.graphNodeId] }),
+      });
+      expect(response.status).toBe(200);
+      const snapshot = await response.json();
+      expect(snapshot.closures).toHaveLength(1);
+      expect(snapshot.closures[0].nodeId).toBe(parent.graphNodeId);
+      expect(Array.isArray(snapshot.invocations)).toBe(true);
+      return snapshot.invocations.map(call => call.invocation.invocationKey).sort();
+    };
+    const recordRefusal = async (key, action, beforeDraft, expectedNativeKeys, contractCount) => {
+      const detail = await request(`/api/threads/${thread.id}`);
+      const receipts = detail.actionInvocations.filter(call => call.invocationKey === key);
+      expect(receipts).toHaveLength(1);
+      const receipt = receipts[0];
+      expect(receipt).toMatchObject({ sourceInteractionId: parent.id, actionId: action.id, durable: false,
+        resultCompletionStatus: "failed", preparationRejected: true, preparationRecoverable: false });
+      const refused = detail.interactions.find(interaction => interaction.id === receipt.resultInteractionId);
+      expect(refused).toMatchObject({ completionStatus: "failed", graphNodeId: null });
+      expect(refused.completionOutput).toBeNull();
+      expect(await request(`/api/threads/${thread.id}/input-draft`)).toEqual(beforeDraft);
+      expect(await graphInventory()).toEqual(expectedNativeKeys);
+      expect(observed.contracts).toHaveLength(contractCount);
+      allowedRefusals.set(refused.id, receipt);
+      return refused;
+    };
+    const emptyDraft = await request(`/api/threads/${thread.id}/input-draft`);
+    const initialContracts = observed.contracts.length;
+    await expect(invoke(consumers[0], 0, "missing")).rejects.toMatchObject({ status: 422 });
+    const missing = await recordRefusal("missing", consumers[0], emptyDraft, [], initialContracts);
     const commit = (action, text, revision) => request(`/api/threads/${thread.id}/input-draft/attachments`, { method: "PUT", body: JSON.stringify({ occurrence: { presentingInteractionNodeId: parent.graphNodeId, presentingLayerId: layer.layer.id, actionId: action.id }, value: { text }, expectedRevision: revision }) });
     await commit(destination, "Kyoto", 0);
     const mixed = await commit(unrelated, "Not an argument", 1);
@@ -65,8 +102,8 @@ it("seals connected inputs, clears exact submissions, recovers their key, and pr
     expect(registered.status).toBe(204);
     const ordinaryRequest = { text: "", inputId: "ordinary-chat", inputDraftRevision: mixed.revision };
     const ordinary = await request(`/api/threads/${thread.id}/interactions`, { method: "POST", headers: { cookie: `${session.readOnlyCookie.name}=${session.readOnlyCookie.value}; relayer_input_operator=${operatorToken}` }, body: JSON.stringify(ordinaryRequest) });
-    const ordinaryDetail = await accepted(2);
-    expect(ordinaryDetail.interactions[1].submittedInputs.map(a => [a.action.prompt, a.value.text])).toEqual([["Unrelated notes", "Not an argument"]]);
+    const ordinaryDetail = await accepted(2, [parent.id, ordinary.id]);
+    expect(ordinaryDetail.interactions.find(interaction => interaction.id === ordinary.id).submittedInputs.map(a => [a.action.prompt, a.value.text])).toEqual([["Unrelated notes", "Not an argument"]]);
     const ordinaryContract = observed.contracts.find(contract => contract.interactionNodeId === ordinary.graphNodeId);
     expect(ordinaryContract.input.answers.map(answer => [answer.question.prompt, answer.value.text])).toEqual([["Unrelated notes", "Not an argument"]]);
     const afterSend = await request(`/api/threads/${thread.id}/input-draft`);
@@ -79,11 +116,12 @@ it("seals connected inputs, clears exact submissions, recovers their key, and pr
     await expect(request(`/api/threads/${thread.id}/interactions`, { method: "POST", body: JSON.stringify({ text: "", inputId: "bound-only", inputDraftRevision: afterSend.revision }) })).rejects.toThrow();
     expect((await request(`/api/threads/${thread.id}`)).interactions.map(({id, text, completionStatus}) => ({id, text, completionStatus}))).toEqual([
       { id: parent.id, text: parent.text, completionStatus: "accepted" },
+      { id: missing.id, text: missing.text, completionStatus: "failed" },
       { id: ordinary.id, text: ordinary.text, completionStatus: "accepted" },
     ]);
     const draft = await commit(unrelated, "Retain this other answer", afterSend.revision);
     const first = await invoke(consumers[0], draft.revision, "first");
-    await accepted(3);
+    await accepted(3, [parent.id, ordinary.id, first.interaction.id]);
     expect(first.invocation).toMatchObject({ durable: true, reusable: true });
     const firstContract = observed.contracts.find((contract) => contract.interactionNodeId === first.interaction.graphNodeId);
     expect(firstContract.input.answers.map((answer) => [answer.question.prompt, answer.value.text])).toEqual([["Destination", "Kyoto"]]);
@@ -96,7 +134,7 @@ it("seals connected inputs, clears exact submissions, recovers their key, and pr
     await expect(invoke(consumers[0], nextDraft.revision, "first")).rejects.toThrow();
     expect((await request(`/api/threads/${thread.id}/input-draft`)).attachments).toHaveLength(2);
     const second = await invoke(consumers[1], nextDraft.revision, "second");
-    await accepted(4);
+    await accepted(4, [parent.id, ordinary.id, first.interaction.id, second.interaction.id]);
     expect(second.invocation).toMatchObject({ durable: true, reusable: false });
     const secondContract = observed.contracts.find((contract) => contract.interactionNodeId === second.interaction.graphNodeId);
     expect(secondContract.input.answers.map((answer) => answer.question.prompt)).toEqual(["Destination"]);
@@ -105,20 +143,28 @@ it("seals connected inputs, clears exact submissions, recovers their key, and pr
     const afterSecond = await request(`/api/threads/${thread.id}/input-draft`);
     expect(afterSecond.attachments.map((input) => input.occurrence.actionId)).toEqual([unrelated.id]);
     const thirdDraft = await commit(destination, "Berlin", afterSecond.revision);
+    const beforeSingleRefusalContracts = observed.contracts.length;
     await expect(invoke(consumers[1], thirdDraft.revision, "another-single-call")).rejects.toThrow();
+    const spent = await recordRefusal("another-single-call", consumers[1], thirdDraft, ["first", "second"], beforeSingleRefusalContracts);
     expect((await request(`/api/threads/${thread.id}/input-draft`)).attachments).toHaveLength(2);
     await expect(invoke(consumers[0], draft.revision, "stale")).rejects.toThrow();
-    expect((await request(`/api/threads/${thread.id}`)).interactions).toHaveLength(4);
+    const finalDetail = await accepted(4, [parent.id, ordinary.id, first.interaction.id, second.interaction.id]);
+    expect(finalDetail.interactions.map(interaction => interaction.id)).toEqual([parent.id, missing.id, ordinary.id, first.interaction.id, second.interaction.id, spent.id]);
+    expect(finalDetail.actionInvocations.filter(call => call.preparationRejected).map(call => call.resultInteractionId)).toEqual([missing.id, spent.id]);
     const records = Buffer.from(await product.exportConversation(thread.id)).toString("utf8").trimEnd().split("\n").map(JSON.parse);
-    const exportedOrdinary = records.find(record => record.recordType === "turn" && record.sequence === 2);
+    const exportedOrdinary = records.find(record => record.recordType === "turn" && record.sequence === ordinary.sequence);
     expect(exportedOrdinary.submittedInputs.map(a => [a.action.prompt, a.value.text])).toEqual([["Unrelated notes", "Not an argument"]]);
     const beforeReopen = await request(`/api/threads/${thread.id}/input-draft`);
     await product.close();
     product = new RelayerAppServerService(productOptions);
     session = await product.start();
     const reopened = await request(`/api/threads/${thread.id}`);
-    expect(reopened.actionInvocations.map(a => [a.durable, a.reusable])).toEqual([[true, true], [true, false]]);
-    expect((await request(`/api/state?threadId=${thread.id}`)).actionInvocations.map(a => [a.durable, a.reusable])).toEqual([[true, true], [true, false]]);
+    for (const calls of [reopened.actionInvocations, (await request(`/api/state?threadId=${thread.id}`)).actionInvocations]) {
+      expect(calls.map(a => [a.resultInteractionId, a.durable, a.reusable])).toEqual([
+        [missing.id, false, false], [first.interaction.id, true, true], [second.interaction.id, true, false], [spent.id, false, false],
+      ]);
+      expect(calls.filter(a => a.preparationRejected).map(a => a.resultInteractionId)).toEqual([missing.id, spent.id]);
+    }
     expect(await request(`/api/threads/${thread.id}/input-draft`)).toEqual(beforeReopen);
     expect(observed.errors).toEqual([]);
 
@@ -172,10 +218,13 @@ it("seals connected inputs, clears exact submissions, recovers their key, and pr
       for (const path of [`/api/threads/${thread.id}`, `/api/state?threadId=${thread.id}`]) {
         const calls = (await request(path)).actionInvocations;
         expect(calls.map(a => [a.actionId, a.resultInteractionId, a.durable])).toEqual([
-          [consumers[0].id, first.interaction.id, true], [consumers[1].id, second.interaction.id, true],
+          [consumers[0].id, missing.id, false], [consumers[0].id, first.interaction.id, true],
+          [consumers[1].id, second.interaction.id, true], [consumers[1].id, spent.id, false],
         ]);
-        if (mode === "exact") expect(calls.map(a => a.reusable)).toEqual([true, false]);
-        else expect(calls.every(a => !Object.hasOwn(a, "reusable"))).toBe(true);
+        const nativeCalls = calls.filter(a => [first.interaction.id, second.interaction.id].includes(a.resultInteractionId));
+        expect(nativeCalls).toHaveLength(2);
+        if (mode === "exact") expect(nativeCalls.map(a => a.reusable)).toEqual([true, false]);
+        else expect(nativeCalls.every(a => !Object.hasOwn(a, "reusable"))).toBe(true);
       }
       const reads = projectedMetadata.slice(before);
       expect(reads.every(([observedMode]) => observedMode === mode)).toBe(true);
@@ -188,8 +237,14 @@ it("seals connected inputs, clears exact submissions, recovers their key, and pr
     session = await product.start();
     for (const path of [`/api/threads/${thread.id}`, `/api/state?threadId=${thread.id}`]) {
       const calls = (await request(path)).actionInvocations;
-      expect(calls.map(a => [a.resultInteractionId, a.durable])).toEqual([[first.interaction.id, true], [second.interaction.id, true]]);
-      expect(calls.every(a => !Object.hasOwn(a, "reusable"))).toBe(true);
+      expect(calls.map(a => [a.resultInteractionId, a.durable])).toEqual([
+        [missing.id, false], [first.interaction.id, true], [second.interaction.id, true], [spent.id, false],
+      ]);
+      const nativeCalls = calls.filter(a => [first.interaction.id, second.interaction.id].includes(a.resultInteractionId));
+      expect(nativeCalls.every(a => !Object.hasOwn(a, "reusable"))).toBe(true);
+      // The refusal proof was captured before persistence, so reopening without
+      // a runtime retains these exact inert receipts and spends no new call.
+      expect(calls.filter(a => a.preparationRejected).map(a => a.resultInteractionId)).toEqual([missing.id, spent.id]);
     }
   } finally {
     await product?.close();

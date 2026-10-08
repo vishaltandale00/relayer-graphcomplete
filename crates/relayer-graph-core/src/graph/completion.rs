@@ -102,21 +102,10 @@ pub(crate) async fn read_conversation_snapshot(
     }
     let roots = serde_json::to_string(&node_ids.iter().map(|id| id.value()).collect::<Vec<_>>())
         .map_err(|error| GraphError::Internal(error.to_string()))?;
-    let parent_nodes = serde_json::to_string(
-        &closures
-            .iter()
-            .flatten()
-            .flat_map(|closure| {
-                closure
-                    .layers
-                    .iter()
-                    .flat_map(|layer| layer.nodes.iter().map(|node| node.id.value()))
-            })
-            .collect::<Vec<_>>(),
-    )
-    .map_err(|error| GraphError::Internal(error.to_string()))?;
-    let call_ids: Vec<i64> = sqlx::query_scalar("WITH RECURSIVE roots(id) AS (SELECT value FROM json_each(?1) UNION SELECT source_completion_id FROM durable_invocations WHERE parent_node_id IN (SELECT value FROM json_each(?2)) UNION SELECT d.child_interaction_node_id FROM durable_invocations d JOIN roots r ON d.source_completion_id=r.id) SELECT DISTINCT d.id FROM durable_invocations d WHERE d.source_completion_id IN (SELECT id FROM roots) OR d.child_interaction_node_id IN (SELECT id FROM roots) ORDER BY d.id")
-        .bind(roots).bind(parent_nodes).fetch_all(&mut *transaction).await?;
+    // Persistent parent Nodes can be reused by other conversations. Only source
+    // completions requested here and their native recursive descendants own this inventory.
+    let call_ids: Vec<i64> = sqlx::query_scalar("WITH RECURSIVE roots(id) AS (SELECT value FROM json_each(?1) UNION SELECT d.child_interaction_node_id FROM durable_invocations d JOIN roots r ON d.source_completion_id=r.id) SELECT DISTINCT d.id FROM durable_invocations d WHERE d.source_completion_id IN (SELECT id FROM roots) ORDER BY d.id")
+        .bind(roots).fetch_all(&mut *transaction).await?;
     let mut invocations = Vec::with_capacity(call_ids.len());
     for id in call_ids {
         let invocation = crate::storage::sqlite::invocations::by_id(&mut transaction, id)

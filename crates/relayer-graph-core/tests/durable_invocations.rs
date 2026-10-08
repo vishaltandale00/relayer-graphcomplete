@@ -942,3 +942,229 @@ async fn reused_key_cannot_reinterpret_changed_draft_instruction() {
         "Investigate the evidence"
     );
 }
+
+#[tokio::test]
+async fn conversation_inventory_excludes_calls_from_reused_nodes_in_other_threads() {
+    let database = GraphDatabase::in_memory().await.unwrap();
+    let project = Some(ProjectId::new(910).unwrap());
+    let parent = database
+        .create_interaction(project, ThreadId::new(911).unwrap(), "Public conversation")
+        .await
+        .unwrap();
+    let writer = database.writer_for_subgraph(parent.id).await.unwrap();
+    let (node, layer) = response(&writer, parent.id, "Public").await;
+    let invoke = writer
+        .add_action(&callable(node.id, layer.id))
+        .await
+        .unwrap();
+    writer.complete(parent.id).await.unwrap();
+    let (_, own) = writer
+        .prepare_user_invocation(invoke.id, "public-call")
+        .await
+        .unwrap();
+
+    let other = database
+        .create_interaction(project, ThreadId::new(912).unwrap(), "Private conversation")
+        .await
+        .unwrap();
+    let other_writer = database.writer_for_subgraph(other.id).await.unwrap();
+    let (_, other_layer) = response(&other_writer, other.id, "Private").await;
+    other_writer
+        .submit_layer(&LayerDraft {
+            client_key: "Private-layer".into(),
+            default_node_id: Some(node.id),
+            nodes: vec![node.id],
+            edges: vec![],
+            size_justification: None,
+            layout: Some(LayerLayout::v1(
+                vec![NodePlacement {
+                    node_id: node.id,
+                    x: 0.5,
+                    y: 0.5,
+                }],
+                "default",
+            )),
+        })
+        .await
+        .unwrap();
+    other_writer.complete(other.id).await.unwrap();
+    assert_eq!(
+        other_writer.get_layer(other_layer.id).await.unwrap().nodes[0].id,
+        node.id
+    );
+    let (_, foreign) = other_writer
+        .prepare_user_invocation_in_layer(invoke.id, "private-call", &[], Some(other_layer.id))
+        .await
+        .unwrap();
+    let public = database
+        .conversation_graph_snapshot(&[parent.id])
+        .await
+        .unwrap();
+    assert_eq!(public.invocations.len(), 1);
+    assert_eq!(public.invocations[0].invocation.id, own.id);
+    let private = database
+        .conversation_graph_snapshot(&[other.id])
+        .await
+        .unwrap();
+    assert_eq!(private.invocations.len(), 1);
+    assert_eq!(private.invocations[0].invocation.id, foreign.id);
+}
+
+#[tokio::test]
+async fn draft_invoke_cannot_downgrade_multiple_frozen_calls_to_single() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("invoke-policy.sqlite3");
+    let database = GraphDatabase::open(&path).await.unwrap();
+    let parent = database
+        .create_interaction(None, ThreadId::new(913).unwrap(), "Compare two cases")
+        .await
+        .unwrap();
+    let writer = database.writer_for_subgraph(parent.id).await.unwrap();
+    let (node, layer) = response(&writer, parent.id, "Comparison").await;
+    let draft = callable(node.id, layer.id);
+    let invoke = writer.add_action(&draft).await.unwrap();
+    writer
+        .prepare_recursive_invocation(invoke.id, "first")
+        .await
+        .unwrap();
+    writer
+        .prepare_recursive_invocation(invoke.id, "second")
+        .await
+        .unwrap();
+    let mut downgrade = draft.clone();
+    downgrade.reusable = Some(false);
+    let refusal = writer.add_action(&downgrade).await.unwrap_err();
+    assert!(matches!(
+        refusal,
+        GraphError::Validation {
+            code: "invoke_reuse_policy_conflict",
+            ..
+        }
+    ));
+    assert_eq!(
+        writer
+            .get_layer(layer.id)
+            .await
+            .unwrap()
+            .actions
+            .iter()
+            .find(|action| action.id == invoke.id)
+            .unwrap()
+            .reusable,
+        Some(true)
+    );
+    writer.complete(parent.id).await.unwrap();
+    database.close().await;
+    let reopened = GraphDatabase::open(&path).await.unwrap();
+    let inventory = reopened
+        .conversation_graph_snapshot(&[parent.id])
+        .await
+        .unwrap();
+    assert_eq!(inventory.invocations.len(), 2);
+    assert!(
+        inventory
+            .invocations
+            .iter()
+            .all(|call| call.source_action.reusable == Some(true))
+    );
+}
+
+#[tokio::test]
+async fn user_call_freezes_the_activated_layer_separately_from_definition_provenance() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("presenting-layer.sqlite3");
+    let database = GraphDatabase::open(&path).await.unwrap();
+    let parent = database
+        .create_interaction(None, ThreadId::new(914).unwrap(), "Two presentations")
+        .await
+        .unwrap();
+    let writer = database.writer_for_subgraph(parent.id).await.unwrap();
+    let (node, authored) = response(&writer, parent.id, "Root").await;
+    let invoke = writer
+        .add_action(&callable(node.id, authored.id))
+        .await
+        .unwrap();
+    let alternate = writer
+        .submit_layer(&LayerDraft {
+            client_key: "alternate".into(),
+            default_node_id: Some(node.id),
+            nodes: vec![node.id],
+            edges: vec![],
+            layout: Some(LayerLayout::v1(
+                vec![NodePlacement {
+                    node_id: node.id,
+                    x: 0.5,
+                    y: 0.5,
+                }],
+                "default",
+            )),
+            size_justification: None,
+        })
+        .await
+        .unwrap();
+    let mut link = callable(node.id, authored.id);
+    link.client_key = "alternate-view".into();
+    link.kind = ActionKind::Navigate;
+    link.relation = Some(NavigateRelation::Reference);
+    link.target_layer_id = Some(alternate.id);
+    link.interaction_text = None;
+    link.reusable = None;
+    writer.add_action(&link).await.unwrap();
+    writer.complete(parent.id).await.unwrap();
+    let (_, first) = writer
+        .prepare_user_invocation_in_layer(invoke.id, "first", &[], Some(authored.id))
+        .await
+        .unwrap();
+    let (_, second) = writer
+        .prepare_user_invocation_in_layer(invoke.id, "second", &[], Some(alternate.id))
+        .await
+        .unwrap();
+    for (call, presentation) in [(&first, authored.id), (&second, alternate.id)] {
+        assert_eq!(
+            call.action_snapshot["sourceLayerId"],
+            serde_json::json!(authored.id)
+        );
+        assert_eq!(
+            call.action_snapshot["presentingLayerId"],
+            serde_json::json!(presentation)
+        );
+        assert_eq!(call.action_snapshot["activator"], "human");
+        assert_eq!(call.action_snapshot["state"], "accepted");
+    }
+    let conflict = writer
+        .prepare_user_invocation_in_layer(invoke.id, "second", &[], Some(authored.id))
+        .await
+        .unwrap_err();
+    assert!(matches!(
+        conflict,
+        GraphError::Validation {
+            code: "invocation_key_conflict",
+            ..
+        }
+    ));
+    assert!(matches!(
+        writer
+            .prepare_user_invocation_in_layer(
+                invoke.id,
+                "bad",
+                &[],
+                Some(LayerId::new(99999).unwrap())
+            )
+            .await,
+        Err(GraphError::Validation {
+            code: "invalid_invocation_presentation",
+            ..
+        })
+    ));
+    database.close().await;
+    let reopened = GraphDatabase::open(&path).await.unwrap();
+    let inventory = reopened
+        .conversation_graph_snapshot(&[parent.id])
+        .await
+        .unwrap();
+    assert_eq!(inventory.invocations.len(), 2);
+    assert_eq!(
+        inventory.invocations[1].invocation.action_snapshot,
+        second.action_snapshot
+    );
+}

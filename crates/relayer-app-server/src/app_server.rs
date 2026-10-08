@@ -58,6 +58,16 @@ async fn reconcile_interrupted_interaction(
     permission_catalog: &PermissionCatalog,
     mut interaction: Interaction,
 ) -> Result<(), StartupReconciliationError> {
+    // A user reservation before execution owns its exact native key and immutable
+    // arguments. Startup must not reinterpret it as a legacy Invoke or mint a child;
+    // only an explicit request may finish this proven preparation-only handoff.
+    if storage
+        .user_invocation_preparation_recoverable(interaction.id)
+        .await
+        .map_err(StartupReconciliationError::retryable)?
+    {
+        return Ok(());
+    }
     // An agent's child is recovered from its own invoke occurrence whatever its parent's
     // status: its parent may already have failed, and it still has to end.
     let agent_child = storage

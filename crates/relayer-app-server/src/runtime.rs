@@ -292,6 +292,8 @@ pub(crate) struct RuntimeInvokedCompletionStart {
 pub(crate) struct RuntimeAction {
     pub(crate) id: i64,
     #[serde(default)]
+    pub(crate) source_layer_id: Option<i64>,
+    #[serde(default)]
     pub(crate) relation: Option<String>,
     #[serde(default)]
     pub(crate) resolved_invoke_interaction_id: Option<i64>,
@@ -372,12 +374,20 @@ pub(crate) struct RuntimeInteractionMetadata {
     pub(crate) input_digest: Option<String>,
 }
 
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct RuntimeInputConsumerState {
+    pub(crate) composer_eligible: bool,
+    pub(crate) editable: bool,
+}
+
 impl RuntimeClient {
     pub(crate) async fn prepare_user_invocation(
         &self,
         source: i64,
         action: i64,
         key: &str,
+        presenting_layer_id: Option<i64>,
         submitted_inputs: &[relayer_graph_core::SubmittedInputDraft],
     ) -> Result<i64, RuntimeError> {
         #[derive(Deserialize)]
@@ -385,7 +395,7 @@ impl RuntimeClient {
         struct Prepared {
             interaction_node: i64,
         }
-        let body = serde_json::json!({ "sourceInteractionNodeId": source, "actionId": action, "invocationKey": key, "submittedInputs": submitted_inputs });
+        let body = serde_json::json!({ "sourceInteractionNodeId": source, "actionId": action, "invocationKey": key, "presentingLayerId": presenting_layer_id, "submittedInputs": submitted_inputs });
         let result: Prepared = self
             .post_idempotent(
                 self.graph_url
@@ -398,6 +408,18 @@ impl RuntimeClient {
             .await?;
         Ok(result.interaction_node)
     }
+    pub(crate) async fn imported_invocation_presentations(
+        &self,
+        thread_id: i64,
+    ) -> Result<Vec<Value>, RuntimeError> {
+        Ok(serde_json::from_value(
+            self.control_get(&format!(
+                "api/control/conversation-imports/{thread_id}/invocations"
+            ))
+            .await?,
+        )?)
+    }
+
     pub(crate) async fn begin_imported_conversation(
         &self,
         input: &ImportedConversationStage,
@@ -1843,6 +1865,32 @@ impl RuntimeClient {
         &self,
         interaction_node_ids: &[i64],
     ) -> Result<relayer_graph_core::ConversationGraphSnapshot, RuntimeError> {
+        self.conversation_graph_snapshot_with_inventory(interaction_node_ids, false)
+            .await
+    }
+
+    pub(crate) async fn native_invocation_key_absent(
+        &self,
+        source: i64,
+        action: i64,
+        key: &str,
+    ) -> Result<bool, RuntimeError> {
+        let snapshot = self
+            .conversation_graph_snapshot_with_inventory(&[source], true)
+            .await?;
+        Ok(snapshot.closures.first().is_some_and(Option::is_some)
+            && !snapshot.invocations.iter().any(|call| {
+                call.invocation.source_completion_id.value() == source
+                    && call.invocation.source_action_id.value() == action
+                    && call.invocation.invocation_key == key
+            }))
+    }
+
+    async fn conversation_graph_snapshot_with_inventory(
+        &self,
+        interaction_node_ids: &[i64],
+        require_inventory: bool,
+    ) -> Result<relayer_graph_core::ConversationGraphSnapshot, RuntimeError> {
         let response = self
             .client
             .post(self.graph_url.join("api/control/accepted-closures")?)
@@ -1874,10 +1922,11 @@ impl RuntimeClient {
             ));
         }
         if value.get("invocations").is_none()
-            && closures
-                .iter()
-                .flatten()
-                .any(|closure| closure.has_reusable_invocations)
+            && (require_inventory
+                || closures
+                    .iter()
+                    .flatten()
+                    .any(|closure| closure.has_reusable_invocations))
         {
             return Err(RuntimeError::Configuration(
                 "Runtime omitted authoritative Invocation inventory for a reusable-call snapshot"
@@ -2146,6 +2195,7 @@ impl RuntimeClient {
         Ok(snapshot)
     }
 
+    #[cfg(test)]
     pub(crate) async fn canonical_input_action_occurrence(
         &self,
         destination_project_id: Option<i64>,
@@ -2164,6 +2214,58 @@ impl RuntimeClient {
                 "destinationProjectId": destination_project_id,
                 "destinationThreadId": destination_thread_id,
                 "occurrence": occurrence,
+            }))
+            .send()
+            .await?;
+        let value = response_json(response, StatusCode::OK).await?;
+        Ok(serde_json::from_value(value)?)
+    }
+
+    pub(crate) async fn canonical_input_action_consumer_state(
+        &self,
+        destination_project_id: Option<i64>,
+        destination_thread_id: i64,
+        occurrence: &relayer_graph_core::PresentingInputOccurrence,
+    ) -> Result<RuntimeInputConsumerState, RuntimeError> {
+        let response = self
+            .client
+            .post(
+                self.graph_url
+                    .join("api/control/input-action-occurrences/canonical")?,
+            )
+            .bearer_auth(&self.graph_control_token)
+            .timeout(CONTROL_REQUEST_TIMEOUT)
+            .json(&serde_json::json!({
+                "destinationProjectId": destination_project_id,
+                "destinationThreadId": destination_thread_id,
+                "occurrence": occurrence,
+                "includeConsumerState": true,
+            }))
+            .send()
+            .await?;
+        let value = response_json(response, StatusCode::OK).await?;
+        Ok(serde_json::from_value(value)?)
+    }
+
+    pub(crate) async fn canonical_editable_input_action_occurrence(
+        &self,
+        destination_project_id: Option<i64>,
+        destination_thread_id: i64,
+        occurrence: &relayer_graph_core::PresentingInputOccurrence,
+    ) -> Result<relayer_graph_core::GraphAction, RuntimeError> {
+        let response = self
+            .client
+            .post(
+                self.graph_url
+                    .join("api/control/input-action-occurrences/canonical")?,
+            )
+            .bearer_auth(&self.graph_control_token)
+            .timeout(CONTROL_REQUEST_TIMEOUT)
+            .json(&serde_json::json!({
+                "destinationProjectId": destination_project_id,
+                "destinationThreadId": destination_thread_id,
+                "occurrence": occurrence,
+                "requireEditable": true,
             }))
             .send()
             .await?;
@@ -3579,19 +3681,23 @@ mod tests {
                 let mode = observed.load(Ordering::SeqCst);
                 async move {
                     assert_eq!(headers["authorization"], "Bearer graph-control");
-                    assert_eq!(body, json!({"interactionNodeIds":[1,2]}));
+                    assert_eq!(body, if mode >= 4 { json!({"interactionNodeIds":[1]}) } else { json!({"interactionNodeIds":[1,2]}) });
+                    if mode == 5 {
+                        return (StatusCode::SERVICE_UNAVAILABLE, Json(json!({"error":"inventory unavailable"})));
+                    }
                     if mode == 3 {
                         tokio::time::sleep(Duration::from_millis(5500)).await;
                     }
-                    Json(match mode {
+                    (StatusCode::OK, Json(match mode {
                         0 | 3 => json!({"closures":[null,null]}),
-                        1 => json!({"closures":[null]}),
+                        1 | 4 => json!({"closures":[null]}),
+                        6 => json!({"closures":[null],"invocations":[]}),
                         _ => json!({"closures":[null,{
                             "nodeId":3,"interaction":{"id":3,"kind":"user-interaction","icon":"user","title":"Question","detail":"Question","state":"accepted"},
                             "rootAction":{"id":1,"sourceNodeId":3,"kind":"navigate","relation":"expand","label":"Response","variant":"pill","targetLayerId":1,"state":"accepted"},
                             "rootLayerId":1,"layers":[]
                         }]}),
-                    })
+                    }))
                 }
             }),
         )).await;
@@ -3626,6 +3732,36 @@ mod tests {
                 RuntimeError::Configuration(_)
             ));
         }
+        mode.store(4, Ordering::SeqCst);
+        assert!(
+            matches!(
+                runtime
+                    .native_invocation_key_absent(1, 41, "refused")
+                    .await
+                    .unwrap_err(),
+                RuntimeError::Configuration(_)
+            ),
+            "omitted inventory cannot certify an unspent call even for a single-call source"
+        );
+        mode.store(5, Ordering::SeqCst);
+        assert!(
+            matches!(
+                runtime
+                    .native_invocation_key_absent(1, 41, "refused")
+                    .await
+                    .unwrap_err(),
+                RuntimeError::Remote { status: 503, .. }
+            ),
+            "unavailable inventory never certifies absence"
+        );
+        mode.store(6, Ordering::SeqCst);
+        assert!(
+            !runtime
+                .native_invocation_key_absent(1, 41, "refused")
+                .await
+                .unwrap(),
+            "missing source closure never certifies absence"
+        );
         mode.store(3, Ordering::SeqCst);
         assert_eq!(
             runtime

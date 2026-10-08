@@ -372,6 +372,7 @@ pub(super) async fn get(
     )
     .await;
     let invocations = project_action_invocations(&state, &detail.action_invocations).await?;
+    let imported_history = project_imported_invocation_history(&state, detail.thread.id).await?;
     let imported_thread = detail.thread.imported;
     let mut completion_executions = std::collections::HashMap::new();
     for invocation in &detail.action_invocations {
@@ -396,6 +397,7 @@ pub(super) async fn get(
         .await?;
     let response = ThreadDetailResponse::from(detail)
         .with_action_invocations(invocations)
+        .with_imported_invocation_history(imported_history)
         .with_conversation_compatibility(Some(compatibility))
         .with_interactions(interactions)
         .with_completion_executions(completion_executions);
@@ -644,6 +646,18 @@ pub(super) async fn project_interaction(
         }
         response.set_interaction_graph(graph);
     }
+    if let Some(graph_id) = graph_node_id
+        && let Some(layer) = response.completion_root_layer_mut()
+    {
+        super::input_drafts::project_layer_input_availability(
+            state,
+            thread_id,
+            graph_id,
+            layer,
+            graph_deadline,
+        )
+        .await?;
+    }
     Ok(response)
 }
 
@@ -692,6 +706,113 @@ async fn project_interactions(
     Ok(responses)
 }
 
+/// Project validated imported inventory as viewing data, never authoritative
+/// Product invocations. Local identities come only from the inert import mapping.
+pub(super) async fn project_imported_invocation_history(
+    state: &ApiState,
+    thread_id: ThreadId,
+) -> Result<Vec<super::types::ImportedInvocationHistoryResponse>, ApiError> {
+    let records = state
+        .product
+        .imported_invocation_export_records(thread_id)
+        .await?;
+    if records.is_empty() {
+        return Ok(Vec::new());
+    }
+    let turns = state
+        .product
+        .imported_turn_export_records(thread_id)
+        .await?;
+    let mappings = match &state.runtime {
+        Some(runtime) => match tokio::time::timeout_at(
+            super::interaction_graph::projection_deadline(),
+            runtime.imported_invocation_presentations(thread_id.value()),
+        )
+        .await
+        {
+            Ok(Ok(mappings)) => mappings,
+            // Portable history remains readable while local graph presentation
+            // is unavailable. Unknown local IDs never become capabilities.
+            _ => Vec::new(),
+        },
+        None => Vec::new(),
+    };
+    let assets = state
+        .product
+        .imported_invocation_asset_contents(thread_id)
+        .await?;
+    let mut history = Vec::with_capacity(records.len());
+    for record in records {
+        let mapping = mappings
+            .iter()
+            .find(|mapping| mapping["invocationId"].as_str() == Some(record.id.as_str()));
+        let source_graph_id =
+            mapping.and_then(|mapping| mapping["sourceInteractionNodeId"].as_i64());
+        let source_interaction_id = turns
+            .iter()
+            .find(|turn| {
+                turn.turn.interaction_node_id.as_deref()
+                    == Some(record.source.interaction_node_id.as_str())
+            })
+            .map(|turn| turn.interaction_id);
+        let source_verified =
+            if let (Some(id), Some(graph_id)) = (source_interaction_id, source_graph_id) {
+                state.product.get_interaction(id).await?.graph_node_id == Some(graph_id)
+            } else {
+                false
+            };
+        let result_interaction_id = record.result_turn_id.as_ref().and_then(|id| {
+            turns
+                .iter()
+                .find(|turn| &turn.source_turn_id == id)
+                .map(|turn| turn.interaction_id.value())
+        });
+        fn collect_pins(value: &Value, pins: &mut std::collections::HashSet<String>) {
+            match value {
+                Value::Object(fields) => {
+                    if let Some(Value::String(digest)) = fields.get("digestSha256") {
+                        pins.insert(digest.clone());
+                    }
+                    for value in fields.values() {
+                        collect_pins(value, pins);
+                    }
+                }
+                Value::Array(values) => {
+                    for value in values {
+                        collect_pins(value, pins);
+                    }
+                }
+                _ => {}
+            }
+        }
+        let mut pins = std::collections::HashSet::new();
+        collect_pins(
+            &serde_json::to_value(&record)
+                .map_err(|_| ApiError::internal("imported history serialization failed"))?,
+            &mut pins,
+        );
+        let visual_asset_contents = assets
+            .iter()
+            .filter(|asset| pins.contains(&asset.digest_sha256))
+            .cloned()
+            .collect();
+        history.push(super::types::ImportedInvocationHistoryResponse {
+            inert: true,
+            thread_id: thread_id.value(),
+            source_interaction_id: source_verified.then(|| source_interaction_id.unwrap().value()),
+            source_node_id: if source_verified {
+                mapping.and_then(|mapping| mapping["sourceNodeId"].as_i64())
+            } else {
+                None
+            },
+            result_interaction_id,
+            record,
+            visual_asset_contents,
+        });
+    }
+    Ok(history)
+}
+
 /// Durable call identity and permission to repeat an action are separate facts.
 /// Policy is projected only from an exact graph-owned frozen call snapshot.
 pub(super) async fn project_action_invocations(
@@ -702,6 +823,18 @@ pub(super) async fn project_action_invocations(
     let mut responses = Vec::with_capacity(invocations.len());
     for invocation in invocations {
         let mut response = ActionInvocationResponse::from(invocation.clone());
+        response.preparation_recoverable = state
+            .product
+            .user_invocation_preparation_recoverable(invocation.result_interaction_id)
+            .await?;
+        response.preparation_rejected = state
+            .product
+            .user_invocation_preparation_rejected(invocation.result_interaction_id)
+            .await?;
+        response.presenting_layer_id = state
+            .product
+            .invocation_presentation(invocation.result_interaction_id)
+            .await?;
         if invocation.durable
             && let Some(runtime) = &state.runtime
         {
@@ -724,6 +857,11 @@ pub(super) async fn project_action_invocations(
             {
                 // A missing historical policy remains unknown. It never
                 // grants repeat-use authority; GraphComplete owns admission.
+                response.presenting_layer_id = response.presenting_layer_id.or_else(|| {
+                    call.action_snapshot
+                        .get("presentingLayerId")
+                        .and_then(Value::as_i64)
+                });
                 response.reusable = call
                     .action_snapshot
                     .get("reusable")
@@ -1165,7 +1303,16 @@ pub(super) async fn get_layer(
         .runtime
         .as_ref()
         .ok_or_else(|| ApiError::invalid("GraphComplete runtime is unavailable"))?;
-    Ok(Json(runtime.get_layer(graph_node_id, layer_id).await?))
+    let mut layer = runtime.get_layer(graph_node_id, layer_id).await?;
+    super::input_drafts::project_layer_input_availability(
+        &state,
+        thread_id,
+        graph_node_id,
+        &mut layer,
+        super::interaction_graph::projection_deadline(),
+    )
+    .await?;
+    Ok(Json(layer))
 }
 
 #[derive(Deserialize)]
@@ -1685,6 +1832,10 @@ async fn launch_prepared_child(
             ));
         }
         crate::runtime::RuntimeAction {
+            source_layer_id: call
+                .action_snapshot
+                .get("sourceLayerId")
+                .and_then(Value::as_i64),
             id: call.source_action_id.value(),
             reusable: call
                 .action_snapshot
@@ -3203,6 +3354,7 @@ async fn resume_unwinding_children_until_ended(
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(super) struct InvokeActionRequest {
     input_draft_revision: Option<i64>,
+    presenting_layer_id: Option<i64>,
 }
 
 pub(super) async fn invoke_action(
@@ -3217,13 +3369,15 @@ pub(super) async fn invoke_action(
         .and_then(|value| value.to_str().ok())
         .map(str::to_owned)
         .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+    let request = request.map(|request| request.0).unwrap_or_default();
     let result = invoke_action_with_authority(
         &state,
         thread_id,
         interaction_id,
         action_id,
         &invocation_key,
-        request.and_then(|request| request.0.input_draft_revision),
+        request.input_draft_revision,
+        request.presenting_layer_id,
     )
     .await;
     if let Err(error) = &result {
@@ -3239,6 +3393,7 @@ async fn invoke_action_with_authority(
     action_id: i64,
     invocation_key: &str,
     input_draft_revision: Option<i64>,
+    presenting_layer_id: Option<i64>,
 ) -> Result<(StatusCode, Json<InvokeActionResponse>), ApiError> {
     let thread_id = ThreadId::try_from(thread_id)?;
     let source_interaction_id = InteractionId::try_from(interaction_id)?;
@@ -3288,6 +3443,51 @@ async fn invoke_action_with_authority(
         .await?
         .has_completion_contract
     {
+        // A default call interrupted before execution handoff recovers its reserved
+        // identity even if a fresh click supplied another UUID. Started work is never retried here.
+        let exact = state
+            .product
+            .user_invocation_reservation(source_interaction_id, action_id, Some(invocation_key))
+            .await?;
+        if let Some(exact) = &exact
+            && state
+                .product
+                .user_invocation_preparation_rejected(exact.interaction.id)
+                .await?
+        {
+            return Err(ApiError::invalid(
+                "Rejected invocation preparation requires a fresh key",
+            ));
+        }
+        let recovered = if exact.is_none() && action.reusable == Some(false) {
+            state
+                .product
+                .user_invocation_reservation(source_interaction_id, action_id, None)
+                .await?
+        } else {
+            None
+        };
+        let prior = exact.as_ref().or(recovered.as_ref());
+        let invocation_key = prior
+            .map(|prior| prior.invocation.invocation_key.as_str())
+            .unwrap_or(invocation_key);
+        let frozen_layer = match prior {
+            Some(prior) => {
+                state
+                    .product
+                    .invocation_presentation(prior.interaction.id)
+                    .await?
+            }
+            None => None,
+        };
+        if exact.is_some() && presenting_layer_id.is_some() && frozen_layer != presenting_layer_id {
+            return Err(ApiError::invalid(
+                "Invocation presenting layer changed for the same key",
+            ));
+        }
+        let presenting_layer_id = frozen_layer
+            .or(presenting_layer_id)
+            .or(action.source_layer_id);
         let existing_submission = state
             .product
             .invocation_input_submission(
@@ -3299,10 +3499,19 @@ async fn invoke_action_with_authority(
             .await?;
         // Exact retry after clearing uses the original submission epochs and arguments.
         let mut submitted_attachments = match &existing_submission {
-            Some((revision, attachments)) if *revision == input_draft_revision => {
+            Some((revision, attachments))
+                if recovered.is_some()
+                    || input_draft_revision.is_none()
+                    || *revision == input_draft_revision =>
+            {
                 attachments.clone()
             }
-            _ => match input_draft_revision {
+            Some(_) => {
+                return Err(ApiError::invalid(
+                    "Invocation input revision changed for the same key",
+                ));
+            }
+            None => match input_draft_revision {
                 Some(revision) => {
                     state
                         .product
@@ -3319,10 +3528,58 @@ async fn invoke_action_with_authority(
         });
         let submitted_inputs =
             crate::product::ProductService::invocation_arguments(&submitted_attachments)?;
-        let node = runtime
-            .prepare_user_invocation(graph_node_id, action_id, invocation_key, &submitted_inputs)
+        let receipt_revision = existing_submission
+            .as_ref()
+            .map(|(revision, _)| *revision)
+            .unwrap_or(input_draft_revision);
+        let reservation = state
+            .product
+            .reserve_user_action_invocation(
+                source_interaction_id,
+                action_id,
+                &interaction_text,
+                invocation_key,
+                presenting_layer_id,
+                receipt_revision,
+                &submitted_attachments,
+            )
             .await?;
-        let outcome = state
+        let node = match runtime
+            .prepare_user_invocation(
+                graph_node_id,
+                action_id,
+                invocation_key,
+                presenting_layer_id,
+                &submitted_inputs,
+            )
+            .await
+        {
+            Ok(node) => node,
+            Err(error) => {
+                // A deterministic preparation rejection spends no graph call. Preserve
+                // the refused receipt and draft, releasing admission for a fresh request.
+                if let RuntimeError::Remote {
+                    status: status @ (400 | 401 | 403 | 404 | 409 | 422),
+                    ..
+                } = &error
+                    && runtime
+                        .native_invocation_key_absent(graph_node_id, action_id, invocation_key)
+                        .await
+                        .unwrap_or(false)
+                {
+                    state
+                        .product
+                        .reject_user_invocation_preparation(
+                            reservation.interaction.id,
+                            *status,
+                            &error.to_string(),
+                        )
+                        .await?;
+                }
+                return Err(error.into());
+            }
+        };
+        let mut outcome = state
             .product
             .invoke_user_durable_action_with_inputs(
                 source_interaction_id,
@@ -3334,36 +3591,16 @@ async fn invoke_action_with_authority(
                 &submitted_attachments,
             )
             .await?;
-        let consumed = state
-            .product
-            .invocation_input_submission(
-                thread_id,
-                source_interaction_id,
-                action_id,
-                invocation_key,
-            )
-            .await?;
-        let result_id = outcome.interaction.id;
+        outcome.created = reservation.created;
+        // Native binding and captured-epoch consumption committed together above.
         let (status, mut response) = spawn_action_handoff(state.clone(), thread, outcome).await?;
-        let result_status = state
-            .product
-            .get_interaction(result_id)
-            .await?
-            .completion_status;
-        if let Some((_, consumed)) =
-            consumed.filter(|_| !matches!(result_status.as_str(), "failed" | "stopped"))
-        {
-            response.0.input_draft = Some(
-                super::input_drafts::scoped_response(
-                    state,
-                    state
-                        .product
-                        .consume_invocation_inputs(thread_id, &consumed)
-                        .await?,
-                )
-                .await?,
-            );
-        }
+        response.0.input_draft = Some(
+            super::input_drafts::scoped_response(
+                state,
+                state.product.action_input_draft(thread_id).await?,
+            )
+            .await?,
+        );
         return Ok((status, response));
     }
     if action.reusable == Some(true) || !action.input_action_ids.is_empty() {

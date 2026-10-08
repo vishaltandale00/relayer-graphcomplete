@@ -301,6 +301,46 @@ impl crate::GraphDatabase {
         .unwrap_or_else(|| Ok(Vec::new()))
     }
 
+    /// Exact local presentation identities for portable call history. This does
+    /// not construct a durable invocation or an execution capability.
+    pub async fn imported_invocation_presentations(
+        &self,
+        thread_id: ThreadId,
+    ) -> Result<Vec<serde_json::Value>, GraphError> {
+        let records = self.imported_invocation_evidence(thread_id).await?;
+        let mut connection = self.storage.acquire().await?;
+        let mut presentations = Vec::with_capacity(records.len());
+        for record in records {
+            let source = record["source"]["interactionNodeId"].as_str().unwrap_or("");
+            let parent = record["source"]["parentNodeId"].as_str().unwrap_or("");
+            let source_id: Option<i64> = sqlx::query_scalar(
+                "SELECT n.id FROM nodes n JOIN completion_authorities authority ON authority.interaction_node_id=n.id
+                 WHERE n.thread_id=?1 AND n.client_key=?2 AND authority.read_entitlement='imported-read-only'",
+            ).bind(thread_id.value()).bind(source).fetch_optional(&mut *connection).await?;
+            let parent_id: Option<i64> = if let Some(source_id) = source_id {
+                sqlx::query_scalar(
+                    "SELECT n.id FROM nodes n WHERE n.thread_id=?1 AND n.client_key=?2
+                     AND (n.id=?3 OR EXISTS(
+                         SELECT 1 FROM imported_node_client_keys keys JOIN graph_imports imported ON imported.import_id=keys.import_id
+                         WHERE keys.node_id=n.id AND imported.thread_id=?1))",
+                )
+                .bind(thread_id.value())
+                .bind(parent)
+                .bind(source_id)
+                .fetch_optional(&mut *connection)
+                .await?
+            } else {
+                None
+            };
+            presentations.push(serde_json::json!({
+                "invocationId": record["id"],
+                "sourceInteractionNodeId": source_id,
+                "sourceNodeId": parent_id,
+            }));
+        }
+        Ok(presentations)
+    }
+
     pub async fn begin_imported_conversation(
         &self,
         input: &ImportedConversationStage,

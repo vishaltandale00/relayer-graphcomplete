@@ -27,10 +27,14 @@ describe("typed Node Detail authoring compiler", () => {
     const inputIds = [21, 22];
     const action = { kind: "invoke", label: "Compare", interactionText: "Update comparison", sourceLayer: layer, clientKey: "compare", inputActions: inputIds } satisfies ActionObject;
     owner.detailAuthoring.setComponent("compare", html`<button gc=${detailCapability.invoke("compare", action)}>Compare</button>`);
+    for (const id of inputIds) {
+      const input: InputActionObject = { kind: "input", clientKey: `input-${id}`, sourceLayer: layer, label: "Destination", control: "text", prompt: "Destination", ref: { id, sourceNodeId: 1, kind: "input", label: "Destination", variant: "pill", state: "accepted" } };
+      owner.detailAuthoring.setComponent(`field-${id}`, html`<input gc=${detailCapability.input(`input-${id}`, input)}>`);
+    }
     const snapshot = snapshotAuthoredNodeDetailProgram(owner.detailAuthoring, { object: owner, clientKey: owner.clientKey });
     inputIds[0] = 99;
     expect(snapshot.components[0]?.markup.bindings[0]).toMatchObject({ capability: { capability: { action: { inputActions: [21, 22], reusable: false } } } });
-    expect(() => owner.detailAuthoring.checkpoint()).not.toThrow();
+    expect(() => owner.detailAuthoring.checkpoint()).toThrow(DetailCompilationError);
   });
 
   it.each([true, false, "true"])("freezes only boolean Invoke reuse policy (%s)", (reusable) => {

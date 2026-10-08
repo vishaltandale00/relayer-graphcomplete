@@ -760,6 +760,7 @@ pub(crate) mod tests {
             await rename(readyFileTemp, readyFile);
             process.on("SIGTERM", () => { void running.close().then(() => process.exit(0)); });
         "#;
+        let stderr_file = directory.path().join("visual-assets-host-stderr.log");
         let mut child = Command::new("node")
             .arg("--input-type=module")
             .arg("-e")
@@ -771,7 +772,9 @@ pub(crate) mod tests {
             .current_dir(root)
             .stdin(Stdio::null())
             .stdout(Stdio::null())
-            .stderr(Stdio::null())
+            .stderr(
+                fs::File::create(&stderr_file).expect("capture visual-assets startup diagnostics"),
+            )
             .spawn()
             .expect("start the real visual-assets host");
         for _ in 0..100 {
@@ -780,13 +783,15 @@ pub(crate) mod tests {
                 return (directory, ChildGuard(child), url, token);
             }
             if let Some(status) = child.try_wait().unwrap() {
-                panic!("real visual-assets host exited during startup: {status}");
+                let diagnostics = fs::read_to_string(&stderr_file).unwrap_or_default();
+                panic!("real visual-assets host exited during startup: {status}\n{diagnostics}");
             }
             std::thread::sleep(std::time::Duration::from_millis(50));
         }
         let _ = child.kill();
         let _ = child.wait();
-        panic!("real visual-assets host did not become ready");
+        let diagnostics = fs::read_to_string(&stderr_file).unwrap_or_default();
+        panic!("real visual-assets host did not become ready\n{diagnostics}");
     }
 
     fn request(method: &str, cookie: &str, body: impl Into<Body>) -> Request<Body> {

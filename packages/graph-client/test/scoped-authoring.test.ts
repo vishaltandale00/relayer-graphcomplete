@@ -155,6 +155,21 @@ describe("scoped graph authoring", () => {
     expect(input.ref?.id).toBe(result.actions.find(action => action.kind === "input")!.id);
   });
 
+  it("binds explicit accepted Input records through their canonical IDs without dependency writes", async () => {
+    const fixture = wire();
+    const author = client().authoring("accepted-input");
+    const layer = author.layer("plan");
+    const node = layer.node("plan", { icon: "compass", title: "Plan", detail: "Inputs" });
+    const accepted = { id: 99, kind: "input", state: "accepted", sourceNodeId: 10, label: "Destination", variant: "pill", control: "text", prompt: "Destination" } as const;
+    layer.action("analyze", node, { kind: "invoke", label: "Analyze", interactionText: "Analyze", inputActions: [accepted] });
+    layer.layout([[node, .5, .5]], { edgeShape: "default" });
+    const pending = author.write(layer);
+    Reflect.set(accepted, "id", 999);
+    await pending;
+    expect(fixture.requests.filter(({ body }) => body.kind === "input")).toEqual([]);
+    expect(fixture.requests.find(({ body }) => body.kind === "invoke")!.body.inputActionIds).toEqual([99]);
+  });
+
   it("rejects forged, cross-source and cross-layer scoped Input declarations before transport", async () => {
     for (const invalidBinding of ["forged", "cross-source", "cross-layer", "changed-layer"] as const) {
       const fixture = wire();

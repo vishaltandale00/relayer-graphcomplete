@@ -502,11 +502,11 @@ export function snapshotAuthoredNodeDetailProgram(
     const capability = binding.capability.capability;
     if (!capability || capability.kind !== "invoke") continue;
     for (const input of (capability.action.inputActions ?? []) as readonly (number | MaterializedAction)[]) {
-      if (typeof input === "number") continue;
-      const origin = ACTION_ORIGINS.get(input);
-      const declaration = origin && mounted.get(origin);
-      if (!declaration || declaration.kind !== "input" || !isMaterializedSourceLayer(input.sourceLayer) || !input.sourceLayer.containsOwner
-        || capabilityValidationCodes({ kind: "input", key: String(input.clientKey), action: input }, owner?.clientKey, false).length) {
+      const origin = typeof input === "number" ? undefined : ACTION_ORIGINS.get(input);
+      const matches = typeof input === "number" ? [...mounted.values()].filter(action => ACTION_IDS.get(action) === input) : [];
+      const declaration = typeof input === "number" ? matches.length === 1 ? matches[0] : undefined : origin && mounted.get(origin);
+      if (!declaration || declaration.kind !== "input" || !isMaterializedSourceLayer(declaration.sourceLayer) || !declaration.sourceLayer.containsOwner
+        || capabilityValidationCodes({ kind: "input", key: String(declaration.clientKey), action: declaration }, owner?.clientKey, false).length) {
         invalidNodeDetailProgram("input_reference_invalid", component.id, "inputActions", "Invoke must reference an exact mounted Input declaration on its source Node");
       }
     }
@@ -1635,6 +1635,8 @@ function hasExactDescriptorFields(
 }
 
 const ACTION_ORIGINS = new WeakMap<object, object>();
+// Capture the canonical reference alongside the declaration, before later edits.
+const ACTION_IDS = new WeakMap<object, number>();
 
 function materializeAction(value: unknown, owner: NodeObject | undefined, repairSource?: NodeObject): MaterializedAction | undefined {
   if (!isOrdinaryRecord(value)) return undefined;
@@ -1660,6 +1662,11 @@ function materializeAction(value: unknown, owner: NodeObject | undefined, repair
   }
   if (snapshot.kind === "invoke" && snapshot.reusable === undefined) snapshot.reusable = false;
   ACTION_ORIGINS.set(snapshot, value);
+  if (isOrdinaryRecord(snapshot.ref)) {
+    const id = Object.getOwnPropertyDescriptor(snapshot.ref, "id")?.value;
+    const kind = Object.getOwnPropertyDescriptor(snapshot.ref, "kind")?.value;
+    if (Number.isSafeInteger(id) && id > 0 && kind === snapshot.kind) ACTION_IDS.set(snapshot, id);
+  }
   return Object.freeze(snapshot);
 }
 

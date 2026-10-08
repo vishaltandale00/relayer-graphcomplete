@@ -301,6 +301,10 @@ impl InteractionResponse {
         Ok(())
     }
 
+    pub(super) fn completion_root_layer_mut(&mut self) -> Option<&mut serde_json::Value> {
+        self.completion_output.as_mut()?.get_mut("rootLayer")
+    }
+
     pub(crate) fn set_submitted_inputs(
         &mut self,
         submitted_inputs: Vec<relayer_graph_core::SubmittedInput>,
@@ -391,9 +395,27 @@ mod attempt_response_tests {
     }
 }
 
+/// Imported call history has portable frozen data and optional local viewing
+/// identities. It is deliberately outside executable action invocation state.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ImportedInvocationHistoryResponse {
+    pub(super) inert: bool,
+    pub(super) thread_id: i64,
+    pub(super) source_interaction_id: Option<i64>,
+    pub(super) source_node_id: Option<i64>,
+    pub(super) result_interaction_id: Option<i64>,
+    pub(super) record: crate::conversation_export::ExportInvocation,
+    pub(super) visual_asset_contents: Vec<crate::conversation_export::ExportVisualAssetContent>,
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct ActionInvocationResponse {
+    pub(super) preparation_recoverable: bool,
+    pub(super) preparation_rejected: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(super) presenting_layer_id: Option<i64>,
     pub(super) durable: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(super) reusable: Option<bool>,
@@ -412,6 +434,9 @@ pub(crate) struct ActionInvocationResponse {
 impl From<ActionInvocation> for ActionInvocationResponse {
     fn from(invocation: ActionInvocation) -> Self {
         Self {
+            preparation_recoverable: false,
+            preparation_rejected: false,
+            presenting_layer_id: None,
             durable: invocation.durable,
             reusable: (!invocation.durable).then_some(false),
             invocation_key: invocation.invocation_key,
@@ -555,6 +580,7 @@ pub(crate) struct ProductStateResponse {
     threads: Vec<ThreadViewResponse>,
     interactions: Vec<InteractionResponse>,
     action_invocations: Vec<ActionInvocationResponse>,
+    imported_invocation_history: Vec<ImportedInvocationHistoryResponse>,
     approvals: Vec<ApprovalReceipt>,
     capabilities: CapabilitiesResponse,
     current_projection: Option<relayer_graph_core::CurrentProjectionPage>,
@@ -602,6 +628,7 @@ impl From<ProductState> for ProductStateResponse {
     fn from(state: ProductState) -> Self {
         Self {
             conversation_compatibility: None,
+            imported_invocation_history: Vec::new(),
             projects: state.projects.into_iter().map(Into::into).collect(),
             threads: state.threads.into_iter().map(Into::into).collect(),
             interactions: state.interactions.into_iter().map(Into::into).collect(),
@@ -625,6 +652,7 @@ pub(crate) struct ThreadDetailResponse {
     thread: ThreadResponse,
     interactions: Vec<InteractionResponse>,
     action_invocations: Vec<ActionInvocationResponse>,
+    imported_invocation_history: Vec<ImportedInvocationHistoryResponse>,
     approvals: Vec<ApprovalReceipt>,
 }
 
@@ -632,6 +660,7 @@ impl From<ThreadDetail> for ThreadDetailResponse {
     fn from(detail: ThreadDetail) -> Self {
         Self {
             conversation_compatibility: None,
+            imported_invocation_history: Vec::new(),
             thread: detail.thread.into(),
             interactions: detail.interactions.into_iter().map(Into::into).collect(),
             action_invocations: detail
@@ -770,6 +799,14 @@ mod tests {
 }
 
 impl ProductStateResponse {
+    pub(crate) fn with_imported_invocation_history(
+        mut self,
+        history: Vec<ImportedInvocationHistoryResponse>,
+    ) -> Self {
+        self.imported_invocation_history = history;
+        self
+    }
+
     pub(crate) fn with_action_invocations(
         mut self,
         invocations: Vec<ActionInvocationResponse>,
@@ -780,6 +817,14 @@ impl ProductStateResponse {
 }
 
 impl ThreadDetailResponse {
+    pub(crate) fn with_imported_invocation_history(
+        mut self,
+        history: Vec<ImportedInvocationHistoryResponse>,
+    ) -> Self {
+        self.imported_invocation_history = history;
+        self
+    }
+
     pub(crate) fn with_action_invocations(
         mut self,
         invocations: Vec<ActionInvocationResponse>,

@@ -76,6 +76,21 @@ it.each(["unmounted", "alias", "cross-node"])("rejects %s visual Input reference
   expect(() => snapshotAuthoredNodeDetailProgram(node.detailAuthoring, { object: node, clientKey: node.clientKey })).toThrow();
 });
 
+it("requires a numeric visual binding to identify an exact mounted Input on the owner", () => {
+  const { node, input, invoke } = fixture();
+  input.ref = { id: 30, sourceNodeId: 10, kind: "input", label: "Destination", variant: "pill", state: "accepted" };
+  const numeric = { ...invoke, inputActions: [30] };
+  node.detailAuthoring.setComponent("button", html`<button gc=${detailCapability.invoke("analyze", numeric)}>Analyze</button>`);
+  expect(() => snapshotAuthoredNodeDetailProgram(node.detailAuthoring, { object: node, clientKey: node.clientKey })).toThrow();
+  node.detailAuthoring.setComponent("field", html`<input gc=${detailCapability.input("destination", input)}>`);
+  expect(() => snapshotAuthoredNodeDetailProgram(node.detailAuthoring, { object: node, clientKey: node.clientKey })).not.toThrow();
+  input.ref = { ...input.ref, kind: "invoke" };
+  expect(() => snapshotAuthoredNodeDetailProgram(node.detailAuthoring, { object: node, clientKey: node.clientKey })).toThrow();
+  input.ref = { ...input.ref, kind: "input" };
+  node.detailAuthoring.setComponent("button", html`<button gc=${detailCapability.invoke("analyze", { ...numeric, inputActions: [31] })}>Analyze</button>`);
+  expect(() => snapshotAuthoredNodeDetailProgram(node.detailAuthoring, { object: node, clientKey: node.clientKey })).toThrow();
+});
+
 it("preserves exact declaration references when reusing a same-node repair template", async () => {
   const { node, input, invoke, graph } = fixture();
   graph.bindNode(node);
