@@ -70,6 +70,43 @@
       "name": "web.log",
       "sha256": "f746713839c90f903bee8390c7fff5033a8fc46ded8d0e5c98bc4f4953e7c3eb",
       "bytes": 4328
+    },
+    {
+      "name": "check-evidence.log",
+      "sha256": "9b5e6197d5d34065b22ad9edf258f82dd875a395915df7f1d8ef738bdd484c2b",
+      "bytes": 126842
+    },
+    {
+      "name": "build-evidence.log",
+      "sha256": "d3d9f5d2108b97264c43e9fdfa10b074ef518d92194116ffdfbd7baf12382989",
+      "bytes": 2040
     }
-  ]
+  ],
+  "evidenceCommitVerification": {
+    "recordedAt": "2026-10-08T09:54:23.454077+00:00",
+    "candidateSourceCommit": "85c72aa5104a790389ed4a64ebdb5e09522107f2",
+    "sourceDigest": "554dc28315ea930875c0bb9bd49c23e34526c9ca31f29bbb7f00aa6d5c935225",
+    "changeScope": "Only public evidence/report files after the candidate commit; executable/config/test bytes unchanged",
+    "check": {
+      "status": "PASS",
+      "processExitCode": 0,
+      "vitestFilesPassed": 301,
+      "vitestFilesSkipped": 1,
+      "vitestTestsPassed": 3762,
+      "vitestTestsSkipped": 3,
+      "secretBoundaryTestsPassed": 2,
+      "pythonTestsPassed": 74,
+      "rustAndClippy": "PASS",
+      "receiptLint": "PASS",
+      "prdReadability": "PASS",
+      "log": "check-evidence.log"
+    },
+    "build": {
+      "status": "PASS",
+      "processExitCode": 0,
+      "nativeAndTypeScriptPackages": "PASS",
+      "log": "build-evidence.log"
+    },
+    "heavyProofReuse": "Earlier compiled-runtime 4/4 and all declared browser chapters apply to the unchanged executable digest; not rerun for evidence-only edits."
+  }
 }

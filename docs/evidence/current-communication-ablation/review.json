@@ -17,6 +17,43 @@
       "Missing revisions/captures/invalid ratings unknown",
       "Order rotated but not completely balanced",
       "Source or helper changes invalidate corresponding review assertion"
+    ],
+    "finalGraderSha256": "5d8e6886aa8b847ea0937f498a11d9245d97028eac2dd05b65a4f6840332f7fd",
+    "finalQualification": "PASS: unique actual native thread/model/effort contexts; failed initial header qualification retained"
+  },
+  "sealedEvidenceReview": {
+    "reviewer": "/root/design_authority_review",
+    "candidateSourceCommit": "85c72aa5104a790389ed4a64ebdb5e09522107f2",
+    "sourceDigest": "554dc28315ea930875c0bb9bd49c23e34526c9ca31f29bbb7f00aa6d5c935225",
+    "verdict": "PASS",
+    "scope": "24 scheduled singleton terminal executions;220 artifact comparisons;5 helper hashes;325 judge artifact receipts;59 passing gate references;native deliveries/current revisions;24 rater rollout and PNG bindings",
+    "sealedReceiptSha256": "552c75726f16330400050cc43000fc83774464cfc8a88e4ef50dcb59cd1f6151",
+    "summarySha256": "f800c7d4d9e7d2847fd3710a8239f97cbdd58d8227ddf28d39269f122e81e83b",
+    "ratingsSha256": "ad868227f82d85c44ad01ec5eb8a26767c1d23f0637633a7cba433e3445a903d",
+    "unresolvedFindings": [],
+    "limits": [
+      "Backend timing is not renderer timing",
+      "Errors partial, exact totals unknown",
+      "13 missing final grades;qualitative task scores unavailable",
+      "Overview only;no inspector/full interaction",
+      "No causal or broad non-regression conclusion"
+    ]
+  },
+  "publicReportReview": {
+    "reviewer": "/root/design_authority_review",
+    "candidateSourceCommit": "85c72aa5104a790389ed4a64ebdb5e09522107f2",
+    "sourceDigest": "554dc28315ea930875c0bb9bd49c23e34526c9ca31f29bbb7f00aa6d5c935225",
+    "scope": "Public report fidelity against sealed data: Return/Advance counts, mandatory gates, partial incidents, unavailable final scores, all first-view ratings; verification receipts reviewed separately",
+    "verdict": "PASS",
+    "publicEvidenceSha256": {
+      "results.json": "4b3862a760e4356d70dadf91921cf70414f25ab27335799dc994a47ca645ec36",
+      "first-view-results.json": "ba497d35c2e3de10c8c09c84af3c6f8e30d95318731c421bb167c4fc3f49c12e",
+      "measurement-receipt.json": "8d027103f64f2978a5ffebe1dcae610fd0d2ada734ba23dd57240df956309063"
+    },
+    "unresolvedFindings": [],
+    "limits": [
+      "No causal, rendered-TTFG or non-regression conclusion",
+      "Pending evidence-commit check/build excluded from this review"
     ]
   }
 }

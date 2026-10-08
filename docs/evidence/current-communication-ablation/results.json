@@ -1,0 +1,1743 @@
+{
+  "candidateSourceCommit": "85c72aa5104a790389ed4a64ebdb5e09522107f2",
+  "sourceDigest": "554dc28315ea930875c0bb9bd49c23e34526c9ca31f29bbb7f00aa6d5c935225",
+  "protocolSha256": "0ad28bc2885b8ee7dd85d44ee46d0df8f41cb5007272d43fa9d23f3da34af832",
+  "metricAvailability": {
+    "terminalAttempts": 24,
+    "taskCheckResults": 24,
+    "qualitativeTaskScores": 0,
+    "completedGraphScores": 11,
+    "observedAuthoringCounts": 24,
+    "firstBackendPublicationTimes": 24
+  },
+  "summary": [
+    {
+      "caseId": "autonomous.h3.sanitize-status-code",
+      "cell": "a",
+      "attempts": 3,
+      "executionStatuses": {
+        "failed": 2,
+        "passed": 1
+      },
+      "taskChecksPassed": 3,
+      "taskQualitativeScored": 0,
+      "graphQuality": {
+        "n": 1,
+        "missing": 2,
+        "values": [
+          4
+        ],
+        "median": 4,
+        "min": 4,
+        "max": 4,
+        "mean": 4
+      },
+      "answerQuality": {
+        "n": 1,
+        "missing": 2,
+        "values": [
+          5
+        ],
+        "median": 5,
+        "min": 5,
+        "max": 5,
+        "mean": 5
+      },
+      "firstBackendPublicationSeconds": {
+        "n": 3,
+        "missing": 0,
+        "values": [
+          38.9,
+          53.3,
+          57.9
+        ],
+        "median": 53.3,
+        "min": 38.9,
+        "max": 57.9,
+        "mean": 50.03
+      },
+      "acceptedBackendPublicationSeconds": {
+        "n": 3,
+        "missing": 0,
+        "values": [
+          38.9,
+          53.3,
+          57.9
+        ],
+        "median": 53.3,
+        "min": 38.9,
+        "max": 57.9,
+        "mean": 50.03
+      },
+      "observedAuthoringErrors": {
+        "n": 3,
+        "missing": 0,
+        "values": [
+          1,
+          0,
+          0
+        ],
+        "median": 0,
+        "min": 0,
+        "max": 1,
+        "mean": 0.33
+      },
+      "naturalAuthoringByCause": {
+        "client": 1
+      },
+      "scoreCeilings": [
+        null,
+        6,
+        null
+      ],
+      "identityGapSamples": 0,
+      "failedOrUnavailableGraphReviews": 2
+    },
+    {
+      "caseId": "autonomous.h3.sanitize-status-code",
+      "cell": "b",
+      "attempts": 3,
+      "executionStatuses": {
+        "passed": 2,
+        "failed": 1
+      },
+      "taskChecksPassed": 3,
+      "taskQualitativeScored": 0,
+      "graphQuality": {
+        "n": 2,
+        "missing": 1,
+        "values": [
+          2,
+          3
+        ],
+        "median": 2.5,
+        "min": 2,
+        "max": 3,
+        "mean": 2.5
+      },
+      "answerQuality": {
+        "n": 2,
+        "missing": 1,
+        "values": [
+          3,
+          3
+        ],
+        "median": 3,
+        "min": 3,
+        "max": 3,
+        "mean": 3
+      },
+      "firstBackendPublicationSeconds": {
+        "n": 3,
+        "missing": 0,
+        "values": [
+          52.1,
+          88.8,
+          46.9
+        ],
+        "median": 52.1,
+        "min": 46.9,
+        "max": 88.8,
+        "mean": 62.6
+      },
+      "acceptedBackendPublicationSeconds": {
+        "n": 3,
+        "missing": 0,
+        "values": [
+          52.1,
+          88.8,
+          46.9
+        ],
+        "median": 52.1,
+        "min": 46.9,
+        "max": 88.8,
+        "mean": 62.6
+      },
+      "observedAuthoringErrors": {
+        "n": 3,
+        "missing": 0,
+        "values": [
+          0,
+          0,
+          0
+        ],
+        "median": 0,
+        "min": 0,
+        "max": 0,
+        "mean": 0
+      },
+      "naturalAuthoringByCause": {},
+      "scoreCeilings": [
+        6,
+        8,
+        null
+      ],
+      "identityGapSamples": 0,
+      "failedOrUnavailableGraphReviews": 1
+    },
+    {
+      "caseId": "autonomous.h3.sanitize-status-code",
+      "cell": "c",
+      "attempts": 3,
+      "executionStatuses": {
+        "failed": 1,
+        "passed": 2
+      },
+      "taskChecksPassed": 2,
+      "taskQualitativeScored": 0,
+      "graphQuality": {
+        "n": 3,
+        "missing": 0,
+        "values": [
+          3,
+          2,
+          2
+        ],
+        "median": 2,
+        "min": 2,
+        "max": 3,
+        "mean": 2.33
+      },
+      "answerQuality": {
+        "n": 3,
+        "missing": 0,
+        "values": [
+          3,
+          3,
+          3
+        ],
+        "median": 3,
+        "min": 3,
+        "max": 3,
+        "mean": 3
+      },
+      "firstBackendPublicationSeconds": {
+        "n": 3,
+        "missing": 0,
+        "values": [
+          38,
+          49.6,
+          98.8
+        ],
+        "median": 49.6,
+        "min": 38,
+        "max": 98.8,
+        "mean": 62.13
+      },
+      "acceptedBackendPublicationSeconds": {
+        "n": 3,
+        "missing": 0,
+        "values": [
+          38,
+          49.6,
+          98.8
+        ],
+        "median": 49.6,
+        "min": 38,
+        "max": 98.8,
+        "mean": 62.13
+      },
+      "observedAuthoringErrors": {
+        "n": 3,
+        "missing": 0,
+        "values": [
+          0,
+          0,
+          4
+        ],
+        "median": 0,
+        "min": 0,
+        "max": 4,
+        "mean": 1.33
+      },
+      "naturalAuthoringByCause": {
+        "server_rejection": 4
+      },
+      "scoreCeilings": [
+        8,
+        6,
+        8
+      ],
+      "identityGapSamples": 0,
+      "failedOrUnavailableGraphReviews": 0
+    },
+    {
+      "caseId": "autonomous.h3.sanitize-status-code",
+      "cell": "d",
+      "attempts": 3,
+      "executionStatuses": {
+        "failed": 2,
+        "passed": 1
+      },
+      "taskChecksPassed": 3,
+      "taskQualitativeScored": 0,
+      "graphQuality": {
+        "n": 1,
+        "missing": 2,
+        "values": [
+          4
+        ],
+        "median": 4,
+        "min": 4,
+        "max": 4,
+        "mean": 4
+      },
+      "answerQuality": {
+        "n": 1,
+        "missing": 2,
+        "values": [
+          5
+        ],
+        "median": 5,
+        "min": 5,
+        "max": 5,
+        "mean": 5
+      },
+      "firstBackendPublicationSeconds": {
+        "n": 3,
+        "missing": 0,
+        "values": [
+          37.3,
+          44.4,
+          64.8
+        ],
+        "median": 44.4,
+        "min": 37.3,
+        "max": 64.8,
+        "mean": 48.83
+      },
+      "acceptedBackendPublicationSeconds": {
+        "n": 3,
+        "missing": 0,
+        "values": [
+          37.3,
+          44.4,
+          64.8
+        ],
+        "median": 44.4,
+        "min": 37.3,
+        "max": 64.8,
+        "mean": 48.83
+      },
+      "observedAuthoringErrors": {
+        "n": 3,
+        "missing": 0,
+        "values": [
+          0,
+          0,
+          1
+        ],
+        "median": 0,
+        "min": 0,
+        "max": 1,
+        "mean": 0.33
+      },
+      "naturalAuthoringByCause": {
+        "client": 1
+      },
+      "scoreCeilings": [
+        null,
+        8,
+        null
+      ],
+      "identityGapSamples": 0,
+      "failedOrUnavailableGraphReviews": 2
+    },
+    {
+      "caseId": "autonomous.h3.investigate-status-code",
+      "cell": "a",
+      "attempts": 3,
+      "executionStatuses": {
+        "failed": 1,
+        "passed": 2
+      },
+      "taskChecksPassed": 3,
+      "taskQualitativeScored": 0,
+      "graphQuality": {
+        "n": 2,
+        "missing": 1,
+        "values": [
+          4,
+          4
+        ],
+        "median": 4,
+        "min": 4,
+        "max": 4,
+        "mean": 4
+      },
+      "answerQuality": {
+        "n": 2,
+        "missing": 1,
+        "values": [
+          5,
+          5
+        ],
+        "median": 5,
+        "min": 5,
+        "max": 5,
+        "mean": 5
+      },
+      "firstBackendPublicationSeconds": {
+        "n": 3,
+        "missing": 0,
+        "values": [
+          27.4,
+          55.5,
+          49.7
+        ],
+        "median": 49.7,
+        "min": 27.4,
+        "max": 55.5,
+        "mean": 44.2
+      },
+      "acceptedBackendPublicationSeconds": {
+        "n": 3,
+        "missing": 0,
+        "values": [
+          27.4,
+          55.5,
+          49.7
+        ],
+        "median": 49.7,
+        "min": 27.4,
+        "max": 55.5,
+        "mean": 44.2
+      },
+      "observedAuthoringErrors": {
+        "n": 3,
+        "missing": 0,
+        "values": [
+          0,
+          1,
+          1
+        ],
+        "median": 1,
+        "min": 0,
+        "max": 1,
+        "mean": 0.67
+      },
+      "naturalAuthoringByCause": {
+        "client": 2
+      },
+      "scoreCeilings": [
+        null,
+        6,
+        8
+      ],
+      "identityGapSamples": 0,
+      "failedOrUnavailableGraphReviews": 1
+    },
+    {
+      "caseId": "autonomous.h3.investigate-status-code",
+      "cell": "b",
+      "attempts": 3,
+      "executionStatuses": {
+        "passed": 2,
+        "failed": 1
+      },
+      "taskChecksPassed": 3,
+      "taskQualitativeScored": 0,
+      "graphQuality": {
+        "n": 2,
+        "missing": 1,
+        "values": [
+          4,
+          3
+        ],
+        "median": 3.5,
+        "min": 3,
+        "max": 4,
+        "mean": 3.5
+      },
+      "answerQuality": {
+        "n": 2,
+        "missing": 1,
+        "values": [
+          5,
+          3
+        ],
+        "median": 4,
+        "min": 3,
+        "max": 5,
+        "mean": 4
+      },
+      "firstBackendPublicationSeconds": {
+        "n": 3,
+        "missing": 0,
+        "values": [
+          53,
+          37,
+          58.5
+        ],
+        "median": 53,
+        "min": 37,
+        "max": 58.5,
+        "mean": 49.5
+      },
+      "acceptedBackendPublicationSeconds": {
+        "n": 3,
+        "missing": 0,
+        "values": [
+          53,
+          37,
+          58.5
+        ],
+        "median": 53,
+        "min": 37,
+        "max": 58.5,
+        "mean": 49.5
+      },
+      "observedAuthoringErrors": {
+        "n": 3,
+        "missing": 0,
+        "values": [
+          1,
+          0,
+          2
+        ],
+        "median": 1,
+        "min": 0,
+        "max": 2,
+        "mean": 1
+      },
+      "naturalAuthoringByCause": {
+        "client": 3
+      },
+      "scoreCeilings": [
+        8,
+        8,
+        null
+      ],
+      "identityGapSamples": 0,
+      "failedOrUnavailableGraphReviews": 1
+    },
+    {
+      "caseId": "autonomous.h3.investigate-status-code",
+      "cell": "c",
+      "attempts": 3,
+      "executionStatuses": {
+        "failed": 3
+      },
+      "taskChecksPassed": 3,
+      "taskQualitativeScored": 0,
+      "graphQuality": {
+        "n": 0,
+        "missing": 3,
+        "values": [],
+        "median": null,
+        "min": null,
+        "max": null,
+        "mean": null
+      },
+      "answerQuality": {
+        "n": 0,
+        "missing": 3,
+        "values": [],
+        "median": null,
+        "min": null,
+        "max": null,
+        "mean": null
+      },
+      "firstBackendPublicationSeconds": {
+        "n": 3,
+        "missing": 0,
+        "values": [
+          40.9,
+          51.4,
+          44.9
+        ],
+        "median": 44.9,
+        "min": 40.9,
+        "max": 51.4,
+        "mean": 45.73
+      },
+      "acceptedBackendPublicationSeconds": {
+        "n": 3,
+        "missing": 0,
+        "values": [
+          40.9,
+          51.4,
+          44.9
+        ],
+        "median": 44.9,
+        "min": 40.9,
+        "max": 51.4,
+        "mean": 45.73
+      },
+      "observedAuthoringErrors": {
+        "n": 3,
+        "missing": 0,
+        "values": [
+          0,
+          4,
+          1
+        ],
+        "median": 1,
+        "min": 0,
+        "max": 4,
+        "mean": 1.67
+      },
+      "naturalAuthoringByCause": {
+        "compiler": 3,
+        "client": 1,
+        "server_rejection": 1
+      },
+      "scoreCeilings": [
+        null,
+        null,
+        null
+      ],
+      "identityGapSamples": 0,
+      "failedOrUnavailableGraphReviews": 3
+    },
+    {
+      "caseId": "autonomous.h3.investigate-status-code",
+      "cell": "d",
+      "attempts": 3,
+      "executionStatuses": {
+        "failed": 3
+      },
+      "taskChecksPassed": 3,
+      "taskQualitativeScored": 0,
+      "graphQuality": {
+        "n": 0,
+        "missing": 3,
+        "values": [],
+        "median": null,
+        "min": null,
+        "max": null,
+        "mean": null
+      },
+      "answerQuality": {
+        "n": 0,
+        "missing": 3,
+        "values": [],
+        "median": null,
+        "min": null,
+        "max": null,
+        "mean": null
+      },
+      "firstBackendPublicationSeconds": {
+        "n": 3,
+        "missing": 0,
+        "values": [
+          43.1,
+          43,
+          54.8
+        ],
+        "median": 43.1,
+        "min": 43,
+        "max": 54.8,
+        "mean": 46.97
+      },
+      "acceptedBackendPublicationSeconds": {
+        "n": 3,
+        "missing": 0,
+        "values": [
+          43.1,
+          43,
+          54.8
+        ],
+        "median": 43.1,
+        "min": 43,
+        "max": 54.8,
+        "mean": 46.97
+      },
+      "observedAuthoringErrors": {
+        "n": 3,
+        "missing": 0,
+        "values": [
+          1,
+          0,
+          2
+        ],
+        "median": 1,
+        "min": 0,
+        "max": 2,
+        "mean": 1
+      },
+      "naturalAuthoringByCause": {
+        "server_rejection": 1,
+        "compiler": 2
+      },
+      "scoreCeilings": [
+        null,
+        null,
+        null
+      ],
+      "identityGapSamples": 0,
+      "failedOrUnavailableGraphReviews": 3
+    }
+  ],
+  "limitations": [
+    "Three serial repetitions in rotated, incompletely balanced order on two related H3 tasks share account/runtime conditions; this is a pilot, not independent statistical samples, broad capability, or causal-improvement proof.",
+    "Timing measures backend publication; it does not prove when the graph became visible in a renderer.",
+    "Authoring-error capture is partial and client reports are unattested; exact totals remain unknown.",
+    "Deterministic task checks do not substitute for missing qualitative task-outcome ratings.",
+    "Graph score ceilings differ by sample and remain recorded; compare within each case rather than pooling raw scores.",
+    "Graph scores depend on the pinned screenshot-grounded judge and rubric; failed or missing reviews remain unavailable."
+  ],
+  "samples": [
+    {
+      "runId": "run-2026-10-08T04-57-42-658Z-481744a5",
+      "cell": "a",
+      "repetition": 1,
+      "caseId": "autonomous.h3.sanitize-status-code",
+      "status": "failed",
+      "taskGatesPassed": true,
+      "failedChecks": [],
+      "graphGrade": {
+        "status": "partial",
+        "score": null,
+        "answerQuality": null,
+        "maximum": 4,
+        "scoreCeiling": null
+      },
+      "judgeStatuses": [
+        {
+          "status": "partial",
+          "error": "Simulated-user judge ended without submitReview finalizing complete review coverage"
+        }
+      ],
+      "observedAuthoringErrors": 1,
+      "authoringByCause": {
+        "client": 1
+      },
+      "backendTiming": {
+        "schemaVersion": 1,
+        "sentAt": "2026-10-08T04:57:45.250Z",
+        "firstGraphAt": "2026-10-08T04:58:24.114Z",
+        "acceptedAt": "2026-10-08T04:58:24.114Z",
+        "firstGraphSeconds": 38.9,
+        "acceptedSeconds": 38.9,
+        "graphWriteRejections": 0,
+        "programRuns": {
+          "programs": 1,
+          "patches": 2,
+          "failed": 1
+        }
+      },
+      "pins": {
+        "harnessConfigurationDigest": "sha256:271922459f215f4405d2ee461a76a3696a8435fc77b580ad228275b3136776bd",
+        "caseSnapshotDigest": "sha256:56bd8eec8705f8e35964f1d06b5fa838350e71fc9274d837e15e1ed1cc3f081b",
+        "judgeSetupRevisionId": "setup-b4b1f7e4-c476-4cee-a5ee-b90ec4682008"
+      }
+    },
+    {
+      "runId": "run-2026-10-08T05-08-53-673Z-a5827705",
+      "cell": "b",
+      "repetition": 1,
+      "caseId": "autonomous.h3.sanitize-status-code",
+      "status": "passed",
+      "taskGatesPassed": true,
+      "failedChecks": [],
+      "graphGrade": {
+        "status": "completed",
+        "score": 2,
+        "answerQuality": 3,
+        "maximum": 8,
+        "scoreCeiling": 6
+      },
+      "judgeStatuses": [
+        {
+          "status": "completed",
+          "error": null
+        }
+      ],
+      "observedAuthoringErrors": 0,
+      "authoringByCause": {},
+      "backendTiming": {
+        "schemaVersion": 1,
+        "sentAt": "2026-10-08T05:08:55.334Z",
+        "firstGraphAt": "2026-10-08T05:09:47.386Z",
+        "acceptedAt": "2026-10-08T05:09:47.386Z",
+        "firstGraphSeconds": 52.1,
+        "acceptedSeconds": 52.1,
+        "graphWriteRejections": 0,
+        "programRuns": {
+          "programs": 4,
+          "patches": 0,
+          "failed": 0
+        }
+      },
+      "pins": {
+        "harnessConfigurationDigest": "sha256:b6a82e8d9eb85f90698803e79d21574c8671f31631e6bc84b388468857274f34",
+        "caseSnapshotDigest": "sha256:56bd8eec8705f8e35964f1d06b5fa838350e71fc9274d837e15e1ed1cc3f081b",
+        "judgeSetupRevisionId": "setup-b4b1f7e4-c476-4cee-a5ee-b90ec4682008"
+      }
+    },
+    {
+      "runId": "run-2026-10-08T05-13-45-154Z-1ec667d0",
+      "cell": "c",
+      "repetition": 1,
+      "caseId": "autonomous.h3.sanitize-status-code",
+      "status": "failed",
+      "taskGatesPassed": false,
+      "failedChecks": [
+        {
+          "name": "implementation:turn-1:workspace:implementation-meaningful-commit",
+          "passed": false,
+          "detail": "1 post-seed commit(s); per-commit files: src/utils/sanitize.ts."
+        }
+      ],
+      "graphGrade": {
+        "status": "completed",
+        "score": 3,
+        "answerQuality": 3,
+        "maximum": 8,
+        "scoreCeiling": 8
+      },
+      "judgeStatuses": [
+        {
+          "status": "completed",
+          "error": null
+        }
+      ],
+      "observedAuthoringErrors": 0,
+      "authoringByCause": {},
+      "backendTiming": {
+        "schemaVersion": 1,
+        "sentAt": "2026-10-08T05:13:46.821Z",
+        "firstGraphAt": "2026-10-08T05:14:24.809Z",
+        "acceptedAt": "2026-10-08T05:14:24.809Z",
+        "firstGraphSeconds": 38,
+        "acceptedSeconds": 38,
+        "graphWriteRejections": 0,
+        "programRuns": {
+          "programs": 3,
+          "patches": 0,
+          "failed": 0
+        }
+      },
+      "pins": {
+        "harnessConfigurationDigest": "sha256:3e0c5e319bc630232a47fa1edd64f12c8c5e278ab02234c72c83d34b2233c40f",
+        "caseSnapshotDigest": "sha256:56bd8eec8705f8e35964f1d06b5fa838350e71fc9274d837e15e1ed1cc3f081b",
+        "judgeSetupRevisionId": "setup-b4b1f7e4-c476-4cee-a5ee-b90ec4682008"
+      }
+    },
+    {
+      "runId": "run-2026-10-08T05-19-46-955Z-3fdafd97",
+      "cell": "d",
+      "repetition": 1,
+      "caseId": "autonomous.h3.sanitize-status-code",
+      "status": "failed",
+      "taskGatesPassed": true,
+      "failedChecks": [],
+      "graphGrade": {
+        "status": "partial",
+        "score": null,
+        "answerQuality": null,
+        "maximum": 4,
+        "scoreCeiling": null
+      },
+      "judgeStatuses": [
+        {
+          "status": "partial",
+          "error": "Simulated-user judge ended without submitReview finalizing complete review coverage"
+        }
+      ],
+      "observedAuthoringErrors": 0,
+      "authoringByCause": {},
+      "backendTiming": {
+        "schemaVersion": 1,
+        "sentAt": "2026-10-08T05:19:50.421Z",
+        "firstGraphAt": "2026-10-08T05:20:27.698Z",
+        "acceptedAt": "2026-10-08T05:20:27.698Z",
+        "firstGraphSeconds": 37.3,
+        "acceptedSeconds": 37.3,
+        "graphWriteRejections": 0,
+        "programRuns": {
+          "programs": 2,
+          "patches": 0,
+          "failed": 0
+        }
+      },
+      "pins": {
+        "harnessConfigurationDigest": "sha256:e8d0f338f160c3aab97ce04ab0088e81acfb665628a0f93fbd5dc58f1a852415",
+        "caseSnapshotDigest": "sha256:56bd8eec8705f8e35964f1d06b5fa838350e71fc9274d837e15e1ed1cc3f081b",
+        "judgeSetupRevisionId": "setup-b4b1f7e4-c476-4cee-a5ee-b90ec4682008"
+      }
+    },
+    {
+      "runId": "run-2026-10-08T05-31-11-183Z-5d3e0d57",
+      "cell": "b",
+      "repetition": 1,
+      "caseId": "autonomous.h3.investigate-status-code",
+      "status": "passed",
+      "taskGatesPassed": true,
+      "failedChecks": [],
+      "graphGrade": {
+        "status": "completed",
+        "score": 4,
+        "answerQuality": 5,
+        "maximum": 8,
+        "scoreCeiling": 8
+      },
+      "judgeStatuses": [
+        {
+          "status": "completed",
+          "error": null
+        }
+      ],
+      "observedAuthoringErrors": 1,
+      "authoringByCause": {
+        "client": 1
+      },
+      "backendTiming": {
+        "schemaVersion": 1,
+        "sentAt": "2026-10-08T05:31:12.935Z",
+        "firstGraphAt": "2026-10-08T05:32:05.941Z",
+        "acceptedAt": "2026-10-08T05:32:05.941Z",
+        "firstGraphSeconds": 53,
+        "acceptedSeconds": 53,
+        "graphWriteRejections": 0,
+        "programRuns": {
+          "programs": 1,
+          "patches": 3,
+          "failed": 2
+        }
+      },
+      "pins": {
+        "harnessConfigurationDigest": "sha256:b6a82e8d9eb85f90698803e79d21574c8671f31631e6bc84b388468857274f34",
+        "caseSnapshotDigest": "sha256:ee0dcb1ed892431587073c88e66943ab7c5356ebec22e061d88dfbb1264574d0",
+        "judgeSetupRevisionId": "setup-b4b1f7e4-c476-4cee-a5ee-b90ec4682008"
+      }
+    },
+    {
+      "runId": "run-2026-10-08T05-38-05-975Z-934aef7f",
+      "cell": "c",
+      "repetition": 1,
+      "caseId": "autonomous.h3.investigate-status-code",
+      "status": "failed",
+      "taskGatesPassed": true,
+      "failedChecks": [],
+      "graphGrade": {
+        "status": "partial",
+        "score": null,
+        "answerQuality": null,
+        "maximum": 4,
+        "scoreCeiling": null
+      },
+      "judgeStatuses": [
+        {
+          "status": "partial",
+          "error": "Simulated-user judge ended without submitReview finalizing complete review coverage"
+        }
+      ],
+      "observedAuthoringErrors": 0,
+      "authoringByCause": {},
+      "backendTiming": {
+        "schemaVersion": 1,
+        "sentAt": "2026-10-08T05:38:08.012Z",
+        "firstGraphAt": "2026-10-08T05:38:48.883Z",
+        "acceptedAt": "2026-10-08T05:38:48.883Z",
+        "firstGraphSeconds": 40.9,
+        "acceptedSeconds": 40.9,
+        "graphWriteRejections": 0,
+        "programRuns": {
+          "programs": 4,
+          "patches": 0,
+          "failed": 0
+        }
+      },
+      "pins": {
+        "harnessConfigurationDigest": "sha256:3e0c5e319bc630232a47fa1edd64f12c8c5e278ab02234c72c83d34b2233c40f",
+        "caseSnapshotDigest": "sha256:ee0dcb1ed892431587073c88e66943ab7c5356ebec22e061d88dfbb1264574d0",
+        "judgeSetupRevisionId": "setup-b4b1f7e4-c476-4cee-a5ee-b90ec4682008"
+      }
+    },
+    {
+      "runId": "run-2026-10-08T05-58-20-343Z-d749985d",
+      "cell": "d",
+      "repetition": 1,
+      "caseId": "autonomous.h3.investigate-status-code",
+      "status": "failed",
+      "taskGatesPassed": true,
+      "failedChecks": [],
+      "graphGrade": {
+        "status": "partial",
+        "score": null,
+        "answerQuality": null,
+        "maximum": 4,
+        "scoreCeiling": null
+      },
+      "judgeStatuses": [
+        {
+          "status": "partial",
+          "error": "Simulated-user judge ended without submitReview finalizing complete review coverage"
+        }
+      ],
+      "observedAuthoringErrors": 1,
+      "authoringByCause": {
+        "server_rejection": 1
+      },
+      "backendTiming": {
+        "schemaVersion": 1,
+        "sentAt": "2026-10-08T05:58:22.399Z",
+        "firstGraphAt": "2026-10-08T05:59:05.485Z",
+        "acceptedAt": "2026-10-08T05:59:05.485Z",
+        "firstGraphSeconds": 43.1,
+        "acceptedSeconds": 43.1,
+        "graphWriteRejections": 1,
+        "programRuns": {
+          "programs": 4,
+          "patches": 1,
+          "failed": 2
+        }
+      },
+      "pins": {
+        "harnessConfigurationDigest": "sha256:e8d0f338f160c3aab97ce04ab0088e81acfb665628a0f93fbd5dc58f1a852415",
+        "caseSnapshotDigest": "sha256:ee0dcb1ed892431587073c88e66943ab7c5356ebec22e061d88dfbb1264574d0",
+        "judgeSetupRevisionId": "setup-b4b1f7e4-c476-4cee-a5ee-b90ec4682008"
+      }
+    },
+    {
+      "runId": "run-2026-10-08T06-17-24-324Z-95296e9a",
+      "cell": "a",
+      "repetition": 1,
+      "caseId": "autonomous.h3.investigate-status-code",
+      "status": "failed",
+      "taskGatesPassed": true,
+      "failedChecks": [],
+      "graphGrade": {
+        "status": "partial",
+        "score": null,
+        "answerQuality": null,
+        "maximum": 4,
+        "scoreCeiling": null
+      },
+      "judgeStatuses": [
+        {
+          "status": "partial",
+          "error": "Simulated-user judge ended without submitReview finalizing complete review coverage"
+        }
+      ],
+      "observedAuthoringErrors": 0,
+      "authoringByCause": {},
+      "backendTiming": {
+        "schemaVersion": 1,
+        "sentAt": "2026-10-08T06:17:26.288Z",
+        "firstGraphAt": "2026-10-08T06:17:53.672Z",
+        "acceptedAt": "2026-10-08T06:17:53.672Z",
+        "firstGraphSeconds": 27.4,
+        "acceptedSeconds": 27.4,
+        "graphWriteRejections": 0,
+        "programRuns": {
+          "programs": 3,
+          "patches": 0,
+          "failed": 0
+        }
+      },
+      "pins": {
+        "harnessConfigurationDigest": "sha256:271922459f215f4405d2ee461a76a3696a8435fc77b580ad228275b3136776bd",
+        "caseSnapshotDigest": "sha256:ee0dcb1ed892431587073c88e66943ab7c5356ebec22e061d88dfbb1264574d0",
+        "judgeSetupRevisionId": "setup-b4b1f7e4-c476-4cee-a5ee-b90ec4682008"
+      }
+    },
+    {
+      "runId": "run-2026-10-08T06-28-52-869Z-763526af",
+      "cell": "c",
+      "repetition": 2,
+      "caseId": "autonomous.h3.sanitize-status-code",
+      "status": "passed",
+      "taskGatesPassed": true,
+      "failedChecks": [],
+      "graphGrade": {
+        "status": "completed",
+        "score": 2,
+        "answerQuality": 3,
+        "maximum": 8,
+        "scoreCeiling": 6
+      },
+      "judgeStatuses": [
+        {
+          "status": "completed",
+          "error": null
+        }
+      ],
+      "observedAuthoringErrors": 0,
+      "authoringByCause": {},
+      "backendTiming": {
+        "schemaVersion": 1,
+        "sentAt": "2026-10-08T06:28:54.581Z",
+        "firstGraphAt": "2026-10-08T06:29:44.131Z",
+        "acceptedAt": "2026-10-08T06:29:44.131Z",
+        "firstGraphSeconds": 49.6,
+        "acceptedSeconds": 49.6,
+        "graphWriteRejections": 0,
+        "programRuns": {
+          "programs": 3,
+          "patches": 0,
+          "failed": 0
+        }
+      },
+      "pins": {
+        "harnessConfigurationDigest": "sha256:3e0c5e319bc630232a47fa1edd64f12c8c5e278ab02234c72c83d34b2233c40f",
+        "caseSnapshotDigest": "sha256:56bd8eec8705f8e35964f1d06b5fa838350e71fc9274d837e15e1ed1cc3f081b",
+        "judgeSetupRevisionId": "setup-b4b1f7e4-c476-4cee-a5ee-b90ec4682008"
+      }
+    },
+    {
+      "runId": "run-2026-10-08T06-33-41-486Z-8586e6c9",
+      "cell": "d",
+      "repetition": 2,
+      "caseId": "autonomous.h3.sanitize-status-code",
+      "status": "passed",
+      "taskGatesPassed": true,
+      "failedChecks": [],
+      "graphGrade": {
+        "status": "completed",
+        "score": 4,
+        "answerQuality": 5,
+        "maximum": 8,
+        "scoreCeiling": 8
+      },
+      "judgeStatuses": [
+        {
+          "status": "completed",
+          "error": null
+        }
+      ],
+      "observedAuthoringErrors": 0,
+      "authoringByCause": {},
+      "backendTiming": {
+        "schemaVersion": 1,
+        "sentAt": "2026-10-08T06:33:43.375Z",
+        "firstGraphAt": "2026-10-08T06:34:27.824Z",
+        "acceptedAt": "2026-10-08T06:34:27.824Z",
+        "firstGraphSeconds": 44.4,
+        "acceptedSeconds": 44.4,
+        "graphWriteRejections": 0,
+        "programRuns": {
+          "programs": 2,
+          "patches": 0,
+          "failed": 0
+        }
+      },
+      "pins": {
+        "harnessConfigurationDigest": "sha256:e8d0f338f160c3aab97ce04ab0088e81acfb665628a0f93fbd5dc58f1a852415",
+        "caseSnapshotDigest": "sha256:56bd8eec8705f8e35964f1d06b5fa838350e71fc9274d837e15e1ed1cc3f081b",
+        "judgeSetupRevisionId": "setup-b4b1f7e4-c476-4cee-a5ee-b90ec4682008"
+      }
+    },
+    {
+      "runId": "run-2026-10-08T06-39-22-364Z-e5a993bf",
+      "cell": "a",
+      "repetition": 2,
+      "caseId": "autonomous.h3.sanitize-status-code",
+      "status": "passed",
+      "taskGatesPassed": true,
+      "failedChecks": [],
+      "graphGrade": {
+        "status": "completed",
+        "score": 4,
+        "answerQuality": 5,
+        "maximum": 8,
+        "scoreCeiling": 6
+      },
+      "judgeStatuses": [
+        {
+          "status": "completed",
+          "error": null
+        }
+      ],
+      "observedAuthoringErrors": 0,
+      "authoringByCause": {},
+      "backendTiming": {
+        "schemaVersion": 1,
+        "sentAt": "2026-10-08T06:39:24.104Z",
+        "firstGraphAt": "2026-10-08T06:40:17.388Z",
+        "acceptedAt": "2026-10-08T06:40:17.388Z",
+        "firstGraphSeconds": 53.3,
+        "acceptedSeconds": 53.3,
+        "graphWriteRejections": 0,
+        "programRuns": {
+          "programs": 4,
+          "patches": 0,
+          "failed": 0
+        }
+      },
+      "pins": {
+        "harnessConfigurationDigest": "sha256:271922459f215f4405d2ee461a76a3696a8435fc77b580ad228275b3136776bd",
+        "caseSnapshotDigest": "sha256:56bd8eec8705f8e35964f1d06b5fa838350e71fc9274d837e15e1ed1cc3f081b",
+        "judgeSetupRevisionId": "setup-b4b1f7e4-c476-4cee-a5ee-b90ec4682008"
+      }
+    },
+    {
+      "runId": "run-2026-10-08T06-46-07-273Z-274ec408",
+      "cell": "b",
+      "repetition": 2,
+      "caseId": "autonomous.h3.sanitize-status-code",
+      "status": "passed",
+      "taskGatesPassed": true,
+      "failedChecks": [],
+      "graphGrade": {
+        "status": "completed",
+        "score": 3,
+        "answerQuality": 3,
+        "maximum": 8,
+        "scoreCeiling": 8
+      },
+      "judgeStatuses": [
+        {
+          "status": "completed",
+          "error": null
+        }
+      ],
+      "observedAuthoringErrors": 0,
+      "authoringByCause": {},
+      "backendTiming": {
+        "schemaVersion": 1,
+        "sentAt": "2026-10-08T06:46:09.018Z",
+        "firstGraphAt": "2026-10-08T06:47:37.844Z",
+        "acceptedAt": "2026-10-08T06:47:37.844Z",
+        "firstGraphSeconds": 88.8,
+        "acceptedSeconds": 88.8,
+        "graphWriteRejections": 0,
+        "programRuns": {
+          "programs": 3,
+          "patches": 2,
+          "failed": 0
+        }
+      },
+      "pins": {
+        "harnessConfigurationDigest": "sha256:b6a82e8d9eb85f90698803e79d21574c8671f31631e6bc84b388468857274f34",
+        "caseSnapshotDigest": "sha256:56bd8eec8705f8e35964f1d06b5fa838350e71fc9274d837e15e1ed1cc3f081b",
+        "judgeSetupRevisionId": "setup-b4b1f7e4-c476-4cee-a5ee-b90ec4682008"
+      }
+    },
+    {
+      "runId": "run-2026-10-08T06-53-28-508Z-2a29c89d",
+      "cell": "d",
+      "repetition": 2,
+      "caseId": "autonomous.h3.investigate-status-code",
+      "status": "failed",
+      "taskGatesPassed": true,
+      "failedChecks": [],
+      "graphGrade": {
+        "status": "partial",
+        "score": null,
+        "answerQuality": null,
+        "maximum": 4,
+        "scoreCeiling": null
+      },
+      "judgeStatuses": [
+        {
+          "status": "partial",
+          "error": "Simulated-user judge ended without submitReview finalizing complete review coverage"
+        }
+      ],
+      "observedAuthoringErrors": 0,
+      "authoringByCause": {},
+      "backendTiming": {
+        "schemaVersion": 1,
+        "sentAt": "2026-10-08T06:53:30.998Z",
+        "firstGraphAt": "2026-10-08T06:54:14.041Z",
+        "acceptedAt": "2026-10-08T06:54:14.041Z",
+        "firstGraphSeconds": 43,
+        "acceptedSeconds": 43,
+        "graphWriteRejections": 0,
+        "programRuns": {
+          "programs": 4,
+          "patches": 0,
+          "failed": 0
+        }
+      },
+      "pins": {
+        "harnessConfigurationDigest": "sha256:e8d0f338f160c3aab97ce04ab0088e81acfb665628a0f93fbd5dc58f1a852415",
+        "caseSnapshotDigest": "sha256:ee0dcb1ed892431587073c88e66943ab7c5356ebec22e061d88dfbb1264574d0",
+        "judgeSetupRevisionId": "setup-b4b1f7e4-c476-4cee-a5ee-b90ec4682008"
+      }
+    },
+    {
+      "runId": "run-2026-10-08T07-05-25-694Z-ad2282f9",
+      "cell": "a",
+      "repetition": 2,
+      "caseId": "autonomous.h3.investigate-status-code",
+      "status": "passed",
+      "taskGatesPassed": true,
+      "failedChecks": [],
+      "graphGrade": {
+        "status": "completed",
+        "score": 4,
+        "answerQuality": 5,
+        "maximum": 8,
+        "scoreCeiling": 6
+      },
+      "judgeStatuses": [
+        {
+          "status": "completed",
+          "error": null
+        }
+      ],
+      "observedAuthoringErrors": 1,
+      "authoringByCause": {
+        "client": 1
+      },
+      "backendTiming": {
+        "schemaVersion": 1,
+        "sentAt": "2026-10-08T07:05:27.458Z",
+        "firstGraphAt": "2026-10-08T07:06:22.913Z",
+        "acceptedAt": "2026-10-08T07:06:22.913Z",
+        "firstGraphSeconds": 55.5,
+        "acceptedSeconds": 55.5,
+        "graphWriteRejections": 0,
+        "programRuns": {
+          "programs": 1,
+          "patches": 2,
+          "failed": 1
+        }
+      },
+      "pins": {
+        "harnessConfigurationDigest": "sha256:271922459f215f4405d2ee461a76a3696a8435fc77b580ad228275b3136776bd",
+        "caseSnapshotDigest": "sha256:ee0dcb1ed892431587073c88e66943ab7c5356ebec22e061d88dfbb1264574d0",
+        "judgeSetupRevisionId": "setup-b4b1f7e4-c476-4cee-a5ee-b90ec4682008"
+      }
+    },
+    {
+      "runId": "run-2026-10-08T07-21-51-114Z-56a7a276",
+      "cell": "b",
+      "repetition": 2,
+      "caseId": "autonomous.h3.investigate-status-code",
+      "status": "passed",
+      "taskGatesPassed": true,
+      "failedChecks": [],
+      "graphGrade": {
+        "status": "completed",
+        "score": 3,
+        "answerQuality": 3,
+        "maximum": 8,
+        "scoreCeiling": 8
+      },
+      "judgeStatuses": [
+        {
+          "status": "completed",
+          "error": null
+        }
+      ],
+      "observedAuthoringErrors": 0,
+      "authoringByCause": {},
+      "backendTiming": {
+        "schemaVersion": 1,
+        "sentAt": "2026-10-08T07:21:53.289Z",
+        "firstGraphAt": "2026-10-08T07:22:30.312Z",
+        "acceptedAt": "2026-10-08T07:22:30.312Z",
+        "firstGraphSeconds": 37,
+        "acceptedSeconds": 37,
+        "graphWriteRejections": 0,
+        "programRuns": {
+          "programs": 3,
+          "patches": 0,
+          "failed": 0
+        }
+      },
+      "pins": {
+        "harnessConfigurationDigest": "sha256:b6a82e8d9eb85f90698803e79d21574c8671f31631e6bc84b388468857274f34",
+        "caseSnapshotDigest": "sha256:ee0dcb1ed892431587073c88e66943ab7c5356ebec22e061d88dfbb1264574d0",
+        "judgeSetupRevisionId": "setup-b4b1f7e4-c476-4cee-a5ee-b90ec4682008"
+      }
+    },
+    {
+      "runId": "run-2026-10-08T07-31-53-080Z-45cc2375",
+      "cell": "c",
+      "repetition": 2,
+      "caseId": "autonomous.h3.investigate-status-code",
+      "status": "failed",
+      "taskGatesPassed": true,
+      "failedChecks": [],
+      "graphGrade": {
+        "status": "partial",
+        "score": null,
+        "answerQuality": null,
+        "maximum": 4,
+        "scoreCeiling": null
+      },
+      "judgeStatuses": [
+        {
+          "status": "partial",
+          "error": "Simulated-user judge ended without submitReview finalizing complete review coverage"
+        }
+      ],
+      "observedAuthoringErrors": 4,
+      "authoringByCause": {
+        "compiler": 3,
+        "client": 1
+      },
+      "backendTiming": {
+        "schemaVersion": 1,
+        "sentAt": "2026-10-08T07:31:54.983Z",
+        "firstGraphAt": "2026-10-08T07:32:46.335Z",
+        "acceptedAt": "2026-10-08T07:32:46.335Z",
+        "firstGraphSeconds": 51.4,
+        "acceptedSeconds": 51.4,
+        "graphWriteRejections": 0,
+        "programRuns": {
+          "programs": 2,
+          "patches": 3,
+          "failed": 3
+        }
+      },
+      "pins": {
+        "harnessConfigurationDigest": "sha256:3e0c5e319bc630232a47fa1edd64f12c8c5e278ab02234c72c83d34b2233c40f",
+        "caseSnapshotDigest": "sha256:ee0dcb1ed892431587073c88e66943ab7c5356ebec22e061d88dfbb1264574d0",
+        "judgeSetupRevisionId": "setup-b4b1f7e4-c476-4cee-a5ee-b90ec4682008"
+      }
+    },
+    {
+      "runId": "run-2026-10-08T07-47-50-649Z-b8b7f90b",
+      "cell": "a",
+      "repetition": 3,
+      "caseId": "autonomous.h3.sanitize-status-code",
+      "status": "failed",
+      "taskGatesPassed": true,
+      "failedChecks": [],
+      "graphGrade": {
+        "status": "partial",
+        "score": null,
+        "answerQuality": null,
+        "maximum": 4,
+        "scoreCeiling": null
+      },
+      "judgeStatuses": [
+        {
+          "status": "partial",
+          "error": "Simulated-user judge ended without submitReview finalizing complete review coverage"
+        }
+      ],
+      "observedAuthoringErrors": 0,
+      "authoringByCause": {},
+      "backendTiming": {
+        "schemaVersion": 1,
+        "sentAt": "2026-10-08T07:47:52.753Z",
+        "firstGraphAt": "2026-10-08T07:48:50.622Z",
+        "acceptedAt": "2026-10-08T07:48:50.622Z",
+        "firstGraphSeconds": 57.9,
+        "acceptedSeconds": 57.9,
+        "graphWriteRejections": 0,
+        "programRuns": {
+          "programs": 4,
+          "patches": 0,
+          "failed": 0
+        }
+      },
+      "pins": {
+        "harnessConfigurationDigest": "sha256:271922459f215f4405d2ee461a76a3696a8435fc77b580ad228275b3136776bd",
+        "caseSnapshotDigest": "sha256:56bd8eec8705f8e35964f1d06b5fa838350e71fc9274d837e15e1ed1cc3f081b",
+        "judgeSetupRevisionId": "setup-b4b1f7e4-c476-4cee-a5ee-b90ec4682008"
+      }
+    },
+    {
+      "runId": "run-2026-10-08T08-01-26-647Z-70d9fe24",
+      "cell": "b",
+      "repetition": 3,
+      "caseId": "autonomous.h3.sanitize-status-code",
+      "status": "failed",
+      "taskGatesPassed": true,
+      "failedChecks": [],
+      "graphGrade": {
+        "status": "partial",
+        "score": null,
+        "answerQuality": null,
+        "maximum": 4,
+        "scoreCeiling": null
+      },
+      "judgeStatuses": [
+        {
+          "status": "partial",
+          "error": "Simulated-user judge ended without submitReview finalizing complete review coverage"
+        }
+      ],
+      "observedAuthoringErrors": 0,
+      "authoringByCause": {},
+      "backendTiming": {
+        "schemaVersion": 1,
+        "sentAt": "2026-10-08T08:01:28.467Z",
+        "firstGraphAt": "2026-10-08T08:02:15.352Z",
+        "acceptedAt": "2026-10-08T08:02:15.352Z",
+        "firstGraphSeconds": 46.9,
+        "acceptedSeconds": 46.9,
+        "graphWriteRejections": 0,
+        "programRuns": {
+          "programs": 2,
+          "patches": 0,
+          "failed": 0
+        }
+      },
+      "pins": {
+        "harnessConfigurationDigest": "sha256:b6a82e8d9eb85f90698803e79d21574c8671f31631e6bc84b388468857274f34",
+        "caseSnapshotDigest": "sha256:56bd8eec8705f8e35964f1d06b5fa838350e71fc9274d837e15e1ed1cc3f081b",
+        "judgeSetupRevisionId": "setup-b4b1f7e4-c476-4cee-a5ee-b90ec4682008"
+      }
+    },
+    {
+      "runId": "run-2026-10-08T08-18-12-617Z-c04032b7",
+      "cell": "c",
+      "repetition": 3,
+      "caseId": "autonomous.h3.sanitize-status-code",
+      "status": "passed",
+      "taskGatesPassed": true,
+      "failedChecks": [],
+      "graphGrade": {
+        "status": "completed",
+        "score": 2,
+        "answerQuality": 3,
+        "maximum": 8,
+        "scoreCeiling": 8
+      },
+      "judgeStatuses": [
+        {
+          "status": "completed",
+          "error": null
+        }
+      ],
+      "observedAuthoringErrors": 4,
+      "authoringByCause": {
+        "server_rejection": 4
+      },
+      "backendTiming": {
+        "schemaVersion": 1,
+        "sentAt": "2026-10-08T08:18:15.533Z",
+        "firstGraphAt": "2026-10-08T08:19:54.342Z",
+        "acceptedAt": "2026-10-08T08:19:54.342Z",
+        "firstGraphSeconds": 98.8,
+        "acceptedSeconds": 98.8,
+        "graphWriteRejections": 4,
+        "programRuns": {
+          "programs": 4,
+          "patches": 3,
+          "failed": 3
+        }
+      },
+      "pins": {
+        "harnessConfigurationDigest": "sha256:3e0c5e319bc630232a47fa1edd64f12c8c5e278ab02234c72c83d34b2233c40f",
+        "caseSnapshotDigest": "sha256:56bd8eec8705f8e35964f1d06b5fa838350e71fc9274d837e15e1ed1cc3f081b",
+        "judgeSetupRevisionId": "setup-b4b1f7e4-c476-4cee-a5ee-b90ec4682008"
+      }
+    },
+    {
+      "runId": "run-2026-10-08T08-22-29-988Z-787e7009",
+      "cell": "d",
+      "repetition": 3,
+      "caseId": "autonomous.h3.sanitize-status-code",
+      "status": "failed",
+      "taskGatesPassed": true,
+      "failedChecks": [],
+      "graphGrade": {
+        "status": "partial",
+        "score": null,
+        "answerQuality": null,
+        "maximum": 4,
+        "scoreCeiling": null
+      },
+      "judgeStatuses": [
+        {
+          "status": "partial",
+          "error": "Simulated-user judge ended without submitReview finalizing complete review coverage"
+        }
+      ],
+      "observedAuthoringErrors": 1,
+      "authoringByCause": {
+        "client": 1
+      },
+      "backendTiming": {
+        "schemaVersion": 1,
+        "sentAt": "2026-10-08T08:22:31.760Z",
+        "firstGraphAt": "2026-10-08T08:23:36.532Z",
+        "acceptedAt": "2026-10-08T08:23:36.532Z",
+        "firstGraphSeconds": 64.8,
+        "acceptedSeconds": 64.8,
+        "graphWriteRejections": 0,
+        "programRuns": {
+          "programs": 1,
+          "patches": 2,
+          "failed": 1
+        }
+      },
+      "pins": {
+        "harnessConfigurationDigest": "sha256:e8d0f338f160c3aab97ce04ab0088e81acfb665628a0f93fbd5dc58f1a852415",
+        "caseSnapshotDigest": "sha256:56bd8eec8705f8e35964f1d06b5fa838350e71fc9274d837e15e1ed1cc3f081b",
+        "judgeSetupRevisionId": "setup-b4b1f7e4-c476-4cee-a5ee-b90ec4682008"
+      }
+    },
+    {
+      "runId": "run-2026-10-08T08-40-50-537Z-1aa06aec",
+      "cell": "b",
+      "repetition": 3,
+      "caseId": "autonomous.h3.investigate-status-code",
+      "status": "failed",
+      "taskGatesPassed": true,
+      "failedChecks": [],
+      "graphGrade": {
+        "status": "partial",
+        "score": null,
+        "answerQuality": null,
+        "maximum": 4,
+        "scoreCeiling": null
+      },
+      "judgeStatuses": [
+        {
+          "status": "partial",
+          "error": "Simulated-user judge ended without submitReview finalizing complete review coverage"
+        }
+      ],
+      "observedAuthoringErrors": 2,
+      "authoringByCause": {
+        "client": 2
+      },
+      "backendTiming": {
+        "schemaVersion": 1,
+        "sentAt": "2026-10-08T08:40:52.402Z",
+        "firstGraphAt": "2026-10-08T08:41:50.931Z",
+        "acceptedAt": "2026-10-08T08:41:50.931Z",
+        "firstGraphSeconds": 58.5,
+        "acceptedSeconds": 58.5,
+        "graphWriteRejections": 0,
+        "programRuns": {
+          "programs": 5,
+          "patches": 0,
+          "failed": 2
+        }
+      },
+      "pins": {
+        "harnessConfigurationDigest": "sha256:b6a82e8d9eb85f90698803e79d21574c8671f31631e6bc84b388468857274f34",
+        "caseSnapshotDigest": "sha256:ee0dcb1ed892431587073c88e66943ab7c5356ebec22e061d88dfbb1264574d0",
+        "judgeSetupRevisionId": "setup-b4b1f7e4-c476-4cee-a5ee-b90ec4682008"
+      }
+    },
+    {
+      "runId": "run-2026-10-08T08-54-17-911Z-a430fcb5",
+      "cell": "c",
+      "repetition": 3,
+      "caseId": "autonomous.h3.investigate-status-code",
+      "status": "failed",
+      "taskGatesPassed": true,
+      "failedChecks": [],
+      "graphGrade": {
+        "status": "partial",
+        "score": null,
+        "answerQuality": null,
+        "maximum": 4,
+        "scoreCeiling": null
+      },
+      "judgeStatuses": [
+        {
+          "status": "partial",
+          "error": "Simulated-user judge ended without submitReview finalizing complete review coverage"
+        }
+      ],
+      "observedAuthoringErrors": 1,
+      "authoringByCause": {
+        "server_rejection": 1
+      },
+      "backendTiming": {
+        "schemaVersion": 1,
+        "sentAt": "2026-10-08T08:54:19.782Z",
+        "firstGraphAt": "2026-10-08T08:55:04.668Z",
+        "acceptedAt": "2026-10-08T08:55:04.668Z",
+        "firstGraphSeconds": 44.9,
+        "acceptedSeconds": 44.9,
+        "graphWriteRejections": 1,
+        "programRuns": {
+          "programs": 2,
+          "patches": 3,
+          "failed": 2
+        }
+      },
+      "pins": {
+        "harnessConfigurationDigest": "sha256:3e0c5e319bc630232a47fa1edd64f12c8c5e278ab02234c72c83d34b2233c40f",
+        "caseSnapshotDigest": "sha256:ee0dcb1ed892431587073c88e66943ab7c5356ebec22e061d88dfbb1264574d0",
+        "judgeSetupRevisionId": "setup-b4b1f7e4-c476-4cee-a5ee-b90ec4682008"
+      }
+    },
+    {
+      "runId": "run-2026-10-08T09-09-57-583Z-7b92d812",
+      "cell": "d",
+      "repetition": 3,
+      "caseId": "autonomous.h3.investigate-status-code",
+      "status": "failed",
+      "taskGatesPassed": true,
+      "failedChecks": [],
+      "graphGrade": {
+        "status": "partial",
+        "score": null,
+        "answerQuality": null,
+        "maximum": 4,
+        "scoreCeiling": null
+      },
+      "judgeStatuses": [
+        {
+          "status": "partial",
+          "error": "Simulated-user judge ended without submitReview finalizing complete review coverage"
+        }
+      ],
+      "observedAuthoringErrors": 2,
+      "authoringByCause": {
+        "compiler": 2
+      },
+      "backendTiming": {
+        "schemaVersion": 1,
+        "sentAt": "2026-10-08T09:09:59.375Z",
+        "firstGraphAt": "2026-10-08T09:10:54.152Z",
+        "acceptedAt": "2026-10-08T09:10:54.152Z",
+        "firstGraphSeconds": 54.8,
+        "acceptedSeconds": 54.8,
+        "graphWriteRejections": 0,
+        "programRuns": {
+          "programs": 6,
+          "patches": 1,
+          "failed": 1
+        }
+      },
+      "pins": {
+        "harnessConfigurationDigest": "sha256:e8d0f338f160c3aab97ce04ab0088e81acfb665628a0f93fbd5dc58f1a852415",
+        "caseSnapshotDigest": "sha256:ee0dcb1ed892431587073c88e66943ab7c5356ebec22e061d88dfbb1264574d0",
+        "judgeSetupRevisionId": "setup-b4b1f7e4-c476-4cee-a5ee-b90ec4682008"
+      }
+    },
+    {
+      "runId": "run-2026-10-08T09-27-58-673Z-70396779",
+      "cell": "a",
+      "repetition": 3,
+      "caseId": "autonomous.h3.investigate-status-code",
+      "status": "passed",
+      "taskGatesPassed": true,
+      "failedChecks": [],
+      "graphGrade": {
+        "status": "completed",
+        "score": 4,
+        "answerQuality": 5,
+        "maximum": 8,
+        "scoreCeiling": 8
+      },
+      "judgeStatuses": [
+        {
+          "status": "completed",
+          "error": null
+        }
+      ],
+      "observedAuthoringErrors": 1,
+      "authoringByCause": {
+        "client": 1
+      },
+      "backendTiming": {
+        "schemaVersion": 1,
+        "sentAt": "2026-10-08T09:28:00.484Z",
+        "firstGraphAt": "2026-10-08T09:28:50.195Z",
+        "acceptedAt": "2026-10-08T09:28:50.195Z",
+        "firstGraphSeconds": 49.7,
+        "acceptedSeconds": 49.7,
+        "graphWriteRejections": 0,
+        "programRuns": {
+          "programs": 4,
+          "patches": 1,
+          "failed": 2
+        }
+      },
+      "pins": {
+        "harnessConfigurationDigest": "sha256:271922459f215f4405d2ee461a76a3696a8435fc77b580ad228275b3136776bd",
+        "caseSnapshotDigest": "sha256:ee0dcb1ed892431587073c88e66943ab7c5356ebec22e061d88dfbb1264574d0",
+        "judgeSetupRevisionId": "setup-b4b1f7e4-c476-4cee-a5ee-b90ec4682008"
+      }
+    }
+  ]
+}

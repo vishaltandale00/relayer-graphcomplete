@@ -80,5 +80,55 @@ initial unchanged Windows cleanup failure (cause unproven), its isolated 10/10
 pass, and the repeated full pass. The newer-main native-cache lock mismatch was
 rejected; the shipped #693 base passed trusted Ladybug identity verification.
 
-Live candidate and first-view results remain pending. These deterministic passes
-do not establish live performance or graph quality.
+All 24 original candidates ran on `85c72aa5104a790389ed4a64ebdb5e09522107f2`.
+No replacements or manual judge termination. Production ledger/timing and grade
+recomputation, gate references, screenshot hashes, 220 pre/post artifact identities,
+and exact root routes passed. Native runtime messages verify A/B/C/D delivery and
+Luna/medium on all 24 roots. `measurement-receipt.json` preserves evidence hashes.
+
+| Case | Version | First publication median (s) | Range (s) | Observed errors | Task gates | Graph scores /8 (available N) |
+| --- | --- | ---: | --- | ---: | --- | --- |
+| Repair | A | 53.3 | 38.9–57.9 | 1 | 3/3 | 4 (N=1) |
+| Repair | B | 52.1 | 46.9–88.8 | 0 | 3/3 | 2, 3 (N=2) |
+| Repair | C | 49.6 | 38–98.8 | 4 | 2/3 | 3, 2, 2 (N=3) |
+| Repair | D | 44.4 | 37.3–64.8 | 1 | 3/3 | 4 (N=1) |
+| Investigation | A | 49.7 | 27.4–55.5 | 2 | 3/3 | 4, 4 (N=2) |
+| Investigation | B | 53 | 37–58.5 | 3 | 3/3 | 4, 3 (N=2) |
+| Investigation | C | 44.9 | 40.9–51.4 | 5 | 3/3 | unavailable (N=0) |
+| Investigation | D | 43.1 | 43–54.8 | 3 | 3/3 | unavailable (N=0) |
+
+Each timing cell has three original attempts. These are backend Send-to-publication
+measurements, not renderer TTFG. Every first publication was a terminal Return:
+24 Return-first, zero Advance transitions. All 24 roots reached acceptance.
+The framing did not produce communication while work proceeded in these tasks.
+D has lower nominal medians (16.7% repair, 13.3% investigation versus A); within-cell
+variation and the small rotated pilot do not establish causal improvement or a winner.
+
+Task gates passed 23/24: C repair repetition 1 omitted a regression-test change from
+its commit; functionality/build/typecheck/focused tests passed. Qualitative task
+scores remain unavailable for all 24. Observed authoring incidents totaled 19:
+A=3, B=3, C=9, D=4; capture remains partial and exact totals unknown.
+
+Final graph review completed 11/24. The other 13 ended without complete submitReview
+coverage; scores remain unavailable, never zero. Raw scores and per-sample ceilings
+are retained in results.json. Missingness differs by cell, so graph non-regression
+is indeterminate. Judge failures are separate from candidate authoring counts.
+
+First-view overview ratings completed 24/24 under the frozen rubric: all 2/4,
+with 15/24 judged to contain meaningful task insight. Every view was terminal-first;
+there were zero early meaningful snapshots and zero D update pairs to assess.
+This crop excludes the inspector and cannot assess full interaction or establish
+Send-to-first-useful-paint latency. First-view scores do not replace final graph scores.
+
+The initial rater qualification failed because native JSON output omitted its
+startup model header. That failure is retained. A separate operational qualification
+passed after binding the unique native thread to its runtime model/effort contexts;
+no rubric, candidate, observer, or scoring factor changed. Retained native sessions
+are private evidence and are not supplied to the fresh-thread raters.
+
+Keep the ordinary baseline. A next experiment can give an explicit first-finding
+trigger for `graph.advance`, after repairing/qualifying final-judge stop feedback
+and richer first-view capture. No treatment is promoted by this change.
+
+Required verification, actual commands and initial failure receipts are recorded in
+verification.json. Live inference was authorized for this pilot, never the default suite.

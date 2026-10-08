@@ -1,0 +1,1493 @@
+{
+  "rubricVersion": "current-communication-first-view-v1",
+  "ratings": [
+    {
+      "repetition": 1,
+      "caseId": "autonomous.h3.sanitize-status-code",
+      "cell": "a",
+      "harness": "codex-eval-current-communication-a",
+      "id": "bf216f31-5f29-48ae-9c4a-b981461716e8",
+      "executionId": "068f932e-249b-4f95-a571-a7a1a68b4fab",
+      "interactionId": 37,
+      "layerId": 50,
+      "revision": 1,
+      "terminalFirst": true,
+      "firstView": true,
+      "status": "completed",
+      "reasonCode": null,
+      "rating": {
+        "overall": 2,
+        "meaningfulInsight": false,
+        "criteria": {
+          "specific_task_insight_shown": "no",
+          "uncertainty_or_limitations_understandable": "no",
+          "useful_implication_or_next_step": "no",
+          "readable_inspect_or_act_choices": "yes"
+        },
+        "reason": "The overview communicates the work area through a single clearly labeled node, but it only paraphrases the requested fix. It provides no concrete finding, validation result, regression-coverage status, commit status, uncertainty, or next step.",
+        "evidence": "The only substantive visible content is one centered, readable node labeled \u201cDecimal status fix,\u201d presented as an inspectable graph target.",
+        "materialUpdate": null
+      },
+      "evidence": [
+        {
+          "layerId": 50,
+          "images": [
+            {
+              "screenshot": "layer-50-1-1.png",
+              "selector": "#graphStage",
+              "clip": {
+                "x": 244,
+                "y": 134,
+                "width": 606,
+                "height": 723
+              },
+              "sha256": "3e6558c2a83cb3ed48f12b8b9f535a6dee31744f8b0fe7db2021b6b3819226de"
+            }
+          ]
+        }
+      ],
+      "rubricVersion": "current-communication-first-view-v1",
+      "rater": {
+        "model": "gpt-5.6-sol",
+        "reasoning": "high",
+        "adapter": "codex-subscription"
+      },
+      "effectiveModelVerified": true,
+      "runtimeModelEvidence": {
+        "nativeThreadId": "01a11add-291d-7792-ab1e-ab79995ec5dd",
+        "model": "gpt-5.6-sol",
+        "reasoning": "high",
+        "contextCount": 1,
+        "rolloutSha256": "d1767ce853d194a2d08be57711267c766339944c427ad3864f97e0a27dd8f41a"
+      },
+      "closedNativeItemAudit": true,
+      "sealedInput": "bf216f31-5f29-48ae-9c4a-b981461716e8"
+    },
+    {
+      "repetition": 1,
+      "caseId": "autonomous.h3.sanitize-status-code",
+      "cell": "b",
+      "harness": "codex-eval-current-communication-b",
+      "id": "a86cba1c-0c0f-4c64-b44a-1117a5e6c593",
+      "executionId": "3f456cd9-5873-4035-8566-4efcfbd3cdb3",
+      "interactionId": 38,
+      "layerId": 51,
+      "revision": 1,
+      "terminalFirst": true,
+      "firstView": true,
+      "status": "completed",
+      "reasonCode": null,
+      "rating": {
+        "overall": 2,
+        "meaningfulInsight": true,
+        "criteria": {
+          "specific_task_insight_shown": "yes",
+          "uncertainty_or_limitations_understandable": "no",
+          "useful_implication_or_next_step": "no",
+          "readable_inspect_or_act_choices": "no"
+        },
+        "reason": "The single readable node conveys a task-specific intended result\u2014decimal HTTP status codes are rejected\u2014but the overview provides no supporting evidence, scope or uncertainty, next step, or explicit inspect/action choice.",
+        "evidence": "Visible centered node labeled \u201cDecimal status codes rejected\u201d; no other task context or controls beyond generic canvas zoom/navigation.",
+        "materialUpdate": null
+      },
+      "evidence": [
+        {
+          "layerId": 51,
+          "images": [
+            {
+              "screenshot": "layer-51-1-1.png",
+              "selector": "#graphStage",
+              "clip": {
+                "x": 244,
+                "y": 134,
+                "width": 606,
+                "height": 723
+              },
+              "sha256": "422588168ed08f0a5a9d58208dfadadc5ee6555831a33091c4e5d4e8d8512a83"
+            }
+          ]
+        }
+      ],
+      "rubricVersion": "current-communication-first-view-v1",
+      "rater": {
+        "model": "gpt-5.6-sol",
+        "reasoning": "high",
+        "adapter": "codex-subscription"
+      },
+      "effectiveModelVerified": true,
+      "runtimeModelEvidence": {
+        "nativeThreadId": "01a11add-4c68-7e80-983e-858ccadf756f",
+        "model": "gpt-5.6-sol",
+        "reasoning": "high",
+        "contextCount": 1,
+        "rolloutSha256": "c0c937ae96dbcfb2b4915ffa8ecc4aabca903b9eb51027b5cf8c157c1df419d9"
+      },
+      "closedNativeItemAudit": true,
+      "sealedInput": "a86cba1c-0c0f-4c64-b44a-1117a5e6c593"
+    },
+    {
+      "repetition": 1,
+      "caseId": "autonomous.h3.sanitize-status-code",
+      "cell": "c",
+      "harness": "codex-eval-current-communication-c",
+      "id": "9194fbef-82a5-4a60-8c0e-0776125b679a",
+      "executionId": "ce148bcc-dd4a-4e28-82ac-82ee3c813c58",
+      "interactionId": 39,
+      "layerId": 52,
+      "revision": 1,
+      "terminalFirst": true,
+      "firstView": true,
+      "status": "completed",
+      "reasonCode": null,
+      "rating": {
+        "overall": 2,
+        "meaningfulInsight": false,
+        "criteria": {
+          "specific_task_insight_shown": "no",
+          "uncertainty_or_limitations_understandable": "no",
+          "useful_implication_or_next_step": "no",
+          "readable_inspect_or_act_choices": "no"
+        },
+        "reason": "The view shows a single task-related node, but its label is truncated and provides no visible finding, evidence, limitation, or next step. The zoom controls are readable, yet there is no clear task-level inspect or action choice.",
+        "evidence": "A lone centered node reads only \u201cDecimal status codes now fa...\u201d on an otherwise empty graph canvas.",
+        "materialUpdate": null
+      },
+      "evidence": [
+        {
+          "layerId": 52,
+          "images": [
+            {
+              "screenshot": "layer-52-1-1.png",
+              "selector": "#graphStage",
+              "clip": {
+                "x": 244,
+                "y": 134,
+                "width": 606,
+                "height": 723
+              },
+              "sha256": "bc78864c4e53619c2a90d54ecf708159dabb24b6a03e4d58a34d3a459adc9e65"
+            }
+          ]
+        }
+      ],
+      "rubricVersion": "current-communication-first-view-v1",
+      "rater": {
+        "model": "gpt-5.6-sol",
+        "reasoning": "high",
+        "adapter": "codex-subscription"
+      },
+      "effectiveModelVerified": true,
+      "runtimeModelEvidence": {
+        "nativeThreadId": "01a11add-8508-7f83-b5dd-3e6e3d0db38b",
+        "model": "gpt-5.6-sol",
+        "reasoning": "high",
+        "contextCount": 1,
+        "rolloutSha256": "c817d1fad14f66aaf3c6497d26ffe4a02a8e62909d0f40f484ce295aaa9f7189"
+      },
+      "closedNativeItemAudit": true,
+      "sealedInput": "9194fbef-82a5-4a60-8c0e-0776125b679a"
+    },
+    {
+      "repetition": 1,
+      "caseId": "autonomous.h3.sanitize-status-code",
+      "cell": "d",
+      "harness": "codex-eval-current-communication-d",
+      "id": "91d3f5ac-69dc-4b6a-b1b9-f9b826f8731a",
+      "executionId": "f5564ae0-17ef-4401-9002-292ddf0bb50b",
+      "interactionId": 40,
+      "layerId": 53,
+      "revision": 1,
+      "terminalFirst": true,
+      "firstView": true,
+      "status": "completed",
+      "reasonCode": null,
+      "rating": {
+        "overall": 2,
+        "meaningfulInsight": false,
+        "criteria": {
+          "specific_task_insight_shown": "yes",
+          "uncertainty_or_limitations_understandable": "no",
+          "useful_implication_or_next_step": "no",
+          "readable_inspect_or_act_choices": "no"
+        },
+        "reason": "The single readable node identifies the task-specific issue, but it largely restates the requested bug and provides no evidence, diagnosis, progress state, limitations, planned action, or visible steering choice.",
+        "evidence": "The graph contains only one central node labeled \u201cDecimal status codes rejected\u201d; no supporting or actionable nodes are visible.",
+        "materialUpdate": null
+      },
+      "evidence": [
+        {
+          "layerId": 53,
+          "images": [
+            {
+              "screenshot": "layer-53-1-1.png",
+              "selector": "#graphStage",
+              "clip": {
+                "x": 244,
+                "y": 134,
+                "width": 606,
+                "height": 723
+              },
+              "sha256": "422588168ed08f0a5a9d58208dfadadc5ee6555831a33091c4e5d4e8d8512a83"
+            }
+          ]
+        }
+      ],
+      "rubricVersion": "current-communication-first-view-v1",
+      "rater": {
+        "model": "gpt-5.6-sol",
+        "reasoning": "high",
+        "adapter": "codex-subscription"
+      },
+      "effectiveModelVerified": true,
+      "runtimeModelEvidence": {
+        "nativeThreadId": "01a11add-9f6a-7cb2-b967-07275f8ba1c2",
+        "model": "gpt-5.6-sol",
+        "reasoning": "high",
+        "contextCount": 1,
+        "rolloutSha256": "0494878059d02b73eab84ec2e030fe2b4c84271d7cea091e1ef7642eacd133f1"
+      },
+      "closedNativeItemAudit": true,
+      "sealedInput": "91d3f5ac-69dc-4b6a-b1b9-f9b826f8731a"
+    },
+    {
+      "repetition": 1,
+      "caseId": "autonomous.h3.investigate-status-code",
+      "cell": "b",
+      "harness": "codex-eval-current-communication-b",
+      "id": "6a210002-a76a-4f74-a991-61fda779aa24",
+      "executionId": "0135c5ba-b302-4488-90d6-7d0ff8a99d5b",
+      "interactionId": 41,
+      "layerId": 54,
+      "revision": 1,
+      "terminalFirst": true,
+      "firstView": true,
+      "status": "completed",
+      "reasonCode": null,
+      "rating": {
+        "overall": 2,
+        "meaningfulInsight": true,
+        "criteria": {
+          "specific_task_insight_shown": "yes",
+          "uncertainty_or_limitations_understandable": "no",
+          "useful_implication_or_next_step": "no",
+          "readable_inspect_or_act_choices": "no"
+        },
+        "reason": "The single node communicates a task-specific direction\u2014\u201cFractional status survives\u2026\u201d\u2014but its text is truncated, with no visible supporting path, test evidence, uncertainty, verification detail, or actionable next step. The overview therefore offers a recognizable finding but limited steering value.",
+        "evidence": "One centered graph node is visible with the truncated label \u201cFractional status survives sa\u2026\u201d. No other nodes, relationships, decisions, tests, limitations, or inspect/action labels are visible in the supplied overview.",
+        "materialUpdate": null
+      },
+      "evidence": [
+        {
+          "layerId": 54,
+          "images": [
+            {
+              "screenshot": "layer-54-1-1.png",
+              "selector": "#graphStage",
+              "clip": {
+                "x": 244,
+                "y": 134,
+                "width": 606,
+                "height": 723
+              },
+              "sha256": "74b47052b09d75c4a05a07cdbbc6db1ee9c213eba5cb9353797c53bc37c89daa"
+            }
+          ]
+        }
+      ],
+      "rubricVersion": "current-communication-first-view-v1",
+      "rater": {
+        "model": "gpt-5.6-sol",
+        "reasoning": "high",
+        "adapter": "codex-subscription"
+      },
+      "effectiveModelVerified": true,
+      "runtimeModelEvidence": {
+        "nativeThreadId": "01a11add-bc8e-7cc1-942b-6ef814cd0e02",
+        "model": "gpt-5.6-sol",
+        "reasoning": "high",
+        "contextCount": 1,
+        "rolloutSha256": "77d7f9dd12b80c91b05937f34953f1cd3b0b1071457f8766865ba625d788a4bf"
+      },
+      "closedNativeItemAudit": true,
+      "sealedInput": "6a210002-a76a-4f74-a991-61fda779aa24"
+    },
+    {
+      "repetition": 1,
+      "caseId": "autonomous.h3.investigate-status-code",
+      "cell": "c",
+      "harness": "codex-eval-current-communication-c",
+      "id": "22c3b552-901a-4d3c-bd86-939c43f112b0",
+      "executionId": "5c6fee56-ac3f-4123-b9ea-8f4b01768cc0",
+      "interactionId": 42,
+      "layerId": 57,
+      "revision": 1,
+      "terminalFirst": true,
+      "firstView": true,
+      "status": "completed",
+      "reasonCode": null,
+      "rating": {
+        "overall": 2,
+        "meaningfulInsight": true,
+        "criteria": {
+          "specific_task_insight_shown": "yes",
+          "uncertainty_or_limitations_understandable": "no",
+          "useful_implication_or_next_step": "no",
+          "readable_inspect_or_act_choices": "no"
+        },
+        "reason": "The single visible node communicates a task-specific direction\u2014\u201cFractional status escapes val...\u201d \u2014which appears to identify validation as the relevant failure area. However, the text is truncated and the overview shows no supporting path, tests, verification evidence, stated uncertainty, or clear next action/inspection choice.",
+        "evidence": "Visible evidence is limited to one centered node labeled \u201cFractional status escapes val...\u201d plus generic canvas zoom controls; no other findings or relationships are shown.",
+        "materialUpdate": null
+      },
+      "evidence": [
+        {
+          "layerId": 57,
+          "images": [
+            {
+              "screenshot": "layer-57-1-1.png",
+              "selector": "#graphStage",
+              "clip": {
+                "x": 244,
+                "y": 134,
+                "width": 606,
+                "height": 723
+              },
+              "sha256": "c863eace577e44a31ee6300238ddd16bf1b942ebb2945d4ed5a2b1462d4dcfc9"
+            }
+          ]
+        }
+      ],
+      "rubricVersion": "current-communication-first-view-v1",
+      "rater": {
+        "model": "gpt-5.6-sol",
+        "reasoning": "high",
+        "adapter": "codex-subscription"
+      },
+      "effectiveModelVerified": true,
+      "runtimeModelEvidence": {
+        "nativeThreadId": "01a11add-da4c-74d1-a2a2-79184b4c82de",
+        "model": "gpt-5.6-sol",
+        "reasoning": "high",
+        "contextCount": 1,
+        "rolloutSha256": "002d2e971fe2a0e6d1cb7c0cb16bb84cc0b12922f4e036af934a134fc4e50274"
+      },
+      "closedNativeItemAudit": true,
+      "sealedInput": "22c3b552-901a-4d3c-bd86-939c43f112b0"
+    },
+    {
+      "repetition": 1,
+      "caseId": "autonomous.h3.investigate-status-code",
+      "cell": "d",
+      "harness": "codex-eval-current-communication-d",
+      "id": "3bbde8f8-e7df-4129-be29-058171b9b906",
+      "executionId": "3d2f9a0c-fa58-48c2-b524-4f76cb0b1723",
+      "interactionId": 43,
+      "layerId": 58,
+      "revision": 1,
+      "terminalFirst": true,
+      "firstView": true,
+      "status": "completed",
+      "reasonCode": null,
+      "rating": {
+        "overall": 2,
+        "meaningfulInsight": false,
+        "criteria": {
+          "specific_task_insight_shown": "no",
+          "uncertainty_or_limitations_understandable": "no",
+          "useful_implication_or_next_step": "no",
+          "readable_inspect_or_act_choices": "no"
+        },
+        "reason": "The view is readable and task-related, but it only restates the reported symptom as \u201cFractional status slips through.\u201d It does not show the cause, smallest responsible path, relevant tests, verification evidence, limitations, or a next step, and no explicit inspect-or-act choice is visible.",
+        "evidence": "A single centered node reads \u201cFractional status slips through\u201d; the rest of the graph is empty aside from canvas and zoom controls.",
+        "materialUpdate": null
+      },
+      "evidence": [
+        {
+          "layerId": 58,
+          "images": [
+            {
+              "screenshot": "layer-58-1-1.png",
+              "selector": "#graphStage",
+              "clip": {
+                "x": 244,
+                "y": 134,
+                "width": 606,
+                "height": 723
+              },
+              "sha256": "1f0e613636afe0a6b7953a142f261255b839e46ba3a156b89987af1fcc1608c7"
+            }
+          ]
+        }
+      ],
+      "rubricVersion": "current-communication-first-view-v1",
+      "rater": {
+        "model": "gpt-5.6-sol",
+        "reasoning": "high",
+        "adapter": "codex-subscription"
+      },
+      "effectiveModelVerified": true,
+      "runtimeModelEvidence": {
+        "nativeThreadId": "01a11ade-3f16-7ca2-8578-97e74a49eed3",
+        "model": "gpt-5.6-sol",
+        "reasoning": "high",
+        "contextCount": 1,
+        "rolloutSha256": "50a69bdb8fd9dc29c8311b2e876513f1dee6c553583ce567e56aa4481448a460"
+      },
+      "closedNativeItemAudit": true,
+      "sealedInput": "3bbde8f8-e7df-4129-be29-058171b9b906"
+    },
+    {
+      "repetition": 1,
+      "caseId": "autonomous.h3.investigate-status-code",
+      "cell": "a",
+      "harness": "codex-eval-current-communication-a",
+      "id": "a76a7fd1-f3ff-4636-81e5-87e3737808f1",
+      "executionId": "64a09a1a-04e9-4a6e-a42e-0dfe34ebb525",
+      "interactionId": 44,
+      "layerId": 60,
+      "revision": 1,
+      "terminalFirst": true,
+      "firstView": true,
+      "status": "completed",
+      "reasonCode": null,
+      "rating": {
+        "overall": 2,
+        "meaningfulInsight": true,
+        "criteria": {
+          "specific_task_insight_shown": "yes",
+          "uncertainty_or_limitations_understandable": "no",
+          "useful_implication_or_next_step": "no",
+          "readable_inspect_or_act_choices": "no"
+        },
+        "reason": "The single visible node gives a recognizable, task-specific direction about a fractional status escaping validation, but its text is truncated and the overview provides no supporting path, test evidence, verification status, stated limitations, or actionable next step.",
+        "evidence": "The graph contains one central node labeled only \"Fractional status escapes sa...\"; no other readable nodes, branches, evidence, or choices are visible.",
+        "materialUpdate": null
+      },
+      "evidence": [
+        {
+          "layerId": 60,
+          "images": [
+            {
+              "screenshot": "layer-60-1-1.png",
+              "selector": "#graphStage",
+              "clip": {
+                "x": 244,
+                "y": 134,
+                "width": 606,
+                "height": 723
+              },
+              "sha256": "312429231c9f2a31eeec1067d67ab6628975224a4db71a51d9794518f298ff4c"
+            }
+          ]
+        }
+      ],
+      "rubricVersion": "current-communication-first-view-v1",
+      "rater": {
+        "model": "gpt-5.6-sol",
+        "reasoning": "high",
+        "adapter": "codex-subscription"
+      },
+      "effectiveModelVerified": true,
+      "runtimeModelEvidence": {
+        "nativeThreadId": "01a11ade-5d8e-7e01-b8b6-648241971028",
+        "model": "gpt-5.6-sol",
+        "reasoning": "high",
+        "contextCount": 1,
+        "rolloutSha256": "d61fbdcc4e95905b237529b56a89d974ad606d16e80e4f14c104e8bc72ef11c8"
+      },
+      "closedNativeItemAudit": true,
+      "sealedInput": "a76a7fd1-f3ff-4636-81e5-87e3737808f1"
+    },
+    {
+      "repetition": 2,
+      "caseId": "autonomous.h3.sanitize-status-code",
+      "cell": "c",
+      "harness": "codex-eval-current-communication-c",
+      "id": "629ebd9c-621b-494b-951a-be31e32a9365",
+      "executionId": "e6d407ab-f664-4c61-91fb-2d11f93c1b8c",
+      "interactionId": 45,
+      "layerId": 61,
+      "revision": 1,
+      "terminalFirst": true,
+      "firstView": true,
+      "status": "completed",
+      "reasonCode": null,
+      "rating": {
+        "overall": 2,
+        "meaningfulInsight": true,
+        "criteria": {
+          "specific_task_insight_shown": "yes",
+          "uncertainty_or_limitations_understandable": "no",
+          "useful_implication_or_next_step": "no",
+          "readable_inspect_or_act_choices": "no"
+        },
+        "reason": "The single node is recognizably tied to the requested decimal HTTP-status bug, but its text is truncated and the overview provides no visible evidence, testing status, limitations, next step, or steering choice.",
+        "evidence": "A lone centered node reads \u201cFractional HTTP statuses rej...\u201d with no other visible nodes, relationships, annotations, or actions.",
+        "materialUpdate": null
+      },
+      "evidence": [
+        {
+          "layerId": 61,
+          "images": [
+            {
+              "screenshot": "layer-61-1-1.png",
+              "selector": "#graphStage",
+              "clip": {
+                "x": 244,
+                "y": 134,
+                "width": 606,
+                "height": 723
+              },
+              "sha256": "6d369cd2cc884ad13958cde04fe6e43709ed466db643672e56166a59834fc255"
+            }
+          ]
+        }
+      ],
+      "rubricVersion": "current-communication-first-view-v1",
+      "rater": {
+        "model": "gpt-5.6-sol",
+        "reasoning": "high",
+        "adapter": "codex-subscription"
+      },
+      "effectiveModelVerified": true,
+      "runtimeModelEvidence": {
+        "nativeThreadId": "01a11ade-8186-74b1-86b2-2a60d2307f52",
+        "model": "gpt-5.6-sol",
+        "reasoning": "high",
+        "contextCount": 1,
+        "rolloutSha256": "9c4eeab659926468e14f3ed064de76994bb217f4678ec89ecbf3b5a9bf0c9d00"
+      },
+      "closedNativeItemAudit": true,
+      "sealedInput": "629ebd9c-621b-494b-951a-be31e32a9365"
+    },
+    {
+      "repetition": 2,
+      "caseId": "autonomous.h3.sanitize-status-code",
+      "cell": "d",
+      "harness": "codex-eval-current-communication-d",
+      "id": "afb7ba57-000b-41a0-aae9-a1379827cd5c",
+      "executionId": "b3ca4138-8520-4a72-9a45-90b8a5e6a7bb",
+      "interactionId": 46,
+      "layerId": 62,
+      "revision": 1,
+      "terminalFirst": true,
+      "firstView": true,
+      "status": "completed",
+      "reasonCode": null,
+      "rating": {
+        "overall": 2,
+        "meaningfulInsight": false,
+        "criteria": {
+          "specific_task_insight_shown": "no",
+          "uncertainty_or_limitations_understandable": "no",
+          "useful_implication_or_next_step": "no",
+          "readable_inspect_or_act_choices": "no"
+        },
+        "reason": "The view communicates a recognizable, task-specific completion status, but it is only a brief progress claim. It does not show what caused the decimal-status bug, what changed, which regression coverage or checks ran, whether scope constraints were verified, or what the user can inspect or do next.",
+        "evidence": "The sole visible node reads \u201cDecimal status fix committed.\u201d No supporting nodes, test/check results, limitations, commit identifier, or explicit inspect/action choices are visible.",
+        "materialUpdate": null
+      },
+      "evidence": [
+        {
+          "layerId": 62,
+          "images": [
+            {
+              "screenshot": "layer-62-1-1.png",
+              "selector": "#graphStage",
+              "clip": {
+                "x": 244,
+                "y": 134,
+                "width": 606,
+                "height": 723
+              },
+              "sha256": "074f3cf7192760804dfe5a58f011c56ef3ac24d7d4b3c6d0d8c5faf87321c944"
+            }
+          ]
+        }
+      ],
+      "rubricVersion": "current-communication-first-view-v1",
+      "rater": {
+        "model": "gpt-5.6-sol",
+        "reasoning": "high",
+        "adapter": "codex-subscription"
+      },
+      "effectiveModelVerified": true,
+      "runtimeModelEvidence": {
+        "nativeThreadId": "01a11ade-a27a-7ea1-8759-ba0709e1c8fe",
+        "model": "gpt-5.6-sol",
+        "reasoning": "high",
+        "contextCount": 1,
+        "rolloutSha256": "fac48789b5b04e6353d6bb82253c910073c19ca945796f27a0f94553df7b4b62"
+      },
+      "closedNativeItemAudit": true,
+      "sealedInput": "afb7ba57-000b-41a0-aae9-a1379827cd5c"
+    },
+    {
+      "repetition": 2,
+      "caseId": "autonomous.h3.sanitize-status-code",
+      "cell": "a",
+      "harness": "codex-eval-current-communication-a",
+      "id": "8af53f23-9cdd-41c5-b38f-7c63bcffd494",
+      "executionId": "c7eae0bc-7c0a-45b2-917e-0ea1744e47a7",
+      "interactionId": 47,
+      "layerId": 64,
+      "revision": 1,
+      "terminalFirst": true,
+      "firstView": true,
+      "status": "completed",
+      "reasonCode": null,
+      "rating": {
+        "overall": 2,
+        "meaningfulInsight": false,
+        "criteria": {
+          "specific_task_insight_shown": "no",
+          "uncertainty_or_limitations_understandable": "no",
+          "useful_implication_or_next_step": "no",
+          "readable_inspect_or_act_choices": "no"
+        },
+        "reason": "The view shows only a single, truncated task label, which confirms the general work direction but provides no concrete finding, decision context, test result, limitation, or next step.",
+        "evidence": "A lone node labeled \u201cDecimal status validation fix...\u201d is visible; no supporting nodes, status details, outcomes, uncertainty, or action choices appear in the overview.",
+        "materialUpdate": null
+      },
+      "evidence": [
+        {
+          "layerId": 64,
+          "images": [
+            {
+              "screenshot": "layer-64-1-1.png",
+              "selector": "#graphStage",
+              "clip": {
+                "x": 244,
+                "y": 134,
+                "width": 606,
+                "height": 723
+              },
+              "sha256": "97578053792f5b84b09045cf5c1d7fedbdfc06754046bda85303012c737972c2"
+            }
+          ]
+        }
+      ],
+      "rubricVersion": "current-communication-first-view-v1",
+      "rater": {
+        "model": "gpt-5.6-sol",
+        "reasoning": "high",
+        "adapter": "codex-subscription"
+      },
+      "effectiveModelVerified": true,
+      "runtimeModelEvidence": {
+        "nativeThreadId": "01a11ade-c746-72b2-bec6-abb946840c1e",
+        "model": "gpt-5.6-sol",
+        "reasoning": "high",
+        "contextCount": 1,
+        "rolloutSha256": "e1386f9638727e511b9748ec8cf5d687b45361bfe07d54330929120cff797423"
+      },
+      "closedNativeItemAudit": true,
+      "sealedInput": "8af53f23-9cdd-41c5-b38f-7c63bcffd494"
+    },
+    {
+      "repetition": 2,
+      "caseId": "autonomous.h3.sanitize-status-code",
+      "cell": "b",
+      "harness": "codex-eval-current-communication-b",
+      "id": "8864f9f7-28d1-4324-8e07-cffb7ad726b5",
+      "executionId": "e66ff638-4752-4ad0-9ce3-7f62373d58e3",
+      "interactionId": 48,
+      "layerId": 66,
+      "revision": 1,
+      "terminalFirst": true,
+      "firstView": true,
+      "status": "completed",
+      "reasonCode": null,
+      "rating": {
+        "overall": 2,
+        "meaningfulInsight": true,
+        "criteria": {
+          "specific_task_insight_shown": "yes",
+          "uncertainty_or_limitations_understandable": "no",
+          "useful_implication_or_next_step": "no",
+          "readable_inspect_or_act_choices": "no"
+        },
+        "reason": "The view communicates one concrete, task-specific result: decimal HTTP status codes are rejected. However, it does not show whether this reflects the reproduced bug, the completed repair, or a passing regression test, and it provides no visible next step, verification context, commit status, or inspect/action choices.",
+        "evidence": "A single readable checked node is visible with the label \u201cDecimal status codes rejected\u201d; no other task details or controls tied to the work are shown.",
+        "materialUpdate": null
+      },
+      "evidence": [
+        {
+          "layerId": 66,
+          "images": [
+            {
+              "screenshot": "layer-66-1-1.png",
+              "selector": "#graphStage",
+              "clip": {
+                "x": 244,
+                "y": 134,
+                "width": 606,
+                "height": 723
+              },
+              "sha256": "354ca1acd87ceef546ed6c0190a67be1e20646ea9db56b001e9db2af891dc33f"
+            }
+          ]
+        }
+      ],
+      "rubricVersion": "current-communication-first-view-v1",
+      "rater": {
+        "model": "gpt-5.6-sol",
+        "reasoning": "high",
+        "adapter": "codex-subscription"
+      },
+      "effectiveModelVerified": true,
+      "runtimeModelEvidence": {
+        "nativeThreadId": "01a11ade-e2a4-7330-bf87-4a509bae3bd7",
+        "model": "gpt-5.6-sol",
+        "reasoning": "high",
+        "contextCount": 1,
+        "rolloutSha256": "e25e05400a560869ecaa34a8c8580d30adbe647fb3f99a18bca3c831a744ad9c"
+      },
+      "closedNativeItemAudit": true,
+      "sealedInput": "8864f9f7-28d1-4324-8e07-cffb7ad726b5"
+    },
+    {
+      "repetition": 2,
+      "caseId": "autonomous.h3.investigate-status-code",
+      "cell": "d",
+      "harness": "codex-eval-current-communication-d",
+      "id": "4d49fb82-1a34-4ee3-a3f6-16b51748de17",
+      "executionId": "3e53b74c-61b9-4edb-8a1d-0d39641ed0e8",
+      "interactionId": 49,
+      "layerId": 67,
+      "revision": 1,
+      "terminalFirst": true,
+      "firstView": true,
+      "status": "completed",
+      "reasonCode": null,
+      "rating": {
+        "overall": 2,
+        "meaningfulInsight": true,
+        "criteria": {
+          "specific_task_insight_shown": "yes",
+          "uncertainty_or_limitations_understandable": "no",
+          "useful_implication_or_next_step": "no",
+          "readable_inspect_or_act_choices": "no"
+        },
+        "reason": "The single visible node is recognizably tied to the reported bug and begins to communicate a concrete finding about fractional statuses passing some boundary. However, its label is truncated (\u201cFractional statuses pass the ...\u201d), so the responsible path, relevant tests, verification evidence, limitations, and next step are not visible. The overview also offers no clearly labeled inspect-or-act choice.",
+        "evidence": "The graph contains one centered node labeled \u201cFractional statuses pass the ...\u201d and no other visible findings, branches, annotations, or action labels.",
+        "materialUpdate": null
+      },
+      "evidence": [
+        {
+          "layerId": 67,
+          "images": [
+            {
+              "screenshot": "layer-67-1-1.png",
+              "selector": "#graphStage",
+              "clip": {
+                "x": 244,
+                "y": 134,
+                "width": 606,
+                "height": 723
+              },
+              "sha256": "2047759b58963a8ab780e5bd78fa1a40181d670869d34bf0e51aaa24ceedd42d"
+            }
+          ]
+        }
+      ],
+      "rubricVersion": "current-communication-first-view-v1",
+      "rater": {
+        "model": "gpt-5.6-sol",
+        "reasoning": "high",
+        "adapter": "codex-subscription"
+      },
+      "effectiveModelVerified": true,
+      "runtimeModelEvidence": {
+        "nativeThreadId": "01a11adf-0bd9-7a03-aebb-cb46defc1d36",
+        "model": "gpt-5.6-sol",
+        "reasoning": "high",
+        "contextCount": 1,
+        "rolloutSha256": "7b6185562de951bbcf0b867c5c527576225f4fa41361a597d39cc1d6973ea8f1"
+      },
+      "closedNativeItemAudit": true,
+      "sealedInput": "4d49fb82-1a34-4ee3-a3f6-16b51748de17"
+    },
+    {
+      "repetition": 2,
+      "caseId": "autonomous.h3.investigate-status-code",
+      "cell": "a",
+      "harness": "codex-eval-current-communication-a",
+      "id": "f646a15e-df24-4157-a890-4d044f091c06",
+      "executionId": "7a73fce0-f8a3-43ea-a07f-cbc072cc7a2c",
+      "interactionId": 50,
+      "layerId": 68,
+      "revision": 1,
+      "terminalFirst": true,
+      "firstView": true,
+      "status": "completed",
+      "reasonCode": null,
+      "rating": {
+        "overall": 2,
+        "meaningfulInsight": true,
+        "criteria": {
+          "specific_task_insight_shown": "yes",
+          "uncertainty_or_limitations_understandable": "no",
+          "useful_implication_or_next_step": "no",
+          "readable_inspect_or_act_choices": "no"
+        },
+        "reason": "The single node visibly states a task-specific finding\u2014\u201cDecimal status escapes valid\u2026\u201d\u2014so the view communicates a recognizable diagnosis direction. However, the label is truncated, no supporting cause, responsible path, tests, or verification are visible, and the view gives no understandable caveat or explicit next step. The node may be inspectable, but the overview does not present a clear readable inspect-or-act choice.",
+        "evidence": "A centered node labeled \u201cDecimal status escapes valid\u2026\u201d is visible, along with generic zoom/pan controls; no other findings, relationships, limitations, verification evidence, or action labels appear.",
+        "materialUpdate": null
+      },
+      "evidence": [
+        {
+          "layerId": 68,
+          "images": [
+            {
+              "screenshot": "layer-68-1-1.png",
+              "selector": "#graphStage",
+              "clip": {
+                "x": 244,
+                "y": 134,
+                "width": 606,
+                "height": 723
+              },
+              "sha256": "febcdc674a1bcc897d7c802f9bf6839cb6e440eb62076850a4c6d4fbcfdcd7ea"
+            }
+          ]
+        }
+      ],
+      "rubricVersion": "current-communication-first-view-v1",
+      "rater": {
+        "model": "gpt-5.6-sol",
+        "reasoning": "high",
+        "adapter": "codex-subscription"
+      },
+      "effectiveModelVerified": true,
+      "runtimeModelEvidence": {
+        "nativeThreadId": "01a11adf-307a-7b23-a11b-2006fefdd5fe",
+        "model": "gpt-5.6-sol",
+        "reasoning": "high",
+        "contextCount": 1,
+        "rolloutSha256": "551d731ba740b53320b3ac5cdf82d2577595e3113caffa028b7ae9b6d3996750"
+      },
+      "closedNativeItemAudit": true,
+      "sealedInput": "f646a15e-df24-4157-a890-4d044f091c06"
+    },
+    {
+      "repetition": 2,
+      "caseId": "autonomous.h3.investigate-status-code",
+      "cell": "b",
+      "harness": "codex-eval-current-communication-b",
+      "id": "0be35e50-03cf-4a04-9321-0a95b4956581",
+      "executionId": "e3d819a8-cb77-415e-9a93-06a7f9501273",
+      "interactionId": 51,
+      "layerId": 70,
+      "revision": 1,
+      "terminalFirst": true,
+      "firstView": true,
+      "status": "completed",
+      "reasonCode": null,
+      "rating": {
+        "overall": 2,
+        "meaningfulInsight": true,
+        "criteria": {
+          "specific_task_insight_shown": "yes",
+          "uncertainty_or_limitations_understandable": "no",
+          "useful_implication_or_next_step": "no",
+          "readable_inspect_or_act_choices": "no"
+        },
+        "reason": "The single node appears task-specific and indicates a finding that a fractional status escapes validation, but the label is truncated and no supporting path, tests, verification, uncertainty, or next action is visible. The overview therefore gives recognizable direction without enough readable detail to understand or steer the investigation.",
+        "evidence": "Visible graph contains one centered node labeled only \u201cFractional status escapes val...\u201d with no other visible nodes, edges, annotations, or action choices.",
+        "materialUpdate": null
+      },
+      "evidence": [
+        {
+          "layerId": 70,
+          "images": [
+            {
+              "screenshot": "layer-70-1-1.png",
+              "selector": "#graphStage",
+              "clip": {
+                "x": 244,
+                "y": 134,
+                "width": 606,
+                "height": 723
+              },
+              "sha256": "c863eace577e44a31ee6300238ddd16bf1b942ebb2945d4ed5a2b1462d4dcfc9"
+            }
+          ]
+        }
+      ],
+      "rubricVersion": "current-communication-first-view-v1",
+      "rater": {
+        "model": "gpt-5.6-sol",
+        "reasoning": "high",
+        "adapter": "codex-subscription"
+      },
+      "effectiveModelVerified": true,
+      "runtimeModelEvidence": {
+        "nativeThreadId": "01a11adf-578e-7902-8964-6b132e01196e",
+        "model": "gpt-5.6-sol",
+        "reasoning": "high",
+        "contextCount": 1,
+        "rolloutSha256": "889da001e32d52b82c93848921c099d562f83a1cafda2f818f84429f2cd711d0"
+      },
+      "closedNativeItemAudit": true,
+      "sealedInput": "0be35e50-03cf-4a04-9321-0a95b4956581"
+    },
+    {
+      "repetition": 2,
+      "caseId": "autonomous.h3.investigate-status-code",
+      "cell": "c",
+      "harness": "codex-eval-current-communication-c",
+      "id": "7c460ee4-0ad9-48e2-b079-fea5835bdebe",
+      "executionId": "bbfff40e-034f-4402-b77b-c2569dc78260",
+      "interactionId": 52,
+      "layerId": 71,
+      "revision": 1,
+      "terminalFirst": true,
+      "firstView": true,
+      "status": "completed",
+      "reasonCode": null,
+      "rating": {
+        "overall": 2,
+        "meaningfulInsight": true,
+        "criteria": {
+          "specific_task_insight_shown": "yes",
+          "uncertainty_or_limitations_understandable": "no",
+          "useful_implication_or_next_step": "no",
+          "readable_inspect_or_act_choices": "no"
+        },
+        "reason": "The single node indicates a task-specific diagnosis direction involving a fractional status escaping validation, but its label is truncated and the overview provides no visible supporting evidence, responsible path, relevant tests, verification method, uncertainty, or next action.",
+        "evidence": "Visible graph contains one central node labeled only \u201cFractional status escapes sa...\u201d plus generic canvas zoom/pan controls.",
+        "materialUpdate": null
+      },
+      "evidence": [
+        {
+          "layerId": 71,
+          "images": [
+            {
+              "screenshot": "layer-71-1-1.png",
+              "selector": "#graphStage",
+              "clip": {
+                "x": 244,
+                "y": 134,
+                "width": 606,
+                "height": 723
+              },
+              "sha256": "13d3f5cb264d195deb59c5c26fd2e2cd92db3bfc1f05c323c9e3fc965c4863f6"
+            }
+          ]
+        }
+      ],
+      "rubricVersion": "current-communication-first-view-v1",
+      "rater": {
+        "model": "gpt-5.6-sol",
+        "reasoning": "high",
+        "adapter": "codex-subscription"
+      },
+      "effectiveModelVerified": true,
+      "runtimeModelEvidence": {
+        "nativeThreadId": "01a11adf-ccc9-75d1-a9a2-e67f270e6a85",
+        "model": "gpt-5.6-sol",
+        "reasoning": "high",
+        "contextCount": 1,
+        "rolloutSha256": "e40bb0c8420b951fcac886072a3ec85a8aed4daa941dd9a992f7f1d209d02654"
+      },
+      "closedNativeItemAudit": true,
+      "sealedInput": "7c460ee4-0ad9-48e2-b079-fea5835bdebe"
+    },
+    {
+      "repetition": 3,
+      "caseId": "autonomous.h3.sanitize-status-code",
+      "cell": "a",
+      "harness": "codex-eval-current-communication-a",
+      "id": "530062a7-df2f-41c1-93dc-c7fc3352a6bf",
+      "executionId": "a0e6d4de-b520-4253-80ae-f12972db4f26",
+      "interactionId": 53,
+      "layerId": 73,
+      "revision": 1,
+      "terminalFirst": true,
+      "firstView": true,
+      "status": "completed",
+      "reasonCode": null,
+      "rating": {
+        "overall": 2,
+        "meaningfulInsight": true,
+        "criteria": {
+          "specific_task_insight_shown": "yes",
+          "uncertainty_or_limitations_understandable": "no",
+          "useful_implication_or_next_step": "no",
+          "readable_inspect_or_act_choices": "no"
+        },
+        "reason": "The overview communicates one concrete, task-specific finding\u2014decimal status codes are being rejected\u2014but provides no visible evidence, scope/uncertainty, planned repair, regression-test status, check results, or commit progress. The node is readable, though there are no clear inspect-or-act choices in the overview.",
+        "evidence": "A single centered node reads \u201cDecimal status codes rejected.\u201d No other task nodes, branches, status indicators, or labeled actions are visible.",
+        "materialUpdate": null
+      },
+      "evidence": [
+        {
+          "layerId": 73,
+          "images": [
+            {
+              "screenshot": "layer-73-1-1.png",
+              "selector": "#graphStage",
+              "clip": {
+                "x": 244,
+                "y": 134,
+                "width": 606,
+                "height": 723
+              },
+              "sha256": "422588168ed08f0a5a9d58208dfadadc5ee6555831a33091c4e5d4e8d8512a83"
+            }
+          ]
+        }
+      ],
+      "rubricVersion": "current-communication-first-view-v1",
+      "rater": {
+        "model": "gpt-5.6-sol",
+        "reasoning": "high",
+        "adapter": "codex-subscription"
+      },
+      "effectiveModelVerified": true,
+      "runtimeModelEvidence": {
+        "nativeThreadId": "01a11ae0-08b7-7320-9676-5a81f163a33f",
+        "model": "gpt-5.6-sol",
+        "reasoning": "high",
+        "contextCount": 1,
+        "rolloutSha256": "c4c97dc803e22155d480e68808a0d6dfc808c55df37d5b1d531ebaf6e406f5ad"
+      },
+      "closedNativeItemAudit": true,
+      "sealedInput": "530062a7-df2f-41c1-93dc-c7fc3352a6bf"
+    },
+    {
+      "repetition": 3,
+      "caseId": "autonomous.h3.sanitize-status-code",
+      "cell": "b",
+      "harness": "codex-eval-current-communication-b",
+      "id": "43330169-e0c9-4865-b19b-1dcebd837610",
+      "executionId": "a92c5068-c7d8-4b09-a682-b9d777aacc71",
+      "interactionId": 54,
+      "layerId": 74,
+      "revision": 1,
+      "terminalFirst": true,
+      "firstView": true,
+      "status": "completed",
+      "reasonCode": null,
+      "rating": {
+        "overall": 2,
+        "meaningfulInsight": false,
+        "criteria": {
+          "specific_task_insight_shown": "no",
+          "uncertainty_or_limitations_understandable": "no",
+          "useful_implication_or_next_step": "no",
+          "readable_inspect_or_act_choices": "no"
+        },
+        "reason": "The view shows a completed-looking node related to the requested decimal status-validation fix, so the task direction is recognizable. However, it provides no concrete finding, changed behavior, regression-test evidence, check results, commit status, limitations, or next step. The node label is also truncated and no clear inspect-or-act choice is visible.",
+        "evidence": "A single checked node labeled \u201cDecimal status validation fix...\u201d appears on an otherwise empty graph canvas; only generic zoom and pan controls are visible.",
+        "materialUpdate": null
+      },
+      "evidence": [
+        {
+          "layerId": 74,
+          "images": [
+            {
+              "screenshot": "layer-74-1-1.png",
+              "selector": "#graphStage",
+              "clip": {
+                "x": 244,
+                "y": 134,
+                "width": 606,
+                "height": 723
+              },
+              "sha256": "18ca9682c5f9f35a4a4e119ce147a85ef611712bae00a125b363b9d1e6a19cd0"
+            }
+          ]
+        }
+      ],
+      "rubricVersion": "current-communication-first-view-v1",
+      "rater": {
+        "model": "gpt-5.6-sol",
+        "reasoning": "high",
+        "adapter": "codex-subscription"
+      },
+      "effectiveModelVerified": true,
+      "runtimeModelEvidence": {
+        "nativeThreadId": "01a11ae0-3254-7a30-94fc-f380d7ee2818",
+        "model": "gpt-5.6-sol",
+        "reasoning": "high",
+        "contextCount": 1,
+        "rolloutSha256": "f898fe8b17f7080f4829db1a19e89b7fe27965f2fa09d7706d626eca56172c64"
+      },
+      "closedNativeItemAudit": true,
+      "sealedInput": "43330169-e0c9-4865-b19b-1dcebd837610"
+    },
+    {
+      "repetition": 3,
+      "caseId": "autonomous.h3.sanitize-status-code",
+      "cell": "c",
+      "harness": "codex-eval-current-communication-c",
+      "id": "c6689052-efc7-4b93-a772-b4f70e34eb80",
+      "executionId": "6544aa44-8cba-4e3f-9dfe-5a5bb988f6fc",
+      "interactionId": 55,
+      "layerId": 77,
+      "revision": 1,
+      "terminalFirst": true,
+      "firstView": true,
+      "status": "completed",
+      "reasonCode": null,
+      "rating": {
+        "overall": 2,
+        "meaningfulInsight": false,
+        "criteria": {
+          "specific_task_insight_shown": "no",
+          "uncertainty_or_limitations_understandable": "no",
+          "useful_implication_or_next_step": "no",
+          "readable_inspect_or_act_choices": "no"
+        },
+        "reason": "The view communicates a recognizable, task-specific completion status, but it is only progress narration. It provides no visible finding about the decimal-validation defect, regression coverage, checks run, scope, commit identity, limitations, or useful next action, and the lone node does not present an explicit inspect-or-act choice.",
+        "evidence": "The graph contains one centered node labeled \u201cDecimal status fix committed,\u201d plus generic canvas zoom controls; no other task evidence or decision context is visible.",
+        "materialUpdate": null
+      },
+      "evidence": [
+        {
+          "layerId": 77,
+          "images": [
+            {
+              "screenshot": "layer-77-1-1.png",
+              "selector": "#graphStage",
+              "clip": {
+                "x": 244,
+                "y": 134,
+                "width": 606,
+                "height": 723
+              },
+              "sha256": "074f3cf7192760804dfe5a58f011c56ef3ac24d7d4b3c6d0d8c5faf87321c944"
+            }
+          ]
+        }
+      ],
+      "rubricVersion": "current-communication-first-view-v1",
+      "rater": {
+        "model": "gpt-5.6-sol",
+        "reasoning": "high",
+        "adapter": "codex-subscription"
+      },
+      "effectiveModelVerified": true,
+      "runtimeModelEvidence": {
+        "nativeThreadId": "01a11ae1-158e-7371-8fb8-b603979e9007",
+        "model": "gpt-5.6-sol",
+        "reasoning": "high",
+        "contextCount": 1,
+        "rolloutSha256": "9c3eeea3fab822cde58084d9848e21ed7d3aff779c10b08160dd7b4c692ad393"
+      },
+      "closedNativeItemAudit": true,
+      "sealedInput": "c6689052-efc7-4b93-a772-b4f70e34eb80"
+    },
+    {
+      "repetition": 3,
+      "caseId": "autonomous.h3.sanitize-status-code",
+      "cell": "d",
+      "harness": "codex-eval-current-communication-d",
+      "id": "b665b450-5d91-42cd-8089-d22f140be27c",
+      "executionId": "4ee90659-44fd-486e-b2dd-c8b35b7480a9",
+      "interactionId": 56,
+      "layerId": 78,
+      "revision": 1,
+      "terminalFirst": true,
+      "firstView": true,
+      "status": "completed",
+      "reasonCode": null,
+      "rating": {
+        "overall": 2,
+        "meaningfulInsight": true,
+        "criteria": {
+          "specific_task_insight_shown": "yes",
+          "uncertainty_or_limitations_understandable": "no",
+          "useful_implication_or_next_step": "no",
+          "readable_inspect_or_act_choices": "yes"
+        },
+        "reason": "The single, clearly readable node identifies the task-specific direction that decimal HTTP status codes should be rejected. However, it does not show whether this is a diagnosis, planned change, or completed result, and provides no visible evidence, limitations, regression-test status, check results, commit status, or explicit next step.",
+        "evidence": "The graph contains one centered node labeled \u201cDecimal status codes rejected,\u201d with a visible code-style icon and standard zoom/pan controls.",
+        "materialUpdate": null
+      },
+      "evidence": [
+        {
+          "layerId": 78,
+          "images": [
+            {
+              "screenshot": "layer-78-1-1.png",
+              "selector": "#graphStage",
+              "clip": {
+                "x": 244,
+                "y": 134,
+                "width": 606,
+                "height": 723
+              },
+              "sha256": "422588168ed08f0a5a9d58208dfadadc5ee6555831a33091c4e5d4e8d8512a83"
+            }
+          ]
+        }
+      ],
+      "rubricVersion": "current-communication-first-view-v1",
+      "rater": {
+        "model": "gpt-5.6-sol",
+        "reasoning": "high",
+        "adapter": "codex-subscription"
+      },
+      "effectiveModelVerified": true,
+      "runtimeModelEvidence": {
+        "nativeThreadId": "01a11ae1-3957-7762-8e9b-47db418d6ae1",
+        "model": "gpt-5.6-sol",
+        "reasoning": "high",
+        "contextCount": 1,
+        "rolloutSha256": "898d7c873fc84b7439ee1dc3650aae8b8409c8a8f926747bcc2a9cd3d22b80f6"
+      },
+      "closedNativeItemAudit": true,
+      "sealedInput": "b665b450-5d91-42cd-8089-d22f140be27c"
+    },
+    {
+      "repetition": 3,
+      "caseId": "autonomous.h3.investigate-status-code",
+      "cell": "b",
+      "harness": "codex-eval-current-communication-b",
+      "id": "12ae759b-0b16-4a39-a36b-f7b5d25c9006",
+      "executionId": "ed7c4a2f-cd07-49e4-a004-2fbb3d6f1655",
+      "interactionId": 57,
+      "layerId": 80,
+      "revision": 1,
+      "terminalFirst": true,
+      "firstView": true,
+      "status": "completed",
+      "reasonCode": null,
+      "rating": {
+        "overall": 2,
+        "meaningfulInsight": false,
+        "criteria": {
+          "specific_task_insight_shown": "yes",
+          "uncertainty_or_limitations_understandable": "no",
+          "useful_implication_or_next_step": "no",
+          "readable_inspect_or_act_choices": "unknown"
+        },
+        "reason": "The single readable node, \u201cFractional status escapes,\u201d is specific to the reported decimal-status problem, but it largely restates the premise. The view does not expose the responsible code path, relevant tests, verification evidence, uncertainty, or a next step, and no explicit inspect/action affordance is visible.",
+        "evidence": "Visible task content consists only of one centered node labeled \u201cFractional status escapes\u201d; the remaining visible elements are generic canvas and zoom controls.",
+        "materialUpdate": null
+      },
+      "evidence": [
+        {
+          "layerId": 80,
+          "images": [
+            {
+              "screenshot": "layer-80-1-1.png",
+              "selector": "#graphStage",
+              "clip": {
+                "x": 244,
+                "y": 134,
+                "width": 606,
+                "height": 723
+              },
+              "sha256": "4f7a1bc1c105c226fc1a78ad3c876e54ed08c4ed0be84f3a7ead971a796406c2"
+            }
+          ]
+        }
+      ],
+      "rubricVersion": "current-communication-first-view-v1",
+      "rater": {
+        "model": "gpt-5.6-sol",
+        "reasoning": "high",
+        "adapter": "codex-subscription"
+      },
+      "effectiveModelVerified": true,
+      "runtimeModelEvidence": {
+        "nativeThreadId": "01a11ae1-5b66-7303-8d0d-c6f02e2bbad9",
+        "model": "gpt-5.6-sol",
+        "reasoning": "high",
+        "contextCount": 1,
+        "rolloutSha256": "cfce7e9395e07b44abc1d0992ff78f458fd978cdb660b2a5f5d4d57eae3a1b96"
+      },
+      "closedNativeItemAudit": true,
+      "sealedInput": "12ae759b-0b16-4a39-a36b-f7b5d25c9006"
+    },
+    {
+      "repetition": 3,
+      "caseId": "autonomous.h3.investigate-status-code",
+      "cell": "c",
+      "harness": "codex-eval-current-communication-c",
+      "id": "fb198c8a-191c-4c01-a389-3666b9aba11b",
+      "executionId": "b9586f63-05c0-4cbc-9f40-09dffe50194e",
+      "interactionId": 58,
+      "layerId": 82,
+      "revision": 1,
+      "terminalFirst": true,
+      "firstView": true,
+      "status": "completed",
+      "reasonCode": null,
+      "rating": {
+        "overall": 2,
+        "meaningfulInsight": true,
+        "criteria": {
+          "specific_task_insight_shown": "yes",
+          "uncertainty_or_limitations_understandable": "no",
+          "useful_implication_or_next_step": "no",
+          "readable_inspect_or_act_choices": "no"
+        },
+        "reason": "The single task-specific node indicates that a fractional status escapes some safeguard, which is a recognizable diagnosis direction. However, its label is truncated, no supporting path or test evidence is visible, and the overview provides no understandable limitations, next step, or clearly labeled inspect/action choice.",
+        "evidence": "The graph contains one centered node labeled only as \u201cFractional status escapes sa...\u201d with no other findings, relationships, qualifications, test references, or action labels visible.",
+        "materialUpdate": null
+      },
+      "evidence": [
+        {
+          "layerId": 82,
+          "images": [
+            {
+              "screenshot": "layer-82-1-1.png",
+              "selector": "#graphStage",
+              "clip": {
+                "x": 244,
+                "y": 134,
+                "width": 606,
+                "height": 723
+              },
+              "sha256": "13d3f5cb264d195deb59c5c26fd2e2cd92db3bfc1f05c323c9e3fc965c4863f6"
+            }
+          ]
+        }
+      ],
+      "rubricVersion": "current-communication-first-view-v1",
+      "rater": {
+        "model": "gpt-5.6-sol",
+        "reasoning": "high",
+        "adapter": "codex-subscription"
+      },
+      "effectiveModelVerified": true,
+      "runtimeModelEvidence": {
+        "nativeThreadId": "01a11ae1-8436-75b0-910c-960704630fc0",
+        "model": "gpt-5.6-sol",
+        "reasoning": "high",
+        "contextCount": 1,
+        "rolloutSha256": "2e3036d2b94823c7d1935cd47f75bf7251749cabd9608f4274fd35956f411e7d"
+      },
+      "closedNativeItemAudit": true,
+      "sealedInput": "fb198c8a-191c-4c01-a389-3666b9aba11b"
+    },
+    {
+      "repetition": 3,
+      "caseId": "autonomous.h3.investigate-status-code",
+      "cell": "d",
+      "harness": "codex-eval-current-communication-d",
+      "id": "d3a8e42c-8876-45cc-a066-81b13f3b8125",
+      "executionId": "2b60882e-ba87-45de-a66a-6d99c7ecb95d",
+      "interactionId": 59,
+      "layerId": 85,
+      "revision": 1,
+      "terminalFirst": true,
+      "firstView": true,
+      "status": "completed",
+      "reasonCode": null,
+      "rating": {
+        "overall": 2,
+        "meaningfulInsight": true,
+        "criteria": {
+          "specific_task_insight_shown": "yes",
+          "uncertainty_or_limitations_understandable": "no",
+          "useful_implication_or_next_step": "no",
+          "readable_inspect_or_act_choices": "no"
+        },
+        "reason": "The lone node communicates a task-specific direction\u2014that a decimal status bypasses some check\u2014but the key statement is truncated and the overview provides no visible supporting evidence, scope boundary, verification result, or next step. The graph controls are generic navigation controls rather than relevant inspect-or-act choices.",
+        "evidence": "A single centered node is visible with the label \u201cDecimal status bypasses the...\u201d; no other findings, connections, tests, caveats, or action choices are shown.",
+        "materialUpdate": null
+      },
+      "evidence": [
+        {
+          "layerId": 85,
+          "images": [
+            {
+              "screenshot": "layer-85-1-1.png",
+              "selector": "#graphStage",
+              "clip": {
+                "x": 244,
+                "y": 134,
+                "width": 606,
+                "height": 723
+              },
+              "sha256": "cae0aa921722cc3cfd457a1dba62ec3b343e4cae59ead6c0cdf0a12742ae70d7"
+            }
+          ]
+        }
+      ],
+      "rubricVersion": "current-communication-first-view-v1",
+      "rater": {
+        "model": "gpt-5.6-sol",
+        "reasoning": "high",
+        "adapter": "codex-subscription"
+      },
+      "effectiveModelVerified": true,
+      "runtimeModelEvidence": {
+        "nativeThreadId": "01a11ae1-da10-7572-be63-88d8e465d2f2",
+        "model": "gpt-5.6-sol",
+        "reasoning": "high",
+        "contextCount": 1,
+        "rolloutSha256": "f88ee66d9107f1418d0990c64583b3c7c521011603f8d6578805f6239494f521"
+      },
+      "closedNativeItemAudit": true,
+      "sealedInput": "d3a8e42c-8876-45cc-a066-81b13f3b8125"
+    },
+    {
+      "repetition": 3,
+      "caseId": "autonomous.h3.investigate-status-code",
+      "cell": "a",
+      "harness": "codex-eval-current-communication-a",
+      "id": "9466a153-4684-4c90-8dc6-61b3247d92c5",
+      "executionId": "05426d47-4146-44e5-ae8b-3a4af508098e",
+      "interactionId": 60,
+      "layerId": 86,
+      "revision": 1,
+      "terminalFirst": true,
+      "firstView": true,
+      "status": "completed",
+      "reasonCode": null,
+      "rating": {
+        "overall": 2,
+        "meaningfulInsight": true,
+        "criteria": {
+          "specific_task_insight_shown": "yes",
+          "uncertainty_or_limitations_understandable": "no",
+          "useful_implication_or_next_step": "no",
+          "readable_inspect_or_act_choices": "no"
+        },
+        "reason": "The single visible node conveys a task-specific preliminary finding that a decimal status escapes validation, but its label is truncated and the overview provides no visible supporting path, tests, verification evidence, uncertainty, or next action.",
+        "evidence": "The graph contains one centered node labeled \u201cDecimal status escapes valid...\u201d with no visible connected nodes, explanatory context, or inspect/action choices.",
+        "materialUpdate": null
+      },
+      "evidence": [
+        {
+          "layerId": 86,
+          "images": [
+            {
+              "screenshot": "layer-86-1-1.png",
+              "selector": "#graphStage",
+              "clip": {
+                "x": 244,
+                "y": 134,
+                "width": 606,
+                "height": 723
+              },
+              "sha256": "469fa38b84afdeecd6fa18ce4987ca8ba80455c99c3cc892627298ebc153a16a"
+            }
+          ]
+        }
+      ],
+      "rubricVersion": "current-communication-first-view-v1",
+      "rater": {
+        "model": "gpt-5.6-sol",
+        "reasoning": "high",
+        "adapter": "codex-subscription"
+      },
+      "effectiveModelVerified": true,
+      "runtimeModelEvidence": {
+        "nativeThreadId": "01a11ae1-fabf-7092-8893-505d4569d670",
+        "model": "gpt-5.6-sol",
+        "reasoning": "high",
+        "contextCount": 1,
+        "rolloutSha256": "912b3c7ac7972f4c493111d9f11052135a3b5d7f1d282991b7ed5eb327dba02b"
+      },
+      "closedNativeItemAudit": true,
+      "sealedInput": "9466a153-4684-4c90-8dc6-61b3247d92c5"
+    }
+  ]
+}
