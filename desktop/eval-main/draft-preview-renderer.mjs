@@ -6,7 +6,7 @@ import { chromium } from "playwright";
 import { startIsolatedPageServer } from "../main/services/isolated-page-capture.mjs";
 import {
   ARTIFACT_SCHEME,
-  artifactPreviewSettleMs,
+  artifactPreviewSettled,
   artifactPreviewSize,
   artifactViewPlan,
   createArtifactRequestHandler,
@@ -71,7 +71,7 @@ async function renderArtifactPreview(browser, { artifact, folder, rendererDirect
     }
     const page = await context.newPage();
     await page.goto(url);
-    await page.waitForTimeout(artifactPreviewSettleMs(plan.kind));
+    await artifactPreviewSettled(plan.kind, (script) => page.evaluate(script));
     // Like the desktop capture, halve a photo-heavy screenshot until it fits the cap; the
     // browser itself redraws it smaller, so no image library is needed.
     let png = await page.screenshot({ type: "png" });

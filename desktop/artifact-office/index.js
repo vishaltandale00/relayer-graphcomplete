@@ -6,6 +6,8 @@ import { read, utils } from "xlsx";
 import { pptxToHtml } from "@jvmr/pptx-to-html";
 
 const SLIDE = { width: 960, height: 540 };
+/** A sheet shows at most this many rows and columns, so a huge range cannot stall the view. */
+const SHEET_LIMIT = { rows: 1000, columns: 100 };
 /** Word list bullets in the Symbol and Wingdings fonts, which browsers lack, as Unicode. */
 const SYMBOL_BULLETS = Object.freeze({ "\uF0B7": "\u2022", "\uF0A7": "\u25AA", "\uF0D8": "\u27A2", "\uF076": "\u2756", "\uF0FC": "\u2713", "\uF06E": "\u25A0", "\uF06C": "\u25CF" });
 
@@ -34,14 +36,21 @@ async function renderWord(bytes, root) {
 
 /** Each sheet in its own tab. Cells show the values the file saved; nothing is recalculated. */
 function renderExcel(bytes, root) {
-  const book = read(bytes, { type: "array" });
+  const book = read(bytes, { type: "array", sheetRows: SHEET_LIMIT.rows });
   const tabs = element("nav", "office-sheet-tabs");
   const sheet = element("div", "office-sheet");
   root.append(tabs, sheet);
   let shown = book.SheetNames[0];
   const show = (name) => {
     shown = name;
-    sheet.innerHTML = utils.sheet_to_html(book.Sheets[name], { header: "", footer: "" });
+    const cells = book.Sheets[name];
+    const full = utils.decode_range(cells["!fullref"] ?? cells["!ref"] ?? "A1");
+    const range = utils.decode_range(cells["!ref"] ?? "A1");
+    range.e.c = Math.min(range.e.c, range.s.c + SHEET_LIMIT.columns - 1);
+    cells["!ref"] = utils.encode_range(range);
+    const clipped = full.e.r > range.e.r || full.e.c > range.e.c;
+    sheet.innerHTML = utils.sheet_to_html(cells, { header: "", footer: "" });
+    if (clipped) sheet.prepend(element("p", "office-sheet-limit", `Showing the first ${SHEET_LIMIT.rows} rows and ${SHEET_LIMIT.columns} columns. Open the file in Excel for the rest.`));
     for (const tab of tabs.children) tab.setAttribute("aria-selected", String(tab.textContent === name));
   };
   for (const name of book.SheetNames) {
@@ -67,7 +76,11 @@ async function renderPowerPoint(bytes, root, slide) {
   const fit = () => root.style.setProperty("--slide-zoom", String(Math.min(1.5, Math.max(0.2, (innerWidth - 48) / SLIDE.width))));
   fit();
   addEventListener("resize", fit);
-  if (Number.isSafeInteger(slide) && slide >= 1) slides[Math.min(slide, slides.length) - 1]?.scrollIntoView();
+  if (Number.isSafeInteger(slide) && slide >= 1) {
+    // A slide past the end is the agent's mistake; it shows as a page error, not silently.
+    if (slide > slides.length) console.error(`The deck has ${slides.length} slides, so slide ${slide} does not exist; showing the last slide.`);
+    slides[Math.min(slide, slides.length) - 1]?.scrollIntoView();
+  }
   return () => {
     const middle = innerHeight / 2;
     const current = slides.filter((frame) => frame.getBoundingClientRect().top <= middle).at(-1) ?? slides[0];

@@ -2942,7 +2942,7 @@ settings:
 <tr><td><code>ART-009</code> (P2)</td><td>The server invoke reuses, asks once, starts, reports failure, stops when idle and records nothing.</td><td>Desktop server-invoke process tests with a fixture app and a failing app, and the desktop run.</td></tr>
 <tr><td><code>ART-010</code> (P2)</td><td>Starting state resets on every open.</td><td>Viewer test that changes storage, reopens and reads the seed.</td></tr>
 <tr><td><code>ART-011</code> (P2)</td><td>Notes collect, pause media, and send as one interaction with screenshots.</td><td>Renderer viewer tests, the harness-host screenshot test, and the desktop run, which sends a note and checks the agent can open its screenshot.</td></tr>
-<tr><td><code>ART-012</code> (P3)</td><td>Office kinds render. Guidance covers calculated values and decks with charts.</td><td><code>test/artifact-viewer-main.test.mjs</code> renders the fixture documents in Chromium. <code>artifact-layer-guidance.test.ts</code> asserts the guidance. The desktop run opens each kind.</td></tr>
+<tr><td><code>ART-012</code> (P3)</td><td>Office kinds render. Guidance covers calculated values and decks with charts.</td><td><code>test/artifact-viewer-main.test.mjs</code> always checks the served Office bundle and page. Where Chromium is installed, it also renders the fixture documents. <code>artifact-layer-guidance.test.ts</code> asserts the guidance. The desktop run opens each kind.</td></tr>
 </tbody>
 </table>
 <p><code>npm run test:desktop:artifact-viewer</code> is the heavy entry point. It drives the fixture thread through real Electron and saves evidence.</p>

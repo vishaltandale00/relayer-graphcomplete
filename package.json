@@ -125,7 +125,7 @@
     "tar": "7.5.22",
     "typescript": "^5.9.2",
     "vitest": "^4.1.9",
-    "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz",
+    "xlsx": "file:vendor/sheetjs/xlsx-0.20.3-sha256-8dc73fc3b00203e72d176e85b50938627c7b086e607c682e8d3c22c02bb99fe8.tgz",
     "yaml": "2.9.0"
   }
 }

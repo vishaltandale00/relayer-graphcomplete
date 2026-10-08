@@ -1,6 +1,6 @@
 // Artifact viewer, main-process seams (PRD 6.6): what each kind opens, what the
 // artifact scheme will serve, drift reporting, and the Eval agent preview.
-import { appendFile, cp, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
+import { appendFile, cp, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -138,6 +138,19 @@ describe("Office documents (ART-012)", () => {
     pptx: { kind: "pptx", source: { file: "docs/seed-pitch.pptx" }, part: { slide: 3 } },
   };
 
+  it("serve the Office bundle, its licences, and a page that takes only a whole slide number", async () => {
+    const get = serve(office.docx);
+    const bundle = await get("/__relayer/office.js");
+    expect(bundle.status).toBe(200);
+    expect(bundle.headers.get("content-type")).toBe("text/javascript; charset=utf-8");
+    expect(await bundle.text()).toContain("relayerOffice");
+    const notices = await readFile(join(root, "desktop", "renderer", "vendor", "artifact-office.LICENSES.txt"), "utf8");
+    for (const name of ["docx-preview", "xlsx", "@jvmr/pptx-to-html", "jszip", "pako"]) expect(notices).toContain(`== ${name} `);
+    const { viewerPage } = artifactViewerTesting;
+    expect(viewerPage("pptx", "deck.pptx", new URLSearchParams({ slide: "1);alert(1);(" }))).toContain("{ slide: null }");
+    expect(viewerPage("pptx", "deck.pptx", new URLSearchParams({ slide: "3" }))).toContain("{ slide: 3 }");
+  });
+
   it("open in the viewer's Office page, a deck at its slide", () => {
     expect(artifactViewPlan(office.docx, "/thread").url).toBe("relayer-artifact://view/__relayer/view?kind=docx&file=wholesale-proposal.docx");
     const deck = artifactViewPlan(office.pptx, "/thread");
@@ -163,15 +176,15 @@ describe("Office documents (ART-012)", () => {
     await page.goto(plan.url.replace("relayer-artifact://view", "https://artifact.relayer.invalid"));
     await page.waitForSelector("#office[data-ready]", { state: "attached" });
     expect(await page.locator("#office").getAttribute("data-ready")).toBe("true");
-    expect(errors).toEqual([]);
     const located = () => page.evaluate(artifactViewerTesting.NOTE_LOCATION_SCRIPT);
-    return { page, located };
+    return { page, located, errors };
   }
 
   it.runIf(headlessChromium)("render Word, every Excel sheet's saved values, and slides with their chart", async () => {
     const browser = await chromium.launch();
     try {
       const word = await openInChromium(browser, office.docx);
+      expect(word.errors).toEqual([]);
       expect(await word.page.locator("#office").innerText()).toContain("Wholesale proposal: Harbour Hotel");
       // Word's Symbol-font bullets draw as bullets, not missing glyphs.
       const bullet = await word.page.evaluate(() => getComputedStyle([...document.querySelectorAll("#office p")].find((p) => p.textContent.startsWith("Weekly delivery")), "::before").content);
@@ -192,8 +205,30 @@ describe("Office documents (ART-012)", () => {
       expect((await deck.located()).slide).toBe(3);
       // python-pptx's column chart: one bar per quarter.
       expect(await deck.page.locator('[data-slide="3"] svg rect').count()).toBe(4);
+      expect([...sheet.errors, ...deck.errors]).toEqual([]);
     } finally {
       await browser.close();
+    }
+  }, 30_000);
+
+  it.runIf(headlessChromium)("stay usable on a huge sheet range and say when a slide is past the deck", async () => {
+    const XLSX = await import("xlsx");
+    const cells = XLSX.utils.aoa_to_sheet([["Only one cell"]]);
+    cells["!ref"] = "A1:Z200000";
+    const book = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(book, cells, "Export");
+    await writeFile(join(folder, "docs", "huge.xlsx"), XLSX.write(book, { type: "buffer", bookType: "xlsx" }));
+    const browser = await chromium.launch();
+    try {
+      const sheet = await openInChromium(browser, { kind: "xlsx", source: { file: "docs/huge.xlsx" } });
+      expect(await sheet.page.locator(".office-sheet-limit").innerText()).toContain("first 1000 rows");
+      expect(await sheet.page.locator(".office-sheet tr").count()).toBeLessThanOrEqual(1000);
+      const deck = await openInChromium(browser, { ...office.pptx, part: { slide: 7 } });
+      expect(deck.errors).toEqual(["The deck has 4 slides, so slide 7 does not exist; showing the last slide."]);
+      expect((await deck.located()).slide).toBe(4);
+    } finally {
+      await browser.close();
+      await rm(join(folder, "docs", "huge.xlsx"), { force: true });
     }
   }, 30_000);
 });

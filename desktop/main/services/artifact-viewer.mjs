@@ -157,7 +157,7 @@ const OFFICE_STYLES = `#office[data-kind="docx"] .docx-wrapper{background:#2a2b2
 .office-sheet-tabs{position:sticky;top:0;display:flex;gap:4px;padding:10px 16px;background:#eceae4;border-bottom:1px solid #d6d3cb}
 .office-sheet-tab{border:1px solid transparent;border-radius:6px;padding:4px 12px;background:none;font:inherit;color:inherit;cursor:pointer}
 .office-sheet-tab[aria-selected="true"]{background:#fff;border-color:#d6d3cb;font-weight:600}
-.office-sheet{padding:16px;overflow:auto}.office-sheet table{border-collapse:collapse;font-variant-numeric:tabular-nums}
+.office-sheet{padding:16px;overflow:auto}.office-sheet-limit{margin:0 0 12px;color:#6b6a65}.office-sheet table{border-collapse:collapse;font-variant-numeric:tabular-nums}
 .office-sheet td{border:1px solid #dcd9d1;padding:4px 10px;white-space:nowrap}.office-sheet td[data-t="n"]{text-align:right}
 #office[data-kind="pptx"]{display:flex;flex-direction:column;align-items:center;padding:24px 0}
 .office-slide{zoom:var(--slide-zoom,1);position:relative;width:960px;height:540px;margin-bottom:24px;overflow:hidden;background:#fff;box-shadow:0 8px 30px rgba(0,0,0,.45)}
@@ -318,9 +318,19 @@ export function artifactPreviewSize(artifact, size) {
   return ["website", "url", "app"].includes(artifact?.kind) ? ARTIFACT_VIEWPORTS[artifact.viewport] ?? size : size;
 }
 
-/** How long a loaded artifact settles before capture: PDFs and video paint late. */
-export function artifactPreviewSettleMs(kind) {
-  return ({ pdf: 1500, video: 1200, docx: 1500, xlsx: 1000, pptx: 1500 })[kind] ?? 600;
+/**
+ * Wait until a loaded artifact is ready to capture. An Office page says when it has drawn,
+ * up to 10 s; other kinds settle for a fixed time, since PDFs and video paint late.
+ * `evaluate` runs a script in the page.
+ */
+export async function artifactPreviewSettled(kind, evaluate) {
+  const sleep = (ms) => new Promise((done) => setTimeout(done, ms));
+  if (!OFFICE_KINDS.has(kind)) return sleep(({ pdf: 1500, video: 1200 })[kind] ?? 600);
+  const until = Date.now() + 10_000;
+  while (Date.now() < until) {
+    if (await evaluate(`document.getElementById("office")?.dataset.ready ?? null`).catch(() => null)) return;
+    await sleep(100);
+  }
 }
 
 /**
@@ -366,7 +376,7 @@ export function createArtifactPreviewCapture({ BrowserWindow, session, rendererD
           // The agent previews the same starting state the viewer will apply.
           await applySeed(contents, plan, artifact.seed);
           await contents.loadURL(plan.url);
-          await new Promise((done) => setTimeout(done, artifactPreviewSettleMs(plan.kind)));
+          await artifactPreviewSettled(plan.kind, (script) => contents.executeJavaScript(script));
           // Report logical pixels, like graph previews; a photo-heavy page can exceed the cap, so halve it until it fits.
           let image = await contents.capturePage();
           if (image.getSize().width !== viewport.width) image = image.resize({ width: viewport.width, height: viewport.height, quality: "best" });
@@ -436,8 +446,9 @@ const NOTE_LOCATION_SCRIPT = `(() => {
 })()`;
 
 /**
- * The page reports only numbers and, for Markdown, the heading in view; the address comes
- * from the view itself. A site can still choose its own path and hash, so both are bounded.
+ * The page reports numbers, plus the heading in view for Markdown and Word and the sheet
+ * for Excel, each cut to 80 characters; the address comes from the view itself. A site can
+ * still choose its own path and hash, so both are bounded.
  */
 function noteLocation(plan, reported, url) {
   const time = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}`;

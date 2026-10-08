@@ -61,6 +61,8 @@ export function createDesktopBuilderConfig(
       "!eval-renderer/**/*",
       "!preload/eval-*.cjs",
       "!packaging/**/*",
+      // Bundled into renderer/vendor/artifact-office.js at build time.
+      "!artifact-office/**/*",
       "!release/**/*",
       "!renderer/**/*",
       "!**/{__fixtures__,__tests__,test,tests}/**/*",

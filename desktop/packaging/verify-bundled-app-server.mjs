@@ -72,7 +72,9 @@ export async function verifyBundledAppServer(
   const graphClientPath = join(resourcesPath, "graph-client", "index.js");
   const markedPath = join(resourcesPath, "renderer", "vendor", "marked.umd.js");
   const officePath = join(resourcesPath, "renderer", "vendor", "artifact-office.js");
-  await Promise.all([access(binaryPath), access(graphBinaryPath), access(graphClientPath), access(markedPath), access(officePath)]);
+  // The Office bundle ships with its third-party licence notices.
+  const officeLicencesPath = join(resourcesPath, "renderer", "vendor", "artifact-office.LICENSES.txt");
+  await Promise.all([access(binaryPath), access(graphBinaryPath), access(graphClientPath), access(markedPath), access(officePath), access(officeLicencesPath)]);
   await verifyNotices(resourcesPath);
   await verifyPackagedGraphClient(graphClientPath);
   const packagedEntries = new Set(listPackageEntries(join(resourcesPath, "app.asar")).map(normalizeAsarEntry));
