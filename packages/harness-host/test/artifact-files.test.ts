@@ -58,6 +58,13 @@ describe("checkArtifactFiles", () => {
     expect(await rejection({ kind: "website", source: { file: "site/index.html", root: "shared" } })).toEqual({ code: "artifact_path_outside_thread", path: "artifact.source.root" });
   });
 
+  it("accepts a file link only where the viewer can serve it, inside the file's own folder", async () => {
+    await symlink("../docs/brief.pdf", join(thread, "site/brief.pdf"));
+    expect(await rejection({ kind: "pdf", source: { file: "site/brief.pdf" } })).toEqual({ code: "artifact_path_outside_folder", path: "artifact.source.file" });
+    await symlink("brief.pdf", join(thread, "docs/latest.pdf"));
+    expect((await checkArtifactFiles(thread, { kind: "pdf", source: { file: "docs/latest.pdf" } })).fingerprint).toMatch(/^sha256:/u);
+  });
+
   it("rejects missing files, folders, unsupported types and entries outside the root", async () => {
     expect((await rejection({ kind: "pdf", source: { file: "docs/q3-forecast.pdf" } })).code).toBe("artifact_file_missing");
     expect((await rejection({ kind: "markdown", source: { file: "docs" } })).code).toBe("artifact_file_missing");

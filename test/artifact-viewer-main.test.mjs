@@ -100,6 +100,11 @@ describe("drift since acceptance (ART-004)", () => {
     await rm(join(folder, "site", "theme.css"));
     const image = artifactViewPlan({ kind: "image", source: { file: "brand/missing.png" } }, folder);
     expect((await artifactFileStatus(image, undefined)).state).toBe("missing");
+    // Review: a file linked out of the folder it is served from cannot show, so it reads as missing.
+    await symlink("../docs/brand-guide.md", join(folder, "site", "guide.md"));
+    const linkedGuide = artifactViewPlan({ kind: "markdown", source: { file: "site/guide.md" } }, folder);
+    expect((await artifactFileStatus(linkedGuide, undefined)).state).toBe("missing");
+    await rm(join(folder, "site", "guide.md"));
   });
 });
 

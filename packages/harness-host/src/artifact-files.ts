@@ -4,7 +4,7 @@
 import { createHash } from "node:crypto";
 import { createReadStream } from "node:fs";
 import { lstat, readdir, readlink, realpath, stat } from "node:fs/promises";
-import { join, relative, resolve, sep } from "node:path";
+import { dirname, join, relative, resolve, sep } from "node:path";
 
 const EXTENSIONS: Readonly<Record<string, readonly string[]>> = {
   website: [".html", ".htm"],
@@ -155,7 +155,14 @@ export async function checkArtifactFiles(workingDirectory: string, artifact: unk
   if (!extensions.some((extension) => real.toLowerCase().endsWith(extension))) {
     throw new ArtifactFileError("artifact_type_unsupported", `"${file}" resolves to a file that is not a supported ${kind} file (${extensions.join(", ")}).`);
   }
-  if (kind !== "website") return { fingerprint: await fingerprintPath(real) };
+  if (kind !== "website") {
+    // The viewer serves a file from its own folder; a link out of that folder would not show.
+    const folder = await realpath(dirname(resolve(await realpath(workingDirectory), file)));
+    if (!inside(folder, real)) {
+      throw new ArtifactFileError("artifact_path_outside_folder", `"${file}" is a link to a file in another folder. Point source.file at that file instead.`, "artifact.source.file");
+    }
+    return { fingerprint: await fingerprintPath(real) };
+  }
   const rootPath = record.source?.root;
   if (typeof rootPath !== "string") {
     throw new ArtifactFileError("artifact_root_required", "A website names its site root folder.", "artifact.source.root");

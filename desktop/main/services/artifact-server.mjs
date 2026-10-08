@@ -3,7 +3,7 @@
 // node's command in the thread folder. No model runs and nothing is written to
 // the graph. The first run of a command in a thread needs the user's approval;
 // a server Relayer started stops once no viewer has shown it for its idle timeout.
-import { execFile, spawn as spawnProcess } from "node:child_process";
+import { execFile, spawn as spawnProcess, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { readFile, realpath, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -77,6 +77,7 @@ export function createArtifactServerRunner({
   platform = process.platform,
   environment = process.env,
   resolveLoginPath = loginShellPath,
+  runSync = spawnSync,
   startupTimeoutMs = STARTUP_TIMEOUT_MS,
   minuteMs = 60_000,
 } = {}) {
@@ -118,7 +119,11 @@ export function createArtifactServerRunner({
    */
   function killGroup(child, { graceMs = 3000 } = {}) {
     if (!child?.pid) return Promise.resolve();
-    const signal = (name) => { try { process.kill(platform === "win32" ? child.pid : -child.pid, name); return true; } catch { return false; } };
+    if (platform === "win32") {
+      killWindowsTree(child.pid);
+      return Promise.resolve();
+    }
+    const signal = (name) => { try { process.kill(-child.pid, name); return true; } catch { return false; } };
     if (!signal("SIGTERM")) return Promise.resolve();
     return new Promise((done) => {
       const deadline = Date.now() + graceMs;
@@ -129,6 +134,16 @@ export function createArtifactServerRunner({
       };
       poll();
     });
+  }
+
+  /**
+   * Windows has no process groups: the server (node under npm) is a descendant of the
+   * shell. taskkill ends the shell's whole tree while the shell still holds it, and
+   * returns once it is gone.
+   */
+  function killWindowsTree(pid) {
+    if (!pid) return;
+    try { runSync("taskkill", ["/pid", String(pid), "/T", "/F"], { windowsHide: true, timeout: 10_000 }); } catch {}
   }
 
   function stop(key) {
@@ -254,7 +269,8 @@ export function createArtifactServerRunner({
     /** On process exit nothing can wait: kill every group at once. */
     killAllNow() {
       for (const server of servers.values()) {
-        try { process.kill(platform === "win32" ? server.child.pid : -server.child.pid, "SIGKILL"); } catch {}
+        if (platform === "win32") killWindowsTree(server.child.pid);
+        else try { process.kill(-server.child.pid, "SIGKILL"); } catch {}
       }
       servers.clear();
     },

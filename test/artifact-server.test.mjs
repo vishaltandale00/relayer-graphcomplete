@@ -170,12 +170,16 @@ describe("the server invoke (ART-009)", () => {
       setTimeout(() => { child.exitCode = 1; child.emit("exit", 1, null); }, 10);
       return child;
     };
-    const { folder, runner } = await setup({ platform: "win32", spawn, environment: { ComSpec: "C:\\Windows\\System32\\cmd.exe", Path: "C:\\Windows;C:\\Program Files\\nodejs" } });
+    const killed = [];
+    const runSync = (file, args) => { killed.push([file, ...args]); return { status: 0 }; };
+    const { folder, runner } = await setup({ platform: "win32", spawn, runSync, environment: { ComSpec: "C:\\Windows\\System32\\cmd.exe", Path: "C:\\Windows;C:\\Program Files\\nodejs" } });
     await runner.ensure({ threadId: 16, nodeId: 3, folder, permissionProfileId: "full", approve: true, server: { command: "npm run dev" }, sourceUrl: `http://127.0.0.1:${await freePort()}/` });
     expect(calls[0]).toMatchObject({ file: "C:\\Windows\\System32\\cmd.exe", args: ["/d", "/s", "/c", "npm run dev"] });
     // Review: Windows' own Path survives as it is, so ordinary commands resolve.
     expect(calls[0].path).toBe("C:\\Windows;C:\\Program Files\\nodejs");
     expect(calls[0].keys).not.toContain("PATH");
+    // Review: the server is a descendant of cmd.exe, so stopping ends the shell's whole tree.
+    expect(killed).toEqual([["taskkill", "/pid", "1234", "/T", "/F"]]);
   });
 
   it("gives commands only a shell's environment, never the desktop's credentials", async () => {

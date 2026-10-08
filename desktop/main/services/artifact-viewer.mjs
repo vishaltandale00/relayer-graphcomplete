@@ -224,13 +224,15 @@ export function createArtifactRequestHandler({ getPlan, markedPath }) {
 export async function artifactFileStatus(plan, accepted) {
   if (addressedByUrl(plan.kind)) return { state: "ok" };
   try {
-    const rootOrFile = plan.kind === "website" ? plan.folder : plan.file;
     await stat(plan.file);
-    // A file or root swapped for a link out of the thread folder is unavailable, not hashed.
-    if (!inside(await realpath(plan.thread), await realpath(rootOrFile))) return { state: "missing" };
+    // What the viewer would refuse to serve is unavailable, not hashed: a root outside the
+    // thread folder, or a file linked out of the folder it is served from.
+    const root = await realpath(plan.folder);
+    const target = plan.kind === "website" ? root : await realpath(plan.file);
+    if (!inside(await realpath(plan.thread), root) || !inside(root, target)) return { state: "missing" };
     let current;
     try {
-      current = await fingerprintPath(await realpath(rootOrFile));
+      current = await fingerprintPath(target);
     } catch (error) {
       // A site root that grew past the host's bounds is shown, but not hashed in main.
       if (error?.code === "artifact_too_large") return { state: "unchecked" };
