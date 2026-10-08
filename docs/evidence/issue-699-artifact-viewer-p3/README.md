@@ -19,6 +19,7 @@ Agent previews of the three Office layers render through the same page (ART-005 
 - Deck charts may still draw imperfectly: the fixture chart's axis labels are cut off. Guidance says to export a PDF next to any deck with charts.
 - Spreadsheets show the values the file saved. A formula saved without its value renders blank, so guidance says to save calculated values.
 - A sheet shows its first 1000 rows and 100 columns, with a note saying so.
+- An Office file over 50 MB, or one whose contents would expand past 250 MB, shows a "too large" message instead of being parsed.
 - The Chromium render test runs where a Playwright browser is installed; CI's Vitest job has none, so there it checks the served bundle and page, and the desktop run covers rendering.
 
 ## Heavy entry point
@@ -27,7 +28,7 @@ Agent previews of the three Office layers render through the same page (ART-005 
 
 ## Source identity
 
-The recorded run and `results.json` come from commit `deb3eb8a` with a clean working tree: 44 checks passed, 0 failed.
+The recorded run and `results.json` come from commit `b7e50b4c` with a clean working tree: 44 checks passed, 0 failed. `results.json` records that commit and tree state itself (`source`); a later source change needs a new run.
 
 ## Files
 
