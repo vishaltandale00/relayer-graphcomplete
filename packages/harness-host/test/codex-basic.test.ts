@@ -803,6 +803,35 @@ describe("CodexBasicHarness", () => {
     expect(prompts[1]).toBe(`${prompts[0]}\n\n${delegationGuidance}`);
   });
 
+  it.each(["basic", "layered-navigation-multi-agent-v1"])("adds only the declared nested communication factors to actual %s Codex turns", async (promptProfile) => {
+    const prompts: string[] = [];
+    for (const factor of [undefined, "communication", "early-publication", "meaningful-updates"] as const) {
+      const harness = new CodexBasicHarness({
+        ...context("auto"),
+        configuration: { ...codexBasicConfiguration, settings: {
+          ...codexBasicConfiguration.settings, ...(promptProfile === "basic" ? {} : { promptProfile }),
+          ...(factor === undefined ? {} : { currentCommunicationGuidance: factor }),
+        } },
+      }, { codexPathOverride: "/managed/codex", runAppServerTurn: async (options) => {
+        prompts.push(options.prompt);
+        options.onThreadId("communication-thread");
+        return { threadId: "communication-thread", turnId: "turn-1", status: "completed" };
+      } });
+      await harness.complete(runContext(1, "token"));
+    }
+    const factors = [
+      "Your current layer is how you communicate with the user while working. Use it to give them insight into what you have learned, what remains uncertain, and what you are doing next.",
+      "Publish a useful current as soon as you have something meaningful to communicate. Continue working after publication; the whole investigation does not need to be finished first.",
+      "Update current when a finding, uncertainty, decision, or change of direction materially changes the user's understanding. Let them follow the work and steer it.",
+    ];
+    for (let index = 1; index < prompts.length; index++) {
+      const addition = "\n\n" + factors.slice(0, index).join("\n");
+      expect(prompts[index]).toContain(addition);
+      expect(prompts[index]!.replace(addition, "")).toBe(prompts[0]);
+    }
+    expect(prompts[0]).not.toContain(factors[0]);
+  });
+
   it("delivers ordered normalized context and child re-read guidance without occurrence authority", async () => {
     let prompt = "";
     const harness = harnessFixture("auto", async (options) => {

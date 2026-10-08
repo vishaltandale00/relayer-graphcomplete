@@ -1,0 +1,216 @@
+{
+  "schemaVersion": 1,
+  "baseCommit": "fcfacdb0a235451f04d97d760d39948ad406972f",
+  "candidate": {
+    "model": "gpt-6-luna",
+    "adapter": "codex-subscription",
+    "reasoning": "medium",
+    "presentation": "personal-presentation-v4"
+  },
+  "finalJudge": {
+    "configuration": "simulated-user",
+    "prompt": "simulated-user-judge-prompt-v11",
+    "model": "gpt-5.6-sol",
+    "reasoning": "high"
+  },
+  "variants": {
+    "a": [],
+    "b": [
+      "Your current layer is how you communicate with the user while working. Use it to give them insight into what you have learned, what remains uncertain, and what you are doing next."
+    ],
+    "c": [
+      "Your current layer is how you communicate with the user while working. Use it to give them insight into what you have learned, what remains uncertain, and what you are doing next.",
+      "Publish a useful current as soon as you have something meaningful to communicate. Continue working after publication; the whole investigation does not need to be finished first."
+    ],
+    "d": [
+      "Your current layer is how you communicate with the user while working. Use it to give them insight into what you have learned, what remains uncertain, and what you are doing next.",
+      "Publish a useful current as soon as you have something meaningful to communicate. Continue working after publication; the whole investigation does not need to be finished first.",
+      "Update current when a finding, uncertainty, decision, or change of direction materially changes the user's understanding. Let them follow the work and steer it."
+    ]
+  },
+  "schedule": [
+    {
+      "repetition": 1,
+      "caseId": "autonomous.h3.sanitize-status-code",
+      "cell": "a",
+      "harness": "codex-eval-current-communication-a"
+    },
+    {
+      "repetition": 1,
+      "caseId": "autonomous.h3.sanitize-status-code",
+      "cell": "b",
+      "harness": "codex-eval-current-communication-b"
+    },
+    {
+      "repetition": 1,
+      "caseId": "autonomous.h3.sanitize-status-code",
+      "cell": "c",
+      "harness": "codex-eval-current-communication-c"
+    },
+    {
+      "repetition": 1,
+      "caseId": "autonomous.h3.sanitize-status-code",
+      "cell": "d",
+      "harness": "codex-eval-current-communication-d"
+    },
+    {
+      "repetition": 1,
+      "caseId": "autonomous.h3.investigate-status-code",
+      "cell": "b",
+      "harness": "codex-eval-current-communication-b"
+    },
+    {
+      "repetition": 1,
+      "caseId": "autonomous.h3.investigate-status-code",
+      "cell": "c",
+      "harness": "codex-eval-current-communication-c"
+    },
+    {
+      "repetition": 1,
+      "caseId": "autonomous.h3.investigate-status-code",
+      "cell": "d",
+      "harness": "codex-eval-current-communication-d"
+    },
+    {
+      "repetition": 1,
+      "caseId": "autonomous.h3.investigate-status-code",
+      "cell": "a",
+      "harness": "codex-eval-current-communication-a"
+    },
+    {
+      "repetition": 2,
+      "caseId": "autonomous.h3.sanitize-status-code",
+      "cell": "c",
+      "harness": "codex-eval-current-communication-c"
+    },
+    {
+      "repetition": 2,
+      "caseId": "autonomous.h3.sanitize-status-code",
+      "cell": "d",
+      "harness": "codex-eval-current-communication-d"
+    },
+    {
+      "repetition": 2,
+      "caseId": "autonomous.h3.sanitize-status-code",
+      "cell": "a",
+      "harness": "codex-eval-current-communication-a"
+    },
+    {
+      "repetition": 2,
+      "caseId": "autonomous.h3.sanitize-status-code",
+      "cell": "b",
+      "harness": "codex-eval-current-communication-b"
+    },
+    {
+      "repetition": 2,
+      "caseId": "autonomous.h3.investigate-status-code",
+      "cell": "d",
+      "harness": "codex-eval-current-communication-d"
+    },
+    {
+      "repetition": 2,
+      "caseId": "autonomous.h3.investigate-status-code",
+      "cell": "a",
+      "harness": "codex-eval-current-communication-a"
+    },
+    {
+      "repetition": 2,
+      "caseId": "autonomous.h3.investigate-status-code",
+      "cell": "b",
+      "harness": "codex-eval-current-communication-b"
+    },
+    {
+      "repetition": 2,
+      "caseId": "autonomous.h3.investigate-status-code",
+      "cell": "c",
+      "harness": "codex-eval-current-communication-c"
+    },
+    {
+      "repetition": 3,
+      "caseId": "autonomous.h3.sanitize-status-code",
+      "cell": "a",
+      "harness": "codex-eval-current-communication-a"
+    },
+    {
+      "repetition": 3,
+      "caseId": "autonomous.h3.sanitize-status-code",
+      "cell": "b",
+      "harness": "codex-eval-current-communication-b"
+    },
+    {
+      "repetition": 3,
+      "caseId": "autonomous.h3.sanitize-status-code",
+      "cell": "c",
+      "harness": "codex-eval-current-communication-c"
+    },
+    {
+      "repetition": 3,
+      "caseId": "autonomous.h3.sanitize-status-code",
+      "cell": "d",
+      "harness": "codex-eval-current-communication-d"
+    },
+    {
+      "repetition": 3,
+      "caseId": "autonomous.h3.investigate-status-code",
+      "cell": "b",
+      "harness": "codex-eval-current-communication-b"
+    },
+    {
+      "repetition": 3,
+      "caseId": "autonomous.h3.investigate-status-code",
+      "cell": "c",
+      "harness": "codex-eval-current-communication-c"
+    },
+    {
+      "repetition": 3,
+      "caseId": "autonomous.h3.investigate-status-code",
+      "cell": "d",
+      "harness": "codex-eval-current-communication-d"
+    },
+    {
+      "repetition": 3,
+      "caseId": "autonomous.h3.investigate-status-code",
+      "cell": "a",
+      "harness": "codex-eval-current-communication-a"
+    }
+  ],
+  "rootAttempts": 24,
+  "renderedLatency": "unsuitable_after_send_observer",
+  "primaryTiming": "backend_first_publication",
+  "firstViewRubric": [
+    "task_specific_finding_evidence",
+    "honest_uncertainty",
+    "actionable_implication_or_next_step",
+    "readable_navigation_useful_presentation"
+  ],
+  "firstViewAssessment": {
+    "version": "current-communication-first-view-v1",
+    "rater": {
+      "model": "gpt-5.6-sol",
+      "reasoning": "high",
+      "adapter": "codex-subscription"
+    },
+    "inputs": "Original request and cropped graph-stage PNG only; blinded cell identifiers; no inspector (node/detail readiness unqualified), code, grades, history or later snapshots in first-view rating.",
+    "criteria": [
+      "specific_task_insight_shown",
+      "uncertainty_or_limitations_understandable",
+      "useful_implication_or_next_step",
+      "readable_inspect_or_act_choices"
+    ],
+    "criterionValues": [
+      "yes",
+      "no",
+      "unknown"
+    ],
+    "overallScale": {
+      "1": "No useful task insight; empty, generic working status or tool narration.",
+      "2": "Recognizable task status or direction; limited concrete insight or next-step usefulness.",
+      "3": "Concrete useful finding or decision context with understandable limits and a useful implication or next step.",
+      "4": "Clear supported task insight that materially helps the user understand or steer ongoing work; readable presentation and relevant inspect-or-act choices."
+    },
+    "meaningfulInsight": "Judge independently of overall score whether the snapshot supplies task-specific evidence, finding, decision context or a substantive open question the user can act on. Mere progress narration is insufficient.",
+    "updates": "For D compare consecutive captured current snapshots in publication order; material if new/corrected task evidence, findings, uncertainty, decision, or direction changes user understanding. Missing intermediate revisions means coverage partial. No frequency reward.",
+    "missing": "Unavailable capture, mismatched first backend layer, unbound publication or invalid rater result => unknown, excluded with explicit denominator. Terminal-first is tagged and remains eligible as first publication, but is not early communication.",
+    "scope": "Visible graph overview insight only; node-detail/full interactive experience remains outside this first-view pilot rubric."
+  }
+}

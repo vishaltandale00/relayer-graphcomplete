@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "reviewer": "/root/design_authority_review",
+  "sourceDigest": "554dc28315ea930875c0bb9bd49c23e34526c9ca31f29bbb7f00aa6d5c935225",
+  "scope": "Ten changed executable/config/test paths; independent warm78tests; prompt factor isolation, baseline parity, Eval opt-in and product configuration exclusion",
+  "verdict": "PASS",
+  "unresolvedSourceFindings": [],
+  "protocolSha256": "0ad28bc2885b8ee7dd85d44ee46d0df8f41cb5007272d43fa9d23f3da34af832",
+  "measurementReview": {
+    "verdict": "PASS by source inspection; no remaining scoring blockers",
+    "observerSha256": "6365da85744431d5b41879b156c1221d7da634a4d890b5edbf09fd04a8bf2a72",
+    "graderSha256": "3abf1ad028bc304eeac5323de30ddd24b0b1051003fcf24b04b15adc12aff758",
+    "limits": [
+      "Not executed rater qualification",
+      "Post-Send observer cannot qualify rendered TTFG",
+      "Only graph overview, not inspector or full interaction",
+      "Missing revisions/captures/invalid ratings unknown",
+      "Order rotated but not completely balanced",
+      "Source or helper changes invalidate corresponding review assertion"
+    ]
+  }
+}

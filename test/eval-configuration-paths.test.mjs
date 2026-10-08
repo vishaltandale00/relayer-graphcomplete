@@ -13,6 +13,26 @@ const names = (paths) => paths.map((path) => basename(path));
 const repositoryRoot = resolve(fileURLToPath(new URL("../", import.meta.url)));
 
 describe("Eval harness configuration availability", () => {
+  it("opts into four configurations that vary only communication guidance", async () => {
+    const common = { harnessDirectory: resolve(repositoryRoot, "harnesses"), packageAvailable: () => false, targetKey: "macos-arm64" };
+    const baseline = evalHarnessConfigurationPaths(common);
+    const selected = evalHarnessConfigurationPaths({ ...common, currentCommunicationAblation: true });
+    const added = selected.filter(path => !baseline.includes(path));
+    expect(added.map(path => basename(path))).toEqual(["a", "b", "c", "d"].map(cell => `codex-eval-current-communication-${cell}.yaml`));
+    const configurations = [...(await loadHarnessConfigurations(added)).values()];
+    const baselineConfiguration = (await loadHarnessConfigurations([resolve(repositoryRoot, "harnesses/codex-basic.yaml")])).get("codex-basic");
+    const { name: baselineName, ...baselineRest } = baselineConfiguration;
+    expect(normalizedConfiguration(configurations[0])).toEqual(baselineRest);
+    function normalizedConfiguration({ name, ...configuration }) { return configuration; }
+    const normalized = configurations.map(({ name, settings, ...configuration }) => {
+      const { currentCommunicationGuidance, ...unchangedSettings } = settings;
+      return { ...configuration, settings: unchangedSettings };
+    });
+    expect(normalized.every(configuration => JSON.stringify(configuration) === JSON.stringify(normalized[0]))).toBe(true);
+    expect(configurations.map(configuration => configuration.settings.currentCommunicationGuidance)).toEqual([undefined, "communication", "early-publication", "meaningful-updates"]);
+    expect(baseline.some(path => path.includes("current-communication"))).toBe(false);
+  });
+
   it("honors the explicit development target override", () => {
     expect(evalRuntimeTarget({
       environment: { RELAYER_DESKTOP_TARGET: "macos-arm64" },

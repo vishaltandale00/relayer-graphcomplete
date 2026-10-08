@@ -1,0 +1,75 @@
+{
+  "recordedAt": "2026-10-08T04:55:39.284582+00:00",
+  "source": {
+    "algorithm": "sha256(sorted UTF-8 path + NUL + contents + NUL)",
+    "paths": [
+      "desktop/eval-main/configuration-paths.mjs",
+      "desktop/eval-main/index.mjs",
+      "harnesses/codex-eval-current-communication-a.yaml",
+      "harnesses/codex-eval-current-communication-b.yaml",
+      "harnesses/codex-eval-current-communication-c.yaml",
+      "harnesses/codex-eval-current-communication-d.yaml",
+      "packages/harness-host/src/implementations/codex-basic.ts",
+      "packages/harness-host/src/implementations/graph-presentation-guidance.ts",
+      "packages/harness-host/test/codex-basic.test.ts",
+      "test/eval-configuration-paths.test.mjs"
+    ],
+    "sha256": "554dc28315ea930875c0bb9bd49c23e34526c9ca31f29bbb7f00aa6d5c935225"
+  },
+  "results": {
+    "warmTests": "78/78 passed",
+    "check": "Passed: 3762 tests, 3 skipped; Rust/Clippy, secret-boundary, Python 74/74, receipt lint and PRD readability passed",
+    "build": "Passed",
+    "compiledRuntime": "4/4 passed",
+    "evalWeb": "Passed: all declared chapters",
+    "initialCheck": "Failed in unchanged Windows mock cleanup: ENOTEMPTY; cause unproven. Isolated fixture 10/10 and repeated full check passed without source changes.",
+    "nativeCache": "Initial newer-main lock identity rejected; shipped base trusted artifact verification passed"
+  },
+  "privateLogReceipts": [
+    {
+      "name": "warm-final.log",
+      "sha256": "80bde898c07dd4695769038b81dfa3cb9488cec13b6107c13f6a8408051e90bc",
+      "bytes": 256
+    },
+    {
+      "name": "cache-verification.log",
+      "sha256": "ff7fc4fdfb7e4a5a9d1ce7758f6f4284d515724db58db174f26a7f72aa715596",
+      "bytes": 88
+    },
+    {
+      "name": "cache-verified-shipped.log",
+      "sha256": "5c0116fb990f3a8b5d465f6e5ed10b2c2401750958155432cdfaa0ccdcacd276",
+      "bytes": 102
+    },
+    {
+      "name": "check.log",
+      "sha256": "27e54fb79f883fbe7994ef194d06d2284d697f245fd9a9362d554ea8d84003e0",
+      "bytes": 127367
+    },
+    {
+      "name": "windows-isolated.log",
+      "sha256": "587afbe3b0a802d991c54a37f73449c87345ed26884f51b807f11f2b4b7e99f8",
+      "bytes": 256
+    },
+    {
+      "name": "check-final.log",
+      "sha256": "b4076ad8d8f0878090f340bc15ae29b8e943b4f0966f7e80930f793329c1681f",
+      "bytes": 126840
+    },
+    {
+      "name": "build.log",
+      "sha256": "d03f1927407cef0e4f8cd337e8306ab8cf20ce8ca14d36589814716ae9b3a1b3",
+      "bytes": 2040
+    },
+    {
+      "name": "compiled.log",
+      "sha256": "fef203432c5941dfdcb51c7ee0d458adaa5b30c130629f7b1f57250bdf39d632",
+      "bytes": 377
+    },
+    {
+      "name": "web.log",
+      "sha256": "f746713839c90f903bee8390c7fff5033a8fc46ded8d0e5c98bc4f4953e7c3eb",
+      "bytes": 4328
+    }
+  ]
+}

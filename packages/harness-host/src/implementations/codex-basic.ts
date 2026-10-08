@@ -12,7 +12,7 @@ import {
   type NativeSessionResetReason,
 } from "../native-session-reset.js";
 import { redactTraceData } from "../trace.js";
-import { CURRENT_WORKSPACE_GUIDANCE, GRAPH_PRESENTATION_GUIDANCE, NODE_ICON_GUIDANCE, scopedAuthoringRecipeJs } from "./graph-presentation-guidance.js";
+import { CURRENT_WORKSPACE_GUIDANCE, currentCommunicationGuidance, type CurrentCommunicationGuidance, GRAPH_PRESENTATION_GUIDANCE, NODE_ICON_GUIDANCE, scopedAuthoringRecipeJs } from "./graph-presentation-guidance.js";
 import { LAYER_EDGE_SHAPE_GUIDANCE } from "./layer-edge-shape-guidance.js";
 import {
   personalPresentationNativeInstructions,
@@ -168,6 +168,7 @@ interface CodexBasicConfiguration {
   readonly skipGitRepoCheck?: boolean;
   readonly additionalDirectories?: readonly string[];
   readonly rootSessionMode?: "resume" | "fresh";
+  readonly currentCommunicationGuidance?: CurrentCommunicationGuidance;
 }
 
 interface ResolvedCodexConfiguration {
@@ -746,7 +747,7 @@ ${GRAPH_PRESENTATION_GUIDANCE}
 ${threadIconGuidance(context, "javascript")}
 ${CODEX_VISUAL_GUIDANCE}
 ${CODEX_ASSET_GUIDANCE}
-${CURRENT_WORKSPACE_GUIDANCE}${includePersonalPresentation ? personalPresentationPrompt(context) : ""}
+${CURRENT_WORKSPACE_GUIDANCE}${currentCommunicationGuidance(this.resolved.settings.currentCommunicationGuidance)}${includePersonalPresentation ? personalPresentationPrompt(context) : ""}
 
 Current interaction node: ${interactionNode.id}
 Normalized interaction input:
@@ -804,6 +805,7 @@ ${graphProgramRepairGuidance(programEditsAvailable(context, this.dependencies.gr
       includePersonalPresentation,
       this.context.configuration.graphCapabilityProfile?.search === "query-v1",
       this.dependencies.graphAuthoringNodePath,
+      this.resolved.settings.currentCommunicationGuidance,
     );
   }
 
@@ -841,6 +843,7 @@ export function buildLayeredNavigationPrompt(
   explicitIncludePersonalPresentation = true,
   explicitGraphSearchEnabled = false,
   graphAuthoringNodePath?: string,
+  communicationProfile?: CurrentCommunicationGuidance,
 ): string {
   const completeModuleUrl = typeof completeModuleUrlOrIncludePersonalPresentation === "string"
     ? completeModuleUrlOrIncludePersonalPresentation
@@ -895,7 +898,7 @@ ${GRAPH_PRESENTATION_GUIDANCE}
 ${threadIconGuidance(context, "javascript")}
 ${CODEX_VISUAL_GUIDANCE}
 ${CODEX_ASSET_GUIDANCE}
-${CURRENT_WORKSPACE_GUIDANCE}${includePersonalPresentation && context !== undefined ? personalPresentationPrompt(context) : ""}
+${CURRENT_WORKSPACE_GUIDANCE}${currentCommunicationGuidance(communicationProfile)}${includePersonalPresentation && context !== undefined ? personalPresentationPrompt(context) : ""}
 
 Current interaction node: ${interactionNode.id}
 Normalized interaction input:
@@ -1406,7 +1409,7 @@ function parseCodexBasicConfiguration(context: HarnessFactoryContext): ResolvedC
     throw new Error(`Unsupported codex.basic implementation version: ${selected.implementationVersion}`);
   }
   const configuration = selected.settings;
-  const allowed = new Set(["model", "modelReasoningEffort", "webSearchMode", "skipGitRepoCheck", "additionalDirectories", "promptProfile", "personalPresentationVersion", "rootSessionMode"]);
+  const allowed = new Set(["model", "modelReasoningEffort", "webSearchMode", "skipGitRepoCheck", "additionalDirectories", "promptProfile", "personalPresentationVersion", "rootSessionMode", "currentCommunicationGuidance"]);
   const unknown = Object.keys(configuration).filter((key) => !allowed.has(key));
   if (unknown.length > 0) throw new Error(`Unknown codex.basic configuration field: ${unknown.join(", ")}`);
 
@@ -1416,6 +1419,7 @@ function parseCodexBasicConfiguration(context: HarnessFactoryContext): ResolvedC
   const skipGitRepoCheck = optionalBoolean(configuration.skipGitRepoCheck, "skipGitRepoCheck");
   const additionalDirectories = optionalStringArray(configuration.additionalDirectories, "additionalDirectories");
   const promptProfile = optionalEnum(configuration.promptProfile, ["layered-navigation-v1", "layered-navigation-multi-agent-v1"] as const, "promptProfile");
+  const communicationProfile = optionalEnum(configuration.currentCommunicationGuidance, ["communication", "early-publication", "meaningful-updates"] as const, "currentCommunicationGuidance");
   const rootSessionMode = optionalEnum(configuration.rootSessionMode, ["resume", "fresh"] as const, "rootSessionMode");
   optionalEnum(configuration.personalPresentationVersion, ["personal-presentation-v0", "personal-presentation-v1", "personal-presentation-v2", "personal-presentation-v3", "personal-presentation-v4"] as const, "personalPresentationVersion");
   const permission = parseCodexPermissionBinding(context.permissionProfileId, context.permissionBinding);
@@ -1428,6 +1432,7 @@ function parseCodexBasicConfiguration(context: HarnessFactoryContext): ResolvedC
       ...(skipGitRepoCheck === undefined ? {} : { skipGitRepoCheck }),
       ...(additionalDirectories === undefined ? {} : { additionalDirectories }),
       ...(rootSessionMode === undefined ? {} : { rootSessionMode }),
+      ...(communicationProfile === undefined ? {} : { currentCommunicationGuidance: communicationProfile }),
     },
     permission,
     ...(promptProfile === undefined ? {} : { promptProfile }),

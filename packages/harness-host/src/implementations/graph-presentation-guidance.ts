@@ -72,3 +72,14 @@ await graph.submit(${interactionNodeId})
 \`\`\`
 Add connections with layer.edge("connection", first, second). Declare controls before write with layer.action("details", node, kind="navigate", relation="expand", label="Details", target=child_layer), then bind that same returned action with action_capability. Use relation="reference" for evidence and kind="invoke", interaction_text="..." for follow-ups. Node fields are icon, title, detail, and optional kind; do not supply client_key or ref. The scoped API supplies action source_layer and identity; do not pass source_layer, client_key, or ref into layer.action. Declare actions before binding them. Set every selected layer's layout explicitly. layer.object exposes the actual LayerObject for specialized operations. Accepted-node additions and presentation replacement retain their existing grants and revisions.`;
 }
+
+/** Opt-in prompt factors; the baseline adds no text or publication policy. */
+export type CurrentCommunicationGuidance = "communication" | "early-publication" | "meaningful-updates";
+
+export function currentCommunicationGuidance(profile?: CurrentCommunicationGuidance): string {
+  if (profile === undefined) return "";
+  const communication = "Your current layer is how you communicate with the user while working. Use it to give them insight into what you have learned, what remains uncertain, and what you are doing next.";
+  const early = "Publish a useful current as soon as you have something meaningful to communicate. Continue working after publication; the whole investigation does not need to be finished first.";
+  const updates = "Update current when a finding, uncertainty, decision, or change of direction materially changes the user's understanding. Let them follow the work and steer it.";
+  return "\n\n" + [communication, ...(profile === "communication" ? [] : [early]), ...(profile === "meaningful-updates" ? [updates] : [])].join("\n");
+}

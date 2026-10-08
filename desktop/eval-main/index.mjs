@@ -70,7 +70,7 @@ const evalTarget = evalRuntimeTarget({ environment: process.env });
 const permissionCatalogPath = join(repositoryRoot, "permissions", "desktop.json");
 const productRendererDirectory = join(desktopDirectory, "renderer");
 const evalRendererDirectory = join(desktopDirectory, "eval-renderer");
-const configurationPaths = evalHarnessConfigurationPaths({ harnessDirectory, targetKey: evalTarget.key });
+const configurationPaths = evalHarnessConfigurationPaths({ harnessDirectory, targetKey: evalTarget.key, currentCommunicationAblation: process.env.RELAYER_EVAL_CURRENT_COMMUNICATION_ABLATION === "1" });
 // Only explicitly selected, commit-pinned developer catalogs execute here.
 const externalCatalog = process.env.RELAYER_EVAL_CATALOG_ROOT
   ? await loadExternalEvalCatalog({

@@ -1,0 +1,16 @@
+{
+  "algorithm": "sha256(sorted UTF-8 path + NUL + contents + NUL)",
+  "paths": [
+    "desktop/eval-main/configuration-paths.mjs",
+    "desktop/eval-main/index.mjs",
+    "harnesses/codex-eval-current-communication-a.yaml",
+    "harnesses/codex-eval-current-communication-b.yaml",
+    "harnesses/codex-eval-current-communication-c.yaml",
+    "harnesses/codex-eval-current-communication-d.yaml",
+    "packages/harness-host/src/implementations/codex-basic.ts",
+    "packages/harness-host/src/implementations/graph-presentation-guidance.ts",
+    "packages/harness-host/test/codex-basic.test.ts",
+    "test/eval-configuration-paths.test.mjs"
+  ],
+  "sha256": "554dc28315ea930875c0bb9bd49c23e34526c9ca31f29bbb7f00aa6d5c935225"
+}

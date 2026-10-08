@@ -25,6 +25,7 @@ export function evalHarnessConfigurationPaths({
   harnessDirectory,
   packageAvailable = defaultPackageAvailable,
   targetKey,
+  currentCommunicationAblation = false,
 }) {
   const graphSearchQualified = targetKey === GRAPH_SEARCH_EVAL_TARGET;
   const paths = [
@@ -35,6 +36,7 @@ export function evalHarnessConfigurationPaths({
     ...(graphSearchQualified ? [join(harnessDirectory, "fixture-graph-memory.yaml")] : []),
     join(harnessDirectory, "codex-basic.yaml"),
     join(harnessDirectory, "codex-basic-high.yaml"),
+    ...(currentCommunicationAblation ? ["a", "b", "c", "d"].map(cell => join(harnessDirectory, `codex-eval-current-communication-${cell}.yaml`)) : []),
     join(harnessDirectory, "codex-eval-visual-node-details-control.yaml"),
     join(harnessDirectory, "codex-eval-visual-node-details-treatment.yaml"),
     ...(graphSearchQualified ? [
