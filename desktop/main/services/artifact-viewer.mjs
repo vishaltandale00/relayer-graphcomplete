@@ -53,8 +53,12 @@ function routePath(route) {
 /** Media in every frame pauses while the user writes a note, then resumes. */
 const PAUSE_MEDIA_SCRIPT = `window.__relayerNotePaused = [...document.querySelectorAll("video,audio")].filter((m) => !m.paused); window.__relayerNotePaused.forEach((m) => m.pause());`;
 const RESUME_MEDIA_SCRIPT = `(window.__relayerNotePaused || []).forEach((m) => m.play().catch(() => {})); window.__relayerNotePaused = [];`;
-async function eachFrame(contents, script) {
-  await Promise.all(contents.mainFrame.framesInSubtree.map((frame) => frame.executeJavaScript(script).catch(() => {})));
+async function eachFrame(contents, script, timeoutMs = 5_000) {
+  // A busy page may never answer; pausing or resuming media is best effort, never a hang.
+  let timer;
+  const expired = new Promise((done) => { timer = setTimeout(done, timeoutMs); });
+  await Promise.race([Promise.all(contents.mainFrame.framesInSubtree.map((frame) => frame.executeJavaScript(script).catch(() => {}))), expired]);
+  clearTimeout(timer);
 }
 
 /** Distinct page errors reported per open. */
@@ -668,7 +672,7 @@ export function createArtifactViewerService({
     let created = false;
     let reported;
     try {
-      await bounded(eachFrame(contents, PAUSE_MEDIA_SCRIPT));
+      await eachFrame(contents, PAUSE_MEDIA_SCRIPT);
       try {
         let image = await bounded(contents.capturePage());
         if (image.getSize().width > 1440) image = image.resize({ width: 1440, quality: "best" });
@@ -749,4 +753,4 @@ export function createArtifactViewerService({
   return Object.freeze({ open, close, setBounds, openExternally, openLink, beginNote, endNote, isOpen: () => current !== null, currentPlan: () => current?.plan ?? null, currentContents: () => current?.view.webContents ?? null });
 }
 
-export const artifactViewerTesting = Object.freeze({ viewerPage, noteLocation, NOTE_LOCATION_SCRIPT, ORIGIN, basename });
+export const artifactViewerTesting = Object.freeze({ viewerPage, noteLocation, eachFrame, NOTE_LOCATION_SCRIPT, ORIGIN, basename });

@@ -161,6 +161,19 @@ describe("Office documents (ART-012)", () => {
     expect(blocksNetwork(plan({ kind: "url", source: { url: "https://example.com/" } }), "https://example.com/app.js")).toBe(false);
   });
 
+  it("pause and resume media in every frame without hanging on a frame that never answers", async () => {
+    // Review: Annotate's pause, and the resume its cleanup runs, both go through this.
+    const ran = [];
+    const contents = { mainFrame: { framesInSubtree: [
+      { executeJavaScript: async (script) => { ran.push(script); } },
+      { executeJavaScript: () => new Promise(() => {}) },
+    ] } };
+    const started = Date.now();
+    await artifactViewerTesting.eachFrame(contents, "resume()", 200);
+    expect(Date.now() - started).toBeLessThan(1000);
+    expect(ran).toEqual(["resume()"]);
+  });
+
   it("wait for an Office page to draw, but never longer than the deadline when it stops answering", async () => {
     const started = Date.now();
     // Review: a page busy parsing never answers; the wait still ends at its deadline.
