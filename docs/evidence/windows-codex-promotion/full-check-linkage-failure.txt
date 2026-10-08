@@ -1,0 +1,27 @@
+
+> relayer-graphcomplete@0.0.0 precheck
+> npm run prepare:renderer
+
+
+> relayer-graphcomplete@0.0.0 prepare:renderer
+> node scripts/prepare-renderer-vendor.mjs
+
+design: H · Sticker × Cocoa (designs/h-sticker-cocoa.json, sha256 dd6ce4a4fc65, 0 floor warnings)
+
+> relayer-graphcomplete@0.0.0 check
+> cargo fmt --all -- --check && cargo clippy --workspace --all-targets --all-features -- -D warnings && cargo test --workspace && npm run check:graph-crash-reconciliation && cargo build -p relayer-app-server -p relayer-graph-server && npm run build:packages && tsc --noEmit && npm run check --workspaces --if-present && vitest run && npm run test:codex-secret-boundary && PYTHONPATH=python/relayer-graph/src python3 -m unittest discover -s python/relayer-graph/tests && npm run lint:ladybug-receipt && npm run prd:check-readability
+
+   Compiling relayer-graph-core v0.0.0 (/Users/vishaltandale/ProjectsDev/relayer-graphcomplete-windows-codex-install-rename/crates/relayer-graph-core)
+    Checking relayer-telemetry-capability v0.0.0 (/Users/vishaltandale/ProjectsDev/relayer-graphcomplete-windows-codex-install-rename/crates/relayer-telemetry-capability)
+   Compiling relayer-graph-server v0.0.0 (/Users/vishaltandale/ProjectsDev/relayer-graphcomplete-windows-codex-install-rename/crates/relayer-graph-server)
+    Checking relayer-app-server v0.0.0 (/Users/vishaltandale/ProjectsDev/relayer-graphcomplete-windows-codex-install-rename/crates/relayer-app-server)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 26.29s
+   Compiling relayer-graph-core v0.0.0 (/Users/vishaltandale/ProjectsDev/relayer-graphcomplete-windows-codex-install-rename/crates/relayer-graph-core)
+   Compiling relayer-telemetry-capability v0.0.0 (/Users/vishaltandale/ProjectsDev/relayer-graphcomplete-windows-codex-install-rename/crates/relayer-telemetry-capability)
+   Compiling relayer-graph-server v0.0.0 (/Users/vishaltandale/ProjectsDev/relayer-graphcomplete-windows-codex-install-rename/crates/relayer-graph-server)
+   Compiling lbug v0.18.0
+error: could not find native static library `lbug`, perhaps an -L flag is missing?
+
+warning: lbug@0.18.0: Skipping prebuilt liblbug because source build was requested
+error: could not compile `lbug` (lib) due to 1 previous error
+warning: build failed, waiting for other jobs to finish...

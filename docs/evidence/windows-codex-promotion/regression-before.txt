@@ -1,0 +1,73 @@
+
+ RUN  v4.1.10 /Users/vishaltandale/ProjectsDev/relayer-graphcomplete-windows-codex-install-rename
+
+ ❯ |isolated| test/managed-runtime-promotion.test.mjs (3 tests | 3 failed) 58ms
+     × recovers a transient EPERM at the real prepare staging rename 29ms
+     × recovers a transient EPERM at the real update staging rename 4ms
+   × keeps Codex preparation from promoting until the probe closes after exit 26ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 3 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  |isolated| test/managed-runtime-promotion.test.mjs > Windows managed runtime promotion > recovers a transient EPERM at the real prepare staging rename
+Error: EPERM: operation not permitted, rename '/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-codex-promotion-YLg51p/.staging/codex-174f2298-49f0-4e09-b14e-fc8dd6bea6fc/installation' -> '/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-codex-promotion-YLg51p/codex/windows-x64/installations/fd41145a-b379-41eb-b81c-726ff2902dd4'
+ ❯ promotionError test/managed-runtime-promotion.test.mjs:36:24
+     34|
+     35| function promotionError(code, source, destination) {
+     36|   return Object.assign(new Error(`${code}: operation not permitted, re…
+       |                        ^
+     37|     { code, syscall: "rename", path: source, dest: destination });
+     38| }
+ ❯ test/managed-runtime-promotion.test.mjs:52:61
+ ❯ install desktop/main/managed-runtimes/installer.mjs:698:13
+ ❯ test/managed-runtime-promotion.test.mjs:57:7
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/3]⎯
+
+ FAIL  |isolated| test/managed-runtime-promotion.test.mjs > Windows managed runtime promotion > recovers a transient EPERM at the real update staging rename
+Error: EPERM: operation not permitted, rename '/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-codex-promotion-H02ZJE/.staging/codex-update-dda42ca7-51db-4a44-be13-d51ce0b55476/installation' -> '/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-codex-promotion-H02ZJE/codex/windows-x64/installations/c25b24d1-7469-4d58-8755-b3d8e9a429b3'
+ ❯ promotionError test/managed-runtime-promotion.test.mjs:36:24
+     34|
+     35| function promotionError(code, source, destination) {
+     36|   return Object.assign(new Error(`${code}: operation not permitted, re…
+       |                        ^
+     37|     { code, syscall: "rename", path: source, dest: destination });
+     38| }
+ ❯ test/managed-runtime-promotion.test.mjs:52:61
+ ❯ stageOne desktop/main/managed-runtimes/installer.mjs:903:13
+ ❯ Object.stageForAppUpdate desktop/main/managed-runtimes/installer.mjs:1040:21
+ ❯ promote test/managed-runtime-promotion.test.mjs:43:18
+ ❯ test/managed-runtime-promotion.test.mjs:57:7
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/3]⎯
+
+ FAIL  |isolated| test/managed-runtime-promotion.test.mjs > keeps Codex preparation from promoting until the probe closes after exit
+AssertionError: expected "vi.fn()" to not be called at all, but actually been called 1 times
+
+Received:
+
+  1st vi.fn() call:
+
+    Array [
+      "/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-codex-close-H7Rwsd/.staging/codex-220bf6e4-b14b-4c72-b9fd-eb7fef4f20f3/installation",
+      "/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-codex-close-H7Rwsd/codex/windows-x64/installations/11238f09-2810-4324-aa19-c361b827f110",
+    ]
+
+
+Number of calls: 1
+
+ ❯ test/managed-runtime-promotion.test.mjs:117:36
+    115|     await exited;
+    116|     await new Promise((resolve) => setTimeout(resolve, 20));
+    117|     expect(renameInstallation).not.toHaveBeenCalled();
+       |                                    ^
+    118|     releaseClose();
+    119|     expect((await outcome).error).toBeUndefined();
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/3]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  3 failed (3)
+   Start at  11:34:57
+   Duration  234ms (transform 44ms, setup 0ms, import 71ms, tests 58ms, environment 0ms)
+
