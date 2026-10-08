@@ -1,23 +1,55 @@
 const PENDING_COMPLETION_STATUSES = new Set(["not_started", "running", "submitted"]);
 
+export function isDurableActionInvocation(call) {
+  return call.durable === true || (call.durable == null && call.reusable === true);
+}
+
+export function recoverActionInvocation(invocations, sourceInteractionId, actionId, invocationKey) {
+  return invocations.find((call) => String(call.sourceInteractionId) === String(sourceInteractionId)
+    && String(call.actionId) === String(actionId)
+    && (isDurableActionInvocation(call) ? call.invocationKey === invocationKey : true));
+}
+
+export function mergeActionInvocation(invocations, next) {
+  return [...invocations.filter((call) => isDurableActionInvocation(next)
+    ? String(call.resultInteractionId) !== String(next.resultInteractionId)
+    : !(String(call.sourceInteractionId) === String(next.sourceInteractionId) && String(call.actionId) === String(next.actionId))), next];
+}
+
 export function actionWasInvoked(
   invocations = [],
   pendingInvocations = [],
   sourceInteractionId,
   actionId,
+  sourceReusable,
 ) {
   return invocations.some((invocation) => (
     String(invocation.actionId) === String(actionId)
-    && invocation.resultCompletionStatus !== "submitted"
+    && (sourceReusable === false || (sourceReusable == null && !isDurableActionInvocation(invocation)))
+    && (sourceReusable === false || invocation.resultCompletionStatus !== "submitted")
   )) || pendingInvocations.some((invocation) => (
     String(invocation.sourceInteractionId) === String(sourceInteractionId)
     && String(invocation.actionId) === String(actionId)
   ));
 }
 
+// A single-call definition stays an Invoke. Its returned call is a read projection,
+// not an accepted action conversion or a second mutable target.
+export function singleCallResultDestination(state, action, node, actions) {
+  if (action?.kind !== "invoke" || action.reusable !== false) return null;
+  const call = (state.actionInvocations ?? []).find((item) =>
+    String(item.actionId) === String(action.id) && item.resultCompletionStatus === "accepted");
+  const result = call && state.interactions?.find((item) => String(item.id) === String(call.resultInteractionId));
+  const layerId = result?.completionOutput?.rootLayer?.layer?.id;
+  const navigation = layerId == null ? null : actions.find((item) => item.kind === "navigate"
+    && String(item.sourceNodeId) === String(node.id) && String(item.targetLayerId) === String(layerId));
+  return navigation ? { call, layerId } : null;
+}
+
 export function actionCanRetry(invocations = [], actionId) {
   return invocations.some((invocation) => (
     String(invocation.actionId) === String(actionId)
+    && !isDurableActionInvocation(invocation)
     && invocation.resultCompletionStatus === "submitted"
   ));
 }

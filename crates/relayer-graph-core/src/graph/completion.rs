@@ -57,11 +57,167 @@ pub struct AcceptedGraphClosure {
     pub detail_asset_revisions: Option<BTreeMap<NodeId, u64>>,
     #[serde(default)]
     pub has_persistent_mutations: bool,
+    /// Export qualification includes prepared calls not yet registered by Product.
+    #[serde(default)]
+    pub has_reusable_invocations: bool,
     pub node_id: NodeId,
     pub interaction: GraphNode,
     pub root_action: GraphAction,
     pub root_layer_id: crate::LayerId,
     pub layers: Vec<ResolvedLayer>,
+}
+
+/// Trusted coherent export inventory; never an execution permit.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConversationGraphSnapshot {
+    pub closures: Vec<Option<AcceptedGraphClosure>>,
+    pub invocations: Vec<InvocationGraphSnapshot>,
+    pub bound_inputs: Vec<GraphAction>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct InvocationGraphSnapshot {
+    pub invocation: crate::GraphInvocation,
+    pub source_action: GraphAction,
+    pub parent_node: GraphNode,
+    pub submitted_inputs: Vec<crate::InteractionInputChild>,
+    pub current: Option<AcceptedGraphPublication>,
+    pub detail_asset_revisions: BTreeMap<NodeId, u64>,
+}
+
+pub(crate) async fn read_conversation_snapshot(
+    database: &GraphDatabase,
+    node_ids: &[NodeId],
+) -> Result<ConversationGraphSnapshot, GraphError> {
+    let mut transaction = database.storage.begin_read().await?;
+    let mut closures = Vec::with_capacity(node_ids.len());
+    for &node_id in node_ids {
+        let scope = NodeTable::new(&mut transaction)
+            .interaction_scope(node_id)
+            .await?;
+        closures.push(read_accepted_closure_on(&mut transaction, &scope, node_id).await?);
+    }
+    let roots = serde_json::to_string(&node_ids.iter().map(|id| id.value()).collect::<Vec<_>>())
+        .map_err(|error| GraphError::Internal(error.to_string()))?;
+    let parent_nodes = serde_json::to_string(
+        &closures
+            .iter()
+            .flatten()
+            .flat_map(|closure| {
+                closure
+                    .layers
+                    .iter()
+                    .flat_map(|layer| layer.nodes.iter().map(|node| node.id.value()))
+            })
+            .collect::<Vec<_>>(),
+    )
+    .map_err(|error| GraphError::Internal(error.to_string()))?;
+    let call_ids: Vec<i64> = sqlx::query_scalar("WITH RECURSIVE roots(id) AS (SELECT value FROM json_each(?1) UNION SELECT source_completion_id FROM durable_invocations WHERE parent_node_id IN (SELECT value FROM json_each(?2)) UNION SELECT d.child_interaction_node_id FROM durable_invocations d JOIN roots r ON d.source_completion_id=r.id) SELECT DISTINCT d.id FROM durable_invocations d WHERE d.source_completion_id IN (SELECT id FROM roots) OR d.child_interaction_node_id IN (SELECT id FROM roots) ORDER BY d.id")
+        .bind(roots).bind(parent_nodes).fetch_all(&mut *transaction).await?;
+    let mut invocations = Vec::with_capacity(call_ids.len());
+    for id in call_ids {
+        let invocation = crate::storage::sqlite::invocations::by_id(&mut transaction, id)
+            .await?
+            .ok_or_else(|| GraphError::Internal("Invocation vanished from read snapshot".into()))?;
+        let source_scope = NodeTable::new(&mut transaction)
+            .interaction_scope(invocation.source_completion_id)
+            .await?;
+        let source_action = ActionTable::new(&mut transaction)
+            .record(&source_scope, invocation.source_action_id)
+            .await?
+            .ok_or_else(|| GraphError::Internal("Invocation source action is missing".into()))?
+            .action;
+        let parent_node = NodeTable::new(&mut transaction)
+            .visible(&source_scope, invocation.parent_node_id)
+            .await?;
+        let submitted_inputs =
+            crate::storage::sqlite::input_children::InputChildTable::new(&mut transaction)
+                .children(invocation.child_interaction_node_id)
+                .await?;
+        let child_scope = NodeTable::new(&mut transaction)
+            .interaction_scope(invocation.child_interaction_node_id)
+            .await?;
+        let current = match invocation.state.current_layer_id {
+            Some(layer_id) => Some(
+                read_accepted_publication_on(&mut transaction, &child_scope, layer_id, None)
+                    .await?,
+            ),
+            None => None,
+        };
+        let mut detail_asset_revisions = BTreeMap::new();
+        let mut asset_nodes = vec![parent_node.id];
+        if let Some(current) = &current {
+            for layer in &current.layers {
+                asset_nodes.extend(layer.nodes.iter().map(|node| node.id));
+            }
+        }
+        for node_id in asset_nodes {
+            let revision =
+                crate::storage::sqlite::attached_navigation::revision(&mut transaction, node_id)
+                    .await?;
+            detail_asset_revisions.insert(node_id, revision);
+        }
+        invocations.push(InvocationGraphSnapshot {
+            invocation,
+            source_action,
+            parent_node,
+            submitted_inputs,
+            current,
+            detail_asset_revisions,
+        });
+    }
+    let mut requested = Vec::new();
+    for closure in closures.iter().flatten() {
+        for action in closure.layers.iter().flat_map(|layer| &layer.actions) {
+            requested.extend(
+                action
+                    .input_action_ids
+                    .iter()
+                    .map(|id| (closure.node_id, *id)),
+            );
+        }
+    }
+    for snapshot in &invocations {
+        if let Some(current) = &snapshot.current {
+            for action in current.layers.iter().flat_map(|layer| &layer.actions) {
+                requested.extend(
+                    action
+                        .input_action_ids
+                        .iter()
+                        .map(|id| (current.node_id, *id)),
+                );
+            }
+        }
+    }
+    let mut bound_inputs = Vec::new();
+    let mut seen = HashSet::new();
+    for (root, id) in requested {
+        if !seen.insert(id) {
+            continue;
+        }
+        let scope = NodeTable::new(&mut transaction)
+            .interaction_scope(root)
+            .await?;
+        let action = ActionTable::new(&mut transaction)
+            .record(&scope, id)
+            .await?
+            .ok_or_else(|| GraphError::Internal("Bound input definition is missing".into()))?
+            .action;
+        if action.kind != ActionKind::Input || action.state != RecordState::Accepted {
+            return Err(GraphError::Internal(
+                "Published Invoke has an unavailable bound input definition".into(),
+            ));
+        }
+        bound_inputs.push(action);
+    }
+    transaction.commit().await?;
+    Ok(ConversationGraphSnapshot {
+        closures,
+        invocations,
+        bound_inputs,
+    })
 }
 
 /// One accepted graph publication written to the derived search store.
@@ -456,6 +612,13 @@ pub(crate) async fn read_accepted_closure_on(
         )
         .await?;
     let mut detail_asset_revisions = BTreeMap::new();
+    let parent_nodes = publication
+        .layers
+        .iter()
+        .flat_map(|layer| layer.nodes.iter().map(|node| node.id.value()))
+        .collect::<Vec<_>>();
+    let has_reusable_invocations: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM durable_invocations WHERE source_completion_id=?1 OR child_interaction_node_id=?1 OR parent_node_id IN (SELECT value FROM json_each(?2)))")
+        .bind(node_id.value()).bind(serde_json::to_string(&parent_nodes).map_err(|error| GraphError::Internal(error.to_string()))?).fetch_one(&mut *transaction).await?;
     for node in publication
         .layers
         .iter()
@@ -473,6 +636,7 @@ pub(crate) async fn read_accepted_closure_on(
     Ok(Some(AcceptedGraphClosure {
         detail_asset_revisions: Some(detail_asset_revisions),
         has_persistent_mutations,
+        has_reusable_invocations,
         node_id: publication.node_id,
         interaction: publication.interaction,
         root_action: publication.root_action.ok_or_else(|| {

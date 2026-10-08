@@ -36,6 +36,8 @@ struct ActionRow {
     description: Option<String>,
     target_layer_id: Option<i64>,
     interaction_text: Option<String>,
+    input_action_ids_json: String,
+    reusable: Option<bool>,
     input_control: Option<String>,
     input_prompt: Option<String>,
     input_options_json: Option<String>,
@@ -45,11 +47,49 @@ struct ActionRow {
 
 macro_rules! action_projection {
     () => {
-        "SELECT id,(SELECT t.interaction_node_id FROM invoke_resolution_transitions t WHERE t.action_id=action_records.id AND t.target_layer_id=action_records.target_layer_id AND action_records.kind='navigate' AND action_records.relation='expand' AND action_records.state='accepted') AS resolved_invoke_interaction_id,EXISTS(SELECT 1 FROM imported_action_conversions c WHERE c.action_id=action_records.id AND c.target_layer_id=action_records.target_layer_id AND action_records.kind='navigate' AND action_records.relation='expand' AND action_records.state='accepted' AND action_records.interaction_text IS NULL) AS converted_from_invoke,client_key,source_node_id,source_layer_id,(SELECT COALESCE((SELECT k.client_key FROM imported_layer_client_keys k WHERE k.layer_id=layers.id),client_key) FROM layers WHERE layers.id=action_records.source_layer_id) AS source_layer_client_key,kind,relation,label,variant,icon,description,target_layer_id,interaction_text,input_control,input_prompt,input_options_json,input_minimum_selections,state FROM action_records"
+        "SELECT id,(SELECT t.interaction_node_id FROM invoke_resolution_transitions t WHERE t.action_id=action_records.id AND t.target_layer_id=action_records.target_layer_id AND action_records.kind='navigate' AND action_records.relation='expand' AND action_records.state='accepted') AS resolved_invoke_interaction_id,EXISTS(SELECT 1 FROM imported_action_conversions c WHERE c.action_id=action_records.id AND c.target_layer_id=action_records.target_layer_id AND action_records.kind='navigate' AND action_records.relation='expand' AND action_records.state='accepted' AND action_records.interaction_text IS NULL) AS converted_from_invoke,client_key,source_node_id,source_layer_id,(SELECT COALESCE((SELECT k.client_key FROM imported_layer_client_keys k WHERE k.layer_id=layers.id),client_key) FROM layers WHERE layers.id=action_records.source_layer_id) AS source_layer_client_key,kind,relation,label,variant,icon,description,target_layer_id,interaction_text,(SELECT json_group_array(input_action_id) FROM (SELECT input_action_id FROM (SELECT input_action_id,position FROM invoke_input_bindings WHERE invoke_action_id=action_records.id UNION ALL SELECT input_action_id,position FROM imported_invoke_input_bindings WHERE invoke_action_id=action_records.id) ORDER BY position)) AS input_action_ids_json,(SELECT reusable FROM actions WHERE id=action_records.id) AS reusable,input_control,input_prompt,input_options_json,input_minimum_selections,state FROM action_records"
     };
 }
 
 impl<'connection> ActionTable<'connection> {
+    pub(crate) async fn validate_invoke_inputs(
+        &mut self,
+        scope: &InteractionScope,
+        source: NodeId,
+        inputs: &[ActionId],
+    ) -> Result<(), GraphError> {
+        for (index, id) in inputs.iter().enumerate() {
+            let input = self
+                .record(scope, *id)
+                .await?
+                .ok_or_else(|| {
+                    GraphError::validation(
+                        "invoke_input_unavailable",
+                        format!("inputActionIds[{index}]"),
+                        "Bind a visible input action.",
+                    )
+                })?
+                .action;
+            let owned: bool =
+                sqlx::query_scalar("SELECT owner_interaction_id=?2 FROM actions WHERE id=?1")
+                    .bind(id.value())
+                    .bind(scope.root_node_id.value())
+                    .fetch_one(&mut *self.connection)
+                    .await?;
+            if input.kind != ActionKind::Input
+                || input.source_node_id != source
+                || !(input.state == RecordState::Accepted
+                    || (owned && input.state == RecordState::Draft))
+            {
+                return Err(GraphError::validation(
+                    "invoke_input_invalid",
+                    format!("inputActionIds[{index}]"),
+                    "Bind an input action on this Node, accepted or owned by the current draft.",
+                ));
+            }
+        }
+        Ok(())
+    }
     pub(crate) async fn accepted_owned_invokes_in_layer(
         &mut self,
         layer: LayerId,
@@ -537,7 +577,7 @@ impl<'connection> ActionTable<'connection> {
         draft: &ActionDraft,
     ) -> Result<GraphAction, GraphError> {
         let result = sqlx::query(
-            "INSERT INTO actions(project_id,thread_id,source_node_id,source_layer_id,kind,relation,label,variant,icon,description,target_layer_id,interaction_text,state,owner_interaction_id,client_key) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,'draft',?13,?14)",
+            "INSERT INTO actions(project_id,thread_id,source_node_id,source_layer_id,kind,relation,label,variant,icon,description,target_layer_id,interaction_text,state,owner_interaction_id,client_key,reusable) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,'draft',?13,?14,?15)",
         )
         .bind(scope.project_id.map(ProjectId::value))
         .bind(scope.thread_id.value())
@@ -553,10 +593,13 @@ impl<'connection> ActionTable<'connection> {
         .bind(&draft.interaction_text)
         .bind(scope.root_node_id.value())
         .bind(&draft.client_key)
+        .bind((draft.kind == ActionKind::Invoke).then_some(draft.reusable.unwrap_or(false)))
         .execute(&mut *self.connection)
         .await?;
         let id = valid_action_id(result.last_insert_rowid())?;
         self.replace_input_payload(id, draft.input.as_ref()).await?;
+        self.replace_invoke_inputs(id, &draft.input_action_ids)
+            .await?;
         Ok(draft_action(id, draft))
     }
 
@@ -565,7 +608,7 @@ impl<'connection> ActionTable<'connection> {
         id: ActionId,
         draft: &ActionDraft,
     ) -> Result<GraphAction, GraphError> {
-        sqlx::query("UPDATE actions SET source_node_id=?1,source_layer_id=?2,kind=?3,relation=?4,label=?5,variant=?6,icon=?7,description=?8,target_layer_id=?9,interaction_text=?10 WHERE id=?11")
+        sqlx::query("UPDATE actions SET source_node_id=?1,source_layer_id=?2,kind=?3,relation=?4,label=?5,variant=?6,icon=?7,description=?8,target_layer_id=?9,interaction_text=?10,reusable=?12 WHERE id=?11")
             .bind(draft.source_node_id.value())
             .bind(draft.source_layer_id.map(LayerId::value))
             .bind(draft.kind.as_str())
@@ -577,10 +620,29 @@ impl<'connection> ActionTable<'connection> {
             .bind(draft.target_layer_id.map(LayerId::value))
             .bind(&draft.interaction_text)
             .bind(id.value())
+            .bind((draft.kind == ActionKind::Invoke).then_some(draft.reusable.unwrap_or(false)))
             .execute(&mut *self.connection)
             .await?;
         self.replace_input_payload(id, draft.input.as_ref()).await?;
+        self.replace_invoke_inputs(id, &draft.input_action_ids)
+            .await?;
         Ok(draft_action(id, draft))
+    }
+
+    async fn replace_invoke_inputs(
+        &mut self,
+        id: ActionId,
+        inputs: &[ActionId],
+    ) -> Result<(), GraphError> {
+        sqlx::query("DELETE FROM invoke_input_bindings WHERE invoke_action_id=?1")
+            .bind(id.value())
+            .execute(&mut *self.connection)
+            .await?;
+        for (position, input) in inputs.iter().enumerate() {
+            sqlx::query("INSERT INTO invoke_input_bindings(invoke_action_id,input_action_id,position) VALUES (?1,?2,?3)")
+                .bind(id.value()).bind(input.value()).bind(position as i64).execute(&mut *self.connection).await?;
+        }
+        Ok(())
     }
 
     async fn replace_input_payload(
@@ -682,6 +744,9 @@ impl TryFrom<ActionRow> for ActionRecord {
                 description: row.description,
                 target_layer_id: row.target_layer_id.map(valid_layer_id).transpose()?,
                 interaction_text: row.interaction_text,
+                input_action_ids: serde_json::from_str(&row.input_action_ids_json)
+                    .map_err(|error| GraphError::Internal(error.to_string()))?,
+                reusable: row.reusable,
                 input,
                 state: RecordState::parse(&row.state)?,
             },
@@ -706,6 +771,8 @@ fn draft_action(id: ActionId, draft: &ActionDraft) -> GraphAction {
         description: draft.description.clone(),
         target_layer_id: draft.target_layer_id,
         interaction_text: draft.interaction_text.clone(),
+        input_action_ids: draft.input_action_ids.clone(),
+        reusable: (draft.kind == ActionKind::Invoke).then_some(draft.reusable.unwrap_or(false)),
         input: draft.input.clone(),
         state: RecordState::Draft,
     }

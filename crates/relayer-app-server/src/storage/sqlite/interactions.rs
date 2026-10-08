@@ -1185,6 +1185,139 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn product_retry_excludes_bound_draft_and_refuses_ordinary_answers() {
+        use crate::product::{
+            ActionInputValue, ProductError, ProductService, RetryInteractionCommand,
+        };
+        use relayer_graph_core::{
+            ActionId, InputAction, InputControl, LayerId, NodeId, PresentingInputOccurrence,
+        };
+
+        let temporary = tempfile::tempdir().unwrap();
+        let path = temporary.path().join("product.sqlite3");
+        let store = SqliteProductStore::open(&path).await.unwrap();
+        seed_test_models(&store).await;
+        let model = selection("first-model");
+        let thread = store
+            .insert_thread_with_initial_interaction(NewThreadRecord {
+                icon_selection_eligible: true,
+                title: "Retry with scoped inputs",
+                project_id: None,
+                initial_message: "Original prompt",
+                harness_configuration_name: "codex-basic",
+                permission_profile_id: "auto",
+                model_selection: Some(&model),
+                timestamp: "1",
+            })
+            .await
+            .unwrap();
+        // A failed model admission leaves this root retryable without executing inference.
+        let attempt_id = sqlx::query("INSERT INTO interaction_attempts(interaction_id,attempt_number,started_at,finished_at,family_id,family_revision,harness_configuration_name,harness_configuration_revision,harness_configuration_digest,provider_id,adapter_id,adapter_implementation_version,model_id,access_contract,outcome,failure_category,effect_boundary) VALUES (?1,1,'2','3',1,1,'codex-basic',1,'sha256:old','codex','codex-subscription',1,'first-model','managed-runtime@1','model_failed','model_unavailable','none')")
+            .bind(thread.root_interaction_id.value()).execute(&store.pool).await.unwrap().last_insert_rowid();
+        let occurrence = |id| PresentingInputOccurrence {
+            presenting_interaction_node_id: NodeId::new(17).unwrap(),
+            presenting_layer_id: LayerId::new(19).unwrap(),
+            action_id: ActionId::new(id).unwrap(),
+        };
+        let bound = occurrence(23);
+        let ordinary = occurrence(24);
+        let action = InputAction {
+            control: InputControl::Text,
+            prompt: "Preference".into(),
+            options: vec![],
+            minimum_selections: None,
+            unsupported_fields: Default::default(),
+        };
+        let mut draft = store.action_input_draft(thread.id).await.unwrap();
+        for (occurrence, text) in [(&bound, "Bound argument"), (&ordinary, "Ordinary answer")] {
+            draft = store
+                .commit_action_input_attachment(
+                    thread.id,
+                    crate::storage::NewActionInputAttachment {
+                        occurrence,
+                        source_node_id: 29,
+                        action: &action,
+                        value: &ActionInputValue::Text { text: text.into() },
+                    },
+                    draft.revision,
+                )
+                .await
+                .unwrap();
+        }
+        let service = ProductService::new(store.clone(), false);
+        let command = |scope| RetryInteractionCommand {
+            expected_attempt_id: attempt_id,
+            text: "Edited retry prompt",
+            input_identity: "scoped-retry",
+            contexts: &[],
+            context_snapshots: &[],
+            context_confirmation_ids: &[],
+            input_draft_revision: None,
+            model_selection: &model,
+            harness_configuration_name: "codex-basic",
+            composer_input_occurrences: Some(scope),
+        };
+        assert!(
+            matches!(service.claim_interaction_retry(thread.root_interaction_id, command(std::slice::from_ref(&ordinary))).await,
+            Err(ProductError::Catalog(ref error)) if error.code() == "submitted_input_retry_requires_new_send")
+        );
+        assert_eq!(store.action_input_draft(thread.id).await.unwrap(), draft);
+        assert_eq!(
+            store
+                .get_interaction(thread.root_interaction_id)
+                .await
+                .unwrap()
+                .unwrap()
+                .text,
+            "Original prompt"
+        );
+
+        // Detaching the ordinary answer leaves only an Invoke-bound draft, excluded
+        // by the trusted Product selection. Retry must preserve that attachment.
+        let retained = store
+            .detach_action_input_attachment(thread.id, &ordinary, draft.revision)
+            .await
+            .unwrap();
+        assert!(
+            service
+                .claim_interaction_retry(thread.root_interaction_id, command(&[]))
+                .await
+                .unwrap()
+        );
+        assert!(
+            !service
+                .claim_interaction_retry(thread.root_interaction_id, command(&[]))
+                .await
+                .unwrap()
+        );
+        assert_eq!(store.action_input_draft(thread.id).await.unwrap(), retained);
+        drop(service);
+        store.pool.close().await;
+        let reopened = SqliteProductStore::open(path).await.unwrap();
+        assert_eq!(
+            reopened.action_input_draft(thread.id).await.unwrap(),
+            retained
+        );
+        let durable = reopened
+            .interaction_input(thread.root_interaction_id)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(durable.input_identity, "scoped-retry");
+        assert!(durable.submitted_inputs.is_empty());
+        let root = reopened
+            .get_interaction(thread.root_interaction_id)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(root.text, "Edited retry prompt");
+        assert_eq!(root.completion_status, "submitted");
+        let receipt = root.latest_attempt.unwrap();
+        assert_eq!(receipt.id, attempt_id);
+        assert_eq!(receipt.outcome, "model_failed");
+    }
+
+    #[tokio::test]
     async fn retry_claim_updates_the_same_draft_once_and_preserves_the_failed_receipt() {
         let temporary = tempfile::Builder::new()
             .prefix("relayer-interaction-retry-")
@@ -1223,6 +1356,7 @@ mod tests {
             annotations: vec!["new context".into()],
         }];
         let edited_input = || NewInteractionInput {
+            composer_input_occurrences: None,
             text: "Edited prompt",
             input_identity: "retry-input",
             input_digest: "sha256:retry-input",
@@ -1265,6 +1399,7 @@ mod tests {
                 thread.root_interaction_id,
                 attempt_id,
                 NewInteractionInput {
+                    composer_input_occurrences: None,
                     text: "A different edit",
                     input_identity: "retry-input-conflict",
                     input_digest: "sha256:retry-input-conflict",

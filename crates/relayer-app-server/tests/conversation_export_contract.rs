@@ -25,6 +25,8 @@ fn action(
         target_layer_id: target_layer_id.map(Into::into),
         interaction_text: None,
         input: None,
+        input_action_ids: Vec::new(),
+        reusable: None,
         state: ExportRecordState::Accepted,
     }
 }
@@ -46,6 +48,8 @@ fn invoke(id: &str, source_node_id: &str, source_layer_id: &str) -> ExportAction
         target_layer_id: None,
         interaction_text: Some("Continue".into()),
         input: None,
+        input_action_ids: Vec::new(),
+        reusable: None,
         state: ExportRecordState::Accepted,
     }
 }
@@ -73,6 +77,8 @@ fn input(id: &str, source_node_id: &str, source_layer_id: &str) -> ExportAction 
             minimum_selections: None,
             unsupported_fields: Default::default(),
         }),
+        input_action_ids: Vec::new(),
+        reusable: None,
         state: ExportRecordState::Accepted,
     }
 }
@@ -237,6 +243,8 @@ fn records() -> Vec<ConversationExportRecord> {
                 sequence: 1,
             }],
             visual_asset_contents: vec![],
+            invocations: vec![],
+            bound_inputs: vec![],
         })),
         ConversationExportRecord::Turn(Box::new(ConversationExportTurn {
             id: "turn:1".into(),
@@ -251,6 +259,252 @@ fn records() -> Vec<ConversationExportRecord> {
             accepted_view: Some(accepted_view()),
         })),
     ]
+}
+
+fn reusable_call(id: &str, child: &str) -> ExportInvocation {
+    ExportInvocation {
+        schema_version: 1,
+        id: id.into(),
+        source: ExportInvocationSource {
+            interaction_node_id: "node:interaction-1".into(),
+            action_id: "action:invoke-1".into(),
+            parent_node_id: "node:1".into(),
+            layer_id: Some("layer:1".into()),
+            instruction: "Continue".into(),
+            label: "Follow up".into(),
+            description: None,
+            icon: None,
+            icon_asset: None,
+            icon_asset_omitted: false,
+            variant: ExportActionVariant::Pill,
+            input_action_ids: vec![],
+            input_bindings_defined: true,
+            reusable: None,
+            parent_title: "Parent".into(),
+            parent_detail: "Analysis".into(),
+            state: "accepted".into(),
+        },
+        child_interaction_node_id: child.into(),
+        result_turn_id: None,
+        lifecycle: "active".into(),
+        safe_reason: None,
+        head_revision: 0,
+        current_layer_id: None,
+        returned_layer_id: None,
+        arguments: vec![],
+        current: None,
+    }
+}
+
+#[test]
+fn v4_calls_preserve_distinct_identity_and_never_promote_retained_current_to_returned() {
+    let mut fixture = records();
+    let current = accepted_view();
+    let ConversationExportRecord::Header(header) = &mut fixture[0] else {
+        unreachable!()
+    };
+    header.export_version = EXPORT_VERSION_V4;
+    let first = reusable_call("invocation:1", "node:call-1");
+    let mut second = reusable_call("invocation:2", "node:call-2");
+    second.lifecycle = "stopped".into();
+    second.head_revision = 1;
+    second.current_layer_id = Some(current.root_layer_id.clone());
+    second.current = Some(ExportInvocationCurrent {
+        root_layer_id: current.root_layer_id,
+        layers: current.layers,
+    });
+    header.invocations = vec![first, second];
+    assert_validation_parity(&fixture);
+    let bytes = fixture
+        .iter()
+        .map(|record| serde_json::to_string(record).unwrap())
+        .collect::<Vec<_>>()
+        .join("\n");
+    let decoded = decode_export_jsonl(bytes.as_bytes()).unwrap();
+    assert_eq!(decoded, fixture);
+    let ConversationExportRecord::Header(header) = &mut fixture[0] else {
+        unreachable!()
+    };
+    header.invocations[1].returned_layer_id = header.invocations[1].current_layer_id.clone();
+    assert_rejected_with_parity(&fixture, "invocation_current_returned_mismatch");
+}
+
+#[test]
+fn v4_rejects_forged_schema_duplicate_children_and_dangling_results() {
+    let mut fixture = records();
+    let ConversationExportRecord::Header(header) = &mut fixture[0] else {
+        unreachable!()
+    };
+    header.export_version = EXPORT_VERSION_V4;
+    header.invocations = vec![reusable_call("invocation:1", "node:call-1")];
+    header.invocations[0].schema_version = 2;
+    assert_rejected_with_parity(&fixture, "invocation_identity_invalid");
+    let ConversationExportRecord::Header(header) = &mut fixture[0] else {
+        unreachable!()
+    };
+    header.invocations[0].schema_version = 1;
+    header
+        .invocations
+        .push(reusable_call("invocation:2", "node:call-1"));
+    assert_rejected_with_parity(&fixture, "invocation_identity_invalid");
+    let ConversationExportRecord::Header(header) = &mut fixture[0] else {
+        unreachable!()
+    };
+    header.invocations.pop();
+    header.invocations[0].result_turn_id = Some("turn:missing".into());
+    assert_rejected_with_parity(&fixture, "invocation_result_unresolved");
+}
+
+#[test]
+fn v4_preserves_explicit_single_or_reusable_policy_and_historical_omission() {
+    for policy in [None, Some(false), Some(true)] {
+        let mut fixture = records();
+        let ConversationExportRecord::Header(header) = &mut fixture[0] else {
+            unreachable!()
+        };
+        header.export_version = EXPORT_VERSION_V4;
+        let mut call = reusable_call("invocation:policy", "node:policy-child");
+        call.source.reusable = policy;
+        header.invocations = vec![call];
+        let ConversationExportRecord::Turn(turn) = &mut fixture[1] else {
+            unreachable!()
+        };
+        turn.accepted_view.as_mut().unwrap().layers[0]
+            .actions
+            .iter_mut()
+            .find(|action| action.kind == ExportActionKind::Invoke)
+            .unwrap()
+            .reusable = policy;
+        assert_validation_parity(&fixture);
+        let bytes = fixture
+            .iter()
+            .map(|record| serde_json::to_string(record).unwrap())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert_eq!(decode_export_jsonl(bytes.as_bytes()).unwrap(), fixture);
+        if policy.is_some() {
+            let ConversationExportRecord::Header(header) = &mut fixture[0] else {
+                unreachable!()
+            };
+            header.invocations.clear();
+            header.export_version = EXPORT_VERSION_V3;
+            assert_rejected_with_parity(&fixture, "invoke_reuse_policy_version");
+        }
+    }
+}
+
+#[test]
+fn v4_preserves_uncalled_explicit_input_bindings_and_rejects_wrong_source() {
+    let mut fixture = records();
+    let ConversationExportRecord::Header(header) = &mut fixture[0] else {
+        unreachable!()
+    };
+    header.export_version = EXPORT_VERSION_V4;
+    let ConversationExportRecord::Turn(turn) = &mut fixture[1] else {
+        unreachable!()
+    };
+    let root = &mut turn.accepted_view.as_mut().unwrap().layers[0];
+    root.actions
+        .push(input("action:question", "node:1", "layer:1"));
+    root.actions
+        .iter_mut()
+        .find(|action| action.kind == ExportActionKind::Invoke)
+        .unwrap()
+        .input_action_ids = vec!["action:question".into()];
+    assert_validation_parity(&fixture);
+    let ConversationExportRecord::Turn(turn) = &mut fixture[1] else {
+        unreachable!()
+    };
+    turn.accepted_view.as_mut().unwrap().layers[0]
+        .actions
+        .iter_mut()
+        .find(|action| action.kind == ExportActionKind::Invoke)
+        .unwrap()
+        .input_action_ids = vec!["action:root-1".into()];
+    assert_rejected_with_parity(&fixture, "invoke_input_binding_unresolved");
+}
+
+#[test]
+fn v4_call_history_is_not_a_canonical_action_replacement_or_an_authority_carrier() {
+    let mut fixture = records();
+    let ConversationExportRecord::Header(header) = &mut fixture[0] else {
+        unreachable!()
+    };
+    header.export_version = EXPORT_VERSION_V4;
+    let mut prior = reusable_call("invocation:1", "node:call-1");
+    prior.source.instruction = "Earlier draft instruction".into();
+    prior.source.label = "Earlier draft label".into();
+    header.invocations = vec![prior];
+    assert_validation_parity(&fixture);
+    let mut json = serde_json::to_value(&fixture[0]).unwrap();
+    json["invocations"][0]["authorities"] = serde_json::json!(["invoke.resolve"]);
+    assert!(serde_json::from_value::<ConversationExportRecord>(json).is_err());
+    let ConversationExportRecord::Header(header) = &mut fixture[0] else {
+        unreachable!()
+    };
+    header.export_version = EXPORT_VERSION_V3;
+    assert_rejected_with_parity(&fixture, "invocation_inventory_version");
+}
+
+#[test]
+fn v4_arguments_must_exactly_answer_the_frozen_callable_bindings() {
+    let mut fixture = records();
+    let ConversationExportRecord::Header(header) = &mut fixture[0] else {
+        unreachable!()
+    };
+    header.export_version = EXPORT_VERSION_V4;
+    let mut call = reusable_call("invocation:1", "node:call-1");
+    call.source.input_action_ids = vec!["action:question".into()];
+    header.invocations = vec![call];
+    assert_rejected_with_parity(&fixture, "invocation_argument_binding_mismatch");
+    let ConversationExportRecord::Header(header) = &mut fixture[0] else {
+        unreachable!()
+    };
+    header.invocations[0]
+        .arguments
+        .push(ExportInvocationArgument {
+            source: ExportInputSource {
+                interaction_node_id: "node:interaction-1".into(),
+                layer_id: "layer:1".into(),
+                action_id: "action:question".into(),
+                node_id: "node:1".into(),
+            },
+            action: ExportInputActionSnapshot {
+                control: ExportInputControl::Text,
+                prompt: "Destination".into(),
+                options: vec![],
+                minimum_selections: None,
+                unsupported_fields: Default::default(),
+            },
+            value: ExportSubmittedInputValue::Text {
+                text: "Kyoto".into(),
+            },
+        });
+    assert_validation_parity(&fixture);
+    let mut foreign_node = fixture.clone();
+    let ConversationExportRecord::Header(header) = &mut foreign_node[0] else {
+        unreachable!()
+    };
+    header.invocations[0].arguments[0].source.node_id = "node:foreign".into();
+    assert_rejected_with_parity(&foreign_node, "invocation_argument_binding_mismatch");
+    let ConversationExportRecord::Header(header) = &mut fixture[0] else {
+        unreachable!()
+    };
+    header.invocations[0].source.input_action_ids.clear();
+    assert_rejected_with_parity(&fixture, "invocation_argument_binding_mismatch");
+    let ConversationExportRecord::Header(header) = &mut fixture[0] else {
+        unreachable!()
+    };
+    header.invocations[0].source.input_bindings_defined = false;
+    let mut second = header.invocations[0].arguments[0].clone();
+    second.source.layer_id = "layer:historical-second-occurrence".into();
+    header.invocations[0].arguments.push(second);
+    assert_validation_parity(&fixture);
+    let ConversationExportRecord::Header(header) = &mut fixture[0] else {
+        unreachable!()
+    };
+    header.invocations[0].arguments[1].source.layer_id = "layer:1".into();
+    assert_rejected_with_parity(&fixture, "invocation_argument_duplicate");
 }
 
 fn records_with_visual_assets(bytes: &[u8], asset_ids: &[&str]) -> Vec<ConversationExportRecord> {
@@ -1710,7 +1964,7 @@ fn visual_content_requires_v2_while_v1_turn_streams_remain_supported() {
     let ConversationExportRecord::Header(header) = &mut fixture[0] else {
         unreachable!()
     };
-    header.export_version = 4;
+    header.export_version = 5;
     assert_rejected_with_parity(&fixture, "unsupported_export_version");
 }
 

@@ -311,6 +311,8 @@ mod tests {
                 description: None,
                 target_layer_id: Some(root.id),
                 interaction_text: None,
+                input_action_ids: Vec::new(),
+                reusable: None,
                 input: None,
             })
             .await
@@ -1245,6 +1247,63 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn reuse_policy_migration_preserves_accepted_history_and_frozen_calls() {
+        use std::borrow::Cow;
+        let file = tempfile::NamedTempFile::new().unwrap();
+        let pool = sqlx::SqlitePool::connect(&format!("sqlite://{}", file.path().display()))
+            .await
+            .unwrap();
+        Migrator {
+            migrations: Cow::Owned(
+                MIGRATOR
+                    .iter()
+                    .filter(|migration| migration.version <= 37)
+                    .cloned()
+                    .collect(),
+            ),
+            ..Migrator::DEFAULT
+        }
+        .run(&pool)
+        .await
+        .unwrap();
+        sqlx::raw_sql("INSERT INTO nodes(id,thread_id,kind,icon,title,detail,state,owner_interaction_id,client_key) VALUES (1,1,'user-interaction','user','Root','Root','accepted',NULL,NULL),(2,1,'concept','box','Source','Source','accepted',1,'source'),(3,1,'user-interaction','user','Child','Child','accepted',NULL,NULL),(4,1,'user-interaction','user','Later','Later','accepted',NULL,NULL);
+            INSERT INTO layers(id,thread_id,state,owner_interaction_id,client_key) VALUES (1,1,'accepted',1,'root');
+            INSERT INTO actions(id,thread_id,source_node_id,source_layer_id,kind,label,interaction_text,state,owner_interaction_id,client_key) VALUES (1,1,2,1,'invoke','Investigate','Frozen work','accepted',1,'callable');
+            INSERT INTO durable_invocations(source_completion_id,source_action_id,parent_node_id,invocation_key,action_snapshot,child_interaction_node_id) VALUES (1,1,2,'old','{\"instruction\":\"Frozen work\"}',3);")
+            .execute(&pool).await.unwrap();
+        let frozen: String = sqlx::query_scalar(
+            "SELECT action_snapshot FROM durable_invocations WHERE invocation_key='old'",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        MIGRATOR.run(&pool).await.unwrap();
+        assert_eq!(
+            sqlx::query_scalar::<_, Option<bool>>("SELECT reusable FROM actions WHERE id=1")
+                .fetch_one(&pool)
+                .await
+                .unwrap(),
+            None
+        );
+        assert_eq!(
+            sqlx::query_scalar::<_, String>(
+                "SELECT action_snapshot FROM durable_invocations WHERE invocation_key='old'"
+            )
+            .fetch_one(&pool)
+            .await
+            .unwrap(),
+            frozen
+        );
+        sqlx::query("INSERT INTO durable_invocations(source_completion_id,source_action_id,parent_node_id,invocation_key,action_snapshot,child_interaction_node_id) VALUES (1,1,2,'later',?1,4)").bind(&frozen).execute(&pool).await.unwrap();
+        assert!(
+            sqlx::query("UPDATE actions SET reusable=0 WHERE id=1")
+                .execute(&pool)
+                .await
+                .is_err()
+        );
+    }
+
+    #[tokio::test]
     async fn edge_layout_migrations_keep_existing_layouts_shape_and_route_free() {
         use std::borrow::Cow;
         let temporary = tempfile::tempdir().unwrap();
@@ -1278,14 +1337,15 @@ mod tests {
         .unwrap();
         assert_eq!((shape, routes), (None, None));
         // Merged migrations retain each distinct version: shipped edge metadata
-        // and the new completion-local topic proposal must coexist.
+        // completion-local topic proposals, Invoke bindings, and inert imported
+        // definitions must coexist.
         let versions: Vec<i64> = sqlx::query_scalar(
             "SELECT version FROM _sqlx_migrations WHERE version >= 30 ORDER BY version",
         )
         .fetch_all(&pool)
         .await
         .unwrap();
-        assert_eq!(versions, [30, 31, 32, 33]);
+        assert_eq!(versions, [30, 31, 32, 33, 34, 35, 36, 37, 38]);
         sqlx::query(
             "INSERT INTO thread_icon_proposals(interaction_node_id,icon) VALUES (1,'compass')",
         )

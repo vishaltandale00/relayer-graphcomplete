@@ -9,6 +9,31 @@ fn thread(value: i64) -> ThreadId {
     ThreadId::new(value).unwrap()
 }
 
+// Tests of pre-contract permission versions must actually reconstruct historical
+// state. Public preparation cannot remove or rewrite a sealed contract.
+async fn emulate_legacy_contract(pool: &sqlx::SqlitePool, interaction: NodeId) {
+    sqlx::query("DROP TRIGGER completion_contract_marker_guard")
+        .execute(pool)
+        .await
+        .unwrap();
+    sqlx::query("DROP TRIGGER completion_contract_delete_guard")
+        .execute(pool)
+        .await
+        .unwrap();
+    sqlx::query(
+        "UPDATE completion_states SET completion_contract_digest=NULL WHERE interaction_node_id=?1",
+    )
+    .bind(interaction.value())
+    .execute(pool)
+    .await
+    .unwrap();
+    sqlx::query("DELETE FROM completion_contracts WHERE interaction_node_id=?1")
+        .bind(interaction.value())
+        .execute(pool)
+        .await
+        .unwrap();
+}
+
 fn authored_layout(nodes: impl IntoIterator<Item = NodeId>) -> Option<LayerLayout> {
     let nodes = nodes.into_iter().collect::<Vec<_>>();
     let last = nodes.len().saturating_sub(1).max(1) as f64;
@@ -47,6 +72,8 @@ async fn personal_presentation_thread_is_reserved_from_ordinary_creation() {
     ));
     let imported = database
         .begin_imported_conversation(&ImportedConversationStage {
+            inert_invocations: Vec::new(),
+            standalone_inputs: Vec::new(),
             import_id: "reserved-import".into(),
             source_sha256: "sha256:test".into(),
             project_id: None,
@@ -160,6 +187,8 @@ fn imported_conversation(interaction_node_id: &str) -> ImportedConversation {
             accepted_view: Some(ImportedAcceptedView {
                 interaction_node_id: interaction_node_id.into(),
                 root_action: ImportedAction {
+                    reusable: None,
+                    input_action_ids: Vec::new(),
                     icon_asset: None,
                     converted_from_invoke: false,
                     id: "action-1".into(),
@@ -261,6 +290,8 @@ fn imported_invoke_conversation() -> ImportedConversation {
         accepted_view: Some(ImportedAcceptedView {
             interaction_node_id: "interaction-1".into(),
             root_action: ImportedAction {
+                reusable: None,
+                input_action_ids: Vec::new(),
                 icon_asset: None,
                 converted_from_invoke: false,
                 id: "root-action-1".into(),
@@ -300,6 +331,8 @@ fn imported_invoke_conversation() -> ImportedConversation {
                 }],
                 edges: vec![],
                 actions: vec![ImportedAction {
+                    reusable: None,
+                    input_action_ids: Vec::new(),
                     icon_asset: None,
                     converted_from_invoke: false,
                     id: "invoke-action-1".into(),
@@ -332,6 +365,8 @@ fn imported_invoke_conversation() -> ImportedConversation {
         accepted_view: Some(ImportedAcceptedView {
             interaction_node_id: "interaction-2".into(),
             root_action: ImportedAction {
+                reusable: None,
+                input_action_ids: Vec::new(),
                 icon_asset: None,
                 converted_from_invoke: false,
                 id: "root-action-2".into(),
@@ -482,6 +517,8 @@ async fn imported_stage_without_publications_can_be_removed() {
     let database = GraphDatabase::in_memory().await.unwrap();
     database
         .begin_imported_conversation(&ImportedConversationStage {
+            inert_invocations: Vec::new(),
+            standalone_inputs: Vec::new(),
             import_id: "empty-stage".into(),
             source_sha256: "source-digest".into(),
             project_id: None,
@@ -499,6 +536,8 @@ async fn imported_stage_without_publications_can_be_removed() {
     // removed even though there were no graph publications to inspect.
     database
         .begin_imported_conversation(&ImportedConversationStage {
+            inert_invocations: Vec::new(),
+            standalone_inputs: Vec::new(),
             import_id: "empty-stage".into(),
             source_sha256: "source-digest".into(),
             project_id: None,
@@ -672,6 +711,8 @@ async fn imported_unanswered_input_action_keeps_its_authored_payload() {
     conversation.turns[0].accepted_view.as_mut().unwrap().layers[0]
         .actions
         .push(ImportedAction {
+            reusable: None,
+            input_action_ids: Vec::new(),
             icon_asset: None,
             converted_from_invoke: false,
             id: "unanswered-input".into(),
@@ -732,6 +773,8 @@ async fn imported_submitted_inputs_are_semantic_inert_turn_owned_and_removable()
     input.turns[0].accepted_view.as_mut().unwrap().layers[0]
         .actions
         .push(ImportedAction {
+            reusable: None,
+            input_action_ids: Vec::new(),
             icon_asset: None,
             converted_from_invoke: false,
             id: "input-action-1".into(),
@@ -850,6 +893,8 @@ async fn imported_submitted_input_provenance_must_be_one_exact_accepted_occurren
     // Two input actions, both genuinely authored by node-1.
     for id in ["input-action-1", "input-action-2"] {
         resolved.actions.push(ImportedAction {
+            reusable: None,
+            input_action_ids: Vec::new(),
             icon_asset: None,
             converted_from_invoke: false,
             id: id.into(),
@@ -951,6 +996,8 @@ async fn imported_submitted_input_value_must_satisfy_the_accepted_action() {
     // carries provenance that actually happened.
     for id in ["input-action-1", "input-action-2"] {
         resolved.actions.push(ImportedAction {
+            reusable: None,
+            input_action_ids: Vec::new(),
             icon_asset: None,
             converted_from_invoke: false,
             id: id.into(),
@@ -1038,6 +1085,8 @@ async fn imported_submitted_input_value_must_satisfy_the_accepted_action() {
         unsupported_fields: Default::default(),
     };
     resolved.actions.push(ImportedAction {
+        reusable: None,
+        input_action_ids: Vec::new(),
         icon_asset: None,
         converted_from_invoke: false,
         id: "input-action-authored-text".into(),
@@ -1161,6 +1210,8 @@ async fn imported_submitted_input_requires_an_earlier_presenting_turn() {
     input.turns[0].accepted_view.as_mut().unwrap().layers[0]
         .actions
         .push(ImportedAction {
+            reusable: None,
+            input_action_ids: Vec::new(),
             icon_asset: None,
             converted_from_invoke: false,
             id: "input-action-1".into(),
@@ -1188,6 +1239,8 @@ async fn imported_submitted_input_requires_an_earlier_presenting_turn() {
     same_turn.accepted_view.as_mut().unwrap().layers[0]
         .actions
         .push(ImportedAction {
+            reusable: None,
+            input_action_ids: Vec::new(),
             icon_asset: None,
             converted_from_invoke: false,
             id: "input-action-2".into(),
@@ -1215,6 +1268,8 @@ async fn imported_submitted_input_requires_an_earlier_presenting_turn() {
     later.accepted_view.as_mut().unwrap().layers[0]
         .actions
         .push(ImportedAction {
+            reusable: None,
+            input_action_ids: Vec::new(),
             icon_asset: None,
             converted_from_invoke: false,
             id: "input-action-3".into(),
@@ -1334,6 +1389,8 @@ async fn imported_duplicate_input_occurrence_drops_only_extra_answer_per_turn() 
         ("input-action-2", action_two.clone()),
     ] {
         source_layer.actions.push(ImportedAction {
+            reusable: None,
+            input_action_ids: Vec::new(),
             icon_asset: None,
             converted_from_invoke: false,
             id: id.into(),
@@ -1510,6 +1567,8 @@ async fn invalid_legacy_child_snapshot_does_not_poison_a_later_valid_answer() {
     input.turns[0].accepted_view.as_mut().unwrap().layers[0]
         .actions
         .push(ImportedAction {
+            reusable: None,
+            input_action_ids: Vec::new(),
             icon_asset: None,
             converted_from_invoke: false,
             id: "legacy-input-action".into(),
@@ -1612,6 +1671,8 @@ async fn reused_legacy_input_uses_presenting_layer_for_snapshot_preference() {
     input.turns[0].accepted_view.as_mut().unwrap().layers[0]
         .actions
         .push(ImportedAction {
+            reusable: None,
+            input_action_ids: Vec::new(),
             icon_asset: None,
             converted_from_invoke: false,
             id: "legacy-input-action".into(),
@@ -1760,6 +1821,8 @@ async fn wrong_occurrence_legacy_snapshot_cannot_poison_exact_sibling() {
     input.turns[0].accepted_view.as_mut().unwrap().layers[0]
         .actions
         .push(ImportedAction {
+            reusable: None,
+            input_action_ids: Vec::new(),
             icon_asset: None,
             converted_from_invoke: false,
             id: "legacy-input-action".into(),
@@ -1879,6 +1942,8 @@ async fn assert_chronologically_invalid_legacy_snapshot_is_ignored(scenario: &st
     presenting_turn.accepted_view.as_mut().unwrap().layers[0]
         .actions
         .push(ImportedAction {
+            reusable: None,
+            input_action_ids: Vec::new(),
             icon_asset: None,
             converted_from_invoke: false,
             id: "legacy-input-action".into(),
@@ -2081,6 +2146,226 @@ async fn imported_action_origin_reconstructs_resolved_invoke_navigation() {
             .value(),
         destination.graph_node_id.unwrap()
     );
+}
+
+#[tokio::test]
+async fn imported_bound_controls_and_call_evidence_reopen_without_execution_authority() {
+    use base64::Engine as _;
+    use sha2::Digest as _;
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("inert-calls.sqlite3");
+    let database = GraphDatabase::open(&path).await.unwrap();
+    let mut input = imported_invoke_conversation();
+    input.turns.truncate(1);
+    let layer = &mut input.turns[0].accepted_view.as_mut().unwrap().layers[0];
+    let mut field = layer.actions[0].clone();
+    field.id = "input:destination".into();
+    field.client_key = Some("destination-input".into());
+    field.kind = "input".into();
+    field.interaction_text = None;
+    field.input = Some(InputAction {
+        control: InputControl::Text,
+        prompt: "Destination".into(),
+        options: vec![],
+        minimum_selections: None,
+        unsupported_fields: Default::default(),
+    });
+    layer.actions[0].input_action_ids = vec![field.id.clone()];
+    let mut standalone = field.clone();
+    standalone.id = "input:outside-closure".into();
+    standalone.client_key = Some("outside-closure-input".into());
+    standalone.source_layer_id = Some("layer:outside-closure".into());
+    layer.actions[0]
+        .input_action_ids
+        .push(standalone.id.clone());
+    // Input definition deliberately follows Invoke in the stream.
+    layer.actions.push(field);
+    let bytes = b"<svg xmlns=\"http://www.w3.org/2000/svg\"/>";
+    let digest = format!("{:x}", sha2::Sha256::digest(bytes));
+    standalone.icon = Some(serde_json::json!({"kind":"image","assetId":"bound-input-icon","digestSha256":digest,"mediaType":"image/svg+xml"}).to_string());
+    standalone.icon_asset = Some(ImportedDetailAsset {
+        asset_id: "bound-input-icon".into(),
+        digest_sha256: digest.clone(),
+        media_type: "image/svg+xml".into(),
+        byte_length: bytes.len(),
+        provenance_source: "system".into(),
+        provenance_file_name: "input.svg".into(),
+    });
+    let evidence = vec![
+        serde_json::json!({"schemaVersion":1,"id":"invocation:1","lifecycle":"active","childInteractionNodeId":"node:unbound-child","current":{"iconAsset":{"digestSha256":digest}}}),
+    ];
+    database
+        .begin_imported_conversation(&ImportedConversationStage {
+            import_id: input.import_id.clone(),
+            source_sha256: input.source_sha256.clone(),
+            project_id: input.project_id,
+            thread_id: input.thread_id,
+            created_at: input.created_at.clone(),
+            inert_invocations: evidence.clone(),
+            standalone_inputs: vec![standalone],
+        })
+        .await
+        .unwrap();
+    database
+        .stage_imported_visual_asset_content(
+            &input.import_id,
+            &ImportedVisualAssetContent {
+                digest_sha256: digest.clone(),
+                media_type: "image/svg+xml".into(),
+                byte_length: bytes.len(),
+                content_base64: base64::engine::general_purpose::STANDARD.encode(bytes),
+            },
+        )
+        .await
+        .unwrap();
+    database
+        .stage_imported_turn(&input.import_id, &input.turns[0])
+        .await
+        .unwrap();
+    let receipt = database
+        .finalize_imported_conversation(&input.import_id)
+        .await
+        .unwrap();
+    drop(database);
+    let reopened = GraphDatabase::open(&path).await.unwrap();
+    let inspection = SqlitePoolOptions::new()
+        .max_connections(1)
+        .connect_with(SqliteConnectOptions::new().filename(&path))
+        .await
+        .unwrap();
+    let retained: Vec<u8> = sqlx::query_scalar(
+        "SELECT content FROM inert_import_asset_contents WHERE import_id=?1 AND digest_sha256=?2",
+    )
+    .bind(&input.import_id)
+    .bind(&digest)
+    .fetch_one(&inspection)
+    .await
+    .unwrap();
+    assert_eq!(retained, bytes);
+    let standalone_id: i64 = sqlx::query_scalar("SELECT id FROM actions WHERE client_key='outside-closure-input' AND source_layer_id IS NULL")
+        .fetch_one(&inspection).await.unwrap();
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM layer_actions WHERE action_id=?1")
+            .bind(standalone_id)
+            .fetch_one(&inspection)
+            .await
+            .unwrap(),
+        0
+    );
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM durable_invocations")
+            .fetch_one(&inspection)
+            .await
+            .unwrap(),
+        0
+    );
+    inspection.close().await;
+    assert_eq!(
+        reopened
+            .imported_invocation_evidence(input.thread_id)
+            .await
+            .unwrap(),
+        evidence
+    );
+    let writer = reopened
+        .writer_for_subgraph(NodeId::new(receipt.turns[0].graph_node_id.unwrap()).unwrap())
+        .await
+        .unwrap();
+    let layer = writer
+        .get_layer(LayerId::new(receipt.turns[0].root_layer_id.unwrap()).unwrap())
+        .await
+        .unwrap();
+    let invoke = layer
+        .actions
+        .iter()
+        .find(|action| action.kind == ActionKind::Invoke)
+        .unwrap();
+    let field = layer
+        .actions
+        .iter()
+        .find(|action| action.kind == ActionKind::Input)
+        .unwrap();
+    assert_eq!(
+        invoke.input_action_ids,
+        vec![field.id, ActionId::new(standalone_id).unwrap()]
+    );
+    let icon = writer
+        .accepted_detail_asset(invoke.source_node_id, "bound-input-icon")
+        .await
+        .unwrap();
+    assert_eq!(icon.content, bytes);
+    assert_eq!(icon.digest_sha256, digest);
+    assert_eq!(invoke.target_layer_id, None);
+    assert!(matches!(
+        writer
+            .prepare_user_invocation(invoke.id, "must-not-execute")
+            .await,
+        Err(GraphError::Forbidden(_))
+    ));
+    assert!(matches!(
+        writer
+            .prepare_recursive_invocation(invoke.id, "must-not-execute")
+            .await,
+        Err(GraphError::Forbidden(_))
+    ));
+    assert!(
+        reopened
+            .activate_completion_authority(
+                NodeId::new(receipt.turns[0].graph_node_id.unwrap()).unwrap()
+            )
+            .await
+            .is_err()
+    );
+}
+
+#[tokio::test]
+async fn imported_invoke_reuse_declaration_reopens_exactly_without_execution_authority() {
+    for reusable in [None, Some(false), Some(true)] {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("imported-reuse.sqlite3");
+        let database = GraphDatabase::open(&path).await.unwrap();
+        let mut input = imported_invoke_conversation();
+        input.turns.truncate(1);
+        input.turns[0].accepted_view.as_mut().unwrap().layers[0].actions[0].reusable = reusable;
+        let imported = database.import_accepted_conversation(&input).await.unwrap();
+        let root = NodeId::new(imported.turns[0].graph_node_id.unwrap()).unwrap();
+        let layer_id = LayerId::new(imported.turns[0].root_layer_id.unwrap()).unwrap();
+        drop(database);
+        let reopened = GraphDatabase::open(&path).await.unwrap();
+        let writer = reopened.writer_for_subgraph(root).await.unwrap();
+        let layer = writer.get_layer(layer_id).await.unwrap();
+        let invoke = layer
+            .actions
+            .iter()
+            .find(|action| action.kind == ActionKind::Invoke)
+            .unwrap();
+        assert_eq!(invoke.reusable, reusable);
+        assert!(matches!(
+            writer
+                .prepare_user_invocation(invoke.id, "must-not-execute")
+                .await,
+            Err(GraphError::Forbidden(_))
+        ));
+    }
+}
+
+#[tokio::test]
+async fn inert_import_rejects_invalid_bound_input_references() {
+    for bindings in [
+        vec!["missing-input".to_owned()],
+        vec!["invoke-action-1".to_owned()],
+        vec!["invoke-action-1".to_owned(), "invoke-action-1".to_owned()],
+    ] {
+        let database = GraphDatabase::in_memory().await.unwrap();
+        let mut input = imported_invoke_conversation();
+        input.turns.truncate(1);
+        input.turns[0].accepted_view.as_mut().unwrap().layers[0].actions[0].input_action_ids =
+            bindings;
+        assert!(matches!(
+            database.import_accepted_conversation(&input).await,
+            Err(GraphError::Validation { .. })
+        ));
+    }
 }
 
 fn imported_converted_invoke_conversation() -> ImportedConversation {
@@ -2315,6 +2600,8 @@ async fn imported_external_source_provenance_preserves_compiled_keys_without_res
             description: None,
             target_layer_id: Some(provenance),
             interaction_text: None,
+            reusable: None,
+            input_action_ids: Vec::new(),
             input: None,
         })
         .await
@@ -2562,6 +2849,8 @@ async fn root_expand(
             description: None,
             target_layer_id: Some(target.id),
             interaction_text: None,
+            reusable: None,
+            input_action_ids: Vec::new(),
             input: None,
         })
         .await
@@ -2588,6 +2877,8 @@ async fn accepted_invoke(
             description: None,
             target_layer_id: None,
             interaction_text: Some("Continue this answer".into()),
+            reusable: None,
+            input_action_ids: Vec::new(),
             input: None,
         })
         .await
@@ -2618,6 +2909,8 @@ async fn navigate(
             description: None,
             target_layer_id: Some(target.id),
             interaction_text: None,
+            reusable: None,
+            input_action_ids: Vec::new(),
             input: None,
         })
         .await
@@ -2653,6 +2946,8 @@ async fn accept_single_node(
             description: None,
             target_layer_id: Some(layer.id),
             interaction_text: None,
+            reusable: None,
+            input_action_ids: Vec::new(),
             input: None,
         })
         .await
@@ -2946,6 +3241,8 @@ async fn interaction_context_is_control_authored_ordered_and_excluded_from_compl
             description: None,
             target_layer_id: Some(answer_layer.id),
             interaction_text: None,
+            reusable: None,
+            input_action_ids: Vec::new(),
             input: None,
         })
         .await
@@ -2970,6 +3267,8 @@ async fn interaction_context_is_control_authored_ordered_and_excluded_from_compl
             description: None,
             target_layer_id: Some(answer_layer.id),
             interaction_text: None,
+            reusable: None,
+            input_action_ids: Vec::new(),
             input: None,
         })
         .await
@@ -2991,6 +3290,7 @@ async fn interaction_context_accepts_published_current_before_turn_completion() 
     let writer = database.writer_for_subgraph(source.id).await.unwrap();
     let target = node(&writer, "working-answer").await;
     let layer = single_node_layer(&writer, "working-current", &target).await;
+    root_expand(&writer, &source, &layer).await;
     let occurrence = InteractionContextTarget {
         node_id: target.id,
         source_interaction_node_id: source.id,
@@ -3019,6 +3319,7 @@ async fn interaction_context_accepts_published_current_before_turn_completion() 
 
     let later = node(&writer, "later-answer").await;
     let later_layer = single_node_layer(&writer, "later-current", &later).await;
+    root_expand(&writer, &source, &later_layer).await;
     writer
         .add_action(&ActionDraft {
             client_key: "retain-annotated-current".into(),
@@ -3032,6 +3333,8 @@ async fn interaction_context_accepts_published_current_before_turn_completion() 
             description: None,
             target_layer_id: Some(layer.id),
             interaction_text: None,
+            reusable: None,
+            input_action_ids: Vec::new(),
             input: None,
         })
         .await
@@ -3333,6 +3636,8 @@ async fn root_action_replay_updates_same_key_and_rejects_a_different_key_without
             description: None,
             target_layer_id: Some(first_layer.id),
             interaction_text: None,
+            reusable: None,
+            input_action_ids: Vec::new(),
             input: None,
         })
         .await
@@ -3364,6 +3669,8 @@ async fn root_action_replay_updates_same_key_and_rejects_a_different_key_without
             description: None,
             target_layer_id: Some(first_layer.id),
             interaction_text: None,
+            reusable: None,
+            input_action_ids: Vec::new(),
             input: None,
         })
         .await
@@ -3395,6 +3702,8 @@ async fn concurrent_root_action_writes_allow_exactly_one_client_key() {
         description: None,
         target_layer_id: Some(layer.id),
         interaction_text: None,
+        reusable: None,
+        input_action_ids: Vec::new(),
         input: None,
     };
     let first_draft = draft("first-root");
@@ -3447,6 +3756,7 @@ async fn current_advance_is_atomic_durable_and_idempotent() {
 
     let answer = node(&writer, "working-answer").await;
     let layer = single_node_layer(&writer, "working-current", &answer).await;
+    root_expand(&writer, &interaction, &layer).await;
     let first = writer
         .transition_current(
             0,
@@ -3493,6 +3803,7 @@ async fn returning_the_existing_current_appends_a_terminal_revision_without_clon
     let writer = database.writer_for_subgraph(interaction.id).await.unwrap();
     let answer = node(&writer, "answer").await;
     let layer = single_node_layer(&writer, "current", &answer).await;
+    root_expand(&writer, &interaction, &layer).await;
     writer
         .transition_current(
             0,
@@ -3603,6 +3914,7 @@ async fn projection_outbox_preserves_each_revision_and_terminal_current() {
     let writer = database.writer_for_subgraph(interaction.id).await.unwrap();
     let answer = node(&writer, "progress").await;
     let layer = single_node_layer(&writer, "progress-current", &answer).await;
+    root_expand(&writer, &interaction, &layer).await;
     let advanced = writer
         .transition_current(
             0,
@@ -3765,7 +4077,8 @@ async fn temporal_rollout_flags_default_off_and_enforce_stage_dependencies() {
 
 #[tokio::test]
 async fn published_active_invoke_prepares_one_recursive_completion_with_canonical_input() {
-    let database = GraphDatabase::in_memory().await.unwrap();
+    let file = tempfile::NamedTempFile::new().unwrap();
+    let database = GraphDatabase::open(file.path()).await.unwrap();
     database
         .set_temporal_features(TemporalFeatureConfig {
             schema_read: true,
@@ -3781,9 +4094,15 @@ async fn published_active_invoke_prepares_one_recursive_completion_with_canonica
         .create_interaction(Some(project(1)), thread(1), "Parent task")
         .await
         .unwrap();
+    let pool = sqlx::SqlitePool::connect(&format!("sqlite://{}", file.path().display()))
+        .await
+        .unwrap();
+    emulate_legacy_contract(&pool, parent.id).await;
+    pool.close().await;
     let writer = database.writer_for_subgraph(parent.id).await.unwrap();
     let source = node(&writer, "recursive-source").await;
     let current = single_node_layer(&writer, "recursive-current", &source).await;
+    root_expand(&writer, &parent, &current).await;
     let invoke = writer
         .add_action(&ActionDraft {
             client_key: "recursive-child".into(),
@@ -3797,6 +4116,8 @@ async fn published_active_invoke_prepares_one_recursive_completion_with_canonica
             description: None,
             target_layer_id: None,
             interaction_text: Some("Investigate the published branch".into()),
+            reusable: None,
+            input_action_ids: Vec::new(),
             input: None,
         })
         .await
@@ -3826,6 +4147,7 @@ async fn published_active_invoke_prepares_one_recursive_completion_with_canonica
         .unwrap();
     let later_source = node(&writer, "later-parent-current").await;
     let later_current = single_node_layer(&writer, "later-current", &later_source).await;
+    root_expand(&writer, &parent, &later_current).await;
     writer
         .add_action(&ActionDraft {
             client_key: "retain-prior-current".into(),
@@ -3839,6 +4161,8 @@ async fn published_active_invoke_prepares_one_recursive_completion_with_canonica
             description: None,
             target_layer_id: Some(current.id),
             interaction_text: None,
+            reusable: None,
+            input_action_ids: Vec::new(),
             input: None,
         })
         .await
@@ -3869,7 +4193,8 @@ async fn published_active_invoke_prepares_one_recursive_completion_with_canonica
 
 #[tokio::test]
 async fn active_invoke_cannot_prepare_a_child_when_parent_recursion_gate_is_off() {
-    let database = GraphDatabase::in_memory().await.unwrap();
+    let file = tempfile::NamedTempFile::new().unwrap();
+    let database = GraphDatabase::open(file.path()).await.unwrap();
     database
         .set_temporal_features(TemporalFeatureConfig {
             schema_read: true,
@@ -3885,9 +4210,15 @@ async fn active_invoke_cannot_prepare_a_child_when_parent_recursion_gate_is_off(
         .create_interaction(Some(project(1)), thread(1), "Parent task")
         .await
         .unwrap();
+    let pool = sqlx::SqlitePool::connect(&format!("sqlite://{}", file.path().display()))
+        .await
+        .unwrap();
+    emulate_legacy_contract(&pool, parent.id).await;
+    pool.close().await;
     let writer = database.writer_for_subgraph(parent.id).await.unwrap();
     let source = node(&writer, "gated-source").await;
     let current = single_node_layer(&writer, "gated-current", &source).await;
+    root_expand(&writer, &parent, &current).await;
     let invoke = writer
         .add_action(&ActionDraft {
             client_key: "gated-child".into(),
@@ -3901,6 +4232,8 @@ async fn active_invoke_cannot_prepare_a_child_when_parent_recursion_gate_is_off(
             description: None,
             target_layer_id: None,
             interaction_text: Some("Investigate the gated branch".into()),
+            reusable: None,
+            input_action_ids: Vec::new(),
             input: None,
         })
         .await
@@ -3989,6 +4322,7 @@ async fn remint_cuts_over_broker_epoch_and_terminal_state_denies_model_reads() {
 
     let answer = node(&second, "authorized").await;
     let layer = single_node_layer(&second, "authorized-current", &answer).await;
+    root_expand(&second, &interaction, &layer).await;
     let model_failure = second
         .transition_current(
             0,
@@ -4106,6 +4440,8 @@ async fn accepts_connected_layer_and_returns_exact_view() {
             description: None,
             target_layer_id: Some(layer.id),
             interaction_text: None,
+            reusable: None,
+            input_action_ids: Vec::new(),
             input: None,
         })
         .await
@@ -4572,6 +4908,8 @@ async fn accepts_recursive_navigate_subgraph() {
             description: None,
             target_layer_id: Some(nested.id),
             interaction_text: None,
+            reusable: None,
+            input_action_ids: Vec::new(),
             input: None,
         })
         .await
@@ -4589,6 +4927,8 @@ async fn accepts_recursive_navigate_subgraph() {
             description: None,
             target_layer_id: Some(root.id),
             interaction_text: None,
+            reusable: None,
+            input_action_ids: Vec::new(),
             input: None,
         })
         .await
@@ -4904,6 +5244,8 @@ async fn reference_layers_cannot_author_expand_or_invoke_actions() {
             description: None,
             target_layer_id: Some(child_layer.id),
             interaction_text: None,
+            reusable: None,
+            input_action_ids: Vec::new(),
             input: None,
         })
         .await
@@ -5238,6 +5580,8 @@ async fn action_keys_are_scoped_to_their_source_nodes() {
             description: None,
             target_layer_id: None,
             interaction_text: Some("Ask about the first node".into()),
+            reusable: None,
+            input_action_ids: Vec::new(),
             input: None,
         })
         .await
@@ -5255,6 +5599,8 @@ async fn action_keys_are_scoped_to_their_source_nodes() {
             description: None,
             target_layer_id: None,
             interaction_text: Some("Ask about the second node".into()),
+            reusable: None,
+            input_action_ids: Vec::new(),
             input: None,
         })
         .await
@@ -5283,6 +5629,8 @@ async fn invoke_actions_reject_whitespace_only_interaction_text() {
             description: None,
             target_layer_id: None,
             interaction_text: Some("  \n\t".into()),
+            reusable: None,
+            input_action_ids: Vec::new(),
             input: None,
         })
         .await
@@ -5314,6 +5662,8 @@ async fn invoke_actions_cannot_author_resolution_targets() {
             description: None,
             target_layer_id: Some(layer.id),
             interaction_text: Some("Continue".into()),
+            reusable: None,
+            input_action_ids: Vec::new(),
             input: None,
         })
         .await
@@ -5374,6 +5724,8 @@ async fn action_presentation_grammar_round_trips_in_authored_order() {
                 description: description.map(str::to_owned),
                 target_layer_id: None,
                 interaction_text: Some(format!("Run {key}")),
+                reusable: None,
+                input_action_ids: Vec::new(),
                 input: None,
             })
             .await
@@ -5477,6 +5829,8 @@ async fn input_actions_round_trip_all_controls_and_reject_malformed_options() {
                 description: None,
                 target_layer_id: None,
                 interaction_text: None,
+                reusable: None,
+                input_action_ids: Vec::new(),
                 input: Some(input),
             })
             .await
@@ -5528,6 +5882,8 @@ async fn input_actions_round_trip_all_controls_and_reject_malformed_options() {
             description: None,
             target_layer_id: None,
             interaction_text: None,
+            reusable: None,
+            input_action_ids: Vec::new(),
             input: Some(InputAction {
                 control: InputControl::MultiSelect,
                 prompt: "Choose".into(),
@@ -5630,6 +5986,8 @@ async fn canonical_input_occurrence_uses_project_scope_with_standalone_thread_fa
             description: None,
             target_layer_id: None,
             interaction_text: None,
+            reusable: None,
+            input_action_ids: Vec::new(),
             input: Some(InputAction {
                 control: InputControl::Text,
                 prompt: "Explain".into(),
@@ -5700,6 +6058,8 @@ async fn canonical_input_occurrence_uses_project_scope_with_standalone_thread_fa
             description: None,
             target_layer_id: None,
             interaction_text: None,
+            reusable: None,
+            input_action_ids: Vec::new(),
             input: Some(InputAction {
                 control: InputControl::Text,
                 prompt: "Explain".into(),
@@ -5742,7 +6102,24 @@ async fn canonical_input_occurrence_uses_project_scope_with_standalone_thread_fa
 
 #[tokio::test]
 async fn submitted_input_children_are_canonical_isolated_and_retry_stable() {
-    let (database, presenting) = setup(Some(project(90)), thread(90)).await;
+    let file = tempfile::NamedTempFile::new().unwrap();
+    let database = GraphDatabase::open(file.path()).await.unwrap();
+    database
+        .set_interaction_permissions_enabled(true)
+        .await
+        .unwrap();
+    database
+        .set_temporal_features(TemporalFeatureConfig {
+            schema_read: true,
+            root_current_write: true,
+            ..TemporalFeatureConfig::default()
+        })
+        .await
+        .unwrap();
+    let presenting = database
+        .create_interaction(Some(project(90)), thread(90), "Inputs")
+        .await
+        .unwrap();
     let writer = database.writer_for_subgraph(presenting.id).await.unwrap();
     let source = node(&writer, "input-source").await;
     let layer = single_node_layer(&writer, "input-layer", &source).await;
@@ -5792,6 +6169,8 @@ async fn submitted_input_children_are_canonical_isolated_and_retry_stable() {
                 description: None,
                 target_layer_id: None,
                 interaction_text: None,
+                reusable: None,
+                input_action_ids: Vec::new(),
                 input: Some(input),
             })
             .await
@@ -5931,6 +6310,17 @@ async fn submitted_input_children_are_canonical_isolated_and_retry_stable() {
     assert!(!visible.to_string().contains("presentingLayerId"));
     assert!(!visible.to_string().contains("attempt"));
     assert!(visible.to_string().contains("Preserve this exactly"));
+    let contract = normalized.completion_contract.unwrap();
+    assert!(contract.input.context.is_empty());
+    assert_eq!(contract.input.answers.len(), 2);
+    assert_eq!(
+        contract.authorities,
+        vec![InteractionPermission::NavigateAdd { node_id: source.id }]
+    );
+    assert_eq!(
+        contract.return_requirements,
+        vec![CompletionReturnRequirement::NavigateResponse { node_id: source.id }]
+    );
 
     let changed_inputs = [second_order[0].clone()];
     let changed_digest = interaction_input_authority_digest("", &changed_inputs).unwrap();
@@ -6007,6 +6397,334 @@ async fn submitted_input_children_are_canonical_isolated_and_retry_stable() {
         )
         .await
         .expect("invalid child preparation must roll back the root and exact child set atomically");
+
+    let second_interaction = database
+        .create_interaction(Some(project(90)), thread(94), "Second input source")
+        .await
+        .unwrap();
+    let second_writer = database
+        .writer_for_subgraph(second_interaction.id)
+        .await
+        .unwrap();
+    let second_source = node(&second_writer, "second-source").await;
+    let second_layer = single_node_layer(&second_writer, "second-layer", &second_source).await;
+    let second_field = second_writer
+        .add_action(&ActionDraft {
+            client_key: "second-field".into(),
+            source_node_id: second_source.id,
+            source_layer_id: Some(second_layer.id),
+            kind: ActionKind::Input,
+            relation: None,
+            label: "Second question".into(),
+            variant: ActionVariant::Pill,
+            icon: None,
+            description: None,
+            target_layer_id: None,
+            interaction_text: None,
+            reusable: None,
+            input_action_ids: Vec::new(),
+            input: Some(second_order[0].action.clone()),
+        })
+        .await
+        .unwrap();
+    root_expand(&second_writer, &second_interaction, &second_layer).await;
+    second_writer.complete(second_interaction.id).await.unwrap();
+    let mut combined_inputs = second_order.clone();
+    combined_inputs.push(SubmittedInputDraft {
+        occurrence: PresentingInputOccurrence {
+            presenting_interaction_node_id: second_interaction.id,
+            presenting_layer_id: second_layer.id,
+            action_id: second_field.id,
+        },
+        action: second_order[0].action.clone(),
+        value: SubmittedInputValue::Text {
+            text: "Another source answer".into(),
+        },
+    });
+    let contexts = [InteractionContextDraft {
+        target: InteractionContextTarget {
+            node_id: source.id,
+            source_interaction_node_id: presenting.id,
+            source_layer_id: layer.id,
+        },
+        annotations: vec!["Same node annotation".into()],
+    }];
+    let combined_digest = interaction_input_authority_digest("", &combined_inputs).unwrap();
+    let (response_root, response_children) = database
+        .create_identified_interaction_with_inputs(
+            Some(project(90)),
+            thread(95),
+            "",
+            InteractionInputPreparation {
+                attempt_key: "attempt:combined",
+                authority_digest: &combined_digest,
+                contexts: &contexts,
+                submitted_inputs: &combined_inputs,
+            },
+        )
+        .await
+        .unwrap();
+    let answer_writer = database
+        .writer_for_subgraph(response_root.id)
+        .await
+        .unwrap();
+    let combined_contract = answer_writer
+        .interaction_input()
+        .await
+        .unwrap()
+        .completion_contract
+        .unwrap();
+    assert_eq!(combined_contract.input.answers.len(), 3);
+    assert_eq!(combined_contract.input.context.len(), 1);
+    assert_eq!(
+        combined_contract.authorities,
+        vec![
+            InteractionPermission::NavigateAdd { node_id: source.id },
+            InteractionPermission::NavigateAdd {
+                node_id: second_source.id
+            }
+        ]
+    );
+    assert_eq!(
+        combined_contract.return_requirements,
+        vec![
+            CompletionReturnRequirement::NavigateResponse { node_id: source.id },
+            CompletionReturnRequirement::NavigateResponse {
+                node_id: second_source.id
+            }
+        ]
+    );
+    answer_writer
+        .authorize_interaction_permission(&InteractionPermission::NavigateAdd {
+            node_id: source.id,
+        })
+        .await
+        .unwrap();
+    answer_writer
+        .authorize_interaction_permission(&InteractionPermission::NavigateAdd {
+            node_id: second_source.id,
+        })
+        .await
+        .unwrap();
+    let unrelated_interaction = database
+        .create_interaction(Some(project(90)), thread(93), "Unrelated")
+        .await
+        .unwrap();
+    let unrelated_writer = database
+        .writer_for_subgraph(unrelated_interaction.id)
+        .await
+        .unwrap();
+    let unrelated = node(&unrelated_writer, "unrelated").await;
+    accept_single_node(&unrelated_writer, unrelated_interaction, unrelated.clone()).await;
+    assert!(
+        answer_writer
+            .authorize_interaction_permission(&InteractionPermission::NavigateAdd {
+                node_id: unrelated.id
+            })
+            .await
+            .is_err()
+    );
+
+    let answer = node(&answer_writer, "input-answer").await;
+    let response = single_node_layer(&answer_writer, "input-answer-layer", &answer).await;
+    root_expand(&answer_writer, &response_root, &response).await;
+    for transition in [
+        CurrentTransition::Advance {
+            layer_id: response.id,
+        },
+        CurrentTransition::Return {
+            layer_id: response.id,
+        },
+    ] {
+        assert!(matches!(
+            answer_writer
+                .transition_current(0, "missing-input-source-link", transition)
+                .await,
+            Err(GraphError::Validation {
+                code: "attached_response_navigation_required",
+                ..
+            })
+        ));
+        assert_eq!(
+            answer_writer
+                .current_completion()
+                .await
+                .unwrap()
+                .head_revision,
+            0
+        );
+        assert_eq!(
+            answer_writer
+                .get_layer(response.id)
+                .await
+                .unwrap()
+                .layer
+                .state,
+            RecordState::Draft
+        );
+    }
+    let backlink = ActionDraft {
+        client_key: "input-source-response".into(),
+        source_node_id: source.id,
+        source_layer_id: None,
+        kind: ActionKind::Navigate,
+        relation: Some(NavigateRelation::Reference),
+        label: "Input response".into(),
+        variant: ActionVariant::default(),
+        icon: None,
+        description: None,
+        target_layer_id: Some(response.id),
+        interaction_text: None,
+        reusable: None,
+        input_action_ids: Vec::new(),
+        input: None,
+    };
+    assert!(
+        answer_writer
+            .add_action(&ActionDraft {
+                source_node_id: unrelated.id,
+                ..backlink.clone()
+            })
+            .await
+            .is_err()
+    );
+    let exact_link = answer_writer.add_action(&backlink).await.unwrap();
+    assert!(matches!(
+        answer_writer
+            .transition_current(
+                0,
+                "one-source-still-missing",
+                CurrentTransition::Advance {
+                    layer_id: response.id
+                }
+            )
+            .await,
+        Err(GraphError::Validation {
+            code: "attached_response_navigation_required",
+            ..
+        })
+    ));
+    let second_link = answer_writer
+        .add_action(&ActionDraft {
+            client_key: "second-source-response".into(),
+            source_node_id: second_source.id,
+            ..backlink.clone()
+        })
+        .await
+        .unwrap();
+    answer_writer
+        .transition_current(
+            0,
+            "linked-input-advance",
+            CurrentTransition::Advance {
+                layer_id: response.id,
+            },
+        )
+        .await
+        .unwrap();
+    assert!(answer_writer.completion_output().await.unwrap().is_none());
+    let returned = answer_writer
+        .transition_current(
+            1,
+            "linked-input-return",
+            CurrentTransition::Return {
+                layer_id: response.id,
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(returned.final_layer_id, Some(response.id));
+
+    database
+        .set_interaction_permissions_enabled(false)
+        .await
+        .unwrap();
+    database.close().await;
+    let reopened = GraphDatabase::open(file.path()).await.unwrap();
+    let (recovered, recovered_children) = reopened
+        .create_identified_interaction_with_inputs(
+            Some(project(90)),
+            thread(91),
+            "",
+            InteractionInputPreparation {
+                attempt_key: "attempt:90",
+                authority_digest: &digest,
+                contexts: &[],
+                submitted_inputs: &second_order,
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(recovered.id, root.id);
+    assert_eq!(recovered_children, children);
+    let recovered_writer = reopened.writer_for_subgraph(root.id).await.unwrap();
+    assert_eq!(
+        recovered_writer
+            .interaction_input()
+            .await
+            .unwrap()
+            .completion_contract,
+        Some(contract)
+    );
+    let (recovered_response, recovered_response_children) = reopened
+        .create_identified_interaction_with_inputs(
+            Some(project(90)),
+            thread(95),
+            "",
+            InteractionInputPreparation {
+                attempt_key: "attempt:combined",
+                authority_digest: &combined_digest,
+                contexts: &contexts,
+                submitted_inputs: &combined_inputs,
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(recovered_response.id, response_root.id);
+    assert_eq!(recovered_response_children, response_children);
+    let recovered_response_writer = reopened
+        .writer_for_subgraph(response_root.id)
+        .await
+        .unwrap();
+    assert_eq!(
+        recovered_response_writer
+            .interaction_input()
+            .await
+            .unwrap()
+            .completion_contract,
+        Some(combined_contract)
+    );
+    assert_eq!(
+        recovered_response_writer
+            .current_completion()
+            .await
+            .unwrap()
+            .head_revision,
+        2
+    );
+    let pool = SqlitePoolOptions::new()
+        .max_connections(1)
+        .connect_with(SqliteConnectOptions::new().filename(file.path()))
+        .await
+        .unwrap();
+    let restored: Vec<(i64, i64, i64)> = sqlx::query_as("SELECT id,source_node_id,target_layer_id FROM actions WHERE id IN (?1,?2) AND state='accepted' ORDER BY id")
+        .bind(exact_link.id.value()).bind(second_link.id.value()).fetch_all(&pool).await.unwrap();
+    assert_eq!(
+        restored,
+        vec![
+            (
+                exact_link.id.value(),
+                source.id.value(),
+                response.id.value()
+            ),
+            (
+                second_link.id.value(),
+                second_source.id.value(),
+                response.id.value()
+            )
+        ]
+    );
+    pool.close().await;
 }
 
 #[tokio::test]
@@ -6028,6 +6746,8 @@ async fn action_presentation_errors_are_repairable() {
             description: None,
             target_layer_id: None,
             interaction_text: Some("Try it".into()),
+            reusable: None,
+            input_action_ids: Vec::new(),
             input: None,
         })
         .await
@@ -6054,6 +6774,8 @@ async fn action_presentation_errors_are_repairable() {
             description: None,
             target_layer_id: None,
             interaction_text: Some("Try it".into()),
+            reusable: None,
+            input_action_ids: Vec::new(),
             input: None,
         })
         .await
@@ -6178,6 +6900,8 @@ async fn completion_rejects_an_edge_accepted_by_a_concurrent_interaction() {
                 description: None,
                 target_layer_id: Some(layer.id),
                 interaction_text: None,
+                reusable: None,
+                input_action_ids: Vec::new(),
                 input: None,
             })
             .await
@@ -6230,6 +6954,8 @@ async fn accepted_layers_keep_their_original_action_snapshot() {
             description: None,
             target_layer_id: Some(viewer_layer.id),
             interaction_text: None,
+            reusable: None,
+            input_action_ids: Vec::new(),
             input: None,
         })
         .await
@@ -6705,6 +7431,8 @@ async fn shape_free_draft_from_before_edge_shapes_accepts_and_reads_after_restar
             description: None,
             target_layer_id: Some(draft.id),
             interaction_text: None,
+            reusable: None,
+            input_action_ids: Vec::new(),
             input: None,
         })
         .await
@@ -6837,6 +7565,8 @@ async fn lease_issuance_rejects_invalid_authority_kind_and_scope() {
             description: None,
             target_layer_id: None,
             interaction_text: Some("Continue".into()),
+            reusable: None,
+            input_action_ids: Vec::new(),
             input: None,
         })
         .await
@@ -7442,6 +8172,8 @@ async fn typed_permissions_freeze_exact_combined_authority_and_reject_false_prov
         description: None,
         target_layer_id: Some(layer.id),
         interaction_text: None,
+        reusable: None,
+        input_action_ids: Vec::new(),
         input: None,
     };
     assert!(writer.add_action(&draft).await.is_err());
@@ -7608,6 +8340,7 @@ async fn typed_permission_storage_is_immutable_and_unknown_versions_fail_closed(
         .execute(&fixture)
         .await
         .unwrap();
+    emulate_legacy_contract(&fixture, interaction.id).await;
     sqlx::query("UPDATE interaction_permissions SET description=?1 WHERE interaction_node_id=?2")
         .bind(r#"{"version":"future","enabled":true,"permissions":[]}"#)
         .bind(interaction.id.value())
@@ -7638,7 +8371,8 @@ async fn typed_permission_storage_is_immutable_and_unknown_versions_fail_closed(
 
 #[tokio::test]
 async fn typed_permissions_temporal_return_and_semantic_child_have_distinct_authority() {
-    let database = GraphDatabase::in_memory().await.unwrap();
+    let file = tempfile::NamedTempFile::new().unwrap();
+    let database = GraphDatabase::open(file.path()).await.unwrap();
     database
         .set_interaction_permissions_enabled(true)
         .await
@@ -7659,6 +8393,11 @@ async fn typed_permissions_temporal_return_and_semantic_child_have_distinct_auth
         .await
         .unwrap();
     let (source_node, invoke) = accepted_invoke(&database, &source).await;
+    let pool = sqlx::SqlitePool::connect(&format!("sqlite://{}", file.path().display()))
+        .await
+        .unwrap();
+    emulate_legacy_contract(&pool, source.id).await;
+    pool.close().await;
     let parent = database.writer_for_subgraph(source.id).await.unwrap();
     let child = parent
         .prepare_recursive_completion(invoke.id)
@@ -7791,6 +8530,8 @@ async fn invoke_occurrences_fixture(source_typed: bool) {
             description: None,
             target_layer_id: None,
             interaction_text: Some("Continue".into()),
+            reusable: None,
+            input_action_ids: Vec::new(),
             input: None,
         })
         .await
@@ -8055,6 +8796,7 @@ async fn default_node_is_member_validated_and_survives_publication_and_reopen() 
     draft.default_node_id = Some(second.id);
     let repaired = writer.submit_layer(&draft).await.unwrap();
     assert_eq!(original.id, repaired.id);
+    root_expand(&writer, &interaction, &repaired).await;
     draft.default_node_id = Some(outside.id);
     let error = writer.submit_layer(&draft).await.unwrap_err();
     assert!(
@@ -8151,6 +8893,8 @@ async fn attached_navigation_without_replacement_preserves_plain_detail_and_refe
         description: None,
         target_layer_id: Some(source_layer.id),
         interaction_text: None,
+        reusable: None,
+        input_action_ids: Vec::new(),
         input: None,
     };
     let action = writer.add_action(&draft).await.unwrap();
@@ -8292,6 +9036,8 @@ async fn attached_navigation_concurrent_replacements_preserve_controls_and_reope
             description: None,
             target_layer_id: None,
             interaction_text: Some("Existing action".into()),
+            reusable: None,
+            input_action_ids: Vec::new(),
             input: None,
         })
         .await
@@ -8341,6 +9087,8 @@ async fn attached_navigation_concurrent_replacements_preserve_controls_and_reope
                 description: None,
                 target_layer_id: Some(response.id),
                 interaction_text: None,
+                reusable: None,
+                input_action_ids: Vec::new(),
                 input: None,
             })
             .await
@@ -8405,6 +9153,25 @@ async fn attached_navigation_concurrent_replacements_preserve_controls_and_reope
             .stage_node_presentation(persistent.id, 0, &package, &[])
             .await
             .unwrap();
+        assert_eq!(
+            writer
+                .interaction_input()
+                .await
+                .unwrap()
+                .completion_contract_status,
+            "sealed"
+        );
+        writer
+            .transition_current(
+                0,
+                "advance-staged-presentation",
+                CurrentTransition::Advance {
+                    layer_id: response.id,
+                },
+            )
+            .await
+            .unwrap();
+        assert!(writer.completion_output().await.unwrap().is_none());
         edits.push((interaction, writer, action, response));
     }
     edits[0].1.complete(edits[0].0.id).await.unwrap();
@@ -8423,8 +9190,11 @@ async fn attached_navigation_concurrent_replacements_preserve_controls_and_reope
             .unwrap()
             .layer
             .state,
-        RecordState::Draft
+        RecordState::Accepted
     );
+    let retained = edits[1].1.current_completion().await.unwrap();
+    assert_eq!(retained.lifecycle, CompletionLifecycle::Active);
+    assert_eq!(retained.current_layer_id, Some(edits[1].3.id));
     let current = edits[1]
         .1
         .get_node_presentation(persistent.id)
@@ -8536,7 +9306,7 @@ async fn attached_navigation_concurrent_replacements_preserve_controls_and_reope
             .unwrap()
             .layer
             .state,
-        RecordState::Draft
+        RecordState::Accepted
     );
     sqlx::query("DROP TRIGGER reject_attached_completion")
         .execute(&fixture)
@@ -8561,7 +9331,7 @@ async fn attached_navigation_concurrent_replacements_preserve_controls_and_reope
     edits[2]
         .1
         .transition_current(
-            0,
+            1,
             "stop",
             CurrentTransition::Stop {
                 reason: "cancelled_by_user".into(),
@@ -8680,6 +9450,8 @@ async fn attached_navigation_concurrent_replacements_preserve_controls_and_reope
             description: None,
             target_layer_id: Some(response.id),
             interaction_text: None,
+            reusable: None,
+            input_action_ids: Vec::new(),
             input: None,
         })
         .await
@@ -8884,19 +9656,27 @@ async fn attached_navigation_advance_is_inert_and_terminal_cycles_are_atomic() {
         description: None,
         target_layer_id: Some(original.id),
         interaction_text: None,
+        reusable: None,
+        input_action_ids: Vec::new(),
         input: None,
     };
     let addition = writer.add_action(&draft).await.unwrap();
-    writer
-        .transition_current(
-            0,
-            "advance",
-            CurrentTransition::Advance {
-                layer_id: response.id,
-            },
-        )
-        .await
-        .unwrap();
+    root_expand(&writer, &interaction, &response).await;
+    assert!(matches!(
+        writer
+            .transition_current(
+                0,
+                "advance",
+                CurrentTransition::Advance {
+                    layer_id: response.id,
+                },
+            )
+            .await,
+        Err(GraphError::Validation {
+            code: "attached_response_navigation_required",
+            ..
+        })
+    ));
     assert!(
         writer
             .get_layer(response.id)
@@ -8921,6 +9701,25 @@ async fn attached_navigation_advance_is_inert_and_terminal_cycles_are_atomic() {
     assert!(sw.get_layer(original.id).await.unwrap().actions.is_empty());
     draft.relation = Some(NavigateRelation::Reference);
     assert_eq!(writer.add_action(&draft).await.unwrap().id, addition.id);
+    writer
+        .transition_current(
+            0,
+            "advance-repaired",
+            CurrentTransition::Advance {
+                layer_id: response.id,
+            },
+        )
+        .await
+        .unwrap();
+    assert!(sw.get_layer(original.id).await.unwrap().actions.is_empty());
+    assert!(
+        writer
+            .get_layer(response.id)
+            .await
+            .unwrap()
+            .actions
+            .is_empty()
+    );
     // Returning an already published current must still validate new detached targets.
     let a = node(&writer, "detached-a").await;
     let b = node(&writer, "detached-b").await;
@@ -9027,6 +9826,8 @@ async fn attached_navigation_reference_targets_keep_reference_authoring_restrict
             description: None,
             target_layer_id: Some(target.id),
             interaction_text: None,
+            reusable: None,
+            input_action_ids: Vec::new(),
             input: None,
         };
         let mut control = ActionDraft {
@@ -9041,6 +9842,8 @@ async fn attached_navigation_reference_targets_keep_reference_authoring_restrict
             description: None,
             target_layer_id: None,
             interaction_text: Some("Investigate".into()),
+            reusable: None,
+            input_action_ids: Vec::new(),
             input: None,
         };
         writer.add_action(&control).await.unwrap();
@@ -9070,6 +9873,8 @@ async fn attached_navigation_reference_targets_keep_reference_authoring_restrict
                 description: None,
                 target_layer_id: Some(target.id),
                 interaction_text: None,
+                reusable: None,
+                input_action_ids: Vec::new(),
                 input: None,
             })
             .await
@@ -9097,6 +9902,8 @@ async fn attached_navigation_reference_targets_keep_reference_authoring_restrict
                 description: None,
                 target_layer_id: None,
                 interaction_text: Some("Investigate response".into()),
+                reusable: None,
+                input_action_ids: Vec::new(),
                 input: None,
             })
             .await
@@ -9181,6 +9988,11 @@ async fn required_attached_navigation_rejects_response_only_then_repairs_after_r
             .unwrap();
         let writer = database.writer_for_subgraph(interaction.id).await.unwrap();
         let delivered = serde_json::to_value(writer.interaction_input().await.unwrap()).unwrap();
+        assert_eq!(delivered["completionContractStatus"], "sealed");
+        assert_eq!(
+            delivered["completionContract"]["returnRequirements"][0]["kind"],
+            "navigate.response"
+        );
         assert_eq!(delivered["interactionPermissions"]["version"], "2");
         assert_eq!(
             delivered["interactionPermissions"]["permissions"][0]["nodeId"],
@@ -9190,16 +10002,21 @@ async fn required_attached_navigation_rejects_response_only_then_repairs_after_r
         let response = single_node_layer(&writer, "response", &answer).await;
         root_expand(&writer, &interaction, &response).await;
         if advance {
-            writer
-                .transition_current(
-                    0,
-                    "advance",
-                    CurrentTransition::Advance {
-                        layer_id: response.id,
-                    },
-                )
-                .await
-                .unwrap();
+            assert!(matches!(
+                writer
+                    .transition_current(
+                        0,
+                        "advance",
+                        CurrentTransition::Advance {
+                            layer_id: response.id,
+                        },
+                    )
+                    .await,
+                Err(GraphError::Validation {
+                    code: "attached_response_navigation_required",
+                    ..
+                })
+            ));
         }
         let error = writer.complete(interaction.id).await.unwrap_err();
         assert!(
@@ -9217,11 +10034,7 @@ async fn required_attached_navigation_rejects_response_only_then_repairs_after_r
         assert!(sw.get_layer(original.id).await.unwrap().actions.is_empty());
         assert_eq!(
             writer.get_layer(response.id).await.unwrap().layer.state,
-            if advance {
-                RecordState::Accepted
-            } else {
-                RecordState::Draft
-            }
+            RecordState::Draft
         );
         drop(writer);
         drop(sw);
@@ -9245,6 +10058,8 @@ async fn required_attached_navigation_rejects_response_only_then_repairs_after_r
             description: None,
             target_layer_id: Some(original.id),
             interaction_text: None,
+            reusable: None,
+            input_action_ids: Vec::new(),
             input: None,
         };
         let wrong = writer.add_action(&action).await.unwrap();
@@ -9257,6 +10072,29 @@ async fn required_attached_navigation_rejects_response_only_then_repairs_after_r
         ));
         action.target_layer_id = Some(response.id);
         assert_eq!(writer.add_action(&action).await.unwrap().id, wrong.id);
+        if advance {
+            writer
+                .transition_current(
+                    0,
+                    "advance-repaired",
+                    CurrentTransition::Advance {
+                        layer_id: response.id,
+                    },
+                )
+                .await
+                .unwrap();
+            assert!(
+                database
+                    .writer_for_subgraph(source.id)
+                    .await
+                    .unwrap()
+                    .get_layer(original.id)
+                    .await
+                    .unwrap()
+                    .actions
+                    .is_empty()
+            );
+        }
         writer.complete(interaction.id).await.unwrap();
         let sw = database.writer_for_subgraph(source.id).await.unwrap();
         let visible = sw.get_layer(original.id).await.unwrap();
@@ -9366,6 +10204,8 @@ async fn required_attached_navigation_covers_distinct_nodes_and_rich_controls() 
         description: None,
         target_layer_id: Some(response.id),
         interaction_text: None,
+        reusable: None,
+        input_action_ids: Vec::new(),
         input: None,
     };
     writer.add_action(&draft).await.unwrap();
@@ -9452,6 +10292,7 @@ async fn required_attached_navigation_preserves_old_and_disabled_preparations() 
         let pool = sqlx::SqlitePool::connect(&format!("sqlite://{}", file.path().display()))
             .await
             .unwrap();
+        emulate_legacy_contract(&pool, interaction.id).await;
         if version == "1" {
             sqlx::query("DROP TRIGGER interaction_permissions_immutable")
                 .execute(&pool)
@@ -9542,6 +10383,8 @@ async fn attached_navigation_review_cycles_follow_exposed_and_prospective_action
             description: None,
             target_layer_id: Some(al.id),
             interaction_text: None,
+            reusable: None,
+            input_action_ids: Vec::new(),
             input: None,
         };
         sw.add_action(&edge).await.unwrap();
@@ -9682,6 +10525,8 @@ async fn attached_navigation_review_identity_releases_only_terminal_unpublished_
                 description: None,
                 target_layer_id: Some(response.id),
                 interaction_text: None,
+                reusable: None,
+                input_action_ids: Vec::new(),
                 input: None,
             };
             edits.push((edit, writer, action));
@@ -9864,6 +10709,8 @@ async fn image_icons_pin_registered_bytes_and_survive_detail_clear_and_reopen() 
         description: None,
         target_layer_id: None,
         interaction_text: Some("Inspect coral".into()),
+        reusable: None,
+        input_action_ids: Vec::new(),
         input: None,
     };
     assert!(writer.add_action(&action).await.is_err());

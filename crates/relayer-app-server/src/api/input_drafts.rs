@@ -39,6 +39,7 @@ struct ActionInputAttachmentResponse {
     value: ActionInputValue,
     draft_revision: i64,
     committed_at: String,
+    composer_eligible: bool,
 }
 
 impl From<ActionInputDraft> for ActionInputDraftResponse {
@@ -56,11 +57,79 @@ impl From<ActionInputDraft> for ActionInputDraftResponse {
                     value: attachment.value,
                     draft_revision: attachment.draft_revision,
                     committed_at: attachment.committed_at,
+                    composer_eligible: true,
                 })
                 .collect(),
             updated_at: draft.updated_at,
         }
     }
+}
+
+// Classification is trusted graph-derived presentation state, never caller input.
+// It follows the attachment's accepted occurrence even after UI navigation.
+pub(super) async fn composer_occurrences(
+    state: &ApiState,
+    draft: &ActionInputDraft,
+) -> Result<Vec<relayer_graph_core::PresentingInputOccurrence>, ApiError> {
+    let mut ordinary = Vec::new();
+    if draft.attachments.is_empty() {
+        return Ok(ordinary);
+    }
+    let runtime = state.runtime.as_ref().ok_or_else(|| {
+        ApiError::internal("graph runtime is unavailable for input scope validation")
+    })?;
+    let project = state
+        .product
+        .get_thread(draft.thread_id)
+        .await?
+        .thread
+        .project_id
+        .map(|id| id.value());
+    let mut layers = std::collections::HashMap::new();
+    for input in &draft.attachments {
+        runtime
+            .canonical_input_action_occurrence(project, draft.thread_id.value(), &input.occurrence)
+            .await?;
+        let key = (
+            input.occurrence.presenting_interaction_node_id.value(),
+            input.occurrence.presenting_layer_id.value(),
+        );
+        if let std::collections::hash_map::Entry::Vacant(entry) = layers.entry(key) {
+            let layer = runtime.get_layer(key.0, key.1).await?;
+            let actions: Vec<relayer_graph_core::GraphAction> = serde_json::from_value(
+                layer
+                    .get("actions")
+                    .cloned()
+                    .ok_or_else(|| ApiError::internal("accepted layer lost its actions"))?,
+            )
+            .map_err(|_| ApiError::internal("accepted layer actions are invalid"))?;
+            entry.insert(actions);
+        }
+        let bound = layers[&key].iter().any(|action| {
+            action.kind == relayer_graph_core::ActionKind::Invoke
+                && action.state == relayer_graph_core::RecordState::Accepted
+                && action.source_node_id.value() == input.source_node_id
+                && action
+                    .input_action_ids
+                    .contains(&input.occurrence.action_id)
+        });
+        if !bound {
+            ordinary.push(input.occurrence.clone());
+        }
+    }
+    Ok(ordinary)
+}
+
+pub(super) async fn scoped_response(
+    state: &ApiState,
+    draft: ActionInputDraft,
+) -> Result<ActionInputDraftResponse, ApiError> {
+    let ordinary = composer_occurrences(state, &draft).await?;
+    let mut response: ActionInputDraftResponse = draft.into();
+    for input in &mut response.attachments {
+        input.composer_eligible = ordinary.contains(&input.occurrence);
+    }
+    Ok(response)
 }
 
 pub(super) async fn get(
@@ -79,11 +148,11 @@ pub(super) async fn get(
         authorize_write(&state, &headers)?;
         None
     };
-    let mut response: ActionInputDraftResponse = state
+    let draft = state
         .product
         .action_input_draft(ThreadId::try_from(thread_id)?)
-        .await?
-        .into();
+        .await?;
+    let mut response = scoped_response(&state, draft).await?;
     if let Some(operator) = operator {
         response.attachments.retain(|attachment| {
             operator
@@ -134,7 +203,7 @@ pub(super) async fn commit(
             &request.occurrence,
         )
         .await?;
-    let mut response: ActionInputDraftResponse = state
+    let draft = state
         .product
         .commit_action_input_attachment(
             thread_id,
@@ -143,8 +212,8 @@ pub(super) async fn commit(
             &request.value,
             request.expected_revision,
         )
-        .await?
-        .into();
+        .await?;
+    let mut response = scoped_response(&state, draft).await?;
     if let Some(operator) = operator {
         response.attachments.retain(|attachment| {
             operator
@@ -179,17 +248,15 @@ pub(super) async fn detach(
         action_id: relayer_graph_core::ActionId::new(action_id)
             .ok_or_else(|| ApiError::invalid("actionId must be positive"))?,
     };
-    Ok(Json(
-        state
-            .product
-            .detach_action_input_attachment(
-                ThreadId::try_from(thread_id)?,
-                &occurrence,
-                query.expected_revision,
-            )
-            .await?
-            .into(),
-    ))
+    let draft = state
+        .product
+        .detach_action_input_attachment(
+            ThreadId::try_from(thread_id)?,
+            &occurrence,
+            query.expected_revision,
+        )
+        .await?;
+    Ok(Json(scoped_response(&state, draft).await?))
 }
 
 #[cfg(test)]

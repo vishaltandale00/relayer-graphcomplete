@@ -168,6 +168,262 @@ function invokeFixtureRecords() {
   return records;
 }
 
+function reusableInvocationRecords() {
+  const records = invokeFixtureRecords();
+  records[0].exportVersion = 4;
+  const invoke = records[1].acceptedView.layers[0].actions.find(action => action.kind === "invoke");
+  invoke.inputActionIds = ["action:input"];
+  records[1].acceptedView.layers[0].actions.find(action => action.kind === "input").input = { control: "text", prompt: "Destination" };
+  const makeCall = (id, turn, destination) => ({
+    schemaVersion: 1, id,
+    source: { interactionNodeId: "node:interaction", actionId: "action:invoke", parentNodeId: "node:root", layerId: "layer:root", instruction: "Continue", label: invoke.label,
+      description: null, icon: null, iconAsset: null, variant: "pill", inputActionIds: ["action:input"], inputBindingsDefined: true, parentTitle: "Node node:root", parentDetail: "Details for node:root", state: "accepted" },
+    childInteractionNodeId: turn.interactionNodeId, resultTurnId: turn.id, lifecycle: "succeeded", headRevision: 1, safeReason: null,
+    currentLayerId: turn.acceptedView.rootLayerId, returnedLayerId: turn.acceptedView.rootLayerId,
+    arguments: [{ source: { interactionNodeId: "node:interaction", layerId: "layer:root", actionId: "action:input", nodeId: "node:root" }, action: { control: "text", prompt: "Destination" }, value: { kind: "text", text: destination } }],
+    current: { rootLayerId: turn.acceptedView.rootLayerId, layers: structuredClone(turn.acceptedView.layers) },
+  });
+  records[2].origin = { kind: "invocation", invocationId: "invocation:lisbon" };
+  const kyoto = structuredClone(records[2]);
+  kyoto.id = "turn:3"; kyoto.sequence = 3; kyoto.interactionNodeId = "node:kyoto-interaction";
+  kyoto.origin = { kind: "invocation", invocationId: "invocation:kyoto" };
+  kyoto.acceptedView = { interactionNodeId: kyoto.interactionNodeId, rootLayerId: "layer:kyoto", rootAction: action("action:kyoto-root", kyoto.interactionNodeId, "layer:kyoto", "expand"), layers: [layer("layer:kyoto", "node:kyoto")] };
+  records.push(kyoto); records[0].turns.push({ id: "turn:3", sequence: 3 });
+  records[0].invocations = [makeCall("invocation:lisbon", records[2], "Lisbon"), makeCall("invocation:kyoto", kyoto, "Kyoto")];
+  return records;
+}
+
+describe("V4 inert reusable Invocation snapshots", () => {
+  it.each(["false", 0, {}, []])("rejects malformed canonical callable reuse policy (%s)", (reusable) => {
+    const records = reusableInvocationRecords();
+    records[1].acceptedView.layers[0].actions.find(action => action.kind === "invoke").reusable = reusable;
+    expect(() => parsePublicSnapshot(recordsJsonl(records))).toThrow(expect.objectContaining({ code: "invoke_reusable_invalid" }));
+  });
+  it.each([1, 3])("rejects explicit callable policy in export V%s", (version) => {
+    const records = invokeFixtureRecords();
+    records[0].exportVersion = version;
+    records[1].acceptedView.layers[0].actions.find(action => action.kind === "invoke").reusable = false;
+    expect(() => parsePublicSnapshot(recordsJsonl(records))).toThrow(expect.objectContaining({ code: "invoke_reuse_policy_version" }));
+  });
+  it.each([false, true])("rejects policy on ordinary navigation but preserves converted Invoke history (%s)", (reusable) => {
+    const records = invokeFixtureRecords();
+    records[0].exportVersion = 4;
+    const view = records[1].acceptedView;
+    const invoke = view.layers[0].actions.find(action => action.kind === "invoke");
+    Object.assign(invoke, { kind: "navigate", relation: "expand", targetLayerId: "layer:child", reusable });
+    delete invoke.interactionText;
+    view.layers.push(structuredClone(records[2].acceptedView.layers[0]));
+    expect(() => parsePublicSnapshot(recordsJsonl(records))).toThrow(expect.objectContaining({ code: "invoke_reusable_invalid" }));
+    invoke.convertedFromInvoke = true;
+    expect(parsePublicSnapshot(recordsJsonl(records)).layersByTurn.get("turn:1").get("layer:root").actions.find(action => action.id === invoke.id).reusable).toBe(reusable);
+  });
+  it.each([false, true, undefined])("preserves explicit or historical callable reuse policy (%s)", (reusable) => {
+    const records = reusableInvocationRecords();
+    const invoke = records[1].acceptedView.layers[0].actions.find(action => action.kind === "invoke");
+    if (reusable !== undefined) {
+      invoke.reusable = reusable;
+      records[0].invocations[0].source.reusable = reusable;
+    }
+    const snapshot = parsePublicSnapshot(recordsJsonl(records));
+    expect(snapshot.layersByTurn.get("turn:1").get("layer:root").actions.find(action => action.kind === "invoke").reusable).toBe(reusable);
+    expect(snapshot.invocations[0].source.reusable).toBe(reusable);
+    records[0].invocations[0].source.reusable = "true";
+    expect(() => parsePublicSnapshot(recordsJsonl(records))).toThrow(expect.objectContaining({ code: "invoke_reusable_invalid" }));
+  });
+  it("preserves a cross-Layer bound input definition without inventing Layer membership", () => {
+    const records = reusableInvocationRecords();
+    const root = records[1].acceptedView.layers[0];
+    const input = root.actions.find(action => action.kind === "input");
+    root.actions = root.actions.filter(action => action !== input);
+    input.sourceLayerId = "layer:outside-navigation";
+    records[0].boundInputs = [input];
+    root.actions.push({ id: "action:uncalled", sourceNodeId: "node:root", sourceLayerId: "layer:root", kind: "invoke", label: "Uncalled", interactionText: "Research", variant: "pill", inputActionIds: [input.id], state: "accepted" });
+    records[0].invocations[0].arguments[0].source.layerId = "layer:another-presentation";
+    records[0].invocations[0].arguments[0].source.interactionNodeId = "node:another-presentation";
+    const snapshot = parsePublicSnapshot(recordsJsonl(records));
+    const uncalled = snapshot.state.actions.find(action => action.id === "action:uncalled");
+    expect(snapshot.boundInputsForInvoke(uncalled)[0]).toMatchObject({ id: "action:input", sourceLayerId: "layer:outside-navigation", input: { control: "text", prompt: "Destination" } });
+    expect(snapshot.state.actions.some(action => action.id === input.id)).toBe(false);
+    expect(snapshot.layerFor("turn:1", "layer:outside-navigation")).toBeNull();
+    expect(snapshot.invocations[0].arguments[0].source.layerId).toBe("layer:another-presentation");
+    delete input.sourceLayerId;
+    expect(parsePublicSnapshot(recordsJsonl(records)).boundInputs[0].sourceLayerId).toBeUndefined();
+  });
+
+  it.each(["wrong-node", "wrong-kind", "duplicate", "conflict", "old-version"])("rejects %s standalone input definitions", (corruption) => {
+    const records = reusableInvocationRecords();
+    const input = structuredClone(records[1].acceptedView.layers[0].actions.find(action => action.kind === "input"));
+    records[0].boundInputs = [input];
+    if (corruption === "wrong-node") input.sourceNodeId = "node:other";
+    if (corruption === "wrong-kind") input.kind = "invoke";
+    if (corruption === "duplicate") records[0].boundInputs.push(structuredClone(input));
+    if (corruption === "conflict") input.input.prompt = "Different frozen question";
+    if (corruption === "old-version") records[0].exportVersion = 3;
+    expect(() => parsePublicSnapshot(recordsJsonl(records))).toThrow(PublicSnapshotError);
+  });
+
+  it("validates standalone input image icons against exact source-owned published bytes", async () => {
+    const { jsonl, asset } = assetFixtureJsonl();
+    const records = jsonl.trimEnd().split("\n").map(JSON.parse);
+    const turn = records.find(record => record.recordType === "turn"), root = turn.acceptedView.layers[0];
+    records[0].exportVersion = 4;
+    const input = { id: "action:external-input", sourceNodeId: root.nodes[0].id, sourceLayerId: "layer:outside", kind: "input", label: "Destination", variant: "pill", state: "accepted", input: { control: "text", prompt: "Destination" }, icon: { kind: "image", assetId: asset.id, digestSha256: asset.digestSha256, mediaType: asset.mediaType } };
+    records[0].boundInputs = [input];
+    root.actions.push({ id: "action:uncalled", sourceNodeId: input.sourceNodeId, sourceLayerId: root.layer.id, kind: "invoke", label: "Research", interactionText: "Research destination", inputActionIds: [input.id], variant: "pill", state: "accepted" });
+    const snapshot = parsePublicSnapshot(recordsJsonl(records));
+    const resolved = await snapshot.resolveNodeDetailAsset(asset, { crypto: webcrypto, URL: { createObjectURL: () => "blob:bound-input", revokeObjectURL: vi.fn() }, Blob });
+    expect(resolved.url).toBe("blob:bound-input");
+    resolved.release();
+    input.icon.digestSha256 = "b".repeat(64);
+    expect(() => parsePublicSnapshot(recordsJsonl(records))).toThrow(expect.objectContaining({ code: "asset_inventory_mismatch" }));
+  });
+
+  it("preserves historical frozen arguments without synthesizing explicit bindings", () => {
+    const records = reusableInvocationRecords();
+    const call = records[0].invocations[0];
+    call.source.inputBindingsDefined = false;
+    call.source.inputActionIds = [];
+    const snapshot = parsePublicSnapshot(recordsJsonl(records));
+    expect(snapshot.invocations[0].source.inputBindingsDefined).toBe(false);
+    expect(snapshot.invocations[0].source.inputActionIds).toEqual([]);
+    expect(snapshot.invocations[0].arguments[0].value.text).toBe("Lisbon");
+    expect(snapshot.layersByTurn.get("turn:1").get("layer:root").actions.find(action => action.kind === "invoke").targetLayerId).toBeUndefined();
+    call.source.inputActionIds = ["action:input"];
+    expect(() => parsePublicSnapshot(recordsJsonl(records))).toThrow(expect.objectContaining({ code: "invocation_binding_invalid" }));
+    call.source.inputActionIds = [];
+    call.arguments.push(structuredClone(call.arguments[0]));
+    expect(() => parsePublicSnapshot(recordsJsonl(records))).toThrow(PublicSnapshotError);
+  });
+
+  it("retains historical repeated canonical actions at distinct accepted occurrences", () => {
+    const records = reusableInvocationRecords(), call = records[0].invocations[0];
+    call.source.inputBindingsDefined = false;
+    call.source.inputActionIds = [];
+    const second = structuredClone(call.arguments[0]);
+    second.source.layerId = "layer:another-presentation";
+    second.value.text = "Kyoto";
+    call.arguments.push(second);
+    const snapshot = parsePublicSnapshot(recordsJsonl(records));
+    expect(snapshot.invocations[0].arguments.map(argument => argument.value.text)).toEqual(["Lisbon", "Kyoto"]);
+    expect(snapshot.invocations[0].arguments.map(argument => argument.source.actionId)).toEqual(["action:input", "action:input"]);
+    second.source.layerId = call.arguments[0].source.layerId;
+    second.source.nodeId = "node:changed-snapshot-parent";
+    expect(() => parsePublicSnapshot(recordsJsonl(records))).toThrow(expect.objectContaining({ code: "invocation_argument_duplicate" }));
+  });
+
+  it("preserves explicit bindings on a never-called callable", () => {
+    const records = reusableInvocationRecords();
+    records[1].acceptedView.layers[0].actions.push({ id: "action:uncalled", sourceNodeId: "node:root", sourceLayerId: "layer:root", kind: "invoke", label: "Research", interactionText: "Research destination", variant: "pill", inputActionIds: ["action:input"], state: "accepted" });
+    const snapshot = parsePublicSnapshot(recordsJsonl(records));
+    expect(snapshot.state.actions.find(action => action.id === "action:uncalled")).toMatchObject({ kind: "invoke", inputActionIds: ["action:input"] });
+    expect(snapshot.state.actionInvocations.every(call => call.actionId !== "action:uncalled")).toBe(true);
+  });
+  it("preserves one callable, distinct frozen calls, bindings and exact result navigation", () => {
+    const records = reusableInvocationRecords();
+    const snapshot = parsePublicSnapshot(recordsJsonl(records));
+    const callable = snapshot.layersByTurn.get("turn:1").get("layer:root").actions.find(action => action.kind === "invoke");
+    expect(callable.inputActionIds).toEqual(["action:input"]);
+    expect(callable.targetLayerId).toBeUndefined();
+    expect(snapshot.invocations.map(call => call.arguments[0].value.text)).toEqual(["Lisbon", "Kyoto"]);
+    expect(snapshot.state.actionInvocations).toHaveLength(2);
+    expect(snapshot.interactions[1].submittedInputs[0].value.text).toBe("Lisbon");
+    const adapter = createPublicViewerAdapter(snapshot);
+    expect(adapter.selectTurnById(snapshot.invocationResultTurnId("invocation:kyoto"))).toBe(true);
+    expect(adapter.state.visibleLayer.layer.id).toBe("layer:kyoto");
+  });
+
+  it("retains own-draft unbound Current without pretending it Returned", () => {
+    const records = reusableInvocationRecords();
+    const active = structuredClone(records[0].invocations[0]);
+    active.id = "invocation:active"; active.childInteractionNodeId = "node:active-child";
+    active.source.state = "draft"; active.source.actionId = "action:draft-call"; active.source.interactionNodeId = "node:unbound";
+    active.arguments[0].source.interactionNodeId = "node:unbound";
+    active.resultTurnId = null; active.lifecycle = "active"; active.returnedLayerId = null;
+    records[0].invocations.push(active);
+    const snapshot = parsePublicSnapshot(recordsJsonl(records));
+    expect(snapshot.invocations[2].current.rootLayerId).toBe("layer:child");
+    expect(snapshot.invocationCurrentLayer(active.id, "layer:child").layer.id).toBe("layer:child");
+    expect(snapshot.invocationResultTurnId(active.id)).toBeNull();
+    expect(snapshot.interactions).toHaveLength(3);
+  });
+
+  it("retains distinct capture-time definitions after an own-draft callable repair", () => {
+    const records = reusableInvocationRecords();
+    records[0].invocations[0].source.state = "draft";
+    records[0].invocations[1].source.instruction = "Repaired comparison instruction";
+    records[0].invocations[1].source.parentNodeId = "node:repaired-parent";
+    records[0].invocations[1].source.layerId = "layer:repaired-source";
+    records[0].invocations[1].arguments[0].source.nodeId = "node:repaired-parent";
+    records[0].invocations[1].arguments[0].source.layerId = "layer:repaired-source";
+    expect(parsePublicSnapshot(recordsJsonl(records)).invocations[0].source.instruction).toBe("Continue");
+  });
+
+  it("rejects a mismatched declared argument parent while retaining historical snapshots", () => {
+    const records = reusableInvocationRecords(), call = records[0].invocations[0];
+    call.arguments[0].source.nodeId = "node:wrong";
+    expect(() => parsePublicSnapshot(recordsJsonl(records))).toThrow(expect.objectContaining({ code: "invocation_argument_source_mismatch" }));
+    call.source.inputBindingsDefined = false;
+    call.source.inputActionIds = [];
+    expect(parsePublicSnapshot(recordsJsonl(records)).invocations[0].arguments[0].source.nodeId).toBe("node:wrong");
+  });
+
+  it("retains another presenting interaction and Layer without changing canonical bound action identity", () => {
+    const records = reusableInvocationRecords(), call = records[0].invocations[0];
+    call.arguments[0].source.interactionNodeId = "node:another-presentation";
+    call.arguments[0].source.layerId = "layer:another-presentation";
+    const source = parsePublicSnapshot(recordsJsonl(records)).invocations[0].arguments[0].source;
+    expect(source).toMatchObject({ interactionNodeId: "node:another-presentation", layerId: "layer:another-presentation", actionId: "action:input", nodeId: "node:root" });
+  });
+
+  it("validates exact frozen selection snapshots and refuses an unknown selected option", () => {
+    const records = reusableInvocationRecords();
+    const argument = records[0].invocations[0].arguments[0];
+    argument.action = { control: "multi_select", prompt: "Interests", options: [{ key: "food", label: "Food" }, { key: "art", label: "Art" }], minimumSelections: 1 };
+    argument.value = { kind: "selected", selected: [{ key: "food", label: "Food" }] };
+    expect(parsePublicSnapshot(recordsJsonl(records)).invocations[0].arguments[0].value.selected[0].label).toBe("Food");
+    argument.value.selected[0].label = "Not the frozen label";
+    expect(() => parsePublicSnapshot(recordsJsonl(records))).toThrow(expect.objectContaining({ code: "invocation_argument_value_invalid" }));
+  });
+
+  it("preserves explicit unavailable historical image pins without inventing replacement bytes", async () => {
+    const records = reusableInvocationRecords();
+    const source = records[0].invocations[0].source;
+    source.icon = { kind: "image", assetId: "historical-icon", digestSha256: "a".repeat(64), mediaType: "image/png" };
+    source.iconAssetOmitted = true;
+    const snapshot = parsePublicSnapshot(recordsJsonl(records));
+    expect(snapshot.invocations[0].source.icon).toEqual(source.icon);
+    await expect(snapshot.resolveNodeDetailAsset({ id: source.icon.assetId, digestSha256: source.icon.digestSha256, mediaType: source.icon.mediaType })).rejects.toThrow("not pinned");
+    source.iconAssetOmitted = false;
+    expect(() => parsePublicSnapshot(recordsJsonl(records))).toThrow(expect.objectContaining({ code: "asset_inventory_mismatch" }));
+  });
+
+  it("retains a failed call's frozen safe reason and Current without Return", () => {
+    const records = reusableInvocationRecords();
+    const call = records[0].invocations[0];
+    call.lifecycle = "failed"; call.returnedLayerId = null; call.safeReason = "provider_unavailable";
+    records[2].completion = { ...records[2].completion, status: "failed" }; records[2].acceptedView = null;
+    const snapshot = parsePublicSnapshot(recordsJsonl(records));
+    expect(snapshot.invocations[0].safeReason).toBe("provider_unavailable");
+    expect(snapshot.invocationResultTurnId(call.id)).toBeNull();
+    expect(snapshot.state.actionInvocations[0].resultCompletionStatus).toBe("failed");
+  });
+
+  it.each(["wrong-child", "wrong-returned", "duplicate-call", "changed-source", "authority-field", "old-version", "unknown-origin", "missing-argument", "extra-argument", "changed-current"])("rejects %s inventory corruption", (corruption) => {
+    const records = reusableInvocationRecords(), call = records[0].invocations[0];
+    if (corruption === "wrong-child") call.childInteractionNodeId = "node:other";
+    if (corruption === "wrong-returned") call.returnedLayerId = "layer:other";
+    if (corruption === "duplicate-call") records[0].invocations[1].id = call.id;
+    if (corruption === "changed-source") records[0].invocations[1].source.parentNodeId = "private-authority";
+    if (corruption === "authority-field") call.authorities = [{ kind: "invoke.resolve" }];
+    if (corruption === "old-version") records[0].exportVersion = 3;
+    if (corruption === "unknown-origin") records[2].origin.invocationId = "invocation:missing";
+    if (corruption === "missing-argument") call.arguments = [];
+    if (corruption === "extra-argument") call.arguments.push({ ...structuredClone(call.arguments[0]), source: { ...call.arguments[0].source, actionId: "action:extra" } });
+    if (corruption === "changed-current") call.current.layers[0].nodes[0].detail = "Changed current";
+    expect(() => parsePublicSnapshot(recordsJsonl(records))).toThrow(PublicSnapshotError);
+  });
+});
+
 function assetFixtureJsonl(bytes = Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"><circle cx="1" cy="1" r="1"/></svg>')) {
   const records = fixtureJsonl().trimEnd().split("\n").map((line) => JSON.parse(line));
   const digestSha256 = createHash("sha256").update(bytes).digest("hex");

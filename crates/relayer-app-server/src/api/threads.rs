@@ -102,6 +102,8 @@ pub(super) struct InvokeActionResponse {
     invocation: ActionInvocationResponse,
     interaction: InteractionResponse,
     created: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    input_draft: Option<super::input_drafts::ActionInputDraftResponse>,
 }
 
 #[derive(Serialize)]
@@ -369,6 +371,7 @@ pub(super) async fn get(
         &std::collections::HashSet::from_iter(detail.thread.imported.then_some(detail.thread.id)),
     )
     .await;
+    let invocations = project_action_invocations(&state, &detail.action_invocations).await?;
     let imported_thread = detail.thread.imported;
     let mut completion_executions = std::collections::HashMap::new();
     for invocation in &detail.action_invocations {
@@ -392,6 +395,7 @@ pub(super) async fn get(
         .conversation_compatibility(detail.thread.id)
         .await?;
     let response = ThreadDetailResponse::from(detail)
+        .with_action_invocations(invocations)
         .with_conversation_compatibility(Some(compatibility))
         .with_interactions(interactions)
         .with_completion_executions(completion_executions);
@@ -527,7 +531,17 @@ pub(super) async fn project_interaction(
         .as_ref()
         .is_some_and(|input| !input.contexts.is_empty());
     let has_durable_submitted_inputs = !durable_submitted_inputs.is_empty();
-    if has_durable_context || has_durable_submitted_inputs || imported_thread {
+    let has_prepared_invocation_input = graph_node_id.is_some()
+        && state
+            .product
+            .prepared_invocation_node(InteractionId::try_from(id)?)
+            .await?
+            == graph_node_id;
+    if has_durable_context
+        || has_durable_submitted_inputs
+        || imported_thread
+        || has_prepared_invocation_input
+    {
         let Some((runtime, graph_node_id)) = state.runtime.as_ref().zip(graph_node_id) else {
             if has_durable_context || has_durable_submitted_inputs {
                 response.mark_projection_stale();
@@ -539,7 +553,7 @@ pub(super) async fn project_interaction(
         };
         match runtime.interaction_input(graph_node_id).await {
             Ok(input) => {
-                if imported_thread {
+                if imported_thread || has_prepared_invocation_input {
                     response.set_submitted_inputs(input.submitted_inputs.clone());
                 } else if !durable_submitted_inputs.is_empty()
                     && !submitted_input_semantic_multisets_match(
@@ -657,6 +671,49 @@ async fn project_interactions(
     Ok(responses)
 }
 
+/// Durable call identity and permission to repeat an action are separate facts.
+/// Policy is projected only from an exact graph-owned frozen call snapshot.
+pub(super) async fn project_action_invocations(
+    state: &ApiState,
+    invocations: &[crate::product::ActionInvocation],
+) -> Result<Vec<ActionInvocationResponse>, ApiError> {
+    let deadline = super::interaction_graph::projection_deadline();
+    let mut responses = Vec::with_capacity(invocations.len());
+    for invocation in invocations {
+        let mut response = ActionInvocationResponse::from(invocation.clone());
+        if invocation.durable
+            && let Some(runtime) = &state.runtime
+        {
+            let source = state
+                .product
+                .get_interaction(invocation.source_interaction_id)
+                .await?;
+            let child = state
+                .product
+                .get_interaction(invocation.result_interaction_id)
+                .await?;
+            if let (Some(source_id), Some(child_id)) = (source.graph_node_id, child.graph_node_id)
+                && let Ok(Ok(metadata)) =
+                    tokio::time::timeout_at(deadline, runtime.interaction_metadata(child_id)).await
+                && let Some(call) = metadata.durable_invocation
+                && call.source_completion_id.value() == source_id
+                && call.child_interaction_node_id.value() == child_id
+                && call.source_action_id.value() == invocation.action_id
+                && call.invocation_key == invocation.invocation_key
+            {
+                // A missing historical policy remains unknown. It never
+                // grants repeat-use authority; GraphComplete owns admission.
+                response.reusable = call
+                    .action_snapshot
+                    .get("reusable")
+                    .and_then(Value::as_bool);
+            }
+        }
+        responses.push(response);
+    }
+    Ok(responses)
+}
+
 pub(super) async fn create_interaction(
     State(state): State<ApiState>,
     headers: HeaderMap,
@@ -675,6 +732,13 @@ pub(super) async fn create_interaction(
         None
     };
     let thread_id = ThreadId::try_from(id)?;
+    let mutable_thread = state.product.get_thread(thread_id).await?;
+    if mutable_thread.thread.imported {
+        return Err(ApiError::invalid("imported conversations are immutable"));
+    }
+    let draft = state.product.action_input_draft(thread_id).await?;
+    let composer_input_occurrences =
+        super::input_drafts::composer_occurrences(&state, &draft).await?;
     if let Some(operator) = operator.as_ref() {
         if !request.text.trim().is_empty()
             || request.model_selection.is_some()
@@ -687,14 +751,11 @@ pub(super) async fn create_interaction(
                 "input operator Send may submit only its scoped committed input draft",
             ));
         }
-        let draft = state.product.action_input_draft(thread_id).await?;
-        if draft.attachments.is_empty()
-            || draft.attachments.iter().any(|attachment| {
+        if composer_input_occurrences.is_empty()
+            || composer_input_occurrences.iter().any(|occurrence| {
                 !operator
                     .occurrences
-                    .contains(&super::input_operator_sessions::occurrence_key(
-                        &attachment.occurrence,
-                    ))
+                    .contains(&super::input_operator_sessions::occurrence_key(occurrence))
             })
         {
             return Err(ApiError::not_found(
@@ -753,6 +814,7 @@ pub(super) async fn create_interaction(
             .create_identified_interaction(
                 thread_id,
                 crate::product::CreateIdentifiedInteractionCommand {
+                    composer_input_occurrences: Some(&composer_input_occurrences),
                     text: &request.text,
                     input_identity: &input_id,
                     contexts: &request.contexts,
@@ -864,11 +926,19 @@ pub(super) async fn retry_interaction(
     let context_snapshots = canonical_context_snapshots(&state, &request.contexts)
         .await
         .map_err(context_snapshot_api_error)?;
+    let mutable_thread = state.product.get_thread(thread_id).await?;
+    if mutable_thread.thread.imported {
+        return Err(ApiError::invalid("imported conversations are immutable"));
+    }
+    let draft = state.product.action_input_draft(thread_id).await?;
+    let composer_input_occurrences =
+        super::input_drafts::composer_occurrences(&state, &draft).await?;
     let claimed = state
         .product
         .claim_interaction_retry(
             interaction_id,
             RetryInteractionCommand {
+                composer_input_occurrences: Some(&composer_input_occurrences),
                 expected_attempt_id: request.attempt_id,
                 text: &request.text,
                 input_identity: &request.input_id,
@@ -1584,9 +1654,44 @@ async fn launch_prepared_child(
         .ok_or_else(|| {
             ApiError::invalid("prepared completion does not belong to this execution")
         })?;
-    let action = runtime
-        .get_action(grant.source_completion_id, invocation.source_action_id)
-        .await?;
+    let durable = metadata.durable_invocation;
+    let action = if let Some(call) = &durable {
+        if call.source_completion_id.value() != grant.source_completion_id
+            || call.child_interaction_node_id.value() != input.interaction_node
+        {
+            return Err(ApiError::invalid(
+                "durable invocation does not belong to this execution",
+            ));
+        }
+        crate::runtime::RuntimeAction {
+            id: call.source_action_id.value(),
+            reusable: call
+                .action_snapshot
+                .get("reusable")
+                .and_then(Value::as_bool),
+            input_action_ids: serde_json::from_value(
+                call.action_snapshot
+                    .get("inputActionIds")
+                    .cloned()
+                    .unwrap_or_else(|| serde_json::json!([])),
+            )
+            .map_err(|_| ApiError::invalid("invalid Invoke input binding"))?,
+            relation: None,
+            resolved_invoke_interaction_id: None,
+            kind: "invoke".into(),
+            interaction_text: call
+                .action_snapshot
+                .get("instruction")
+                .and_then(Value::as_str)
+                .map(str::to_owned),
+            target_layer_id: None,
+            state: "draft".into(),
+        }
+    } else {
+        runtime
+            .get_action(grant.source_completion_id, invocation.source_action_id)
+            .await?
+    };
     if action.id == invocation.source_action_id
         && action.kind == "navigate"
         && action.state == "accepted"
@@ -1613,7 +1718,7 @@ async fn launch_prepared_child(
             }),
         ));
     }
-    if action.kind != "invoke" || action.state != "accepted" {
+    if action.kind != "invoke" || (durable.is_none() && action.state != "accepted") {
         return Err(ApiError::invalid(
             "prepared completion requires an accepted invoke action",
         ));
@@ -1622,14 +1727,28 @@ async fn launch_prepared_child(
         .interaction_text
         .as_deref()
         .ok_or_else(|| ApiError::invalid("invoke action has no interaction text"))?;
-    let outcome = state
-        .product
-        .invoke_action_recursively(
-            grant.source_interaction_id,
-            invocation.source_action_id,
-            interaction_text,
-        )
-        .await?;
+    let outcome = if let Some(durable) = &durable {
+        state
+            .product
+            .invoke_durable_action(
+                grant.source_interaction_id,
+                invocation.source_action_id,
+                interaction_text,
+                input.interaction_node,
+                true,
+                &durable.invocation_key,
+            )
+            .await?
+    } else {
+        state
+            .product
+            .invoke_action_recursively(
+                grant.source_interaction_id,
+                invocation.source_action_id,
+                interaction_text,
+            )
+            .await?
+    };
     // The action's result belongs to a user's own invoke of it, made from an accepted source
     // whose agent is still unwinding. The product runs and settles that result; the broker
     // never launches it.
@@ -2620,11 +2739,22 @@ async fn authorize_child_completion(
         .invocation
         .filter(|invocation| invocation.source_interaction_node_id == grant.source_completion_id)
         .ok_or_else(|| ApiError::invalid("completion does not belong to this execution"))?;
-    let outcome = state
-        .product
-        .get_action_invocation(grant.source_interaction_id, invocation.source_action_id)
-        .await?
-        .ok_or_else(|| ApiError::invalid("completion has no product invocation binding"))?;
+    let outcome = if metadata.durable_invocation.is_some() {
+        state
+            .product
+            .invocation_for_graph_node(
+                grant.source_interaction_id,
+                invocation.source_action_id,
+                completion_id,
+            )
+            .await?
+    } else {
+        state
+            .product
+            .get_action_invocation(grant.source_interaction_id, invocation.source_action_id)
+            .await?
+    }
+    .ok_or_else(|| ApiError::invalid("completion has no product invocation binding"))?;
     // A user's own invoke of the action owns its result; only an agent's child answers to
     // the broker, even while the source's agent still holds its grant.
     if !outcome.invocation.agent_invoked {
@@ -3048,13 +3178,33 @@ async fn resume_unwinding_children_until_ended(
     while children.join_next().await.is_some() {}
 }
 
+#[derive(Default, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(super) struct InvokeActionRequest {
+    input_draft_revision: Option<i64>,
+}
+
 pub(super) async fn invoke_action(
     State(state): State<ApiState>,
     headers: HeaderMap,
     Path((thread_id, interaction_id, action_id)): Path<(i64, i64, i64)>,
+    request: Option<Json<InvokeActionRequest>>,
 ) -> Result<(StatusCode, Json<InvokeActionResponse>), ApiError> {
     authorize_write(&state, &headers)?;
-    let result = invoke_action_with_authority(&state, thread_id, interaction_id, action_id).await;
+    let invocation_key = headers
+        .get("idempotency-key")
+        .and_then(|value| value.to_str().ok())
+        .map(str::to_owned)
+        .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+    let result = invoke_action_with_authority(
+        &state,
+        thread_id,
+        interaction_id,
+        action_id,
+        &invocation_key,
+        request.and_then(|request| request.0.input_draft_revision),
+    )
+    .await;
     if let Err(error) = &result {
         log_action_invocation_request_failure(thread_id, interaction_id, action_id, error);
     }
@@ -3066,6 +3216,8 @@ async fn invoke_action_with_authority(
     thread_id: i64,
     interaction_id: i64,
     action_id: i64,
+    invocation_key: &str,
+    input_draft_revision: Option<i64>,
 ) -> Result<(StatusCode, Json<InvokeActionResponse>), ApiError> {
     let thread_id = ThreadId::try_from(thread_id)?;
     let source_interaction_id = InteractionId::try_from(interaction_id)?;
@@ -3110,6 +3262,94 @@ async fn invoke_action_with_authority(
         .as_deref()
         .ok_or_else(|| ApiError::invalid("invoke action has no interaction text"))?
         .to_owned();
+    if runtime
+        .interaction_metadata(graph_node_id)
+        .await?
+        .has_completion_contract
+    {
+        let existing_submission = state
+            .product
+            .invocation_input_submission(
+                thread_id,
+                source_interaction_id,
+                action_id,
+                invocation_key,
+            )
+            .await?;
+        // Exact retry after clearing uses the original submission epochs and arguments.
+        let mut submitted_attachments = match &existing_submission {
+            Some((revision, attachments)) if *revision == input_draft_revision => {
+                attachments.clone()
+            }
+            _ => match input_draft_revision {
+                Some(revision) => {
+                    state
+                        .product
+                        .invocation_input_attachment_snapshot(thread_id, revision)
+                        .await?
+                }
+                None => Vec::new(),
+            },
+        };
+        submitted_attachments.retain(|input| {
+            action
+                .input_action_ids
+                .contains(&input.occurrence.action_id)
+        });
+        let submitted_inputs =
+            crate::product::ProductService::invocation_arguments(&submitted_attachments)?;
+        let node = runtime
+            .prepare_user_invocation(graph_node_id, action_id, invocation_key, &submitted_inputs)
+            .await?;
+        let outcome = state
+            .product
+            .invoke_user_durable_action_with_inputs(
+                source_interaction_id,
+                action_id,
+                &interaction_text,
+                node,
+                invocation_key,
+                input_draft_revision,
+                &submitted_attachments,
+            )
+            .await?;
+        let consumed = state
+            .product
+            .invocation_input_submission(
+                thread_id,
+                source_interaction_id,
+                action_id,
+                invocation_key,
+            )
+            .await?;
+        let result_id = outcome.interaction.id;
+        let (status, mut response) = spawn_action_handoff(state.clone(), thread, outcome).await?;
+        let result_status = state
+            .product
+            .get_interaction(result_id)
+            .await?
+            .completion_status;
+        if let Some((_, consumed)) =
+            consumed.filter(|_| !matches!(result_status.as_str(), "failed" | "stopped"))
+        {
+            response.0.input_draft = Some(
+                super::input_drafts::scoped_response(
+                    state,
+                    state
+                        .product
+                        .consume_invocation_inputs(thread_id, &consumed)
+                        .await?,
+                )
+                .await?,
+            );
+        }
+        return Ok((status, response));
+    }
+    if action.reusable == Some(true) || !action.input_action_ids.is_empty() {
+        return Err(ApiError::invalid(
+            "reusable Invoke or connected inputs require a sealed source interaction",
+        ));
+    }
     if let Some(outcome) = state
         .product
         .get_action_invocation(source_interaction_id, action_id)
@@ -3186,9 +3426,12 @@ async fn finish_action_handoff(
     Ok((
         status,
         Json(InvokeActionResponse {
-            invocation: outcome.invocation.into(),
+            invocation: project_action_invocations(state, &[outcome.invocation])
+                .await?
+                .remove(0),
             interaction: interaction.into(),
             created: outcome.created,
+            input_draft: None,
         }),
     ))
 }
@@ -3561,9 +3804,18 @@ async fn prepare_interaction(
             .unwrap_or(&[]),
     };
     let mut binding_attempt = 0;
+    let prepared_graph_node = state
+        .product
+        .prepared_invocation_node(interaction.id)
+        .await?;
     let prepared = loop {
         binding_attempt += 1;
-        let prepared = match runtime.prepare(&command).await {
+        let preparation = if prepared_graph_node.is_some() {
+            runtime.prepare_bound(&command, prepared_graph_node).await
+        } else {
+            runtime.prepare(&command).await
+        };
+        let prepared = match preparation {
             Ok(prepared) => prepared,
             Err(error)
                 if (invocation.is_some() || durable_input.is_some()) && binding_attempt > 1 =>

@@ -311,6 +311,37 @@ describe("node input draft controller", () => {
     expect(changed).toHaveBeenCalledTimes(3);
   });
 
+  it("adopts Invoke consumption responses without replacing newer committed edits", async () => {
+    const api = { get: vi.fn(async () => draft(9, [responseAttachment({ value: { text: "Kyoto" }, draftRevision: 9 })])) };
+    const controller = createNodeInputDraftController({ api });
+    await controller.load(7);
+    expect(controller.adoptResponse(7, draft(10)).attachments).toEqual([]);
+    const newer = draft(11, [responseAttachment({ value: { text: "Lisbon" }, draftRevision: 11 })]);
+    controller.adoptResponse(7, newer);
+    expect(controller.adoptResponse(7, draft(10))).toEqual(newer);
+    expect(api.get).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not restore consumed connected inputs when an unrelated commit reply arrives later", async () => {
+    const destination = responseAttachment({ value: { text: "Kyoto" }, draftRevision: 9 });
+    let releaseCommit;
+    const api = {
+      get: vi.fn(async () => draft(9, [destination])),
+      commit: vi.fn(() => new Promise((resolve) => { releaseCommit = resolve; })),
+    };
+    const controller = createNodeInputDraftController({ api });
+    await controller.load(7);
+    const pending = controller.commit(7, otherOccurrence, textAction, "Keep these notes");
+    await vi.waitFor(() => expect(api.commit).toHaveBeenCalledTimes(1));
+    const notes = responseAttachment({ inputOccurrence: otherOccurrence, value: { text: "Keep these notes" }, draftRevision: 11 });
+    const consumed = controller.adoptResponse(7, draft(11, [notes]));
+    releaseCommit(draft(10, [{ ...destination, draftRevision: 10 }, { ...notes, draftRevision: 10 }]));
+    expect(await pending).toBe(consumed);
+    expect(controller.current(7)).toBe(consumed);
+    expect(committedInputAttachment(controller.current(7), occurrence)).toBeNull();
+    expect(committedInputAttachment(controller.current(7), otherOccurrence).value.text).toBe("Keep these notes");
+  });
+
   it("preserves the prior committed snapshot when validation or persistence fails", async () => {
     const priorAttachment = responseAttachment({
       value: { text: "Prior" },

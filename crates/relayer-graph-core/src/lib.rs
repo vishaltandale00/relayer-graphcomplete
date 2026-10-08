@@ -6,10 +6,13 @@ mod storage;
 pub use error::{GraphError, ValidationIssue};
 #[cfg(feature = "crash-test-support")]
 pub use graph::CompletionCrashPoint;
+pub use graph::GraphInvocation;
 pub use graph::{
     AcceptedDetailAsset, AcceptedDetailAssetMetadata, AcceptedGraphClosure,
     AcceptedGraphPublication, ActionDraft, ActionId, ActionKind, ActionVariant,
-    AuthoredDetailUpdate, CompletionLifecycle, CompletionOutput, CompletionState,
+    AuthoredDetailUpdate, CompletionContract, CompletionContractAnswer, CompletionContractContext,
+    CompletionContractInput, CompletionInvocationReference, CompletionLifecycle, CompletionOutput,
+    CompletionReturnRequirement, CompletionState, ConversationGraphSnapshot,
     CurrentProjectionEvent, CurrentProjectionPage, CurrentTransition, CurrentTransitionReceipt,
     DEFAULT_IMPORT_INDEX_BUDGET, DEFAULT_SEARCH_INDEX_BUDGET, EDGE_SHAPES, EdgeDraft, EdgeEnd,
     EdgeId, EdgeRoute, GraphAction, GraphDatabase, GraphEdge, GraphLayer, GraphNode, GraphWriter,
@@ -22,10 +25,10 @@ pub use graph::{
     InputOption, InteractionContext, InteractionContextAction, InteractionContextDraft,
     InteractionContextTarget, InteractionInput, InteractionInputChild, InteractionInputChildId,
     InteractionInputNode, InteractionInputPreparation, InteractionInvocation,
-    InteractionPermission, InteractionPermissions, LayerDraft, LayerId, LayerLayout, LayoutPoint,
-    MAX_EDGE_ROUTE_WAYPOINTS, NODE_SIDES, NavigateRelation, NoSearchIndex, NodeDraft, NodeId,
-    NodePlacement, PERSONAL_PRESENTATION_PROFILE_THREAD_ID, PersonalPresentationAttachment,
-    PreparedDetailAsset, PresentingInputOccurrence, ProjectId,
+    InteractionPermission, InteractionPermissions, InvocationGraphSnapshot, LayerDraft, LayerId,
+    LayerLayout, LayoutPoint, MAX_EDGE_ROUTE_WAYPOINTS, NODE_SIDES, NavigateRelation,
+    NoSearchIndex, NodeDraft, NodeId, NodePlacement, PERSONAL_PRESENTATION_PROFILE_THREAD_ID,
+    PersonalPresentationAttachment, PreparedDetailAsset, PresentingInputOccurrence, ProjectId,
     PublishedPersonalPresentationVersion, RELAYER_ICON_ALIASES, RELAYER_ICON_CATALOG_JSON,
     RELAYER_ICON_NAMES, RecordState, ResolvedLayer, ResolvedPersonalPresentation, SearchIndex,
     SearchIndexComponent, SearchIndexFuture, SearchIndexRebuildClosure, SearchIndexRebuildSnapshot,

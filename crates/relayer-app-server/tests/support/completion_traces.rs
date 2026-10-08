@@ -105,6 +105,7 @@ struct HarnessControl {
 /// Faults the graph server injects, set by a test.
 #[derive(Default)]
 struct GraphFaults {
+    detail_asset_reads: std::sync::atomic::AtomicUsize,
     /// The next capability activation answers 503, as a busy graph would.
     fail_activation: AtomicBool,
     /// While set, every control preparation answers 200 with a body the client cannot
@@ -121,6 +122,7 @@ struct World {
     state: ApiState,
     product: ProductService,
     runtime: RuntimeClient,
+    graph_url: String,
     thread: Thread,
     child: Interaction,
     seeded: PreparedInteraction,
@@ -183,6 +185,25 @@ impl World {
     }
 
     async fn build(label: &str, selected: bool, bound: bool) -> Self {
+        Self::build_mode(label, selected, bound, None).await
+    }
+
+    async fn build_mode(
+        label: &str,
+        selected: bool,
+        bound: bool,
+        durable_agent: Option<bool>,
+    ) -> Self {
+        Self::build_call_mode(label, selected, bound, durable_agent, false).await
+    }
+
+    async fn build_call_mode(
+        label: &str,
+        selected: bool,
+        bound: bool,
+        durable_agent: Option<bool>,
+        reusable: bool,
+    ) -> Self {
         let root = tempfile::Builder::new()
             .prefix(&format!("relayer-completion-trace-{label}-"))
             .tempdir()
@@ -223,12 +244,34 @@ impl World {
             provider_recursion: true,
             ..TemporalFeatureConfig::default()
         };
-        let graph = GraphDatabase::in_memory().await.unwrap();
+        // This fixture protects the historical one-shot conversion protocol,
+        // not new reusable Invocation behavior. Reconstruct pre-contract source.
+        let graph_path = root.path().join("legacy-graph.sqlite3");
+        let graph = GraphDatabase::open(&graph_path).await.unwrap();
         graph.set_temporal_features(features).await.unwrap();
         let parent = graph
             .create_interaction(None, ThreadId::new(thread.id.value()).unwrap(), "Root")
             .await
             .unwrap();
+        if durable_agent.is_none() {
+            let legacy_pool =
+                sqlx::SqlitePool::connect(&format!("sqlite://{}", graph_path.display()))
+                    .await
+                    .unwrap();
+            for statement in [
+                "DROP TRIGGER completion_contract_marker_guard",
+                "DROP TRIGGER completion_contract_delete_guard",
+            ] {
+                sqlx::query(statement).execute(&legacy_pool).await.unwrap();
+            }
+            sqlx::query("UPDATE completion_states SET completion_contract_digest=NULL WHERE interaction_node_id=?1").bind(parent.id.value()).execute(&legacy_pool).await.unwrap();
+            sqlx::query("DELETE FROM completion_contracts WHERE interaction_node_id=?1")
+                .bind(parent.id.value())
+                .execute(&legacy_pool)
+                .await
+                .unwrap();
+            legacy_pool.close().await;
+        }
         let writer = graph.writer_for_subgraph(parent.id).await.unwrap();
         let source = writer
             .submit_node(&NodeDraft {
@@ -271,10 +314,33 @@ impl World {
                 description: None,
                 target_layer_id: None,
                 interaction_text: Some("Child work".into()),
+                reusable: Some(reusable),
+                input_action_ids: Vec::new(),
                 input: None,
             })
             .await
             .unwrap();
+        if durable_agent.is_some() {
+            writer
+                .add_action(&ActionDraft {
+                    client_key: "root".into(),
+                    source_node_id: parent.id,
+                    source_layer_id: None,
+                    kind: ActionKind::Navigate,
+                    relation: Some(relayer_graph_core::NavigateRelation::Expand),
+                    label: "Response".into(),
+                    variant: ActionVariant::Pill,
+                    icon: None,
+                    description: None,
+                    target_layer_id: Some(layer.id),
+                    interaction_text: None,
+                    reusable: None,
+                    input_action_ids: Vec::new(),
+                    input: None,
+                })
+                .await
+                .unwrap();
+        }
         writer
             .transition_current(
                 0,
@@ -295,6 +361,11 @@ impl World {
                 let faults = injected.clone();
                 async move {
                     use axum::response::IntoResponse;
+                    if request.method() == axum::http::Method::GET
+                        && request.uri().path().contains("/detail-assets/")
+                    {
+                        faults.detail_asset_reads.fetch_add(1, Ordering::SeqCst);
+                    }
                     if request.method() == axum::http::Method::GET
                         && request.uri().path().ends_with("/current")
                         && faults
@@ -602,11 +673,43 @@ impl World {
             source_interaction_node_id: parent.id.value(),
             source_action_id: invoke.id.value(),
         };
-        let child = product
-            .invoke_action_recursively(thread.root_interaction_id, invoke.id.value(), "Child work")
-            .await
-            .unwrap()
-            .interaction;
+        let durable_node = if durable_agent.is_some() {
+            Some(
+                writer
+                    .prepare_recursive_invocation(invoke.id, "startup-call")
+                    .await
+                    .unwrap()
+                    .0
+                    .id
+                    .value(),
+            )
+        } else {
+            None
+        };
+        let child = if let Some(node) = durable_node {
+            product
+                .invoke_durable_action(
+                    thread.root_interaction_id,
+                    invoke.id.value(),
+                    "Child work",
+                    node,
+                    durable_agent.unwrap(),
+                    "startup-call",
+                )
+                .await
+                .unwrap()
+                .interaction
+        } else {
+            product
+                .invoke_action_recursively(
+                    thread.root_interaction_id,
+                    invoke.id.value(),
+                    "Child work",
+                )
+                .await
+                .unwrap()
+                .interaction
+        };
         assert_eq!(child.model_selection.is_some(), selected);
         let state = ApiState {
             product: product.clone(),
@@ -648,30 +751,33 @@ impl World {
             // the same leased node the product's own preparation recovers for this occurrence.
             let working_directory = root.path().to_string_lossy().into_owned();
             let prepared = runtime
-                .prepare(&CompleteInteraction {
-                    thread_icon_selection_eligible: false,
-                    require_native_continuity: false,
-                    native_history_anchor: None,
-                    project_id: None,
-                    product_interaction_id: child.id.value(),
-                    thread_id: thread.id.value(),
-                    interaction_id: child.id.value(),
-                    text: &child.text,
-                    working_directory: &working_directory,
-                    harness_configuration_name: HARNESS,
-                    permission_profile: state.permission_catalog.profile("auto").unwrap(),
-                    model_selection: None,
-                    model_plan: None,
-                    attempt_admission_id: None,
-                    execution_lease_id: None,
-                    harness_policy: None,
-                    invocation: Some(invocation),
-                    input_identity: None,
-                    input_digest: None,
-                    personal_presentation: None,
-                    contexts: &[],
-                    submitted_inputs: &[],
-                })
+                .prepare_bound(
+                    &CompleteInteraction {
+                        thread_icon_selection_eligible: false,
+                        require_native_continuity: false,
+                        native_history_anchor: None,
+                        project_id: None,
+                        product_interaction_id: child.id.value(),
+                        thread_id: thread.id.value(),
+                        interaction_id: child.id.value(),
+                        text: &child.text,
+                        working_directory: &working_directory,
+                        harness_configuration_name: HARNESS,
+                        permission_profile: state.permission_catalog.profile("auto").unwrap(),
+                        model_selection: None,
+                        model_plan: None,
+                        attempt_admission_id: None,
+                        execution_lease_id: None,
+                        harness_policy: None,
+                        invocation: Some(invocation),
+                        input_identity: None,
+                        input_digest: None,
+                        personal_presentation: None,
+                        contexts: &[],
+                        submitted_inputs: &[],
+                    },
+                    durable_node,
+                )
                 .await
                 .unwrap();
             runtime.discard_prepared(prepared.clone()).await.unwrap();
@@ -681,6 +787,7 @@ impl World {
             completion_permission_origin_digest(&seeded.effective_permission_receipt, invocation)
                 .unwrap_or_else(|error| panic!("origin digest: {}", error.message()));
         Self {
+            graph_url,
             state,
             product,
             runtime,
@@ -1067,6 +1174,8 @@ impl World {
                         description: None,
                         target_layer_id: Some(layer.id),
                         interaction_text: None,
+                        reusable: None,
+                        input_action_ids: Vec::new(),
                         input: None,
                     })
                     .await
@@ -1828,6 +1937,8 @@ async fn a_child_returned_while_its_provider_runs_exports_and_restarts_as_accept
             description: None,
             target_layer_id: root_current.current_layer_id,
             interaction_text: None,
+            reusable: None,
+            input_action_ids: Vec::new(),
             input: None,
         })
         .await
@@ -2514,6 +2625,8 @@ async fn a_users_invoke_does_not_run_an_agents_child() {
         world.thread.id.value(),
         world.thread.root_interaction_id.value(),
         world.invocation.source_action_id,
+        "legacy-test-request",
+        None,
     )
     .await
     .unwrap_or_else(|error| panic!("invoke: {}", error.message()));
@@ -2549,6 +2662,768 @@ async fn a_deterministic_startup_failure_fails_the_child_in_both_stores() {
     );
     assert_eq!(child.harness_configuration_name.as_deref(), Some(HARNESS));
     world.finish().await;
+}
+
+#[tokio::test]
+async fn a_restart_recovers_exact_unbound_durable_agent_call() {
+    verify_unbound_durable_restart(true).await;
+}
+
+#[tokio::test]
+async fn v4_import_reexport_preserves_standalone_bound_input_image_without_layer_membership() {
+    let world = World::build_mode("outside-closure-input", false, false, Some(true)).await;
+    let (_assets_directory, _assets_host, assets_url, assets_token) =
+        crate::api::conversation_imports::tests::real_visual_assets_host();
+    reqwest::Client::new()
+        .put(format!(
+            "{}api/control/visual-assets/bridge",
+            world.graph_url
+        ))
+        .bearer_auth("graph-control")
+        .json(&serde_json::json!({"url":assets_url,"token":assets_token,"generation":1}))
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap();
+    let thread = world
+        .product
+        .create_thread(CreateThreadCommand {
+            icon_selection_eligible: true,
+            title: None,
+            project_id: None,
+            initial_message: "Bound input archive".into(),
+            harness_configuration_name: HARNESS.into(),
+            personal_presentation_version_key: None,
+            permission_profile_id: "auto".into(),
+            model_selection: None,
+            allow_unselected_model: true,
+        })
+        .await
+        .unwrap();
+    let parent = world
+        .graph
+        .create_interaction(
+            None,
+            ThreadId::new(thread.id.value()).unwrap(),
+            "Bound input archive",
+        )
+        .await
+        .unwrap()
+        .id;
+    let writer = world.graph.writer_for_subgraph(parent).await.unwrap();
+    use sha2::{Digest, Sha256};
+    let content = b"<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 8 8\"><rect width=\"8\" height=\"8\"/></svg>".to_vec();
+    let asset = relayer_graph_core::PreparedDetailAsset {
+        asset_id: "question-icon".into(),
+        digest_sha256: format!("{:x}", Sha256::digest(&content)),
+        media_type: "image/svg+xml".into(),
+        byte_length: content.len(),
+        content: content.clone(),
+        provenance_source: "user".into(),
+        provenance_file_name: "question.svg".into(),
+    };
+    let node = writer
+        .submit_node(&NodeDraft {
+            client_key: "shared-source".into(),
+            kind: "concept".into(),
+            icon: "box".into(),
+            title: "Analysis".into(),
+            detail: "Analysis with a callable".into(),
+        })
+        .await
+        .unwrap()
+        .id;
+    let layer_draft = |key: &str| LayerDraft {
+        client_key: key.into(),
+        default_node_id: None,
+        nodes: vec![node],
+        edges: vec![],
+        layout: Some(LayerLayout::v1(
+            vec![NodePlacement {
+                node_id: node,
+                x: 0.5,
+                y: 0.5,
+            }],
+            "default",
+        )),
+        size_justification: None,
+    };
+    let original_layer = writer
+        .submit_layer(&layer_draft("invoke-layer"))
+        .await
+        .unwrap()
+        .id;
+    let field = writer
+        .add_action_with_prepared_icon(&ActionDraft {
+            client_key: "historical-question".into(),
+            source_node_id: node,
+            source_layer_id: Some(original_layer),
+            kind: ActionKind::Input,
+            relation: None,
+            label: "Destination".into(),
+            variant: ActionVariant::Pill,
+            icon: Some(serde_json::json!({"kind":"image","assetId":asset.asset_id,"digestSha256":asset.digest_sha256,"mediaType":asset.media_type}).to_string()),
+            description: None,
+            target_layer_id: None,
+            interaction_text: None,
+            reusable: None,
+            input_action_ids: Vec::new(),
+            input: Some(relayer_graph_core::InputAction {
+                control: relayer_graph_core::InputControl::Text,
+                prompt: "Destination".into(),
+                options: Vec::new(),
+                minimum_selections: None,
+                unsupported_fields: Default::default(),
+            }),
+        }, Some(&asset))
+        .await
+        .unwrap();
+    let root = |target| ActionDraft {
+        client_key: "root".into(),
+        source_node_id: parent,
+        source_layer_id: None,
+        kind: ActionKind::Navigate,
+        relation: Some(NavigateRelation::Expand),
+        label: "Response".into(),
+        variant: ActionVariant::Pill,
+        icon: None,
+        description: None,
+        target_layer_id: Some(target),
+        interaction_text: None,
+        reusable: None,
+        input_action_ids: Vec::new(),
+        input: None,
+    };
+    writer
+        .add_action(&ActionDraft {
+            client_key: "child".into(),
+            source_node_id: node,
+            source_layer_id: Some(original_layer),
+            kind: ActionKind::Invoke,
+            relation: None,
+            label: "Investigate".into(),
+            variant: ActionVariant::Pill,
+            icon: None,
+            description: None,
+            target_layer_id: None,
+            interaction_text: Some("Child work".into()),
+            reusable: None,
+            input_action_ids: vec![field.id],
+            input: None,
+        })
+        .await
+        .unwrap();
+    writer.add_action(&root(original_layer)).await.unwrap();
+    writer.complete(parent).await.unwrap();
+    let pool = sqlx::SqlitePool::connect(&format!(
+        "sqlite://{}",
+        world.root.path().join("product.sqlite3").display()
+    ))
+    .await
+    .unwrap();
+    sqlx::query(
+        "UPDATE interactions SET graph_node_id=?1,completion_status='accepted' WHERE id=?2",
+    )
+    .bind(parent.value())
+    .bind(thread.root_interaction_id.value())
+    .execute(&pool)
+    .await
+    .unwrap();
+    pool.close().await;
+
+    // Construct a valid V4 archive from real accepted authored definitions, then
+    // move the question into the standalone inventory. The imported canonical
+    // graph must not fabricate membership in its absent historical Layer.
+    let seed = crate::conversation_export_service::build_conversation_export(
+        &world.product,
+        &world.runtime,
+        thread.id,
+        world.state.export_producer.clone(),
+        "2026-10-04T00:00:00Z".into(),
+    )
+    .await
+    .unwrap();
+    let mut archive = crate::conversation_export::decode_export_jsonl(&seed).unwrap();
+    let definition = archive
+        .iter_mut()
+        .find_map(|record| match record {
+            ConversationExportRecord::Turn(turn) => turn.accepted_view.as_mut().map(|view| {
+                let layer = &mut view.layers[0];
+                let position = layer
+                    .actions
+                    .iter()
+                    .position(|action| {
+                        action.kind == crate::conversation_export::ExportActionKind::Input
+                    })
+                    .unwrap();
+                let mut input = layer.actions.remove(position);
+                input.source_layer_id = Some("layer:historical-input-presentation".into());
+                let source = layer
+                    .nodes
+                    .iter_mut()
+                    .find(|node| node.id == input.source_node_id)
+                    .unwrap();
+                input.icon_asset = source
+                    .authored_detail_assets
+                    .iter()
+                    .find(|pin| pin.digest_sha256 == asset.digest_sha256)
+                    .cloned();
+                source.authored_detail_assets.clear();
+                input
+            }),
+            _ => None,
+        })
+        .unwrap();
+    let ConversationExportRecord::Header(header) = &mut archive[0] else {
+        unreachable!()
+    };
+    header.export_version = crate::conversation_export::EXPORT_VERSION_V4;
+    header.bound_inputs = vec![definition];
+    crate::conversation_export::validate_export_records(&archive).unwrap();
+    use crate::conversation_import_service::ConversationImportStager;
+    let ConversationExportRecord::Header(header) = &archive[0] else {
+        unreachable!()
+    };
+    let mut stager = ConversationImportStager::begin(*header.clone(), &world.product)
+        .await
+        .unwrap();
+    for record in archive.iter().skip(1) {
+        match record {
+            ConversationExportRecord::Turn(turn) => {
+                stager.push_turn(turn, &world.product).await.unwrap()
+            }
+            ConversationExportRecord::VisualAssetContent(content) => stager
+                .push_visual_asset_content(content, &world.product)
+                .await
+                .unwrap(),
+            _ => unreachable!(),
+        }
+    }
+    let receipt = stager
+        .finish(
+            format!(
+                "sha256:{:x}",
+                Sha256::digest(serde_json::to_vec(&archive).unwrap())
+            ),
+            &world.product,
+        )
+        .await
+        .unwrap();
+    let imported = crate::conversation_import_service::materialize_and_publish_conversation(
+        &receipt.import_id,
+        &world.product,
+        &world.runtime,
+    )
+    .await
+    .unwrap();
+    let thread_id = crate::product::ThreadId::from_database(imported.thread_id);
+    {
+        let reads_before = world.faults.detail_asset_reads.load(Ordering::SeqCst);
+        let bytes = {
+            crate::conversation_export_service::build_conversation_export(
+                &world.product,
+                &world.runtime,
+                thread_id,
+                world.state.export_producer.clone(),
+                "2026-10-04T00:00:00Z".into(),
+            )
+            .await
+            .unwrap()
+        };
+        assert!(
+            world.faults.detail_asset_reads.load(Ordering::SeqCst) > reads_before,
+            "Standalone pin collection must read real canonical registered bytes, not only replay original Header content"
+        );
+        let records = bytes
+            .split(|byte| *byte == b'\n')
+            .filter(|line| !line.is_empty())
+            .map(|line| serde_json::from_slice::<ConversationExportRecord>(line).unwrap())
+            .collect::<Vec<_>>();
+        let ConversationExportRecord::Header(header) = &records[0] else {
+            panic!("header")
+        };
+        assert_eq!(
+            header.export_version,
+            crate::conversation_export::EXPORT_VERSION_V4
+        );
+        assert_eq!(header.bound_inputs.len(), 1);
+        let definition = &header.bound_inputs[0];
+        assert_eq!(
+            definition.kind,
+            crate::conversation_export::ExportActionKind::Input
+        );
+        assert_eq!(definition.input.as_ref().unwrap().prompt, "Destination");
+        let pin = definition
+            .icon_asset
+            .as_ref()
+            .expect("standalone Input captures its real image pin");
+        assert_eq!(pin.digest_sha256, asset.digest_sha256);
+        assert!(records.iter().any(|record| matches!(record, ConversationExportRecord::VisualAssetContent(bytes) if bytes.digest_sha256 == asset.digest_sha256)));
+        let returned = records
+            .iter()
+            .find_map(|record| match record {
+                ConversationExportRecord::Turn(turn) => turn.accepted_view.as_ref(),
+                _ => None,
+            })
+            .unwrap();
+        let invoke = returned
+            .layers
+            .iter()
+            .flat_map(|layer| &layer.actions)
+            .find(|action| action.kind == crate::conversation_export::ExportActionKind::Invoke)
+            .unwrap();
+        assert_eq!(invoke.input_action_ids, vec![definition.id.clone()]);
+        assert_eq!(invoke.source_node_id, definition.source_node_id);
+        assert_ne!(invoke.source_layer_id, definition.source_layer_id);
+        assert!(
+            !returned
+                .layers
+                .iter()
+                .flat_map(|layer| &layer.actions)
+                .any(|action| action.id == definition.id)
+        );
+        assert!(
+            header.invocations.is_empty(),
+            "uncalled Invoke acquires no invented call"
+        );
+    }
+    let share = crate::conversation_export_service::build_share_conversation_export(
+        &world.product,
+        &world.runtime,
+        thread_id,
+        world.state.export_producer.clone(),
+        "2026-10-04T00:00:00Z".into(),
+        "Analysis",
+    )
+    .await;
+    assert!(matches!(share, Err(crate::conversation_export_service::ConversationExportBuildError::ShareImportedConversation)), "Imported conversations retain the existing share authority gate");
+    let native_share = crate::conversation_export_service::build_share_conversation_export(
+        &world.product,
+        &world.runtime,
+        thread.id,
+        world.state.export_producer.clone(),
+        "2026-10-04T00:00:00Z".into(),
+        "Analysis",
+    )
+    .await
+    .unwrap();
+    let native_records = crate::conversation_export::decode_export_jsonl(&native_share).unwrap();
+    crate::conversation_export::validate_export_records(&native_records).unwrap();
+    assert!(native_records.iter().any(|record| matches!(record, ConversationExportRecord::VisualAssetContent(bytes) if bytes.digest_sha256 == asset.digest_sha256)));
+    world.finish().await;
+}
+
+#[tokio::test]
+async fn native_reusable_invocations_preserve_conversation_and_share_export_for_single_multiple_and_graph_only_calls()
+ {
+    let world =
+        World::build_call_mode("durable-export-block", false, false, Some(true), true).await;
+    let source = world
+        .graph
+        .writer_for_subgraph(NodeId::new(world.invocation.source_interaction_node_id).unwrap())
+        .await
+        .unwrap();
+    source
+        .complete(NodeId::new(world.invocation.source_interaction_node_id).unwrap())
+        .await
+        .unwrap();
+    world.set_parent_status("accepted").await;
+    let inspect = |bytes: Vec<u8>, expected: usize| {
+        let text = String::from_utf8(bytes.clone()).unwrap();
+        assert!(
+            !text.contains("startup-call") && !text.contains("second-export-call"),
+            "private call keys must not escape into portable identity"
+        );
+        let header: ConversationExportRecord =
+            serde_json::from_slice(bytes.split(|byte| *byte == b'\n').next().unwrap()).unwrap();
+        let ConversationExportRecord::Header(header) = header else {
+            panic!("expected export header")
+        };
+        assert_eq!(
+            header.export_version,
+            crate::conversation_export::EXPORT_VERSION_V4
+        );
+        assert_eq!(header.invocations.len(), expected);
+        let ids = header
+            .invocations
+            .iter()
+            .map(|call| &call.id)
+            .collect::<std::collections::HashSet<_>>();
+        assert_eq!(
+            ids.len(),
+            expected,
+            "each call retains a distinct portable identity"
+        );
+        assert!(
+            header
+                .invocations
+                .iter()
+                .all(|call| call.arguments.is_empty() && call.returned_layer_id.is_none())
+        );
+        assert!(
+            header
+                .invocations
+                .iter()
+                .all(|call| call.source.instruction == "Child work")
+        );
+    };
+    for call_count in [1, 2] {
+        if call_count == 2 {
+            let child = source
+                .prepare_user_invocation(
+                    relayer_graph_core::ActionId::new(world.invocation.source_action_id).unwrap(),
+                    "second-export-call",
+                )
+                .await
+                .unwrap()
+                .0;
+            world
+                .product
+                .invoke_durable_action(
+                    world.thread.root_interaction_id,
+                    world.invocation.source_action_id,
+                    "Child work",
+                    child.id.value(),
+                    false,
+                    "second-export-call",
+                )
+                .await
+                .unwrap();
+        }
+        assert_eq!(
+            world
+                .product
+                .action_invocations_for_export(world.thread.id)
+                .await
+                .unwrap()
+                .len(),
+            call_count
+        );
+        let conversation = crate::conversation_export_service::build_conversation_export(
+            &world.product,
+            &world.runtime,
+            world.thread.id,
+            world.state.export_producer.clone(),
+            "2026-10-04T00:00:00Z".into(),
+        )
+        .await;
+        inspect(conversation.unwrap(), call_count);
+        let share = crate::conversation_export_service::build_share_conversation_export(
+            &world.product,
+            &world.runtime,
+            world.thread.id,
+            world.state.export_producer.clone(),
+            "2026-10-04T00:00:00Z".into(),
+            "Analysis",
+        )
+        .await;
+        inspect(share.unwrap(), call_count);
+        assert_eq!(
+            source
+                .action_invocations(
+                    relayer_graph_core::ActionId::new(world.invocation.source_action_id).unwrap()
+                )
+                .await
+                .unwrap()
+                .len(),
+            call_count
+        );
+    }
+    // Graph-owned prepared calls remain portable even without Product call rows.
+    sqlx::query("DELETE FROM action_invocations WHERE source_interaction_id=?1")
+        .bind(world.thread.root_interaction_id.value())
+        .execute(&world.pool)
+        .await
+        .unwrap();
+    assert!(
+        world
+            .product
+            .action_invocations_for_export(world.thread.id)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    let conversation = crate::conversation_export_service::build_conversation_export(
+        &world.product,
+        &world.runtime,
+        world.thread.id,
+        world.state.export_producer.clone(),
+        "2026-10-04T00:00:00Z".into(),
+    )
+    .await;
+    inspect(conversation.unwrap(), 2);
+    let share = crate::conversation_export_service::build_share_conversation_export(
+        &world.product,
+        &world.runtime,
+        world.thread.id,
+        world.state.export_producer.clone(),
+        "2026-10-04T00:00:00Z".into(),
+        "Unbound analysis",
+    )
+    .await;
+    inspect(share.unwrap(), 2);
+    world.finish().await;
+}
+
+#[tokio::test]
+async fn a_restart_recovers_exact_unbound_durable_user_call() {
+    verify_unbound_durable_restart(false).await;
+}
+
+#[tokio::test]
+async fn native_call_export_preserves_stopped_and_failed_current_without_return_or_staged_parent_link()
+ {
+    for stopped in [true, false] {
+        let world = World::build_mode(
+            if stopped {
+                "portable-stopped-current"
+            } else {
+                "portable-failed-current"
+            },
+            false,
+            false,
+            Some(true),
+        )
+        .await;
+        let parent_id = NodeId::new(world.invocation.source_interaction_node_id).unwrap();
+        let source = world.graph.writer_for_subgraph(parent_id).await.unwrap();
+        source.complete(parent_id).await.unwrap();
+        world.set_parent_status("accepted").await;
+        let child_id = NodeId::new(world.completion_id).unwrap();
+        let child = world.graph.writer_for_subgraph(child_id).await.unwrap();
+        let node = child
+            .submit_node(&NodeDraft {
+                client_key: "retained-analysis".into(),
+                kind: "concept".into(),
+                icon: "box".into(),
+                title: "Retained contribution".into(),
+                detail: "Useful analysis before the attempt settled.".into(),
+            })
+            .await
+            .unwrap();
+        let layer = child
+            .submit_layer(&LayerDraft {
+                client_key: "retained-layer".into(),
+                default_node_id: Some(node.id),
+                nodes: vec![node.id],
+                edges: vec![],
+                layout: Some(LayerLayout::v1(
+                    vec![NodePlacement {
+                        node_id: node.id,
+                        x: 0.5,
+                        y: 0.5,
+                    }],
+                    "default",
+                )),
+                size_justification: None,
+            })
+            .await
+            .unwrap();
+        child
+            .add_action(&ActionDraft {
+                client_key: "retained-root".into(),
+                source_node_id: child_id,
+                source_layer_id: None,
+                kind: ActionKind::Navigate,
+                relation: Some(NavigateRelation::Expand),
+                label: "Current".into(),
+                variant: ActionVariant::Pill,
+                icon: None,
+                description: None,
+                target_layer_id: Some(layer.id),
+                interaction_text: None,
+                reusable: None,
+                input_action_ids: vec![],
+                input: None,
+            })
+            .await
+            .unwrap();
+        let original = world
+            .graph
+            .accepted_graph_closure(parent_id)
+            .await
+            .unwrap()
+            .unwrap()
+            .layers
+            .into_iter()
+            .flat_map(|layer| layer.actions)
+            .find(|action| action.id.value() == world.invocation.source_action_id)
+            .unwrap();
+        child
+            .add_action(&ActionDraft {
+                client_key: "staged-reconciliation".into(),
+                source_node_id: original.source_node_id,
+                source_layer_id: original.source_layer_id,
+                kind: ActionKind::Navigate,
+                relation: Some(NavigateRelation::Reference),
+                label: "Staged parent integration".into(),
+                variant: ActionVariant::Pill,
+                icon: None,
+                description: None,
+                target_layer_id: Some(layer.id),
+                interaction_text: None,
+                reusable: None,
+                input_action_ids: vec![],
+                input: None,
+            })
+            .await
+            .unwrap();
+        child
+            .transition_current(
+                0,
+                "portable-current",
+                CurrentTransition::Advance { layer_id: layer.id },
+            )
+            .await
+            .unwrap();
+        let reason = if stopped {
+            "cancelled_by_user"
+        } else {
+            "provider_timeout"
+        };
+        child
+            .transition_current(
+                1,
+                "portable-outcome",
+                if stopped {
+                    CurrentTransition::Stop {
+                        reason: reason.into(),
+                    }
+                } else {
+                    CurrentTransition::Fail {
+                        reason: reason.into(),
+                    }
+                },
+            )
+            .await
+            .unwrap();
+        let ordinary = crate::conversation_export_service::build_conversation_export(
+            &world.product,
+            &world.runtime,
+            world.thread.id,
+            world.state.export_producer.clone(),
+            "2026-10-04T00:00:00Z".into(),
+        )
+        .await
+        .unwrap();
+        let share = crate::conversation_export_service::build_share_conversation_export(
+            &world.product,
+            &world.runtime,
+            world.thread.id,
+            world.state.export_producer.clone(),
+            "2026-10-04T00:00:00Z".into(),
+            "Retained analysis",
+        )
+        .await
+        .unwrap();
+        for bytes in [ordinary, share] {
+            let records = crate::conversation_export::decode_export_jsonl(&bytes).unwrap();
+            crate::conversation_export::validate_export_records(&records).unwrap();
+            let ConversationExportRecord::Header(header) = &records[0] else {
+                unreachable!()
+            };
+            assert_eq!(header.invocations.len(), 1);
+            let call = &header.invocations[0];
+            assert_eq!(call.lifecycle, if stopped { "stopped" } else { "failed" });
+            assert_eq!(call.safe_reason.as_deref(), Some(reason));
+            assert_eq!(call.head_revision, 2);
+            assert!(call.returned_layer_id.is_none());
+            assert_eq!(
+                call.current_layer_id.as_ref(),
+                call.current.as_ref().map(|current| &current.root_layer_id)
+            );
+            assert!(
+                call.current
+                    .as_ref()
+                    .unwrap()
+                    .layers
+                    .iter()
+                    .flat_map(|layer| &layer.nodes)
+                    .any(|node| node.title == "Retained contribution")
+            );
+            assert!(
+                !String::from_utf8(bytes)
+                    .unwrap()
+                    .contains("Staged parent integration"),
+                "Advance must not export its staged accepted-history effect as accepted content"
+            );
+        }
+        world.finish().await;
+    }
+}
+
+async fn verify_unbound_durable_restart(agent: bool) {
+    // This recovery scenario intentionally owns a second, graph-only sibling call.
+    let world = World::build_call_mode("durable-unbound", false, false, Some(agent), true).await;
+    assert!(world.child.graph_node_id.is_none());
+    let source = world
+        .graph
+        .writer_for_subgraph(
+            relayer_graph_core::NodeId::new(world.invocation.source_interaction_node_id).unwrap(),
+        )
+        .await
+        .unwrap();
+    let sibling = source
+        .prepare_recursive_invocation(
+            relayer_graph_core::ActionId::new(world.invocation.source_action_id).unwrap(),
+            "unrecorded-sibling",
+        )
+        .await
+        .unwrap()
+        .0;
+    world.restart().await;
+    let recovered = world.product.get_interaction(world.child.id).await.unwrap();
+    assert_eq!(recovered.graph_node_id, Some(world.completion_id));
+    // Existing startup semantics fail agent work but preserve an unlaunched
+    // user call as submitted. Neither branch may substitute another call.
+    assert_eq!(
+        recovered.completion_status,
+        if agent { "failed" } else { "submitted" }
+    );
+    assert_eq!(
+        world
+            .runtime
+            .completion_current(world.completion_id)
+            .await
+            .unwrap()
+            .lifecycle,
+        if agent {
+            relayer_graph_core::CompletionLifecycle::Failed
+        } else {
+            relayer_graph_core::CompletionLifecycle::Active
+        }
+    );
+    assert_eq!(
+        world
+            .runtime
+            .completion_current(sibling.id.value())
+            .await
+            .unwrap()
+            .lifecycle,
+        relayer_graph_core::CompletionLifecycle::Active
+    );
+    assert_eq!(
+        source
+            .action_invocations(
+                relayer_graph_core::ActionId::new(world.invocation.source_action_id).unwrap()
+            )
+            .await
+            .unwrap()
+            .len(),
+        2
+    );
+    assert_eq!(*world.harness.prov.lock().unwrap(), "none");
+    world.restart().await;
+    assert_eq!(
+        world
+            .product
+            .get_interaction(world.child.id)
+            .await
+            .unwrap()
+            .graph_node_id,
+        Some(world.completion_id)
+    );
 }
 
 /// An unbound child whose saved model no longer validates is still located and failed at

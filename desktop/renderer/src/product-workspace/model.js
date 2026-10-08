@@ -1,3 +1,5 @@
+import { singleCallResultDestination } from "../action-invocation-state.js";
+
 export function interactionForThread(state, thread) {
   const interactions = (state.interactions || []).filter((interaction) => (
     String(interaction.threadId) === String(thread?.id)
@@ -121,10 +123,12 @@ export function rootLayerPath(interaction) {
   }];
 }
 
-export function appendLayerPath(path, action, sourceNode) {
-  if (action?.kind !== "navigate" || action.targetLayerId == null) return [...(path || [])];
+export function appendLayerPath(path, action, sourceNode, invocationResultLayerId = null) {
+  const layerId = action?.kind === "navigate" ? action.targetLayerId
+    : action?.kind === "invoke" && action.reusable === false ? invocationResultLayerId : null;
+  if (layerId == null) return [...(path || [])];
   return [...(path || []), {
-    layerId: action.targetLayerId,
+    layerId,
     label: sourceNode?.title || action.label || "Layer",
     icon: sourceNode?.icon || sourceNode?.metadata?.relayer?.icon || null,
     actionId: action.id ?? null,
@@ -132,7 +136,7 @@ export function appendLayerPath(path, action, sourceNode) {
   }];
 }
 
-export async function restoreLayerPath(interaction, navigationPath, loadLayer) {
+export async function restoreLayerPath(interaction, navigationPath, loadLayer, invocationState = {}) {
   const rootLayer = interaction?.completionOutput?.rootLayer;
   const path = rootLayerPath(interaction);
   if (!rootLayer || !path.length || !Array.isArray(navigationPath)) return null;
@@ -140,12 +144,12 @@ export async function restoreLayerPath(interaction, navigationPath, loadLayer) {
   let layer = rootLayer;
   for (const step of navigationPath.slice(1)) {
     const action = layer.actions?.find((candidate) => sameId(candidate.id, step.viaActionId));
-    if (
-      action?.kind !== "navigate"
-      || !sameId(action.targetLayerId, step.layerId)
-    ) return null;
-    const sourceNode = layer.nodes?.find((candidate) => sameId(candidate.id, action.sourceNodeId));
-    path.push(appendLayerPath([], action, sourceNode)[0]);
+    const sourceNode = layer.nodes?.find((candidate) => sameId(candidate.id, action?.sourceNodeId));
+    const result = action?.kind === "invoke" && sourceNode
+      ? singleCallResultDestination(invocationState, action, sourceNode, layer.actions ?? []) : null;
+    if (action?.kind === "navigate" ? !sameId(action.targetLayerId, step.layerId)
+      : !result || !sameId(result.layerId, step.layerId)) return null;
+    path.push(appendLayerPath([], action, sourceNode, result?.layerId)[0]);
     layer = await loadLayer(step.layerId);
   }
   return { layer, layerPath: path };

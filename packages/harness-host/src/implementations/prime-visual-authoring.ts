@@ -7,7 +7,7 @@ const presentation = { variant: z.enum(["chip", "pill", "wide", "card"]).optiona
 const common = { clientKey: identity, label: z.string(), sourceLayer: layer, ...presentation };
 const action = z.discriminatedUnion("kind", [
   z.object({ ...common, kind: z.literal("navigate"), sourceLayer: layer.optional(), relation: z.enum(["expand", "reference"]), target: z.union([z.number().int().positive(), layer]) }).strict(),
-  z.object({ ...common, kind: z.literal("invoke"), interactionText: z.string() }).strict(),
+  z.object({ ...common, kind: z.literal("invoke"), interactionText: z.string(), reusable: z.boolean().optional(), inputActions: z.array(z.union([z.number().int().positive(), z.object({ inputActionClientKey: identity }).strict()])).max(128).optional() }).strict(),
   z.object({ ...common, kind: z.literal("input"), control: z.enum(["text", "single_select", "multi_select"]), prompt: z.string(), options: z.array(z.object({ key: z.string(), label: z.string() }).strict()).max(50).optional(), minimumSelections: z.number().int().optional() }).strict(),
 ]);
 const binding = z.discriminatedUnion("kind", [
@@ -64,13 +64,36 @@ export class PrimeVisualAuthoring {
       value.nodes.map((key) => key === node.clientKey ? node : new NodeObject("", "", "", "concept", key)),
       [], new LayerLayoutObject([], "default"), value.clientKey,
     );
+    const declarations = new Map<string, ActionObject>();
+    const signatures = new Map<string, string>();
+    try {
+      const actions = input.detail.components.flatMap((component) => component.markup.values).filter((value) => value.kind === "action");
+      for (const value of actions) {
+        const declaration = value.action;
+        const signature = JSON.stringify(declaration);
+        if (signatures.has(declaration.clientKey) && signatures.get(declaration.clientKey) !== signature) throw new Error("Conflicting action declarations share a clientKey");
+        signatures.set(declaration.clientKey, signature);
+        if (!declarations.has(declaration.clientKey)) declarations.set(declaration.clientKey, { ...declaration,
+          ...(declaration.sourceLayer === undefined ? {} : { sourceLayer: makeLayer(declaration.sourceLayer) }),
+          ...(declaration.kind === "navigate" ? { target: typeof declaration.target === "number" ? declaration.target : makeLayer(declaration.target) } : {}),
+        } as ActionObject);
+      }
+      for (const value of actions) {
+        if (value.action.kind !== "invoke") continue;
+        const inputs = (value.action.inputActions ?? []).map((reference) => {
+          if (typeof reference === "number") return reference;
+          const input = declarations.get(reference.inputActionClientKey);
+          if (!input || input.kind !== "input") throw new Error("Invoke must reference a mounted Input declaration");
+          return input;
+        });
+        const native = declarations.get(value.action.clientKey)!;
+        if (native.kind === "invoke") declarations.set(value.action.clientKey, { ...native, inputActions: inputs });
+      }
+    } catch (error) { return authoringFailure(error, false); }
     const makeBinding = (value: z.infer<typeof binding>): unknown => {
       if (value.kind === "asset") return assetRef(value.logicalId);
       if (value.kind === "link") return detailCapability.externalLink(value.key, value.href);
-      const declaration = value.action;
-      const native = { ...declaration, ...(declaration.sourceLayer === undefined ? {} : { sourceLayer: makeLayer(declaration.sourceLayer) }),
-        ...(declaration.kind === "navigate" ? { target: typeof declaration.target === "number" ? declaration.target : makeLayer(declaration.target) } : {}),
-      } as ActionObject;
+      const native = declarations.get(value.action.clientKey)!;
       if (native.kind === "invoke") return detailCapability.invoke(value.key, native);
       if (native.kind === "input") return detailCapability.input(value.key, native);
       return native.relation === "expand" ? detailCapability.expand(value.key, { ...native, relation: "expand" }) : detailCapability.reference(value.key, { ...native, relation: "reference" });

@@ -73,6 +73,74 @@ describe("scoped graph authoring", () => {
   });
 
   afterEach(() => vi.unstubAllGlobals());
+  it("captures scoped Input bindings before queued transport and writes canonical refs despite later mutation", async () => {
+    const fixture = wire();
+    const entered = gate();
+    const release = gate();
+    fixture.fetch.mockImplementation(async (url, init) => {
+      const path = new URL(url).pathname;
+      const body = JSON.parse(String(init.body));
+      fixture.requests.push({ path, body });
+      if (path.endsWith("/nodes")) {
+        entered.release();
+        await release.promise;
+      }
+      return new Response(JSON.stringify(fixture.reply(path, body)));
+    });
+    const author = client().authoring("inputs");
+    const layer = author.layer("plan");
+    const node = layer.node("plan", { icon: "compass", title: "Plan", detail: "Inputs" });
+    const options = [{ key: "lisbon", label: "Lisbon" }];
+    const input = layer.action("destination", node, { kind: "input", label: "Destination", control: "single_select", prompt: "Destination", options });
+    const invoke = layer.action("analyze", node, { kind: "invoke", label: "Analyze", interactionText: "Analyze", inputActions: [input] });
+    layer.layout([[node, .5, .5]], { edgeShape: "default" });
+    const pending = author.write(layer);
+    await entered.promise;
+    options[0]!.label = "Late option";
+    Reflect.set(input, "label", "Late Input");
+    Reflect.set(input, "sourceLayer", new Object());
+    Reflect.set(input, "ref", { id: 999 });
+    Reflect.set(invoke, "inputActions", [999]);
+    Reflect.set(invoke, "interactionText", "Late instruction");
+    release.release();
+    const result = await pending;
+    const inputWrite = fixture.requests.find(({ body }) => body.kind === "input")!;
+    const invocation = fixture.requests.find(({ body }) => body.kind === "invoke")!;
+    expect(inputWrite.body).toMatchObject({ label: "Destination", options: [{ key: "lisbon", label: "Lisbon" }] });
+    expect(invocation.body.interactionText).toBe("Analyze");
+    expect(invocation.body.inputActionIds).toEqual([result.actions.find(action => action.kind === "input")!.id]);
+    expect(invocation.body.sourceLayerId).toBe(inputWrite.body.sourceLayerId);
+    expect(invocation.body.reusable).toBe(false);
+    expect(input.ref?.id).toBe(result.actions.find(action => action.kind === "input")!.id);
+  });
+
+  it("rejects forged, cross-source and cross-layer scoped Input declarations before transport", async () => {
+    for (const invalidBinding of ["forged", "cross-source", "cross-layer", "changed-layer"] as const) {
+      const fixture = wire();
+      const author = client().authoring(`invalid-${invalidBinding}`);
+      const layer = author.layer("plan");
+      const node = layer.node("plan", { icon: "compass", title: "Plan", detail: "Inputs" });
+      const input = layer.action("destination", node, { kind: "input", label: "Destination", control: "text", prompt: "Destination" });
+      let binding = input;
+      if (invalidBinding === "forged") binding = { ...input, ref: { id: 999 } } as typeof input;
+      if (invalidBinding === "cross-source") {
+        const other = layer.node("other", { icon: "info", title: "Other", detail: "Other" });
+        binding = layer.action("other-input", other, { kind: "input", label: "Other", control: "text", prompt: "Other" });
+        layer.layout([[node, .2, .5], [other, .8, .5]], { edgeShape: "default" });
+      } else layer.layout([[node, .5, .5]], { edgeShape: "default" });
+      if (invalidBinding === "cross-layer") {
+        const other = author.layer("other");
+        const owner = other.node("owner", { icon: "info", title: "Other", detail: "Other" });
+        binding = other.action("input", owner, { kind: "input", label: "Other", control: "text", prompt: "Other" });
+        other.layout([[owner, .5, .5]], { edgeShape: "default" });
+      }
+      if (invalidBinding === "changed-layer") Reflect.set(input, "sourceLayer", author.layer("other").object);
+      layer.action("analyze", node, { kind: "invoke", label: "Analyze", interactionText: "Analyze", inputActions: [binding] });
+      await expect(author.write(layer)).rejects.toThrow(invalidBinding === "changed-layer" ? "containing source layer" : "same source Node and scoped Layer");
+      expect(fixture.requests).toEqual([]);
+    }
+  });
+
   it("captures a bound two-layer program before queued transport and preserves all selected aliases", async () => {
     const fixture = wire();
     const entered = gate();

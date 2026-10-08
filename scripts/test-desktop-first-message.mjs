@@ -15,6 +15,13 @@ import { RelayerAppServerService } from "../desktop/main/services/relayer-app-se
 import { createWindowFactory } from "../desktop/main/window.mjs";
 
 const repositoryRoot = resolve(import.meta.dirname, "..");
+function invocationResultQuery(interactionId) {
+  const selector = JSON.stringify(`[data-invocation-result-interaction-id="${interactionId}"]`);
+  return `(document.querySelector(${selector}) ?? document.querySelector("[data-node-detail-runtime]")?.shadowRoot?.querySelector(${selector}))`;
+}
+function invocationDestinationReady(layerId) {
+  return `import("./src/state.js").then(({appState}) => String(appState.visibleLayer?.layer?.id) === "${layerId}" && [...document.querySelectorAll(".breadcrumb-label")].some(label => label.textContent === "Results store"))`;
+}
 const screenshotPath = process.env.RELAYER_FIRST_MESSAGE_SCREENSHOT
   || join(repositoryRoot, ".relayer", "evidence", "first-message-enter-smoke.png");
 const evalScreenshotPath = process.env.RELAYER_NAVIGATION_EVAL_SCREENSHOT
@@ -236,7 +243,8 @@ function requiredNavigationFixtureFactory(configuration) {
     }
     const source = input.contexts[0].targetNode;
     const before = await graph.getNodePresentation(source.id);
-    if (before.actions.length !== 1 || before.actions[0].kind !== "navigate") throw new Error("Fixture expected one preserved resolved control.");
+    const callable = before.actions.filter((action) => action.kind === "invoke" && action.targetLayerId == null);
+    if (callable.length !== 1 || before.actions.some((action) => !["invoke", "navigate"].includes(action.kind))) throw new Error("Fixture expected one preserved reusable callable and its prior analysis controls.");
     const answer = new NodeObject("info", "Attached response", "The results store retains completed work.", "concept", "attached-answer");
     await graph.submitNode(answer);
     const response = new LayerObject([answer], [], new LayerLayoutObject([new NodePlacementObject(answer, .5, .5)], "default"), "attached-response");
@@ -251,12 +259,17 @@ function requiredNavigationFixtureFactory(configuration) {
     }
     const addition = {kind:"navigate",relation:"reference",label:"Open attached response",target:response,clientKey:"required-response"};
     await graph.addAction(source.id, addition);
-    const old = before.actions[0];
     const presentation = new NodeObject(source.icon, source.title, source.detail, before.node.kind, before.node.clientKey);
-    // Reconstruct exact binding provenance only; this layer is never submitted.
-    const sourceLayer = new LayerObject([presentation], [], new LayerLayoutObject([new NodePlacementObject(presentation, .5, .5)], "default"), old.sourceLayerClientKey);
-    const preserved = {kind:"invoke",label:old.label,interactionText:"Propose the most useful next improvement to this task system.",clientKey:old.clientKey,sourceLayer};
-    presentation.detailAuthoring.setComponent("continuation", html`<p>Completed tasks remain in the results store.</p><button gc=${detailCapability.invoke("preserved", preserved)}>Plan the next improvement</button><button gc=${detailCapability.reference("required", addition)}>Open attached response</button>`);
+    presentation.detailAuthoring.setComponent("continuation", html`<p>Completed tasks remain in the results store.</p><button gc=${detailCapability.reference("required", addition)}>Open attached response</button>`);
+    for (const old of before.actions) {
+      // Reconstruct exact binding provenance only; this layer is never submitted.
+      const sourceLayer = old.sourceLayerId == null ? undefined : new LayerObject([presentation], [], new LayerLayoutObject([new NodePlacementObject(presentation, .5, .5)], "default"), old.sourceLayerClientKey);
+      const preserved = {kind:old.kind,label:old.label,clientKey:old.clientKey,...(sourceLayer ? {sourceLayer} : {}),...(old.kind === "invoke" ? {interactionText:old.interactionText} : {relation:old.relation,target:old.targetLayerId})};
+      const binding = old.kind === "invoke" ? detailCapability.invoke(`preserved-${old.id}`, preserved) : old.relation === "reference" ? detailCapability.reference(`preserved-${old.id}`, preserved) : detailCapability.expand(`preserved-${old.id}`, preserved);
+      presentation.detailAuthoring.setComponent(`preserved-${old.id}`, old.kind === "invoke"
+        ? html`<section><button gc=${binding}>Plan the next improvement</button></section>`
+        : html`<section><button gc=${binding}>Earlier overall analysis</button></section>`);
+    }
     await graph.replaceNodePresentation(source.id, before.revision, presentation);
     await graph.submit(context.inputGraph.id);
     } catch (error) { attachedFixtureFailure = `${error.stack ?? error} ${JSON.stringify(error.issues ?? [])}`; throw error; }
@@ -266,7 +279,7 @@ function requiredNavigationFixtureFactory(configuration) {
 
 async function activateRequiredResponse(contents, sourceInteractionId, nodeId, responseNodeId, responseLayerId, evidenceName) {
   await waitFor("required response workspace initialization", () => contents.executeJavaScript(`document.querySelectorAll("#turnPopover .interaction-graph-node").length === 5 && document.querySelectorAll(".graph-node").length > 0`));
-  await contents.executeJavaScript(`import("./src/threads.js").then(({ selectTurnById }) => selectTurnById(${sourceInteractionId}))`);
+  await contents.executeJavaScript(`import("./src/threads.js").then(({ selectTurnById }) => selectTurnById(${sourceInteractionId}, { responseRoot: true }))`);
   await waitFor("attached source node", () => contents.executeJavaScript(`Boolean(document.querySelector('[data-node="${nodeId}"]'))`));
   await contents.executeJavaScript(`document.querySelector('[data-node="${nodeId}"]').click()`);
   const buttonExpression = `[...document.querySelector("[data-node-detail-runtime]")?.shadowRoot?.querySelectorAll("button") || []].find(button => button.textContent === "Open attached response")`;
@@ -447,9 +460,13 @@ async function run() {
   const sourceInteraction = accepted.interactions[0];
   const invokeAction = sourceInteraction.completionOutput.rootLayer.actions.find((action) => action.kind === "invoke");
   if (!invokeAction) throw new Error("The deterministic root did not expose an invoke action.");
+  const sourcePackage = sourceInteraction.completionOutput.rootLayer.nodes.find((node) => node.id === invokeAction.sourceNodeId)?.authoredDetail;
+  const sourceCallableMount = sourcePackage?.mounts.find((mount) => mount.kind === "capability" && mount.capability?.kind === "invoke" && mount.capability.action?.clientKey === invokeAction.clientKey);
+  if (typedPermissions && !sourceCallableMount) throw new Error("The compiled source did not bind its exact callable.");
+  const sourceCallableSelector = JSON.stringify(`[data-gc-mount="${sourceCallableMount?.id}"]`);
   const unresolvedActionVisible = `(() => {
     const inspector = document.querySelector("#inspector");
-    const button = (document.querySelector("[data-node-detail-runtime]")?.shadowRoot?.querySelector("button") ?? (${typedPermissions} ? null : document.querySelector('[data-action-id="${invokeAction.id}"]')));
+    const button = (document.querySelector("[data-node-detail-runtime]")?.shadowRoot?.querySelector(${sourceCallableSelector}) ?? (${typedPermissions} ? null : document.querySelector('[data-action-id="${invokeAction.id}"]')));
     return !inspector?.classList.contains("hidden")
       && document.querySelector("#detailTitle")?.textContent === "Results store"
       && Boolean(button && button.offsetParent !== null)
@@ -466,7 +483,7 @@ async function run() {
     unresolved: await captureEvidence(webContents, "01-unresolved", { settle: false }),
   };
 
-  await webContents.executeJavaScript(`(document.querySelector("[data-node-detail-runtime]")?.shadowRoot?.querySelector("button") ?? (${typedPermissions} ? null : document.querySelector('[data-action-id="${invokeAction.id}"]')))?.click()`);
+  await webContents.executeJavaScript(`(document.querySelector("[data-node-detail-runtime]")?.shadowRoot?.querySelector(${sourceCallableSelector}) ?? (${typedPermissions} ? null : document.querySelector('[data-action-id="${invokeAction.id}"]')))?.click()`);
   const runningInteraction = await waitFor("the running invoked interaction", async () => {
     const detail = await productRequest(productSession, `/api/threads/${threadId}`);
     return detail.interactions.find((interaction) => interaction.completionStatus === "running");
@@ -481,8 +498,8 @@ async function run() {
     `document.querySelector("#interactionText")?.textContent === "Show the deterministic task system."`,
   ));
   await webContents.executeJavaScript(`document.querySelector('[data-node="${invokeAction.sourceNodeId}"]')?.click()`);
-  await waitFor("the visible disabled source invoke while its result runs", () => webContents.executeJavaScript(`(() => {
-    const button = (document.querySelector("[data-node-detail-runtime]")?.shadowRoot?.querySelector("button") ?? (${typedPermissions} ? null : document.querySelector('[data-action-id="${invokeAction.id}"]')));
+  await waitFor("the visible disabled Invocation result while its child runs", () => webContents.executeJavaScript(`(() => {
+    const button = document.querySelector('[data-invocation-result-interaction-id="${runningInteraction.id}"]');
     return document.querySelector("#interactionText")?.textContent === "Show the deterministic task system."
       && !document.querySelector("#inspector")?.classList.contains("hidden")
       && document.querySelector("#detailTitle")?.textContent === "Results store"
@@ -490,7 +507,7 @@ async function run() {
       && button?.disabled === true;
   })()`));
   invokeEvidencePaths.runningDisabled = await captureEvidence(webContents, "02-running-disabled");
-  if (typedPermissions) await webContents.executeJavaScript(`window.__runningInvokeButton = document.querySelector("[data-node-detail-runtime]").shadowRoot.querySelector("button")`);
+  if (typedPermissions) await webContents.executeJavaScript(`window.__runningInvokeButton = document.querySelector("[data-node-detail-runtime]").shadowRoot.querySelector(${sourceCallableSelector})`);
   await writeFile(invokeGatePath, "release");
 
   const invokedDetail = await waitFor("the invoked result to be accepted", async () => {
@@ -510,39 +527,47 @@ async function run() {
   ));
   const invokedRootLayerId = invokedResult?.completionOutput?.rootLayer?.layer?.id;
   if (
-    canonicalInvoke?.kind !== (typedPermissions ? "navigate" : "invoke")
-    || canonicalInvoke.targetLayerId == null
-    || String(canonicalInvoke.targetLayerId) !== String(invokedRootLayerId)
+    canonicalInvoke?.kind !== "invoke"
+    || canonicalInvoke.targetLayerId != null
+    || canonicalInvoke.interactionText !== invokeAction.interactionText
+    || JSON.stringify(canonicalInvoke) !== JSON.stringify(invokeAction)
   ) {
-    throw new Error("The accepted source projection did not expose the invoked result root as its durable target.");
+    throw new Error("The accepted InvokeAction definition changed after its child Returned.");
   }
-  const canonicalDestination = await productRequest(
-    productSession,
-    `/api/threads/${threadId}/interactions/${sourceInteraction.id}/actions/${invokeAction.id}/destination`,
-  );
-  if (
-    String(canonicalDestination.interactionId) !== String(invokedResult.id)
-    || String(canonicalDestination.rootLayerId) !== String(invokedRootLayerId)
-    || String(canonicalDestination.targetLayerId) !== String(canonicalInvoke.targetLayerId)
-  ) {
-    throw new Error("The resolved invoke destination did not identify the accepted result interaction and root.");
-  }
-  await waitFor("the visible source invoke to refresh as resolved navigation", () => webContents.executeJavaScript(`(() => {
-    const button = (document.querySelector("[data-node-detail-runtime]")?.shadowRoot?.querySelector("button") ?? (${typedPermissions} ? null : document.querySelector('[data-action-id="${invokeAction.id}"]')));
+  const canonicalCall = canonicalSourceDetail.actionInvocations.find((call) => String(call.actionId) === String(invokeAction.id) && String(call.resultInteractionId) === String(invokedResult.id));
+  if (!canonicalCall?.durable || canonicalCall.resultCompletionStatus !== "accepted" || invokedRootLayerId == null) throw new Error("The durable Invocation did not expose its accepted child result separately.");
+  await waitFor("the visible Invocation result to become navigable", () => webContents.executeJavaScript(`(() => {
+    const button = ${invocationResultQuery(invokedResult.id)};
     return document.querySelector("#interactionText")?.textContent === "Show the deterministic task system."
       && !document.querySelector("#inspector")?.classList.contains("hidden")
       && document.querySelector("#detailTitle")?.textContent === "Results store"
       && Boolean(button && button.offsetParent !== null)
-      && button?.disabled === false
-      && (button.getRootNode() instanceof ShadowRoot || (button?.dataset.reviewKind === "navigate-action"
-      && button?.dataset.reviewTargetLayerId === "${canonicalInvoke.targetLayerId}"));
+      && button?.disabled === false;
   })()`)).catch(async (error) => { process.stderr.write(await webContents.executeJavaScript(`JSON.stringify({text:document.querySelector("#interactionText")?.textContent,title:document.querySelector("#detailTitle")?.textContent,inspector:document.querySelector("#inspector")?.className,shadow:document.querySelector("[data-node-detail-runtime]")?.shadowRoot?.innerHTML})`) + "\n"); throw error; });
-  if (typedPermissions && !await webContents.executeJavaScript(`window.__runningInvokeButton === document.querySelector("[data-node-detail-runtime]").shadowRoot.querySelector("button")`)) throw new Error("Acceptance replaced the mounted compiled button.");
+  const integratedPackage = canonicalSource?.completionOutput?.rootLayer?.nodes?.find((node) => node.id === invokeAction.sourceNodeId)?.authoredDetail;
+  const integratedCallableMount = integratedPackage?.mounts.find((mount) => mount.kind === "capability" && mount.capability?.kind === "invoke" && mount.capability.action?.clientKey === invokeAction.clientKey);
+  const integratedCallableSelector = JSON.stringify(`[data-gc-mount="${integratedCallableMount?.id}"]`);
+  if (typedPermissions) {
+    if (!integratedCallableMount || JSON.stringify(integratedCallableMount.capability.action) !== JSON.stringify(sourceCallableMount.capability.action)) throw new Error("Integration changed the preserved callable's semantic binding.");
+    if (integratedPackage.integritySha256 === sourcePackage.integritySha256) {
+      if (!await webContents.executeJavaScript(`window.__runningInvokeButton === document.querySelector("[data-node-detail-runtime]").shadowRoot.querySelector(${integratedCallableSelector})`)) throw new Error("Capability-only acceptance replaced the mounted callable.");
+    } else {
+      const integration = canonicalSource.completionOutput.rootLayer.actions.find((action) => action.sourceNodeId === invokeAction.sourceNodeId && action.kind === "navigate" && action.targetLayerId === invokedRootLayerId);
+      const mount = integratedPackage.mounts.find((item) => item.kind === "capability" && item.capability?.kind === "reference" && item.capability.action?.clientKey === integration?.clientKey);
+      if (!integration || !mount || !await webContents.executeJavaScript(`Boolean(document.querySelector("[data-node-detail-runtime]")?.shadowRoot?.querySelector(${JSON.stringify(`[data-gc-mount="${mount?.id}"]`)}))`)) throw new Error("The new presentation did not expose its exact enclosing-analysis integration.");
+      await webContents.executeJavaScript(`document.querySelector("[data-node-detail-runtime]").shadowRoot.querySelector(${JSON.stringify(`[data-gc-mount="${mount.id}"]`)}).click()`);
+      await waitFor("compiled enclosing-analysis control to open the exact child response", () => webContents.executeJavaScript(`import("./src/state.js").then(({appState}) => String(appState.visibleLayer?.layer?.id) === "${invokedRootLayerId}")`));
+      if ((await productRequest(productSession, `/api/threads/${threadId}`)).interactions.length !== canonicalSourceDetail.interactions.length) throw new Error("Reading the integrated analysis launched a new completion.");
+      await webContents.executeJavaScript(`import("./src/threads.js").then(({navigateHistory}) => navigateHistory("back"))`);
+      await waitFor("Back from integrated analysis to restore the source layer", () => webContents.executeJavaScript(`import("./src/state.js").then(({appState}) => String(appState.visibleLayer?.layer?.id) === "${canonicalSource.completionOutput.rootLayer.layer.id}")`));
+    }
+    if (!await webContents.executeJavaScript(`Boolean(document.querySelector("[data-node-detail-runtime]")?.shadowRoot?.querySelector(${integratedCallableSelector}))`)) throw new Error("The integrated presentation lost its preserved callable control.");
+  }
   invokeEvidencePaths.resolved = await captureEvidence(webContents, "03-resolved");
 
-  await webContents.executeJavaScript(`(document.querySelector("[data-node-detail-runtime]")?.shadowRoot?.querySelector("button") ?? (${typedPermissions} ? null : document.querySelector('[data-action-id="${invokeAction.id}"]')))?.click()`);
+  await webContents.executeJavaScript(`${invocationResultQuery(invokedResult.id)}?.click()`);
   await waitFor("the resolved cross-interaction destination", () => webContents.executeJavaScript(
-    `${turnReady(2, 2)}`,
+    invocationDestinationReady(invokedRootLayerId),
   ));
   invokeEvidencePaths.crossInteraction = await captureEvidence(webContents, "04-cross-interaction-destination");
   await webContents.executeJavaScript(`import("./src/threads.js").then(({ navigateHistory }) => navigateHistory("back"))`);
@@ -726,12 +751,12 @@ async function run() {
   await evalContents.executeJavaScript(`import("./src/threads.js").then(({ selectTurnById }) => selectTurnById(${sourceInteraction.id}))`);
   await evalContents.executeJavaScript(`document.querySelector('[data-node="${invokeAction.sourceNodeId}"]')?.click()`);
   await waitFor("the Eval resolved invoke action", () => evalContents.executeJavaScript(`(() => {
-    const button = (document.querySelector("[data-node-detail-runtime]")?.shadowRoot?.querySelector("button") ?? (${typedPermissions} ? null : document.querySelector('[data-action-id="${invokeAction.id}"]')));
+    const button = ${invocationResultQuery(invokedResult.id)};
     return Boolean(button && button.offsetParent !== null && button.disabled === false);
   })()`));
-  await evalContents.executeJavaScript(`(document.querySelector("[data-node-detail-runtime]")?.shadowRoot?.querySelector("button") ?? (${typedPermissions} ? null : document.querySelector('[data-action-id="${invokeAction.id}"]')))?.click()`);
+  await evalContents.executeJavaScript(`${invocationResultQuery(invokedResult.id)}?.click()`);
   await waitFor("the Eval resolved invoke destination", () => evalContents.executeJavaScript(
-    `document.querySelector("#interactionText")?.textContent === "Propose the most useful next improvement to this task system."`,
+    invocationDestinationReady(invokedRootLayerId),
   ));
   invokeEvidencePaths.evalCrossInteraction = await captureEvidence(evalContents, "06-eval-cross-interaction-destination");
   await evalContents.executeJavaScript(`import("./src/threads.js").then(({ selectTurnById }) => selectTurnById(${latest.id}))`);
@@ -874,6 +899,11 @@ async function run() {
     await window.loadURL(`${reopenedProductSession.origin}/?threadId=${threadId}`);
     const reopenedContents = window.webContents;
     reopenedContents.setBackgroundThrottling(false);
+    const reopenedDetail = await productRequest(reopenedProductSession, `/api/threads/${threadId}`);
+    const reopenedPackage = reopenedDetail.interactions.find((interaction) => interaction.id === sourceInteraction.id)?.completionOutput?.rootLayer?.nodes?.find((node) => node.id === invokeAction.sourceNodeId)?.authoredDetail;
+    const reopenedCallableMount = reopenedPackage?.mounts.find((mount) => mount.kind === "capability" && mount.capability?.kind === "invoke" && mount.capability.action?.clientKey === invokeAction.clientKey);
+    if (!reopenedCallableMount) throw new Error("Reopened presentation lost the exact preserved callable binding.");
+    const reopenedCallableSelector = JSON.stringify(`[data-gc-mount="${reopenedCallableMount.id}"]`);
     await waitFor("reopened thread", () => reopenedContents.executeJavaScript(`${turnReady(5, 5)}`));
     await reopenedContents.executeJavaScript(`import("./src/threads.js").then(({ selectTurnById }) => selectTurnById(${sourceInteraction.id}))`);
     // Select the other occurrence through the source's queue expansion.
@@ -883,10 +913,10 @@ async function run() {
     await reopenedContents.executeJavaScript(`document.querySelector('[data-action-id="${queueAction.id}"]')?.click()`);
     await waitFor("second source occurrence", () => reopenedContents.executeJavaScript(`Boolean(document.querySelector('[data-node="${invokeAction.sourceNodeId}"]')) && [...document.querySelectorAll(".graph-node b")].some(node => node.textContent === "Waiting tasks")`));
     await reopenedContents.executeJavaScript(`document.querySelector('[data-node="${invokeAction.sourceNodeId}"]')?.click()`);
-    await waitFor("reopened compiled invoke binding", () => reopenedContents.executeJavaScript(`(() => { const button=document.querySelector("[data-node-detail-runtime]")?.shadowRoot?.querySelector("button"); return Boolean(button && !button.disabled && button.getBoundingClientRect().width > 0 && button.getBoundingClientRect().height > 0 && !document.querySelector("#inspector")?.classList.contains("hidden") && document.querySelector(".graph-node.selected")?.dataset.node === "${invokeAction.sourceNodeId}"); })()`)).catch(async (error) => { process.stderr.write(await reopenedContents.executeJavaScript(`JSON.stringify({body:document.body.innerText,detail:document.querySelector("#inspector")?.innerHTML,shadow:document.querySelector("[data-node-detail-runtime]")?.shadowRoot?.innerHTML})`) + "\n"); throw error; });
+    await waitFor("reopened compiled invoke binding", () => reopenedContents.executeJavaScript(`(() => { const button=document.querySelector("[data-node-detail-runtime]")?.shadowRoot?.querySelector(${reopenedCallableSelector}); return Boolean(button && !button.disabled && button.getBoundingClientRect().width > 0 && button.getBoundingClientRect().height > 0 && !document.querySelector("#inspector")?.classList.contains("hidden") && document.querySelector(".graph-node.selected")?.dataset.node === "${invokeAction.sourceNodeId}"); })()`)).catch(async (error) => { process.stderr.write(await reopenedContents.executeJavaScript(`JSON.stringify({body:document.body.innerText,detail:document.querySelector("#inspector")?.innerHTML,shadow:document.querySelector("[data-node-detail-runtime]")?.shadowRoot?.innerHTML})`) + "\n"); throw error; });
     invokeEvidencePaths.reopenedSecondOccurrence = await captureEvidence(reopenedContents, "07-reopened-second-occurrence");
-    await reopenedContents.executeJavaScript(`document.querySelector("[data-node-detail-runtime]").shadowRoot.querySelector("button").click()`);
-    await waitFor("reopened compiled navigation destination", () => reopenedContents.executeJavaScript(`document.querySelector("#interactionText")?.textContent === "Propose the most useful next improvement to this task system."`));
+    await reopenedContents.executeJavaScript(`${invocationResultQuery(invokedResult.id)}?.click()`);
+    await waitFor("reopened Invocation result destination and parent breadcrumb", () => reopenedContents.executeJavaScript(invocationDestinationReady(invokedRootLayerId)));
     const afterNavigation = await productRequest(reopenedProductSession, `/api/threads/${threadId}`);
     if (afterNavigation.interactions.length !== 5) throw new Error("Reopened compiled navigation launched execution.");
     invokeEvidencePaths.reopenedDestination = await captureEvidence(reopenedContents, "08-reopened-destination");

@@ -132,6 +132,7 @@ export async function resolveNavigationPresentation(entry, {
       restorationInteraction,
       normalized.navigationPath,
       loadAcceptedLayer,
+      { interactions, actionInvocations: detail.actionInvocations ?? [] },
     );
     if (!restored) {
       throw new Error("Navigation history layer path is no longer available.");

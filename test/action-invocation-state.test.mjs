@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
+import { appendLayerPath } from "../desktop/renderer/src/product-workspace/model.js";
 import {
   actionCanRetry,
+  recoverActionInvocation,
+  mergeActionInvocation,
   actionWasInvoked,
   reconcileActionTransitions,
   visibleLayerAfterRefresh,
@@ -8,6 +11,50 @@ import {
 } from "../desktop/renderer/src/action-invocation-state.js";
 
 describe("durable action invocation renderer state", () => {
+  it("retains the canonical single-call Invoke breadcrumb without changing its definition", () => {
+    const action = { id: 2, kind: "invoke", sourceNodeId: 7, label: "Analyze", reusable: false };
+    const source = { id: 7, title: "Comparison" };
+    expect(appendLayerPath([], action, source, 201)).toEqual([{ layerId: 201, label: "Comparison", icon: null, actionId: 2, sourceNodeId: 7 }]);
+    expect(action.targetLayerId).toBeUndefined();
+    expect(appendLayerPath([], { ...action, reusable: true }, source, 201)).toEqual([]);
+    expect(appendLayerPath([], action, source)).toEqual([]);
+  });
+  it("locks explicit single-call sources without reinterpreting historical durable call flags", () => {
+    for (const resultCompletionStatus of ["submitted", "running", "accepted", "failed", "stopped"]) {
+      const calls = [{ actionId: 2, reusable: true, resultCompletionStatus }];
+      expect(actionWasInvoked(calls, [], 1, 2, false)).toBe(true);
+      expect(actionWasInvoked(calls, [], 1, 2, true)).toBe(false);
+      expect(actionWasInvoked(calls, [], 1, 2, undefined)).toBe(false);
+      expect(actionWasInvoked(calls, [], 1, 3, false)).toBe(false);
+    }
+  });
+  it("recovers the exact gesture key even when another call completes concurrently", () => {
+    const first = {sourceInteractionId:1,actionId:2,resultInteractionId:10,reusable:true,invocationKey:"call-a"};
+    const other = {...first,resultInteractionId:11,invocationKey:"call-b"};
+    expect(recoverActionInvocation([other,first],1,2,"call-a")).toBe(first);
+    expect(recoverActionInvocation([other],1,2,"call-a")).toBeUndefined();
+    expect(mergeActionInvocation([first],other)).toEqual([first,other]);
+    expect(mergeActionInvocation([first,other],{...first,resultCompletionStatus:"accepted"})).toHaveLength(2);
+  });
+  it("identifies durable single calls independently of their reuse policy", () => {
+    const first = { sourceInteractionId: 1, actionId: 2, resultInteractionId: 10, durable: true, reusable: false, invocationKey: "first", resultCompletionStatus: "submitted" };
+    const other = { ...first, resultInteractionId: 11, invocationKey: "other" };
+    expect(recoverActionInvocation([other, first], 1, 2, "first")).toBe(first);
+    expect(recoverActionInvocation([other], 1, 2, "first")).toBeUndefined();
+    expect(mergeActionInvocation([first], other)).toEqual([first, other]);
+    expect(actionCanRetry([first], 2)).toBe(false);
+    expect(actionWasInvoked([first], [], 1, 2, false)).toBe(true);
+    expect(actionWasInvoked([first], [], 1, 2, true)).toBe(false);
+  });
+  it("keeps reusable calls independently readable without locking their callable", () => {
+    const calls = [
+      { actionId: 2, resultInteractionId: 10, resultCompletionStatus: "accepted", reusable: true },
+      { actionId: 2, resultInteractionId: 11, resultCompletionStatus: "running", reusable: true },
+    ];
+    expect(actionWasInvoked(calls, [], 1, 2)).toBe(false);
+    expect(actionCanRetry(calls, 2)).toBe(false);
+    expect(actionWasInvoked(calls, [{ sourceInteractionId: 1, actionId: 2 }], 1, 2)).toBe(true);
+  });
   it("treats optimistic and durable records as one-shot locks", () => {
     expect(actionWasInvoked(
       [{ sourceInteractionId: 1, actionId: 2 }],

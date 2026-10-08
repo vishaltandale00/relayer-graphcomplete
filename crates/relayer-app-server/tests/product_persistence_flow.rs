@@ -296,6 +296,13 @@ async fn eval_input_operator_session_is_server_scoped_to_one_thread_and_occurren
     pool.close().await;
     let graph = Router::new()
         .route(
+            "/api/control/interactions/{interaction}/layers/{layer}",
+            axum::routing::get(|| async {
+                // This scope-validation fixture has no accepted Invoke bindings.
+                axum::Json(json!({ "actions": [] }))
+            }),
+        )
+        .route(
             "/api/control/input-action-occurrences/canonical",
             axum::routing::post(move |axum::Json(body): axum::Json<Value>| async move {
                 assert_eq!(body["destinationThreadId"], first_id);
@@ -1526,6 +1533,10 @@ async fn input_draft_commit_sends_the_destination_product_graph_scope() {
     let observed_interaction = Arc::new(Mutex::new(None));
     let observed_interaction_request = observed_interaction.clone();
     let graph = Router::new()
+        .route("/api/control/interactions/{interaction}/layers/{layer}", axum::routing::get(|| async {
+            // This scope-validation fixture has no accepted Invoke bindings.
+            axum::Json(json!({ "actions": [] }))
+        }))
         .route(
             "/api/control/input-action-occurrences/canonical",
             axum::routing::post(move |axum::Json(body): axum::Json<Value>| {
@@ -2963,6 +2974,8 @@ async fn conversation_export_uses_real_accepted_graph_and_rejects_read_only_auth
             description: Some("Inspect /var/folders/project/tokenizer".into()),
             target_layer_id: None,
             interaction_text: Some("Continue from /var/folders/project/tokenizer".into()),
+            reusable: None,
+            input_action_ids: Vec::new(),
             input: None,
         })
         .await
@@ -3022,6 +3035,8 @@ async fn conversation_export_uses_real_accepted_graph_and_rejects_read_only_auth
                 description: None,
                 target_layer_id: Some(target_layer_id),
                 interaction_text: None,
+                reusable: None,
+                input_action_ids: Vec::new(),
                 input: None,
             })
             .await
@@ -3040,6 +3055,8 @@ async fn conversation_export_uses_real_accepted_graph_and_rejects_read_only_auth
             description: Some("Root /var/folders/project/tokenizer".into()),
             target_layer_id: Some(layer.id),
             interaction_text: None,
+            reusable: None,
+            input_action_ids: Vec::new(),
             input: None,
         })
         .await
@@ -3189,8 +3206,8 @@ async fn conversation_export_uses_real_accepted_graph_and_rejects_read_only_auth
         panic!("expected header")
     };
     assert_eq!(
-        header.export_version, 1,
-        "ordinary exports retain the V1 contract"
+        header.export_version, 4,
+        "newly authored Invoke policy requires the portable V4 contract"
     );
     assert_eq!(header.conversation.title, "Debug [project-path]");
     assert_eq!(
@@ -3203,6 +3220,14 @@ async fn conversation_export_uses_real_accepted_graph_and_rejects_read_only_auth
     assert_eq!(first.completion.status, ExportCompletionStatus::Accepted);
     assert_eq!(first.text, "Review [project-path]");
     let accepted_view = first.accepted_view.as_ref().unwrap();
+    assert!(
+        accepted_view
+            .layers
+            .iter()
+            .flat_map(|layer| &layer.actions)
+            .any(|action| action.reusable == Some(false)),
+        "ordinary export must preserve the authored single-call declaration"
+    );
     assert_eq!(accepted_view.layers.len(), 4);
     let root_layer = accepted_view
         .layers
@@ -3384,6 +3409,8 @@ async fn conversation_export_uses_real_accepted_graph_and_rejects_read_only_auth
             description: None,
             target_layer_id: Some(result_layer.id),
             interaction_text: None,
+            reusable: None,
+            input_action_ids: Vec::new(),
             input: None,
         })
         .await
@@ -3406,7 +3433,7 @@ async fn conversation_export_uses_real_accepted_graph_and_rejects_read_only_auth
     let ConversationExportRecord::Header(header) = &exported[0] else {
         panic!("missing header")
     };
-    assert_eq!(header.export_version, 3);
+    assert_eq!(header.export_version, 4);
     let turns = exported
         .iter()
         .filter_map(|record| match record {
@@ -3506,7 +3533,7 @@ async fn conversation_export_uses_real_accepted_graph_and_rejects_read_only_auth
     let ConversationExportRecord::Header(shared_header) = &shared_records[0] else {
         panic!("missing shared header")
     };
-    assert_eq!(shared_header.export_version, 3);
+    assert_eq!(shared_header.export_version, 4);
     assert!(shared_records.iter().any(|record| match record {
         ConversationExportRecord::Turn(turn) => turn.accepted_view.as_ref().is_some_and(|view| {
             view.layers

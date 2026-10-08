@@ -6,6 +6,8 @@ import { preferredLayerNode, rememberedLayerSelection, rememberLayerSelection } 
 import { request } from "./api.js";
 import {
   actionWasInvoked,
+  recoverActionInvocation,
+  mergeActionInvocation,
   visibleLayerAfterRefresh,
   withoutPendingActionInvocation,
 } from "./action-invocation-state.js";
@@ -870,7 +872,7 @@ export function selectTurnById(interactionId, { responseRoot = false, threadId =
   schedulePendingRefresh(viewState.currentThreadId, { force: true });
 }
 
-async function selectInteractionGraphSource(threadId, interactionId) {
+export async function selectInteractionGraphSource(threadId, interactionId) {
   cancelAutomaticTurn();
   recordCurrentNavigation();
   const sourceLocationKey = navigationEntryKey(currentNavigationEntry());
@@ -1092,7 +1094,7 @@ export async function navigateLayer(layerId, navigation = {}) {
     if (!ownedNavigation) return;
     const layerPath = navigation.restore
       ? pendingNavigation.layerPath.slice(0, navigation.pathIndex + 1)
-      : appendLayerPath(pendingNavigation.layerPath, navigation.action, navigation.sourceNode);
+      : appendLayerPath(pendingNavigation.layerPath, navigation.action, navigation.sourceNode, layerId);
     viewState.selectedNodeId = null;
     const projection = appState.currentProjections.get(String(interaction?.graphNodeId));
     hydrateWorkspace(interaction, layer, {
@@ -1395,16 +1397,21 @@ export async function navigateHistory(deltaOrDirection, { beforeCommit } = {}) {
   }
 }
 
-export async function invokeAction(action) {
+export async function invokeAction(action, { inputDraftRevision } = {}) {
   const intent = readingIntent;
   const threadId = viewState.currentThreadId;
   const sourceInteractionId = viewState.currentInteractionId;
   if (!threadId || !sourceInteractionId || action?.kind !== "invoke" || !action.id) return null;
+  const invocationKey = crypto.randomUUID();
+  const invocationInput = Number.isSafeInteger(inputDraftRevision)
+    ? { inputDraftRevision }
+    : null;
   if (actionWasInvoked(
     appState.actionInvocations,
     appState.pendingActionInvocations,
     sourceInteractionId,
     action.id,
+    action.reusable,
   )) return null;
   appState.pendingActionInvocations.push({
     sourceInteractionId,
@@ -1417,7 +1424,11 @@ export async function invokeAction(action) {
   try {
     response = await request(
       `/api/threads/${encodeURIComponent(threadId)}/interactions/${encodeURIComponent(sourceInteractionId)}/actions/${encodeURIComponent(action.id)}/invoke`,
-      { method: "POST" },
+      {
+        method: "POST",
+        headers: { "Idempotency-Key": invocationKey },
+        ...(invocationInput ? { body: JSON.stringify(invocationInput) } : {}),
+      },
     );
   } catch (error) {
     if (String(viewState.currentThreadId) !== String(threadId)) {
@@ -1430,10 +1441,7 @@ export async function invokeAction(action) {
     }
     await refreshAfterModelSelectionRejection(error, true);
     await refreshState(threadId).catch(() => {});
-    const durable = appState.actionInvocations.find((invocation) => (
-      String(invocation.sourceInteractionId) === String(sourceInteractionId)
-      && String(invocation.actionId) === String(action.id)
-    ));
+    const durable = recoverActionInvocation(appState.actionInvocations, sourceInteractionId, action.id, invocationKey);
     appState.pendingActionInvocations = withoutPendingActionInvocation(
       appState.pendingActionInvocations,
       sourceInteractionId,
@@ -1460,11 +1468,7 @@ export async function invokeAction(action) {
     return null;
   }
   if (response.invocation) {
-    appState.actionInvocations = appState.actionInvocations.filter((invocation) => !(
-      String(invocation.sourceInteractionId) === String(sourceInteractionId)
-      && String(invocation.actionId) === String(action.id)
-    ));
-    appState.actionInvocations.push(response.invocation);
+    appState.actionInvocations = mergeActionInvocation(appState.actionInvocations, response.invocation);
     appState.pendingActionInvocations = withoutPendingActionInvocation(
       appState.pendingActionInvocations,
       sourceInteractionId,

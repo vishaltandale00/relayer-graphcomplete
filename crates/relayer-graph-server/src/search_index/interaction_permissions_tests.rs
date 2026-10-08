@@ -37,6 +37,7 @@ async fn content(writer: &GraphWriter, key: &str) -> GraphNode {
 async fn root(writer: &GraphWriter, interaction: &GraphNode, layer: &GraphLayer) {
     writer
         .add_action(&ActionDraft {
+            reusable: None,
             client_key: "response".into(),
             source_node_id: interaction.id,
             source_layer_id: None,
@@ -48,6 +49,7 @@ async fn root(writer: &GraphWriter, interaction: &GraphNode, layer: &GraphLayer)
             description: None,
             target_layer_id: Some(layer.id),
             interaction_text: None,
+            input_action_ids: Vec::new(),
             input: None,
         })
         .await
@@ -83,6 +85,7 @@ async fn typed_invoke_index_matches_rebuild_without_widening_result_thread() {
     for target in [&source_layer, &legacy_second] {
         writer
             .add_action(&ActionDraft {
+                reusable: None,
                 client_key: format!("open-{}", target.id),
                 source_node_id: menu.id,
                 source_layer_id: Some(source_root.id),
@@ -94,6 +97,7 @@ async fn typed_invoke_index_matches_rebuild_without_widening_result_thread() {
                 description: None,
                 target_layer_id: Some(target.id),
                 interaction_text: None,
+                input_action_ids: Vec::new(),
                 input: None,
             })
             .await
@@ -101,6 +105,7 @@ async fn typed_invoke_index_matches_rebuild_without_widening_result_thread() {
     }
     let invoke = writer
         .add_action(&ActionDraft {
+            reusable: None,
             client_key: "invoke".into(),
             source_node_id: node.id,
             source_layer_id: Some(source_layer.id),
@@ -112,6 +117,7 @@ async fn typed_invoke_index_matches_rebuild_without_widening_result_thread() {
             description: None,
             target_layer_id: None,
             interaction_text: Some("Continue".into()),
+            input_action_ids: Vec::new(),
             input: None,
         })
         .await

@@ -691,10 +691,21 @@ export class ScopedGraphAuthoring {
               id: Number(targetFields.id),
             } as unknown as GraphLayer;
           }
+          const inputActions = fields.kind === "invoke" ? array((fields.inputActions ?? []) as readonly unknown[]).map((reference) => {
+            if (typeof reference === "number") {
+              if (!Number.isSafeInteger(reference) || reference < 1) invalid("Input action ID must be positive.");
+              return reference;
+            }
+            const declared = [...declaration.actions.values()].find(candidate => candidate.action === reference);
+            if (!declared || declared.source !== source || declared.action.kind !== "input")
+              invalid("Invoke Inputs must be declared on the same source Node and scoped Layer.");
+            const input = data(declared.action);
+            return { ...Object.fromEntries(Object.entries(input).filter(([field]) => !["sourceLayer", "ref"].includes(field)).map(([field, value]) => [field, copyValue(value)])), sourceLayer: declaration.object } as ActionObject;
+          }) : undefined;
           const copied = Object.fromEntries(
             Object.entries(fields)
               .filter(
-                ([field]) => !["sourceLayer", "target", "ref"].includes(field),
+                ([field]) => !["sourceLayer", "target", "ref", "inputActions"].includes(field),
               )
               .map(([field, value]) => [field, copyValue(value)]),
           );
@@ -704,6 +715,7 @@ export class ScopedGraphAuthoring {
             captured: {
               ...copied,
               sourceLayer: declaration.object,
+              ...(inputActions === undefined ? {} : { inputActions }),
               ...(target === undefined
                 ? {}
                 : {
@@ -838,7 +850,7 @@ export class ScopedGraphAuthoring {
                       ? layerResults.get(action.target as LayerObject)!
                       : action.target,
                   }
-                : { ...action, sourceLayer };
+                : { ...action, sourceLayer, ...(action.kind === "invoke" ? { inputActions: (action.inputActions ?? []).map(input => typeof input === "number" || "id" in input ? input : { ...input, sourceLayer }) } : {}) };
             const value = freezeRecord(
               await this.#transport.addAction(
                 nodeRef(capture.source),

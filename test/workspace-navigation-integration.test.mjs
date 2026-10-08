@@ -7,6 +7,7 @@ let throwOnRender;
 let tutorialActionSucceeded;
 let tutorialFollowupSubmitted;
 const ownedControllers = new Set();
+const invocationKey = "70c6e3d5-cc62-4b10-8588-9e21f091f851";
 
 function retireOwnedControllers() {
   for (const controller of ownedControllers) controller.cancelNavigationHistory();
@@ -100,8 +101,47 @@ async function loadModules(url = "http://127.0.0.1:43123/") {
 }
 
 describe("workspace navigation integration", () => {
+  it.each([true, false])("retains the invoking Node when a result is followed, refreshed and restored (reuse %s)", async (reusable) => {
+    const root = rootLayer(101, 11);
+    root.nodes[0].title = "Choose a vacation destination";
+    root.actions = [
+      { id: 501, kind: "invoke", sourceNodeId: 11, label: "Analyze destination", reusable },
+      { id: 502, kind: "navigate", relation: "reference", sourceNodeId: 11, targetLayerId: 201, label: "Overall analysis · Kyoto" },
+    ];
+    const result = rootLayer(201, 21);
+    const source = interaction(1, 10, root);
+    const child = interaction(2, 10, result, 2);
+    const state = productState([{ id: 10, title: "Vacation comparison" }], [source, child]);
+    state.actionInvocations = [{ reusable: true, sourceInteractionId: 1, actionId: 501, resultInteractionId: 2, resultCompletionStatus: "accepted" }];
+    requestImplementation = vi.fn(async (path) => {
+      if (path.startsWith("/api/state?threadId=10")) return state;
+      if (path === "/api/threads/10") return { thread: state.threads[0], interactions: state.interactions, actionInvocations: state.actionInvocations };
+      if (path.endsWith("/layers/201")) return result;
+      throw new Error(`Unexpected request: ${path}`);
+    });
+    const controller = await loadModules();
+    await controller.loadThread(10);
+    controller.selectTurnById(1);
+    await controller.navigateLayer(201, { action: root.actions[reusable ? 1 : 0], sourceNode: root.nodes[0] });
+    const expectOrigin = () => {
+      expect(controller.appState.visibleLayer.layer.id).toBe(201);
+      expect(controller.viewState.layerPath.map(({ layerId }) => layerId)).toEqual([101, 201]);
+      expect(controller.viewState.layerPath[1]).toMatchObject({ label: "Choose a vacation destination", sourceNodeId: 11, actionId: reusable ? 502 : 501 });
+      expect(controller.appState.currentInteractionId).toBe(1);
+    };
+    expectOrigin();
+    await controller.refreshState(10);
+    expectOrigin();
+    await controller.navigateHistory("back");
+    expect(controller.appState.visibleLayer.layer.id).toBe(101);
+    await controller.navigateHistory("forward");
+    expectOrigin();
+    expect(state.interactions).toHaveLength(2);
+    expect(requestImplementation.mock.calls.every(([, options]) => !options?.method || options.method === "GET")).toBe(true);
+  });
   beforeEach(() => {
     vi.restoreAllMocks();
+    vi.spyOn(globalThis.crypto, "randomUUID").mockReturnValue(invocationKey);
   });
 
   afterEach(() => {
@@ -1043,6 +1083,42 @@ describe("workspace navigation integration", () => {
     expect(controller.appState.actions[0]).toMatchObject({ id: 6, kind: "navigate", targetLayerId: 8 });
   });
 
+  it.each([true, false])("recovers response loss only for the exact reusable Invocation key (matches=%s)", async (matches) => {
+    vi.useFakeTimers();
+    const sourceRoot = rootLayer(7, 22);
+    const action = { id: 6, kind: "invoke", sourceNodeId: 22, targetLayerId: null };
+    sourceRoot.actions = [action];
+    const source = interaction(1, 10, sourceRoot);
+    const result = interaction(2, 10, rootLayer(8, 26), 2);
+    const state = { ...productState([{ id: 10, title: "Recover exact call" }], [source]), inputDraftRevision: 12 };
+    let posted = false;
+    requestImplementation = vi.fn(async (path, options) => {
+      if (path.startsWith("/api/state?threadId=10")) return posted ? {
+        ...state, interactions: [source, result], actionInvocations: [{
+          reusable: true, invocationKey: matches ? invocationKey : "another-call",
+          sourceInteractionId: 1, actionId: 6, resultInteractionId: 2, resultCompletionStatus: "accepted",
+        }],
+      } : state;
+      if (path === "/api/threads/10/interactions/1/actions/6/invoke") {
+        expect(options).toEqual({ method: "POST", headers: { "Idempotency-Key": invocationKey }, body: JSON.stringify({ inputDraftRevision: 13 }) });
+        posted = true;
+        throw new Error("response lost");
+      }
+      if (path.endsWith("/layers/7")) return sourceRoot;
+      throw new Error(`Unexpected request: ${path}`);
+    });
+    const controller = await loadModules();
+    const toast = { textContent: "", classList: { add: vi.fn(), remove: vi.fn() } };
+    document.querySelector = (selector) => selector === "#toast" ? toast : null;
+    await controller.loadThread(10);
+    controller.viewState.mainView = "thread";
+    const recovered = await controller.invokeAction(action, { inputDraftRevision: 13 });
+    expect(recovered).toEqual(matches ? { interaction: { id: 2 }, recovered: true } : null);
+    expect(controller.viewState.currentInteractionId).toBe(matches ? 2 : 1);
+    expect(tutorialActionSucceeded).toHaveBeenCalledTimes(matches ? 1 : 0);
+    expect(controller.appState.pendingActionInvocations).toEqual([]);
+  });
+
   it("retries a project-visible submitted invocation through the same source action", async () => {
     vi.useFakeTimers();
     try {
@@ -1073,7 +1149,7 @@ describe("workspace navigation integration", () => {
         if (path.startsWith("/api/state?threadId=10")) return retried ? running : submitted;
         if (path.endsWith("/layers/101")) return root;
         if (path === "/api/threads/10/interactions/1/actions/777/invoke") {
-          expect(options).toEqual({ method: "POST" });
+          expect(options).toEqual({ method: "POST", headers: { "Idempotency-Key": invocationKey } });
           retried = true;
           return {
             created: false,
@@ -1091,7 +1167,7 @@ describe("workspace navigation integration", () => {
       expect(retried).toBe(true);
       expect(requestImplementation).toHaveBeenCalledWith(
         "/api/threads/10/interactions/1/actions/777/invoke",
-        { method: "POST" },
+        { method: "POST", headers: { "Idempotency-Key": invocationKey } },
       );
       expect(controller.appState.actionInvocations[0].resultCompletionStatus).toBe("running");
       expect(controller.viewState).toMatchObject({ currentThreadId: 10, currentInteractionId: 1 });
@@ -1142,7 +1218,7 @@ describe("workspace navigation integration", () => {
         if (path.startsWith("/api/state?threadId=10")) return invoked ? afterInvoke : beforeInvoke;
         if (path.endsWith("/layers/101")) return root;
         if (path === "/api/threads/10/interactions/1/actions/777/invoke") {
-          expect(options).toEqual({ method: "POST" });
+          expect(options).toEqual({ method: "POST", headers: { "Idempotency-Key": invocationKey } });
           invoked = true;
           return {
             created: true,

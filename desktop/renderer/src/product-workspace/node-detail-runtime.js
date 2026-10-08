@@ -439,6 +439,7 @@ function configureInput(host, action, resolveCurrentAction, onInput, onInputEdit
     });
   }
   host.addEventListener("change", () => {
+    if (host.localName === "select") reportEdit([...host.selectedOptions].map((option) => option.value));
     const submitted = submit();
     reportEdit(null, submitted);
   });

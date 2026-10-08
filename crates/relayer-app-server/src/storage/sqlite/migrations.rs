@@ -57,7 +57,7 @@ mod tests {
         .fetch_all(&store.pool)
         .await
         .unwrap();
-        assert_eq!(versions, [40, 41, 42]);
+        assert_eq!(versions, [40, 41, 42, 43, 44]);
         assert!(
             store
                 .recover_interaction_accepted(
@@ -639,6 +639,10 @@ mod tests {
             .unwrap();
         // The recreated action_invocations table also lacks 0038's agent_invoked column.
         sqlx::query("DELETE FROM _sqlx_migrations WHERE version=38")
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query("DELETE FROM _sqlx_migrations WHERE version=43")
             .execute(&pool)
             .await
             .unwrap();

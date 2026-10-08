@@ -124,10 +124,11 @@ function workspace() {
     onNavigateResolvedInvoke: (action, navigation) => import("./threads.js").then(
       ({ navigateResolvedInvoke }) => navigateResolvedInvoke(action, navigation),
     ),
-    onInvokeAction: (action) => import("./threads.js").then(({ invokeAction }) => invokeAction(action)),
+    onInvokeAction: (action, options) => import("./threads.js").then(({ invokeAction }) => invokeAction(action, options)),
     onDecideApproval: (requestId, decision) => import("./threads.js").then(({ decideApproval }) => decideApproval(requestId, decision)),
     annotationApi,
     contextDraftApi: nextMode === "interactive" ? createNodeContextDraftApi() : null,
+    implicitInputAcceptance: nextMode === "interactive",
     inputDraftApi: nextMode === "interactive" ? createNodeInputDraftApi() : null,
     inputOperatorAvailable: nextMode === "review" && query.get("inputOperator") === "1",
   });

@@ -128,6 +128,21 @@ impl CompletionPlan {
         };
         plan.walk_layers(connection, scope, root_layer, NavigateRelation::Expand)
             .await?;
+        if crate::storage::sqlite::contracts::read(connection, scope.root_node_id)
+            .await?
+            .is_some()
+        {
+            // Validate the complete prospective Return while publishing only the
+            // response closure. Attached accepted-history mutations stay drafts.
+            let prospective = Self::build(connection, scope).await?;
+            if prospective.root_layer != root_layer {
+                return Err(GraphError::validation(
+                    "advance_layer_mismatch",
+                    "layerId",
+                    "The root expand action must target the exact layer being Advanced.",
+                ));
+            }
+        }
         plan.validate_expand_acyclic(connection, scope).await?;
         plan.validate_edge_uniqueness(connection, scope).await?;
         Ok(plan)
@@ -222,10 +237,47 @@ impl CompletionPlan {
         connection: &mut GraphConnection,
         scope: &InteractionScope,
     ) -> Result<(), GraphError> {
-        let mut missing = crate::storage::sqlite::permissions::read(connection, scope.root_node_id)
-            .await?
-            .map(|snapshot| snapshot.required_response_sources())
-            .unwrap_or_default();
+        let mut missing = match crate::storage::sqlite::contracts::read(
+            connection,
+            scope.root_node_id,
+        )
+        .await?
+        {
+            Some(contract) => {
+                for invocation in &contract.input.invocation_references {
+                    let parent = NodeTable::new(&mut *connection)
+                        .record(invocation.parent_node_id)
+                        .await?
+                        .ok_or_else(|| {
+                            GraphError::NotFound(format!(
+                                "invocation parent {}",
+                                invocation.parent_node_id
+                            ))
+                        })?;
+                    if parent.node.state != RecordState::Accepted {
+                        return Err(GraphError::validation(
+                            "invocation_parent_unpublished",
+                            "invocationReferences.parentNodeId",
+                            format!(
+                                "Publish the enclosing response containing parent Node {} before advancing or returning this child. Its revised overall analysis must remain linked from that parent.",
+                                invocation.parent_node_id
+                            ),
+                        ));
+                    }
+                }
+                contract
+                    .return_requirements
+                    .into_iter()
+                    .map(|requirement| match requirement {
+                        crate::CompletionReturnRequirement::NavigateResponse { node_id } => node_id,
+                    })
+                    .collect()
+            }
+            None => crate::storage::sqlite::permissions::read(connection, scope.root_node_id)
+                .await?
+                .map(|snapshot| snapshot.required_response_sources())
+                .unwrap_or_default(),
+        };
         let ids =
             crate::storage::sqlite::attached_navigation::draft_actions(connection, scope).await?;
         for id in ids {
@@ -418,6 +470,9 @@ impl CompletionPlan {
                 .await?;
             for record in current_actions {
                 let action = record.action;
+                ActionTable::new(&mut *connection)
+                    .validate_invoke_inputs(scope, action.source_node_id, &action.input_action_ids)
+                    .await?;
                 if !node_ids.contains(&action.source_node_id) {
                     return Err(GraphError::validation(
                         "source_node_outside_layer",

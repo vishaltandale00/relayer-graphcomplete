@@ -13,18 +13,20 @@ use relayer_graph_core::{
 use crate::{
     conversation_export::{
         ConversationExportHeader, ConversationExportRecord, ConversationExportTurn,
-        EXPORT_VERSION_V1, EXPORT_VERSION_V2, EXPORT_VERSION_V3, ExportAcceptedView, ExportAction,
-        ExportActionKind, ExportActionVariant, ExportAdmittedExecutionModelPlan,
-        ExportAdmittedExecutionModelRoute, ExportAttemptOutcome, ExportAuthoredDetailOmission,
-        ExportCompletionReceipt, ExportCompletionStatus, ExportContextSource,
-        ExportContextTargetSnapshot, ExportConversation, ExportEdge, ExportEdgeEnd,
-        ExportEdgeRoute, ExportInputActionSnapshot, ExportInputControl, ExportInputOption,
-        ExportInputSource, ExportInteractionContext, ExportLayer, ExportLayerLayout,
-        ExportModelSelection, ExportNavigateRelation, ExportNode, ExportNodePlacement,
-        ExportPermissionReceipt, ExportProducer, ExportRecordState, ExportResolvedLayer,
-        ExportSubmittedInput, ExportSubmittedInputValue, ExportTurnManifestEntry, ExportTurnOrigin,
-        ExportVisualAssetAssociation, ExportVisualAssetContent, ExportVisualAssetProvenance,
-        MAX_EXPORT_BYTES, MAX_JSONL_LINE_BYTES, MAX_SHARE_SNAPSHOT_BYTES, validate_export_records,
+        EXPORT_VERSION_V1, EXPORT_VERSION_V2, EXPORT_VERSION_V3, EXPORT_VERSION_V4,
+        ExportAcceptedView, ExportAction, ExportActionKind, ExportActionVariant,
+        ExportAdmittedExecutionModelPlan, ExportAdmittedExecutionModelRoute, ExportAttemptOutcome,
+        ExportAuthoredDetailOmission, ExportCompletionReceipt, ExportCompletionStatus,
+        ExportContextSource, ExportContextTargetSnapshot, ExportConversation, ExportEdge,
+        ExportEdgeEnd, ExportEdgeRoute, ExportInputActionSnapshot, ExportInputControl,
+        ExportInputOption, ExportInputSource, ExportInteractionContext, ExportInvocation,
+        ExportInvocationArgument, ExportInvocationCurrent, ExportInvocationSource, ExportLayer,
+        ExportLayerLayout, ExportModelSelection, ExportNavigateRelation, ExportNode,
+        ExportNodePlacement, ExportPermissionReceipt, ExportProducer, ExportRecordState,
+        ExportResolvedLayer, ExportSubmittedInput, ExportSubmittedInputValue,
+        ExportTurnManifestEntry, ExportTurnOrigin, ExportVisualAssetAssociation,
+        ExportVisualAssetContent, ExportVisualAssetProvenance, MAX_EXPORT_BYTES,
+        MAX_JSONL_LINE_BYTES, MAX_SHARE_SNAPSHOT_BYTES, validate_export_records,
     },
     product::{
         ActionInvocation, DurableInteractionInput, Interaction, InteractionId, ProductError,
@@ -78,10 +80,17 @@ fn needs_current_snapshot(closure: &AcceptedGraphClosure) -> bool {
 async fn snapshot_closures(
     runtime: &RuntimeClient,
     interactions: &[&Interaction],
-) -> Result<Vec<Option<AcceptedGraphClosure>>, ConversationExportBuildError> {
+) -> Result<
+    (
+        Vec<Option<AcceptedGraphClosure>>,
+        Vec<relayer_graph_core::InvocationGraphSnapshot>,
+        Vec<GraphAction>,
+    ),
+    ConversationExportBuildError,
+> {
     let root_ids = interactions
         .iter()
-        .filter(|i| i.completion_status == "accepted")
+        .filter(|i| i.graph_node_id.is_some() || i.completion_status == "accepted")
         .map(|i| {
             i.graph_node_id.ok_or_else(|| {
                 ConversationExportBuildError::Invalid(format!(
@@ -92,32 +101,39 @@ async fn snapshot_closures(
         })
         .collect::<Result<Vec<_>, _>>()?;
     if root_ids.is_empty() {
-        return Ok(vec![None; interactions.len()]);
+        return Ok((vec![None; interactions.len()], Vec::new(), Vec::new()));
     }
-    let closures = runtime.accepted_graph_closures(&root_ids).await?;
+    let snapshot = runtime.conversation_graph_snapshot(&root_ids).await?;
+    let closures = snapshot.closures;
     if closures.len() != root_ids.len() {
         return Err(ConversationExportBuildError::Invalid(
             "accepted snapshot root count mismatch".into(),
         ));
     }
     for (id, closure) in root_ids.iter().zip(&closures) {
-        if closure.as_ref().map(|c| c.node_id.value()) != Some(*id) {
+        if closure.as_ref().is_some_and(|c| c.node_id.value() != *id) {
             return Err(ConversationExportBuildError::Invalid(
                 "accepted snapshot root identity mismatch".into(),
             ));
         }
     }
     let mut accepted = closures.into_iter();
-    Ok(interactions
+    let ordered = interactions
         .iter()
         .map(|i| {
-            if i.completion_status == "accepted" {
-                accepted.next().expect("validated accepted snapshot count")
+            if i.graph_node_id.is_some() {
+                let closure = accepted.next().expect("validated graph snapshot count");
+                if i.completion_status == "accepted" {
+                    closure
+                } else {
+                    None
+                }
             } else {
                 None
             }
         })
-        .collect())
+        .collect();
+    Ok((ordered, snapshot.invocations, snapshot.bound_inputs))
 }
 
 fn invocation_matches_snapshot(
@@ -192,11 +208,14 @@ async fn build_conversation_export_once(
     let detail = product.get_thread(thread_id).await?;
     let export_invocations = product.action_invocations_for_export(thread_id).await?;
     let imported_turns = product.imported_turn_export_records(thread_id).await?;
+    let mut imported_invocations = product
+        .imported_invocation_export_records(thread_id)
+        .await?;
     // Import provenance survives even when this closure has no conversion or
     // layerless action: V3 can also carry completion-scoped repeated keys.
     let imported_current_snapshot = imported_turns
         .iter()
-        .any(|turn| turn.export_version == EXPORT_VERSION_V3);
+        .any(|turn| turn.export_version >= EXPORT_VERSION_V3);
     let project_path = detail.project.as_ref().map(|project| project.path.as_str());
     let redactor = ProjectPathRedactor::new(project_path);
     let project_name = detail
@@ -215,7 +234,8 @@ async fn build_conversation_export_once(
     let conversation_invocations = export_invocations
         .iter()
         .filter(|invocation| {
-            interaction_indexes.contains_key(&invocation.source_interaction_id)
+            !invocation.durable
+                && interaction_indexes.contains_key(&invocation.source_interaction_id)
                 && interaction_indexes.contains_key(&invocation.result_interaction_id)
         })
         .collect::<Vec<_>>();
@@ -254,19 +274,37 @@ async fn build_conversation_export_once(
         .iter()
         .map(|record| (record.interaction_id, record))
         .collect::<HashMap<_, _>>();
+    for call in &mut imported_invocations {
+        if let Some(result) = &call.result_turn_id {
+            call.result_turn_id = Some(turn_id(
+                *imported_turn_sequences
+                    .get(result.as_str())
+                    .ok_or_else(|| {
+                        ConversationExportBuildError::Invalid(
+                            "Imported call result is outside its conversation".into(),
+                        )
+                    })?,
+            ));
+        }
+    }
     let mut ids = PortableIds::default();
-    let closures =
+    let (closures, graph_invocations, graph_bound_inputs) =
         snapshot_closures(runtime, &detail.interactions.iter().collect::<Vec<_>>()).await?;
+    let graph_bound_inputs = standalone_bound_inputs(
+        graph_bound_inputs,
+        closures.iter().flatten(),
+        &graph_invocations,
+    );
     let mut context_inputs = Vec::with_capacity(detail.interactions.len());
     let mut submitted_evidence = Vec::with_capacity(detail.interactions.len());
     let mut settled_attempt_outcomes = Vec::with_capacity(detail.interactions.len());
     for interaction in &detail.interactions {
         let durable_input = product.interaction_input(interaction.id).await?;
         let context_input = match interaction.graph_node_id {
-            Some(node_id) => Some(ContextInput::Runtime(RuntimeContextInput {
+            Some(node_id) => Some(ContextInput::Runtime(Box::new(RuntimeContextInput {
                 input: runtime.interaction_input(node_id).await?,
                 actions: runtime.interaction_context_actions(node_id).await?,
-            })),
+            }))),
             None => durable_input
                 .filter(|input| !input.contexts.is_empty())
                 .map(ContextInput::Durable),
@@ -362,16 +400,54 @@ async fn build_conversation_export_once(
         || !context_owners.is_empty()
         || closures.iter().flatten().any(needs_current_snapshot);
     let context_icon_nodes = context_image_nodes(context_inputs.iter().flatten());
-    let (authored_detail_assets, visual_asset_contents) = collect_visual_assets_with_context_icons(
+    let invocation_assets = invocation_asset_closures(&graph_invocations);
+    let (authored_detail_assets, mut visual_asset_contents) =
+        collect_visual_assets_with_context_icons(
+            runtime,
+            closures.iter().flatten().chain(invocation_assets.iter()),
+            &redactor,
+            current_snapshot,
+            &context_icon_nodes,
+        )
+        .await?;
+    let (bound_input_assets, bound_input_contents) = collect_bound_input_assets(
         runtime,
-        closures.iter().flatten(),
+        &graph_bound_inputs,
+        closures.iter().flatten().chain(invocation_assets.iter()),
         &redactor,
-        current_snapshot,
-        &context_icon_nodes,
     )
     .await?;
+    merge_visual_contents(&mut visual_asset_contents, bound_input_contents)?;
+    for content in product
+        .imported_invocation_asset_contents(thread_id)
+        .await?
+    {
+        if let Some(existing) = visual_asset_contents
+            .iter()
+            .find(|existing| existing.digest_sha256 == content.digest_sha256)
+        {
+            if existing.media_type != content.media_type
+                || existing.byte_length != content.byte_length
+                || existing.content_base64 != content.content_base64
+            {
+                return Err(ConversationExportBuildError::Invalid(
+                    "Imported Invocation asset content conflicts with the accepted snapshot".into(),
+                ));
+            }
+        } else {
+            visual_asset_contents.push(content);
+        }
+    }
+    visual_asset_contents.sort_by(|left, right| left.digest_sha256.cmp(&right.digest_sha256));
     let header = ConversationExportRecord::Header(Box::new(ConversationExportHeader {
-        export_version: if current_snapshot {
+        export_version: if closures
+            .iter()
+            .flatten()
+            .flat_map(|closure| closure.layers.iter().flat_map(|layer| &layer.actions))
+            .any(|action| !action.input_action_ids.is_empty() || action.reusable.is_some())
+        {
+            EXPORT_VERSION_V4
+        } else if current_snapshot {
             EXPORT_VERSION_V3
         } else if visual_asset_contents.is_empty() {
             EXPORT_VERSION_V1
@@ -390,6 +466,8 @@ async fn build_conversation_export_once(
         },
         turns,
         visual_asset_contents: Vec::new(),
+        invocations: imported_invocations,
+        bound_inputs: Vec::new(),
     }));
     let mut records = vec![header];
     records.extend(
@@ -427,6 +505,25 @@ async fn build_conversation_export_once(
         )?)));
     }
     enrich_context_owners(&mut records, &context_owners, &ids);
+    attach_bound_inputs(
+        &mut records,
+        &graph_bound_inputs,
+        product
+            .imported_bound_input_export_records(thread_id)
+            .await?,
+        &mut ids,
+        &redactor,
+        &bound_input_assets,
+    )?;
+    attach_invocation_inventory(
+        &mut records,
+        &graph_invocations,
+        &detail.interactions.iter().collect::<Vec<_>>(),
+        &turn_sequences,
+        &mut ids,
+        &redactor,
+        &authored_detail_assets,
+    )?;
     validate_export_records(&records)?;
     let mut body = Vec::new();
     for record in &records {
@@ -507,7 +604,8 @@ async fn build_share_conversation_export_once(
     let conversation_invocations = export_invocations
         .iter()
         .filter(|invocation| {
-            selected_indexes.contains_key(&invocation.source_interaction_id)
+            !invocation.durable
+                && selected_indexes.contains_key(&invocation.source_interaction_id)
                 && selected_indexes.contains_key(&invocation.result_interaction_id)
         })
         .collect::<Vec<_>>();
@@ -526,11 +624,14 @@ async fn build_share_conversation_export_once(
         HashMap::new();
 
     let mut ids = PortableIds::default();
-    let mut closures = snapshot_closures(runtime, &selected)
-        .await?
+    let (selected_closures, graph_invocations, graph_bound_inputs) =
+        snapshot_closures(runtime, &selected).await?;
+    let mut closures = selected_closures
         .into_iter()
         .map(|closure| closure.expect("selected accepted snapshot"))
         .collect::<Vec<_>>();
+    let graph_bound_inputs =
+        standalone_bound_inputs(graph_bound_inputs, closures.iter(), &graph_invocations);
     let mut context_inputs = Vec::with_capacity(selected.len());
     let mut submitted_evidence = Vec::with_capacity(selected.len());
     let mut settled_attempt_outcomes = Vec::with_capacity(selected.len());
@@ -542,10 +643,10 @@ async fn build_share_conversation_export_once(
             ))
         })?;
         let durable_input = product.interaction_input(interaction.id).await?;
-        context_inputs.push(ContextInput::Runtime(RuntimeContextInput {
+        context_inputs.push(ContextInput::Runtime(Box::new(RuntimeContextInput {
             input: runtime.interaction_input(node_id).await?,
             actions: runtime.interaction_context_actions(node_id).await?,
-        }));
+        })));
         // Keep this call in the same frozen builder pass as graph/context reads;
         // submitted-input evidence is part of the accepted turn snapshot.
         let _ = durable_input;
@@ -625,16 +726,32 @@ async fn build_share_conversation_export_once(
     let current_snapshot =
         !context_owners.is_empty() || closures.iter().any(needs_current_snapshot);
     let context_icon_nodes = context_image_nodes(context_inputs.iter());
-    let (authored_detail_assets, visual_asset_contents) = collect_visual_assets_with_context_icons(
+    let invocation_assets = invocation_asset_closures(&graph_invocations);
+    let (authored_detail_assets, mut visual_asset_contents) =
+        collect_visual_assets_with_context_icons(
+            runtime,
+            closures.iter().chain(invocation_assets.iter()),
+            &redactor,
+            current_snapshot,
+            &context_icon_nodes,
+        )
+        .await?;
+    let (bound_input_assets, bound_input_contents) = collect_bound_input_assets(
         runtime,
-        closures.iter(),
+        &graph_bound_inputs,
+        closures.iter().chain(invocation_assets.iter()),
         &redactor,
-        current_snapshot,
-        &context_icon_nodes,
     )
     .await?;
+    merge_visual_contents(&mut visual_asset_contents, bound_input_contents)?;
     let header = ConversationExportRecord::Header(Box::new(ConversationExportHeader {
-        export_version: if current_snapshot {
+        export_version: if closures
+            .iter()
+            .flat_map(|closure| closure.layers.iter().flat_map(|layer| &layer.actions))
+            .any(|action| !action.input_action_ids.is_empty() || action.reusable.is_some())
+        {
+            EXPORT_VERSION_V4
+        } else if current_snapshot {
             EXPORT_VERSION_V3
         } else if visual_asset_contents.is_empty() {
             EXPORT_VERSION_V1
@@ -655,6 +772,8 @@ async fn build_share_conversation_export_once(
         },
         turns,
         visual_asset_contents: Vec::new(),
+        invocations: Vec::new(),
+        bound_inputs: Vec::new(),
     }));
     let mut records = vec![header];
     records.extend(
@@ -694,6 +813,23 @@ async fn build_share_conversation_export_once(
         )?)));
     }
     enrich_context_owners(&mut records, &context_owners, &ids);
+    attach_bound_inputs(
+        &mut records,
+        &graph_bound_inputs,
+        Vec::new(),
+        &mut ids,
+        &redactor,
+        &bound_input_assets,
+    )?;
+    attach_invocation_inventory(
+        &mut records,
+        &graph_invocations,
+        &selected,
+        &turn_sequences,
+        &mut ids,
+        &redactor,
+        &authored_detail_assets,
+    )?;
     validate_export_records(&records)?;
 
     let mut body = Vec::new();
@@ -1198,7 +1334,7 @@ struct RuntimeContextInput {
 }
 
 enum ContextInput {
-    Runtime(RuntimeContextInput),
+    Runtime(Box<RuntimeContextInput>),
     Durable(DurableInteractionInput),
 }
 
@@ -1359,6 +1495,7 @@ fn export_turn(
             }
         }
         None => match imported.turn.map(|record| &record.origin) {
+            Some(ExportTurnOrigin::Invocation { invocation_id }) => ExportTurnOrigin::Invocation { invocation_id: invocation_id.clone() },
             Some(ExportTurnOrigin::Action {
                 source_turn_id,
                 source_action_id,
@@ -2022,6 +2159,18 @@ fn seed_imported_action_ids(
                 )));
             }
             ids.bind_action(action.id.value(), imported_action.id.clone())?;
+            if action.input_action_ids.len() != imported_action.input_action_ids.len() {
+                return Err(ConversationExportBuildError::Invalid(
+                    "Imported callable bindings changed".into(),
+                ));
+            }
+            for (materialized, portable) in action
+                .input_action_ids
+                .iter()
+                .zip(&imported_action.input_action_ids)
+            {
+                ids.bind_action(materialized.value(), portable.clone())?;
+            }
             if let (Some(materialized), Some(portable)) =
                 (action.source_layer_id, &imported_action.source_layer_id)
             {
@@ -2052,6 +2201,415 @@ fn export_view(
         root_layer_id,
         layers,
     })
+}
+
+fn attach_invocation_inventory(
+    records: &mut [ConversationExportRecord],
+    snapshots: &[relayer_graph_core::InvocationGraphSnapshot],
+    interactions: &[&Interaction],
+    turn_sequences: &HashMap<InteractionId, i64>,
+    ids: &mut PortableIds,
+    redactor: &ProjectPathRedactor,
+    assets: &HashMap<i64, Vec<ExportVisualAssetAssociation>>,
+) -> Result<(), ConversationExportBuildError> {
+    let mut inventory = match records.first() {
+        Some(ConversationExportRecord::Header(header)) => header.invocations.clone(),
+        _ => Vec::new(),
+    };
+    let initial_count = inventory.len();
+    for (index, snapshot) in snapshots.iter().enumerate() {
+        let call = &snapshot.invocation;
+        let id = format!("invocation:{}", initial_count + index + 1);
+        let result_turn_id = interactions
+            .iter()
+            .find(|interaction| {
+                interaction.graph_node_id == Some(call.child_interaction_node_id.value())
+            })
+            .and_then(|interaction| turn_sequences.get(&interaction.id))
+            .map(|sequence| turn_id(*sequence));
+        if let Some(turn_id) = &result_turn_id {
+            for record in records.iter_mut() {
+                if let ConversationExportRecord::Turn(turn) = record
+                    && &turn.id == turn_id
+                {
+                    turn.origin = ExportTurnOrigin::Invocation {
+                        invocation_id: id.clone(),
+                    };
+                }
+            }
+        }
+        let source = &snapshot.source_action;
+        let frozen = &call.action_snapshot;
+        let frozen_variant = frozen
+            .get("variant")
+            .cloned()
+            .map(serde_json::from_value::<ActionVariant>)
+            .transpose()?;
+        let variant = match frozen_variant.as_ref().unwrap_or(&source.variant) {
+            ActionVariant::Chip => ExportActionVariant::Chip,
+            ActionVariant::Pill => ExportActionVariant::Pill,
+            ActionVariant::Wide => ExportActionVariant::Wide,
+            ActionVariant::Card => ExportActionVariant::Card,
+            ActionVariant::Unsupported(_) => {
+                return Err(ConversationExportBuildError::Invalid(
+                    "Invocation has an unsupported source variant".into(),
+                ));
+            }
+        };
+        let arguments = snapshot
+            .submitted_inputs
+            .iter()
+            .map(|input| {
+                let action = export_input_action(&input.action, redactor)?;
+                let keys = injective_portable_option_keys(
+                    input
+                        .action
+                        .options
+                        .iter()
+                        .map(|option| option.key.as_str()),
+                    redactor,
+                );
+                let value = match &input.value {
+                    relayer_graph_core::SubmittedInputValue::Text { text } => {
+                        ExportSubmittedInputValue::Text {
+                            text: redactor.text(text),
+                        }
+                    }
+                    relayer_graph_core::SubmittedInputValue::Selected { selected } => {
+                        ExportSubmittedInputValue::Selected {
+                            selected: selected
+                                .iter()
+                                .map(|option| ExportInputOption {
+                                    key: keys
+                                        .get(&option.key)
+                                        .cloned()
+                                        .unwrap_or_else(|| redactor.text(&option.key)),
+                                    label: redactor.text(&option.label),
+                                    unsupported_fields: Default::default(),
+                                })
+                                .collect(),
+                        }
+                    }
+                };
+                Ok(ExportInvocationArgument {
+                    source: ExportInputSource {
+                        interaction_node_id: ids
+                            .node(input.occurrence.presenting_interaction_node_id.value()),
+                        layer_id: ids.layer(input.occurrence.presenting_layer_id.value()),
+                        action_id: ids.action(input.occurrence.action_id.value()),
+                        node_id: ids.node(input.source_node_id.value()),
+                    },
+                    action,
+                    value,
+                })
+            })
+            .collect::<Result<Vec<_>, ConversationExportBuildError>>()?;
+        let current = snapshot
+            .current
+            .as_ref()
+            .map(|current| {
+                let mut layers = current
+                    .layers
+                    .iter()
+                    .map(|layer| export_layer(layer, ids, redactor))
+                    .collect::<Result<Vec<_>, _>>()?;
+                for (native, exported) in current.layers.iter().zip(&mut layers) {
+                    for (node, portable) in native.nodes.iter().zip(&mut exported.nodes) {
+                        portable.authored_detail_assets =
+                            assets.get(&node.id.value()).cloned().unwrap_or_default();
+                    }
+                }
+                Ok::<_, ConversationExportBuildError>(ExportInvocationCurrent {
+                    root_layer_id: ids.layer(current.root_layer_id.value()),
+                    layers,
+                })
+            })
+            .transpose()?;
+        let historical_icon = frozen
+            .get("icon")
+            .and_then(serde_json::Value::as_str)
+            .and_then(relayer_graph_core::image_icon);
+        let icon_asset = historical_icon.as_ref().and_then(|icon| {
+            assets
+                .get(&call.parent_node_id.value())
+                .and_then(|assets| {
+                    assets.iter().find(|asset| {
+                        asset.asset_id == icon.asset_id
+                            && Some(asset.digest_sha256.as_str()) == icon.digest_sha256.as_deref()
+                            && Some(asset.media_type.as_str()) == icon.media_type.as_deref()
+                    })
+                })
+                .cloned()
+        });
+        inventory.push(ExportInvocation {
+            schema_version: 1,
+            id,
+            source: ExportInvocationSource {
+                interaction_node_id: ids.node(call.source_completion_id.value()),
+                action_id: ids.action(call.source_action_id.value()),
+                parent_node_id: ids.node(call.parent_node_id.value()),
+                layer_id: frozen
+                    .get("sourceLayerId")
+                    .and_then(serde_json::Value::as_i64)
+                    .map(|layer| ids.layer(layer)),
+                instruction: redactor.text(
+                    call.action_snapshot
+                        .get("instruction")
+                        .and_then(serde_json::Value::as_str)
+                        .unwrap_or_default(),
+                ),
+                label: redactor.text(
+                    frozen
+                        .get("label")
+                        .and_then(serde_json::Value::as_str)
+                        .unwrap_or(&source.label),
+                ),
+                description: redactor.optional(
+                    frozen
+                        .get("description")
+                        .and_then(serde_json::Value::as_str),
+                ),
+                icon: redactor.optional(frozen.get("icon").and_then(serde_json::Value::as_str)),
+                icon_asset_omitted: historical_icon.is_some() && icon_asset.is_none(),
+                icon_asset,
+                variant,
+                input_action_ids: frozen
+                    .get("inputActionIds")
+                    .and_then(serde_json::Value::as_array)
+                    .map(|values| {
+                        values
+                            .iter()
+                            .filter_map(serde_json::Value::as_i64)
+                            .map(|raw| ids.action(raw))
+                            .collect()
+                    })
+                    .unwrap_or_default(),
+                input_bindings_defined: frozen.get("inputActionIds").is_some(),
+                reusable: frozen.get("reusable").and_then(serde_json::Value::as_bool),
+                parent_title: redactor.text(&snapshot.parent_node.title),
+                parent_detail: redactor.text(&snapshot.parent_node.detail),
+                state: match source.state {
+                    RecordState::Draft => "draft",
+                    RecordState::Accepted => "accepted",
+                    RecordState::Stopped => "stopped",
+                }
+                .into(),
+            },
+            child_interaction_node_id: ids.node(call.child_interaction_node_id.value()),
+            result_turn_id,
+            lifecycle: match call.state.lifecycle {
+                relayer_graph_core::CompletionLifecycle::Active => "active",
+                relayer_graph_core::CompletionLifecycle::Succeeded => "succeeded",
+                relayer_graph_core::CompletionLifecycle::Stopped => "stopped",
+                relayer_graph_core::CompletionLifecycle::Failed => "failed",
+            }
+            .into(),
+            safe_reason: redactor.optional(call.state.safe_reason.as_deref()),
+            head_revision: call.state.head_revision,
+            current_layer_id: call.state.current_layer_id.map(|id| ids.layer(id.value())),
+            returned_layer_id: call.state.final_layer_id.map(|id| ids.layer(id.value())),
+            arguments,
+            current,
+        });
+    }
+    if let Some(ConversationExportRecord::Header(header)) = records.first_mut()
+        && !inventory.is_empty()
+    {
+        header.export_version = EXPORT_VERSION_V4;
+        header.invocations = inventory;
+    }
+    Ok(())
+}
+
+fn attach_bound_inputs(
+    records: &mut [ConversationExportRecord],
+    native: &[GraphAction],
+    imported: Vec<ExportAction>,
+    ids: &mut PortableIds,
+    redactor: &ProjectPathRedactor,
+    assets: &HashMap<i64, ExportVisualAssetAssociation>,
+) -> Result<(), ConversationExportBuildError> {
+    let mut definitions = imported
+        .into_iter()
+        .map(|action| (action.id.clone(), action))
+        .collect::<BTreeMap<_, _>>();
+    for action in native {
+        let mut exported = export_action(action, ids, redactor)?;
+        exported.icon_asset = assets.get(&action.id.value()).cloned();
+        if definitions
+            .get(&exported.id)
+            .is_some_and(|existing| existing != &exported)
+        {
+            // Imported standalone definitions retain original source-Layer provenance,
+            // even when that Layer has no canonical imported navigation membership.
+            continue;
+        }
+        definitions.insert(exported.id.clone(), exported);
+    }
+    if let Some(ConversationExportRecord::Header(header)) = records.first_mut()
+        && !definitions.is_empty()
+    {
+        header.export_version = EXPORT_VERSION_V4;
+        header.bound_inputs = definitions.into_values().collect();
+    }
+    Ok(())
+}
+
+fn standalone_bound_inputs<'a>(
+    inputs: Vec<GraphAction>,
+    closures: impl IntoIterator<Item = &'a AcceptedGraphClosure>,
+    calls: &[relayer_graph_core::InvocationGraphSnapshot],
+) -> Vec<GraphAction> {
+    let mut shown = closures
+        .into_iter()
+        .flat_map(|closure| {
+            closure
+                .layers
+                .iter()
+                .flat_map(|layer| layer.actions.iter().map(|action| action.id))
+        })
+        .collect::<HashSet<_>>();
+    for call in calls {
+        if let Some(current) = &call.current {
+            shown.extend(
+                current
+                    .layers
+                    .iter()
+                    .flat_map(|layer| layer.actions.iter().map(|action| action.id)),
+            );
+        }
+    }
+    inputs
+        .into_iter()
+        .filter(|input| !shown.contains(&input.id))
+        .collect()
+}
+
+fn merge_visual_contents(
+    target: &mut Vec<ExportVisualAssetContent>,
+    additional: Vec<ExportVisualAssetContent>,
+) -> Result<(), ConversationExportBuildError> {
+    for content in additional {
+        if let Some(existing) = target
+            .iter()
+            .find(|existing| existing.digest_sha256 == content.digest_sha256)
+        {
+            if existing != &content {
+                return Err(ConversationExportBuildError::Invalid(
+                    "Portable asset content definitions conflict".into(),
+                ));
+            }
+        } else {
+            target.push(content);
+        }
+    }
+    target.sort_by(|left, right| left.digest_sha256.cmp(&right.digest_sha256));
+    Ok(())
+}
+
+async fn collect_bound_input_assets<'a>(
+    runtime: &RuntimeClient,
+    inputs: &[GraphAction],
+    closures: impl IntoIterator<Item = &'a AcceptedGraphClosure>,
+    redactor: &ProjectPathRedactor,
+) -> Result<
+    (
+        HashMap<i64, ExportVisualAssetAssociation>,
+        Vec<ExportVisualAssetContent>,
+    ),
+    ConversationExportBuildError,
+> {
+    let closures = closures.into_iter().collect::<Vec<_>>();
+    let mut associations = HashMap::new();
+    let mut contents = Vec::new();
+    for input in inputs {
+        let Some(icon) = input
+            .icon
+            .as_deref()
+            .and_then(relayer_graph_core::image_icon)
+        else {
+            continue;
+        };
+        let owner = closures
+            .iter()
+            .find(|closure| {
+                closure
+                    .layers
+                    .iter()
+                    .flat_map(|layer| &layer.nodes)
+                    .any(|node| node.id == input.source_node_id)
+            })
+            .ok_or_else(|| {
+                ConversationExportBuildError::Invalid(
+                    "Standalone input source Node is outside the captured graph".into(),
+                )
+            })?;
+        let mut node = owner
+            .layers
+            .iter()
+            .flat_map(|layer| &layer.nodes)
+            .find(|node| node.id == input.source_node_id)
+            .unwrap()
+            .clone();
+        node.authored_detail = None;
+        node.icon = input.icon.clone().unwrap();
+        // This envelope feeds only the existing revision-pinned asset collector;
+        // it is not serialized and creates no Layer membership or terminal result.
+        let envelope = AcceptedGraphClosure {
+            detail_asset_revisions: owner.detail_asset_revisions.clone(),
+            has_persistent_mutations: false,
+            has_reusable_invocations: false,
+            node_id: owner.node_id,
+            interaction: node,
+            root_action: input.clone(),
+            root_layer_id: owner.root_layer_id,
+            layers: Vec::new(),
+        };
+        let (assets, bytes) =
+            collect_visual_assets_with_context_icons(runtime, [&envelope], redactor, true, &[])
+                .await?;
+        let association = assets
+            .get(&input.source_node_id.value())
+            .and_then(|assets| assets.iter().find(|asset| asset.asset_id == icon.asset_id))
+            .cloned()
+            .ok_or_else(|| {
+                ConversationExportBuildError::Invalid(
+                    "Standalone input image pin has no captured bytes".into(),
+                )
+            })?;
+        associations.insert(input.id.value(), association);
+        merge_visual_contents(&mut contents, bytes)?;
+    }
+    Ok((associations, contents))
+}
+
+// Reuse asset capture over accepted Current without inventing a terminal Return.
+// These internal envelopes are used only by asset collection, never serialized.
+fn invocation_asset_closures(
+    snapshots: &[relayer_graph_core::InvocationGraphSnapshot],
+) -> Vec<AcceptedGraphClosure> {
+    snapshots
+        .iter()
+        .filter_map(|snapshot| {
+            snapshot
+                .current
+                .as_ref()
+                .map(|current| AcceptedGraphClosure {
+                    detail_asset_revisions: Some(snapshot.detail_asset_revisions.clone()),
+                    has_persistent_mutations: true,
+                    has_reusable_invocations: false,
+                    node_id: current.node_id,
+                    interaction: current.interaction.clone(),
+                    root_action: {
+                        let mut source = snapshot.source_action.clone();
+                        source.icon = None;
+                        source
+                    },
+                    root_layer_id: current.root_layer_id,
+                    layers: current.layers.clone(),
+                })
+        })
+        .collect()
 }
 
 fn export_view_with_assets(
@@ -2326,6 +2884,12 @@ fn export_action(
             .as_ref()
             .map(|input| export_input_action(input, redactor))
             .transpose()?,
+        input_action_ids: action
+            .input_action_ids
+            .iter()
+            .map(|id| ids.action(id.value()))
+            .collect(),
+        reusable: action.reusable,
         state: ExportRecordState::Accepted,
     })
 }
@@ -3929,8 +4493,10 @@ mod tests {
         consumer.sequence = 2;
         let owner_closure = closures[0].as_ref().unwrap();
         assert!(!super::needs_current_snapshot(owner_closure));
-        let context = ContextInput::Runtime(RuntimeContextInput {
+        let context = ContextInput::Runtime(Box::new(RuntimeContextInput {
             input: InteractionInput {
+                completion_contract: None,
+                completion_contract_status: "legacy".into(),
                 interaction_permissions: None,
                 interaction: InteractionInputNode::from(owner_closure.interaction.clone()),
                 contexts: vec![],
@@ -3948,7 +4514,7 @@ mod tests {
                 annotations: vec![],
                 state: RecordState::Accepted,
             }],
-        });
+        }));
         let owners = super::collect_context_owners(
             &runtime,
             vec![(&owner, owner_closure)],
@@ -4691,6 +5257,8 @@ mod tests {
             latest_attempt: None,
         };
         let invoke = |source, result| ActionInvocation {
+            durable: false,
+            invocation_key: "legacy".into(),
             source_interaction_id: InteractionId::from_database(source),
             action_id: result,
             result_interaction_id: InteractionId::from_database(result),
@@ -5168,6 +5736,8 @@ mod tests {
         let target = InteractionInputNode::from(target_node.clone());
         let runtime = RuntimeContextInput {
             input: InteractionInput {
+                completion_contract: None,
+                completion_contract_status: "legacy".into(),
                 interaction_permissions: None,
                 interaction: InteractionInputNode::from(GraphNode {
                     id: NodeId::new(10).unwrap(),
@@ -5212,7 +5782,7 @@ mod tests {
         ids.bind_layer(50, long_layer_id.clone()).unwrap();
         let exported = export_contexts(
             &interaction,
-            Some(&ContextInput::Runtime(runtime)),
+            Some(&ContextInput::Runtime(Box::new(runtime))),
             None,
             &mut ids,
             &ProjectPathRedactor::new(Some("/workspace/project")),
@@ -5345,6 +5915,8 @@ mod tests {
             description: None,
             target_layer_id: Some(LayerId::new(4).unwrap()),
             interaction_text: Some("Continue from here".into()),
+            reusable: None,
+            input_action_ids: Vec::new(),
             input: None,
             state: RecordState::Accepted,
         };
@@ -5403,6 +5975,8 @@ mod tests {
             description: None,
             target_layer_id: None,
             interaction_text: None,
+            reusable: None,
+            input_action_ids: Vec::new(),
             input: Some(InputAction {
                 control: InputControl::SingleSelect,
                 prompt: "Choose /private/tmp/project/target".into(),
@@ -5465,6 +6039,8 @@ mod tests {
             description: None,
             target_layer_id: None,
             interaction_text: None,
+            reusable: None,
+            input_action_ids: Vec::new(),
             input: Some(InputAction {
                 control: InputControl::SingleSelect,
                 prompt: "Choose".into(),
@@ -5530,6 +6106,8 @@ mod tests {
             latest_attempt: None,
         };
         let invocation = ActionInvocation {
+            durable: false,
+            invocation_key: "legacy".into(),
             source_interaction_id: source_id,
             action_id: 41,
             result_interaction_id: result_id,

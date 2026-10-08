@@ -298,6 +298,10 @@ pub(crate) struct RuntimeAction {
     pub(crate) kind: String,
     pub(crate) interaction_text: Option<String>,
     #[serde(default)]
+    pub(crate) input_action_ids: Vec<relayer_graph_core::ActionId>,
+    #[serde(default)]
+    pub(crate) reusable: Option<bool>,
+    #[serde(default)]
     pub(crate) target_layer_id: Option<i64>,
     pub(crate) state: String,
 }
@@ -359,12 +363,41 @@ pub(crate) struct RuntimeInteractionMetadata {
     pub(crate) node_id: i64,
     pub(crate) invocation: Option<PreparedInvocation>,
     #[serde(default)]
+    pub(crate) durable_invocation: Option<relayer_graph_core::GraphInvocation>,
+    #[serde(default)]
+    pub(crate) has_completion_contract: bool,
+    #[serde(default)]
     pub(crate) input_identity: Option<String>,
     #[serde(default)]
     pub(crate) input_digest: Option<String>,
 }
 
 impl RuntimeClient {
+    pub(crate) async fn prepare_user_invocation(
+        &self,
+        source: i64,
+        action: i64,
+        key: &str,
+        submitted_inputs: &[relayer_graph_core::SubmittedInputDraft],
+    ) -> Result<i64, RuntimeError> {
+        #[derive(Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct Prepared {
+            interaction_node: i64,
+        }
+        let body = serde_json::json!({ "sourceInteractionNodeId": source, "actionId": action, "invocationKey": key, "submittedInputs": submitted_inputs });
+        let result: Prepared = self
+            .post_idempotent(
+                self.graph_url
+                    .join("api/control/durable-invocations/prepare")?,
+                &body,
+                &self.graph_control_token,
+                StatusCode::OK,
+                "user invocation preparation",
+            )
+            .await?;
+        Ok(result.interaction_node)
+    }
     pub(crate) async fn begin_imported_conversation(
         &self,
         input: &ImportedConversationStage,
@@ -733,6 +766,14 @@ impl RuntimeClient {
         &self,
         command: &CompleteInteraction<'_>,
     ) -> Result<PreparedInteraction, RuntimeError> {
+        self.prepare_bound(command, None).await
+    }
+
+    pub(crate) async fn prepare_bound(
+        &self,
+        command: &CompleteInteraction<'_>,
+        prepared_interaction_node: Option<i64>,
+    ) -> Result<PreparedInteraction, RuntimeError> {
         let selected = self
             .configurations
             .get(command.harness_configuration_name)
@@ -763,6 +804,7 @@ impl RuntimeClient {
             "threadId": command.thread_id,
             "text": command.text,
             "invocation": invocation,
+            "preparedInteractionNode": prepared_interaction_node,
             "inputIdentity": command.input_identity,
             "inputDigest": command.input_digest,
             "contexts": command.contexts,
@@ -1797,10 +1839,10 @@ impl RuntimeClient {
         )?)
     }
 
-    pub(crate) async fn accepted_graph_closures(
+    pub(crate) async fn conversation_graph_snapshot(
         &self,
         interaction_node_ids: &[i64],
-    ) -> Result<Vec<Option<relayer_graph_core::AcceptedGraphClosure>>, RuntimeError> {
+    ) -> Result<relayer_graph_core::ConversationGraphSnapshot, RuntimeError> {
         let response = self
             .client
             .post(self.graph_url.join("api/control/accepted-closures")?)
@@ -1831,7 +1873,34 @@ impl RuntimeClient {
                 "Accepted closure snapshot does not match requested roots".into(),
             ));
         }
-        Ok(closures)
+        if value.get("invocations").is_none()
+            && closures
+                .iter()
+                .flatten()
+                .any(|closure| closure.has_reusable_invocations)
+        {
+            return Err(RuntimeError::Configuration(
+                "Runtime omitted authoritative Invocation inventory for a reusable-call snapshot"
+                    .into(),
+            ));
+        }
+        let invocations = serde_json::from_value(
+            value
+                .get("invocations")
+                .cloned()
+                .unwrap_or_else(|| serde_json::json!([])),
+        )?;
+        let bound_inputs = serde_json::from_value(
+            value
+                .get("boundInputs")
+                .cloned()
+                .unwrap_or_else(|| serde_json::json!([])),
+        )?;
+        Ok(relayer_graph_core::ConversationGraphSnapshot {
+            closures,
+            invocations,
+            bound_inputs,
+        })
     }
 
     pub(crate) async fn accepted_graph_closure(
@@ -3540,19 +3609,30 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(
-            runtime.accepted_graph_closures(&[1, 2]).await.unwrap(),
+            runtime
+                .conversation_graph_snapshot(&[1, 2])
+                .await
+                .unwrap()
+                .closures,
             vec![None, None]
         );
         for scenario in [1, 2] {
             mode.store(scenario, Ordering::SeqCst);
             assert!(matches!(
-                runtime.accepted_graph_closures(&[1, 2]).await.unwrap_err(),
+                runtime
+                    .conversation_graph_snapshot(&[1, 2])
+                    .await
+                    .unwrap_err(),
                 RuntimeError::Configuration(_)
             ));
         }
         mode.store(3, Ordering::SeqCst);
         assert_eq!(
-            runtime.accepted_graph_closures(&[1, 2]).await.unwrap(),
+            runtime
+                .conversation_graph_snapshot(&[1, 2])
+                .await
+                .unwrap()
+                .closures,
             vec![None, None],
             "two roots retain their aggregate read budget rather than sharing one root's timeout"
         );

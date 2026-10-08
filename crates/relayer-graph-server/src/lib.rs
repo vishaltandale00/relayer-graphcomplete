@@ -195,6 +195,10 @@ pub fn router(state: ServerState) -> Router {
         )
         .route("/api/control/interactions", post(create_interaction))
         .route("/api/control/interactions/{id}", get(interaction_metadata))
+        .route(
+            "/api/control/durable-invocations/prepare",
+            post(prepare_user_invocation),
+        )
         .route("/api/control/interactions/{id}/input", get(control_input))
         .route(
             "/api/control/interactions/{id}/input-children",
@@ -334,6 +338,10 @@ pub fn router(state: ServerState) -> Router {
         .route("/api/graph/layers/{id}/discard", post(discard_layer))
         .route("/api/graph/actions", post(add_action))
         .route("/api/graph/actions/{id}", get(get_action))
+        .route(
+            "/api/graph/actions/{id}/invocations",
+            get(get_action_invocations),
+        )
         .route("/api/graph/submit", post(submit_completion))
         .route("/api/graph/thread-icon", post(propose_thread_icon))
         .route("/api/graph/current", get(graph_current))
@@ -1202,11 +1210,13 @@ async fn accepted_closures(
             }}),
         ));
     }
-    let closures = state
+    let snapshot = state
         .graph
-        .accepted_graph_closures(&input.interaction_node_ids)
+        .conversation_graph_snapshot(&input.interaction_node_ids)
         .await?;
-    Ok(Json(json!({"closures": closures})))
+    Ok(Json(
+        json!({"closures": snapshot.closures, "invocations": snapshot.invocations, "boundInputs": snapshot.bound_inputs}),
+    ))
 }
 
 async fn accepted_closure(
@@ -1444,6 +1454,8 @@ struct CreateInteractionRequest {
     #[serde(default)]
     invocation: Option<InteractionInvocation>,
     #[serde(default)]
+    prepared_interaction_node: Option<NodeId>,
+    #[serde(default)]
     contexts: Vec<InteractionContextDraft>,
     #[serde(default)]
     submitted_inputs: Vec<relayer_graph_core::SubmittedInputDraft>,
@@ -1489,7 +1501,44 @@ async fn create_interaction(
             "invocation and submitted interaction input cannot be prepared together",
         ));
     }
-    let (interaction, context_actions, input_children) = if input.personal_presentation_profile {
+    let (interaction, context_actions, input_children) = if let Some(node_id) =
+        input.prepared_interaction_node
+    {
+        let durable = state
+            .graph
+            .durable_invocation(node_id)
+            .await?
+            .ok_or_else(|| ApiError::invalid("prepared interaction is not a durable invocation"))?;
+        let source = input
+            .invocation
+            .ok_or_else(|| ApiError::invalid("prepared invocation source is required"))?;
+        if source.source_interaction_node_id != durable.source_completion_id
+            || source.source_action_id != durable.source_action_id
+            || !input.contexts.is_empty()
+            || !input.submitted_inputs.is_empty()
+            || input.input_identity.is_some()
+            || input.input_digest.is_some()
+            || input.personal_presentation_profile
+        {
+            return Err(ApiError::invalid(
+                "prepared invocation provenance or input mismatch",
+            ));
+        }
+        let writer = state
+            .graph
+            .writer_for_subgraph(durable.source_completion_id)
+            .await?;
+        if writer.authority_scope() != (input.project_id, input.thread_id) {
+            return Err(ApiError::invalid("prepared invocation scope mismatch"));
+        }
+        let node = writer.get_node(node_id).await?;
+        if node.detail != input.text {
+            return Err(ApiError::invalid(
+                "prepared invocation instruction mismatch",
+            ));
+        }
+        (node, Vec::new(), Vec::new())
+    } else if input.personal_presentation_profile {
         if input.project_id.is_some()
             || input.thread_id.value() != PERSONAL_PRESENTATION_PROFILE_THREAD_ID
             || input.invocation.is_some()
@@ -1649,12 +1698,16 @@ async fn prepare_recursive_completion(
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct PrepareGraphCompletionRequest {
     action_id: ActionId,
+    #[serde(default)]
+    invocation_key: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 struct PrepareGraphCompletionResponse {
     interaction_node: NodeId,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    invocation_id: Option<i64>,
 }
 
 async fn prepare_graph_completion(
@@ -1667,14 +1720,56 @@ async fn prepare_graph_completion(
         "provider-recursion",
     )?;
     let authority = session(&state, &headers)?;
-    let node = state
+    let writer = state
         .graph
         .writer_for_completion_authority(authority.node_id, authority.epoch)
-        .await?
-        .prepare_recursive_completion(input.action_id)
+        .await?;
+    if let Some(key) = input.invocation_key {
+        let (node, invocation) = writer
+            .prepare_recursive_invocation(input.action_id, &key)
+            .await?;
+        return Ok(Json(PrepareGraphCompletionResponse {
+            interaction_node: node.id,
+            invocation_id: Some(invocation.id),
+        }));
+    }
+    let node = writer.prepare_recursive_completion(input.action_id).await?;
+    Ok(Json(PrepareGraphCompletionResponse {
+        interaction_node: node.id,
+        invocation_id: None,
+    }))
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct PrepareUserInvocationRequest {
+    source_interaction_node_id: NodeId,
+    action_id: ActionId,
+    invocation_key: String,
+    #[serde(default)]
+    submitted_inputs: Vec<relayer_graph_core::SubmittedInputDraft>,
+}
+async fn prepare_user_invocation(
+    State(state): State<ServerState>,
+    headers: HeaderMap,
+    Json(input): Json<PrepareUserInvocationRequest>,
+) -> Result<Json<PrepareGraphCompletionResponse>, ApiError> {
+    require_bearer(&headers, &state.control_token)?;
+    let writer = state
+        .graph
+        .writer_for_subgraph(input.source_interaction_node_id)
+        .await?;
+    accepted_action(&writer, input.action_id).await?;
+    let (node, invocation) = writer
+        .prepare_user_invocation_with_inputs(
+            input.action_id,
+            &input.invocation_key,
+            &input.submitted_inputs,
+        )
         .await?;
     Ok(Json(PrepareGraphCompletionResponse {
         interaction_node: node.id,
+        invocation_id: Some(invocation.id),
     }))
 }
 
@@ -1790,11 +1885,27 @@ async fn interaction_metadata(
     Path(id): Path<NodeId>,
 ) -> Result<Json<Value>, ApiError> {
     require_bearer(&headers, &state.control_token)?;
-    let invocation = state.graph.interaction_invocation(id).await?;
+    let mut invocation = state.graph.interaction_invocation(id).await?;
     let input = state.graph.interaction_input_identity(id).await?;
+    let durable_invocation = state.graph.durable_invocation(id).await?;
+    let contract = state
+        .graph
+        .writer_for_subgraph(id)
+        .await?
+        .interaction_input()
+        .await?
+        .completion_contract;
+    if let Some(durable) = &durable_invocation {
+        invocation = Some(InteractionInvocation {
+            source_interaction_node_id: durable.source_completion_id,
+            source_action_id: durable.source_action_id,
+        });
+    }
     Ok(Json(json!({
         "nodeId": id,
         "invocation": invocation,
+        "durableInvocation": durable_invocation,
+        "hasCompletionContract": contract.is_some(),
         "inputIdentity": input.as_ref().map(|value| value.0.as_str()),
         "inputDigest": input.as_ref().map(|value| value.1.as_str()),
     })))
@@ -2872,6 +2983,21 @@ async fn get_action(
         .await?;
     let action = accepted_action(&writer, id).await?;
     Ok(Json(json!({"action": action})))
+}
+
+async fn get_action_invocations(
+    State(state): State<ServerState>,
+    headers: HeaderMap,
+    Path(id): Path<ActionId>,
+) -> Result<Json<Value>, ApiError> {
+    let authority = session(&state, &headers)?;
+    let writer = state
+        .graph
+        .writer_for_completion_authority(authority.node_id, authority.epoch)
+        .await?;
+    Ok(Json(
+        json!({"invocations": writer.action_invocations(id).await?}),
+    ))
 }
 
 async fn accepted_action(writer: &GraphWriter, id: ActionId) -> Result<GraphAction, ApiError> {
@@ -4725,6 +4851,8 @@ mod tests {
         let stage = serde_json::to_vec(&ImportedConversationStage {
             import_id: "import-stage-1".into(),
             source_sha256: "sha256:fixture".into(),
+            inert_invocations: Vec::new(),
+            standalone_inputs: Vec::new(),
             project_id: None,
             thread_id: ThreadId::new(9001).unwrap(),
             created_at: "1770000000000".into(),
@@ -4852,6 +4980,7 @@ mod tests {
             .unwrap();
         version_writer
             .add_action(&ActionDraft {
+                reusable: None,
                 client_key: "response".into(),
                 source_node_id: version.id,
                 source_layer_id: None,
@@ -4863,6 +4992,7 @@ mod tests {
                 description: None,
                 target_layer_id: Some(layer.id),
                 interaction_text: None,
+                input_action_ids: Vec::new(),
                 input: None,
             })
             .await
@@ -4973,6 +5103,7 @@ mod tests {
             .unwrap();
         source_writer
             .add_action(&ActionDraft {
+                reusable: None,
                 client_key: "response".into(),
                 source_node_id: source.id,
                 source_layer_id: None,
@@ -4984,6 +5115,7 @@ mod tests {
                 description: None,
                 target_layer_id: Some(layer.id),
                 interaction_text: None,
+                input_action_ids: Vec::new(),
                 input: None,
             })
             .await
@@ -5405,7 +5537,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn parent_capability_prepares_one_recursive_child_without_caller_scope() {
+    async fn parent_capability_prepares_distinct_keyed_children_without_caller_scope() {
         let features = TemporalFeatureConfig {
             schema_read: true,
             root_current_write: true,
@@ -5444,6 +5576,7 @@ mod tests {
             .unwrap();
         let invoke = writer
             .add_action(&ActionDraft {
+                reusable: Some(true),
                 client_key: "child".into(),
                 source_node_id: source.id,
                 source_layer_id: Some(layer.id),
@@ -5455,6 +5588,26 @@ mod tests {
                 description: None,
                 target_layer_id: None,
                 interaction_text: Some("Canonical child input".into()),
+                input_action_ids: Vec::new(),
+                input: None,
+            })
+            .await
+            .unwrap();
+        writer
+            .add_action(&ActionDraft {
+                reusable: None,
+                client_key: "root".into(),
+                source_node_id: parent.id,
+                source_layer_id: None,
+                kind: ActionKind::Navigate,
+                relation: Some(relayer_graph_core::NavigateRelation::Expand),
+                label: "Answer".into(),
+                variant: relayer_graph_core::ActionVariant::Pill,
+                icon: None,
+                description: None,
+                target_layer_id: Some(layer.id),
+                interaction_text: None,
+                input_action_ids: Vec::new(),
                 input: None,
             })
             .await
@@ -5487,41 +5640,31 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(denied.status(), StatusCode::UNAUTHORIZED);
-        let request = || {
+        let request = |key: Option<&str>| {
             Request::builder()
                 .method("POST")
-                .uri("/api/control/recursive-completions")
-                .header("authorization", "Bearer control")
+                .uri("/api/graph/completions/prepare")
+                .header("authorization", format!("Bearer {parent_token}"))
                 .header("content-type", "application/json")
                 .body(Body::from(
-                    json!({ "actionId": invoke.id, "parentGraphToken": &parent_token }).to_string(),
+                    json!({ "actionId": invoke.id, "invocationKey": key }).to_string(),
                 ))
                 .unwrap()
         };
-
-        let first = app.clone().oneshot(request()).await.unwrap();
+        let missing_key = app.clone().oneshot(request(None)).await.unwrap();
+        assert_eq!(missing_key.status(), StatusCode::UNPROCESSABLE_ENTITY);
+        let first = app.clone().oneshot(request(Some("first"))).await.unwrap();
         assert_eq!(first.status(), StatusCode::OK);
-        let first: PrepareRecursiveCompletionResponse =
+        let first: PrepareGraphCompletionResponse =
             serde_json::from_slice(&to_bytes(first.into_body(), usize::MAX).await.unwrap())
                 .unwrap();
-        let retry = app.clone().oneshot(request()).await.unwrap();
+        let retry = app.clone().oneshot(request(Some("first"))).await.unwrap();
         assert_eq!(retry.status(), StatusCode::OK);
-        let retry: PrepareRecursiveCompletionResponse =
+        let retry: PrepareGraphCompletionResponse =
             serde_json::from_slice(&to_bytes(retry.into_body(), usize::MAX).await.unwrap())
                 .unwrap();
 
-        let model_prepared = app
-            .oneshot(
-                Request::builder()
-                    .method("POST")
-                    .uri("/api/graph/completions/prepare")
-                    .header("authorization", format!("Bearer {parent_token}"))
-                    .header("content-type", "application/json")
-                    .body(Body::from(json!({ "actionId": invoke.id }).to_string()))
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
+        let model_prepared = app.clone().oneshot(request(Some("second"))).await.unwrap();
         assert_eq!(model_prepared.status(), StatusCode::OK);
         let model_prepared: PrepareGraphCompletionResponse = serde_json::from_slice(
             &to_bytes(model_prepared.into_body(), usize::MAX)
@@ -5530,11 +5673,27 @@ mod tests {
         )
         .unwrap();
 
-        assert_eq!(retry.node.id, first.node.id);
-        assert_eq!(model_prepared.interaction_node, first.node.id);
-        assert_eq!(first.node.detail, "Canonical child input");
-        assert_eq!(first.node.leased_action_id, Some(invoke.id));
-        assert_ne!(first.node.id, parent.id);
+        assert_eq!(retry.interaction_node, first.interaction_node);
+        assert_eq!(retry.invocation_id, first.invocation_id);
+        assert_ne!(model_prepared.interaction_node, first.interaction_node);
+        assert_ne!(model_prepared.invocation_id, first.invocation_id);
+        assert_ne!(first.interaction_node, parent.id);
+        let calls = app
+            .oneshot(
+                Request::builder()
+                    .uri(format!("/api/graph/actions/{}/invocations", invoke.id))
+                    .header("authorization", format!("Bearer {parent_token}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(calls.status(), StatusCode::OK);
+        let calls: Value =
+            serde_json::from_slice(&to_bytes(calls.into_body(), usize::MAX).await.unwrap())
+                .unwrap();
+        assert_eq!(calls["invocations"].as_array().unwrap().len(), 2);
+        assert_eq!(calls["invocations"][0]["parentNodeId"], source.id.value());
     }
 
     #[tokio::test]
@@ -5768,6 +5927,7 @@ mod tests {
             .unwrap();
         let invoke = writer
             .add_action(&ActionDraft {
+                reusable: None,
                 client_key: "continue".into(),
                 source_node_id: source.id,
                 source_layer_id: Some(layer.id),
@@ -5779,12 +5939,14 @@ mod tests {
                 description: None,
                 target_layer_id: None,
                 interaction_text: Some("Continue".into()),
+                input_action_ids: Vec::new(),
                 input: None,
             })
             .await
             .unwrap();
         writer
             .add_action(&ActionDraft {
+                reusable: None,
                 client_key: "response".into(),
                 source_node_id: source_interaction.id,
                 source_layer_id: None,
@@ -5796,6 +5958,7 @@ mod tests {
                 description: None,
                 target_layer_id: Some(layer.id),
                 interaction_text: None,
+                input_action_ids: Vec::new(),
                 input: None,
             })
             .await
@@ -5904,6 +6067,7 @@ mod tests {
             .unwrap();
         result_writer
             .add_action(&ActionDraft {
+                reusable: None,
                 client_key: "response".into(),
                 source_node_id: first.node.id,
                 source_layer_id: None,
@@ -5915,6 +6079,7 @@ mod tests {
                 description: None,
                 target_layer_id: Some(result_layer.id),
                 interaction_text: None,
+                input_action_ids: Vec::new(),
                 input: None,
             })
             .await
@@ -6341,6 +6506,7 @@ mod tests {
 
         writer
             .add_action(&ActionDraft {
+                reusable: None,
                 client_key: "continue".into(),
                 source_node_id: answer.id,
                 source_layer_id: LayerId::new(layer_id),
@@ -6352,12 +6518,14 @@ mod tests {
                 description: None,
                 target_layer_id: None,
                 interaction_text: Some("Continue from here".into()),
+                input_action_ids: Vec::new(),
                 input: None,
             })
             .await
             .unwrap();
         writer
             .add_action(&ActionDraft {
+                reusable: None,
                 client_key: "response".into(),
                 source_node_id: interaction.id,
                 source_layer_id: None,
@@ -6369,6 +6537,7 @@ mod tests {
                 description: None,
                 target_layer_id: LayerId::new(layer_id),
                 interaction_text: None,
+                input_action_ids: Vec::new(),
                 input: None,
             })
             .await
@@ -6825,6 +6994,7 @@ mod tests {
             .unwrap();
         let invoke = writer
             .add_action(&ActionDraft {
+                reusable: None,
                 client_key: "continue".into(),
                 source_node_id: answer.id,
                 source_layer_id: Some(layer.id),
@@ -6836,12 +7006,14 @@ mod tests {
                 description: None,
                 target_layer_id: None,
                 interaction_text: Some("Continue from here".into()),
+                input_action_ids: Vec::new(),
                 input: None,
             })
             .await
             .unwrap();
         writer
             .add_action(&ActionDraft {
+                reusable: None,
                 client_key: "response".into(),
                 source_node_id: interaction.id,
                 source_layer_id: None,
@@ -6853,6 +7025,7 @@ mod tests {
                 description: None,
                 target_layer_id: Some(layer.id),
                 interaction_text: None,
+                input_action_ids: Vec::new(),
                 input: None,
             })
             .await
@@ -6981,6 +7154,7 @@ mod tests {
         };
         let action = writer
             .add_action(&ActionDraft {
+                reusable: None,
                 client_key: "evidence".into(),
                 source_node_id: source.id,
                 source_layer_id: Some(layer.id),
@@ -6992,12 +7166,14 @@ mod tests {
                 description: None,
                 target_layer_id: None,
                 interaction_text: None,
+                input_action_ids: Vec::new(),
                 input: Some(input_action.clone()),
             })
             .await
             .unwrap();
         writer
             .add_action(&ActionDraft {
+                reusable: None,
                 client_key: "response".into(),
                 source_node_id: presenting.id,
                 source_layer_id: None,
@@ -7009,6 +7185,7 @@ mod tests {
                 description: None,
                 target_layer_id: Some(layer.id),
                 interaction_text: None,
+                input_action_ids: Vec::new(),
                 input: None,
             })
             .await
@@ -7350,6 +7527,7 @@ mod attached_navigation_route_tests {
             .await
             .unwrap();
         let mut action = ActionDraft {
+            reusable: None,
             client_key: "root".into(),
             source_node_id: source.id,
             source_layer_id: None,
@@ -7361,6 +7539,7 @@ mod attached_navigation_route_tests {
             description: None,
             target_layer_id: Some(layer.id),
             interaction_text: None,
+            input_action_ids: Vec::new(),
             input: None,
         };
         sw.add_action(&action).await.unwrap();

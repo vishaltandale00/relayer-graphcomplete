@@ -243,7 +243,7 @@ pub(super) async fn remove(
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use std::{
         fs,
         path::Path,
@@ -284,6 +284,8 @@ mod tests {
     fn records(text: String) -> Vec<ConversationExportRecord> {
         vec![
             ConversationExportRecord::Header(Box::new(ConversationExportHeader {
+                invocations: Vec::new(),
+                bound_inputs: Vec::new(),
                 export_version: EXPORT_VERSION_V1,
                 exported_at: "1770000000000".into(),
                 producer: ExportProducer {
@@ -400,6 +402,8 @@ mod tests {
         target_layer_id: Option<&str>,
     ) -> ExportAction {
         ExportAction {
+            reusable: None,
+            input_action_ids: Vec::new(),
             converted_from_invoke: false,
             id: id.into(),
             client_key: None,
@@ -471,6 +475,8 @@ mod tests {
         );
         vec![
             ConversationExportRecord::Header(Box::new(ConversationExportHeader {
+                invocations: Vec::new(),
+                bound_inputs: Vec::new(),
                 export_version: EXPORT_VERSION_V1,
                 exported_at: "1770000000000".into(),
                 producer: ExportProducer {
@@ -692,7 +698,7 @@ mod tests {
         (directory, router, store, graph, graph_task)
     }
 
-    struct ChildGuard(Child);
+    pub(crate) struct ChildGuard(Child);
 
     impl Drop for ChildGuard {
         fn drop(&mut self) {
@@ -701,7 +707,7 @@ mod tests {
         }
     }
 
-    fn real_visual_assets_host() -> (tempfile::TempDir, ChildGuard, String, String) {
+    pub(crate) fn real_visual_assets_host() -> (tempfile::TempDir, ChildGuard, String, String) {
         let directory = tempfile::tempdir().unwrap();
         let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
         static HOST_PACKAGES_BUILT: OnceLock<Result<(), String>> = OnceLock::new();
@@ -2725,6 +2731,8 @@ mod tests {
         );
         graph
             .begin_imported_conversation(&relayer_graph_core::ImportedConversationStage {
+                inert_invocations: Vec::new(),
+                standalone_inputs: Vec::new(),
                 import_id: import_id.clone(),
                 source_sha256: "sha256:cleanup-probe".into(),
                 project_id: None,

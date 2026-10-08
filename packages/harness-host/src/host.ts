@@ -1,4 +1,5 @@
 import { NativeExecutionCancelled } from "./completion-execution.js";
+import { validateCompletionContract } from "./completion-contract.js";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { mkdir, mkdtemp, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
@@ -1216,10 +1217,18 @@ export class HarnessHost {
         throw error;
       }),
     ]);
+    validateCompletionContract(interactionInput, interactionNodeId);
     if (origin.kind === "invoke") {
-      if (interaction.leasedActionId !== origin.actionId) {
+      const invocationMatches = interactionInput.completionContract?.input.invocationReferences.some((reference) =>
+        reference.sourceActionId === origin.actionId && reference.sourceCompletionId === origin.sourceCompletionId);
+      const sealedLegacyLeaseMatches = interaction.leasedActionId === origin.actionId
+        && interactionInput.completionContract?.authorities.some((authority) =>
+          authority.kind === "invoke.resolve" && authority.actionId === origin.actionId);
+      if (interactionInput.completionContract === undefined
+        ? interaction.leasedActionId !== origin.actionId
+        : !invocationMatches && !sealedLegacyLeaseMatches) {
         throw new HarnessExecutionFailure(
-          "Invoked completion does not match its graph-owned action lease",
+          "Invoked completion does not match its graph-owned Invocation or legacy action lease",
           "configuration",
           "none",
         );

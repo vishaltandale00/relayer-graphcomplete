@@ -44,6 +44,58 @@ function mountedCss(shadowRoot, index) {
 afterEach(() => vi.unstubAllGlobals());
 
 describe("compiled Node Detail product runtime", () => {
+  it.each([false, true])("uses one canonical result control and source-node navigation (authored=%s)", async (authored) => {
+    const window = new Window({ url: "http://127.0.0.1:3000" });
+    vi.stubGlobal("document", window.document);
+    vi.stubGlobal("window", window);
+    vi.stubGlobal("lucide", new Proxy({ Circle: {}, createElement: () => window.document.createElement("svg") }, { get: (target, key) => target[key] ?? {} }));
+    window.document.body.innerHTML = '<section id="threadView"></section>';
+    const node = { id: 7, clientKey: "destination", kind: "concept", icon: "box", title: "Choose a vacation destination", detail: "Compare destinations" };
+    const invoke = { id: 12, clientKey: "analyze", sourceNodeId: 7, kind: "invoke", label: "Analyze destination", interactionText: "Analyze" };
+    const navigation = { id: 13, clientKey: "overall", sourceNodeId: 7, kind: "navigate", relation: "reference", label: "Overall analysis · Kyoto", targetLayerId: 201 };
+    if (authored) node.authoredDetail = compiledPackage({ version: 1,
+      components: [{ id: "controls", order: 0, html: '<button data-gc-mount="invoke">Analyze destination</button><button data-gc-mount="analysis">Overall analysis · Kyoto</button>', css: "" }],
+      mounts: [
+        { id: "invoke", componentId: "controls", kind: "capability", host: "button", capability: { kind: "invoke", action: { clientKey: "analyze", sourceNode: { clientKey: "destination" } } } },
+        { id: "analysis", componentId: "controls", kind: "capability", host: "button", capability: { kind: "reference", action: { clientKey: "overall", sourceNode: { clientKey: "destination" } } } },
+      ], assets: [] });
+    const layer = { layer: { id: 101 }, nodes: [node], edges: [], actions: [invoke, navigation] };
+    const child = { id: 6, threadId: 3, completionStatus: "accepted", completionOutput: { rootLayer: { layer: { id: 201 }, nodes: [], actions: [], edges: [] } } };
+    const state = { status: "accepted", currentInteractionId: 5, interactions: [{ id: 5, threadId: 3, graphNodeId: 50, text: "Compare", completionStatus: "accepted", completionOutput: { rootLayer: layer } }, child], visibleLayer: layer, nodes: [node], actions: layer.actions, projects: [], permissionProfiles: [], modelSettings: { defaults: { harnessId: "fixture" }, harnesses: [{ id: "fixture", available: true }], providers: [], families: [] }, modelCatalog: [], actionInvocations: [{ reusable: true, sourceInteractionId: 5, actionId: 12, resultInteractionId: 6, resultCompletionStatus: "accepted" }], pendingActionInvocations: [] };
+    const onNavigateLayer = vi.fn();
+    const onNavigateInvocationResult = vi.fn();
+    const workspace = createProductWorkspace({ root: window.document, getState: () => state, getThread: () => ({ id: 3, rootInteractionId: 5, harnessId: "fixture" }), selection: { currentThreadId: 3, currentInteractionId: 5, selectedNodeId: 7, layerPath: [] }, onNavigateLayer, onNavigateInvocationResult, showThread() {}, showEmpty() {} });
+    try {
+      workspace.render();
+      await window.happyDOM.waitUntilComplete();
+      const shadow = window.document.querySelector("[data-node-detail-runtime]")?.shadowRoot;
+      const controls = [...window.document.querySelectorAll(".action-control"), ...(shadow?.querySelectorAll("button") ?? [])];
+      expect(controls.filter((control) => control.textContent.includes("Kyoto") || control.dataset.invocationResultInteractionId === "6")).toHaveLength(1);
+      const result = controls.find((control) => control.dataset.invocationResultInteractionId === "6");
+      expect(result).toBeDefined();
+      result.click();
+      await window.happyDOM.waitUntilComplete();
+      expect(onNavigateLayer).toHaveBeenCalledWith(201, expect.objectContaining({ action: navigation, sourceNode: node }));
+      expect(onNavigateInvocationResult).not.toHaveBeenCalled();
+      for (const status of ["running", "failed"]) {
+        state.actionInvocations[0].resultCompletionStatus = status;
+        workspace.render();
+        await vi.waitFor(() => {
+          expect(window.document.querySelector('[data-invocation-result-interaction-id="6"]')?.disabled).toBe(true);
+          expect(window.document.querySelector("[data-node-detail-runtime]")?.shadowRoot?.querySelector('[data-invocation-result-interaction-id="6"]')).toBeFalsy();
+        });
+      }
+      state.actionInvocations[0].resultCompletionStatus = "accepted";
+      child.completionOutput.rootLayer.layer.id = 202;
+      workspace.render();
+      await window.happyDOM.waitUntilComplete();
+      expect(window.document.querySelector('[data-invocation-result-interaction-id="6"]')?.disabled).toBe(true);
+      await vi.waitFor(() => {
+        const currentShadow = window.document.querySelector("[data-node-detail-runtime]")?.shadowRoot;
+        expect((currentShadow || window.document).querySelector(authored ? '[data-gc-mount="analysis"]' : '[data-action-id="13"]')).toBeTruthy();
+      });
+    } finally { workspace.dispose(); await window.happyDOM.close(); }
+  });
   it.each([
     ['*{color:red}p:only-child{color:blue;--note:"[data-relayer-theme=dark]"}', false],
     ['[title="[data-relayer-theme=dark]"] p{color:red}', false],
@@ -1062,6 +1114,7 @@ describe("compiled Node Detail product runtime", () => {
       modelCatalog: [],
       actionInvocations: [],
       pendingActionInvocations: [],
+      inputDraftRevision: 99,
     };
     const selection = { currentThreadId: 3, currentInteractionId: 5, selectedNodeId: null, layerPath: [] };
     const onNavigateLayer = vi.fn();
@@ -1127,7 +1180,7 @@ describe("compiled Node Detail product runtime", () => {
     runtimeHost.shadowRoot.querySelector("[data-gc-mount='invoke']").click();
     await window.happyDOM.waitUntilComplete();
     expect(onNavigateLayer).toHaveBeenCalledWith(91, expect.objectContaining({ action: actions[0], sourceNode: node }));
-    expect(onInvokeAction).toHaveBeenCalledWith(actions[1]);
+    expect(onInvokeAction).toHaveBeenCalledWith(actions[1], { inputDraftRevision: 0 });
     const invokeButton = runtimeHost.shadowRoot.querySelector("[data-gc-mount='invoke']");
     Object.assign(actions[1], { kind: "navigate", relation: "expand", targetLayerId: 92,
       state: "accepted", interactionText: null, resolvedInvokeInteractionId: 51 });
@@ -1175,6 +1228,14 @@ describe("compiled Node Detail product runtime", () => {
       { text: "answer still being written" },
       0,
     );
+    Object.assign(actions[1], { kind: "invoke", targetLayerId: null, interactionText: "Investigate" });
+    delete actions[1].relation;
+    delete actions[1].convertedFromInvoke;
+    workspace.render();
+    await window.happyDOM.waitUntilComplete();
+    runtimeHost.shadowRoot.querySelector("[data-gc-mount='invoke']").click();
+    await window.happyDOM.waitUntilComplete();
+    expect(onInvokeAction).toHaveBeenLastCalledWith(actions[1], { inputDraftRevision: 1 });
     expect(window.document.querySelector("#detailActions").classList.contains("hidden")).toBe(true);
 
     node.authoredDetail = compiledPackage({
@@ -1190,6 +1251,10 @@ describe("compiled Node Detail product runtime", () => {
     expect(window.document.querySelector("#detailContent").textContent).toContain("Legacy fallback");
     expect(window.document.querySelector("#detailActions").classList.contains("hidden")).toBe(false);
     expect(window.document.querySelector("#nodeInputActions").classList.contains("hidden")).toBe(false);
+
+    window.document.querySelector("#detailActions [data-action-id='12']").click();
+    await window.happyDOM.waitUntilComplete();
+    expect(onInvokeAction).toHaveBeenLastCalledWith(actions[1], { inputDraftRevision: 1 });
 
     node.authoredDetail = compiledPackage({
       version: detail.version,

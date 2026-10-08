@@ -578,6 +578,7 @@ impl GraphDatabase {
             .identified_interaction(project_id, thread_id, input_identity, input_digest)
             .await?
         {
+            crate::storage::sqlite::contracts::read(&mut transaction, node.id).await?;
             let scope = InteractionScope {
                 project_id,
                 thread_id,
@@ -698,6 +699,7 @@ impl GraphDatabase {
                 other => other,
             })?;
         if let Some(node) = identified {
+            crate::storage::sqlite::contracts::read(&mut transaction, node.id).await?;
             let scope = InteractionScope {
                 project_id,
                 thread_id,
@@ -757,10 +759,10 @@ impl GraphDatabase {
         ContextTable::new(&mut transaction)
             .insert_all(&scope, contexts)
             .await?;
-        initialize_completion(&mut transaction, &node, project_id, thread_id).await?;
         let children = InputChildTable::new(&mut transaction)
             .validate_and_insert_all(&scope, text, input_identity, authority_digest, attachments)
             .await?;
+        initialize_completion(&mut transaction, &node, project_id, thread_id).await?;
         transaction.commit().await?;
         Ok((node, children))
     }
@@ -792,6 +794,7 @@ impl GraphDatabase {
 
     pub async fn activate_completion_authority(&self, node_id: NodeId) -> Result<u64, GraphError> {
         let mut transaction = self.storage.begin_write().await?;
+        crate::storage::sqlite::contracts::read(&mut transaction, node_id).await?;
         NodeTable::new(&mut transaction)
             .interaction_scope(node_id)
             .await?;
@@ -854,6 +857,13 @@ impl GraphDatabase {
         node_ids: &[NodeId],
     ) -> Result<Vec<Option<AcceptedGraphClosure>>, GraphError> {
         crate::graph::completion::read_accepted_closures(self, node_ids).await
+    }
+
+    pub async fn conversation_graph_snapshot(
+        &self,
+        node_ids: &[NodeId],
+    ) -> Result<crate::ConversationGraphSnapshot, GraphError> {
+        crate::graph::completion::read_conversation_snapshot(self, node_ids).await
     }
 
     pub async fn accepted_detail_asset_metadata(
@@ -1131,7 +1141,9 @@ pub(crate) async fn initialize_completion(
         authority_epoch: None,
     };
     crate::storage::sqlite::permissions::prepare(connection, node.id).await?;
-    initialize_completion_scope(connection, &scope).await
+    crate::storage::sqlite::contracts::prepare(connection, &scope).await?;
+    initialize_completion_scope(connection, &scope).await?;
+    crate::storage::sqlite::contracts::pin(connection, node.id).await
 }
 
 async fn initialize_completion_scope(

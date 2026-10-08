@@ -394,6 +394,10 @@ mod attempt_response_tests {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct ActionInvocationResponse {
+    pub(super) durable: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(super) reusable: Option<bool>,
+    pub(super) invocation_key: String,
     pub(super) source_interaction_id: i64,
     pub(super) action_id: i64,
     pub(super) result_interaction_id: i64,
@@ -408,6 +412,9 @@ pub(crate) struct ActionInvocationResponse {
 impl From<ActionInvocation> for ActionInvocationResponse {
     fn from(invocation: ActionInvocation) -> Self {
         Self {
+            durable: invocation.durable,
+            reusable: (!invocation.durable).then_some(false),
+            invocation_key: invocation.invocation_key,
             source_interaction_id: invocation.source_interaction_id.value(),
             action_id: invocation.action_id,
             result_interaction_id: invocation.result_interaction_id.value(),
@@ -759,5 +766,25 @@ mod tests {
                 .unwrap()
                 .contains("rate limited")
         );
+    }
+}
+
+impl ProductStateResponse {
+    pub(crate) fn with_action_invocations(
+        mut self,
+        invocations: Vec<ActionInvocationResponse>,
+    ) -> Self {
+        self.action_invocations = invocations;
+        self
+    }
+}
+
+impl ThreadDetailResponse {
+    pub(crate) fn with_action_invocations(
+        mut self,
+        invocations: Vec<ActionInvocationResponse>,
+    ) -> Self {
+        self.action_invocations = invocations;
+        self
     }
 }

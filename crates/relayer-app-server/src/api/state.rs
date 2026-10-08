@@ -185,7 +185,11 @@ pub(super) async fn product_state(
         Some(id) => Some(state.product.conversation_compatibility(id).await?),
         None => None,
     };
+    let invocations =
+        super::threads::project_action_invocations(&state, &product_state.action_invocations)
+            .await?;
     let response = ProductStateResponse::from(product_state)
+        .with_action_invocations(invocations)
         .with_conversation_compatibility(compatibility)
         .with_interactions(interactions)
         .with_current_projection(current_projection)

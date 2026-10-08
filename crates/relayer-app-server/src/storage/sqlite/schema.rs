@@ -222,6 +222,8 @@ const ACTION_INVOCATION_COLUMNS: &[(&str, &str, bool, i64)] = &[
     ("authoritative", "INTEGER", true, 0),
     ("agent_invoked", "INTEGER", true, 0),
     ("graph_failure_pending", "INTEGER", true, 0),
+    ("invocation_key", "TEXT", true, 3),
+    ("prepared_graph_node_id", "INTEGER", false, 0),
 ];
 const COMPLETION_EXECUTION_COLUMNS: &[(&str, &str, bool, i64)] = &[
     ("interaction_id", "INTEGER", true, 1),
@@ -636,11 +638,18 @@ pub(super) async fn validate(pool: &SqlitePool) -> Result<(), StorageError> {
     validate_index(
         pool,
         "action_invocations",
-        &["source_interaction_id", "action_id"],
+        &["source_interaction_id", "action_id", "invocation_key"],
         true,
     )
     .await?;
     validate_index(pool, "action_invocations", &["result_interaction_id"], true).await?;
+    validate_index(
+        pool,
+        "action_invocations",
+        &["prepared_graph_node_id"],
+        true,
+    )
+    .await?;
     validate_index(
         pool,
         "completion_executions",
@@ -1155,6 +1164,7 @@ pub(super) async fn validate(pool: &SqlitePool) -> Result<(), StorageError> {
             FROM action_invocations ai
             JOIN interactions source ON source.id=ai.source_interaction_id
             JOIN threads thread ON thread.id=source.thread_id
+            WHERE ai.prepared_graph_node_id IS NULL
             GROUP BY CASE
                        WHEN thread.project_id IS NOT NULL THEN 'project:' || thread.project_id
                        ELSE 'thread:' || thread.id
@@ -1169,6 +1179,10 @@ pub(super) async fn validate(pool: &SqlitePool) -> Result<(), StorageError> {
         return Err(incompatible(
             "a node-owned action must have exactly one authoritative invocation result in its project scope",
         ));
+    }
+    let invalid_bound_invocation: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM action_invocations WHERE trim(invocation_key)='' OR (prepared_graph_node_id IS NOT NULL AND (prepared_graph_node_id<=0 OR authoritative!=1)) OR (prepared_graph_node_id IS NULL AND invocation_key!='legacy'))").fetch_one(pool).await?;
+    if invalid_bound_invocation {
+        return Err(incompatible("durable invocation identity is invalid"));
     }
     super::catalog::validate_catalog_rows(pool).await?;
     let invalid_approval_resolution: bool = sqlx::query_scalar(

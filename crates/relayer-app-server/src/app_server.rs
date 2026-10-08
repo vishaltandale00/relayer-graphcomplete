@@ -74,6 +74,16 @@ async fn reconcile_interrupted_interaction(
         .interaction_input(interaction.id)
         .await
         .map_err(StartupReconciliationError::retryable)?;
+    let prepared_invocation_node = if storage
+        .prepared_invocation_node(interaction.id)
+        .await
+        .map_err(StartupReconciliationError::retryable)?
+        .is_some()
+    {
+        Some(locate_agent_child_node(storage, runtime, &interaction).await?)
+    } else {
+        None
+    };
     // An agent's child is only ever failed at startup, so its graph interaction is located
     // without the checks a new run needs: its saved model or harness policy may no longer
     // validate, and that must not keep its current active.
@@ -147,40 +157,43 @@ async fn reconcile_interrupted_interaction(
             None
         };
         let prepared = runtime
-            .prepare(&crate::runtime::CompleteInteraction {
-                thread_icon_selection_eligible: false,
-                require_native_continuity: false,
-                native_history_anchor: None,
-                project_id: thread.project_id.map(ProjectId::value),
-                product_interaction_id: interaction.id.value(),
-                thread_id: thread.id.value(),
-                interaction_id: interaction.id.value(),
-                text: &interaction.text,
-                working_directory: "",
-                harness_configuration_name: &thread.harness_configuration_name,
-                permission_profile: permission,
-                model_selection: execution_model_selection.as_ref(),
-                model_plan: None,
-                attempt_admission_id: None,
-                execution_lease_id: None,
-                harness_policy: harness_policy.as_ref(),
-                invocation: prepared_invocation,
-                input_identity: durable_input
-                    .as_ref()
-                    .map(|input| input.input_identity.as_str()),
-                input_digest: durable_input
-                    .as_ref()
-                    .map(|input| input.input_digest.as_str()),
-                contexts: durable_input
-                    .as_ref()
-                    .map(|input| input.contexts.as_slice())
-                    .unwrap_or(&[]),
-                personal_presentation: personal_presentation.as_ref(),
-                submitted_inputs: durable_input
-                    .as_ref()
-                    .map(|input| input.submitted_inputs.as_slice())
-                    .unwrap_or(&[]),
-            })
+            .prepare_bound(
+                &crate::runtime::CompleteInteraction {
+                    thread_icon_selection_eligible: false,
+                    require_native_continuity: false,
+                    native_history_anchor: None,
+                    project_id: thread.project_id.map(ProjectId::value),
+                    product_interaction_id: interaction.id.value(),
+                    thread_id: thread.id.value(),
+                    interaction_id: interaction.id.value(),
+                    text: &interaction.text,
+                    working_directory: "",
+                    harness_configuration_name: &thread.harness_configuration_name,
+                    permission_profile: permission,
+                    model_selection: execution_model_selection.as_ref(),
+                    model_plan: None,
+                    attempt_admission_id: None,
+                    execution_lease_id: None,
+                    harness_policy: harness_policy.as_ref(),
+                    invocation: prepared_invocation,
+                    input_identity: durable_input
+                        .as_ref()
+                        .map(|input| input.input_identity.as_str()),
+                    input_digest: durable_input
+                        .as_ref()
+                        .map(|input| input.input_digest.as_str()),
+                    contexts: durable_input
+                        .as_ref()
+                        .map(|input| input.contexts.as_slice())
+                        .unwrap_or(&[]),
+                    personal_presentation: personal_presentation.as_ref(),
+                    submitted_inputs: durable_input
+                        .as_ref()
+                        .map(|input| input.submitted_inputs.as_slice())
+                        .unwrap_or(&[]),
+                },
+                prepared_invocation_node,
+            )
             .await
             .map_err(StartupReconciliationError::from_runtime)?;
         let bound = match storage
@@ -459,6 +472,40 @@ async fn locate_agent_child_node(
                 interaction.id
             ))
         })?;
+    if let Some((node, key)) = storage
+        .prepared_invocation_call(interaction.id)
+        .await
+        .map_err(StartupReconciliationError::retryable)?
+    {
+        let metadata = runtime
+            .interaction_metadata(node)
+            .await
+            .map_err(StartupReconciliationError::from_runtime)?;
+        let call = metadata.durable_invocation.as_ref().ok_or_else(|| {
+            StartupReconciliationError::deterministic(anyhow::anyhow!(
+                "durable child {} has no graph call",
+                interaction.id
+            ))
+        })?;
+        if metadata.node_id != node
+            || !metadata.has_completion_contract
+            || call.child_interaction_node_id.value() != node
+            || call.source_completion_id.value() != source_interaction_node_id
+            || call.source_action_id.value() != source_action_id
+            || call.invocation_key != key
+            || call
+                .action_snapshot
+                .get("instruction")
+                .and_then(serde_json::Value::as_str)
+                != Some(interaction.text.as_str())
+        {
+            return Err(StartupReconciliationError::deterministic(anyhow::anyhow!(
+                "durable child {} graph call mismatch",
+                interaction.id
+            )));
+        }
+        return Ok(node);
+    }
     let thread = storage
         .get_thread(interaction.thread_id)
         .await

@@ -45,6 +45,26 @@ function fixture() {
 }
 
 describe("workspace navigation presentation", () => {
+  it.each(["returned", "running", "wrong-call", "wrong-target", "missing-navigation", "wrong-source", "reusable"])("restores only an exactly supported returned single-call path (%s)", async (scenario) => {
+    const { root, child, detail } = fixture();
+    root.actions.push({ id: 502, kind: "invoke", sourceNodeId: 10, reusable: scenario === "reusable", label: "Analyze" });
+    detail.interactions.push({ id: 3, threadId: 7, completionStatus: "accepted", completionOutput: { rootLayer: child } });
+    detail.actionInvocations = [{ reusable: true, sourceInteractionId: 2, actionId: scenario === "wrong-call" ? 999 : 502, resultInteractionId: 3, resultCompletionStatus: scenario === "running" ? "running" : "accepted" }];
+    if (scenario === "wrong-target") root.actions[0].targetLayerId = 999;
+    if (scenario === "missing-navigation") root.actions.shift();
+    if (scenario === "wrong-source") root.actions[0].sourceNodeId = 999;
+    const loadLayer = vi.fn(async () => child);
+    const pending = resolveNavigationPresentation({ threadId: 7, turnId: 2, navigationPath: [{ layerId: 100, viaActionId: null }, { layerId: 101, viaActionId: 502 }] }, { loadThread: async () => detail, loadLayer });
+    if (scenario === "returned") {
+      const restored = await pending;
+      expect(restored.layerPath[1]).toMatchObject({ layerId: 101, actionId: 502, sourceNodeId: 10 });
+      expect(root.actions[1]).toMatchObject({ kind: "invoke", reusable: false });
+      expect(root.actions[1].targetLayerId).toBeUndefined();
+    } else {
+      await expect(pending).rejects.toThrow("Navigation history layer path is no longer available");
+      expect(loadLayer).not.toHaveBeenCalled();
+    }
+  });
   it("captures stable identity from the renderer layer path", () => {
     const entry = navigationEntryFromView({
       threadId: 7,

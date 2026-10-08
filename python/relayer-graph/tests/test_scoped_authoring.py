@@ -4,6 +4,7 @@ import json
 import sys
 import types
 import unittest
+from dataclasses import replace
 from unittest.mock import patch
 from relayer_graph import (GraphAuthoringWriteError, GraphAuthoringValidationError,
     GraphNode, GraphLayer, GraphSession, RelayerGraphClient, EdgeRouteObject, html, action_capability)
@@ -32,6 +33,74 @@ class Wire:
 
 
 class ScopedAuthoringTests(unittest.IsolatedAsyncioTestCase):
+    async def test_scoped_input_binding_captures_fields_before_queued_transport(self):
+        wire = Wire()
+        entered, release = asyncio.Event(), asyncio.Event()
+        async def request(method, path, body=None):
+            wire.requests.append((path, body))
+            if path.endswith("/nodes"):
+                entered.set()
+                await release.wait()
+            return wire.reply(path, body)
+        graph = RelayerGraphClient("http://graph.test", "token", 1)
+        graph._request = request
+        author = graph.authoring("inputs")
+        layer = author.layer("plan")
+        node = layer.node("plan", icon="compass", title="Plan", detail="Inputs")
+        options = [("lisbon", "Lisbon")]
+        field = layer.action("destination", node, kind="input", label="Destination", control="single_select", prompt="Destination", options=options)
+        invoke = layer.action("analyze", node, kind="invoke", label="Analyze", interaction_text="Analyze", input_actions=(field,))
+        layer.layout([(node, .5, .5)], edge_shape="default")
+        pending = asyncio.create_task(author.write(layer))
+        await entered.wait()
+        options[0] = ("lisbon", "Late option")
+        object.__setattr__(field, "label", "Late Input")
+        object.__setattr__(field, "source_layer", object())
+        object.__setattr__(invoke, "input_actions", (999,))
+        object.__setattr__(invoke, "interaction_text", "Late instruction")
+        release.set()
+        result = await pending
+        invocation = next(body for path, body in wire.requests if body.get("kind") == "invoke")
+        input_write = next(body for path, body in wire.requests if body.get("kind") == "input")
+        self.assertEqual(input_write["label"], "Destination")
+        self.assertEqual(input_write["options"], [{"key": "lisbon", "label": "Lisbon"}])
+        self.assertEqual(invocation["interactionText"], "Analyze")
+        self.assertEqual(invocation["inputActionIds"], [next(action["id"] for action in result.actions if action["kind"] == "input")])
+        self.assertEqual(invocation["sourceLayerId"], input_write["sourceLayerId"])
+        self.assertFalse(invocation["reusable"])
+
+    async def test_rejects_forged_cross_source_and_cross_layer_inputs_before_transport(self):
+        for invalid_binding in ("forged", "cross-source", "cross-layer", "changed-layer"):
+            with self.subTest(binding=invalid_binding):
+                wire = Wire()
+                graph = RelayerGraphClient("http://graph.test", "token", 1)
+                graph._request = wire.request
+                author = graph.authoring("invalid-" + invalid_binding)
+                layer = author.layer("plan")
+                node = layer.node("plan", icon="compass", title="Plan", detail="Inputs")
+                field = layer.action("destination", node, kind="input", label="Destination", control="text", prompt="Destination")
+                binding = field
+                if invalid_binding == "forged":
+                    binding = replace(field)
+                if invalid_binding == "cross-source":
+                    other = layer.node("other", icon="info", title="Other", detail="Other")
+                    binding = layer.action("other-input", other, kind="input", label="Other", control="text", prompt="Other")
+                    layer.layout([(node, .2, .5), (other, .8, .5)], edge_shape="default")
+                else:
+                    layer.layout([(node, .5, .5)], edge_shape="default")
+                if invalid_binding == "cross-layer":
+                    other = author.layer("other")
+                    owner = other.node("owner", icon="info", title="Other", detail="Other")
+                    binding = other.action("input", owner, kind="input", label="Other", control="text", prompt="Other")
+                    other.layout([(owner, .5, .5)], edge_shape="default")
+                if invalid_binding == "changed-layer":
+                    object.__setattr__(field, "source_layer", author.layer("other").object)
+                layer.action("analyze", node, kind="invoke", label="Analyze", interaction_text="Analyze", input_actions=(binding,))
+                message = "exact containing source layer" if invalid_binding == "changed-layer" else "same source Node and scoped Layer"
+                with self.assertRaisesRegex(GraphAuthoringValidationError, message):
+                    await author.write(layer)
+                self.assertEqual(wire.requests, [])
+
     async def test_captures_prime_program_and_aliases_before_queued_transport(self):
         graph = GraphSession("http://unused", "run", 1)
         wire = Wire()

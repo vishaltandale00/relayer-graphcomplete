@@ -257,6 +257,8 @@ pub(crate) struct ActionInputDraft {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ActionInvocation {
+    pub(crate) durable: bool,
+    pub(crate) invocation_key: String,
     pub(crate) source_interaction_id: InteractionId,
     pub(crate) action_id: i64,
     pub(crate) result_interaction_id: InteractionId,

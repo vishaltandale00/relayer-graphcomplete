@@ -15,6 +15,7 @@ import { GraphIcons } from "./icon-discovery.js";
 import { materializeGraphPreview, type GraphPreview } from "./preview.js";
 import { rememberGraphProgram } from "./program.js";
 import { GraphVisualAssets } from "./visual-assets.js";
+import { snapshotActionRecipe, type ActionRecipe } from "./action-declarations.js";
 
 /** A committed write, with its advisory draft preview when the run supports one. */
 export type WithGraphPreview<T> = T & { readonly preview?: GraphPreview };
@@ -53,6 +54,7 @@ export class RelayerGraphClient {
       reportCaptureError: (error) => { if (!(error instanceof GraphApiError)) reportAuthoringError(this.capability, error); },
     });
   }
+  readonly #pendingInputs = new Map<string, { signature: string; result: Promise<GraphAction> }>();
 
   constructor(capability: GraphCapability, private readonly requestScope?: { readonly beforeRequest: (path: string) => void; readonly signal: AbortSignal }) {
     this.capability = { ...capability, url: capability.url.replace(/\/$/, "") };
@@ -106,6 +108,16 @@ export class RelayerGraphClient {
 
   async getInteractionInput(): Promise<InteractionInput> {
     return this.request<InteractionInput>("/api/graph/input");
+  }
+
+  /** Read the exact sealed contract; legacy preparations have no synthesized contract. */
+  async getContract(): Promise<import("./types.js").CompletionContract | undefined> {
+    return (await this.getInteractionInput()).completionContract;
+  }
+
+  async getInvocations(action: ActionReference): Promise<readonly import("./types.js").GraphInvocation[]> {
+    const body = await this.request<{ invocations: import("./types.js").GraphInvocation[] }>(`/api/graph/actions/${actionId(action)}/invocations`);
+    return body.invocations;
   }
 
   async getPersonalPresentation(): Promise<ResolvedPersonalPresentation> {
@@ -346,52 +358,42 @@ export class RelayerGraphClient {
   }
 
   async addAction(source: NodeReference, action: ActionObject): Promise<GraphAction> {
-    const clientKey = action.clientKey ??= randomUUID();
-    return this.submitAction(source, action, { ...action, clientKey });
+    return this.writeActionRecipe(snapshotActionRecipe(source, action));
   }
 
-  private async submitAction(source: NodeReference, original: ActionObject, action: ActionObject): Promise<GraphAction> {
-    const clientKey = action.clientKey;
-    const body = await this.request<{ action: GraphAction }>("/api/graph/actions", {
-      method: "POST",
-      body: JSON.stringify(action.kind === "navigate" ? {
-        clientKey,
-        sourceNodeId: nodeId(source),
-        sourceLayerId: action.sourceLayer === undefined ? null : layerId(action.sourceLayer),
-        kind: action.kind,
-        relation: action.relation,
-        label: action.label,
-        variant: action.variant ?? "pill",
-        icon: action.icon ?? null,
-        description: action.description ?? null,
-        targetLayerId: layerId(action.target),
-      } : action.kind === "invoke" ? {
-        clientKey,
-        sourceNodeId: nodeId(source),
-        sourceLayerId: layerId(action.sourceLayer),
-        kind: action.kind,
-        label: action.label,
-        variant: action.variant ?? "pill",
-        icon: action.icon ?? null,
-        description: action.description ?? null,
-        interactionText: action.interactionText,
-      } : {
-        clientKey,
-        sourceNodeId: nodeId(source),
-        sourceLayerId: layerId(action.sourceLayer),
-        kind: action.kind,
-        label: action.label,
-        variant: action.variant ?? "pill",
-        icon: action.icon ?? null,
-        description: action.description ?? null,
-        control: action.control,
-        prompt: action.prompt,
-        ...(action.control === "text" ? {} : { options: action.options }),
-        ...(action.minimumSelections === undefined ? {} : { minimumSelections: action.minimumSelections }),
-      }),
-    });
-    original.ref = body.action;
-    return body.action;
+  private async submitAction(source: NodeReference, original: ActionObject, captured: ActionObject): Promise<GraphAction> {
+    const recipe = snapshotActionRecipe(source, captured);
+    return this.writeActionRecipe({ ...recipe, object: original });
+  }
+
+  private async writeActionRecipe(recipe: ActionRecipe): Promise<GraphAction> {
+    const signature = JSON.stringify(recipe.payload);
+    const key = JSON.stringify([recipe.payload.sourceNodeId, recipe.payload.clientKey]);
+    const pending = recipe.payload.kind === "input" ? this.#pendingInputs.get(key) : undefined;
+    if (pending) {
+      if (pending.signature !== signature) throw new Error("Conflicting concurrent Input declarations");
+      const result = await pending.result;
+      recipe.object.ref = result;
+      return result;
+    }
+    const write = async (): Promise<GraphAction> => {
+      const inputActionIds: number[] = [];
+      for (const input of recipe.inputs) {
+        const id = typeof input === "number" ? input : (await this.writeActionRecipe(input)).id;
+        if (inputActionIds.includes(id)) throw new Error("Duplicate canonical Input action ID");
+        inputActionIds.push(id);
+      }
+      const body = await this.request<{ action: GraphAction }>("/api/graph/actions", {
+        method: "POST", body: JSON.stringify({ ...recipe.payload, ...(recipe.payload.kind === "invoke" ? { inputActionIds } : {}) }),
+      });
+      recipe.object.ref = body.action;
+      return body.action;
+    };
+    const result = write();
+    if (recipe.payload.kind !== "input") return result;
+    this.#pendingInputs.set(key, { signature, result });
+    try { return await result; }
+    finally { if (this.#pendingInputs.get(key)?.result === result) this.#pendingInputs.delete(key); }
   }
 
   async getLayer(reference: LayerReference): Promise<ResolvedLayer> {
@@ -430,10 +432,11 @@ export class RelayerGraphClient {
     return this.request<CompletionState>("/api/graph/current");
   }
 
-  async prepareComplete(action: ActionReference): Promise<CompletionInputGraph> {
+  /** A stable key recovers one call. Omitting it creates an independent durable Invocation. */
+  async prepareComplete(action: ActionReference, invocationKey: string = randomUUID()): Promise<CompletionInputGraph> {
     return this.request<CompletionInputGraph>("/api/graph/completions/prepare", {
       method: "POST",
-      body: JSON.stringify({ actionId: actionId(action) }),
+      body: JSON.stringify({ actionId: actionId(action), invocationKey }),
     });
   }
 

@@ -33,6 +33,11 @@ pub struct ImportedConversationStage {
     pub project_id: Option<ProjectId>,
     pub thread_id: ThreadId,
     pub created_at: String,
+    /// Original portable call evidence only. These IDs never confer graph authority.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub inert_invocations: Vec<serde_json::Value>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub standalone_inputs: Vec<ImportedAction>,
 }
 
 /// One digest-addressed blob staged once, independently of turn/node references.
@@ -215,6 +220,8 @@ pub struct ImportedEdge {
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ImportedAction {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reusable: Option<bool>,
     /// Inert portable history; never a native invoke-resolution permission.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub converted_from_invoke: bool,
@@ -232,6 +239,8 @@ pub struct ImportedAction {
     pub description: Option<String>,
     pub target_layer_id: Option<String>,
     pub interaction_text: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub input_action_ids: Vec<String>,
     pub input: Option<InputAction>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub icon_asset: Option<ImportedDetailAsset>,
@@ -270,6 +279,24 @@ pub struct SkippedSubmittedInput {
 }
 
 impl crate::GraphDatabase {
+    /// Read-only evidence from an inert import. Portable IDs are not capabilities.
+    pub async fn imported_invocation_evidence(
+        &self,
+        thread_id: ThreadId,
+    ) -> Result<Vec<serde_json::Value>, GraphError> {
+        let mut connection = self.storage.acquire().await?;
+        let json: Option<String> = sqlx::query_scalar(
+            "SELECT inert_invocations_json FROM graph_imports WHERE thread_id=?1",
+        )
+        .bind(thread_id.value())
+        .fetch_optional(&mut *connection)
+        .await?;
+        json.map(|json| {
+            serde_json::from_str(&json).map_err(|error| GraphError::Internal(error.to_string()))
+        })
+        .unwrap_or_else(|| Ok(Vec::new()))
+    }
+
     pub async fn begin_imported_conversation(
         &self,
         input: &ImportedConversationStage,
@@ -299,9 +326,12 @@ impl crate::GraphDatabase {
                 "graph import identity already exists".into(),
             ));
         }
-        sqlx::query("INSERT INTO graph_imports(import_id,source_sha256,project_id,thread_id,created_at) VALUES (?1,?2,?3,?4,?5)")
+        sqlx::query("INSERT INTO graph_imports(import_id,source_sha256,project_id,thread_id,created_at,inert_invocations_json,standalone_inputs_json) VALUES (?1,?2,?3,?4,?5,?6,?7)")
             .bind(&input.import_id).bind(&input.source_sha256).bind(input.project_id.map(ProjectId::value))
-            .bind(input.thread_id.value()).bind(&input.created_at).execute(&mut *tx).await?;
+            .bind(input.thread_id.value()).bind(&input.created_at)
+            .bind(serde_json::to_string(&input.inert_invocations).map_err(|error| GraphError::Internal(error.to_string()))?)
+            .bind(serde_json::to_string(&input.standalone_inputs).map_err(|error| GraphError::Internal(error.to_string()))?)
+            .execute(&mut *tx).await?;
         tx.commit().await?;
         Ok(())
     }
@@ -986,6 +1016,135 @@ impl crate::GraphDatabase {
             }
         }
 
+        // Standalone bound definitions preserve controls without inventing display membership.
+        for action in &metadata.standalone_inputs {
+            if action.kind != "input"
+                || action.input.is_none()
+                || !action.input_action_ids.is_empty()
+            {
+                return Err(GraphError::validation(
+                    "imported_bound_input_invalid",
+                    "standaloneInputs",
+                    "Standalone bound definitions must be input controls.",
+                ));
+            }
+            if let Some(existing) = action_definitions.get(&action.id) {
+                if existing != action {
+                    return Err(GraphError::validation(
+                        "imported_bound_input_mismatch",
+                        "standaloneInputs",
+                        "Repeated input definitions must preserve their exact snapshot.",
+                    ));
+                }
+                continue;
+            }
+            // An unpublished source may exist only in frozen call evidence.
+            // Preserve its definition in inert metadata, without fabricating a Node.
+            let Some(&owner) = node_owners.get(&action.source_node_id) else {
+                continue;
+            };
+            let mut canonical = action.clone();
+            if canonical
+                .source_layer_id
+                .as_ref()
+                .is_some_and(|id| !context.layers.contains_key(id))
+            {
+                canonical.source_layer_id = None;
+            }
+            if let Some(icon) = canonical
+                .icon
+                .as_deref()
+                .and_then(super::model::image_icon::image_icon)
+            {
+                let asset = canonical.icon_asset.as_ref().ok_or_else(|| {
+                    GraphError::validation(
+                        "import_icon_pin_missing",
+                        "standaloneInputs.icon",
+                        "Imported bound input image icon requires pinned content.",
+                    )
+                })?;
+                super::model::image_icon::canonical_icon(canonical.icon.as_ref().unwrap())?;
+                if asset.asset_id != icon.asset_id
+                    || icon.digest_sha256.as_deref() != Some(&asset.digest_sha256)
+                    || icon.media_type.as_deref() != Some(&asset.media_type)
+                {
+                    return Err(GraphError::validation(
+                        "import_icon_pin_mismatch",
+                        "standaloneInputs.icon",
+                        "Bound input icon does not match its frozen pin.",
+                    ));
+                }
+                let (media_type, byte_length) = AuthoredDetailAssetTable::new(&mut tx)
+                    .materialize_import_content(import_id, &asset.digest_sha256)
+                    .await?;
+                if media_type != asset.media_type || byte_length != asset.byte_length {
+                    return Err(GraphError::validation(
+                        "import_asset_content_mismatch",
+                        "standaloneInputs.iconAsset",
+                        "Bound input icon does not match staged bytes.",
+                    ));
+                }
+                let source_node = NodeId::new(context.nodes[&canonical.source_node_id]).unwrap();
+                AuthoredDetailAssetTable::new(&mut tx)
+                    .insert_import_icon_reference(source_node, asset)
+                    .await?;
+                let conflict: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM (SELECT * FROM authored_detail_assets UNION ALL SELECT * FROM graph_icon_assets) WHERE node_id=?1 AND asset_id=?2 AND (digest_sha256<>?3 OR media_type<>?4 OR byte_length<>?5))")
+                    .bind(source_node.value()).bind(&asset.asset_id).bind(&asset.digest_sha256).bind(&asset.media_type).bind(asset.byte_length as i64).fetch_one(&mut *tx).await?;
+                if conflict {
+                    return Err(GraphError::validation(
+                        "import_asset_pin_conflict",
+                        "standaloneInputs.iconAsset",
+                        "An existing Node icon association must preserve exact bytes.",
+                    ));
+                }
+            } else if canonical.icon_asset.is_some() {
+                return Err(GraphError::validation(
+                    "import_icon_asset_unexpected",
+                    "standaloneInputs.iconAsset",
+                    "Bound input icon content requires an image icon pin.",
+                ));
+            }
+            insert_action(&mut tx, &context, owner, &canonical, false, &mut action_ids).await?;
+            action_definitions.insert(action.id.clone(), action.clone());
+        }
+
+        // Bindings describe inert controls only. Imported scopes remain read_only,
+        // author_eligible=0; require_native_provenance rejects these actions before
+        // any Invocation preparation. No durable_invocations or capability is created.
+        // Resolve after all fresh action IDs exist, including forward references.
+        for action in action_definitions.values() {
+            if !action.input_action_ids.is_empty() && action.kind != "invoke" {
+                return Err(GraphError::validation(
+                    "imported_invoke_binding_invalid",
+                    "inputActionIds",
+                    "Only an Invoke may bind input actions.",
+                ));
+            }
+            let mut seen = HashSet::new();
+            for (position, input_id) in action.input_action_ids.iter().enumerate() {
+                let input = action_definitions.get(input_id).ok_or_else(|| {
+                    GraphError::validation(
+                        "imported_invoke_binding_missing",
+                        "inputActionIds",
+                        "Bound input must be included in the imported graph.",
+                    )
+                })?;
+                if !seen.insert(input_id)
+                    || input.kind != "input"
+                    || input.source_node_id != action.source_node_id
+                {
+                    return Err(GraphError::validation(
+                        "imported_invoke_binding_invalid",
+                        "inputActionIds",
+                        "Bind distinct input actions on the same Node.",
+                    ));
+                }
+                sqlx::query("INSERT INTO imported_invoke_input_bindings(invoke_action_id,input_action_id,position) VALUES (?1,?2,?3)")
+                    .bind(action_ids[&action.id]).bind(action_ids[input_id]).bind(position as i64)
+                    .execute(&mut *tx).await?;
+            }
+        }
+
         for position in 0..turn_count {
             let turn = load_turn(&mut tx, import_id, position).await?;
             let portable_interaction_id = turn.interaction_node_id.as_ref().or_else(|| {
@@ -1313,6 +1472,10 @@ impl crate::GraphDatabase {
         // Accepted associations now own the verified content. Reclaim only this
         // import's staging copy in the same transaction, so failures retain all
         // staged bytes for retry while graph_imports keeps its ownership record.
+        // Header-only Current snapshots have no executable node asset owner.
+        // Preserve their exact pinned bytes in inert history before reclaiming staging.
+        sqlx::query("INSERT INTO inert_import_asset_contents(import_id,digest_sha256,media_type,byte_length,content) SELECT import_id,digest_sha256,media_type,byte_length,content FROM graph_import_asset_contents WHERE import_id=?1 AND digest_sha256 IN (SELECT pins.value FROM graph_imports imported,json_tree(imported.inert_invocations_json) pins WHERE imported.import_id=?1 AND pins.key='digestSha256' AND pins.type='text' UNION SELECT pins.value FROM graph_imports imported,json_tree(imported.standalone_inputs_json) pins WHERE imported.import_id=?1 AND pins.key='digestSha256' AND pins.type='text')")
+            .bind(import_id).execute(&mut *tx).await?;
         sqlx::query("DELETE FROM graph_import_asset_contents WHERE import_id=?1")
             .bind(import_id)
             .execute(&mut *tx)
@@ -1396,6 +1559,8 @@ impl crate::GraphDatabase {
             project_id: input.project_id,
             thread_id: input.thread_id,
             created_at: input.created_at.clone(),
+            inert_invocations: Vec::new(),
+            standalone_inputs: Vec::new(),
         };
         self.begin_imported_conversation(&stage).await?;
         for turn in &input.turns {
@@ -1667,7 +1832,7 @@ async fn load_metadata(
     tx: &mut sqlx::Transaction<'static, sqlx::Sqlite>,
     import_id: &str,
 ) -> Result<ImportedConversationStage, GraphError> {
-    let row = sqlx::query("SELECT source_sha256,project_id,thread_id,created_at FROM graph_imports WHERE import_id=?1").bind(import_id).fetch_one(&mut **tx).await?;
+    let row = sqlx::query("SELECT source_sha256,project_id,thread_id,created_at,inert_invocations_json,standalone_inputs_json FROM graph_imports WHERE import_id=?1").bind(import_id).fetch_one(&mut **tx).await?;
     let project: Option<i64> = sqlx::Row::try_get(&row, 1)?;
     Ok(ImportedConversationStage {
         import_id: import_id.to_owned(),
@@ -1681,6 +1846,10 @@ async fn load_metadata(
         thread_id: ThreadId::new(sqlx::Row::try_get(&row, 2)?)
             .ok_or_else(|| GraphError::Internal("invalid imported thread ID".into()))?,
         created_at: sqlx::Row::try_get(&row, 3)?,
+        inert_invocations: serde_json::from_str(&sqlx::Row::try_get::<String, _>(&row, 4)?)
+            .map_err(|error| GraphError::Internal(error.to_string()))?,
+        standalone_inputs: serde_json::from_str(&sqlx::Row::try_get::<String, _>(&row, 5)?)
+            .map_err(|error| GraphError::Internal(error.to_string()))?,
     })
 }
 
@@ -1805,6 +1974,13 @@ async fn insert_action(
     response: bool,
     ids: &mut HashMap<String, i64>,
 ) -> Result<(), GraphError> {
+    if response && !action.input_action_ids.is_empty() {
+        return Err(GraphError::validation(
+            "imported_invoke_binding_invalid",
+            "inputActionIds",
+            "Response navigation cannot bind inputs.",
+        ));
+    }
     if action.converted_from_invoke
         && (response
             || action.kind != "navigate"
@@ -1878,12 +2054,13 @@ async fn insert_action(
         .map(|input| serde_json::to_string(&input.options))
         .transpose()
         .map_err(|error| GraphError::Internal(error.to_string()))?;
-    let result = sqlx::query("INSERT INTO actions(project_id,thread_id,source_node_id,source_layer_id,kind,relation,label,variant,icon,description,target_layer_id,interaction_text,response,state,owner_interaction_id,client_key) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,'accepted',?14,?15)")
+    let result = sqlx::query("INSERT INTO actions(project_id,thread_id,source_node_id,source_layer_id,kind,relation,label,variant,icon,description,target_layer_id,interaction_text,response,state,owner_interaction_id,client_key,reusable) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,'accepted',?14,?15,?16)")
         .bind(context.metadata.project_id.map(ProjectId::value)).bind(context.metadata.thread_id.value())
         .bind(source_node).bind(source_layer)
         .bind(&action.kind).bind(&action.relation).bind(&action.label).bind(&action.variant).bind(&action.icon).bind(&action.description)
         .bind(target_layer).bind(&action.interaction_text)
         .bind(response).bind(owner).bind(action.client_key.as_deref().unwrap_or(&action.id))
+        .bind(action.reusable)
         .execute(&mut **tx).await?;
     let action_id = result.last_insert_rowid();
     if action.converted_from_invoke {

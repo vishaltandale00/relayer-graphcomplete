@@ -109,6 +109,10 @@ export interface InvokeActionFields {
   readonly kind: "invoke";
   readonly label: string;
   readonly interactionText: string;
+  /** New Invokes are single-call unless repeat use is explicitly authored. */
+  readonly reusable?: boolean;
+  /** Exact Input declarations or canonical IDs; never inferred from nearby fields. */
+  readonly inputActions?: readonly (InputActionObject | GraphAction | GraphId)[];
   readonly sourceLayer: LayerReference;
   clientKey?: string;
   ref?: GraphAction;

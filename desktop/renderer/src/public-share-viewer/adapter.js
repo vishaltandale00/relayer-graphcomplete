@@ -85,7 +85,7 @@ export function createPublicViewerAdapter(snapshot) {
       ? selection.layerPath.slice(0, Number(navigation.pathIndex) + 1)
       : existingIndex >= 0
         ? selection.layerPath.slice(0, existingIndex + 1)
-        : appendLayerPath(selection.layerPath, navigation.action, navigation.sourceNode);
+        : appendLayerPath(selection.layerPath, navigation.action, navigation.sourceNode, layerId);
     selection.selectedNodeId = null;
     hydrate(interaction, layer, layerPath);
     navigation.beforeCommit?.();

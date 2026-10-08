@@ -1,0 +1,554 @@
+{
+  "schemaVersion": 1,
+  "demonstration": "deterministic production services and renderer",
+  "inference": false,
+  "sourceCommit": "fcfacdb0a235451f04d97d760d39948ad406972f",
+  "sourceDigest": "9153f1c8d0656cce7f49cd72f998eb4447233f01029edd09b86c6f9252441006",
+  "binaries": {
+    "relayer-graph-server": "97681f8d3ffa3c862b067adb87aeff48bfc71d9bd9d2d208abf68504decde9e7",
+    "relayer-app-server": "9064120ff230d04662053bda9667181c10abe48c4796f8535e04aea930009b40"
+  },
+  "video": {
+    "path": "/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-completion-review-g0hXcp/evidence/completion-contract.mp4",
+    "sha256": "fb255bc3091564e65ced57b84c058fae0f6c373e8ef3664b6385bd0f23a7e2c5"
+  },
+  "frames": [
+    {
+      "file": "/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-completion-review-g0hXcp/evidence/frame-00001.png",
+      "capturedAt": 1791421756288,
+      "sha256": "168a2ba4010cb6d5d321c829d8f6ddae2d9bc9ba9240dc8d128cff1b49aa8c4c"
+    },
+    {
+      "file": "/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-completion-review-g0hXcp/evidence/frame-00002.png",
+      "capturedAt": 1791421756484,
+      "sha256": "f3192a6452507b67aabde0a7946f7b26dd1715a91d996b25712f94823f9c907f"
+    },
+    {
+      "file": "/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-completion-review-g0hXcp/evidence/frame-00003.png",
+      "capturedAt": 1791421756738,
+      "sha256": "e58458b590cf7d6d4274c407636ca12970cf1194a82e5c420bc2d06a92745a4e"
+    },
+    {
+      "file": "/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-completion-review-g0hXcp/evidence/frame-00004.png",
+      "capturedAt": 1791421756995,
+      "sha256": "a62406dff65119964482b4bf07ece402781d68a275c7ac084ac90ccb0bf8a2d5"
+    },
+    {
+      "file": "/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-completion-review-g0hXcp/evidence/frame-00005.png",
+      "capturedAt": 1791421757251,
+      "sha256": "f6673d8dec04ba904f606e92337f7ab051b39ca2192526fded12e24eab30a35d"
+    },
+    {
+      "file": "/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-completion-review-g0hXcp/evidence/frame-00006.png",
+      "capturedAt": 1791421757490,
+      "sha256": "9818255176473ee3227b4e4cf9f39f6ff5f3c040fe0ba5e7dd3420934f44dec1"
+    },
+    {
+      "file": "/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-completion-review-g0hXcp/evidence/frame-00007.png",
+      "capturedAt": 1791421757741,
+      "sha256": "9818255176473ee3227b4e4cf9f39f6ff5f3c040fe0ba5e7dd3420934f44dec1"
+    },
+    {
+      "file": "/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-completion-review-g0hXcp/evidence/frame-00008.png",
+      "capturedAt": 1791421757990,
+      "sha256": "4280849a822d94cd42e595cfff580cbeafedeadbf9760dd23880ffd1af2a76ce"
+    },
+    {
+      "file": "/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-completion-review-g0hXcp/evidence/frame-00009.png",
+      "capturedAt": 1791421758243,
+      "sha256": "c3aea8fc25246974a290e56a838922573c8b4c302caf2f7ba3a09dca1d502354"
+    },
+    {
+      "file": "/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-completion-review-g0hXcp/evidence/frame-00010.png",
+      "capturedAt": 1791421758492,
+      "sha256": "85b6eaf91d07798d448b5df72e6e690670e8b93b52d656a65359fada0b42db9c"
+    },
+    {
+      "file": "/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-completion-review-g0hXcp/evidence/frame-00011.png",
+      "capturedAt": 1791421758744,
+      "sha256": "fad1f0cd7e90f749f0af2a43ae561634d2e2938dd93c07315813fb6c1d4e0796"
+    },
+    {
+      "file": "/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-completion-review-g0hXcp/evidence/frame-00012.png",
+      "capturedAt": 1791421758994,
+      "sha256": "4376bedae9228d8ddb4f994111535c5582aefdd34d9232d1705d0e3c9546a60d"
+    },
+    {
+      "file": "/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-completion-review-g0hXcp/evidence/frame-00013.png",
+      "capturedAt": 1791421759243,
+      "sha256": "4376bedae9228d8ddb4f994111535c5582aefdd34d9232d1705d0e3c9546a60d"
+    },
+    {
+      "file": "/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-completion-review-g0hXcp/evidence/frame-00014.png",
+      "capturedAt": 1791421759494,
+      "sha256": "b3d1dedc0cd460025a3932422757dc68f6e8448888d3468585217d1759a7f8ae"
+    },
+    {
+      "file": "/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-completion-review-g0hXcp/evidence/frame-00015.png",
+      "capturedAt": 1791421759750,
+      "sha256": "5f2a781bca2dda96e3fb9d598bafe65dfcb27845a6551d0e2ade4ab23dfbadf9"
+    },
+    {
+      "file": "/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-completion-review-g0hXcp/evidence/frame-00016.png",
+      "capturedAt": 1791421759995,
+      "sha256": "6b90ab7051f18de9a4907ddd14936ab382cd0f061cae12e1c7fceae79019b77a"
+    },
+    {
+      "file": "/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-completion-review-g0hXcp/evidence/frame-00017.png",
+      "capturedAt": 1791421760248,
+      "sha256": "aa6114bc5a3062ea98e7aa54ae7b591ca518483926dcaaea3b29a2d71373841d"
+    },
+    {
+      "file": "/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-completion-review-g0hXcp/evidence/frame-00018.png",
+      "capturedAt": 1791421760503,
+      "sha256": "af5034d109ac6143b194c1451e7a821f8125c543525cd5404cb3ed721b59180f"
+    },
+    {
+      "file": "/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-completion-review-g0hXcp/evidence/frame-00019.png",
+      "capturedAt": 1791421760750,
+      "sha256": "af5034d109ac6143b194c1451e7a821f8125c543525cd5404cb3ed721b59180f"
+    },
+    {
+      "file": "/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-completion-review-g0hXcp/evidence/frame-00020.png",
+      "capturedAt": 1791421760999,
+      "sha256": "0ea3786d005f77cde0997f199ca7bc6a51493f31ac5f49d650cd138ae0dbb8c9"
+    },
+    {
+      "file": "/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-completion-review-g0hXcp/evidence/frame-00021.png",
+      "capturedAt": 1791421761249,
+      "sha256": "0ea3786d005f77cde0997f199ca7bc6a51493f31ac5f49d650cd138ae0dbb8c9"
+    },
+    {
+      "file": "/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-completion-review-g0hXcp/evidence/frame-00022.png",
+      "capturedAt": 1791421761500,
+      "sha256": "af5034d109ac6143b194c1451e7a821f8125c543525cd5404cb3ed721b59180f"
+    },
+    {
+      "file": "/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-completion-review-g0hXcp/evidence/frame-00023.png",
+      "capturedAt": 1791421761751,
+      "sha256": "af5034d109ac6143b194c1451e7a821f8125c543525cd5404cb3ed721b59180f"
+    },
+    {
+      "file": "/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-completion-review-g0hXcp/evidence/frame-00024.png",
+      "capturedAt": 1791421762176,
+      "sha256": "54344e021853179fdfbc6f36f58bece337d68bdb5f1176920996f22142a2c2ee"
+    },
+    {
+      "file": "/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-completion-review-g0hXcp/evidence/frame-00025.png",
+      "capturedAt": 1791421762261,
+      "sha256": "b8a042a1047296c774221c59045d8c94991e505302ce303ed221966a2fc9f458"
+    },
+    {
+      "file": "/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-completion-review-g0hXcp/evidence/frame-00026.png",
+      "capturedAt": 1791421762508,
+      "sha256": "56bfd306fe5cd149ae77e8c1b062bde302cf8c4f911e3166e69d0d5368948990"
+    },
+    {
+      "file": "/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-completion-review-g0hXcp/evidence/frame-00027.png",
+      "capturedAt": 1791421762760,
+      "sha256": "a8293098232dbbc2fda6b4b7b4069bb78a4bf5c7168e09b04eaf16f5d1f5ea26"
+    },
+    {
+      "file": "/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-completion-review-g0hXcp/evidence/frame-00028.png",
+      "capturedAt": 1791421763011,
+      "sha256": "fdae16c9b11d1ac70b1f38c60e26b41d1a4cfde9501ab0bdcf549c1d2d318f76"
+    },
+    {
+      "file": "/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-completion-review-g0hXcp/evidence/frame-00029.png",
+      "capturedAt": 1791421763258,
+      "sha256": "c7304cd2e4620bb53ad8dc2cede773fdf2514970cce14d1624e6044f6ac062bc"
+    },
+    {
+      "file": "/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-completion-review-g0hXcp/evidence/frame-00030.png",
+      "capturedAt": 1791421763506,
+      "sha256": "c7304cd2e4620bb53ad8dc2cede773fdf2514970cce14d1624e6044f6ac062bc"
+    },
+    {
+      "file": "/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-completion-review-g0hXcp/evidence/frame-00031.png",
+      "capturedAt": 1791421763757,
+      "sha256": "c7304cd2e4620bb53ad8dc2cede773fdf2514970cce14d1624e6044f6ac062bc"
+    },
+    {
+      "file": "/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-completion-review-g0hXcp/evidence/frame-00032.png",
+      "capturedAt": 1791421764007,
+      "sha256": "8f96c626a0ee025ddab67112245bf9c97cef4e2047aed784567f8930159e2434"
+    },
+    {
+      "file": "/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-completion-review-g0hXcp/evidence/frame-00033.png",
+      "capturedAt": 1791421764264,
+      "sha256": "8d1f620a39ca7e22756da4d8e018e8ff0b11a4bd95ed82fce00cd6b087e8b7d0"
+    },
+    {
+      "file": "/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-completion-review-g0hXcp/evidence/frame-00034.png",
+      "capturedAt": 1791421764506,
+      "sha256": "8d1f620a39ca7e22756da4d8e018e8ff0b11a4bd95ed82fce00cd6b087e8b7d0"
+    },
+    {
+      "file": "/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-completion-review-g0hXcp/evidence/frame-00035.png",
+      "capturedAt": 1791421764757,
+      "sha256": "8d1f620a39ca7e22756da4d8e018e8ff0b11a4bd95ed82fce00cd6b087e8b7d0"
+    },
+    {
+      "file": "/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-completion-review-g0hXcp/evidence/frame-00036.png",
+      "capturedAt": 1791421765008,
+      "sha256": "8d1f620a39ca7e22756da4d8e018e8ff0b11a4bd95ed82fce00cd6b087e8b7d0"
+    },
+    {
+      "file": "/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-completion-review-g0hXcp/evidence/frame-00037.png",
+      "capturedAt": 1791421765259,
+      "sha256": "8d1f620a39ca7e22756da4d8e018e8ff0b11a4bd95ed82fce00cd6b087e8b7d0"
+    },
+    {
+      "file": "/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-completion-review-g0hXcp/evidence/frame-00038.png",
+      "capturedAt": 1791421765512,
+      "sha256": "bc355b8b8168c886c315cb3966934c763bd9e5279c67327d60cfbb4bf7c0fcb3"
+    },
+    {
+      "file": "/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-completion-review-g0hXcp/evidence/frame-00039.png",
+      "capturedAt": 1791421765763,
+      "sha256": "bc355b8b8168c886c315cb3966934c763bd9e5279c67327d60cfbb4bf7c0fcb3"
+    },
+    {
+      "file": "/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-completion-review-g0hXcp/evidence/frame-00040.png",
+      "capturedAt": 1791421766014,
+      "sha256": "a37cfb022b5829a7e9f9616d6d65e32ef0bdc5f2904e29de7d81b709b10f88da"
+    },
+    {
+      "file": "/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-completion-review-g0hXcp/evidence/frame-00041.png",
+      "capturedAt": 1791421766265,
+      "sha256": "c18a8e3712626386816de6d483ce90a23da40b8cdf5fbd0ef64484865539ad33"
+    },
+    {
+      "file": "/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-completion-review-g0hXcp/evidence/frame-00042.png",
+      "capturedAt": 1791421766516,
+      "sha256": "4b851a581588fbab9e67afa61717f700366fb366ab81a0928b359e20434d6148"
+    },
+    {
+      "file": "/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-completion-review-g0hXcp/evidence/frame-00043.png",
+      "capturedAt": 1791421766764,
+      "sha256": "a202f4d269899247bedbe2b6244cdc021320181d26392184d9c488e75c231cbe"
+    },
+    {
+      "file": "/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-completion-review-g0hXcp/evidence/frame-00044.png",
+      "capturedAt": 1791421767023,
+      "sha256": "5f25f0f907c57dcc66d738d3363a40a330dd52018d1b6b3efec4a94e4ddd7b46"
+    },
+    {
+      "file": "/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-completion-review-g0hXcp/evidence/frame-00045.png",
+      "capturedAt": 1791421767272,
+      "sha256": "038f8ea027ab2189c861afc395924c017fe7ea832926933be9e1591346683b05"
+    },
+    {
+      "file": "/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-completion-review-g0hXcp/evidence/frame-00046.png",
+      "capturedAt": 1791421767533,
+      "sha256": "33f706f1f79bc381eb0faa0a3ba491da4d558543c0ed3cb222d4e4f2120f617a"
+    },
+    {
+      "file": "/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-completion-review-g0hXcp/evidence/frame-00047.png",
+      "capturedAt": 1791421767771,
+      "sha256": "cd657c6a205361332e4e4855d7d5bbf0108c7dfba1700bc22c04c300333cb177"
+    },
+    {
+      "file": "/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-completion-review-g0hXcp/evidence/frame-00048.png",
+      "capturedAt": 1791421768021,
+      "sha256": "1d4827c720fa9c6e34cd1de80b7ec9f4c3b7d41b11a2182801602fe7c01754d8"
+    },
+    {
+      "file": "/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-completion-review-g0hXcp/evidence/frame-00049.png",
+      "capturedAt": 1791421768275,
+      "sha256": "1d4827c720fa9c6e34cd1de80b7ec9f4c3b7d41b11a2182801602fe7c01754d8"
+    },
+    {
+      "file": "/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-completion-review-g0hXcp/evidence/frame-00050.png",
+      "capturedAt": 1791421768526,
+      "sha256": "03e68dd3e1cc4584b79d75238fc50ab579678f4ca596e5ac24a09ecf83d0d681"
+    },
+    {
+      "file": "/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-completion-review-g0hXcp/evidence/frame-00051.png",
+      "capturedAt": 1791421768782,
+      "sha256": "5b4762f54e6884e13f94464e2cc66b6f105d6e277ce2601d5684151142a5044c"
+    },
+    {
+      "file": "/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-completion-review-g0hXcp/evidence/frame-00052.png",
+      "capturedAt": 1791421769025,
+      "sha256": "2c6cf08965092a7e7df0c8ab2b90a56baa318b2f0c43121481bc131c141ae3cf"
+    },
+    {
+      "file": "/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-completion-review-g0hXcp/evidence/frame-00053.png",
+      "capturedAt": 1791421769285,
+      "sha256": "a50fc393dd303f57d8e4b8e093d9448aaacda7f217969beb4fd9a5c9279fc352"
+    },
+    {
+      "file": "/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-completion-review-g0hXcp/evidence/frame-00054.png",
+      "capturedAt": 1791421769527,
+      "sha256": "8d982d35165b8eeb5325f97e7a55f55999177a99028f0df193271614a77cfd4b"
+    },
+    {
+      "file": "/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-completion-review-g0hXcp/evidence/frame-00055.png",
+      "capturedAt": 1791421769788,
+      "sha256": "57a9bf7455769fd00a37b8d6551f3eb8437db9b1dad4c200cce9446957d03438"
+    },
+    {
+      "file": "/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-completion-review-g0hXcp/evidence/frame-00056.png",
+      "capturedAt": 1791421770034,
+      "sha256": "23402724c61a78863d3dcced16e186514a3855d0e392cfc1b2b284c5d916b945"
+    },
+    {
+      "file": "/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-completion-review-g0hXcp/evidence/frame-00057.png",
+      "capturedAt": 1791421770278,
+      "sha256": "1e1a8ca6d1488ca32d678783c2ffc24ed6e5cea80191f374b343bfe356e2ee40"
+    },
+    {
+      "file": "/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-completion-review-g0hXcp/evidence/frame-00058.png",
+      "capturedAt": 1791421770527,
+      "sha256": "ef761c82550907212973aa790887f8a3e1be501328f6ba0f3cfeb29448241e9e"
+    },
+    {
+      "file": "/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-completion-review-g0hXcp/evidence/frame-00059.png",
+      "capturedAt": 1791421770782,
+      "sha256": "ef761c82550907212973aa790887f8a3e1be501328f6ba0f3cfeb29448241e9e"
+    },
+    {
+      "file": "/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-completion-review-g0hXcp/evidence/frame-00060.png",
+      "capturedAt": 1791421771034,
+      "sha256": "ef761c82550907212973aa790887f8a3e1be501328f6ba0f3cfeb29448241e9e"
+    },
+    {
+      "file": "/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-completion-review-g0hXcp/evidence/frame-00061.png",
+      "capturedAt": 1791421771284,
+      "sha256": "ef761c82550907212973aa790887f8a3e1be501328f6ba0f3cfeb29448241e9e"
+    },
+    {
+      "file": "/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-completion-review-g0hXcp/evidence/frame-00062.png",
+      "capturedAt": 1791421771534,
+      "sha256": "1e1a8ca6d1488ca32d678783c2ffc24ed6e5cea80191f374b343bfe356e2ee40"
+    },
+    {
+      "file": "/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-completion-review-g0hXcp/evidence/frame-00063.png",
+      "capturedAt": 1791421771788,
+      "sha256": "1e1a8ca6d1488ca32d678783c2ffc24ed6e5cea80191f374b343bfe356e2ee40"
+    },
+    {
+      "file": "/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-completion-review-g0hXcp/evidence/frame-00064.png",
+      "capturedAt": 1791421772037,
+      "sha256": "1e1a8ca6d1488ca32d678783c2ffc24ed6e5cea80191f374b343bfe356e2ee40"
+    }
+  ],
+  "observed": {
+    "errors": [],
+    "contracts": [
+      {
+        "schemaVersion": 1,
+        "interactionNodeId": 21,
+        "input": {
+          "text": "Plan a trip with two separately scoped Invokes and an ordinary input.",
+          "context": [],
+          "answers": [],
+          "invocationReferences": []
+        },
+        "authorities": [],
+        "returnRequirements": [],
+        "digest": "sha256:v1:78d415741d6cbc675c12fe529dd5cc9b3b73f6c939292db6ead3178209fd8e96"
+      },
+      {
+        "schemaVersion": 1,
+        "interactionNodeId": 23,
+        "input": {
+          "text": "",
+          "context": [],
+          "answers": [
+            {
+              "sourceNodeId": 22,
+              "sourceActionId": 12,
+              "question": {
+                "control": "text",
+                "prompt": "Unrelated notes"
+              },
+              "value": {
+                "text": "Prefer morning departures"
+              }
+            }
+          ],
+          "invocationReferences": []
+        },
+        "authorities": [
+          {
+            "kind": "navigate.add",
+            "nodeId": 22
+          }
+        ],
+        "returnRequirements": [
+          {
+            "kind": "navigate.response",
+            "nodeId": 22
+          }
+        ],
+        "digest": "sha256:v1:df9f483aed9f17094084fb28112aa9c6cab153321c58e69392b94db5964a428b"
+      },
+      {
+        "schemaVersion": 1,
+        "interactionNodeId": 25,
+        "input": {
+          "text": "Analyze itinerary inputs",
+          "context": [],
+          "answers": [
+            {
+              "sourceNodeId": 22,
+              "sourceActionId": 6,
+              "question": {
+                "control": "text",
+                "prompt": "Destination"
+              },
+              "value": {
+                "text": "Lisbon"
+              }
+            },
+            {
+              "sourceNodeId": 22,
+              "sourceActionId": 7,
+              "question": {
+                "control": "text",
+                "prompt": "Trip pace"
+              },
+              "value": {
+                "text": "Relaxed"
+              }
+            }
+          ],
+          "invocationReferences": [
+            {
+              "invocationId": 1,
+              "sourceCompletionId": 21,
+              "sourceActionId": 8,
+              "parentNodeId": 22,
+              "actionSnapshot": {
+                "actionId": 8,
+                "description": null,
+                "icon": null,
+                "inputActionIds": [
+                  6,
+                  7
+                ],
+                "instruction": "Analyze itinerary inputs",
+                "label": "Build itinerary",
+                "reusable": false,
+                "sourceLayerId": 6,
+                "sourceNodeId": 22,
+                "variant": "pill"
+              }
+            }
+          ]
+        },
+        "authorities": [
+          {
+            "kind": "navigate.add",
+            "nodeId": 22
+          }
+        ],
+        "returnRequirements": [
+          {
+            "kind": "navigate.response",
+            "nodeId": 22
+          }
+        ],
+        "digest": "sha256:v1:d2130c827481952e414af2d8f137996c39230ffcb914734a01a624127576e970"
+      },
+      {
+        "schemaVersion": 1,
+        "interactionNodeId": 27,
+        "input": {
+          "text": "Analyze budget inputs",
+          "context": [],
+          "answers": [
+            {
+              "sourceNodeId": 22,
+              "sourceActionId": 9,
+              "question": {
+                "control": "text",
+                "prompt": "Budget"
+              },
+              "value": {
+                "text": "1500"
+              }
+            },
+            {
+              "sourceNodeId": 22,
+              "sourceActionId": 10,
+              "question": {
+                "control": "text",
+                "prompt": "Days"
+              },
+              "value": {
+                "text": "7"
+              }
+            }
+          ],
+          "invocationReferences": [
+            {
+              "invocationId": 2,
+              "sourceCompletionId": 21,
+              "sourceActionId": 11,
+              "parentNodeId": 22,
+              "actionSnapshot": {
+                "actionId": 11,
+                "description": null,
+                "icon": null,
+                "inputActionIds": [
+                  9,
+                  10
+                ],
+                "instruction": "Analyze budget inputs",
+                "label": "Estimate budget",
+                "reusable": false,
+                "sourceLayerId": 6,
+                "sourceNodeId": 22,
+                "variant": "pill"
+              }
+            }
+          ]
+        },
+        "authorities": [
+          {
+            "kind": "navigate.add",
+            "nodeId": 22
+          }
+        ],
+        "returnRequirements": [
+          {
+            "kind": "navigate.response",
+            "nodeId": 22
+          }
+        ],
+        "digest": "sha256:v1:3ef7bd0c3ca99e2972238fddb6479530780539000414aeac90ec3d0780fd0578"
+      }
+    ],
+    "invocations": [],
+    "advances": [
+      {
+        "interactionNode": 21,
+        "revision": 1
+      },
+      {
+        "interactionNode": 23,
+        "revision": 1
+      },
+      {
+        "interactionNode": 25,
+        "revision": 1
+      },
+      {
+        "interactionNode": 27,
+        "revision": 1
+      }
+    ],
+    "results": []
+  },
+  "acceptedInteractionIds": [
+    1,
+    2,
+    3,
+    4
+  ],
+  "humanVerdict": "pending",
+  "modelExecutionProof": "not claimed"
+}

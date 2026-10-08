@@ -7,6 +7,18 @@ export type GraphId = number;
 export interface CompletionInputGraph {
   readonly interactionNode: GraphId;
 }
+
+/** Durable bound calls of one reusable InvokeAction, observed through ordinary graph visibility. */
+export interface GraphInvocation {
+  readonly id: number;
+  readonly invocationKey: string;
+  readonly sourceCompletionId: GraphId;
+  readonly sourceActionId: GraphId;
+  readonly parentNodeId: GraphId;
+  readonly childInteractionNodeId: GraphId;
+  readonly actionSnapshot: Readonly<Record<string, unknown>>;
+  readonly state: CompletionState;
+}
 export type RecordState = "draft" | "accepted" | "stopped";
 
 export interface GraphNode {
@@ -92,6 +104,9 @@ export interface GraphAction {
   readonly description?: string | null;
   readonly targetLayerId?: GraphId | null;
   readonly interactionText?: string | null;
+  /** Absent/null only for historical Invokes whose original policy allowed reuse. */
+  readonly reusable?: boolean | null;
+  readonly inputActionIds?: readonly GraphId[];
   readonly control?: InputControl;
   readonly prompt?: string;
   readonly options?: readonly InputOption[];
@@ -181,7 +196,36 @@ export interface InteractionPermissions {
   )[];
 }
 
+/** Trusted, immutable semantics of one prepared completion. Runtime credentials are separate. */
+export interface CompletionContract {
+  readonly schemaVersion: 1;
+  readonly interactionNodeId: GraphId;
+  readonly input: {
+    readonly text: string;
+    readonly context: readonly { readonly nodeId: GraphId; readonly annotations: readonly string[] }[];
+    readonly answers: readonly {
+      readonly sourceNodeId: GraphId;
+      readonly sourceActionId: GraphId;
+      readonly question: SubmittedInputAction;
+      readonly value: SubmittedInputValue;
+    }[];
+    readonly invocationReferences: readonly {
+      readonly invocationId: number;
+      readonly sourceCompletionId: GraphId;
+      readonly sourceActionId: GraphId;
+      readonly parentNodeId: GraphId;
+      readonly actionSnapshot: Readonly<Record<string, unknown>>;
+    }[];
+  };
+  readonly authorities: InteractionPermissions["permissions"];
+  readonly returnRequirements: readonly { readonly kind: "navigate.response"; readonly nodeId: GraphId }[];
+  readonly digest: string;
+}
+
 export interface InteractionInput {
+  /** Absent only for an explicitly preserved legacy preparation. */
+  readonly completionContract?: CompletionContract;
+  readonly completionContractStatus?: "sealed" | "legacy";
   readonly interactionPermissions?: InteractionPermissions;
   readonly interaction: InteractionInputNode;
   readonly contexts: readonly InteractionContext[];

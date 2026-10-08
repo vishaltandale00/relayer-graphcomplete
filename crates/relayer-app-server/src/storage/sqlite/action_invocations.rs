@@ -259,8 +259,15 @@ impl SqliteProductStore {
         action_id: i64,
         text: &str,
     ) -> Result<ActionInvocationInsertOutcome, StorageError> {
-        self.insert_action_invocation_with_mode(source_interaction_id, action_id, text, false)
-            .await
+        self.insert_action_invocation_with_mode(
+            source_interaction_id,
+            action_id,
+            text,
+            false,
+            None,
+            None,
+        )
+        .await
     }
 
     pub(crate) async fn insert_recursive_action_invocation(
@@ -269,8 +276,85 @@ impl SqliteProductStore {
         action_id: i64,
         text: &str,
     ) -> Result<ActionInvocationInsertOutcome, StorageError> {
-        self.insert_action_invocation_with_mode(source_interaction_id, action_id, text, true)
-            .await
+        self.insert_action_invocation_with_mode(
+            source_interaction_id,
+            action_id,
+            text,
+            true,
+            None,
+            None,
+        )
+        .await
+    }
+
+    pub(crate) async fn insert_durable_action_invocation(
+        &self,
+        source: InteractionId,
+        action: i64,
+        text: &str,
+        node: i64,
+        agent_invoked: bool,
+        invocation_key: &str,
+    ) -> Result<ActionInvocationInsertOutcome, StorageError> {
+        self.insert_action_invocation_with_mode(
+            source,
+            action,
+            text,
+            agent_invoked,
+            Some((node, invocation_key)),
+            None,
+        )
+        .await
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) async fn insert_user_durable_action_invocation_with_inputs(
+        &self,
+        source: InteractionId,
+        action: i64,
+        text: &str,
+        node: i64,
+        invocation_key: &str,
+        revision: Option<i64>,
+        attachments: &[crate::product::ActionInputAttachment],
+    ) -> Result<ActionInvocationInsertOutcome, StorageError> {
+        self.insert_action_invocation_with_mode(
+            source,
+            action,
+            text,
+            false,
+            Some((node, invocation_key)),
+            Some((revision, attachments)),
+        )
+        .await
+    }
+
+    pub(crate) async fn prepared_invocation_node(
+        &self,
+        result: InteractionId,
+    ) -> Result<Option<i64>, StorageError> {
+        Ok(sqlx::query_scalar("SELECT prepared_graph_node_id FROM action_invocations WHERE result_interaction_id=?1 AND authoritative=1").bind(result.value()).fetch_optional(&self.pool).await?.flatten())
+    }
+
+    pub(crate) async fn prepared_invocation_call(
+        &self,
+        result: InteractionId,
+    ) -> Result<Option<(i64, String)>, StorageError> {
+        Ok(sqlx::query_as("SELECT prepared_graph_node_id,invocation_key FROM action_invocations WHERE result_interaction_id=?1 AND authoritative=1 AND prepared_graph_node_id IS NOT NULL").bind(result.value()).fetch_optional(&self.pool).await?)
+    }
+
+    pub(crate) async fn invocation_for_graph_node(
+        &self,
+        source: InteractionId,
+        action: i64,
+        node: i64,
+    ) -> Result<Option<(ActionInvocation, Interaction)>, StorageError> {
+        let mut connection = self.pool.acquire().await?;
+        let row = sqlx::query("SELECT ai.source_interaction_id,ai.action_id,ai.result_interaction_id,ai.created_at,result.completion_status,ai.agent_invoked,(ai.prepared_graph_node_id IS NOT NULL) AS durable,ai.invocation_key FROM action_invocations ai JOIN interactions result ON result.id=ai.result_interaction_id WHERE ai.source_interaction_id=?1 AND ai.action_id=?2 AND ai.prepared_graph_node_id=?3 AND ai.authoritative=1").bind(source.value()).bind(action).bind(node).fetch_optional(&mut *connection).await?;
+        match row {
+            Some(row) => invocation_with_result(&mut connection, row).await,
+            None => Ok(None),
+        }
     }
 
     async fn insert_action_invocation_with_mode(
@@ -279,11 +363,31 @@ impl SqliteProductStore {
         action_id: i64,
         text: &str,
         recursive: bool,
+        prepared_call: Option<(i64, &str)>,
+        submission: Option<(Option<i64>, &[crate::product::ActionInputAttachment])>,
     ) -> Result<ActionInvocationInsertOutcome, StorageError> {
         let mut transaction = self.pool.begin_with("BEGIN IMMEDIATE").await?;
-        if let Some((mut invocation, interaction)) =
+        let prepared_graph_node = prepared_call.map(|(node, _)| node);
+        let invocation_key = prepared_call.map(|(_, key)| key).unwrap_or("legacy");
+        let existing = if let Some(node) = prepared_graph_node {
+            let row = sqlx::query("SELECT ai.source_interaction_id,ai.action_id,ai.result_interaction_id,ai.created_at,result.completion_status,ai.agent_invoked,(ai.prepared_graph_node_id IS NOT NULL) AS durable,ai.invocation_key FROM action_invocations ai JOIN interactions result ON result.id=ai.result_interaction_id WHERE ai.prepared_graph_node_id=?1 AND ai.source_interaction_id=?2 AND ai.action_id=?3 AND ai.authoritative=1")
+                .bind(node).bind(source_interaction_id.value()).bind(action_id).fetch_optional(&mut *transaction).await?;
+            match row {
+                Some(row) => invocation_with_result(&mut transaction, row).await?,
+                None => None,
+            }
+        } else {
             existing_for_action_scope(&mut transaction, source_interaction_id, action_id).await?
-        {
+        };
+        if let Some((mut invocation, interaction)) = existing {
+            if prepared_graph_node.is_some()
+                && (interaction.text != text || invocation.invocation_key != invocation_key)
+            {
+                return Err(StorageError::Catalog(CatalogError::invalid(
+                    "invocation_input_conflict",
+                    "Invocation instruction changed.",
+                )));
+            }
             // An older build recorded an agent's child without the marker. An agent's retry of
             // the same recursive invocation marks it only on proof that no user created it: the
             // broker launched it (it has a completion execution), or its source was never
@@ -318,11 +422,20 @@ impl SqliteProductStore {
             });
         }
 
-        let source = sqlx::query("SELECT i.thread_id,t.permission_profile_id,t.harness_configuration_name,i.model_provider_id,i.provider_model_id,i.model_family_id,i.completion_status,i.graph_node_id FROM interactions i JOIN threads t ON t.id=i.thread_id WHERE i.id=?1")
+        let source = sqlx::query("SELECT i.thread_id,t.conversation_import_id,t.permission_profile_id,t.harness_configuration_name,i.model_provider_id,i.provider_model_id,i.model_family_id,i.completion_status,i.graph_node_id FROM interactions i JOIN threads t ON t.id=i.thread_id WHERE i.id=?1")
             .bind(source_interaction_id.value())
             .fetch_one(&mut *transaction)
             .await?;
         let thread_id = ThreadId::from_database(source.try_get("thread_id")?);
+        if submission.is_some()
+            && source
+                .try_get::<Option<String>, _>("conversation_import_id")?
+                .is_some()
+        {
+            return Err(StorageError::IncompatibleSchema(
+                "Imported calls cannot record executable input submissions".into(),
+            ));
+        }
         let permission_profile_id: String = source.try_get("permission_profile_id")?;
         let harness_id: String = source.try_get("harness_configuration_name")?;
         let model_provider_id: Option<String> = source.try_get("model_provider_id")?;
@@ -450,21 +563,37 @@ impl SqliteProductStore {
             .await?;
         }
         sqlx::query(
-            "INSERT INTO action_invocations(source_interaction_id,action_id,result_interaction_id,created_at,graph_lease_required,authoritative,agent_invoked) VALUES (?1,?2,?3,?4,1,1,?5)",
+            "INSERT INTO action_invocations(source_interaction_id,action_id,result_interaction_id,created_at,graph_lease_required,authoritative,agent_invoked,invocation_key,prepared_graph_node_id) VALUES (?1,?2,?3,?4,1,1,?5,?6,?7)",
         )
         .bind(source_interaction_id.value())
         .bind(action_id)
         .bind(interaction.id.value())
         .bind(&timestamp)
         .bind(recursive)
+        .bind(invocation_key)
+        .bind(prepared_graph_node)
         .execute(&mut *transaction)
         .await?;
+        if let Some((revision, attachments)) = submission {
+            if recursive
+                || prepared_graph_node.is_none()
+                || attachments.iter().any(|input| input.thread_id != thread_id)
+            {
+                return Err(StorageError::IncompatibleSchema(
+                    "Submission receipt requires a native user call and same-thread inputs".into(),
+                ));
+            }
+            sqlx::query("INSERT INTO invocation_input_submission_receipts(result_interaction_id,input_draft_revision,attachments_json) VALUES (?1,?2,?3)")
+                .bind(interaction.id.value()).bind(revision).bind(super::input_drafts::submission_json(attachments)?).execute(&mut *transaction).await?;
+        }
         sqlx::query("UPDATE threads SET updated_at=?1 WHERE id=?2")
             .bind(&timestamp)
             .bind(thread_id.value())
             .execute(&mut *transaction)
             .await?;
         let invocation = ActionInvocation {
+            invocation_key: invocation_key.into(),
+            durable: prepared_graph_node.is_some(),
             source_interaction_id,
             action_id,
             result_interaction_id: interaction.id,
@@ -502,7 +631,7 @@ pub(super) async fn fetch_action_invocations(
     thread_id: ThreadId,
 ) -> Result<Vec<ActionInvocation>, StorageError> {
     let rows = sqlx::query(
-        "SELECT ai.source_interaction_id,ai.action_id,ai.result_interaction_id,ai.created_at,result.completion_status,ai.agent_invoked
+        "SELECT ai.source_interaction_id,ai.action_id,ai.result_interaction_id,ai.created_at,result.completion_status,ai.agent_invoked,(ai.prepared_graph_node_id IS NOT NULL) AS durable,ai.invocation_key
          FROM action_invocations ai
          JOIN interactions source ON source.id=ai.source_interaction_id
          JOIN interactions result ON result.id=ai.result_interaction_id
@@ -525,7 +654,7 @@ pub(super) async fn fetch_action_invocations_for_export(
     thread_id: ThreadId,
 ) -> Result<Vec<ActionInvocation>, StorageError> {
     let rows = sqlx::query(
-        "SELECT ai.source_interaction_id,ai.action_id,ai.result_interaction_id,ai.created_at,result.completion_status,ai.agent_invoked
+        "SELECT ai.source_interaction_id,ai.action_id,ai.result_interaction_id,ai.created_at,result.completion_status,ai.agent_invoked,(ai.prepared_graph_node_id IS NOT NULL) AS durable,ai.invocation_key
          FROM action_invocations ai
          JOIN interactions source ON source.id=ai.source_interaction_id
          JOIN interactions result ON result.id=ai.result_interaction_id
@@ -544,7 +673,7 @@ async fn existing_for_action_scope(
     action_id: i64,
 ) -> Result<Option<(ActionInvocation, Interaction)>, StorageError> {
     let Some(row) = sqlx::query(
-        "SELECT ai.source_interaction_id,ai.action_id,ai.result_interaction_id,ai.created_at,result.completion_status,ai.agent_invoked
+        "SELECT ai.source_interaction_id,ai.action_id,ai.result_interaction_id,ai.created_at,result.completion_status,ai.agent_invoked,(ai.prepared_graph_node_id IS NOT NULL) AS durable,ai.invocation_key
          FROM interactions requested_source
          JOIN threads requested_thread ON requested_thread.id=requested_source.thread_id
          JOIN action_invocations ai ON ai.action_id=?2
@@ -552,7 +681,7 @@ async fn existing_for_action_scope(
          JOIN interactions result ON result.id=ai.result_interaction_id
          JOIN threads existing_thread ON existing_thread.id=existing_source.thread_id
          WHERE requested_source.id=?1
-           AND ai.authoritative=1
+           AND ai.authoritative=1 AND ai.invocation_key='legacy'
            AND (
              (requested_thread.project_id IS NOT NULL
                AND existing_thread.project_id=requested_thread.project_id)
@@ -591,6 +720,8 @@ async fn invocation_with_result(
 
 fn invocation_from_row(row: &SqliteRow) -> Result<ActionInvocation, StorageError> {
     Ok(ActionInvocation {
+        invocation_key: row.try_get("invocation_key")?,
+        durable: row.try_get("durable")?,
         source_interaction_id: InteractionId::from_database(row.try_get(0)?),
         action_id: row.try_get(1)?,
         result_interaction_id: InteractionId::from_database(row.try_get(2)?),
@@ -605,6 +736,316 @@ mod tests {
     use super::*;
     use crate::storage::NewThreadRecord;
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[tokio::test]
+    async fn user_call_receipt_is_atomic_reopens_and_never_recaptures_retry_epochs() {
+        use relayer_graph_core::{
+            ActionId, InputAction, InputControl, LayerId, NodeId, PresentingInputOccurrence,
+        };
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("receipt.sqlite3");
+        let store = SqliteProductStore::open(&path).await.unwrap();
+        seed_test_model_selection(&store).await;
+        let selection = InteractionModelSelection {
+            family_id: ModelFamilyId::from_database(1),
+            provider_id: ProviderId::parse("codex").unwrap(),
+            model_id: "test-model".into(),
+        };
+        let thread = store
+            .insert_thread_with_initial_interaction(NewThreadRecord {
+                icon_selection_eligible: true,
+                title: "Receipt",
+                project_id: None,
+                initial_message: "Analyze",
+                harness_configuration_name: "codex-basic",
+                permission_profile_id: "auto",
+                model_selection: Some(&selection),
+                timestamp: "9999999999999",
+            })
+            .await
+            .unwrap();
+        mark_interaction_accepted(&store, thread.root_interaction_id).await;
+        let occurrence = PresentingInputOccurrence {
+            presenting_interaction_node_id: NodeId::new(100).unwrap(),
+            presenting_layer_id: LayerId::new(200).unwrap(),
+            action_id: ActionId::new(300).unwrap(),
+        };
+        let action = InputAction {
+            control: InputControl::Text,
+            prompt: "Destination".into(),
+            options: vec![],
+            minimum_selections: None,
+            unsupported_fields: Default::default(),
+        };
+        let value = crate::product::ActionInputValue::Text {
+            text: "Kyoto".into(),
+        };
+        let first_draft = store
+            .commit_action_input_attachment(
+                thread.id,
+                crate::storage::NewActionInputAttachment {
+                    occurrence: &occurrence,
+                    source_node_id: 400,
+                    action: &action,
+                    value: &value,
+                },
+                0,
+            )
+            .await
+            .unwrap();
+        let created = store
+            .insert_user_durable_action_invocation_with_inputs(
+                thread.root_interaction_id,
+                41,
+                "Analyze",
+                101,
+                "first",
+                Some(first_draft.revision),
+                &first_draft.attachments,
+            )
+            .await
+            .unwrap();
+        let result = match created {
+            ActionInvocationInsertOutcome::Created { interaction, .. } => interaction.id,
+            _ => panic!("not created"),
+        };
+        // Reopen sees the call and receipt together, not a gap where fresh epochs can be captured.
+        drop(store);
+        let store = SqliteProductStore::open(&path).await.unwrap();
+        let receipt = store
+            .invocation_input_submission(thread.id, thread.root_interaction_id, 41, "first")
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            receipt,
+            (Some(first_draft.revision), first_draft.attachments.clone())
+        );
+        let newer = store
+            .commit_action_input_attachment(
+                thread.id,
+                crate::storage::NewActionInputAttachment {
+                    occurrence: &occurrence,
+                    source_node_id: 400,
+                    action: &action,
+                    value: &value,
+                },
+                first_draft.revision,
+            )
+            .await
+            .unwrap();
+        let recovered = store
+            .insert_user_durable_action_invocation_with_inputs(
+                thread.root_interaction_id,
+                41,
+                "Analyze",
+                101,
+                "first",
+                Some(newer.revision),
+                &newer.attachments,
+            )
+            .await
+            .unwrap();
+        assert!(matches!(
+            recovered,
+            ActionInvocationInsertOutcome::Existing { .. }
+        ));
+        assert_eq!(
+            store
+                .invocation_input_submission(thread.id, thread.root_interaction_id, 41, "first")
+                .await
+                .unwrap()
+                .unwrap(),
+            receipt
+        );
+        assert_eq!(
+            store
+                .consume_invocation_inputs(thread.id, &receipt.1)
+                .await
+                .unwrap(),
+            newer
+        );
+        mark_interaction_accepted_with_node(&store, result, 101).await;
+        // Existing historical user calls have no receipt: a retry must never invent one.
+        let historical = store
+            .insert_durable_action_invocation(
+                thread.root_interaction_id,
+                42,
+                "Analyze",
+                102,
+                false,
+                "historical",
+            )
+            .await
+            .unwrap();
+        let historical_result = match historical {
+            ActionInvocationInsertOutcome::Created { interaction, .. } => interaction.id,
+            _ => panic!("not created"),
+        };
+        store
+            .insert_user_durable_action_invocation_with_inputs(
+                thread.root_interaction_id,
+                42,
+                "Analyze",
+                102,
+                "historical",
+                Some(newer.revision),
+                &newer.attachments,
+            )
+            .await
+            .unwrap();
+        assert!(
+            store
+                .invocation_input_submission(
+                    thread.id,
+                    thread.root_interaction_id,
+                    42,
+                    "historical"
+                )
+                .await
+                .unwrap()
+                .is_none()
+        );
+        assert_eq!(store.action_input_draft(thread.id).await.unwrap(), newer);
+        mark_interaction_accepted_with_node(&store, historical_result, 102).await;
+        // Invalid input ownership rolls back child, call, and receipt as one transaction.
+        let before: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM interactions")
+            .fetch_one(&store.pool)
+            .await
+            .unwrap();
+        let mut foreign = newer.attachments.clone();
+        foreign[0].thread_id = ThreadId::from_database(thread.id.value() + 1000);
+        assert!(
+            store
+                .insert_user_durable_action_invocation_with_inputs(
+                    thread.root_interaction_id,
+                    43,
+                    "Analyze",
+                    103,
+                    "invalid",
+                    Some(newer.revision),
+                    &foreign
+                )
+                .await
+                .is_err()
+        );
+        assert_eq!(
+            sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM interactions")
+                .fetch_one(&store.pool)
+                .await
+                .unwrap(),
+            before
+        );
+        assert!(
+            store
+                .invocation_input_submission(thread.id, thread.root_interaction_id, 43, "invalid")
+                .await
+                .unwrap()
+                .is_none()
+        );
+    }
+
+    #[tokio::test]
+    async fn reusable_calls_keep_exact_keys_and_survive_product_reopen() {
+        let temporary = tempfile::tempdir().unwrap();
+        let path = temporary.path().join("product.sqlite3");
+        let store = SqliteProductStore::open(&path).await.unwrap();
+        seed_test_model_selection(&store).await;
+        let selection = InteractionModelSelection {
+            family_id: ModelFamilyId::from_database(1),
+            provider_id: ProviderId::parse("codex").unwrap(),
+            model_id: "test-model".into(),
+        };
+        let thread = store
+            .insert_thread_with_initial_interaction(NewThreadRecord {
+                icon_selection_eligible: true,
+                title: "Callable",
+                project_id: None,
+                initial_message: "Investigate",
+                harness_configuration_name: "codex-basic",
+                permission_profile_id: "auto",
+                model_selection: Some(&selection),
+                timestamp: "1",
+            })
+            .await
+            .unwrap();
+        mark_interaction_accepted(&store, thread.root_interaction_id).await;
+        for (node, key) in [(101, "first-call"), (102, "second-call")] {
+            let created = store
+                .insert_durable_action_invocation(
+                    thread.root_interaction_id,
+                    41,
+                    "Investigate",
+                    node,
+                    true,
+                    key,
+                )
+                .await
+                .unwrap();
+            assert!(matches!(
+                created,
+                ActionInvocationInsertOutcome::Created { .. }
+            ));
+        }
+        let calls = fetch_action_invocations(&mut store.pool.acquire().await.unwrap(), thread.id)
+            .await
+            .unwrap();
+        assert_eq!(calls.len(), 2);
+        assert!(calls.iter().all(|call| call.durable));
+        assert_ne!(
+            calls[0].result_interaction_id,
+            calls[1].result_interaction_id
+        );
+        assert_eq!(calls[0].invocation_key, "first-call");
+        assert_eq!(calls[1].invocation_key, "second-call");
+        assert!(
+            store
+                .insert_durable_action_invocation(
+                    thread.root_interaction_id,
+                    41,
+                    "Changed",
+                    101,
+                    true,
+                    "first-call"
+                )
+                .await
+                .is_err()
+        );
+        assert!(
+            store
+                .insert_durable_action_invocation(
+                    thread.root_interaction_id,
+                    41,
+                    "Investigate",
+                    101,
+                    true,
+                    "wrong-key"
+                )
+                .await
+                .is_err()
+        );
+        store.pool.close().await;
+        let reopened = SqliteProductStore::open(&path).await.unwrap();
+        let recovered = reopened
+            .insert_durable_action_invocation(
+                thread.root_interaction_id,
+                41,
+                "Investigate",
+                101,
+                true,
+                "first-call",
+            )
+            .await
+            .unwrap();
+        match recovered {
+            ActionInvocationInsertOutcome::Existing { invocation, .. } => assert_eq!(
+                invocation.result_interaction_id,
+                calls[0].result_interaction_id
+            ),
+            _ => panic!("recreated durable call"),
+        }
+        reopened.pool.close().await;
+    }
 
     #[tokio::test]
     async fn one_shot_invocation_is_atomic_idempotent_and_durable() {

@@ -947,7 +947,7 @@ describe("onboarding tutorial controller", () => {
       .toBeLessThan(threads.indexOf("followupSubmitted({"));
     expect(graph).not.toContain("followupSubmitted({");
     expect(graph).toContain("if (navigated === true)");
-    expect(graph).toContain('onInvokeAction: (action) => import("./threads.js")');
+    expect(graph).toContain('onInvokeAction: (action, options) => import("./threads.js")');
     expect(threads.indexOf("onboardingTutorialController()?.actionSucceeded({"))
       .toBeLessThan(threads.indexOf("trackPendingTurn(threadId, response.interaction.id, intent)"));
     expect(threads.indexOf('const thread = await request("/api/threads", {'))
