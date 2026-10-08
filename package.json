@@ -110,11 +110,14 @@
     "@actions/cache": "6.2.0",
     "@actions/core": "3.0.1",
     "@electron/asar": "3.4.1",
+    "@jvmr/pptx-to-html": "1.1.2",
     "@sentry/cli": "3.7.0",
     "@types/node": "^22.20.1",
     "app-builder-lib": "26.15.3",
+    "docx-preview": "0.4.1",
     "electron": "43.0.0",
     "electron-builder": "26.15.3",
+    "extract-zip": "2.0.1",
     "happy-dom": "20.0.8",
     "playwright": "1.58.2",
     "rolldown": "1.2.3",
@@ -122,7 +125,7 @@
     "tar": "7.5.22",
     "typescript": "^5.9.2",
     "vitest": "^4.1.9",
-    "yaml": "2.9.0",
-    "extract-zip": "2.0.1"
+    "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz",
+    "yaml": "2.9.0"
   }
 }

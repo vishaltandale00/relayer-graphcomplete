@@ -13,7 +13,10 @@ import { fingerprintPath } from "@relayer/harness-host";
 
 export const ARTIFACT_SCHEME = "relayer-artifact";
 const ORIGIN = `${ARTIFACT_SCHEME}://view`;
-const FILE_KINDS = new Set(["website", "pdf", "video", "image", "markdown"]);
+const OFFICE_KINDS = new Set(["docx", "xlsx", "pptx"]);
+const FILE_KINDS = new Set(["website", "pdf", "video", "image", "markdown", ...OFFICE_KINDS]);
+/** Viewer scripts the artifact scheme serves from the renderer's vendor folder. */
+const VENDOR_SCRIPTS = Object.freeze({ "/__relayer/marked.js": "marked.umd.js", "/__relayer/office.js": "artifact-office.js" });
 
 const MIME = {
   ".html": "text/html; charset=utf-8", ".htm": "text/html; charset=utf-8", ".js": "text/javascript", ".mjs": "text/javascript",
@@ -100,9 +103,10 @@ export function artifactViewPlan(artifact, threadFolder) {
       query.set("end", String(part.end));
     }
     if (kind === "markdown" && typeof part.heading === "string") query.set("heading", part.heading);
+    if (kind === "pptx" && Number.isSafeInteger(part.slide)) query.set("slide", String(part.slide));
     url = `${ORIGIN}/__relayer/view?${query}`;
   }
-  const address = `${file}${kind === "website" ? routePath(part.route) : kind === "pdf" && part.page ? ` · page ${part.page}` : ""}`;
+  const address = `${file}${kind === "website" ? routePath(part.route) : kind === "pdf" && part.page ? ` · page ${part.page}` : kind === "pptx" && part.slide ? ` · slide ${part.slide}` : ""}`;
   return Object.freeze({ kind, url, address, folder, entry, file: resolve(threadFolder, file), source: file, thread: resolve(threadFolder) });
 }
 
@@ -139,8 +143,25 @@ if(heading){const want=heading.toLowerCase();const target=[...doc.querySelectorA
 document.addEventListener("click",(event)=>{const link=event.target.closest?.('a[href^="#"]');if(!link)return;event.preventDefault();document.getElementById(decodeURIComponent(link.getAttribute("href").slice(1)))?.scrollIntoView();});
 }).catch((error)=>{doc.textContent=error.message;console.error(error.message);});</script></body>`);
   }
+  if (OFFICE_KINDS.has(kind)) {
+    const slide = Number(query.get("slide"));
+    return shell(`<main id="office"></main><script src="/__relayer/office.js"></script>
+<script>relayerOffice.render(${scriptJson(kind)}, ${scriptJson(src)}, { slide: ${Number.isSafeInteger(slide) && slide >= 1 ? slide : "null"} });</script>`, `<style>${OFFICE_STYLES}</style>`);
+  }
   return shell(`<p class="center">Unsupported artifact.</p>`);
 }
+
+/** Word pages on grey, Excel as a light sheet with tabs, PowerPoint slides scaled to the width. */
+const OFFICE_STYLES = `#office[data-kind="docx"] .docx-wrapper{background:#2a2b2e;padding:32px 16px}
+#office[data-kind="xlsx"]{min-height:100%;background:#fbfaf7;color:#1d2a2a}
+.office-sheet-tabs{position:sticky;top:0;display:flex;gap:4px;padding:10px 16px;background:#eceae4;border-bottom:1px solid #d6d3cb}
+.office-sheet-tab{border:1px solid transparent;border-radius:6px;padding:4px 12px;background:none;font:inherit;color:inherit;cursor:pointer}
+.office-sheet-tab[aria-selected="true"]{background:#fff;border-color:#d6d3cb;font-weight:600}
+.office-sheet{padding:16px;overflow:auto}.office-sheet table{border-collapse:collapse;font-variant-numeric:tabular-nums}
+.office-sheet td{border:1px solid #dcd9d1;padding:4px 10px;white-space:nowrap}.office-sheet td[data-t="n"]{text-align:right}
+#office[data-kind="pptx"]{display:flex;flex-direction:column;align-items:center;padding:24px 0}
+.office-slide{zoom:var(--slide-zoom,1);position:relative;width:960px;height:540px;margin-bottom:24px;overflow:hidden;background:#fff;box-shadow:0 8px 30px rgba(0,0,0,.45)}
+.office-error{padding:48px;text-align:center}`;
 
 async function respondWithFile(path, request, root) {
   // Open without following a link swapped in after the containment check, then stream
@@ -177,7 +198,8 @@ async function respondWithFile(path, request, root) {
 }
 
 /** Serve one artifact's folder. Every path is resolved through links and must stay inside it. */
-export function createArtifactRequestHandler({ getPlan, markedPath }) {
+/** `vendorDirectory` holds the viewer scripts in VENDOR_SCRIPTS. */
+export function createArtifactRequestHandler({ getPlan, vendorDirectory }) {
   return async (request) => {
     try {
       if (request.method !== "GET" && request.method !== "HEAD") return new Response(null, { status: 405 });
@@ -187,8 +209,8 @@ export function createArtifactRequestHandler({ getPlan, markedPath }) {
       if (url.pathname === SEED_PATH) {
         return new Response("<!doctype html><title></title>", { headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" } });
       }
-      if (url.pathname === "/__relayer/marked.js") {
-        return new Response(await readFile(markedPath), { headers: { "Content-Type": "text/javascript" } });
+      if (Object.hasOwn(VENDOR_SCRIPTS, url.pathname)) {
+        return new Response(await readFile(join(vendorDirectory, VENDOR_SCRIPTS[url.pathname])), { headers: { "Content-Type": "text/javascript; charset=utf-8" } });
       }
       if (url.pathname === "/__relayer/view") {
         return new Response(viewerPage(url.searchParams.get("kind"), url.searchParams.get("file") ?? "", url.searchParams), {
@@ -259,7 +281,7 @@ function hardenArtifactSession(ses, { getPlan, rendererDirectory }) {
   hardened.add(ses);
   ses.protocol.handle(ARTIFACT_SCHEME, createArtifactRequestHandler({
     getPlan,
-    markedPath: join(rendererDirectory, "vendor", "marked.umd.js"),
+    vendorDirectory: join(rendererDirectory, "vendor"),
   }));
   ses.setPermissionRequestHandler((_contents, _permission, callback) => callback(false));
   ses.setPermissionCheckHandler(() => false);
@@ -298,7 +320,7 @@ export function artifactPreviewSize(artifact, size) {
 
 /** How long a loaded artifact settles before capture: PDFs and video paint late. */
 export function artifactPreviewSettleMs(kind) {
-  return ({ pdf: 1500, video: 1200 })[kind] ?? 600;
+  return ({ pdf: 1500, video: 1200, docx: 1500, xlsx: 1000, pptx: 1500 })[kind] ?? 600;
 }
 
 /**
@@ -409,7 +431,8 @@ const NOTE_LOCATION_SCRIPT = `(() => {
   const video = document.querySelector("video");
   const doc = document.querySelector("#doc");
   const headings = doc ? [...doc.querySelectorAll("h1,h2,h3,h4")].filter((h) => h.getBoundingClientRect().top <= 80) : [];
-  return { time: video ? video.currentTime : null, heading: headings.at(-1)?.textContent ?? null, scroll: scrollY };
+  const office = typeof window.relayerOfficeLocation === "function" ? window.relayerOfficeLocation() : {};
+  return { time: video ? video.currentTime : null, heading: office.heading ?? headings.at(-1)?.textContent ?? null, slide: office.slide ?? null, sheet: office.sheet ?? null, scroll: scrollY };
 })()`;
 
 /**
@@ -423,10 +446,16 @@ function noteLocation(plan, reported, url) {
   if (plan.kind === "video") return Number.isFinite(seconds) ? `at ${time(seconds)}` : "in the video";
   if (plan.kind === "image") return "the whole image";
   if (plan.kind === "pdf") return `in ${basename(plan.file)}${/#page=(\d+)/u.test(url) ? `, page ${url.match(/#page=(\d+)/u)[1]}` : ""}`;
-  if (plan.kind === "markdown") {
-    const heading = String(reported?.heading ?? "").replace(/\s+/gu, " ").trim().slice(0, 80);
+  const text = (value) => String(value ?? "").replace(/\s+/gu, " ").trim().slice(0, 80);
+  if (plan.kind === "markdown" || plan.kind === "docx") {
+    const heading = text(reported?.heading);
     return heading ? `under “${heading}”` : "at the top";
   }
+  if (plan.kind === "pptx") {
+    const slide = Number(reported?.slide);
+    return Number.isSafeInteger(slide) && slide >= 1 ? `on slide ${slide}` : "in the deck";
+  }
+  if (plan.kind === "xlsx") return text(reported?.sheet) ? `on the “${text(reported.sheet)}” sheet` : "in the spreadsheet";
   let place = url;
   try { const parsed = new URL(url); place = `${parsed.pathname}${parsed.search}${parsed.hash}`; } catch {}
   return `at ${place.slice(0, 160)}${scroll > 0 ? `, scrolled ${scroll} px` : ""}`;
@@ -686,4 +715,4 @@ export function createArtifactViewerService({
   return Object.freeze({ open, close, setBounds, openExternally, openLink, beginNote, endNote, isOpen: () => current !== null, currentPlan: () => current?.plan ?? null, currentContents: () => current?.view.webContents ?? null });
 }
 
-export const artifactViewerTesting = Object.freeze({ viewerPage, ORIGIN, basename });
+export const artifactViewerTesting = Object.freeze({ viewerPage, noteLocation, NOTE_LOCATION_SCRIPT, ORIGIN, basename });

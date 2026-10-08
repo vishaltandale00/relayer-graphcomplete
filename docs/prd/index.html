@@ -2853,7 +2853,7 @@ settings:
 <tr><td>Video</td><td><code>.mp4</code>, <code>.webm</code> or <code>.mov</code></td><td>The whole video, or a start and end time</td></tr>
 <tr><td>Image</td><td><code>.png</code>, <code>.jpg</code>, <code>.gif</code>, <code>.webp</code> or <code>.svg</code></td><td>The whole image</td></tr>
 <tr><td>Markdown</td><td><code>.md</code></td><td>A heading</td></tr>
-<tr><td>Office (P3)</td><td><code>.docx</code>, <code>.xlsx</code> or <code>.pptx</code></td><td>The whole document, or a slide</td></tr>
+<tr><td>Office (P3)</td><td><code>.docx</code>, <code>.xlsx</code> or <code>.pptx</code></td><td>The whole document. A deck can open at a slide.</td></tr>
 </tbody>
 </table>
 <ul>
@@ -2909,10 +2909,10 @@ settings:
 </ul>
 <h4>6.6.9 Office documents (P3)</h4>
 <ul>
-<li>Word and Excel render in the viewer with their own renderers. PowerPoint renders slides, but charts may draw wrongly.</li>
+<li>Word, Excel and PowerPoint render in the viewer with open-source renderers. Excel shows each sheet. PowerPoint charts may draw wrongly.</li>
 <li>Agent guidance says to save calculated values in spreadsheets. Totals otherwise render blank.</li>
 <li>Agent guidance says to export a PDF next to any deck with charts, and to point the artifact at the PDF.</li>
-<li>P3 ships only after the PowerPoint renderer&#39;s licence is cleared, or a replacement renders the same fixture deck.</li>
+<li>PowerPoint uses an MIT-licensed renderer that draws the fixture deck, its chart included (decision 2026-10-08).</li>
 </ul>
 <h4>6.6.10 Share and Eval</h4>
 <ul>
@@ -2942,7 +2942,7 @@ settings:
 <tr><td><code>ART-009</code> (P2)</td><td>The server invoke reuses, asks once, starts, reports failure, stops when idle and records nothing.</td><td>Desktop server-invoke process tests with a fixture app and a failing app, and the desktop run.</td></tr>
 <tr><td><code>ART-010</code> (P2)</td><td>Starting state resets on every open.</td><td>Viewer test that changes storage, reopens and reads the seed.</td></tr>
 <tr><td><code>ART-011</code> (P2)</td><td>Notes collect, pause media, and send as one interaction with screenshots.</td><td>Renderer viewer tests, the harness-host screenshot test, and the desktop run, which sends a note and checks the agent can open its screenshot.</td></tr>
-<tr><td><code>ART-012</code> (P3)</td><td>Office kinds render. Guidance covers calculated values and decks with charts.</td><td>Viewer tests on the fixture documents, and guidance assertions.</td></tr>
+<tr><td><code>ART-012</code> (P3)</td><td>Office kinds render. Guidance covers calculated values and decks with charts.</td><td><code>test/artifact-viewer-main.test.mjs</code> renders the fixture documents in Chromium. <code>artifact-layer-guidance.test.ts</code> asserts the guidance. The desktop run opens each kind.</td></tr>
 </tbody>
 </table>
 <p><code>npm run test:desktop:artifact-viewer</code> is the heavy entry point. It drives the fixture thread through real Electron and saves evidence.</p>

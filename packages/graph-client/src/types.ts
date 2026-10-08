@@ -10,7 +10,7 @@ export interface CompletionInputGraph {
 export type RecordState = "draft" | "accepted" | "stopped";
 
 /** What an artifact node shows in the artifact viewer (PRD 6.6, 11.11). */
-export type ArtifactKind = "website" | "pdf" | "video" | "image" | "markdown" | "url" | "app";
+export type ArtifactKind = "website" | "pdf" | "video" | "image" | "markdown" | "docx" | "xlsx" | "pptx" | "url" | "app";
 export type ArtifactViewport = "desktop" | "tablet" | "phone";
 
 export type ArtifactSource =
@@ -47,6 +47,8 @@ export interface ArtifactPart {
   readonly end?: number;
   /** markdown: the heading text to open at. */
   readonly heading?: string;
+  /** pptx: the slide to open at, from 1. */
+  readonly slide?: number;
 }
 
 export interface ArtifactDetails {

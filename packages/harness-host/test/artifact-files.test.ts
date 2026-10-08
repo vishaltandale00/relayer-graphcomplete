@@ -52,6 +52,13 @@ describe("checkArtifactFiles", () => {
     expect(await checkArtifactFiles(thread, site)).toEqual(after);
   });
 
+  it("fingerprints Office documents by their extension (ART-012)", async () => {
+    await writeFile(join(thread, "docs/proposal.docx"), "PK word");
+    await writeFile(join(thread, "docs/pitch.key"), "keynote");
+    expect((await checkArtifactFiles(thread, { kind: "docx", source: { file: "docs/proposal.docx" } })).fingerprint).toMatch(/^sha256:/u);
+    expect((await rejection({ kind: "pptx", source: { file: "docs/pitch.key" } })).code).toBe("artifact_type_unsupported");
+  });
+
   it("rejects paths and links that leave the thread folder", async () => {
     expect(await rejection({ kind: "pdf", source: { file: "../outside/secret.pdf" } })).toEqual({ code: "artifact_path_outside_thread", path: "artifact.source.file" });
     expect(await rejection({ kind: "pdf", source: { file: "shared/secret.pdf" } })).toEqual({ code: "artifact_path_outside_thread", path: "artifact.source.file" });

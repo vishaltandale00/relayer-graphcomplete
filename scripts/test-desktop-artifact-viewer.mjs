@@ -206,7 +206,7 @@ async function run(window) {
     .catch(async (error) => { throw new Error(`${error.message}: ${await js(window, `document.querySelector("#createThread").title`)}`); });
   await hold(800);
   await js(window, `document.querySelector("#createThread").click()`);
-  say("The agent builds the site, brief, video and brand assets, and links each one");
+  say("The agent builds the site, brief, video, brand assets and Office documents, and links each one");
   const thread = await waitFor("thread", async () => (await request("/api/threads")).threads.find((candidate) => candidate.title !== undefined) ?? null);
   await waitFor("accepted launch kit", async () => {
     const detail = await request(`/api/threads/${thread.id}`);
@@ -220,7 +220,7 @@ async function run(window) {
   // A web app's preview is advisory: before the user approves it, its server is not running.
   const filePreviews = previews.filter((preview) => !preview.key.startsWith("order-desk"));
   const unrendered = filePreviews.filter((preview) => preview.status !== "rendered" && preview.status !== "cached");
-  check("ART-005 agent previews of artifact layers", filePreviews.length === 11 && unrendered.length === 0, `${filePreviews.length - unrendered.length}/${filePreviews.length} rendered${unrendered.length ? `; not: ${unrendered.map((preview) => `${preview.key}=${preview.status}`).join(", ")}` : ""}`);
+  check("ART-005 agent previews of artifact layers", filePreviews.length === 14 && unrendered.length === 0, `${filePreviews.length - unrendered.length}/${filePreviews.length} rendered${unrendered.length ? `; not: ${unrendered.map((preview) => `${preview.key}=${preview.status}`).join(", ")}` : ""}`);
   await waitFor("graph", () => js(window, `document.querySelectorAll("[data-node]").length >= 5`));
   await sleep(600);
   say("The answer is a graph; each node links to what the agent made");
@@ -372,6 +372,50 @@ async function run(window) {
   check("ART-007 Markdown heading", heading >= 0 && heading < 80, `Colour heading top=${heading}px`);
   await shot(window, "09-markdown-heading");
   await hold(2500);
+  await closeViewer(window);
+
+  // ART-012: Office documents render in the viewer with their own renderers.
+  const officeReady = (contents) => waitFor("Office document", () => contents.executeJavaScript(`document.getElementById("office")?.dataset.ready ?? null`), 15_000).catch(() => "timeout");
+  say("Word: the wholesale proposal");
+  await openArtifact(window, "Office documents", "Proposal");
+  view = await viewerLoaded(window);
+  const word = { ready: await officeReady(view.webContents), title: await view.webContents.executeJavaScript(`document.getElementById("office").innerText.includes("Wholesale proposal: Harbour Hotel")`) };
+  check("ART-012 Word", word.ready === "true" && word.title, JSON.stringify(word));
+  await shot(window, "19-word");
+  await hold(2500);
+  await closeViewer(window);
+  say("Excel: every sheet, showing the totals the file saved");
+  await openArtifact(window, "Office documents", "Budget");
+  view = await viewerLoaded(window);
+  const excel = {
+    ready: await officeReady(view.webContents),
+    tabs: await view.webContents.executeJavaScript(`[...document.querySelectorAll(".office-sheet-tab")].map((tab) => tab.textContent)`),
+    total: await view.webContents.executeJavaScript(`[...document.querySelectorAll(".office-sheet tr")].at(-1)?.innerText.replace(/\\s+/g, " ").trim() ?? ""`),
+  };
+  check("ART-012 Excel", excel.ready === "true" && excel.tabs.join() === "Budget,Notes" && excel.total === "Total 34300 40200 40900 47600", JSON.stringify(excel));
+  await shot(window, "20-excel");
+  await hold(2500);
+  await closeViewer(window);
+  say("PowerPoint: the seed deck, opened at its chart slide");
+  await openArtifact(window, "Office documents", "Seed deck (slide 3)");
+  view = await viewerLoaded(window);
+  const deck = {
+    ready: await officeReady(view.webContents),
+    slides: await view.webContents.executeJavaScript(`document.querySelectorAll(".office-slide").length`),
+    bars: await view.webContents.executeJavaScript(`document.querySelectorAll('[data-slide="3"] svg rect').length`),
+    address: await js(window, `document.querySelector(".artifact-strip-text")?.textContent`),
+  };
+  check("ART-012 PowerPoint at a slide, its chart drawn", deck.ready === "true" && deck.slides === 4 && deck.bars === 4 && deck.address === "docs/seed-pitch.pptx · slide 3", JSON.stringify(deck));
+  await shot(window, "21-powerpoint");
+  say("Annotate on a deck says which slide the note is about");
+  await js(window, `document.querySelector('[aria-label="Annotate"]').click()`);
+  await waitFor("note panel", () => js(window, `!!document.querySelector(".artifact-note-panel .artifact-note-field")`), 15_000);
+  const slideWhere = await js(window, `document.querySelector(".artifact-note-where").textContent`);
+  check("ART-012 a note on a deck names its slide", slideWhere === "Where: on slide 3", slideWhere);
+  await shot(window, "22-powerpoint-annotate");
+  await hold(2000);
+  await js(window, `document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }))`);
+  await waitFor("panel closed", () => js(window, `document.querySelector(".artifact-note-panel") === null`));
   await closeViewer(window);
 
   // A page whose script fails.

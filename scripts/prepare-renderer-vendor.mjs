@@ -1,6 +1,8 @@
 import { copyFile, mkdir } from "node:fs/promises";
 import { resolve } from "node:path";
 
+import { build } from "rolldown";
+
 import { buildDesign } from "./design/build.mjs";
 
 const repositoryRoot = resolve(import.meta.dirname, "..");
@@ -15,4 +17,11 @@ await copyFile(
   resolve(repositoryRoot, "node_modules/lucide/dist/umd/lucide.min.js"),
   resolve(vendorDirectory, "lucide.min.js"),
 );
+// Office renderers for the artifact viewer (PRD 6.6.9), served only inside artifact views.
+await build({
+  input: resolve(repositoryRoot, "desktop/artifact-office/index.js"),
+  platform: "browser",
+  logLevel: "warn",
+  output: { file: resolve(vendorDirectory, "artifact-office.js"), format: "iife", minify: true },
+});
 await buildDesign();

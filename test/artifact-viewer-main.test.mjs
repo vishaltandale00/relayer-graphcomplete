@@ -6,7 +6,7 @@ import { join, resolve } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { fingerprintPath } from "@relayer/harness-host";
-import { artifactFileStatus, artifactViewPlan, createArtifactRequestHandler } from "../desktop/main/services/artifact-viewer.mjs";
+import { artifactFileStatus, artifactViewPlan, artifactViewerTesting, createArtifactRequestHandler } from "../desktop/main/services/artifact-viewer.mjs";
 import { draftPreviewArtifact } from "../desktop/main/services/draft-preview-renderer.mjs";
 import { createPlaywrightDraftPreviewRenderer } from "../desktop/eval-main/draft-preview-renderer.mjs";
 import { artifactFrameDocument } from "../desktop/renderer/src/artifact-viewer.js";
@@ -32,7 +32,7 @@ afterAll(async () => {
 
 function serve(artifact) {
   const plan = artifactViewPlan(artifact, folder);
-  const handler = createArtifactRequestHandler({ getPlan: () => plan, markedPath: join(root, "desktop", "renderer", "vendor", "marked.umd.js") });
+  const handler = createArtifactRequestHandler({ getPlan: () => plan, vendorDirectory: join(root, "desktop", "renderer", "vendor") });
   return (path, headers = {}) => handler(new Request(`relayer-artifact://view${path}`, { headers }));
 }
 
@@ -125,6 +125,73 @@ describe("deployed sites in a share or Eval frame (ART-008)", () => {
       await expect.poll(() => fetched, { timeout: 5000 }).toContain("https://site.example/pricing");
       await page.waitForTimeout(500);
       expect(fetched).toEqual(["https://site.example/", "https://site.example/pricing"]);
+    } finally {
+      await browser.close();
+    }
+  }, 30_000);
+});
+
+describe("Office documents (ART-012)", () => {
+  const office = {
+    docx: { kind: "docx", source: { file: "docs/wholesale-proposal.docx" } },
+    xlsx: { kind: "xlsx", source: { file: "docs/budget-2027.xlsx" } },
+    pptx: { kind: "pptx", source: { file: "docs/seed-pitch.pptx" }, part: { slide: 3 } },
+  };
+
+  it("open in the viewer's Office page, a deck at its slide", () => {
+    expect(artifactViewPlan(office.docx, "/thread").url).toBe("relayer-artifact://view/__relayer/view?kind=docx&file=wholesale-proposal.docx");
+    const deck = artifactViewPlan(office.pptx, "/thread");
+    expect(deck.url).toBe("relayer-artifact://view/__relayer/view?kind=pptx&file=seed-pitch.pptx&slide=3");
+    expect(deck.address).toBe("docs/seed-pitch.pptx · slide 3");
+    const { noteLocation } = artifactViewerTesting;
+    expect(noteLocation(deck, { slide: 2 }, deck.url)).toBe("on slide 2");
+    expect(noteLocation(artifactViewPlan(office.xlsx, "/thread"), { sheet: "Notes" }, "")).toBe("on the “Notes” sheet");
+    expect(noteLocation(artifactViewPlan(office.docx, "/thread"), { heading: "Pricing" }, "")).toBe("under “Pricing”");
+  });
+
+  // The viewer's own page and Office bundle in Chromium, as Desktop and Eval load them.
+  async function openInChromium(browser, artifact) {
+    const plan = artifactViewPlan(artifact, folder);
+    const handler = createArtifactRequestHandler({ getPlan: () => plan, vendorDirectory: join(root, "desktop", "renderer", "vendor") });
+    const page = await browser.newPage({ viewport: { width: 1164, height: 703 } });
+    const errors = [];
+    page.on("console", (message) => { if (message.type() === "error") errors.push(message.text()); });
+    await page.route("https://artifact.relayer.invalid/**", async (route) => {
+      const response = await handler(new Request(route.request().url().replace("https://artifact.relayer.invalid", "relayer-artifact://view")));
+      await route.fulfill({ status: response.status, headers: Object.fromEntries(response.headers), body: Buffer.from(await response.arrayBuffer()) });
+    });
+    await page.goto(plan.url.replace("relayer-artifact://view", "https://artifact.relayer.invalid"));
+    await page.waitForSelector("#office[data-ready]", { state: "attached" });
+    expect(await page.locator("#office").getAttribute("data-ready")).toBe("true");
+    expect(errors).toEqual([]);
+    const located = () => page.evaluate(artifactViewerTesting.NOTE_LOCATION_SCRIPT);
+    return { page, located };
+  }
+
+  it.runIf(headlessChromium)("render Word, every Excel sheet's saved values, and slides with their chart", async () => {
+    const browser = await chromium.launch();
+    try {
+      const word = await openInChromium(browser, office.docx);
+      expect(await word.page.locator("#office").innerText()).toContain("Wholesale proposal: Harbour Hotel");
+      // Word's Symbol-font bullets draw as bullets, not missing glyphs.
+      const bullet = await word.page.evaluate(() => getComputedStyle([...document.querySelectorAll("#office p")].find((p) => p.textContent.startsWith("Weekly delivery")), "::before").content);
+      expect(bullet).toContain("•");
+      await word.page.getByText("Pricing", { exact: true }).evaluate((heading) => heading.scrollIntoView());
+      expect((await word.located()).heading).toBe("Pricing");
+
+      const sheet = await openInChromium(browser, office.xlsx);
+      expect(await sheet.page.locator(".office-sheet-tab").allInnerTexts()).toEqual(["Budget", "Notes"]);
+      // The total is a formula saved with its value; the viewer shows that value.
+      expect(await sheet.page.locator(".office-sheet tr").last().innerText()).toMatch(/Total\s+34300\s+40200\s+40900\s+47600/u);
+      await sheet.page.getByRole("button", { name: "Notes" }).click();
+      expect(await sheet.page.locator(".office-sheet").innerText()).toContain("Green bean prices rise 4% a quarter.");
+      expect((await sheet.located()).sheet).toBe("Notes");
+
+      const deck = await openInChromium(browser, office.pptx);
+      expect(await deck.page.locator(".office-slide").count()).toBe(4);
+      expect((await deck.located()).slide).toBe(3);
+      // python-pptx's column chart: one bar per quarter.
+      expect(await deck.page.locator('[data-slide="3"] svg rect').count()).toBe(4);
     } finally {
       await browser.close();
     }

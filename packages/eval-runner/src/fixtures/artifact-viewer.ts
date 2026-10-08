@@ -89,6 +89,14 @@ export const ARTIFACT_VIEWER_FIXTURE_GROUPS: readonly Group[] = [
       { key: "deployed", icon: "link", title: "Deployed site", detail: "The preview deployment over https.", label: "Deployed site", artifact: { kind: "url", source: { url: "https://example.com/" } } },
     ],
   },
+  {
+    key: "office", icon: "briefcase", title: "Office documents", detail: "The wholesale proposal, the 2027 budget and the seed deck.",
+    views: [
+      { key: "proposal", icon: "file-text", title: "Wholesale proposal", detail: "The Word proposal for the Harbour Hotel.", label: "Proposal", artifact: { kind: "docx", source: { file: "docs/wholesale-proposal.docx" } } },
+      { key: "budget", icon: "file-spreadsheet", title: "Budget 2027", detail: "Quarterly costs with saved totals, and the assumptions sheet.", label: "Budget", artifact: { kind: "xlsx", source: { file: "docs/budget-2027.xlsx" } } },
+      { key: "deck-chart", icon: "presentation", title: "Subscribers by quarter", detail: "Slide 3 of the seed deck: its chart.", label: "Seed deck (slide 3)", artifact: { kind: "pptx", source: { file: "docs/seed-pitch.pptx" }, part: { slide: 3 } } },
+    ],
+  },
 ];
 
 class ArtifactViewerFixtureHarness implements Harness {
@@ -147,7 +155,7 @@ class ArtifactViewerFixtureHarness implements Harness {
       await graph.createEdge(edge);
       edges.push(edge);
     }
-    const spots = [[0.5, 0.2], [0.15, 0.7], [0.32, 0.85], [0.5, 0.88], [0.68, 0.85], [0.85, 0.7]] as const;
+    const spots = [[0.5, 0.18], [0.12, 0.6], [0.24, 0.84], [0.42, 0.9], [0.58, 0.9], [0.76, 0.84], [0.88, 0.6]] as const;
     const root = new LayerObject(
       groups.map(({ node }) => node),
       edges,

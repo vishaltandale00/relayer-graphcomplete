@@ -71,7 +71,8 @@ export async function verifyBundledAppServer(
   const graphBinaryPath = join(resourcesPath, "bin", `relayer-graph-server${binarySuffix}`);
   const graphClientPath = join(resourcesPath, "graph-client", "index.js");
   const markedPath = join(resourcesPath, "renderer", "vendor", "marked.umd.js");
-  await Promise.all([access(binaryPath), access(graphBinaryPath), access(graphClientPath), access(markedPath)]);
+  const officePath = join(resourcesPath, "renderer", "vendor", "artifact-office.js");
+  await Promise.all([access(binaryPath), access(graphBinaryPath), access(graphClientPath), access(markedPath), access(officePath)]);
   await verifyNotices(resourcesPath);
   await verifyPackagedGraphClient(graphClientPath);
   const packagedEntries = new Set(listPackageEntries(join(resourcesPath, "app.asar")).map(normalizeAsarEntry));

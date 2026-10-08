@@ -35,7 +35,7 @@ const ARTIFACT_ORIGIN = "https://artifact.relayer.invalid";
 async function renderArtifactPreview(browser, { artifact, folder, rendererDirectory }) {
   if (artifact.kind !== "url" && typeof folder !== "string") throw new Error("The artifact's thread folder is unknown.");
   const plan = artifactViewPlan(artifact, folder);
-  const handler = createArtifactRequestHandler({ getPlan: () => plan, markedPath: join(rendererDirectory, "vendor", "marked.umd.js") });
+  const handler = createArtifactRequestHandler({ getPlan: () => plan, vendorDirectory: join(rendererDirectory, "vendor") });
   const scheme = `${ARTIFACT_SCHEME}://view`;
   const url = plan.kind === "url" ? plan.url : plan.url.replace(scheme, ARTIFACT_ORIGIN);
   const allowed = new URL(url).origin;

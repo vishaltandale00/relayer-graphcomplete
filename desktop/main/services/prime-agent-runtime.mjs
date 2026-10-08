@@ -51,7 +51,7 @@ export const PRIME_AGENT_RUNTIME_FUNCTIONS = Object.freeze([
 export const PRIME_AGENT_SESSION_FUNCTIONS = Object.freeze(["waitForRlmQuiescence"]);
 export const PRIME_AGENT_ASSET_SHA256 = Object.freeze({
   harnessConfigurations: Object.freeze({
-    "prime-agent-basic.yaml": "7511e84a916cf9697a542ea581686ce106acd045a56af1c8f60861756da36d20",
+    "prime-agent-basic.yaml": "4fe7c0df2b254b9b69729220163a6d049a8c70bafcb49b0c0179a6fc0cb50d04",
   }),
   pythonPackageTree: "5ab47e1cf15afd1b42e07a6d8fdf8bd23637a7324c4bae9aa54d4ff0f79188ae",
 });
