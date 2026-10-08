@@ -118,6 +118,7 @@
     "happy-dom": "20.0.8",
     "playwright": "1.58.2",
     "rolldown": "1.2.3",
+    "sharp": "^0.35.4",
     "tar": "7.5.22",
     "typescript": "^5.9.2",
     "vitest": "^4.1.9",

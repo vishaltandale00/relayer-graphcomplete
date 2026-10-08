@@ -2,9 +2,9 @@
 // WebContentsView on its own partition, never in the main window. Files
 // come from the thread folder through the `relayer-artifact:` scheme, which serves
 // only paths inside the artifact's folder and answers byte ranges for media.
-import { createReadStream } from "node:fs";
+import { constants as fsConstants } from "node:fs";
 import { createHash } from "node:crypto";
-import { mkdir, readFile, realpath, stat, writeFile } from "node:fs/promises";
+import { mkdir, open, readFile, realpath, rm, stat, writeFile } from "node:fs/promises";
 import { basename, dirname, extname, join, relative, resolve, sep } from "node:path";
 import { Readable } from "node:stream";
 
@@ -47,6 +47,13 @@ function routePath(route) {
  * What one artifact needs to be served: the folder files may come from, the
  * entry inside it, and the URL the view opens. Pure, so it is testable without Electron.
  */
+/** Media in every frame pauses while the user writes a note, then resumes. */
+const PAUSE_MEDIA_SCRIPT = `window.__relayerNotePaused = [...document.querySelectorAll("video,audio")].filter((m) => !m.paused); window.__relayerNotePaused.forEach((m) => m.pause());`;
+const RESUME_MEDIA_SCRIPT = `(window.__relayerNotePaused || []).forEach((m) => m.play().catch(() => {})); window.__relayerNotePaused = [];`;
+async function eachFrame(contents, script) {
+  await Promise.all(contents.mainFrame.framesInSubtree.map((frame) => frame.executeJavaScript(script).catch(() => {})));
+}
+
 /** How recent the user's own input must be for the page to open their browser. */
 const USER_GESTURE_MS = 2_000;
 /** Distinct page errors reported per open. */
@@ -138,21 +145,30 @@ document.addEventListener("click",(event)=>{const link=event.target.closest?.('a
 }
 
 async function respondWithFile(path, request) {
-  const info = await stat(path);
+  // Open without following a link swapped in after the containment check, then stream
+  // from that descriptor, never from the pathname again.
+  const handle = await open(path, fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW);
+  const info = await handle.stat();
+  if (!info.isFile()) {
+    await handle.close();
+    return new Response("Not found", { status: 404 });
+  }
+  const stream = (options = {}) => Readable.toWeb(handle.createReadStream({ ...options, autoClose: true }));
   const type = MIME[extname(path).toLowerCase()] ?? "application/octet-stream";
   const range = /^bytes=(\d*)-(\d*)$/u.exec(request.headers.get("range") ?? "");
   if (range && (range[1] !== "" || range[2] !== "")) {
     const start = range[1] !== "" ? Number(range[1]) : Math.max(0, info.size - Number(range[2]));
     const end = range[1] !== "" && range[2] !== "" ? Math.min(Number(range[2]), info.size - 1) : info.size - 1;
     if (start > end || start >= info.size) {
+      await handle.close();
       return new Response(null, { status: 416, headers: { "Content-Range": `bytes */${info.size}` } });
     }
-    return new Response(Readable.toWeb(createReadStream(path, { start, end })), {
+    return new Response(stream({ start, end }), {
       status: 206,
       headers: { "Content-Type": type, "Accept-Ranges": "bytes", "Content-Range": `bytes ${start}-${end}/${info.size}`, "Content-Length": String(end - start + 1), "Cache-Control": "no-store" },
     });
   }
-  return new Response(Readable.toWeb(createReadStream(path)), {
+  return new Response(stream(), {
     status: 200,
     headers: { "Content-Type": type, "Accept-Ranges": "bytes", "Content-Length": String(info.size), "Cache-Control": "no-store" },
   });
@@ -297,9 +313,10 @@ export function createArtifactPreviewCapture({ BrowserWindow, session, rendererD
     plan = artifactViewPlan(artifact, folder);
     if (!addressedByUrl(plan.kind) && !(await stat(plan.file).then((info) => info.isFile(), () => false))) throw new Error("The artifact file is missing.");
     await clearSession(ses);
-    // Like graph previews, a file artifact's preview loads nothing from the network.
+    // The preview loads what the viewer would: a website may use internet assets such as
+    // fonts; a PDF, video, image or Markdown file loads nothing from the network.
     ses.webRequest.onBeforeRequest((details, callback) => callback({
-      cancel: plan !== null && !addressedByUrl(plan.kind) && /^(https?|wss?|ftp):/u.test(details.url),
+      cancel: plan !== null && !addressedByUrl(plan.kind) && plan.kind !== "website" && /^(https?|wss?|ftp):/u.test(details.url),
     }));
     const viewport = artifactPreviewSize(artifact, size);
     const window = new BrowserWindow({
@@ -320,6 +337,8 @@ export function createArtifactPreviewCapture({ BrowserWindow, session, rendererD
     try {
       return await Promise.race([
         (async () => {
+          // The agent previews the same starting state the viewer will apply.
+          await applySeed(contents, plan, artifact.seed);
           await contents.loadURL(plan.url);
           await new Promise((done) => setTimeout(done, artifactPreviewSettleMs(plan.kind)));
           // Report logical pixels, like graph previews; a photo-heavy page can exceed the cap, so halve it until it fits.
@@ -487,7 +506,12 @@ export function createArtifactViewerService({
       if (token !== latest) { serverRunner.release(serverKey); return { status: { state: "superseded" }, address: plan.address }; }
     }
     plans.set(partition, plan);
-    await prepareSession(partition);
+    try {
+      await prepareSession(partition);
+    } catch (error) {
+      if (serverKey) serverRunner.release(serverKey);
+      throw error;
+    }
     if (token !== latest) {
       if (serverKey) serverRunner.release(serverKey);
       return { status: { state: "superseded" }, address: plan.address };
@@ -573,7 +597,7 @@ export function createArtifactViewerService({
     const viewing = current;
     if (!viewing?.view || !notesDirectory) return null;
     const contents = viewing.view.webContents;
-    await contents.executeJavaScript(`window.__relayerNotePaused = [...document.querySelectorAll("video,audio")].filter((m) => !m.paused); window.__relayerNotePaused.forEach((m) => m.pause());`).catch(() => {});
+    await eachFrame(contents, PAUSE_MEDIA_SCRIPT);
     // A capture can stall while Chromium paints no frames; never leave the viewer waiting.
     const bounded = (promise) => Promise.race([promise, new Promise((_, reject) => setTimeout(() => reject(new Error("The view could not be captured.")), 5_000))]);
     // Anything that fails after the pause must resume the media it paused.
@@ -605,14 +629,18 @@ export function createArtifactViewerService({
       throw error;
     }
     if (current !== viewing) return null;
+    viewing.noteDigest = digest;
     viewing.view.setVisible(false);
     return { location: noteLocation(viewing.plan, reported, contents.getURL()), digest, screenshot: `data:image/png;base64,${png.toString("base64")}` };
   }
 
-  async function endNote() {
+  /** End a note session; a screenshot no note kept is deleted. */
+  async function endNote({ kept = true } = {}) {
+    if (current?.noteDigest && !kept) await rm(join(notesDirectory, `${current.noteDigest}.png`), { force: true }).catch(() => {});
+    if (current) current.noteDigest = null;
     if (!current?.view) return;
     current.view.setVisible(true);
-    await current.view.webContents.executeJavaScript(`(window.__relayerNotePaused || []).forEach((m) => m.play().catch(() => {})); window.__relayerNotePaused = [];`).catch(() => {});
+    await eachFrame(current.view.webContents, RESUME_MEDIA_SCRIPT);
   }
 
   function setBounds(bounds) {

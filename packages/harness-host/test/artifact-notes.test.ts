@@ -1,4 +1,5 @@
 // PRD 6.6.8: the agent can open each artifact note's screenshot.
+import { createHash } from "node:crypto";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -20,16 +21,21 @@ describe("artifact note screenshots", () => {
     const notes = await mkdtemp(join(tmpdir(), "relayer-notes-"));
     const turn = await mkdtemp(join(tmpdir(), "relayer-turn-"));
     cleanup.push(notes, turn);
-    const digest = "a".repeat(64);
+    const digest = createHash("sha256").update(PNG).digest("hex");
     const missing = "b".repeat(64);
+    const tampered = "c".repeat(64);
     await writeFile(join(notes, `${digest}.png`), PNG);
+    // Bytes that do not match the digest the note names are not that screenshot.
+    await writeFile(join(notes, `${tampered}.png`), PNG);
     const result = await withArtifactNoteScreenshots(input([
       `The price is wrong\n— at /#pricing · screenshot sha256:${digest}`,
       `Too dark\n— at 0:12 · screenshot sha256:${missing}`,
       "A plain annotation",
+      `Swapped\n— at /#menu · screenshot sha256:${tampered}`,
       `An ordinary note quoting screenshot sha256:${digest} mid-sentence.`,
     ]), notes, turn);
-    const [first, second, plain, quoted] = result.contexts[0]!.annotations;
+    const [first, second, plain, swapped, quoted] = result.contexts[0]!.annotations;
+    expect(swapped).toBe("Swapped\n— at /#menu · screenshot unavailable");
     // Only the suffix the viewer writes is rewritten.
     expect(quoted).toBe(`An ordinary note quoting screenshot sha256:${digest} mid-sentence.`);
     const file = join(turn, "artifact-notes", `${digest}.png`);

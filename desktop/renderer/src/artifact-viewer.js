@@ -189,7 +189,7 @@ export function createArtifactViewer({ root = document.body, native = null, onAd
     unsubscribe();
     unsubscribe = () => {};
     document.removeEventListener("keydown", onKeyDown, true);
-    if (closing.noting) void native?.endNote?.();
+    if (closing.noting) void native?.endNote?.({ kept: (closing.notesAdded ?? 0) > 0 });
     // Always tell main, so an open still in flight there is dropped too.
     if (native) void native.close();
     closing.overlay.remove();
@@ -244,6 +244,7 @@ export function createArtifactViewer({ root = document.body, native = null, onAd
       field.disabled = true;
       try {
         await notes.add({ threadId: viewing.threadId, node: viewing.node, target: viewing.target, text });
+        viewing.notesAdded = (viewing.notesAdded ?? 0) + 1;
         field.value = "";
         await renderNoteList();
       } finally {
@@ -271,7 +272,9 @@ export function createArtifactViewer({ root = document.body, native = null, onAd
     viewing.annotate.setAttribute("aria-pressed", "false");
     viewing.notePanel?.remove();
     viewing.freeze?.remove();
-    await native.endNote();
+    // A screenshot no note used is not kept.
+    await native.endNote({ kept: (viewing.notesAdded ?? 0) > 0 });
+    viewing.notesAdded = 0;
   }
 
   async function open({ threadId, node, target = null, approveServer = false }) {

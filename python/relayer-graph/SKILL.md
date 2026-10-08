@@ -123,9 +123,9 @@ Kinds: "website" (an entry .html file plus its site root folder), "pdf",
 "video" (.mp4, .webm, .mov), "image" (.png, .jpg, .gif, .webp, .svg),
 "markdown" (.md), and "url" (https, or http only on localhost). File paths are
 relative to the thread folder and must stay inside it. A part opens the artifact
-at one place: a route for websites and URLs, a page for PDFs (from 1), start and
+at one place: a route for websites, web apps and URLs, a page for PDFs (from 1), start and
 end seconds for a video segment, or a heading for Markdown. A viewport
-("desktop", "tablet", "phone") applies to websites and URLs only. Show two views
+("desktop", "tablet", "phone") applies to websites, web apps and URLs only. Show two views
 of one artifact as two artifact nodes, each in its own artifact layer. An
 artifact layer holds exactly that one node and no edges; never put an artifact
 node in a graph layer. Relayer fingerprints the files when you submit the node

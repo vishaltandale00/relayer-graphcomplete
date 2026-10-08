@@ -459,9 +459,9 @@ export function registerArtifactViewerIpc({ ipcMain, Menu, viewer, getWindow }) 
     fromMainWindow(event);
     return viewer.beginNote();
   });
-  ipcMain.handle("relayer:artifact-viewer-note-end", (event) => {
+  ipcMain.handle("relayer:artifact-viewer-note-end", (event, options) => {
     fromMainWindow(event);
-    return viewer.endNote();
+    return viewer.endNote({ kept: options?.kept !== false });
   });
   ipcMain.handle("relayer:artifact-viewer-close", (event) => {
     fromMainWindow(event);

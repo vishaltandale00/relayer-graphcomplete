@@ -179,7 +179,7 @@ if (contextBridge) contextBridge.exposeInMainWorld("relayerDesktop", {
     close: () => ipcRenderer.invoke("relayer:artifact-viewer-close"),
     showMenu: (position) => ipcRenderer.invoke("relayer:artifact-viewer-menu", position),
     beginNote: () => ipcRenderer.invoke("relayer:artifact-viewer-note-begin"),
-    endNote: () => ipcRenderer.invoke("relayer:artifact-viewer-note-end"),
+    endNote: (options) => ipcRenderer.invoke("relayer:artifact-viewer-note-end", options),
     onEvent: (callback) => subscribe("relayer:artifact-viewer-event", callback),
   },
   updater: {

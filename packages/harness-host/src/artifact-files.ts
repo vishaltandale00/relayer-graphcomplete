@@ -84,6 +84,7 @@ export async function fingerprintPath(path: string): Promise<string> {
   }
   const entries: { readonly rel: string; readonly full: string; readonly link?: string; readonly size?: number }[] = [];
   let bytes = 0;
+  let visited = 0;
   const tooLarge = () => new ArtifactFileError(
     "artifact_too_large",
     "The site root holds more than 5,000 files or 2 GB. Point root at the built site folder, not the whole project.",
@@ -92,6 +93,9 @@ export async function fingerprintPath(path: string): Promise<string> {
   async function walk(folder: string): Promise<void> {
     const listed = (await readdir(folder, { withFileTypes: true })).sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
     for (const entry of listed) {
+      // Every visited entry, folders included, counts toward the bound before recursing.
+      visited += 1;
+      if (visited > MAX_SITE_FILES) throw tooLarge();
       const full = join(folder, entry.name);
       const rel = relative(path, full).split(sep).join("/");
       if (entry.isSymbolicLink()) {

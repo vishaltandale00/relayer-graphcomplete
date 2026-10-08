@@ -518,3 +518,50 @@ async fn an_artifact_layer_cannot_be_the_response_root() {
     let error = writer.complete(interaction.id).await.unwrap_err();
     assert_eq!(code(error), "artifact_layer_as_response");
 }
+
+/// Review: acceptance fingerprints only the artifacts that the publish accepts. (A
+/// completion already refuses unreachable draft layers, so its closure is every live layer.)
+#[tokio::test]
+async fn only_the_published_closure_is_fingerprinted() {
+    let (_database, interaction, writer) = setup().await;
+    let overview = plain_node(&writer, "overview").await;
+    let root = writer
+        .submit_layer(&layer_draft("root", &[overview.id]))
+        .await
+        .unwrap();
+    let shown = artifact_node(&writer, "shown", &website()).await.unwrap();
+    let shown_layer = writer
+        .submit_layer_with_renderer(&layer_draft("shown-viewer", &[shown.id]), Some("artifact"))
+        .await
+        .unwrap();
+    let unrelated = artifact_node(&writer, "unrelated", &website())
+        .await
+        .unwrap();
+    writer
+        .submit_layer_with_renderer(
+            &layer_draft("unrelated-viewer", &[unrelated.id]),
+            Some("artifact"),
+        )
+        .await
+        .unwrap();
+    navigate(&writer, "response", &interaction, None, &root).await;
+    navigate(&writer, "open-shown", &overview, Some(&root), &shown_layer).await;
+
+    // An advance publishes only its target's closure; unrelated draft work may remain.
+    let advance = CurrentTransition::Advance { layer_id: root.id };
+    let selected = writer.draft_artifacts_for(Some(&advance)).await.unwrap();
+    assert_eq!(
+        selected.iter().map(|(id, _)| *id).collect::<Vec<_>>(),
+        vec![shown.id]
+    );
+    let stop = CurrentTransition::Stop {
+        reason: "user".into(),
+    };
+    assert!(
+        writer
+            .draft_artifacts_for(Some(&stop))
+            .await
+            .unwrap()
+            .is_empty()
+    );
+}

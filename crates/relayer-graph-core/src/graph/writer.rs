@@ -270,8 +270,42 @@ impl GraphWriter {
         Ok(node)
     }
 
-    /// This interaction's draft nodes with artifact details, for the host to
-    /// fingerprint again just before acceptance (ADR 0014).
+    /// The draft artifact nodes a publish would accept, for the host to fingerprint just
+    /// before it: the whole answer for completion (`None`), or the target layer's closure
+    /// for an advance or return. A plan that cannot be built yet selects nothing; the
+    /// publish itself then reports why.
+    pub async fn draft_artifacts_for(
+        &self,
+        transition: Option<&CurrentTransition>,
+    ) -> Result<Vec<(NodeId, serde_json::Value)>, GraphError> {
+        let mut transaction = self.database.storage.begin_read().await?;
+        self.scope
+            .require_active_authority(&mut transaction)
+            .await?;
+        let plan = match transition {
+            None => completion::CompletionPlan::build(&mut transaction, &self.scope).await,
+            Some(
+                CurrentTransition::Advance { layer_id } | CurrentTransition::Return { layer_id },
+            ) => {
+                completion::CompletionPlan::build_current(&mut transaction, &self.scope, *layer_id)
+                    .await
+            }
+            Some(_) => return Ok(Vec::new()),
+        };
+        let Ok(plan) = plan else {
+            return Ok(Vec::new());
+        };
+        let artifacts = NodeTable::new(&mut transaction)
+            .draft_artifacts(self.scope.root_node_id)
+            .await?
+            .into_iter()
+            .filter(|(id, _)| plan.nodes.contains(id))
+            .collect();
+        transaction.commit().await?;
+        Ok(artifacts)
+    }
+
+    /// This interaction's draft nodes with artifact details that a live layer shows.
     pub async fn draft_artifacts(&self) -> Result<Vec<(NodeId, serde_json::Value)>, GraphError> {
         let mut transaction = self.database.storage.begin_read().await?;
         self.scope

@@ -2453,6 +2453,7 @@ async fn pin_artifact_fingerprints(
     state: &ServerState,
     authority: RuntimeAuthority,
     asset_generation: u64,
+    transition: Option<&relayer_graph_core::CurrentTransition>,
 ) -> Result<(), ApiError> {
     // An inactive authority is reported by the pause and acceptance that follow,
     // exactly as for a run without artifacts.
@@ -2466,7 +2467,7 @@ async fn pin_artifact_fingerprints(
     if writer.require_active_authority().await.is_err() {
         return Ok(());
     }
-    for (node_id, artifact) in writer.draft_artifacts().await? {
+    for (node_id, artifact) in writer.draft_artifacts_for(transition).await? {
         let kind = artifact["kind"].as_str().unwrap_or_default();
         if !relayer_graph_core::artifact::is_file_artifact_kind(kind) {
             continue;
@@ -3098,7 +3099,7 @@ async fn submit_completion(
     let mut generation = gate.lock().await;
     // Before the asset pause: the host still answers file checks, and the gate
     // keeps node writes out until acceptance.
-    pin_artifact_fingerprints(&state, authority, *generation).await?;
+    pin_artifact_fingerprints(&state, authority, *generation, None).await?;
     let barrier = format!("complete-{}", authority.node_id.value());
     *generation = visual_assets_lifecycle(
         &state,
@@ -3188,8 +3189,11 @@ async fn transition_current(
             input.operation_key
         );
         let mut generation = gate.lock().await;
-        // Publishing drafts is acceptance too: pin artifact fingerprints first (PRD 6.6.5).
-        pin_artifact_fingerprints(&state, authority, *generation).await?;
+        // Return publishes drafts, so it pins first (PRD 6.6.5); Stop and Fail publish none.
+        if matches!(input.transition, CurrentTransition::Return { .. }) {
+            pin_artifact_fingerprints(&state, authority, *generation, Some(&input.transition))
+                .await?;
+        }
         *generation = visual_assets_lifecycle(
             &state,
             authority.node_id,
@@ -3226,7 +3230,7 @@ async fn transition_current(
     // the fingerprint pin and the transition.
     let gate = completion_asset_gate(&state, authority.node_id)?;
     let generation = gate.lock().await;
-    pin_artifact_fingerprints(&state, authority, *generation).await?;
+    pin_artifact_fingerprints(&state, authority, *generation, Some(&input.transition)).await?;
     Ok(Json(
         state
             .graph

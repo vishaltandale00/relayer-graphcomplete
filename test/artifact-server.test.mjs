@@ -123,6 +123,15 @@ describe("the server invoke (ART-009)", () => {
     expect(other.log).toContain("Another thread's app is already serving");
   });
 
+  it("treats localhost and 127.0.0.1 on one port as the same server", async () => {
+    const { folder, runner } = await setup();
+    const port = await freePort();
+    expect((await runner.ensure({ threadId: 17, nodeId: 3, folder, permissionProfileId: "auto", approve: true, server: { command: `node app/server.mjs ${port}` }, sourceUrl: `http://127.0.0.1:${port}/` })).state).toBe("ready");
+    const alias = await runner.ensure({ threadId: 18, nodeId: 3, folder, permissionProfileId: "auto", approve: true, server: { command: "npm run dev" }, sourceUrl: `http://localhost:${port}/` });
+    expect(alias.state).toBe("failed");
+    expect(alias.log).toContain("Another thread's app is already serving");
+  });
+
   it("replaces the same thread's earlier server when its command changes", async () => {
     const { folder, runner } = await setup();
     const port = await freePort();

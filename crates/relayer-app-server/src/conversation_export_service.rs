@@ -2167,7 +2167,13 @@ fn export_layer(
                         })
                         .collect(),
                 }),
-            renderer: resolved.layer.renderer.clone(),
+            // A share that dropped sensitive artifact details also drops the renderer, so
+            // the layer reads consistently as an ordinary graph (PRD 6.6.11 fallback).
+            renderer: resolved
+                .layer
+                .renderer
+                .clone()
+                .filter(|_| nodes.iter().all(|node| node.artifact.is_some())),
             state: ExportRecordState::Accepted,
         },
         nodes,

@@ -2,7 +2,8 @@
 // context annotation that names its screenshot by digest. Before a turn, the host
 // copies each named screenshot into the turn's folder and rewrites the reference
 // to that file, so the agent can open what the user saw.
-import { copyFile, mkdir } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { InteractionInput } from "@relayer/graph-client";
 
@@ -20,8 +21,11 @@ export async function withArtifactNoteScreenshots(
   const copied = new Map<string, string | null>();
   const fileFor = async (digest: string): Promise<string | null> => {
     if (!copied.has(digest)) {
+      // The note names its screenshot by digest; anything else in that file is not it.
+      const bytes = await readFile(join(notesDirectory, `${digest}.png`)).catch(() => null);
       const target = join(folder, `${digest}.png`);
-      copied.set(digest, await copyFile(join(notesDirectory, `${digest}.png`), target).then(() => target, () => null));
+      const matches = bytes !== null && createHash("sha256").update(bytes).digest("hex") === digest;
+      copied.set(digest, matches ? await writeFile(target, bytes, { mode: 0o600 }).then(() => target, () => null) : null);
     }
     return copied.get(digest) ?? null;
   };

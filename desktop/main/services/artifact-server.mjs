@@ -37,6 +37,13 @@ export function serverSandboxProfile({ folder, temporary }) {
   ].join("\n");
 }
 
+/** localhost and 127.0.0.1 on one port are the same server. */
+function loopbackEndpoint(url) {
+  const parsed = new URL(url);
+  const host = ["localhost", "127.0.0.1", "[::1]"].includes(parsed.hostname) ? "loopback" : parsed.hostname;
+  return `${parsed.protocol}//${host}:${parsed.port || (parsed.protocol === "https:" ? "443" : "80")}`;
+}
+
 function readyUrlOf(server, sourceUrl) {
   return String(server?.readyUrl ?? sourceUrl);
 }
@@ -131,10 +138,13 @@ export function createArtifactServerRunner({
     const child = spawn(file, args, { cwd: folder, env, detached: true, stdio: ["ignore", "pipe", "pipe"] });
     const server = { child, log: "", readyUrl, idleMinutes, viewers: 0, idleTimer: null };
     servers.set(key, server);
+    // The log streams to the starting card only until startup ends; after that it is
+    // kept (bounded) but no longer forwarded.
+    let forward = onLog;
     const append = (chunk) => {
       const text = String(chunk);
       server.log = (server.log + text).slice(-LOG_LIMIT);
-      onLog?.(text);
+      forward?.(text);
     };
     child.stdout?.on("data", append);
     child.stderr?.on("data", append);
@@ -143,6 +153,7 @@ export function createArtifactServerRunner({
       child.once("error", (error) => { append(`${error.message}\n`); done({ code: -1, signal: null }); });
     });
     const deadline = Date.now() + startupTimeoutMs;
+    try {
     while (Date.now() < deadline) {
       const ended = await Promise.race([exited, new Promise((done) => setTimeout(() => done(null), READY_POLL_MS))]);
       if (ended) {
@@ -155,6 +166,9 @@ export function createArtifactServerRunner({
     if (servers.get(key) === server) stop(key);
     else killGroup(child);
     return { state: "failed", log: `${server.log}\nNo answer from ${readyUrl} after ${Math.round(startupTimeoutMs / 1000)} s.`.trim() };
+    } finally {
+      forward = null;
+    }
   }
 
   return {
@@ -168,9 +182,9 @@ export function createArtifactServerRunner({
       const key = `${threadId}:${commandDigest(command)}`;
       // Another thread's app on the same address is a different app; never show it here.
       // This thread's own earlier server there (a revised command, or one that died) is replaced.
-      const origin = new URL(readyUrl).origin;
+      const origin = loopbackEndpoint(readyUrl);
       for (const [other, entry] of [...servers.entries()]) {
-        if (other === key || new URL(entry.readyUrl).origin !== origin) continue;
+        if (other === key || loopbackEndpoint(entry.readyUrl) !== origin) continue;
         const exited = entry.child.exitCode !== null || entry.child.signalCode !== null;
         if (exited || other.startsWith(`${threadId}:`)) { stop(other); continue; }
         return { state: "failed", log: `Another thread's app is already serving ${origin}. Close it there, or give this app another port.` };

@@ -44,9 +44,10 @@ async function renderArtifactPreview(browser, { artifact, folder, rendererDirect
   try {
     await context.route("**/*", async (route) => {
       const requested = route.request().url();
-      // A deployed site or web app may load its own CDN assets; local files load nothing else.
+      // A deployed site, web app or website may load internet assets such as fonts, as in the
+      // viewer; a PDF, video, image or Markdown file loads nothing else.
       if (plan.kind === "url" || plan.kind === "app") return route.continue();
-      if (new URL(requested).origin !== allowed) return route.abort();
+      if (new URL(requested).origin !== allowed) return plan.kind === "website" ? route.continue() : route.abort();
       const response = await handler(new Request(requested.replace(ARTIFACT_ORIGIN, scheme), { headers: route.request().headers() }));
       // A preview never buffers a huge file; it fails that one request instead.
       if (Number(response.headers.get("content-length") ?? 0) > MAX_PREVIEW_RESOURCE_BYTES) {
@@ -55,12 +56,34 @@ async function renderArtifactPreview(browser, { artifact, folder, rendererDirect
       }
       return route.fulfill({ status: response.status, headers: Object.fromEntries(response.headers), body: Buffer.from(await response.arrayBuffer()) });
     });
+    // The agent previews the same starting state the viewer applies.
+    if (artifact.seed?.cookies?.length && plan.kind === "app") {
+      await context.addCookies(artifact.seed.cookies.map((cookie) => ({ url: new URL(url).origin, name: cookie.name, value: cookie.value, path: cookie.path ?? "/" })));
+    }
+    if (artifact.seed?.localStorage) {
+      await context.addInitScript((entries) => {
+        if (sessionStorage.getItem("__relayerSeeded")) return;
+        sessionStorage.setItem("__relayerSeeded", "1");
+        for (const [key, value] of entries) localStorage.setItem(key, value);
+      }, Object.entries(artifact.seed.localStorage));
+    }
     const page = await context.newPage();
     await page.goto(url);
     await page.waitForTimeout(artifactPreviewSettleMs(plan.kind));
-    const png = await page.screenshot({ type: "png" });
+    // Like the desktop capture, halve a photo-heavy screenshot until it fits the cap; the
+    // browser itself redraws it smaller, so no image library is needed.
+    let png = await page.screenshot({ type: "png" });
+    let size = { ...viewport };
+    while (png.byteLength > DRAFT_PREVIEW_MAX_BYTES && size.width > 200) {
+      size = { width: Math.round(size.width / 2), height: Math.round(size.height / 2) };
+      const shrink = await context.newPage();
+      await shrink.setViewportSize(size);
+      await shrink.setContent(`<style>html,body{margin:0}img{display:block;width:${size.width}px;height:${size.height}px}</style><img src="data:image/png;base64,${Buffer.from(png).toString("base64")}">`);
+      png = await shrink.screenshot({ type: "png" });
+      await shrink.close();
+    }
     if (png.byteLength > DRAFT_PREVIEW_MAX_BYTES) throw new Error("Preview too large");
-    return { png: new Uint8Array(png), ...viewport };
+    return { png: new Uint8Array(png), ...size };
   } finally {
     await context.close();
   }
