@@ -4,7 +4,7 @@ Product meaning is PRD §6.6.3, §6.6.9 and §11.11, and ADR 0014. P3 adds Offic
 
 ## Renderer decision (2026-10-08)
 
-The prototype's PowerPoint renderer, pptx-preview, publishes no source and drew no bars in the fixture deck's chart. P3 uses MIT-licensed `@jvmr/pptx-to-html` instead; it draws the same fixture deck, chart included. Word uses `docx-preview` (Apache-2.0). Excel uses SheetJS 0.20.3 (Apache-2.0), installed from SheetJS's own site because the npm copy (0.18.5) carries two known vulnerabilities. `scripts/prepare-renderer-vendor.mjs` bundles all three into `desktop/renderer/vendor/artifact-office.js`, which only artifact views load.
+The prototype's PowerPoint renderer, pptx-preview, publishes no source and drew no bars in the fixture deck's chart. P3 uses MIT-licensed `@jvmr/pptx-to-html` instead; it draws the same fixture deck, chart included. Word uses `docx-preview` (Apache-2.0). Excel uses SheetJS 0.20.3 (Apache-2.0), taken from SheetJS's own site because the npm copy (0.18.5) carries two known vulnerabilities; its tarball is committed in `vendor/sheetjs/`. `scripts/prepare-renderer-vendor.mjs` bundles all three into `desktop/renderer/vendor/artifact-office.js`, which only artifact views load, and writes `artifact-office.LICENSES.txt` beside it with every bundled package's licence.
 
 ## Checkpoints and production seams
 
@@ -18,10 +18,16 @@ Agent previews of the three Office layers render through the same page (ART-005 
 
 - Deck charts may still draw imperfectly: the fixture chart's axis labels are cut off. Guidance says to export a PDF next to any deck with charts.
 - Spreadsheets show the values the file saved. A formula saved without its value renders blank, so guidance says to save calculated values.
+- A sheet shows its first 1000 rows and 100 columns, with a note saying so.
+- The Chromium render test runs where a Playwright browser is installed; CI's Vitest job has none, so there it checks the served bundle and page, and the desktop run covers rendering.
 
 ## Heavy entry point
 
 `npm run test:desktop:artifact-viewer` runs the real `desktop/main/index.mjs` with the `fixture.artifact-viewer` harness in place of Codex, and checks P1, P2 and P3 together. `RELAYER_ARTIFACT_VIDEO=<file>.mp4` records the run with captions.
+
+## Source identity
+
+The recorded run and `results.json` come from commit `deb3eb8a` with a clean working tree: 44 checks passed, 0 failed.
 
 ## Files
 
