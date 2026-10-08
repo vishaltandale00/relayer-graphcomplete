@@ -159,7 +159,7 @@ const OFFICE_STYLES = `#office[data-kind="docx"] .docx-wrapper{background:#2a2b2
 .office-sheet-tab[aria-selected="true"]{background:#fff;border-color:#d6d3cb;font-weight:600}
 .office-sheet{padding:16px;overflow:auto}.office-sheet-limit{margin:0 0 12px;color:#6b6a65}.office-sheet table{border-collapse:collapse;font-variant-numeric:tabular-nums}
 .office-sheet td{border:1px solid #dcd9d1;padding:4px 10px;white-space:nowrap}.office-sheet td[data-t="n"]{text-align:right}
-#office[data-kind="pptx"]{display:flex;flex-direction:column;align-items:center;padding:24px 0}
+#office[data-kind="pptx"]{display:flex;flex-direction:column;align-items:center;padding:24px 0 50vh}
 .office-slide{zoom:var(--slide-zoom,1);position:relative;width:960px;height:540px;margin-bottom:24px;overflow:hidden;background:#fff;box-shadow:0 8px 30px rgba(0,0,0,.45)}
 .office-error{padding:48px;text-align:center}`;
 

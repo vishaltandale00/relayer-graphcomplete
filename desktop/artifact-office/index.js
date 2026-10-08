@@ -11,10 +11,11 @@ const SHEET_LIMIT = { rows: 1000, columns: 100 };
 /** An Office file is a zip; one this large, or expanding past this, is not parsed in the view. */
 const ARCHIVE_LIMIT = { bytes: 50 * 1024 * 1024, expanded: 250 * 1024 * 1024 };
 /**
- * The spreadsheet parser builds every cell of a sheet before the view clips it, so each
- * worksheet part is capped too: 32 MB of XML is about a million cells.
+ * Converters parse every XML part whole (a worksheet's cells, shared strings, a document's
+ * body) before the view clips anything, so each XML part is capped: 32 MB is about a
+ * million spreadsheet cells, far beyond any document a person reads.
  */
-const WORKSHEET_LIMIT = 32 * 1024 * 1024;
+const XML_PART_LIMIT = 32 * 1024 * 1024;
 /** Word list bullets in the Symbol and Wingdings fonts, which browsers lack, as Unicode. */
 const SYMBOL_BULLETS = Object.freeze({ "\uF0B7": "\u2022", "\uF0A7": "\u25AA", "\uF0D8": "\u27A2", "\uF076": "\u2756", "\uF0FC": "\u2713", "\uF06E": "\u25A0", "\uF06C": "\u25CF" });
 
@@ -91,6 +92,8 @@ async function renderPowerPoint(bytes, root, slide) {
     slides[Math.min(slide, slides.length) - 1]?.scrollIntoView();
   }
   return () => {
+    // The last slide whose top is above the middle of the view. The deck has room below its
+    // last slide (see OFFICE_STYLES) so that one, too, can scroll up to the middle.
     const middle = innerHeight / 2;
     const current = slides.filter((frame) => frame.getBoundingClientRect().top <= middle).at(-1) ?? slides[0];
     return { slide: current ? Number(current.dataset.slide) : null };
@@ -138,17 +141,21 @@ async function readBounded(response) {
  * parser may trust either; and each entry is inflated once, counting bytes, so a stream that
  * expands past its declared size is caught without ever holding more than one chunk.
  */
-async function checkArchive(bytes, kind) {
+async function checkArchive(bytes) {
   const tooLarge = () => { throw new Error("The file is too large to show here. Open it in its own app."); };
   const damaged = () => { throw new Error("This Office file is damaged."); };
   if (bytes.byteLength > ARCHIVE_LIMIT.bytes) tooLarge();
   const view = new DataView(bytes);
   // The end-of-central-directory record sits within the last 64 KiB (its comment's limit).
-  let end = -1;
-  for (let at = bytes.byteLength - 22; at >= Math.max(0, bytes.byteLength - 22 - 0xffff); at -= 1) {
-    if (view.getUint32(at, true) === 0x06054b50) { end = at; break; }
+  // Parsers search for it from different ends, so there must be exactly one, and its comment
+  // must run exactly to the end of the file: every parser then reads the same directory.
+  const ends = [];
+  for (let at = bytes.byteLength - 4; at >= Math.max(0, bytes.byteLength - 22 - 0xffff); at -= 1) {
+    if (view.getUint32(at, true) === 0x06054b50) ends.push(at);
   }
-  if (end < 0) throw new Error("This is not an Office file.");
+  if (ends.length === 0) throw new Error("This is not an Office file.");
+  const end = ends[0];
+  if (ends.length > 1 || end + 22 > bytes.byteLength || end + 22 + view.getUint16(end + 20, true) !== bytes.byteLength) damaged();
   // One disk, and a directory that runs exactly up to the end record: an archive whose
   // record undercounts its entries cannot hide one from this check.
   const count = view.getUint16(end + 10, true);
@@ -162,8 +169,10 @@ async function checkArchive(bytes, kind) {
     const method = view.getUint16(at + 10, true);
     const compressed = view.getUint32(at + 20, true);
     const size = view.getUint32(at + 24, true);
-    const name = new TextDecoder().decode(new Uint8Array(bytes, at + 46, Math.min(view.getUint16(at + 28, true), bytes.byteLength - at - 46)));
-    if (kind === "xlsx" && /^xl\/worksheets\/[^/]+\.xml$/iu.test(name) && size > WORKSHEET_LIMIT) tooLarge();
+    const nameLength = view.getUint16(at + 28, true);
+    if (at + 46 + nameLength > bytes.byteLength) damaged();
+    const name = new Uint8Array(bytes, at + 46, nameLength);
+    if (/\.(xml|rels)$/iu.test(new TextDecoder().decode(name)) && size > XML_PART_LIMIT) tooLarge();
     // 0xFFFFFFFF marks a ZIP64 size, which is over the limit anyway.
     expanded += size === 0xffffffff ? Infinity : size;
     if (expanded > ARCHIVE_LIMIT.expanded) tooLarge();
@@ -173,6 +182,9 @@ async function checkArchive(bytes, kind) {
     const described = (view.getUint16(local + 6, true) & 0x8) !== 0;
     const localCompressed = view.getUint32(local + 18, true);
     const localSize = view.getUint32(local + 22, true);
+    // A parser may name the part from its local header, so the two names must be the same bytes.
+    const localName = new Uint8Array(bytes, local + 30, Math.min(view.getUint16(local + 26, true), Math.max(0, bytes.byteLength - local - 30)));
+    if (localName.length !== name.length || localName.some((byte, index) => byte !== name[index])) damaged();
     // A parser may follow the local compression method, so it must be the central one.
     if (view.getUint16(local + 8, true) !== method) damaged();
     if (!(described && localCompressed === 0 && localSize === 0) && (localCompressed !== compressed || localSize !== size)) damaged();
@@ -222,7 +234,7 @@ async function render(kind, source, { slide } = {}) {
     const response = await fetch(source);
     if (!response.ok) throw new Error("The file is not in the thread folder.");
     const bytes = await readBounded(response);
-    await checkArchive(bytes, kind);
+    await checkArchive(bytes);
     const locate = kind === "docx" ? await renderWord(bytes, root)
       : kind === "xlsx" ? renderExcel(bytes, root)
         : kind === "pptx" ? await renderPowerPoint(bytes, root, slide)
