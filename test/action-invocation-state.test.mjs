@@ -37,6 +37,19 @@ describe("durable action invocation renderer state", () => {
     expect(mergeActionInvocation([first],other)).toEqual([first,other]);
     expect(mergeActionInvocation([first,other],{...first,resultCompletionStatus:"accepted"})).toHaveLength(2);
   });
+  it("keeps native graph-only keys separate without granting Product recovery", () => {
+    const native = { graphOnly: true, sourceInteractionId: 1, actionId: 2, resultInteractionId: null,
+      durable: true, invocationKey: "native-a", preparationRecoverable: false, resultCompletionStatus: "not_started" };
+    const other = { ...native, invocationKey: "native-b" };
+    expect(mergeActionInvocation([native], other)).toEqual([native, other]);
+    expect(mergeActionInvocation([native, other], { ...native, resultCompletionStatus: "stopped" })).toHaveLength(2);
+    expect(actionWasInvoked([native], [], 1, 2, false)).toBe(true);
+    expect(actionCanRetry([{ ...native, preparationRecoverable: true }], 2)).toBe(false);
+    expect(recoverActionInvocation([native], 1, 2, "native-a")).toBeUndefined();
+    const reserved = { ...native, graphOnly: false, durable: false, resultInteractionId: 10, preparationRecoverable: true };
+    expect(actionWasInvoked([reserved], [], 1, 2, false)).toBe(false);
+    expect(recoverableActionInvocation([reserved], 1, 2)).toBe(reserved);
+  });
   it("identifies durable single calls independently of their reuse policy", () => {
     const first = { sourceInteractionId: 1, actionId: 2, resultInteractionId: 10, durable: true, reusable: false, invocationKey: "first", preparationRecoverable: true, resultCompletionStatus: "submitted" };
     const other = { ...first, resultInteractionId: 11, invocationKey: "other" };

@@ -443,11 +443,12 @@ async fn build_conversation_export_once(
     }
     visual_asset_contents.sort_by(|left, right| left.digest_sha256.cmp(&right.digest_sha256));
     let header = ConversationExportRecord::Header(Box::new(ConversationExportHeader {
-        export_version: if closures
-            .iter()
-            .flatten()
-            .flat_map(|closure| closure.layers.iter().flat_map(|layer| &layer.actions))
-            .any(|action| !action.input_action_ids.is_empty() || action.reusable.is_some())
+        export_version: if !imported_invocations.is_empty()
+            || closures
+                .iter()
+                .flatten()
+                .flat_map(|closure| closure.layers.iter().flat_map(|layer| &layer.actions))
+                .any(|action| !action.input_action_ids.is_empty() || action.reusable.is_some())
         {
             EXPORT_VERSION_V4
         } else if current_snapshot {
@@ -4866,6 +4867,29 @@ mod tests {
             super::ConversationExportBuildError::ReusableInvocationPortabilityUnavailable
         ));
         server.abort();
+    }
+
+    #[test]
+    fn project_redaction_keeps_raw_frozen_and_product_trimmed_instruction_join() {
+        let redactor = ProjectPathRedactor::new(Some("/private/tmp/project"));
+        let instruction = "\u{85}\u{2003} Continue /private/tmp/project/private.txt \u{85}";
+        let frozen = redactor.text(instruction);
+        let product_text = redactor.text(instruction.trim());
+        assert_eq!(
+            frozen,
+            "\u{85}\u{2003} Continue [project-path]/private.txt \u{85}"
+        );
+        assert_eq!(frozen.trim(), product_text);
+        assert!(!frozen.contains("/private/tmp/project"));
+        // Redaction does not make contradictory instructions interchangeable.
+        assert_ne!(
+            redactor.text("Delete /private/tmp/project/private.txt"),
+            product_text
+        );
+        assert_eq!(
+            redactor.text("\u{feff}Continue\u{feff}").trim(),
+            "\u{feff}Continue\u{feff}"
+        );
     }
 
     #[test]

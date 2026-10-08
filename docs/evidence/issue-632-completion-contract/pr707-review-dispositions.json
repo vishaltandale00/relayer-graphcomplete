@@ -141,10 +141,54 @@
       "threadId": "PRRT_kwDOTyTfxM6qNYvt",
       "disposition": "Standard/authored bound controls display the valid saved answer from another presenting Layer without manufacturing an empty current occurrence. Explicit current edits save the clicked occurrence. Undo, exact original saved provenance, unrelated answers and independently newer source/display edits survive.",
       "checkpoint": "Nine mounted cross-Layer plain/authored Input scenarios; numeric epoch/occurrence comparator parity with API; current-value acceptance and source/display epoch cleanup"
+    },
+    {
+      "index": 23,
+      "threadId": "PRRT_kwDOTyTfxM6qOaOW",
+      "disposition": "Nonempty imported call inventory retains V4 even when its own-draft source has no accepted closure.",
+      "checkpoint": "Real v4_import_reexport_preserves_call_only_own_draft_history export/import/materialize/reopen/re-export"
+    },
+    {
+      "index": 24,
+      "threadId": "PRRT_kwDOTyTfxM6qOaOa",
+      "disposition": "Local reads merge source-local graph-only calls and opaque whole-Node single-call occupancy, without Product launches or foreign payload; inventory unknown disables mutation.",
+      "checkpoint": "Real local_call_occupancy_is_private_and_isolated_across_unrelated_roots GET/state/nativewire; graph-only-history, numeric-key collision and availability renderer fixtures"
+    },
+    {
+      "index": 25,
+      "threadId": "PRRT_kwDOTyTfxM6qOaOf",
+      "disposition": "Bindings retain canonical identity checks; prepared arguments use 256 submitted-input bound, independent of per-Layer 64 actions.",
+      "checkpoint": "Native/browser 65/256/257 argument and multiple-Layer binding fixtures"
+    },
+    {
+      "index": 26,
+      "threadId": "PRRT_kwDOTyTfxM6qOaOo",
+      "disposition": "Portable native head revision is bounded to JavaScript safe integers.",
+      "checkpoint": "Native/browser MAX_SAFE_INTEGER boundary and overflow corruption matrix"
+    },
+    {
+      "index": 27,
+      "threadId": "PRRT_kwDOTyTfxM6qOaOs",
+      "disposition": "Frozen card presentation requires nonempty description; non-card forbids description consistently.",
+      "checkpoint": "Native/browser frozen card/description matrix"
+    },
+    {
+      "index": 28,
+      "threadId": "PRRT_kwDOTyTfxM6qOaOv",
+      "disposition": "Exact keyed recovery validates original frozen child, arguments and authority after mutable own-draft callable repair; no new execution retry authority.",
+      "checkpoint": "Native durable_invocations repaired definition/reopen/conflicting-scope cases, existing graph_database immutable source identity; real agent-owned-key human-adoption refusal"
+    },
+    {
+      "index": 29,
+      "threadId": "PRRT_kwDOTyTfxM6qOaO2",
+      "disposition": "Associated Product result text must equal raw frozen instruction or its existing Rust-trimmed form after identical project redaction. Runtime prepared-child adapter sends trusted canonical raw instruction while preserving Product chronology.",
+      "checkpoint": "Native/browser mismatched instruction and Rust Unicode whitespace concordance; project redactor fixture; actual prepared-child export/import/reopen World"
     }
   ],
   "testDeletion": [],
   "authority": "Metadata resolution after committed exact-source evidence; no merge approval, paid inference, hosted publication or release authority.",
   "followupBaselineHead": "8f9bb094853a609d2edc647f2020bc5c07ef2c34",
-  "followupQualification": "qualification-pr707-followup-review-2026-10-08.json"
+  "followupQualification": "qualification-pr707-followup-review-2026-10-08.json",
+  "nativePortableBaselineHead": "4432809514480873633260099b7ae5466f200bae",
+  "nativePortableQualification": "qualification-pr707-native-portable-repairs-2026-10-08.json"
 }

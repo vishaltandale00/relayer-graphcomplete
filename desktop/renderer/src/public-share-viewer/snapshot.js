@@ -8,6 +8,7 @@ const MAX_LAYERS_PER_TURN = 10_000;
 const MAX_NODES_PER_LAYER = 8;
 const MAX_EDGES_PER_LAYER = 28;
 const MAX_ACTIONS_PER_LAYER = 64;
+const MAX_SUBMITTED_INPUTS_PER_TURN = 256;
 const MAX_STRING_BYTES = 4 * 1024 * 1024;
 const MAX_ASSET_BYTES = 8 * 1024 * 1024;
 const MAX_ASSET_BASE64_LENGTH = 4 * Math.ceil(MAX_ASSET_BYTES / 3);
@@ -62,8 +63,14 @@ function utf8Length(value) {
   return new TextEncoder().encode(value).length;
 }
 
+// Match Rust str::trim / Product required(text). This changes only validation
+// and comparison predicates: retained portable string bytes remain untouched.
+function trimPortableWhitespace(value) {
+  return value.replace(/^\p{White_Space}+|\p{White_Space}+$/gu, "");
+}
+
 function requireString(value, path, { allowEmpty = false } = {}) {
-  if (typeof value !== "string" || (!allowEmpty && value.trim() === "")) {
+  if (typeof value !== "string" || (!allowEmpty && trimPortableWhitespace(value) === "")) {
     fail("string_invalid", path, "Expected a non-empty string.");
   }
   if (utf8Length(value) > MAX_STRING_BYTES) {
@@ -422,13 +429,13 @@ function validateAction(action, path, { sourceLayerRequired = false, exportVersi
     requireString(own(value, "interactionText", `${path}.interactionText`), `${path}.interactionText`);
     if (value.relation != null || value.targetLayerId != null || value.input != null) fail("action_shape_invalid", path, "Invoke actions cannot carry navigation or input fields.");
     const bindings = requireArray(value.inputActionIds ?? [], `${path}.inputActionIds`);
-    if (bindings.length > MAX_ACTIONS_PER_LAYER || new Set(bindings).size !== bindings.length) fail("invoke_binding_invalid", path, "Input bindings must be bounded and distinct.");
+    if (new Set(bindings).size !== bindings.length) fail("invoke_binding_invalid", path, "Input bindings must be distinct.");
     bindings.forEach(id => requirePortableId(id, "action", `${path}.inputActionIds`));
   } else {
     requireRecord(own(value, "input", `${path}.input`), `${path}.input`);
     if (value.relation != null || value.targetLayerId != null || value.interactionText != null) fail("action_shape_invalid", path, "Input actions cannot carry navigation or invoke fields.");
   }
-  if (variant === "card" && (!value.description || value.description.trim() === "")) {
+  if (variant === "card" && (!value.description || trimPortableWhitespace(value.description) === "")) {
     fail("card_description_missing", `${path}.description`, "Card actions require a description.");
   }
   if (variant !== "card" && value.description != null) {
@@ -763,7 +770,7 @@ function validateInvocations(header, turns) {
     else if (call.safeReason != null) fail("invocation_reason_invalid", path, "Active and succeeded calls cannot retain a terminal reason.");
     const bindings = requireArray(source.inputActionIds, `${path}.source.inputActionIds`);
     if (typeof source.inputBindingsDefined !== "boolean" || (!source.inputBindingsDefined && bindings.length)) fail("invocation_binding_invalid", path, "Historical undeclared bindings must remain explicitly absent.");
-    if (new Set(bindings).size !== bindings.length || bindings.length > MAX_ACTIONS_PER_LAYER) fail("invocation_binding_duplicate", path, "Invalid input binding inventory.");
+    if (new Set(bindings).size !== bindings.length) fail("invocation_binding_duplicate", path, "Invalid input binding inventory.");
     bindings.forEach(id => requirePortableId(id, "action", path));
     for (const field of ["currentLayerId", "returnedLayerId"]) if (call[field] != null) requirePortableId(call[field], "layer", `${path}.${field}`);
     if ((call.lifecycle === "succeeded") !== (call.returnedLayerId != null)
@@ -775,7 +782,7 @@ function validateInvocations(header, turns) {
         rootAction: { id: `action:validation-${index}`, sourceNodeId: call.childInteractionNodeId, kind: "navigate", relation: "expand", label: "Current", variant: "chip", targetLayerId: call.current.rootLayerId, state: "accepted" } }, `${path}.current`, 4);
     }
     const argumentsList = requireArray(call.arguments, `${path}.arguments`);
-    if (argumentsList.length > MAX_ACTIONS_PER_LAYER) fail("invocation_arguments_invalid", path, "Arguments are bounded.");
+    if (argumentsList.length > MAX_SUBMITTED_INPUTS_PER_TURN) fail("invocation_arguments_invalid", path, "Arguments are bounded.");
     const occurrences = new Set();
     for (const argument of argumentsList) {
       exactFields(argument, ["source", "action", "value"], `${path}.arguments`);
@@ -816,9 +823,12 @@ function validateInvocations(header, turns) {
     if (call.resultTurnId != null) {
       requirePortableId(call.resultTurnId, "turn", `${path}.resultTurnId`);
       const turn = turns.find(candidate => candidate.id === call.resultTurnId);
+      // Match Rust Product required(text): Unicode White_Space trims NEL,
+      // preserves BOM, and never rewrites the raw frozen instruction.
       if (results.has(call.resultTurnId) || !turn || turn.origin.kind !== "invocation" || turn.origin.invocationId !== call.id
+        || (turn.text !== source.instruction && turn.text !== trimPortableWhitespace(source.instruction))
         || turn.interactionNodeId !== call.childInteractionNodeId
-        || (call.lifecycle === "succeeded" ? turn.completion.status !== "accepted" || !turn.acceptedView || turn.acceptedView.rootLayerId !== call.returnedLayerId : turn.acceptedView != null)) fail("invocation_result_mismatch", path, "Result must retain its exact child, Invocation origin, and Returned layer.");
+        || (call.lifecycle === "succeeded" ? turn.completion.status !== "accepted" || !turn.acceptedView || turn.acceptedView.rootLayerId !== call.returnedLayerId : turn.acceptedView != null)) fail("invocation_result_mismatch", path, "Result must retain its frozen instruction, exact child, Invocation origin, and Returned layer.");
       results.add(call.resultTurnId);
     }
   }

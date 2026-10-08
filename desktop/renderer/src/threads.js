@@ -571,7 +571,10 @@ export async function refreshState(
   const nextActionInvocations = state.actionInvocations || [];
   const nextApprovals = Array.isArray(state.approvals) ? state.approvals : [];
   const active = nextThreads.find((thread) => thread.active);
-  const nextThreadId = threadId ?? active?.id ?? viewState.currentThreadId;
+  // The backend active chat restores the initial workspace only. A global
+  // refresh cannot supersede a newer client choice to stay in the composer.
+  const nextThreadId = threadId ?? viewState.currentThreadId
+    ?? (readingIntent === 0 ? active?.id : null);
   invalidateResolvedInvokeLayerCache(nextActionInvocations);
   const threadInteractions = nextInteractions.filter((interaction) => (
     String(interaction.threadId) === String(nextThreadId)
@@ -769,6 +772,7 @@ export async function refreshState(
   appState.threads = nextThreads;
   appState.interactions = nextInteractions;
   appState.actionInvocations = nextActionInvocations;
+  appState.invocationInventoryAvailable = state.invocationInventoryAvailable === true;
   appState.importedInvocationHistory = state.importedInvocationHistory ?? [];
   appState.approvals = nextApprovals;
   appState.inputDraftRevision = Number.isSafeInteger(state.inputDraftRevision)
@@ -1410,6 +1414,7 @@ function captureWorkspaceState() {
       threads: appState.threads,
       interactions: appState.interactions,
       actionInvocations: appState.actionInvocations,
+      invocationInventoryAvailable: appState.invocationInventoryAvailable,
       importedInvocationHistory: appState.importedInvocationHistory,
       approvals: appState.approvals,
       nodes: appState.nodes,
@@ -1467,7 +1472,7 @@ function applyResolvedPresentation(resolved, { restoreSelection = false } = {}) 
   const invocationIdentity = (invocation) => [
     invocation.sourceInteractionId,
     invocation.actionId,
-    invocation.resultInteractionId,
+    invocation.graphOnly ? `native:${invocation.invocationKey || "occupancy"}` : `product:${invocation.resultInteractionId}`,
   ].map(String).join(":");
   for (const invocation of [
     ...appState.actionInvocations.filter((invocation) => (
@@ -1478,6 +1483,7 @@ function applyResolvedPresentation(resolved, { restoreSelection = false } = {}) 
     actionInvocationsByIdentity.set(invocationIdentity(invocation), invocation);
   }
   appState.actionInvocations = [...actionInvocationsByIdentity.values()];
+  appState.invocationInventoryAvailable = resolved.invocationInventoryAvailable === true;
   appState.importedInvocationHistory = resolved.importedInvocationHistory ?? appState.importedInvocationHistory;
   appState.approvals = [
     ...appState.approvals.filter((receipt) => (
@@ -1579,6 +1585,7 @@ export async function invokeAction(action, { inputDraftRevision } = {}) {
   if (!threadId || !sourceInteractionId || action?.kind !== "invoke" || !action.id
     || appState.threads.some(thread => String(thread.id) === String(threadId) && thread.imported === true)
     || appState.interactions.some(interaction => String(interaction.id) === String(sourceInteractionId) && interaction.inertInvocationCurrent)) return null;
+  if (appState.invocationInventoryAvailable !== true) { toast("Invoke availability is unavailable. Your inputs were preserved."); return null; }
   const recoveringCall = recoverableActionInvocation(appState.actionInvocations, sourceInteractionId, action.id);
   const invocationKey = recoveringCall?.invocationKey ?? crypto.randomUUID();
   const invocationInput = !recoveringCall && Number.isSafeInteger(inputDraftRevision)

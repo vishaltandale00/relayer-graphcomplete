@@ -6377,7 +6377,7 @@ export function createProductWorkspace({
           disabled: !destination && (actionActivationPresentation(action, {
             invoked,
             retryable: actionCanRetry(state.actionInvocations, action.id),
-            canInvokeMutatingActions: capabilities.canInvokeMutatingActions,
+            canInvokeMutatingActions: capabilities.canInvokeMutatingActions && state.invocationInventoryAvailable === true,
             imported: getThread()?.imported,
           }).disabled || Boolean(boundInvokeIssue(state, action))),
         };
@@ -6460,7 +6460,7 @@ export function createProductWorkspace({
             action.reusable,
           ),
           retryable: actionCanRetry(state.actionInvocations, action.id),
-          canInvokeMutatingActions: capabilities.canInvokeMutatingActions,
+          canInvokeMutatingActions: capabilities.canInvokeMutatingActions && state.invocationInventoryAvailable === true,
           imported: getThread()?.imported,
         });
         if (activation.navigational) {
@@ -6646,7 +6646,7 @@ export function createProductWorkspace({
         const activation = actionActivationPresentation(action, {
           invoked,
           retryable,
-          canInvokeMutatingActions: capabilities.canInvokeMutatingActions,
+          canInvokeMutatingActions: capabilities.canInvokeMutatingActions && state.invocationInventoryAvailable === true,
           imported: getThread()?.imported,
         });
         button.querySelector(".action-label").textContent = activation.label;
@@ -6697,7 +6697,7 @@ export function createProductWorkspace({
       groupNodeInvokeInputs(state, node);
     }
     const callableIds = new Set(ordinaryActions.filter((action) => action.kind === "invoke").map((action) => String(action.id)));
-    const calls = (state.actionInvocations || []).filter((call) => isDurableActionInvocation(call) && String(call.sourceInteractionId) === String(interaction?.id) && callableIds.has(String(call.actionId)));
+    const calls = (state.actionInvocations || []).filter((call) => isDurableActionInvocation(call) && call.occupancyOnly !== true && String(call.sourceInteractionId) === String(interaction?.id) && callableIds.has(String(call.actionId)));
     const shadow = $("#detailContent").querySelector("[data-node-detail-runtime]")?.shadowRoot;
     if (shadow) {
       for (const mount of node.authoredDetail?.mounts ?? []) {
@@ -6710,7 +6710,7 @@ export function createProductWorkspace({
         control.dataset.invokeBaseDisabled = String(actionActivationPresentation(action, {
           invoked: actionWasInvoked(state.actionInvocations, state.pendingActionInvocations,
             state.currentInteractionId, action.id, action.reusable),
-          canInvokeMutatingActions: capabilities.canInvokeMutatingActions,
+          canInvokeMutatingActions: capabilities.canInvokeMutatingActions && state.invocationInventoryAvailable === true,
           imported: getThread()?.imported,
         }).disabled);
         const inputMounts = (node.authoredDetail.mounts ?? []).filter((candidate) => candidate.kind === "capability"
@@ -6809,12 +6809,13 @@ export function createProductWorkspace({
         const button = graphDocument.createElement("button");
         button.type = "button";
         button.className = "action-control action-pill invocation-result-control";
-        button.dataset.invocationResultInteractionId = String(call.resultInteractionId);
+        if (call.resultInteractionId != null) button.dataset.invocationResultInteractionId = String(call.resultInteractionId);
+        if (call.graphOnly) button.dataset.graphOwnedInvocationId = String(call.nativeInvocation?.invocation?.id);
         const action = ordinaryActions.find((item) => String(item.id) === String(call.actionId));
-        const confirmedInputs = (resultInteraction?.submittedInputs || []).map((input) => submittedInputHistoryPresentation(input).compactValue).filter(Boolean);
+        const confirmedInputs = (call.graphOnly ? call.nativeInvocation?.submittedInputs ?? [] : resultInteraction?.submittedInputs || []).map((input) => submittedInputHistoryPresentation(input).compactValue).filter(Boolean);
         const callLabel = confirmedInputs.length ? confirmedInputs.join(" · ") : `Call ${index + 1}`;
-        button.textContent = `${actionPresentation(action).label} · ${callLabel} · ${call.currentOnly ? "Current · " : ""}${call.resultCompletionStatus}`;
-        button.disabled = call.currentOnly ? !onNavigateInvocationCurrent : call.resultCompletionStatus !== "accepted" || !navigation;
+        button.textContent = `${call.graphOnly ? call.nativeInvocation?.invocation?.actionSnapshot?.label ?? actionPresentation(action).label : actionPresentation(action).label} · ${callLabel} · ${call.currentOnly ? "Current · " : ""}${call.graphOnly ? ({ not_started: "Prepared", running: "Running", accepted: "Completed", stopped: "Stopped", failed: "Failed" }[call.resultCompletionStatus] ?? "Unavailable") : call.resultCompletionStatus}`;
+        button.disabled = call.graphOnly && call.resultInteractionId == null ? true : call.currentOnly ? !onNavigateInvocationCurrent : call.resultCompletionStatus !== "accepted" || !navigation;
         button.onclick = async () => {
           if (!await prepareNodeContextSelectionChange()) return;
           if (call.currentOnly) return onNavigateInvocationCurrent?.(call);

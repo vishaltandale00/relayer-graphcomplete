@@ -6,7 +6,7 @@ import { chromium } from "playwright";
 import { startIsolatedPageServer } from "../main/services/isolated-page-capture.mjs";
 import {
   ARTIFACT_SCHEME,
-  artifactPreviewSettleMs,
+  artifactPreviewSettled,
   artifactPreviewSize,
   artifactViewPlan,
   createArtifactRequestHandler,
@@ -35,7 +35,7 @@ const ARTIFACT_ORIGIN = "https://artifact.relayer.invalid";
 async function renderArtifactPreview(browser, { artifact, folder, rendererDirectory }) {
   if (artifact.kind !== "url" && typeof folder !== "string") throw new Error("The artifact's thread folder is unknown.");
   const plan = artifactViewPlan(artifact, folder);
-  const handler = createArtifactRequestHandler({ getPlan: () => plan, markedPath: join(rendererDirectory, "vendor", "marked.umd.js") });
+  const handler = createArtifactRequestHandler({ getPlan: () => plan, vendorDirectory: join(rendererDirectory, "vendor") });
   const scheme = `${ARTIFACT_SCHEME}://view`;
   const url = plan.kind === "url" ? plan.url : plan.url.replace(scheme, ARTIFACT_ORIGIN);
   const allowed = new URL(url).origin;
@@ -71,7 +71,7 @@ async function renderArtifactPreview(browser, { artifact, folder, rendererDirect
     }
     const page = await context.newPage();
     await page.goto(url);
-    await page.waitForTimeout(artifactPreviewSettleMs(plan.kind));
+    await artifactPreviewSettled(plan.kind, (script) => page.evaluate(script));
     // Like the desktop capture, halve a photo-heavy screenshot until it fits the cap; the
     // browser itself redraws it smaller, so no image library is needed.
     let png = await page.screenshot({ type: "png" });

@@ -2935,6 +2935,8 @@ describe("desktop skeleton", () => {
         writeFile(bundledGraphBinary, "binary-fixture"),
         writeFile(bundledGraphClient, "export class RelayerGraphClient { search() {} }\n"),
         writeFile(bundledMarked, "marked-fixture"),
+        writeFile(join(appPath, "Contents", "Resources", "renderer", "vendor", "artifact-office.js"), "office-fixture"),
+        writeFile(join(appPath, "Contents", "Resources", "renderer", "vendor", "artifact-office.LICENSES.txt"), "licences-fixture"),
         writeFile(join(bundledCodexBrowserRoot, "package.json"), `${JSON.stringify({ name: "chrome-devtools-mcp", version: "1.8.0" })}\n`),
         writeFile(bundledCodexBrowserScript, "helper-fixture"),
       ]);
@@ -3151,6 +3153,8 @@ describe("desktop skeleton", () => {
         writeFile(join(windowsPath, "resources", "bin", "relayer-graph-server.exe"), "binary-fixture"),
         writeFile(join(windowsPath, "resources", "graph-client", "index.js"), "export class RelayerGraphClient { search() {} }\n"),
         writeFile(join(windowsPath, "resources", "renderer", "vendor", "marked.umd.js"), "marked-fixture"),
+        writeFile(join(windowsPath, "resources", "renderer", "vendor", "artifact-office.js"), "office-fixture"),
+        writeFile(join(windowsPath, "resources", "renderer", "vendor", "artifact-office.LICENSES.txt"), "licences-fixture"),
         writeFile(join(windowsCodexBrowserRoot, "package.json"), `${JSON.stringify({ name: "chrome-devtools-mcp", version: "1.8.0" })}\n`),
         writeFile(join(windowsCodexBrowserRoot, "build", "src", "bin", "chrome-devtools-mcp.js"), "helper-fixture"),
       ]);

@@ -8,6 +8,7 @@ export const appState = {
   threads: [],
   interactions: [],
   actionInvocations: [],
+  invocationInventoryAvailable: false,
   importedInvocationHistory: [],
   pendingActionInvocations: [],
   approvals: [],

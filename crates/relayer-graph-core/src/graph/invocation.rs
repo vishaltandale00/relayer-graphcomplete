@@ -108,6 +108,114 @@ impl GraphWriter {
             .await?
             .ok_or_else(|| GraphError::NotFound(format!("action {action_id}")))?
             .action;
+        let owned = crate::storage::sqlite::invocations::action_owned(
+            &mut transaction,
+            action_id,
+            self.scope.root_node_id,
+        )
+        .await?;
+        if (!owned && !user_initiated)
+            || (user_initiated && action.state != RecordState::Accepted)
+            || action.kind != ActionKind::Invoke
+            || !matches!(action.state, RecordState::Draft | RecordState::Accepted)
+        {
+            return Err(GraphError::Forbidden(
+                "This completion may invoke only its own native callable actions.".into(),
+            ));
+        }
+        if let Some(existing) = crate::storage::sqlite::invocations::for_key(
+            &mut transaction,
+            self.scope.root_node_id,
+            invocation_key,
+        )
+        .await?
+        {
+            let frozen = &existing.action_snapshot;
+            let original_layer = frozen
+                .get("presentingLayerId")
+                .or_else(|| frozen.get("sourceLayerId"))
+                .and_then(serde_json::Value::as_i64)
+                .and_then(LayerId::new);
+            if existing.source_action_id != action_id
+                || existing.parent_node_id != action.source_node_id
+                || frozen.get("actionId").and_then(serde_json::Value::as_i64)
+                    != Some(action_id.value())
+                || frozen
+                    .get("sourceNodeId")
+                    .and_then(serde_json::Value::as_i64)
+                    != Some(existing.parent_node_id.value())
+                || presenting_layer.is_some_and(|layer| Some(layer) != original_layer)
+            {
+                return Err(GraphError::validation(
+                    "invocation_key_conflict",
+                    "invocationKey",
+                    "Recover the original action and presenting occurrence of this invocation.",
+                ));
+            }
+            if user_initiated {
+                let closure = crate::graph::completion::read_accepted_closure_on(
+                    &mut transaction,
+                    &self.scope,
+                    self.scope.root_node_id,
+                )
+                .await?
+                .ok_or_else(|| {
+                    GraphError::Forbidden(
+                        "User Invoke requires an accepted source response.".into(),
+                    )
+                })?;
+                if !closure.layers.iter().any(|layer| {
+                    Some(layer.layer.id) == original_layer
+                        && layer.layer.state == RecordState::Accepted
+                        && layer
+                            .nodes
+                            .iter()
+                            .any(|node| node.id == existing.parent_node_id)
+                }) {
+                    return Err(GraphError::validation(
+                        "invalid_invocation_presentation",
+                        "presentingLayerId",
+                        "Recover the original accepted presenting occurrence of this invocation.",
+                    ));
+                }
+            }
+            let instruction = frozen
+                .get("instruction")
+                .and_then(serde_json::Value::as_str)
+                .ok_or_else(|| {
+                    GraphError::Internal("Frozen Invoke instruction is missing".into())
+                })?;
+            let stored_inputs =
+                crate::storage::sqlite::input_children::InputChildTable::new(&mut transaction)
+                    .children(existing.child_interaction_node_id)
+                    .await?
+                    .into_iter()
+                    .map(|child| SubmittedInputDraft {
+                        occurrence: child.occurrence,
+                        action: child.action,
+                        value: child.value,
+                    })
+                    .collect::<Vec<_>>();
+            let frozen_digest = interaction_input_authority_digest(instruction, &stored_inputs)
+                .map_err(|error| GraphError::Internal(error.to_string()))?;
+            let supplied_digest = interaction_input_authority_digest(instruction, submitted_inputs)
+                .map_err(|error| GraphError::Internal(error.to_string()))?;
+            if frozen_digest != supplied_digest {
+                return Err(GraphError::validation(
+                    "invocation_key_conflict",
+                    "submittedInputs",
+                    "Recover this invocation's original frozen argument payload.",
+                ));
+            }
+            // This is a read of an already-prepared child, not a new call or
+            // execution retry. Mutable own-draft repairs cannot rewrite its
+            // instruction, bindings, policy, activator or presenting provenance.
+            let node = NodeTable::new(&mut transaction)
+                .visible(&self.scope, existing.child_interaction_node_id)
+                .await?;
+            transaction.commit().await?;
+            return Ok((node, existing));
+        }
         let presenting_layer = presenting_layer.or(action.source_layer_id);
         if user_initiated {
             let closure = crate::graph::completion::read_accepted_closure_on(
@@ -153,87 +261,6 @@ impl GraphWriter {
             .ok_or_else(|| GraphError::Forbidden("Invoke action has no instruction.".into()))?;
         let input_digest = interaction_input_authority_digest(instruction, submitted_inputs)
             .map_err(|error| GraphError::Internal(error.to_string()))?;
-        if let Some(existing) = crate::storage::sqlite::invocations::for_key(
-            &mut transaction,
-            self.scope.root_node_id,
-            invocation_key,
-        )
-        .await?
-        {
-            let stored =
-                crate::storage::sqlite::invocations::snapshot(&mut transaction, existing.id)
-                    .await?;
-            let stored_inputs =
-                crate::storage::sqlite::input_children::InputChildTable::new(&mut transaction)
-                    .children(existing.child_interaction_node_id)
-                    .await?
-                    .into_iter()
-                    .map(|child| SubmittedInputDraft {
-                        occurrence: child.occurrence,
-                        action: child.action,
-                        value: child.value,
-                    })
-                    .collect::<Vec<_>>();
-            let stored_input_digest =
-                interaction_input_authority_digest(instruction, &stored_inputs)
-                    .map_err(|error| GraphError::Internal(error.to_string()))?;
-            // Old immutable snapshots retain their exact historical omissions.
-            let mut stored_value: serde_json::Value = serde_json::from_str(&stored)
-                .map_err(|error| GraphError::Internal(error.to_string()))?;
-            let mut recovery_snapshot = snapshot_value.clone();
-            // Publication changes Draft to Accepted without changing the frozen callable.
-            stored_value.as_object_mut().unwrap().remove("state");
-            recovery_snapshot.as_object_mut().unwrap().remove("state");
-            // Recovery reads the original call; it cannot reassign its captured activator.
-            stored_value.as_object_mut().unwrap().remove("activator");
-            recovery_snapshot
-                .as_object_mut()
-                .unwrap()
-                .remove("activator");
-            if stored_value.get("presentingLayerId").is_none() {
-                if presenting_layer != action.source_layer_id {
-                    return Err(GraphError::validation(
-                        "invocation_key_conflict",
-                        "presentingLayerId",
-                        "Historical call provenance cannot be reassigned to another presenting layer.",
-                    ));
-                }
-                recovery_snapshot
-                    .as_object_mut()
-                    .unwrap()
-                    .remove("presentingLayerId");
-            }
-            if existing.source_action_id != action_id
-                || stored_value != recovery_snapshot
-                || stored_input_digest != input_digest
-            {
-                return Err(GraphError::validation(
-                    "invocation_key_conflict",
-                    "invocationKey",
-                    "Recover the existing invocation rather than reusing its key for another action or argument payload.",
-                ));
-            }
-            let node = NodeTable::new(&mut transaction)
-                .visible(&self.scope, existing.child_interaction_node_id)
-                .await?;
-            transaction.commit().await?;
-            return Ok((node, existing));
-        }
-        let owned = crate::storage::sqlite::invocations::action_owned(
-            &mut transaction,
-            action_id,
-            self.scope.root_node_id,
-        )
-        .await?;
-        if (!owned && !user_initiated)
-            || (user_initiated && action.state != RecordState::Accepted)
-            || action.kind != ActionKind::Invoke
-            || !matches!(action.state, RecordState::Draft | RecordState::Accepted)
-        {
-            return Err(GraphError::Forbidden(
-                "This completion may invoke only its own native callable actions.".into(),
-            ));
-        }
         ActionTable::new(&mut transaction)
             .validate_invoke_inputs(&self.scope, action.source_node_id, &action.input_action_ids)
             .await?;

@@ -228,3 +228,67 @@ The new two-Invoke recording verifies each automatically opened accepted Current
 Initial full check failed a stale textual onboarding call assertion; the exact new signature preserves its ordering assertion. Native Input attempts exposed disclosure-readiness and pointer-delivery observer gaps; final observation preserves the original geometry, persistence and reload checks and uses real trusted down/capture and document release. Initial artifact runs each passed 39/40 on different boundaries: hover, then PDF-page preview. An unchanged real fixture under an observation-only error logger passed all 40 checks, including 11 file previews. Earlier failure causes remain unknown. The logger also found a separate generic graph-layer preview error, `snapshot.actionsForLayer is not a function`; that production seam remains unqualified pending its repair. Successful and failed logs are retained under `v1/invoke-breadcrumb`, with exact per-result scope in `qualification-pr707-invoke-breadcrumb-2026-10-08.json`. No blanket product or merge-readiness claim follows from this bounded proof.
 
 History, final authority and evidence assertions bind their recorded source. The first authority receipt is historical because subsequent evidence prose changed; its final receipt excludes mutable evidence prose and separately records the reviewed section. Seven new GitHub review findings remain separate repairs before merge. No paid inference ran.
+
+## Native inventory and portable review repairs (2026-10-08)
+
+The committed breadcrumb candidate remains evidence for its own source. Seven subsequent PR findings and the generic draft graph preview failure require fresh qualification of the following changed seams. No earlier check or recording qualifies these repairs.
+
+### Live-review portable V4 concordance and generic graph preview
+
+Changed executable seams: local export version selection now includes retained imported Invocation inventory; Rust V4 inventory validates JSON-safe head revisions and frozen card-description shape; Rust and browser associated result text must match either exact raw frozen instruction or its existing Product Unicode White_Space-trimmed form after redaction. The browser uses that same Rust whitespace predicate for portable string emptiness and card descriptions, preserving original string bytes. Browser Input binding IDs retain distinct-ID/exact-reference checks without the incorrect per-Layer 64 cap; prepared arguments retain 256 and actual Layer action membership retains 64. Existing envelope, line, string, turn, Layer, Node and standalone-definition resource bounds remain. Native authoring policy and schema are unchanged. Draft preview now supplies the accepted-only actionsForLayer read-model contract required by real public adapter hydration/navigation; Invoke and Send remain refused.
+
+| Checkpoint | Smallest production-seam proof |
+| --- | --- |
+| Imported own-draft call-only history remains V4 with absent accepted callable, no Current, no arguments and no standalone Inputs; original inert call survives import/materialize/Product reopen/reexport | `api::threads::completion_traces::v4_import_reexport_preserves_call_only_own_draft_history`: real native/Product bound seed additionally freezes raw NEL/EMSPACE instruction while Product result text is trimmed; explicit absent-source archive fixture then reaches actual import/reexport path. Constructed archive provenance is not a claim of actual native own-draft preparation. |
+| 65/256 prepared answers readable; 257 refused; uncalled 257-binding definition remains readable without raising actual Layer membership above 64 | Rust `v4_bindings_are_not_layer_membership_but_prepared_arguments_are_bounded` and browser `V4 Rust/browser portable boundary concordance` count scenarios: canonical standalone Input definitions, exact same-Node questions/arguments and separate overfull-Layer refusal. |
+| Head 9007199254740991 and valid frozen card description preserved; unsafe next head, missing/empty card description or noncard description refused | Rust `v4_frozen_presentation_and_head_revision_match_portable_json_readers`; mirrored browser archive reader scenarios. |
+| Raw and Product-trimmed instruction both join their exact result; contradictory text, BOM stripping and composed/decomposed substitution refused | Existing Rust `v4_call_result_requires_an_accepted_turn_and_exact_returned_root` extended; browser raw/trim join scenario. Actual `ProjectPathRedactor` unit proves private-path replacement retains that same join and cannot make different instructions interchangeable. |
+| Secondary portable string emptiness exactly follows existing Rust Unicode White_Space, preserving BOM-only title/canonical/frozen instruction/card text and refusing NEL-only equivalents | Mirrored native contract/browser cases; string values and byte-length checks remain unchanged. No Unicode composition normalization or content rewrite. |
+| Generic graph preview hydrates, navigates and selects response root through production adapter without missing actionsForLayer; draft actions and mutating callbacks remain unavailable | `test/draft-preview-read-model.test.mjs` actual `createPublicViewerAdapter` journey; final real Electron artifact-viewer capture separately required after final build to verify generic graph preview no longer logs the missing-helper error. |
+
+Warm commands (no inference, no World/process scenarios):
+
+```sh
+./node_modules/.bin/vitest run test/public-share-viewer.test.mjs test/draft-preview-read-model.test.mjs
+cargo test -p relayer-app-server --test conversation_export_contract
+cargo test -p relayer-app-server --lib project_redaction_keeps_raw_frozen_and_product_trimmed_instruction_join
+```
+
+Declared process qualification after playground closure/final source build:
+
+```sh
+cargo test -p relayer-app-server --lib api::threads::completion_traces::v4_import_reexport_preserves_call_only_own_draft_history -- --exact
+```
+
+The existing `test:desktop:artifact-viewer` entry point (`electron scripts/test-desktop-artifact-viewer.mjs` after the final build) owns actual preview/asset capture. Outer exit alone does not qualify generic graph preview: retain inner scenario result and check captured preview errors. Whole `npm run check` and `npm run build` remain parent-owned required gates. Hosted V4 remains fail closed; no publication or paid inference authorized.
+
+Failures preserved: `/private/tmp/pr707-portable-concordance-warm-1.log` had one older internally contradictory own-draft fixture (repaired second call instruction but original result text), repaired only the result text to its own frozen instruction; three additional failures were incorrect new test error-name expectations, fixed to real Layer membership error. No tests removed or assertions relaxed.
+
+The required generic preview heavy entry also includes `npm run evidence:agent-preview` (PREV-004), which checks real Electron images in both themes, frame agreement, isolation and cleanup. The final current-source qualification receipt records actual results separately from this plan.
+
+
+### PR #707 native inventory and prepared instruction boundaries
+
+These repairs preserve CC-001/004/006/008/009 and READ-001: frozen child scope, capture-time instruction and call authority remain GraphComplete-owned; Product chronology, acceptance and launch remain Product-owned. The breadcrumb is a session reading-context edge to the exact invoking occurrence, including that occurrence's Current. It is not an authored Navigate or a new persisted graph relation.
+
+| Changed executable seam / boundary | Real checkpoint |
+| --- | --- |
+| Exact keyed recovery after own-draft callable repair; original instruction and submitted arguments stay frozen | `durable_invocations`: repaired definition recovery/reopen plus conflicting action, presenting occurrence, arguments, action kind and stopped parent cases; immutable source Node identity remains covered by existing `graph_database` source identity scenario |
+| Coherent graph inventory; accepted global single-call occupancy, local projection and graph-server response wire | `local_call_occupancy_is_private_and_isolated_across_unrelated_roots`: native three-root World, opaque foreign occupancy, explicit native refusal code, genuine no-effect Product receipt alongside occupancy marker, API GET/state parity and foreign payload absence |
+| Same source/key on another action cannot become a human reservation; post-refusal absence is scoped to the requested action | `user_cannot_adopt_graph_owned_key_after_callable_repair`: real agent-owned preparation, two accepted callables, pre-reservation refusal for either action, unchanged Product/Graph data and no execution; native key-absence and request-absence assertions protect distinct boundaries |
+| Lost bind and unavailable proof preserve trusted preexecution receipt; definite ownership mismatch stays nonrecoverable | existing bound receipt/recovery World scenarios plus stale-inventory fault in the agent-owned-key World; the fault hides an already prepared call, not an impossible preparation after source acceptance |
+| Local action availability and inert history; unknown inventory preserves Inputs; numeric native key cannot alias a Product result ID | `action-invocation-state`, `invoke-input-bindings`, `workspace-reading-context` and `workspace-navigation-integration` realistic renderer fixtures |
+| Runtime adapter canonicalizes only a trusted prepared child to its frozen native instruction; Product's existing trimmed text stays unchanged | `v4_import_reexport_preserves_call_only_own_draft_history`: real World raw Unicode-whitespace instruction, byte-identical sealed native input, raw/trimmed prepared command recovery, wrong instruction/source refusal, export/import/materialization/reopen/re-export. Own-draft-only absent-source history is an inert archive fixture, not a claim that a native call can prepare after Return. |
+| Invoke auto-open and source breadcrumb / Back / Forward | actual `run-completion-contract-human-gate.mjs --multiple --record`: two separate Invokes, source restore, accepted results, scoped Inputs and ordinary Send; renderer fixtures cover delayed resolution, frozen source occurrence and lost response recovery |
+
+No test was deleted. The former repaired-instruction-conflict expectation was replaced by exact frozen-child recovery and conflicting-scope checks; the new test preserves the original immutable authority boundary while admitting the explicitly supported mutable draft definition. Adversarial review must record exact source and this subsumption assertion. Native keyboard, paid provider execution, installer/release, deployed hosted V4 and human acceptance remain separate gates.
+
+Required plan: final source `npm run check`, `npm run build`, declared native interaction/context/Input/project-restart and compiled evaluation entry points, PREV-004, actual artifact preview, and both recorded graph journeys. Actual results and preserved failures are recorded in `qualification-pr707-native-portable-repairs-2026-10-08.json`; a test name or outer process exit alone is not a pass claim.
+
+
+The combined-source qualification also integrates main `73bfeb18` (Office artifact viewer). The generated social-preview receipt conflict was resolved by taking main's receipt, then regenerating it with the real capture on the combined source. No Office product decision was added in this PR. The authored Node-detail workspace fixture now declares the same known invocation inventory and explicit accepted single-call policy returned by the real API; its original navigation, callback, pending input, remount and compatibility assertions remain. The prior failure (zero Invoke callbacks while inventory was unknown) is preserved, alongside the corrected 53/53 warm result. The new combined-source review refreshes the authority scope after the Office-only PRD change; prior review receipts remain immutable historical evidence.
+
+
+Secondary reading seam found by declared heavy qualification: global state refresh could replace a restored pending New Thread composer with the backend's active chat. The disk draft and main-process read were correct; the real desktop reproduction showed the composer text/scope restored before background navigation hid it. `refreshState` now uses server active-chat fallback only before any client reading intent. Explicit arguments and current client selection retain precedence. Existing READ-001 and SCP-016 authorize this preservation; no PRD decision was invented.
+
+The realistic `workspace-reading-context` checkpoint observes bootstrap active-chat restoration, a deferred unscoped refresh resolving after new-composer cancellation, another refresh while composing, project-scope retention, and explicit navigation to a different chat despite the backend active marker. Existing Invoke/Back/Forward and authored detail cases remain. Three warm files passed 139/139; the actual project-compose checkpoint then passed its restored drafts, collapsed project, remembered node selection and Send assertions. The original timeout and read-only diagnosis remain preserved. This checkpoint recreates renderer windows and restarts the Rust app server/settings store within one Electron main process; it does not certify full Electron process-restart recovery.

@@ -23,7 +23,7 @@ describe("explicit input to Invoke connection", () => {
     expect(groups[0].invokes.map((action) => action.id).sort()).toEqual([1, 2, 3]);
   });
 
-  it.each([[false, "consume"], [true, "consume"], [false, "edit"], [true, "edit"], [false, "edit-back"], [true, "edit-back"], [false, "failure"], [true, "failure"], [false, "recovered"], [true, "recovered"], [false, "recovered-edit"], [true, "recovered-edit"]].map(([compiled, outcome]) => [compiled, outcome, false]).concat(["consume", "edit", "edit-back", "failure", "recovered", "recovered-edit", "snapshot", "bridge", "bridge-edit", "bridge-fallback", "bridge-select-fallback", "recovery-adoption", "imported-history", "preparation-rejected", "two-layer-saved", "two-layer-edit", "two-layer-undo", "two-layer-newer", "two-layer-existing"].map(outcome => [false, outcome, true])).concat(["consume", "edit", "edit-back", "failure", "recovered", "recovered-edit", "authored-pending", "authored-refusal", "authored-unblurred", "authored-select", "recovery-adoption", "preparation-rejected", "two-layer-saved", "two-layer-edit", "two-layer-newer", "two-layer-existing"].map(outcome => [true, outcome, true])))("connected fields preserve Invoke submission boundaries (compiled=%s, outcome=%s, implicit=%s)", async (compiled, outcome, implicit) => {
+  it.each([[false, "consume"], [true, "consume"], [false, "edit"], [true, "edit"], [false, "edit-back"], [true, "edit-back"], [false, "failure"], [true, "failure"], [false, "recovered"], [true, "recovered"], [false, "recovered-edit"], [true, "recovered-edit"]].map(([compiled, outcome]) => [compiled, outcome, false]).concat(["consume", "edit", "edit-back", "failure", "recovered", "recovered-edit", "snapshot", "bridge", "bridge-edit", "bridge-fallback", "bridge-select-fallback", "recovery-adoption", "imported-history", "graph-only", "graph-only-recovery", "graph-only-occupancy", "graph-only-foreign", "inventory-unknown", "preparation-rejected", "two-layer-saved", "two-layer-edit", "two-layer-undo", "two-layer-newer", "two-layer-existing"].map(outcome => [false, outcome, true])).concat(["consume", "edit", "edit-back", "failure", "recovered", "recovered-edit", "authored-pending", "authored-refusal", "authored-unblurred", "authored-select", "recovery-adoption", "graph-only", "graph-only-recovery", "graph-only-occupancy", "graph-only-foreign", "inventory-unknown", "preparation-rejected", "two-layer-saved", "two-layer-edit", "two-layer-newer", "two-layer-existing"].map(outcome => [true, outcome, true])))("connected fields preserve Invoke submission boundaries (compiled=%s, outcome=%s, implicit=%s)", async (compiled, outcome, implicit) => {
     const window = new Window({ url: "http://127.0.0.1:3000" });
     vi.stubGlobal("document", window.document);
     vi.stubGlobal("window", window);
@@ -54,7 +54,7 @@ describe("explicit input to Invoke connection", () => {
     }
     const layer = { layer: { id: 101 }, nodes: [node], edges: [], actions };
     const thread = { id: 3, rootInteractionId: 5, harnessId: "fixture" };
-    const state = { conversationCompatibility: { threadId: 3, status: "unrestricted", harnessId: "fixture" }, status: "accepted", currentInteractionId: 5, interactions: [{ id: 5, threadId: 3, graphNodeId: 50, text: "Compare", completionStatus: "accepted", completionOutput: { rootLayer: layer } }], visibleLayer: layer, nodes: [node], actions, projects: [], permissionProfiles: [], modelSettings: { defaults: { harnessId: "fixture" }, harnesses: [{ id: "fixture", available: true }], providers: [], families: [] }, modelCatalog: [], actionInvocations: [], pendingActionInvocations: [] };
+    const state = { invocationInventoryAvailable: true, conversationCompatibility: { threadId: 3, status: "unrestricted", harnessId: "fixture" }, status: "accepted", currentInteractionId: 5, interactions: [{ id: 5, threadId: 3, graphNodeId: 50, text: "Compare", completionStatus: "accepted", completionOutput: { rootLayer: layer } }], visibleLayer: layer, nodes: [node], actions, projects: [], permissionProfiles: [], modelSettings: { defaults: { harnessId: "fixture" }, harnesses: [{ id: "fixture", available: true }], providers: [], families: [] }, modelCatalog: [], actionInvocations: [], pendingActionInvocations: [] };
     let draft = { threadId: 3, revision: 0, attachments: [], updatedAt: "2026-10-04T00:00:00Z" };
     if (outcome === "recovery-adoption") {
       actions[3].inputActionIds = [];
@@ -80,6 +80,26 @@ describe("explicit input to Invoke connection", () => {
       state.actionInvocations = [{ sourceInteractionId: 5, actionId: 12, resultInteractionId: 6,
         durable: false, reusable: false, invocationKey: "rejected-gesture", resultCompletionStatus: "failed",
         preparationRecoverable: false, preparationRejected: true }];
+    }
+    if (outcome.startsWith("graph-only") || outcome === "inventory-unknown") {
+      actions[3].inputActionIds = [];
+      const native = { invocation: { id: 9, childInteractionNodeId: 700, actionSnapshot: { label: "Frozen analysis", activator: "agent" } },
+        submittedInputs: [{ action: { control: "text", prompt: "Destination" }, value: { text: "Lisbon" } }], current: { nodeId: 700, rootLayerId: 701, layers: [{ layer: { id: 701, state: "accepted" }, nodes: [{ id: 702, title: "Inert native Current" }], actions: [], edges: [] }] } };
+      state.actionInvocations = [{ graphOnly: true, occupancyOnly: outcome === "graph-only-occupancy", nativeInvocation: native,
+        durable: true, agentInvoked: true, reusable: false, sourceInteractionId: 5, actionId: 12,
+        invocationKey: outcome === "graph-only-occupancy" ? "" : "native-call", resultInteractionId: null,
+        resultCompletionStatus: "not_started", preparationRecoverable: false }];
+      if (outcome === "graph-only-occupancy") delete state.actionInvocations[0].nativeInvocation;
+      if (outcome === "graph-only-foreign") {
+        state.actionInvocations[0].sourceInteractionId = 99;
+        native.invocation.actionSnapshot.label = "Foreign secret label";
+        native.submittedInputs[0].value.text = "Foreign secret value";
+      }
+      if (outcome === "inventory-unknown") { delete state.invocationInventoryAvailable; state.actionInvocations = []; }
+      if (outcome === "graph-only-recovery") {
+        state.actionInvocations = [{ sourceInteractionId: 5, actionId: 12, resultInteractionId: 6,
+          durable: false, reusable: false, invocationKey: "native-call", resultCompletionStatus: "not_started", preparationRecoverable: true }];
+      }
     }
     if (outcome === "imported-history") {
       thread.imported = true;
@@ -117,9 +137,35 @@ describe("explicit input to Invoke connection", () => {
       const cost = () => surface()?.querySelector(compiled ? '[data-gc-mount="cost"]' : '[data-action-id="15"]');
       const field = () => surface()?.querySelector(compiled ? '[data-gc-mount="destination"]' : '[aria-label="Destination"]');
       await vi.waitFor(() => {
-        expect(invoke()?.disabled).toBe(outcome !== "recovery-adoption" && !outcome.startsWith("two-layer-"));
+        expect(invoke()?.disabled).toBe(outcome !== "recovery-adoption" && outcome !== "graph-only-recovery" && !outcome.startsWith("two-layer-"));
         expect(field()).toBeTruthy();
       });
+      if (outcome.startsWith("graph-only") || outcome === "inventory-unknown") {
+        if (outcome === "graph-only-recovery") {
+          invoke().click();
+          await vi.waitFor(() => expect(onInvokeAction).toHaveBeenCalledExactlyOnceWith(actions[2]));
+          settleInvoke({});
+        } else {
+          expect(invoke().disabled).toBe(true);
+          invoke().click();
+          expect(onInvokeAction).not.toHaveBeenCalled();
+        }
+        const history = window.document.querySelectorAll("[data-graph-owned-invocation-id]");
+        expect(history).toHaveLength(outcome === "graph-only" ? 1 : 0);
+        if (outcome === "graph-only-foreign") {
+          expect(window.document.body.textContent).not.toContain("Foreign secret");
+          expect(window.document.querySelector("[data-invocation-result-interaction-id]")).toBeNull();
+        }
+        if (history.length) {
+          expect(history[0].textContent).toContain("Frozen analysis · Lisbon · Prepared");
+          expect(history[0].disabled).toBe(true);
+          expect(history[0].hasAttribute("data-invocation-result-interaction-id")).toBe(false);
+          history[0].click();
+          expect(onNavigateLayer).not.toHaveBeenCalled();
+        }
+        expect(commit).not.toHaveBeenCalled(); expect(onSubmitInteraction).not.toHaveBeenCalled();
+        return;
+      }
       if (outcome.startsWith("two-layer-")) {
         await vi.waitFor(() => expect(field().value).toBe("Lisbon"));
         const originalAnswer = structuredClone(draft.attachments[0]);

@@ -105,6 +105,10 @@ struct HarnessControl {
 /// Faults the graph server injects, set by a test.
 #[derive(Default)]
 struct GraphFaults {
+    /// A stale control snapshot omits native calls once; later proof is intact.
+    hide_native_inventory_once: AtomicBool,
+    fail_inventory_after_user_prepare: AtomicBool,
+    fail_next_inventory: AtomicBool,
     detail_asset_reads: std::sync::atomic::AtomicUsize,
     fail_input_occurrence_reads: AtomicBool,
     /// The next capability activation answers 503, as a busy graph would.
@@ -204,6 +208,46 @@ impl World {
         bound: bool,
         durable_agent: Option<bool>,
         reusable: bool,
+    ) -> Self {
+        Self::build_call_mode_with_instruction(
+            label,
+            selected,
+            bound,
+            durable_agent,
+            reusable,
+            "Child work",
+        )
+        .await
+    }
+
+    async fn build_call_mode_with_instruction(
+        label: &str,
+        selected: bool,
+        bound: bool,
+        durable_agent: Option<bool>,
+        reusable: bool,
+        instruction: &str,
+    ) -> Self {
+        Self::build_program_mode(
+            label,
+            selected,
+            bound,
+            durable_agent,
+            reusable,
+            instruction,
+            true,
+        )
+        .await
+    }
+
+    async fn build_program_mode(
+        label: &str,
+        selected: bool,
+        bound: bool,
+        durable_agent: Option<bool>,
+        reusable: bool,
+        instruction: &str,
+        publish_current: bool,
     ) -> Self {
         let root = tempfile::Builder::new()
             .prefix(&format!("relayer-completion-trace-{label}-"))
@@ -314,7 +358,7 @@ impl World {
                 icon: None,
                 description: None,
                 target_layer_id: None,
-                interaction_text: Some("Child work".into()),
+                interaction_text: Some(instruction.into()),
                 reusable: Some(reusable),
                 input_action_ids: Vec::new(),
                 input: None,
@@ -342,14 +386,16 @@ impl World {
                 .await
                 .unwrap();
         }
-        writer
-            .transition_current(
-                0,
-                "publish-child",
-                CurrentTransition::Advance { layer_id: layer.id },
-            )
-            .await
-            .unwrap();
+        if publish_current {
+            writer
+                .transition_current(
+                    0,
+                    "publish-child",
+                    CurrentTransition::Advance { layer_id: layer.id },
+                )
+                .await
+                .unwrap();
+        }
         let graph_reader = graph.clone();
         let faults = Arc::new(GraphFaults::default());
         let injected = faults.clone();
@@ -422,6 +468,24 @@ impl World {
                             return (StatusCode::OK, "{not json").into_response();
                         }
                     }
+                    if request.uri().path() == "/api/control/accepted-closures" && faults.fail_next_inventory.swap(false, Ordering::SeqCst) {
+                        return (StatusCode::SERVICE_UNAVAILABLE, axum::Json(serde_json::json!({"error":{"code":"unavailable","message":"inventory temporarily unavailable"}}))).into_response();
+                    }
+                    if request.uri().path() == "/api/control/durable-invocations/prepare" && faults.fail_inventory_after_user_prepare.swap(false, Ordering::SeqCst) {
+                        let response = next.run(request).await;
+                        faults.fail_next_inventory.store(true, Ordering::SeqCst);
+                        return response;
+                    }
+                    if request.uri().path() == "/api/control/accepted-closures"
+                        && faults.hide_native_inventory_once.swap(false, Ordering::SeqCst)
+                    {
+                        let response = next.run(request).await;
+                        let (parts, body) = response.into_parts();
+                        let bytes = axum::body::to_bytes(body, 1024 * 1024 * 32).await.unwrap();
+                        let mut snapshot: Value = serde_json::from_slice(&bytes).unwrap();
+                        snapshot["invocations"] = serde_json::json!([]);
+                        return axum::response::Response::from_parts(parts, axum::body::Body::from(serde_json::to_vec(&snapshot).unwrap()));
+                    }
                     next.run(request).await
                 }
             },
@@ -438,7 +502,7 @@ impl World {
             serde_json::json!({
                 "nodeId":parent.id.value(),
                 "rootLayer":{"layer":{"id":layer.id.value()},"nodes":[],"edges":[],"actions":[{
-                    "id":invoke.id.value(),"kind":"invoke","interactionText":"Child work",
+                    "id":invoke.id.value(),"kind":"invoke","interactionText":instruction,
                     "state":"accepted","targetLayerId":null
                 }]}
             })
@@ -699,7 +763,7 @@ impl World {
                 .invoke_durable_action(
                     thread.root_interaction_id,
                     invoke.id.value(),
-                    "Child work",
+                    instruction,
                     node,
                     durable_agent.unwrap(),
                     "startup-call",
@@ -712,7 +776,7 @@ impl World {
                 .invoke_action_recursively(
                     thread.root_interaction_id,
                     invoke.id.value(),
-                    "Child work",
+                    instruction,
                 )
                 .await
                 .unwrap()
@@ -752,7 +816,7 @@ impl World {
             // Prepared and bound exactly as complete_prepared_child prepares it.
             prepare_and_claim_interaction(&state, &thread, &child, false, true)
                 .await
-                .unwrap_or_else(|error| panic!("prepare: {}", error.message()))
+                .unwrap_or_else(|error| panic!("prepare: {}", error.internal_diagnostic()))
                 .expect("prepared child")
         } else {
             // Only the graph interaction exists, as the parent's prepareComplete leaves it:
@@ -2687,6 +2751,241 @@ async fn a_restart_recovers_exact_unbound_durable_agent_call() {
     verify_unbound_durable_restart(true).await;
 }
 
+// An own-draft source can disappear before publication. The retained call is
+// inert archive history, even when no accepted callable or Current needs V4.
+#[tokio::test]
+async fn v4_import_reexport_preserves_call_only_own_draft_history() {
+    use crate::conversation_export::{
+        EXPORT_VERSION_V4, ExportActionKind, ExportInvocationCaptureState,
+    };
+    use crate::conversation_import_service::ConversationImportStager;
+    let instruction = "\u{85}\u{2003} Continue /private/tmp/private-instruction.txt \u{85}";
+    let world = World::build_call_mode_with_instruction(
+        "own-draft-call-archive",
+        false,
+        true,
+        Some(true),
+        false,
+        instruction,
+    )
+    .await;
+    assert_eq!(world.child_row().await.text, instruction.trim());
+    let canonical_input = world
+        .runtime
+        .interaction_input(world.completion_id)
+        .await
+        .unwrap();
+    assert_eq!(canonical_input.interaction.detail, instruction);
+    let contract = canonical_input.completion_contract.as_ref().unwrap();
+    contract.validate().unwrap();
+    assert_eq!(contract.input.text, instruction);
+    assert_eq!(
+        contract.input.invocation_references[0].action_snapshot["instruction"],
+        instruction
+    );
+    let working_directory = world.root.path().to_string_lossy().into_owned();
+    let mut command = CompleteInteraction {
+        thread_icon_selection_eligible: false,
+        require_native_continuity: false,
+        native_history_anchor: None,
+        project_id: None,
+        product_interaction_id: world.child.id.value(),
+        thread_id: world.thread.id.value(),
+        interaction_id: world.child.id.value(),
+        text: instruction.trim(),
+        working_directory: &working_directory,
+        harness_configuration_name: HARNESS,
+        permission_profile: world.state.permission_catalog.profile("auto").unwrap(),
+        model_selection: None,
+        model_plan: None,
+        attempt_admission_id: None,
+        execution_lease_id: None,
+        harness_policy: None,
+        invocation: Some(world.invocation),
+        input_identity: None,
+        input_digest: None,
+        personal_presentation: None,
+        contexts: &[],
+        submitted_inputs: &[],
+    };
+    let recovered = world
+        .runtime
+        .prepare_bound(&command, Some(world.completion_id))
+        .await
+        .unwrap();
+    assert_eq!(recovered.graph_node_id, world.completion_id);
+    world.runtime.discard_prepared(recovered).await.unwrap();
+    command.text = "Different instruction";
+    let error = world
+        .runtime
+        .prepare_bound(&command, Some(world.completion_id))
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(error, crate::runtime::RuntimeError::Protocol(ref message) if message == "prepared invocation instruction mismatch")
+    );
+    command.text = instruction;
+    command.invocation = Some(PreparedInvocation {
+        source_interaction_node_id: world.invocation.source_interaction_node_id + 1,
+        source_action_id: world.invocation.source_action_id,
+    });
+    let error = world
+        .runtime
+        .prepare_bound(&command, Some(world.completion_id))
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(error, crate::runtime::RuntimeError::Protocol(ref message) if message == "prepared invocation provenance mismatch")
+    );
+    command.invocation = Some(world.invocation);
+    let recovered = world
+        .runtime
+        .prepare_bound(&command, Some(world.completion_id))
+        .await
+        .unwrap();
+    assert_eq!(recovered.graph_node_id, world.completion_id);
+    world.runtime.discard_prepared(recovered).await.unwrap();
+    assert_eq!(
+        world
+            .runtime
+            .interaction_input(world.completion_id)
+            .await
+            .unwrap(),
+        canonical_input
+    );
+    assert_eq!(world.child_row().await.text, instruction.trim());
+    let source = world
+        .graph
+        .writer_for_subgraph(NodeId::new(world.invocation.source_interaction_node_id).unwrap())
+        .await
+        .unwrap();
+    source
+        .complete(NodeId::new(world.invocation.source_interaction_node_id).unwrap())
+        .await
+        .unwrap();
+    world.set_parent_status("accepted").await;
+    let bytes = crate::conversation_export_service::build_conversation_export(
+        &world.product,
+        &world.runtime,
+        world.thread.id,
+        world.state.export_producer.clone(),
+        "2026-10-08T00:00:00Z".into(),
+    )
+    .await
+    .unwrap();
+    let mut archive = crate::conversation_export::decode_export_jsonl(&bytes).unwrap();
+    let ConversationExportRecord::Header(seed) = &archive[0] else {
+        unreachable!()
+    };
+    assert_eq!(seed.invocations[0].source.instruction, instruction);
+    let result_id = seed.invocations[0].result_turn_id.as_ref().unwrap();
+    assert!(archive.iter().any(|record| matches!(record, ConversationExportRecord::Turn(turn) if &turn.id == result_id && turn.text == instruction.trim())));
+    // Keep the unrelated accepted response, while representing the call's
+    // nonpublished own-draft source. No synthetic accepted action is imported.
+    for record in &mut archive {
+        if let ConversationExportRecord::Turn(turn) = record {
+            if matches!(
+                turn.origin,
+                crate::conversation_export::ExportTurnOrigin::Invocation { .. }
+            ) {
+                turn.origin = crate::conversation_export::ExportTurnOrigin::User;
+            }
+            if let Some(view) = &mut turn.accepted_view {
+                for layer in &mut view.layers {
+                    layer.actions.retain(|action| {
+                        action.kind != ExportActionKind::Invoke
+                            && action.kind != ExportActionKind::Input
+                    });
+                    for action in &mut layer.actions {
+                        action.reusable = None;
+                        action.input_action_ids.clear();
+                    }
+                }
+            }
+        }
+    }
+    let ConversationExportRecord::Header(header) = &mut archive[0] else {
+        unreachable!()
+    };
+    assert_eq!(header.invocations.len(), 1);
+    assert!(header.bound_inputs.is_empty());
+    let call = &mut header.invocations[0];
+    assert!(call.current.is_none());
+    assert!(call.arguments.is_empty());
+    call.result_turn_id = None;
+    call.source.interaction_node_id = "node:nonpublished-source".into();
+    call.source.parent_node_id = "node:nonpublished-parent".into();
+    call.source.action_id = "action:nonpublished-invoke".into();
+    call.source.layer_id = Some("layer:nonpublished-source".into());
+    call.source.presenting_layer_id = call.source.layer_id.clone();
+    call.source.state = "draft".into();
+    call.source.capture_state = Some(ExportInvocationCaptureState::Draft);
+    let frozen = call.clone();
+    crate::conversation_export::validate_export_records(&archive).unwrap();
+    let ConversationExportRecord::Header(header) = &archive[0] else {
+        unreachable!()
+    };
+    let mut stager = ConversationImportStager::begin(*header.clone(), &world.product)
+        .await
+        .unwrap();
+    for record in archive.iter().skip(1) {
+        match record {
+            ConversationExportRecord::Turn(turn) => {
+                stager.push_turn(turn, &world.product).await.unwrap()
+            }
+            ConversationExportRecord::VisualAssetContent(content) => stager
+                .push_visual_asset_content(content, &world.product)
+                .await
+                .unwrap(),
+            _ => unreachable!(),
+        }
+    }
+    let receipt = stager
+        .finish("sha256:own-draft-call-only".into(), &world.product)
+        .await
+        .unwrap();
+    let imported = crate::conversation_import_service::materialize_and_publish_conversation(
+        &receipt.import_id,
+        &world.product,
+        &world.runtime,
+    )
+    .await
+    .unwrap();
+    let imported_id = crate::product::ThreadId::from_database(imported.thread_id);
+    let reopened = ProductService::new(
+        SqliteProductStore::open(&world.root.path().join("product.sqlite3"))
+            .await
+            .unwrap(),
+        true,
+    );
+    assert!(
+        reopened
+            .get_thread(imported_id)
+            .await
+            .unwrap()
+            .action_invocations
+            .is_empty()
+    );
+    let bytes = crate::conversation_export_service::build_conversation_export(
+        &reopened,
+        &world.runtime,
+        imported_id,
+        world.state.export_producer.clone(),
+        "2026-10-08T00:00:01Z".into(),
+    )
+    .await
+    .unwrap();
+    let exported = crate::conversation_export::decode_export_jsonl(&bytes).unwrap();
+    let ConversationExportRecord::Header(header) = &exported[0] else {
+        unreachable!()
+    };
+    assert_eq!(header.export_version, EXPORT_VERSION_V4);
+    assert_eq!(header.invocations, vec![frozen]);
+    assert!(header.bound_inputs.is_empty());
+    assert!(exported.iter().all(|record| !matches!(record, ConversationExportRecord::Turn(turn) if turn.accepted_view.as_ref().is_some_and(|view| view.layers.iter().flat_map(|layer| &layer.actions).any(|action| action.kind == ExportActionKind::Invoke || !action.input_action_ids.is_empty() || action.reusable.is_some())))));
+    world.finish().await;
+}
+
 #[tokio::test]
 async fn v4_import_reexport_preserves_standalone_bound_input_image_without_layer_membership() {
     let world = World::build_mode("outside-closure-input", false, false, Some(true)).await;
@@ -3192,6 +3491,62 @@ async fn native_reusable_invocations_preserve_conversation_and_share_export_for_
     )
     .await;
     assert!(matches!(share, Err(crate::conversation_export_service::ConversationExportBuildError::ReusableInvocationPortabilityUnavailable)), "Graph-only calls still require V4 and cannot bypass hosted capability admission");
+    // No Product launch exists for this third prepared call. GET must preserve
+    // native identity without inventing a Product result or starting execution.
+    let (_, graph_only) = source
+        .prepare_user_invocation(
+            relayer_graph_core::ActionId::new(world.invocation.source_action_id).unwrap(),
+            "native-only-read",
+        )
+        .await
+        .unwrap();
+    let before = world.product.get_thread(world.thread.id).await.unwrap();
+    let headers =
+        HeaderMap::from_iter([(header::COOKIE, "relayer_control=control".parse().unwrap())]);
+    let detail = get(
+        State(world.state.clone()),
+        headers.clone(),
+        Path(world.thread.id.value()),
+    )
+    .await
+    .unwrap_or_else(|error| panic!("detail {}", error.message()));
+    let detail = serde_json::to_value(detail.0).unwrap();
+    assert_eq!(detail["invocationInventoryAvailable"], true);
+    let calls = detail["actionInvocations"].as_array().unwrap();
+    assert_eq!(calls.len(), 3);
+    let native_only = calls
+        .iter()
+        .find(|call| call["invocationKey"] == "native-only-read")
+        .unwrap();
+    assert_eq!(native_only["graphOnly"], true);
+    assert_eq!(native_only["occupancyOnly"], false);
+    assert!(native_only["resultInteractionId"].is_null());
+    assert_eq!(native_only["preparationRecoverable"], false);
+    assert_eq!(
+        native_only["agentInvoked"], false,
+        "human preparation is not agent activation"
+    );
+    assert_eq!(
+        native_only["nativeInvocation"]["invocation"]["id"],
+        graph_only.id
+    );
+    assert_eq!(native_only["resultCompletionStatus"], "not_started");
+    let query =
+        serde_json::from_value(serde_json::json!({"threadId":world.thread.id.value()})).unwrap();
+    let projected =
+        crate::api::state::product_state(State(world.state.clone()), headers, Query(query))
+            .await
+            .unwrap_or_else(|error| panic!("state {}", error.message()));
+    let projected = serde_json::to_value(projected.0).unwrap();
+    assert_eq!(projected["invocationInventoryAvailable"], true);
+    assert_eq!(projected["actionInvocations"], detail["actionInvocations"]);
+    let after = world.product.get_thread(world.thread.id).await.unwrap();
+    assert_eq!(before.interactions.len(), after.interactions.len());
+    assert!(
+        after.action_invocations.is_empty(),
+        "projection cannot mint launch receipts"
+    );
+    assert_eq!(graph_only.state.head_revision, 0);
     world.finish().await;
 }
 
@@ -5024,6 +5379,10 @@ async fn user_reservation_precedes_native_prepare_and_recovers_a_failed_bind() {
     // boundary proves native preparation succeeded for that new key.
     sqlx::query("CREATE TRIGGER fail_authority_bind BEFORE UPDATE OF prepared_graph_node_id ON action_invocations WHEN NEW.prepared_graph_node_id IS NOT NULL BEGIN SELECT RAISE(ABORT,'test bind failure'); END")
         .execute(&world.pool).await.unwrap();
+    world
+        .faults
+        .fail_inventory_after_user_prepare
+        .store(true, Ordering::SeqCst);
     assert!(
         invoke_action_with_authority(
             &world.state,
@@ -5036,6 +5395,26 @@ async fn user_reservation_precedes_native_prepare_and_recovers_a_failed_bind() {
         )
         .await
         .is_err()
+    );
+    // Unknown post-preparation inventory retains only the original preexecution
+    // receipt. Restoring proof reaches the independent real SQLite bind refusal,
+    // without another native call, input consumption or execution handoff.
+    let bind_refusal = invoke_action_with_authority(
+        &world.state,
+        world.thread.id.value(),
+        world.thread.root_interaction_id.value(),
+        invoke.id.value(),
+        "frozen-call",
+        None,
+        Some(layer.id.value()),
+    )
+    .await
+    .err()
+    .unwrap();
+    assert!(
+        bind_refusal.message().contains("test bind failure"),
+        "{}",
+        bind_refusal.message()
     );
     let pending = world
         .product
@@ -5058,7 +5437,7 @@ async fn user_reservation_precedes_native_prepare_and_recovers_a_failed_bind() {
     assert!(
         !world
             .runtime
-            .native_invocation_key_absent(parent.id.value(), invoke.id.value(), "frozen-call")
+            .native_invocation_request_absent(parent.id.value(), invoke.id.value(), "frozen-call")
             .await
             .unwrap(),
         "a lost Product bind cannot be certified as a native refusal"
@@ -5076,6 +5455,38 @@ async fn user_reservation_precedes_native_prepare_and_recovers_a_failed_bind() {
         .await
         .unwrap();
     assert_eq!(inventory.invocations.len(), 1);
+    assert_eq!(inventory.exhausted_action_ids, Some(vec![invoke.id]));
+    let (local, available) = project_local_invocations(
+        &world.state,
+        &world
+            .product
+            .get_thread(world.thread.id)
+            .await
+            .unwrap()
+            .action_invocations,
+        &[(
+            world.thread.root_interaction_id,
+            parent.id.value(),
+            world.thread.id,
+        )],
+    )
+    .await
+    .unwrap_or_else(|error| panic!("pending projection {}", error.message()));
+    assert!(available);
+    let frozen = local
+        .iter()
+        .filter(|call| call.action_id == invoke.id.value())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        frozen.len(),
+        2,
+        "rejected chronology and exact pending reservation only, no graph-owned duplicate or occupancy lock"
+    );
+    let recoverable = frozen
+        .iter()
+        .find(|call| call.invocation_key == "frozen-call")
+        .unwrap();
+    assert!(!recoverable.graph_only && !recoverable.durable && recoverable.preparation_recoverable);
     let native_child = inventory.invocations[0]
         .invocation
         .child_interaction_node_id;
@@ -5723,5 +6134,530 @@ async fn invoke_selects_one_saved_occurrence_and_consumes_only_its_frozen_epoch(
         "atomic bind consumes only unchanged captured epochs; A and newer B survive"
     );
     assert_eq!(remaining.revision, newer.revision + 1);
+    world.finish().await;
+}
+
+/// Native exact-key reads do not authorize adopting an agent-prepared child as
+/// a new human launch after its own draft definition is repaired and accepted.
+#[tokio::test]
+async fn user_cannot_adopt_graph_owned_key_after_callable_repair() {
+    let world = World::build_program_mode(
+        "graph-owned-adoption",
+        false,
+        false,
+        Some(true),
+        true,
+        "Original agent instruction",
+        false,
+    )
+    .await;
+    let parent = NodeId::new(world.invocation.source_interaction_node_id).unwrap();
+    let writer = world.graph.writer_for_subgraph(parent).await.unwrap();
+    let original = world
+        .graph
+        .conversation_graph_snapshot(&[parent])
+        .await
+        .unwrap()
+        .invocations[0]
+        .source_action
+        .clone();
+    writer
+        .add_action(&ActionDraft {
+            client_key: "child".into(),
+            source_node_id: original.source_node_id,
+            source_layer_id: original.source_layer_id,
+            kind: ActionKind::Invoke,
+            relation: None,
+            label: "Repaired human label".into(),
+            variant: original.variant,
+            icon: original.icon,
+            description: original.description,
+            target_layer_id: None,
+            interaction_text: Some("Repaired human instruction".into()),
+            reusable: Some(true),
+            input_action_ids: vec![],
+            input: None,
+        })
+        .await
+        .unwrap();
+    let other_action = writer
+        .add_action(&ActionDraft {
+            client_key: "other-child".into(),
+            source_node_id: original.source_node_id,
+            source_layer_id: original.source_layer_id,
+            kind: ActionKind::Invoke,
+            relation: None,
+            label: "Another request".into(),
+            variant: ActionVariant::Pill,
+            icon: None,
+            description: None,
+            target_layer_id: None,
+            interaction_text: Some("Another request".into()),
+            reusable: Some(false),
+            input_action_ids: vec![],
+            input: None,
+        })
+        .await
+        .unwrap();
+    writer.complete(parent).await.unwrap();
+    world.set_parent_status("accepted").await;
+    // Reconstruct a native prepared call without a trusted Product launch link.
+    sqlx::query("DELETE FROM action_invocations WHERE source_interaction_id=?1")
+        .bind(world.thread.root_interaction_id.value())
+        .execute(&world.pool)
+        .await
+        .unwrap();
+    let before = world.product.get_thread(world.thread.id).await.unwrap();
+    let draft = world
+        .product
+        .action_input_draft(world.thread.id)
+        .await
+        .unwrap();
+    let frozen = world
+        .graph
+        .conversation_graph_snapshot(&[parent])
+        .await
+        .unwrap();
+    assert_eq!(frozen.invocations.len(), 1);
+    let call = &frozen.invocations[0].invocation;
+    assert_eq!(call.action_snapshot["activator"], "agent");
+    assert_eq!(
+        call.action_snapshot["instruction"],
+        "Original agent instruction"
+    );
+    let error = invoke_action_with_authority(
+        &world.state,
+        world.thread.id.value(),
+        world.thread.root_interaction_id.value(),
+        original.id.value(),
+        &call.invocation_key,
+        None,
+        original.source_layer_id.map(|id| id.value()),
+    )
+    .await
+    .err()
+    .expect("no graph call adoption");
+    assert!(error.message().contains("matching user reservation"));
+    let error = invoke_action_with_authority(
+        &world.state,
+        world.thread.id.value(),
+        world.thread.root_interaction_id.value(),
+        other_action.id.value(),
+        &call.invocation_key,
+        None,
+        original.source_layer_id.map(|id| id.value()),
+    )
+    .await
+    .err()
+    .expect("a different action cannot adopt an occupied source key");
+    assert!(error.message().contains("matching user reservation"));
+    assert!(
+        !world
+            .runtime
+            .native_invocation_key_absent(parent.value(), &call.invocation_key)
+            .await
+            .unwrap()
+    );
+    assert!(
+        world
+            .runtime
+            .native_invocation_request_absent(
+                parent.value(),
+                other_action.id.value(),
+                &call.invocation_key
+            )
+            .await
+            .unwrap()
+    );
+    let after = world.product.get_thread(world.thread.id).await.unwrap();
+    assert_eq!(before.interactions.len(), after.interactions.len());
+    assert!(after.action_invocations.is_empty());
+    assert_eq!(
+        world
+            .product
+            .action_input_draft(world.thread.id)
+            .await
+            .unwrap(),
+        draft
+    );
+    let retained = world
+        .graph
+        .conversation_graph_snapshot(&[parent])
+        .await
+        .unwrap();
+    assert_eq!(retained.invocations.len(), 1);
+    assert_eq!(retained.invocations[0].invocation, *call);
+    assert_eq!(*world.harness.prov.lock().unwrap(), "none");
+    world.finish().await;
+
+    // Adversarial control-snapshot fault: an accepted Returned source cannot
+    // author another agent call. Hide the existing call in one absence read,
+    // then restore full inventory at preparation/proof without changing native state.
+    let world = World::build_call_mode("graph-owned-race", false, false, Some(true), true).await;
+    world
+        .product
+        .fail_interaction_completion(
+            world.child.id,
+            HARNESS,
+            "Fixture leaves original native call unlaunched.",
+        )
+        .await
+        .unwrap();
+    let parent = NodeId::new(world.invocation.source_interaction_node_id).unwrap();
+    world
+        .graph
+        .writer_for_subgraph(parent)
+        .await
+        .unwrap()
+        .complete(parent)
+        .await
+        .unwrap();
+    world.set_parent_status("accepted").await;
+    sqlx::query("DELETE FROM action_invocations WHERE source_interaction_id=?1")
+        .bind(world.thread.root_interaction_id.value())
+        .execute(&world.pool)
+        .await
+        .unwrap();
+    let before = world.product.get_thread(world.thread.id).await.unwrap();
+    let draft = world
+        .product
+        .action_input_draft(world.thread.id)
+        .await
+        .unwrap();
+    world
+        .faults
+        .hide_native_inventory_once
+        .store(true, Ordering::SeqCst);
+    let error = invoke_action_with_authority(
+        &world.state,
+        world.thread.id.value(),
+        world.thread.root_interaction_id.value(),
+        world.invocation.source_action_id,
+        "startup-call",
+        None,
+        None,
+    )
+    .await
+    .err()
+    .expect("agent collision is not human launch");
+    assert!(
+        error.message().contains("does not belong"),
+        "{}",
+        error.message()
+    );
+    let after = world.product.get_thread(world.thread.id).await.unwrap();
+    assert_eq!(after.interactions.len(), before.interactions.len() + 1);
+    let receipt = after
+        .action_invocations
+        .iter()
+        .find(|call| call.invocation_key == "startup-call")
+        .unwrap();
+    assert!(!receipt.durable && !receipt.agent_invoked);
+    let failed = world
+        .product
+        .get_interaction(receipt.result_interaction_id)
+        .await
+        .unwrap();
+    assert_eq!(failed.completion_status, "failed");
+    assert!(failed.graph_node_id.is_none());
+    assert!(
+        !world
+            .product
+            .user_invocation_preparation_recoverable(failed.id)
+            .await
+            .unwrap()
+    );
+    assert!(
+        !world
+            .product
+            .user_invocation_preparation_rejected(failed.id)
+            .await
+            .unwrap(),
+        "a real agent call was spent, not no-effect refusal"
+    );
+    assert!(
+        world
+            .product
+            .completion_execution(failed.id)
+            .await
+            .unwrap()
+            .is_none()
+    );
+    assert_eq!(
+        world
+            .product
+            .action_input_draft(world.thread.id)
+            .await
+            .unwrap(),
+        draft
+    );
+    let inventory = world
+        .graph
+        .conversation_graph_snapshot(&[parent])
+        .await
+        .unwrap();
+    let native = inventory
+        .invocations
+        .iter()
+        .find(|entry| entry.invocation.invocation_key == "startup-call")
+        .unwrap();
+    assert_eq!(native.invocation.action_snapshot["activator"], "agent");
+    assert_eq!(native.invocation.state.head_revision, 0);
+    assert_eq!(
+        native.invocation.state.lifecycle,
+        relayer_graph_core::CompletionLifecycle::Active
+    );
+    assert_eq!(*world.harness.prov.lock().unwrap(), "none");
+    world.finish().await;
+}
+
+/// Aggregate native occupancy stays available across unrelated roots, while a
+/// shared Node's foreign call contributes only its canonical single-use flag.
+#[tokio::test]
+async fn local_call_occupancy_is_private_and_isolated_across_unrelated_roots() {
+    let world = World::new("local-occupancy", false).await;
+    let project = world
+        .product
+        .create_project(crate::product::CreateProjectCommand {
+            path: world.root.path().to_str().unwrap().into(),
+            name: Some("Occupancy".into()),
+            reuse_existing: true,
+        })
+        .await
+        .unwrap()
+        .project;
+    let mut threads = Vec::new();
+    for name in ["Public", "Foreign"] {
+        threads.push(
+            world
+                .product
+                .create_thread(CreateThreadCommand {
+                    icon_selection_eligible: true,
+                    title: None,
+                    project_id: Some(project.id),
+                    initial_message: name.into(),
+                    harness_configuration_name: HARNESS.into(),
+                    personal_presentation_version_key: None,
+                    permission_profile_id: "auto".into(),
+                    model_selection: None,
+                    allow_unselected_model: true,
+                })
+                .await
+                .unwrap(),
+        );
+    }
+    world
+        .product
+        .fail_interaction_completion(
+            world.child.id,
+            HARNESS,
+            "Fixture leaves native child graph-only.",
+        )
+        .await
+        .unwrap();
+    for thread in &threads {
+        world
+            .product
+            .fail_interaction_completion(
+                thread.root_interaction_id,
+                HARNESS,
+                "Fixture prepares independent native accepted source.",
+            )
+            .await
+            .unwrap();
+    }
+    let extra = world
+        .product
+        .create_interaction(threads[0].id, "Independent root", None, true)
+        .await
+        .unwrap();
+    let mut roots = Vec::new();
+    for (thread, turn, text) in [
+        (&threads[0], threads[0].root_interaction_id, "Public"),
+        (&threads[1], threads[1].root_interaction_id, "Foreign"),
+        (&threads[0], extra.id, "Independent"),
+    ] {
+        let root = world
+            .graph
+            .create_interaction(
+                Some(relayer_graph_core::ProjectId::new(project.id.value()).unwrap()),
+                ThreadId::new(thread.id.value()).unwrap(),
+                text,
+            )
+            .await
+            .unwrap();
+        roots.push((root, turn));
+    }
+    let mut presenting_layers = Vec::new();
+    let mut shared = None;
+    let mut single = None;
+    for (index, (root, turn)) in roots.iter().enumerate() {
+        let writer = world.graph.writer_for_subgraph(root.id).await.unwrap();
+        let node = if index == 1 {
+            shared.clone().unwrap()
+        } else {
+            writer
+                .submit_node(&NodeDraft {
+                    client_key: "owner".into(),
+                    kind: "concept".into(),
+                    icon: "box".into(),
+                    title: "Visible owner".into(),
+                    detail: "Visible owner".into(),
+                })
+                .await
+                .unwrap()
+        };
+        if index == 0 {
+            shared = Some(node.clone());
+        }
+        let layer = writer
+            .submit_layer(&LayerDraft {
+                client_key: "root".into(),
+                default_node_id: Some(node.id),
+                nodes: vec![node.id],
+                edges: vec![],
+                size_justification: None,
+                layout: Some(LayerLayout::v1(
+                    vec![NodePlacement {
+                        node_id: node.id,
+                        x: 0.5,
+                        y: 0.5,
+                    }],
+                    "default",
+                )),
+            })
+            .await
+            .unwrap();
+        presenting_layers.push(layer.id);
+        if index != 1 {
+            let action = writer
+                .add_action(&ActionDraft {
+                    client_key: "call".into(),
+                    source_node_id: node.id,
+                    source_layer_id: Some(layer.id),
+                    kind: ActionKind::Invoke,
+                    relation: None,
+                    label: "Analyze".into(),
+                    variant: Default::default(),
+                    icon: None,
+                    description: None,
+                    target_layer_id: None,
+                    interaction_text: Some("Analyze visible owner".into()),
+                    reusable: Some(index == 2),
+                    input_action_ids: vec![],
+                    input: None,
+                })
+                .await
+                .unwrap();
+            if index == 0 {
+                single = Some(action);
+            }
+        }
+        writer
+            .add_action(&ActionDraft {
+                client_key: "response".into(),
+                source_node_id: root.id,
+                source_layer_id: None,
+                kind: ActionKind::Navigate,
+                relation: Some(NavigateRelation::Expand),
+                label: "Response".into(),
+                variant: Default::default(),
+                icon: None,
+                description: None,
+                target_layer_id: Some(layer.id),
+                interaction_text: None,
+                reusable: None,
+                input_action_ids: vec![],
+                input: None,
+            })
+            .await
+            .unwrap();
+        writer.complete(root.id).await.unwrap();
+        sqlx::query(
+            "UPDATE interactions SET graph_node_id=?1,completion_status='accepted' WHERE id=?2",
+        )
+        .bind(root.id.value())
+        .bind(turn.value())
+        .execute(&world.pool)
+        .await
+        .unwrap();
+    }
+    let foreign = world
+        .graph
+        .writer_for_subgraph(roots[1].0.id)
+        .await
+        .unwrap();
+    foreign
+        .prepare_user_invocation_in_layer(
+            single.as_ref().unwrap().id,
+            "FOREIGN_CALL_KEY",
+            &[],
+            Some(presenting_layers[1]),
+        )
+        .await
+        .unwrap();
+    // The local request spends no native call. Its refused receipt must not
+    // suppress the foreign occupancy marker or reveal the foreign call.
+    let local_action = single.as_ref().unwrap().id.value();
+    let refusal = invoke_action_with_authority(
+        &world.state,
+        threads[0].id.value(),
+        threads[0].root_interaction_id.value(),
+        local_action,
+        "local-refused-call",
+        None,
+        Some(presenting_layers[0].value()),
+    )
+    .await
+    .err()
+    .expect("foreign single-use call is already spent");
+    assert!(
+        refusal
+            .internal_diagnostic()
+            .contains("invoke_single_call_already_prepared"),
+        "{}",
+        refusal.internal_diagnostic()
+    );
+    let headers =
+        HeaderMap::from_iter([(header::COOKIE, "relayer_control=control".parse().unwrap())]);
+    let response = get(
+        State(world.state.clone()),
+        headers.clone(),
+        Path(threads[0].id.value()),
+    )
+    .await
+    .unwrap_or_else(|error| panic!("detail {}", error.message()));
+    let detail = serde_json::to_value(response.0).unwrap();
+    assert_eq!(detail["invocationInventoryAvailable"], true);
+    let calls = detail["actionInvocations"].as_array().unwrap();
+    assert_eq!(calls.len(), 2);
+    let rejected = calls
+        .iter()
+        .find(|call| call["invocationKey"] == "local-refused-call")
+        .unwrap();
+    assert_eq!(rejected["preparationRejected"], true);
+    assert_eq!(rejected["preparationRecoverable"], false);
+    assert_eq!(rejected["durable"], false);
+    let occupied = calls
+        .iter()
+        .find(|call| call["occupancyOnly"] == true)
+        .unwrap();
+    assert_eq!(occupied["actionId"], local_action);
+    assert_eq!(
+        occupied["sourceInteractionId"],
+        threads[0].root_interaction_id.value()
+    );
+    assert!(occupied["resultInteractionId"].is_null() && occupied["nativeInvocation"].is_null());
+    assert_eq!(occupied["invocationKey"], "");
+    assert!(!detail.to_string().contains("FOREIGN_CALL_KEY"));
+    let query =
+        serde_json::from_value(serde_json::json!({"threadId":threads[0].id.value()})).unwrap();
+    let response =
+        crate::api::state::product_state(State(world.state.clone()), headers, Query(query))
+            .await
+            .unwrap_or_else(|error| panic!("state {}", error.message()));
+    let state = serde_json::to_value(response.0).unwrap();
+    assert_eq!(state["invocationInventoryAvailable"], true);
+    assert_eq!(state["actionInvocations"], detail["actionInvocations"]);
     world.finish().await;
 }

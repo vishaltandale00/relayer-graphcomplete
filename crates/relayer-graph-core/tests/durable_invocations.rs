@@ -902,8 +902,9 @@ async fn distinct_calls_seal_source_node_and_return_independently_after_parent()
 }
 
 #[tokio::test]
-async fn reused_key_cannot_reinterpret_changed_draft_instruction() {
-    let database = GraphDatabase::in_memory().await.unwrap();
+async fn reused_key_recovers_frozen_child_across_own_draft_repairs() {
+    let file = tempfile::NamedTempFile::new().unwrap();
+    let database = GraphDatabase::open(file.path()).await.unwrap();
     let parent = database
         .create_interaction(None, ThreadId::new(52).unwrap(), "Investigate")
         .await
@@ -912,21 +913,64 @@ async fn reused_key_cannot_reinterpret_changed_draft_instruction() {
     let (node, layer) = response(&writer, parent.id, "Parent").await;
     let mut draft = callable(node.id, layer.id);
     let action = writer.add_action(&draft).await.unwrap();
-    let (child, _) = writer
+    let (child, original) = writer
         .prepare_recursive_invocation(action.id, "stable-call")
         .await
         .unwrap();
-    draft.interaction_text = Some("Changed instruction".into());
-    writer.add_action(&draft).await.unwrap();
-    assert!(matches!(
-        writer
-            .prepare_recursive_invocation(action.id, "stable-call")
-            .await,
-        Err(GraphError::Validation {
-            code: "invocation_key_conflict",
-            ..
+    let original_input = database
+        .writer_for_subgraph(child.id)
+        .await
+        .unwrap()
+        .interaction_input()
+        .await
+        .unwrap();
+    let repaired_layer = writer
+        .submit_layer(&LayerDraft {
+            client_key: "repaired-source".into(),
+            default_node_id: Some(node.id),
+            nodes: vec![node.id],
+            edges: vec![],
+            layout: Some(LayerLayout::v1(
+                vec![NodePlacement {
+                    node_id: node.id,
+                    x: 0.5,
+                    y: 0.5,
+                }],
+                "default",
+            )),
+            size_justification: None,
         })
-    ));
+        .await
+        .unwrap();
+    let field = writer
+        .add_action(&ActionDraft {
+            client_key: "later-binding".into(),
+            kind: ActionKind::Input,
+            reusable: None,
+            interaction_text: None,
+            input: Some(InputAction {
+                control: InputControl::Text,
+                prompt: "Later question".into(),
+                options: vec![],
+                minimum_selections: None,
+                unsupported_fields: Default::default(),
+            }),
+            ..draft.clone()
+        })
+        .await
+        .unwrap();
+    draft.interaction_text = Some("Changed instruction".into());
+    draft.label = "Repaired label".into();
+    draft.source_layer_id = Some(repaired_layer.id);
+    draft.reusable = Some(false);
+    draft.input_action_ids = vec![field.id];
+    assert_eq!(writer.add_action(&draft).await.unwrap().id, action.id);
+    let (recovered_child, recovered) = writer
+        .prepare_recursive_invocation(action.id, "stable-call")
+        .await
+        .unwrap();
+    assert_eq!(recovered_child, child);
+    assert_eq!(recovered, original);
     assert_eq!(
         database
             .writer_for_subgraph(child.id)
@@ -934,18 +978,106 @@ async fn reused_key_cannot_reinterpret_changed_draft_instruction() {
             .unwrap()
             .interaction_input()
             .await
-            .unwrap()
+            .unwrap(),
+        original_input
+    );
+    assert_eq!(
+        original_input
             .completion_contract
+            .as_ref()
             .unwrap()
             .input
             .text,
         "Investigate the evidence"
     );
+    assert_eq!(original.action_snapshot["label"], "Investigate");
+    assert_eq!(
+        original.action_snapshot["presentingLayerId"],
+        layer.id.value()
+    );
+    assert_eq!(original.action_snapshot["activator"], "agent");
+    assert_eq!(original.action_snapshot["reusable"], true);
+    assert!(original.action_snapshot.get("inputActionIds").is_none());
+    assert!(matches!(
+        writer
+            .prepare_recursive_invocation(action.id, "fresh-call")
+            .await,
+        Err(GraphError::Validation {
+            code: "invoke_single_call_already_prepared",
+            ..
+        })
+    ));
+    let other = writer
+        .add_action(&ActionDraft {
+            client_key: "another-action".into(),
+            ..callable(node.id, layer.id)
+        })
+        .await
+        .unwrap();
+    assert!(matches!(
+        writer
+            .prepare_recursive_invocation(other.id, "stable-call")
+            .await,
+        Err(GraphError::Validation {
+            code: "invocation_key_conflict",
+            ..
+        })
+    ));
+    // A repair to another kind cannot resurrect a callable from its old snapshot.
+    writer
+        .add_action(&ActionDraft {
+            kind: ActionKind::Input,
+            reusable: None,
+            interaction_text: None,
+            input_action_ids: vec![],
+            input: field.input.clone(),
+            ..draft.clone()
+        })
+        .await
+        .unwrap();
+    assert!(matches!(
+        writer
+            .prepare_recursive_invocation(action.id, "stable-call")
+            .await,
+        Err(GraphError::Forbidden(_))
+    ));
+    writer.add_action(&draft).await.unwrap();
+    drop(writer);
+    drop(database);
+    let reopened = GraphDatabase::open(file.path()).await.unwrap();
+    let writer = reopened.writer_for_subgraph(parent.id).await.unwrap();
+    assert_eq!(
+        writer
+            .prepare_recursive_invocation(action.id, "stable-call")
+            .await
+            .unwrap()
+            .1,
+        original
+    );
+    assert_eq!(writer.action_invocations(action.id).await.unwrap().len(), 1);
+    writer
+        .transition_current(
+            0,
+            "stop-source",
+            CurrentTransition::Stop {
+                reason: "cancelled_by_user".into(),
+            },
+        )
+        .await
+        .unwrap();
+    assert!(
+        writer
+            .prepare_recursive_invocation(action.id, "stable-call")
+            .await
+            .is_err()
+    );
 }
 
 #[tokio::test]
 async fn conversation_inventory_excludes_calls_from_reused_nodes_in_other_threads() {
-    let database = GraphDatabase::in_memory().await.unwrap();
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("shared-inventory.sqlite3");
+    let database = GraphDatabase::open(&path).await.unwrap();
     let project = Some(ProjectId::new(910).unwrap());
     let parent = database
         .create_interaction(project, ThreadId::new(911).unwrap(), "Public conversation")
@@ -957,6 +1089,10 @@ async fn conversation_inventory_excludes_calls_from_reused_nodes_in_other_thread
         .add_action(&callable(node.id, layer.id))
         .await
         .unwrap();
+    let mut single_definition = callable(node.id, layer.id);
+    single_definition.client_key = "global-single".into();
+    single_definition.reusable = Some(false);
+    let single = writer.add_action(&single_definition).await.unwrap();
     writer.complete(parent.id).await.unwrap();
     let (_, own) = writer
         .prepare_user_invocation(invoke.id, "public-call")
@@ -996,18 +1132,67 @@ async fn conversation_inventory_excludes_calls_from_reused_nodes_in_other_thread
         .prepare_user_invocation_in_layer(invoke.id, "private-call", &[], Some(other_layer.id))
         .await
         .unwrap();
+    let (_, private_single) = other_writer
+        .prepare_user_invocation_in_layer(
+            single.id,
+            "private-single-secret",
+            &[],
+            Some(other_layer.id),
+        )
+        .await
+        .unwrap();
+    // Historical accepted Layers can omit a later canonical whole-Node Invoke.
+    // Reconstruct only that projection omission, keeping the accepted definition
+    // and native call unchanged; it must not mint another single activation.
+    let fixture_pool = sqlx::SqlitePool::connect(&format!("sqlite://{}", path.display()))
+        .await
+        .unwrap();
+    sqlx::query("DELETE FROM layer_actions WHERE layer_id=?1 AND action_id=?2")
+        .bind(layer.id.value())
+        .bind(single.id.value())
+        .execute(&fixture_pool)
+        .await
+        .unwrap();
+    fixture_pool.close().await;
+    assert!(
+        !writer
+            .get_layer(layer.id)
+            .await
+            .unwrap()
+            .actions
+            .iter()
+            .any(|action| action.id == single.id)
+    );
     let public = database
         .conversation_graph_snapshot(&[parent.id])
         .await
         .unwrap();
     assert_eq!(public.invocations.len(), 1);
     assert_eq!(public.invocations[0].invocation.id, own.id);
+    assert_eq!(public.exhausted_action_ids, Some(vec![single.id]));
+    assert!(
+        !serde_json::to_string(&public)
+            .unwrap()
+            .contains("private-single-secret")
+    );
     let private = database
         .conversation_graph_snapshot(&[other.id])
         .await
         .unwrap();
-    assert_eq!(private.invocations.len(), 1);
-    assert_eq!(private.invocations[0].invocation.id, foreign.id);
+    assert_eq!(private.invocations.len(), 2);
+    assert!(
+        private
+            .invocations
+            .iter()
+            .any(|call| call.invocation.id == foreign.id)
+    );
+    assert!(
+        private
+            .invocations
+            .iter()
+            .any(|call| call.invocation.id == private_single.id)
+    );
+    assert_eq!(private.exhausted_action_ids, Some(vec![single.id]));
 }
 
 #[tokio::test]

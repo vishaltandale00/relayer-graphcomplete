@@ -15,7 +15,7 @@ const pending = { id: 2, threadId: 10, graphNodeId: 902, sequence: 2, text: "Fol
 function state(turn = null, projection = null) {
   return {
     projects: [], threads: [{ id: 10, title: "Reading context" }],
-    interactions: [source, ...(turn ? [turn] : [])], actionInvocations: [],
+    interactions: [source, ...(turn ? [turn] : [])], invocationInventoryAvailable: true, actionInvocations: [],
     capabilities: { canCompose: true },
     ...(projection ? { currentProjection: { cursor: projection.headRevision, hasMore: false, events: [], states: [projection] } } : {}),
   };
@@ -35,7 +35,7 @@ async function setup({ post, readLayer, invokePost, readSource, readSourceLayer,
       return post ? post.promise : pending;
     }
     if (path === "/api/threads/10" && readSource) return readSource(current);
-    if (path === "/api/threads/10") return { thread: current.threads[0], interactions: current.interactions, actionInvocations: current.actionInvocations };
+    if (path === "/api/threads/10") return { invocationInventoryAvailable: current.invocationInventoryAvailable, thread: current.threads[0], interactions: current.interactions, actionInvocations: current.actionInvocations };
     if (path.includes("/interactions/1/layers/102") && readLayer) return readLayer(path);
     if (path.includes("/interactions/1/layers/101") && readSourceLayer) return readSourceLayer(path);
     if (path.includes("/interactions/1/layers/101")) return current.interactions.find(({ id }) => id === 1).completionOutput.rootLayer;
@@ -76,6 +76,54 @@ function expectOldSelection(nodeId = 11) {
 }
 
 describe("follow-up reading context at the production thread controller", () => {
+  it("uses the server active chat only at startup and preserves a newer composer choice during global refresh", async () => {
+    const snapshot = state(); snapshot.threads[0].active = true;
+    snapshot.threads.push({ id: 20, title: "Another chat", active: false });
+    const another = { ...source, id: 3, threadId: 20, graphNodeId: 903,
+      completionOutput: { rootLayer: layer(301, [31]) } };
+    snapshot.interactions.push(another);
+    requestImplementation = vi.fn(async path => {
+      if (path.startsWith("/api/state?")) return snapshot;
+      throw new Error(`Unexpected request: ${path}`);
+    });
+    await controller.refreshState(null);
+    expect(controller.viewState.currentThreadId).toBe(10);
+    expectOldSelection();
+
+    const lateGlobalRead = deferred();
+    requestImplementation.mockImplementationOnce(() => lateGlobalRead.promise);
+    const refreshing = controller.refreshState(null);
+    // The real new-chat entry point cancels reading intent before clearing selection.
+    controller.cancelNavigationHistory();
+    const scope = { kind: "project", projectId: 7, label: "My project" };
+    Object.assign(controller.viewState, { currentThreadId: null, currentInteractionId: null,
+      mainView: "new", selectedScope: scope });
+    lateGlobalRead.resolve(snapshot);
+    await refreshing;
+    await controller.refreshState();
+    expect(controller.viewState.currentThreadId).toBeNull();
+    expect(controller.viewState.currentInteractionId).toBeNull();
+    expect(controller.viewState.mainView).toBe("new");
+    expect(controller.viewState.selectedScope).toEqual(scope);
+    expect(controller.appState.visibleLayer).toBeNull();
+    expect(controller.appState.threads[0].active).toBe(true);
+
+    await controller.loadThread(20);
+    expect(controller.viewState.currentThreadId).toBe(20);
+    expect(controller.viewState.currentInteractionId).toBe(3);
+    expect(controller.appState.visibleLayer).toEqual(another.completionOutput.rootLayer);
+    expect(controller.viewState.selectedNodeId).toBe(31);
+  });
+
+  it("missing inventory stays unknown after state refresh and refuses Invoke before POST", async () => {
+    const initial = state(); delete initial.invocationInventoryAvailable;
+    await setup({ initialState: initial });
+    expect(controller.appState.invocationInventoryAvailable).toBe(false);
+    expect(await controller.invokeAction({ id: 777, sourceNodeId: 11, kind: "invoke", state: "accepted", reusable: false })).toBeNull();
+    expect(requestImplementation.mock.calls.some(([path, options]) => path.endsWith("/invoke") && options?.method === "POST")).toBe(false);
+    expect(controller.appState.pendingTurn).toBeNull();
+  });
+
   it("preserves reading until accepted output exists, then opens its first node", async () => {
     const fixture = await setup();
     await controller.submitInteraction("Follow-up", modelSelection);
@@ -145,7 +193,7 @@ describe("follow-up reading context at the production thread controller", () => 
     const other = { ...source, id: 3, threadId: 20, completionOutput: { rootLayer: resultLayer } };
     requestImplementation = vi.fn(async (path, options) => {
       if (path === "/api/threads/20") return ownerLoad.promise;
-      if (path === "/api/threads/10") return { thread: { id: 10 }, interactions: [source, pending], actionInvocations: [] };
+      if (path === "/api/threads/10") return { thread: { id: 10 }, interactions: [source, pending], invocationInventoryAvailable: true, actionInvocations: [] };
       if (path.startsWith("/api/state?threadId=20")) return { ...state(), interactions: [other] };
       return baseRequest(path, options);
     });
@@ -154,7 +202,7 @@ describe("follow-up reading context at the production thread controller", () => 
     post.resolve(pending);
     await sending;
     expect(controller.appState.pendingTurn.auto).toBe(false);
-    ownerLoad.resolve({ thread: { id: 20 }, interactions: [other], actionInvocations: [] });
+    ownerLoad.resolve({ thread: { id: 20 }, interactions: [other], invocationInventoryAvailable: true, actionInvocations: [] });
     await selecting;
     await controller.navigateHistory(-1);
     fixture.setState(state({ ...pending, completionStatus: "accepted", completionOutput: { rootLayer: resultLayer } }));

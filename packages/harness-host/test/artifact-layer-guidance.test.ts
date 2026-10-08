@@ -14,12 +14,15 @@ describe("artifact layer guidance", () => {
   ])("teaches the %s client to author and open an artifact layer", (_language, guidance, layer, artifact) => {
     expect(guidance).toContain(layer);
     expect(guidance).toContain(artifact);
-    for (const kind of ["website", "pdf", "video", "image", "markdown", "url", "app"]) expect(guidance).toContain(`"${kind}"`);
+    for (const kind of ["website", "pdf", "video", "image", "markdown", "docx", "xlsx", "pptx", "url", "app"]) expect(guidance).toContain(`"${kind}"`);
     expect(guidance).toContain("relative to the thread folder and must stay inside it");
     expect(guidance).toContain("never put an artifact node in a graph layer");
     expect(guidance).toContain("again when your answer is accepted");
     expect(guidance).toContain("approves it once per thread");
     expect(guidance).toContain("Seeds hold test values only");
+    // ART-012: spreadsheets keep calculated values; decks with charts get a PDF.
+    expect(guidance).toContain("Save spreadsheets with their calculated values");
+    expect(guidance).toContain("export a PDF next to any deck with charts");
   });
 
   it("reaches every product harness prompt and the Python skill", async () => {
@@ -32,5 +35,6 @@ describe("artifact layer guidance", () => {
     expect(claude).toContain("buildLayeredNavigationPrompt");
     expect(skill).toContain("LayerObject.for_artifact(site");
     expect(skill).toContain('"kind": "app"');
+    expect(skill.replace(/\s+/gu, " ")).toContain("Save spreadsheets with their calculated values");
   });
 });

@@ -44,6 +44,7 @@ describe("artifact layers", () => {
   it("address the file and the part shown", () => {
     expect(artifactAddress(site)).toBe("site/index.html#pricing");
     expect(artifactAddress({ kind: "pdf", source: { file: "docs/brief.pdf" }, part: { page: 4 } })).toBe("docs/brief.pdf · page 4");
+    expect(artifactAddress({ kind: "pptx", source: { file: "docs/pitch.pptx" }, part: { slide: 3 } })).toBe("docs/pitch.pptx · slide 3");
     expect(artifactAddress({ kind: "video", source: { file: "media/promo.mp4" }, part: { start: 10, end: 75 } })).toBe("media/promo.mp4 · 0:10–1:15");
     expect(artifactAddress({ kind: "markdown", source: { file: "docs/guide.md" }, part: { heading: "Colour" } })).toBe("docs/guide.md · Colour");
     expect(artifactAddress({ kind: "url", source: { url: "https://example.com/" } })).toBe("https://example.com/");

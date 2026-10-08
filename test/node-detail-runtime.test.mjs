@@ -1085,7 +1085,7 @@ describe("compiled Node Detail product runtime", () => {
     const node = { id: 7, clientKey: "authored-node", kind: "concept", icon: "box", title: "Authored node", detail: "Legacy fallback", authoredDetail: detail };
     const actions = [
       { id: 11, clientKey: "expand-action", sourceNodeId: 7, sourceLayerId: 10, sourceLayerClientKey: "original-layer", kind: "navigate", relation: "expand", targetLayerId: 91 },
-      { id: 12, clientKey: "invoke-action", sourceNodeId: 7, sourceLayerId: 10, sourceLayerClientKey: "original-layer", kind: "invoke", interactionText: "Investigate" },
+      { id: 12, clientKey: "invoke-action", sourceNodeId: 7, sourceLayerId: 10, sourceLayerClientKey: "original-layer", kind: "invoke", state: "accepted", reusable: false, interactionText: "Investigate" },
       { id: 13, clientKey: "input-action", sourceNodeId: 7, sourceLayerId: 10, sourceLayerClientKey: "original-layer", kind: "input", control: "text", prompt: "Draft answer" },
     ];
     const layer = {
@@ -1112,6 +1112,7 @@ describe("compiled Node Detail product runtime", () => {
         families: [],
       },
       modelCatalog: [],
+      invocationInventoryAvailable: true,
       actionInvocations: [],
       pendingActionInvocations: [],
       inputDraftRevision: 99,

@@ -14,7 +14,7 @@ export function isRejectedActionPreparation(call) {
 }
 
 export function recoverableActionInvocation(invocations = [], sourceInteractionId, actionId) {
-  return invocations.find(call => String(call.sourceInteractionId) === String(sourceInteractionId)
+  return invocations.find(call => call.graphOnly !== true && String(call.sourceInteractionId) === String(sourceInteractionId)
     && String(call.actionId) === String(actionId)
     && call.preparationRecoverable === true
     && ["not_started", "submitted", "failed"].includes(call.resultCompletionStatus)
@@ -22,14 +22,17 @@ export function recoverableActionInvocation(invocations = [], sourceInteractionI
 }
 
 export function recoverActionInvocation(invocations, sourceInteractionId, actionId, invocationKey) {
-  return invocations.find((call) => String(call.sourceInteractionId) === String(sourceInteractionId)
+  return invocations.find((call) => call.graphOnly !== true && String(call.sourceInteractionId) === String(sourceInteractionId)
     && String(call.actionId) === String(actionId)
     && (isDurableActionInvocation(call) || call.invocationKey ? call.invocationKey === invocationKey : true));
 }
 
 export function mergeActionInvocation(invocations, next) {
   return [...invocations.filter((call) => isDurableActionInvocation(next) || next.invocationKey
-    ? String(call.resultInteractionId) !== String(next.resultInteractionId)
+    ? (next.graphOnly === true || call.graphOnly === true
+      ? !(String(call.sourceInteractionId) === String(next.sourceInteractionId)
+        && String(call.actionId) === String(next.actionId) && call.invocationKey === next.invocationKey)
+      : String(call.resultInteractionId) !== String(next.resultInteractionId))
     : !(String(call.sourceInteractionId) === String(next.sourceInteractionId) && String(call.actionId) === String(next.actionId))), next];
 }
 
@@ -66,7 +69,7 @@ export function singleCallResultDestination(state, action, node, actions) {
 }
 
 export function actionCanRetry(invocations = [], actionId) {
-  return invocations.some(invocation => String(invocation.actionId) === String(actionId)
+  return invocations.some(invocation => invocation.graphOnly !== true && String(invocation.actionId) === String(actionId)
     && (isDurableActionInvocation(invocation) || invocation.invocationKey
       ? Boolean(recoverableActionInvocation([invocation], invocation.sourceInteractionId, actionId))
       : invocation.resultCompletionStatus === "submitted"));

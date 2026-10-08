@@ -1233,7 +1233,7 @@ async fn accepted_closures(
         .conversation_graph_snapshot(&input.interaction_node_ids)
         .await?;
     Ok(Json(
-        json!({"closures": snapshot.closures, "invocations": snapshot.invocations, "boundInputs": snapshot.bound_inputs}),
+        json!({"closures": snapshot.closures, "invocations": snapshot.invocations, "boundInputs": snapshot.bound_inputs, "exhaustedActionIds": snapshot.exhausted_action_ids, "exhaustedActionSources": snapshot.exhausted_action_sources}),
     ))
 }
 

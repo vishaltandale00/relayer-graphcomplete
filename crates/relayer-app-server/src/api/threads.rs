@@ -371,7 +371,17 @@ pub(super) async fn get(
         &std::collections::HashSet::from_iter(detail.thread.imported.then_some(detail.thread.id)),
     )
     .await;
-    let invocations = project_action_invocations(&state, &detail.action_invocations).await?;
+    let sources = if detail.thread.imported {
+        Vec::new()
+    } else {
+        detail
+            .interactions
+            .iter()
+            .filter_map(|row| row.graph_node_id.map(|node| (row.id, node, row.thread_id)))
+            .collect::<Vec<_>>()
+    };
+    let (invocations, inventory_available) =
+        project_local_invocations(&state, &detail.action_invocations, &sources).await?;
     let imported_history = project_imported_invocation_history(&state, detail.thread.id).await?;
     let imported_thread = detail.thread.imported;
     let mut completion_executions = std::collections::HashMap::new();
@@ -396,6 +406,7 @@ pub(super) async fn get(
         .conversation_compatibility(detail.thread.id)
         .await?;
     let response = ThreadDetailResponse::from(detail)
+        .with_invocation_inventory_available(inventory_available)
         .with_action_invocations(invocations)
         .with_imported_invocation_history(imported_history)
         .with_conversation_compatibility(Some(compatibility))
@@ -871,6 +882,160 @@ pub(super) async fn project_action_invocations(
         responses.push(response);
     }
     Ok(responses)
+}
+
+/// Join read-only native calls only to genuine Product identities in this view.
+/// Global occupancy reveals only visible action IDs, never foreign call data.
+pub(super) async fn project_local_invocations(
+    state: &ApiState,
+    invocations: &[crate::product::ActionInvocation],
+    sources: &[(InteractionId, i64, ThreadId)],
+) -> Result<(Vec<ActionInvocationResponse>, bool), ApiError> {
+    let mut responses = project_action_invocations(state, invocations).await?;
+    if sources.is_empty() {
+        return Ok((responses, true));
+    }
+    let roots = sources.iter().map(|(_, node, _)| *node).collect::<Vec<_>>();
+    let Some(runtime) = &state.runtime else {
+        return Ok((responses, false));
+    };
+    let deadline = super::interaction_graph::projection_deadline();
+    let snapshot =
+        match tokio::time::timeout_at(deadline, runtime.local_invocation_inventory(&roots)).await {
+            Ok(Ok(snapshot)) => snapshot,
+            _ => return Ok((responses, false)),
+        };
+    if snapshot.invocations.iter().any(|native| {
+        let call = &native.invocation;
+        native.source_action.id != call.source_action_id
+            || native.source_action.source_node_id != call.parent_node_id
+            || native.parent_node.id != call.parent_node_id
+            || call.state.completion_id != call.child_interaction_node_id
+            || call.action_snapshot.get("actionId").and_then(Value::as_i64)
+                != Some(call.source_action_id.value())
+            || call
+                .action_snapshot
+                .get("sourceNodeId")
+                .and_then(Value::as_i64)
+                != Some(call.parent_node_id.value())
+            || native.current.as_ref().is_some_and(|current| {
+                current.node_id != call.child_interaction_node_id
+                    || Some(current.root_layer_id) != call.state.current_layer_id
+            })
+    }) {
+        return Ok((responses, false));
+    }
+    for native in snapshot.invocations {
+        let call = &native.invocation;
+        let Some((source_id, _, source_thread)) = sources
+            .iter()
+            .find(|(_, node, _)| *node == call.source_completion_id.value())
+        else {
+            continue;
+        };
+        // Product owns launch receipts. An exact existing Product row wins.
+        if responses.iter().any(|row| {
+            row.source_interaction_id == source_id.value()
+                && row.action_id == call.source_action_id.value()
+                && row.invocation_key == call.invocation_key
+                && (row.durable || row.preparation_recoverable)
+        }) {
+            continue;
+        }
+        let result_id = sources
+            .iter()
+            .find(|(_, node, thread)| {
+                *node == call.child_interaction_node_id.value() && thread == source_thread
+            })
+            .map(|(id, _, _)| id.value());
+        let status = match call.state.lifecycle {
+            relayer_graph_core::CompletionLifecycle::Active if call.state.head_revision == 0 => {
+                "not_started"
+            }
+            relayer_graph_core::CompletionLifecycle::Active => "running",
+            relayer_graph_core::CompletionLifecycle::Succeeded => "accepted",
+            relayer_graph_core::CompletionLifecycle::Stopped => "stopped",
+            relayer_graph_core::CompletionLifecycle::Failed => "failed",
+        };
+        responses.push(ActionInvocationResponse {
+            preparation_recoverable: false,
+            preparation_rejected: false,
+            presenting_layer_id: call
+                .action_snapshot
+                .get("presentingLayerId")
+                .and_then(Value::as_i64),
+            durable: true,
+            reusable: call
+                .action_snapshot
+                .get("reusable")
+                .and_then(Value::as_bool),
+            invocation_key: call.invocation_key.clone(),
+            source_interaction_id: source_id.value(),
+            action_id: call.source_action_id.value(),
+            result_interaction_id: result_id,
+            result_completion_status: status.into(),
+            created_at: String::new(),
+            agent_invoked: call
+                .action_snapshot
+                .get("activator")
+                .and_then(Value::as_str)
+                == Some("agent"),
+            graph_only: true,
+            occupancy_only: false,
+            native_invocation: Some(native),
+            execution: None,
+        });
+    }
+    for closure in snapshot.closures.iter().flatten() {
+        let Some((source_id, _, _)) = sources
+            .iter()
+            .find(|(_, node, _)| *node == closure.node_id.value())
+        else {
+            continue;
+        };
+        for occupied in snapshot
+            .exhausted_action_sources
+            .as_ref()
+            .into_iter()
+            .flatten()
+        {
+            let action_id = occupied.action_id;
+            if responses.iter().any(|row| {
+                row.action_id == action_id.value()
+                    && !row.preparation_rejected
+                    && (row.durable || row.preparation_recoverable)
+            }) {
+                continue;
+            }
+            if !closure.layers.iter().any(|layer| {
+                layer
+                    .nodes
+                    .iter()
+                    .any(|node| node.id == occupied.source_node_id)
+            }) {
+                continue;
+            }
+            responses.push(ActionInvocationResponse {
+                preparation_recoverable: false,
+                preparation_rejected: false,
+                presenting_layer_id: None,
+                durable: true,
+                reusable: Some(false),
+                invocation_key: String::new(),
+                source_interaction_id: source_id.value(),
+                action_id: action_id.value(),
+                result_interaction_id: None,
+                result_completion_status: "unavailable".into(),
+                created_at: String::new(),
+                agent_invoked: false,
+                graph_only: true,
+                occupancy_only: true,
+                native_invocation: None,
+                execution: None,
+            });
+        }
+    }
+    Ok((responses, true))
 }
 
 pub(super) async fn create_interaction(
@@ -3537,6 +3702,19 @@ async fn invoke_action_with_authority(
         let invocation_key = prior
             .map(|prior| prior.invocation.invocation_key.as_str())
             .unwrap_or(invocation_key);
+        // A native prepared call is not a Product user launch receipt. Existing
+        // graph-owned keys can be read natively, but cannot be adopted by a new
+        // human reservation, including after the author repairs its definition.
+        if prior.is_none()
+            && !runtime
+                .native_invocation_key_absent(graph_node_id, invocation_key)
+                .await?
+        {
+            return Err(ApiError::conflict(
+                "invocation_owned_by_graph",
+                "This prepared call has no matching user reservation.",
+            ));
+        }
         let frozen_layer = match prior {
             Some(prior) => {
                 state
@@ -3640,7 +3818,7 @@ async fn invoke_action_with_authority(
                     ..
                 } = &error
                     && runtime
-                        .native_invocation_key_absent(graph_node_id, action_id, invocation_key)
+                        .native_invocation_request_absent(graph_node_id, action_id, invocation_key)
                         .await
                         .unwrap_or(false)
                 {
@@ -3656,6 +3834,58 @@ async fn invoke_action_with_authority(
                 return Err(error.into());
             }
         };
+        // Close a key collision between the absence read and native preparation.
+        // Only the originally frozen human preparation may be bound/launched;
+        // a graph-owned child retains its activator and execution ownership.
+        let proof = runtime.local_invocation_inventory(&[graph_node_id]).await?;
+        let frozen = proof.invocations.iter().find(|entry| {
+            let call = &entry.invocation;
+            call.source_completion_id.value() == graph_node_id
+                && call.source_action_id.value() == action_id
+                && call.invocation_key == invocation_key
+                && call.child_interaction_node_id.value() == node
+        });
+        let Some(frozen) = frozen else {
+            state
+                .product
+                .fail_interaction_completion(
+                    reservation.interaction.id,
+                    &thread.harness_configuration_name,
+                    "Complete native inventory omitted the prepared user call.",
+                )
+                .await?;
+            return Err(ApiError::conflict(
+                "invocation_preparation_unverified",
+                "Native user preparation could not be verified.",
+            ));
+        };
+        if frozen
+            .invocation
+            .action_snapshot
+            .get("activator")
+            .and_then(Value::as_str)
+            != Some("human")
+            || frozen
+                .invocation
+                .action_snapshot
+                .get("instruction")
+                .and_then(Value::as_str)
+                .map(str::trim)
+                != Some(reservation.interaction.text.trim())
+        {
+            state
+                .product
+                .fail_interaction_completion(
+                    reservation.interaction.id,
+                    &thread.harness_configuration_name,
+                    "Native prepared call ownership does not match the user reservation.",
+                )
+                .await?;
+            return Err(ApiError::conflict(
+                "invocation_owned_by_graph",
+                "The frozen native call does not belong to this user reservation.",
+            ));
+        }
         let mut outcome = state
             .product
             .invoke_user_durable_action_with_inputs(

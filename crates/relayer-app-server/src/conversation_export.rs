@@ -31,6 +31,8 @@ pub const MAX_NODES_PER_LAYER: usize = 8;
 pub const MAX_EDGES_PER_LAYER: usize = 28;
 pub const MAX_ACTIONS_PER_LAYER: usize = 64;
 pub const MAX_SUBMITTED_INPUTS_PER_TURN: usize = 256;
+/// JSON consumers must retain an Invocation head without numeric precision loss.
+pub const MAX_PORTABLE_HEAD_REVISION: u64 = 9_007_199_254_740_991;
 pub const MAX_STRING_BYTES: usize = 4 * 1024 * 1024;
 pub const MAX_PERMISSION_RECEIPT_BYTES: usize = 64 * 1024;
 
@@ -952,6 +954,10 @@ impl ConversationExportValidator {
                     )
                 })?;
             if call.result_turn_id.as_deref() != Some(turn.id.as_str())
+                // Product stores required interaction text trimmed, while the
+                // native frozen instruction remains exact historical content.
+                || (turn.text != call.source.instruction
+                    && turn.text != call.source.instruction.trim())
                 || (call.lifecycle == "succeeded"
                     && (turn.completion.status != ExportCompletionStatus::Accepted
                         || turn.accepted_view.is_none()))
@@ -968,7 +974,7 @@ impl ConversationExportValidator {
                 return Err(ExportValidationError::new(
                     "invocation_result_mismatch",
                     &path,
-                    "Invocation result turn must match its exact child and Returned layer.",
+                    "Invocation result turn must match its frozen instruction, exact child and Returned layer.",
                 ));
             }
         } else if self
@@ -1958,6 +1964,23 @@ fn validate_invocation_inventory(
                 "invocation_identity_invalid",
                 &path,
                 "Calls require distinct identities/children and supported schema, source state, and lifecycle.",
+            ));
+        }
+        if call.head_revision > MAX_PORTABLE_HEAD_REVISION {
+            return Err(ExportValidationError::new(
+                "invocation_head_revision_invalid",
+                &path,
+                "Invocation head revision must be a JSON-safe integer.",
+            ));
+        }
+        if let Some(description) = &call.source.description {
+            require_string(description, format!("{path}.source.description"))?;
+        }
+        if (call.source.variant == ExportActionVariant::Card) != call.source.description.is_some() {
+            return Err(ExportValidationError::new(
+                "invocation_source_invalid",
+                &path,
+                "Only card sources require a nonempty description.",
             ));
         }
         require_string(&call.source.instruction, &path)?;

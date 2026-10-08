@@ -12,6 +12,9 @@ const EXTENSIONS: Readonly<Record<string, readonly string[]>> = {
   video: [".mp4", ".webm", ".mov"],
   image: [".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg"],
   markdown: [".md", ".markdown"],
+  docx: [".docx"],
+  xlsx: [".xlsx"],
+  pptx: [".pptx"],
 };
 
 /** A site root is fingerprinted file by file; these bounds keep that honest. */

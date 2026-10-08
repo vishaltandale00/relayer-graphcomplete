@@ -7,6 +7,7 @@ import { createRelayerIcon } from "./product-workspace/icons.js";
 
 const KIND_LABELS = Object.freeze({
   website: "Website", pdf: "PDF", video: "Video", image: "Image", markdown: "Markdown", url: "Deployed site", app: "Web app",
+  docx: "Word", xlsx: "Excel", pptx: "PowerPoint",
 });
 const STRIP_HEIGHT = 26;
 const TOOLBAR_HEIGHT = 46;
@@ -57,7 +58,8 @@ export function artifactAddress(artifact) {
   const detail = artifact?.kind === "pdf" && part.page ? ` · page ${part.page}`
     : artifact?.kind === "video" && Number.isFinite(part.start) && Number.isFinite(part.end) ? ` · ${time(part.start)}–${time(part.end)}`
       : artifact?.kind === "markdown" && part.heading ? ` · ${part.heading}`
-        : "";
+        : artifact?.kind === "pptx" && part.slide ? ` · slide ${part.slide}`
+          : "";
   return `${file}${artifact?.kind === "website" ? route : ""}${detail}`;
 }
 

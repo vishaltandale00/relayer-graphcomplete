@@ -13,7 +13,7 @@ mod writer;
 pub use completion::CompletionCrashPoint;
 pub use completion::{
     AcceptedGraphClosure, AcceptedGraphPublication, CompletionOutput, ConversationGraphSnapshot,
-    InvocationGraphSnapshot, current_transition_request_digest,
+    ExhaustedInvocationAction, InvocationGraphSnapshot, current_transition_request_digest,
 };
 pub use database::{DEFAULT_IMPORT_INDEX_BUDGET, DEFAULT_SEARCH_INDEX_BUDGET, GraphDatabase};
 pub use import::{

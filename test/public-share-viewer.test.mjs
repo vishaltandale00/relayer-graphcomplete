@@ -184,6 +184,7 @@ function reusableInvocationRecords() {
     arguments: [{ source: { interactionNodeId: "node:interaction", layerId: "layer:root", actionId: "action:input", nodeId: "node:root" }, action: { control: "text", prompt: "Destination" }, value: { kind: "text", text: destination } }],
     current: { rootLayerId: turn.acceptedView.rootLayerId, layers: structuredClone(turn.acceptedView.layers) },
   });
+  records[2].text = "Continue";
   records[2].origin = { kind: "invocation", invocationId: "invocation:lisbon" };
   const kyoto = structuredClone(records[2]);
   kyoto.id = "turn:3"; kyoto.sequence = 3; kyoto.interactionNodeId = "node:kyoto-interaction";
@@ -358,6 +359,7 @@ describe("V4 inert reusable Invocation snapshots", () => {
     records[0].invocations[1].source.captureState = "draft";
     records[0].invocations[1].source.state = "draft";
     records[0].invocations[1].source.instruction = "Repaired comparison instruction";
+    records[3].text = "Repaired comparison instruction";
     records[0].invocations[1].source.parentNodeId = "node:repaired-parent";
     records[0].invocations[1].source.layerId = "layer:repaired-source";
     records[0].invocations[1].arguments[0].source.nodeId = "node:repaired-parent";
@@ -1612,6 +1614,89 @@ describe("artifact layers in a shared snapshot (ART-008)", () => {
     } finally {
       Object.assign(globalThis, previous);
       await windowRef.close();
+    }
+  });
+});
+
+
+describe("V4 Rust/browser portable boundary concordance", () => {
+  function boundRecords(count, prepared = true) {
+    const records = reusableInvocationRecords();
+    const root = records[1].acceptedView.layers[0];
+    const question = root.actions.find(action => action.kind === "input");
+    root.actions = root.actions.filter(action => action !== question);
+    const inputs = Array.from({ length: count }, (_, index) => ({ ...structuredClone(question), id: `action:question-${index}` }));
+    records[0].boundInputs = inputs;
+    const bindings = inputs.map(input => input.id);
+    root.actions.find(action => action.kind === "invoke").inputActionIds = bindings;
+    records[0].invocations = prepared ? records[0].invocations.slice(0, 1) : [];
+    records[0].turns = records[0].turns.slice(0, prepared ? 2 : 1);
+    records.splice(prepared ? 3 : 2);
+    if (prepared) {
+      const call = records[0].invocations[0];
+      call.source.inputActionIds = bindings;
+      call.arguments = inputs.map(input => ({ source: { interactionNodeId: call.source.interactionNodeId, layerId: "layer:root", actionId: input.id, nodeId: input.sourceNodeId }, action: input.input, value: { kind: "text", text: "Lisbon" } }));
+    }
+    return records;
+  }
+  it.each([65, 256, 257])("keeps Input binding IDs independent of per-Layer action membership (%s)", count => {
+    const uncalled = parsePublicSnapshot(recordsJsonl(boundRecords(count, false)));
+    expect(uncalled.header.boundInputs).toHaveLength(count);
+    expect(uncalled.interactions[0].completionOutput.rootLayer.actions).toHaveLength(2);
+    const prepared = boundRecords(count);
+    if (count === 257) expect(() => parsePublicSnapshot(recordsJsonl(prepared))).toThrow(expect.objectContaining({ code: "invocation_arguments_invalid" }));
+    else expect(parsePublicSnapshot(recordsJsonl(prepared)).header.invocations[0].arguments).toHaveLength(count);
+    if (count === 65) {
+      const overfull = boundRecords(65, false);
+      overfull[1].acceptedView.layers[0].actions.push(...overfull[0].boundInputs);
+      expect(() => parsePublicSnapshot(recordsJsonl(overfull))).toThrow(expect.objectContaining({ code: "layer_member_limit" }));
+    }
+  });
+  it("retains safe heads and exact card presentation while refusing unreadable frozen sources", () => {
+    const records = reusableInvocationRecords();
+    const call = records[0].invocations[0];
+    call.headRevision = Number.MAX_SAFE_INTEGER;
+    call.source.variant = "card"; call.source.description = "Frozen card explanation";
+    expect(parsePublicSnapshot(recordsJsonl(records)).header.invocations[0].source.description).toBe(call.source.description);
+    for (const patch of [{ headRevision: Number.MAX_SAFE_INTEGER + 1 }, { source: { ...call.source, description: null } }, { source: { ...call.source, variant: "pill" } }, { source: { ...call.source, description: " " } }]) {
+      const invalid = structuredClone(records); Object.assign(invalid[0].invocations[0], patch);
+      expect(() => parsePublicSnapshot(recordsJsonl(invalid))).toThrow();
+    }
+  });
+  it("uses native whitespace emptiness without rewriting canonical or frozen BOM-only text", () => {
+    const records = reusableInvocationRecords();
+    const invoke = records[1].acceptedView.layers[0].actions.find(action => action.kind === "invoke");
+    const call = records[0].invocations[0];
+    records[0].conversation.title = "\ufeff";
+    Object.assign(invoke, { interactionText: "\ufeff", variant: "card", description: "\ufeff" });
+    Object.assign(call.source, { instruction: "\ufeff", variant: "card", description: "\ufeff" });
+    records[2].text = "\ufeff";
+    const parsed = parsePublicSnapshot(recordsJsonl(records));
+    expect(parsed.header.conversation.title).toBe("\ufeff");
+    expect(parsed.header.invocations[0].source.instruction).toBe("\ufeff");
+    expect(parsed.layersByTurn.get("turn:1").get("layer:root").actions.find(action => action.kind === "invoke").description).toBe("\ufeff");
+    for (const field of ["title", "canonicalInstruction", "canonicalDescription", "frozenInstruction", "frozenDescription"]) {
+      const invalid = structuredClone(records);
+      const action = invalid[1].acceptedView.layers[0].actions.find(action => action.kind === "invoke");
+      if (field === "title") invalid[0].conversation.title = "\u0085";
+      else if (field === "canonicalInstruction") action.interactionText = "\u0085";
+      else if (field === "canonicalDescription") action.description = "\u0085";
+      else if (field === "frozenInstruction") invalid[0].invocations[0].source.instruction = "\u0085";
+      else invalid[0].invocations[0].source.description = "\u0085";
+      expect(() => parsePublicSnapshot(recordsJsonl(invalid))).toThrow(expect.objectContaining({ code: "string_invalid" }));
+    }
+  });
+  it("joins result text to the raw or Product Unicode White_Space-trimmed frozen instruction", () => {
+    for (const instruction of ["\u0085\u2003 Continue [project]/private.txt \u0085", "\ufeffContinue [project]/private.txt\ufeff", "Cafe\u0301"]) {
+      const records = reusableInvocationRecords();
+      const call = records[0].invocations[0]; call.source.instruction = instruction;
+      const result = records.find(turn => turn.id === call.resultTurnId);
+      for (const text of [instruction, instruction.replace(/^\p{White_Space}+|\p{White_Space}+$/gu, "")]) {
+        result.text = text;
+        expect(parsePublicSnapshot(recordsJsonl(records)).header.invocations[0].source.instruction).toBe(instruction);
+      }
+      result.text = instruction.includes("\ufeff") ? instruction.trim() : instruction === "Cafe\u0301" ? "Café" : "A contradictory instruction";
+      expect(() => parsePublicSnapshot(recordsJsonl(records))).toThrow(expect.objectContaining({ code: "invocation_result_mismatch" }));
     }
   });
 });

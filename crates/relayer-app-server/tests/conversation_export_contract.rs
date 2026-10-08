@@ -430,6 +430,163 @@ fn v4_preserves_uncalled_explicit_input_bindings_and_rejects_wrong_source() {
     assert_rejected_with_parity(&fixture, "invoke_input_binding_unresolved");
 }
 
+// Mirror the public reader's resource-bound scenarios. Definitions outside Layer
+// membership remain canonical; binding IDs are not Layer action membership.
+#[test]
+fn v4_bindings_are_not_layer_membership_but_prepared_arguments_are_bounded() {
+    for count in [65, 256, 257] {
+        let mut fixture = records();
+        let inputs = (0..count)
+            .map(|index| input(&format!("action:question-{index}"), "node:1", "layer:1"))
+            .collect::<Vec<_>>();
+        let ids = inputs
+            .iter()
+            .map(|input| input.id.clone())
+            .collect::<Vec<_>>();
+        let ConversationExportRecord::Header(header) = &mut fixture[0] else {
+            unreachable!()
+        };
+        header.export_version = EXPORT_VERSION_V4;
+        header.bound_inputs = inputs.clone();
+        let ConversationExportRecord::Turn(turn) = &mut fixture[1] else {
+            unreachable!()
+        };
+        let root = &mut turn.accepted_view.as_mut().unwrap().layers[0];
+        root.actions
+            .iter_mut()
+            .find(|action| action.kind == ExportActionKind::Invoke)
+            .unwrap()
+            .input_action_ids = ids.clone();
+        validate_export_records(&fixture).unwrap();
+        assert_validation_parity(&fixture);
+        let mut call = reusable_call("invocation:many", "node:call-many");
+        call.source.input_action_ids = ids;
+        call.arguments = inputs
+            .iter()
+            .map(|input| ExportInvocationArgument {
+                source: ExportInputSource {
+                    interaction_node_id: "node:interaction-1".into(),
+                    layer_id: "layer:1".into(),
+                    action_id: input.id.clone(),
+                    node_id: input.source_node_id.clone(),
+                },
+                action: input.input.clone().unwrap(),
+                value: ExportSubmittedInputValue::Text {
+                    text: "Lisbon".into(),
+                },
+            })
+            .collect();
+        let ConversationExportRecord::Header(header) = &mut fixture[0] else {
+            unreachable!()
+        };
+        header.invocations = vec![call];
+        if count == 257 {
+            assert_rejected_with_parity(&fixture, "invocation_arguments_invalid");
+        } else {
+            validate_export_records(&fixture).unwrap();
+            assert_validation_parity(&fixture);
+        }
+    }
+}
+
+#[test]
+fn v4_frozen_presentation_and_head_revision_match_portable_json_readers() {
+    let mut fixture = records();
+    let ConversationExportRecord::Header(header) = &mut fixture[0] else {
+        unreachable!()
+    };
+    header.export_version = EXPORT_VERSION_V4;
+    let mut call = reusable_call("invocation:card", "node:card-call");
+    call.head_revision = MAX_PORTABLE_HEAD_REVISION;
+    call.source.variant = ExportActionVariant::Card;
+    call.source.description = Some("Frozen card explanation".into());
+    header.invocations = vec![call];
+    validate_export_records(&fixture).unwrap();
+    assert_validation_parity(&fixture);
+    let mut unicode = fixture.clone();
+    let ConversationExportRecord::Header(header) = &mut unicode[0] else {
+        unreachable!()
+    };
+    header.conversation.title = "\u{feff}".into();
+    header.invocations[0].source.instruction = "\u{feff}".into();
+    header.invocations[0].source.description = Some("\u{feff}".into());
+    let ConversationExportRecord::Turn(turn) = &mut unicode[1] else {
+        unreachable!()
+    };
+    let invoke = turn.accepted_view.as_mut().unwrap().layers[0]
+        .actions
+        .iter_mut()
+        .find(|action| action.kind == ExportActionKind::Invoke)
+        .unwrap();
+    invoke.interaction_text = Some("\u{feff}".into());
+    invoke.variant = ExportActionVariant::Card;
+    invoke.description = Some("\u{feff}".into());
+    validate_export_records(&unicode).unwrap();
+    assert_validation_parity(&unicode);
+    for field in [
+        "title",
+        "canonicalInstruction",
+        "canonicalDescription",
+        "frozenInstruction",
+        "frozenDescription",
+    ] {
+        let mut invalid = unicode.clone();
+        if field.starts_with("canonical") {
+            let ConversationExportRecord::Turn(turn) = &mut invalid[1] else {
+                unreachable!()
+            };
+            let action = turn.accepted_view.as_mut().unwrap().layers[0]
+                .actions
+                .iter_mut()
+                .find(|action| action.kind == ExportActionKind::Invoke)
+                .unwrap();
+            if field == "canonicalInstruction" {
+                action.interaction_text = Some("\u{85}".into());
+            } else {
+                action.description = Some("\u{85}".into());
+            }
+        } else {
+            let ConversationExportRecord::Header(header) = &mut invalid[0] else {
+                unreachable!()
+            };
+            if field == "title" {
+                header.conversation.title = "\u{85}".into();
+            } else if field == "frozenInstruction" {
+                header.invocations[0].source.instruction = "\u{85}".into();
+            } else {
+                header.invocations[0].source.description = Some("\u{85}".into());
+            }
+        }
+        assert_rejected_with_parity(
+            &invalid,
+            if field == "canonicalInstruction" {
+                "invalid_action_shape"
+            } else {
+                "string_empty"
+            },
+        );
+    }
+    for (change, code) in [
+        ("head", "invocation_head_revision_invalid"),
+        ("missing", "invocation_source_invalid"),
+        ("pill", "invocation_source_invalid"),
+        ("empty", "string_empty"),
+    ] {
+        let mut invalid = fixture.clone();
+        let ConversationExportRecord::Header(header) = &mut invalid[0] else {
+            unreachable!()
+        };
+        let call = &mut header.invocations[0];
+        match change {
+            "head" => call.head_revision += 1,
+            "missing" => call.source.description = None,
+            "pill" => call.source.variant = ExportActionVariant::Pill,
+            _ => call.source.description = Some(" ".into()),
+        }
+        assert_rejected_with_parity(&invalid, code);
+    }
+}
+
 #[test]
 fn v4_call_history_is_not_a_canonical_action_replacement_or_an_authority_carrier() {
     let mut fixture = records();
@@ -697,7 +854,40 @@ fn v4_call_result_requires_an_accepted_turn_and_exact_returned_root() {
             accepted_view: Some(view),
         },
     )));
+    validate_export_records(&fixture).unwrap();
     assert_validation_parity(&fixture);
+    // Rust Product required(text) trims Unicode White_Space, preserving BOM
+    // and Unicode composition. Native frozen text itself is never rewritten.
+    for instruction in [
+        "\u{85}\u{2003} Continue [project]/private.txt \u{85}",
+        "\u{feff}Continue [project]/private.txt\u{feff}",
+        "Cafe\u{301}",
+    ] {
+        let mut whitespace = fixture.clone();
+        let ConversationExportRecord::Header(header) = &mut whitespace[0] else {
+            unreachable!()
+        };
+        header.invocations[0].source.instruction = instruction.into();
+        for text in [instruction, instruction.trim()] {
+            let ConversationExportRecord::Turn(turn) = &mut whitespace[2] else {
+                unreachable!()
+            };
+            turn.text = text.into();
+            validate_export_records(&whitespace).unwrap();
+            assert_validation_parity(&whitespace);
+        }
+        let ConversationExportRecord::Turn(turn) = &mut whitespace[2] else {
+            unreachable!()
+        };
+        turn.text = if instruction.contains('\u{feff}') {
+            "Continue [project]/private.txt".into()
+        } else if instruction == "Cafe\u{301}" {
+            "Café".into()
+        } else {
+            "A contradictory instruction".into()
+        };
+        assert_rejected_with_parity(&whitespace, "invocation_result_mismatch");
+    }
     let mut wrong_root = fixture.clone();
     let ConversationExportRecord::Header(header) = &mut wrong_root[0] else {
         unreachable!()

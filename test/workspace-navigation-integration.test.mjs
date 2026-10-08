@@ -37,6 +37,7 @@ function interaction(id, threadId, layer, sequence = 1) {
 
 function productState(threads, interactions) {
   return {
+    invocationInventoryAvailable: true,
     projects: [],
     threads,
     interactions,
@@ -116,7 +117,7 @@ describe("workspace navigation integration", () => {
     state.actionInvocations = [{ reusable: true, sourceInteractionId: 1, actionId: 501, resultInteractionId: 2, resultCompletionStatus: "accepted" }];
     requestImplementation = vi.fn(async (path) => {
       if (path.startsWith("/api/state?threadId=10")) return state;
-      if (path === "/api/threads/10") return { thread: state.threads[0], interactions: state.interactions, actionInvocations: state.actionInvocations };
+      if (path === "/api/threads/10") return { invocationInventoryAvailable: state.invocationInventoryAvailable, thread: state.threads[0], interactions: state.interactions, actionInvocations: state.actionInvocations };
       if (path.endsWith("/layers/201")) return result;
       throw new Error(`Unexpected request: ${path}`);
     });
@@ -1254,7 +1255,7 @@ describe("workspace navigation integration", () => {
         if (path.startsWith("/api/state?threadId=10")) return retried ? running : submitted;
         if (path.endsWith("/layers/101")) return root;
         if (path.endsWith("/layers/202")) return original;
-        if (path === "/api/threads/10") return { thread: submitted.threads[0], interactions: [source], actionInvocations: submitted.actionInvocations };
+        if (path === "/api/threads/10") return { invocationInventoryAvailable: true, thread: submitted.threads[0], interactions: [source], actionInvocations: submitted.actionInvocations };
         if (path === "/api/threads/10/interactions/1/actions/777/invoke") {
           expect(options).toEqual({ method: "POST", headers: { "Idempotency-Key": durable ? "saved-gesture" : invocationKey }, body: JSON.stringify({ presentingLayerId: durable ? 202 : 101 }) });
           retried = true;
@@ -1540,6 +1541,16 @@ describe("workspace navigation integration", () => {
       if (path.endsWith("/layers/102")) return child;
       throw new Error(`Unexpected request: ${path}`);
     });
+    // Native keys and genuine Product result IDs are separate namespaces.
+    const calls = [
+      { sourceInteractionId: 1, actionId: 502, resultInteractionId: 42, durable: true, invocationKey: "human-key" },
+      { sourceInteractionId: 1, actionId: 502, resultInteractionId: null, durable: true, graphOnly: true, invocationKey: "42" },
+    ];
+    state.actionInvocations = calls;
+    const originalRequest = requestImplementation;
+    requestImplementation = vi.fn(async (path, options) => path === "/api/threads/10"
+      ? { thread: state.threads[0], interactions: [turn], actionInvocations: calls, invocationInventoryAvailable: true }
+      : originalRequest(path, options));
     const controller = await loadModules();
     await controller.loadThread(10);
     await controller.navigateLayer(102, {
@@ -1554,20 +1565,22 @@ describe("workspace navigation integration", () => {
     await controller.navigateHistory(-1);
 
     expect(controller.appState.visibleLayer.layer.id).toBe(102);
+    expect(controller.appState.actionInvocations).toEqual(calls);
     expect(requestImplementation.mock.calls.filter(([path]) => path.endsWith("/layers/102")))
       .toHaveLength(2);
   });
 
-  it("rolls back the presentation without advancing the cursor when application fails", async () => {
+  it.each([true, false])("rolls back the presentation without advancing the cursor when application fails (inventory=%s)", async (priorAvailable) => {
     const turn1 = interaction(1, 10, rootLayer(101, 11));
     const turn2 = interaction(2, 20, rootLayer(201, 21));
     const state1 = productState([{ id: 10, title: "First" }, { id: 20, title: "Second" }], [turn1]);
     const state2 = productState([{ id: 10, title: "First" }, { id: 20, title: "Second" }], [turn2]);
+    state2.invocationInventoryAvailable = priorAvailable;
     requestImplementation = vi.fn(async (path) => {
       if (path.startsWith("/api/state?threadId=10")) return state1;
       if (path.startsWith("/api/state?threadId=20")) return state2;
       if (path === "/api/threads/10") {
-        return { thread: state1.threads[0], interactions: [turn1], actionInvocations: [] };
+        return { thread: state1.threads[0], interactions: [turn1], actionInvocations: [], invocationInventoryAvailable: !priorAvailable };
       }
       throw new Error(`Unexpected request: ${path}`);
     });
@@ -1580,6 +1593,7 @@ describe("workspace navigation integration", () => {
     await expect(controller.navigateHistory(-1, { beforeCommit }))
       .rejects.toThrow("injected render failure");
     expect(beforeCommit).not.toHaveBeenCalled();
+    expect(controller.appState.invocationInventoryAvailable).toBe(priorAvailable);
 
     expect(controller.viewState).toMatchObject({ currentThreadId: 20, currentInteractionId: 2 });
     expect(controller.getNavigationHistory()).toMatchObject({
@@ -1928,7 +1942,7 @@ it.each(["failed", "stopped", "running", "pending"])("navigates to a local %s in
   const state = productState([{ id: 10, title: "Thread" }], [accepted, unfinished]);
   requestImplementation = vi.fn(async (path) => {
     if (path.startsWith("/api/state?threadId=10")) return state;
-    if (path === "/api/threads/10") return { thread: state.threads[0], interactions: state.interactions, actionInvocations: [] };
+    if (path === "/api/threads/10") return { invocationInventoryAvailable: state.invocationInventoryAvailable, thread: state.threads[0], interactions: state.interactions, actionInvocations: [] };
     throw new Error(`Unexpected request: ${path}`);
   });
   const controller = await loadModules();

@@ -68,6 +68,15 @@ pub struct AcceptedGraphClosure {
     pub layers: Vec<ResolvedLayer>,
 }
 
+/// Canonical ownership of a globally spent visible single-call definition.
+/// This conveys occupancy only, never a foreign call identity or payload.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExhaustedInvocationAction {
+    pub action_id: crate::ActionId,
+    pub source_node_id: NodeId,
+}
+
 /// Trusted coherent export inventory; never an execution permit.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -75,6 +84,12 @@ pub struct ConversationGraphSnapshot {
     pub closures: Vec<Option<AcceptedGraphClosure>>,
     pub invocations: Vec<InvocationGraphSnapshot>,
     pub bound_inputs: Vec<GraphAction>,
+    /// Read-only global single-call occupancy for visible accepted definitions;
+    /// contains no foreign call identity, arguments or Current. None means unknown.
+    #[serde(default)]
+    pub exhausted_action_ids: Option<Vec<crate::ActionId>>,
+    #[serde(default)]
+    pub exhausted_action_sources: Option<Vec<ExhaustedInvocationAction>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -202,11 +217,44 @@ pub(crate) async fn read_conversation_snapshot(
         }
         bound_inputs.push(action);
     }
+    let visible_nodes = closures
+        .iter()
+        .flatten()
+        .flat_map(|closure| &closure.layers)
+        .flat_map(|layer| &layer.nodes)
+        .map(|node| node.id.value())
+        .collect::<std::collections::BTreeSet<_>>();
+    let visible_nodes = serde_json::to_string(&visible_nodes)
+        .map_err(|error| GraphError::Internal(error.to_string()))?;
+    // Accepted actions belong to their persistent Node. An older Layer may omit
+    // a later canonical callable; Layer membership is not its reuse policy.
+    let exhausted: Vec<(i64, i64)> = sqlx::query_as(
+        "SELECT a.id,a.source_node_id FROM actions a WHERE a.source_node_id IN (SELECT value FROM json_each(?1))
+         AND a.kind='invoke' AND a.state='accepted' AND a.reusable=0
+         AND EXISTS(SELECT 1 FROM durable_invocations d WHERE d.source_action_id=a.id) ORDER BY a.id",
+    ).bind(visible_nodes).fetch_all(&mut *transaction).await?;
+    let exhausted_action_sources = exhausted
+        .into_iter()
+        .map(|(action, node)| {
+            Ok(ExhaustedInvocationAction {
+                action_id: crate::ActionId::new(action)
+                    .ok_or_else(|| GraphError::Internal("Invalid Invoke identity".into()))?,
+                source_node_id: NodeId::new(node)
+                    .ok_or_else(|| GraphError::Internal("Invalid Invoke source identity".into()))?,
+            })
+        })
+        .collect::<Result<Vec<_>, GraphError>>()?;
+    let exhausted_action_ids = exhausted_action_sources
+        .iter()
+        .map(|source| source.action_id)
+        .collect();
     transaction.commit().await?;
     Ok(ConversationGraphSnapshot {
         closures,
         invocations,
         bound_inputs,
+        exhausted_action_ids: Some(exhausted_action_ids),
+        exhausted_action_sources: Some(exhausted_action_sources),
     })
 }
 

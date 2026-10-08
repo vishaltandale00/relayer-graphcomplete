@@ -815,6 +815,43 @@ impl RuntimeClient {
                 profile_id: command.permission_profile.id.clone(),
                 configuration_name: selected.configuration.name.clone(),
             })?;
+        // Product chronology stores required text trimmed. A prepared native
+        // call instead owns its original byte-exact instruction, including
+        // surrounding whitespace. Recover those frozen bytes for the exact
+        // bound call without reinterpreting a repaired callable definition.
+        let frozen_instruction = if let Some(node_id) = prepared_interaction_node {
+            let metadata = self.interaction_metadata(node_id).await?;
+            let call = metadata.durable_invocation.ok_or_else(|| {
+                RuntimeError::Protocol("prepared interaction has no durable invocation".into())
+            })?;
+            if metadata.node_id != node_id
+                || call.child_interaction_node_id.value() != node_id
+                || command.invocation
+                    != Some(PreparedInvocation {
+                        source_interaction_node_id: call.source_completion_id.value(),
+                        source_action_id: call.source_action_id.value(),
+                    })
+            {
+                return Err(RuntimeError::Protocol(
+                    "prepared invocation provenance mismatch".into(),
+                ));
+            }
+            let instruction = call
+                .action_snapshot
+                .get("instruction")
+                .and_then(Value::as_str)
+                .ok_or_else(|| {
+                    RuntimeError::Protocol("prepared invocation instruction is missing".into())
+                })?;
+            if command.text != instruction && command.text != instruction.trim() {
+                return Err(RuntimeError::Protocol(
+                    "prepared invocation instruction mismatch".into(),
+                ));
+            }
+            Some(instruction.to_owned())
+        } else {
+            None
+        };
         let invocation = command.invocation.map(|invocation| {
             serde_json::json!({
                 "sourceInteractionNodeId": invocation.source_interaction_node_id,
@@ -825,7 +862,7 @@ impl RuntimeClient {
         let create_body = serde_json::json!({
             "projectId": command.project_id,
             "threadId": command.thread_id,
-            "text": command.text,
+            "text": frozen_instruction.as_deref().unwrap_or(command.text),
             "invocation": invocation,
             "preparedInteractionNode": prepared_interaction_node,
             "inputIdentity": command.input_identity,
@@ -1870,10 +1907,60 @@ impl RuntimeClient {
             .await
     }
 
+    pub(crate) async fn local_invocation_inventory(
+        &self,
+        roots: &[i64],
+    ) -> Result<relayer_graph_core::ConversationGraphSnapshot, RuntimeError> {
+        let snapshot = self
+            .conversation_graph_snapshot_with_inventory(roots, true)
+            .await?;
+        let ids = snapshot.exhausted_action_ids.as_ref();
+        let sources = snapshot.exhausted_action_sources.as_ref();
+        if ids.is_none()
+            || sources.is_none()
+            || ids.is_some_and(|ids| {
+                sources.is_some_and(|sources| {
+                    ids.len() != sources.len()
+                        || ids.iter().collect::<std::collections::BTreeSet<_>>().len() != ids.len()
+                        || sources
+                            .iter()
+                            .map(|source| &source.action_id)
+                            .collect::<std::collections::BTreeSet<_>>()
+                            != ids.iter().collect()
+                })
+            })
+        {
+            return Err(RuntimeError::Configuration(
+                "Runtime omitted authoritative single-call occupancy".into(),
+            ));
+        }
+        Ok(snapshot)
+    }
+
     pub(crate) async fn native_invocation_key_absent(
         &self,
         source: i64,
+        key: &str,
+    ) -> Result<bool, RuntimeError> {
+        self.native_invocation_absent(source, None, key).await
+    }
+
+    /// A deterministic refusal made no call for this request. A different
+    /// action's occupied key remains spent; this never recovers that call.
+    pub(crate) async fn native_invocation_request_absent(
+        &self,
+        source: i64,
         action: i64,
+        key: &str,
+    ) -> Result<bool, RuntimeError> {
+        self.native_invocation_absent(source, Some(action), key)
+            .await
+    }
+
+    async fn native_invocation_absent(
+        &self,
+        source: i64,
+        action: Option<i64>,
         key: &str,
     ) -> Result<bool, RuntimeError> {
         let snapshot = self
@@ -1882,7 +1969,8 @@ impl RuntimeClient {
         Ok(snapshot.closures.first().is_some_and(Option::is_some)
             && !snapshot.invocations.iter().any(|call| {
                 call.invocation.source_completion_id.value() == source
-                    && call.invocation.source_action_id.value() == action
+                    && action
+                        .is_none_or(|action| call.invocation.source_action_id.value() == action)
                     && call.invocation.invocation_key == key
             }))
     }
@@ -1950,6 +2038,14 @@ impl RuntimeClient {
             closures,
             invocations,
             bound_inputs,
+            exhausted_action_ids: value
+                .get("exhaustedActionIds")
+                .map(|value| serde_json::from_value(value.clone()))
+                .transpose()?,
+            exhausted_action_sources: value
+                .get("exhaustedActionSources")
+                .map(|value| serde_json::from_value(value.clone()))
+                .transpose()?,
         })
     }
 
@@ -3692,6 +3788,10 @@ mod tests {
                         0 | 3 => json!({"closures":[null,null]}),
                         1 | 4 => json!({"closures":[null]}),
                         6 => json!({"closures":[null],"invocations":[]}),
+                        7 => json!({"closures":[null],"exhaustedActionIds":[]}),
+                        8 => json!({"closures":[null],"invocations":[],"exhaustedActionIds":[],"exhaustedActionSources":[]}),
+                        9 => json!({"closures":[null],"invocations":[],"exhaustedActionIds":[]}),
+                        10 => json!({"closures":[null],"invocations":[],"exhaustedActionIds":[41],"exhaustedActionSources":[]}),
                         _ => json!({"closures":[null,{
                             "nodeId":3,"interaction":{"id":3,"kind":"user-interaction","icon":"user","title":"Question","detail":"Question","state":"accepted"},
                             "rootAction":{"id":1,"sourceNodeId":3,"kind":"navigate","relation":"expand","label":"Response","variant":"pill","targetLayerId":1,"state":"accepted"},
@@ -3736,7 +3836,7 @@ mod tests {
         assert!(
             matches!(
                 runtime
-                    .native_invocation_key_absent(1, 41, "refused")
+                    .native_invocation_key_absent(1, "refused")
                     .await
                     .unwrap_err(),
                 RuntimeError::Configuration(_)
@@ -3747,7 +3847,7 @@ mod tests {
         assert!(
             matches!(
                 runtime
-                    .native_invocation_key_absent(1, 41, "refused")
+                    .native_invocation_key_absent(1, "refused")
                     .await
                     .unwrap_err(),
                 RuntimeError::Remote { status: 503, .. }
@@ -3757,10 +3857,29 @@ mod tests {
         mode.store(6, Ordering::SeqCst);
         assert!(
             !runtime
-                .native_invocation_key_absent(1, 41, "refused")
+                .native_invocation_key_absent(1, "refused")
                 .await
                 .unwrap(),
             "missing source closure never certifies absence"
+        );
+        for scenario in [6, 7, 9, 10] {
+            mode.store(scenario, Ordering::SeqCst);
+            assert!(
+                matches!(
+                    runtime.local_invocation_inventory(&[1]).await.unwrap_err(),
+                    RuntimeError::Configuration(_)
+                ),
+                "missing either native call inventory or global occupancy is unknown"
+            );
+        }
+        mode.store(8, Ordering::SeqCst);
+        assert_eq!(
+            runtime
+                .local_invocation_inventory(&[1])
+                .await
+                .unwrap()
+                .exhausted_action_ids,
+            Some(vec![])
         );
         mode.store(3, Ordering::SeqCst);
         assert_eq!(

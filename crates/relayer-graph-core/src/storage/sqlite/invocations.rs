@@ -9,17 +9,6 @@ pub(crate) async fn source_active(
         == crate::CompletionLifecycle::Active)
 }
 
-pub(crate) async fn snapshot(
-    connection: &mut SqliteConnection,
-    id: i64,
-) -> Result<String, GraphError> {
-    Ok(
-        sqlx::query_scalar("SELECT action_snapshot FROM durable_invocations WHERE id=?1")
-            .bind(id)
-            .fetch_one(connection)
-            .await?,
-    )
-}
 pub(crate) async fn action_owned(
     connection: &mut SqliteConnection,
     action: ActionId,
