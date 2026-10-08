@@ -244,6 +244,36 @@ describe("Office documents (ART-012)", () => {
     bomb.writeUInt16LE(1, 47 + 10);
     bomb.writeUInt32LE(47, 47 + 12);
     await writeFile(join(folder, "docs", "bomb.docx"), bomb);
+    // Review: one deflated entry whose headers claim 16 bytes but whose stream expands to 4 MiB,
+    // first with the local header telling the truth, then with both headers lying.
+    const { deflateRawSync } = await import("node:zlib");
+    const zipOf = ({ central, local, data }) => {
+      const name = Buffer.from("a");
+      const header = Buffer.alloc(30);
+      header.writeUInt32LE(0x04034b50, 0);
+      header.writeUInt16LE(8, 8);
+      header.writeUInt32LE(data.length, 18);
+      header.writeUInt32LE(local, 22);
+      header.writeUInt16LE(1, 26);
+      const entry = Buffer.alloc(46);
+      entry.writeUInt32LE(0x02014b50, 0);
+      entry.writeUInt16LE(8, 10);
+      entry.writeUInt32LE(data.length, 20);
+      entry.writeUInt32LE(central, 24);
+      entry.writeUInt16LE(1, 28);
+      const directory = Buffer.concat([entry, name]);
+      const offset = header.length + name.length + data.length;
+      const close = Buffer.alloc(22);
+      close.writeUInt32LE(0x06054b50, 0);
+      close.writeUInt16LE(1, 8);
+      close.writeUInt16LE(1, 10);
+      close.writeUInt32LE(directory.length, 12);
+      close.writeUInt32LE(offset, 16);
+      return Buffer.concat([header, name, data, directory, close]);
+    };
+    const flood = deflateRawSync(Buffer.alloc(4 * 1024 * 1024));
+    await writeFile(join(folder, "docs", "headers.xlsx"), zipOf({ central: 16, local: 4 * 1024 * 1024, data: flood }));
+    await writeFile(join(folder, "docs", "stream.xlsx"), zipOf({ central: 16, local: 16, data: flood }));
     const browser = await chromium.launch();
     try {
       const sheet = await openInChromium(browser, { kind: "xlsx", source: { file: "docs/huge.xlsx" } });
@@ -256,12 +286,16 @@ describe("Office documents (ART-012)", () => {
       expect(await wide.page.locator(".office-sheet tr").first().locator("td").count()).toBe(100);
       const bombed = await openInChromium(browser, { kind: "docx", source: { file: "docs/bomb.docx" } }, { ready: "failed" });
       expect(await bombed.page.locator(".office-error").innerText()).toContain("too large to show here");
+      for (const file of ["headers.xlsx", "stream.xlsx"]) {
+        const crafted = await openInChromium(browser, { kind: "xlsx", source: { file: `docs/${file}` } }, { ready: "failed" });
+        expect(await crafted.page.locator(".office-error").innerText(), file).toContain("damaged");
+      }
       const deck = await openInChromium(browser, { ...office.pptx, part: { slide: 7 } });
       expect(deck.errors).toEqual(["The deck has 4 slides, so slide 7 does not exist; showing the last slide."]);
       expect((await deck.located()).slide).toBe(4);
     } finally {
       await browser.close();
-      for (const file of ["huge.xlsx", "wide.xlsx", "bomb.docx"]) await rm(join(folder, "docs", file), { force: true });
+      for (const file of ["huge.xlsx", "wide.xlsx", "bomb.docx", "headers.xlsx", "stream.xlsx"]) await rm(join(folder, "docs", file), { force: true });
     }
   }, 30_000);
 });

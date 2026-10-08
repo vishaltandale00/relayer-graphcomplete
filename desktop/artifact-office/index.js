@@ -94,10 +94,13 @@ async function renderPowerPoint(bytes, root, slide) {
 
 /**
  * Refuse an archive too large to parse safely, before any converter expands it. The zip's
- * central directory gives every entry's expanded size without decompressing anything.
+ * central directory gives each entry's expanded size; its local header must agree, since a
+ * parser may trust either; and each entry is inflated once, counting bytes, so a stream that
+ * expands past its declared size is caught without ever holding more than one chunk.
  */
-function checkArchive(bytes) {
+async function checkArchive(bytes) {
   const tooLarge = () => { throw new Error("The file is too large to show here. Open it in its own app."); };
+  const damaged = () => { throw new Error("This Office file is damaged."); };
   if (bytes.byteLength > ARCHIVE_LIMIT.bytes) tooLarge();
   const view = new DataView(bytes);
   // The end-of-central-directory record sits within the last 64 KiB (its comment's limit).
@@ -109,13 +112,49 @@ function checkArchive(bytes) {
   const count = view.getUint16(end + 10, true);
   let at = view.getUint32(end + 16, true);
   let expanded = 0;
+  const entries = [];
   for (let index = 0; index < count; index += 1) {
-    if (at + 46 > bytes.byteLength || view.getUint32(at, true) !== 0x02014b50) throw new Error("This Office file is damaged.");
+    if (at + 46 > bytes.byteLength || view.getUint32(at, true) !== 0x02014b50) damaged();
+    const method = view.getUint16(at + 10, true);
+    const compressed = view.getUint32(at + 20, true);
     const size = view.getUint32(at + 24, true);
     // 0xFFFFFFFF marks a ZIP64 size, which is over the limit anyway.
     expanded += size === 0xffffffff ? Infinity : size;
     if (expanded > ARCHIVE_LIMIT.expanded) tooLarge();
+    const local = view.getUint32(at + 42, true);
+    if (local + 30 > bytes.byteLength || view.getUint32(local, true) !== 0x04034b50) damaged();
+    // With a data descriptor (flag bit 3) the local sizes may be zero; otherwise they must match.
+    const described = (view.getUint16(local + 6, true) & 0x8) !== 0;
+    const localCompressed = view.getUint32(local + 18, true);
+    const localSize = view.getUint32(local + 22, true);
+    if (!(described && localCompressed === 0 && localSize === 0) && (localCompressed !== compressed || localSize !== size)) damaged();
+    const start = local + 30 + view.getUint16(local + 26, true) + view.getUint16(local + 28, true);
+    if (start + compressed > bytes.byteLength) damaged();
+    entries.push({ method, start, compressed, size });
     at += 46 + view.getUint16(at + 28, true) + view.getUint16(at + 30, true) + view.getUint16(at + 32, true);
+  }
+  for (const { method, start, compressed, size } of entries) {
+    if (method === 0) {
+      if (compressed !== size) damaged();
+      continue;
+    }
+    // Office files store or deflate their parts; nothing else is expected.
+    if (method !== 8) damaged();
+    const reader = new Blob([new Uint8Array(bytes, start, compressed)]).stream().pipeThrough(new DecompressionStream("deflate-raw")).getReader();
+    let produced = 0;
+    try {
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        produced += value.byteLength;
+        if (produced > size) damaged();
+      }
+    } catch (error) {
+      await reader.cancel().catch(() => {});
+      if (error?.message === "This Office file is damaged.") throw error;
+      damaged();
+    }
+    if (produced !== size) damaged();
   }
 }
 
@@ -130,7 +169,7 @@ async function render(kind, source, { slide } = {}) {
     const response = await fetch(source);
     if (!response.ok) throw new Error("The file is not in the thread folder.");
     const bytes = await response.arrayBuffer();
-    checkArchive(bytes);
+    await checkArchive(bytes);
     const locate = kind === "docx" ? await renderWord(bytes, root)
       : kind === "xlsx" ? renderExcel(bytes, root)
         : kind === "pptx" ? await renderPowerPoint(bytes, root, slide)

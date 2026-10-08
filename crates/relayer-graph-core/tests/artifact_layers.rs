@@ -246,6 +246,14 @@ async fn artifact_details_are_checked_before_any_write() {
             "artifact_part_invalid",
         ),
         (
+            json!({"kind":"pptx","source":{"file":"deck.pptx"},"part":{"slide":9_007_199_254_740_992_u64},"fingerprint":FINGERPRINT}),
+            "artifact_part_invalid",
+        ),
+        (
+            json!({"kind":"pdf","source":{"file":"brief.pdf"},"part":{"page":9_007_199_254_740_992_u64},"fingerprint":FINGERPRINT}),
+            "artifact_part_invalid",
+        ),
+        (
             json!({"kind":"docx","source":{"file":"proposal.docx"},"part":{"slide":2},"fingerprint":FINGERPRINT}),
             "artifact_field_unknown",
         ),
