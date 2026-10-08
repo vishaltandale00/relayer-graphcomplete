@@ -23,7 +23,7 @@ describe("explicit input to Invoke connection", () => {
     expect(groups[0].invokes.map((action) => action.id).sort()).toEqual([1, 2, 3]);
   });
 
-  it.each([[false, "consume"], [true, "consume"], [false, "edit"], [true, "edit"], [false, "edit-back"], [true, "edit-back"], [false, "failure"], [true, "failure"], [false, "recovered"], [true, "recovered"], [false, "recovered-edit"], [true, "recovered-edit"]].map(([compiled, outcome]) => [compiled, outcome, false]).concat(["consume", "edit", "edit-back", "failure", "recovered", "recovered-edit", "snapshot", "bridge", "bridge-edit", "bridge-fallback", "bridge-select-fallback", "recovery-adoption", "imported-history", "graph-only", "graph-only-recovery", "graph-only-occupancy", "graph-only-foreign", "inventory-unknown", "preparation-rejected", "two-layer-saved", "two-layer-edit", "two-layer-undo", "two-layer-newer", "two-layer-existing"].map(outcome => [false, outcome, true])).concat(["consume", "edit", "edit-back", "failure", "recovered", "recovered-edit", "authored-pending", "authored-refusal", "authored-unblurred", "authored-select", "recovery-adoption", "graph-only", "graph-only-recovery", "graph-only-occupancy", "graph-only-foreign", "inventory-unknown", "preparation-rejected", "two-layer-saved", "two-layer-edit", "two-layer-newer", "two-layer-existing"].map(outcome => [true, outcome, true])))("connected fields preserve Invoke submission boundaries (compiled=%s, outcome=%s, implicit=%s)", async (compiled, outcome, implicit) => {
+  it.each([[false, "consume"], [true, "consume"], [false, "edit"], [true, "edit"], [false, "edit-back"], [true, "edit-back"], [false, "failure"], [true, "failure"], [false, "recovered"], [true, "recovered"], [false, "recovered-edit"], [true, "recovered-edit"]].map(([compiled, outcome]) => [compiled, outcome, false]).concat(["consume", "edit", "edit-back", "failure", "recovered", "recovered-edit", "snapshot", "bridge", "bridge-edit", "bridge-fallback", "bridge-select-fallback", "recovery-adoption", "imported-history", "graph-only", "graph-only-recovery", "graph-only-occupancy", "graph-only-foreign", "inventory-unknown", "preparation-rejected", "two-layer-saved", "two-layer-edit", "two-layer-undo", "two-layer-newer", "two-layer-existing"].map(outcome => [false, outcome, true])).concat(["consume", "edit", "edit-back", "failure", "recovered", "recovered-edit", "authored-pending", "authored-refusal", "authored-unblurred", "authored-select", "authored-snapshot-newer", "authored-snapshot-pending-newer", "recovery-adoption", "graph-only", "graph-only-recovery", "graph-only-occupancy", "graph-only-foreign", "inventory-unknown", "preparation-rejected", "two-layer-saved", "two-layer-edit", "two-layer-newer", "two-layer-existing"].map(outcome => [true, outcome, true])))("connected fields preserve Invoke submission boundaries (compiled=%s, outcome=%s, implicit=%s)", async (compiled, outcome, implicit) => {
     const window = new Window({ url: "http://127.0.0.1:3000" });
     vi.stubGlobal("document", window.document);
     vi.stubGlobal("window", window);
@@ -39,7 +39,7 @@ describe("explicit input to Invoke connection", () => {
     if (["bridge-select-fallback", "authored-select"].includes(outcome)) Object.assign(actions[0], {
       control: "single_select", options: [{ key: "relaxed", label: "Relaxed" }, { key: "packed", label: "Packed" }],
     });
-    if (outcome === "snapshot") {
+    if (["snapshot", "authored-snapshot-newer", "authored-snapshot-pending-newer"].includes(outcome)) {
       actions.push({ id: 16, clientKey: "pace", sourceNodeId: 7, kind: "input", control: "text", prompt: "Trip pace" });
       actions[2].inputActionIds.push(16);
     }
@@ -49,6 +49,10 @@ describe("explicit input to Invoke connection", () => {
       if (outcome === "authored-select") {
         content.components[0].html = content.components[0].html.replace('<textarea data-gc-mount="destination"></textarea>', '<select data-gc-mount="destination"></select>');
         content.mounts[0].host = "select";
+      }
+      if (outcome.startsWith("authored-snapshot-")) {
+        content.components[0].html += '<label>Trip pace<textarea data-gc-mount="pace"></textarea></label>';
+        content.mounts.find(mount => mount.capability.action.clientKey === "pace").id = "pace";
       }
       node.authoredDetail = { ...content, integritySha256: createHash("sha256").update(canonical(content)).digest("hex") };
     }
@@ -114,7 +118,7 @@ describe("explicit input to Invoke connection", () => {
         { ...current, sourceNodeId: 999, record: { ...record, id: "invocation:wrong-node" } }];
     }
     let releaseSave;
-    const saveGate = ["snapshot", "authored-pending", "authored-refusal"].includes(outcome) ? new Promise(resolve => { releaseSave = resolve; }) : null;
+    const saveGate = ["snapshot", "authored-pending", "authored-refusal", "authored-snapshot-newer", "authored-snapshot-pending-newer"].includes(outcome) ? new Promise(resolve => { releaseSave = resolve; }) : null;
     const commit = vi.fn(async (_threadId, occurrence, value) => {
       if (saveGate && draft.revision === 0) await saveGate;
       if (outcome === "authored-refusal") throw new Error("Save refused");
@@ -124,7 +128,16 @@ describe("explicit input to Invoke connection", () => {
       return draft;
     });
     let settleInvoke;
-    const onInvokeAction = vi.fn(() => new Promise((resolve) => { settleInvoke = resolve; }));
+    const onInvokeAction = vi.fn((_action, options) => {
+      if (outcome.startsWith("authored-snapshot-")) {
+        if (draft.revision !== options.inputDraftRevision) {
+          return Promise.reject(Object.assign(new Error("The input draft changed before invocation."), { code: "input_draft_revision_conflict" }));
+        }
+        draft = { ...draft, revision: draft.revision + 1, attachments: [] };
+        return Promise.resolve({ inputDraft: draft });
+      }
+      return new Promise((resolve) => { settleInvoke = resolve; });
+    });
     const onNavigateImportedInvocationHistory = vi.fn(async () => true);
     const onSubmitInteraction = vi.fn(async () => ({}));
     const onNavigateLayer = vi.fn();
@@ -322,6 +335,44 @@ describe("explicit input to Invoke connection", () => {
         draft = { ...draft, revision: 2, attachments: [] };
         settleInvoke({ inputDraft: draft });
         await vi.waitFor(() => expect(replacementField().value).toBe(""));
+        return;
+      }
+      if (outcome.startsWith("authored-snapshot-")) {
+        const pace = () => surface().querySelector('[data-gc-mount="pace"]');
+        for (const [control, value] of [[field(), "Lisbon"], [pace(), "Relaxed"]]) {
+          control.value = value;
+          control.dispatchEvent(new window.Event("input", { bubbles: true }));
+        }
+        if (outcome === "authored-snapshot-pending-newer") {
+          field().dispatchEvent(new window.Event("change", { bubbles: true }));
+          await vi.waitFor(() => expect(commit).toHaveBeenCalledTimes(1));
+        }
+        invoke().click();
+        await vi.waitFor(() => expect(commit).toHaveBeenCalledTimes(1));
+        pace().value = "Packed";
+        pace().dispatchEvent(new window.Event("input", { bubbles: true }));
+        pace().dispatchEvent(new window.Event("change", { bubbles: true }));
+        releaseSave();
+        await vi.waitFor(() => expect(draft.attachments.find(attachment => attachment.occurrence.actionId === 16)?.value).toEqual({ text: "Packed" }));
+        await vi.waitFor(() => expect(invoke().title).not.toBe("Saving inputs…"));
+        if (outcome === "authored-snapshot-newer") {
+          expect(commit.mock.calls.map(call => [call[1].actionId, call[2]])).toEqual([
+            [13, { text: "Lisbon" }], [16, { text: "Relaxed" }], [16, { text: "Packed" }],
+          ]);
+          expect(onInvokeAction).toHaveBeenCalledWith(actions[2], { inputDraftRevision: 2 });
+        } else {
+          // A captured authored save may still be pending at the click. The
+          // boundary may refuse or use its own earlier revision, but it must
+          // never enqueue the captured answer after the newer authored save.
+          expect(commit.mock.calls.filter(call => call[1].actionId === 16).at(-1)?.[2]).toEqual({ text: "Packed" });
+          if (onInvokeAction.mock.calls.length) {
+            const capturedSave = commit.mock.calls.findIndex(call => call[1].actionId === 16 && call[2].text === "Relaxed");
+            expect(capturedSave).toBeGreaterThanOrEqual(0);
+            expect(onInvokeAction).toHaveBeenCalledWith(actions[2], { inputDraftRevision: capturedSave + 1 });
+          }
+        }
+        expect(draft.attachments.find(attachment => attachment.occurrence.actionId === 16)?.value).toEqual({ text: "Packed" });
+        expect(pace().value).toBe("Packed");
         return;
       }
       if (outcome === "snapshot") {

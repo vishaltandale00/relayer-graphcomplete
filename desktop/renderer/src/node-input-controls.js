@@ -490,10 +490,15 @@ export function createNodeInputDraftController({ api, onChange = () => {} } = {}
     adoptResponse(threadId, response) {
       return adopt(threadId, response);
     },
-    async commit(threadId, occurrence, action, stagedValue) {
+    async commit(threadId, occurrence, action, stagedValue, { skipIfUnchanged = false } = {}) {
       const value = inputStageValueForApi(action, stagedValue);
       return enqueue(threadId, async () => {
         const current = requireCurrent(threadId);
+        const attachment = committedInputAttachment(current, occurrence);
+        if (skipIfUnchanged && attachment && inputStageValuesEqual(action, stagedValue,
+          initialInputStageValue(action, attachment))) {
+          return current;
+        }
         try {
           const response = await api.commit(threadId, occurrence, value, current.revision);
           requireCommitPostcondition(threadId, response, current, occurrence, action, value);

@@ -507,7 +507,9 @@ async fn locate_agent_child_node(
                 .action_snapshot
                 .get("instruction")
                 .and_then(serde_json::Value::as_str)
-                != Some(interaction.text.as_str())
+                .is_none_or(|instruction| {
+                    interaction.text != instruction && interaction.text != instruction.trim()
+                })
         {
             return Err(StartupReconciliationError::deterministic(anyhow::anyhow!(
                 "durable child {} graph call mismatch",

@@ -216,6 +216,15 @@ impl GraphWriter {
             transaction.commit().await?;
             return Ok((node, existing));
         }
+        // Definitions may carry a larger uncalled binding recipe, but every
+        // new call must fit the same argument inventory as portable V4.
+        if submitted_inputs.len() > 256 {
+            return Err(GraphError::validation(
+                "invoke_input_limit",
+                "submittedInputs",
+                "An Invoke call may contain at most 256 input arguments.",
+            ));
+        }
         let presenting_layer = presenting_layer.or(action.source_layer_id);
         if user_initiated {
             let closure = crate::graph::completion::read_accepted_closure_on(

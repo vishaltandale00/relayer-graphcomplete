@@ -4083,8 +4083,28 @@ async fn native_call_export_preserves_stopped_and_failed_current_without_return_
 
 async fn verify_unbound_durable_restart(agent: bool) {
     // This recovery scenario intentionally owns a second, graph-only sibling call.
-    let world = World::build_call_mode("durable-unbound", false, false, Some(agent), true).await;
+    let instruction = "\u{85}\u{2003} Continue /private/tmp/private-startup.txt \u{85}";
+    let world = World::build_call_mode_with_instruction(
+        "durable-unbound",
+        false,
+        false,
+        Some(agent),
+        true,
+        instruction,
+    )
+    .await;
     assert!(world.child.graph_node_id.is_none());
+    assert_eq!(world.child_row().await.text, instruction.trim());
+    assert_eq!(
+        world
+            .runtime
+            .interaction_input(world.completion_id)
+            .await
+            .unwrap()
+            .interaction
+            .detail,
+        instruction
+    );
     let source = world
         .graph
         .writer_for_subgraph(
@@ -4152,6 +4172,66 @@ async fn verify_unbound_durable_restart(agent: bool) {
             .graph_node_id,
         Some(world.completion_id)
     );
+}
+
+#[tokio::test]
+async fn startup_quarantines_mismatched_frozen_durable_child_without_ending_native_call() {
+    for corrupt_key in [false, true] {
+        let world = World::build_call_mode_with_instruction(
+            "durable-startup-mismatch",
+            false,
+            false,
+            Some(true),
+            true,
+            "\u{85}\u{2003} Continue /private/tmp/private-startup.txt \u{85}",
+        )
+        .await;
+        if corrupt_key {
+            sqlx::query("UPDATE action_invocations SET invocation_key='wrong-frozen-key' WHERE result_interaction_id=?1")
+                .bind(world.child.id.value()).execute(&world.pool).await.unwrap();
+        } else {
+            sqlx::query("UPDATE interactions SET text='Different instruction' WHERE id=?1")
+                .bind(world.child.id.value())
+                .execute(&world.pool)
+                .await
+                .unwrap();
+        }
+        world.restart().await;
+        let child = world.child_row().await;
+        assert_eq!(child.completion_status, "failed");
+        assert!(
+            child.graph_node_id.is_none(),
+            "A mismatched receipt cannot bind the native child"
+        );
+        assert_eq!(
+            world
+                .runtime
+                .completion_current(world.completion_id)
+                .await
+                .unwrap()
+                .lifecycle,
+            relayer_graph_core::CompletionLifecycle::Active
+        );
+        assert_eq!(
+            world
+                .graph
+                .writer_for_subgraph(
+                    relayer_graph_core::NodeId::new(world.invocation.source_interaction_node_id)
+                        .unwrap(),
+                )
+                .await
+                .unwrap()
+                .action_invocations(
+                    relayer_graph_core::ActionId::new(world.invocation.source_action_id).unwrap(),
+                )
+                .await
+                .unwrap()
+                .len(),
+            1
+        );
+        assert_eq!(*world.harness.prov.lock().unwrap(), "none");
+        world.finish().await;
+    }
 }
 
 /// An unbound child whose saved model no longer validates is still located and failed at
@@ -6659,5 +6739,315 @@ async fn local_call_occupancy_is_private_and_isolated_across_unrelated_roots() {
     let state = serde_json::to_value(response.0).unwrap();
     assert_eq!(state["invocationInventoryAvailable"], true);
     assert_eq!(state["actionInvocations"], detail["actionInvocations"]);
+    world.finish().await;
+}
+
+// Invocation submission is bounded independently of the preserved callable's
+// Input definitions and the visible Layer's action membership.
+#[tokio::test]
+async fn native_invocation_argument_bound_preserves_exportable_calls_and_uncalled_definitions() {
+    use relayer_graph_core::{
+        GraphError, InputAction, InputControl, PresentingInputOccurrence, SubmittedInputDraft,
+        SubmittedInputValue,
+    };
+    let world = World::build_mode("native-argument-bound", false, false, Some(true)).await;
+    let thread = world
+        .product
+        .create_thread(CreateThreadCommand {
+            icon_selection_eligible: true,
+            title: None,
+            project_id: None,
+            initial_message: "Compare a bounded submission with an uncalled definition".into(),
+            harness_configuration_name: HARNESS.into(),
+            personal_presentation_version_key: None,
+            permission_profile_id: "auto".into(),
+            model_selection: None,
+            allow_unselected_model: true,
+        })
+        .await
+        .unwrap();
+    let parent = world
+        .graph
+        .create_interaction(
+            None,
+            ThreadId::new(thread.id.value()).unwrap(),
+            "Bounded submission",
+        )
+        .await
+        .unwrap();
+    let writer = world.graph.writer_for_subgraph(parent.id).await.unwrap();
+    let node = writer
+        .submit_node(&NodeDraft {
+            client_key: "source".into(),
+            kind: "concept".into(),
+            icon: "box".into(),
+            title: "Question inventory".into(),
+            detail: "Inputs remain separate from Layer controls".into(),
+        })
+        .await
+        .unwrap();
+    let layer = writer
+        .submit_layer(&LayerDraft {
+            client_key: "source-layer".into(),
+            default_node_id: Some(node.id),
+            nodes: vec![node.id],
+            edges: vec![],
+            size_justification: None,
+            layout: Some(LayerLayout::v1(
+                vec![NodePlacement {
+                    node_id: node.id,
+                    x: 0.5,
+                    y: 0.5,
+                }],
+                "default",
+            )),
+        })
+        .await
+        .unwrap();
+    let mut question_layers = Vec::new();
+    for index in 0..5 {
+        let question_layer = writer
+            .submit_layer(&LayerDraft {
+                client_key: format!("question-layer-{index}"),
+                default_node_id: Some(node.id),
+                nodes: vec![node.id],
+                edges: vec![],
+                size_justification: None,
+                layout: Some(LayerLayout::v1(
+                    vec![NodePlacement {
+                        node_id: node.id,
+                        x: 0.5,
+                        y: 0.5,
+                    }],
+                    "default",
+                )),
+            })
+            .await
+            .unwrap();
+        writer
+            .add_action(&ActionDraft {
+                client_key: format!("open-questions-{index}"),
+                source_node_id: node.id,
+                source_layer_id: Some(layer.id),
+                kind: ActionKind::Navigate,
+                relation: Some(NavigateRelation::Expand),
+                label: format!("Questions {index}"),
+                variant: ActionVariant::Pill,
+                icon: None,
+                description: None,
+                target_layer_id: Some(question_layer.id),
+                interaction_text: None,
+                reusable: None,
+                input_action_ids: vec![],
+                input: None,
+            })
+            .await
+            .unwrap();
+        question_layers.push(question_layer.id);
+    }
+    let mut arguments = Vec::new();
+    let mut inputs = Vec::new();
+    for index in 0..257 {
+        let question = InputAction {
+            control: InputControl::Text,
+            prompt: format!("Question {index}"),
+            options: vec![],
+            minimum_selections: None,
+            unsupported_fields: Default::default(),
+        };
+        let field = writer
+            .add_action(&ActionDraft {
+                client_key: format!("question-{index}"),
+                source_node_id: node.id,
+                source_layer_id: Some(question_layers[index / 60]),
+                kind: ActionKind::Input,
+                relation: None,
+                label: format!("Question {index}"),
+                variant: ActionVariant::Pill,
+                icon: None,
+                description: None,
+                target_layer_id: None,
+                interaction_text: None,
+                reusable: None,
+                input_action_ids: vec![],
+                input: Some(question.clone()),
+            })
+            .await
+            .unwrap();
+        inputs.push(field.id);
+        arguments.push(SubmittedInputDraft {
+            occurrence: PresentingInputOccurrence {
+                presenting_interaction_node_id: parent.id,
+                presenting_layer_id: question_layers[index / 60],
+                action_id: field.id,
+            },
+            action: question,
+            value: SubmittedInputValue::Text {
+                text: format!("Answer {index}"),
+            },
+        });
+    }
+    let mut invokes = Vec::new();
+    for count in [256, 257] {
+        invokes.push(
+            writer
+                .add_action(&ActionDraft {
+                    client_key: format!("invoke-{count}"),
+                    source_node_id: node.id,
+                    source_layer_id: Some(layer.id),
+                    kind: ActionKind::Invoke,
+                    relation: None,
+                    label: format!("Use {count} answers"),
+                    variant: ActionVariant::Pill,
+                    icon: None,
+                    description: None,
+                    target_layer_id: None,
+                    interaction_text: Some("Review these answers".into()),
+                    reusable: Some(false),
+                    input_action_ids: inputs[..count].to_vec(),
+                    input: None,
+                })
+                .await
+                .unwrap(),
+        );
+    }
+    writer
+        .add_action(&ActionDraft {
+            client_key: "response".into(),
+            source_node_id: parent.id,
+            source_layer_id: None,
+            kind: ActionKind::Navigate,
+            relation: Some(NavigateRelation::Expand),
+            label: "Response".into(),
+            variant: ActionVariant::Pill,
+            icon: None,
+            description: None,
+            target_layer_id: Some(layer.id),
+            interaction_text: None,
+            reusable: None,
+            input_action_ids: vec![],
+            input: None,
+        })
+        .await
+        .unwrap();
+    writer.complete(parent.id).await.unwrap();
+    sqlx::query(
+        "UPDATE interactions SET graph_node_id=?1,completion_status='accepted' WHERE id=?2",
+    )
+    .bind(parent.id.value())
+    .bind(thread.root_interaction_id.value())
+    .execute(&world.pool)
+    .await
+    .unwrap();
+    assert_eq!(writer.get_layer(layer.id).await.unwrap().actions.len(), 7);
+    let (child, call) = writer
+        .prepare_user_invocation_with_inputs(invokes[0].id, "bounded-call", &arguments[..256])
+        .await
+        .unwrap();
+    assert_eq!(
+        world
+            .graph
+            .writer_for_subgraph(child.id)
+            .await
+            .unwrap()
+            .interaction_input()
+            .await
+            .unwrap()
+            .completion_contract
+            .unwrap()
+            .input
+            .answers
+            .len(),
+        256
+    );
+    let graph_pool = sqlx::SqlitePool::connect(&format!(
+        "sqlite://{}",
+        world.root.path().join("legacy-graph.sqlite3").display(),
+    ))
+    .await
+    .unwrap();
+    let before: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM nodes")
+        .fetch_one(&graph_pool)
+        .await
+        .unwrap();
+    assert!(matches!(
+        writer
+            .prepare_user_invocation_with_inputs(invokes[1].id, "oversized-call", &arguments,)
+            .await,
+        Err(GraphError::Validation {
+            code: "invoke_input_limit",
+            ..
+        })
+    ));
+    let after: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM nodes")
+        .fetch_one(&graph_pool)
+        .await
+        .unwrap();
+    assert_eq!(
+        after, before,
+        "Refused submission must not create a child or answer nodes"
+    );
+    let oversized_calls: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM durable_invocations WHERE source_completion_id=?1 AND invocation_key=?2")
+        .bind(parent.id.value()).bind("oversized-call").fetch_one(&graph_pool).await.unwrap();
+    assert_eq!(oversized_calls, 0);
+    assert!(
+        writer
+            .action_invocations(invokes[1].id)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    assert_eq!(
+        writer.action_invocations(invokes[0].id).await.unwrap()[0].id,
+        call.id
+    );
+    graph_pool.close().await;
+    let bytes = crate::conversation_export_service::build_conversation_export(
+        &world.product,
+        &world.runtime,
+        thread.id,
+        world.state.export_producer.clone(),
+        "2026-10-08T00:00:00Z".into(),
+    )
+    .await
+    .unwrap();
+    let records = crate::conversation_export::decode_export_jsonl(&bytes).unwrap();
+    crate::conversation_export::validate_export_records(&records).unwrap();
+    let ConversationExportRecord::Header(header) = &records[0] else {
+        panic!("header")
+    };
+    assert_eq!(header.export_version, 4);
+    assert_eq!(header.invocations.len(), 1);
+    assert_eq!(header.invocations[0].arguments.len(), 256);
+    let exported_inputs: Vec<_> = records
+        .iter()
+        .filter_map(|record| match record {
+            ConversationExportRecord::Turn(turn) => turn.accepted_view.as_ref(),
+            _ => None,
+        })
+        .flat_map(|view| &view.layers)
+        .flat_map(|layer| &layer.actions)
+        .filter(|action| action.kind == crate::conversation_export::ExportActionKind::Input)
+        .collect();
+    assert_eq!(exported_inputs.len(), 257);
+    let uncalled = records
+        .iter()
+        .find_map(|record| match record {
+            ConversationExportRecord::Turn(turn) => turn.accepted_view.as_ref().and_then(|view| {
+                view.layers
+                    .iter()
+                    .flat_map(|layer| &layer.actions)
+                    .find(|action| action.label == "Use 257 answers")
+            }),
+            _ => None,
+        })
+        .unwrap();
+    assert_eq!(uncalled.input_action_ids.len(), 257);
+    assert!(
+        uncalled
+            .input_action_ids
+            .iter()
+            .all(|id| exported_inputs.iter().any(|input| &input.id == id))
+    );
     world.finish().await;
 }

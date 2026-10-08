@@ -183,6 +183,24 @@
       "threadId": "PRRT_kwDOTyTfxM6qOaO2",
       "disposition": "Associated Product result text must equal raw frozen instruction or its existing Rust-trimmed form after identical project redaction. Runtime prepared-child adapter sends trusted canonical raw instruction while preserving Product chronology.",
       "checkpoint": "Native/browser mismatched instruction and Rust Unicode whitespace concordance; project redactor fixture; actual prepared-child export/import/reopen World"
+    },
+    {
+      "index": 30,
+      "threadId": "PRRT_kwDOTyTfxM6qjnbz",
+      "disposition": "Startup joins Product chronology to the present frozen instruction using exact raw or Rust-trimmed text, preserving every source/action/key/child/contract guard.",
+      "checkpoint": "Real durable agent/user restart World raw NEL/EMSPACE/private path; mismatched text/key Product-only quarantine/native active World; durable10/10 and full383-lib explicit cases."
+    },
+    {
+      "index": 31,
+      "threadId": "PRRT_kwDOTyTfxM6qjnb7",
+      "disposition": "Captured Input saves enqueue together before the first await; same-value skipping stays inside the existing per-thread queue. Invoke uses the captured reply revision, preserving newer authored saves or honoring the existing stale-revision refusal.",
+      "checkpoint": "Two real authored multi-input workspace races, including already-owned pending save, preserve B2 and frozen revision; full60 binding fixture and secondary controller/Send suites."
+    },
+    {
+      "index": 32,
+      "threadId": "PRRT_kwDOTyTfxM6qjnb_",
+      "disposition": "Fresh native preparation refuses more than256 submitted arguments before creating a child or call. Uncalled257-binding recipes remain readable, independently of Layer membership64; exact-key recovery stays above this new-call guard.",
+      "checkpoint": "One real five-Layer World:256 native call seals/exports;257 exact invoke_input_limit and no graph mutation; export retains uncalled257 binding definition."
     }
   ],
   "testDeletion": [],
@@ -190,5 +208,7 @@
   "followupBaselineHead": "8f9bb094853a609d2edc647f2020bc5c07ef2c34",
   "followupQualification": "qualification-pr707-followup-review-2026-10-08.json",
   "nativePortableBaselineHead": "4432809514480873633260099b7ae5466f200bae",
-  "nativePortableQualification": "qualification-pr707-native-portable-repairs-2026-10-08.json"
+  "nativePortableQualification": "qualification-pr707-native-portable-repairs-2026-10-08.json",
+  "laterReviewBaselineHead": "98318b37ad4eb91dc5c7e805733d76a2640b9bc3",
+  "laterReviewQualification": "qualification-pr707-later-boundaries-2026-10-08.json"
 }

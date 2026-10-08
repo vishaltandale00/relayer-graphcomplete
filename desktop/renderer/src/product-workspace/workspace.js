@@ -5645,17 +5645,19 @@ export function createProductWorkspace({
       const issue = validateInputStage(entry.semantic, entry.value);
       if (issue) { inputErrors.set(entry.key, issue.message); throw new Error(issue.message); }
     }
-    // Wait only for saves already owned by the clicked occurrences. New edits
-    // do not change the boundary's captured values or extend its wait.
-    const saved = await Promise.allSettled([...new Set(snapshot.flatMap(entry => entry.pendingCommits ?? []))]);
+    // Queue every captured answer before yielding, including behind saves
+    // already owned by these occurrences. Later edits must follow the entire
+    // captured boundary instead of slipping between its individual answers.
+    const captures = snapshot.map(entry => {
+      if (disposed || String(getThread()?.id) !== String(threadId)) throw new Error("Input selection changed before submission. Your answers were preserved.");
+      return inputDraftController.commit(threadId, entry.occurrence, entry.semantic, entry.value, { skipIfUnchanged: true });
+    });
+    const boundaryDraft = inputDraftController.current(threadId);
+    const pending = [...new Set(snapshot.flatMap(entry => entry.pendingCommits ?? []))];
+    const saved = await Promise.allSettled([...pending, ...captures]);
     const failed = saved.find(result => result.status === "rejected" || result.value === false);
     if (failed) throw failed.reason ?? new Error("A connected input could not be saved.");
-    for (const entry of snapshot) {
-      if (disposed || String(getThread()?.id) !== String(threadId)) throw new Error("Input selection changed before submission. Your answers were preserved.");
-      const attachment = committedInputAttachment(inputDraftController.current(threadId), entry.occurrence);
-      if (attachment && inputStageValuesEqual(entry.semantic, entry.value, initialInputStageValue(entry.semantic, attachment))) continue;
-      await inputDraftController.commit(threadId, entry.occurrence, entry.semantic, entry.value);
-    }
+    return captures.length ? saved.at(-1).value : boundaryDraft;
   }
 
   function clearSubmittedImplicitStages(snapshot) {
@@ -5679,7 +5681,7 @@ export function createProductWorkspace({
     syncBoundInvokeControls(getState());
     syncComposer();
     try {
-    await flushImplicitInputs(threadId, snapshot);
+    const capturedDraft = await flushImplicitInputs(threadId, snapshot);
     if (disposed || String(getThread()?.id) !== boundaryKey
       || currentInteraction(getState(), getThread())?.id !== sourceInteractionId
       || currentLayerId(getState(), getThread()) !== sourceLayerId) return null;
@@ -5694,7 +5696,7 @@ export function createProductWorkspace({
       });
     const runtime = mountedAuthoredDetail;
     const node = (getState().nodes ?? []).find((candidate) => String(candidate.id) === String(action.sourceNodeId));
-    const result = await (recoveringCall ? onInvokeAction(action) : onInvokeAction(action, { inputDraftRevision: currentInputDraftRevision(threadId) }));
+    const result = await (recoveringCall ? onInvokeAction(action) : onInvokeAction(action, { inputDraftRevision: capturedDraft?.revision ?? currentInputDraftRevision(threadId) }));
     let responseDraft = result?.inputDraft;
     if (!responseDraft && result?.recovered && submitted.length && inputDraftApi?.get) {
       try {
