@@ -1832,6 +1832,11 @@ async fn launch_prepared_child(
             ));
         }
         crate::runtime::RuntimeAction {
+            source_node_id: call
+                .action_snapshot
+                .get("sourceNodeId")
+                .and_then(Value::as_i64)
+                .ok_or_else(|| ApiError::invalid("invalid frozen Invoke source Node"))?,
             source_layer_id: call
                 .action_snapshot
                 .get("sourceLayerId")
@@ -3386,6 +3391,67 @@ pub(super) async fn invoke_action(
     result
 }
 
+/// Select one current answer for each connected field, retaining its exact saved occurrence.
+/// Existing keyed submissions bypass this selection so recovery never recaptures a draft.
+async fn select_invocation_input_attachments(
+    runtime: &crate::runtime::RuntimeClient,
+    thread: &Thread,
+    source_graph_node_id: i64,
+    presenting_layer_id: Option<i64>,
+    action: &crate::runtime::RuntimeAction,
+    attachments: Vec<crate::product::ActionInputAttachment>,
+) -> Result<Vec<crate::product::ActionInputAttachment>, ApiError> {
+    let mut selected = Vec::new();
+    for bound_id in &action.input_action_ids {
+        let mut valid = Vec::new();
+        for attachment in attachments.iter().filter(|input| {
+            input.occurrence.action_id == *bound_id && input.source_node_id == action.source_node_id
+        }) {
+            let canonical = match runtime
+                .canonical_input_action_occurrence(
+                    thread.project_id.map(|id| id.value()),
+                    thread.id.value(),
+                    &attachment.occurrence,
+                )
+                .await
+            {
+                Ok(canonical) => canonical,
+                // Only an explicit canonical refusal proves this saved occurrence invalid.
+                Err(RuntimeError::Remote {
+                    status: 400 | 403 | 404 | 409 | 422,
+                    ..
+                }) => continue,
+                Err(error) => return Err(error.into()),
+            };
+            if !crate::product::ProductService::input_attachment_matches_action(
+                attachment, &canonical,
+            ) {
+                continue;
+            }
+            let epoch = attachment.committed_at.parse::<u128>().map_err(|_| {
+                ApiError::invalid("Saved input occurrence has an invalid commit epoch")
+            })?;
+            let occurrence = &attachment.occurrence;
+            let clicked = occurrence.presenting_interaction_node_id.value() == source_graph_node_id
+                && Some(occurrence.presenting_layer_id.value()) == presenting_layer_id;
+            valid.push((
+                (
+                    clicked,
+                    epoch,
+                    occurrence.presenting_interaction_node_id.value(),
+                    occurrence.presenting_layer_id.value(),
+                    occurrence.action_id.value(),
+                ),
+                attachment,
+            ));
+        }
+        if let Some((_, attachment)) = valid.into_iter().max_by_key(|(priority, _)| *priority) {
+            selected.push(attachment.clone());
+        }
+    }
+    Ok(selected)
+}
+
 async fn invoke_action_with_authority(
     state: &ApiState,
     thread_id: i64,
@@ -3526,6 +3592,17 @@ async fn invoke_action_with_authority(
                 .input_action_ids
                 .contains(&input.occurrence.action_id)
         });
+        if existing_submission.is_none() {
+            submitted_attachments = select_invocation_input_attachments(
+                runtime,
+                &thread,
+                graph_node_id,
+                presenting_layer_id,
+                &action,
+                submitted_attachments,
+            )
+            .await?;
+        }
         let submitted_inputs =
             crate::product::ProductService::invocation_arguments(&submitted_attachments)?;
         let receipt_revision = existing_submission
@@ -4397,8 +4474,10 @@ mod tests {
         .bind(
             serde_json::json!({
                 "nodeId":101,
-                "rootLayer":{"layer":{"id":1},"nodes":[],"edges":[],"actions":[{
-                    "id":41,"kind":"invoke","interactionText":"Child work",
+                "rootLayer":{"layer":{"id":1},"nodes":[{
+                    "id":102,"kind":"concept","title":"Child work","state":"accepted"
+                }],"edges":[],"actions":[{
+                    "id":41,"sourceNodeId":102,"kind":"invoke","interactionText":"Child work",
                     "state":"accepted","targetLayerId":null
                 }]}
             })
@@ -4420,7 +4499,7 @@ mod tests {
         let transition_refusals = Arc::new(AtomicUsize::new(0));
         let refused_transitions = transition_refusals.clone();
         let action = Arc::new(Mutex::new(
-            serde_json::json!({"id":41,"kind":"invoke","interactionText":"Child work","state":"accepted"}),
+            serde_json::json!({"id":41,"sourceNodeId":102,"kind":"invoke","interactionText":"Child work","state":"accepted"}),
         ));
         let read_action = action.clone();
         let graph = Router::new()
@@ -5004,7 +5083,7 @@ mod tests {
         }
 
         *fixture.action.lock().unwrap() = serde_json::json!({
-            "id":41,"kind":"navigate","relation":"expand","state":"accepted",
+            "id":41,"sourceNodeId":102,"kind":"navigate","relation":"expand","state":"accepted",
             "targetLayerId":1,"resolvedInvokeInteractionId":202
         });
         let retry = complete_prepared_child(

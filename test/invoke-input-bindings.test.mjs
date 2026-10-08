@@ -23,7 +23,7 @@ describe("explicit input to Invoke connection", () => {
     expect(groups[0].invokes.map((action) => action.id).sort()).toEqual([1, 2, 3]);
   });
 
-  it.each([[false, "consume"], [true, "consume"], [false, "edit"], [true, "edit"], [false, "edit-back"], [true, "edit-back"], [false, "failure"], [true, "failure"], [false, "recovered"], [true, "recovered"], [false, "recovered-edit"], [true, "recovered-edit"]].map(([compiled, outcome]) => [compiled, outcome, false]).concat(["consume", "edit", "edit-back", "failure", "recovered", "recovered-edit", "snapshot", "bridge", "bridge-edit", "bridge-fallback", "bridge-select-fallback", "recovery-adoption", "imported-history", "preparation-rejected"].map(outcome => [false, outcome, true])).concat(["consume", "edit", "edit-back", "failure", "recovered", "recovered-edit", "authored-pending", "authored-refusal", "authored-unblurred", "authored-select", "recovery-adoption", "preparation-rejected"].map(outcome => [true, outcome, true])))("connected fields preserve Invoke submission boundaries (compiled=%s, outcome=%s, implicit=%s)", async (compiled, outcome, implicit) => {
+  it.each([[false, "consume"], [true, "consume"], [false, "edit"], [true, "edit"], [false, "edit-back"], [true, "edit-back"], [false, "failure"], [true, "failure"], [false, "recovered"], [true, "recovered"], [false, "recovered-edit"], [true, "recovered-edit"]].map(([compiled, outcome]) => [compiled, outcome, false]).concat(["consume", "edit", "edit-back", "failure", "recovered", "recovered-edit", "snapshot", "bridge", "bridge-edit", "bridge-fallback", "bridge-select-fallback", "recovery-adoption", "imported-history", "preparation-rejected", "two-layer-saved", "two-layer-edit", "two-layer-undo", "two-layer-newer", "two-layer-existing"].map(outcome => [false, outcome, true])).concat(["consume", "edit", "edit-back", "failure", "recovered", "recovered-edit", "authored-pending", "authored-refusal", "authored-unblurred", "authored-select", "recovery-adoption", "preparation-rejected", "two-layer-saved", "two-layer-edit", "two-layer-newer", "two-layer-existing"].map(outcome => [true, outcome, true])))("connected fields preserve Invoke submission boundaries (compiled=%s, outcome=%s, implicit=%s)", async (compiled, outcome, implicit) => {
     const window = new Window({ url: "http://127.0.0.1:3000" });
     vi.stubGlobal("document", window.document);
     vi.stubGlobal("window", window);
@@ -63,6 +63,18 @@ describe("explicit input to Invoke connection", () => {
       state.actionInvocations = [{ sourceInteractionId: 5, actionId: 12, resultInteractionId: 6,
         durable: true, reusable: false, invocationKey: "saved-gesture", resultCompletionStatus: "not_started", preparationRecoverable: true }];
     }
+    if (outcome.startsWith("two-layer-")) {
+      draft = { ...draft, revision: 7, attachments: [
+        { occurrence: { presentingInteractionNodeId: 50, presentingLayerId: 101, actionId: 13 }, sourceNodeId: 7,
+          action: { control: "text", prompt: "Destination" }, value: { text: "Lisbon" }, draftRevision: 6, committedAt: "1000" },
+        { occurrence: { presentingInteractionNodeId: 50, presentingLayerId: 99, actionId: 13 }, sourceNodeId: 7,
+          action: { control: "text", prompt: "Destination" }, value: { text: "Old choice" }, draftRevision: 7, committedAt: "999" },
+        { occurrence: { presentingInteractionNodeId: 50, presentingLayerId: 101, actionId: 14 }, sourceNodeId: 7,
+          action: { control: "text", prompt: "Unrelated notes" }, value: { text: "Retain notes" }, draftRevision: 6, committedAt: "2026-10-07T00:00:00Z" },
+      ] };
+      if (outcome === "two-layer-existing") draft.attachments.push({ occurrence: { presentingInteractionNodeId: 50, presentingLayerId: 102, actionId: 13 }, sourceNodeId: 7,
+        action: { control: "text", prompt: "Destination" }, value: { text: "Tokyo" }, draftRevision: 5, committedAt: "998" });
+    }
     if (outcome === "preparation-rejected") {
       actions[3].inputActionIds = [];
       state.actionInvocations = [{ sourceInteractionId: 5, actionId: 12, resultInteractionId: 6,
@@ -87,7 +99,8 @@ describe("explicit input to Invoke connection", () => {
       if (saveGate && draft.revision === 0) await saveGate;
       if (outcome === "authored-refusal") throw new Error("Save refused");
       const input = actions.find(action => action.id === occurrence.actionId);
-      draft = { ...draft, revision: draft.revision + 1, attachments: [...draft.attachments.filter(item => item.occurrence.actionId !== occurrence.actionId), { occurrence, sourceNodeId: 7, action: { control: input.control, prompt: input.prompt, ...(input.options ? { options: input.options } : {}) }, value, draftRevision: draft.revision + 1, committedAt: "2026-10-04T00:00:01Z" }] };
+      draft = { ...draft, revision: draft.revision + 1, attachments: [...draft.attachments.filter(item => outcome.startsWith("two-layer-")
+        ? JSON.stringify(item.occurrence) !== JSON.stringify(occurrence) : item.occurrence.actionId !== occurrence.actionId), { occurrence, sourceNodeId: 7, action: { control: input.control, prompt: input.prompt, ...(input.options ? { options: input.options } : {}) }, value, draftRevision: draft.revision + 1, committedAt: "2026-10-04T00:00:01Z" }] };
       return draft;
     });
     let settleInvoke;
@@ -104,9 +117,53 @@ describe("explicit input to Invoke connection", () => {
       const cost = () => surface()?.querySelector(compiled ? '[data-gc-mount="cost"]' : '[data-action-id="15"]');
       const field = () => surface()?.querySelector(compiled ? '[data-gc-mount="destination"]' : '[aria-label="Destination"]');
       await vi.waitFor(() => {
-        expect(invoke()?.disabled).toBe(outcome !== "recovery-adoption");
+        expect(invoke()?.disabled).toBe(outcome !== "recovery-adoption" && !outcome.startsWith("two-layer-"));
         expect(field()).toBeTruthy();
       });
+      if (outcome.startsWith("two-layer-")) {
+        await vi.waitFor(() => expect(field().value).toBe("Lisbon"));
+        const originalAnswer = structuredClone(draft.attachments[0]);
+        // Actual mounted workspace navigation presents the same persistent Node
+        // and canonical Input from a second accepted Layer.
+        const secondLayer = { ...layer, layer: { id: 102 } };
+        state.visibleLayer = secondLayer;
+        state.interactions[0].completionOutput.rootLayer = layer;
+        workspace.render();
+        await vi.waitFor(() => expect(field()?.value).toBe(outcome === "two-layer-existing" ? "Tokyo" : "Lisbon"));
+        expect(invoke().disabled).toBe(false);
+        expect(commit).not.toHaveBeenCalled();
+        if (["two-layer-edit", "two-layer-undo"].includes(outcome)) {
+          field().value = "Kyoto";
+          field().dispatchEvent(new window.Event("input", { bubbles: true }));
+          if (outcome === "two-layer-undo") {
+            window.document.querySelector('[aria-label="Undo Destination"]').click();
+            await vi.waitFor(() => expect(field().value).toBe("Lisbon"));
+          }
+        }
+        // Ordinary Send never obtains the bound answer just because its saved
+        // provenance belongs to another accepted Layer.
+        expect(window.document.querySelector("#composerContextChips")?.textContent ?? "").not.toContain("Lisbon");
+        invoke().click();
+        await vi.waitFor(() => expect(onInvokeAction).toHaveBeenCalledExactlyOnceWith(actions[2], { inputDraftRevision: outcome === "two-layer-edit" ? 8 : 7 }));
+        expect(commit).toHaveBeenCalledTimes(outcome === "two-layer-edit" ? 1 : 0);
+        const selected = ["two-layer-edit", "two-layer-existing"].includes(outcome)
+          ? draft.attachments.find(item => item.occurrence.actionId === 13 && item.occurrence.presentingLayerId === 102)
+          : draft.attachments.find(item => item.occurrence.actionId === 13 && item.occurrence.presentingLayerId === 101);
+        expect(selected).toMatchObject({ occurrence: { presentingInteractionNodeId: 50, presentingLayerId: ["two-layer-edit", "two-layer-existing"].includes(outcome) ? 102 : 101, actionId: 13 },
+          value: { text: outcome === "two-layer-edit" ? "Kyoto" : outcome === "two-layer-existing" ? "Tokyo" : "Lisbon" } });
+        expect(draft.attachments.find(item => item.occurrence.presentingLayerId === 101 && item.occurrence.actionId === 13)).toEqual(originalAnswer);
+        if (outcome === "two-layer-newer") {
+          // Even an edit with the same text has its own newer visible epoch.
+          field().value = "Lisbon";
+          field().dispatchEvent(new window.Event("input", { bubbles: true }));
+        }
+        draft = { ...draft, revision: draft.revision + 1, attachments: draft.attachments.filter(item => item !== selected) };
+        settleInvoke({ inputDraft: draft });
+        await vi.waitFor(() => expect(field().value).toBe(outcome === "two-layer-newer" || ["two-layer-edit", "two-layer-existing"].includes(outcome) ? "Lisbon" : "Old choice"));
+        expect(draft.attachments.find(item => item.occurrence.actionId === 14)?.value).toEqual({ text: "Retain notes" });
+        expect(draft.attachments.some(item => item.occurrence.actionId === 13 && item.occurrence.presentingLayerId === 101)).toBe(["two-layer-edit", "two-layer-existing"].includes(outcome));
+        return;
+      }
       if (outcome === "imported-history") {
         await vi.waitFor(() => expect(window.document.querySelectorAll(".imported-invocation-history")).toHaveLength(2));
         const current = window.document.querySelector('[data-imported-invocation-id="invocation:current"]');

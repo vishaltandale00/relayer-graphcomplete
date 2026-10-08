@@ -1850,6 +1850,18 @@ impl ProductService {
         Ok(draft.attachments)
     }
 
+    pub(crate) fn input_attachment_matches_action(
+        attachment: &super::ActionInputAttachment,
+        canonical: &relayer_graph_core::GraphAction,
+    ) -> bool {
+        canonical.id == attachment.occurrence.action_id
+            && canonical.source_node_id.value() == attachment.source_node_id
+            && canonical.kind == relayer_graph_core::ActionKind::Input
+            && canonical.state == relayer_graph_core::RecordState::Accepted
+            && canonical.input.as_ref() == Some(&attachment.action)
+            && validate_action_input_value(&attachment.action, &attachment.value).is_ok()
+    }
+
     pub(crate) fn invocation_arguments(
         attachments: &[super::ActionInputAttachment],
     ) -> Result<Vec<relayer_graph_core::SubmittedInputDraft>, ProductError> {

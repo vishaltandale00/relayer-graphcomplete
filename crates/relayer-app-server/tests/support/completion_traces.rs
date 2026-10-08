@@ -106,6 +106,7 @@ struct HarnessControl {
 #[derive(Default)]
 struct GraphFaults {
     detail_asset_reads: std::sync::atomic::AtomicUsize,
+    fail_input_occurrence_reads: AtomicBool,
     /// The next capability activation answers 503, as a busy graph would.
     fail_activation: AtomicBool,
     /// While set, every control preparation answers 200 with a body the client cannot
@@ -397,6 +398,13 @@ impl World {
                     }
                     if request.method() == axum::http::Method::POST {
                         let path = request.uri().path();
+                        if path == "/api/control/input-action-occurrences/canonical"
+                            && faults.fail_input_occurrence_reads.load(Ordering::SeqCst)
+                        {
+                            return (StatusCode::SERVICE_UNAVAILABLE, axum::Json(
+                                serde_json::json!({"error":{"code":"unavailable","message":"graph busy"}})
+                            )).into_response();
+                        }
                         if path == "/api/control/capabilities"
                             && faults.fail_activation.swap(false, Ordering::SeqCst)
                         {
@@ -5233,5 +5241,487 @@ async fn user_reservation_precedes_native_prepare_and_recovers_a_failed_bind() {
         "Kyoto"
     );
     assert_reservation_export(&world, rejected.interaction.id, pending.interaction.id).await;
+    world.finish().await;
+}
+
+/// One accepted Input may be saved in two accepted presentations. Invoke freezes
+/// one occurrence; ordinary attachment identity and concurrent newer epochs survive.
+#[tokio::test]
+async fn invoke_selects_one_saved_occurrence_and_consumes_only_its_frozen_epoch() {
+    use relayer_graph_core::{InputAction, InputControl, PresentingInputOccurrence};
+    let world = World::new("invoke-multiple-occurrences", true).await;
+    let parent = world
+        .graph
+        .create_interaction(
+            None,
+            ThreadId::new(world.thread.id.value()).unwrap(),
+            "Root",
+        )
+        .await
+        .unwrap();
+    let writer = world.graph.writer_for_subgraph(parent.id).await.unwrap();
+    let node = writer
+        .submit_node(&NodeDraft {
+            client_key: "reservation-source".into(),
+            kind: "concept".into(),
+            icon: "box".into(),
+            title: "Destination".into(),
+            detail: "Pick a trip".into(),
+        })
+        .await
+        .unwrap();
+    let layer = writer
+        .submit_layer(&LayerDraft {
+            client_key: "reservation-layer".into(),
+            default_node_id: Some(node.id),
+            nodes: vec![node.id],
+            edges: vec![],
+            layout: Some(LayerLayout::v1(
+                vec![NodePlacement {
+                    node_id: node.id,
+                    x: 0.5,
+                    y: 0.5,
+                }],
+                "default",
+            )),
+            size_justification: None,
+        })
+        .await
+        .unwrap();
+    let question = InputAction {
+        control: InputControl::Text,
+        prompt: "Destination".into(),
+        options: vec![],
+        minimum_selections: None,
+        unsupported_fields: Default::default(),
+    };
+    let mut definition = ActionDraft {
+        client_key: "destination".into(),
+        source_node_id: node.id,
+        source_layer_id: Some(layer.id),
+        kind: ActionKind::Input,
+        relation: None,
+        label: "Destination".into(),
+        variant: Default::default(),
+        icon: None,
+        description: None,
+        target_layer_id: None,
+        interaction_text: None,
+        reusable: None,
+        input_action_ids: vec![],
+        input: Some(question),
+    };
+    let field = writer.add_action(&definition).await.unwrap();
+    definition.client_key = "pace".into();
+    definition.input.as_mut().unwrap().prompt = "Pace".into();
+    let companion = writer.add_action(&definition).await.unwrap();
+    definition.client_key = "itinerary".into();
+    definition.kind = ActionKind::Invoke;
+    definition.input = None;
+    definition.interaction_text = Some("Plan the trip".into());
+    definition.input_action_ids = vec![field.id, companion.id];
+    definition.reusable = Some(true);
+    let invoke = writer.add_action(&definition).await.unwrap();
+    definition.client_key = "response".into();
+    definition.source_node_id = parent.id;
+    definition.source_layer_id = None;
+    definition.kind = ActionKind::Navigate;
+    definition.relation = Some(NavigateRelation::Expand);
+    definition.target_layer_id = Some(layer.id);
+    definition.interaction_text = None;
+    definition.input_action_ids.clear();
+    definition.reusable = None;
+    writer.add_action(&definition).await.unwrap();
+    writer.complete(parent.id).await.unwrap();
+    let field = writer
+        .get_layer(layer.id)
+        .await
+        .unwrap()
+        .actions
+        .into_iter()
+        .find(|action| action.id == field.id)
+        .unwrap();
+
+    // A later real interaction reuses the accepted persistent Node. Its new Layer
+    // inherits the accepted Input identity without rewriting the authored occurrence.
+    let authored_parent = parent;
+    let parent = world
+        .graph
+        .create_interaction(
+            None,
+            ThreadId::new(world.thread.id.value()).unwrap(),
+            "Another accepted presentation",
+        )
+        .await
+        .unwrap();
+    let presented_writer = world.graph.writer_for_subgraph(parent.id).await.unwrap();
+    let alternate = presented_writer
+        .submit_layer(&LayerDraft {
+            client_key: "alternate-input-view".into(),
+            default_node_id: Some(node.id),
+            nodes: vec![node.id],
+            edges: vec![],
+            layout: Some(LayerLayout::v1(
+                vec![NodePlacement {
+                    node_id: node.id,
+                    x: 0.5,
+                    y: 0.5,
+                }],
+                "default",
+            )),
+            size_justification: None,
+        })
+        .await
+        .unwrap();
+    definition.client_key = "new-presentation".into();
+    definition.source_node_id = parent.id;
+    definition.target_layer_id = Some(alternate.id);
+    presented_writer.add_action(&definition).await.unwrap();
+    presented_writer.complete(parent.id).await.unwrap();
+    sqlx::query("UPDATE interactions SET graph_node_id=?1 WHERE id=?2")
+        .bind(parent.id.value())
+        .bind(world.thread.root_interaction_id.value())
+        .execute(&world.pool)
+        .await
+        .unwrap();
+    let occurrence_a = PresentingInputOccurrence {
+        presenting_interaction_node_id: authored_parent.id,
+        presenting_layer_id: layer.id,
+        action_id: field.id,
+    };
+    let occurrence_b = PresentingInputOccurrence {
+        presenting_interaction_node_id: parent.id,
+        presenting_layer_id: alternate.id,
+        ..occurrence_a.clone()
+    };
+    world
+        .runtime
+        .canonical_input_action_occurrence(None, world.thread.id.value(), &occurrence_b)
+        .await
+        .unwrap();
+    let draft = world
+        .product
+        .commit_action_input_attachment(
+            world.thread.id,
+            &occurrence_b,
+            &field,
+            &crate::product::ActionInputValue::Text {
+                text: "Kyoto".into(),
+            },
+            0,
+        )
+        .await
+        .unwrap();
+    let draft = world
+        .product
+        .commit_action_input_attachment(
+            world.thread.id,
+            &occurrence_a,
+            &field,
+            &crate::product::ActionInputValue::Text {
+                text: "Lisbon".into(),
+            },
+            draft.revision,
+        )
+        .await
+        .unwrap();
+    let companion_occurrence = PresentingInputOccurrence {
+        action_id: companion.id,
+        ..occurrence_b.clone()
+    };
+    let companion = world
+        .runtime
+        .canonical_input_action_occurrence(None, world.thread.id.value(), &companion_occurrence)
+        .await
+        .unwrap();
+    let draft = world
+        .product
+        .commit_action_input_attachment(
+            world.thread.id,
+            &companion_occurrence,
+            &companion,
+            &crate::product::ActionInputValue::Text {
+                text: "Relaxed".into(),
+            },
+            draft.revision,
+        )
+        .await
+        .unwrap();
+    assert_eq!(draft.attachments.len(), 3);
+    // An unavailable canonical read cannot silently discard a saved answer or reserve a call.
+    world
+        .faults
+        .fail_input_occurrence_reads
+        .store(true, Ordering::SeqCst);
+    assert!(
+        invoke_action_with_authority(
+            &world.state,
+            world.thread.id.value(),
+            world.thread.root_interaction_id.value(),
+            invoke.id.value(),
+            "unknown-occurrence",
+            Some(draft.revision),
+            Some(alternate.id.value())
+        )
+        .await
+        .is_err()
+    );
+    assert!(
+        world
+            .product
+            .user_invocation_reservation(
+                world.thread.root_interaction_id,
+                invoke.id.value(),
+                Some("unknown-occurrence")
+            )
+            .await
+            .unwrap()
+            .is_none()
+    );
+    assert!(
+        world
+            .graph
+            .conversation_graph_snapshot(&[parent.id])
+            .await
+            .unwrap()
+            .invocations
+            .is_empty()
+    );
+    assert_eq!(
+        world
+            .product
+            .action_input_draft(world.thread.id)
+            .await
+            .unwrap(),
+        draft
+    );
+    world
+        .faults
+        .fail_input_occurrence_reads
+        .store(false, Ordering::SeqCst);
+    let native_action = world
+        .runtime
+        .get_action(parent.id.value(), invoke.id.value())
+        .await
+        .unwrap();
+    // No saved clicked occurrence: choose the latest valid answer, keeping A's provenance.
+    let fallback = select_invocation_input_attachments(
+        &world.runtime,
+        &world.thread,
+        parent.id.value(),
+        Some(alternate.id.value()),
+        &native_action,
+        draft
+            .attachments
+            .iter()
+            .filter(|item| item.occurrence != occurrence_b)
+            .cloned()
+            .collect(),
+    )
+    .await
+    .unwrap_or_else(|error| panic!("selector: {}", error.message()));
+    assert_eq!(fallback.len(), 2);
+    assert_eq!(fallback[0].occurrence, occurrence_a);
+    // The canonical route rejects an inaccessible occurrence; its newer saved
+    // epoch does not hide valid answers. Unknown route failures above fail closed.
+    let mut invalid = draft.attachments[0].clone();
+    invalid.occurrence.presenting_layer_id = relayer_graph_core::LayerId::new(999999).unwrap();
+    invalid.committed_at = u128::MAX.to_string();
+    let mut candidates = draft.attachments.clone();
+    candidates.push(invalid);
+    let latest = select_invocation_input_attachments(
+        &world.runtime,
+        &world.thread,
+        parent.id.value(),
+        None,
+        &native_action,
+        candidates,
+    )
+    .await
+    .unwrap_or_else(|error| panic!("latest selector: {}", error.message()));
+    assert_eq!(latest[0].occurrence, occurrence_a);
+    let mut tied = draft.attachments.clone();
+    for item in &mut tied {
+        item.committed_at = "10".into();
+    }
+    let tie = select_invocation_input_attachments(
+        &world.runtime,
+        &world.thread,
+        parent.id.value(),
+        None,
+        &native_action,
+        tied,
+    )
+    .await
+    .unwrap_or_else(|error| panic!("tie selector: {}", error.message()));
+    assert_eq!(
+        tie[0].occurrence, occurrence_b,
+        "restored ties use numeric exact-occurrence order"
+    );
+
+    sqlx::query("CREATE TRIGGER fail_occurrence_bind BEFORE UPDATE OF prepared_graph_node_id ON action_invocations WHEN NEW.prepared_graph_node_id IS NOT NULL BEGIN SELECT RAISE(ABORT,'occurrence bind fault'); END")
+        .execute(&world.pool).await.unwrap();
+    assert!(
+        invoke_action_with_authority(
+            &world.state,
+            world.thread.id.value(),
+            world.thread.root_interaction_id.value(),
+            invoke.id.value(),
+            "clicked-B",
+            Some(draft.revision),
+            Some(alternate.id.value())
+        )
+        .await
+        .is_err()
+    );
+    let frozen = world
+        .product
+        .invocation_input_submission(
+            world.thread.id,
+            world.thread.root_interaction_id,
+            invoke.id.value(),
+            "clicked-B",
+        )
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(frozen.1.len(), 2);
+    assert_eq!(
+        frozen.1[0].occurrence, occurrence_b,
+        "clicked B wins even though A was saved later"
+    );
+    assert_eq!(
+        frozen.1[0].value,
+        crate::product::ActionInputValue::Text {
+            text: "Kyoto".into()
+        }
+    );
+    let inventory = world
+        .graph
+        .conversation_graph_snapshot(&[parent.id])
+        .await
+        .unwrap();
+    assert_eq!(
+        inventory.invocations.len(),
+        1,
+        "duplicate action IDs never enter native preparation"
+    );
+    let native_answers = &inventory.invocations[0].submitted_inputs;
+    assert_eq!(native_answers.len(), 2);
+    let native_destination = native_answers
+        .iter()
+        .find(|answer| answer.occurrence.action_id == field.id)
+        .unwrap();
+    assert_eq!(native_destination.occurrence, occurrence_b);
+    assert_eq!(native_destination.source_node_id, node.id);
+    assert_eq!(native_destination.action, field.input.clone().unwrap());
+    assert_eq!(
+        native_destination.value,
+        relayer_graph_core::SubmittedInputValue::Text {
+            text: "Kyoto".into()
+        }
+    );
+    let call = &inventory.invocations[0].invocation;
+    assert_eq!(
+        call.action_snapshot["presentingLayerId"],
+        serde_json::json!(alternate.id)
+    );
+    let newer = world
+        .product
+        .commit_action_input_attachment(
+            world.thread.id,
+            &occurrence_b,
+            &field,
+            &crate::product::ActionInputValue::Text {
+                text: "Oslo".into(),
+            },
+            draft.revision,
+        )
+        .await
+        .unwrap();
+    assert!(
+        invoke_action_with_authority(
+            &world.state,
+            world.thread.id.value(),
+            world.thread.root_interaction_id.value(),
+            invoke.id.value(),
+            "clicked-B",
+            None,
+            Some(alternate.id.value())
+        )
+        .await
+        .is_err()
+    );
+    assert_eq!(
+        world
+            .product
+            .invocation_input_submission(
+                world.thread.id,
+                world.thread.root_interaction_id,
+                invoke.id.value(),
+                "clicked-B"
+            )
+            .await
+            .unwrap()
+            .unwrap(),
+        frozen
+    );
+    assert_eq!(
+        world
+            .graph
+            .conversation_graph_snapshot(&[parent.id])
+            .await
+            .unwrap()
+            .invocations
+            .len(),
+        1
+    );
+    sqlx::query("DROP TRIGGER fail_occurrence_bind")
+        .execute(&world.pool)
+        .await
+        .unwrap();
+    let node = world
+        .runtime
+        .prepare_user_invocation(
+            parent.id.value(),
+            invoke.id.value(),
+            "clicked-B",
+            Some(alternate.id.value()),
+            &ProductService::invocation_arguments(&frozen.1).unwrap(),
+        )
+        .await
+        .unwrap();
+    world
+        .product
+        .invoke_user_durable_action_with_inputs(
+            world.thread.root_interaction_id,
+            invoke.id.value(),
+            "Plan the trip",
+            node,
+            "clicked-B",
+            frozen.0,
+            &frozen.1,
+        )
+        .await
+        .unwrap();
+    let remaining = world
+        .product
+        .action_input_draft(world.thread.id)
+        .await
+        .unwrap();
+    assert_eq!(
+        remaining.attachments,
+        newer
+            .attachments
+            .into_iter()
+            .filter(|item| item.occurrence != companion_occurrence)
+            .map(|mut item| {
+                item.draft_revision = remaining.revision;
+                item
+            })
+            .collect::<Vec<_>>(),
+        "atomic bind consumes only unchanged captured epochs; A and newer B survive"
+    );
+    assert_eq!(remaining.revision, newer.revision + 1);
     world.finish().await;
 }

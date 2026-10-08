@@ -2604,7 +2604,7 @@ async fn resolved_invoke_destination_is_readable_cross_thread_in_review_mode() {
     let canonical_source = json!({
         "nodeId": 90,
         "rootLayer": {
-            "layer": {"id": 500}, "nodes": [], "edges": [],
+            "layer": {"id": 500}, "nodes": [{"id":7,"kind":"concept","title":"Source","state":"accepted"}], "edges": [],
             "actions": [{"id": 41, "sourceNodeId": 7, "kind": "navigate", "relation":"expand", "resolvedInvokeInteractionId":91, "targetLayerId": 501, "state": "accepted"}]
         }
     });
@@ -2643,7 +2643,7 @@ async fn resolved_invoke_destination_is_readable_cross_thread_in_review_mode() {
             "/api/control/interactions/90/actions/41",
             axum::routing::get(|| async {
                 axum::Json(json!({"action": {
-                    "id": 41, "kind": "navigate", "relation":"expand", "resolvedInvokeInteractionId":91,
+                    "id": 41, "sourceNodeId": 7, "kind": "navigate", "relation":"expand", "resolvedInvokeInteractionId":91,
                     "targetLayerId": 501, "state": "accepted"
                 }}))
             }),
@@ -4264,8 +4264,8 @@ async fn action_invocation_api_is_idempotent_and_survives_restart() {
     )
     .bind(json!({
         "nodeId":101,
-        "rootLayer":{"layer":{"id":1},"nodes":[],"edges":[],"actions":[{
-            "id":41,"kind":"invoke","interactionText":"Authored follow-up",
+        "rootLayer":{"layer":{"id":1},"nodes":[{"id":7,"kind":"concept","title":"Authored follow-up","state":"accepted"}],"edges":[],"actions":[{
+            "id":41,"sourceNodeId":7,"kind":"invoke","interactionText":"Authored follow-up",
             "state":"accepted","targetLayerId":null
         }]}
     }).to_string())
@@ -4303,6 +4303,7 @@ async fn action_invocation_api_is_idempotent_and_survives_restart() {
                             axum::Json(json!({
                                 "action": {
                                     "id": action_id,
+                                    "sourceNodeId": if id == 303 {307} else {7},
                                     "kind": "invoke",
                                     "interactionText": "Authored follow-up",
                                     "state": "accepted"
@@ -4378,8 +4379,8 @@ async fn action_invocation_api_is_idempotent_and_survives_restart() {
                         StatusCode::OK,
                         axum::Json(json!({
                             "nodeId":101,
-                            "rootLayer":{"layer":{"id":1},"nodes":[],"edges":[],"actions":[{
-                                "id":41,"kind":"invoke","interactionText":"Authored follow-up",
+                            "rootLayer":{"layer":{"id":1},"nodes":[{"id":7,"kind":"concept","title":"Authored follow-up","state":"accepted"}],"edges":[],"actions":[{
+                                "id":41,"sourceNodeId":7,"kind":"invoke","interactionText":"Authored follow-up",
                                 "state":"accepted","targetLayerId":null
                             }]}
                         })),
@@ -4611,8 +4612,8 @@ async fn action_invocation_api_is_idempotent_and_survives_restart() {
         .bind(reused_thread_id)
         .bind(json!({
             "nodeId": 103,
-            "rootLayer": {"layer": {"id": 3}, "nodes": [], "edges": [], "actions": [{
-                "id": 41, "kind": "invoke", "interactionText": "Authored follow-up",
+            "rootLayer": {"layer": {"id": 3}, "nodes": [{"id":7,"kind":"concept","title":"Authored follow-up","state":"accepted"}], "edges": [], "actions": [{
+                "id": 41, "sourceNodeId": 7, "kind": "invoke", "interactionText": "Authored follow-up",
                 "state": "accepted", "targetLayerId": null
             }]}
         }).to_string())

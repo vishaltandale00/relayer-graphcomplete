@@ -975,7 +975,8 @@ function projectInteractionGraphs(interactions, turns, layersByTurn, exportVersi
       else complete = false;
     } else if (origin.kind === "invocation") {
       const call = invocations.find(candidate => candidate.id === origin.invocationId);
-      const source = interactions.find(candidate => candidate.graphNodeId === call?.source.interactionNodeId);
+      const source = interactions.find(candidate => candidate.inertInvocationSource && candidate.invocationId === call?.id)
+        ?? interactions.find(candidate => !candidate.inertInvocationSource && candidate.graphNodeId === call?.source.interactionNodeId);
       if (source) group(source).invocationActionId = call.source.actionId;
       else complete = false;
     }
@@ -995,15 +996,46 @@ export function inertInvocationCurrent(call, { threadId, id = `current:${call.id
     completionOutput: { rootLayer: layers.get(call.currentLayerId) }, submittedInputs: cloneJson(call.arguments),
     safeReason: call.safeReason,
     interactionGraph: { enabled: true, complete: sourceInteractionId != null, sources: sourceInteractionId == null ? [] : [{
-      interactionId: sourceInteractionId, invocationActionId: call.source.actionId, contexts: [], message: call.source.label,
+      interactionId: sourceInteractionId, threadId, invocationActionId: call.source.actionId, contexts: [], message: call.source.label,
     }] },
   }, layers };
+}
+
+// A call can freeze an own-draft source that never reaches an accepted view.
+// Render its frozen identity as an inert per-call source, without creating a
+// portable accepted record, canonical Layer membership, or execution authority.
+function inertInvocationSource(call, turns, threadId) {
+  const source = call.source;
+  const turn = turns.find(candidate => candidate.interactionNodeId === source.interactionNodeId);
+  const layerId = `source-layer:${call.id}`;
+  const node = { id: source.parentNodeId, kind: "concept", icon: "box",
+    title: source.parentTitle, detail: source.parentDetail, state: "draft" };
+  const action = { id: source.actionId, sourceNodeId: node.id, kind: "invoke",
+    label: source.label, interactionText: source.instruction, description: source.description,
+    icon: source.icon, variant: source.variant, state: source.state,
+    inputActionIds: [...source.inputActionIds], ...(source.reusable == null ? {} : { reusable: source.reusable }) };
+  const rootLayer = { layer: { id: layerId, nodes: [node.id], edges: [], defaultNodeId: node.id,
+    layout: { version: 1, placements: [{ nodeId: node.id, x: 0.5, y: 0.5 }] }, state: "draft" },
+    nodes: [node], edges: [], actions: [action] };
+  return { id: `source:${call.id}`, threadId, sequence: turn?.sequence ?? 0,
+    invocationId: call.id, inertInvocationSource: true, invocationSourceTurnId: turn?.id ?? null,
+    frozenInvocationSource: cloneJson(source), graphNodeId: source.interactionNodeId,
+    text: `${source.parentTitle} · ${source.label} · Frozen source`,
+    completionStatus: turn?.completion.status ?? "not_started",
+    submittedInputs: cloneJson(call.arguments), completionOutput: { rootLayer },
+    interactionGraph: { enabled: true, complete: true, sources: [] } };
+}
+
+function invocationSourceFor(call, accepted, inertSources) {
+  return accepted.find(item => item.graphNodeId === call.source.interactionNodeId)
+    ?? inertSources.find(item => item.invocationId === call.id);
 }
 
 export function publicState(snapshot) {
   const thread = snapshot.thread;
   const acceptedInteractions = snapshot.interactions;
   const currentInteractions = snapshot.currentInteractions ?? [];
+  const sourceInteractions = snapshot.sourceInteractions ?? [];
   const first = acceptedInteractions[0];
   const project = snapshot.projectName
     ? { id: "export:project", name: snapshot.projectName }
@@ -1011,9 +1043,9 @@ export function publicState(snapshot) {
   return {
     projects: project ? [project] : [],
     threads: [thread],
-    interactions: [...acceptedInteractions, ...currentInteractions],
+    interactions: [...acceptedInteractions, ...sourceInteractions, ...currentInteractions],
     actionInvocations: (snapshot.invocations ?? []).flatMap(call => {
-      const source = acceptedInteractions.find(candidate => candidate.graphNodeId === call.source.interactionNodeId);
+      const source = invocationSourceFor(call, acceptedInteractions, sourceInteractions);
       const result = snapshot.turns.find(candidate => candidate.id === call.resultTurnId);
       const current = currentInteractions.find(candidate => candidate.invocationId === call.id);
       return source ? [{ id: call.id, durable: true, reusable: call.source.reusable,
@@ -1157,7 +1189,9 @@ export function parseConversationExportSnapshot(input) {
     const call = invocations.find(candidate => candidate.resultTurnId === interaction.id);
     if (call) interaction.submittedInputs = cloneJson(call.arguments);
   }
-  projectInteractionGraphs(interactions, turns, layersByTurn, header.exportVersion, invocations);
+  const sourceInteractions = invocations.filter(call => !interactions.some(item => item.graphNodeId === call.source.interactionNodeId))
+    .map(call => inertInvocationSource(call, turns, threadId));
+  projectInteractionGraphs([...interactions, ...sourceInteractions], turns, layersByTurn, header.exportVersion, invocations);
   const projectName = conversation.projectName ?? null;
   const projectId = projectName ? "export:project" : null;
   const thread = {
@@ -1178,8 +1212,9 @@ export function parseConversationExportSnapshot(input) {
     turns: turns.map(publicTurnRecord),
     acceptedTurns: acceptedTurns.map(publicTurnRecord),
     interactions,
+    sourceInteractions,
     currentInteractions: invocations.map(call => inertInvocationCurrent(call, { threadId,
-      sourceInteractionId: interactions.find(item => item.graphNodeId === call.source.interactionNodeId)?.id,
+      sourceInteractionId: invocationSourceFor(call, interactions, sourceInteractions)?.id,
       sequence: turns.find(turn => turn.interactionNodeId === call.source.interactionNodeId)?.sequence ?? 0,
     })?.interaction).filter(Boolean),
     layersByTurn,
@@ -1190,6 +1225,8 @@ export function parseConversationExportSnapshot(input) {
     assetContents: contentRecords.map(cloneJson),
     state: null,
     layerFor(turnId, layerId) {
+      const source = this.sourceInteractions.find(interaction => interaction.id === turnId);
+      if (source) return source.completionOutput.rootLayer.layer.id === layerId ? source.completionOutput.rootLayer : null;
       const current = this.currentInteractions.find(interaction => interaction.id === turnId);
       return current ? this.invocationCurrentLayer(current.invocationId, layerId)
         : layersByTurn.get(String(turnId))?.get(String(layerId)) ?? null;

@@ -123,8 +123,28 @@
       "threadId": "PRRT_kwDOTyTfxM6qKiIG",
       "disposition": "Canonical whole-Node consumers govern inputCanAcceptAnswer; a shared field remains editable until all explicit single consumers freeze; API refuses exhausted writes before draft mutation.",
       "checkpoint": "bound_input_edits_stop_only_when_all_native_single_consumers_are_frozen with hidden historical consumer and renderer true/false matrix"
+    },
+    {
+      "index": 20,
+      "threadId": "PRRT_kwDOTyTfxM6qNYve",
+      "disposition": "Own-draft calls retain a per-call inert source when the source never accepted. Frozen identity, original state, arguments and call lifecycle remain visible with and without Current; synthetic source and Current are excluded from human/latest-turn semantics and confer no mutation authority.",
+      "checkpoint": "Actual public snapshot/workspace DOM stopped/failed source x noCurrent/Current matrix; accepted views and portable invocation records unchanged; read-only navigation and mutation-denial callbacks"
+    },
+    {
+      "index": 21,
+      "threadId": "PRRT_kwDOTyTfxM6qNYvk",
+      "disposition": "New bound preparations select one canonical-valid saved occurrence per required Input. Exact clicked occurrence has priority, otherwise the greatest numeric commit epoch and deterministic occurrence tuple. Immutable keyed receipts bypass selection; only selected captured epochs are consumed.",
+      "checkpoint": "Real API invoke_selects_one_saved_occurrence_and_consumes_only_its_frozen_epoch; canonical validation and transport-unknown refusal; native exact-key recovery and atomic epoch cleanup"
+    },
+    {
+      "index": 22,
+      "threadId": "PRRT_kwDOTyTfxM6qNYvt",
+      "disposition": "Standard/authored bound controls display the valid saved answer from another presenting Layer without manufacturing an empty current occurrence. Explicit current edits save the clicked occurrence. Undo, exact original saved provenance, unrelated answers and independently newer source/display edits survive.",
+      "checkpoint": "Nine mounted cross-Layer plain/authored Input scenarios; numeric epoch/occurrence comparator parity with API; current-value acceptance and source/display epoch cleanup"
     }
   ],
   "testDeletion": [],
-  "authority": "Metadata resolution after committed exact-source evidence; no merge approval, paid inference, hosted publication or release authority."
+  "authority": "Metadata resolution after committed exact-source evidence; no merge approval, paid inference, hosted publication or release authority.",
+  "followupBaselineHead": "8f9bb094853a609d2edc647f2020bc5c07ef2c34",
+  "followupQualification": "qualification-pr707-followup-review-2026-10-08.json"
 }

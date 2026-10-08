@@ -43,7 +43,7 @@ export function agentChildIds(state) {
  */
 export function humanTurns(state, thread) {
   const children = agentChildIds(state);
-  return workspaceTurns(state, thread).filter(turn => !turn.inertInvocationCurrent && !children.has(String(turn.id)));
+  return workspaceTurns(state, thread).filter(turn => !turn.inertInvocationCurrent && !turn.inertInvocationSource && !children.has(String(turn.id)));
 }
 
 function sameId(left, right) {

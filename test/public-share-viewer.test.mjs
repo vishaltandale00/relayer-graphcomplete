@@ -444,6 +444,75 @@ describe("V4 inert reusable Invocation snapshots", () => {
     expect(() => parsePublicSnapshot(recordsJsonl(records))).toThrow(expect.objectContaining({ code: "invocation_argument_source_mismatch" }));
   });
 
+  it.each(["stopped", "failed"].flatMap(status => [false, true].map(current => ({ status, current }))))(
+    "retains an inert own-draft source and visible call when parent $status (Current $current)", async ({ status, current }) => {
+      const records = reusableInvocationRecords(), call = records[0].invocations[0];
+      call.activator = "agent";
+      call.source.state = "draft"; call.source.captureState = "draft";
+      call.lifecycle = "active"; call.safeReason = null;
+      call.resultTurnId = null; call.returnedLayerId = null;
+      if (!current) { call.current = null; call.currentLayerId = null; call.headRevision = 0; }
+      records[0].invocations = [call];
+      records[1].interactionNodeId = call.source.interactionNodeId;
+      records[1].completion = { ...records[1].completion, status }; records[1].acceptedView = null;
+      records[2].origin = { kind: "user" };
+      records[2].completion = { ...records[2].completion, status: "failed" }; records[2].acceptedView = null;
+      records[3].origin = { kind: "user" };
+      const acceptedView = structuredClone(records[3].acceptedView);
+      const originalCall = structuredClone(call);
+      const snapshot = parsePublicSnapshot(recordsJsonl(records));
+      expect(snapshot.acceptedTurns.map(turn => turn.id)).toEqual(["turn:3"]);
+      expect(snapshot.interactions.map(turn => turn.id)).toEqual(["turn:3"]);
+      expect(snapshot.acceptedTurns[0].acceptedView).toEqual(acceptedView);
+      expect(snapshot.invocations).toEqual([originalCall]);
+      const source = snapshot.sourceInteractions[0];
+      expect(source).toMatchObject({ id: `source:${call.id}`, inertInvocationSource: true,
+        invocationSourceTurnId: "turn:1", completionStatus: status, frozenInvocationSource: call.source });
+      expect(source.completionOutput.rootLayer.layer.state).toBe("draft");
+      expect(snapshot.state.actionInvocations).toMatchObject([{ id: call.id, durable: true,
+        agentInvoked: true, sourceInteractionId: source.id, resultInteractionId: current ? `current:${call.id}` : null }]);
+      expect(humanTurns(snapshot.state, snapshot.thread).map(turn => turn.id)).toEqual(["turn:3"]);
+      if (current) expect(snapshot.currentInteractions[0].interactionGraph.sources).toMatchObject([
+        { interactionId: source.id, threadId: snapshot.thread.id, invocationActionId: call.source.actionId },
+      ]);
+      const windowRef = new Window({ url: "https://share.example.test" });
+      windowRef.document.write(renderPublicViewerTemplate({ snapshot: recordsJsonl(records) }));
+      vi.stubGlobal("window", windowRef); vi.stubGlobal("document", windowRef.document);
+      vi.stubGlobal("DOMParser", windowRef.DOMParser);
+      vi.stubGlobal("lucide", { Circle: {}, createElement: () => windowRef.document.createElementNS("http://www.w3.org/2000/svg", "svg") });
+      vi.stubGlobal("marked", { parse: value => `<p>${value}</p>` });
+      let viewer;
+      try {
+        viewer = bootPublicViewer({ documentRef: windowRef.document, windowRef, onRenderError: error => { throw error; } });
+        expect(viewer).toBeTruthy();
+        windowRef.document.querySelector("#turnPickerButton").click();
+        const sourceButton = windowRef.document.querySelector(`[data-turn-id="${source.id}"]`);
+        expect(sourceButton?.disabled).toBe(false);
+        sourceButton.click();
+        await vi.waitFor(() => expect(viewer.adapter.selection.currentInteractionId).toBe(source.id));
+        expect(viewer.adapter.state.status).toBe(status);
+        windowRef.document.querySelector(".graph-node").click();
+        const callButton = () => windowRef.document.querySelector(".invocation-result-control");
+        await vi.waitFor(() => expect(callButton()).toBeTruthy());
+        expect(callButton().disabled).toBe(!current);
+        expect(callButton().textContent).toContain(current ? "running" : "active");
+        if (current) {
+          callButton().click();
+          await vi.waitFor(() => expect(viewer.adapter.selection.currentInteractionId).toBe(`current:${call.id}`));
+          expect(viewer.adapter.state.visibleLayer.layer.id).toBe(call.currentLayerId);
+          windowRef.document.querySelector("#turnPickerButton").click();
+          const returnSource = windowRef.document.querySelector(`[data-turn-id="${source.id}"]`);
+          expect(returnSource?.disabled).toBe(false);
+          returnSource.click();
+          await vi.waitFor(() => expect(viewer.adapter.selection.currentInteractionId).toBe(source.id));
+        }
+        await expect(viewer.adapter.onInvokeAction(source.completionOutput.rootLayer.actions[0])).resolves.toBe(false);
+        await expect(viewer.adapter.onSubmitInteraction({ text: "mutate" })).resolves.toBe(false);
+        expect(humanTurns(viewer.adapter.state, viewer.adapter.thread).at(-1).id).toBe("turn:3");
+        expect(viewer.adapter.state.actionInvocations).toHaveLength(1);
+      } finally { viewer?.dispose(); vi.unstubAllGlobals(); await windowRef.happyDOM.close(); }
+    });
+
   it.each(["active", "stopped", "failed"])("opens %s Current from its source in the actual public renderer without Return or execution", async lifecycle => {
     const records = reusableInvocationRecords(), call = records[0].invocations[0];
     call.lifecycle = lifecycle; call.resultTurnId = null; call.returnedLayerId = null;

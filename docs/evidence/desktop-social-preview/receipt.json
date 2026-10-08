@@ -13,7 +13,7 @@
   },
   "rendererArtifact": {
     "directory": "desktop/renderer",
-    "digest": "c0a199cf5dcb146c3189c68780a310c6097d53b33a1117de58e6f5ed0e661fe1",
+    "digest": "c65f8ba93b93a0af3c6f05752130d50e991c21f583fc4392b644392af1ac2200",
     "files": {
       "assets/relayer-logo.svg": {
         "bytes": 509,
@@ -256,8 +256,8 @@
         "sha256": "2db93cdd4c3c790c2b9b87a4d13c89f17561c60a8a337b28ea68369f3e1f9424"
       },
       "src/product-workspace/invoke-inputs.js": {
-        "bytes": 2063,
-        "sha256": "0c2fe7281acd4140e33f83dfc4a0ea4a7f1ac5dac9050dc848550849cde14c2e"
+        "bytes": 3279,
+        "sha256": "c40975e8364f71b4d9b7448277c3e457979117873876d9a99153f57899c3164c"
       },
       "src/product-workspace/layer-selection.js": {
         "bytes": 4777,
@@ -268,8 +268,8 @@
         "sha256": "338cdd8855f3b40c4138d0245262c209554b26b94c1a4655598ce976fca5b90c"
       },
       "src/product-workspace/model.js": {
-        "bytes": 9870,
-        "sha256": "e8a0f0115cd09963972f13dc8c7a50f25a9a8f3a2d385f8e7bba934e4e083462"
+        "bytes": 9901,
+        "sha256": "7797cc82ec7d6c8eec0d44f0e7499c5c4818fff524030f21369ae5df310282bb"
       },
       "src/product-workspace/node-detail-runtime.js": {
         "bytes": 30996,
@@ -288,8 +288,8 @@
         "sha256": "8e5d307f95b1863fb995606ca32a832de088916716c39476f9d31f2174de002d"
       },
       "src/product-workspace/workspace.js": {
-        "bytes": 303806,
-        "sha256": "ab169473d5e8e6ec04cc95420513606670c4938cf7d52fcf101307e53f931e1b"
+        "bytes": 305049,
+        "sha256": "d8a1632b7d6e9c0ac15e7a0a4ae5c24caa7e0322f8913014da2adb0ba93f2f4d"
       },
       "src/project-composer-navigation.js": {
         "bytes": 282,
@@ -332,8 +332,8 @@
         "sha256": "14f9e26730fb4028b8349517519881dbe62ff6798ea2aaad0f7c57a356073918"
       },
       "src/public-share-viewer/snapshot.js": {
-        "bytes": 78827,
-        "sha256": "080e0538a4a7796ac78dbaf42cc6cea1a6181928a84f82c454f1d327900774ed"
+        "bytes": 81482,
+        "sha256": "f1f099ad7778a0abf6117896be0444edfb68e29d60c19bfe9d9cec5fa08f0eaa"
       },
       "src/public-share-viewer/template.js": {
         "bytes": 7378,

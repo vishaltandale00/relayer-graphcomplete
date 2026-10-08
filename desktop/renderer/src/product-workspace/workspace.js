@@ -29,7 +29,7 @@ import { renderMarkdown } from "./markdown.js";
 import { isResolvedInvokeAction, mountCompiledNodeDetail } from "./node-detail-runtime.js";
 import { productWorkspaceMarkup } from "./view.js";
 import { createSharePublishController } from "../share-publish-ui.js";
-import { connectedInvokeInputs, invokeInputGroups, invokeInputIssue } from "./invoke-inputs.js";
+import { boundInputAttachment, connectedInvokeInputs, invokeInputGroups, invokeInputIssue } from "./invoke-inputs.js";
 import {
   confirmationRestorationKey,
   restoredDraftForInteraction,
@@ -5604,6 +5604,12 @@ export function createProductWorkspace({
     ));
   }
 
+  function displayedInputAttachment(draft, input, occurrence) {
+    const bound = implicitInputAcceptance && (getState().actions ?? []).some(action => action.kind === "invoke"
+      && action.inputActionIds?.some(id => String(id) === String(input.id)));
+    return bound ? boundInputAttachment(draft, input, occurrence) : committedInputAttachment(draft, occurrence);
+  }
+
   function captureImplicitInputs(threadId, { composerOnly = false, action = null } = {}) {
     if (!implicitInputAcceptance) return [];
     const state = getState();
@@ -5611,17 +5617,24 @@ export function createProductWorkspace({
     const layerId = currentLayerId(state, getThread());
     const draft = inputDraftController?.current(threadId);
     return [...implicitInputEntries].filter(([key, entry]) => inputKeyBelongsToThread(key, threadId)
-      && (inputTouched.has(key) || committedInputAttachment(draft, entry.occurrence))
       && (!composerOnly || isComposerInputOccurrence(entry.occurrence))
       && (!action || (String(entry.occurrence.presentingInteractionNodeId) === String(interaction?.graphNodeId)
         && String(entry.occurrence.presentingLayerId) === String(layerId)
         && action.inputActionIds?.some(id => String(id) === String(entry.occurrence.actionId)))))
-      .map(([key, entry]) => ({ key, ...entry,
-        value: structuredClone(inputTouched.has(key) ? inputStages.get(key) : initialInputStageValue(entry.semantic, committedInputAttachment(draft, entry.occurrence))),
-        editEpoch: inputEditEpochs.get(key) ?? 0,
-        pendingCommits: [...(authoredInputCommits.get(String(threadId)) ?? [])]
-          .filter(commit => authoredCommitOccurrences.get(commit) === authoredInputKey(entry.occurrence)),
-      }));
+      .flatMap(([key, entry]) => {
+        const attachment = action ? boundInputAttachment(draft, entry.action, entry.occurrence)
+          : committedInputAttachment(draft, entry.occurrence);
+        const touched = inputTouched.has(key);
+        if (!touched && !attachment) return [];
+        const occurrence = touched ? entry.occurrence : attachment.occurrence;
+        const sourceKey = threadInputOccurrenceKey(threadId, occurrence);
+        return [{ key, ...entry, occurrence, sourceKey, sourceEditEpoch: inputEditEpochs.get(sourceKey) ?? 0,
+          value: structuredClone(touched ? inputStages.get(key) : initialInputStageValue(entry.semantic, attachment)),
+          editEpoch: inputEditEpochs.get(key) ?? 0,
+          pendingCommits: [...(authoredInputCommits.get(String(threadId)) ?? [])]
+            .filter(commit => authoredCommitOccurrences.get(commit) === authoredInputKey(entry.occurrence)),
+        }];
+      });
   }
 
   async function flushImplicitInputs(threadId, snapshot) {
@@ -5670,9 +5683,13 @@ export function createProductWorkspace({
       || currentLayerId(getState(), getThread()) !== sourceLayerId) return null;
     const draft = inputDraftController?.current(threadId);
     const submitted = (draft?.attachments ?? []).filter((attachment) =>
-      action.inputActionIds?.some((id) => String(id) === String(attachment.occurrence.actionId)))
-      .map((attachment) => ({ attachment, editEpoch: snapshot.find(entry => entry.key === threadInputOccurrenceKey(threadId, attachment.occurrence))?.editEpoch
-        ?? inputEditEpochs.get(threadInputOccurrenceKey(threadId, attachment.occurrence)) ?? 0 }));
+      recoveringCall || !implicitInputAcceptance ? action.inputActionIds?.some(id => String(id) === String(attachment.occurrence.actionId))
+        : snapshot.some(entry => inputOccurrenceKey(entry.occurrence) === inputOccurrenceKey(attachment.occurrence)))
+      .map((attachment) => {
+        const captured = snapshot.find(entry => inputOccurrenceKey(entry.occurrence) === inputOccurrenceKey(attachment.occurrence));
+        return { attachment, displayKey: captured?.key, displayEditEpoch: captured?.editEpoch,
+          editEpoch: captured?.sourceEditEpoch ?? inputEditEpochs.get(threadInputOccurrenceKey(threadId, attachment.occurrence)) ?? 0 };
+      });
     const runtime = mountedAuthoredDetail;
     const node = (getState().nodes ?? []).find((candidate) => String(candidate.id) === String(action.sourceNodeId));
     const result = await (recoveringCall ? onInvokeAction(action) : onInvokeAction(action, { inputDraftRevision: currentInputDraftRevision(threadId) }));
@@ -5687,7 +5704,7 @@ export function createProductWorkspace({
     }
     if (!responseDraft || !inputDraftController) return result;
     const current = inputDraftController.adoptResponse(threadId, responseDraft);
-    for (const { attachment, editEpoch } of submitted) {
+    for (const { attachment, editEpoch, displayKey, displayEditEpoch } of submitted) {
       if (committedInputAttachment(current, attachment.occurrence)) continue;
       const semantic = attachment.action;
       const submittedValue = initialInputStageValue(semantic, attachment);
@@ -5698,7 +5715,8 @@ export function createProductWorkspace({
         inputErrors.delete(stageKey);
         inputTouched.delete(stageKey);
       }
-      if (runtime !== mountedAuthoredDetail || String(threadId) !== String(getThread()?.id)) continue;
+      if (runtime !== mountedAuthoredDetail || String(threadId) !== String(getThread()?.id)
+        || (displayKey && (inputEditEpochs.get(displayKey) ?? 0) !== displayEditEpoch)) continue;
       const mount = node?.authoredDetail?.mounts?.find((candidate) => candidate.kind === "capability"
         && candidate.capability.kind === "input"
         && String(resolveCompiledNodeDetailAction(getState().actions, candidate.capability.action, node)?.id) === String(attachment.occurrence.actionId));
@@ -5758,7 +5776,7 @@ export function createProductWorkspace({
         if (!key) return "Connected inputs are unavailable.";
         const semantic = input.input ?? input;
         const stageKey = threadInputOccurrenceKey(thread.id, key);
-        const attachment = committedInputAttachment(inputDraftController?.current(thread.id), key);
+        const attachment = boundInputAttachment(inputDraftController?.current(thread.id), input, key);
         const value = inputStages.has(stageKey) ? inputStages.get(stageKey) : initialInputStageValue(semantic, attachment);
         if (validateInputStage(semantic, value)) return `Enter ${semantic.prompt} before invoking.`;
       }
@@ -5896,9 +5914,9 @@ export function createProductWorkspace({
       const semantic = action.input || action;
       const occurrence = createInputOccurrence(interaction.graphNodeId, layerId, action.id);
       const stageKey = threadInputOccurrenceKey(thread.id, occurrence);
-      const attachment = committedInputAttachment(draft, occurrence);
+      const attachment = displayedInputAttachment(draft, action, occurrence);
       const committedValue = initialInputStageValue(semantic, attachment);
-      implicitInputEntries.set(stageKey, { occurrence, semantic,
+      implicitInputEntries.set(stageKey, { occurrence, semantic, action,
         composerEligible: !(state.actions ?? []).some(candidate => candidate.kind === "invoke"
           && candidate.inputActionIds?.some(id => String(id) === String(action.id))) });
       if (!inputStages.has(stageKey) || !inputTouched.has(stageKey)) inputStages.set(stageKey, committedValue);
@@ -6329,11 +6347,11 @@ export function createProductWorkspace({
       for (const action of inputActions) {
         const occurrence = createInputOccurrence(interaction.graphNodeId, visibleLayer.layer.id, action.id);
         const key = threadInputOccurrenceKey(getThread()?.id, occurrence);
-        implicitInputEntries.set(key, { occurrence, semantic: action.input ?? action,
+        implicitInputEntries.set(key, { occurrence, action, semantic: action.input ?? action,
           composerEligible: !(state.actions ?? []).some(candidate => candidate.kind === "invoke"
             && candidate.inputActionIds?.some(id => String(id) === String(action.id))) });
         if (!inputStages.has(key) || !inputTouched.has(key)) inputStages.set(key, initialInputStageValue(action.input ?? action,
-          committedInputAttachment(inputDraftController.current(getThread()?.id), occurrence)));
+          displayedInputAttachment(inputDraftController.current(getThread()?.id), action, occurrence)));
       }
     }
     const authoredCapabilityState = {};
@@ -6366,7 +6384,7 @@ export function createProductWorkspace({
           ? createInputOccurrence(interaction.graphNodeId, visibleLayer.layer.id, action.id)
           : null;
         const attachment = occurrence && inputDraftController
-          ? committedInputAttachment(inputDraftController.current(getThread()?.id), occurrence)
+          ? displayedInputAttachment(inputDraftController.current(getThread()?.id), action, occurrence)
           : null;
         const failure = occurrence
           ? authoredInputErrors.get(`${getThread()?.id}\u0000${authoredInputKey(occurrence)}`)

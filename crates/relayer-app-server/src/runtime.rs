@@ -290,6 +290,7 @@ pub(crate) struct RuntimeInvokedCompletionStart {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct RuntimeAction {
+    pub(crate) source_node_id: i64,
     pub(crate) id: i64,
     #[serde(default)]
     pub(crate) source_layer_id: Option<i64>,
@@ -2195,7 +2196,6 @@ impl RuntimeClient {
         Ok(snapshot)
     }
 
-    #[cfg(test)]
     pub(crate) async fn canonical_input_action_occurrence(
         &self,
         destination_project_id: Option<i64>,
