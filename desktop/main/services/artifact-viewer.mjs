@@ -324,12 +324,16 @@ export function artifactPreviewSize(artifact, size) {
  * `evaluate` runs a script in the page.
  */
 export async function artifactPreviewSettled(kind, evaluate) {
-  const sleep = (ms) => new Promise((done) => setTimeout(done, ms));
-  if (!OFFICE_KINDS.has(kind)) return sleep(({ pdf: 1500, video: 1200 })[kind] ?? 600);
+  if (!OFFICE_KINDS.has(kind)) return new Promise((done) => setTimeout(done, ({ pdf: 1500, video: 1200 })[kind] ?? 600));
+  await officeDrawn(evaluate);
+}
+
+/** Wait, up to 10 s, until an Office page says it has drawn (or failed to). */
+async function officeDrawn(evaluate) {
   const until = Date.now() + 10_000;
   while (Date.now() < until) {
     if (await evaluate(`document.getElementById("office")?.dataset.ready ?? null`).catch(() => null)) return;
-    await sleep(100);
+    await new Promise((done) => setTimeout(done, 100));
   }
 }
 
@@ -637,6 +641,8 @@ export function createArtifactViewerService({
     const viewing = current;
     if (!viewing?.view || !notesDirectory) return null;
     const contents = viewing.view.webContents;
+    // A note on an Office document captures it once drawn, never half-rendered.
+    if (OFFICE_KINDS.has(viewing.plan.kind)) await officeDrawn((script) => contents.executeJavaScript(script));
     await eachFrame(contents, PAUSE_MEDIA_SCRIPT);
     // A capture can stall while Chromium paints no frames; never leave the viewer waiting.
     const bounded = (promise) => Promise.race([promise, new Promise((_, reject) => setTimeout(() => reject(new Error("The view could not be captured.")), 5_000))]);

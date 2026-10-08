@@ -163,7 +163,7 @@ describe("Office documents (ART-012)", () => {
   });
 
   // The viewer's own page and Office bundle in Chromium, as Desktop and Eval load them.
-  async function openInChromium(browser, artifact) {
+  async function openInChromium(browser, artifact, { ready = "true" } = {}) {
     const plan = artifactViewPlan(artifact, folder);
     const handler = createArtifactRequestHandler({ getPlan: () => plan, vendorDirectory: join(root, "desktop", "renderer", "vendor") });
     const page = await browser.newPage({ viewport: { width: 1164, height: 703 } });
@@ -175,7 +175,7 @@ describe("Office documents (ART-012)", () => {
     });
     await page.goto(plan.url.replace("relayer-artifact://view", "https://artifact.relayer.invalid"));
     await page.waitForSelector("#office[data-ready]", { state: "attached" });
-    expect(await page.locator("#office").getAttribute("data-ready")).toBe("true");
+    expect(await page.locator("#office").getAttribute("data-ready")).toBe(ready);
     const located = () => page.evaluate(artifactViewerTesting.NOTE_LOCATION_SCRIPT);
     return { page, located, errors };
   }
@@ -218,17 +218,40 @@ describe("Office documents (ART-012)", () => {
     const book = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(book, cells, "Export");
     await writeFile(join(folder, "docs", "huge.xlsx"), XLSX.write(book, { type: "buffer", bookType: "xlsx" }));
+    // Review: a sheet only wider than the limit keeps its note after switching tabs.
+    const wideBook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wideBook, XLSX.utils.aoa_to_sheet([Array.from({ length: 150 }, (_, index) => index + 1)]), "Wide");
+    XLSX.utils.book_append_sheet(wideBook, XLSX.utils.aoa_to_sheet([["Notes"]]), "Notes");
+    await writeFile(join(folder, "docs", "wide.xlsx"), XLSX.write(wideBook, { type: "buffer", bookType: "xlsx" }));
+    // Review: an archive that would expand past the limit is refused before any parser runs.
+    // One central-directory entry claiming 2 GiB, then the end record.
+    const bomb = Buffer.alloc(47 + 22);
+    bomb.writeUInt32LE(0x02014b50, 0);
+    bomb.writeUInt32LE(0x7fffffff, 24);
+    bomb.writeUInt16LE(1, 28);
+    bomb.write("a", 46);
+    bomb.writeUInt32LE(0x06054b50, 47);
+    bomb.writeUInt16LE(1, 47 + 10);
+    bomb.writeUInt32LE(47, 47 + 12);
+    await writeFile(join(folder, "docs", "bomb.docx"), bomb);
     const browser = await chromium.launch();
     try {
       const sheet = await openInChromium(browser, { kind: "xlsx", source: { file: "docs/huge.xlsx" } });
       expect(await sheet.page.locator(".office-sheet-limit").innerText()).toContain("first 1000 rows");
       expect(await sheet.page.locator(".office-sheet tr").count()).toBeLessThanOrEqual(1000);
+      const wide = await openInChromium(browser, { kind: "xlsx", source: { file: "docs/wide.xlsx" } });
+      await wide.page.getByRole("button", { name: "Notes" }).click();
+      await wide.page.getByRole("button", { name: "Wide" }).click();
+      expect(await wide.page.locator(".office-sheet-limit").count()).toBe(1);
+      expect(await wide.page.locator(".office-sheet tr").first().locator("td").count()).toBe(100);
+      const bombed = await openInChromium(browser, { kind: "docx", source: { file: "docs/bomb.docx" } }, { ready: "failed" });
+      expect(await bombed.page.locator(".office-error").innerText()).toContain("too large to show here");
       const deck = await openInChromium(browser, { ...office.pptx, part: { slide: 7 } });
       expect(deck.errors).toEqual(["The deck has 4 slides, so slide 7 does not exist; showing the last slide."]);
       expect((await deck.located()).slide).toBe(4);
     } finally {
       await browser.close();
-      await rm(join(folder, "docs", "huge.xlsx"), { force: true });
+      for (const file of ["huge.xlsx", "wide.xlsx", "bomb.docx"]) await rm(join(folder, "docs", file), { force: true });
     }
   }, 30_000);
 });

@@ -7,6 +7,7 @@
 //
 // RELAYER_ARTIFACT_EVIDENCE_DIR overrides where screenshots and results.json go.
 import { app, BrowserWindow, shell } from "electron";
+import { execFileSync } from "node:child_process";
 import { appendFile, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import sharp from "sharp";
@@ -19,6 +20,9 @@ import { RelayerAppServerService } from "../desktop/main/services/relayer-app-se
 import { ModelCatalogService } from "../desktop/main/models/model-catalog-service.mjs";
 
 const root = resolve(import.meta.dirname, "..");
+// The exact source this run tests: a pass is claimed only for that snapshot (AGENTS.md).
+const git = (...args) => execFileSync("git", args, { cwd: root, encoding: "utf8" }).trim();
+const source = { commit: git("rev-parse", "HEAD"), clean: git("status", "--porcelain", "--untracked-files=no") === "" };
 const profile = join(root, ".relayer", `artifact-viewer-evidence-${Date.now()}`);
 const output = process.env.RELAYER_ARTIFACT_EVIDENCE_DIR ?? join(root, ".relayer", "evidence", "artifact-viewer");
 await rm(output, { recursive: true, force: true });
@@ -551,7 +555,7 @@ async function run(window) {
   await hold(3000);
   if (recorder) await recorder.stop();
   const failed = results.filter((result) => !result.ok);
-  await writeFile(join(output, "results.json"), JSON.stringify({ at: new Date().toISOString(), entryPoint: "desktop/main/index.mjs", inference: false, results, external }, null, 2));
+  await writeFile(join(output, "results.json"), JSON.stringify({ at: new Date().toISOString(), source, entryPoint: "desktop/main/index.mjs", inference: false, results, external }, null, 2));
   console.log(`\n${results.length - failed.length} passed, ${failed.length} failed. Evidence: ${output}`);
   return failed.length === 0;
 }

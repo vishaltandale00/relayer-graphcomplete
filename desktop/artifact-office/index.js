@@ -8,6 +8,8 @@ import { pptxToHtml } from "@jvmr/pptx-to-html";
 const SLIDE = { width: 960, height: 540 };
 /** A sheet shows at most this many rows and columns, so a huge range cannot stall the view. */
 const SHEET_LIMIT = { rows: 1000, columns: 100 };
+/** An Office file is a zip; one this large, or expanding past this, is not parsed in the view. */
+const ARCHIVE_LIMIT = { bytes: 50 * 1024 * 1024, expanded: 250 * 1024 * 1024 };
 /** Word list bullets in the Symbol and Wingdings fonts, which browsers lack, as Unicode. */
 const SYMBOL_BULLETS = Object.freeze({ "\uF0B7": "\u2022", "\uF0A7": "\u25AA", "\uF0D8": "\u27A2", "\uF076": "\u2756", "\uF0FC": "\u2713", "\uF06E": "\u25A0", "\uF06C": "\u25CF" });
 
@@ -40,11 +42,13 @@ function renderExcel(bytes, root) {
   const tabs = element("nav", "office-sheet-tabs");
   const sheet = element("div", "office-sheet");
   root.append(tabs, sheet);
+  // Each sheet's whole range, read before any is clipped to the limit.
+  const fullRanges = new Map(book.SheetNames.map((name) => [name, book.Sheets[name]["!fullref"] ?? book.Sheets[name]["!ref"] ?? "A1"]));
   let shown = book.SheetNames[0];
   const show = (name) => {
     shown = name;
     const cells = book.Sheets[name];
-    const full = utils.decode_range(cells["!fullref"] ?? cells["!ref"] ?? "A1");
+    const full = utils.decode_range(fullRanges.get(name));
     const range = utils.decode_range(cells["!ref"] ?? "A1");
     range.e.c = Math.min(range.e.c, range.s.c + SHEET_LIMIT.columns - 1);
     cells["!ref"] = utils.encode_range(range);
@@ -89,6 +93,33 @@ async function renderPowerPoint(bytes, root, slide) {
 }
 
 /**
+ * Refuse an archive too large to parse safely, before any converter expands it. The zip's
+ * central directory gives every entry's expanded size without decompressing anything.
+ */
+function checkArchive(bytes) {
+  const tooLarge = () => { throw new Error("The file is too large to show here. Open it in its own app."); };
+  if (bytes.byteLength > ARCHIVE_LIMIT.bytes) tooLarge();
+  const view = new DataView(bytes);
+  // The end-of-central-directory record sits within the last 64 KiB (its comment's limit).
+  let end = -1;
+  for (let at = bytes.byteLength - 22; at >= Math.max(0, bytes.byteLength - 22 - 0xffff); at -= 1) {
+    if (view.getUint32(at, true) === 0x06054b50) { end = at; break; }
+  }
+  if (end < 0) throw new Error("This is not an Office file.");
+  const count = view.getUint16(end + 10, true);
+  let at = view.getUint32(end + 16, true);
+  let expanded = 0;
+  for (let index = 0; index < count; index += 1) {
+    if (at + 46 > bytes.byteLength || view.getUint32(at, true) !== 0x02014b50) throw new Error("This Office file is damaged.");
+    const size = view.getUint32(at + 24, true);
+    // 0xFFFFFFFF marks a ZIP64 size, which is over the limit anyway.
+    expanded += size === 0xffffffff ? Infinity : size;
+    if (expanded > ARCHIVE_LIMIT.expanded) tooLarge();
+    at += 46 + view.getUint16(at + 28, true) + view.getUint16(at + 30, true) + view.getUint16(at + 32, true);
+  }
+}
+
+/**
  * Render one Office file into `#office`. The view's note location script reads
  * `window.relayerOfficeLocation()` for the slide, sheet or heading in view.
  */
@@ -99,6 +130,7 @@ async function render(kind, source, { slide } = {}) {
     const response = await fetch(source);
     if (!response.ok) throw new Error("The file is not in the thread folder.");
     const bytes = await response.arrayBuffer();
+    checkArchive(bytes);
     const locate = kind === "docx" ? await renderWord(bytes, root)
       : kind === "xlsx" ? renderExcel(bytes, root)
         : kind === "pptx" ? await renderPowerPoint(bytes, root, slide)
