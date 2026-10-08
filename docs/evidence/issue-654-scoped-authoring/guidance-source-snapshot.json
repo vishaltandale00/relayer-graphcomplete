@@ -1,0 +1,33 @@
+{
+  "schemaVersion": 1,
+  "algorithm": "sha256(sorted UTF-8 path + NUL + contents + NUL)",
+  "sha256": "144fb0723490d5b2fe6ccd0f150a33298bab3e39b4fda3ab4b33ba2399e25d1b",
+  "paths": [
+    "desktop/main/managed-runtimes/recipes.mjs",
+    "desktop/main/services/prime-agent-runtime.mjs",
+    "docs/scoped-graph-authoring.md",
+    "packages/graph-client/src/agent-resource-entry.ts",
+    "packages/graph-client/src/authoring-errors.ts",
+    "packages/graph-client/src/client.ts",
+    "packages/graph-client/src/index.ts",
+    "packages/graph-client/src/scoped-authoring.ts",
+    "packages/graph-client/test/objects.test.ts",
+    "packages/graph-client/test/scoped-authoring.test.ts",
+    "packages/harness-host/src/implementations/codex-basic.ts",
+    "packages/harness-host/src/implementations/graph-presentation-guidance.ts",
+    "packages/harness-host/src/implementations/prime-agent.ts",
+    "packages/harness-host/src/implementations/prime-visual-authoring.ts",
+    "packages/harness-host/test/codex-basic.test.ts",
+    "packages/harness-host/test/prime-agent.test.ts",
+    "packages/harness-host/test/prime-visual-authoring.test.ts",
+    "python/relayer-graph/README.md",
+    "python/relayer-graph/src/relayer_graph/__init__.py",
+    "python/relayer-graph/src/relayer_graph/authoring.py",
+    "python/relayer-graph/src/relayer_graph/scoped_authoring.py",
+    "python/relayer-graph/src/relayer_graph/session.py",
+    "python/relayer-graph/tests/test_scoped_authoring.py",
+    "test/graph-authoring-replay.test.mjs",
+    "test/graph-client-packaged-detail.test.mjs",
+    "vendor/prime-agent/manifest.json"
+  ]
+}

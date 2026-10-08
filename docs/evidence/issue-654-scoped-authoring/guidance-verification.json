@@ -1,0 +1,85 @@
+{
+  "schemaVersion": 1,
+  "sourceSha256": "144fb0723490d5b2fe6ccd0f150a33298bab3e39b4fda3ab4b33ba2399e25d1b",
+  "sourceManifest": "guidance-source-snapshot.json",
+  "currentSnapshotPasses": {
+    "fullCheck": {
+      "rustWorkspaceClippyCrashChecks": "passed",
+      "vitestFilesPassed": 298,
+      "vitestTestsPassed": 3719,
+      "vitestFilesSkipped": 1,
+      "vitestTestsSkipped": 3,
+      "secretBoundaryPassed": 2,
+      "pythonPassed": 74,
+      "receiptLint": "passed",
+      "prdReadability": "passed",
+      "rustTestThreads": 4
+    },
+    "build": "passed",
+    "compiledRuntimePassed": 4,
+    "graphPreview": "PREV-003 passed: three real PNGs + cache"
+  },
+  "history": "Earlier failures preserved below. No earlier mixed-state run is claimed as current-source proof. Unchanged 1-second output-bound Rust timing fixture passed alone; bounded Rust concurrency used in final full check. First module split consolidated into existing guidance module, keeping inventory/visual source receipts unchanged.",
+  "logs": [
+    {
+      "file": ".relayer/issue-654-validation/guidance-check.log",
+      "result": "failed:4 Vitest fixtures, diagnostic-only mixed source",
+      "sha256": "c0eea77c1db47d2b44813ccab9d55f30c7fc40d0ed70c5a2b8f3d6375f5111d4",
+      "bytes": 129404
+    },
+    {
+      "file": ".relayer/issue-654-validation/guidance-check-final.log",
+      "result": "failed: unchanged Rust bounded-command timing fixture",
+      "sha256": "1cb2312ca2838811fba463b8f0eaf92e40b98a836c466f8c753b7640a06073ad",
+      "bytes": 41497
+    },
+    {
+      "file": ".relayer/issue-654-validation/guidance-timeout-diagnosis.log",
+      "result": "passed isolated unchanged timing fixture",
+      "sha256": "35fa94a4adfe26530e9051cdebb3cb2ee568bf3ead9d753623c851a78e6e5da3",
+      "bytes": 1289
+    },
+    {
+      "file": ".relayer/issue-654-validation/guidance-check-pass.log",
+      "result": "failed: prior new-module inventory invalidated social screenshot receipt; diagnostic-only",
+      "sha256": "d4480d98a5123290184fad24cc2334596f211a415b9de003e5861b43ca4cb2c8",
+      "bytes": 126431
+    },
+    {
+      "file": ".relayer/issue-654-validation/guidance-consolidated.log",
+      "result": "passed148 focused checks",
+      "sha256": "f8ced4a612ce6a357a86348cc585f6d103fc1c2df1b59da32fa626229d29af8e",
+      "bytes": 259
+    },
+    {
+      "file": ".relayer/issue-654-validation/guidance-check-complete.log",
+      "result": "passed full check",
+      "sha256": "ffe6e608f5ff7ee73703db66337a1262286c120bf968d091f4ee203410338480",
+      "bytes": 126788
+    },
+    {
+      "file": ".relayer/issue-654-validation/guidance-build.log",
+      "result": "passed build",
+      "sha256": "d03f1927407cef0e4f8cd337e8306ab8cf20ce8ca14d36589814716ae9b3a1b3",
+      "bytes": 2040
+    },
+    {
+      "file": ".relayer/issue-654-validation/guidance-compiled-final.log",
+      "result": "passed4 compiled runtime checks",
+      "sha256": "6dc34da1404f4ca5584087a1528fe440e312f411e0d40262ffe32406b95f3634",
+      "bytes": 377
+    },
+    {
+      "file": ".relayer/issue-654-validation/guidance-preview.log",
+      "result": "passed PREV-003 rendered3 PNGs and cached response",
+      "sha256": "5de1f29b58e023c26f582a1cc8e4b05d50f39a9190f9141a8556609bdbc936e5",
+      "bytes": 576
+    },
+    {
+      "file": ".relayer/issue-654-validation/guidance-cache.log",
+      "result": "verified compatible trusted Ladybug cache",
+      "sha256": "5c0116fb990f3a8b5d465f6e5ed10b2c2401750958155432cdfaa0ccdcacd276",
+      "bytes": 102
+    }
+  ]
+}

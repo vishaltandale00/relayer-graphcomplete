@@ -1,0 +1,18 @@
+{
+  "schemaVersion": 1,
+  "algorithm": "sha256(sorted UTF-8 path + NUL + contents + NUL)",
+  "baseCommit": "c22b5e5b10d1f11d798bd31108c40b066b473e36",
+  "paths": [
+    "desktop/main/services/graph-operation-recorder.mjs",
+    "packages/graph-client/src/authoring-errors.ts",
+    "packages/graph-client/src/index.ts",
+    "packages/graph-client/src/scoped-authoring.ts",
+    "packages/graph-client/test/scoped-authoring.test.ts",
+    "packages/harness-host/src/host.ts",
+    "packages/harness-host/src/implementations/graph-presentation-guidance.ts",
+    "packages/harness-host/test/host.test.ts",
+    "test/eval-authoring-error-delivery.test.mjs",
+    "test/graph-authoring-replay.test.mjs"
+  ],
+  "sha256": "de363d143720b0ed5068db7e699bec069b756787c6d686bb2e7dfaefacecd3f3"
+}

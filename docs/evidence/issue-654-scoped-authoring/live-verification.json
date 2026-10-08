@@ -1,0 +1,1111 @@
+{
+  "schemaVersion": 1,
+  "kind": "issue_654_authoring_guidance_live_verification",
+  "collectedAt": "2026-10-07T07:06:52.334Z",
+  "sourceCommit": "57e5d1b9fa011b78c344537787d5f1f81c3fd8f7",
+  "sourceTree": "5b317aa94b81a84f3dafc938c9b69391e99ef5f1",
+  "sourceManifest": "guidance-source-snapshot.json",
+  "sourceDigest": "144fb0723490d5b2fe6ccd0f150a33298bab3e39b4fda3ab4b33ba2399e25d1b",
+  "protocol": {
+    "cases": [
+      {
+        "id": "autonomous.h3.sanitize-status-code",
+        "caseSnapshotDigest": "sha256:56bd8eec8705f8e35964f1d06b5fa838350e71fc9274d837e15e1ed1cc3f081b"
+      },
+      {
+        "id": "autonomous.h3.investigate-status-code",
+        "caseSnapshotDigest": "sha256:ee0dcb1ed892431587073c88e66943ab7c5356ebec22e061d88dfbb1264574d0"
+      }
+    ],
+    "harness": "codex-basic",
+    "candidateModel": "gpt-6-luna",
+    "candidateAdapter": "codex-subscription",
+    "repetitions": 3,
+    "judge": {
+      "id": "setup-5caf4cc0-5914-4564-9b4a-0da706f5ff89",
+      "digest": "sha256:80b4a138e23817ce99e2a6ccccb84aedc1c14a141b69bc9439f40e75ad44a6c2",
+      "promptVersion": "simulated-user-judge-prompt-v11",
+      "settings": {
+        "model": "gpt-5.6-sol",
+        "modelReasoningEffort": "high",
+        "shellAccess": false
+      }
+    },
+    "personalPresentation": {
+      "id": 15,
+      "key": "personal-presentation-v4"
+    },
+    "injectedErrors": false,
+    "replacementRuns": false
+  },
+  "sourceAndRuntimeUnchanged": true,
+  "preRunRuntimeAndConfigFiles": 6,
+  "preRunCompiledSdkAndHarnessFiles": 44,
+  "actualCandidateRoutesVerified": true,
+  "actualCandidateInteractions": 6,
+  "candidateFamily": 6,
+  "caseHarnessJudgePresentationPinsMatch": true,
+  "profileAndFamilyIdentical": false,
+  "aggregate": {
+    "baseline": {
+      "attempts": 6,
+      "mandatoryTaskGatePasses": 5,
+      "acceptedGraphAttempts": 5,
+      "completedGraphScores": 2,
+      "knownObservedAuthoringErrorSum": 8,
+      "authoringCountAvailableSamples": 6,
+      "authoringCountUnavailableSamples": 0
+    },
+    "pr": {
+      "attempts": 6,
+      "mandatoryTaskGatePasses": 5,
+      "acceptedGraphAttempts": 5,
+      "completedGraphScores": 2,
+      "knownObservedAuthoringErrorSum": 5,
+      "authoringCountAvailableSamples": 6,
+      "authoringCountUnavailableSamples": 0
+    }
+  },
+  "metricAvailability": {
+    "terminalAttempts": 6,
+    "taskCheckResults": 6,
+    "qualitativeTaskScores": 0,
+    "completedGraphScores": 2,
+    "observedAuthoringCounts": 6,
+    "firstBackendPublicationTimes": 5
+  },
+  "caseDistributions": [
+    {
+      "caseId": "autonomous.h3.sanitize-status-code",
+      "attempts": 3,
+      "executionStatuses": {
+        "failed": 2,
+        "passed": 1
+      },
+      "taskChecksPassed": 2,
+      "taskQualitativeScored": 0,
+      "graphQuality": {
+        "n": 1,
+        "missing": 2,
+        "values": [
+          3
+        ],
+        "median": 3,
+        "min": 3,
+        "max": 3,
+        "mean": 3
+      },
+      "answerQuality": {
+        "n": 1,
+        "missing": 2,
+        "values": [
+          3
+        ],
+        "median": 3,
+        "min": 3,
+        "max": 3,
+        "mean": 3
+      },
+      "firstBackendPublicationSeconds": {
+        "n": 3,
+        "missing": 0,
+        "values": [
+          37.3,
+          123,
+          114
+        ],
+        "median": 114,
+        "min": 37.3,
+        "max": 123,
+        "mean": 91.43
+      },
+      "acceptedBackendPublicationSeconds": {
+        "n": 3,
+        "missing": 0,
+        "values": [
+          37.3,
+          123,
+          114
+        ],
+        "median": 114,
+        "min": 37.3,
+        "max": 123,
+        "mean": 91.43
+      },
+      "observedAuthoringErrors": {
+        "n": 3,
+        "missing": 0,
+        "values": [
+          0,
+          0,
+          0
+        ],
+        "median": 0,
+        "min": 0,
+        "max": 0,
+        "mean": 0
+      },
+      "naturalAuthoringByCause": {},
+      "scoreCeilings": [
+        null,
+        8,
+        null
+      ],
+      "identityGapSamples": 0,
+      "failedOrUnavailableGraphReviews": 2
+    },
+    {
+      "caseId": "autonomous.h3.investigate-status-code",
+      "attempts": 3,
+      "executionStatuses": {
+        "failed": 2,
+        "passed": 1
+      },
+      "taskChecksPassed": 3,
+      "taskQualitativeScored": 0,
+      "graphQuality": {
+        "n": 1,
+        "missing": 2,
+        "values": [
+          2
+        ],
+        "median": 2,
+        "min": 2,
+        "max": 2,
+        "mean": 2
+      },
+      "answerQuality": {
+        "n": 1,
+        "missing": 2,
+        "values": [
+          3
+        ],
+        "median": 3,
+        "min": 3,
+        "max": 3,
+        "mean": 3
+      },
+      "firstBackendPublicationSeconds": {
+        "n": 2,
+        "missing": 1,
+        "values": [
+          62.5,
+          123.1
+        ],
+        "median": 92.8,
+        "min": 62.5,
+        "max": 123.1,
+        "mean": 92.8
+      },
+      "acceptedBackendPublicationSeconds": {
+        "n": 2,
+        "missing": 1,
+        "values": [
+          62.5,
+          123.1
+        ],
+        "median": 92.8,
+        "min": 62.5,
+        "max": 123.1,
+        "mean": 92.8
+      },
+      "observedAuthoringErrors": {
+        "n": 3,
+        "missing": 0,
+        "values": [
+          0,
+          3,
+          2
+        ],
+        "median": 2,
+        "min": 0,
+        "max": 3,
+        "mean": 1.67
+      },
+      "naturalAuthoringByCause": {
+        "compiler": 5
+      },
+      "scoreCeilings": [
+        null,
+        8,
+        null
+      ],
+      "identityGapSamples": 0,
+      "failedOrUnavailableGraphReviews": 2
+    }
+  ],
+  "samples": [
+    {
+      "repetition": 1,
+      "caseId": "autonomous.h3.sanitize-status-code",
+      "runId": "run-2026-10-07T05-46-58-719Z-6f4d9c73",
+      "executionId": "62643494-5351-43bd-bf8e-3dc85a46a5f9",
+      "executionStatus": "failed",
+      "mandatoryTaskGatesPassed": true,
+      "allDeterministicChecksPassed": true,
+      "failedCheckNames": [],
+      "acceptedGraph": true,
+      "observedAuthoringErrors": 0,
+      "authoringByCause": {},
+      "authoringCoverage": [
+        {
+          "status": "partial",
+          "total": null,
+          "observed": 0,
+          "ledgerVerified": true
+        }
+      ],
+      "graphReviewStatus": "partial",
+      "graphScore": null,
+      "graphComprehension": null,
+      "graphScoreMaximum": 4,
+      "scoreCeiling": null,
+      "firstBackendPublicationSeconds": 37.3,
+      "scopedCallTextDetected": true,
+      "directNodeSubmissionTextDetected": false,
+      "failedGraphAuthoringCommands": [],
+      "acceptedScopedIdentities": [
+        {
+          "acceptedOutputAvailable": true,
+          "rootState": "accepted",
+          "rootLayerScopedKey": true,
+          "rootNodes": 1,
+          "rootNodesWithScopedKeys": 1,
+          "snapshotSha256": "sha256:ab9f3abdedc5abfa2d07098ada8031de5e05dfb76853ba79060c708ea645d929"
+        }
+      ],
+      "judgeEvidence": [
+        {
+          "status": "partial",
+          "error": "Simulated-user judge ended without submitReview finalizing complete review coverage",
+          "screenshotCount": 6,
+          "coverageComplete": false,
+          "reviewContract": "recursive-presentation-judge-v6"
+        }
+      ]
+    },
+    {
+      "repetition": 1,
+      "caseId": "autonomous.h3.investigate-status-code",
+      "runId": "run-2026-10-07T05-46-58-719Z-6f4d9c73",
+      "executionId": "270a75a6-af5c-4744-bb96-13d57131c30f",
+      "executionStatus": "failed",
+      "mandatoryTaskGatesPassed": true,
+      "allDeterministicChecksPassed": false,
+      "failedCheckNames": [
+        "investigation:turn-1:accepted"
+      ],
+      "acceptedGraph": false,
+      "observedAuthoringErrors": 0,
+      "authoringByCause": {},
+      "authoringCoverage": [
+        {
+          "status": "partial",
+          "total": null,
+          "observed": 0,
+          "ledgerVerified": true
+        }
+      ],
+      "graphReviewStatus": "failed",
+      "graphScore": null,
+      "graphComprehension": null,
+      "graphScoreMaximum": 4,
+      "scoreCeiling": null,
+      "firstBackendPublicationSeconds": null,
+      "scopedCallTextDetected": true,
+      "directNodeSubmissionTextDetected": false,
+      "failedGraphAuthoringCommands": [
+        {
+          "sequence": 163,
+          "exitCode": 1,
+          "errorTypes": [
+            "GraphAuthoringValidationError"
+          ]
+        },
+        {
+          "sequence": 240,
+          "exitCode": 1,
+          "errorTypes": [
+            "ReferenceError"
+          ]
+        },
+        {
+          "sequence": 246,
+          "exitCode": 1,
+          "errorTypes": [
+            "GraphProgramEditError"
+          ]
+        },
+        {
+          "sequence": 252,
+          "exitCode": 1,
+          "errorTypes": [
+            "TypeError"
+          ]
+        }
+      ],
+      "acceptedScopedIdentities": [
+        {
+          "acceptedOutputAvailable": false,
+          "rootState": null,
+          "rootLayerScopedKey": null,
+          "rootNodes": null,
+          "rootNodesWithScopedKeys": null,
+          "snapshotSha256": null
+        }
+      ],
+      "judgeEvidence": []
+    },
+    {
+      "repetition": 2,
+      "caseId": "autonomous.h3.sanitize-status-code",
+      "runId": "run-2026-10-07T06-05-33-942Z-eaa95d46",
+      "executionId": "98106dbf-0d9c-44bc-aa57-32686f0c0cc0",
+      "executionStatus": "passed",
+      "mandatoryTaskGatesPassed": true,
+      "allDeterministicChecksPassed": true,
+      "failedCheckNames": [],
+      "acceptedGraph": true,
+      "observedAuthoringErrors": 0,
+      "authoringByCause": {},
+      "authoringCoverage": [
+        {
+          "status": "partial",
+          "total": null,
+          "observed": 0,
+          "ledgerVerified": true
+        }
+      ],
+      "graphReviewStatus": "completed",
+      "graphScore": 3,
+      "graphComprehension": 3,
+      "graphScoreMaximum": 8,
+      "scoreCeiling": 8,
+      "firstBackendPublicationSeconds": 123,
+      "scopedCallTextDetected": true,
+      "directNodeSubmissionTextDetected": false,
+      "failedGraphAuthoringCommands": [],
+      "acceptedScopedIdentities": [
+        {
+          "acceptedOutputAvailable": true,
+          "rootState": "accepted",
+          "rootLayerScopedKey": true,
+          "rootNodes": 1,
+          "rootNodesWithScopedKeys": 1,
+          "snapshotSha256": "sha256:ed5199aa84d0e4960fd3fdda66b7df95427ddffc36c3e1aa4c1be675b4d32fde"
+        }
+      ],
+      "judgeEvidence": [
+        {
+          "status": "completed",
+          "error": null,
+          "screenshotCount": 3,
+          "coverageComplete": true,
+          "reviewContract": "recursive-presentation-judge-v6"
+        }
+      ]
+    },
+    {
+      "repetition": 2,
+      "caseId": "autonomous.h3.investigate-status-code",
+      "runId": "run-2026-10-07T06-05-33-942Z-eaa95d46",
+      "executionId": "a4eb43a7-20c2-49b8-bc61-c66a213ae4b1",
+      "executionStatus": "passed",
+      "mandatoryTaskGatesPassed": true,
+      "allDeterministicChecksPassed": true,
+      "failedCheckNames": [],
+      "acceptedGraph": true,
+      "observedAuthoringErrors": 3,
+      "authoringByCause": {
+        "compiler": 3
+      },
+      "authoringCoverage": [
+        {
+          "status": "partial",
+          "total": null,
+          "observed": 3,
+          "ledgerVerified": true
+        }
+      ],
+      "graphReviewStatus": "completed",
+      "graphScore": 2,
+      "graphComprehension": 3,
+      "graphScoreMaximum": 8,
+      "scoreCeiling": 8,
+      "firstBackendPublicationSeconds": 62.5,
+      "scopedCallTextDetected": true,
+      "directNodeSubmissionTextDetected": false,
+      "failedGraphAuthoringCommands": [
+        {
+          "sequence": 248,
+          "exitCode": 1,
+          "errorTypes": [
+            "GraphAuthoringWriteError"
+          ]
+        },
+        {
+          "sequence": 294,
+          "exitCode": 1,
+          "errorTypes": [
+            "GraphAuthoringWriteError"
+          ]
+        },
+        {
+          "sequence": 300,
+          "exitCode": 1,
+          "errorTypes": [
+            "GraphAuthoringWriteError"
+          ]
+        }
+      ],
+      "acceptedScopedIdentities": [
+        {
+          "acceptedOutputAvailable": true,
+          "rootState": "accepted",
+          "rootLayerScopedKey": true,
+          "rootNodes": 1,
+          "rootNodesWithScopedKeys": 1,
+          "snapshotSha256": "sha256:f84c0f916513121f2aef46561fd78332e9351077a969e5babd466b305a71ff2a"
+        }
+      ],
+      "judgeEvidence": [
+        {
+          "status": "completed",
+          "error": null,
+          "screenshotCount": 3,
+          "coverageComplete": true,
+          "reviewContract": "recursive-presentation-judge-v6"
+        }
+      ]
+    },
+    {
+      "repetition": 3,
+      "caseId": "autonomous.h3.sanitize-status-code",
+      "runId": "run-2026-10-07T06-24-40-806Z-d53028ee",
+      "executionId": "bdec5fa2-3710-4c24-a083-8ae9830242aa",
+      "executionStatus": "failed",
+      "mandatoryTaskGatesPassed": false,
+      "allDeterministicChecksPassed": false,
+      "failedCheckNames": [
+        "implementation:turn-1:workspace:implementation-meaningful-commit"
+      ],
+      "acceptedGraph": true,
+      "observedAuthoringErrors": 0,
+      "authoringByCause": {},
+      "authoringCoverage": [
+        {
+          "status": "partial",
+          "total": null,
+          "observed": 0,
+          "ledgerVerified": true
+        }
+      ],
+      "graphReviewStatus": "partial",
+      "graphScore": null,
+      "graphComprehension": null,
+      "graphScoreMaximum": 4,
+      "scoreCeiling": null,
+      "firstBackendPublicationSeconds": 114,
+      "scopedCallTextDetected": true,
+      "directNodeSubmissionTextDetected": false,
+      "failedGraphAuthoringCommands": [],
+      "acceptedScopedIdentities": [
+        {
+          "acceptedOutputAvailable": true,
+          "rootState": "accepted",
+          "rootLayerScopedKey": true,
+          "rootNodes": 1,
+          "rootNodesWithScopedKeys": 1,
+          "snapshotSha256": "sha256:b290b0d10df689828afc078bc3b3247e16480c103c5c4ce82b3f88b896a16c46"
+        }
+      ],
+      "judgeEvidence": [
+        {
+          "status": "partial",
+          "error": "Codex Exec exited with signal SIGTERM: Reading prompt from stdin...\n",
+          "screenshotCount": 3,
+          "coverageComplete": false,
+          "reviewContract": "recursive-presentation-judge-v6"
+        }
+      ]
+    },
+    {
+      "repetition": 3,
+      "caseId": "autonomous.h3.investigate-status-code",
+      "runId": "run-2026-10-07T06-24-40-806Z-d53028ee",
+      "executionId": "28c52ea0-680e-4cfd-91bd-3a9e1182c353",
+      "executionStatus": "failed",
+      "mandatoryTaskGatesPassed": true,
+      "allDeterministicChecksPassed": true,
+      "failedCheckNames": [],
+      "acceptedGraph": true,
+      "observedAuthoringErrors": 2,
+      "authoringByCause": {
+        "compiler": 2
+      },
+      "authoringCoverage": [
+        {
+          "status": "partial",
+          "total": null,
+          "observed": 2,
+          "ledgerVerified": true
+        }
+      ],
+      "graphReviewStatus": "partial",
+      "graphScore": null,
+      "graphComprehension": null,
+      "graphScoreMaximum": 4,
+      "scoreCeiling": null,
+      "firstBackendPublicationSeconds": 123.1,
+      "scopedCallTextDetected": true,
+      "directNodeSubmissionTextDetected": false,
+      "failedGraphAuthoringCommands": [
+        {
+          "sequence": 190,
+          "exitCode": 1,
+          "errorTypes": [
+            "GraphAuthoringValidationError"
+          ]
+        },
+        {
+          "sequence": 196,
+          "exitCode": 1,
+          "errorTypes": [
+            "GraphAuthoringValidationError"
+          ]
+        },
+        {
+          "sequence": 206,
+          "exitCode": 1,
+          "errorTypes": [
+            "GraphAuthoringWriteError"
+          ]
+        },
+        {
+          "sequence": 257,
+          "exitCode": 1,
+          "errorTypes": [
+            "GraphAuthoringWriteError"
+          ]
+        }
+      ],
+      "acceptedScopedIdentities": [
+        {
+          "acceptedOutputAvailable": true,
+          "rootState": "accepted",
+          "rootLayerScopedKey": true,
+          "rootNodes": 1,
+          "rootNodesWithScopedKeys": 1,
+          "snapshotSha256": "sha256:85a71eb4130eec72e4084c92a1dadbf307dfa0b38c0b269d892291ef58ac1dd3"
+        }
+      ],
+      "judgeEvidence": [
+        {
+          "status": "partial",
+          "error": "Simulated-user judge ended without submitReview finalizing complete review coverage",
+          "screenshotCount": 4,
+          "coverageComplete": false,
+          "reviewContract": "recursive-presentation-judge-v6"
+        }
+      ]
+    }
+  ],
+  "supportedClientValidationFailuresVisibleInCommandTrace": 3,
+  "originalBaselineContext": {
+    "sourceCommit": "149373d2f85ba36717049732ca68ac82d2b397ea",
+    "summarySha256": "sha256:e15bdc9eea8ef304bac1da65822e3542f40df524d7616a1b714fcb41a4adb610",
+    "aggregate": {
+      "attempts": 6,
+      "mandatoryTaskGatePasses": 6,
+      "acceptedGraphAttempts": 6,
+      "completedGraphScores": 4,
+      "knownObservedAuthoringErrorSum": 8,
+      "authoringCountAvailableSamples": 6,
+      "authoringCountUnavailableSamples": 0
+    },
+    "metricAvailability": {
+      "terminalAttempts": 6,
+      "taskCheckResults": 6,
+      "qualitativeTaskScores": 0,
+      "completedGraphScores": 4,
+      "observedAuthoringCounts": 6,
+      "firstBackendPublicationTimes": 6
+    },
+    "summary": [
+      {
+        "caseId": "autonomous.h3.sanitize-status-code",
+        "attempts": 3,
+        "executionStatuses": {
+          "passed": 2,
+          "failed": 1
+        },
+        "taskChecksPassed": 3,
+        "taskQualitativeScored": 0,
+        "graphQuality": {
+          "n": 2,
+          "missing": 1,
+          "values": [
+            3,
+            3
+          ],
+          "median": 3,
+          "min": 3,
+          "max": 3,
+          "mean": 3
+        },
+        "answerQuality": {
+          "n": 2,
+          "missing": 1,
+          "values": [
+            4,
+            3
+          ],
+          "median": 3.5,
+          "min": 3,
+          "max": 4,
+          "mean": 3.5
+        },
+        "firstBackendPublicationSeconds": {
+          "n": 3,
+          "missing": 0,
+          "values": [
+            105.9,
+            65.1,
+            106.8
+          ],
+          "median": 105.9,
+          "min": 65.1,
+          "max": 106.8,
+          "mean": 92.6
+        },
+        "acceptedBackendPublicationSeconds": {
+          "n": 3,
+          "missing": 0,
+          "values": [
+            105.9,
+            65.1,
+            106.8
+          ],
+          "median": 105.9,
+          "min": 65.1,
+          "max": 106.8,
+          "mean": 92.6
+        },
+        "observedAuthoringErrors": {
+          "n": 3,
+          "missing": 0,
+          "values": [
+            2,
+            2,
+            2
+          ],
+          "median": 2,
+          "min": 2,
+          "max": 2,
+          "mean": 2
+        },
+        "naturalAuthoringByCause": {
+          "server_rejection": 6
+        },
+        "scoreCeilings": [
+          8,
+          6,
+          null
+        ],
+        "identityGapSamples": 0,
+        "failedOrUnavailableGraphReviews": 1
+      },
+      {
+        "caseId": "autonomous.h3.investigate-status-code",
+        "attempts": 3,
+        "executionStatuses": {
+          "passed": 2,
+          "failed": 1
+        },
+        "taskChecksPassed": 3,
+        "taskQualitativeScored": 0,
+        "graphQuality": {
+          "n": 2,
+          "missing": 1,
+          "values": [
+            3,
+            3
+          ],
+          "median": 3,
+          "min": 3,
+          "max": 3,
+          "mean": 3
+        },
+        "answerQuality": {
+          "n": 2,
+          "missing": 1,
+          "values": [
+            3,
+            4
+          ],
+          "median": 3.5,
+          "min": 3,
+          "max": 4,
+          "mean": 3.5
+        },
+        "firstBackendPublicationSeconds": {
+          "n": 3,
+          "missing": 0,
+          "values": [
+            45.2,
+            50.4,
+            67.3
+          ],
+          "median": 50.4,
+          "min": 45.2,
+          "max": 67.3,
+          "mean": 54.3
+        },
+        "acceptedBackendPublicationSeconds": {
+          "n": 3,
+          "missing": 0,
+          "values": [
+            45.2,
+            50.4,
+            67.3
+          ],
+          "median": 50.4,
+          "min": 45.2,
+          "max": 67.3,
+          "mean": 54.3
+        },
+        "observedAuthoringErrors": {
+          "n": 3,
+          "missing": 0,
+          "values": [
+            2,
+            0,
+            0
+          ],
+          "median": 0,
+          "min": 0,
+          "max": 2,
+          "mean": 0.67
+        },
+        "naturalAuthoringByCause": {
+          "server_rejection": 2
+        },
+        "scoreCeilings": [
+          6,
+          8,
+          null
+        ],
+        "identityGapSamples": 0,
+        "failedOrUnavailableGraphReviews": 1
+      }
+    ]
+  },
+  "supplementalJudgeDiagnostics": {
+    "schemaVersion": 1,
+    "scope": "Supplemental native judge trace diagnostics. Counts are output batches containing each error type, may overlap, and are not tool-call counts or candidate metric 2. No raw authored text or tool arguments are copied.",
+    "rows": [
+      {
+        "runId": "run-2026-10-07T05-46-58-719Z-6f4d9c73",
+        "executionId": "62643494-5351-43bd-bf8e-3dc85a46a5f9",
+        "interactionId": 24,
+        "judgeId": "5e7c2790-ad28-45e6-ac40-1c20bba3ee56",
+        "judgeStatus": "partial",
+        "nativeReceipts": [
+          {
+            "ref": "codex-home/sessions/2026/10/07/rollout-2026-10-07T01-47-49-01a114e7-5eea-7a10-9130-99bd66494f5c.jsonl",
+            "sha256": "sha256:9b663819c2ba9102a8de912a97af178fbd0f7f1edc54c6e2552edf4b032c8b6a",
+            "bytes": 51304215,
+            "actualModel": "gpt-5.6-sol",
+            "outputBatches": 72,
+            "errorBatches": {
+              "mcp_argument_validation_batches": 10,
+              "review_semantic_validation_batches": 25,
+              "action_order_validation_batches": 19,
+              "missing_node_review_batches": 1
+            }
+          }
+        ]
+      },
+      {
+        "runId": "run-2026-10-07T06-05-33-942Z-eaa95d46",
+        "executionId": "98106dbf-0d9c-44bc-aa57-32686f0c0cc0",
+        "interactionId": 26,
+        "judgeId": "01088b45-c5a5-4943-8e0f-226407b64bed",
+        "judgeStatus": "completed",
+        "nativeReceipts": [
+          {
+            "ref": "codex-home/sessions/2026/10/07/rollout-2026-10-07T02-07-51-01a114f9-b332-7d63-81c1-a270cb817394.jsonl",
+            "sha256": "sha256:aea061483ca12d03235b466ded1c7bef04d166d96dd1fd951b27a441524b4a56",
+            "bytes": 155975723,
+            "actualModel": "gpt-5.6-sol",
+            "outputBatches": 40,
+            "errorBatches": {
+              "mcp_argument_validation_batches": 6,
+              "review_semantic_validation_batches": 6,
+              "action_order_validation_batches": 5
+            }
+          }
+        ]
+      },
+      {
+        "runId": "run-2026-10-07T06-05-33-942Z-eaa95d46",
+        "executionId": "a4eb43a7-20c2-49b8-bc61-c66a213ae4b1",
+        "interactionId": 27,
+        "judgeId": "a4339fbc-1b70-4bad-aefa-e6b77176a2e1",
+        "judgeStatus": "completed",
+        "nativeReceipts": [
+          {
+            "ref": "codex-home/sessions/2026/10/07/rollout-2026-10-07T02-18-41-01a11503-a188-7043-9c94-771f052da9de.jsonl",
+            "sha256": "sha256:e0cbf6eff869a109613c95c69d7c395c23a425aee32f0f905314b179e9a31a24",
+            "bytes": 1008595,
+            "actualModel": "gpt-5.6-sol",
+            "outputBatches": 16,
+            "errorBatches": {
+              "mcp_argument_validation_batches": 3,
+              "review_semantic_validation_batches": 5,
+              "action_order_validation_batches": 4
+            }
+          }
+        ]
+      },
+      {
+        "runId": "run-2026-10-07T06-24-40-806Z-d53028ee",
+        "executionId": "bdec5fa2-3710-4c24-a083-8ae9830242aa",
+        "interactionId": 28,
+        "judgeId": "e8e10c2c-11c0-47e6-a002-76f59a4f1e9f",
+        "judgeStatus": "partial",
+        "nativeReceipts": [
+          {
+            "ref": "codex-home/sessions/2026/10/07/rollout-2026-10-07T02-26-49-01a1150b-1098-7f51-97a2-2eafbd8d9498.jsonl",
+            "sha256": "sha256:ef5c183100b814010cb7cb27f425f53706db0aeb6ce67e70dc8b62693c956656",
+            "bytes": 287754653,
+            "actualModel": "gpt-5.6-sol",
+            "outputBatches": 42,
+            "errorBatches": {
+              "mcp_argument_validation_batches": 2,
+              "review_semantic_validation_batches": 8,
+              "action_order_validation_batches": 6
+            }
+          }
+        ]
+      },
+      {
+        "runId": "run-2026-10-07T06-24-40-806Z-d53028ee",
+        "executionId": "28c52ea0-680e-4cfd-91bd-3a9e1182c353",
+        "interactionId": 29,
+        "judgeId": "3ee16c2b-8b92-4588-bf6e-96c8d753c456",
+        "judgeStatus": "partial",
+        "nativeReceipts": [
+          {
+            "ref": "codex-home/sessions/2026/10/07/rollout-2026-10-07T02-50-50-01a11521-0fa9-7281-9790-f762e89550e3.jsonl",
+            "sha256": "sha256:206bce37fbc91d0abfeb14b3d39f46d24b0ca4b3fd2c6248f540ee2e050fe6d2",
+            "bytes": 3193336,
+            "actualModel": "gpt-5.6-sol",
+            "outputBatches": 48,
+            "errorBatches": {
+              "mcp_argument_validation_batches": 5,
+              "review_semantic_validation_batches": 38,
+              "action_order_validation_batches": 35,
+              "missing_node_review_batches": 1
+            }
+          }
+        ]
+      }
+    ]
+  },
+  "privateArtifactReceipts": [
+    {
+      "file": "plan.json",
+      "sha256": "sha256:7df4c20c92f088c91fac680da7ab8cac1f290a3a0e5223a0f7a82cd30f1f885b",
+      "bytes": 1150
+    },
+    {
+      "file": "state-snapshot.json",
+      "sha256": "sha256:2d79aa311f650e74b67849cd232ed4f4324e60fc1c33daeded1ef287a331ff50",
+      "bytes": 1185781
+    },
+    {
+      "file": "identities.json",
+      "sha256": "sha256:c8913231bbf9d9ff2e501702737f7a376ba67790dc99108121fe7341d48ed82e",
+      "bytes": 3199
+    },
+    {
+      "file": "sdk-identities.json",
+      "sha256": "sha256:a5bfeb1a1f793a78c5959cd4ee399555d9915ccba6b127b63adf39c0f38629ff",
+      "bytes": 10789
+    },
+    {
+      "file": "summary.json",
+      "sha256": "sha256:b1029716198069f17ef0749a04ead9efaf9bbdb024a55facf64504c643ee40da",
+      "bytes": 72972
+    },
+    {
+      "file": "api-usage.json",
+      "sha256": "sha256:226eb4bed7f8b5bd28ee1938e40ce60c72fa8e51e8c44129b821983ba72c4d75",
+      "bytes": 8508
+    },
+    {
+      "file": "actual-selections.json",
+      "sha256": "sha256:5d6e90d51c90e4819ea2eb0511c54c84bd888b5f00d2988d6325e41743331d9b",
+      "bytes": 2893
+    },
+    {
+      "file": "accepted-scoped-identities.json",
+      "sha256": "sha256:06c801c432ea23057b0498933dade59c3bd19ad0c36e446f0332fac715f7b7b3",
+      "bytes": 3220
+    },
+    {
+      "file": "judge-diagnostics.json",
+      "sha256": "sha256:20020175e0fc906cd3d641490dbc303a362175fedc983841027f371a8464972f",
+      "bytes": 4416
+    },
+    {
+      "file": "judge-intervention.json",
+      "sha256": "sha256:1710bcdfc320130e6aa95264cbdc6a2e7ccd9318cb0e91e41fa665f3789fce32",
+      "bytes": 790
+    },
+    {
+      "file": "comparison.json",
+      "sha256": "sha256:ee0b24ddf4c0652893051edd20c96fcec68ee52a436b19a74f0b1a4e8d6e7830",
+      "bytes": 13812
+    },
+    {
+      "file": "original-baseline-context.json",
+      "sha256": "sha256:e598d98553ff0b65863c86ff246932d5895d9bea15096e5e7627f29a517973ec",
+      "bytes": 8955
+    }
+  ],
+  "helperReceipts": [
+    {
+      "file": "accepted-keys.py",
+      "sha256": "sha256:31007be13c64f36f9de5f2bca4f528d6bbe310098584dc59b9b4a44b7e566c1a",
+      "bytes": 1742
+    },
+    {
+      "file": "actual-selections.py",
+      "sha256": "sha256:1d2beb2fa30f6b39b3e5dc99805e6dc8d33a0e42d61b5599e3e4ae0634bb9c09",
+      "bytes": 1931
+    },
+    {
+      "file": "compare.mjs",
+      "sha256": "sha256:aff619391628984188db58ef14173c70d8d329e8c9b2180e1c8f4455cb3099b5",
+      "bytes": 5186
+    },
+    {
+      "file": "finalize.mjs",
+      "sha256": "sha256:c35a3d29a5ddd15f6d5355678937fb64ab20e79e649ef2f56ddb3f420ff97553",
+      "bytes": 1621
+    },
+    {
+      "file": "inspect-usage.mjs",
+      "sha256": "sha256:0f9d776d4300a4200aa7f678009a5e015e1a6a71c11d1dd490e3392d9ad2937f",
+      "bytes": 2881
+    },
+    {
+      "file": "inspect.mjs",
+      "sha256": "sha256:b69e1b6a389c1efca3149823a8e0478ced50858086934960e653813ebcec2530",
+      "bytes": 1785
+    },
+    {
+      "file": "judge-diagnostics.py",
+      "sha256": "sha256:e856c02630e69aac91a07c2d5c588d9accd6354fcab71a4a44f799c3af264f30",
+      "bytes": 3065
+    },
+    {
+      "file": "monitor.mjs",
+      "sha256": "sha256:1d5a31a9686d96be541d2b105f5c80df0e50acc897a1580b9f4226c8aa6f31a4",
+      "bytes": 1860
+    },
+    {
+      "file": "original-baseline.mjs",
+      "sha256": "sha256:5a0a41e3a16e8f3be5ec6ff559ba3a9233e7224cf2adbce27891671030fa8249",
+      "bytes": 2526
+    },
+    {
+      "file": "pin-model.mjs",
+      "sha256": "sha256:5213a88ba2aae6baca683d50c0e73e481431fa1b4fbcfade698d24deff55f494",
+      "bytes": 1572
+    },
+    {
+      "file": "public-receipt.mjs",
+      "sha256": "sha256:75018cb333a692c6f5f8f663aff08c6c30dddd63dea66c11c47650e86c356395",
+      "bytes": 8135
+    },
+    {
+      "file": "record-identities.mjs",
+      "sha256": "sha256:e8e230408fd2efb5eadf743adf66e4c3f22f0fefc247c0f8a804b7ac9897d43f",
+      "bytes": 2657
+    },
+    {
+      "file": "record-sdk.mjs",
+      "sha256": "sha256:8b3ab5bb25c744d760872531c470b8ed4b95a9e3763754e5b56a64a2c5618d05",
+      "bytes": 1110
+    },
+    {
+      "file": "reproduce-capture-gap.mjs",
+      "sha256": "sha256:9f04ec6be03c1e45ea0ddf31f1a7b24f2169ee1aec3e4ef3717592ef9d47de65",
+      "bytes": 2264
+    },
+    {
+      "file": "run.mjs",
+      "sha256": "sha256:cd319122bd50152d7d33819329cff836a10126fbaa6d4a94c7debf787aada0d4",
+      "bytes": 4482
+    },
+    {
+      "file": "setup.mjs",
+      "sha256": "sha256:dbee423828256d1e97e38c388c9b5ba2d047f789f08cad8cb408be28bd7c9d66",
+      "bytes": 733
+    },
+    {
+      "file": "summarize.mjs",
+      "sha256": "sha256:2598d7e8ea6c186038b5f2cc1c46cd950ca57995f694530a859c9991d2df33a8",
+      "bytes": 13884
+    },
+    {
+      "file": "capture-gap-receipt.json",
+      "sha256": "sha256:5b0495e394ee2aa14570ab717bbe7d7484178b7f3febe058ee2ce52f6b461982",
+      "bytes": 3357
+    }
+  ],
+  "operationalJudgeIntervention": {
+    "judgeId": "e8e10c2c-11c0-47e6-a002-76f59a4f1e9f",
+    "executionId": "bdec5fa2-3710-4c24-a083-8ae9830242aa",
+    "target": {
+      "pid": 82069,
+      "parent": 21072,
+      "elapsed": "21:21",
+      "exactJudgeWorkingDirectoryArgumentMatch": true,
+      "actualModelArgumentMatch": true
+    },
+    "requestedAt": "2026-10-07T06:48:31.832941+00:00",
+    "signal": "SIGTERM",
+    "reason": "Repeated rejected implicit-stop action-id guesses; native trace had more than88000 item-completed events and no finalized review after21minutes. Stop only this own judge, preserve original candidate and partial review, no replacement.",
+    "protocolEffect": "Operational intervention in third repair judge; graph score unavailable and cannot certify nonregression. All original candidate attempts remain in matrix."
+  },
+  "supportedClientCaptureGapReproduction": {
+    "node": "v25.9.0",
+    "uncaughtCases": 5,
+    "uncaughtDiagnosticReceipts": 0,
+    "settledCases": 5,
+    "settledDiagnosticReceipts": 5,
+    "originalErrorsPreserved": 10,
+    "sdkEntrySha256": "0279d3aa633091517be88496f08e5aa4ba8c4a4f2ffb01c0ade761995852c62b",
+    "limits": "Local fake HTTP fixture, no inference or live profile writes. Reproduction Node25 differs from live Node24; it proves a process-termination loss mode, not the exact live cause. No production capture change was made during this matrix."
+  },
+  "claimBoundaries": [
+    "Three serial repetitions in fixed order on two related H3 tasks share account/runtime conditions; this is a pilot, not independent statistical samples, broad capability, or causal-improvement proof.",
+    "Timing measures backend publication; it does not prove when the graph became visible in a renderer.",
+    "Authoring-error capture is partial and client reports are unattested; exact totals remain unknown.",
+    "Deterministic task checks do not substitute for missing qualitative task-outcome ratings.",
+    "Graph score ceilings differ by sample and remain recorded; compare within each case rather than pooling raw scores.",
+    "Graph scores depend on the pinned screenshot-grounded judge and rubric; failed or missing reviews remain unavailable.",
+    "The immediate before matrix uses the parent commit of the guidance fixes. Candidate and judge settings/presentation match; source guidance and local SDK feedback are the intended treatment.",
+    "Live scoped use is verified from recorded command text and accepted graph identities; indirect paths may be undetectable.",
+    "Compiled SDK and harness bytes were attested before the first candidate began and rechecked at finalization. Immediate before SDK receipt was recorded after its first pair started with earlier mtimes.",
+    "No injected failures and no replacement runs; command failures are supplemental and are not added to metric 2.",
+    "The first and third investigations contain three GraphAuthoringValidationError command failures inside instrumented scoped node/action methods but no matching client-validation receipts. This is a supported-client capture gap, not proof of error-free authoring. A local fake-server reproduction shows an uncaught-process-exit loss mode on Node25, differing from live Node24; exact live cause remains unproven. Ordinary script errors and ambiguous program edits are separately supplemental.",
+    "Fresh isolated profile preserves configuration/presentation snapshots and accepted history; a copied in-progress interaction was disabled only in the offline copy. Candidate selection uses a new single-member Luna family after startup advanced the system default; actual model and adapter remain pinned. Concurrent Prime work shares the host; this remains descriptive, not causal proof.",
+    "Operational intervention in third repair judge; graph score unavailable and cannot certify nonregression. All original candidate attempts remain in matrix."
+  ],
+  "verificationPlanAndDeterministicEvidence": "README.md and guidance-verification.json record required plan, actual deterministic checks, exact tested source digest, prior failures and renewed source review. This receipt records all six original live attempts; terminal does not mean every metric is available."
+}

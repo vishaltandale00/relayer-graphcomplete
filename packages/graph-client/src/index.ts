@@ -1,4 +1,6 @@
 export * from "./client.js";
+export { GraphAuthoringValidationError, GraphAuthoringWriteError } from "./scoped-authoring.js";
+export type { ScopedGraphAuthoring, ScopedAuthoringLayer, GraphWriteResult, AuthoringNodeFields, AuthoringActionFields, AuthoringLayoutOptions, CompletedAuthoringWrite, FailedAuthoringWrite } from "./scoped-authoring.js";
 export {
   DETAIL_AUTHORING_LIMITS,
   DetailCompilationError,
@@ -39,3 +41,5 @@ export * from "./image-icons.js";
 export * from "./icon-discovery.js";
 
 export * from "./image-icon-detail.js";
+
+export { flushAuthoringErrors } from "./authoring-errors.js";

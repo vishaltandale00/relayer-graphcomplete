@@ -1,0 +1,159 @@
+{
+  "schemaVersion": 1,
+  "sourceManifest": "delivery-source-snapshot.json",
+  "sourceSha256": "de363d143720b0ed5068db7e699bec069b756787c6d686bb2e7dfaefacecd3f3",
+  "currentSnapshotPasses": {
+    "fullCheck": {
+      "rustWorkspaceClippyCrashChecks": "passed",
+      "vitestFilesPassed": 299,
+      "vitestTestsPassed": 3732,
+      "vitestFilesSkipped": 1,
+      "vitestTestsSkipped": 3,
+      "secretBoundaryPassed": 2,
+      "pythonPassed": 74,
+      "receiptLint": "passed",
+      "prdReadability": "passed",
+      "rustTestThreads": 4,
+      "vitestMaxWorkers": 1
+    },
+    "build": "passed",
+    "compiledRuntimePassed": 4,
+    "evalWeb": "all declared chapters passed",
+    "graphPreview": "PREV-003: three real PNGs + cached response"
+  },
+  "history": "All failures and earlier snapshot checks remain recorded. Final serial full check consumed the final SDK/harness sources after native stages. Source digest reverified before final build and heavy checks. Lower concurrency changed no test scope. Earlier Lantern failure cause remains unproven; isolated and final aggregate passes do not erase it. No paid inference is in these commands.",
+  "logs": [
+    {
+      "file": ".relayer/issue-654-validation/delivery-check.log",
+      "result": "failed: new host fixture used the wrong complete overload; corrected fixture",
+      "sha256": "0ad0b8ff6c326127fd9371b32b39bd73d70753413c903eb1be342b7eec700e2f",
+      "bytes": 108385
+    },
+    {
+      "file": ".relayer/issue-654-validation/delivery-check-final.log",
+      "result": "failed: existing Lantern quartet recursive graph-memory evidence check; 3731 passed, 1 failed, 3 skipped; aggregate cause unproven",
+      "sha256": "4a436ce3ad134dcb4a61c8e130dbcc176462f295b8f07a6dd9b81c5b1de32675",
+      "bytes": 127083
+    },
+    {
+      "file": ".relayer/issue-654-validation/delivery-lantern-diagnosis.log",
+      "result": "passed isolated unchanged Lantern quartet; 1 passed, 17 skipped; does not establish aggregate failure cause",
+      "sha256": "355e79582185752bbfe20437ceb79afedacb237bc8d73fcf9f2df168ee1fc51b",
+      "bytes": 270
+    },
+    {
+      "file": ".relayer/issue-654-validation/delivery-check-serial.log",
+      "result": "passed full check; 3732 Vitest tests, 3 skipped; secret boundary 2; Python 74; receipt/readability checks",
+      "sha256": "38869c0735c132ef5235522748feeeda90d426158136fffb11a244248a2fad9d",
+      "bytes": 126738
+    },
+    {
+      "file": ".relayer/issue-654-validation/delivery-build-final.log",
+      "result": "passed final build",
+      "sha256": "b02c692c9a05e78d60701c3c7888504c6b576f1c5d6a5cefa95caa0c37d3bd9d",
+      "bytes": 2040
+    },
+    {
+      "file": ".relayer/issue-654-validation/delivery-compiled-final.log",
+      "result": "passed 4 compiled-runtime checks",
+      "sha256": "368dc96e88ae2814e8aba56da0f830024094c7963f7a5dcf7076aace4714591f",
+      "bytes": 377
+    },
+    {
+      "file": ".relayer/issue-654-validation/delivery-web-final.log",
+      "result": "passed every declared browser chapter on final source",
+      "sha256": "f746713839c90f903bee8390c7fff5033a8fc46ded8d0e5c98bc4f4953e7c3eb",
+      "bytes": 4328
+    },
+    {
+      "file": ".relayer/issue-654-validation/delivery-preview-final.log",
+      "result": "passed PREV-003: three real PNGs plus cached response",
+      "sha256": "ebd1ee111d9a93e8d551d11c82662acb60180c5b530579d79d4b5882476f15b0",
+      "bytes": 576
+    },
+    {
+      "file": ".relayer/issue-654-validation/delivery-focused.log",
+      "result": "failed: initial spool/manifest fixture iteration; non-final source",
+      "sha256": "443d0fceaffa93222a872c8162d0b4481268c861db83d00b49b9869ae383a173",
+      "bytes": 3883
+    },
+    {
+      "file": ".relayer/issue-654-validation/delivery-focused-2.log",
+      "result": "failed: accepted diagnostic fixture and cancellation access release ordering; moved drain after access settlement",
+      "sha256": "8468274dfc43aab7c860ac71f0528ed1924e9889761f0bb078b194dc5fb4f3a7",
+      "bytes": 2387
+    },
+    {
+      "file": ".relayer/issue-654-validation/delivery-focused-3.log",
+      "result": "passed 124 focused checks on earlier source",
+      "sha256": "d263c8e207515ecc7767b0bc0e27df0b523452b00b74d6d0589d4a5bce652de6",
+      "bytes": 258
+    },
+    {
+      "file": ".relayer/issue-654-validation/delivery-focused-final.log",
+      "result": "passed 214 focused checks on earlier source",
+      "sha256": "fdf0e633b3e110cfc58568516836526edbfebf1153ed39f3d1a51934ea8af7df",
+      "bytes": 260
+    },
+    {
+      "file": ".relayer/issue-654-validation/delivery-real-seams.log",
+      "result": "passed 9 delivery and 2 real SDK-to-Rust replay checks on earlier source",
+      "sha256": "b2477029f30d5b34c2599bc3022b6dd3d6b74a18e45f2dc2a6b5ca3b8f587bf8",
+      "bytes": 256
+    },
+    {
+      "file": ".relayer/issue-654-validation/delivery-repaired-fixtures.log",
+      "result": "passed 119 scoped/host checks on earlier source",
+      "sha256": "dcbe914a070d47bf8268b9015a215de95b248357887b93176d9e9ca7fbb5542b",
+      "bytes": 258
+    },
+    {
+      "file": ".relayer/issue-654-validation/delivery-fast-empty.log",
+      "result": "passed 121 delivery/host checks before final guard refinement",
+      "sha256": "86916b1f4120397fffeded583223b370e1ac005b46474a667710708d4c911afb",
+      "bytes": 258
+    },
+    {
+      "file": ".relayer/issue-654-validation/delivery-web.log",
+      "result": "failed existing task form became hidden after catalog refresh; non-final snapshot",
+      "sha256": "c3d7763b3cc46f15788f5753439d644c18bd5431213c139e0c77ea522b8b39be",
+      "bytes": 2808
+    },
+    {
+      "file": ".relayer/issue-654-validation/delivery-web-retry.log",
+      "result": "passed unchanged retry every chapter; non-final snapshot",
+      "sha256": "f746713839c90f903bee8390c7fff5033a8fc46ded8d0e5c98bc4f4953e7c3eb",
+      "bytes": 4328
+    },
+    {
+      "file": ".relayer/issue-654-validation/delivery-cache.log",
+      "result": "failed verifier invocation omitted required platform arguments; corrected invocation follows",
+      "sha256": "ae57b46fcfe050774fa922b9fb72d4ff7a4efcea0e66404e273599300820844a",
+      "bytes": 21
+    },
+    {
+      "file": ".relayer/issue-654-validation/delivery-cache-verified.log",
+      "result": "passed trusted compatible lbug 0.18 artifact identity/hash verification",
+      "sha256": "5c0116fb990f3a8b5d465f6e5ed10b2c2401750958155432cdfaa0ccdcacd276",
+      "bytes": 102
+    },
+    {
+      "file": ".relayer/issue-654-validation/delivery-build.log",
+      "result": "passed earlier build; superseded by final build",
+      "sha256": "dea12bc1ee25f05b9e8c9d04619fcf7e3be3ce3483c552bd43f762af8654dfd2",
+      "bytes": 2040
+    },
+    {
+      "file": ".relayer/issue-654-validation/delivery-compiled.log",
+      "result": "passed 4 earlier compiled checks; superseded by final checks",
+      "sha256": "dd11bddfdcbe695b57978523c325c7ab9c7f3c1eebdb59610cf7a2da291e21ee",
+      "bytes": 377
+    },
+    {
+      "file": ".relayer/issue-654-validation/delivery-preview.log",
+      "result": "passed earlier preview; superseded by final preview",
+      "sha256": "42bb078a434e274be4388badfe501ede8b9aeb513c97aff2be5a660ce8ddf457",
+      "bytes": 576
+    }
+  ]
+}

@@ -41,6 +41,27 @@ describe("packaged graph-client authored detail boundary", () => {
     for (const selector of detailAuthoringReference().themeSelectors) expect(checkpoint.components[0].css).toContain(selector);
   });
 
+  it("exposes scoped bound authoring through the agent resource without a public capture adapter", async () => {
+    const sdk = await import(graphClientIndexUrl.href);
+    const requests = [];let next = 10;
+    vi.stubGlobal("fetch",vi.fn(async(url,init)=>{
+      const body = JSON.parse(String(init.body));requests.push(body);const id = next++;
+      const key = new URL(url).pathname.split("/").at(-1);
+      return Response.json({[key === "nodes" ? "node" : key === "layers" ? "layer" : "action"]:{...body,id,state:"draft"}});
+    }));
+    const graph = new sdk.RelayerGraphClient({url:"http://graph.test",token:"run",nodeId:1});
+    const author = graph.authoring("packaged");const root = author.layer("answer");const child = author.layer("evidence");
+    const node = root.node("finding",{icon:"info",title:"Finding",detail:"Finding"});const evidence = child.node("proof",{icon:"file",title:"Proof",detail:"Proof"});
+    const action = root.action("evidence",node,{kind:"navigate",relation:"expand",label:"Evidence",target:child});
+    node.detailAuthoring.setComponent("main",sdk.html`<button gc=${sdk.detailCapability.expand("evidence",action)}>Evidence</button>`);
+    root.layout([[node,.5,.5]],{edgeShape:"default"});child.layout([[evidence,.5,.5]],{edgeShape:"default"});
+    const written = await author.write(root);
+    expect(written.rootLayer.state).toBe("draft");
+    expect(written.nodes.find(value=>value.id===node.ref.id).authoredDetail.mounts[0].capability.action).toMatchObject({clientKey:action.clientKey,sourceLayer:{clientKey:root.object.clientKey}});
+    expect(requests.at(-1)).toMatchObject({clientKey:action.clientKey,sourceNodeId:node.ref.id,sourceLayerId:written.rootLayer.id,targetLayerId:child.object.ref.id});
+    expect(sdk.createScopedGraphAuthoring).toBeUndefined();expect(Object.keys(author)).not.toContain("transport");
+  });
+
   it("has no sibling compiler modules and ignores forged public compiler output", async () => {
     for (const sibling of ["detail-host.js", "detail.js"]) {
       await expect(import(new URL(`./${sibling}`, graphClientIndexUrl).href))
@@ -1195,6 +1216,17 @@ describe("packaged graph-client authored detail boundary", () => {
         const compiled = submitted.authoredDetail;
         if (compiled.components[0]?.html !== "<table><tbody><tr><td>Packaged</td></tr></tbody></table>") process.exit(2);
         if (!compiled.components[0]?.css.includes("grid-template-columns:minmax(10rem,1fr) 2fr")) process.exit(3);
+        globalThis.fetch = async (url, init) => {
+          const body = JSON.parse(String(init.body));
+          return Response.json(new URL(url).pathname.endsWith("/nodes")
+            ? {node:{...body,id:2,state:"draft"}} : {layer:{...body,id:3,state:"draft"}});
+        };
+        const scope = new RelayerGraphClient({url:"http://graph.test",token:"run",nodeId:1}).authoring("relocated");
+        const layer = scope.layer("answer");const scoped = layer.node("finding",{icon:"info",title:"Scoped",detail:"Scoped"});
+        scoped.detailAuthoring.setComponent("main",html\`<p>Scoped</p>\`);
+        layer.layout([[scoped,.5,.5]],{edgeShape:"default"});
+        const written = await scope.write(layer);
+        if(written.rootLayer.state !== "draft" || written.nodes[0].authoredDetail.components[0].html !== "<p>Scoped</p>") process.exit(4);
         process.stdout.write("packaged graph-client compile passed\\n");
       `;
       const result = await execFileAsync(process.execPath, ["--input-type=module", "--eval", probe], {

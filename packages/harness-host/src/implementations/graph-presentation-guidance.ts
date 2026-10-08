@@ -18,3 +18,57 @@ Public visual authoring reference (generated from the compiler; no source inspec
 ${NODE_ICON_GUIDANCE}
 Use CSS custom properties and the listed properties/functions; allowed names still have value and selector validation. Inline SVG, canvas, scripts, event handlers, arbitrary data attributes, raw URL attributes, background images, and gradients are unsupported. Use HTML/CSS shapes or registered image assets. Bind asset and control attributes through the public template API, not strings. Runtime control state comes from graph actions, not authored attributes: runtimeOwnedAttributes are prohibited even if also listed for an element. Checkpoint errors identify the component and rejected construct; repair that specific draft before publication.
 Theme authoring: design readable light AND dark presentations in the same saved detail. Relayer owns the active theme; select it with [data-relayer-theme="light"] and [data-relayer-theme="dark"] in component CSS. The marker is on a runtime-owned inner scope, inside the protected detail host. For example, [data-relayer-theme="light"] .explanation { color: #182c34; background-color: #fafbf9; } and [data-relayer-theme="dark"] .explanation { color: #edf2f3; background-color: #121619; }. Relayer light uses pale neutral surfaces and dark text; dark uses charcoal surfaces and light text. These palette examples are guidance, not mandatory colors or a layout recipe. You control styling, layout, and visual composition. Cover text, surfaces, borders, chart marks and labels, controls, hover and keyboard focus with suitable contrast. Preserve meaning across modes, including semantic chart colors. Theme switching happens without generation or replacing controls. Keep each input/action on its existing stable capability mount and reposition/restyle it as needed; do not create duplicate inputs for the two themes. For different illustrations or static compositions, bind both variants as ordinary assets/content, give each a class, and use the theme selectors with display rules to show the matching variant. Share an asset across themes when it works in both. The theme marker is host-owned: do not author it into HTML or use operating-system prefers-color-scheme as the product theme. Missing theme-specific styles render the same authored presentation in both modes; they are not rejected or automatically recolored.`;
+
+/** Mechanics only: presentation and graph decomposition remain model decisions. */
+export function scopedAuthoringRecipeJs(interactionNodeId: number, clientModuleUrl: string): string {
+  return `Use graph.authoring(snapshotKey) for new response drafts, with named node fields. Keep the snapshot and local keys stable when repairing a rejected draft; choose a new snapshot for a new accepted response. The writer handles dependency order and scoped client keys. It persists drafts; root attachment and acceptance remain explicit. Consult the compiler-generated Node Detail reference above before styling and after a CSS rejection; detailAuthoringReference() returns the same structured reference. Give graph-authoring native children this recipe and the exact supplied import URL.
+The following runnable example demonstrates mechanics only. Replace its content and choose the topology, layout and controls for the task.
+
+\`\`\`javascript
+import { RelayerGraphClient, html, css, detailCapability, detailAuthoringReference } from ${JSON.stringify(clientModuleUrl)};
+const graph = RelayerGraphClient.fromEnv();
+// Inspect detailAuthoringReference() when consulting the compiler constraints.
+const author = graph.authoring("response-v1");
+const layer = author.layer("answer");
+const childLayer = author.layer("details");
+const node = layer.node("finding", { icon: "info", title: "Answer", detail: "Replace with the supported answer." });
+const child = childLayer.node("detail", { icon: "info", title: "Details", detail: "Replace with useful depth." });
+// Declare the action before binding it. The scoped API supplies identity and source layer.
+const expand = layer.action("details", node, { kind: "navigate", relation: "expand", label: "Details", target: childLayer });
+const sharedStyles = css\`section { display: grid; gap: 0.75rem; background-color: transparent; }\`;
+node.detailAuthoring.setComponent("main", html\`<section><h2>Answer</h2><p>Replace with the supported answer.</p><button gc=\${detailCapability.expand("details-control", expand)}>Details</button></section>\`, sharedStyles);
+child.detailAuthoring.setComponent("main", html\`<section><h2>Supporting evidence</h2><p>Explain the evidence behind the answer.</p></section>\`, sharedStyles);
+layer.layout([[node, 0.5, 0.5]], { edgeShape: "default", defaultNode: node });
+childLayer.layout([[child, 0.5, 0.5]], { edgeShape: "default", defaultNode: child });
+const written = await author.write(layer);
+await graph.addAction(${interactionNodeId}, { kind: "navigate", relation: "expand", label: "Answer", target: written.rootLayer, clientKey: "root-response" });
+await graph.submit(${interactionNodeId});
+\`\`\`
+Add a connection with layer.edge("connection", first, second). Declare node controls before write with layer.action("details", node, { kind: "navigate", relation: "expand", label: "Details", target: childLayer }); bind that same returned action with detailCapability.expand("stable-control-key", action) in an unquoted gc= template interpolation, as shown above. The key and action are both required. For references use relation: "reference" and detailCapability.reference; for follow-ups use kind: "invoke", interactionText, and detailCapability.invoke. layer.node(localKey, fields) accepts only icon, title, detail, and optional kind: do not pass clientKey or ref in fields. layer.action(localKey, sourceNode, fields) supplies sourceLayer, clientKey, and ref: do not author these fields. Declare actions before binding them, and reuse the returned action without cloning or adding identity fields. Set each selected layer's layout explicitly, including routes or sizeJustification when needed, with layer.layout(...); written.rootLayer is available only after author.write(...), and has no .layer wrapper. For specialized low-level calls, layer.object is the actual LayerObject. Accepted-node additions and replacements still use their existing authorized low-level APIs and presentation revisions.`;
+}
+
+export function scopedAuthoringRecipePython(interactionNodeId: number): string {
+  return `Use graph.authoring(snapshot_key) for new response drafts with named fields. Keep snapshot and local keys stable for rejected-draft repair. Choose a new snapshot for a new accepted response. Give graph-authoring RLM children this recipe. The writer persists drafts; root attachment and acceptance remain explicit.
+Before styling and after a CSS rejection, consult the compiler-generated Node Detail reference in Graph presentation guidance above. CSS uses complete rules with braces and the listed allowed properties.
+This runnable example demonstrates mechanics only; its placeholder content and layout are not a recommended response design. Choose content, topology, layout and controls for the task.
+
+\`\`\`python
+from relayer_graph import GraphSession, html, action_capability
+graph = await GraphSession.current()
+author = graph.authoring("response-v1")
+layer = author.layer("answer")
+child_layer = author.layer("details")
+node = layer.node("finding", icon="info", title="Answer", detail="Replace with the supported answer.")
+child = child_layer.node("detail", icon="info", title="Details", detail="Replace with useful depth.")
+expand = layer.action("details", node, kind="navigate", relation="expand", label="Details", target=child_layer)
+shared_styles = "section { display: grid; gap: 0.75rem; background-color: transparent; }"
+node.detail_authoring.set_component("main", html(["<section><h2>Answer</h2><p>Replace with the supported answer.</p><button gc=", ">Details</button></section>"], action_capability("details-control", expand)), shared_styles)
+child.detail_authoring.set_component("main", html("<section><h2>Supporting evidence</h2><p>Explain the evidence behind the answer.</p></section>"), shared_styles)
+layer.layout([(node, 0.5, 0.5)], edge_shape="default", default_node=node)
+child_layer.layout([(child, 0.5, 0.5)], edge_shape="default", default_node=child)
+written = await author.write(layer)
+await graph.add_navigate_action(${interactionNodeId}, "Answer", written.root_layer, relation="expand", client_key="root-response")
+await graph.submit(${interactionNodeId})
+\`\`\`
+Add connections with layer.edge("connection", first, second). Declare controls before write with layer.action("details", node, kind="navigate", relation="expand", label="Details", target=child_layer), then bind that same returned action with action_capability. Use relation="reference" for evidence and kind="invoke", interaction_text="..." for follow-ups. Node fields are icon, title, detail, and optional kind; do not supply client_key or ref. The scoped API supplies action source_layer and identity; do not pass source_layer, client_key, or ref into layer.action. Declare actions before binding them. Set every selected layer's layout explicitly. layer.object exposes the actual LayerObject for specialized operations. Accepted-node additions and presentation replacement retain their existing grants and revisions.`;
+}

@@ -1,4 +1,5 @@
-import { markAuthoringTransportError, observeAuthoringMethods } from "./authoring-errors.js";
+import { markAuthoringTransportError, observeAuthoringMethods, reportAuthoringError } from "./authoring-errors.js";
+import { createScopedGraphAuthoring, type CapturedNodeWrite, type ScopedGraphAuthoring } from "./scoped-authoring.js";
 import { isImageIcon, type GraphIcon } from "./image-icons.js";
 import { randomUUID } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
@@ -26,6 +27,32 @@ export class RelayerGraphClient {
   readonly #acceptedDetails = new WeakMap<NodeObject, Promise<CompiledNodeDetail>>();
   readonly #submissionEnvelopes = new WeakMap<NodeObject, NodeSubmissionEnvelope>();
   readonly #submittedNodes = new WeakMap<NodeObject, Promise<WithGraphPreview<GraphNode>>>();
+  readonly #scopedIdentities = new Map<string, string>();
+  readonly #scopedWrites = new Set<string>();
+
+  /** Assemble one named draft snapshot; writing it does not accept or publish it. */
+  authoring(snapshotKey: string): ScopedGraphAuthoring {
+    return createScopedGraphAuthoring(snapshotKey, this.capability, {
+      captureNode: (node) => this.reserveNodeSubmission(node, true),
+      rememberIdentity: (key, context) => {
+        const previous = this.#scopedIdentities.get(key);
+        if (previous !== undefined && previous !== context) throw new Error("A scoped edge or action changed its identity-owning context; use a new key.");
+        this.#scopedIdentities.set(key, context);
+      },
+      claimWrites: (keys) => {
+        if (keys.some((key) => this.#scopedWrites.has(key))) throw new Error("An overlapping scoped write is running; await it before repairing the same identities.");
+        keys.forEach((key) => this.#scopedWrites.add(key));
+        return () => keys.forEach((key) => this.#scopedWrites.delete(key));
+      },
+      createEdge: (edge) => observeAuthoringMethods(this, this.capability, (error) => error instanceof GraphApiError).createEdge(edge),
+      submitLayer: (layer, options) => observeAuthoringMethods(this, this.capability, (error) => error instanceof GraphApiError).submitLayer(layer, options),
+      addAction: (source, original, captured) => {
+        const writer = observeAuthoringMethods({ addAction: () => this.submitAction(source, original, captured) }, this.capability, (error) => error instanceof GraphApiError);
+        return writer.addAction();
+      },
+      reportCaptureError: (error) => { if (!(error instanceof GraphApiError)) reportAuthoringError(this.capability, error); },
+    });
+  }
 
   constructor(capability: GraphCapability, private readonly requestScope?: { readonly beforeRequest: (path: string) => void; readonly signal: AbortSignal }) {
     this.capability = { ...capability, url: capability.url.replace(/\/$/, "") };
@@ -99,44 +126,66 @@ export class RelayerGraphClient {
   }
 
   submitNode(node: NodeObject): Promise<WithGraphPreview<GraphNode>> {
-    try { this.bindSubmissionNode(node); } catch (error) { return Promise.reject(error); }
+    try { return this.reserveNodeSubmission(node).run(); } catch (error) { return Promise.reject(error); }
+  }
+
+  /** Register and capture synchronously, but let the scoped writer start transport later. */
+  private reserveNodeSubmission(node: NodeObject, observe = false): CapturedNodeWrite {
+    this.bindSubmissionNode(node);
     const existing = this.#submittedNodes.get(node);
-    if (existing !== undefined) return existing;
+    if (existing !== undefined) return { run: () => existing, cancel: () => undefined };
     const submission = deferred<WithGraphPreview<GraphNode>>();
     this.#submittedNodes.set(node, submission.promise);
-    let work: Promise<WithGraphPreview<GraphNode>>;
+    // A queued reservation may be cancelled before any caller starts awaiting it.
+    void submission.promise.catch(() => undefined);
+    const acceptedDetail = deferred<CompiledNodeDetail>();
+    this.#acceptedDetails.set(node, acceptedDetail.promise);
+    void acceptedDetail.promise.catch(() => undefined);
+    let envelope: NodeSubmissionEnvelope;
+    let program: AuthenticatedNodeDetailProgramSnapshot | undefined;
+    let cleared: boolean;
+    const reject = (error: unknown) => {
+      if (this.#submittedNodes.get(node) === submission.promise) this.#submittedNodes.delete(node);
+      if (this.#acceptedDetails.get(node) === acceptedDetail.promise) this.#acceptedDetails.delete(node);
+      acceptedDetail.reject(error);
+      submission.reject(error);
+    };
     try {
-      const envelope = this.submissionEnvelope(node);
-      const acceptedDetail = deferred<CompiledNodeDetail>();
-      this.#acceptedDetails.set(node, acceptedDetail.promise);
-      void acceptedDetail.promise.catch(() => undefined);
-      work = this.submitNodeEnvelope(node, envelope, acceptedDetail);
+      envelope = this.submissionEnvelope(node);
+      cleared = isNodeDetailAuthoringCleared(envelope.detailAuthoring);
+      program = finalizedNodeDetailAuthoring(envelope.detailAuthoring) === undefined
+        ? snapshotAuthoredNodeDetailProgram(envelope.detailAuthoring, envelope.owner) : undefined;
     } catch (error) {
-      if (this.#submittedNodes.get(node) === submission.promise) this.#submittedNodes.delete(node);
-      submission.reject(error);
-      return submission.promise;
+      reject(error);
+      throw error;
     }
-    void work.then(submission.resolve, (error: unknown) => {
-      if (this.#submittedNodes.get(node) === submission.promise) this.#submittedNodes.delete(node);
-      this.#acceptedDetails.delete(node);
-      submission.reject(error);
-    });
-    return submission.promise;
+    let started = false;
+    const run = () => {
+      if (!started) {
+        started = true;
+        void this.submitNodeEnvelope(node, envelope, acceptedDetail, program, cleared).then(submission.resolve, reject);
+      }
+      return submission.promise;
+    };
+    const writer = observe ? observeAuthoringMethods({ submitNode: run }, this.capability, (error) => error instanceof GraphApiError) : { submitNode: run };
+    return { run: () => writer.submitNode(), cancel: (error) => { if (!started) { started = true; markAuthoringTransportError(error); reject(error); } } };
   }
 
   private async submitNodeEnvelope(
     node: NodeObject,
     envelope: NodeSubmissionEnvelope,
     acceptedDetail: ReturnType<typeof deferred<CompiledNodeDetail>>,
+    capturedProgram?: AuthenticatedNodeDetailProgramSnapshot,
+    cleared = false,
   ): Promise<WithGraphPreview<GraphNode>> {
     let authoredDetail: CompiledNodeDetail | undefined;
     try {
-      authoredDetail = await this.finalizeNodeDetail(node, envelope);
+      authoredDetail = await this.finalizeNodeDetail(node, envelope, capturedProgram);
       // Three-state wire contract: a package replaces the draft's checkpointed
       // package, `null` clears it (only after an explicit `clear()`), and an
       // untouched empty builder omits the field so the graph retains it.
       const submitsPackage = authoredDetail.components.length > 0;
-      const clearsPackage = !submitsPackage && isNodeDetailAuthoringCleared(envelope.detailAuthoring);
+      const clearsPackage = !submitsPackage && cleared;
       const body = await this.request<unknown>("/api/graph/nodes", {
         method: "POST",
         body: JSON.stringify({
@@ -158,6 +207,11 @@ export class RelayerGraphClient {
       applyAcceptedNodeResponse(envelope.owner.object, accepted);
       return this.withPreview(accepted, (body as { preview?: unknown }).preview, `node-${accepted.id}`);
     } catch (error) {
+      if (error instanceof GraphApiError && error.code === "unsupported_icon" && error.path === "icon" && typeof envelope.icon === "string") {
+        // Enrich the same origin error from the frozen request, never the live builder.
+        const icon = JSON.stringify(envelope.icon.slice(0, 128));
+        error.message += ` Rejected node.icon = ${icon}. NodeObject takes icon as its first argument and kind as its fourth argument. Prefer named fields: layer.node("finding", { icon: "bug", title: "Finding", detail: "Evidence" }). Choose a supported icon using graph.icons.discover({ query: "finding", kind: "symbols" }).`;
+      }
       if (authoredDetail === undefined) acceptedDetail.reject(error);
       else acceptedDetail.resolve(authoredDetail);
       throw error;
@@ -182,14 +236,14 @@ export class RelayerGraphClient {
     return compileAuthenticatedNodeDetail(program, assets);
   }
 
-  private finalizeNodeDetail(node: NodeObject, envelope: NodeSubmissionEnvelope): Promise<CompiledNodeDetail> {
+  private finalizeNodeDetail(node: NodeObject, envelope: NodeSubmissionEnvelope, capturedProgram?: AuthenticatedNodeDetailProgramSnapshot): Promise<CompiledNodeDetail> {
     const finalized = this.#submittedDetails.get(node);
     if (finalized !== undefined) return finalized;
     const finalization = deferred<CompiledNodeDetail>();
     this.#submittedDetails.set(node, finalization.promise);
     let work: Promise<CompiledNodeDetail>;
     try {
-      work = this.compileAndFreezeNodeDetail(envelope);
+      work = this.compileAndFreezeNodeDetail(envelope, capturedProgram);
     } catch (error) {
       if (this.#submittedDetails.get(node) === finalization.promise) this.#submittedDetails.delete(node);
       finalization.reject(error);
@@ -202,10 +256,10 @@ export class RelayerGraphClient {
     return finalization.promise;
   }
 
-  private async compileAndFreezeNodeDetail(envelope: NodeSubmissionEnvelope): Promise<CompiledNodeDetail> {
+  private async compileAndFreezeNodeDetail(envelope: NodeSubmissionEnvelope, capturedProgram?: AuthenticatedNodeDetailProgramSnapshot): Promise<CompiledNodeDetail> {
     const finalized = finalizedNodeDetailAuthoring(envelope.detailAuthoring);
     if (finalized !== undefined) return finalized;
-    const program = snapshotAuthoredNodeDetailProgram(envelope.detailAuthoring, envelope.owner);
+    const program = capturedProgram ?? snapshotAuthoredNodeDetailProgram(envelope.detailAuthoring, envelope.owner);
     const finalization = beginNodeDetailAuthoringFinalization(envelope.detailAuthoring);
     try {
       const assets = await this.resolveDetailAssets(program);
@@ -293,6 +347,11 @@ export class RelayerGraphClient {
 
   async addAction(source: NodeReference, action: ActionObject): Promise<GraphAction> {
     const clientKey = action.clientKey ??= randomUUID();
+    return this.submitAction(source, action, { ...action, clientKey });
+  }
+
+  private async submitAction(source: NodeReference, original: ActionObject, action: ActionObject): Promise<GraphAction> {
+    const clientKey = action.clientKey;
     const body = await this.request<{ action: GraphAction }>("/api/graph/actions", {
       method: "POST",
       body: JSON.stringify(action.kind === "navigate" ? {
@@ -331,7 +390,7 @@ export class RelayerGraphClient {
         ...(action.minimumSelections === undefined ? {} : { minimumSelections: action.minimumSelections }),
       }),
     });
-    action.ref = body.action;
+    original.ref = body.action;
     return body.action;
   }
 

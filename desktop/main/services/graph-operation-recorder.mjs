@@ -292,7 +292,7 @@ export async function startGraphOperationRecorder({
   const stateFor = (interactionNodeId) => {
     let state = interactions.get(interactionNodeId);
     if (state === undefined) {
-      state = { events: [], graphEventCount: 0, diagnosticEventCount: 0, diagnosticBytes: 0, diagnosticDiscarded: 0, byteLength: 0, discardedEvents: 0, discardedBytes: 0, pending: new Map(), pendingDiagnostics: new Map() };
+      state = { events: [], graphEventCount: 0, diagnosticEventCount: 0, diagnosticBytes: 0, diagnosticDiscarded: 0, diagnosticIds: new Set(), byteLength: 0, discardedEvents: 0, discardedBytes: 0, pending: new Map(), pendingDiagnostics: new Map() };
       interactions.set(interactionNodeId, state);
     }
     return state;
@@ -308,10 +308,13 @@ export async function startGraphOperationRecorder({
     const bytes = Buffer.from(`${JSON.stringify(event)}\n`);
     const state = stateFor(interactionNodeId);
     if (receipt.authoringError !== undefined) {
+      // HTTP delivery and the host's fatal-exit spool replay carry the same origin ID.
+      if (state.diagnosticIds.has(receipt.authoringError.id)) return;
       if (state.diagnosticEventCount >= maxAuthoringDiagnosticsPerInteraction || state.diagnosticBytes + bytes.byteLength > 256 * 1024) {
         state.diagnosticDiscarded += 1;
         return;
       }
+      state.diagnosticIds.add(receipt.authoringError.id);
       state.events.push(event);
       state.diagnosticEventCount += 1;
       state.diagnosticBytes += bytes.byteLength;

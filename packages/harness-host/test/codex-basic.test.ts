@@ -55,7 +55,7 @@ describe("CodexBasicHarness", () => {
     const codexProviderPrompt = buildLayeredNavigationPrompt(personalPresentationRunContext(true), "@relayer/graph-client", undefined, false);
 
     expect(neutral).toBe(baseline);
-    for (const fragment of ["html`", "css`", "detailCapability", "setComponent", "checkpointNodeDetail", "submitNode", "graph.addAction", "graph.bindNode", "do not copy a whole explanation across siblings", "const common = css", "evidence.detailAuthoring.setComponent"]) {
+    for (const fragment of ["html`", "css`", "detailCapability", "setComponent", "checkpointNodeDetail", "author.write", "graph.addAction", "graph.bindNode", "do not copy a whole explanation across siblings", "const common = css", "evidence.detailAuthoring.setComponent"]) {
       expect(visualTreatment).toContain(fragment);
     }
     expect(treatment).toContain("Personal graph presentation preferences:");
@@ -507,17 +507,17 @@ describe("CodexBasicHarness", () => {
     expect(submitted?.prompt).toContain("pass the program through standard input");
     expect(submitted?.prompt).toContain("never place authored graph code in a --eval argument");
     expect(submitted?.prompt).toContain("do not create a script in either the project checkout or a temporary directory");
-    expect(submitted?.prompt).toContain('kind: "navigate", relation: "expand", label: "Key findings", icon: "search"');
+    expect(submitted?.prompt).toContain('kind: "navigate", relation: "expand", label: "Answer", target: written.rootLayer');
     expect(submitted?.prompt).toContain("including follow-ups and annotation-only or input-only interactions");
     expect(submitted?.prompt).toContain("Node and action icons accept supported symbol names or registered image references");
-    expect(submitted?.prompt).toContain("exactly one NodePlacementObject(node, x, y) per layer node");
+    expect(submitted?.prompt).toContain("Set each selected layer's layout explicitly");
     expect(submitted?.prompt).toContain("Place a one-node layer at (0.5, 0.5)");
     expect(submitted?.prompt).toContain("independently of the viewport");
     expect(submitted?.prompt).toContain("graph.icons.discover");
-    expect(submitted?.prompt).toContain('new NodeObject("info", "Summary", "...", "concept", "summary-node")');
+    expect(submitted?.prompt).toContain('layer.node("finding", { icon: "info", title: "Answer", detail: "Replace with the supported answer." })');
     expect(submitted?.prompt).not.toContain('new NodeObject("lightbulb"');
-    expect(submitted?.prompt).toContain('new EdgeObject([summaryNode, detailNode], "summary-detail-edge")');
-    expect(submitted?.prompt).toContain('new LayerObject(nodes, edges, layout, "response-layer")');
+    expect(submitted?.prompt).toContain('layer.edge("connection", first, second)');
+    expect(submitted?.prompt).toContain('const layer = author.layer("answer")');
     expect(submitted?.prompt).toContain('relation: "expand"');
     expect(submitted?.prompt).toContain("sourceLayer: layer");
     expect(submitted?.prompt).toContain('clientKey: "root-response"');
@@ -674,9 +674,14 @@ describe("CodexBasicHarness", () => {
       expect(submittedPrompt).toContain("do not create a script in either the project checkout or a temporary directory");
       expect(submittedPrompt).not.toContain("do not resolve Node.js from PATH");
       // A retry names the program that printed its id and sends edits through the same heredoc.
-      expect(submittedPrompt).toContain("Do not retype the whole program for a small fix");
+      expect(submittedPrompt).toContain("Prefer a unique exact-match edit for a small fix");
       expect(submittedPrompt).toContain('await rerunGraphProgram("<id>", [{ find: "exact text from that program", replace: "fixed text" }])');
       expect(submittedPrompt).toContain("Each find must match exactly one place in that program");
+      expect(submittedPrompt).toContain("Preserve the supplied import URL byte for byte");
+      expect(submittedPrompt).toContain("reconstruct a fresh graph-only draft");
+      expect(submittedPrompt).toContain("outcome is unknown");
+      expect(submittedPrompt).toContain("detailAuthoringReference()");
+      expect(submittedPrompt).toContain("Give graph-authoring native children this recipe");
       expect(submittedPrompt).toContain("A program that crashed before printing an id has no saved copy");
       expect(submittedEnvironment).not.toHaveProperty("RELAYER_GRAPH_AUTHORING_NODE");
     }
@@ -754,7 +759,7 @@ describe("CodexBasicHarness", () => {
     expect(submittedPrompt).toContain("Never mention or expose the size justification");
     expect(submittedPrompt).toContain("Every new root, expansion, and reference layer requires a version-1 LayerLayoutObject");
     expect(submittedPrompt).toContain("align comparisons deliberately");
-    expect(submittedPrompt).toContain('new NodeObject("info", "Summary", "...", "concept", "summary-node")');
+    expect(submittedPrompt).toContain('layer.node("finding", { icon: "info", title: "Answer", detail: "Replace with the supported answer." })');
     expect(submittedPrompt).not.toContain('new NodeObject("lightbulb"');
     expect(submittedPrompt).toContain('clientKey: "root-response"');
     expect(submittedPrompt).toContain('clientKey: "node-detail"');

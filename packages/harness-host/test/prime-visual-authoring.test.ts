@@ -147,6 +147,11 @@ asyncio.run(run())
     expect(fetch.mock.calls[1]![1].signal?.aborted).toBe(false);
     expect(bodies).toHaveLength(1);
   });
+  it("preserves server rejection status and cause across the Python bridge", async () => {
+    const { fetch } = graphTransport();
+    fetch.mockResolvedValueOnce(Response.json({error:{code:"unsupported_icon",path:"icon",message:"Unsupported icon",issues:[]}}, {status:422}));
+    expect(await new PrimeVisualAuthoring().execute(request(),capability,()=>{},signal())).toMatchObject({ok:false,frozen:true,httpStatus:422,error:{code:"unsupported_icon",path:"icon",message:expect.stringContaining('Unsupported icon Rejected node.icon = "box"')}});
+  });
   it("fences authority again after asynchronous asset resolution and before node write", async () => {
     let active = true;
     vi.stubGlobal("fetch", vi.fn(async () => { active = false; return Response.json({ assets: [] }); }));

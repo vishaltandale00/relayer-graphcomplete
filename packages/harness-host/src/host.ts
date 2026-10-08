@@ -5,7 +5,7 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import type { Socket } from "node:net";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
-import { GraphApiError, RelayerGraphClient, type GraphCapability, type GraphId } from "@relayer/graph-client";
+import { flushAuthoringErrors, GraphApiError, RelayerGraphClient, type GraphCapability, type GraphId } from "@relayer/graph-client";
 import {
   VisualAssetsError,
   createMemoryVisualDetailPersistence,
@@ -1388,6 +1388,9 @@ export class HarnessHost {
           completionError ??= normalizeHarnessFailure(error, true, observedTrace.effectBoundary());
         }
       }
+      // Native scripts may have exited before their asynchronous diagnostic request arrived.
+      // Deliver their bounded sanitized spool while this exact capability is still active.
+      await flushAuthoringErrors({ ...capability, programDirectory, ...(traceContext === undefined ? {} : { authoringErrors: true }) });
       // Saved programs are transient too: they never outlive the turn.
       await rm(programDirectory, { recursive: true, force: true }).catch(() => undefined);
     }

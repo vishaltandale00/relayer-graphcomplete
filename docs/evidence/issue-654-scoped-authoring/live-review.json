@@ -1,0 +1,27 @@
+{
+  "reviewer": "/root/design_authority_review",
+  "sourceCommit": "57e5d1b9fa011b78c344537787d5f1f81c3fd8f7",
+  "sourceTree": "5b317aa94b81a84f3dafc938c9b69391e99ef5f1",
+  "sourceSha256": "144fb0723490d5b2fe6ccd0f150a33298bab3e39b4fda3ab4b33ba2399e25d1b",
+  "liveReceipt": "live-verification.json",
+  "liveReceiptSha256": "2e976b9852fbf4130141de5c974bd49978eb444b90b7ffd887171abbc2fbc00e",
+  "liveReceiptBytes": 34751,
+  "scope": "Original six-attempt matrix; source/pins, helper/private receipts, ledger/gate/route/snapshot/judge artifacts and partial/missing metric semantics; disclosed profile/family confounds, capture gaps and judge intervention",
+  "verdict": "pass_for_evidence_fidelity",
+  "independentlyVerified": {
+    "helperAndPrivateReceipts": 30,
+    "runtimePins": 50,
+    "judgeArtifactReceipts": 63,
+    "passingGateReferences": 14,
+    "actualCandidateRoutes": 6,
+    "acceptedSnapshots": 5
+  },
+  "unresolvedReceiptBlockers": [],
+  "substantiveFindings": [
+    "Three supported-client validation failures lack diagnostic receipts.",
+    "Three partial judge reviews remain unavailable, including one disclosed SIGTERM intervention.",
+    "No qualitative task-outcome scores.",
+    "Unsupported-icon rejections were not observed in these six attempts; observed8-to5, mixed timings, tiny samples and profile/family/shared-runtime differences do not establish total-error, quality, speed, causal-improvement or broad nonregression proof."
+  ],
+  "limits": "This certifies the exact receipt and source snapshot evidence interpretation, not nonregression or quality. Source or receipt edits invalidate this assertion. PR remains draft."
+}

@@ -1,0 +1,10 @@
+{
+  "reviewer": "/root/design_authority_review",
+  "sourceSha256": "144fb0723490d5b2fe6ccd0f150a33298bab3e39b4fda3ab4b33ba2399e25d1b",
+  "sourceManifest": "guidance-source-snapshot.json",
+  "scope": "All26 named source files; co-located JS/Python recipes and provider delivery, existing generated reference, canonical compilation/control binding, explicit authority and acceptance, local captured-icon feedback, safe program repair and checkpoint map",
+  "verdict": "pass",
+  "unresolvedFindings": [],
+  "independentChecks": {},
+  "limits": "Telemetry inventory independently compared with a12216c byte-for-byte; no stale removed module output. Reported148 tests and aggregate/build/live proof were not independently rerun. No regression/quality certification; named-source edits invalidate assertion; evidence excluded."
+}
