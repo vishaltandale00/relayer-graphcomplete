@@ -6,6 +6,7 @@ import { PassThrough, Writable } from "node:stream";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { reportDesktopStartupFailure } from "../desktop/main/services/startup-failure-recovery.mjs";
 import { createWindowFactory } from "../desktop/main/window.mjs";
 import { installElectronMainErrorAdapter } from "../desktop/main/services/electron-main-error-adapter.mjs";
 import { RelayerAppServerService } from "../desktop/main/services/relayer-app-server.mjs";
@@ -45,6 +46,64 @@ function fixtureHarnessModule({ start = "return { url: 'http://127.0.0.1:43124',
 }
 
 describe("desktop failure-domain adapters", () => {
+  it.each(["graph", "app"])("deduplicates a %s exit during the remaining desktop startup work", async (kind) => {
+    const directory = await mkdtemp(join(tmpdir(), "relayer-later-startup-exit-"));
+    directories.push(directory);
+    const reports = [];
+    let priorReport;
+    const child = readyChild(kind === "graph" ? { ready: true, url: "http://127.0.0.1:43125" }
+      : { ready: true, origin: "http://127.0.0.1:43123", cookieName: "relayer_control" });
+    const options = { userDataDirectory: directory, configurationPaths: [],
+      harnessHostModuleUrl: fixtureHarnessModule(), graphServerBinary: "/test/graph", binaryPath: "/test/app",
+      webDirectory: "/test/renderer", permissionCatalogPath: "/test/permissions.json", fetchRequest: async () => new Response(null, { status: 204 }),
+      issueErrorReporter: () => ({ report: async (record) => { reports.push(record.code); return { accepted: true }; }, revoke: () => {} }),
+      onUnexpectedStop: (_event, report) => { priorReport = report; }, spawnProcess: () => child,
+    };
+    const service = kind === "graph" ? new GraphCompleteRuntimeService(options) : new RelayerAppServerService(options);
+    await service.start();
+    child.exitCode = 17;
+    child.emit("exit", 17, null);
+    const mainReporter = vi.fn();
+    await reportDesktopStartupFailure({ error: new Error("local service stopped during startup"), startupStage: "initialization", priorReport,
+      accountStartup: Promise.resolve({ status: "signed-in", subject: "auth0|readiness" }),
+      account: { telemetryIdentity: () => ({ generation: 1, subject: "auth0|readiness" }) },
+      reporting: { issueStartupFailureReporter: mainReporter },
+    });
+    expect(reports).toEqual([kind === "graph" ? "rust_graph_server.unexpected_exit" : "rust_app_server.unexpected_exit"]);
+    expect(mainReporter).not.toHaveBeenCalled();
+    await service.close();
+  });
+
+
+  it.each(["graph", "app"])("attributes a %s child exit immediately after readiness before main recovery", async (kind) => {
+    const directory = await mkdtemp(join(tmpdir(), "relayer-readiness-exit-"));
+    directories.push(directory);
+    const reports = [];
+    const child = readyChild(kind === "graph" ? { ready: true, url: "http://127.0.0.1:43125" }
+      : { ready: true, origin: "http://127.0.0.1:43123", cookieName: "relayer_control" });
+    // Readiness arrives and the real startup continuation observes an already dead child.
+    child.exitCode = 17;
+    const options = { userDataDirectory: directory, configurationPaths: [],
+      harnessHostModuleUrl: fixtureHarnessModule(), graphServerBinary: "/test/graph", binaryPath: "/test/app",
+      webDirectory: "/test/renderer", permissionCatalogPath: "/test/permissions.json",
+      issueErrorReporter: () => ({ report: async (record) => { reports.push(record.code); return { accepted: true }; }, revoke: () => {} }),
+      spawnProcess: () => child,
+    };
+    const service = kind === "graph" ? new GraphCompleteRuntimeService(options) : new RelayerAppServerService(options);
+    const caught = await service.start().catch((error) => error);
+    expect(caught.message).toContain("stopped after readiness");
+    const mainReporter = vi.fn();
+    await reportDesktopStartupFailure({ error: caught, startupStage: "runtime-start",
+      accountStartup: Promise.resolve({ status: "signed-in", subject: "auth0|readiness" }),
+      account: { telemetryIdentity: () => ({ generation: 1, subject: "auth0|readiness" }) },
+      reporting: { issueStartupFailureReporter: mainReporter },
+    });
+    expect(reports).toEqual([kind === "graph" ? "rust_graph_server.unexpected_exit" : "rust_app_server.unexpected_exit"]);
+    expect(mainReporter).not.toHaveBeenCalled();
+    await service.close().catch(() => undefined);
+  });
+
+
   it.each([undefined, false, true])("passes Eval thread exclusion to the real app-server spawn only for evalMode=%s", async (evalMode) => {
     const directory = await mkdtemp(join(tmpdir(), "relayer-app-eval-mode-"));
     directories.push(directory);
@@ -130,7 +189,16 @@ describe("desktop failure-domain adapters", () => {
       },
     });
 
-    await expect(service.start()).rejects.toThrow("could not start");
+    const caught = await service.start().catch((error) => error);
+    expect(caught.message).toContain("could not start");
+    const mainReporter = vi.fn();
+    await reportDesktopStartupFailure({
+      error: new AggregateError([caught], "startup and cleanup failed"), startupStage: "runtime-start",
+      accountStartup: Promise.resolve({ status: "signed-in", subject: "auth0|adapter" }),
+      account: { telemetryIdentity: () => ({ generation: 1, subject: "auth0|adapter" }) },
+      reporting: { issueStartupFailureReporter: mainReporter },
+    });
+    expect(mainReporter).not.toHaveBeenCalled();
     await new Promise((resolve) => setImmediate(resolve));
     expect(report).toHaveBeenCalledWith({
       code: "rust_graph_server.startup_failure",
@@ -196,7 +264,16 @@ describe("desktop failure-domain adapters", () => {
       },
     });
 
-    await expect(service.start()).rejects.toThrow("could not start");
+    const caught = await service.start().catch((error) => error);
+    expect(caught.message).toContain("could not start");
+    const mainReporter = vi.fn();
+    await reportDesktopStartupFailure({
+      error: new AggregateError([caught], "startup and cleanup failed"), startupStage: "runtime-start",
+      accountStartup: Promise.resolve({ status: "signed-in", subject: "auth0|adapter" }),
+      account: { telemetryIdentity: () => ({ generation: 1, subject: "auth0|adapter" }) },
+      reporting: { issueStartupFailureReporter: mainReporter },
+    });
+    expect(mainReporter).not.toHaveBeenCalled();
     await new Promise((resolve) => setImmediate(resolve));
     expect(report).toHaveBeenCalledWith({
       code: "rust_app_server.startup_failure",

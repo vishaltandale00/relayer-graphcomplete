@@ -387,7 +387,7 @@ V1 reports unhandled process crashes, supervised-child startup failures, and
 supervised-child unexpected exits. One closed Electron-main exception admits
 share export, oversize, upload, service, and unexpected deletion failures using
 the user-visible attempt reference. Cancellation, sign-in requirements, quota,
-and all other handled or expected product states remain excluded. Every adapter emits a closed record with stable component,
+and all other handled or expected product states except the narrow fatal startup extension below remain excluded. Every adapter emits a closed record with stable component,
 operation, and failure codes plus a code-owned message. JavaScript frames are
 application-relative, limited to 32, and limited to 256 characters per module
 name. Rust frames name only approved workspace crates and modules. Absolute paths,
@@ -395,6 +395,26 @@ third-party frames, arbitrary maps, and raw errors are rejected. Module names mu
 also occur in the checked-in packaged-module inventory, so a caller cannot encode
 private data inside a valid-looking application path. The final event is validated
 again immediately before transport.
+
+The narrowly approved handled fatal `electron_main.startup_failure` uses a separate
+main-only generation-bound reporter. Its code-owned message, closed startup stage,
+allowlisted network code, and approved application frames reuse the existing release,
+pseudonym, final validators, and encrypted offline queue. One 2.5-second budget
+covers saved-login verification, child attribution, and delivery; unverified or late
+identity creates neither an event nor a deferred record. Child/runtime failures are
+attributed through in-memory error identity, including bounded cleanup wrappers,
+and an already admitted child event suppresses main reporting. No raw exception or
+path enters an attribution record. Recovery login never replays an original
+prelogin failure. Revocation fences queue persistence as well as initial admission.
+
+The fatal startup catch offers native Retry, Sign in and retry, and Quit. A
+renderer-free BaseWindow parents these dialogs, including the cancellable sign-in
+wait. Recovery requires idle and verified account state before shutdown/relaunch;
+opening the browser alone is insufficient. Cancellation and timeouts retire the
+login generation and cannot relaunch late. The unusable product window is destroyed,
+and the normal window-all-closed handler is fenced during startup/recovery. A clean
+process restart follows bounded service shutdown; no services are initialized twice
+in the failed process. See PRD TEL-013/TEL-014 and ADR 0009.
 
 The handled-share schema adds the reference, closed stage/code, optional
 oversize byte count, and the bounded diagnostics described below. It reuses verified-account admission, the main-owned

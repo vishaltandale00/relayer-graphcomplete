@@ -239,6 +239,11 @@ describe("desktop skeleton", () => {
     expect(desktopMain.match(/issueErrorCapability,/gu)).toHaveLength(2);
     expect(desktopMain).toContain("authenticatedErrorReporting?.issueCapability({ component, processGeneration }) ?? null");
     expect(desktopMain).toContain("createDesktopAccountTelemetry");
+    expect(desktopMain).toContain("getWindow: () => startupRecoveryWindow ?? mainWindow");
+    expect(desktopMain).toContain("recoverDesktopStartupFailure({");
+    expect(desktopMain).toContain("runDesktopStartupFailureRecovery({");
+    expect(desktopMain).toContain("priorReport: fatalStartupReport");
+    expect(desktopMain).toContain("dialog.showMessageBox(startupRecoveryWindow, options)");
     expect(desktopMain).toContain("developmentTelemetryPackageMetadata(desktopVersion)");
     expect(desktopMain).toContain("appVersion: desktopVersion");
     expect(desktopMain).toContain("removeLeftoverEphemeralCodexAuthFiles(providerRuntimeRoot)");

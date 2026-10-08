@@ -1,3 +1,4 @@
+import { trackStartupErrorReport } from "./startup-report-status.mjs";
 import { randomBytes } from "node:crypto";
 import { spawn } from "node:child_process";
 import { chmod, cp, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
@@ -545,9 +546,13 @@ export class GraphCompleteRuntimeService {
         if (!this.closing) this.#reportGraphStartupFailure(error);
          throw error;
        }
-      this.#superviseGraph(graphProcess);
+      const onGraphStopped = this.#superviseGraph(graphProcess);
       if (graphProcess.exitCode !== null || graphProcess.signalCode !== null) {
-        throw new Error(`Relayer graph server stopped after readiness (${graphProcess.signalCode || graphProcess.exitCode || "unknown"}).`);
+        graphProcess.off("exit", onGraphStopped);
+        const report = onGraphStopped(graphProcess.exitCode, graphProcess.signalCode);
+        const error = new Error(`Relayer graph server stopped after readiness (${graphProcess.signalCode || graphProcess.exitCode || "unknown"}).`);
+        trackStartupErrorReport(error, report);
+        throw error;
       }
       const graphOperationRecorder = this.candidateTrace
         ? await this.#awaitStartupOperation(
@@ -932,11 +937,13 @@ export class GraphCompleteRuntimeService {
   #reportGraphStartupFailure(error) {
     const startupReporter = this.graphErrorReporter;
     this.graphErrorReporter = null;
-    Promise.resolve(startupReporter?.report({
+    if (!startupReporter) return;
+    const report = Promise.resolve().then(() => startupReporter?.report({
       code: "rust_graph_server.startup_failure",
       exceptionClass: sanitizedExceptionClass(error),
       frames: [],
     })).catch(() => undefined).finally(() => startupReporter?.revoke());
+    trackStartupErrorReport(error, report);
   }
 
   async #closeHarnessHost(harnessHost, deadline) {
@@ -1045,17 +1052,19 @@ export class GraphCompleteRuntimeService {
         this.session = null;
       }
       if (!expected) {
-        Promise.resolve(stoppedReporter?.report({
+        const report = Promise.resolve().then(() => stoppedReporter?.report({
           code: "rust_graph_server.unexpected_exit",
           exceptionClass: null,
           frames: [],
         })).catch(() => undefined).finally(() => stoppedReporter?.revoke());
         console.error(`Relayer graph server stopped (${signal || code || "unknown"}).`);
-        Promise.resolve(this.onUnexpectedStop({ code, signal })).catch((error) => {
+        Promise.resolve(this.onUnexpectedStop({ code, signal }, report)).catch((error) => {
           console.error("Relayer graph-server stop handler failed:", error);
         });
+        return report;
       } else stoppedReporter?.revoke();
     };
     child.once("exit", onStopped);
+    return onStopped;
   }
 }

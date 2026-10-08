@@ -1,3 +1,4 @@
+import { trackStartupErrorReport } from "./startup-report-status.mjs";
 import { randomBytes } from "node:crypto";
 import { spawn } from "node:child_process";
 import { chmod, mkdir } from "node:fs/promises";
@@ -242,22 +243,25 @@ export class RelayerAppServerService {
         this.child = null;
         this.listening = null;
         if (!expected) {
-          Promise.resolve(stoppedReporter?.report({
+          const report = Promise.resolve().then(() => stoppedReporter?.report({
             code: "rust_app_server.unexpected_exit",
             exceptionClass: null,
             frames: [],
           })).catch(() => undefined).finally(() => stoppedReporter?.revoke());
           console.error(`Relayer app server stopped (${signal || code || "unknown"}).`);
-          Promise.resolve(this.onUnexpectedStop({ code, signal })).catch((error) => {
+          Promise.resolve(this.onUnexpectedStop({ code, signal }, report)).catch((error) => {
             console.error("Relayer app-server stop handler failed:", error);
           });
+          return report;
         } else stoppedReporter?.revoke();
       };
       child.once("exit", onStopped);
       if (child.exitCode !== null || child.signalCode !== null) {
         child.off("exit", onStopped);
-        onStopped(child.exitCode, child.signalCode);
-        throw new Error(`Relayer app server stopped after readiness (${child.signalCode || child.exitCode || "unknown"}).`);
+        const report = onStopped(child.exitCode, child.signalCode);
+        const error = new Error(`Relayer app server stopped after readiness (${child.signalCode || child.exitCode || "unknown"}).`);
+        trackStartupErrorReport(error, report);
+        throw error;
       }
       return this.listening;
     } catch (error) {
@@ -315,11 +319,13 @@ export class RelayerAppServerService {
   #reportStartupFailure(error) {
     const startupReporter = this.errorReporter;
     this.errorReporter = null;
-    Promise.resolve(startupReporter?.report({
+    if (!startupReporter) return;
+    const report = Promise.resolve().then(() => startupReporter?.report({
       code: "rust_app_server.startup_failure",
       exceptionClass: sanitizedExceptionClass(error),
       frames: [],
     })).catch(() => undefined).finally(() => startupReporter?.revoke());
+    trackStartupErrorReport(error, report);
   }
 
   // Every publish names the connection generation its result started with (PROV-002). A

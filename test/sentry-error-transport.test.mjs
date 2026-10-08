@@ -37,6 +37,17 @@ const handledShareEvent = Object.freeze({
   snapshotBytes: 16777217,
 });
 
+const startupEvent = Object.freeze({
+  ...projection,
+  component: "electron-main", operation: "startup", code: "electron_main.startup_failure",
+  message: "Relayer could not start.", exceptionClass: null,
+  startupStage: "window-load", networkCode: "ERR_FAILED",
+  frames: [
+    { module: "desktop/main/index.mjs", line: 413, column: 7 },
+    { module: "desktop/main/window.mjs", line: 42, column: 2 },
+  ],
+});
+
 function fixture({ flushResult = true, closeResult = true } = {}) {
   const accepted = [];
   let options;
@@ -205,6 +216,42 @@ describe("Sentry error transport", () => {
     expect(state.accepted).toHaveLength(1);
   });
 
+  it("maps a handled fatal startup event and rejects mutation at each final validator", async () => {
+    const state = fixture();
+    await state.transport.enable(projection);
+    await expect(state.transport.send(startupEvent)).resolves.toEqual({ delivered: true });
+    expect(state.accepted).toHaveLength(1);
+    const prepared = state.accepted[0];
+    expect(prepared.level).toBe("fatal");
+    expect(prepared.tags).toEqual({
+      component: "electron-main", operation: "startup", failure_code: "electron_main.startup_failure",
+      os: "macos", architecture: "arm64", startup_stage: "window-load", network_code: "ERR_FAILED",
+    });
+    expect(prepared.exception.values[0].stacktrace.frames.map((frame) => frame.lineno)).toEqual([42, 413]);
+    for (const mutation of [
+      { startupStage: "private-stage" }, { networkCode: "SECRET_NATIVE_ERROR" },
+      { component: "renderer" }, { code: "electron_main.unhandled_crash" },
+      { message: "ERR_FAILED loading http://127.0.0.1/private" }, { url: "http://private" },
+      { frames: [{ module: "desktop/main/private.mjs", line: 1, column: 2 }] },
+    ]) await expect(state.transport.send({ ...startupEvent, ...mutation })).rejects.toThrow();
+    for (const key of ["startupStage", "networkCode"]) {
+      const event = { ...startupEvent }; delete event[key];
+      await expect(state.transport.send(event)).rejects.toThrow();
+    }
+    for (const mutation of [
+      { startup_stage: "private-stage" }, { network_code: "SECRET_NATIVE_ERROR" },
+      { component: "renderer" }, { failure_code: "electron_main.unhandled_crash" },
+      { url: "http://private" },
+    ]) expect(state.options.beforeSend({ ...prepared, tags: { ...prepared.tags, ...mutation } })).toBeNull();
+    for (const key of ["startup_stage", "network_code"]) {
+      const tags = { ...prepared.tags }; delete tags[key];
+      expect(state.options.beforeSend({ ...prepared, tags })).toBeNull();
+    }
+    expect(state.options.beforeSend({ ...prepared, level: "error" })).toBeNull();
+    expect(state.options.beforeSend({ ...prepared, exception: { values: [{ ...prepared.exception.values[0], value: "private-message" }] } })).toBeNull();
+    expect(state.options.beforeSend({ ...prepared, logs: "private-log" })).toBeNull();
+  });
+
   it("drops SDK or hook mutation at beforeSend and rejects non-gateway input", async () => {
     const state = fixture();
     await state.transport.enable(projection);
@@ -238,7 +285,7 @@ describe("Sentry error transport", () => {
     expect(closeState.client.close).toHaveBeenCalledWith(250);
   });
 
-  it("sends one privacy-bounded envelope through the real SDK transport to a loopback sink", async () => {
+  it("sends privacy-bounded crash and startup envelopes through the real SDK transport to a loopback sink", async () => {
     const requests = [];
     const server = createServer((request, response) => {
       const chunks = [];
@@ -262,9 +309,15 @@ describe("Sentry error transport", () => {
     try {
       await transport.enable(projection);
       await expect(transport.send(gatewayEvent)).resolves.toEqual({ delivered: true });
+      await expect(transport.send(startupEvent)).resolves.toEqual({ delivered: true });
       await expect(transport.send({ ...gatewayEvent, prompt: "private" })).rejects.toThrow();
 
-      expect(requests).toHaveLength(1);
+      expect(requests).toHaveLength(2);
+      const startupSent = JSON.parse(requests[1].trim().split("\n")[2]);
+      expect(startupSent).toMatchObject({
+        level: "fatal", tags: { failure_code: "electron_main.startup_failure", startup_stage: "window-load", network_code: "ERR_FAILED" },
+      });
+      expect(Object.keys(startupSent).sort()).toEqual(["environment", "event_id", "exception", "level", "release", "tags", "timestamp", "user"]);
       const lines = requests[0].trim().split("\n");
       expect(lines).toHaveLength(3);
       const envelopeHeader = JSON.parse(lines[0]);

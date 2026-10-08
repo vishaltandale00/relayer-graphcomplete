@@ -11,6 +11,7 @@ import { isApprovedTelemetryModule } from "../../shared/telemetry-module-invento
 import { exactKeys, validSourcePosition } from "../../shared/telemetry-validation.mjs";
 
 import { validShareHttpStatus, validShareNetworkCode } from "./share-error-diagnostics.mjs";
+import { validStartupStage, validStartupNetworkCode } from "./startup-error-diagnostics.mjs";
 
 const ENVIRONMENTS = new Set(["development", "preview", "stable"]);
 const COMPONENT_PREFIXES = Object.freeze({
@@ -87,7 +88,8 @@ function validateGatewayEvent(event, projection) {
   ]);
   const diagnostics = exactKeys(event, shareKeys.concat(["httpStatus", "networkCode"]));
   const shareFailure = exactKeys(event, shareKeys) || diagnostics;
-  if ((!exactKeys(event, ordinaryKeys) && !shareFailure)
+  const startupFailure = exactKeys(event, ordinaryKeys.concat(["startupStage", "networkCode"]));
+  if ((!exactKeys(event, ordinaryKeys) && !shareFailure && !startupFailure)
     || !exactKeys(event.user, ["id"])
     || event.user.id !== projection.user.id
     || event.release !== projection.release
@@ -108,6 +110,13 @@ function validateGatewayEvent(event, projection) {
     || event.frames.some((frame) => !validGatewayFrame(frame, event.component))) {
     throw new TypeError("Sentry gateway event is invalid.");
   }
+  if ((startupFailure || event.code === "electron_main.startup_failure") && (!startupFailure
+    || event.component !== "electron-main" || event.operation !== "startup"
+    || event.code !== "electron_main.startup_failure" || event.message !== "Relayer could not start."
+    || event.exceptionClass !== null || !validStartupStage(event.startupStage)
+    || !validStartupNetworkCode(event.networkCode))) {
+    throw new TypeError("Sentry gateway startup event is invalid.");
+  }
   if (shareFailure && (event.component !== "electron-main"
     || !/^(?:share-publication|share-deletion)$/u.test(event.operation)
     || (event.failureStage === "delete") !== (event.operation === "share-deletion")
@@ -125,8 +134,9 @@ function validateGatewayEvent(event, projection) {
 
 function mapEvent(event) {
   const shareFailure = Object.hasOwn(event, "attemptReferenceId");
+  const startupFailure = Object.hasOwn(event, "startupStage");
   return {
-    level: "error",
+    level: startupFailure ? "fatal" : "error",
     user: { id: event.user.id },
     release: event.release,
     environment: event.environment,
@@ -136,6 +146,7 @@ function mapEvent(event) {
       failure_code: event.code,
       os: event.os,
       architecture: event.architecture,
+      ...(startupFailure ? { startup_stage: event.startupStage, network_code: event.networkCode ?? "none" } : {}),
       ...(shareFailure ? {
         attempt_reference: event.attemptReferenceId,
         failure_stage: event.failureStage,
@@ -152,7 +163,7 @@ function mapEvent(event) {
         value: event.message,
         stacktrace: {
           // V8 stacks are newest-first; Sentry expects the failing frame last.
-          frames: (shareFailure ? [...event.frames].reverse() : event.frames).map((frame) => ({
+          frames: ((shareFailure || startupFailure) ? [...event.frames].reverse() : event.frames).map((frame) => ({
             filename: frame.module,
             lineno: frame.line,
             colno: frame.column,
@@ -182,8 +193,9 @@ function isApprovedSentryEvent(event, projection) {
     "attempt_reference", "failure_stage", "snapshot_bytes",
   ]);
   const diagnostics = exactKeys(event?.tags, shareTagKeys.concat(["http_status", "network_code"]));
+  const startupFailure = exactKeys(event?.tags, ordinaryTagKeys.concat(["startup_stage", "network_code"]));
   if (!exactKeys(event, topLevelKeys)
-    || event.level !== "error"
+    || event.level !== (startupFailure ? "fatal" : "error")
     || event.release !== projection.release
     || event.environment !== projection.environment
     || !/^[a-f0-9]{32}$/u.test(event.event_id)
@@ -192,7 +204,7 @@ function isApprovedSentryEvent(event, projection) {
     || event.timestamp < 0
     || !exactKeys(event.user, ["id"])
     || event.user.id !== projection.user.id
-    || (!exactKeys(event.tags, ordinaryTagKeys) && !exactKeys(event.tags, shareTagKeys) && !diagnostics)
+    || (!exactKeys(event.tags, ordinaryTagKeys) && !exactKeys(event.tags, shareTagKeys) && !diagnostics && !startupFailure)
     || event.tags.os !== projection.os
     || event.tags.architecture !== projection.architecture
     || !Object.hasOwn(COMPONENT_PREFIXES, event.tags.component)
@@ -203,6 +215,12 @@ function isApprovedSentryEvent(event, projection) {
     || !exactKeys(event.exception, ["values"])
     || !Array.isArray(event.exception.values)
     || event.exception.values.length !== 1) return false;
+  if ((startupFailure || event.tags.failure_code === "electron_main.startup_failure") && (!startupFailure
+    || event.tags.component !== "electron-main" || event.tags.operation !== "startup"
+    || event.tags.failure_code !== "electron_main.startup_failure"
+    || !validStartupStage(event.tags.startup_stage)
+    || typeof event.tags.network_code !== "string"
+    || !validStartupNetworkCode(event.tags.network_code === "none" ? null : event.tags.network_code))) return false;
   if (Object.hasOwn(event.tags, "attempt_reference")
     && (event.tags.component !== "electron-main"
       || !/^(?:share-publication|share-deletion)$/u.test(event.tags.operation)
@@ -219,6 +237,7 @@ function isApprovedSentryEvent(event, projection) {
   const [exception] = event.exception.values;
   return exactKeys(exception, ["type", "value", "stacktrace"])
     && EXCEPTION_CLASSES.has(exception.type)
+    && (!startupFailure || (exception.type === "Error" && exception.value === "Relayer could not start."))
     && typeof exception.value === "string"
     && exception.value.length > 0
     && exception.value.length <= 256

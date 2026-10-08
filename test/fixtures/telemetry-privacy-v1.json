@@ -264,5 +264,97 @@
       "id": "oversized-module",
       "kind": "oversized-module"
     }
+  ],
+  "startupFailurePositiveCases": [
+    {
+      "code": "electron_main.startup_failure",
+      "startupStage": "initialization",
+      "networkCode": null,
+      "frames": [
+        {
+          "module": "desktop/main/index.mjs",
+          "line": 413,
+          "column": 7
+        }
+      ]
+    },
+    {
+      "code": "electron_main.startup_failure",
+      "startupStage": "runtime-start",
+      "networkCode": null,
+      "frames": [
+        {
+          "module": "desktop/main/index.mjs",
+          "line": 413,
+          "column": 7
+        }
+      ]
+    },
+    {
+      "code": "electron_main.startup_failure",
+      "startupStage": "product-server-start",
+      "networkCode": null,
+      "frames": [
+        {
+          "module": "desktop/main/index.mjs",
+          "line": 413,
+          "column": 7
+        }
+      ]
+    },
+    {
+      "code": "electron_main.startup_failure",
+      "startupStage": "window-load",
+      "networkCode": "ERR_FAILED",
+      "frames": [
+        {
+          "module": "desktop/main/index.mjs",
+          "line": 413,
+          "column": 7
+        }
+      ]
+    }
+  ],
+  "startupFailureForbiddenCases": [
+    {
+      "field": "url",
+      "value": "http://127.0.0.1:58702/private"
+    },
+    {
+      "field": "logs",
+      "value": "privacy-sentinel-log"
+    },
+    {
+      "field": "token",
+      "value": "privacy-sentinel-token"
+    },
+    {
+      "field": "path",
+      "value": "C:\\Users\\private\\app"
+    },
+    {
+      "field": "user",
+      "value": {
+        "id": "override"
+      }
+    },
+    {
+      "field": "startupStage",
+      "value": "private-stage"
+    },
+    {
+      "field": "networkCode",
+      "value": "PRIVATE_NATIVE_ERROR"
+    },
+    {
+      "field": "frames",
+      "value": [
+        {
+          "module": "desktop/main/privacy-sentinel-token.mjs",
+          "line": 1,
+          "column": 1
+        }
+      ]
+    }
   ]
 }

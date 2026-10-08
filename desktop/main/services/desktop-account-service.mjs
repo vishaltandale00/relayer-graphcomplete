@@ -308,6 +308,7 @@ export function createDesktopAccountService({
     const current = attempt;
     attempt = null;
     clearTimeout(current.timer);
+    current.removeAbortListener?.();
     await closeServer(current.server);
     current.resolve(state);
   }
@@ -316,6 +317,7 @@ export function createDesktopAccountService({
     if (attempt !== current) return state;
     attempt = null;
     clearTimeout(current.timer);
+    current.removeAbortListener?.();
     await closeServer(current.server, { wait: false });
     const result = generation === current.generation ? transition(nextState) : state;
     current.resolve(result);
@@ -537,13 +539,15 @@ export function createDesktopAccountService({
         : null;
     },
 
-    async login() {
+    async login({ signal } = {}) {
       return queueControlOperation(async () => {
         await startupPromise;
+        if (signal?.aborted) return state;
         generation += 1;
         await cancelAttempt();
         idToken = null;
         await projectTelemetryIdentity(null, { retire: Boolean(credential) });
+        if (signal?.aborted) return state;
         const atGeneration = generation;
         const attemptChannel = currentChannel;
         const stateValue = randomBytes(32).toString("base64url");
@@ -555,6 +559,10 @@ export function createDesktopAccountService({
           bound = await bindLoopback(callbackHandler(currentRef), portsByChannel[attemptChannel]);
         } catch {
           return transition(publicState(attemptChannel, "error", { reason: "authentication-failed" }));
+        }
+        if (signal?.aborted || generation !== atGeneration) {
+          await closeServer(bound.server);
+          return state;
         }
         const redirectUri = `http://127.0.0.1:${bound.port}${CALLBACK_PATH}`;
         let resolveIdle;
@@ -572,8 +580,13 @@ export function createDesktopAccountService({
         };
         currentRef.current = current;
         attempt = current;
+        if (signal) {
+          const onAbort = () => { if (attempt === current) void service.cancelLogin().catch(() => {}); };
+          signal.addEventListener("abort", onAbort, { once: true });
+          current.removeAbortListener = () => signal.removeEventListener("abort", onAbort);
+        }
         current.timer = setTimeout(() => {
-          void finishAttempt(current, publicState(attemptChannel, "error", { reason: "authentication-failed" }));
+          if (attempt === current) void service.cancelLogin({ timedOut: true }).catch(() => {});
         }, timeoutMs);
         transition(publicState(attemptChannel, "signing-in"));
         const launch = new URL(launcherUrl);
@@ -590,6 +603,32 @@ export function createDesktopAccountService({
         }
         return state;
       });
+    },
+
+    async cancelLogin({ timedOut = false } = {}) {
+      const retiring = attempt;
+      if (!retiring) return state;
+      // Invalidate synchronously, even if browser launch holds the control queue.
+      // Late exchange, credential writes, and identity projection are fenced.
+      generation += 1;
+      idToken = null;
+      credential = null;
+      const retirement = projectTelemetryIdentity(null);
+      const cancelling = cancelAttempt();
+      const removal = queueCredentialMutation(async () => {
+        // A callback may have committed before optional telemetry settled. Remove
+        // only that attempt's bytes; a newer successful login owns its own file.
+        let envelope;
+        try { envelope = JSON.parse(await readFile(credentialPath, "utf8")); }
+        catch (error) { if (error?.code === "ENOENT") return; throw error; }
+        if (envelope.generation === retiring.generation) await rm(credentialPath, { force: true });
+      });
+      try {
+        transition(timedOut ? publicState(currentChannel, "error", { reason: "authentication-failed" }) : publicState(currentChannel, "signed-out"));
+      } finally {
+        await Promise.all([retirement, cancelling, removal]);
+      }
+      return state;
     },
 
     async logout() {
