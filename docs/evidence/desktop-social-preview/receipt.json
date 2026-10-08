@@ -13,7 +13,7 @@
   },
   "rendererArtifact": {
     "directory": "desktop/renderer",
-    "digest": "e65d0682d37a86afbb6bf2f78caeff8c412d19f9ec822d8b2e3c4c711c31470f",
+    "digest": "b6ca3c9ca91ddd6bc197e03631fc5485bddac74d1e0967f252db2a016e1a1eb3",
     "files": {
       "assets/relayer-logo.svg": {
         "bytes": 509,
@@ -400,8 +400,8 @@
         "sha256": "282ec6cde664e4b25c2d436acca3bdba1c8c4287bd11054f06f65d41b81304a0"
       },
       "vendor/artifact-office.js": {
-        "bytes": 601236,
-        "sha256": "eb5986f8b35731f1e69a3f33bd9464a75dcc8a3870d83adb0c989216d2df6077"
+        "bytes": 601183,
+        "sha256": "72171f3e6196d49e21b1fcc4ccc91597083da660776cece212c06177425d47ec"
       },
       "vendor/lucide.min.js": {
         "bytes": 386702,

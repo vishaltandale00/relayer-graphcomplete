@@ -310,8 +310,10 @@ describe("Office documents (ART-012)", () => {
     // Review: a worksheet part over 32 MB is refused before the parser builds its cells.
     const sheetXml = deflateRawSync(Buffer.alloc(33 * 1024 * 1024, 0x20));
     await writeFile(join(folder, "docs", "dense.xlsx"), zipOf({ central: 33 * 1024 * 1024, local: 33 * 1024 * 1024, data: sheetXml, entry: "xl/worksheets/sheet1.xml" }));
-    // Review: a 33 MB shared-strings part is refused like a worksheet; every XML part is capped.
+    // Review: a 33 MB shared-strings part is refused like a worksheet, and so is a 33 MB part
+    // under a harmless name (a Unicode-path extra field could rename it for a parser).
     await writeFile(join(folder, "docs", "strings.xlsx"), zipOf({ central: 33 * 1024 * 1024, local: 33 * 1024 * 1024, data: sheetXml, entry: "xl/sharedStrings.xml" }));
+    await writeFile(join(folder, "docs", "unnamed.xlsx"), zipOf({ central: 33 * 1024 * 1024, local: 33 * 1024 * 1024, data: sheetXml, entry: "a" }));
     // Review: an entry named harmlessly centrally but as a worksheet locally.
     await writeFile(join(folder, "docs", "renamed.xlsx"), zipOf({ central: 16, local: 16, data: small, localEntry: "xl/worksheets/sheet1.xml" }));
     // Review: a second end record hidden in the first one's comment, which a parser searching
@@ -339,7 +341,7 @@ describe("Office documents (ART-012)", () => {
       expect(await oversized.page.locator(".office-error").innerText()).toContain("too large to show here");
       const plain = await openInChromium(browser, { kind: "xlsx", source: { file: "docs/plain.xlsx" } }, { ready: "failed" });
       expect(await plain.page.locator(".office-error").innerText()).not.toContain("damaged");
-      for (const file of ["dense.xlsx", "strings.xlsx"]) {
+      for (const file of ["dense.xlsx", "strings.xlsx", "unnamed.xlsx"]) {
         const large = await openInChromium(browser, { kind: "xlsx", source: { file: `docs/${file}` } }, { ready: "failed" });
         expect(await large.page.locator(".office-error").innerText(), file).toContain("too large to show here");
       }
@@ -355,7 +357,7 @@ describe("Office documents (ART-012)", () => {
       expect((await narrow.located()).slide).toBe(4);
     } finally {
       await browser.close();
-      for (const file of ["huge.xlsx", "wide.xlsx", "bomb.docx", "headers.xlsx", "stream.xlsx", "hidden.pptx", "zip64.xlsx", "plain.xlsx", "method.xlsx", "dense.xlsx", "strings.xlsx", "renamed.xlsx", "decoy.xlsx", "oversized.docx"]) await rm(join(folder, "docs", file), { force: true });
+      for (const file of ["huge.xlsx", "wide.xlsx", "bomb.docx", "headers.xlsx", "stream.xlsx", "hidden.pptx", "zip64.xlsx", "plain.xlsx", "method.xlsx", "dense.xlsx", "strings.xlsx", "unnamed.xlsx", "renamed.xlsx", "decoy.xlsx", "oversized.docx"]) await rm(join(folder, "docs", file), { force: true });
     }
   }, 30_000);
 });

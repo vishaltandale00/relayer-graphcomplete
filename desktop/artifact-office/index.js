@@ -11,11 +11,11 @@ const SHEET_LIMIT = { rows: 1000, columns: 100 };
 /** An Office file is a zip; one this large, or expanding past this, is not parsed in the view. */
 const ARCHIVE_LIMIT = { bytes: 50 * 1024 * 1024, expanded: 250 * 1024 * 1024 };
 /**
- * Converters parse every XML part whole (a worksheet's cells, shared strings, a document's
- * body) before the view clips anything, so each XML part is capped: 32 MB is about a
- * million spreadsheet cells, far beyond any document a person reads.
+ * Converters parse a part whole (a worksheet's cells, shared strings, a document's body)
+ * before the view clips anything, so every part is capped, whatever name a parser reads
+ * for it: 32 MB is about a million spreadsheet cells, far beyond any document a person reads.
  */
-const XML_PART_LIMIT = 32 * 1024 * 1024;
+const PART_LIMIT = 32 * 1024 * 1024;
 /** Word list bullets in the Symbol and Wingdings fonts, which browsers lack, as Unicode. */
 const SYMBOL_BULLETS = Object.freeze({ "\uF0B7": "\u2022", "\uF0A7": "\u25AA", "\uF0D8": "\u27A2", "\uF076": "\u2756", "\uF0FC": "\u2713", "\uF06E": "\u25A0", "\uF06C": "\u25CF" });
 
@@ -172,7 +172,7 @@ async function checkArchive(bytes) {
     const nameLength = view.getUint16(at + 28, true);
     if (at + 46 + nameLength > bytes.byteLength) damaged();
     const name = new Uint8Array(bytes, at + 46, nameLength);
-    if (/\.(xml|rels)$/iu.test(new TextDecoder().decode(name)) && size > XML_PART_LIMIT) tooLarge();
+    if (size > PART_LIMIT) tooLarge();
     // 0xFFFFFFFF marks a ZIP64 size, which is over the limit anyway.
     expanded += size === 0xffffffff ? Infinity : size;
     if (expanded > ARCHIVE_LIMIT.expanded) tooLarge();
