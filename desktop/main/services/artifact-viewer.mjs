@@ -323,16 +323,23 @@ export function artifactPreviewSize(artifact, size) {
  * up to 10 s; other kinds settle for a fixed time, since PDFs and video paint late.
  * `evaluate` runs a script in the page.
  */
-export async function artifactPreviewSettled(kind, evaluate) {
+export async function artifactPreviewSettled(kind, evaluate, timeoutMs = 10_000) {
   if (!OFFICE_KINDS.has(kind)) return new Promise((done) => setTimeout(done, ({ pdf: 1500, video: 1200 })[kind] ?? 600));
-  await officeDrawn(evaluate);
+  await officeDrawn(evaluate, timeoutMs);
 }
 
-/** Wait, up to 10 s, until an Office page says it has drawn (or failed to). */
-async function officeDrawn(evaluate) {
-  const until = Date.now() + 10_000;
+/**
+ * Wait until an Office page says it has drawn (or failed to), up to `timeoutMs`. A page busy
+ * parsing may never answer, so each check races the time left.
+ */
+async function officeDrawn(evaluate, timeoutMs = 10_000) {
+  const until = Date.now() + timeoutMs;
   while (Date.now() < until) {
-    if (await evaluate(`document.getElementById("office")?.dataset.ready ?? null`).catch(() => null)) return;
+    let timer;
+    const expired = new Promise((done) => { timer = setTimeout(() => done(null), until - Date.now()); });
+    const ready = await Promise.race([evaluate(`document.getElementById("office")?.dataset.ready ?? null`).catch(() => null), expired]);
+    clearTimeout(timer);
+    if (ready) return;
     await new Promise((done) => setTimeout(done, 100));
   }
 }

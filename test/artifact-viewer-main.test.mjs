@@ -6,7 +6,7 @@ import { join, resolve } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { fingerprintPath } from "@relayer/harness-host";
-import { artifactFileStatus, artifactViewPlan, artifactViewerTesting, createArtifactRequestHandler } from "../desktop/main/services/artifact-viewer.mjs";
+import { artifactFileStatus, artifactPreviewSettled, artifactViewPlan, artifactViewerTesting, createArtifactRequestHandler } from "../desktop/main/services/artifact-viewer.mjs";
 import { draftPreviewArtifact } from "../desktop/main/services/draft-preview-renderer.mjs";
 import { createPlaywrightDraftPreviewRenderer } from "../desktop/eval-main/draft-preview-renderer.mjs";
 import { artifactFrameDocument } from "../desktop/renderer/src/artifact-viewer.js";
@@ -149,6 +149,16 @@ describe("Office documents (ART-012)", () => {
     const { viewerPage } = artifactViewerTesting;
     expect(viewerPage("pptx", "deck.pptx", new URLSearchParams({ slide: "1);alert(1);(" }))).toContain("{ slide: null }");
     expect(viewerPage("pptx", "deck.pptx", new URLSearchParams({ slide: "3" }))).toContain("{ slide: 3 }");
+  });
+
+  it("wait for an Office page to draw, but never longer than the deadline when it stops answering", async () => {
+    const started = Date.now();
+    // Review: a page busy parsing never answers; the wait still ends at its deadline.
+    await artifactPreviewSettled("docx", () => new Promise(() => {}), 300);
+    expect(Date.now() - started).toBeLessThan(1000);
+    let checks = 0;
+    await artifactPreviewSettled("pptx", async () => (++checks === 3 ? "true" : null), 5_000);
+    expect(checks).toBe(3);
   });
 
   it("open in the viewer's Office page, a deck at its slide", () => {
