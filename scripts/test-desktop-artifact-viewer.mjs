@@ -384,7 +384,9 @@ async function run(window) {
   await openArtifact(window, "Office documents", "Proposal");
   view = await viewerLoaded(window);
   const word = { ready: await officeReady(view.webContents), title: await view.webContents.executeJavaScript(`document.getElementById("office").innerText.includes("Wholesale proposal: Harbour Hotel")`) };
-  check("ART-012 Word", word.ready === "true" && word.title, JSON.stringify(word));
+  // PRD 6.6.4: only websites reach the network; a link inside a document goes nowhere.
+  word.network = await view.webContents.executeJavaScript(`fetch("https://example.com/").then(() => "reached", () => "blocked")`);
+  check("ART-012 Word", word.ready === "true" && word.title && word.network === "blocked", JSON.stringify(word));
   await shot(window, "19-word");
   await hold(2500);
   await closeViewer(window);

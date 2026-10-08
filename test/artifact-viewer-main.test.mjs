@@ -6,7 +6,7 @@ import { join, resolve } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { fingerprintPath } from "@relayer/harness-host";
-import { artifactFileStatus, artifactPreviewSettled, artifactViewPlan, artifactViewerTesting, createArtifactRequestHandler } from "../desktop/main/services/artifact-viewer.mjs";
+import { artifactFileStatus, artifactPreviewSettled, artifactViewPlan, artifactViewerTesting, blocksNetwork, createArtifactRequestHandler } from "../desktop/main/services/artifact-viewer.mjs";
 import { draftPreviewArtifact } from "../desktop/main/services/draft-preview-renderer.mjs";
 import { createPlaywrightDraftPreviewRenderer } from "../desktop/eval-main/draft-preview-renderer.mjs";
 import { artifactFrameDocument } from "../desktop/renderer/src/artifact-viewer.js";
@@ -151,6 +151,16 @@ describe("Office documents (ART-012)", () => {
     expect(viewerPage("pptx", "deck.pptx", new URLSearchParams({ slide: "3" }))).toContain("{ slide: 3 }");
   });
 
+  it("keep every file kind but a website off the network (PRD 6.6.4)", () => {
+    const plan = (artifact) => artifactViewPlan(artifact, "/thread");
+    for (const kind of ["docx", "xlsx", "pptx"]) {
+      for (const url of ["https://tracker.example/pixel.png", "http://127.0.0.1:8080/", "wss://host.example/"]) expect(blocksNetwork(plan({ kind, source: { file: `a.${kind}` } }), url)).toBe(true);
+      expect(blocksNetwork(plan({ kind, source: { file: `a.${kind}` } }), "relayer-artifact://view/a")).toBe(false);
+    }
+    expect(blocksNetwork(plan(site), "https://fonts.example/font.woff2")).toBe(false);
+    expect(blocksNetwork(plan({ kind: "url", source: { url: "https://example.com/" } }), "https://example.com/app.js")).toBe(false);
+  });
+
   it("wait for an Office page to draw, but never longer than the deadline when it stops answering", async () => {
     const started = Date.now();
     // Review: a page busy parsing never answers; the wait still ends at its deadline.
@@ -241,6 +251,7 @@ describe("Office documents (ART-012)", () => {
     bomb.writeUInt16LE(1, 28);
     bomb.write("a", 46);
     bomb.writeUInt32LE(0x06054b50, 47);
+    bomb.writeUInt16LE(1, 47 + 8);
     bomb.writeUInt16LE(1, 47 + 10);
     bomb.writeUInt32LE(47, 47 + 12);
     await writeFile(join(folder, "docs", "bomb.docx"), bomb);
@@ -274,6 +285,13 @@ describe("Office documents (ART-012)", () => {
     const flood = deflateRawSync(Buffer.alloc(4 * 1024 * 1024));
     await writeFile(join(folder, "docs", "headers.xlsx"), zipOf({ central: 16, local: 4 * 1024 * 1024, data: flood }));
     await writeFile(join(folder, "docs", "stream.xlsx"), zipOf({ central: 16, local: 16, data: flood }));
+    // Review: an end record that undercounts its directory cannot hide an entry.
+    const hidden = zipOf({ central: 16, local: 16, data: flood });
+    hidden.writeUInt16LE(0, hidden.length - 22 + 8);
+    hidden.writeUInt16LE(0, hidden.length - 22 + 10);
+    await writeFile(join(folder, "docs", "hidden.pptx"), hidden);
+    // Review: a file over the byte limit is refused before it is held whole.
+    await writeFile(join(folder, "docs", "oversized.docx"), Buffer.alloc(51 * 1024 * 1024));
     const browser = await chromium.launch();
     try {
       const sheet = await openInChromium(browser, { kind: "xlsx", source: { file: "docs/huge.xlsx" } });
@@ -286,8 +304,10 @@ describe("Office documents (ART-012)", () => {
       expect(await wide.page.locator(".office-sheet tr").first().locator("td").count()).toBe(100);
       const bombed = await openInChromium(browser, { kind: "docx", source: { file: "docs/bomb.docx" } }, { ready: "failed" });
       expect(await bombed.page.locator(".office-error").innerText()).toContain("too large to show here");
-      for (const file of ["headers.xlsx", "stream.xlsx"]) {
-        const crafted = await openInChromium(browser, { kind: "xlsx", source: { file: `docs/${file}` } }, { ready: "failed" });
+      const oversized = await openInChromium(browser, { kind: "docx", source: { file: "docs/oversized.docx" } }, { ready: "failed" });
+      expect(await oversized.page.locator(".office-error").innerText()).toContain("too large to show here");
+      for (const file of ["headers.xlsx", "stream.xlsx", "hidden.pptx"]) {
+        const crafted = await openInChromium(browser, { kind: file.split(".").pop(), source: { file: `docs/${file}` } }, { ready: "failed" });
         expect(await crafted.page.locator(".office-error").innerText(), file).toContain("damaged");
       }
       const deck = await openInChromium(browser, { ...office.pptx, part: { slide: 7 } });
@@ -295,7 +315,7 @@ describe("Office documents (ART-012)", () => {
       expect((await deck.located()).slide).toBe(4);
     } finally {
       await browser.close();
-      for (const file of ["huge.xlsx", "wide.xlsx", "bomb.docx", "headers.xlsx", "stream.xlsx"]) await rm(join(folder, "docs", file), { force: true });
+      for (const file of ["huge.xlsx", "wide.xlsx", "bomb.docx", "headers.xlsx", "stream.xlsx", "hidden.pptx", "oversized.docx"]) await rm(join(folder, "docs", file), { force: true });
     }
   }, 30_000);
 });

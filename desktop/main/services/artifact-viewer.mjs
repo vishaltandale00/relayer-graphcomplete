@@ -275,7 +275,18 @@ async function clearSession(ses) {
 
 const hardened = new WeakSet();
 
-/** Serve the session's current plan on the artifact scheme and refuse every permission and download. */
+/**
+ * A website may load internet assets such as fonts (PRD 6.6.4); every other file kind
+ * loads nothing from the network, not even a link an Office document points at.
+ */
+export function blocksNetwork(plan, url) {
+  return plan != null && !addressedByUrl(plan.kind) && plan.kind !== "website" && /^(https?|wss?|ftp):/u.test(url);
+}
+
+/**
+ * Serve the session's current plan on the artifact scheme, keep file kinds off the network,
+ * and refuse every permission and download. The viewer and agent previews both use it.
+ */
 function hardenArtifactSession(ses, { getPlan, rendererDirectory }) {
   if (hardened.has(ses)) return;
   hardened.add(ses);
@@ -283,6 +294,7 @@ function hardenArtifactSession(ses, { getPlan, rendererDirectory }) {
     getPlan,
     vendorDirectory: join(rendererDirectory, "vendor"),
   }));
+  ses.webRequest.onBeforeRequest((details, callback) => callback({ cancel: blocksNetwork(getPlan(), details.url) }));
   ses.setPermissionRequestHandler((_contents, _permission, callback) => callback(false));
   ses.setPermissionCheckHandler(() => false);
   ses.setDevicePermissionHandler?.(() => false);
@@ -360,11 +372,6 @@ export function createArtifactPreviewCapture({ BrowserWindow, session, rendererD
     plan = artifactViewPlan(artifact, folder);
     if (!addressedByUrl(plan.kind) && !(await stat(plan.file).then((info) => info.isFile(), () => false))) throw new Error("The artifact file is missing.");
     await clearSession(ses);
-    // The preview loads what the viewer would: a website may use internet assets such as
-    // fonts; a PDF, video, image or Markdown file loads nothing from the network.
-    ses.webRequest.onBeforeRequest((details, callback) => callback({
-      cancel: plan !== null && !addressedByUrl(plan.kind) && plan.kind !== "website" && /^(https?|wss?|ftp):/u.test(details.url),
-    }));
     const viewport = artifactPreviewSize(artifact, size);
     const window = new BrowserWindow({
       show: false,
@@ -405,7 +412,6 @@ export function createArtifactPreviewCapture({ BrowserWindow, session, rendererD
       clearTimeout(deadline);
       if (!window.isDestroyed()) window.destroy();
       plan = null;
-      ses.webRequest.onBeforeRequest(null);
       await clearSession(ses).catch(() => {});
     }
   };

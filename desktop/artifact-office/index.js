@@ -92,6 +92,32 @@ async function renderPowerPoint(bytes, root, slide) {
   };
 }
 
+/** The response's bytes, refusing a file over the limit before holding more than that. */
+async function readBounded(response) {
+  const tooLarge = () => new Error("The file is too large to show here. Open it in its own app.");
+  if (Number(response.headers.get("content-length") ?? 0) > ARCHIVE_LIMIT.bytes) throw tooLarge();
+  const reader = response.body.getReader();
+  const chunks = [];
+  let length = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    length += value.byteLength;
+    if (length > ARCHIVE_LIMIT.bytes) {
+      await reader.cancel().catch(() => {});
+      throw tooLarge();
+    }
+    chunks.push(value);
+  }
+  const bytes = new Uint8Array(length);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return bytes.buffer;
+}
+
 /**
  * Refuse an archive too large to parse safely, before any converter expands it. The zip's
  * central directory gives each entry's expanded size; its local header must agree, since a
@@ -109,8 +135,12 @@ async function checkArchive(bytes) {
     if (view.getUint32(at, true) === 0x06054b50) { end = at; break; }
   }
   if (end < 0) throw new Error("This is not an Office file.");
+  // One disk, and a directory that runs exactly up to the end record: an archive whose
+  // record undercounts its entries cannot hide one from this check.
   const count = view.getUint16(end + 10, true);
+  const length = view.getUint32(end + 12, true);
   let at = view.getUint32(end + 16, true);
+  if (view.getUint16(end + 8, true) !== count || at + length !== end) damaged();
   let expanded = 0;
   const entries = [];
   for (let index = 0; index < count; index += 1) {
@@ -133,6 +163,7 @@ async function checkArchive(bytes) {
     entries.push({ method, start, compressed, size });
     at += 46 + view.getUint16(at + 28, true) + view.getUint16(at + 30, true) + view.getUint16(at + 32, true);
   }
+  if (at !== end) damaged();
   for (const { method, start, compressed, size } of entries) {
     if (method === 0) {
       if (compressed !== size) damaged();
@@ -168,7 +199,7 @@ async function render(kind, source, { slide } = {}) {
   try {
     const response = await fetch(source);
     if (!response.ok) throw new Error("The file is not in the thread folder.");
-    const bytes = await response.arrayBuffer();
+    const bytes = await readBounded(response);
     await checkArchive(bytes);
     const locate = kind === "docx" ? await renderWord(bytes, root)
       : kind === "xlsx" ? renderExcel(bytes, root)
