@@ -9,7 +9,7 @@ The immutable source/release c2905c193c98529bfcda8891f8a0ada8e2dbc213 is untouch
 
 | Production seam | Promise / failure boundary | Deterministic checkpoint |
 | --- | --- | --- |
-| Main startup catch and window factory | Native recovery after load failure; unusable window/reporter disposed | `desktop-startup-failure-recovery` window/load and choices, including successful loadURL after a fatal child exit; `desktop-shell` startup composition |
+| Main startup catch and window factory | Native recovery after load failure; native-parent setup failure reaches bounded shutdown; unusable window/reporter disposed | `desktop-startup-failure-recovery` window/load, parent construction/presentation failure, and choices, including successful loadURL after a fatal child exit; `desktop-shell` startup composition |
 | Saved account verification to main reporter | One bounded wait; no unsigned, uncertain, late, revoked, or post-login replay | `desktop-startup-failure-recovery` saved identity, deadlines, revocation, suppression |
 | Runtime/app-server adapters and error wrappers | One admitted child failure suppresses corresponding main event | `desktop-error-domain-adapters` and `desktop-startup-failure-recovery` child attribution |
 | Main startup reporter / receiver / transport | Main-only generation authority, closed diagnostics, fatal envelope, duplicate suppression | Gateway, receiver, transport and `startup-error-diagnostics` fixtures; versioned privacy corpus |

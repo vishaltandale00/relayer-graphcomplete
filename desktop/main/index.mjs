@@ -1,4 +1,4 @@
-import { completeDesktopStartupWindow, recoverDesktopStartupFailure } from "./services/startup-failure-recovery.mjs";
+import { completeDesktopStartupWindow, recoverDesktopStartupFailure, runDesktopStartupFailureRecovery } from "./services/startup-failure-recovery.mjs";
 import { packagedWindowsNodePath } from "../shared/windows-node-runtime.mjs";
 import { createSharePreviewCapture } from "./services/share-preview-capture.mjs";
 import { createElectronDraftPreviewRenderer } from "./services/draft-preview-renderer.mjs";
@@ -734,28 +734,27 @@ if (primaryInstance) {
     console.error("Relayer startup failed:", error);
     // BaseWindow has no renderer. macOS requires a visible native parent for
     // cancellable message boxes; the failed product renderer is never involved.
-    startupRecoveryWindow = new BaseWindow({ width: 480, height: 240, title: "Relayer", resizable: false });
-    primaryInstance.presentPrimaryWindow();
-    startupRecoveryWindow.on("close", (event) => { event.preventDefault(); startupRecoveryCancellation.abort(); });
-    try {
-      await recoverDesktopStartupFailure({
+    const exit = (code) => { shutdownComplete = true; app.exit(code); };
+    await runDesktopStartupFailureRecovery({
+      createWindow: () => (startupRecoveryWindow = new BaseWindow({ width: 480, height: 240, title: "Relayer", resizable: false })),
+      presentWindow: (window) => {
+        primaryInstance.presentPrimaryWindow();
+        window.on("close", (event) => { event.preventDefault(); startupRecoveryCancellation.abort(); });
+      },
+      recover: () => recoverDesktopStartupFailure({
         error, startupStage, accountStartup, account: accountService, reporting: authenticatedErrorReporting,
         priorReport: fatalStartupReport,
         showDialog: (options) => dialog.showMessageBox(startupRecoveryWindow, options),
         shutdown: shutdownServices,
         relaunch: () => app.relaunch(),
-        exit: (code) => { shutdownComplete = true; app.exit(code); },
+        exit,
         signal: startupRecoveryCancellation.signal,
-      });
-    } catch (recoveryError) {
-      console.error("Relayer startup recovery failed:", recoveryError);
-      await settleShutdownWithin({ shutdown: shutdownServices, budgetMs: 10_000 });
-      shutdownComplete = true;
-      app.exit(1);
-    } finally {
-      if (!startupRecoveryWindow.isDestroyed()) startupRecoveryWindow.destroy();
-      startupRecoveryWindow = undefined;
-    }
+      }),
+      shutdown: shutdownServices,
+      exit,
+      onFailure: (recoveryError) => console.error("Relayer startup recovery failed:", recoveryError),
+      clearWindow: () => { startupRecoveryWindow = undefined; },
+    });
   });
 
   app.on("window-all-closed", () => { if (!startupInProgress && !startupRecoveryActive && process.platform !== "darwin") app.quit(); });

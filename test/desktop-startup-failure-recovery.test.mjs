@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createDesktopAuthenticatedErrorReporting } from "../desktop/main/services/authenticated-error-reporting.mjs";
-import { completeDesktopStartupWindow, reportDesktopStartupFailure, recoverDesktopStartupFailure } from "../desktop/main/services/startup-failure-recovery.mjs";
+import { completeDesktopStartupWindow, reportDesktopStartupFailure, recoverDesktopStartupFailure, runDesktopStartupFailureRecovery } from "../desktop/main/services/startup-failure-recovery.mjs";
 import { trackStartupErrorReport } from "../desktop/main/services/startup-report-status.mjs";
 import { createWindowFactory } from "../desktop/main/window.mjs";
 
@@ -35,6 +35,30 @@ async function fixture({ signedIn = true, offline = false } = {}) {
 }
 
 describe("desktop startup reporting and native recovery", () => {
+  it.each(["construction", "presentation", "dialog"])("%s failure reaches bounded shutdown without leaking the native parent", async (phase) => {
+    vi.useFakeTimers();
+    const failure = new Error("native recovery failed");
+    const calls = [];
+    const window = { isDestroyed: () => false, destroy: vi.fn(() => calls.push("destroy")) };
+    const recover = vi.fn(async () => { throw failure; });
+    const onFailure = vi.fn();
+    const recovery = runDesktopStartupFailureRecovery({
+      createWindow: () => { if (phase === "construction") throw failure; return window; },
+      presentWindow: () => { if (phase === "presentation") throw failure; },
+      recover, shutdown: () => { calls.push("shutdown"); return new Promise(() => {}); },
+      exit: (code) => calls.push(`exit:${code}`), onFailure,
+      clearWindow: () => calls.push("clear"), shutdownBudgetMs: 40,
+    });
+    await vi.advanceTimersByTimeAsync(39);
+    expect(calls).toEqual(["shutdown"]);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(await recovery).toBe("failed");
+    expect(calls).toEqual(phase === "construction" ? ["shutdown", "exit:1", "clear"]
+      : ["shutdown", "exit:1", "destroy", "clear"]);
+    expect(recover).toHaveBeenCalledTimes(phase === "dialog" ? 1 : 0);
+    expect(onFailure).toHaveBeenCalledExactlyOnceWith(failure);
+  });
+
   it("a child exit during loadURL cannot become a successful desktop startup", async () => {
     const loading = held();
     let fatal = false;

@@ -17,6 +17,33 @@ export async function completeDesktopStartupWindow({ createWindow, productSessio
   return window;
 }
 
+// Native setup belongs to the same fallback as dialog recovery. Construction
+// may fail before a parent exists; presentation may fail after it was allocated.
+export async function runDesktopStartupFailureRecovery({
+  createWindow, presentWindow, recover, shutdown, exit, onFailure, clearWindow,
+  shutdownBudgetMs = 10_000,
+}) {
+  let window;
+  try {
+    window = createWindow();
+    presentWindow(window);
+    return await recover();
+  } catch (error) {
+    onFailure(error);
+    await settleShutdownWithin({ shutdown, budgetMs: shutdownBudgetMs });
+    exit(1);
+    return "failed";
+  } finally {
+    try {
+      if (window && !window.isDestroyed()) window.destroy();
+    } catch (error) {
+      onFailure(error);
+    } finally {
+      clearWindow();
+    }
+  }
+}
+
 // One deadline covers identity restoration, child attribution, and report delivery.
 // Ending the wait also revokes admission; a late promise cannot initiate a report.
 async function bounded(operation, budgetMs, signal, onEnd = () => {}) {

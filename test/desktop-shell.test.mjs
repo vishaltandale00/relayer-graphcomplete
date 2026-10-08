@@ -241,6 +241,7 @@ describe("desktop skeleton", () => {
     expect(desktopMain).toContain("createDesktopAccountTelemetry");
     expect(desktopMain).toContain("getWindow: () => startupRecoveryWindow ?? mainWindow");
     expect(desktopMain).toContain("recoverDesktopStartupFailure({");
+    expect(desktopMain).toContain("runDesktopStartupFailureRecovery({");
     expect(desktopMain).toContain("priorReport: fatalStartupReport");
     expect(desktopMain).toContain("dialog.showMessageBox(startupRecoveryWindow, options)");
     expect(desktopMain).toContain("developmentTelemetryPackageMetadata(desktopVersion)");
