@@ -207,10 +207,16 @@ async function checkArchive(bytes) {
       || hasZip64(view, local + 30 + view.getUint16(local + 26, true), view.getUint16(local + 28, true))) damaged();
     const start = local + 30 + view.getUint16(local + 26, true) + view.getUint16(local + 28, true);
     if (start + compressed > bytes.byteLength) damaged();
-    entries.push({ method, start, compressed, size });
+    entries.push({ local, method, start, compressed, size });
     at += 46 + view.getUint16(at + 28, true) + view.getUint16(at + 30, true) + view.getUint16(at + 32, true);
   }
   if (at !== end) damaged();
+  // Each entry owns its own span of the file, so no data is inflated twice and total work
+  // stays within the file's size, however many directory records point into it.
+  const spans = [...entries].sort((left, right) => left.local - right.local);
+  for (let index = 1; index < spans.length; index += 1) {
+    if (spans[index - 1].start + spans[index - 1].compressed > spans[index].local) damaged();
+  }
   for (const { method, start, compressed, size } of entries) {
     if (method === 0) {
       if (compressed !== size) damaged();

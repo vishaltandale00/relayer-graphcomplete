@@ -321,6 +321,14 @@ describe("Office documents (ART-012)", () => {
     const decoy = Buffer.alloc(20);
     decoy.writeUInt32LE(0x06054b50, 0);
     await writeFile(join(folder, "docs", "decoy.xlsx"), zipOf({ central: 16, local: 16, data: small, comment: decoy }));
+    // Review: two directory records pointing at one local entry would inflate it twice.
+    const once = zipOf({ central: 16, local: 16, data: small });
+    const record = once.subarray(once.length - 22 - 47, once.length - 22);
+    const twice = Buffer.concat([once.subarray(0, once.length - 22), record, once.subarray(once.length - 22)]);
+    twice.writeUInt16LE(2, twice.length - 22 + 8);
+    twice.writeUInt16LE(2, twice.length - 22 + 10);
+    twice.writeUInt32LE(94, twice.length - 22 + 12);
+    await writeFile(join(folder, "docs", "twice.xlsx"), twice);
     // Review: a valid part whose bytes contain the end-record signature is not "damaged".
     const signed = Buffer.concat([Buffer.from("PK\x05\x06", "latin1"), Buffer.alloc(64)]);
     await writeFile(join(folder, "docs", "signed.xlsx"), zipOf({ central: signed.length, local: signed.length, data: deflateRawSync(signed, { level: 0 }) }));
@@ -370,7 +378,7 @@ describe("Office documents (ART-012)", () => {
         const large = await openInChromium(browser, { kind: "xlsx", source: { file: `docs/${file}` } }, { ready: "failed" });
         expect(await large.page.locator(".office-error").innerText(), file).toContain("too large to show here");
       }
-      for (const file of ["headers.xlsx", "stream.xlsx", "hidden.pptx", "zip64.xlsx", "method.xlsx", "renamed.xlsx", "decoy.xlsx"]) {
+      for (const file of ["headers.xlsx", "stream.xlsx", "hidden.pptx", "zip64.xlsx", "method.xlsx", "renamed.xlsx", "decoy.xlsx", "twice.xlsx"]) {
         const crafted = await openInChromium(browser, { kind: file.split(".").pop(), source: { file: `docs/${file}` } }, { ready: "failed" });
         expect(await crafted.page.locator(".office-error").innerText(), file).toContain("damaged");
       }
@@ -382,7 +390,7 @@ describe("Office documents (ART-012)", () => {
       expect((await narrow.located()).slide).toBe(4);
     } finally {
       await browser.close();
-      for (const file of ["huge.xlsx", "wide.xlsx", "bomb.docx", "headers.xlsx", "stream.xlsx", "hidden.pptx", "zip64.xlsx", "plain.xlsx", "signed.xlsx", "merged.xlsx", "saved.xlsx", "method.xlsx", "dense.xlsx", "strings.xlsx", "unnamed.xlsx", "renamed.xlsx", "decoy.xlsx", "oversized.docx"]) await rm(join(folder, "docs", file), { force: true });
+      for (const file of ["huge.xlsx", "wide.xlsx", "bomb.docx", "headers.xlsx", "stream.xlsx", "hidden.pptx", "zip64.xlsx", "plain.xlsx", "signed.xlsx", "merged.xlsx", "saved.xlsx", "twice.xlsx", "method.xlsx", "dense.xlsx", "strings.xlsx", "unnamed.xlsx", "renamed.xlsx", "decoy.xlsx", "oversized.docx"]) await rm(join(folder, "docs", file), { force: true });
     }
   }, 30_000);
 });
