@@ -146,6 +146,10 @@ function authoringFailure(error: unknown, frozen: boolean): Record<string, unkno
   return { ok: false, frozen,
     message: error instanceof Error ? error.message : "Visual authoring failed",
     ...(error instanceof DetailCompilationError ? { issues: error.issues } : {}),
+    ...(error instanceof GraphApiError ? { httpStatus: error.status, error: {
+      code: error.code, message: error.message,
+      ...(error.path === undefined ? {} : {path:error.path}), issues: error.issues,
+    } } : {}),
   };
 }
 

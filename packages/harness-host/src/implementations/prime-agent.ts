@@ -29,7 +29,7 @@ import type {
   HarnessTraceSupport,
   JsonObject,
 } from "../types.js";
-import { CURRENT_WORKSPACE_GUIDANCE, GRAPH_PRESENTATION_GUIDANCE, NODE_ICON_GUIDANCE } from "./graph-presentation-guidance.js";
+import { CURRENT_WORKSPACE_GUIDANCE, GRAPH_PRESENTATION_GUIDANCE, NODE_ICON_GUIDANCE, scopedAuthoringRecipePython } from "./graph-presentation-guidance.js";
 import { ARTIFACT_LAYER_GUIDANCE_PYTHON } from "./artifact-layer-guidance.js";
 import { LAYER_EDGE_SHAPE_GUIDANCE } from "./layer-edge-shape-guidance.js";
 import {
@@ -1145,7 +1145,7 @@ ${PYTHON_GRAPH_API_REFERENCE}
 ${currentWorkspaceMechanicsPython()}
 ${semanticChildGuidancePython(context)}${graphSearchGuidancePython(this.context.configuration.graphCapabilityProfile?.search === "query-v1")}${draftPreviewGuidancePython(context)}
 
-The graph scope is supplied by the host for this complete() execution and is inherited by your RLM children. Do not read graph credentials from environment variables or files. Give every persisted NodeObject, EdgeObject, LayerObject, navigate action, and invoke action an explicit descriptive client_key that is unique within this interaction and stable across edits and reruns. Never rely on generated client keys in authored code.
+The graph scope is supplied by the host for this complete() execution and is inherited by your RLM children. Do not read graph credentials from environment variables or files. Use the scoped recipe above for new drafts; final acceptance requires await graph.submit(${interaction.id}).
 
 Author nodes, edges, layers, and useful expand, reference, or invoke actions. For supporting evidence or reusable context, use await graph.add_navigate_action(node, "View evidence", evidence_layer, relation="reference", source_layer=response_layer, client_key="node-evidence") after submitting the referenced layer. The visible response layer must contain 1 to 8 connected nodes. The interaction node needs exactly one new root navigate action, relation="expand" with no source_layer; on a rerun, reuse its client_key rather than adding another.
 
@@ -1191,7 +1191,7 @@ ${PYTHON_GRAPH_API_REFERENCE}
 ${currentWorkspaceMechanicsPython()}
 ${semanticChildGuidancePython(context)}${graphSearchGuidancePython(this.context.configuration.graphCapabilityProfile?.search === "query-v1")}${draftPreviewGuidancePython(context)}
 
-The graph scope is supplied by the host for this complete() execution and is inherited by your RLM children. Do not read graph credentials from environment variables or files. Give every persisted NodeObject, EdgeObject, LayerObject, navigate action, and invoke action an explicit descriptive client_key that is unique within this interaction and stable across edits and reruns. For example, use NodeObject("info", "Summary", "...", client_key="summary-node"), EdgeObject((summary_node, detail_node), client_key="summary-detail-edge"), and LayerObject(nodes, edges, layout, client_key="response-layer"). Never rely on generated client keys in authored code. Author in whatever order fits the task, while submitting each referenced object before using it. The final graph call must be await graph.submit(${interaction.id}); call it only after the full response has been authored.
+The graph scope is supplied by the host for this complete() execution and is inherited by your RLM children. Do not read graph credentials from environment variables or files. Use the scoped recipe above for new drafts; final acceptance requires await graph.submit(${interaction.id}).
 
 The current interaction may carry an invoke lease created by the product. Before authoring, use await graph.get_node(${interaction.id}) and await graph.get_neighbors(${interaction.id}) to inspect the current node and any relevant source context exposed by the graph. Treat that context as input to your answer; do not copy, forge, or manage lease metadata. Author the response normally. A successful ordinary graph.submit(${interaction.id}) automatically fulfills any lease held by this interaction. There is no separate resolve_action call.
 
@@ -2082,30 +2082,5 @@ const PRIME_VISUAL_GUIDANCE = `For visual Node Details, import html, asset_ref, 
 Discover assets with graph.visual_assets.scope(), list_assets(scope=scope), list_tags(scope=scope), and inspect(asset_id, scope). Add caller-read bytes with VisualAssetFile(name, media_type, bytes) and await graph.visual_assets.add(file=file, scope=scope, name=name). Bind logical asset IDs with html(['<img asset=', ' alt="Description">'], asset_ref(asset_id)); the host resolves and pins content. Never supply compiled packages, mounts, hashes, raw image URLs, or executable JavaScript.`;
 
 function primeVisualExample(interactionNodeId: number): string {
-  return `This runnable example demonstrates the Python client lifecycle and required call ordering only. Its placeholder content and layout are not a recommended response design. Choose the representation for the task and attached presentation preferences. Use the public client API; inspect a specific signature or error only when needed instead of reading compiler or server internals. Discover assets when the chosen explanation benefits from them.
-
-\`\`\`python
-from relayer_graph import GraphSession, NodeObject, LayerObject, LayerLayoutObject, NodePlacementObject, ActionObject, html, action_capability
-graph = await GraphSession.current()
-node = NodeObject("info", "Answer", "Replace with the answer.", client_key="answer")
-child = NodeObject("info", "Details", "Replace with useful depth.", client_key="details")
-layer = LayerObject([node], [], LayerLayoutObject([NodePlacementObject(node, 0.5, 0.5)], "default"), client_key="answer-layer")
-child_layer = LayerObject([child], [], LayerLayoutObject([NodePlacementObject(child, 0.5, 0.5)], "default"), client_key="details-layer")
-expand = ActionObject("navigate", "Details", layer, "details-action", relation="expand", target=child_layer)
-shared_styles = "section { display: grid; gap: 0.75rem; }"
-node.detail_authoring.set_component("main", html(["<section><h2>Answer</h2><p>Replace with the answer.</p><button gc=", ">Details</button></section>"], action_capability("details-control", expand)), shared_styles)
-child.detail_authoring.set_component("main", html("<section><h2>Supporting evidence</h2><p>Explain the evidence behind the answer.</p></section>"), shared_styles)
-for item in [node, child]:
-    await graph.checkpoint_node_detail(item)
-    await graph.submit_node(item)
-await graph.submit_layer(child_layer)
-await graph.submit_layer(layer)
-await graph.add_action(node, expand)
-await graph.add_navigate_action(${interactionNodeId}, "Answer", layer, relation="expand", client_key="response")
-# Optional progress publication: all actions must already exist.
-current = await graph.get_current()
-await graph.advance_current(layer, expected_revision=current["headRevision"], operation_key="answer-ready")
-await graph.submit(${interactionNodeId})
-\`\`\`
-The final submit accepts the graph; do not run this placeholder unchanged. Additional nodes and controls should serve the user's task.`;
+  return scopedAuthoringRecipePython(interactionNodeId);
 }

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { DETAIL_AUTHORING_LIMITS, EdgeObject, LayerLayoutObject, LayerObject, NodeObject, NodePlacementObject, RelayerGraphClient, html, type ActionObject } from "../src/index.js";
+import { DETAIL_AUTHORING_LIMITS, EdgeObject, GraphApiError, LayerLayoutObject, LayerObject, NodeObject, NodePlacementObject, RelayerGraphClient, html, type ActionObject } from "../src/index.js";
 import { assetRef } from "../src/detail.js";
 import { edgeId, layerId, nodeId } from "../src/objects.js";
 
@@ -16,6 +16,24 @@ function nodeResponse(init: RequestInit, node: Record<string, unknown>): Respons
 
 describe("agent-facing graph objects", () => {
   afterEach(() => vi.unstubAllGlobals());
+
+  it("identifies the captured icon field after a positional mistake without replacing the server error", async () => {
+    const node = new NodeObject("finding", "Finding", "Evidence", "bug", "finding");
+    const issues = [{ code: "unsupported_icon", path: "icon", message: "Use a supported symbol" }];
+    vi.stubGlobal("fetch", vi.fn(async () => {
+      node.icon = "compass";
+      return new Response(JSON.stringify({ error: { code: "unsupported_icon", path: "icon", message: "Use a supported symbol", issues } }), { status: 422 });
+    }));
+    const graph = new RelayerGraphClient({ url: "http://graph.test", token: "token", nodeId: 1 });
+    const error = await graph.submitNode(node).catch((error: unknown) => error);
+    expect(error).toBeInstanceOf(GraphApiError);
+    expect(error).toMatchObject({ status: 422, code: "unsupported_icon", path: "icon", issues });
+    if (!(error instanceof GraphApiError)) throw new Error("Expected the original API error");
+    expect(error.message).toContain('node.icon = "finding"');
+    expect(error.message).toContain("first argument");
+    expect(error.message).toContain('layer.node("finding", { icon:');
+    expect(error.message).not.toContain('node.icon = "compass"');
+  });
 
   it("proposes optional thread metadata without throwing on non-string selection", async () => {
     const fetch = vi.fn(async (_url: string, init: RequestInit) =>

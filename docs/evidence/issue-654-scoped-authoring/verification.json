@@ -1,0 +1,81 @@
+{
+  "sourceSha256": "65bff52001574f159803bca67c23f049383227064d6694d84b7f6dd35eb65466",
+  "baseCommit": "32e313213fe4355efabf3ec61cea2991eb145d71",
+  "paidInference": false,
+  "commands": [
+    {
+      "command": "npm run check",
+      "exitCode": 0,
+      "result": {
+        "rustWorkspace": "passed",
+        "clippy": "passed",
+        "crashReconciliation": "passed",
+        "typeChecks": "passed",
+        "vitest": {
+          "filesPassed": 298,
+          "filesSkipped": 1,
+          "testsPassed": 3718,
+          "testsSkipped": 3
+        },
+        "secretBoundaryPassed": 2,
+        "pythonPassed": 74,
+        "receiptLint": "passed",
+        "prdReadability": "passed"
+      }
+    },
+    {
+      "command": "npm run build",
+      "exitCode": 0
+    },
+    {
+      "command": "npm run test:eval-compiled-runtime",
+      "exitCode": 0,
+      "testsPassed": 4
+    },
+    {
+      "command": "npm run test:eval-graph-preview",
+      "exitCode": 0,
+      "checkpoint": "PREV-003",
+      "runStatus": "passed",
+      "renderedImages": 3,
+      "cachedImages": 1
+    }
+  ],
+  "realScopedJourney": {
+    "test": "test/graph-authoring-replay.test.mjs",
+    "includedInFullCheck": true,
+    "testsPassed": 2,
+    "boundaries": [
+      "canonical TS bound two-layer acceptance",
+      "Python canonical bridge bound control",
+      "authorized accepted context reuse",
+      "reference cycle acceptance",
+      "expansion cycle rejection",
+      "orphan rejection",
+      "foreign-project accepted endpoint rejection"
+    ]
+  },
+  "logDigests": {
+    "check": {
+      "sha256": "151dcacc8684deaac8736ee8a3c87edafdc59fb8dbd04594381fa032a7c1dbb9",
+      "bytes": 127436
+    },
+    "build": {
+      "sha256": "d3d9f5d2108b97264c43e9fdfa10b074ef518d92194116ffdfbd7baf12382989",
+      "bytes": 2040
+    },
+    "compiledRuntime": {
+      "sha256": "475eb79a31a7f6141a232ec8326282cca35d35015fe4ba4e0ae1ae9ce80a5f10",
+      "bytes": 377
+    },
+    "graphPreview": {
+      "sha256": "c88ec6f626cd8c52ff8ab27c905fb892563b34ddab61009de2826ff230878c6e",
+      "bytes": 576
+    }
+  },
+  "limits": [
+    "No paid or model-based speed/quality proof",
+    "No publishCurrent/finish or harness prompt adoption in this slice",
+    "First-useful-graph-after-paint rubric and proof entry point remain undefined"
+  ]
+}

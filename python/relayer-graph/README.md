@@ -68,3 +68,8 @@ Discard preserves the layer as terminal stopped history. It does not delete or
 change the layer's nodes, edges, actions, or child layers, and it rejects layers
 that are accepted, owned by another interaction, or still reachable from the
 current root action.
+
+For named scoped assembly, use `graph.authoring(snapshot_key)` and
+`await author.write(root_layer)`. See [scoped draft authoring](../../docs/scoped-graph-authoring.md)
+for the TS/Python recipes, captured-write behavior, stable identity and repair
+rules, and the explicit acceptance step. Writing a scope returns drafts.
