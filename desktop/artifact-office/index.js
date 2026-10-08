@@ -92,6 +92,15 @@ async function renderPowerPoint(bytes, root, slide) {
   };
 }
 
+/** Whether a zip extra field holds a ZIP64 record (tag 0x0001), or runs past the file. */
+function hasZip64(view, start, length) {
+  if (start + length > view.byteLength) return true;
+  for (let at = start; at + 4 <= start + length; at += 4 + view.getUint16(at + 2, true)) {
+    if (view.getUint16(at, true) === 0x0001) return true;
+  }
+  return false;
+}
+
 /** The response's bytes, refusing a file over the limit before holding more than that. */
 async function readBounded(response) {
   const tooLarge = () => new Error("The file is too large to show here. Open it in its own app.");
@@ -158,6 +167,10 @@ async function checkArchive(bytes) {
     const localCompressed = view.getUint32(local + 18, true);
     const localSize = view.getUint32(local + 22, true);
     if (!(described && localCompressed === 0 && localSize === 0) && (localCompressed !== compressed || localSize !== size)) damaged();
+    // A ZIP64 extra field carries 64-bit sizes a parser may trust over the checked ones; an
+    // Office file under the byte limit never needs one, so either header carrying it is refused.
+    if (hasZip64(view, at + 46 + view.getUint16(at + 28, true), view.getUint16(at + 30, true))
+      || hasZip64(view, local + 30 + view.getUint16(local + 26, true), view.getUint16(local + 28, true))) damaged();
     const start = local + 30 + view.getUint16(local + 26, true) + view.getUint16(local + 28, true);
     if (start + compressed > bytes.byteLength) damaged();
     entries.push({ method, start, compressed, size });

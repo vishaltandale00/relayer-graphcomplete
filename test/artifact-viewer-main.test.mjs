@@ -164,8 +164,10 @@ describe("Office documents (ART-012)", () => {
   it("wait for an Office page to draw, but never longer than the deadline when it stops answering", async () => {
     const started = Date.now();
     // Review: a page busy parsing never answers; the wait still ends at its deadline.
-    await artifactPreviewSettled("docx", () => new Promise(() => {}), 300);
+    await expect(artifactPreviewSettled("docx", () => new Promise(() => {}), 300)).rejects.toThrow("did not finish drawing");
     expect(Date.now() - started).toBeLessThan(1000);
+    // Review: a page still drawing at the deadline fails the capture instead of passing as ready.
+    await expect(artifactPreviewSettled("xlsx", async () => null, 300)).rejects.toThrow("did not finish drawing");
     let checks = 0;
     await artifactPreviewSettled("pptx", async () => (++checks === 3 ? "true" : null), 5_000);
     expect(checks).toBe(3);
@@ -258,7 +260,7 @@ describe("Office documents (ART-012)", () => {
     // Review: one deflated entry whose headers claim 16 bytes but whose stream expands to 4 MiB,
     // first with the local header telling the truth, then with both headers lying.
     const { deflateRawSync } = await import("node:zlib");
-    const zipOf = ({ central, local, data }) => {
+    const zipOf = ({ central, local, data, localExtra = Buffer.alloc(0) }) => {
       const name = Buffer.from("a");
       const header = Buffer.alloc(30);
       header.writeUInt32LE(0x04034b50, 0);
@@ -266,6 +268,7 @@ describe("Office documents (ART-012)", () => {
       header.writeUInt32LE(data.length, 18);
       header.writeUInt32LE(local, 22);
       header.writeUInt16LE(1, 26);
+      header.writeUInt16LE(localExtra.length, 28);
       const entry = Buffer.alloc(46);
       entry.writeUInt32LE(0x02014b50, 0);
       entry.writeUInt16LE(8, 10);
@@ -273,14 +276,14 @@ describe("Office documents (ART-012)", () => {
       entry.writeUInt32LE(central, 24);
       entry.writeUInt16LE(1, 28);
       const directory = Buffer.concat([entry, name]);
-      const offset = header.length + name.length + data.length;
+      const offset = header.length + name.length + localExtra.length + data.length;
       const close = Buffer.alloc(22);
       close.writeUInt32LE(0x06054b50, 0);
       close.writeUInt16LE(1, 8);
       close.writeUInt16LE(1, 10);
       close.writeUInt32LE(directory.length, 12);
       close.writeUInt32LE(offset, 16);
-      return Buffer.concat([header, name, data, directory, close]);
+      return Buffer.concat([header, name, localExtra, data, directory, close]);
     };
     const flood = deflateRawSync(Buffer.alloc(4 * 1024 * 1024));
     await writeFile(join(folder, "docs", "headers.xlsx"), zipOf({ central: 16, local: 4 * 1024 * 1024, data: flood }));
@@ -290,6 +293,16 @@ describe("Office documents (ART-012)", () => {
     hidden.writeUInt16LE(0, hidden.length - 22 + 8);
     hidden.writeUInt16LE(0, hidden.length - 22 + 10);
     await writeFile(join(folder, "docs", "hidden.pptx"), hidden);
+    // Review: an honest 16-byte entry whose local ZIP64 extra field claims 4 GiB.
+    const small = deflateRawSync(Buffer.alloc(16));
+    const zip64 = Buffer.alloc(20);
+    zip64.writeUInt16LE(0x0001, 0);
+    zip64.writeUInt16LE(16, 2);
+    zip64.writeBigUInt64LE(4n * 1024n ** 3n, 4);
+    zip64.writeBigUInt64LE(BigInt(small.length), 12);
+    await writeFile(join(folder, "docs", "zip64.xlsx"), zipOf({ central: 16, local: 16, data: small, localExtra: zip64 }));
+    // Without the extra field the same entry passes the archive check (and is just not a workbook).
+    await writeFile(join(folder, "docs", "plain.xlsx"), zipOf({ central: 16, local: 16, data: small }));
     // Review: a file over the byte limit is refused before it is held whole.
     await writeFile(join(folder, "docs", "oversized.docx"), Buffer.alloc(51 * 1024 * 1024));
     const browser = await chromium.launch();
@@ -306,7 +319,9 @@ describe("Office documents (ART-012)", () => {
       expect(await bombed.page.locator(".office-error").innerText()).toContain("too large to show here");
       const oversized = await openInChromium(browser, { kind: "docx", source: { file: "docs/oversized.docx" } }, { ready: "failed" });
       expect(await oversized.page.locator(".office-error").innerText()).toContain("too large to show here");
-      for (const file of ["headers.xlsx", "stream.xlsx", "hidden.pptx"]) {
+      const plain = await openInChromium(browser, { kind: "xlsx", source: { file: "docs/plain.xlsx" } }, { ready: "failed" });
+      expect(await plain.page.locator(".office-error").innerText()).not.toContain("damaged");
+      for (const file of ["headers.xlsx", "stream.xlsx", "hidden.pptx", "zip64.xlsx"]) {
         const crafted = await openInChromium(browser, { kind: file.split(".").pop(), source: { file: `docs/${file}` } }, { ready: "failed" });
         expect(await crafted.page.locator(".office-error").innerText(), file).toContain("damaged");
       }
@@ -315,7 +330,7 @@ describe("Office documents (ART-012)", () => {
       expect((await deck.located()).slide).toBe(4);
     } finally {
       await browser.close();
-      for (const file of ["huge.xlsx", "wide.xlsx", "bomb.docx", "headers.xlsx", "stream.xlsx", "hidden.pptx", "oversized.docx"]) await rm(join(folder, "docs", file), { force: true });
+      for (const file of ["huge.xlsx", "wide.xlsx", "bomb.docx", "headers.xlsx", "stream.xlsx", "hidden.pptx", "zip64.xlsx", "plain.xlsx", "oversized.docx"]) await rm(join(folder, "docs", file), { force: true });
     }
   }, 30_000);
 });

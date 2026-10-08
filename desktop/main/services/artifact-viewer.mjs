@@ -342,7 +342,8 @@ export async function artifactPreviewSettled(kind, evaluate, timeoutMs = 10_000)
 
 /**
  * Wait until an Office page says it has drawn (or failed to), up to `timeoutMs`. A page busy
- * parsing may never answer, so each check races the time left.
+ * parsing may never answer, so each check races the time left; one still drawing at the
+ * deadline throws, so nothing captures a blank or half-drawn document.
  */
 async function officeDrawn(evaluate, timeoutMs = 10_000) {
   const until = Date.now() + timeoutMs;
@@ -354,6 +355,7 @@ async function officeDrawn(evaluate, timeoutMs = 10_000) {
     if (ready) return;
     await new Promise((done) => setTimeout(done, 100));
   }
+  throw new Error("The document did not finish drawing in time.");
 }
 
 /**
@@ -654,17 +656,19 @@ export function createArtifactViewerService({
     const viewing = current;
     if (!viewing?.view || !notesDirectory) return null;
     const contents = viewing.view.webContents;
-    // A note on an Office document captures it once drawn, never half-rendered.
-    if (OFFICE_KINDS.has(viewing.plan.kind)) await officeDrawn((script) => contents.executeJavaScript(script));
-    await eachFrame(contents, PAUSE_MEDIA_SCRIPT);
-    // A capture can stall while Chromium paints no frames; never leave the viewer waiting.
+    // A capture can stall while Chromium paints no frames, and a busy page may never answer
+    // a script; never leave the viewer waiting on either.
     const bounded = (promise) => Promise.race([promise, new Promise((_, reject) => setTimeout(() => reject(new Error("The view could not be captured.")), 5_000))]);
+    // A note on an Office document captures it once drawn, never half-rendered; one that
+    // does not finish drawing fails the note before anything is paused.
+    if (OFFICE_KINDS.has(viewing.plan.kind)) await officeDrawn((script) => contents.executeJavaScript(script));
     // Anything that fails after the pause must resume the media it paused.
     let png;
     let digest;
     let created = false;
     let reported;
     try {
+      await bounded(eachFrame(contents, PAUSE_MEDIA_SCRIPT));
       try {
         let image = await bounded(contents.capturePage());
         if (image.getSize().width > 1440) image = image.resize({ width: 1440, quality: "best" });
@@ -685,7 +689,7 @@ export function createArtifactViewerService({
       // Screenshots are content-addressed: one an earlier note already holds stays its own.
       await writeFile(join(notesDirectory, `${digest}.png`), png, { mode: 0o600, flag: "wx" })
         .then(() => { created = true; }, (error) => { if (error.code !== "EEXIST") throw error; });
-      reported = await contents.executeJavaScript(NOTE_LOCATION_SCRIPT).catch(() => null);
+      reported = await bounded(contents.executeJavaScript(NOTE_LOCATION_SCRIPT)).catch(() => null);
     } catch (error) {
       if (current === viewing) await endNote();
       throw error;
