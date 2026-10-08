@@ -1,4 +1,4 @@
-import { normalizeNavigationEntry } from "./navigation-history.js";
+import { normalizeInvocationOrigin, normalizeNavigationEntry } from "./navigation-history.js";
 import {
   layerPathForVisibleLayer,
   restoreLayerPath,
@@ -14,6 +14,7 @@ export function navigationEntryFromView({
   layerPath = [],
   selectedNodeId = null,
   temporalCurrent = null,
+  invocationOrigin = null,
 }) {
   if (threadId == null || turnId == null) return null;
   return normalizeNavigationEntry({
@@ -25,16 +26,49 @@ export function navigationEntryFromView({
     })),
     selectedNodeId,
     temporalCurrent,
+    ...(invocationOrigin == null ? {} : { invocationOrigin }),
   });
 }
 
 export function navigationEntryKey(entry) {
   const normalized = normalizeNavigationEntry(entry);
-  return JSON.stringify([
+  const identity = [
     normalized.threadId,
     normalized.turnId,
     normalized.navigationPath.map(({ layerId, viaActionId }) => [layerId, viaActionId]),
-  ]);
+  ];
+  if (normalized.invocationOrigin != null) identity.push(normalized.invocationOrigin);
+  return JSON.stringify(identity);
+}
+
+// A reading relationship to an exact call is separate from authored Navigate ancestry.
+export function invocationOriginForSource(origin, sourceLayer, actionInvocations, resultTurnId) {
+  let identity;
+  try {
+    identity = normalizeInvocationOrigin(origin, origin?.sourceEntry?.threadId);
+  } catch {
+    return null;
+  }
+  if (!identity || resultTurnId == null
+    || sameId(resultTurnId, identity.sourceEntry.turnId)
+    || !sameId(identity.sourceEntry.selectedNodeId, identity.sourceNodeId)
+    || !sameId(sourceLayer?.layer?.id, identity.presentingLayerId)
+    || sourceLayer.layer.state !== "accepted") return null;
+  const node = sourceLayer.nodes?.find(node => sameId(node.id, identity.sourceNodeId) && node.state === "accepted");
+  const action = sourceLayer.actions?.find(action => sameId(action.id, identity.actionId)
+    && sameId(action.sourceNodeId, identity.sourceNodeId)
+    && action.kind === "invoke" && action.state === "accepted");
+  if (!node || !action) return null;
+  const calls = (actionInvocations ?? []).filter(call => call.durable === true
+    && call.preparationRejected !== true
+    && sameId(call.sourceInteractionId, identity.sourceEntry.turnId)
+    && sameId(call.actionId, identity.actionId)
+    && call.invocationKey === identity.invocationKey
+    && sameId(call.presentingLayerId, identity.presentingLayerId)
+    && sameId(call.resultInteractionId, resultTurnId)
+    && (call.sourceNodeId == null || sameId(call.sourceNodeId, identity.sourceNodeId)));
+  if (calls.length !== 1) return null;
+  return Object.freeze({ ...identity, label: node.title, icon: node.icon ?? node.metadata?.relayer?.icon ?? null });
 }
 
 export function workspaceUrlForPresentation(url, { threadId, turnId }) {
@@ -101,25 +135,37 @@ export async function resolveNavigationPresentation(entry, {
   }
 
   let rootLayer = interaction.completionOutput?.rootLayer ?? null;
-  const loadAcceptedLayer = async (layerId) => {
+  const loadAcceptedLayer = async (layerId, requireAccepted = false) => {
     const identity = {
       threadId: normalized.threadId,
       turnId: normalized.turnId,
       layerId,
     };
-    const loadValidated = async () => validateResolvedLayer(identity, await loadLayer(identity));
-    return layerCache
+    const validate = layer => {
+      const resolved = validateResolvedLayer(identity, layer);
+      if (requireAccepted && resolved.layer.state !== "accepted") {
+        layerCache?.delete(identity);
+        throw new Error("Navigation history Current Layer is not accepted.");
+      }
+      return resolved;
+    };
+    const loadValidated = async () => validate(await loadLayer(identity));
+    const layer = await (layerCache
       ? layerCache.getOrLoad(identity, loadValidated)
-      : loadValidated();
+      : loadValidated());
+    return validate(layer);
   };
 
   let restorationInteraction = interaction;
   if (
-    rootLayer == null
-    && normalized.temporalCurrent != null
+    normalized.temporalCurrent != null
     && normalized.navigationPath.length > 0
+    && !sameId(rootLayer?.layer?.id, normalized.navigationPath[0].layerId)
   ) {
-    rootLayer = await loadAcceptedLayer(normalized.navigationPath[0].layerId);
+    if (!sameId(normalized.temporalCurrent.completionId, interaction.graphNodeId)) {
+      throw new Error("Navigation history Current identity is unavailable.");
+    }
+    rootLayer = await loadAcceptedLayer(normalized.navigationPath[0].layerId, true);
     restorationInteraction = {
       ...interaction,
       completionOutput: { rootLayer },
@@ -154,7 +200,17 @@ export async function resolveNavigationPresentation(entry, {
     layerPath,
     selectedNodeId: normalized.selectedNodeId,
     temporalCurrent: normalized.temporalCurrent,
+    invocationOrigin: normalized.invocationOrigin,
   });
+  let invocationOrigin = null;
+  if (normalized.invocationOrigin != null) {
+    const source = await resolveNavigationPresentation(normalized.invocationOrigin.sourceEntry, {
+      loadThread, loadLayer, layerCache,
+    });
+    invocationOrigin = invocationOriginForSource(normalized.invocationOrigin, source.layer,
+      detail.actionInvocations, normalized.turnId);
+    if (!invocationOrigin) throw new Error("Invocation origin source or exact call is no longer available.");
+  }
   return Object.freeze({
     entry: resolvedEntry,
     thread,
@@ -165,6 +221,7 @@ export async function resolveNavigationPresentation(entry, {
     layer,
     layerPath,
     selectedNodeId: normalized.selectedNodeId,
+    ...(invocationOrigin == null ? {} : { invocationOrigin }),
     metadata: navigationDestinationMetadata({ thread, interaction, interactions, layerPath }),
   });
 }

@@ -13,7 +13,7 @@
   },
   "rendererArtifact": {
     "directory": "desktop/renderer",
-    "digest": "c65f8ba93b93a0af3c6f05752130d50e991c21f583fc4392b644392af1ac2200",
+    "digest": "fb8a1965c10040b6b6f6ad97a313729a43c4d10dd414599f2b9807f6aaf29d7f",
     "files": {
       "assets/relayer-logo.svg": {
         "bytes": 509,
@@ -180,8 +180,8 @@
         "sha256": "5ea8b7bb2975e33f6b0938235cac1761bf93131dde2987c8a675d3cee8c7c372"
       },
       "src/navigation-history.js": {
-        "bytes": 11424,
-        "sha256": "af9bba3744b0538437c81f7303cafa764e9d17273699b5016e69bb8f7cde3db9"
+        "bytes": 13242,
+        "sha256": "e72fd5cf6f25b343bd8c693541f7c04219d21c0dbef925c9b94bfaea11fe5837"
       },
       "src/navigation-model.js": {
         "bytes": 199,
@@ -268,8 +268,8 @@
         "sha256": "338cdd8855f3b40c4138d0245262c209554b26b94c1a4655598ce976fca5b90c"
       },
       "src/product-workspace/model.js": {
-        "bytes": 9901,
-        "sha256": "7797cc82ec7d6c8eec0d44f0e7499c5c4818fff524030f21369ae5df310282bb"
+        "bytes": 10425,
+        "sha256": "054c36151ae5e101e3b721caa7157a11c2c50cc85a2a846383b8733a5cf0be68"
       },
       "src/product-workspace/node-detail-runtime.js": {
         "bytes": 30996,
@@ -288,8 +288,8 @@
         "sha256": "8e5d307f95b1863fb995606ca32a832de088916716c39476f9d31f2174de002d"
       },
       "src/product-workspace/workspace.js": {
-        "bytes": 305049,
-        "sha256": "d8a1632b7d6e9c0ac15e7a0a4ae5c24caa7e0322f8913014da2adb0ba93f2f4d"
+        "bytes": 305217,
+        "sha256": "5b4889836a51a7e4752f2ec46fdfa2c5dc5388d15f462fb0d0d6b1a499a87303"
       },
       "src/project-composer-navigation.js": {
         "bytes": 282,
@@ -360,8 +360,8 @@
         "sha256": "ddd96da3ca35dfe455f9ce541eb746aee6a161e589376e741c7d254430508536"
       },
       "src/state.js": {
-        "bytes": 1486,
-        "sha256": "e7879f6681500ed8bc90aa069ddb8c3931afd42ae4dd8cd4d9acb21385d10ca8"
+        "bytes": 1512,
+        "sha256": "ab65daa3131a485ef6d9db623edd485d6de9a492a5870d3942a5504ca45503f1"
       },
       "src/thread-archive.js": {
         "bytes": 4672,
@@ -372,8 +372,8 @@
         "sha256": "6ecc188e2f85f1d507775cd5dc7cb077d1f85698cd5940c1b501e62bf71d45c1"
       },
       "src/threads.js": {
-        "bytes": 75644,
-        "sha256": "3e15c08997ea1520f2ed2ce54b8d0bd95d56a3955a6c27a87b7c2e1f0be6a037"
+        "bytes": 80791,
+        "sha256": "b582dbb8ec28acd1cd65ecf77ad80a9f6b62ee9a1df281b698cfc920cec84b33"
       },
       "src/ui.js": {
         "bytes": 2147,
@@ -388,8 +388,8 @@
         "sha256": "f6a9a025f95c2291dc61190ddbd599e843b8f92569a984acba8dcca621ed2d4f"
       },
       "src/workspace-navigation.js": {
-        "bytes": 5772,
-        "sha256": "56f877d1495153845af7b290884a2f8029948a87a2eaa4eeae2557db02d868cc"
+        "bytes": 8835,
+        "sha256": "a8d0b03cef5882196cc5095f914d1f6e1699134c3788d9ba82d52cea9a85effb"
       },
       "src/worktree-controller.js": {
         "bytes": 8161,

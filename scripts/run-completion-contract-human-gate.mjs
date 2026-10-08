@@ -194,12 +194,22 @@ async function start() {
         }, 45000);
         const call = observed.contracts.find(c => c.interactionNodeId === detail.interactions.at(-1).graphNodeId);
         if (JSON.stringify(call.input.answers.map(a => [a.question.prompt, a.value.text])) !== JSON.stringify(expected)) throw new Error("Invoke captured another consumer's inputs.");
-        if (await driver.evaluate("document.querySelector('.graph-node b')?.textContent !== 'Plan a trip'")) {
-          await driver.click("#turnPickerButton");
-          await driver.click(`#turnPopover [data-turn-id='${detail.interactions[0].id}']`);
-          await driver.waitFor("source after Invoke", () => driver.evaluate("document.querySelector('.graph-node b')?.textContent === 'Plan a trip'"));
-          await driver.clickNode("Plan a trip");
-        }
+        const resultTitle = index === 0 ? "Itinerary — Lisbon" : "Budget — 1500";
+        await driver.waitFor("Invoke result automatically opens", () => driver.evaluate(`document.querySelector('.graph-node b')?.textContent === ${JSON.stringify(resultTitle)}`));
+        await driver.waitFor("automatic result retains invoking Node breadcrumb", () => driver.evaluate("document.querySelector('button.breadcrumb-invoke-origin .breadcrumb-label')?.textContent === 'Plan a trip'"));
+        const breadcrumbImage = (await window.webContents.capturePage()).toPNG();
+        await writeFile(join(evidenceDirectory, `invoke-result-${index}.png`), breadcrumbImage);
+        (observed.invocationBreadcrumbs ??= []).push({ action: label, sourceNode: "Plan a trip", automaticallyOpened: true,
+          screenshot: `invoke-result-${index}.png`, screenshotSha256: createHash("sha256").update(breadcrumbImage).digest("hex") });
+        await driver.click("button.breadcrumb-invoke-origin");
+        await driver.waitFor("source Node restored by Invoke breadcrumb", () => driver.evaluate("document.querySelector('.graph-node b')?.textContent === 'Plan a trip' && document.querySelector('#inspector h2')?.textContent === 'Plan a trip'"));
+        await driver.waitFor("Invoke source navigation settled", () => driver.evaluate("(async () => !(await import('./src/threads.js')).getNavigationHistory().pendingResolvedInvokeNavigation)()"));
+        process.stdout.write(`INVOKE_SOURCE_HISTORY ${JSON.stringify(await driver.evaluate("(async () => (await import('./src/threads.js')).getNavigationHistory())()"))}\n`);
+        await driver.click("#historyBack");
+        await driver.waitFor("Back restores Invoke result with source breadcrumb", () => driver.evaluate(`document.querySelector('button.breadcrumb-invoke-origin .breadcrumb-label')?.textContent === 'Plan a trip' && document.querySelector('.graph-node b')?.textContent === ${JSON.stringify(resultTitle)}`));
+        await driver.click("#historyForward");
+        await driver.waitFor("Forward restores invoking Node", () => driver.evaluate("document.querySelector('.graph-node b')?.textContent === 'Plan a trip'"));
+        Object.assign(observed.invocationBreadcrumbs.at(-1), { sourceNodeRestored: true, backRestoredResult: true, forwardRestoredSource: true });
         await driver.waitFor("consumed fields clear", () => driver.evaluate(`document.querySelector('[aria-label=${index === 0 ? "Destination" : "Budget"}]')?.value === ''`));
         if (index === 0 && await driver.evaluate("document.querySelector('[aria-label=Budget]').value") !== "1500") throw new Error("Itinerary consumed budget stage.");
         await sleep(750);

@@ -34,16 +34,51 @@ function normalizeTemporalCurrent(value) {
   });
 }
 
+export function normalizeInvocationOrigin(value, threadId) {
+  if (value == null) return null;
+  const identity = (item, name) => {
+    const id = requiredId(item, name);
+    if (!/^[1-9]\d*$/.test(id)) throw new TypeError(`${name} must be a canonical identity`);
+    return id;
+  };
+  if (!value.sourceEntry || value.sourceEntry.invocationOrigin != null) {
+    throw new TypeError("Invocation origin requires a source entry without another origin");
+  }
+  const sourceEntry = normalizeNavigationEntry(value.sourceEntry);
+  if (sourceEntry.threadId !== String(threadId)) {
+    throw new TypeError("Invocation origin source must belong to the same thread");
+  }
+  identity(sourceEntry.threadId, "invocationOrigin.sourceEntry.threadId");
+  identity(sourceEntry.turnId, "invocationOrigin.sourceEntry.turnId");
+  const presentingLayerId = identity(value.presentingLayerId, "invocationOrigin.presentingLayerId");
+  if (sourceEntry.navigationPath.at(-1)?.layerId !== presentingLayerId) {
+    throw new TypeError("Invocation origin source path must end at its presenting Layer");
+  }
+  const invocationKey = requiredId(value.invocationKey, "invocationOrigin.invocationKey");
+  if (!invocationKey.trim() || invocationKey === "legacy") {
+    throw new TypeError("Invocation origin requires an exact durable call key");
+  }
+  return Object.freeze({
+    sourceEntry,
+    actionId: identity(value.actionId, "invocationOrigin.actionId"),
+    invocationKey,
+    sourceNodeId: identity(value.sourceNodeId, "invocationOrigin.sourceNodeId"),
+    presentingLayerId,
+  });
+}
+
 export function normalizeNavigationEntry(entry) {
   if (!entry || typeof entry !== "object") {
     throw new TypeError("navigation entry must be an object");
   }
+  const invocationOrigin = normalizeInvocationOrigin(entry.invocationOrigin, entry.threadId);
   return Object.freeze({
     threadId: requiredId(entry.threadId, "threadId"),
     turnId: requiredId(entry.turnId, "turnId"),
     navigationPath: normalizePath(entry.navigationPath),
     selectedNodeId: optionalId(entry.selectedNodeId),
     temporalCurrent: normalizeTemporalCurrent(entry.temporalCurrent),
+    ...(invocationOrigin == null ? {} : { invocationOrigin }),
   });
 }
 
@@ -55,6 +90,7 @@ export function navigationEntriesEqual(left, right) {
     || String(left.turnId) !== String(right.turnId)
     || optionalId(left.selectedNodeId) !== optionalId(right.selectedNodeId)
     || JSON.stringify(left.temporalCurrent ?? null) !== JSON.stringify(right.temporalCurrent ?? null)
+    || JSON.stringify(left.invocationOrigin ?? null) !== JSON.stringify(right.invocationOrigin ?? null)
     || left.navigationPath?.length !== right.navigationPath?.length
   ) return false;
   return left.navigationPath.every((step, index) => {

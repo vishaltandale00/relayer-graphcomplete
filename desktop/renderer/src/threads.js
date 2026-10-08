@@ -43,6 +43,7 @@ import {
   navigationDestinationMetadata,
   navigationEntryFromView,
   navigationEntryKey,
+  invocationOriginForSource,
   resolveNavigationPresentation,
   validateResolvedLayer,
   workspaceUrlForPresentation,
@@ -99,10 +100,16 @@ function cancelAutomaticTurn() {
   readingIntent += 1;
   for (const pending of pendingTurns.values()) pending.auto = false;
 }
-function trackPendingTurn(threadId, interactionId, intent) {
-  const pending = { threadId, interactionId, auto: readingIntent === intent, status: "running", readyLayer: null };
+function trackPendingTurn(threadId, interactionId, intent, invocationSource = null) {
+  const pending = { threadId, interactionId, invocationSource, auto: readingIntent === intent, status: "running", readyLayer: null };
   pendingTurns.set(String(threadId), pending);
   if (String(viewState.currentThreadId) === String(threadId)) appState.pendingTurn = pending;
+}
+function pendingInvocationOrigin(pending, actionInvocations = appState.actionInvocations) {
+  const source = pending?.invocationSource;
+  return source == null ? null : invocationOriginForSource(
+    source.origin, source.layer, actionInvocations, pending.interactionId,
+  );
 }
 function displayableLayer(layer) {
   return layer?.layer?.id != null && layer.layer.state !== "draft" && layer.layer.state !== "stopped"
@@ -116,7 +123,10 @@ export function openReadyResult() {
   cancelAutomaticTurn();
   refreshGate.invalidate();
   supersedePendingHistory({ presentationChanged: true });
-  hydrateWorkspace(interaction, pending.readyLayer, { temporalCurrent: pending.temporalCurrent ?? null });
+  hydrateWorkspace(interaction, pending.readyLayer, {
+    temporalCurrent: pending.temporalCurrent ?? null,
+    invocationOrigin: pendingInvocationOrigin(pending),
+  });
   pendingTurns.delete(String(pending.threadId));
   appState.pendingTurn = null;
   recordCurrentNavigation("push");
@@ -343,6 +353,7 @@ function currentNavigationEntry() {
     layerPath: viewState.layerPath,
     selectedNodeId: viewState.selectedNodeId,
     temporalCurrent: viewState.temporalCurrent,
+    invocationOrigin: viewState.invocationOrigin,
   });
 }
 
@@ -610,7 +621,7 @@ export async function refreshState(
   );
   if (advancePending) refreshedVisibleLayer = pending.readyLayer;
   let temporalSelectedNodeId;
-  let temporalCurrent = viewState.temporalCurrent;
+  let temporalCurrent = advancePending ? pending.temporalCurrent ?? null : viewState.temporalCurrent;
   let temporalProjectionFailed = false;
   let canonicalVisibleLayerRead = false;
   const projectionPage = state.currentProjection;
@@ -775,9 +786,10 @@ export async function refreshState(
   viewState.currentThreadId = nextThreadId;
   hydrateWorkspace(selected, refreshedVisibleLayer, {
     ...(temporalSelectedNodeId === undefined ? {} : { selectedNodeId: temporalSelectedNodeId }),
+    ...(advancePending ? { invocationOrigin: pendingInvocationOrigin(pending, nextActionInvocations) } : {}),
     temporalCurrent,
   });
-  recordCurrentNavigation(historyMode);
+  recordCurrentNavigation(advancePending ? "push" : historyMode);
   renderSidebar();
   renderScopeMenu();
   if (viewState.mainView === "settings") setMainView("settings");
@@ -802,6 +814,7 @@ export async function loadThread(threadId) {
   viewState.currentInteractionId = null;
   viewState.selectedNodeId = null;
   viewState.temporalCurrent = null;
+  viewState.invocationOrigin = null;
   setMainView("thread");
   const url = new URL(location.href);
   url.searchParams.set("threadId", threadId);
@@ -823,7 +836,7 @@ export async function loadThread(threadId) {
 export function hydrateWorkspace(
   interaction,
   layer = interaction?.completionOutput?.rootLayer ?? null,
-  { layerPath, selectedNodeId, temporalCurrent, restoreSelection = false } = {},
+  { layerPath, selectedNodeId, temporalCurrent, invocationOrigin, restoreSelection = false } = {},
 ) {
   const previousInteractionId = viewState.currentInteractionId;
   const previousLayerId = viewState.layerPath.at(-1)?.layerId;
@@ -847,6 +860,8 @@ export function hydrateWorkspace(
   }
   viewState.currentInteractionId = interaction?.id ?? null;
   viewState.layerPath = nextLayerPath;
+  if (invocationOrigin !== undefined) viewState.invocationOrigin = invocationOrigin;
+  else if (String(previousInteractionId) !== String(interaction?.id)) viewState.invocationOrigin = null;
   if (temporalCurrent !== undefined) viewState.temporalCurrent = temporalCurrent;
   else if (String(previousInteractionId) !== String(interaction?.id)) viewState.temporalCurrent = null;
   appState.currentInteractionId = interaction?.id ?? null;
@@ -887,6 +902,7 @@ export function selectTurnById(interactionId, { responseRoot = false, threadId =
   viewState.selectedNodeId = null;
   const projection = appState.currentProjections.get(String(target.graphNodeId));
   hydrateWorkspace(target, undefined, {
+    invocationOrigin: null,
     temporalCurrent: projection == null ? null : {
       completionId: projection.completionId,
       revision: projection.headRevision,
@@ -898,15 +914,16 @@ export function selectTurnById(interactionId, { responseRoot = false, threadId =
   schedulePendingRefresh(viewState.currentThreadId, { force: true });
 }
 
-export async function selectInteractionGraphSource(threadId, interactionId) {
+export async function selectInteractionGraphSource(threadId, interactionId, { invocationOrigin = null } = {}) {
   cancelAutomaticTurn();
   recordCurrentNavigation();
   const sourceLocationKey = navigationEntryKey(currentNavigationEntry());
   supersedePendingHistory({ presentationChanged: true });
+  const resultInteractionId = viewState.currentInteractionId;
   const requestToken = resolvedInvokeNavigationGate.begin();
   pendingResolvedInvokeNavigation = true;
   try {
-    let resolved = await resolveNavigationPresentation({
+    let resolved = await resolveNavigationPresentation(invocationOrigin?.sourceEntry ?? {
       threadId, turnId: interactionId, navigationPath: [], selectedNodeId: null,
     }, {
       loadThread: (id) => request(`/api/threads/${encodeURIComponent(id)}`),
@@ -915,7 +932,10 @@ export async function selectInteractionGraphSource(threadId, interactionId) {
       ),
       layerCache: acceptedLayerCache,
     });
-    if (!resolved.interaction.completionOutput?.rootLayer) return false;
+    if (!resolved.interaction.completionOutput?.rootLayer && !invocationOrigin) return false;
+    if (invocationOrigin && !invocationOriginForSource(
+      invocationOrigin, resolved.layer, resolved.actionInvocations, resultInteractionId,
+    )) throw new Error("The invoking Node is no longer available.");
     if (!resolvedInvokeNavigationGate.isCurrent(requestToken)
       || !currentNavigationEntry()
       || navigationEntryKey(currentNavigationEntry()) !== sourceLocationKey) return false;
@@ -1174,6 +1194,11 @@ export async function navigateImportedInvocationHistory(historyEntry) {
 }
 
 export async function navigateLayer(layerId, navigation = {}) {
+  if (navigation.invocationOrigin) {
+    const origin = viewState.invocationOrigin;
+    if (!origin) return false;
+    return selectInteractionGraphSource(origin.sourceEntry.threadId, origin.sourceEntry.turnId, { invocationOrigin: origin });
+  }
   cancelAutomaticTurn();
   if (!viewState.currentThreadId || !viewState.currentInteractionId) return;
   const local = inertInvocationPresentations.get(inertPresentationKey(viewState.currentThreadId, viewState.currentInteractionId));
@@ -1400,6 +1425,8 @@ function captureWorkspaceState() {
       selectedNodeId: viewState.selectedNodeId,
       nodeDetailsClosed: viewState.nodeDetailsClosed,
       layerPath: viewState.layerPath,
+      temporalCurrent: viewState.temporalCurrent,
+      invocationOrigin: viewState.invocationOrigin,
       mainView: viewState.mainView,
     },
     url: location.href,
@@ -1465,6 +1492,7 @@ function applyResolvedPresentation(resolved, { restoreSelection = false } = {}) 
     selectedNodeId: resolved.selectedNodeId,
     restoreSelection,
     temporalCurrent: resolved.entry.temporalCurrent,
+    invocationOrigin: resolved.invocationOrigin ?? null,
   });
   setMainView("thread");
   renderSidebar();
@@ -1573,8 +1601,55 @@ export async function invokeAction(action, { inputDraftRevision } = {}) {
   recordCurrentNavigation();
   layerNavigationCoordinator.cancel();
   const sourceLocationKey = navigationEntryKey(navigationHistory.current);
+  // Capture the clicked occurrence before asynchronous execution or browsing.
+  let sourceEntry = { ...navigationHistory.current, selectedNodeId: action.sourceNodeId };
+  delete sourceEntry.invocationOrigin;
+  if (sourceEntry.temporalCurrent) sourceEntry.temporalCurrent = { ...sourceEntry.temporalCurrent, mode: "pinned" };
+  let invocationSource = {
+    origin: { sourceEntry, actionId: action.id, invocationKey, sourceNodeId: action.sourceNodeId,
+      presentingLayerId: invocationBody.presentingLayerId },
+    layer: appState.visibleLayer,
+  };
+  if (recoveringCall && String(invocationSource.layer?.layer?.id) !== String(recoveringCall.presentingLayerId)) {
+    const historical = navigationHistory.entries().toReversed().find(entry =>
+      String(entry.threadId) === String(threadId) && String(entry.turnId) === String(sourceInteractionId)
+      && entry.navigationPath.some(step => String(step.layerId) === String(recoveringCall.presentingLayerId)));
+    const sourceInteraction = appState.interactions.find(item => String(item.id) === String(sourceInteractionId));
+    const root = sourceInteraction?.completionOutput?.rootLayer;
+    sourceEntry = historical ? {
+      ...historical,
+      navigationPath: historical.navigationPath.slice(0, historical.navigationPath.findIndex(step =>
+        String(step.layerId) === String(recoveringCall.presentingLayerId)) + 1),
+      selectedNodeId: action.sourceNodeId,
+    } : String(root?.layer?.id) === String(recoveringCall.presentingLayerId) ? navigationEntryFromView({
+      threadId, turnId: sourceInteractionId,
+      layerPath: layerPathForVisibleLayer([], sourceInteraction, root), selectedNodeId: action.sourceNodeId,
+    }) : null;
+    if (sourceEntry) {
+      sourceEntry = { ...sourceEntry }; delete sourceEntry.invocationOrigin;
+      if (sourceEntry.temporalCurrent) sourceEntry.temporalCurrent = { ...sourceEntry.temporalCurrent, mode: "pinned" };
+    }
+    // A reservation retains its original presenting Layer. Unknown session paths
+    // cannot be substituted with the currently visible occurrence.
+    invocationSource = sourceEntry ? { ...invocationSource, origin: { ...invocationSource.origin, sourceEntry }, layer: null } : null;
+  }
   let response;
   try {
+    if (invocationSource && invocationSource.layer == null) {
+      const resolved = await resolveNavigationPresentation(invocationSource.origin.sourceEntry, {
+        loadThread: id => request(`/api/threads/${encodeURIComponent(id)}`),
+        loadLayer: ({ threadId, turnId, layerId }) => request(
+          `/api/threads/${encodeURIComponent(threadId)}/interactions/${encodeURIComponent(turnId)}/layers/${encodeURIComponent(layerId)}`,
+        ),
+      }).catch(() => null);
+      invocationSource = resolved ? { ...invocationSource, layer: resolved.layer } : null;
+    }
+    if (recoveringCall && !invocationSource) {
+      appState.pendingActionInvocations = withoutPendingActionInvocation(appState.pendingActionInvocations, sourceInteractionId, action.id);
+      renderThread();
+      toast("The original invoking Node is unavailable. Keep reading here and retry when its source can be opened.");
+      return null;
+    }
     response = await request(
       `/api/threads/${encodeURIComponent(threadId)}/interactions/${encodeURIComponent(sourceInteractionId)}/actions/${encodeURIComponent(action.id)}/invoke`,
       {
@@ -1612,7 +1687,7 @@ export async function invokeAction(action, { inputDraftRevision } = {}) {
         resultInteractionId: durable.resultInteractionId,
       });
       supersedePendingHistory({ presentationChanged: true });
-      trackPendingTurn(threadId, durable.resultInteractionId, intent);
+      trackPendingTurn(threadId, durable.resultInteractionId, intent, invocationSource);
       await refreshState(threadId, { historyMode: "push" }).catch(() => {});
       return { interaction: { id: durable.resultInteractionId }, recovered: true };
     } else {
@@ -1633,7 +1708,11 @@ export async function invokeAction(action, { inputDraftRevision } = {}) {
     currentNavigationEntry()
     && navigationEntryKey(currentNavigationEntry()) === sourceLocationKey
   );
-  const createdResultCanAdvance = response.created
+  const resumedOrCreated = response.created || Boolean(recoveringCall
+    && response.invocation?.invocationKey === invocationKey
+    && String(response.invocation.resultInteractionId) === String(response.interaction?.id)
+    && !isRejectedActionPreparation(response.invocation));
+  const createdResultCanAdvance = resumedOrCreated
     && response.interaction?.id
     && !invokeResultIsRetryable(response.interaction.completionStatus)
     && sourceIsStillSelected;
@@ -1646,8 +1725,8 @@ export async function invokeAction(action, { inputDraftRevision } = {}) {
     });
     supersedePendingHistory({ presentationChanged: true });
   }
-  if (response.created && response.interaction?.id && !invokeResultIsRetryable(response.interaction.completionStatus)) {
-    trackPendingTurn(threadId, response.interaction.id, intent);
+  if (resumedOrCreated && response.interaction?.id && !invokeResultIsRetryable(response.interaction.completionStatus)) {
+    trackPendingTurn(threadId, response.interaction.id, intent, invocationSource);
   }
   if (String(viewState.currentThreadId) === String(threadId)) {
     await refreshState(threadId, {

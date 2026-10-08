@@ -936,7 +936,7 @@ async function run() {
   const acceptedThread = await waitForAcceptedInteractions(thread.id, 3);
   await waitFor("ready response preserves explicit browsing", () => evaluate(`!document.querySelector('#openReadyResult').classList.contains('hidden') && document.querySelector('#detailTitle').textContent === 'Selection guard'`));
   await click("#openReadyResult");
-  await waitFor("accepted Send clears composer inputs", () => evaluate("document.querySelectorAll('.composer-input-pill').length === 0 && document.querySelectorAll('#interactionInputHistory .interaction-input-history-item').length >= 1"));
+  await waitFor("accepted Send clears composer inputs", () => evaluate("document.querySelectorAll('.composer-input-pill').length === 0 && document.querySelectorAll('#interactionInputHistory .interaction-input-history-item').length >= 1 && Boolean(document.querySelector('.interaction-input-history-disclosure'))"));
   const disclosure = await evaluate(`(() => { const d = document.querySelector('.interaction-input-history-disclosure'); const summary = d?.querySelector('summary'); return { tag: d?.tagName, open: d?.open, summaryTag: summary?.tagName, summary: summary?.textContent, summaryName: summary?.getAttribute('aria-label'), summaryWidth: summary?.getBoundingClientRect().width, full: d?.querySelector('p')?.textContent }; })()`);
   if (disclosure.tag !== "DETAILS" || disclosure.open || disclosure.summaryTag !== "SUMMARY"
     || [...disclosure.summary].length !== 80 || disclosure.full !== submittedTextValue
@@ -991,15 +991,30 @@ async function run() {
   }
   const dividerX = Math.round(beforeResize.divider.x + beforeResize.divider.width / 2);
   const dividerY = Math.round(beforeResize.divider.y + beforeResize.divider.height / 2);
+  window.focus();
+  await evaluate(`(() => { window.__nativeSplitPointerEvents = []; const divider = document.querySelector('#workspaceDivider');
+    for (const type of ['pointerdown', 'pointermove', 'pointerup', 'pointercancel']) document.addEventListener(type, event => {
+      window.__nativeSplitPointerEvents.push({ type, pointerId: event.pointerId, x: event.clientX, buttons: event.buttons, target: event.target.id, trusted: event.isTrusted });
+    }, true); })()`);
   window.webContents.sendInputEvent({ type: "mouseMove", x: dividerX, y: dividerY });
+  await evaluate("new Promise(resolve => requestAnimationFrame(resolve))");
   window.webContents.sendInputEvent({ type: "mouseDown", x: dividerX, y: dividerY, button: "left", clickCount: 1 });
+  await waitFor("native divider pointer-down capture", () => evaluate(`(() => {
+    const down = window.__nativeSplitPointerEvents.find(event => event.type === 'pointerdown' && event.target === 'workspaceDivider' && event.trusted);
+    return down && document.querySelector('#workspaceDivider').hasPointerCapture(down.pointerId);
+  })()`));
   window.webContents.sendInputEvent({ type: "mouseMove", x: dividerX + 90, y: dividerY });
-  window.webContents.sendInputEvent({ type: "mouseUp", x: dividerX + 90, y: dividerY, button: "left", clickCount: 1 });
   const resized = await waitFor("drag changes both rendered pane widths", async () => {
     const value = await readSplit();
     return value.graph.width > beforeResize.graph.width + 50
       && value.detail.width < beforeResize.detail.width - 50 ? value : false;
   });
+  window.webContents.sendInputEvent({ type: "mouseUp", x: dividerX + 90, y: dividerY, button: "left", clickCount: 1 });
+  await waitFor("native divider pointer-up delivered", () => evaluate(`(() => {
+    const down = window.__nativeSplitPointerEvents.find(event => event.type === 'pointerdown' && event.target === 'workspaceDivider' && event.trusted);
+    return down && window.__nativeSplitPointerEvents.some(event => event.type === 'pointerup' && event.pointerId === down.pointerId && event.trusted);
+  })()`));
+  process.stdout.write(`RELAYER_NATIVE_SPLIT_POINTER ${JSON.stringify(await evaluate("window.__nativeSplitPointerEvents"))}\n`);
   let persistedRatio;
   try {
     await waitFor("desktop durable ratio is written", async () => {

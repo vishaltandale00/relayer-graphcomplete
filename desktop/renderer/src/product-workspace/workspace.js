@@ -4982,6 +4982,7 @@ export function createProductWorkspace({
             await onNavigateLayer(item.layerId, {
               restore: true,
               pathIndex: item.pathIndex,
+              ...(item.kind === "invoke-origin" ? { invocationOrigin: true } : {}),
             });
           };
         }
@@ -5005,6 +5006,7 @@ export function createProductWorkspace({
               await onNavigateLayer(item.layerId, {
                 restore: true,
                 pathIndex: item.pathIndex,
+              ...(item.kind === "invoke-origin" ? { invocationOrigin: true } : {}),
               });
             }
             if (String(getThread()?.id) !== String(thread?.id)) return;

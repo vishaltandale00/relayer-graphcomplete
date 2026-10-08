@@ -40,6 +40,7 @@ export const viewState = {
   nodeDetailsClosed: false,
   layerPath: [],
   temporalCurrent: null,
+  invocationOrigin: null,
   evalContext: null,
 };
 

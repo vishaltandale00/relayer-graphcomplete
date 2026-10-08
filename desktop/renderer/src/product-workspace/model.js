@@ -181,7 +181,21 @@ export function workspaceBreadcrumbItems(state, thread, selection) {
   if (!thread) return [];
   const interaction = interactionForThread(state, thread);
   const path = layerPathForVisibleLayer(selection?.layerPath, interaction, state.visibleLayer);
-  return path.map((entry, pathIndex) => ({
+  const origin = selection?.invocationOrigin;
+  const originItems = origin == null ? [] : [{
+    key: `invoke-origin:${origin.sourceEntry.turnId}:${origin.actionId}:${origin.invocationKey}`,
+    kind: "invoke-origin",
+    label: origin.label,
+    icon: origin.icon,
+    interactive: true,
+    invocationOrigin: true,
+    sourceEntry: origin.sourceEntry,
+    layerId: origin.presentingLayerId,
+    sourceLayerId: origin.presentingLayerId,
+    sourceNodeId: origin.sourceNodeId,
+    current: false,
+  }];
+  return [...originItems, ...path.map((entry, pathIndex) => ({
     key: `layer:${pathIndex}:${entry.layerId}`,
     kind: "layer",
     label: entry.label,
@@ -193,7 +207,7 @@ export function workspaceBreadcrumbItems(state, thread, selection) {
     sourceNodeId: entry.sourceNodeId,
     sourceLayerId: entry.sourceLayerId ?? (pathIndex === 0 ? entry.layerId : path[pathIndex - 1]?.layerId),
     current: pathIndex === path.length - 1,
-  }));
+  }))];
 }
 
 export function responseNodesForThread(state, thread) {

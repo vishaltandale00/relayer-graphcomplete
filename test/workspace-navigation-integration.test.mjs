@@ -1222,7 +1222,9 @@ describe("workspace navigation integration", () => {
     vi.useFakeTimers();
     try {
       const root = rootLayer(101, 11);
+      root.layer.state = "accepted"; root.nodes[0].state = "accepted";
       const action = {
+        state: "accepted",
         id: 777,
         kind: "invoke",
         sourceNodeId: 11,
@@ -1230,7 +1232,9 @@ describe("workspace navigation integration", () => {
         interactionText: "Resume the leased result",
         ...(durable ? { reusable: false } : {}),
       };
-      root.actions = [action];
+      const navigate = { id: 778, kind: "navigate", state: "accepted", sourceNodeId: 11, targetLayerId: 202 };
+      root.actions = [action, navigate];
+      const original = { ...root, layer: { ...root.layer, id: 202 }, actions: [action] };
       const source = interaction(1, 10, root);
       const submitted = productState([{ id: 10, title: "Recovery source" }], [source]);
       submitted.actionInvocations = [{
@@ -1249,6 +1253,8 @@ describe("workspace navigation integration", () => {
       requestImplementation = vi.fn(async (path, options) => {
         if (path.startsWith("/api/state?threadId=10")) return retried ? running : submitted;
         if (path.endsWith("/layers/101")) return root;
+        if (path.endsWith("/layers/202")) return original;
+        if (path === "/api/threads/10") return { thread: submitted.threads[0], interactions: [source], actionInvocations: submitted.actionInvocations };
         if (path === "/api/threads/10/interactions/1/actions/777/invoke") {
           expect(options).toEqual({ method: "POST", headers: { "Idempotency-Key": durable ? "saved-gesture" : invocationKey }, body: JSON.stringify({ presentingLayerId: durable ? 202 : 101 }) });
           retried = true;
@@ -1263,6 +1269,10 @@ describe("workspace navigation integration", () => {
       const controller = await loadModules();
 
       await controller.loadThread(10);
+      if (durable) {
+        await controller.navigateLayer(202, { action: navigate, sourceNode: root.nodes[0] });
+        await controller.navigateLayer(101, { restore: true, pathIndex: 0 });
+      }
       await controller.invokeAction(action, { inputDraftRevision: durable ? 999 : undefined });
 
       expect(retried).toBe(true);

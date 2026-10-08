@@ -949,7 +949,7 @@ describe("onboarding tutorial controller", () => {
     expect(graph).toContain("if (navigated === true)");
     expect(graph).toContain('onInvokeAction: (action, options) => import("./threads.js")');
     expect(threads.indexOf("onboardingTutorialController()?.actionSucceeded({"))
-      .toBeLessThan(threads.indexOf("trackPendingTurn(threadId, response.interaction.id, intent)"));
+      .toBeLessThan(threads.indexOf("trackPendingTurn(threadId, response.interaction.id, intent, invocationSource)"));
     expect(threads.indexOf('const thread = await request("/api/threads", {'))
       .toBeLessThan(threads.indexOf("onboardingTutorialController()?.threadCreated({"));
     expect(threads).toContain("return createdInteraction;");

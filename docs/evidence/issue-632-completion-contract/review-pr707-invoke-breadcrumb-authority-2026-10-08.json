@@ -1,0 +1,186 @@
+{
+  "reviewer": "authority_review",
+  "date": "2026-10-08",
+  "workspace": "/private/tmp/relayer-interactive-inputs-v1-merge",
+  "baselineHead": "8685f6e957a17e1b146c07af871cff83e222478c",
+  "sourceDigest": "4d3cb14666a1c05dc4d1dc353770ecdffaef3bc4cc182917e7c140ca16034c0b",
+  "digestMethod": "SHA256 of sorted relative UTF-8 path + NUL + exact bytes + NUL for each manifest entry",
+  "manifest": [
+    {
+      "path": "README.md",
+      "sha256": "d5399602fa132c96035656a9555e083b48f6f578331239d87dc301b369b8563b"
+    },
+    {
+      "path": "desktop/renderer/src/action-invocation-state.js",
+      "sha256": "81ab2c3afb5292ec3a6ea7584d5e5bf514d9725e34a1a7ed2c2ef17bbb40f7f2"
+    },
+    {
+      "path": "desktop/renderer/src/navigation-history.js",
+      "sha256": "e72fd5cf6f25b343bd8c693541f7c04219d21c0dbef925c9b94bfaea11fe5837"
+    },
+    {
+      "path": "desktop/renderer/src/product-workspace/model.js",
+      "sha256": "054c36151ae5e101e3b721caa7157a11c2c50cc85a2a846383b8733a5cf0be68"
+    },
+    {
+      "path": "desktop/renderer/src/product-workspace/workspace.js",
+      "sha256": "5b4889836a51a7e4752f2ec46fdfa2c5dc5388d15f462fb0d0d6b1a499a87303"
+    },
+    {
+      "path": "desktop/renderer/src/state.js",
+      "sha256": "ab65daa3131a485ef6d9db623edd485d6de9a492a5870d3942a5504ca45503f1"
+    },
+    {
+      "path": "desktop/renderer/src/threads.js",
+      "sha256": "b582dbb8ec28acd1cd65ecf77ad80a9f6b62ee9a1df281b698cfc920cec84b33"
+    },
+    {
+      "path": "desktop/renderer/src/workspace-navigation.js",
+      "sha256": "a8d0b03cef5882196cc5095f914d1f6e1699134c3788d9ba82d52cea9a85effb"
+    },
+    {
+      "path": "docs/architecture.md",
+      "sha256": "11eefef942bf2a96a8058b79918573f62b8e026d04154b1e2070adf59bcbbc19"
+    },
+    {
+      "path": "docs/decisions/0005-layered-navigation-contract.md",
+      "sha256": "c339e6d66c828ee12b66482b260af50b892874b7f34309b6183e4b74b6914df0"
+    },
+    {
+      "path": "docs/decisions/0008-temporal-current-and-completion-brokers.md",
+      "sha256": "9d1f48515a550a1a8df7b81231de361c83c358014d79de50154075aabf6a3073"
+    },
+    {
+      "path": "docs/decisions/0015-sealed-completion-contract-and-invocations.md",
+      "sha256": "bcc37d822bb5a96f0e092a1ad6908b743acceb4e0932f4dce57e9272ebcba0a7"
+    },
+    {
+      "path": "docs/evidence/issue-632-completion-contract/README.md",
+      "sha256": "d8f9d2314b8077bc3be0bb7585663f86464468d2358461b7118d6d9aa435a725"
+    },
+    {
+      "path": "docs/prd/index.html",
+      "sha256": "94d4aa3545f2aed7b369ed1e8e61f6120802c2e007f93fd050b23358800dca69"
+    },
+    {
+      "path": "test/navigation-history.test.mjs",
+      "sha256": "ca33f90e38c3a78a03a11373f261e3f94d3ec5c9e2be22912ac9ad3c65a098e0"
+    },
+    {
+      "path": "test/workspace-breadcrumb.test.mjs",
+      "sha256": "9f47c594ff35ec4cc693ea2c5e564c09902f65a800f3566281fb285dbaf7323e"
+    },
+    {
+      "path": "test/workspace-navigation-integration.test.mjs",
+      "sha256": "47475a82566bce3cdf0796b50dedda654bc98f697f1711ad5a9ef0693168a1cc"
+    },
+    {
+      "path": "test/workspace-navigation.test.mjs",
+      "sha256": "38a83d0d441647abf2a4a12ef80e3538646efcc93061a81605a4fb8437aaa171"
+    },
+    {
+      "path": "test/workspace-reading-context.test.mjs",
+      "sha256": "3ff19a8fa57858d1bf76a910655c8632f9c3379d7f6026e504922c015706d45d"
+    }
+  ],
+  "scope": "Independent bounded read-only semantic, UX and authority review of READ-001 session-local Invoke origin across production capture, pending/result hydration, Current/Returned, explicit Result ready, history/source restoration, trusted reservation recovery and cancellation. Includes checkpoint realism and changed existing recovery fixture. No executable edits, builds or tests performed by reviewer.",
+  "verdict": "No unresolved blocker identified in the exact reviewed session-local source. This assertion is not merge, live-inference, browser/native recording, release or human-acceptance certification.",
+  "unresolvedFindings": [],
+  "productDecision": "Invoke automatic/ready result opening retains the exact invoking Node before the child path. State updates and in-session Back/Forward retain it. Browser reload persistence and repeated-use Invoke UX are outside this decision and proof.",
+  "reviewedSeams": [
+    {
+      "seam": "navigation-history.js / workspace-navigation.js identity",
+      "assertion": "Exact thread/source turn/action/source Node/presenting Layer/durable key/result join; same-thread nonnested sourceEntry and canonical positive IDs. Source selected Node must equal action owner. Labels/icons derive from canonical accepted source, not stored presentation text. Unknown, legacy, non-durable, draft-source, duplicate-call or mismatched identities refuse."
+    },
+    {
+      "seam": "threads.js invocation/pending capture",
+      "assertion": "Clicked source captured before async work; source temporal Current pinned to captured revision. Source origin separate from child authored navigation path. Source exact key and frozen presenting Layer retained on response loss and trusted recovery."
+    },
+    {
+      "seam": "threads.js frozen reservation from another Layer",
+      "assertion": "Resume uses genuine bounded-history ancestor ending at original Layer or genuine canonical original root; resolves it offscreen. Unknown/unavailable original path clears pending marker and refuses before POST. New draft revision is omitted for trusted exact recovery. created:false exact recovered call can still establish pending reading state."
+    },
+    {
+      "seam": "refreshState/openReadyResult/hydrateWorkspace",
+      "assertion": "Accepted first Current opens with origin; delayed first Current pushes distinct child into bounded history. Recovery advances with captured child temporal state, maintaining later following. Later Current and Returned retain same origin; explicit browsing cancels automatic switch and leaves Result ready."
+    },
+    {
+      "seam": "workspace/model/source click/history",
+      "assertion": "Invoke-origin crumb precedes child path but creates no Navigate. Source resolves accepted exact occurrence and call before applying state. Source Current may have no final root only with typed accepted historical path. Source restores exact Node and pinned revision. Child path remains independent; Back/Forward revalidates both. Async request gates and location checks preserve superseding reading intent. History rollback snapshots include origin and temporal Current."
+    },
+    {
+      "seam": "accepted history cache",
+      "assertion": "Typed temporal roots require same completion graph identity and exact accepted Layer; rejected draft is evicted and cannot poison subsequent accepted load. Validation occurs before caching and on cached return."
+    }
+  ],
+  "closedFindings": [
+    "Valid selected-other-Node mismatch now rejected by source identity guard.",
+    "Frozen A reservation clicked from B now restores genuine A source and handles created:false result.",
+    "Unavailable A no longer POSTs then auto-opens without origin; explicit no-POST refusal is observed.",
+    "Response-loss recovery no longer loses child following temporal state.",
+    "Delayed first Current now enters history; source-click Back no longer skips visible child.",
+    "Source Current before parent Returns retains exact accepted occurrence and pinned revision.",
+    "Typed Current draft-cache rejection no longer poisons a corrected accepted read.",
+    "Ambiguous reload wording narrowed to explicit session-local state updates/Back/Forward."
+  ],
+  "checkpointMap": [
+    {
+      "promise": "Capture/cancel/auto-open/Current/Returned/source click/history/refusal",
+      "test": "test/workspace-reading-context.test.mjs: retains the exact invoking Node through Current, Returned, source click and history",
+      "cases": [
+        "automatic",
+        "delayed",
+        "browsed",
+        "recovered",
+        "reserved",
+        "unavailable",
+        "source-current"
+      ],
+      "observes": "Real production threads controller and breadcrumb model, exact keyed wire, accepted projection reads, source Node, following/pin, Back/Forward, stale-call refusal; unavailable case asserts no POST and pending cleanup."
+    },
+    {
+      "promise": "Exact origin authority; child/source independent; historical Current restore and cache",
+      "test": "test/workspace-navigation.test.mjs",
+      "observes": "Real resolver/helper/model; canonical source and call matrix; accepted source+child Current after different Returned roots; wrong completion/untyped/draft and corrected accepted retry."
+    },
+    {
+      "promise": "Bounded immutable history identity and async transition atomicity",
+      "test": "test/navigation-history.test.mjs",
+      "observes": "Production normalization/history/cache/gates; call-key separation, nested/cross-thread/legacy refusal, no partial transition commit."
+    },
+    {
+      "promise": "Existing durable/native-recovery wire regression",
+      "test": "test/workspace-navigation-integration.test.mjs: existing saved-gesture recovery fixture",
+      "observes": "Accepted source101 -> real Navigate778 -> original202 with accepted Node/Invoke; history visit then source/root recovery. Exact saved key/frozen Layer/input omission/transport assertions retained. No decoder or scope relaxation."
+    },
+    {
+      "promise": "Existing non-Invoke authored hierarchy stays separate",
+      "test": "test/workspace-breadcrumb.test.mjs (unchanged fifth warm file)",
+      "observes": "Production model/coordinator: Navigate-only ordinary hierarchy, unrelated product context exclusion, latest request, authored labels/reference path preservation; new Invoke origin positive/negative coverage stays in real controller/resolver fixtures."
+    }
+  ],
+  "observedEvidence": [
+    {
+      "log": "/private/tmp/pr707-invoke-breadcrumb-warm-final-2.log",
+      "sha256": "352638e04edb831db68d0004ec36a9263d19fb129d5a671e6d460e0995cfa00f",
+      "observedResult": "5 files passed; 141 tests passed; duration 865ms. Summary independently read by reviewer; root ran portfolio, reviewer did not execute it.",
+      "command": "PATH=/private/tmp/relayer-node22-runtime.GL3kmC:$PATH ./node_modules/.bin/vitest run test/workspace-reading-context.test.mjs test/workspace-navigation-integration.test.mjs test/navigation-history.test.mjs test/workspace-navigation.test.mjs test/workspace-breadcrumb.test.mjs > /private/tmp/pr707-invoke-breadcrumb-warm-final-2.log 2>&1",
+      "commandSource": "Exact shell invocation supplied by parent; inner pass totals independently observed in retained log. Parent reports exit 0."
+    }
+  ],
+  "peerReview": {
+    "reviewer": "context_trace",
+    "path": "docs/evidence/issue-632-completion-contract/review-pr707-invocation-origin-history-2026-10-08.json",
+    "sourceDigest": "5024b0dd1eaf0a09ed4c713e51747645bf78fbcbf0ab0c6eb4d1f1011a46f3d2",
+    "scope": "3 history/resolver/model source files plus 2 tests",
+    "verdict": "Independent authority_review reread accepted this scope, including exact selected owner and accepted cache validation/eviction; controller reviewed separately here."
+  },
+  "qualificationLimits": [
+    "No test removal/subsumption; new/refined checkpoints protect distinct capture, refusal and restoration boundaries.",
+    "No mutation, scheduler, inferred accepted topology or executable permission is added by the reading relationship. Native provider recursion and complete(inputGraph) ownership unchanged.",
+    "Source origin is in-session reading state; URLs/browser reload do not preserve it. JSON identity normalization is not reload proof.",
+    "script/run-completion-contract-human-gate.mjs recordings and artifact hashes are outside this static receipt. Parent final assembled native proof, full check/build and declared heavy portfolio remain separately required.",
+    "Earlier failures/diagnosis and previous qualified receipts remain historical; this review does not overwrite them or promote summaries to full qualification."
+  ],
+  "invalidationRule": "Any change to a manifest file invalidates this exact-byte assertion until reread/rehashed. Evidence metadata outside the manifest is not executable certification; new artifacts require their own source-bound checks. No approval to commit, push or merge is supplied."
+}

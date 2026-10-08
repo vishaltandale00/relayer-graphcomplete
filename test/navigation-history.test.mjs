@@ -24,6 +24,39 @@ function layerIdentity(layerId, threadId = 1, turnId = 10) {
 }
 
 describe("navigation history", () => {
+  it("preserves exact invocation origin in history while rejecting nested or cross-thread identity", () => {
+    const sourceEntry = entry({ turnId: 9, selectedNodeId: 7 });
+    const origin = { sourceEntry, actionId: 41, invocationKey: "call-one", sourceNodeId: 7,
+      presentingLayerId: 100, label: "Untrusted label", icon: "Untrusted icon" };
+    const child = normalizeNavigationEntry({ ...entry(), invocationOrigin: origin });
+    expect(child.invocationOrigin).toEqual({ sourceEntry: normalizeNavigationEntry(sourceEntry),
+      actionId: "41", invocationKey: "call-one", sourceNodeId: "7", presentingLayerId: "100" });
+    sourceEntry.navigationPath[0].layerId = 999;
+    expect(child.invocationOrigin.sourceEntry.navigationPath[0].layerId).toBe("100");
+    expect(Object.isFrozen(child.invocationOrigin)).toBe(true);
+    const history = createNavigationHistory();
+    history.seed(entry());
+    history.push(child);
+    const second = { ...child, invocationOrigin: { ...child.invocationOrigin, invocationKey: "call-two" } };
+    history.push(second);
+    expect(history.size).toBe(3);
+    expect(navigationEntriesEqual(child, second)).toBe(false);
+    const back = history.go(-1);
+    history.commit(back);
+    expect(history.current).toEqual(child);
+    const forward = history.go(1);
+    history.commit(forward);
+    expect(history.current.invocationOrigin.invocationKey).toBe("call-two");
+    for (const invalid of [
+      { ...child.invocationOrigin, sourceEntry: { ...child.invocationOrigin.sourceEntry, threadId: 2 } },
+      { ...child.invocationOrigin, sourceEntry: { ...child.invocationOrigin.sourceEntry, invocationOrigin: origin } },
+      { ...child.invocationOrigin, presentingLayerId: 999 },
+      { ...child.invocationOrigin, sourceNodeId: null },
+      { ...child.invocationOrigin, invocationKey: "legacy" },
+    ]) expect(() => normalizeNavigationEntry({ ...entry(), invocationOrigin: invalid })).toThrow();
+    expect(normalizeNavigationEntry(entry())).not.toHaveProperty("invocationOrigin");
+  });
+
   it("distinguishes turn changes from navigation within one turn", () => {
     const current = entry();
     expect(navigationEntriesChangeTurn(current, entry({

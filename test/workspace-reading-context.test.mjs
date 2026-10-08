@@ -21,12 +21,12 @@ function state(turn = null, projection = null) {
   };
 }
 function deferred() {
-  let resolve;
-  const promise = new Promise((done) => { resolve = done; });
-  return { promise, resolve };
+  let resolve, reject;
+  const promise = new Promise((done, fail) => { resolve = done; reject = fail; });
+  return { promise, resolve, reject };
 }
-async function setup({ post, readLayer, invokePost } = {}) {
-  let current = state();
+async function setup({ post, readLayer, invokePost, readSource, readSourceLayer, initialState } = {}) {
+  let current = initialState ?? state();
   requestImplementation = vi.fn(async (path, options) => {
     if (path.startsWith("/api/state?threadId=10")) return current;
     if (path.endsWith("/actions/777/invoke") && invokePost) return invokePost.promise;
@@ -34,6 +34,11 @@ async function setup({ post, readLayer, invokePost } = {}) {
       current = state(pending);
       return post ? post.promise : pending;
     }
+    if (path === "/api/threads/10" && readSource) return readSource(current);
+    if (path === "/api/threads/10") return { thread: current.threads[0], interactions: current.interactions, actionInvocations: current.actionInvocations };
+    if (path.includes("/interactions/1/layers/102") && readLayer) return readLayer(path);
+    if (path.includes("/interactions/1/layers/101") && readSourceLayer) return readSourceLayer(path);
+    if (path.includes("/interactions/1/layers/101")) return current.interactions.find(({ id }) => id === 1).completionOutput.rootLayer;
     if (path.includes("/interactions/2/layers/")) return readLayer ? readLayer(path) : resultLayer;
     throw new Error(`Unexpected request: ${path}`);
   });
@@ -51,6 +56,7 @@ beforeEach(async () => {
     window: { relayerDesktop: undefined, relayerEvalReview: undefined },
     history: { replaceState: vi.fn((_state, _title, url) => { globalThis.location = new URL(url); }) },
   });
+  vi.doMock("../desktop/renderer/src/ui.js", async () => ({ ...await vi.importActual("../desktop/renderer/src/ui.js"), toast: vi.fn() }));
   vi.doMock("../desktop/renderer/src/api.js", () => ({ request: (...args) => requestImplementation(...args) }));
   vi.doMock("../desktop/renderer/src/graph.js", () => ({ renderThread: vi.fn() }));
   vi.doMock("../desktop/renderer/src/navigation.js", () => ({ renderScopeMenu: vi.fn(), renderSidebar: vi.fn(), setMainView: vi.fn(), setSettingsTab: vi.fn() }));
@@ -208,6 +214,96 @@ describe("follow-up reading context at the production thread controller", () => 
     expect(controller.viewState.currentInteractionId).toBe(2);
   });
 
+
+  it.each(["automatic", "delayed", "browsed", "recovered", "reserved", "unavailable", "source-current"])("retains the exact invoking Node through Current, Returned, source click and history (%s)", async (mode) => {
+    const browsed = mode === "browsed";
+    const reserved = ["reserved", "unavailable"].includes(mode);
+    const invokePost = deferred();
+    const second = layer(202, [22]);
+    const root = {
+      ...oldLayer, layer: { ...oldLayer.layer, state: "accepted" },
+      nodes: oldLayer.nodes.map(node => ({ ...node, title: node.id === 11 ? "Plan a trip" : node.title, state: "accepted" })),
+      actions: [{ id: 777, kind: "invoke", sourceNodeId: 11, sourceLayerId: 101, state: "accepted", reusable: false },
+        { id: 778, kind: "navigate", sourceNodeId: 11, state: "accepted", targetLayerId: 102, label: "Other occurrence" }],
+    };
+    const invokingSource = mode === "source-current" ? { ...source, completionStatus: "running", completionOutput: null }
+      : { ...source, completionOutput: { rootLayer: root } };
+    const fixture = await setup({ invokePost, readSourceLayer: () => root, ...(mode === "source-current" ? { initialState: { ...state(invokingSource), interactions: [invokingSource], currentProjection: { cursor: 1, states: [{ completionId: 901, headRevision: 1, lifecycle: "active", currentLayerId: 101, finalLayerId: null, safeReason: null, temporalFeatures: { projectionUi: true } }] } } } : {}), ...(mode === "unavailable" ? { readSource: () => { throw new Error("Source read unavailable503"); } } : {}), readLayer: path => path.endsWith("/102") ? { ...root, layer: { ...root.layer, id: 102 } } : path.endsWith("/202") ? second : resultLayer });
+    const withCall = (turn, projection = null) => {
+      const value = state(turn, projection);
+      value.interactions[0] = invokingSource;
+      value.actionInvocations = [{ durable: true, sourceInteractionId: 1, actionId: 777, invocationKey: key,
+        presentingLayerId: 101, resultInteractionId: 2, resultCompletionStatus: turn.completionStatus }];
+      return value;
+    };
+    const initial = state(); initial.interactions[0] = invokingSource;
+    if (mode === "source-current") initial.currentProjection = { cursor: 1, states: [{ completionId: 901, headRevision: 1, lifecycle: "active", currentLayerId: 101, finalLayerId: null, safeReason: null, temporalFeatures: { projectionUi: true } }] };
+    if (reserved) initial.actionInvocations = [{ durable: true, sourceInteractionId: 1, actionId: 777,
+      invocationKey: "reserved-key", presentingLayerId: 101, preparationRecoverable: true, resultInteractionId: 2, resultCompletionStatus: "not_started" }];
+    fixture.setState(initial); await controller.refreshState(10);
+    if (reserved) await controller.navigateLayer(102, { action: root.actions[1], sourceNode: root.nodes[0] });
+    // The clicked action owns Node 11 even when another Node was selected.
+    controller.replaceCurrentSelection(12);
+    const invoking = controller.invokeAction(root.actions[0]);
+    if (mode === "unavailable") {
+      expect(await invoking).toBeNull();
+      expect(controller.viewState.currentInteractionId).toBe(1);
+      expect(controller.appState.visibleLayer.layer.id).toBe(102);
+      expect(controller.appState.pendingActionInvocations).toEqual([]);
+      expect(controller.appState.pendingTurn).toBeNull();
+      expect(requestImplementation.mock.calls.some(([path]) => path.endsWith("/actions/777/invoke"))).toBe(false);
+      return;
+    }
+    if (reserved) {
+      // The original occurrence is loaded before resuming the frozen reservation.
+      await vi.waitFor(() => expect(requestImplementation.mock.calls.some(([path]) => path.endsWith("/actions/777/invoke"))).toBe(true));
+    }
+    const key = requestImplementation.mock.calls.find(([path]) => path.endsWith("/actions/777/invoke"))[1].headers["Idempotency-Key"];
+    if (mode === "reserved") expect(key).toBe("reserved-key");
+    if (browsed) controller.replaceCurrentSelection(11);
+    const firstCurrent = withCall(pending, { completionId: 902, headRevision: 1, lifecycle: "active", currentLayerId: 201,
+      finalLayerId: null, safeReason: null, temporalFeatures: { projectionUi: true } });
+    fixture.setState(mode === "delayed" ? withCall(pending) : firstCurrent);
+    if (mode === "recovered") invokePost.reject(new Error("Lost response after durable Invoke"));
+    else invokePost.resolve({ created: mode !== "reserved", interaction: pending, invocation: withCall(pending).actionInvocations[0] });
+    await invoking;
+    if (mode === "delayed") { fixture.setState(firstCurrent); await controller.refreshState(10); }
+    if (browsed) {
+      expect(controller.viewState.currentInteractionId).toBe(1);
+      expect(controller.openReadyResult()).toBe(true);
+    }
+    const { workspaceBreadcrumbItems } = await import("../desktop/renderer/src/product-workspace/model.js");
+    const crumbs = () => workspaceBreadcrumbItems(controller.appState, { id: 10 }, controller.viewState);
+    expect(controller.viewState.currentInteractionId).toBe(2);
+    expect(crumbs()[0]).toMatchObject({ kind: "invoke-origin", label: "Plan a trip", sourceNodeId: "11", interactive: true });
+    const origin = controller.viewState.invocationOrigin;
+    fixture.setState(withCall(pending, { completionId: 902, headRevision: 2, lifecycle: "active", currentLayerId: 202,
+      finalLayerId: null, safeReason: null, temporalFeatures: { projectionUi: true } }));
+    await controller.refreshState(10);
+    expect(controller.appState.visibleLayer).toEqual(second);
+    expect(controller.viewState.invocationOrigin).toEqual(origin);
+    fixture.setState(withCall({ ...pending, completionStatus: "accepted", completionOutput: { rootLayer: second } }));
+    await controller.refreshState(10);
+    expect(crumbs()[0].label).toBe("Plan a trip");
+    await controller.navigateLayer(101, { invocationOrigin: true });
+    expect(controller.viewState.currentInteractionId).toBe(1);
+    expect(controller.viewState.selectedNodeId).toBe("11");
+    expect(controller.viewState.invocationOrigin).toBeNull();
+    if (mode === "source-current") expect(controller.viewState.temporalCurrent.mode).toBe("pinned");
+    await controller.navigateHistory("back");
+    expect(controller.viewState.currentInteractionId).toBe(2);
+    expect(crumbs()[0].label).toBe("Plan a trip");
+    await controller.navigateHistory("forward");
+    expect(controller.viewState.selectedNodeId).toBe("11");
+    // A stale call cannot authorize the origin or partially switch presentation.
+    await controller.navigateHistory("back");
+    const invalid = withCall({ ...pending, completionStatus: "accepted", completionOutput: { rootLayer: second } });
+    invalid.actionInvocations[0].invocationKey = "different-call";
+    fixture.setState(invalid);
+    await expect(controller.navigateLayer(101, { invocationOrigin: true })).rejects.toThrow("invoking Node");
+    expect(controller.viewState.currentInteractionId).toBe(2);
+    expect(crumbs()[0].label).toBe("Plan a trip");
+  });
 
   it("opens the latest ready current and continues following later accepted currents", async () => {
     const second = layer(202, [22]);
