@@ -321,6 +321,24 @@ describe("Office documents (ART-012)", () => {
     const decoy = Buffer.alloc(20);
     decoy.writeUInt32LE(0x06054b50, 0);
     await writeFile(join(folder, "docs", "decoy.xlsx"), zipOf({ central: 16, local: 16, data: small, comment: decoy }));
+    // Review: a valid part whose bytes contain the end-record signature is not "damaged".
+    const signed = Buffer.concat([Buffer.from("PK\x05\x06", "latin1"), Buffer.alloc(64)]);
+    await writeFile(join(folder, "docs", "signed.xlsx"), zipOf({ central: signed.length, local: signed.length, data: deflateRawSync(signed, { level: 0 }) }));
+    // Review: 50,000 merged ranges off screen do not slow the sheet in view.
+    const merged = XLSX.utils.aoa_to_sheet(Array.from({ length: 1000 }, (_, row) => Array.from({ length: 10 }, (_, column) => row * 10 + column)));
+    merged["!merges"] = Array.from({ length: 50_000 }, (_, index) => ({ s: { r: index % 1000, c: 200 + Math.floor(index / 1000) * 2 }, e: { r: index % 1000, c: 201 + Math.floor(index / 1000) * 2 } }));
+    const mergedBook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(mergedBook, merged, "Merged");
+    await writeFile(join(folder, "docs", "merged.xlsx"), XLSX.write(mergedBook, { type: "buffer", bookType: "xlsx" }));
+    // Review: the workbook opens at the sheet it was saved on, and hidden sheets stay hidden.
+    const savedBook = XLSX.utils.book_new();
+    for (const name of ["Calc", "Summary", "Detail"]) XLSX.utils.book_append_sheet(savedBook, XLSX.utils.aoa_to_sheet([[name]]), name);
+    savedBook.Workbook = { Sheets: [{ Hidden: 1 }, { Hidden: 0 }, { Hidden: 0 }] };
+    // SheetJS's writer always saves the first visible tab as active, so set the saved view as Excel would.
+    const { default: JSZip } = await import("jszip");
+    const savedZip = await JSZip.loadAsync(XLSX.write(savedBook, { type: "buffer", bookType: "xlsx" }));
+    savedZip.file("xl/workbook.xml", (await savedZip.file("xl/workbook.xml").async("string")).replace('activeTab="1"', 'activeTab="2"'));
+    await writeFile(join(folder, "docs", "saved.xlsx"), await savedZip.generateAsync({ type: "nodebuffer", compression: "DEFLATE" }));
     // Without the extra field the same entry passes the archive check (and is just not a workbook).
     await writeFile(join(folder, "docs", "plain.xlsx"), zipOf({ central: 16, local: 16, data: small }));
     // Review: a file over the byte limit is refused before it is held whole.
@@ -339,8 +357,15 @@ describe("Office documents (ART-012)", () => {
       expect(await bombed.page.locator(".office-error").innerText()).toContain("too large to show here");
       const oversized = await openInChromium(browser, { kind: "docx", source: { file: "docs/oversized.docx" } }, { ready: "failed" });
       expect(await oversized.page.locator(".office-error").innerText()).toContain("too large to show here");
-      const plain = await openInChromium(browser, { kind: "xlsx", source: { file: "docs/plain.xlsx" } }, { ready: "failed" });
-      expect(await plain.page.locator(".office-error").innerText()).not.toContain("damaged");
+      for (const file of ["plain.xlsx", "signed.xlsx"]) {
+        const passes = await openInChromium(browser, { kind: "xlsx", source: { file: `docs/${file}` } }, { ready: "failed" });
+        expect(await passes.page.locator(".office-error").innerText(), file).not.toContain("damaged");
+      }
+      const mergedSheet = await openInChromium(browser, { kind: "xlsx", source: { file: "docs/merged.xlsx" } });
+      expect(await mergedSheet.page.locator(".office-sheet tr").count()).toBe(1000);
+      const savedSheet = await openInChromium(browser, { kind: "xlsx", source: { file: "docs/saved.xlsx" } });
+      expect(await savedSheet.page.locator(".office-sheet-tab").allInnerTexts()).toEqual(["Summary", "Detail"]);
+      expect((await savedSheet.located()).sheet).toBe("Detail");
       for (const file of ["dense.xlsx", "strings.xlsx", "unnamed.xlsx"]) {
         const large = await openInChromium(browser, { kind: "xlsx", source: { file: `docs/${file}` } }, { ready: "failed" });
         expect(await large.page.locator(".office-error").innerText(), file).toContain("too large to show here");
@@ -357,7 +382,7 @@ describe("Office documents (ART-012)", () => {
       expect((await narrow.located()).slide).toBe(4);
     } finally {
       await browser.close();
-      for (const file of ["huge.xlsx", "wide.xlsx", "bomb.docx", "headers.xlsx", "stream.xlsx", "hidden.pptx", "zip64.xlsx", "plain.xlsx", "method.xlsx", "dense.xlsx", "strings.xlsx", "unnamed.xlsx", "renamed.xlsx", "decoy.xlsx", "oversized.docx"]) await rm(join(folder, "docs", file), { force: true });
+      for (const file of ["huge.xlsx", "wide.xlsx", "bomb.docx", "headers.xlsx", "stream.xlsx", "hidden.pptx", "zip64.xlsx", "plain.xlsx", "signed.xlsx", "merged.xlsx", "saved.xlsx", "method.xlsx", "dense.xlsx", "strings.xlsx", "unnamed.xlsx", "renamed.xlsx", "decoy.xlsx", "oversized.docx"]) await rm(join(folder, "docs", file), { force: true });
     }
   }, 30_000);
 });

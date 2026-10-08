@@ -42,15 +42,22 @@ async function renderWord(bytes, root) {
   };
 }
 
-/** Each sheet in its own tab. Cells show the values the file saved; nothing is recalculated. */
+/**
+ * Each visible sheet in its own tab, opened at the sheet the workbook was saved on. Hidden
+ * sheets stay hidden. Cells show the values the file saved; nothing is recalculated.
+ */
 function renderExcel(bytes, root) {
   const book = read(bytes, { type: "array", sheetRows: SHEET_LIMIT.rows });
   const tabs = element("nav", "office-sheet-tabs");
   const sheet = element("div", "office-sheet");
   root.append(tabs, sheet);
-  // Each sheet's whole range, read before any is clipped to the limit.
+  const visible = book.SheetNames.filter((_, index) => !book.Workbook?.Sheets?.[index]?.Hidden);
+  const names = visible.length ? visible : book.SheetNames;
+  // Each sheet's whole range and merged cells, read before any is clipped to the limit.
   const fullRanges = new Map(book.SheetNames.map((name) => [name, book.Sheets[name]["!fullref"] ?? book.Sheets[name]["!ref"] ?? "A1"]));
-  let shown = book.SheetNames[0];
+  const merges = new Map(book.SheetNames.map((name) => [name, book.Sheets[name]["!merges"] ?? []]));
+  const saved = book.SheetNames[book.Workbook?.WBView?.[0]?.activeTab ?? 0];
+  let shown = names.includes(saved) ? saved : names[0];
   const show = (name) => {
     shown = name;
     const cells = book.Sheets[name];
@@ -58,18 +65,23 @@ function renderExcel(bytes, root) {
     const range = utils.decode_range(cells["!ref"] ?? "A1");
     range.e.c = Math.min(range.e.c, range.s.c + SHEET_LIMIT.columns - 1);
     cells["!ref"] = utils.encode_range(range);
+    // The HTML writer checks every cell against every merge, so only merges in view are kept,
+    // and at most a thousand of them; the rest of the sheet shows unmerged.
+    cells["!merges"] = merges.get(name)
+      .filter((merge) => merge.s.r <= range.e.r && merge.s.c <= range.e.c && merge.e.r >= range.s.r && merge.e.c >= range.s.c)
+      .slice(0, 1000);
     const clipped = full.e.r > range.e.r || full.e.c > range.e.c;
     sheet.innerHTML = utils.sheet_to_html(cells, { header: "", footer: "" });
     if (clipped) sheet.prepend(element("p", "office-sheet-limit", `Showing the first ${SHEET_LIMIT.rows} rows and ${SHEET_LIMIT.columns} columns. Open the file in Excel for the rest.`));
     for (const tab of tabs.children) tab.setAttribute("aria-selected", String(tab.textContent === name));
   };
-  for (const name of book.SheetNames) {
+  for (const name of names) {
     const tab = element("button", "office-sheet-tab", name);
     tab.type = "button";
     tab.onclick = () => show(name);
     tabs.append(tab);
   }
-  if (book.SheetNames.length < 2) tabs.hidden = true;
+  if (names.length < 2) tabs.hidden = true;
   if (shown !== undefined) show(shown);
   return () => ({ sheet: shown ?? null });
 }
@@ -147,15 +159,16 @@ async function checkArchive(bytes) {
   if (bytes.byteLength > ARCHIVE_LIMIT.bytes) tooLarge();
   const view = new DataView(bytes);
   // The end-of-central-directory record sits within the last 64 KiB (its comment's limit).
-  // Parsers search for it from different ends, so there must be exactly one, and its comment
-  // must run exactly to the end of the file: every parser then reads the same directory.
-  const ends = [];
+  // Parsers search backward for it, some from the last bytes and some from 22 bytes earlier.
+  // The signature nearest the end must therefore be the record itself, with a comment running
+  // exactly to the end of the file; a signature hidden in that comment fails. Signatures
+  // earlier in the file, inside a part's data, are never reached and do not matter.
+  let end = -1;
   for (let at = bytes.byteLength - 4; at >= Math.max(0, bytes.byteLength - 22 - 0xffff); at -= 1) {
-    if (view.getUint32(at, true) === 0x06054b50) ends.push(at);
+    if (view.getUint32(at, true) === 0x06054b50) { end = at; break; }
   }
-  if (ends.length === 0) throw new Error("This is not an Office file.");
-  const end = ends[0];
-  if (ends.length > 1 || end + 22 > bytes.byteLength || end + 22 + view.getUint16(end + 20, true) !== bytes.byteLength) damaged();
+  if (end < 0) throw new Error("This is not an Office file.");
+  if (end + 22 > bytes.byteLength || end + 22 + view.getUint16(end + 20, true) !== bytes.byteLength) damaged();
   // One disk, and a directory that runs exactly up to the end record: an archive whose
   // record undercounts its entries cannot hide one from this check.
   const count = view.getUint16(end + 10, true);
