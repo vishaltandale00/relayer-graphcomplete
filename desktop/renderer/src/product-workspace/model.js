@@ -239,8 +239,56 @@ export function workspaceModeCapabilities(mode) {
   throw new Error(`Unknown product workspace mode: ${mode}`);
 }
 
-export function productWorkspaceMode({ evalReviewContext, reviewRequested, thread }) {
-  return evalReviewContext || reviewRequested || thread?.imported === true ? "review" : "interactive";
+export function productWorkspaceMode({ evalReviewContext, reviewRequested, thread, interaction }) {
+  return evalReviewContext || reviewRequested || thread?.imported === true
+    || interaction?.inertInvocationCurrent === true ? "review" : "interactive";
+}
+
+// A graph-owned call can publish accepted progress without a Product launch row.
+// This is a read presentation of that coherent native snapshot, never a Product
+// interaction, execution receipt, or permission to launch/continue the child.
+export function nativeInvocationCurrentPresentation(call, { threadId, sourceInteraction } = {}) {
+  const native = call?.nativeInvocation;
+  const invocation = native?.invocation;
+  const current = native?.current;
+  if (call?.graphOnly !== true || call.occupancyOnly === true || !invocation || !current
+    || !sameId(sourceInteraction?.threadId, threadId)
+    || !sameId(sourceInteraction?.id, call.sourceInteractionId)
+    || !sameId(sourceInteraction?.graphNodeId, invocation.sourceCompletionId)
+    || !sameId(invocation.sourceActionId, call.actionId)
+    || invocation.invocationKey !== call.invocationKey
+    || !sameId(native.sourceAction?.id, invocation.sourceActionId)
+    || !sameId(native.sourceAction?.sourceNodeId, invocation.parentNodeId)
+    || !sameId(native.parentNode?.id, invocation.parentNodeId)
+    || !sameId(invocation.actionSnapshot?.actionId, invocation.sourceActionId)
+    || !sameId(invocation.actionSnapshot?.sourceNodeId, invocation.parentNodeId)
+    || !sameId(invocation.state?.completionId, invocation.childInteractionNodeId)
+    || !sameId(current.nodeId, invocation.childInteractionNodeId)
+    || !sameId(current.rootLayerId, invocation.state?.currentLayerId)) return null;
+  const layers = new Map((current.layers ?? []).map(layer => [String(layer.layer?.id), layer]));
+  const rootLayer = layers.get(String(current.rootLayerId));
+  if (!rootLayer || [...layers.values()].some(layer => layer.layer?.state !== "accepted")) return null;
+  const lifecycleStatus = { active: "running", succeeded: "accepted", stopped: "stopped", failed: "failed" }[invocation.state.lifecycle];
+  if (!lifecycleStatus || lifecycleStatus !== call.resultCompletionStatus) return null;
+  return {
+    interaction: {
+      id: `native-current:${invocation.id}`, threadId,
+      inertInvocationCurrent: true, nativeInvocationCurrent: true,
+      invocationId: invocation.id, invocationKey: invocation.invocationKey,
+      invocationSourceInteractionId: call.sourceInteractionId,
+      graphNodeId: invocation.childInteractionNodeId,
+      sequence: sourceInteraction.sequence,
+      text: `${invocation.actionSnapshot.label || native.sourceAction.label || "Invoke"} · ${lifecycleStatus === "accepted" ? "Result" : "Current"}`,
+      completionStatus: lifecycleStatus,
+      completionOutput: { nodeId: current.nodeId, rootAction: current.rootAction, rootLayer },
+      submittedInputs: native.submittedInputs ?? [], safeReason: invocation.state.safeReason ?? null,
+      interactionGraph: { enabled: true, complete: true, sources: [{
+        interactionId: sourceInteraction.id, threadId, invocationActionId: call.actionId,
+        contexts: [], message: invocation.actionSnapshot.label || native.sourceAction.label || "Invoke",
+      }] },
+    },
+    layers,
+  };
 }
 
 export function productWorkspaceNeedsRecreation(currentMode, nextMode) {

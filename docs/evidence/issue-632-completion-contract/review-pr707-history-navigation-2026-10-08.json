@@ -1,0 +1,225 @@
+{
+  "schemaVersion": 1,
+  "reviewer": "/root/history_ack_authority_review",
+  "reviewRole": "Independent adversarial source, semantic authority, acknowledgement, and reading-history review",
+  "createdAt": "2026-10-08T22:30:15.581919+00:00",
+  "worktree": "/private/tmp/relayer-interactive-inputs-v1-merge",
+  "baselineHead": "f10b853ccfce143b10da0afc25897f0df1dd6014",
+  "qualifiedSourceDigest": "64868080384030e5cfec7ca705463eb4b5387061d8f140e2d12b09782dd9925b",
+  "qualifiedSourceManifest": "/private/tmp/pr707-history-navigation-source.json",
+  "completePortfolio": {
+    "pathCount": 235,
+    "digestMethod": "SHA256 sorted relative path + NUL + file bytes + NUL",
+    "independentlyVerified": true,
+    "verification": "Every file SHA256 and sorted combined digest checked independently after deterministic tests; this verifies complete portfolio identity, not independent semantic review of all 235 paths."
+  },
+  "scopeDigest": "2b5bdc852f53c320eed24223d81c881ec5e95950ed1f78030c9c34b605177e4d",
+  "scopeManifest": [
+    {
+      "path": "crates/relayer-app-server/src/api/input_drafts.rs",
+      "sha256": "3bbee455979cb4c408471991334555d0d5feb3b5800a0266d4f5c35e61a95df1"
+    },
+    {
+      "path": "crates/relayer-app-server/src/api/threads.rs",
+      "sha256": "1cde0e0d958ed8c9c0736ae6e504724c744894287307553c98ff1076ca5ef87b"
+    },
+    {
+      "path": "crates/relayer-app-server/src/api/types.rs",
+      "sha256": "a54ff03c02e9cf8b49be9cd32c08352437502663bcf1f83c3bf31abac309de54"
+    },
+    {
+      "path": "crates/relayer-app-server/tests/support/completion_traces.rs",
+      "sha256": "4542ee386ca0d23674f7d0f20d9d568ec77e2603632357cb894e70060395caa3"
+    },
+    {
+      "path": "crates/relayer-graph-core/src/graph/completion.rs",
+      "sha256": "dce3a39543fd36e9b7bd0150fac92988833b1ff885bd0c0a473b76a2f73a645c"
+    },
+    {
+      "path": "crates/relayer-graph-core/src/graph/import.rs",
+      "sha256": "339c6d6c60a625d789b3207d0df79c9700b919467e206fa6b21569ba42a102e7"
+    },
+    {
+      "path": "desktop/renderer/src/graph.js",
+      "sha256": "6729cc9a0f392176ae079eb607b988f3ab2abf53e50c592b402b6747af5f7d0c"
+    },
+    {
+      "path": "desktop/renderer/src/navigation-history.js",
+      "sha256": "100e0ef52f1b4a76e0c675adc5489be975b840b5df00ca163a2446573172f6c4"
+    },
+    {
+      "path": "desktop/renderer/src/node-detail-assets.js",
+      "sha256": "a22fde3c848bf37ac33af790ef1e93c23873306cb6c0763252cfc846820c73c0"
+    },
+    {
+      "path": "desktop/renderer/src/product-workspace/model.js",
+      "sha256": "8500da923137531d53296687229cea4b0f8c2c0d4fe2db12179d32eed61d5132"
+    },
+    {
+      "path": "desktop/renderer/src/product-workspace/workspace.js",
+      "sha256": "ee742e116321785222e0db61bcd7e43a335b2e4ee5b028787e850a255ac9bda9"
+    },
+    {
+      "path": "desktop/renderer/src/public-share-viewer/snapshot.js",
+      "sha256": "29464dbabc7d7a94b472a8e90a68f7ccd2978bbc93145b23c2e03bc8fd043160"
+    },
+    {
+      "path": "desktop/renderer/src/threads.js",
+      "sha256": "15ab2d18b029e81a2d45b7ba13bbe30eddb49c8adf27b804514453ca997c5a20"
+    },
+    {
+      "path": "desktop/renderer/src/workspace-navigation.js",
+      "sha256": "816bcd91928e8888e052e22501a617e711a3c3a494dcc6874ebaf975b5511f5b"
+    },
+    {
+      "path": "docs/evidence/issue-632-completion-contract/README.md",
+      "sha256": "12daa556b8a4f30f8a048fd6b56d250d3576770646b18dbcd3d35c58b41e5280"
+    },
+    {
+      "path": "test/fixtures/inert-returned-call.json",
+      "sha256": "6e835960697485d933ddb47f8b565e096d02982dadbb327a05524495b033b1b1"
+    },
+    {
+      "path": "test/imported-returned-workspace.test.mjs",
+      "sha256": "826d51fdc9b3c690741c88c30d5c1a773c43c393505fe0ab2f0ac66c09e2f996"
+    },
+    {
+      "path": "test/native-invocation-current-input-state.test.mjs",
+      "sha256": "272efee3eeb597d134c17c563299830a6e4987889a3ff43fb12a499dfba3bfd9"
+    },
+    {
+      "path": "test/native-invocation-current-workspace.test.mjs",
+      "sha256": "bd99684b3a7d98b2d17519149eb9af5ad216d904213d650586ebbf5b87465708"
+    },
+    {
+      "path": "test/node-detail-assets.test.mjs",
+      "sha256": "5790a7117968da0aa907d5a00bdc68698490d1a3be737383f94bb134f54dd7eb"
+    },
+    {
+      "path": "test/workspace-navigation-integration.test.mjs",
+      "sha256": "e5579cfed46a353c7e09c4e533c02061d78616ff2b645d2522abab706ead3eab"
+    },
+    {
+      "path": "test/workspace-navigation.test.mjs",
+      "sha256": "c876e1b48b644aeb0991776251df90f044d7f04826f763c1f5ecb619fbe19570"
+    },
+    {
+      "path": "test/workspace-reading-context.test.mjs",
+      "sha256": "c5fc299644eebab92ac00c3bd6bc1780d1fa957e9e4cae853d71b7e6657fac0b"
+    }
+  ],
+  "verdict": "no_source_blockers",
+  "unresolvedFindings": [],
+  "reviewBasis": [
+    "PRD CC-009 imported inert call identities and no portable replay authority",
+    "PRD READ-001 invoking source breadcrumb, Current, and reading history",
+    "PRD SCP-016 preservation of source input drafts across reading navigation"
+  ],
+  "reviewedBoundaries": [
+    "Committed Input save/detach acknowledgements preserve exact durable values and revisions when optional composer projection fails or times out; uncertain attachment classification fails closed. Strict canonical, operator, and precommit validation remains before mutation.",
+    "Successful native claim and activation synchronously spawn the existing executor before optional Product reread. Fallback carries the exact successfully claimed interaction and PreparedInteraction child identity, never inferred accepted output or reusable execution authority. Optional invocation/input projections cannot reject the irreversible successful handoff.",
+    "Renderer returns the successful POST acknowledgement independently of optional refresh failure; durable calls remain single use and recovery/refusal flags do not grant unconditional retries.",
+    "Imported source mappings use actual canonical accepted source/action/presenting identities within the unique thread import. Action mapping requires exactly one matching accepted canonical action; portable IDs remain inert reading identity and never native capability.",
+    "Native Current resolution validates source, frozen action and key, child, lifecycle, and accepted current root. Graph-only synthetic views remain read only with no Product receipt, accepted Navigate relation, or synthetic Product URL.",
+    "Source/Back/Forward/Current retain the exact invoking source path and selected node. Changed or missing native evidence restores that saved source rather than an unrelated later human turn; asynchronous refresh respects reading intent and preserves stored composer context.",
+    "Graph-owned imported Succeeded without Product result uses actual retained Returned evidence only when coherent with Current. A nonnull missing Product result or inconsistent Returned root refuses resolution rather than manufacturing a result.",
+    "Native child root SVG access uses the real Product source interaction and exact unique native invocation/current/accepted Navigate Expand root association. Wrong source, node, layer, and asset are refused; pinned bytes retain hash and media validation. Succeeded root enrichment reads actual accepted output in one transaction; Advance, Stopped, and Failed do not infer a root action.",
+    "Workspace recreation transfers plain occurrence-keyed local Input stages and edit epochs, including unblurred implicit values and independent Undo baselines. It does not transfer controller promises, captured submissions, execution authority, or input draft revision. Authoritative persisted draft state reloads; entering and leaving Current does not accept or mutate the inputs.",
+    "Public-share snapshot regression and asset delivery do not gain execution grants. No test was deleted or retired in this reviewed delta."
+  ],
+  "resolvedReviewFindings": [
+    {
+      "finding": "Stale or missing native Current selected an unrelated latest human turn.",
+      "resolution": "Refresh restores exact saved canonical source path and selected node; later-human regression passes."
+    },
+    {
+      "finding": "Successful Invoke POST could surface failure through awaited optional renderer refresh.",
+      "resolution": "Optional refresh is detached and schedules later retry; exact successful response remains acknowledged."
+    },
+    {
+      "finding": "Native Current root topic image lacked coherent accepted root metadata and narrowly scoped asset access.",
+      "resolution": "Succeeded-only accepted root projection and exact native Current root asset guard; real SVG positive and refusal cases pass."
+    },
+    {
+      "finding": "Workspace mode recreation discarded unblurred implicit Input values and Undo state.",
+      "resolution": "Exact occurrence state transfer and mounted source-to-Current-to-source regression preserve both independently staged fields without writes."
+    }
+  ],
+  "actualVerification": [
+    {
+      "command": "./node_modules/.bin/vitest run test/native-invocation-current-input-state.test.mjs test/native-invocation-current-workspace.test.mjs test/workspace-navigation-integration.test.mjs test/workspace-navigation.test.mjs test/workspace-reading-context.test.mjs test/node-detail-assets.test.mjs test/public-share-viewer.test.mjs",
+      "log": "/private/tmp/pr707-history-ack-independent-final-js.log",
+      "filesPassed": 7,
+      "testsPassed": 284,
+      "testsFailed": 0,
+      "exitCode": 0,
+      "durationSeconds": 5.46,
+      "execution": "Independent rerun",
+      "logSha256": "d0b5813c6c665bd30500747f614257f50cde0172bd895b3dea10a76247bc57a3"
+    },
+    {
+      "command": "./node_modules/.bin/vitest run test/imported-returned-workspace.test.mjs",
+      "log": "/private/tmp/pr707-history-ack-independent-returned-js.log",
+      "filesPassed": 1,
+      "testsPassed": 3,
+      "testsFailed": 0,
+      "exitCode": 0,
+      "durationSeconds": 0.722,
+      "execution": "Independent rerun",
+      "logSha256": "919c4f6b2ecd674b01acbbba69efc199bc86d9696fc074b02cc4f2ec810732b6"
+    },
+    {
+      "command": "cargo test -p relayer-app-server --lib completion_traces -- --nocapture",
+      "log": "/private/tmp/pr707-history-ack-independent-native.log",
+      "testsPassed": 49,
+      "testsFailed": 0,
+      "testsIgnored": 0,
+      "testsFiltered": 340,
+      "exitCode": 0,
+      "durationSeconds": 14.08,
+      "execution": "Independent rerun; real native fault, import, reopen, accepted output, and asset scenarios",
+      "logSha256": "d366fb8159b2b7fb0303e560b9d478f5a79f63657685d8ed988aad8a6dd98824"
+    },
+    {
+      "command": "/usr/bin/git diff --check",
+      "exitCode": 0,
+      "execution": "Independent check on frozen bytes"
+    },
+    {
+      "command": "Independent Python SHA256 verification of all 235 frozen paths and combined sorted path/NUL/bytes/NUL digest",
+      "result": "All entries match; no duplicate or unsorted paths; verified again after all independent tests",
+      "evidence": "/private/tmp/pr707-history-ack-independent-source-check.json"
+    }
+  ],
+  "preservedFailures": [
+    {
+      "log": "/private/tmp/pr707-mutation-ack-red-2.log",
+      "classification": "Actual executed pre-fix committed-save and started-Invoke failure cases; not a passing qualification."
+    },
+    {
+      "log": "/private/tmp/pr707-mutation-ack-claimed-red.log",
+      "classification": "Actual executed pre-fix postclaim Product reread fault; not a passing qualification."
+    },
+    {
+      "classification": "Earlier root SVG fixture compile failure and incorrect expectation that native Return alone creates a Product receipt were retained by the implementation owner. Correct fixture uses actual trusted binding and startup reconciliation; those earlier failures are not counted as passes."
+    },
+    {
+      "classification": "Earlier Input transfer regression exposed review inspector clearing retained stages; final mounted production-wrapper scenario passes. Historical edit-loop logs do not certify the frozen source."
+    }
+  ],
+  "qualificationLimits": [
+    "Native inert Current fullscreen artifact viewers, captures, and native turn/node/action metadata comment delivery are unsupported or unqualified. Existing typed Product-ID refusals do not justify a claim that those rich features work; no fake Product route or execution grant was found in the reviewed callbacks.",
+    "The tested native root topic icon and retained Returned fixture do not prove all rich Current artifact behavior. Portable Current wire shape remains layers/rootLayer; accepted native root metadata enrichment is native-only.",
+    "Transient local Input preservation covers mounted workspace recreation and exact source navigation; full Electron process restart and unsaved edit recovery are not independently qualified here.",
+    "No paid/live provider, external-runtime, release, signed package, deployment, human acceptance, current hosted CI, or merge action was performed or certified by this review.",
+    "Complete 235-path identity verification is broader than this 23-path independent semantic review. Earlier portfolio reviews remain separate evidence for unchanged source."
+  ],
+  "pendingQualification": [
+    "Parent fresh declared 13-gate runner, including required check/build and applicable deterministic heavy chapters, was underway when this receipt was written. This receipt makes no claim about its outcome."
+  ],
+  "excludedGeneratedEvidenceChanges": [
+    "docs/evidence/issue-632-completion-contract/pr707-review-dispositions.json"
+  ],
+  "sourceInvalidationRule": "Any byte change in the frozen 235-path portfolio invalidates qualifiedSourceDigest. Any source/test/fixture addition outside the manifest requires an updated scope and review. Generated review evidence is outside the source digest.",
+  "reviewOnly": true
+}

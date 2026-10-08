@@ -84,6 +84,10 @@ fn sign_admission(body: &Value) -> Value {
 
 /// What the fake harness does, set by the replay.
 struct HarnessControl {
+    /// Hold the ordinary session stub after detached ownership, before failure cleanup.
+    session_gated: AtomicBool,
+    session_requested: AtomicBool,
+    session_gate: tokio::sync::Semaphore,
     /// "fail" refuses a start; "lost" runs it but acknowledges another identity.
     start: Mutex<&'static str>,
     /// "ok" admits a family plan by signing it as the host does; "fail" refuses it;
@@ -111,6 +115,10 @@ struct GraphFaults {
     fail_next_inventory: AtomicBool,
     detail_asset_reads: std::sync::atomic::AtomicUsize,
     fail_input_occurrence_reads: AtomicBool,
+    /// Presentation joins fail independently of authoritative occurrence admission.
+    fail_input_consumer_projection: AtomicBool,
+    /// Introduce a real Product read outage only after native capability activation.
+    post_activation_read_fault: Mutex<Option<(sqlx::SqlitePool, &'static str)>>,
     /// The next capability activation answers 503, as a busy graph would.
     fail_activation: AtomicBool,
     /// While set, every control preparation answers 200 with a body the client cannot
@@ -404,7 +412,7 @@ impl World {
                 .with_temporal_features(features),
         )
         .layer(axum::middleware::from_fn(
-            move |request: axum::extract::Request, next: axum::middleware::Next| {
+            move |mut request: axum::extract::Request, next: axum::middleware::Next| {
                 let faults = injected.clone();
                 async move {
                     use axum::response::IntoResponse;
@@ -443,7 +451,20 @@ impl World {
                             .into_response();
                     }
                     if request.method() == axum::http::Method::POST {
-                        let path = request.uri().path();
+                        let path = request.uri().path().to_owned();
+                        if path == "/api/control/input-action-occurrences/canonical"
+                            && faults.fail_input_consumer_projection.load(Ordering::SeqCst)
+                        {
+                            let (parts, body) = request.into_parts();
+                            let bytes = axum::body::to_bytes(body, 1024 * 1024).await.unwrap();
+                            let input: Value = serde_json::from_slice(&bytes).unwrap();
+                            if input["includeConsumerState"] == true {
+                                return (StatusCode::SERVICE_UNAVAILABLE, axum::Json(
+                                    serde_json::json!({"error":{"code":"unavailable","message":"projection busy"}})
+                                )).into_response();
+                            }
+                            request = axum::http::Request::from_parts(parts, axum::body::Body::from(bytes));
+                        }
                         if path == "/api/control/input-action-occurrences/canonical"
                             && faults.fail_input_occurrence_reads.load(Ordering::SeqCst)
                         {
@@ -466,6 +487,15 @@ impl World {
                             && faults.garble_preparation.load(Ordering::SeqCst)
                         {
                             return (StatusCode::OK, "{not json").into_response();
+                        }
+                        if path == "/api/control/capabilities" {
+                            let fault = faults.post_activation_read_fault.lock().unwrap().take();
+                            if let Some((pool, statement)) = fault {
+                                let response = next.run(request).await;
+                                assert!(response.status().is_success());
+                                sqlx::query(statement).execute(&pool).await.unwrap();
+                                return response;
+                            }
                         }
                     }
                     if request.uri().path() == "/api/control/accepted-closures" && faults.fail_next_inventory.swap(false, Ordering::SeqCst) {
@@ -532,6 +562,9 @@ impl World {
         }
 
         let harness_control = Arc::new(HarnessControl {
+            session_gated: AtomicBool::new(false),
+            session_requested: AtomicBool::new(false),
+            session_gate: tokio::sync::Semaphore::new(0),
             start: Mutex::new("fail"),
             admission: Mutex::new("ok"),
             granted: Mutex::new(std::collections::HashSet::new()),
@@ -547,6 +580,7 @@ impl World {
         let release_control = harness_control.clone();
         let admission_pool = pool.clone();
         let observe_control = harness_control.clone();
+        let session_control = harness_control.clone();
         let harness = Router::new()
             // Like the host: a run it never registered is an error, a live run is
             // answered only when it ends, and an ended run answers at once.
@@ -611,13 +645,20 @@ impl World {
                 "/sessions",
                 // The thread's live session is held by the running root turn, which
                 // awaits its child, so a child must never ask the host to set it up.
-                routing::post(|| async {
-                    (
-                        StatusCode::CONFLICT,
-                        axum::Json(
-                            serde_json::json!({"error":"session is held by the running root turn"}),
-                        ),
-                    )
+                routing::post(move || {
+                    let control = session_control.clone();
+                    async move {
+                        control.session_requested.store(true, Ordering::SeqCst);
+                        if control.session_gated.load(Ordering::SeqCst) {
+                            control.session_gate.acquire().await.unwrap().forget();
+                        }
+                        (
+                            StatusCode::CONFLICT,
+                            axum::Json(
+                                serde_json::json!({"error":"session is held by the running root turn"}),
+                            ),
+                        )
+                    }
                 }),
             )
             .route(
@@ -4544,6 +4585,15 @@ async fn the_broker_refuses_every_request_for_a_users_result() {
 
 #[tokio::test]
 async fn imported_current_call_history_is_projected_without_execution_authority() {
+    imported_call_history_round_trip(false).await;
+}
+
+#[tokio::test]
+async fn imported_returned_call_without_product_result_is_read_only() {
+    imported_call_history_round_trip(true).await;
+}
+
+async fn imported_call_history_round_trip(returned_without_product: bool) {
     use crate::conversation_import_service::ConversationImportStager;
     let world =
         World::build_call_mode("inert-call-presentation", false, false, Some(true), true).await;
@@ -4610,22 +4660,22 @@ async fn imported_current_call_history_is_projected_without_execution_authority(
         .await
         .unwrap();
     child
-        .add_action(&ActionDraft {
+        .add_action_with_prepared_icon(&ActionDraft {
             client_key: "current-response".into(),
             source_node_id: NodeId::new(world.completion_id).unwrap(),
             source_layer_id: None,
             kind: ActionKind::Navigate,
             relation: Some(NavigateRelation::Expand),
-            label: "Response".into(),
+            label: "Current contribution".into(),
             variant: Default::default(),
-            icon: None,
+            icon: Some(serde_json::json!({"kind":"image","assetId":icon.asset_id,"digestSha256":icon.digest_sha256,"mediaType":icon.media_type}).to_string()),
             description: None,
             target_layer_id: Some(current.id),
             interaction_text: None,
             reusable: None,
             input_action_ids: vec![],
             input: None,
-        })
+        }, Some(&icon))
         .await
         .unwrap();
     let prepared = world
@@ -4665,6 +4715,83 @@ async fn imported_current_call_history_is_projected_without_execution_authority(
         )
         .await
         .unwrap();
+    // Read the graph-only accepted Current through the source's existing scope;
+    // this requires neither a synthetic Product turn nor a launch receipt.
+    let asset_headers =
+        HeaderMap::from_iter([(header::COOKIE, "relayer_control=control".parse().unwrap())]);
+    let asset_response = get_detail_asset(
+        State(world.state.clone()),
+        asset_headers.clone(),
+        Path((
+            world.thread.id.value(),
+            world.thread.root_interaction_id.value(),
+            answer.id.value(),
+            icon.asset_id.clone(),
+        )),
+        Query(DetailAssetQuery {
+            layer_id: current.id.value(),
+        }),
+    )
+    .await
+    .unwrap_or_else(|error| panic!("Current icon read: {}", error.message()));
+    assert_eq!(asset_response.0["digestSha256"], icon.digest_sha256);
+    assert_eq!(asset_response.0["byteLength"], icon_bytes.len());
+    let active_snapshot = world
+        .runtime
+        .local_invocation_inventory(&[source_id.value()])
+        .await
+        .unwrap();
+    assert!(
+        active_snapshot.invocations[0]
+            .current
+            .as_ref()
+            .unwrap()
+            .root_action
+            .is_none()
+    );
+    assert!(
+        get_detail_asset(
+            State(world.state.clone()),
+            asset_headers.clone(),
+            Path((
+                world.thread.id.value(),
+                world.thread.root_interaction_id.value(),
+                world.completion_id,
+                icon.asset_id.clone()
+            )),
+            Query(DetailAssetQuery {
+                layer_id: current.id.value()
+            })
+        )
+        .await
+        .is_err()
+    );
+    assert!(
+        get_detail_asset(
+            State(world.state.clone()),
+            asset_headers.clone(),
+            Path((
+                world.thread.id.value(),
+                world.thread.root_interaction_id.value(),
+                source_id.value(),
+                icon.asset_id.clone()
+            )),
+            Query(DetailAssetQuery {
+                layer_id: current.id.value()
+            })
+        )
+        .await
+        .is_err()
+    );
+    if returned_without_product {
+        child
+            .complete(NodeId::new(world.completion_id).unwrap())
+            .await
+            .unwrap();
+        let retained = world.product.get_interaction(world.child.id).await.unwrap();
+        assert!(retained.graph_node_id.is_none());
+        assert!(retained.completion_output.is_none());
+    }
     let bytes = crate::conversation_export_service::build_conversation_export(
         &world.product,
         &world.runtime,
@@ -4682,6 +4809,20 @@ async fn imported_current_call_history_is_projected_without_execution_authority(
     let frozen = header.invocations[0].clone();
     assert!(frozen.current.is_some());
     assert!(frozen.result_turn_id.is_none());
+    if returned_without_product {
+        assert_eq!(frozen.lifecycle, "succeeded");
+        assert_eq!(
+            frozen.returned_layer_id.as_ref(),
+            frozen.current_layer_id.as_ref()
+        );
+        assert_eq!(
+            frozen.returned_layer_id.as_ref(),
+            frozen
+                .current
+                .as_ref()
+                .map(|current| &current.root_layer_id)
+        );
+    }
     assert_eq!(
         frozen.activator,
         Some(crate::conversation_export::ExportInvocationActivator::Agent)
@@ -4760,6 +4901,7 @@ async fn imported_current_call_history_is_projected_without_execution_authority(
         .await
         .unwrap();
     assert_eq!(history[0]["sourceNodeId"], layer.nodes[0].id.value());
+    assert_eq!(history[0]["presentingLayerId"], layer.layer.id.value());
     assert!(
         project_imported_invocation_history(&state, world.thread.id)
             .await
@@ -4771,6 +4913,7 @@ async fn imported_current_call_history_is_projected_without_execution_authority(
         .iter()
         .find(|action| action.kind == ActionKind::Invoke)
         .unwrap();
+    assert_eq!(history[0]["sourceActionId"], invoke.id.value());
     assert!(
         writer
             .prepare_user_invocation(invoke.id, "forbidden-import-activation")
@@ -4807,7 +4950,223 @@ async fn imported_current_call_history_is_projected_without_execution_authority(
     .unwrap();
     assert_eq!(unknown[0]["record"], serde_json::to_value(&frozen).unwrap());
     assert!(unknown[0]["sourceNodeId"].is_null() && unknown[0]["sourceInteractionId"].is_null());
+    assert!(unknown[0]["sourceActionId"].is_null() && unknown[0]["presentingLayerId"].is_null());
 
+    if returned_without_product {
+        if let Ok(path) = std::env::var("RELAYER_INERT_RETURNED_FIXTURE_PATH") {
+            std::fs::write(
+                path,
+                serde_json::to_vec_pretty(&serde_json::json!({
+                    "detail": detail_json,
+                    "sourceLayer": layer,
+                    "archiveSha256": format!("{:x}", Sha256::digest(&bytes)),
+                    "nativeProductResultBound": false,
+                }))
+                .unwrap(),
+            )
+            .unwrap();
+        }
+        world.finish().await;
+        return;
+    }
+
+    // The first half deliberately had no Product execution binding. Bind the
+    // same native identity through trusted preparation before terminal Product
+    // portability; this does not author a second graph call or launch a model.
+    let retained_child = world.product.get_interaction(world.child.id).await.unwrap();
+    let rebound =
+        prepare_and_claim_interaction(&world.state, &world.thread, &retained_child, false, true)
+            .await
+            .unwrap_or_else(|error| {
+                panic!("bind retained Current: {}", error.internal_diagnostic())
+            })
+            .unwrap();
+    assert_eq!(rebound.graph_node_id, world.completion_id);
+    child
+        .complete(NodeId::new(world.completion_id).unwrap())
+        .await
+        .unwrap();
+    let root_icon_response = get_detail_asset(
+        State(world.state.clone()),
+        asset_headers.clone(),
+        Path((
+            world.thread.id.value(),
+            world.thread.root_interaction_id.value(),
+            world.completion_id,
+            icon.asset_id.clone(),
+        )),
+        Query(DetailAssetQuery {
+            layer_id: current.id.value(),
+        }),
+    )
+    .await
+    .unwrap_or_else(|error| panic!("Current icon read: {}", error.message()));
+    assert_eq!(root_icon_response.0["digestSha256"], icon.digest_sha256);
+    let returned_snapshot = world
+        .runtime
+        .local_invocation_inventory(&[source_id.value()])
+        .await
+        .unwrap();
+    let returned_call = &returned_snapshot.invocations[0];
+    assert_eq!(
+        returned_call
+            .current
+            .as_ref()
+            .unwrap()
+            .root_action
+            .as_ref()
+            .unwrap()
+            .source_node_id
+            .value(),
+        world.completion_id
+    );
+    assert!(
+        returned_call
+            .detail_asset_revisions
+            .contains_key(&NodeId::new(world.completion_id).unwrap())
+    );
+    assert!(
+        get_detail_asset(
+            State(world.state.clone()),
+            asset_headers.clone(),
+            Path((
+                world.thread.id.value(),
+                world.thread.root_interaction_id.value(),
+                world.completion_id,
+                "wrong-icon".into()
+            )),
+            Query(DetailAssetQuery {
+                layer_id: current.id.value()
+            })
+        )
+        .await
+        .is_err()
+    );
+    assert!(
+        get_detail_asset(
+            State(world.state.clone()),
+            asset_headers.clone(),
+            Path((
+                world.thread.id.value(),
+                world.thread.root_interaction_id.value(),
+                world.completion_id,
+                icon.asset_id.clone()
+            )),
+            Query(DetailAssetQuery {
+                layer_id: prepared.action_snapshot["sourceLayerId"].as_i64().unwrap()
+            })
+        )
+        .await
+        .is_err()
+    );
+    assert!(
+        get_detail_asset(
+            State(world.state.clone()),
+            asset_headers.clone(),
+            Path((
+                world.thread.id.value() + 1,
+                world.thread.root_interaction_id.value(),
+                world.completion_id,
+                icon.asset_id.clone()
+            )),
+            Query(DetailAssetQuery {
+                layer_id: current.id.value()
+            })
+        )
+        .await
+        .is_err()
+    );
+    let returned_output = world
+        .runtime
+        .completion_output(world.completion_id)
+        .await
+        .unwrap()
+        .unwrap();
+    world.restart().await;
+    assert_eq!(
+        world
+            .product
+            .get_interaction(world.child.id)
+            .await
+            .unwrap()
+            .completion_output,
+        Some(returned_output)
+    );
+    assert_eq!(
+        world
+            .product
+            .get_interaction(world.child.id)
+            .await
+            .unwrap()
+            .completion_status
+            .as_str(),
+        "accepted"
+    );
+    let returned_bytes = crate::conversation_export_service::build_conversation_export(
+        &world.product,
+        &world.runtime,
+        world.thread.id,
+        world.state.export_producer.clone(),
+        "2026-10-08T00:00:01Z".into(),
+    )
+    .await
+    .unwrap();
+    let returned_records =
+        crate::conversation_export::decode_export_jsonl(&returned_bytes).unwrap();
+    let has_root_pin = |records: &[ConversationExportRecord]| {
+        records.iter().any(|record| match record {
+            ConversationExportRecord::Turn(turn) => turn
+                .accepted_view
+                .as_ref()
+                .and_then(|view| view.root_action.icon_asset.as_ref())
+                .is_some_and(|pin| pin.digest_sha256 == icon.digest_sha256),
+            _ => false,
+        })
+    };
+    assert!(has_root_pin(&returned_records));
+    let ConversationExportRecord::Header(returned_header) = &returned_records[0] else {
+        panic!("returned header");
+    };
+    let mut returned_stager =
+        ConversationImportStager::begin(*returned_header.clone(), &world.product)
+            .await
+            .unwrap();
+    for record in returned_records.iter().skip(1) {
+        match record {
+            ConversationExportRecord::Turn(turn) => returned_stager
+                .push_turn(turn, &world.product)
+                .await
+                .unwrap(),
+            ConversationExportRecord::VisualAssetContent(content) => returned_stager
+                .push_visual_asset_content(content, &world.product)
+                .await
+                .unwrap(),
+            _ => unreachable!(),
+        }
+    }
+    let returned_receipt = returned_stager
+        .finish("sha256:returned-root-image".into(), &world.product)
+        .await
+        .unwrap();
+    let returned_import = crate::conversation_import_service::materialize_and_publish_conversation(
+        &returned_receipt.import_id,
+        &world.product,
+        &world.runtime,
+    )
+    .await
+    .unwrap();
+    let reexport = crate::conversation_export_service::build_conversation_export(
+        &world.product,
+        &world.runtime,
+        crate::product::ThreadId::from_database(returned_import.thread_id),
+        world.state.export_producer.clone(),
+        "2026-10-08T00:00:02Z".into(),
+    )
+    .await
+    .unwrap();
+    assert!(has_root_pin(
+        &crate::conversation_export::decode_export_jsonl(&reexport).unwrap()
+    ));
     world.finish().await;
 }
 
@@ -7048,6 +7407,544 @@ async fn native_invocation_argument_bound_preserves_exportable_calls_and_uncalle
             .input_action_ids
             .iter()
             .all(|id| exported_inputs.iter().any(|input| &input.id == id))
+    );
+    world.finish().await;
+}
+
+/// Accepted production source with one Invoke-bound and one ordinary Input.
+/// Only execution is stubbed; canonical occurrence reads and Product mutations are real.
+async fn mutation_ack_world(
+    label: &str,
+) -> (
+    World,
+    NodeId,
+    relayer_graph_core::LayerId,
+    Vec<relayer_graph_core::GraphAction>,
+    relayer_graph_core::ActionId,
+) {
+    use relayer_graph_core::{InputAction, InputControl};
+    let world = World::new(label, true).await;
+    let parent = world
+        .graph
+        .create_interaction(
+            None,
+            ThreadId::new(world.thread.id.value()).unwrap(),
+            "Root",
+        )
+        .await
+        .unwrap();
+    let writer = world.graph.writer_for_subgraph(parent.id).await.unwrap();
+    let node = writer
+        .submit_node(&NodeDraft {
+            client_key: "ack-source".into(),
+            kind: "concept".into(),
+            icon: "box".into(),
+            title: "Trip".into(),
+            detail: "Trip".into(),
+        })
+        .await
+        .unwrap();
+    let layer = writer
+        .submit_layer(&LayerDraft {
+            client_key: "ack-layer".into(),
+            default_node_id: Some(node.id),
+            nodes: vec![node.id],
+            edges: vec![],
+            layout: Some(LayerLayout::v1(
+                vec![NodePlacement {
+                    node_id: node.id,
+                    x: 0.5,
+                    y: 0.5,
+                }],
+                "default",
+            )),
+            size_justification: None,
+        })
+        .await
+        .unwrap();
+    let mut definition = ActionDraft {
+        client_key: "destination".into(),
+        source_node_id: node.id,
+        source_layer_id: Some(layer.id),
+        kind: ActionKind::Input,
+        relation: None,
+        label: "Destination".into(),
+        variant: Default::default(),
+        icon: None,
+        description: None,
+        target_layer_id: None,
+        interaction_text: None,
+        reusable: None,
+        input_action_ids: vec![],
+        input: Some(InputAction {
+            control: InputControl::Text,
+            prompt: "Destination".into(),
+            options: vec![],
+            minimum_selections: None,
+            unsupported_fields: Default::default(),
+        }),
+    };
+    let bound = writer.add_action(&definition).await.unwrap();
+    definition.client_key = "notes".into();
+    definition.label = "Notes".into();
+    definition.input.as_mut().unwrap().prompt = "Notes".into();
+    let ordinary = writer.add_action(&definition).await.unwrap();
+    definition.client_key = "itinerary".into();
+    definition.label = "Build itinerary".into();
+    definition.kind = ActionKind::Invoke;
+    definition.input = None;
+    definition.interaction_text = Some("Plan the trip".into());
+    definition.reusable = Some(false);
+    definition.input_action_ids = vec![bound.id];
+    let invoke = writer.add_action(&definition).await.unwrap();
+    definition.client_key = "response".into();
+    definition.kind = ActionKind::Navigate;
+    definition.source_node_id = parent.id;
+    definition.source_layer_id = None;
+    definition.relation = Some(NavigateRelation::Expand);
+    definition.target_layer_id = Some(layer.id);
+    definition.interaction_text = None;
+    definition.reusable = None;
+    definition.input_action_ids.clear();
+    writer.add_action(&definition).await.unwrap();
+    writer.complete(parent.id).await.unwrap();
+    sqlx::query(
+        "UPDATE interactions SET graph_node_id=?1,completion_status='accepted' WHERE id=?2",
+    )
+    .bind(parent.id.value())
+    .bind(world.thread.root_interaction_id.value())
+    .execute(&world.pool)
+    .await
+    .unwrap();
+    let accepted = writer.get_layer(layer.id).await.unwrap();
+    let fields = [bound.id, ordinary.id]
+        .into_iter()
+        .map(|id| {
+            accepted
+                .actions
+                .iter()
+                .find(|action| action.id == id)
+                .unwrap()
+                .clone()
+        })
+        .collect();
+    (world, parent.id, layer.id, fields, invoke.id)
+}
+
+#[tokio::test]
+async fn committed_input_ack_survives_consumer_projection_failure_without_scope_leak() {
+    use relayer_graph_core::PresentingInputOccurrence;
+    let (world, parent, layer, fields, _) = mutation_ack_world("input-committed-ack").await;
+    let occurrence = |index: usize| PresentingInputOccurrence {
+        presenting_interaction_node_id: parent,
+        presenting_layer_id: layer,
+        action_id: fields[index].id,
+    };
+    let headers =
+        HeaderMap::from_iter([(header::COOKIE, "relayer_control=control".parse().unwrap())]);
+    let commit_request = |index: usize, text: &str, revision: i64| {
+        serde_json::from_value::<crate::api::input_drafts::CommitActionInputRequest>(serde_json::json!({"occurrence":occurrence(index),"value":{"text":text},"expectedRevision":revision})).unwrap()
+    };
+    // Pre-mutation failure remains a refusal and spends no draft revision.
+    world
+        .faults
+        .fail_input_occurrence_reads
+        .store(true, Ordering::SeqCst);
+    assert!(
+        crate::api::input_drafts::commit(
+            State(world.state.clone()),
+            headers.clone(),
+            Path(world.thread.id.value()),
+            Json(commit_request(0, "Lisbon", 0))
+        )
+        .await
+        .is_err()
+    );
+    assert_eq!(
+        world
+            .product
+            .action_input_draft(world.thread.id)
+            .await
+            .unwrap()
+            .revision,
+        0
+    );
+    world
+        .faults
+        .fail_input_occurrence_reads
+        .store(false, Ordering::SeqCst);
+    world
+        .faults
+        .fail_input_consumer_projection
+        .store(true, Ordering::SeqCst);
+    let reply = crate::api::input_drafts::commit(
+        State(world.state.clone()),
+        headers.clone(),
+        Path(world.thread.id.value()),
+        Json(commit_request(0, "Lisbon", 0)),
+    )
+    .await
+    .unwrap_or_else(|error| panic!("committed input reported failure: {}", error.message()));
+    let reply = serde_json::to_value(reply.0).unwrap();
+    assert_eq!(reply["revision"], 1);
+    assert_eq!(reply["attachments"][0]["value"]["text"], "Lisbon");
+    assert_eq!(reply["attachments"][0]["composerEligible"], false);
+    let stored = world
+        .product
+        .action_input_draft(world.thread.id)
+        .await
+        .unwrap();
+    assert_eq!(stored.revision, 1);
+    assert_eq!(stored.attachments[0].occurrence, occurrence(0));
+    // An expired shared presentation budget has the same safe acknowledgement
+    // shape and cannot consume another revision or expose this bound answer.
+    let timed_out = crate::api::input_drafts::committed_response(
+        &world.state,
+        stored,
+        tokio::time::Instant::now(),
+    )
+    .await;
+    let timed_out = serde_json::to_value(timed_out).unwrap();
+    assert_eq!(timed_out["revision"], 1);
+    assert_eq!(timed_out["attachments"][0]["value"]["text"], "Lisbon");
+    assert_eq!(timed_out["attachments"][0]["composerEligible"], false);
+    let notes = world
+        .product
+        .commit_action_input_attachment(
+            world.thread.id,
+            &occurrence(1),
+            &fields[1],
+            &crate::product::ActionInputValue::Text {
+                text: "Private notes".into(),
+            },
+            1,
+        )
+        .await
+        .unwrap();
+    // An operator acknowledgement must still expose only its commissioned occurrence.
+    let mut operator_state = world.state.clone();
+    operator_state.annotations_enabled = true;
+    operator_state.authenticator = DesktopSessionAuthenticator::new("control", Some("read".into()));
+    let token = "mutation-ack-operator-token-000000000000";
+    let registration=serde_json::from_value::<crate::api::input_operator_sessions::RegisterInputOperatorSessionRequest>(serde_json::json!({"token":token,"threadId":world.thread.id.value(),"occurrences":[occurrence(0)]})).unwrap();
+    crate::api::input_operator_sessions::register_session(
+        State(operator_state.clone()),
+        headers.clone(),
+        Json(registration),
+    )
+    .await
+    .unwrap_or_else(|error| panic!("operator register {}", error.message()));
+    let operator_headers = HeaderMap::from_iter([(
+        header::COOKIE,
+        format!("relayer_control=read; relayer_input_operator={token}")
+            .parse()
+            .unwrap(),
+    )]);
+    let operator_reply = crate::api::input_drafts::commit(
+        State(operator_state.clone()),
+        operator_headers.clone(),
+        Path(world.thread.id.value()),
+        Json(commit_request(0, "Porto", notes.revision)),
+    )
+    .await
+    .unwrap_or_else(|error| panic!("operator ack {}", error.message()));
+    let operator_reply = serde_json::to_value(operator_reply.0).unwrap();
+    assert_eq!(operator_reply["revision"], 3);
+    assert_eq!(operator_reply["attachments"].as_array().unwrap().len(), 1);
+    assert_eq!(operator_reply["attachments"][0]["value"]["text"], "Porto");
+    assert_eq!(operator_reply["attachments"][0]["composerEligible"], false);
+    assert!(
+        crate::api::input_drafts::commit(
+            State(operator_state),
+            operator_headers,
+            Path(world.thread.id.value()),
+            Json(commit_request(1, "Unauthorized notes", 3))
+        )
+        .await
+        .is_err()
+    );
+    // Detach commits before its remaining-attachment presentation join too.
+    let query = serde_json::from_value::<crate::api::input_drafts::DetachActionInputQuery>(
+        serde_json::json!({"expectedRevision":3}),
+    )
+    .unwrap();
+    let detached = crate::api::input_drafts::detach(
+        State(world.state.clone()),
+        headers.clone(),
+        Path((
+            world.thread.id.value(),
+            parent.value(),
+            layer.value(),
+            fields[0].id.value(),
+        )),
+        Query(query),
+    )
+    .await
+    .unwrap_or_else(|error| panic!("detached input reported failure: {}", error.message()));
+    let detached = serde_json::to_value(detached.0).unwrap();
+    assert_eq!(detached["revision"], 4);
+    assert_eq!(detached["attachments"].as_array().unwrap().len(), 1);
+    assert_eq!(detached["attachments"][0]["value"]["text"], "Private notes");
+    assert_eq!(detached["attachments"][0]["composerEligible"], false);
+    assert_eq!(
+        world
+            .product
+            .action_input_draft(world.thread.id)
+            .await
+            .unwrap()
+            .revision,
+        4
+    );
+    // A later authoritative refresh restores actual ordinary-chat classification.
+    world
+        .faults
+        .fail_input_consumer_projection
+        .store(false, Ordering::SeqCst);
+    let refreshed = crate::api::input_drafts::get(
+        State(world.state.clone()),
+        headers,
+        Path(world.thread.id.value()),
+    )
+    .await
+    .unwrap_or_else(|error| panic!("refresh {}", error.message()));
+    assert_eq!(
+        serde_json::to_value(refreshed.0).unwrap()["attachments"][0]["composerEligible"],
+        true
+    );
+    world.finish().await;
+}
+
+#[tokio::test]
+async fn started_invoke_ack_survives_remaining_input_projection_failure() {
+    verify_started_invoke_ack("consumer").await;
+}
+
+#[tokio::test]
+async fn started_invoke_ack_survives_invocation_projection_failure() {
+    verify_started_invoke_ack("invocation").await;
+}
+
+#[tokio::test]
+async fn started_invoke_ack_survives_product_draft_read_failure() {
+    verify_started_invoke_ack("draft").await;
+}
+
+#[tokio::test]
+async fn started_invoke_ack_survives_claimed_interaction_read_failure() {
+    verify_started_invoke_ack("claimed").await;
+}
+
+async fn verify_started_invoke_ack(fault: &str) {
+    use relayer_graph_core::PresentingInputOccurrence;
+    let (world, parent, layer, fields, invoke) = mutation_ack_world("invoke-started-ack").await;
+    let mut draft = world
+        .product
+        .action_input_draft(world.thread.id)
+        .await
+        .unwrap();
+    for (index, text) in ["Lisbon", "Keep notes"].into_iter().enumerate() {
+        let occurrence = PresentingInputOccurrence {
+            presenting_interaction_node_id: parent,
+            presenting_layer_id: layer,
+            action_id: fields[index].id,
+        };
+        draft = world
+            .product
+            .commit_action_input_attachment(
+                world.thread.id,
+                &occurrence,
+                &fields[index],
+                &crate::product::ActionInputValue::Text { text: text.into() },
+                draft.revision,
+            )
+            .await
+            .unwrap();
+    }
+    let mut state = world.state.clone();
+    state.interaction_execution = Some(crate::product::InteractionExecutionService::new(
+        world.product.clone(),
+        world.runtime.clone(),
+        state.permission_catalog.clone(),
+        state.standalone_workspaces_directory.clone(),
+        state.approval_decisions.clone(),
+        None,
+        state.completion_brokers.clone(),
+    ));
+    // Hold the actual ordinary-session stub until after acknowledgement: its
+    // eventual execution refusal restores inputs through independent cleanup.
+    world.harness.session_gated.store(true, Ordering::SeqCst);
+    world
+        .harness
+        .session_requested
+        .store(false, Ordering::SeqCst);
+    let restore = match fault {
+        "consumer" => {
+            world
+                .faults
+                .fail_input_consumer_projection
+                .store(true, Ordering::SeqCst);
+            None
+        }
+        "invocation" => {
+            *world.faults.post_activation_read_fault.lock().unwrap() = Some((
+                world.pool.clone(),
+                "ALTER TABLE invocation_preparation_refusals RENAME TO unavailable_invocation_refusals",
+            ));
+            Some(
+                "ALTER TABLE unavailable_invocation_refusals RENAME TO invocation_preparation_refusals",
+            )
+        }
+        "draft" => {
+            *world.faults.post_activation_read_fault.lock().unwrap() = Some((
+                world.pool.clone(),
+                "ALTER TABLE action_input_attachments RENAME TO unavailable_input_attachments",
+            ));
+            Some("ALTER TABLE unavailable_input_attachments RENAME TO action_input_attachments")
+        }
+        "claimed" => {
+            *world.faults.post_activation_read_fault.lock().unwrap() = Some((
+                world.pool.clone(),
+                "ALTER TABLE interaction_attempts RENAME TO unavailable_interaction_attempts",
+            ));
+            Some("ALTER TABLE unavailable_interaction_attempts RENAME TO interaction_attempts")
+        }
+        _ => panic!("unknown fixture fault"),
+    };
+    let (status, reply) = invoke_action_with_authority(
+        &state,
+        world.thread.id.value(),
+        world.thread.root_interaction_id.value(),
+        invoke.value(),
+        "ack-after-launch",
+        Some(draft.revision),
+        Some(layer.value()),
+    )
+    .await
+    .unwrap_or_else(|error| panic!("started invocation reported failure: {}", error.message()));
+    assert_eq!(status, StatusCode::CREATED);
+    let reply = serde_json::to_value(reply.0).unwrap();
+    assert_eq!(reply["invocation"]["invocationKey"], "ack-after-launch");
+    assert_eq!(reply["invocation"]["actionId"], invoke.value());
+    assert_eq!(
+        reply["invocation"]["sourceInteractionId"],
+        world.thread.root_interaction_id.value()
+    );
+    assert_eq!(
+        reply["invocation"]["resultInteractionId"],
+        reply["interaction"]["id"]
+    );
+    assert_eq!(reply["created"], true);
+    let handoff_deadline = Instant::now() + Duration::from_secs(3);
+    while !world.harness.session_requested.load(Ordering::SeqCst) {
+        assert!(
+            Instant::now() < handoff_deadline,
+            "detached execution did not own session preparation"
+        );
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    if fault == "claimed" {
+        assert_eq!(reply["interaction"]["completionStatus"], "running");
+        assert!(reply["interaction"]["graphNodeId"].as_i64().unwrap() > 0);
+    }
+    if let Some(restore) = restore {
+        assert!(
+            world
+                .faults
+                .post_activation_read_fault
+                .lock()
+                .unwrap()
+                .is_none(),
+            "native activation injected the actual SQLite read outage"
+        );
+        sqlx::query(restore).execute(&world.pool).await.unwrap();
+    }
+    if fault == "draft" {
+        assert!(reply["inputDraft"].is_null());
+    } else {
+        assert_eq!(
+            reply["inputDraft"]["attachments"].as_array().unwrap().len(),
+            1
+        );
+        assert_eq!(
+            reply["inputDraft"]["attachments"][0]["value"]["text"],
+            "Keep notes"
+        );
+        assert_eq!(
+            reply["inputDraft"]["attachments"][0]["composerEligible"],
+            fault == "invocation"
+        );
+    }
+    if fault == "invocation" || fault == "claimed" {
+        assert_eq!(reply["invocation"]["preparationRecoverable"], false);
+        assert_eq!(reply["invocation"]["preparationRejected"], false);
+        assert!(reply["invocation"]["reusable"].is_null());
+    }
+    let inventory = world
+        .graph
+        .conversation_graph_snapshot(&[parent])
+        .await
+        .unwrap();
+    assert_eq!(inventory.invocations.len(), 1);
+    assert_eq!(
+        reply["interaction"]["graphNodeId"].as_i64(),
+        Some(
+            inventory.invocations[0]
+                .invocation
+                .child_interaction_node_id
+                .value()
+        ),
+        "acknowledgement names exactly the graph-owned child"
+    );
+    assert_eq!(inventory.invocations[0].submitted_inputs.len(), 1);
+    assert_eq!(
+        serde_json::to_value(&inventory.invocations[0].submitted_inputs[0].value).unwrap()["text"],
+        "Lisbon"
+    );
+    let remaining = world
+        .product
+        .action_input_draft(world.thread.id)
+        .await
+        .unwrap();
+    assert_eq!(remaining.attachments.len(), 1);
+    assert_eq!(remaining.attachments[0].occurrence.action_id, fields[1].id);
+    let reservation = world
+        .product
+        .user_invocation_reservation(
+            world.thread.root_interaction_id,
+            invoke.value(),
+            Some("ack-after-launch"),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(reservation.invocation.durable);
+    assert_eq!(
+        reservation.interaction.id.value(),
+        reply["interaction"]["id"].as_i64().unwrap()
+    );
+    world.harness.session_gate.add_permits(1);
+    let deadline = Instant::now() + Duration::from_secs(3);
+    loop {
+        let current = world
+            .product
+            .get_interaction(reservation.interaction.id)
+            .await
+            .unwrap();
+        if current.completion_status == "not_started" && current.latest_attempt.is_some() {
+            break;
+        }
+        assert!(Instant::now() < deadline, "stub refusal did not settle");
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    assert_eq!(
+        world
+            .product
+            .action_input_draft(world.thread.id)
+            .await
+            .unwrap()
+            .attachments
+            .len(),
+        2
     );
     world.finish().await;
 }

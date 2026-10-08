@@ -42,7 +42,7 @@ export function navigationEntryKey(entry) {
 }
 
 // A reading relationship to an exact call is separate from authored Navigate ancestry.
-export function invocationOriginForSource(origin, sourceLayer, actionInvocations, resultTurnId) {
+export function invocationOriginForSource(origin, sourceLayer, actionInvocations, resultTurnId, importedInvocationHistory = []) {
   let identity;
   try {
     identity = normalizeInvocationOrigin(origin, origin?.sourceEntry?.threadId);
@@ -59,7 +59,33 @@ export function invocationOriginForSource(origin, sourceLayer, actionInvocations
     && sameId(action.sourceNodeId, identity.sourceNodeId)
     && action.kind === "invoke" && action.state === "accepted");
   if (!node || !action) return null;
-  const calls = (actionInvocations ?? []).filter(call => call.durable === true
+  let calls;
+  if (identity.kind === "imported") {
+    calls = importedInvocationHistory.filter(call => call.inert === true
+      && sameId(call.threadId, identity.sourceEntry.threadId)
+      && sameId(call.sourceInteractionId, identity.sourceEntry.turnId)
+      && sameId(call.sourceActionId, identity.actionId)
+      && sameId(call.sourceNodeId, identity.sourceNodeId)
+      && sameId(call.presentingLayerId, identity.presentingLayerId)
+      && call.record?.id === identity.invocationId && identity.invocationKey === call.record.id
+      && (call.record.lifecycle === "succeeded"
+        ? sameId(call.resultInteractionId, resultTurnId) || call.resultInteractionId == null
+          && String(resultTurnId) === `current:${call.record.id}`
+          && call.record.returnedLayerId != null && call.record.returnedLayerId === call.record.current?.rootLayerId
+          && call.record.currentLayerId === call.record.returnedLayerId
+        : String(resultTurnId) === `current:${call.record.id}` && call.record.current != null));
+  } else if (identity.kind === "graph") {
+    calls = (actionInvocations ?? []).filter(call => call.graphOnly === true && call.occupancyOnly !== true
+      && sameId(call.sourceInteractionId, identity.sourceEntry.turnId)
+      && sameId(call.actionId, identity.actionId) && call.invocationKey === identity.invocationKey
+      && sameId(call.presentingLayerId, identity.presentingLayerId)
+      && sameId(call.nativeInvocation?.invocation?.id, identity.invocationId)
+      && sameId(call.nativeInvocation?.invocation?.parentNodeId, identity.sourceNodeId)
+      && call.nativeInvocation?.invocation?.invocationKey === identity.invocationKey
+      && sameId(call.nativeInvocation?.invocation?.sourceActionId, identity.actionId)
+      && sameId(call.nativeInvocation?.invocation?.actionSnapshot?.presentingLayerId, identity.presentingLayerId)
+      && String(resultTurnId) === `native-current:${identity.invocationId}`);
+  } else calls = (actionInvocations ?? []).filter(call => call.durable === true
     && call.preparationRejected !== true
     && sameId(call.sourceInteractionId, identity.sourceEntry.turnId)
     && sameId(call.actionId, identity.actionId)
@@ -208,7 +234,7 @@ export async function resolveNavigationPresentation(entry, {
       loadThread, loadLayer, layerCache,
     });
     invocationOrigin = invocationOriginForSource(normalized.invocationOrigin, source.layer,
-      detail.actionInvocations, normalized.turnId);
+      detail.actionInvocations, normalized.turnId, detail.importedInvocationHistory);
     if (!invocationOrigin) throw new Error("Invocation origin source or exact call is no longer available.");
   }
   return Object.freeze({
@@ -217,6 +243,7 @@ export async function resolveNavigationPresentation(entry, {
     interactions,
     actionInvocations: Array.isArray(detail.actionInvocations) ? detail.actionInvocations : [],
     invocationInventoryAvailable: detail.invocationInventoryAvailable === true,
+    importedInvocationHistory: detail.importedInvocationHistory ?? [],
     approvals: Array.isArray(detail.approvals) ? detail.approvals : [],
     interaction,
     layer,

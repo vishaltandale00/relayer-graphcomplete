@@ -180,6 +180,40 @@ pub(super) async fn scoped_response(
     Ok(response)
 }
 
+/// The mutation already committed. Presentation availability cannot turn that
+/// success into a failed save or detach. Unknown scope stays outside Send until
+/// a later authoritative refresh; the exact saved values/revision remain visible.
+pub(super) async fn committed_response(
+    state: &ApiState,
+    draft: ActionInputDraft,
+    deadline: tokio::time::Instant,
+) -> ActionInputDraftResponse {
+    let ordinary =
+        match tokio::time::timeout_at(deadline, composer_occurrences(state, &draft)).await {
+            Ok(Ok(ordinary)) => Some(ordinary),
+            result => {
+                let reason = if result.is_err() {
+                    "timed_out"
+                } else {
+                    "unavailable"
+                };
+                // Never log the answer, action prompt, backend body or private path.
+                eprintln!(
+                    "committed input response projection unavailable: thread={} reason={reason}",
+                    draft.thread_id.value()
+                );
+                None
+            }
+        };
+    let mut response: ActionInputDraftResponse = draft.into();
+    for input in &mut response.attachments {
+        input.composer_eligible = ordinary
+            .as_ref()
+            .is_some_and(|occurrences| occurrences.contains(&input.occurrence));
+    }
+    response
+}
+
 pub(super) async fn get(
     State(state): State<ApiState>,
     headers: HeaderMap,
@@ -261,7 +295,12 @@ pub(super) async fn commit(
             request.expected_revision,
         )
         .await?;
-    let mut response = scoped_response(&state, draft).await?;
+    let mut response = committed_response(
+        &state,
+        draft,
+        super::interaction_graph::projection_deadline(),
+    )
+    .await;
     if let Some(operator) = operator {
         response.attachments.retain(|attachment| {
             operator
@@ -304,7 +343,14 @@ pub(super) async fn detach(
             query.expected_revision,
         )
         .await?;
-    Ok(Json(scoped_response(&state, draft).await?))
+    Ok(Json(
+        committed_response(
+            &state,
+            draft,
+            super::interaction_graph::projection_deadline(),
+        )
+        .await,
+    ))
 }
 
 #[cfg(test)]

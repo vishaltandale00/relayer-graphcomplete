@@ -1,4 +1,5 @@
 import { request } from "./api.js";
+import { nativeInvocationCurrentPresentation } from "./product-workspace/model.js";
 
 const MEDIA_TYPES = new Set(["image/png", "image/jpeg", "image/svg+xml"]);
 const MAX_BYTES = 8 * 1024 * 1024;
@@ -14,6 +15,24 @@ export async function resolveAcceptedNodeDetailAsset(asset, context, dependencie
   const read = dependencies.request ?? request;
   const response = await read(`/api/threads/${threadId}/interactions/${interactionId}/nodes/${nodeId}/detail-assets/${encodeURIComponent(asset.id)}?layerId=${layerId}`);
   return resolvePinnedAssetBytes(asset, response, dependencies);
+}
+
+// A graph-owned child has no Product turn. Its accepted Current is read through
+// the real source turn's existing read scope after checking the exact call.
+export async function resolveNativeInvocationAsset(asset, call, { threadId, sourceInteraction, interaction, nodeId, layerId }, dependencies = {}) {
+  const presentation = nativeInvocationCurrentPresentation(call, { threadId, sourceInteraction });
+  const layer = presentation?.layers.get(String(layerId));
+  const root = presentation?.interaction.completionOutput.rootAction;
+  const rootIcon = String(presentation?.interaction.graphNodeId) === String(nodeId)
+    && String(presentation?.interaction.completionOutput.rootLayer.layer.id) === String(layerId)
+    && String(root?.sourceNodeId) === String(nodeId) && String(root?.targetLayerId) === String(layerId)
+    && root?.state === "accepted" && root.kind === "navigate" && root.icon?.kind === "image"
+    && root.icon.assetId === asset?.id && root.icon.digestSha256 === asset.digestSha256 && root.icon.mediaType === asset.mediaType;
+  if (!presentation || String(presentation.interaction.id) !== String(interaction?.id)
+    || !(rootIcon || layer?.nodes?.some(node => String(node.id) === String(nodeId) && node.state === "accepted"))) {
+    throw new Error("Visual asset is not owned by this native Current view.");
+  }
+  return resolveAcceptedNodeDetailAsset(asset, { threadId, interactionId: sourceInteraction.id, nodeId, layerId }, dependencies);
 }
 
 // Imported Current has only portable viewing identities. Its validated frozen

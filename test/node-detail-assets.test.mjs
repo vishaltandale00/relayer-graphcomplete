@@ -1,6 +1,6 @@
 import { createHash, webcrypto } from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
-import { resolveAcceptedNodeDetailAsset, resolveImportedInvocationAsset } from "../desktop/renderer/src/node-detail-assets.js";
+import { resolveAcceptedNodeDetailAsset, resolveImportedInvocationAsset, resolveNativeInvocationAsset } from "../desktop/renderer/src/node-detail-assets.js";
 
 function fixture() {
   const bytes = Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"/>');
@@ -67,5 +67,38 @@ describe("inert imported Current asset delivery", () => {
       expect(dependencies.URL.createObjectURL).not.toHaveBeenCalled();
     }
     expect(dependencies.request).not.toHaveBeenCalled();
+  });
+});
+
+describe("graph-owned native Current asset delivery", () => {
+  it.each(["valid", "returned-root-valid", "wrong-source", "wrong-key", "wrong-node", "wrong-layer", "child-anchor"])("uses only the real source Product read scope (%s)", async scenario => {
+    const { asset, dependencies, context } = fixture();
+    const sourceInteraction = { id: 2, threadId: 1, graphNodeId: 50 };
+    const call = { graphOnly: true, sourceInteractionId: 2, actionId: 8, invocationKey: "call-a", resultCompletionStatus: "stopped",
+      nativeInvocation: { sourceAction: { id: 8, sourceNodeId: 9 }, parentNode: { id: 9 },
+        invocation: { id: 70, invocationKey: "call-a", sourceCompletionId: 50, sourceActionId: 8, parentNodeId: 9, childInteractionNodeId: 700,
+          actionSnapshot: { actionId: 8, sourceNodeId: 9 }, state: { completionId: 700, currentLayerId: 4, lifecycle: "stopped" } },
+        current: { nodeId: 700, rootLayerId: 4, layers: [{ layer: { id: 4, state: "accepted" }, nodes: [{ id: 3, state: "accepted" }], actions: [], edges: [] }] } } };
+    const view = { ...context, sourceInteraction, interaction: { id: "native-current:70" } };
+    if (scenario === "returned-root-valid") {
+      view.nodeId = 700;
+      call.resultCompletionStatus = "accepted";
+      call.nativeInvocation.invocation.state.lifecycle = "succeeded";
+      call.nativeInvocation.current.rootAction = { state: "accepted", kind: "navigate", sourceNodeId: 700, targetLayerId: 4,
+        icon: { kind: "image", assetId: asset.id, digestSha256: asset.digestSha256, mediaType: asset.mediaType } };
+    }
+    if (scenario === "wrong-source") view.sourceInteraction = { ...sourceInteraction, graphNodeId: 51 };
+    if (scenario === "wrong-key") call.invocationKey = "other";
+    if (scenario === "wrong-node") view.nodeId = 5;
+    if (scenario === "wrong-layer") view.layerId = 6;
+    if (scenario === "child-anchor") view.nodeId = 700;
+    if (scenario === "valid" || scenario === "returned-root-valid") {
+      const result = await resolveNativeInvocationAsset(asset, call, view, dependencies);
+      expect(dependencies.request).toHaveBeenCalledExactlyOnceWith(`/api/threads/1/interactions/2/nodes/${view.nodeId}/detail-assets/visual%2Fa?layerId=4`);
+      result.release();
+    } else {
+      await expect(resolveNativeInvocationAsset(asset, call, view, dependencies)).rejects.toThrow("native Current");
+      expect(dependencies.request).not.toHaveBeenCalled();
+    }
   });
 });

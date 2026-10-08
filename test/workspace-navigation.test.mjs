@@ -102,6 +102,36 @@ describe("workspace navigation presentation", () => {
     expect(invocationOriginForSource(origin, sourceLayer, detail.actionInvocations, 3)).toEqual(restored.invocationOrigin);
   });
 
+  it.each(["imported", "graph"])("validates %s origins against their own inert inventory without native execution receipts", async kind => {
+    const { detail, sourceLayer, childEntry, options } = invocationFixture();
+    const resultId = kind === "graph" ? "native-current:70" : 3;
+    const origin = { ...childEntry.invocationOrigin, kind, invocationId: kind === "graph" ? "70" : "invocation:call",
+      invocationKey: kind === "graph" ? "call-a" : "invocation:call" };
+    detail.interactions[2].id = resultId;
+    const imported = { inert: true, threadId: 7, sourceInteractionId: 2, sourceNodeId: 11, sourceActionId: 777, presentingLayerId: 101,
+      resultInteractionId: 3, record: { id: "invocation:call", lifecycle: "succeeded" } };
+    const native = { graphOnly: true, sourceInteractionId: 2, actionId: 777, invocationKey: "call-a", presentingLayerId: 101,
+      nativeInvocation: { invocation: { id: 70, parentNodeId: 11, sourceActionId: 777, invocationKey: "call-a", actionSnapshot: { presentingLayerId: 101 } } } };
+    detail.actionInvocations = kind === "graph" ? [native] : [];
+    detail.importedInvocationHistory = kind === "imported" ? [imported] : [];
+    const entry = { ...childEntry, turnId: String(resultId), invocationOrigin: origin };
+    expect(await resolveNavigationPresentation(entry, options)).toMatchObject({ invocationOrigin: { kind, label: "API", presentingLayerId: "101" } });
+    const inventory = kind === "graph" ? detail.actionInvocations : detail.importedInvocationHistory;
+    const baseline = structuredClone(inventory[0]);
+    for (const scenario of ["key", "node", "action", "presenting", "source", "ambiguous"]) {
+      inventory.splice(0, inventory.length, structuredClone(baseline));
+      if (scenario === "key") { if (kind === "graph") inventory[0].invocationKey = "other"; else inventory[0].record.id = "invocation:other"; }
+      if (scenario === "node") { if (kind === "graph") inventory[0].nativeInvocation.invocation.parentNodeId = 12; else inventory[0].sourceNodeId = 12; }
+      if (scenario === "action") { if (kind === "graph") inventory[0].actionId = 778; else inventory[0].sourceActionId = 778; }
+      if (scenario === "presenting") inventory[0].presentingLayerId = 100;
+      if (scenario === "source") inventory[0].sourceInteractionId = 1;
+      if (scenario === "ambiguous") inventory.push(structuredClone(baseline));
+      await expect(resolveNavigationPresentation(entry, options)).rejects.toThrow("Invocation origin source or exact call");
+    }
+    expect(sourceLayer.actions).toHaveLength(1);
+    expect(detail.actionInvocations.every(call => call.durable !== true)).toBe(true);
+  });
+
   it("restores exact source and child Current history after both return different root Layers", async () => {
     const { detail, sourceLayer, resultLayer, childEntry, options } = invocationFixture(true);
     const source = detail.interactions.find(turn => turn.id === 2);

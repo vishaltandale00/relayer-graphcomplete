@@ -816,6 +816,16 @@ pub(super) async fn project_imported_invocation_history(
             } else {
                 None
             },
+            source_action_id: if source_verified {
+                mapping.and_then(|mapping| mapping["sourceActionId"].as_i64())
+            } else {
+                None
+            },
+            presenting_layer_id: if source_verified {
+                mapping.and_then(|mapping| mapping["presentingLayerId"].as_i64())
+            } else {
+                None
+            },
             result_interaction_id,
             record,
             visual_asset_contents,
@@ -1531,6 +1541,52 @@ pub(super) async fn get_detail_asset(
                         .and_then(Value::as_i64)
                         == Some(graph_node_id)
             })
+    } else if !layer.nodes.iter().any(|node| node.id == node_id) {
+        // A graph-only child's response icon belongs to its canonical anchor,
+        // which is not a content member of Current. The real Product source is
+        // only a read scope: exact native call and accepted Current prove this
+        // one association without creating a Product child or asset capability.
+        let snapshot = runtime.local_invocation_inventory(&[graph_node_id]).await?;
+        let matching = snapshot
+            .invocations
+            .iter()
+            .filter(|native| {
+                let call = &native.invocation;
+                let Some(current) = &native.current else {
+                    return false;
+                };
+                let Some(root) = &current.root_action else {
+                    return false;
+                };
+                let icon = serde_json::to_value(root).ok();
+                call.source_completion_id.value() == graph_node_id
+                    && call.child_interaction_node_id == node_id
+                    && call.state.completion_id == node_id
+                    && call.state.current_layer_id == Some(current.root_layer_id)
+                    && current.node_id == node_id
+                    && current.root_layer_id.value() == query.layer_id
+                    && layer.layer.state == relayer_graph_core::RecordState::Accepted
+                    && native.source_action.id == call.source_action_id
+                    && native.source_action.source_node_id == call.parent_node_id
+                    && native.parent_node.id == call.parent_node_id
+                    && root.state == relayer_graph_core::RecordState::Accepted
+                    && root.kind == relayer_graph_core::ActionKind::Navigate
+                    && root.relation == Some(relayer_graph_core::NavigateRelation::Expand)
+                    && root.source_node_id == node_id
+                    && root.target_layer_id == Some(current.root_layer_id)
+                    && icon
+                        .as_ref()
+                        .and_then(|value| value.pointer("/icon/kind"))
+                        .and_then(Value::as_str)
+                        == Some("image")
+                    && icon
+                        .as_ref()
+                        .and_then(|value| value.pointer("/icon/assetId"))
+                        .and_then(Value::as_str)
+                        == Some(asset_id.as_str())
+            })
+            .count();
+        matching == 1
     } else {
         false
     };
@@ -3901,13 +3957,26 @@ async fn invoke_action_with_authority(
         outcome.created = reservation.created;
         // Native binding and captured-epoch consumption committed together above.
         let (status, mut response) = spawn_action_handoff(state.clone(), thread, outcome).await?;
-        response.0.input_draft = Some(
-            super::input_drafts::scoped_response(
-                state,
-                state.product.action_input_draft(thread_id).await?,
-            )
-            .await?,
-        );
+        // The detached handoff already owns execution. A draft read/presentation
+        // outage must not tell the caller that this activation failed.
+        let deadline = super::interaction_graph::projection_deadline();
+        match tokio::time::timeout_at(deadline, state.product.action_input_draft(thread_id)).await {
+            Ok(Ok(draft)) => {
+                response.0.input_draft =
+                    Some(super::input_drafts::committed_response(state, draft, deadline).await);
+            }
+            result => {
+                let reason = if result.is_err() {
+                    "timed_out"
+                } else {
+                    "unavailable"
+                };
+                eprintln!(
+                    "started invocation input response unavailable: thread={} reason={reason}",
+                    thread_id.value()
+                );
+            }
+        }
         return Ok((status, response));
     }
     if action.reusable == Some(true) || !action.input_action_ids.is_empty() {
@@ -3988,12 +4057,32 @@ async fn finish_action_handoff(
     } else {
         outcome.interaction
     };
+    let invocation = match tokio::time::timeout_at(
+        super::interaction_graph::projection_deadline(),
+        project_action_invocations(state, std::slice::from_ref(&outcome.invocation)),
+    )
+    .await
+    {
+        Ok(Ok(mut invocations)) => invocations.remove(0),
+        result => {
+            let reason = if result.is_err() {
+                "timed_out"
+            } else {
+                "unavailable"
+            };
+            eprintln!(
+                "started invocation response projection unavailable: interaction={} reason={reason}",
+                interaction.id.value()
+            );
+            // Keep the immutable exact call and child identity. Missing read
+            // enrichment cannot grant repetition or preexecution recovery.
+            ActionInvocationResponse::from(outcome.invocation)
+        }
+    };
     Ok((
         status,
         Json(InvokeActionResponse {
-            invocation: project_action_invocations(state, &[outcome.invocation])
-                .await?
-                .remove(0),
+            invocation,
             interaction: interaction.into(),
             created: outcome.created,
             input_draft: None,
@@ -4032,20 +4121,42 @@ async fn claim_and_start_action_interaction(
             .await
             .map_err(Into::into);
     };
-    let running = state.product.get_interaction(interaction.id).await?;
-
-    // There is no await between the durable claim and spawning execution. Once this detached
-    // handoff owns the interaction, losing the HTTP request cannot strand it as not_started.
-    let state = state.clone();
-    let thread = thread.clone();
+    // A successful claim/activation already proves this exact interaction is
+    // running on this prepared node. Preserve that minimal acknowledgement if
+    // the optional Product reread is unavailable; never invent accepted output.
+    let mut running = interaction.clone();
+    running.completion_status = "running".into();
+    running.graph_node_id = Some(prepared.graph_node_id);
+    // No await after claim/activation and before detached execution ownership.
+    let execution_state = state.clone();
+    let execution_thread = thread.clone();
     tokio::spawn(async move {
-        state
+        execution_state
             .interaction_execution
             .as_ref()
             .expect("runtime-backed interaction execution service")
-            .execute_prepared_interaction(thread, interaction, prepared)
+            .execute_prepared_interaction(execution_thread, interaction, prepared)
             .await;
     });
+    match tokio::time::timeout_at(
+        super::interaction_graph::projection_deadline(),
+        state.product.get_interaction(running.id),
+    )
+    .await
+    {
+        Ok(Ok(current)) => running = current,
+        result => {
+            let reason = if result.is_err() {
+                "timed_out"
+            } else {
+                "unavailable"
+            };
+            eprintln!(
+                "started invocation interaction response unavailable: interaction={} reason={reason}",
+                running.id.value()
+            );
+        }
+    }
     Ok(running)
 }
 

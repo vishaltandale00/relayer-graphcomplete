@@ -996,13 +996,15 @@ function projectInteractionGraphs(interactions, turns, layersByTurn, exportVersi
 
 // Presentation only: caller must provide a validated portable Invocation record.
 // This helper creates no accepted Product turn, receipt, or mutation capability.
-export function inertInvocationCurrent(call, { threadId, id = `current:${call.id}`, sourceInteractionId, sequence = 0 } = {}) {
-  if (!call.current || call.lifecycle === "succeeded") return null;
+export function inertInvocationCurrent(call, { threadId, id = `current:${call.id}`, sourceInteractionId, sequence = 0, allowReturned = false } = {}) {
+  const returned = allowReturned && call.lifecycle === "succeeded" && call.returnedLayerId != null
+    && call.returnedLayerId === call.current?.rootLayerId && call.currentLayerId === call.returnedLayerId;
+  if (!call.current || call.lifecycle === "succeeded" && !returned) return null;
   const layerKeys = new Map(call.current.layers.map(layer => [layer.layer.id, layer.layer.clientKey]));
   const layers = new Map(call.current.layers.map(layer => [layer.layer.id, normalizeLayer(layer, layerKeys, new Map())]));
   return { interaction: { id, invocationId: call.id, inertInvocationCurrent: true, threadId,
     invocationSourceInteractionId: sourceInteractionId, graphNodeId: call.childInteractionNodeId, sequence,
-    text: `${call.source.label} · Current`, completionStatus: call.lifecycle === "active" ? "running" : call.lifecycle,
+    text: `${call.source.label} · ${returned ? "Result" : "Current"}`, completionStatus: returned ? "accepted" : call.lifecycle === "active" ? "running" : call.lifecycle,
     completionOutput: { rootLayer: layers.get(call.currentLayerId) }, submittedInputs: cloneJson(call.arguments),
     safeReason: call.safeReason,
     interactionGraph: { enabled: true, complete: sourceInteractionId != null, sources: sourceInteractionId == null ? [] : [{

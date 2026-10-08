@@ -317,6 +317,7 @@ describe("follow-up reading context at the production thread controller", () => 
     await invoking;
     if (mode === "delayed") { fixture.setState(firstCurrent); await controller.refreshState(10); }
     if (browsed) {
+      await vi.waitFor(() => expect(controller.appState.pendingTurn?.readyLayer?.layer.id).toBe(201));
       expect(controller.viewState.currentInteractionId).toBe(1);
       expect(controller.openReadyResult()).toBe(true);
     }

@@ -5,7 +5,7 @@ import {
   productWorkspaceNeedsRecreation,
 } from "./product-workspace/model.js";
 import { activeThread, appState, desktop, evalReview, query, viewState } from "./state.js";
-import { resolveAcceptedNodeDetailAsset, resolveImportedInvocationAsset } from "./node-detail-assets.js";
+import { resolveAcceptedNodeDetailAsset, resolveImportedInvocationAsset, resolveNativeInvocationAsset } from "./node-detail-assets.js";
 import { toast } from "./ui.js";
 import { onboardingTutorialController } from "./onboarding-tutorial.js";
 import { createAnnotationApi } from "./annotation-api.js";
@@ -28,8 +28,11 @@ function workspace() {
     evalReviewContext: evalReview,
     reviewRequested: query.get("review") === "1",
     thread: activeThread(),
+    interaction: appState.interactions.find(interaction => String(interaction.id) === String(viewState.currentInteractionId)),
   });
+  let inputEditingState = null;
   if (productWorkspaceNeedsRecreation(productWorkspace?.mode, nextMode)) {
+    inputEditingState = productWorkspace.captureInputEditingState();
     productWorkspace.dispose();
     productWorkspace = undefined;
   }
@@ -38,10 +41,18 @@ function workspace() {
     : null;
   productWorkspace ??= createProductWorkspace({
     mode: nextMode,
+    inputEditingState,
     getState: () => appState,
     getThread: activeThread,
     selection: viewState,
     resolveNodeDetailAsset: (asset, { node, thread, interaction, layerId }) => {
+      if (interaction?.nativeInvocationCurrent) {
+        const call = appState.actionInvocations.find(call => call.graphOnly === true
+          && String(call.nativeInvocation?.invocation?.id) === String(interaction.invocationId)
+          && call.invocationKey === interaction.invocationKey);
+        const sourceInteraction = appState.interactions.find(source => String(source.id) === String(interaction.invocationSourceInteractionId));
+        return resolveNativeInvocationAsset(asset, call, { threadId: thread?.id, sourceInteraction, interaction, nodeId: node.id, layerId });
+      }
       if (interaction?.inertInvocationCurrent) {
         const history = (appState.importedInvocationHistory ?? []).find(entry => entry.inert === true
           && String(entry.threadId) === String(thread?.id) && entry.record?.id === interaction.invocationId);
@@ -129,6 +140,7 @@ function workspace() {
       ({ navigateResolvedInvoke }) => navigateResolvedInvoke(action, navigation),
     ),
     onNavigateImportedInvocationHistory: (entry) => import("./threads.js").then(({ navigateImportedInvocationHistory }) => navigateImportedInvocationHistory(entry)),
+    onNavigateInvocationCurrent: (entry) => import("./threads.js").then(({ navigateInvocationCurrent }) => navigateInvocationCurrent(entry)),
     onInvokeAction: (action, options) => import("./threads.js").then(({ invokeAction }) => invokeAction(action, options)),
     onDecideApproval: (requestId, decision) => import("./threads.js").then(({ decideApproval }) => decideApproval(requestId, decision)),
     annotationApi,

@@ -1,0 +1,612 @@
+{
+  "schemaVersion": 1,
+  "demonstration": "deterministic production services and renderer",
+  "inference": false,
+  "sourceCommit": "f10b853ccfce143b10da0afc25897f0df1dd6014",
+  "sourceDigest": "79956b1e2c3ed9c89e2ff83426ce257c18fe13fd6c1912a6d9a3ca8079e8ab62",
+  "binaries": {
+    "relayer-graph-server": "c4d9e66b58873f874e15899a30418e43cf336fac6af0d731eec317e6de787bd9",
+    "relayer-app-server": "019d95a02d2afce6c22845a9f518a0849f385c91dabbf26c3a9f4e4368ccef6b"
+  },
+  "video": {
+    "path": "/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-completion-review-DKahnw/evidence/completion-contract.mp4",
+    "sha256": "0f6f8fc00f73f9496f2ad6bd4acd5bbb25d2a4611fb916210458e5fbab79ac3b"
+  },
+  "frames": [
+    {
+      "file": "/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-completion-review-DKahnw/evidence/frame-00001.png",
+      "capturedAt": 1791499550292,
+      "sha256": "168a2ba4010cb6d5d321c829d8f6ddae2d9bc9ba9240dc8d128cff1b49aa8c4c"
+    },
+    {
+      "file": "/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-completion-review-DKahnw/evidence/frame-00002.png",
+      "capturedAt": 1791499550474,
+      "sha256": "9b3fcb319b08aec41b4e6f9305531f64ef1d233a8c86a707388e0d50040da983"
+    },
+    {
+      "file": "/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-completion-review-DKahnw/evidence/frame-00003.png",
+      "capturedAt": 1791499550735,
+      "sha256": "b72bb81657d77d973735e721d4b6f33224f97692322a86db593bf5454ee9447f"
+    },
+    {
+      "file": "/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-completion-review-DKahnw/evidence/frame-00004.png",
+      "capturedAt": 1791499550991,
+      "sha256": "d8df5a525c15eac3c38f0a96fcbb28c6fe14374461ea11dac29599544bb9380b"
+    },
+    {
+      "file": "/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-completion-review-DKahnw/evidence/frame-00005.png",
+      "capturedAt": 1791499551248,
+      "sha256": "ba1572ca382fa74309a0ba844f881212599ab4009f07e0c8e46e2ce2f239bb85"
+    },
+    {
+      "file": "/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-completion-review-DKahnw/evidence/frame-00006.png",
+      "capturedAt": 1791499551490,
+      "sha256": "50a692cf65c02077b2578be10f53dafdd0e502711f4c952a32298cef8f074d8b"
+    },
+    {
+      "file": "/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-completion-review-DKahnw/evidence/frame-00007.png",
+      "capturedAt": 1791499551745,
+      "sha256": "ea1335128c453dbc056d25b34a40f9b1be9a5712c20340efac0eadb03e1a0e21"
+    },
+    {
+      "file": "/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-completion-review-DKahnw/evidence/frame-00008.png",
+      "capturedAt": 1791499552000,
+      "sha256": "679622ba0bf52142b16c0c1be46d07a398a68572f2bd3641bd1318ede9362613"
+    },
+    {
+      "file": "/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-completion-review-DKahnw/evidence/frame-00009.png",
+      "capturedAt": 1791499552252,
+      "sha256": "d55363189ba485ae03b8762b24fcce1d9d2887c3cc84b962df9b095725bfd6c3"
+    },
+    {
+      "file": "/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-completion-review-DKahnw/evidence/frame-00010.png",
+      "capturedAt": 1791499552498,
+      "sha256": "ad697d812bf2b5d2f31d519b32c0706c71fa4bcb2b09f97470593300fbd503a0"
+    },
+    {
+      "file": "/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-completion-review-DKahnw/evidence/frame-00011.png",
+      "capturedAt": 1791499552753,
+      "sha256": "67f5076a8358aa49c805349e372544fdf2656de74791871d44b9061f4ca1f5c5"
+    },
+    {
+      "file": "/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-completion-review-DKahnw/evidence/frame-00012.png",
+      "capturedAt": 1791499553007,
+      "sha256": "1c11d19a5eac8bd109465fa38a5f9713da2ffbeaed18ca8ffa46a3448860c80c"
+    },
+    {
+      "file": "/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-completion-review-DKahnw/evidence/frame-00013.png",
+      "capturedAt": 1791499553261,
+      "sha256": "9580ba9bb36cc67c291cf1e40e0cbe44e25f671c7170e8eb56fcffba3cd89245"
+    },
+    {
+      "file": "/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-completion-review-DKahnw/evidence/frame-00014.png",
+      "capturedAt": 1791499553512,
+      "sha256": "96d15cf68798a2ff1d10eb30c30db120b752240a1f14f890ba627192bf347b0f"
+    },
+    {
+      "file": "/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-completion-review-DKahnw/evidence/frame-00015.png",
+      "capturedAt": 1791499553756,
+      "sha256": "4c05aecadc61989b55a968c6d35c6eaa5a72b6470f8b38f7e226cbd9c9566f51"
+    },
+    {
+      "file": "/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-completion-review-DKahnw/evidence/frame-00016.png",
+      "capturedAt": 1791499554019,
+      "sha256": "60c87673d34f2917bde2e1ada297cac85f8af6385c05b8474f7d9f24c9d7da2b"
+    },
+    {
+      "file": "/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-completion-review-DKahnw/evidence/frame-00017.png",
+      "capturedAt": 1791499554260,
+      "sha256": "9becfb7b73dafe9b5cf720813167fd21e18d1c9e76187dda3b2c56877d47412a"
+    },
+    {
+      "file": "/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-completion-review-DKahnw/evidence/frame-00018.png",
+      "capturedAt": 1791499554526,
+      "sha256": "9becfb7b73dafe9b5cf720813167fd21e18d1c9e76187dda3b2c56877d47412a"
+    },
+    {
+      "file": "/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-completion-review-DKahnw/evidence/frame-00019.png",
+      "capturedAt": 1791499554781,
+      "sha256": "9becfb7b73dafe9b5cf720813167fd21e18d1c9e76187dda3b2c56877d47412a"
+    },
+    {
+      "file": "/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-completion-review-DKahnw/evidence/frame-00020.png",
+      "capturedAt": 1791499555032,
+      "sha256": "9becfb7b73dafe9b5cf720813167fd21e18d1c9e76187dda3b2c56877d47412a"
+    },
+    {
+      "file": "/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-completion-review-DKahnw/evidence/frame-00021.png",
+      "capturedAt": 1791499555284,
+      "sha256": "9becfb7b73dafe9b5cf720813167fd21e18d1c9e76187dda3b2c56877d47412a"
+    },
+    {
+      "file": "/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-completion-review-DKahnw/evidence/frame-00022.png",
+      "capturedAt": 1791499555522,
+      "sha256": "93d9703321ac7b09d8c787240acda5673e5d787a07a9c67fd0509f2a0389baa1"
+    },
+    {
+      "file": "/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-completion-review-DKahnw/evidence/frame-00023.png",
+      "capturedAt": 1791499555786,
+      "sha256": "93d9703321ac7b09d8c787240acda5673e5d787a07a9c67fd0509f2a0389baa1"
+    },
+    {
+      "file": "/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-completion-review-DKahnw/evidence/frame-00024.png",
+      "capturedAt": 1791499556041,
+      "sha256": "7410a6261730d25b378e1dc21fd316053d8061331169fc74626fb0acf3f2de5c"
+    },
+    {
+      "file": "/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-completion-review-DKahnw/evidence/frame-00025.png",
+      "capturedAt": 1791499556290,
+      "sha256": "85678d19fe603d2237afcbcef66aafccb6a31f5dc594769a051ebb65fac8915c"
+    },
+    {
+      "file": "/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-completion-review-DKahnw/evidence/frame-00026.png",
+      "capturedAt": 1791499556526,
+      "sha256": "c173b0c6cc48979bb107ff0c28a48b5bcb4c48a0c19509800918bd6dd1aaca90"
+    },
+    {
+      "file": "/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-completion-review-DKahnw/evidence/frame-00027.png",
+      "capturedAt": 1791499556781,
+      "sha256": "ddb829140a39dfd6ca3e37571c38009d91fabdc5b81bd36b8518466b232cd1f1"
+    },
+    {
+      "file": "/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-completion-review-DKahnw/evidence/frame-00028.png",
+      "capturedAt": 1791499557026,
+      "sha256": "ddb829140a39dfd6ca3e37571c38009d91fabdc5b81bd36b8518466b232cd1f1"
+    },
+    {
+      "file": "/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-completion-review-DKahnw/evidence/frame-00029.png",
+      "capturedAt": 1791499557298,
+      "sha256": "e0698d3633133e8fcdef9570fa10b4abf8a41ec1169aff9180f17eb0b0db5622"
+    },
+    {
+      "file": "/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-completion-review-DKahnw/evidence/frame-00030.png",
+      "capturedAt": 1791499557553,
+      "sha256": "e0698d3633133e8fcdef9570fa10b4abf8a41ec1169aff9180f17eb0b0db5622"
+    },
+    {
+      "file": "/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-completion-review-DKahnw/evidence/frame-00031.png",
+      "capturedAt": 1791499557786,
+      "sha256": "13de0c34d6a6c946409dc10f8ddf3a53a923bad7b3b1d204881f994a1e634b6b"
+    },
+    {
+      "file": "/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-completion-review-DKahnw/evidence/frame-00032.png",
+      "capturedAt": 1791499558033,
+      "sha256": "34c85c3aa23e43f51c18f94a79ac52cdc4b998837e01320613a1ee4eba15ea31"
+    },
+    {
+      "file": "/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-completion-review-DKahnw/evidence/frame-00033.png",
+      "capturedAt": 1791499558285,
+      "sha256": "99339ab3e22cbd11db588ec1dd5fc80fdf7231851944831c6ad0091e270a4ab6"
+    },
+    {
+      "file": "/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-completion-review-DKahnw/evidence/frame-00034.png",
+      "capturedAt": 1791499558543,
+      "sha256": "d4217bc368c7d1138ab3193549830cda8ebd923da97116d2c5138abe61070022"
+    },
+    {
+      "file": "/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-completion-review-DKahnw/evidence/frame-00035.png",
+      "capturedAt": 1791499558795,
+      "sha256": "37b258480bb48ad45aeb03dfbad7715aa599ac9245ab1516b3c26c68d0d0c843"
+    },
+    {
+      "file": "/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-completion-review-DKahnw/evidence/frame-00036.png",
+      "capturedAt": 1791499559042,
+      "sha256": "8318486e61bf5924b6cb262b80c408c8c7e483690894e8c507969c5d2c9a1ca5"
+    },
+    {
+      "file": "/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-completion-review-DKahnw/evidence/frame-00037.png",
+      "capturedAt": 1791499559296,
+      "sha256": "a8ec5c3e9530f0e327987b937e5f5beccc10d57c1a8db727879ab73d57b1106d"
+    },
+    {
+      "file": "/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-completion-review-DKahnw/evidence/frame-00038.png",
+      "capturedAt": 1791499559542,
+      "sha256": "65b69cc0f4b0384245d02ea8403b6891b854d1a25990b9ed9ac473d059f47c10"
+    },
+    {
+      "file": "/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-completion-review-DKahnw/evidence/frame-00039.png",
+      "capturedAt": 1791499559803,
+      "sha256": "7ee53b3d9dbe67b63b1bc659ab600f17a0f8d0351098f32747dd143132d7995c"
+    },
+    {
+      "file": "/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-completion-review-DKahnw/evidence/frame-00040.png",
+      "capturedAt": 1791499560043,
+      "sha256": "26f381f5a7cd918c104614eee87141c4824bab6d0c89b885ced70ef3207aeff0"
+    },
+    {
+      "file": "/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-completion-review-DKahnw/evidence/frame-00041.png",
+      "capturedAt": 1791499560301,
+      "sha256": "146ac7f17ea65974c1406de4c84212d22f59197c74cb9c775c3586f60f27ab77"
+    },
+    {
+      "file": "/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-completion-review-DKahnw/evidence/frame-00042.png",
+      "capturedAt": 1791499560553,
+      "sha256": "bf897d912553c1b7e987bcb387ef03f37059b62d94ba0cd60608c782613d5e9e"
+    },
+    {
+      "file": "/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-completion-review-DKahnw/evidence/frame-00043.png",
+      "capturedAt": 1791499560800,
+      "sha256": "9b8f74f2103e0a4d09b9010aa2b11dcf0e19f829139e017d4bba93f66fcf953c"
+    },
+    {
+      "file": "/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-completion-review-DKahnw/evidence/frame-00044.png",
+      "capturedAt": 1791499561052,
+      "sha256": "18e0fb52af9c938107d94045a321221229c15d6524ac739f317e92db251ffb22"
+    },
+    {
+      "file": "/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-completion-review-DKahnw/evidence/frame-00045.png",
+      "capturedAt": 1791499561305,
+      "sha256": "c7ba9d337f82a4478c8caf601142309acf83639c02509476db195b6b4298a328"
+    },
+    {
+      "file": "/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-completion-review-DKahnw/evidence/frame-00046.png",
+      "capturedAt": 1791499561552,
+      "sha256": "a90d95334b8d278bb03008e1037fbdd19ba69a9e3e4d01495c82554f2c259540"
+    },
+    {
+      "file": "/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-completion-review-DKahnw/evidence/frame-00047.png",
+      "capturedAt": 1791499561824,
+      "sha256": "a90d95334b8d278bb03008e1037fbdd19ba69a9e3e4d01495c82554f2c259540"
+    },
+    {
+      "file": "/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-completion-review-DKahnw/evidence/frame-00048.png",
+      "capturedAt": 1791499562062,
+      "sha256": "a90d95334b8d278bb03008e1037fbdd19ba69a9e3e4d01495c82554f2c259540"
+    },
+    {
+      "file": "/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-completion-review-DKahnw/evidence/frame-00049.png",
+      "capturedAt": 1791499562325,
+      "sha256": "a90d95334b8d278bb03008e1037fbdd19ba69a9e3e4d01495c82554f2c259540"
+    },
+    {
+      "file": "/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-completion-review-DKahnw/evidence/frame-00050.png",
+      "capturedAt": 1791499562576,
+      "sha256": "a90d95334b8d278bb03008e1037fbdd19ba69a9e3e4d01495c82554f2c259540"
+    },
+    {
+      "file": "/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-completion-review-DKahnw/evidence/frame-00051.png",
+      "capturedAt": 1791499562828,
+      "sha256": "a90d95334b8d278bb03008e1037fbdd19ba69a9e3e4d01495c82554f2c259540"
+    },
+    {
+      "file": "/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-completion-review-DKahnw/evidence/frame-00052.png",
+      "capturedAt": 1791499563078,
+      "sha256": "3a8e7055f5e125105fffb0c475ef09a781e73fa4ef2a17f9dcd71ccbd96eac6e"
+    },
+    {
+      "file": "/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-completion-review-DKahnw/evidence/frame-00053.png",
+      "capturedAt": 1791499563331,
+      "sha256": "3a8e7055f5e125105fffb0c475ef09a781e73fa4ef2a17f9dcd71ccbd96eac6e"
+    },
+    {
+      "file": "/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-completion-review-DKahnw/evidence/frame-00054.png",
+      "capturedAt": 1791499563586,
+      "sha256": "3a8e7055f5e125105fffb0c475ef09a781e73fa4ef2a17f9dcd71ccbd96eac6e"
+    },
+    {
+      "file": "/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-completion-review-DKahnw/evidence/frame-00055.png",
+      "capturedAt": 1791499563835,
+      "sha256": "3a8e7055f5e125105fffb0c475ef09a781e73fa4ef2a17f9dcd71ccbd96eac6e"
+    },
+    {
+      "file": "/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-completion-review-DKahnw/evidence/frame-00056.png",
+      "capturedAt": 1791499564087,
+      "sha256": "9f74c106939f00002d3b17c3b3d865f97891b8af00564d5aaa2ffd1c6c5ed797"
+    },
+    {
+      "file": "/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-completion-review-DKahnw/evidence/frame-00057.png",
+      "capturedAt": 1791499564339,
+      "sha256": "9f74c106939f00002d3b17c3b3d865f97891b8af00564d5aaa2ffd1c6c5ed797"
+    },
+    {
+      "file": "/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-completion-review-DKahnw/evidence/frame-00058.png",
+      "capturedAt": 1791499564578,
+      "sha256": "9f74c106939f00002d3b17c3b3d865f97891b8af00564d5aaa2ffd1c6c5ed797"
+    },
+    {
+      "file": "/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-completion-review-DKahnw/evidence/frame-00059.png",
+      "capturedAt": 1791499564845,
+      "sha256": "9f74c106939f00002d3b17c3b3d865f97891b8af00564d5aaa2ffd1c6c5ed797"
+    },
+    {
+      "file": "/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-completion-review-DKahnw/evidence/frame-00060.png",
+      "capturedAt": 1791499565076,
+      "sha256": "cf09b4729e256f236bd4ca8077f91a942e341e9b6b29bedb60c4a501c740cd0b"
+    },
+    {
+      "file": "/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-completion-review-DKahnw/evidence/frame-00061.png",
+      "capturedAt": 1791499565329,
+      "sha256": "cf09b4729e256f236bd4ca8077f91a942e341e9b6b29bedb60c4a501c740cd0b"
+    },
+    {
+      "file": "/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-completion-review-DKahnw/evidence/frame-00062.png",
+      "capturedAt": 1791499565601,
+      "sha256": "cf09b4729e256f236bd4ca8077f91a942e341e9b6b29bedb60c4a501c740cd0b"
+    },
+    {
+      "file": "/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-completion-review-DKahnw/evidence/frame-00063.png",
+      "capturedAt": 1791499565853,
+      "sha256": "cf09b4729e256f236bd4ca8077f91a942e341e9b6b29bedb60c4a501c740cd0b"
+    }
+  ],
+  "observed": {
+    "errors": [],
+    "contracts": [
+      {
+        "schemaVersion": 1,
+        "interactionNodeId": 21,
+        "input": {
+          "text": "Compare two approaches and show the findings.",
+          "context": [],
+          "answers": [],
+          "invocationReferences": []
+        },
+        "authorities": [],
+        "returnRequirements": [],
+        "digest": "sha256:v1:b84cd2c88118f914c055231d1a541fd0a32eb03f1511460d3f5cefad8efa3873"
+      },
+      {
+        "schemaVersion": 1,
+        "interactionNodeId": 23,
+        "input": {
+          "text": "Compare the two approaches for this review",
+          "context": [],
+          "answers": [],
+          "invocationReferences": [
+            {
+              "invocationId": 1,
+              "sourceCompletionId": 21,
+              "sourceActionId": 7,
+              "parentNodeId": 22,
+              "actionSnapshot": {
+                "actionId": 7,
+                "activator": "agent",
+                "description": null,
+                "icon": "git-compare",
+                "instruction": "Compare the two approaches for this review",
+                "label": "Compare approaches",
+                "presentingLayerId": 6,
+                "reusable": false,
+                "sourceLayerId": 6,
+                "sourceNodeId": 22,
+                "state": "draft",
+                "variant": "pill"
+              }
+            }
+          ]
+        },
+        "authorities": [
+          {
+            "kind": "navigate.add",
+            "nodeId": 22
+          }
+        ],
+        "returnRequirements": [
+          {
+            "kind": "navigate.response",
+            "nodeId": 22
+          }
+        ],
+        "digest": "sha256:v1:7e5484c9858c211c276ced1e11d49313a20ef9d9c2aff8912986f8b2b7ef51ea"
+      },
+      {
+        "schemaVersion": 1,
+        "interactionNodeId": 27,
+        "input": {
+          "text": "Use the attached finding to compare the next steps.",
+          "context": [
+            {
+              "nodeId": 26,
+              "annotations": [
+                "Use this finding when comparing the next steps."
+              ]
+            }
+          ],
+          "answers": [],
+          "invocationReferences": []
+        },
+        "authorities": [
+          {
+            "kind": "navigate.add",
+            "nodeId": 26
+          }
+        ],
+        "returnRequirements": [
+          {
+            "kind": "navigate.response",
+            "nodeId": 26
+          }
+        ],
+        "digest": "sha256:v1:b6a7afb5bae80be1ede9674f45be2132983ac9db236cfdb0a2f045e4d37fedd5"
+      },
+      {
+        "schemaVersion": 1,
+        "interactionNodeId": 29,
+        "input": {
+          "text": "Compare the two approaches for this review",
+          "context": [],
+          "answers": [],
+          "invocationReferences": [
+            {
+              "invocationId": 2,
+              "sourceCompletionId": 27,
+              "sourceActionId": 15,
+              "parentNodeId": 28,
+              "actionSnapshot": {
+                "actionId": 15,
+                "activator": "agent",
+                "description": null,
+                "icon": "git-compare",
+                "instruction": "Compare the two approaches for this review",
+                "label": "Compare approaches",
+                "presentingLayerId": 10,
+                "reusable": false,
+                "sourceLayerId": 10,
+                "sourceNodeId": 28,
+                "state": "draft",
+                "variant": "pill"
+              }
+            }
+          ]
+        },
+        "authorities": [
+          {
+            "kind": "navigate.add",
+            "nodeId": 28
+          }
+        ],
+        "returnRequirements": [
+          {
+            "kind": "navigate.response",
+            "nodeId": 28
+          }
+        ],
+        "digest": "sha256:v1:b745415b4da5967666b44852f9f7a6c5c63fbb23c4607d44e047e7ebf975d05c"
+      }
+    ],
+    "invocations": [
+      {
+        "interactionNode": 23,
+        "invocationId": 1
+      },
+      {
+        "interactionNode": 29,
+        "invocationId": 2
+      }
+    ],
+    "advances": [
+      {
+        "interactionNode": 21,
+        "revision": 1
+      },
+      {
+        "interactionNode": 23,
+        "revision": 1
+      },
+      {
+        "interactionNode": 27,
+        "revision": 1
+      },
+      {
+        "interactionNode": 29,
+        "revision": 1
+      }
+    ],
+    "results": [
+      {
+        "actions": [
+          {
+            "clientKey": "comparison-detail",
+            "description": null,
+            "icon": null,
+            "id": 8,
+            "interactionText": null,
+            "kind": "navigate",
+            "label": "Inspect the supporting comparison",
+            "relation": "expand",
+            "sourceLayerClientKey": "first-layer",
+            "sourceLayerId": 7,
+            "sourceNodeId": 24,
+            "state": "accepted",
+            "targetLayerId": 8,
+            "variant": "pill"
+          }
+        ],
+        "edges": [],
+        "layer": {
+          "clientKey": "first-layer",
+          "edges": [],
+          "id": 7,
+          "layout": {
+            "edgeShape": "default",
+            "placements": [
+              {
+                "nodeId": 24,
+                "x": 0.5,
+                "y": 0.5
+              }
+            ],
+            "version": 1
+          },
+          "nodes": [
+            24
+          ],
+          "state": "accepted"
+        },
+        "nodes": [
+          {
+            "clientKey": "first-node",
+            "detail": "Overall recommendation: use Approach A for a fast first result, then Approach B to check the decision. The comparison below supports this recommendation; the enclosing analysis now incorporates its findings.",
+            "icon": "check-circle",
+            "id": 24,
+            "kind": "concept",
+            "leasedActionId": null,
+            "state": "accepted",
+            "title": "Updated overall analysis"
+          }
+        ]
+      },
+      {
+        "actions": [
+          {
+            "clientKey": "comparison-detail",
+            "description": null,
+            "icon": null,
+            "id": 16,
+            "interactionText": null,
+            "kind": "navigate",
+            "label": "Inspect the supporting comparison",
+            "relation": "expand",
+            "sourceLayerClientKey": "first-layer",
+            "sourceLayerId": 11,
+            "sourceNodeId": 30,
+            "state": "accepted",
+            "targetLayerId": 12,
+            "variant": "pill"
+          }
+        ],
+        "edges": [],
+        "layer": {
+          "clientKey": "first-layer",
+          "edges": [],
+          "id": 11,
+          "layout": {
+            "edgeShape": "default",
+            "placements": [
+              {
+                "nodeId": 30,
+                "x": 0.5,
+                "y": 0.5
+              }
+            ],
+            "version": 1
+          },
+          "nodes": [
+            30
+          ],
+          "state": "accepted"
+        },
+        "nodes": [
+          {
+            "clientKey": "first-node",
+            "detail": "Overall recommendation: use Approach A for a fast first result, then Approach B to check the decision. The comparison below supports this recommendation; the enclosing analysis now incorporates its findings.",
+            "icon": "check-circle",
+            "id": 30,
+            "kind": "concept",
+            "leasedActionId": null,
+            "state": "accepted",
+            "title": "Updated overall analysis"
+          }
+        ]
+      }
+    ]
+  },
+  "acceptedInteractionIds": [
+    1,
+    2,
+    3,
+    4
+  ],
+  "humanVerdict": "pending",
+  "modelExecutionProof": "not claimed"
+}

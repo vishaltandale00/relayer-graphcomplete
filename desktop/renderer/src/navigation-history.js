@@ -36,6 +36,9 @@ function normalizeTemporalCurrent(value) {
 
 export function normalizeInvocationOrigin(value, threadId) {
   if (value == null) return null;
+  if (value.kind != null && value.kind !== "graph" && value.kind !== "imported") {
+    throw new TypeError("Invocation origin kind is unavailable");
+  }
   const identity = (item, name) => {
     const id = requiredId(item, name);
     if (!/^[1-9]\d*$/.test(id)) throw new TypeError(`${name} must be a canonical identity`);
@@ -64,6 +67,10 @@ export function normalizeInvocationOrigin(value, threadId) {
     invocationKey,
     sourceNodeId: identity(value.sourceNodeId, "invocationOrigin.sourceNodeId"),
     presentingLayerId,
+    ...(value.kind === "imported" || value.kind === "graph" ? {
+      kind: value.kind,
+      invocationId: requiredId(value.invocationId, "invocationOrigin.invocationId"),
+    } : {}),
   });
 }
 

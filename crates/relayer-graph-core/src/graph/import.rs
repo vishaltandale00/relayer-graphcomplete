@@ -309,6 +309,16 @@ impl crate::GraphDatabase {
     ) -> Result<Vec<serde_json::Value>, GraphError> {
         let records = self.imported_invocation_evidence(thread_id).await?;
         let mut connection = self.storage.acquire().await?;
+        let turns: Vec<String> = sqlx::query_scalar(
+            "SELECT turn_json FROM graph_import_turns turns JOIN graph_imports imported ON imported.import_id=turns.import_id WHERE imported.thread_id=?1 ORDER BY position",
+        ).bind(thread_id.value()).fetch_all(&mut *connection).await?;
+        let turns = turns
+            .into_iter()
+            .map(|json| {
+                serde_json::from_str::<ImportedTurn>(&json)
+                    .map_err(|error| GraphError::Internal(error.to_string()))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
         let mut presentations = Vec::with_capacity(records.len());
         for record in records {
             let source = record["source"]["interactionNodeId"].as_str().unwrap_or("");
@@ -332,10 +342,41 @@ impl crate::GraphDatabase {
             } else {
                 None
             };
+            // Portable identities are evidence, never route IDs. Resolve only an
+            // included accepted definition and its exact captured presentation.
+            let portable_action = record["source"]["actionId"].as_str().unwrap_or("");
+            let definition = turns
+                .iter()
+                .filter_map(|turn| turn.accepted_view.as_ref())
+                .flat_map(|view| &view.layers)
+                .flat_map(|layer| &layer.actions)
+                .find(|action| action.id == portable_action && action.source_node_id == parent);
+            let action_id = if let (Some(parent_id), Some(definition)) = (parent_id, definition) {
+                let ids: Vec<i64> = sqlx::query_scalar(
+                    "SELECT id FROM actions WHERE thread_id=?1 AND source_node_id=?2 AND client_key=?3 AND kind='invoke' AND state='accepted'",
+                ).bind(thread_id.value()).bind(parent_id)
+                    .bind(definition.client_key.as_deref().unwrap_or(&definition.id))
+                    .fetch_all(&mut *connection).await?;
+                (ids.len() == 1).then(|| ids[0])
+            } else {
+                None
+            };
+            let presenting_layer_id = if let (Some(parent_id), Some(portable_layer)) =
+                (parent_id, record["source"]["presentingLayerId"].as_str())
+            {
+                sqlx::query_scalar::<_, i64>(
+                    "SELECT layer.id FROM layers layer JOIN layer_nodes member ON member.layer_id=layer.id WHERE layer.thread_id=?1 AND layer.client_key=?2 AND layer.state='accepted' AND member.node_id=?3",
+                ).bind(thread_id.value()).bind(portable_layer).bind(parent_id)
+                    .fetch_optional(&mut *connection).await?
+            } else {
+                None
+            };
             presentations.push(serde_json::json!({
                 "invocationId": record["id"],
                 "sourceInteractionNodeId": source_id,
                 "sourceNodeId": parent_id,
+                "sourceActionId": action_id,
+                "presentingLayerId": presenting_layer_id,
             }));
         }
         Ok(presentations)

@@ -19,6 +19,7 @@ import {
   workspaceModeCapabilities,
   humanTurns,
   workspaceTurns,
+  nativeInvocationCurrentPresentation,
 } from "./model.js";
 import { createLucideIcon, createRelayerIcon as createSymbolIcon, relayerIconFamily, renderThreadTitle } from "./icons.js";
 import { createImageIcon, imageIconReference } from "./image-icons.js";
@@ -1663,6 +1664,7 @@ export function createProductWorkspace({
   inputDraftApi = null,
   isComposerInputOccurrence = null,
   implicitInputAcceptance = false,
+  inputEditingState = null,
   inputOperatorAvailable = false,
 }) {
   const iconMounts = new Set();
@@ -1769,9 +1771,11 @@ export function createProductWorkspace({
     ? createNodeInputDraftLoadQueue({ load: (threadId) => inputDraftController.load(threadId) })
     : null;
   const loadedInputDraftThreads = new Set();
-  const inputStages = new Map();
-  const implicitInputEntries = new Map();
-  const inputScopeObservations = new Map();
+  const retainedInputEditingState = inputEditingState?.version === 1 ? structuredClone(inputEditingState) : {};
+  const retainedInputEditingKeys = new Set((retainedInputEditingState.stages ?? []).map(([key]) => key));
+  const inputStages = new Map(retainedInputEditingState.stages ?? []);
+  const implicitInputEntries = new Map(retainedInputEditingState.entries ?? []);
+  const inputScopeObservations = new Map(retainedInputEditingState.scopeObservations ?? []);
   const implicitInvokeBoundaries = new Set();
   const implicitSendSnapshots = new Map();
   isComposerInputOccurrence ??= (occurrence) => {
@@ -1790,14 +1794,14 @@ export function createProductWorkspace({
     return !(state.actions ?? []).some(action => action.kind === "invoke"
       && action.inputActionIds?.some(id => String(id) === String(occurrence.actionId)));
   };
-  const inputEditEpochs = new Map();
+  const inputEditEpochs = new Map(retainedInputEditingState.editEpochs ?? []);
   const noteInputEdit = (key) => {
     inputEditEpochs.set(key, (inputEditEpochs.get(key) ?? 0) + 1);
     const entry = implicitInputEntries.get(key);
     if (implicitInputAcceptance && entry?.composerEligible) markInputCompositionChanged(JSON.parse(key)[0]);
   };
-  const inputErrors = new Map();
-  const inputTouched = new Set();
+  const inputErrors = new Map(retainedInputEditingState.errors ?? []);
+  const inputTouched = new Set(retainedInputEditingState.touched ?? []);
   const inputPending = createInputMutationTracker();
   // Stage keys whose pending mutation is a commit. Send waits for a commit
   // (through authoredInputCommits) instead of being disabled by it.
@@ -1917,11 +1921,11 @@ export function createProductWorkspace({
     if (!failed?.size) failedAuthoredInputs.delete(key);
     return !composerFailures.length;
   };
-  const inputRailScroll = new Map();
+  const inputRailScroll = new Map(retainedInputEditingState.railScroll ?? []);
   let inputFocusRequest = null;
   const renderedInputDraftStatusKeys = new Map();
   let openComposerInputKey = null;
-  const inputCompositionRevisions = new Map();
+  const inputCompositionRevisions = new Map(retainedInputEditingState.compositionRevisions ?? []);
   const recoveredConfirmationThreads = new Set();
   const contextDraftLoadRetryTimers = new Map();
   const contextDraftLoadRetryAttempts = new Map();
@@ -1932,6 +1936,9 @@ export function createProductWorkspace({
     if (implicitInputAcceptance && !composerOnly) return;
     for (const collection of [inputStages, inputErrors, inputRailScroll, inputTouched]) {
       for (const key of collection.keys()) {
+        // A read-only Current has no authority to discard the source's local
+        // edits when its inspector changes or closes.
+        if (mode === "review" && retainedInputEditingKeys.has(key)) continue;
         if (inputKeyBelongsToThread(key, threadId)
           && (!composerOnly || !implicitInputEntries.has(key)
             || isComposerInputOccurrence(implicitInputEntries.get(key).occurrence))) collection.delete(key);
@@ -6759,7 +6766,9 @@ export function createProductWorkspace({
         const answers = (call.arguments ?? []).map(input => submittedInputHistoryPresentation(input).compactValue).filter(Boolean).join(" · ");
         button.textContent = `${call.source.label} · ${answers ? `${answers} · ` : ""}${call.lifecycle === "succeeded" ? "Result" : "Current"} · ${call.lifecycle}`;
         const acceptedResult = state.interactions?.some(item => String(item.id) === String(entry.resultInteractionId) && item.completionStatus === "accepted");
-        button.disabled = !onNavigateImportedInvocationHistory || (call.lifecycle === "succeeded" ? !acceptedResult : !call.current);
+        const retainedReturned = entry.resultInteractionId == null && call.returnedLayerId != null
+          && call.returnedLayerId === call.current?.rootLayerId && call.currentLayerId === call.returnedLayerId;
+        button.disabled = !onNavigateImportedInvocationHistory || (call.lifecycle === "succeeded" ? !acceptedResult && !retainedReturned : !call.current);
         button.onclick = async () => {
           if (!await prepareNodeContextSelectionChange()) return;
           await onNavigateImportedInvocationHistory?.(entry);
@@ -6771,6 +6780,8 @@ export function createProductWorkspace({
       const controls = $("#detailActions");
       controls.classList.remove("hidden");
       for (const [index, call] of calls.entries()) {
+        const nativeCurrent = nativeInvocationCurrentPresentation(call, { threadId: getThread()?.id, sourceInteraction: interaction });
+        const currentOnly = call.currentOnly === true || (call.graphOnly === true && nativeCurrent != null);
         const resultInteraction = state.interactions?.find((interaction) => String(interaction.id) === String(call.resultInteractionId));
         const returnedLayerId = call.resultCompletionStatus === "accepted"
           ? resultInteraction?.completionOutput?.rootLayer?.layer?.id : null;
@@ -6816,11 +6827,12 @@ export function createProductWorkspace({
         const action = ordinaryActions.find((item) => String(item.id) === String(call.actionId));
         const confirmedInputs = (call.graphOnly ? call.nativeInvocation?.submittedInputs ?? [] : resultInteraction?.submittedInputs || []).map((input) => submittedInputHistoryPresentation(input).compactValue).filter(Boolean);
         const callLabel = confirmedInputs.length ? confirmedInputs.join(" · ") : `Call ${index + 1}`;
-        button.textContent = `${call.graphOnly ? call.nativeInvocation?.invocation?.actionSnapshot?.label ?? actionPresentation(action).label : actionPresentation(action).label} · ${callLabel} · ${call.currentOnly ? "Current · " : ""}${call.graphOnly ? ({ not_started: "Prepared", running: "Running", accepted: "Completed", stopped: "Stopped", failed: "Failed" }[call.resultCompletionStatus] ?? "Unavailable") : call.resultCompletionStatus}`;
-        button.disabled = call.graphOnly && call.resultInteractionId == null ? true : call.currentOnly ? !onNavigateInvocationCurrent : call.resultCompletionStatus !== "accepted" || !navigation;
+        button.textContent = `${call.graphOnly ? call.nativeInvocation?.invocation?.actionSnapshot?.label ?? actionPresentation(action).label : actionPresentation(action).label} · ${callLabel} · ${currentOnly ? call.resultCompletionStatus === "accepted" ? "Result · " : "Current · " : ""}${call.graphOnly ? ({ not_started: "Prepared", running: "Running", accepted: "Completed", stopped: "Stopped", failed: "Failed" }[call.resultCompletionStatus] ?? "Unavailable") : call.resultCompletionStatus}`;
+        button.disabled = currentOnly ? !onNavigateInvocationCurrent || (call.graphOnly && !nativeCurrent)
+          : call.graphOnly && call.resultInteractionId == null ? true : call.resultCompletionStatus !== "accepted" || !navigation;
         button.onclick = async () => {
           if (!await prepareNodeContextSelectionChange()) return;
-          if (call.currentOnly) return onNavigateInvocationCurrent?.(call);
+          if (currentOnly) return onNavigateInvocationCurrent?.(call);
           if (!navigation) return;
           await onNavigateLayer(navigation.targetLayerId, { action: navigation, sourceNode: node });
         };
@@ -6901,6 +6913,15 @@ export function createProductWorkspace({
     mode,
     capabilities,
     render,
+    // Mode recreation must preserve local edits without saving them or granting
+    // the inert Current view access to the mutable draft controller. Only plain
+    // occurrence-keyed UI data crosses this boundary; persistence is reloaded.
+    captureInputEditingState: () => structuredClone({
+      version: 1, stages: [...inputStages], entries: [...implicitInputEntries],
+      scopeObservations: [...inputScopeObservations], editEpochs: [...inputEditEpochs],
+      errors: [...inputErrors], touched: [...inputTouched], railScroll: [...inputRailScroll],
+      compositionRevisions: [...inputCompositionRevisions],
+    }),
     setInputOperatorCommitted,
     prepareSelectionChange: prepareNodeContextSelectionChange,
     // Artifact notes are confirmed outside the workspace; pull them into the composer (PRD 6.6.8).

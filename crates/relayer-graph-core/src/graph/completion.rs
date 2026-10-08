@@ -145,15 +145,52 @@ pub(crate) async fn read_conversation_snapshot(
             .interaction_scope(invocation.child_interaction_node_id)
             .await?;
         let current = match invocation.state.current_layer_id {
-            Some(layer_id) => Some(
-                read_accepted_publication_on(&mut transaction, &child_scope, layer_id, None)
+            Some(layer_id) => {
+                // Advance has no response root action. A succeeded call does:
+                // carry its actual accepted Returned action in this same read
+                // transaction so inert Result preserves the authored topic.
+                let root_action = if invocation.state.lifecycle
+                    == crate::CompletionLifecycle::Succeeded
+                {
+                    let output = read_output_on(&mut transaction, &child_scope)
+                        .await?
+                        .ok_or_else(|| {
+                            GraphError::Internal(
+                                "Succeeded Invocation has no accepted Returned output".into(),
+                            )
+                        })?;
+                    if invocation.state.final_layer_id != Some(layer_id)
+                        || output.node_id != invocation.child_interaction_node_id
+                        || output.root_layer.layer.id != layer_id
+                        || output.root_action.source_node_id != invocation.child_interaction_node_id
+                        || output.root_action.state != RecordState::Accepted
+                    {
+                        return Err(GraphError::Internal(
+                            "Invocation Current and Returned publication disagree".into(),
+                        ));
+                    }
+                    Some(output.root_action)
+                } else {
+                    None
+                };
+                Some(
+                    read_accepted_publication_on(
+                        &mut transaction,
+                        &child_scope,
+                        layer_id,
+                        root_action,
+                    )
                     .await?,
-            ),
+                )
+            }
             None => None,
         };
         let mut detail_asset_revisions = BTreeMap::new();
         let mut asset_nodes = vec![parent_node.id];
         if let Some(current) = &current {
+            if current.root_action.is_some() {
+                asset_nodes.push(current.node_id);
+            }
             for layer in &current.layers {
                 asset_nodes.extend(layer.nodes.iter().map(|node| node.id));
             }

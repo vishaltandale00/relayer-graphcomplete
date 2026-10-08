@@ -36,6 +36,7 @@ import {
   reconcileCurrentProjection,
   humanTurns,
   workspaceTurns,
+  nativeInvocationCurrentPresentation,
 } from "./product-workspace/model.js";
 import {
   descendantLayerIdentities,
@@ -520,6 +521,7 @@ export async function refreshState(
     return;
   }
   const refreshToken = refreshGate.begin();
+  const refreshReadingIntent = readingIntent;
   const requestedThreadId = threadId;
   const stateQuery = new URLSearchParams();
   if (threadId) stateQuery.set("threadId", threadId);
@@ -552,7 +554,18 @@ export async function refreshState(
   const nextThreads = state.threads || [];
   const nextInteractions = [...(state.interactions || [])];
   const nextImportedHistory = state.importedInvocationHistory ?? [];
-  if (visibleInteraction?.inertInvocationCurrent) {
+  if (visibleInteraction?.nativeInvocationCurrent) {
+    const local = inertInvocationPresentations.get(inertPresentationKey(threadId, visibleInteraction.id));
+    const previous = local?.detail.actionInvocations.find(call => call.graphOnly === true
+      && String(call.nativeInvocation?.invocation?.id) === String(visibleInteraction.invocationId));
+    const retained = (state.actionInvocations ?? []).find(call => call.graphOnly === true
+      && String(call.nativeInvocation?.invocation?.id) === String(visibleInteraction.invocationId));
+    // A refreshed or missing graph Current cannot silently replace the snapshot
+    // the reader opened. Changed evidence falls back to the source instead.
+    if (previous && retained && JSON.stringify(previous.nativeInvocation) === JSON.stringify(retained.nativeInvocation)) {
+      nextInteractions.push(visibleInteraction);
+    }
+  } else if (visibleInteraction?.inertInvocationCurrent) {
     const retained = nextImportedHistory.find(entry => entry.inert === true
       && String(entry.threadId) === String(threadId)
       && String(entry.sourceInteractionId) === String(visibleInteraction.invocationSourceInteractionId)
@@ -565,8 +578,15 @@ export async function refreshState(
     }
   }
   for (const [key, local] of inertInvocationPresentations) {
-    if (!nextThreads.some(thread => String(thread.id) === String(local.detail.thread.id) && thread.imported === true)
-      || !nextImportedHistory.some(entry => String(entry.threadId) === String(local.detail.thread.id))) inertInvocationPresentations.delete(key);
+    const threadExists = nextThreads.some(thread => String(thread.id) === String(local.detail.thread.id));
+    const retained = local.nativeCall == null
+      ? nextImportedHistory.some(entry => String(entry.threadId) === String(local.detail.thread.id)
+        && (local.importedCall == null || entry.record?.id === local.importedCall.record?.id
+          && JSON.stringify(entry.record) === JSON.stringify(local.importedCall.record)))
+      : (state.actionInvocations ?? []).some(call => call.graphOnly === true
+        && call.invocationKey === local.nativeCall.invocationKey
+        && JSON.stringify(call.nativeInvocation) === JSON.stringify(local.nativeCall.nativeInvocation));
+    if (!threadExists || !retained) inertInvocationPresentations.delete(key);
   }
   const nextActionInvocations = state.actionInvocations || [];
   const nextApprovals = Array.isArray(state.approvals) ? state.approvals : [];
@@ -616,15 +636,37 @@ export async function refreshState(
   const advancePending = pending?.auto && pending.readyLayer && viewState.mainView === "thread";
   const selected = (advancePending ? threadInteractions.find((item) => String(item.id) === String(pending.interactionId)) : null) || threadInteractions.find((interaction) => (
     String(interaction.id) === String(viewState.currentInteractionId)
-  )) || humanTurns({ interactions: threadInteractions, actionInvocations: nextActionInvocations, importedInvocationHistory: nextImportedHistory }, { id: nextThreadId }).at(-1);
+  )) || (visibleInteraction?.inertInvocationCurrent ? threadInteractions.find(interaction =>
+    String(interaction.id) === String(visibleInteraction.invocationSourceInteractionId)) : null)
+    || humanTurns({ interactions: threadInteractions, actionInvocations: nextActionInvocations, importedInvocationHistory: nextImportedHistory }, { id: nextThreadId }).at(-1);
+  let restoredInvocationSource = null;
+  const sourceEntry = visibleInteraction?.inertInvocationCurrent
+    && String(selected?.id) === String(visibleInteraction.invocationSourceInteractionId)
+    ? viewState.invocationOrigin?.sourceEntry : null;
+  if (sourceEntry) {
+    try {
+      const last = sourceEntry.navigationPath.at(-1);
+      if (last) acceptedLayerCache.delete({ threadId: nextThreadId, turnId: selected.id, layerId: last.layerId });
+      restoredInvocationSource = await resolveNavigationPresentation(sourceEntry, {
+        loadThread: async () => ({ thread: nextThreads.find(thread => String(thread.id) === String(nextThreadId)),
+          interactions: threadInteractions, actionInvocations: nextActionInvocations, importedInvocationHistory: nextImportedHistory }),
+        loadLayer: ({ threadId, turnId, layerId }) => request(`/api/threads/${encodeURIComponent(threadId)}/interactions/${encodeURIComponent(turnId)}/layers/${encodeURIComponent(layerId)}`),
+        layerCache: acceptedLayerCache,
+      });
+    } catch { /* An unavailable source path falls back to its canonical turn. */ }
+    if (!refreshGate.isCurrent(refreshToken) || readingIntent !== refreshReadingIntent
+      || String(viewState.currentThreadId) !== String(nextThreadId)) return false;
+  }
   let refreshedVisibleLayer = visibleLayerAfterRefresh(
     previousInteractionId,
     previousVisibleLayer,
     selected,
   );
   if (advancePending) refreshedVisibleLayer = pending.readyLayer;
+  if (restoredInvocationSource) refreshedVisibleLayer = restoredInvocationSource.layer;
   let temporalSelectedNodeId;
   let temporalCurrent = advancePending ? pending.temporalCurrent ?? null : viewState.temporalCurrent;
+  if (restoredInvocationSource) temporalCurrent = restoredInvocationSource.entry.temporalCurrent;
   let temporalProjectionFailed = false;
   let canonicalVisibleLayerRead = false;
   const projectionPage = state.currentProjection;
@@ -639,7 +681,7 @@ export async function refreshState(
     const previousLayerId = previousProjection?.currentLayerId ?? null;
     const visibleLayerId = previousVisibleLayer?.layer?.id ?? null;
     const selectedChanged = String(previousInteractionId) !== String(selected?.id);
-    const wasFollowing = previousProjection == null
+    const wasFollowing = restoredInvocationSource ? false : previousProjection == null
       ? previousVisibleLayer == null || selectedChanged
       : (selectedChanged && viewState.temporalCurrent == null)
         || (
@@ -789,11 +831,13 @@ export async function refreshState(
   }
   viewState.currentThreadId = nextThreadId;
   hydrateWorkspace(selected, refreshedVisibleLayer, {
+    ...(restoredInvocationSource ? { layerPath: restoredInvocationSource.layerPath,
+      selectedNodeId: restoredInvocationSource.selectedNodeId, invocationOrigin: null } : {}),
     ...(temporalSelectedNodeId === undefined ? {} : { selectedNodeId: temporalSelectedNodeId }),
     ...(advancePending ? { invocationOrigin: pendingInvocationOrigin(pending, nextActionInvocations) } : {}),
     temporalCurrent,
   });
-  recordCurrentNavigation(advancePending ? "push" : historyMode);
+  recordCurrentNavigation(advancePending || visibleInteraction?.inertInvocationCurrent && !selected?.inertInvocationCurrent ? "push" : historyMode);
   renderSidebar();
   renderScopeMenu();
   if (viewState.mainView === "settings") setMainView("settings");
@@ -927,18 +971,20 @@ export async function selectInteractionGraphSource(threadId, interactionId, { in
   const requestToken = resolvedInvokeNavigationGate.begin();
   pendingResolvedInvokeNavigation = true;
   try {
+    const local = invocationOrigin ? inertInvocationPresentations.get(inertPresentationKey(threadId, interactionId)) : null;
     let resolved = await resolveNavigationPresentation(invocationOrigin?.sourceEntry ?? {
       threadId, turnId: interactionId, navigationPath: [], selectedNodeId: null,
     }, {
-      loadThread: (id) => request(`/api/threads/${encodeURIComponent(id)}`),
-      loadLayer: ({ threadId, turnId, layerId }) => request(
+      loadThread: (id) => local ? Promise.resolve(local.detail) : request(`/api/threads/${encodeURIComponent(id)}`),
+      loadLayer: ({ threadId, turnId, layerId }) => local ? (local.layers.has(String(layerId))
+        ? Promise.resolve(local.layers.get(String(layerId))) : Promise.reject(new Error("Invocation source Layer is unavailable."))) : request(
         `/api/threads/${encodeURIComponent(threadId)}/interactions/${encodeURIComponent(turnId)}/layers/${encodeURIComponent(layerId)}`,
       ),
-      layerCache: acceptedLayerCache,
+      layerCache: local ? null : acceptedLayerCache,
     });
     if (!resolved.interaction.completionOutput?.rootLayer && !invocationOrigin) return false;
     if (invocationOrigin && !invocationOriginForSource(
-      invocationOrigin, resolved.layer, resolved.actionInvocations, resultInteractionId,
+      invocationOrigin, resolved.layer, resolved.actionInvocations, resultInteractionId, resolved.importedInvocationHistory,
     )) throw new Error("The invoking Node is no longer available.");
     if (!resolvedInvokeNavigationGate.isCurrent(requestToken)
       || !currentNavigationEntry()
@@ -973,6 +1019,10 @@ export async function submitInteraction(
   inputDraftRevision = null,
 ) {
   if (!viewState.currentThreadId) throw new Error("Select a thread before sending a follow-up.");
+  if (appState.threads.some(thread => String(thread.id) === String(viewState.currentThreadId) && thread.imported === true)
+    || appState.interactions.some(interaction => String(interaction.id) === String(viewState.currentInteractionId) && interaction.inertInvocationCurrent)) {
+    throw new Error("This Invocation history is read only. Return to the source before sending a follow-up.");
+  }
   const threadId = viewState.currentThreadId;
   const intent = readingIntent;
   recordCurrentNavigation();
@@ -1160,6 +1210,67 @@ function artifactViewer() {
 const inertInvocationPresentations = new Map();
 const inertPresentationKey = (threadId, turnId) => `${threadId}\u0000${turnId}`;
 
+function retainInvocationPresentation(thread, source, interaction, layers, origin, nativeCall = null, importedCall = null) {
+  const sourceLayers = new Map([source?.completionOutput?.rootLayer, appState.visibleLayer].filter(Boolean).map(layer => [String(layer.layer.id), layer]));
+  for (const step of viewState.layerPath) {
+    const layer = acceptedLayerCache.get({ threadId: thread.id, turnId: source.id, layerId: step.layerId });
+    if (layer) sourceLayers.set(String(step.layerId), layer);
+  }
+  const interactions = [...appState.interactions.filter(item => String(item.id) !== String(interaction.id)), interaction];
+  const detail = { thread, interactions, actionInvocations: appState.actionInvocations,
+    invocationInventoryAvailable: appState.invocationInventoryAvailable,
+    importedInvocationHistory: appState.importedInvocationHistory, approvals: [] };
+  inertInvocationPresentations.set(inertPresentationKey(thread.id, source.id), { detail, layers: sourceLayers, nativeCall, importedCall });
+  inertInvocationPresentations.set(inertPresentationKey(thread.id, interaction.id), { detail, layers, nativeCall, importedCall });
+  appState.interactions = interactions;
+  cancelAutomaticTurn();
+  cancelPendingRefresh();
+  recordCurrentNavigation();
+  supersedePendingHistory({ presentationChanged: true });
+  hydrateWorkspace(interaction, undefined, { selectedNodeId: null, invocationOrigin: origin });
+  recordCurrentNavigation("push");
+  renderThread();
+  return true;
+}
+
+function retainedInvocationOrigin(thread, source, call, resultId, kind) {
+  const presentingLayerId = call.presentingLayerId;
+  const sourceNodeId = kind === "graph" ? call.nativeInvocation?.invocation?.parentNodeId : call.sourceNodeId;
+  const actionId = kind === "graph" ? call.actionId : call.sourceActionId;
+  const invocationId = kind === "graph" ? call.nativeInvocation?.invocation?.id : call.record?.id;
+  const key = kind === "graph" ? call.invocationKey : call.record?.id;
+  if (presentingLayerId == null || actionId == null || sourceNodeId == null) return null;
+  const current = currentNavigationEntry();
+  const entry = String(appState.visibleLayer?.layer?.id) === String(presentingLayerId) ? current
+    : navigationHistory.entries().toReversed().find(entry => String(entry.threadId) === String(thread.id)
+      && String(entry.turnId) === String(source.id) && entry.navigationPath.at(-1)?.layerId === String(presentingLayerId))
+    ?? (String(source.completionOutput?.rootLayer?.layer?.id) === String(presentingLayerId) ? navigationEntryFromView({
+      threadId: thread.id, turnId: source.id, layerPath: layerPathForVisibleLayer([], source, source.completionOutput.rootLayer), selectedNodeId: sourceNodeId,
+    }) : null);
+  if (!entry) return null;
+  const sourceEntry = { ...entry, selectedNodeId: sourceNodeId };
+  delete sourceEntry.invocationOrigin;
+  if (sourceEntry.temporalCurrent) sourceEntry.temporalCurrent = { ...sourceEntry.temporalCurrent, mode: "pinned" };
+  const layer = String(appState.visibleLayer?.layer?.id) === String(presentingLayerId) ? appState.visibleLayer
+    : String(source.completionOutput?.rootLayer?.layer?.id) === String(presentingLayerId) ? source.completionOutput.rootLayer
+      : acceptedLayerCache.get({ threadId: thread.id, turnId: source.id, layerId: presentingLayerId });
+  return invocationOriginForSource({ kind, sourceEntry, sourceNodeId, actionId, presentingLayerId, invocationKey: key, invocationId },
+    layer, appState.actionInvocations, resultId, appState.importedInvocationHistory);
+}
+
+export async function navigateInvocationCurrent(historyEntry) {
+  const thread = appState.threads.find(thread => String(thread.id) === String(viewState.currentThreadId));
+  const source = appState.interactions.find(item => String(item.id) === String(viewState.currentInteractionId));
+  const retained = (appState.actionInvocations ?? []).find(call => call.graphOnly === true && call.occupancyOnly !== true
+    && String(call.sourceInteractionId) === String(source?.id) && call.invocationKey === historyEntry?.invocationKey
+    && String(call.nativeInvocation?.invocation?.id) === String(historyEntry?.nativeInvocation?.invocation?.id));
+  if (!thread || thread.imported || !retained) return false;
+  const presentation = nativeInvocationCurrentPresentation(retained, { threadId: thread.id, sourceInteraction: source });
+  if (!presentation) return false;
+  const origin = retainedInvocationOrigin(thread, source, retained, presentation.interaction.id, "graph");
+  return retainInvocationPresentation(thread, source, presentation.interaction, presentation.layers, origin, retained);
+}
+
 export async function navigateImportedInvocationHistory(historyEntry) {
   const thread = appState.threads.find(thread => String(thread.id) === String(viewState.currentThreadId));
   const retained = (appState.importedInvocationHistory ?? []).find(entry => entry.inert === true
@@ -1167,34 +1278,20 @@ export async function navigateImportedInvocationHistory(historyEntry) {
     && String(entry.sourceInteractionId) === String(viewState.currentInteractionId)
     && entry.record?.id === historyEntry?.record?.id);
   if (!thread?.imported || !retained || retained.sourceInteractionId == null || retained.sourceNodeId == null) return false;
+  const source = appState.interactions.find(interaction => String(interaction.id) === String(retained.sourceInteractionId));
   const result = appState.interactions.find(interaction => String(interaction.threadId) === String(thread.id)
     && String(interaction.id) === String(retained.resultInteractionId) && interaction.completionStatus === "accepted");
   if (retained.record.lifecycle === "succeeded" && result) {
-    selectTurnById(result.id, { responseRoot: true });
-    return true;
+    const layers = new Map([[String(result.completionOutput?.rootLayer?.layer?.id), result.completionOutput?.rootLayer]]);
+    const origin = retainedInvocationOrigin(thread, source, retained, result.id, "imported");
+    return retainInvocationPresentation(thread, source, result, layers, origin, null, retained);
   }
+  if (retained.record.lifecycle === "succeeded" && retained.resultInteractionId != null) return false;
   const current = inertInvocationCurrent(retained.record, { threadId: thread.id,
-    id: `current:${retained.record.id}`, sourceInteractionId: retained.sourceInteractionId });
+    id: `current:${retained.record.id}`, sourceInteractionId: retained.sourceInteractionId, allowReturned: true });
   if (!current) return false;
-  cancelAutomaticTurn();
-  cancelPendingRefresh();
-  recordCurrentNavigation();
-  supersedePendingHistory({ presentationChanged: true });
-  const source = appState.interactions.find(interaction => String(interaction.id) === String(retained.sourceInteractionId));
-  const sourceLayers = new Map([source?.completionOutput?.rootLayer, appState.visibleLayer].filter(Boolean).map(layer => [String(layer.layer.id), layer]));
-  for (const step of viewState.layerPath) {
-    const layer = acceptedLayerCache.get({ threadId: thread.id, turnId: source.id, layerId: step.layerId });
-    if (layer) sourceLayers.set(String(step.layerId), layer);
-  }
-  const interactions = [...appState.interactions.filter(interaction => interaction.id !== current.interaction.id), current.interaction];
-  const detail = { thread, interactions, actionInvocations: [], importedInvocationHistory: appState.importedInvocationHistory, approvals: [] };
-  inertInvocationPresentations.set(inertPresentationKey(thread.id, source.id), { detail, layers: sourceLayers });
-  inertInvocationPresentations.set(inertPresentationKey(thread.id, current.interaction.id), { detail, layers: current.layers });
-  appState.interactions = interactions;
-  hydrateWorkspace(current.interaction, undefined, { selectedNodeId: null });
-  recordCurrentNavigation("push");
-  renderThread();
-  return true;
+  const origin = retainedInvocationOrigin(thread, source, retained, current.interaction.id, "imported");
+  return retainInvocationPresentation(thread, source, current.interaction, current.layers, origin, null, retained);
 }
 
 export async function navigateLayer(layerId, navigation = {}) {
@@ -1535,9 +1632,15 @@ export async function navigateHistory(deltaOrDirection, { beforeCommit } = {}) {
     const local = inertInvocationPresentations.get(inertPresentationKey(transition.entry.threadId, transition.entry.turnId));
     let resolved = await resolveNavigationPresentation(transition.entry, {
       loadThread: (threadId) => local ? Promise.resolve(local.detail) : request(`/api/threads/${encodeURIComponent(threadId)}`),
-      loadLayer: ({ threadId, turnId, layerId }) => local ? (local.layers.has(String(layerId)) ? Promise.resolve(local.layers.get(String(layerId))) : Promise.reject(new Error("Inert Current layer is unavailable."))) : request(
-        `/api/threads/${encodeURIComponent(threadId)}/interactions/${encodeURIComponent(turnId)}/layers/${encodeURIComponent(layerId)}`,
-      ),
+      loadLayer: ({ threadId, turnId, layerId }) => {
+        const presentation = local ? inertInvocationPresentations.get(inertPresentationKey(threadId, turnId)) : null;
+        if (local && presentation?.layers.has(String(layerId))) return Promise.resolve(presentation.layers.get(String(layerId)));
+        const target = local?.detail.interactions.find(item => String(item.id) === String(turnId));
+        if (local && (!target || target.inertInvocationCurrent)) return Promise.reject(new Error("Inert Current layer is unavailable."));
+        return request(
+          `/api/threads/${encodeURIComponent(threadId)}/interactions/${encodeURIComponent(turnId)}/layers/${encodeURIComponent(layerId)}`,
+        );
+      },
       layerCache: local ? null : acceptedLayerCache,
     });
     if (local) resolved = { ...resolved, importedInvocationHistory: local.detail.importedInvocationHistory };
@@ -1736,8 +1839,12 @@ export async function invokeAction(action, { inputDraftRevision } = {}) {
     trackPendingTurn(threadId, response.interaction.id, intent, invocationSource);
   }
   if (String(viewState.currentThreadId) === String(threadId)) {
-    await refreshState(threadId, {
+    void refreshState(threadId, {
       historyMode: createdResultCanAdvance ? "push" : "replace",
+    }).catch(() => {
+      // The activation is already acknowledged. A failed optional read must
+      // not report a failed Invoke or offer a second activation of this key.
+      schedulePendingRefresh(threadId, { force: true });
     });
   }
   return response;
