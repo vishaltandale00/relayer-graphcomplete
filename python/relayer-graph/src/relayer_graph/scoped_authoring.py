@@ -247,7 +247,7 @@ class ScopedGraphAuthoring:
                     routes.append(EdgeRouteObject(route.edge, route.shape, ends, _copy(route.waypoints)))
                 captured = LayerObject(list(layer._members), list(layer._connections),
                                        LayerLayoutObject(placements, layer.object.layout.edge_shape, routes),
-                                       layer.object.client_key, layer.object.default_node)
+                                       layer.object.client_key, layer.object.default_node, renderer=layer.object.renderer)
                 layers.append((layer, captured, layer._size_justification))
                 for key, node in layer._nodes.items():
                     if node.client_key != _identity(self.snapshot_key, layer._key, "n", key):
@@ -328,7 +328,7 @@ class ScopedGraphAuthoring:
                             route.waypoints) for route in captured.layout.edge_routes])
                     result = await self._client.submit_layer(LayerObject([node_ref(node) for node in captured.nodes],
                         [edge_ref(edge) for edge in captured.edges], layout, captured.client_key,
-                        None if captured.default_node is None else node_ref(captured.default_node)), size_justification=justification)
+                        None if captured.default_node is None else node_ref(captured.default_node), renderer=captured.renderer), size_justification=justification)
                     layer_results[id(layer.object)] = result
                     layer.object.ref = result
                     return result

@@ -60,5 +60,6 @@ pub(crate) use model::{
     canonical_submitted_input_bytes, validate_authored_layout, validate_edge_route_ends,
 };
 
+pub use model::artifact;
 pub use model::image_icon::{ImageIcon, image_icon};
 pub use model::image_icon::{optional_wire as optional_icon_serde, wire as icon_serde};

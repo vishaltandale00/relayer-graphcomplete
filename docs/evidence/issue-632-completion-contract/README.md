@@ -133,6 +133,28 @@ Ordinary answer-only Send derives exact native source-Node Navigate grants and s
 
 Recorded journeys: [multiple Input actions and two Invokes](v1/multiple-inputs.mp4), [ordinary annotation and source response Navigate](v1/annotation.mp4). Their manifests retain original capture paths for inspection of saved isolated sessions. The current recording files are committed alongside those immutable manifests. Native/user acceptance remains explicitly separate.
 
+## Qualification before the artifact-viewer merge
+
 Final local qualification passed for executable/test snapshot `e6a69da45909f88ccd94a148fe447663a580e45c956a04cdda7a3782bec89f32` (145 files; definition and manifest in `qualification-2026-10-07.json`). Full `npm run check` exited 0: native workspace and crash/reopen portfolios; 306 Vitest files with 3,895 passing tests, one file and three tests explicitly skipped; both secret-boundary tests; 86 Python tests; receipt lints and PRD readability. Final `npm run build` exited 0. Required first-message navigation-only, interaction-context, instrumented node-input, and four compiled-Eval scenarios passed their inner checkpoints. Successful full-check/build and heavy logs are retained compressed in `v1/`; earlier failed logs remain at their recorded local paths. No paid inference ran.
 
 All three review manifests match this candidate's reviewed file bytes. These local assertions are non-certifying until matched to the stabilized PR; they do not grant merge approval. The user approved the prototype's design; exact native recordings remain available for human review. Native keyboard focus, the prior blank-page cause, hosted V4, paid model behavior and release qualification remain unknown or outside scope as named in the receipt.
+
+
+## Integration with artifact-viewer main (2026-10-07)
+
+Main `67703532` (#701) landed during PR qualification. The earlier qualification and recordings remain immutable evidence of their own source snapshot. The merged candidate is qualified separately below; earlier passes are not borrowed for changed sources. Main's shipped artifact migration 0034 stays unchanged; unpublished completion-contract migrations follow at 0035–0039. Earlier candidate-only databases are not upgrade evidence. Completion-contract ADR is now 0015, preserving main's artifact ADR 0014.
+
+| Changed integration seam | Checkpoint |
+| --- | --- |
+| Shipped artifact schema plus sealed contract migrations | Native migrations suite: artifact-schema upgrade preserves accepted artifact/renderer and adds no guessed contract; contracts follow shipped migration and reopen without authority backfill |
+| Artifact fingerprint selection plus prospective sealed Advance | `artifact_layers::only_the_published_closure_is_fingerprinted`: orphan live layer refuses real Advance; explicit discard retains unrelated draft Node; selected reachable artifact alone is pinned/published; Stop selects none |
+| Artifact screenshot hints versus canonical sealed annotation | Real-files `artifact-notes.test.ts`: valid, missing and tampered screenshots; identical canonical contexts and contract validate before/after; advisory mapping serialized separately; actual desktop fixture reads exact digest-bound file |
+| Scoped captured artifact layers in TypeScript and Python | Existing scoped-authoring fixtures capture artifact metadata and layer renderer, lower them through the real write transport and preserve declaration isolation |
+| Input ownership plus artifact workspace entry | Actual renderer focused Input/Invoke/navigation/artifact suite; declared native Input and artifact-viewer runners retain their independent authority and visual checkpoints |
+| Artifact fields alongside inert exported/imported V4 invocation history | Native import fixture asserts persisted artifact/renderer and readonly refusal; existing real Product/export policy and mismatch scenarios cover canonical call identity separately |
+
+The required full `npm run check` and `npm run build` remain the fallback for every auto-merged secondary seam. Artifact-viewer heavy verification is added because the canonical annotation/materialization boundary changed. The original PR-head CI passed; its result does not qualify this merge. Current-source qualification, logs, refreshed reviews and recordings are recorded in `qualification-main-merge-2026-10-07.json`.
+
+Merged candidate local qualification passed for executable/test/configuration snapshot `ee204f8de3a496b072b8cb7bee823b6112422b2aa1cf558972017b90686b3fac` (206 files). Full check exited 0: 3,946 JavaScript tests in 313 files, one file and three tests explicitly skipped; both secret-boundary tests; 90 Python tests; native workspace and crash/reopen portfolios; receipts and PRD readability. Final build exited 0. First-message navigation-only, interaction-context, Input desktop, four compiled-Eval scenarios and all 40 artifact desktop checkpoints passed their inner results. Screenshot annotation text stayed canonical; the fixture opened its separately materialized PNG and verified its SHA256. No inference ran.
+
+Fresh [multiple Input/Invoke](v1/main-merge/multiple-inputs.mp4) and [annotation response navigation](v1/main-merge/annotation.mp4) recordings reached HUMAN_GATE_READY with no observed fixture errors. Both manifests' binary hashes match the final build; human verdicts remain pending. The annotation capture app was closed with SIGINT after its immutable manifest was saved; that shutdown exit is recorded separately and is not an outer test pass. Prior recordings remain unchanged. Three new scoped review manifests independently match current source bytes; none grants merge approval. Hosted CI must still qualify the current PR head.

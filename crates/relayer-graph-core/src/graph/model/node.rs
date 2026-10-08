@@ -20,6 +20,9 @@ pub struct GraphNode {
     pub detail: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub authored_detail: Option<serde_json::Value>,
+    /// Artifact details (PRD 11.11): only on the single node of an `artifact` layer.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub artifact: Option<serde_json::Value>,
     pub state: RecordState,
 }
 

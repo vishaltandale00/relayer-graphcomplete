@@ -27,7 +27,7 @@ Advance validates the full prospective Return plan, but publishes only the compl
 
 An InvokeAction is a reusable definition, not a child identity. Keyed Invocations store separate child identities, source-action snapshots and the exact source response Node as parent. Calls can be prepared from an owned draft. Returned results are joined per call without converting the source action. GraphComplete records these semantics; each provider still owns native recursive execution. No graph-level scheduler is introduced.
 
-[ADR 0014](decisions/0014-sealed-completion-contract-and-invocations.md) and PRD section 12.1A define the compatibility and delivery boundaries. The first slice stops at its recorded and hands-on human gate; execution retry histories and inert Eval Replay follow in separate gated slices.
+[ADR 0015](decisions/0015-sealed-completion-contract-and-invocations.md) and PRD section 12.1A define the compatibility and delivery boundaries. The first slice stops at its recorded and hands-on human gate; execution retry histories and inert Eval Replay follow in separate gated slices.
 
 ## Working desktop product path
 

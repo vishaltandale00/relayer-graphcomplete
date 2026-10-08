@@ -214,6 +214,8 @@ export interface DraftPreviewRenderRequest {
   readonly fingerprint: string;
   /** The graph server's draft snapshot: target, layer, nodes, edges and assets. */
   readonly snapshot: JsonObject;
+  /** The run's thread folder, where an artifact layer's files live (PRD 6.6). */
+  readonly workingDirectory?: string;
 }
 
 export interface DraftPreviewImage {

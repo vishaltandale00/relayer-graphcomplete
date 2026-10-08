@@ -173,6 +173,16 @@ if (contextBridge) contextBridge.exposeInMainWorld("relayerDesktop", {
     dismiss: () => ipcRenderer.invoke("relayer:tutorial-dismiss"),
     complete: () => ipcRenderer.invoke("relayer:tutorial-complete"),
   },
+  artifactViewer: {
+    open: (request) => ipcRenderer.invoke("relayer:artifact-viewer-open", request),
+    setBounds: (bounds) => ipcRenderer.invoke("relayer:artifact-viewer-bounds", bounds),
+    close: () => ipcRenderer.invoke("relayer:artifact-viewer-close"),
+    showMenu: (position) => ipcRenderer.invoke("relayer:artifact-viewer-menu", position),
+    openLink: (url) => ipcRenderer.invoke("relayer:artifact-viewer-open-link", url),
+    beginNote: () => ipcRenderer.invoke("relayer:artifact-viewer-note-begin"),
+    endNote: (options) => ipcRenderer.invoke("relayer:artifact-viewer-note-end", options),
+    onEvent: (callback) => subscribe("relayer:artifact-viewer-event", callback),
+  },
   updater: {
     status: () => ipcRenderer.invoke("relayer:update-status"),
     check: () => ipcRenderer.invoke("relayer:update-check"),

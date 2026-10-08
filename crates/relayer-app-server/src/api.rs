@@ -236,6 +236,7 @@ pub(crate) fn router(
         .route("/api/threads/{id}/archive", axum::routing::post(threads::set_archived))
         .route("/api/threads/{id}", get(threads::get))
         .route("/api/threads/{id}/export", get(threads::export))
+        .route("/api/threads/{id}/artifact-folder", get(threads::artifact_folder))
         .route(
             "/api/threads/{id}/share-export",
             axum::routing::post(threads::share_export),

@@ -1,0 +1,68 @@
+[
+  {
+    "key": "site",
+    "status": "rendered",
+    "width": 1164,
+    "height": 703
+  },
+  {
+    "key": "site-phone",
+    "status": "rendered",
+    "width": 390,
+    "height": 844
+  },
+  {
+    "key": "pdf",
+    "status": "rendered",
+    "width": 1164,
+    "height": 703
+  },
+  {
+    "key": "pdf-page",
+    "status": "rendered",
+    "width": 1164,
+    "height": 703
+  },
+  {
+    "key": "video",
+    "status": "rendered",
+    "width": 1164,
+    "height": 703
+  },
+  {
+    "key": "video-segment",
+    "status": "rendered",
+    "width": 1164,
+    "height": 703
+  },
+  {
+    "key": "hero",
+    "status": "rendered",
+    "width": 1164,
+    "height": 703
+  },
+  {
+    "key": "guide",
+    "status": "rendered",
+    "width": 1164,
+    "height": 703
+  },
+  {
+    "key": "guide-colour",
+    "status": "rendered",
+    "width": 1164,
+    "height": 703
+  },
+  {
+    "key": "menu-board",
+    "status": "rendered",
+    "width": 1164,
+    "height": 703
+  },
+  {
+    "key": "deployed",
+    "status": "rendered",
+    "width": 1164,
+    "height": 703
+  }
+]

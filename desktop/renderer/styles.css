@@ -477,3 +477,58 @@ body.sidebar-collapsed .thread-archive-button{display:none}body.sidebar-collapse
 .checkout-new-row{display:flex;align-items:center;gap:4px}.checkout-new-row .checkout-checkbox{flex-shrink:0}.checkout-menu #worktreeBaseButton{display:flex;flex-direction:row;width:auto;flex:1;align-items:center;justify-content:space-between;gap:8px;min-width:0;max-width:190px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;padding:6px 8px;border-radius:6px;color:var(--muted)}.checkout-menu #worktreeBaseButton:hover,.checkout-menu #worktreeBaseButton:focus-visible{background:var(--hover);color:var(--text)}.worktree-base-picker{position:fixed;z-index:1000;padding:6px;border:1px solid var(--line);border-radius:10px;background:var(--panel);box-shadow:0 8px 28px #0004}.worktree-base-picker input{width:100%;padding:8px;border:1px solid var(--line);border-radius:6px;background:var(--bg);color:var(--text)}#worktreeBaseList{max-height:180px;overflow-y:auto;overscroll-behavior:contain;margin-top:5px}#worktreeBaseList button{min-height:36px}#worktreeBaseList button[aria-selected="true"]{background:var(--hover)}#worktreeBaseResults:empty{display:none}
 
 #worktreeBaseButton span:first-child{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}#worktreeBaseList small{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:10px}#worktreeBaseList button{flex-shrink:0}
+/* Artifact viewer (PRD 6.6). In Desktop the artifact is a native view main places inside .artifact-stage; nothing here draws over it.
+   The strip is the pointer target that brings the toolbar back, so it must never be a window drag region: macOS gives drag regions' mouse events to the window, not the page. */
+.artifact-viewer{position:fixed;inset:0;z-index:200;display:flex;flex-direction:column;background:var(--canvas-bg);color:var(--text);outline:none}
+.artifact-strip{flex:none;height:26px;display:flex;align-items:center;justify-content:center;padding:0 84px;border-bottom:1px solid var(--line);background:var(--bg);color:var(--text-muted);font:11px ui-monospace,SFMono-Regular,Menlo,monospace;-webkit-app-region:no-drag}
+.artifact-strip-text{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.artifact-toolbar{flex:none;height:46px;display:flex;align-items:center;gap:8px;padding:0 10px;border-bottom:1px solid var(--line);background:var(--surface);transition:margin-top .2s ease,opacity .2s ease}
+.artifact-toolbar-hidden .artifact-toolbar{margin-top:-46px;opacity:0;pointer-events:none}
+.artifact-tool{height:32px;display:inline-flex;align-items:center;gap:6px;padding:0 10px;border:1px solid transparent;border-radius:8px;background:transparent;color:var(--text-muted);font-size:12px;white-space:nowrap}
+.artifact-tool:hover,.artifact-tool:focus-visible{background:var(--hover);color:var(--text)}
+.artifact-tool svg{width:16px;height:16px}
+.artifact-icon-tool{width:34px;padding:0;justify-content:center}
+.artifact-title{display:flex;align-items:center;gap:8px;min-width:0;padding:0 6px}
+.artifact-title svg{width:16px;height:16px;flex:none}
+.artifact-title b{font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:280px}
+.artifact-title small{color:var(--faint);font-size:10px;text-transform:uppercase;letter-spacing:.06em}
+.artifact-address{display:flex;align-items:center;gap:6px;min-width:120px;max-width:440px;height:30px;padding:0 10px;border-radius:15px;border:1px solid var(--line);background:var(--field);color:var(--text-muted);font:12px ui-monospace,SFMono-Regular,Menlo,monospace;overflow:hidden}
+.artifact-address svg{width:13px;height:13px;flex:none}
+.artifact-address-text{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.artifact-badges{display:flex;gap:6px;min-width:0;overflow:hidden}
+.artifact-badge{display:inline-flex;align-items:center;height:26px;padding:0 9px;border-radius:13px;border:1px solid var(--line);background:var(--bg);color:var(--text-muted);font-size:11px;white-space:nowrap}
+.artifact-badge[role=button]{cursor:pointer}
+.artifact-badge-warning{color:var(--warning-text);border-color:color-mix(in srgb,var(--warning-text) 45%,transparent)}
+.artifact-badge-error{color:var(--danger-text);border-color:color-mix(in srgb,var(--danger-text) 45%,transparent)}
+.artifact-spacer{flex:1}
+.artifact-stage{position:relative;flex:1;min-height:0;display:flex}
+.artifact-frame{flex:1;width:100%;height:100%;border:0;background:#fff}
+.artifact-card{position:absolute;left:50%;top:50%;transform:translate(-50%,-40%);width:min(560px,calc(100vw - 32px));display:grid;gap:10px;justify-items:start;padding:28px;border-radius:14px;border:1px solid var(--line-strong);background:var(--surface)}
+.artifact-card[hidden]{display:none}
+.artifact-card svg{width:28px;height:28px}
+.artifact-card h2{margin:2px 0 0;font-size:18px;letter-spacing:-.01em}
+.artifact-card p{margin:0;color:var(--text-muted);line-height:1.5;overflow-wrap:anywhere}
+.artifact-card .artifact-card-note{font-size:12px;color:var(--faint)}
+.artifact-card-action{height:32px;padding:0 14px;border:0;border-radius:8px;background:var(--text);color:var(--bg);font-weight:600}
+.artifact-card-actions{display:flex;gap:8px;flex-wrap:wrap}
+.artifact-card-secondary{background:transparent;color:var(--text);border:1px solid var(--line-strong)}
+.artifact-card-command{display:block;white-space:pre-wrap;max-width:100%;padding:8px 10px;border-radius:8px;background:var(--bg);border:1px solid var(--line);font:12px ui-monospace,SFMono-Regular,Menlo,monospace;overflow-wrap:anywhere}
+.artifact-card-log{width:100%;max-height:220px;margin:0;padding:10px;overflow:auto;border-radius:8px;background:var(--bg);border:1px solid var(--line);color:var(--text-muted);font:11px/1.45 ui-monospace,SFMono-Regular,Menlo,monospace;white-space:pre-wrap;box-sizing:border-box}
+.artifact-device{align-self:center;flex:none;margin:auto;border-radius:22px;background:#fff;box-shadow:0 0 0 10px #050505,0 24px 70px rgba(0,0,0,.5);overflow:hidden;display:flex}
+.artifact-device-tablet{border-radius:16px}
+.artifact-device-label{position:absolute;bottom:8px;left:50%;transform:translateX(-50%);color:var(--faint);font-size:11px;text-transform:capitalize}
+/* Annotate (PRD 6.6.8): the live view freezes on its screenshot while the panel is open. */
+.artifact-freeze{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;object-position:top center;background:var(--canvas-bg)}
+.artifact-device{position:relative}
+.artifact-tool[aria-pressed="true"]{background:var(--hover);color:var(--text)}
+.artifact-note-panel{position:absolute;top:80px;right:12px;z-index:3;width:min(380px,calc(100vw - 32px));max-height:calc(100% - 100px);overflow:auto;display:grid;gap:10px;padding:14px;border-radius:12px;border:1px solid var(--line-strong);background:var(--surface);box-shadow:0 18px 50px rgba(0,0,0,.35)}
+.artifact-note-panel header{display:flex;align-items:baseline;justify-content:space-between;gap:8px}
+.artifact-note-panel header small{color:var(--text-muted);font-size:11px}
+.artifact-note-list{margin:0;padding:0;list-style:none;display:grid;gap:6px}
+.artifact-note-list:empty{display:none}
+.artifact-note-list li{display:flex;align-items:flex-start;gap:8px;padding:8px 10px;border-radius:8px;background:var(--bg);font-size:12px;white-space:pre-wrap}
+.artifact-note-list li span{flex:1;min-width:0;overflow-wrap:anywhere}
+.artifact-note-remove{border:0;background:transparent;color:var(--text-muted);font-size:15px;line-height:1;padding:0 2px}
+.artifact-note-where{margin:0;color:var(--text-muted);font-size:12px}
+.artifact-note-shot{width:100%;max-height:150px;object-fit:cover;object-position:top;border-radius:8px;border:1px solid var(--line)}
+.artifact-note-field{width:100%;box-sizing:border-box;resize:vertical;padding:8px 10px;border-radius:8px;border:1px solid var(--line-strong);background:var(--bg);color:var(--text);font:inherit;font-size:13px}

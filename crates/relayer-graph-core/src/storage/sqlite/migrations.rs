@@ -1257,7 +1257,7 @@ mod tests {
             migrations: Cow::Owned(
                 MIGRATOR
                     .iter()
-                    .filter(|migration| migration.version <= 37)
+                    .filter(|migration| migration.version <= 38)
                     .cloned()
                     .collect(),
             ),
@@ -1304,6 +1304,111 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn shipped_artifact_schema_upgrades_without_backfilling_completion_contracts() {
+        let file = tempfile::NamedTempFile::new().unwrap();
+        let url = format!("sqlite://{}", file.path().display());
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect(&url)
+            .await
+            .unwrap();
+        Migrator {
+            migrations: Cow::Owned(
+                MIGRATOR
+                    .iter()
+                    .filter(|migration| migration.version <= 34)
+                    .cloned()
+                    .collect(),
+            ),
+            ..Migrator::DEFAULT
+        }
+        .run(&pool)
+        .await
+        .unwrap();
+        let artifact = serde_json::json!({
+            "kind": "url",
+            "source": {"url": "https://example.com"},
+        });
+        sqlx::raw_sql("INSERT INTO nodes(id,thread_id,kind,icon,title,detail,state,owner_interaction_id,client_key) VALUES (1,1,'user-interaction','user','Legacy','Legacy','accepted',NULL,NULL),(2,1,'concept','globe','Site','Site','accepted',1,'site'); INSERT INTO layers(id,thread_id,state,owner_interaction_id,client_key,renderer) VALUES (1,1,'accepted',1,'site-view','artifact'); INSERT INTO layer_nodes(layer_id,node_id,position) VALUES (1,2,0);")
+            .execute(&pool).await.unwrap();
+        sqlx::query("UPDATE nodes SET artifact=?1 WHERE id=2")
+            .bind(artifact.to_string())
+            .execute(&pool)
+            .await
+            .unwrap();
+        pool.close().await;
+
+        let database = GraphDatabase::open(file.path()).await.unwrap();
+        let restored = database
+            .writer_for_subgraph(NodeId::new(1).unwrap())
+            .await
+            .unwrap()
+            .get_layer(LayerId::new(1).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(restored.layer.renderer.as_deref(), Some("artifact"));
+        assert_eq!(restored.nodes[0].artifact.as_ref(), Some(&artifact));
+        let fresh = database
+            .create_interaction(None, ThreadId::new(1).unwrap(), "New answer")
+            .await
+            .unwrap();
+        let contract = database
+            .writer_for_subgraph(fresh.id)
+            .await
+            .unwrap()
+            .interaction_input()
+            .await
+            .unwrap()
+            .completion_contract
+            .unwrap();
+        contract.validate().unwrap();
+        database.close().await;
+
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect(&url)
+            .await
+            .unwrap();
+        assert_eq!(
+            sqlx::query_scalar::<_, i64>(
+                "SELECT COUNT(*) FROM completion_contracts WHERE interaction_node_id=1"
+            )
+            .fetch_one(&pool)
+            .await
+            .unwrap(),
+            0
+        );
+        assert!(
+            sqlx::query(
+                "UPDATE completion_contracts SET description='{}' WHERE interaction_node_id=?1"
+            )
+            .bind(fresh.id.value())
+            .execute(&pool)
+            .await
+            .is_err()
+        );
+        pool.close().await;
+        let reopened = GraphDatabase::open(file.path()).await.unwrap();
+        let input = reopened
+            .writer_for_subgraph(fresh.id)
+            .await
+            .unwrap()
+            .interaction_input()
+            .await
+            .unwrap();
+        assert_eq!(input.completion_contract, Some(contract));
+        let restored = reopened
+            .writer_for_subgraph(NodeId::new(1).unwrap())
+            .await
+            .unwrap()
+            .get_layer(LayerId::new(1).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(restored.layer.renderer.as_deref(), Some("artifact"));
+        assert_eq!(restored.nodes[0].artifact.as_ref(), Some(&artifact));
+    }
+
+    #[tokio::test]
     async fn edge_layout_migrations_keep_existing_layouts_shape_and_route_free() {
         use std::borrow::Cow;
         let temporary = tempfile::tempdir().unwrap();
@@ -1337,15 +1442,15 @@ mod tests {
         .unwrap();
         assert_eq!((shape, routes), (None, None));
         // Merged migrations retain each distinct version: shipped edge metadata
-        // completion-local topic proposals, Invoke bindings, and inert imported
-        // definitions must coexist.
+        // completion-local topic proposals, artifact layers, sealed completion contracts,
+        // Invoke bindings, and inert imported definitions must coexist.
         let versions: Vec<i64> = sqlx::query_scalar(
             "SELECT version FROM _sqlx_migrations WHERE version >= 30 ORDER BY version",
         )
         .fetch_all(&pool)
         .await
         .unwrap();
-        assert_eq!(versions, [30, 31, 32, 33, 34, 35, 36, 37, 38]);
+        assert_eq!(versions, [30, 31, 32, 33, 34, 35, 36, 37, 38, 39]);
         sqlx::query(
             "INSERT INTO thread_icon_proposals(interaction_node_id,icon) VALUES (1,'compass')",
         )

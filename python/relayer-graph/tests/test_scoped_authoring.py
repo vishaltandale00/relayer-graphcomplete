@@ -33,6 +33,49 @@ class Wire:
 
 
 class ScopedAuthoringTests(unittest.IsolatedAsyncioTestCase):
+    async def test_scoped_artifact_captures_renderer_and_metadata_before_queued_writes(self):
+        wire = Wire()
+        entered, release = asyncio.Event(), asyncio.Event()
+        fingerprint = "a" * 64
+        async def request(method, path, body=None):
+            wire.requests.append((path, body))
+            if path.endswith("/nodes"):
+                entered.set()
+                await release.wait()
+            reply = wire.reply(path, body)
+            if path.endswith("/nodes") and "artifact" in body:
+                reply["node"]["artifact"] = {**body["artifact"], "fingerprint": fingerprint}
+            return reply
+        graph = RelayerGraphClient("http://graph.test", "token", 1)
+        graph._request = request
+        author = graph.authoring("artifact-capture")
+        root, viewer = author.layer("answer"), author.layer("viewer")
+        summary = root.node("summary", icon="info", title="Site", detail="Open the site")
+        artifact = viewer.node("site", icon="globe", title="Site", detail="Website")
+        source = {"file": "site/index.html", "root": "site"}
+        artifact.artifact = {"kind": "website", "source": source, "part": {"route": "#pricing"}, "viewport": "phone"}
+        viewer.object.renderer = "artifact"
+        root.action("open", summary, kind="navigate", relation="expand", label="Open site", target=viewer)
+        root.layout([(summary, .5, .5)], edge_shape="default")
+        viewer.layout([(artifact, .5, .5)], edge_shape="default", default_node=artifact)
+        pending = asyncio.create_task(author.write(root))
+        await entered.wait()
+        source["file"] = "late/index.html"
+        artifact.artifact["part"]["route"] = "#late"
+        viewer.object.renderer = None
+        release.set()
+        written = await pending
+        expected = {"kind": "website", "source": {"file": "site/index.html", "root": "site"}, "part": {"route": "#pricing"}, "viewport": "phone"}
+        artifact_write = next(body for path, body in wire.requests if "artifact" in body)
+        self.assertEqual(artifact_write["artifact"], expected)
+        viewer_write = next(body for path, body in wire.requests if path.endswith("/layers") and body["clientKey"] == viewer.object.client_key)
+        self.assertEqual(viewer_write["renderer"], "artifact")
+        self.assertEqual(viewer_write["nodes"], [artifact.ref.id])
+        self.assertEqual(viewer_write["defaultNodeId"], artifact.ref.id)
+        self.assertEqual(viewer.object.ref.renderer, "artifact")
+        self.assertEqual(artifact.ref.artifact, {**expected, "fingerprint": fingerprint})
+        self.assertEqual(next(action for action in written.actions if action["label"] == "Open site")["targetLayerId"], viewer.object.ref.id)
+
     async def test_scoped_input_binding_captures_fields_before_queued_transport(self):
         wire = Wire()
         entered, release = asyncio.Event(), asyncio.Event()

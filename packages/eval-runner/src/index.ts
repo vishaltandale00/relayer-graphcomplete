@@ -6,6 +6,7 @@ export * from "./cases/natural-graph-memory-query.js";
 export * from "./cases/graph-memory.js";
 export * from "./cases/recursive-graph-memory-grading.js";
 export * from "./fixtures/approval.js";
+export * from "./fixtures/artifact-viewer.js";
 export * from "./fixtures/graph-memory.js";
 export * from "./fixtures/node-detail.js";
 export * from "./fixtures/task-system.js";

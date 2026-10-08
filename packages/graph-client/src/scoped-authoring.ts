@@ -24,6 +24,7 @@ import {
   type GraphEdge,
   type GraphLayer,
   type GraphNode,
+  type LayerRenderer,
 } from "./types.js";
 
 /** Private client seam: a captured node still uses the client's compiler and retry state. */
@@ -423,6 +424,7 @@ interface CapturedLayer {
   readonly edges: readonly EdgeReference[];
   readonly layout: LayerLayoutObject;
   readonly defaultNode?: NodeReference | undefined;
+  readonly renderer?: LayerRenderer | undefined;
   readonly sizeJustification?: string | undefined;
 }
 
@@ -620,6 +622,7 @@ export class ScopedGraphAuthoring {
           edges,
           layout: new LayerLayoutObject(placements, layout.edgeShape, routes),
           defaultNode: declaration.object.defaultNode,
+          renderer: declaration.object.renderer,
           sizeJustification: declaration.sizeJustification,
         });
         for (const [key, node] of declaration.nodes)
@@ -821,6 +824,7 @@ export class ScopedGraphAuthoring {
                   capture.defaultNode === undefined
                     ? undefined
                     : nodeRef(capture.defaultNode),
+                  capture.renderer,
                 ),
                 capture.sizeJustification === undefined
                   ? {}

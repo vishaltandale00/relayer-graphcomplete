@@ -74,6 +74,8 @@ export function publicViewerCsp() {
     "style-src 'self' 'unsafe-inline'",
     "img-src 'self' data: blob:",
     "font-src 'self'",
+    // Deployed https artifacts play in a sandboxed frame (PRD 6.6.10); nothing else is framed.
+    "frame-src https:",
     "connect-src 'none'",
     "form-action 'none'",
   ].join("; ");

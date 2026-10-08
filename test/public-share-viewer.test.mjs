@@ -1402,3 +1402,53 @@ describe("public share edge shapes", () => {
     }
   });
 });
+
+describe("artifact layers in a shared snapshot (ART-008)", () => {
+  it("open as a card for local files and a sandboxed frame for https, without leaving the graph", async () => {
+    const records = fixtureJsonl().trimEnd().split("\n").map(JSON.parse);
+    const view = records[1].acceptedView;
+    const artifactLayer = (id, nodeId, title, artifact) => {
+      const resolved = layer(id, nodeId);
+      resolved.layer.renderer = "artifact";
+      Object.assign(resolved.nodes[0], { title, artifact });
+      return resolved;
+    };
+    view.layers.push(
+      artifactLayer("layer:site", "node:site", "Landing page", { kind: "website", source: { file: "site/index.html", root: "site" }, fingerprint: `sha256:${"a".repeat(64)}` }),
+      artifactLayer("layer:deployed", "node:deployed", "Deployed site", { kind: "url", source: { url: "https://example.com/" } }),
+    );
+    view.layers[0].actions.push(
+      action("action:site", "node:root", "layer:site", "expand", "layer:root"),
+      action("action:deployed", "node:root", "layer:deployed", "expand", "layer:root"),
+    );
+    const windowRef = new Window({ url: `https://share.example.test/t/${"a".repeat(32)}` });
+    windowRef.document.write(renderPublicViewerTemplate({ snapshot: recordsJsonl(records), sharePath: `/t/${"a".repeat(32)}` }));
+    const previous = { DOMParser: globalThis.DOMParser, document: globalThis.document, lucide: globalThis.lucide, marked: globalThis.marked, window: globalThis.window };
+    Object.assign(globalThis, { window: windowRef, document: windowRef.document, DOMParser: windowRef.DOMParser, marked: { parse: (value) => value } });
+    globalThis.lucide = { Circle: {}, createElement: () => windowRef.document.createElementNS("http://www.w3.org/2000/svg", "svg") };
+    try {
+      const onRenderError = vi.fn();
+      const viewer = bootPublicViewer({ documentRef: windowRef.document, windowRef, onRenderError });
+      expect(onRenderError).not.toHaveBeenCalled();
+      windowRef.document.querySelector(".graph-node").click();
+      await windowRef.happyDOM.waitUntilComplete();
+      windowRef.document.querySelector('[data-action-id="action:site"]').click();
+      await vi.waitFor(() => expect(windowRef.document.querySelector(".artifact-viewer")).toBeTruthy());
+      expect(windowRef.document.querySelector(".artifact-card-note").textContent).toBe("Available in Relayer on the machine that made it.");
+      expect(windowRef.document.querySelector(".artifact-viewer iframe")).toBeNull();
+      expect(viewer.adapter.state.visibleLayer.layer.id).toBe("layer:root");
+      windowRef.document.dispatchEvent(new windowRef.KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+      expect(windowRef.document.querySelector(".artifact-viewer")).toBeNull();
+      windowRef.document.querySelector('[data-action-id="action:deployed"]').click();
+      await vi.waitFor(() => expect(windowRef.document.querySelector(".artifact-viewer iframe")).toBeTruthy());
+      expect(windowRef.document.querySelector(".artifact-viewer iframe").getAttribute("srcdoc")).toContain('src="https://example.com/"');
+      expect(publicViewerCsp()).toContain("frame-src https:");
+      // Disposing the share viewer closes an open artifact overlay too.
+      viewer.dispose();
+      expect(windowRef.document.querySelector(".artifact-viewer")).toBeNull();
+    } finally {
+      Object.assign(globalThis, previous);
+      await windowRef.close();
+    }
+  });
+});

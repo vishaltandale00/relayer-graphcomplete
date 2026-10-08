@@ -110,6 +110,7 @@ fn layer(id: &str, node_id: &str, actions: Vec<ExportAction>) -> ExportResolvedL
                 edge_routes: Vec::new(),
             }),
             state: ExportRecordState::Accepted,
+            renderer: None,
         },
         nodes: vec![ExportNode {
             id: node_id.into(),
@@ -128,6 +129,7 @@ fn layer(id: &str, node_id: &str, actions: Vec<ExportAction>) -> ExportResolvedL
             authored_detail_omitted: None,
             authored_detail_assets: vec![],
             state: ExportRecordState::Accepted,
+            artifact: None,
         }],
         edges: vec![],
         actions,

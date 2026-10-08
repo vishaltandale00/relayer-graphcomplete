@@ -3,6 +3,7 @@ import { interactionGraph, renderInteractionGraph } from "./interaction-graph.js
 import { createWorkspaceLayout } from "./workspace-layout.js";
 import { preferredLayerNode, rememberedLayerSelection, rememberLayerSelection } from "./layer-selection.js";
 import { escapeHtml, toast } from "../ui.js";
+import { artifactNoteLabel } from "../artifact-viewer.js";
 import { isDurableActionInvocation, actionCanRetry, actionWasInvoked, actionReviewKind, singleCallResultDestination } from "../action-invocation-state.js";
 import { setControlActivationCompletion } from "../control-activation.js";
 import {
@@ -3459,7 +3460,7 @@ export function createProductWorkspace({
       openContext.annotations.forEach((annotation, index) => {
         const item = graphDocument.createElement("li");
         const text = graphDocument.createElement("span");
-        text.textContent = annotation;
+        text.textContent = artifactNoteLabel(annotation);
         const remove = graphDocument.createElement("button");
         remove.type = "button";
         remove.className = "context-symbol-button";
@@ -4544,7 +4545,8 @@ export function createProductWorkspace({
         const list = graphDocument.createElement("ol");
         for (const annotation of context.annotations) {
           const item = graphDocument.createElement("li");
-          item.textContent = annotation;
+          // An artifact note names its screenshot for the agent; people see the note.
+          item.textContent = artifactNoteLabel(annotation);
           list.append(item);
         }
         group.append(list);
@@ -6811,6 +6813,10 @@ export function createProductWorkspace({
     render,
     setInputOperatorCommitted,
     prepareSelectionChange: prepareNodeContextSelectionChange,
+    // Artifact notes are confirmed outside the workspace; pull them into the composer (PRD 6.6.8).
+    reloadConfirmedContexts: (threadId) => contextDraftController
+      ? reconcileConfirmedComposerContexts(threadId, { reload: true })
+      : Promise.resolve(),
     modelSelectionPayload: () => modelPicker?.isReady()
       ? pickerSelectionPayload(modelPicker.getSelection())
       : null,

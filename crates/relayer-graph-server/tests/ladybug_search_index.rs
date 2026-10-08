@@ -246,6 +246,7 @@ fn imported_conversation(project_id: Option<ProjectId>) -> ImportedConversation 
                             edge_shape: None,
                             edge_routes: Vec::new(),
                         }),
+                        renderer: None,
                     },
                     nodes: vec![ImportedNode {
                         id: "node-1".into(),
@@ -257,6 +258,7 @@ fn imported_conversation(project_id: Option<ProjectId>) -> ImportedConversation 
                         authored_detail: None,
                         authored_detail_assets: vec![],
                         authored_detail_omitted: false,
+                        artifact: None,
                     }],
                     edges: vec![],
                     actions: vec![],

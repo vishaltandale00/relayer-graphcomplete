@@ -13,6 +13,7 @@ import {
 } from "../native-session-reset.js";
 import { redactTraceData } from "../trace.js";
 import { CURRENT_WORKSPACE_GUIDANCE, GRAPH_PRESENTATION_GUIDANCE, NODE_ICON_GUIDANCE, scopedAuthoringRecipeJs } from "./graph-presentation-guidance.js";
+import { ARTIFACT_LAYER_GUIDANCE } from "./artifact-layer-guidance.js";
 import { LAYER_EDGE_SHAPE_GUIDANCE } from "./layer-edge-shape-guidance.js";
 import {
   personalPresentationNativeInstructions,
@@ -773,6 +774,8 @@ The visible layer must contain 1 to 8 nodes and must be connected. Layer edges a
 
 ${LAYER_EDGE_SHAPE_GUIDANCE}
 
+${ARTIFACT_LAYER_GUIDANCE}
+
 Every new layer, including every child layer, requires an intentional authored layout. Coordinates are normalized numbers from 0 through 1 and describe semantic relative position independently of the viewport. Place a one-node layer at (0.5, 0.5). Keep flow or time moving consistently, use a parent or summary node to anchor hierarchy, group related nodes spatially, align comparisons deliberately, and avoid accidental overlap or edge crossings where a clearer arrangement is available. The renderer changes the camera for the viewport; do not derive coordinates from pixels, window size, or inspector state.
 
 Node and action icons accept supported symbol names or registered image references. Invalid draft references are repairable.
@@ -942,6 +945,8 @@ Layers normally contain 1 to 5 nodes. A layer may contain 6 to 8 nodes only when
 
 Every new root, expansion, and reference layer requires a version-1 LayerLayoutObject(placements, edgeShape, edgeRoutes?) with exactly one NodePlacementObject(node, x, y) per member node. Coordinates are normalized numbers from 0 through 1 and express semantic relative position independently of the viewport. Place a one-node layer at (0.5, 0.5). Keep flow or time moving consistently, use a parent or summary node to anchor hierarchy, group related nodes spatially, align comparisons deliberately, and avoid accidental overlap or edge crossings where a clearer arrangement is available. Do not use pixels, window size, or inspector state. Example: const layout = new LayerLayoutObject([new NodePlacementObject(first, 0.25, 0.5), new NodePlacementObject(second, 0.75, 0.5)], "elbow-horizontal"); const layer = new LayerObject([first, second], [edge], layout); a routed loop-back: new LayerLayoutObject(placements, "elbow-horizontal", [{ edge: loopBack, ends: [{ node: last, side: "top" }, { node: first, side: "top" }], waypoints: [{ x: 0.9, y: 0.1 }, { x: 0.1, y: 0.1 }] }]);
 ${LAYER_EDGE_SHAPE_GUIDANCE}
+
+${ARTIFACT_LAYER_GUIDANCE}
 
 Layer edges are exactly what the user sees and are undirected. Every node needs a supported icon, a short title, and useful markdown detail. Optional action icons must also use a supported Relayer icon name:
 ${NODE_ICON_GUIDANCE}

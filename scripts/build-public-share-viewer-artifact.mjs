@@ -18,6 +18,7 @@ const browserResources = Object.freeze([
   "src/action-invocation-state.js",
   "src/api.js",
   "src/approval-model.js",
+  "src/artifact-viewer.js",
   "src/composer-drafts.js",
   "src/control-activation.js",
   "src/environment-context.js",

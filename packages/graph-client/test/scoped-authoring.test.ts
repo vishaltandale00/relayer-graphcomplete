@@ -73,6 +73,47 @@ describe("scoped graph authoring", () => {
   });
 
   afterEach(() => vi.unstubAllGlobals());
+  it("captures a scoped artifact destination and preserves its canonical node and renderer through queued writes", async () => {
+    const fixture = wire();
+    const entered = gate();
+    const release = gate();
+    const fingerprint = "a".repeat(64);
+    fixture.fetch.mockImplementation(async (url, init) => {
+      const path = new URL(url).pathname;
+      const body = JSON.parse(String(init.body));
+      fixture.requests.push({ path, body });
+      if (path.endsWith("/nodes")) { entered.release(); await release.promise; }
+      const reply = fixture.reply(path, body);
+      if ("node" in reply && body.artifact) Object.assign(reply.node, { artifact: { ...body.artifact, fingerprint } });
+      return new Response(JSON.stringify(reply));
+    });
+    const author = client().authoring("artifact-capture");
+    const root = author.layer("answer");
+    const viewer = author.layer("viewer");
+    const summary = root.node("summary", { icon: "info", title: "Site", detail: "Open the site" });
+    const artifact = viewer.node("site", { icon: "globe", title: "Site", detail: "Website" });
+    const source = { file: "site/index.html", root: "site" };
+    artifact.artifact = { kind: "website", source, part: { route: "#pricing" }, viewport: "phone" };
+    viewer.object.renderer = "artifact";
+    const open = root.action("open", summary, { kind: "navigate", relation: "expand", label: "Open site", target: viewer });
+    root.layout([[summary, .5, .5]], { edgeShape: "default" });
+    viewer.layout([[artifact, .5, .5]], { edgeShape: "default", defaultNode: artifact });
+    const pending = author.write(root);
+    await entered.promise;
+    source.file = "late/index.html";
+    Reflect.set(artifact.artifact, "part", { route: "#late" });
+    viewer.object.renderer = undefined;
+    release.release();
+    const written = await pending;
+    const artifactWrite = fixture.requests.find(({ body }) => body.artifact)!;
+    expect(artifactWrite.body.artifact).toEqual({ kind: "website", source: { file: "site/index.html", root: "site" }, part: { route: "#pricing" }, viewport: "phone" });
+    const viewerWrite = fixture.requests.find(({ path, body }) => path.endsWith("/layers") && body.clientKey === viewer.object.clientKey)!;
+    expect(viewerWrite.body).toMatchObject({ renderer: "artifact", nodes: [artifact.ref!.id], defaultNodeId: artifact.ref!.id });
+    expect(viewer.object.ref?.renderer).toBe("artifact");
+    expect(artifact.ref?.artifact).toEqual({ ...(artifactWrite.body.artifact as object), fingerprint });
+    expect(written.actions.find(action => action.clientKey === open.clientKey)?.targetLayerId).toBe(viewer.object.ref!.id);
+  });
+
   it("captures scoped Input bindings before queued transport and writes canonical refs despite later mutation", async () => {
     const fixture = wire();
     const entered = gate();

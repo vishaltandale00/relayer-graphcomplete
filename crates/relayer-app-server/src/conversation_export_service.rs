@@ -983,6 +983,7 @@ fn context_image_nodes<'a>(inputs: impl IntoIterator<Item = &'a ContextInput>) -
                         title: target.title.clone(),
                         detail: target.detail.clone(),
                         authored_detail: None,
+                        artifact: None,
                         state: target.state,
                     });
                 }
@@ -2724,6 +2725,13 @@ fn export_layer(
                         })
                         .collect(),
                 }),
+            // A share that dropped sensitive artifact details also drops the renderer, so
+            // the layer reads consistently as an ordinary graph (PRD 6.6.11 fallback).
+            renderer: resolved
+                .layer
+                .renderer
+                .clone()
+                .filter(|_| nodes.iter().all(|node| node.artifact.is_some())),
             state: ExportRecordState::Accepted,
         },
         nodes,
@@ -2760,6 +2768,10 @@ fn export_node(
         authored_detail,
         authored_detail_omitted,
         authored_detail_assets: Vec::new(),
+        // A share drops artifact details that look sensitive; the node then reads as ordinary.
+        artifact: node.artifact.clone().filter(|artifact| {
+            !(redactor.is_share() && redactor.contains_sensitive_json(artifact))
+        }),
         state: ExportRecordState::Accepted,
     })
 }
@@ -4841,6 +4853,7 @@ mod tests {
             title: "Private detail".into(),
             detail: "Fallback".into(),
             authored_detail: Some(package.clone()),
+            artifact: None,
             state: RecordState::Accepted,
         };
 
@@ -4878,6 +4891,7 @@ mod tests {
             title: "Portable detail".into(),
             detail: "Fallback".into(),
             authored_detail: Some(package.clone()),
+            artifact: None,
             state: RecordState::Accepted,
         };
 
@@ -4905,6 +4919,7 @@ mod tests {
             title: "Encoded detail".into(),
             detail: "Portable fallback".into(),
             authored_detail: Some(package),
+            artifact: None,
             state: RecordState::Accepted,
         }
     }
@@ -5384,6 +5399,7 @@ mod tests {
             title: "Private detail".into(),
             detail: "Portable fallback".into(),
             authored_detail: Some(package),
+            artifact: None,
             state: RecordState::Accepted,
         };
 
@@ -5422,6 +5438,7 @@ mod tests {
             title: "Private detail".into(),
             detail: "Portable fallback".into(),
             authored_detail: Some(package),
+            artifact: None,
             state: RecordState::Accepted,
         };
 
@@ -5480,6 +5497,7 @@ mod tests {
                     "assets": [],
                     "integritySha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
                 })),
+                artifact: None,
                 state: RecordState::Accepted,
             };
 
@@ -5730,6 +5748,7 @@ mod tests {
                 "assets": [],
                 "integritySha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
             })),
+            artifact: None,
             state: RecordState::Accepted,
             leased_action_id: None,
         };
@@ -5747,6 +5766,7 @@ mod tests {
                     title: "Use context".into(),
                     detail: "Use context".into(),
                     authored_detail: None,
+                    artifact: None,
                     state: RecordState::Accepted,
                     leased_action_id: None,
                 }),

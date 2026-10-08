@@ -343,6 +343,7 @@ export class GraphCompleteRuntimeService {
     candidateTrace,
     draftPreviewRenderer,
     retainDraftPreviews = false,
+    artifactNotesDirectory,
     acquireProviderExecution,
     interactionPermissions = false,
     acknowledgeUnknownProviderRelease,
@@ -376,6 +377,7 @@ export class GraphCompleteRuntimeService {
     this.harnessHostModuleUrl = harnessHostModuleUrl;
     this.candidateTrace = candidateTrace;
     this.draftPreviewRenderer = draftPreviewRenderer;
+    this.artifactNotesDirectory = artifactNotesDirectory;
     this.retainDraftPreviews = retainDraftPreviews === true;
     this.draftPreviewDirectory = null;
     this.acquireProviderExecution = acquireProviderExecution;
@@ -587,6 +589,7 @@ export class GraphCompleteRuntimeService {
           library: visualAssetsLibrary,
         },
         ...(this.candidateTrace ? { trace: this.candidateTrace } : {}),
+        ...(this.artifactNotesDirectory ? { artifactNotesDirectory: this.artifactNotesDirectory } : {}),
         ...(this.draftPreviewRenderer ? {
           draftPreviews: {
             token: draftPreviewsToken,

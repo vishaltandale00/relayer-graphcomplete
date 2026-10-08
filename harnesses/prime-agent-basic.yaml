@@ -2,7 +2,7 @@ schemaVersion: 1
 name: prime-agent-basic
 implementation: prime.agent
 implementationVersion: 1
-revision: 6
+revision: 8
 complete:
   agentAuthored: true
 permissionBindings:

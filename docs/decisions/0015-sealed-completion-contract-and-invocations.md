@@ -1,4 +1,4 @@
-# ADR 0014: Sealed completion contracts and reusable Invocations
+# ADR 0015: Sealed completion contracts and reusable Invocations
 
 Accepted product direction for #632, delivered by #658, #659 and #660. Implementation and verification remain gated independently. A canonical InteractionNode owns one immutable versioned CompletionContract sealed atomically by trusted preparation before capability issuance and inference. Exact recovery preserves the original input, authority, requirements and digest; it never upgrades old preparations. The executing completion observes the entire contract through the typed graph input API.
 
