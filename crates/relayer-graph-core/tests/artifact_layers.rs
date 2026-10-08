@@ -242,7 +242,27 @@ async fn artifact_details_are_checked_before_any_write() {
             "artifact_viewport_invalid",
         ),
         (
-            json!({"kind":"pptx","source":{"file":"deck.pptx"}}),
+            json!({"kind":"pptx","source":{"file":"deck.pptx"},"part":{"slide":0},"fingerprint":FINGERPRINT}),
+            "artifact_part_invalid",
+        ),
+        (
+            json!({"kind":"pptx","source":{"file":"deck.pptx"},"part":{"slide":9_007_199_254_740_992_u64},"fingerprint":FINGERPRINT}),
+            "artifact_part_invalid",
+        ),
+        (
+            json!({"kind":"pdf","source":{"file":"brief.pdf"},"part":{"page":9_007_199_254_740_992_u64},"fingerprint":FINGERPRINT}),
+            "artifact_part_invalid",
+        ),
+        (
+            json!({"kind":"docx","source":{"file":"proposal.docx"},"part":{"slide":2},"fingerprint":FINGERPRINT}),
+            "artifact_field_unknown",
+        ),
+        (
+            json!({"kind":"xlsx","source":{"file":"budget.csv"},"fingerprint":FINGERPRINT}),
+            "artifact_type_unsupported",
+        ),
+        (
+            json!({"kind":"keynote","source":{"file":"deck.key"}}),
             "artifact_kind_unsupported",
         ),
     ];
@@ -257,6 +277,26 @@ async fn artifact_details_are_checked_before_any_write() {
     assert!(artifact_node(&writer, "deployed", &url).await.is_ok());
     let loopback = json!({"kind":"url","source":{"url":"http://localhost:5173/"}});
     assert!(artifact_node(&writer, "local", &loopback).await.is_ok());
+    // P3: Office documents, and a deck opened at a slide.
+    for (key, office) in [
+        (
+            "proposal",
+            json!({"kind":"docx","source":{"file":"docs/proposal.docx"},"fingerprint":FINGERPRINT}),
+        ),
+        (
+            "budget",
+            json!({"kind":"xlsx","source":{"file":"docs/budget.xlsx"},"fingerprint":FINGERPRINT}),
+        ),
+        (
+            "pitch",
+            json!({"kind":"pptx","source":{"file":"docs/pitch.pptx"},"part":{"slide":3},"fingerprint":FINGERPRINT}),
+        ),
+    ] {
+        assert!(
+            artifact_node(&writer, key, &office).await.is_ok(),
+            "{office}"
+        );
+    }
     // Review: IPv6 loopback is loopback too.
     let ipv6 = json!({"kind":"app","source":{"url":"http://[::1]:5173/"},"server":{"command":"npm run dev"}});
     assert!(artifact_node(&writer, "local-ipv6", &ipv6).await.is_ok());

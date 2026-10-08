@@ -11,8 +11,11 @@ use crate::{GraphError, GraphNode, ValidationIssue};
 /// The only non-default layer renderer.
 pub const ARTIFACT_RENDERER: &str = "artifact";
 
-/// Kinds a node may declare: P1 files and URLs, and P2 web apps started by a server invoke.
-pub const ARTIFACT_KINDS: &[&str] = &["website", "pdf", "video", "image", "markdown", "url", "app"];
+/// Kinds a node may declare: P1 files and URLs, P2 web apps started by a server invoke,
+/// and P3 Office documents.
+pub const ARTIFACT_KINDS: &[&str] = &[
+    "website", "pdf", "video", "image", "markdown", "url", "app", "docx", "xlsx", "pptx",
+];
 
 /// File extensions each file kind accepts, lowercase and with the dot.
 pub fn artifact_extensions(kind: &str) -> &'static [&'static str] {
@@ -22,6 +25,9 @@ pub fn artifact_extensions(kind: &str) -> &'static [&'static str] {
         "video" => &[".mp4", ".webm", ".mov"],
         "image" => &[".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg"],
         "markdown" => &[".md", ".markdown"],
+        "docx" => &[".docx"],
+        "xlsx" => &[".xlsx"],
+        "pptx" => &[".pptx"],
         _ => &[],
     }
 }
@@ -38,6 +44,8 @@ const MAX_COMMAND_BYTES: usize = 1024;
 const DEFAULT_IDLE_MINUTES: u64 = 60;
 const MAX_IDLE_MINUTES: u64 = 24 * 60;
 const MAX_SEED_BYTES: usize = 16 * 1024;
+/// Page and slide numbers reach JavaScript viewers, which hold integers exactly only up to 2^53 - 1.
+const MAX_PART_NUMBER: u64 = (1 << 53) - 1;
 const MAX_SEED_ENTRIES: usize = 64;
 
 /// The idle timeout a server invoke uses when the node names none (PRD 6.6.6).
@@ -320,6 +328,7 @@ fn validate_part(kind: &str, part: &Map<String, Value>) -> Result<(), GraphError
         "pdf" => &["page"],
         "video" => &["start", "end"],
         "markdown" => &["heading"],
+        "pptx" => &["slide"],
         _ => &[],
     };
     keys_within(part, allowed, "artifact.part")?;
@@ -340,12 +349,25 @@ fn validate_part(kind: &str, part: &Map<String, Value>) -> Result<(), GraphError
         }
     }
     if let Some(page) = part.get("page")
-        && !page.as_u64().is_some_and(|page| page >= 1)
+        && !page
+            .as_u64()
+            .is_some_and(|page| (1..=MAX_PART_NUMBER).contains(&page))
     {
         return Err(issue(
             "artifact_part_invalid",
             "artifact.part.page",
             "A PDF page is a whole number from 1.",
+        ));
+    }
+    if let Some(slide) = part.get("slide")
+        && !slide
+            .as_u64()
+            .is_some_and(|slide| (1..=MAX_PART_NUMBER).contains(&slide))
+    {
+        return Err(issue(
+            "artifact_part_invalid",
+            "artifact.part.slide",
+            "A slide is a whole number from 1.",
         ));
     }
     if part.contains_key("start") || part.contains_key("end") {

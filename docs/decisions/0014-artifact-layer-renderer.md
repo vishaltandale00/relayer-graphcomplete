@@ -45,8 +45,9 @@ its portability. Agent-made content must never run with Relayer's authority.
 - Fingerprints make drift visible without copying large files into storage.
 - Artifact partitions are persistent and cleared on every open and close.
   Chromium's PDF viewer does not start in an in-memory session.
-- Office rendering depends on third-party renderers; P3 is gated on the
-  PowerPoint renderer's licence.
+- Office rendering depends on third-party renderers: docx-preview, SheetJS
+  and an MIT-licensed PowerPoint renderer (decision 2026-10-08). They run in
+  the artifact's isolated view, never in Relayer's page.
 
 ## Alternatives rejected
 
