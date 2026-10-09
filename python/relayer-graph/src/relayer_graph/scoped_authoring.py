@@ -113,16 +113,26 @@ class ScopedAuthoringLayer:
                                   _identity(owner.snapshot_key, key, "l", ""))
 
     def node(self, local_key: str, *, icon: Any, title: str, detail: str,
-             kind: str = "concept") -> NodeObject:
+             kind: str = "concept", artifact: dict[str, Any] | None = None) -> NodeObject:
         key = _name(local_key)
         if key in self._nodes:
             raise GraphAuthoringValidationError("Duplicate node " + _path(self._key, "nodes", key))
         if any(type(value) is not str for value in (title, detail, kind)):
             raise GraphAuthoringValidationError("Node title, detail, and kind must be strings")
-        node = NodeObject(icon, title, detail, kind, _identity(self._owner.snapshot_key, self._key, "n", key))
+        # The client captures artifact details at write, as on the direct path.
+        node = NodeObject(icon, title, detail, kind, _identity(self._owner.snapshot_key, self._key, "n", key),
+                          artifact=artifact)
         self._nodes[key] = node
         self._members.append(node)
         self.object.nodes = list(self._members)
+        return node
+
+    def artifact_node(self, local_key: str, *, icon: Any, title: str, detail: str,
+                      artifact: dict[str, Any], kind: str = "concept") -> NodeObject:
+        """Make this an artifact layer holding one artifact node, like LayerObject.for_artifact."""
+        node = self.node(local_key, icon=icon, title=title, detail=detail, kind=kind, artifact=artifact)
+        self.object.renderer = "artifact"
+        self.layout([(node, 0.5, 0.5)], edge_shape="default", default_node=node)
         return node
 
     def include(self, record: GraphNode | GraphEdge) -> None:
@@ -252,6 +262,11 @@ class ScopedGraphAuthoring:
                 for key, node in layer._nodes.items():
                     if node.client_key != _identity(self.snapshot_key, layer._key, "n", key):
                         raise GraphAuthoringValidationError("A declared node identity changed")
+                    # Like the TypeScript client: plain data only, so capture runs no author code.
+                    if node.artifact is not None:
+                        if type(node.artifact) is not dict:
+                            raise GraphAuthoringValidationError("Artifact details must be a plain dict of ordinary data")
+                        _copy(node.artifact)
                 for key, edge in layer._edges.items():
                     endpoints = layer._endpoints[key]
                     if edge.client_key != _identity(self.snapshot_key, layer._key, "e", key) or not _same(edge.endpoints, endpoints):

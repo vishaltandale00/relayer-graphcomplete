@@ -6,12 +6,14 @@ import {
   PrimeVisualAuthoring,
   submitPrimeLayer,
 } from "../packages/harness-host/dist/implementations/prime-visual-authoring.js";
-import { mkdtemp, rm } from "node:fs/promises";
+import { checkArtifactFiles } from "../packages/harness-host/dist/artifact-files.js";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
 import {
   EdgeObject,
+  GraphAuthoringWriteError,
   LayerLayoutObject,
   LayerObject,
   NodeObject,
@@ -776,6 +778,140 @@ async function terminate(child) {
 }
 
 // Replaces inference only: Python -> production host compiler -> authenticated Rust writes.
+describe("scoped artifact authoring against the real graph server", () => {
+  it("rejects, repairs and accepts scoped artifact layers whose files the host fingerprints", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "relayer-scoped-artifact-"));
+    directories.push(directory);
+    const threadFolder = join(directory, "thread");
+    await mkdir(join(threadFolder, "site"), { recursive: true });
+    await writeFile(join(threadFolder, "site", "index.html"), "<!doctype html><h1>Launch</h1>");
+    const token = "deterministic-scoped-artifact-control-token";
+    const server = await startGraphServer(join(directory, "graph.sqlite3"), token);
+    processes.push(server.process);
+    const bridge = await startArtifactBridge(threadFolder);
+    try {
+      const registered = await fetch(`${server.url}/api/control/visual-assets/bridge`, {
+        method: "PUT",
+        headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+        body: JSON.stringify({ url: bridge.url, token: bridge.token, generation: 1 }),
+      });
+      expect(registered.status, await registered.clone().text()).toBe(200);
+      const site = { kind: "website", source: { file: "site/index.html", root: "site" }, viewport: "phone" };
+      const interaction = await controlRequest(server.url, token, "/api/control/interactions", { projectId: 41, threadId: 76, text: "Show the launch site" });
+      const graph = new RelayerGraphClient({ url: server.url, token: interaction.graphToken, nodeId: interaction.node.id });
+      const assemble = (artifact, overviewArtifact) => {
+        const author = graph.authoring("site-v1");
+        const answer = author.layer("answer");
+        const viewer = author.layer("site-viewer");
+        const overview = answer.node("overview", { icon: "info", title: "Launch site", detail: "The launch site is ready to review.", ...(overviewArtifact ? { artifact: overviewArtifact } : {}) });
+        viewer.artifactNode("site", { icon: "globe", title: "Landing page", detail: "Check the hero on a phone.", artifact });
+        answer.action("open-site", overview, { kind: "navigate", relation: "expand", label: "Open the site", target: viewer });
+        answer.layout([[overview, 0.5, 0.5]], { edgeShape: "default", defaultNode: overview });
+        return { author, answer };
+      };
+      const rejection = async (draft) => {
+        const error = await draft.author.write(draft.answer).catch((caught) => caught);
+        expect(error).toBeInstanceOf(GraphAuthoringWriteError);
+        expect(error.failures).toHaveLength(1);
+        expect(error.failures[0].outcome).toBe("rejected");
+        return error.failures[0];
+      };
+
+      // graph-core rejects a malformed artifact shape at the node.
+      const shape = await rejection(assemble({ ...site, viewport: "watch" }));
+      expect(shape.path).toBe('layers["site-viewer"].nodes["site"]');
+      expect(JSON.stringify(shape.cause.issues)).toContain("artifact_viewport_invalid");
+      // The host's file check rejects a file outside the thread folder at the node.
+      const outside = await rejection(assemble({ ...site, source: { file: "../outside/index.html", root: "../outside" } }));
+      expect(outside.path).toBe('layers["site-viewer"].nodes["site"]');
+      expect(outside.cause.code).toBe("artifact_path_outside_thread");
+      // graph-core rejects an artifact node in an ordinary graph layer at that layer.
+      const misplaced = await rejection(assemble(site, site));
+      expect(misplaced.path).toBe('layers["answer"]');
+      expect(JSON.stringify(misplaced.cause.issues)).toContain("artifact_node_outside_artifact_layer");
+
+      // Repair with the same snapshot and keys, attach the root, and accept.
+      const repaired = assemble(site);
+      const written = await repaired.author.write(repaired.answer);
+      await graph.addAction(interaction.node.id, { kind: "navigate", relation: "expand", label: "Launch site", target: written.rootLayer, clientKey: "root-response" });
+      await graph.submit(interaction.node.id);
+      const viewerLayer = written.layers.find((layer) => layer.renderer === "artifact");
+      const accepted = await controlRead(server.url, token, `/api/control/interactions/${interaction.node.id}/layers/${viewerLayer.id}`);
+      expect(accepted.layer).toMatchObject({ state: "accepted", renderer: "artifact", edges: [] });
+      expect(accepted.nodes).toEqual([expect.objectContaining({ title: "Landing page", artifact: expect.objectContaining({ ...site, fingerprint: expect.stringMatching(/^sha256:[0-9a-f]{64}$/) }) })]);
+      expect(accepted.nodes[0].artifact.fingerprint).toBe((await checkArtifactFiles(threadFolder, site)).fingerprint);
+      const root = await controlRead(server.url, token, `/api/control/interactions/${interaction.node.id}/layers/${written.rootLayer.id}`);
+      expect(root.layer).not.toHaveProperty("renderer");
+      expect(root.actions).toEqual([expect.objectContaining({ targetLayerId: viewerLayer.id, state: "accepted" })]);
+
+      // Python's ordinary client writes the same artifact layer through the same server.
+      const pythonInteraction = await controlRequest(server.url, token, "/api/control/interactions", { projectId: 41, threadId: 77, text: "Show the launch site from Python" });
+      const output = await runRecipeProcess("python3", ["-"], SCOPED_ARTIFACT_PYTHON, {
+        PYTHONPATH: join(repositoryRoot, "python/relayer-graph/src"),
+        RELAYER_GRAPH_URL: server.url, RELAYER_GRAPH_TOKEN: pythonInteraction.graphToken,
+        RELAYER_NODE_ID: String(pythonInteraction.node.id), SITE: JSON.stringify(site),
+      });
+      const pythonViewer = Number(output.match(/VIEWER:(\d+)/)[1]);
+      const pythonAccepted = await controlRead(server.url, token, `/api/control/interactions/${pythonInteraction.node.id}/layers/${pythonViewer}`);
+      expect(pythonAccepted.layer).toMatchObject({ state: "accepted", renderer: "artifact" });
+      expect(pythonAccepted.nodes[0].artifact.fingerprint).toBe(accepted.nodes[0].artifact.fingerprint);
+    } finally {
+      await bridge.close();
+    }
+  });
+});
+
+const SCOPED_ARTIFACT_PYTHON = String.raw`
+import asyncio, json, os
+from relayer_graph import RelayerGraphClient
+
+async def main():
+    node_id = int(os.environ["RELAYER_NODE_ID"])
+    graph = RelayerGraphClient(os.environ["RELAYER_GRAPH_URL"], os.environ["RELAYER_GRAPH_TOKEN"], node_id)
+    author = graph.authoring("site-v1")
+    answer, viewer = author.layer("answer"), author.layer("site-viewer")
+    overview = answer.node("overview", icon="info", title="Launch site", detail="The launch site is ready to review.")
+    viewer.artifact_node("site", icon="globe", title="Landing page", detail="Check the hero on a phone.",
+                         artifact=json.loads(os.environ["SITE"]))
+    answer.action("open-site", overview, kind="navigate", relation="expand", label="Open the site", target=viewer)
+    answer.layout([(overview, .5, .5)], edge_shape="default", default_node=overview)
+    written = await author.write(answer)
+    await graph.add_navigate_action(node_id, "Launch site", written.root_layer, relation="expand", client_key="root-response")
+    await graph.submit(node_id)
+    print("VIEWER:" + str(next(layer.id for layer in written.layers if layer.renderer == "artifact")))
+
+asyncio.run(main())
+`;
+
+/**
+ * Stands in for the harness host's visual-assets bridge: lifecycle calls keep the
+ * generation, and artifact checks run the host's real file check on one thread folder.
+ */
+async function startArtifactBridge(threadFolder) {
+  const token = "deterministic-artifact-bridge-token-0123456789";
+  const host = createServer(async (request, response) => {
+    const reply = (status, body) => response.writeHead(status, { "content-type": "application/json" }).end(JSON.stringify(body));
+    if (request.headers.authorization !== `Bearer ${token}`) return reply(401, { error: { code: "unauthorized" } });
+    const chunks = [];
+    for await (const chunk of request) chunks.push(chunk);
+    const { operation } = JSON.parse(Buffer.concat(chunks));
+    if (operation.kind !== "check-artifact") {
+      return reply(200, { result: { assetGeneration: operation.expectedGeneration ?? operation.assetGeneration ?? 1 } });
+    }
+    try {
+      reply(200, { result: await checkArtifactFiles(threadFolder, operation.artifact) });
+    } catch (error) {
+      reply(422, { error: { code: error.code, message: error.message, path: error.path } });
+    }
+  });
+  await new Promise((resolve) => host.listen(0, "127.0.0.1", resolve));
+  return {
+    url: `http://127.0.0.1:${host.address().port}`,
+    token,
+    close: () => new Promise((resolve) => host.close(resolve)),
+  };
+}
+
 const SCOPED_PYTHON = String.raw`
 import asyncio, json, os, sys, types
 from urllib.request import Request, urlopen
