@@ -39,6 +39,7 @@ struct ActionInputAttachmentResponse {
     value: ActionInputValue,
     draft_revision: i64,
     committed_at: String,
+    composer_eligible: bool,
 }
 
 impl From<ActionInputDraft> for ActionInputDraftResponse {
@@ -56,11 +57,161 @@ impl From<ActionInputDraft> for ActionInputDraftResponse {
                     value: attachment.value,
                     draft_revision: attachment.draft_revision,
                     committed_at: attachment.committed_at,
+                    composer_eligible: true,
                 })
                 .collect(),
             updated_at: draft.updated_at,
         }
     }
+}
+
+// Classification is trusted graph-derived presentation state, never caller input.
+// It follows the attachment's accepted occurrence even after UI navigation.
+pub(super) async fn composer_occurrences(
+    state: &ApiState,
+    draft: &ActionInputDraft,
+) -> Result<Vec<relayer_graph_core::PresentingInputOccurrence>, ApiError> {
+    let mut ordinary = Vec::new();
+    if draft.attachments.is_empty() {
+        return Ok(ordinary);
+    }
+    let runtime = state.runtime.as_ref().ok_or_else(|| {
+        ApiError::internal("graph runtime is unavailable for input scope validation")
+    })?;
+    let project = state
+        .product
+        .get_thread(draft.thread_id)
+        .await?
+        .thread
+        .project_id
+        .map(|id| id.value());
+    for input in &draft.attachments {
+        let consumers = runtime
+            .canonical_input_action_consumer_state(
+                project,
+                draft.thread_id.value(),
+                &input.occurrence,
+            )
+            .await?;
+        if consumers.composer_eligible {
+            ordinary.push(input.occurrence.clone());
+        }
+    }
+    Ok(ordinary)
+}
+
+/// Presentation-only admission flags use the same whole canonical Node binding
+/// inventory as commit refusal and composer scoping. They never alter stored
+/// accepted action definitions or grant execution authority.
+pub(super) async fn project_layer_input_availability(
+    state: &ApiState,
+    thread_id: ThreadId,
+    presenting_interaction: i64,
+    layer: &mut serde_json::Value,
+    deadline: tokio::time::Instant,
+) -> Result<(), ApiError> {
+    let Some(actions) = layer
+        .get_mut("actions")
+        .and_then(serde_json::Value::as_array_mut)
+    else {
+        return Ok(());
+    };
+    if !actions.iter().any(|action| action["kind"] == "input") {
+        return Ok(());
+    }
+    let thread = state.product.get_thread(thread_id).await?.thread;
+    let project = thread.project_id.map(|id| id.value());
+    let layer_id = layer["layer"]["id"].as_i64();
+    // Reborrow after reading immutable Layer identity.
+    let actions = layer["actions"].as_array_mut().unwrap();
+    for action in actions
+        .iter_mut()
+        .filter(|action| action["kind"] == "input")
+    {
+        let occurrence = match (
+            relayer_graph_core::NodeId::new(presenting_interaction),
+            layer_id.and_then(relayer_graph_core::LayerId::new),
+            action["id"]
+                .as_i64()
+                .and_then(relayer_graph_core::ActionId::new),
+        ) {
+            (Some(presenting_interaction_node_id), Some(presenting_layer_id), Some(action_id)) => {
+                relayer_graph_core::PresentingInputOccurrence {
+                    presenting_interaction_node_id,
+                    presenting_layer_id,
+                    action_id,
+                }
+            }
+            _ => {
+                action["inputCanAcceptAnswer"] = serde_json::json!(false);
+                continue;
+            }
+        };
+        let flags = match &state.runtime {
+            Some(runtime) if !thread.imported => tokio::time::timeout_at(
+                deadline,
+                runtime.canonical_input_action_consumer_state(
+                    project,
+                    thread_id.value(),
+                    &occurrence,
+                ),
+            )
+            .await
+            .ok()
+            .and_then(Result::ok),
+            _ => None,
+        };
+        // Unknown availability cannot invite an answer that may have no consumer.
+        action["inputCanAcceptAnswer"] =
+            serde_json::json!(flags.is_some_and(|state| state.editable));
+    }
+    Ok(())
+}
+
+pub(super) async fn scoped_response(
+    state: &ApiState,
+    draft: ActionInputDraft,
+) -> Result<ActionInputDraftResponse, ApiError> {
+    let ordinary = composer_occurrences(state, &draft).await?;
+    let mut response: ActionInputDraftResponse = draft.into();
+    for input in &mut response.attachments {
+        input.composer_eligible = ordinary.contains(&input.occurrence);
+    }
+    Ok(response)
+}
+
+/// The mutation already committed. Presentation availability cannot turn that
+/// success into a failed save or detach. Unknown scope stays outside Send until
+/// a later authoritative refresh; the exact saved values/revision remain visible.
+pub(super) async fn committed_response(
+    state: &ApiState,
+    draft: ActionInputDraft,
+    deadline: tokio::time::Instant,
+) -> ActionInputDraftResponse {
+    let ordinary =
+        match tokio::time::timeout_at(deadline, composer_occurrences(state, &draft)).await {
+            Ok(Ok(ordinary)) => Some(ordinary),
+            result => {
+                let reason = if result.is_err() {
+                    "timed_out"
+                } else {
+                    "unavailable"
+                };
+                // Never log the answer, action prompt, backend body or private path.
+                eprintln!(
+                    "committed input response projection unavailable: thread={} reason={reason}",
+                    draft.thread_id.value()
+                );
+                None
+            }
+        };
+    let mut response: ActionInputDraftResponse = draft.into();
+    for input in &mut response.attachments {
+        input.composer_eligible = ordinary
+            .as_ref()
+            .is_some_and(|occurrences| occurrences.contains(&input.occurrence));
+    }
+    response
 }
 
 pub(super) async fn get(
@@ -79,11 +230,11 @@ pub(super) async fn get(
         authorize_write(&state, &headers)?;
         None
     };
-    let mut response: ActionInputDraftResponse = state
+    let draft = state
         .product
         .action_input_draft(ThreadId::try_from(thread_id)?)
-        .await?
-        .into();
+        .await?;
+    let mut response = scoped_response(&state, draft).await?;
     if let Some(operator) = operator {
         response.attachments.retain(|attachment| {
             operator
@@ -128,13 +279,13 @@ pub(super) async fn commit(
         .project_id
         .map(|project_id| project_id.value());
     let action = runtime
-        .canonical_input_action_occurrence(
+        .canonical_editable_input_action_occurrence(
             destination_project_id,
             thread_id.value(),
             &request.occurrence,
         )
         .await?;
-    let mut response: ActionInputDraftResponse = state
+    let draft = state
         .product
         .commit_action_input_attachment(
             thread_id,
@@ -143,8 +294,13 @@ pub(super) async fn commit(
             &request.value,
             request.expected_revision,
         )
-        .await?
-        .into();
+        .await?;
+    let mut response = committed_response(
+        &state,
+        draft,
+        super::interaction_graph::projection_deadline(),
+    )
+    .await;
     if let Some(operator) = operator {
         response.attachments.retain(|attachment| {
             operator
@@ -179,16 +335,21 @@ pub(super) async fn detach(
         action_id: relayer_graph_core::ActionId::new(action_id)
             .ok_or_else(|| ApiError::invalid("actionId must be positive"))?,
     };
+    let draft = state
+        .product
+        .detach_action_input_attachment(
+            ThreadId::try_from(thread_id)?,
+            &occurrence,
+            query.expected_revision,
+        )
+        .await?;
     Ok(Json(
-        state
-            .product
-            .detach_action_input_attachment(
-                ThreadId::try_from(thread_id)?,
-                &occurrence,
-                query.expected_revision,
-            )
-            .await?
-            .into(),
+        committed_response(
+            &state,
+            draft,
+            super::interaction_graph::projection_deadline(),
+        )
+        .await,
     ))
 }
 

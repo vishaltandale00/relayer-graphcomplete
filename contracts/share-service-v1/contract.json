@@ -4,7 +4,8 @@
     "exportVersions": [
       1,
       2,
-      3
+      3,
+      4
     ],
     "mediaType": "application/x-ndjson",
     "maxBytes": 16777216,

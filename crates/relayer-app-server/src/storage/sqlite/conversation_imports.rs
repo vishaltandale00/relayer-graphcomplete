@@ -12,6 +12,44 @@ use crate::{
 use sqlx::Row;
 
 impl SqliteProductStore {
+    pub(crate) async fn imported_bound_input_export_records(
+        &self,
+        thread_id: ThreadId,
+    ) -> Result<Vec<crate::conversation_export::ExportAction>, StorageError> {
+        let header: Option<String> = sqlx::query_scalar("SELECT ci.header_json FROM conversation_imports ci JOIN threads t ON t.conversation_import_id=ci.id WHERE t.id=?1 AND ci.state='published'")
+            .bind(thread_id.value()).fetch_optional(&self.pool).await?;
+        header
+            .map(|json| {
+                serde_json::from_str::<ConversationExportHeader>(&json)
+                    .map(|header| header.bound_inputs)
+                    .map_err(serialization)
+            })
+            .unwrap_or_else(|| Ok(Vec::new()))
+    }
+    pub(crate) async fn imported_invocation_asset_contents(
+        &self,
+        thread_id: ThreadId,
+    ) -> Result<Vec<crate::conversation_export::ExportVisualAssetContent>, StorageError> {
+        sqlx::query_scalar::<_, String>("SELECT contents.content_json FROM conversation_import_asset_contents contents JOIN conversation_imports ci ON ci.id=contents.conversation_import_id JOIN threads t ON t.conversation_import_id=ci.id WHERE t.id=?1 AND ci.state='published' ORDER BY contents.digest_sha256")
+            .bind(thread_id.value()).fetch_all(&self.pool).await?
+            .into_iter().map(|json| serde_json::from_str(&json).map_err(serialization)).collect()
+    }
+
+    pub(crate) async fn imported_invocation_export_records(
+        &self,
+        thread_id: ThreadId,
+    ) -> Result<Vec<crate::conversation_export::ExportInvocation>, StorageError> {
+        let header: Option<String> = sqlx::query_scalar("SELECT ci.header_json FROM conversation_imports ci JOIN threads t ON t.conversation_import_id=ci.id WHERE t.id=?1 AND ci.state='published'")
+            .bind(thread_id.value()).fetch_optional(&self.pool).await?;
+        header
+            .map(|json| {
+                serde_json::from_str::<ConversationExportHeader>(&json)
+                    .map(|header| header.invocations)
+                    .map_err(|error| StorageError::Serialization(error.to_string()))
+            })
+            .unwrap_or_else(|| Ok(Vec::new()))
+    }
+
     pub(crate) async fn imported_turn_export_records(
         &self,
         thread_id: ThreadId,
@@ -233,7 +271,7 @@ impl SqliteProductStore {
             "conversation import is incomplete or not staged",
         )?;
         sqlx::query(
-            "DELETE FROM conversation_import_asset_contents WHERE conversation_import_id=?1",
+            "DELETE FROM conversation_import_asset_contents WHERE conversation_import_id=?1 AND digest_sha256 NOT IN (SELECT pins.value FROM conversation_imports imported,json_tree(imported.header_json,'$.invocations') pins WHERE imported.id=?1 AND pins.key='digestSha256' AND pins.type='text' UNION SELECT pins.value FROM conversation_imports imported,json_tree(imported.header_json,'$.boundInputs') pins WHERE imported.id=?1 AND pins.key='digestSha256' AND pins.type='text')",
         )
         .bind(import_id)
         .execute(&mut *tx)
@@ -352,6 +390,8 @@ mod tests {
 
     fn fixture_header(export_version: u32) -> ConversationExportHeader {
         ConversationExportHeader {
+            invocations: Vec::new(),
+            bound_inputs: Vec::new(),
             export_version,
             exported_at: "1770000000000".into(),
             producer: ExportProducer {
@@ -479,7 +519,7 @@ mod tests {
         let store = SqliteProductStore::open(directory.path().join("product.sqlite3"))
             .await
             .unwrap();
-        for version in [1, 2, 3] {
+        for version in [1, 2, 3, 4] {
             let id = format!("import:version-{version}");
             let staged = store
                 .stage_conversation_import(NewConversationImport {
@@ -513,5 +553,171 @@ mod tests {
             assert_eq!(records[0].export_version, version);
             assert_eq!(records[0].turn, fixture_turn());
         }
+    }
+
+    #[tokio::test]
+    async fn published_inert_invocation_inventory_reopens_for_exact_reexport() {
+        use base64::Engine as _;
+        use sha2::Digest as _;
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("inert-product.sqlite3");
+        let store = SqliteProductStore::open(&path).await.unwrap();
+        let mut header = fixture_header(4);
+        header.invocations = vec![serde_json::from_value(serde_json::json!({
+            "schemaVersion":1,"id":"invocation:1","source":{
+                "interactionNodeId":"node:1","actionId":"action:1","parentNodeId":"node:2",
+                "layerId":null,"instruction":"Analyze","label":"Analyze","description":null,"icon":null,"iconAsset":null,
+                "variant":"pill","inputActionIds":[],"inputBindingsDefined":true,"parentTitle":"Parent","parentDetail":"Detail","state":"draft"
+            },"childInteractionNodeId":"node:3","resultTurnId":null,"lifecycle":"active","headRevision":0,
+                "currentLayerId":null,"returnedLayerId":null,"arguments":[],"current":null,"safeReason":null
+        })).unwrap()];
+        let bytes = b"<svg xmlns=\"http://www.w3.org/2000/svg\"/>";
+        let digest = format!("{:x}", sha2::Sha256::digest(bytes));
+        header.invocations[0].source.icon_asset =
+            Some(crate::conversation_export::ExportVisualAssetAssociation {
+                asset_id: "call-icon".into(),
+                digest_sha256: digest.clone(),
+                media_type: "image/svg+xml".into(),
+                byte_length: bytes.len(),
+                provenance: crate::conversation_export::ExportVisualAssetProvenance {
+                    source: "fixture".into(),
+                    file_name: "call.svg".into(),
+                },
+            });
+        let content = crate::conversation_export::ExportVisualAssetContent {
+            digest_sha256: digest,
+            media_type: "image/svg+xml".into(),
+            byte_length: bytes.len(),
+            content_base64: base64::engine::general_purpose::STANDARD.encode(bytes),
+        };
+        let staged = store
+            .stage_conversation_import(NewConversationImport {
+                id: "inert-inventory",
+                source_sha256: "sha256:inert",
+                header: &header,
+            })
+            .await
+            .unwrap();
+        assert!(
+            store
+                .imported_invocation_export_records(staged.thread_id)
+                .await
+                .unwrap()
+                .is_empty()
+        );
+        store
+            .append_conversation_import_turn("inert-inventory", &fixture_turn())
+            .await
+            .unwrap();
+        store
+            .append_conversation_import_visual_asset_content("inert-inventory", &content)
+            .await
+            .unwrap();
+        store
+            .publish_conversation_import("inert-inventory", "1770000000001")
+            .await
+            .unwrap();
+        drop(store);
+        let reopened = SqliteProductStore::open(&path).await.unwrap();
+        assert_eq!(
+            reopened
+                .imported_invocation_export_records(staged.thread_id)
+                .await
+                .unwrap(),
+            header.invocations
+        );
+        assert_eq!(
+            reopened
+                .imported_invocation_asset_contents(staged.thread_id)
+                .await
+                .unwrap(),
+            vec![content]
+        );
+    }
+
+    #[tokio::test]
+    async fn published_standalone_bound_input_reopens_with_original_provenance_and_only_pinned_asset()
+     {
+        use base64::Engine as _;
+        use sha2::Digest as _;
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("bound-input-product.sqlite3");
+        let store = SqliteProductStore::open(&path).await.unwrap();
+        let mut header = fixture_header(4);
+        let bytes = b"<svg xmlns=\"http://www.w3.org/2000/svg\"/>";
+        let digest = format!("{:x}", sha2::Sha256::digest(bytes));
+        header.bound_inputs = vec![serde_json::from_value(serde_json::json!({
+            "id":"action:outside-input","clientKey":"original-input","sourceNodeId":"node:unpublished-parent",
+            "sourceLayerId":"layer:outside-closure","kind":"input","label":"Destination","variant":"pill",
+            "iconAsset":{"assetId":"input-icon","digestSha256":digest,"mediaType":"image/svg+xml","byteLength":bytes.len(),
+                "provenance":{"source":"fixture","fileName":"input.svg"}},
+            "input":{"control":"text","prompt":"Destination"},"state":"accepted"
+        })).unwrap()];
+        // No Invocation pins exist: this exercises the independent boundInputs GC branch.
+        assert!(header.invocations.is_empty());
+        let content = crate::conversation_export::ExportVisualAssetContent {
+            digest_sha256: digest,
+            media_type: "image/svg+xml".into(),
+            byte_length: bytes.len(),
+            content_base64: base64::engine::general_purpose::STANDARD.encode(bytes),
+        };
+        let staged = store
+            .stage_conversation_import(NewConversationImport {
+                id: "bound-only",
+                source_sha256: "sha256:bound-only",
+                header: &header,
+            })
+            .await
+            .unwrap();
+        assert!(
+            store
+                .imported_bound_input_export_records(staged.thread_id)
+                .await
+                .unwrap()
+                .is_empty()
+        );
+        store
+            .append_conversation_import_turn("bound-only", &fixture_turn())
+            .await
+            .unwrap();
+        store
+            .append_conversation_import_visual_asset_content("bound-only", &content)
+            .await
+            .unwrap();
+        let unpinned_bytes =
+            b"<svg xmlns=\"http://www.w3.org/2000/svg\"><title>unused</title></svg>";
+        store
+            .append_conversation_import_visual_asset_content(
+                "bound-only",
+                &crate::conversation_export::ExportVisualAssetContent {
+                    digest_sha256: format!("{:x}", sha2::Sha256::digest(unpinned_bytes)),
+                    media_type: "image/svg+xml".into(),
+                    byte_length: unpinned_bytes.len(),
+                    content_base64: base64::engine::general_purpose::STANDARD
+                        .encode(unpinned_bytes),
+                },
+            )
+            .await
+            .unwrap();
+        store
+            .publish_conversation_import("bound-only", "1770000000001")
+            .await
+            .unwrap();
+        drop(store);
+        let reopened = SqliteProductStore::open(&path).await.unwrap();
+        assert_eq!(
+            reopened
+                .imported_bound_input_export_records(staged.thread_id)
+                .await
+                .unwrap(),
+            header.bound_inputs
+        );
+        assert_eq!(
+            reopened
+                .imported_invocation_asset_contents(staged.thread_id)
+                .await
+                .unwrap(),
+            vec![content]
+        );
     }
 }

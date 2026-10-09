@@ -1,3 +1,5 @@
+import { singleCallResultDestination } from "../action-invocation-state.js";
+
 export function interactionForThread(state, thread) {
   const interactions = (state.interactions || []).filter((interaction) => (
     String(interaction.threadId) === String(thread?.id)
@@ -27,9 +29,11 @@ export function workspaceTurns(state, thread) {
 
 /** The results an agent launched as semantic children. They are not human turns. */
 export function agentChildIds(state) {
-  return new Set((state.actionInvocations || [])
-    .filter((invocation) => invocation.agentInvoked === true)
-    .map((invocation) => String(invocation.resultInteractionId)));
+  return new Set([
+    ...(state.actionInvocations || []).filter(invocation => invocation.agentInvoked === true).map(invocation => String(invocation.resultInteractionId)),
+    ...(state.importedInvocationHistory || []).filter(history => history.inert === true && history.record?.activator === "agent")
+      .map(history => String(history.resultInteractionId)),
+  ]);
 }
 
 /**
@@ -39,7 +43,7 @@ export function agentChildIds(state) {
  */
 export function humanTurns(state, thread) {
   const children = agentChildIds(state);
-  return workspaceTurns(state, thread).filter((turn) => !children.has(String(turn.id)));
+  return workspaceTurns(state, thread).filter(turn => !turn.inertInvocationCurrent && !turn.inertInvocationSource && !children.has(String(turn.id)));
 }
 
 function sameId(left, right) {
@@ -121,10 +125,12 @@ export function rootLayerPath(interaction) {
   }];
 }
 
-export function appendLayerPath(path, action, sourceNode) {
-  if (action?.kind !== "navigate" || action.targetLayerId == null) return [...(path || [])];
+export function appendLayerPath(path, action, sourceNode, invocationResultLayerId = null) {
+  const layerId = action?.kind === "navigate" ? action.targetLayerId
+    : action?.kind === "invoke" && action.reusable === false ? invocationResultLayerId : null;
+  if (layerId == null) return [...(path || [])];
   return [...(path || []), {
-    layerId: action.targetLayerId,
+    layerId,
     label: sourceNode?.title || action.label || "Layer",
     icon: sourceNode?.icon || sourceNode?.metadata?.relayer?.icon || null,
     actionId: action.id ?? null,
@@ -132,7 +138,7 @@ export function appendLayerPath(path, action, sourceNode) {
   }];
 }
 
-export async function restoreLayerPath(interaction, navigationPath, loadLayer) {
+export async function restoreLayerPath(interaction, navigationPath, loadLayer, invocationState = {}) {
   const rootLayer = interaction?.completionOutput?.rootLayer;
   const path = rootLayerPath(interaction);
   if (!rootLayer || !path.length || !Array.isArray(navigationPath)) return null;
@@ -140,12 +146,12 @@ export async function restoreLayerPath(interaction, navigationPath, loadLayer) {
   let layer = rootLayer;
   for (const step of navigationPath.slice(1)) {
     const action = layer.actions?.find((candidate) => sameId(candidate.id, step.viaActionId));
-    if (
-      action?.kind !== "navigate"
-      || !sameId(action.targetLayerId, step.layerId)
-    ) return null;
-    const sourceNode = layer.nodes?.find((candidate) => sameId(candidate.id, action.sourceNodeId));
-    path.push(appendLayerPath([], action, sourceNode)[0]);
+    const sourceNode = layer.nodes?.find((candidate) => sameId(candidate.id, action?.sourceNodeId));
+    const result = action?.kind === "invoke" && sourceNode
+      ? singleCallResultDestination(invocationState, action, sourceNode, layer.actions ?? []) : null;
+    if (action?.kind === "navigate" ? !sameId(action.targetLayerId, step.layerId)
+      : !result || !sameId(result.layerId, step.layerId)) return null;
+    path.push(appendLayerPath([], action, sourceNode, result?.layerId)[0]);
     layer = await loadLayer(step.layerId);
   }
   return { layer, layerPath: path };
@@ -175,7 +181,21 @@ export function workspaceBreadcrumbItems(state, thread, selection) {
   if (!thread) return [];
   const interaction = interactionForThread(state, thread);
   const path = layerPathForVisibleLayer(selection?.layerPath, interaction, state.visibleLayer);
-  return path.map((entry, pathIndex) => ({
+  const origin = selection?.invocationOrigin;
+  const originItems = origin == null ? [] : [{
+    key: `invoke-origin:${origin.sourceEntry.turnId}:${origin.actionId}:${origin.invocationKey}`,
+    kind: "invoke-origin",
+    label: origin.label,
+    icon: origin.icon,
+    interactive: true,
+    invocationOrigin: true,
+    sourceEntry: origin.sourceEntry,
+    layerId: origin.presentingLayerId,
+    sourceLayerId: origin.presentingLayerId,
+    sourceNodeId: origin.sourceNodeId,
+    current: false,
+  }];
+  return [...originItems, ...path.map((entry, pathIndex) => ({
     key: `layer:${pathIndex}:${entry.layerId}`,
     kind: "layer",
     label: entry.label,
@@ -187,7 +207,7 @@ export function workspaceBreadcrumbItems(state, thread, selection) {
     sourceNodeId: entry.sourceNodeId,
     sourceLayerId: entry.sourceLayerId ?? (pathIndex === 0 ? entry.layerId : path[pathIndex - 1]?.layerId),
     current: pathIndex === path.length - 1,
-  }));
+  }))];
 }
 
 export function responseNodesForThread(state, thread) {
@@ -219,8 +239,56 @@ export function workspaceModeCapabilities(mode) {
   throw new Error(`Unknown product workspace mode: ${mode}`);
 }
 
-export function productWorkspaceMode({ evalReviewContext, reviewRequested, thread }) {
-  return evalReviewContext || reviewRequested || thread?.imported === true ? "review" : "interactive";
+export function productWorkspaceMode({ evalReviewContext, reviewRequested, thread, interaction }) {
+  return evalReviewContext || reviewRequested || thread?.imported === true
+    || interaction?.inertInvocationCurrent === true || interaction?.inertInvocationSource === true ? "review" : "interactive";
+}
+
+// A graph-owned call can publish accepted progress without a Product launch row.
+// This is a read presentation of that coherent native snapshot, never a Product
+// interaction, execution receipt, or permission to launch/continue the child.
+export function nativeInvocationCurrentPresentation(call, { threadId, sourceInteraction } = {}) {
+  const native = call?.nativeInvocation;
+  const invocation = native?.invocation;
+  const current = native?.current;
+  if (call?.graphOnly !== true || call.occupancyOnly === true || !invocation || !current
+    || !sameId(sourceInteraction?.threadId, threadId)
+    || !sameId(sourceInteraction?.id, call.sourceInteractionId)
+    || !sameId(sourceInteraction?.graphNodeId, invocation.sourceCompletionId)
+    || !sameId(invocation.sourceActionId, call.actionId)
+    || invocation.invocationKey !== call.invocationKey
+    || !sameId(native.sourceAction?.id, invocation.sourceActionId)
+    || !sameId(native.sourceAction?.sourceNodeId, invocation.parentNodeId)
+    || !sameId(native.parentNode?.id, invocation.parentNodeId)
+    || !sameId(invocation.actionSnapshot?.actionId, invocation.sourceActionId)
+    || !sameId(invocation.actionSnapshot?.sourceNodeId, invocation.parentNodeId)
+    || !sameId(invocation.state?.completionId, invocation.childInteractionNodeId)
+    || !sameId(current.nodeId, invocation.childInteractionNodeId)
+    || !sameId(current.rootLayerId, invocation.state?.currentLayerId)) return null;
+  const layers = new Map((current.layers ?? []).map(layer => [String(layer.layer?.id), layer]));
+  const rootLayer = layers.get(String(current.rootLayerId));
+  if (!rootLayer || [...layers.values()].some(layer => layer.layer?.state !== "accepted")) return null;
+  const lifecycleStatus = { active: "running", succeeded: "accepted", stopped: "stopped", failed: "failed" }[invocation.state.lifecycle];
+  if (!lifecycleStatus || lifecycleStatus !== call.resultCompletionStatus) return null;
+  return {
+    interaction: {
+      id: `native-current:${invocation.id}`, threadId,
+      inertInvocationCurrent: true, nativeInvocationCurrent: true,
+      invocationId: invocation.id, invocationKey: invocation.invocationKey,
+      invocationSourceInteractionId: call.sourceInteractionId,
+      graphNodeId: invocation.childInteractionNodeId,
+      sequence: sourceInteraction.sequence,
+      text: `${invocation.actionSnapshot.label || native.sourceAction.label || "Invoke"} · ${lifecycleStatus === "accepted" ? "Result" : "Current"}`,
+      completionStatus: lifecycleStatus,
+      completionOutput: { nodeId: current.nodeId, rootAction: current.rootAction, rootLayer },
+      submittedInputs: native.submittedInputs ?? [], safeReason: invocation.state.safeReason ?? null,
+      interactionGraph: { enabled: true, complete: true, sources: [{
+        interactionId: sourceInteraction.id, threadId, invocationActionId: call.actionId,
+        contexts: [], message: invocation.actionSnapshot.label || native.sourceAction.label || "Invoke",
+      }] },
+    },
+    layers,
+  };
 }
 
 export function productWorkspaceNeedsRecreation(currentMode, nextMode) {

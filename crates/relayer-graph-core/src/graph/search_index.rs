@@ -366,6 +366,8 @@ mod tests {
                 description: None,
                 target_layer_id: Some(LayerId::new(1).unwrap()),
                 interaction_text: None,
+                input_action_ids: Vec::new(),
+                reusable: None,
                 input: None,
                 state: RecordState::Accepted,
             }),

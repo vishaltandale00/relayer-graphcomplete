@@ -1,0 +1,111 @@
+{
+  "schemaVersion": 1,
+  "date": "2026-10-08",
+  "reviewer": "context_trace",
+  "workspace": "/private/tmp/relayer-interactive-inputs-v1-merge",
+  "pullRequestNumber": 707,
+  "digestMethod": "SHA256 over sorted relative UTF8 path+NUL+exactbytes+NUL; receipt excluded",
+  "sourceDigest": "5024b0dd1eaf0a09ed4c713e51747645bf78fbcbf0ab0c6eb4d1f1011a46f3d2",
+  "manifest": [
+    {
+      "path": "desktop/renderer/src/navigation-history.js",
+      "sha256": "e72fd5cf6f25b343bd8c693541f7c04219d21c0dbef925c9b94bfaea11fe5837"
+    },
+    {
+      "path": "desktop/renderer/src/product-workspace/model.js",
+      "sha256": "054c36151ae5e101e3b721caa7157a11c2c50cc85a2a846383b8733a5cf0be68"
+    },
+    {
+      "path": "desktop/renderer/src/workspace-navigation.js",
+      "sha256": "a8d0b03cef5882196cc5095f914d1f6e1699134c3788d9ba82d52cea9a85effb"
+    },
+    {
+      "path": "test/navigation-history.test.mjs",
+      "sha256": "ca33f90e38c3a78a03a11373f261e3f94d3ec5c9e2be22912ac9ad3c65a098e0"
+    },
+    {
+      "path": "test/workspace-navigation.test.mjs",
+      "sha256": "38a83d0d441647abf2a4a12ef80e3538646efcc93061a81605a4fb8437aaa171"
+    }
+  ],
+  "reviewedScope": "History/model half of exact Invoke reading-origin presentation only. Parent owns controller/workspace/state/PRD, broad checks and merge. Existing legacy reading entries unchanged when origin absent. No graph/native authority or scheduler changes.",
+  "changedExecutableSeams": [
+    {
+      "path": "desktop/renderer/src/navigation-history.js",
+      "boundary": "Optional bounded invocationOrigin normalized to exact identity only; no labels/icons persisted. Source same thread and sourcepath ends at presentingLayer, positive source/action/Node identities and exact nonlegacykey. Nestedsource origin rejected. History equality includes origin; noorigin entries unchanged."
+    },
+    {
+      "path": "desktop/renderer/src/workspace-navigation.js",
+      "boundary": "Entry capture/key retains origin; invocationOriginForSource returns null unless exact unique durable call joins sourceProductturn/action/key/presentingLayer/resultchild and accepted sourceLayer/Invoke/Node, with selectedNode exact owner. Resolver restores independent child path, canonical sourceEntry path and returns canonical sourceNode label/icon without Navigate fabrication."
+    },
+    {
+      "path": "desktop/renderer/src/workspace-navigation.js",
+      "boundary": "Typed temporal Current path can restore retained prior accepted root after terminal root changes. Exact completionId must match interaction.graphNodeId; exact scoped Layer ID/stateaccepted before caching; invalid cachedvalue evicted. No arbitraryroot without temporalidentity."
+    },
+    {
+      "path": "desktop/renderer/src/product-workspace/model.js",
+      "boundary": "Adds separate clickable invoke-origin sourceNode breadcrumb to existing child authored layerpath; own child pathIndex values unchanged."
+    }
+  ],
+  "checkpointMapping": [
+    {
+      "promise": "Same-session history retains exact call origin and independent child path without mutating authored Navigate ancestry.",
+      "tests": [
+        "navigation history preserves exact invocation origin in history while rejecting nested or cross-thread identity",
+        "workspace navigation restores independent child and exact invoking source paths (Current=false/true)"
+      ],
+      "observed": "Normalized labels/icons stripped; immutable source identity; key differs origin; Back/Forward retains key; JSON serialization suppliedentry resolves via production historyresolver; sourceclick sourceEntry returns actual accepted Node11/Layer101 and same child ownroot301; canonical label/icon reconstructed."
+    },
+    {
+      "promise": "Origin is refused when exact durable call, source occurrence or accepted semantic owner is unsupported.",
+      "tests": [
+        "workspace navigation refuses unsupported invocation origin without inventing navigation (10 scenarios)"
+      ],
+      "observed": "Wrong key/result/presentingLayer, nondurable, wrongsourceNode, missingInvoke, draftNode, duplicatecall, unsupportedsourceNavigatepath and selecteddifferentvalidNode refused; accepted child/source graph records remain unchanged."
+    },
+    {
+      "promise": "Previously accepted Current source and child remain restorable after both Return different roots; untyped/invalid Current cannot become graph provenance or poison cache.",
+      "tests": [
+        "workspace navigation restores exact source and child Current history after both return different root Layers",
+        "existing stoppedCurrent fixture strengthened accepted Layer and exact graphNode identity"
+      ],
+      "observed": "Source100\u2192101 and child301 preserved after Returns400/500 with typed Currentcompletion202/303; arbitraryroot without temporal, wrongcompletion, draftLayer refused. Draft not cached; corrected acceptedload succeeds."
+    }
+  ],
+  "actualResults": [
+    {
+      "log": "/private/tmp/pr707-invocation-origin-history-5.log",
+      "sha256": "6fb0ea60851132b6eb677cea38e8bda4680ed3ed4dcce8886b9a7fc339aa0187",
+      "observedOutcome": "passed",
+      "passedTests": 50,
+      "files": 2,
+      "vitestDurationMs": 128,
+      "execution": "context_trace focused warm Vitest only; no builds or fullcheck.",
+      "innerTestDurationMs": 15
+    }
+  ],
+  "preservedFailures": [
+    {
+      "log": "/private/tmp/pr707-invocation-origin-history-4.log",
+      "sha256": "4b9e9d2d8728660b3caf5012ab3912df88179de73bd27a9197b49acf6dd496cd",
+      "observed": "49passed/1failed; test asserted missing accepted cache returned null, actual API returns undefined.",
+      "disposition": "Corrected test expectation to existing cache API. Strict accepted-before-cache implementation unchanged; final50/50 pass."
+    }
+  ],
+  "independentReview": {
+    "reviewer": "authority_review",
+    "sourceDigest": "5024b0dd1eaf0a09ed4c713e51747645bf78fbcbf0ab0c6eb4d1f1011a46f3d2",
+    "scope": "Owned3 production files and realistic history/model checkpoints at final source; typedCurrent cache delta included.",
+    "verdict": "No blocker found: exact selectedNode, canonical source call, independent Current/Returned paths, accepted-before-cache validation and invalidcached eviction independently accepted.",
+    "unresolvedFindings": []
+  },
+  "noDeletionOrSubsumption": "No tests removed. Existing untyped/legacy normalization key shapes retained and all existing twofiles pass. New integrity normalization and real resolver scenarios protect distinct source/call/Current authority boundaries.",
+  "limitations": [
+    "Session-local reading/history origin only. Supplied serializedentry roundtrip proves resolver; full browser reload storage/bootstrap is not implemented or qualified by this scope.",
+    "Native Product call DTO has no sourceNodeId; owner validated through exact accepted source Invoke+Node and presentingLayer. Optional suppliedcall.sourceNodeId must match.",
+    "Parent controller execution/recovery, source breadcrumb callbacks, cancellation of automatic switching and assembled DOM journey require parent checkpoint proof. Known root offscreen frozenLayerA read refusal currently under repair; not silently certified by owned helper tests.",
+    "Whole PR fullcheck/build/declared heavies/CI remain parent requirements; no paid inference or release proof run."
+  ],
+  "verdict": "Owned history/model implementation passes focused50/50 and independent scoped review at exact manifestedsource. Non-certifying for combined controller/wholePR/human acceptance; any manifested byte change invalidates assertion.",
+  "unresolvedFindings": []
+}

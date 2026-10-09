@@ -1,6 +1,11 @@
 mod action;
 pub mod artifact;
 mod context;
+mod contract;
+pub use contract::{
+    CompletionContract, CompletionContractAnswer, CompletionContractContext,
+    CompletionContractInput, CompletionInvocationReference, CompletionReturnRequirement,
+};
 mod current;
 mod edge;
 mod icon;

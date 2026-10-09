@@ -1,0 +1,323 @@
+{
+  "schemaVersion": 1,
+  "reviewer": "/root/premerge_resource_selection_review",
+  "observedHead": "90a1e4539ec6d06fa53bc1641b2bb54f32f165af",
+  "observedAt": "2026-10-09T00:13:55.315841+00:00",
+  "qualifiedSourceDigest": "6aa02ff996896590ae66a6a8702b680e2fd7a8f97e693713a64677ebe34a7cef",
+  "sourceDigest": "6aa02ff996896590ae66a6a8702b680e2fd7a8f97e693713a64677ebe34a7cef",
+  "qualifiedManifestFileCount": 237,
+  "all237identitiesVerified": true,
+  "wholeManifestIdentitiesVerified": true,
+  "wholeManifestPath": "/private/tmp/pr707-premerge-portable-source.json",
+  "wholeManifestSha256": "10dfa4adaea01c0aa96d8793552fef2b50e7cb2f528e9cba39b5b8cec00d298d",
+  "digestMethod": "SHA256 sorted relative path + NUL + file bytes + NUL",
+  "scopeManifest": [
+    {
+      "path": "crates/relayer-app-server/src/api/threads.rs",
+      "sha256": "51ad28cf15c65e876864798c32337ad20b5762e4c0dc3ab80a0a2b15abf1c0ad"
+    },
+    {
+      "path": "crates/relayer-app-server/src/api/types.rs",
+      "sha256": "e07fb91cf498e41247a583cfe50afc9e7b262c60852d79bba866819d8a6d2996"
+    },
+    {
+      "path": "crates/relayer-app-server/src/conversation_export.rs",
+      "sha256": "d88c91819789434ca2c82827484c6043dfd2ad672008d8244aa24a6ccc444e58"
+    },
+    {
+      "path": "crates/relayer-app-server/tests/conversation_export_contract.rs",
+      "sha256": "7de36d08b3c4e4e36e345af8a9c53618108c7597e3efdb11eb6fc04efb99b7df"
+    },
+    {
+      "path": "crates/relayer-app-server/tests/support/completion_traces.rs",
+      "sha256": "4c2c3d4ced44d7396cef38f17cf23ab8762ab5018169a91f0a0570aec0b8d49d"
+    },
+    {
+      "path": "desktop/renderer/src/graph.js",
+      "sha256": "a5a491ac529a11f6e7326bac81e27d24cec53ee2ddb9679cf27f205e8a44c9c4"
+    },
+    {
+      "path": "desktop/renderer/src/navigation-history.js",
+      "sha256": "a72627125239826ece7a4b989bb50b5f9f509f95f4916c4519c80299ffae3baf"
+    },
+    {
+      "path": "desktop/renderer/src/node-detail-assets.js",
+      "sha256": "35f382a94025454ef6425afd1722055f2895e0af4d064bb4c4543187070dea3c"
+    },
+    {
+      "path": "desktop/renderer/src/product-workspace/model.js",
+      "sha256": "ae3f4cfa2d85d8774f61687bc323635a23c36e97f602491575ac626db8d1c203"
+    },
+    {
+      "path": "desktop/renderer/src/product-workspace/workspace.js",
+      "sha256": "6d09923db0499f6b9af5d08d0403b524bd0f9c2fb664cca9d45b345990b4b5d9"
+    },
+    {
+      "path": "desktop/renderer/src/public-share-viewer/snapshot.js",
+      "sha256": "17d6110d208162544756b8b3a2a3ed5a4b16e407b65253844ef689e2c3257c9a"
+    },
+    {
+      "path": "desktop/renderer/src/threads.js",
+      "sha256": "f6dfc64ea34a6e3b5e4ad0a4bb0b02121477e4e5e98f33ec3a086c5fbcb826b1"
+    },
+    {
+      "path": "desktop/renderer/src/workspace-navigation.js",
+      "sha256": "f89af27a29ce09155bb055eca5305f7cba83539987e20051ae48c20aca455c1d"
+    },
+    {
+      "path": "docs/evidence/issue-632-completion-contract/README.md",
+      "sha256": "c7b503d5753c7eb6a647902352d382bb59b753a2e4402874a4ce34b0d761fd05"
+    },
+    {
+      "path": "scripts/test-desktop-node-input-actions.mjs",
+      "sha256": "4a5da1a7a337696c9ab2f01509c95250feeb1f667f27ee68e328cb6598e637ba"
+    },
+    {
+      "path": "test/fixtures/inert-draft-sources.json",
+      "sha256": "48e91e7d315b7b0e0e655076425f2b292dff91b6c053bec9fbf3eb3ec4234f9d"
+    },
+    {
+      "path": "test/imported-draft-source-workspace.test.mjs",
+      "sha256": "3e687c0fbb95b1beb3fc5e45841f225f4e8d882060f0f4941362967d8c5d52cf"
+    },
+    {
+      "path": "test/navigation-history.test.mjs",
+      "sha256": "dca638ad0803131561d15531480912f56126395e8d41a4e74e4aeba71d601062"
+    },
+    {
+      "path": "test/node-detail-assets.test.mjs",
+      "sha256": "955c5f1eb9ec52b9bab160055285b67bc0b451b54686090f67c34d3c100d0fd0"
+    },
+    {
+      "path": "test/public-share-viewer.test.mjs",
+      "sha256": "98aef53c029ec30982dff1f29aaadf382dcd94dfc45d7a5440a00c2973d3c4d8"
+    },
+    {
+      "path": "test/workspace-navigation-integration.test.mjs",
+      "sha256": "401a40e95023cb6f41b745fc20b48b021bbedf49efd8ba89e718a19c8fbb6cd6"
+    }
+  ],
+  "verdict": "no_source_blockers",
+  "unresolvedFindings": [],
+  "reviewedScope": [
+    "All changed production/test seams over90a1; full237-file byteidentity independentlyverified againstfrozenmanifest; semanticreview ofunchangedhistorical235portfolio isnotnewfull-stackproof.",
+    "CC004/CC009 accepted frozen callable agreeswithexactincludedcanonicalInvoke includingactualTurnrootwrongkind andCurrent-onlyinventory; ownDraft/unknowncaptures repairable.",
+    "CC009 knowncapture requires exactselectedLayer while historicalunknownomission remainsreadable.",
+    "CC008/CC009 optionalmulti emptyselected[] survivesnative/Product/export/import/reexport; explicitminimum>=1 andsingleexact1 staystrict.",
+    "CC009 frozenown-draft source fromfailed/stopped parent becomespercall inertlocalview, preservingdistinctcallcapture/state/Current withnoacceptedsourcefabrication.",
+    "READ001 exactfrozenSource breadcrumb/BackForward/narrowtaggedorigin/coldURLreload/stalechangedorremovedrecord invalidation.",
+    "RESP003 exactpercall frozenimagepin+retainedSVGcontent is locallydigestverified boundedblob, no synthetic/nativeassetrequest.",
+    "SCP016 importedthread/reviewmode noCompose/nativeInvoke; originalProductinteractions/nativecalls/canonicalsourceIDs unchanged.",
+    "Revised native Input fixture waits for successful real POST response identity before holding/releasing response loss, selects that exact committed turn, and establishes visible focused native pointer delivery/compositor/hit-test before unchanged trusted capture/drag/durable persistence assertions."
+  ],
+  "assertions": [
+    {
+      "checkpoint": "accepted-callable-inventory",
+      "assertion": "Rust incremental finish collects includedcanonicalTurnroot/layeractions andCurrentlayeractions beforedigestcomparison; browseractualTurnroots nowregistered too. Fingerprint compareskind/sourceNode/authoredLayer/instruction/label/description/variant/icon/bindingIDs/nullableReuse/state. Displayparenttext, activator andselectedpresentingLayer are distinctfrozenprovenance, notmutablecanonicalrewrite. Emptybindingpresence isnotfabricatedaswirecapability."
+    },
+    {
+      "checkpoint": "selection-contract",
+      "assertion": "Missingminimum defaults0onlyforMulti valuecount. Singleexact1; definitionexplicitminimum0/unsupportedcontrols/unknownkeys/options/duplicateorforgedselectedlabels remainrefused. Existing Product/nativeacceptedquestion validation unchanged."
+    },
+    {
+      "checkpoint": "draft-source-authority",
+      "assertion": "Importednonacceptedanchor mayhave readonlyentitlementrow. Realfixture asserts author_eligible=0, acceptedcompletions=0,nativecalls=0 and actualsubmit_nodeForbidden. NoProductinvocationreceipt oracceptedfrozenSourceLayer invented. Synthetic source.state/draftLayer remainsviewdata, productWorkspace reviewmode and importedInvoke guard denyexecution."
+    },
+    {
+      "checkpoint": "exact-tagged-origin",
+      "assertion": "Portable IDs allowedonlyfor kindimported source:exactInvocation withmatchingkey/source-layer, onepath/noVia/noTemporalCurrent/exactselectedNode; canonical Product/graph/import origins retainnumericidentities. workspace-navigation separately requiresoneexactretainedcall, presentationSourceidentity and completefrozenLayer equality."
+    },
+    {
+      "checkpoint": "reopen-and-invalidation",
+      "assertion": "Freshreload dropsnonnumericProductprojectionquery, requestsrealstate and rebuildsvalidselectedfrozenSource. Missing/changedretainedcall removesoldCurrent orfallsbackexactfreshsource, clearsoldorigin. AlllocalfrozenLayer/source/history reads useperthread+turncache; no syntheticsource/current/layer routes."
+    },
+    {
+      "checkpoint": "source-image-pin",
+      "assertion": "Newresolver branchrequires inert exactcall/source-layer,parentNode,notomitted, matching source.imageicon andiconAsset association+diges/media/id/bytes beforelocalcontentSHA verification. PositiveblobcontainsactualSVG, releaseidempotent; changed/missing/oversized/foreignpins refusewithoutHTTP."
+    },
+    {
+      "checkpoint": "resource-policy",
+      "assertion": "Header16MiB existingline resource refusal isintentionalexportboundary; 256MiBlocalfile/16MiBpublicfile/10000turnexistinglimits unchanged. Currentpatch doesnotinvent cumulative nativearchiveadmissionbudget/newwireformat/scheduler/paidproof. Overlimitdecoder and existingserializer rejectcompleteoutput, nevertruncate."
+    },
+    {
+      "checkpoint": "final-source-rebind",
+      "assertion": "All237 final6aa02ff9 manifest identities/aggregate independently verified. Delta from2cb0 remains fixture and evidence README only; all production and other runner/test/dependency bytes unchanged. Fresh native Input/build/fullcheck pending parent results; earlier successful2cb0 heavy results bounded to exact unchanged executable scope."
+    },
+    {
+      "checkpoint": "native-input-fixture-observer-and-pointer",
+      "assertion": "Successful actual POST response cloned only for fixture observation; held delivery gives host an explicit commit barrier before injecting original transport loss. Earlier GETs pass and exact response ID selects durable Product inputs; failure, reentry, immutable click-time values, concurrent detach and reconciliation checks remain. Split fixture uses real visible focused WebContents and painted hit-test geometry; real sendInputEvent, trusted down/hasPointerCapture, rendered widths, same-pointer trusted up, desktop IPC ratio, close/open/reload/environment assertions retained. No synthetic pointer dispatch, production change, skip, assertion removal or increased timeout. Drag move now matches real first-message native event sequence with leftButtonDown modifier and requires trusted same-pointer buttons===1 movement. Pointer down/capture, original pane thresholds, release and durable reload remain strict. Failure logger retains before/current geometry and actual pointer/capture events before rethrowing original checkpoint failure; no claim that absent old event sequence proves the exact third-failure cause. Final focus setup also calls actual app.focus({steal:true}), waits visible document.hasFocus, and logs both native focus getters. Removing the newly added WebContents getter precondition is justified by isolated actual Electron diagnostics where both native getters are false but document focused and real trusted down/capture/held-move/up deliver. Actual trusted pointer/capture/geometry/persistence requirements remain unchanged; diagnostic is bounded to that Electron environment and does not prove the Product fixture."
+    }
+  ],
+  "actualChecks": [
+    {
+      "owner": "independent reviewer",
+      "command": "Node22 vitest run test/navigation-history.test.mjs test/node-detail-assets.test.mjs test/imported-draft-source-workspace.test.mjs test/public-share-viewer.test.mjs test/workspace-navigation-integration.test.mjs test/workspace-navigation.test.mjs",
+      "result": "315 passed; zero failed;6files",
+      "durationSeconds": 6.3,
+      "log": "/private/tmp/pr707-premerge-source-review-final-df3-renderer.log",
+      "sourceDigest": "df3da329db83390d8ce2512238a1cebdf50b98bf069f3647a260a599a2f6700f",
+      "finalSourceApplicability": "All tested renderer/controller/warm fixture bytes remain identical in final6aa02ff9 manifest. Subsequent Rust test-only Copy borrow correction and Electron node-input fixture observer/native-pointer setup change are outside the315-test scope. Not fresh full-head/native proof."
+    },
+    {
+      "owner": "independent reviewer",
+      "command": "git diff --check",
+      "result": "pass; no whitespace errors"
+    },
+    {
+      "owner": "independent reviewer",
+      "command": "SHA256 all237files and sortedpathNULbytesNUL aggregate versus finalmanifest",
+      "result": "all237match; aggregate 2cb0acbee499701eb038b2b23fe0736d66e2590c692e3fbdc05b053559edbf02"
+    },
+    {
+      "owner": "otheragent observedinnerlog and assertions independentlyreviewed",
+      "command": "cargo test -p relayer-app-server --lib imported_own_draft_sources_preserve_per_call_history_without_authority",
+      "result": "1passed0failed; bothstopped/failedparents andtwoindependentdraftcalls; actualwriteForbidden retained",
+      "log": "/private/tmp/pr707-draft-source-native-final-2.log",
+      "durationSeconds": 0.47
+    },
+    {
+      "owner": "otheragent observedinnerlog and tests independentlyreviewed",
+      "command": "cargo test -p relayer-app-server --test conversation_export_contract",
+      "result": "49passed0failed; semanticcheckpointproof scope; rootfullcheck requalifiesfinalwholeRustsource",
+      "log": "/private/tmp/pr707-premerge-integrity-rust-green.log",
+      "durationSeconds": 1.69
+    },
+    {
+      "owner": "independent reviewer",
+      "command": "Node22 node --check scripts/test-desktop-node-input-actions.mjs",
+      "result": "exit0 syntax check; not native gate proof",
+      "sourceDigest": "2686d6730589c9d290853500db4b84e7e530d2843e40dd603bd5f77256c08835"
+    },
+    {
+      "owner": "independent reviewer",
+      "command": "SHA256 all237 current bytes and aggregate; compare prior2cb0 manifest identities",
+      "result": "all237 verified; aggregate2686d6730589c9d290853500db4b84e7e530d2843e40dd603bd5f77256c08835; changed exactly fixture and evidence README; all production/dependency/other gate executable bytes unchanged"
+    },
+    {
+      "owner": "independent reviewer",
+      "command": "Node22 node --check scripts/test-desktop-node-input-actions.mjs after held-button/diagnostics edit",
+      "result": "exit0 syntax check; no reviewer heavy run",
+      "sourceDigest": "43c14f11fdff38a3b34db82e1190ef25af2f737f8c3113cef5a09a2f6d3d6caf"
+    },
+    {
+      "owner": "independent reviewer",
+      "command": "Verify237 exact file hashes, aggregate43c14f11, compare2cb0 manifest",
+      "result": "all237 match; only fixture/README changed; all production/dependency/other heavy runner executable identity retained"
+    },
+    {
+      "owner": "parent executed; reviewer read raw actual event log",
+      "command": "isolated actual Electron native focus/pointer diagnostic",
+      "result": "visible=true/documentFocused=true; windowFocused=false/contentsFocused=false; trusted pointerdown buttons1, gotcapture, same-pointer pointermove buttons1, trusted up and lostcapture observed",
+      "log": "/private/tmp/pr707-native-focus-pointer-diagnostic.log",
+      "scope": "Diagnostic proxy validity only; no Product graph/pane/durable preference gate proof."
+    },
+    {
+      "owner": "independent reviewer",
+      "command": "Node22 node --check scripts/test-desktop-node-input-actions.mjs",
+      "result": "exit0 syntax check only",
+      "sourceDigest": "6aa02ff996896590ae66a6a8702b680e2fd7a8f97e693713a64677ebe34a7cef"
+    },
+    {
+      "owner": "independent reviewer",
+      "command": "SHA256 all237 current bytes/aggregate; compare2cb0 manifest",
+      "result": "all237 match; aggregate6aa02ff996896590ae66a6a8702b680e2fd7a8f97e693713a64677ebe34a7cef; only fixture and README changed"
+    }
+  ],
+  "historicalFailures": [
+    {
+      "log": "/private/tmp/pr707-premerge-source-review-renderer.log",
+      "result": "2realbehavioralfaileddraftSourceorigins,174pass",
+      "disposition": "normalizernumeric-onlycontract rejectedvalidtaggedportable source. Narrowexactpercallimport branchrepairs; final315pass."
+    },
+    {
+      "log": "/private/tmp/pr707-premerge-source-review-renderer2.log",
+      "result": "3fail211pass",
+      "disposition": "Reviewertestunseededhistory fixture correctedtoexistingseedAPI; draftsourcecoldreloadtest wrongloadThread clearsintent, correctedtoactualmainrefreshStateentrypoint. Neitherusedasproductionfailureproof."
+    },
+    {
+      "log": "/private/tmp/pr707-premerge-source-review-final-renderer.log",
+      "result": "1fail314pass",
+      "disposition": "Existingcontroller testusedsparse source{label} andmissingcanonicaltuple, impossiblevalidatedAPIrecord. Fixture nowcompletefrozenfields/canonicaltuple whilepreservingalloriginalCurrent/history/assertions; no productionweakening."
+    },
+    {
+      "manifest": "Earliercf477freeze",
+      "result": "completion_traces.rs changedafterfreeze; exacthashmismatchreported",
+      "disposition": "Finalsource re-frozen df3da329; full13runner restarted; oldsourcepass notborrowed."
+    },
+    {
+      "log": "/private/tmp/pr707-premerge-portable-check-clippy-failure.log",
+      "result": "Clippy needlessborrow in completion_traces.rs serde_json::to_value(&turn.completion.status)",
+      "disposition": "Rootremoved redundant& forCopyenum, finalsource2cb0 refrozen; no productionsemanticchange, fullportfolio restarted."
+    },
+    {
+      "log": "/private/tmp/pr707-premerge-portable-node-input-first-failure.log",
+      "result": "FAILED: script893 undefined selected input; fixture submit also logged visual_assets_unavailable503",
+      "disposition": "Preserved exact failure; old observer did not distinguish successful real POST commitment from any earlier draft GET. Exact original trigger and bridge phase remain unknown; teardown can produce503 before caught run error print. Changed fixture now observes exact POST response before response-loss injection. No infrastructure assertion."
+    },
+    {
+      "log": "/private/tmp/pr707-premerge-portable-node-input-second-failure.log",
+      "result": "ONE unchanged diagnostic retry FAILED later at trusted divider pointer-down capture, after lost response chapter completed",
+      "disposition": "Preserved failure; TestWindow hidden by default and only shown in optional evidence-env path. No native focus/compositor readiness established. Revised fixture establishes those real preconditions, retains all trusted native drag assertions. Exact dropped event sequence not captured; no claim the full old run passed."
+    },
+    {
+      "log": "/private/tmp/pr707-premerge-portable-node-input-third-failure.log",
+      "sourceDigest": "2686d6730589c9d290853500db4b84e7e530d2843e40dd603bd5f77256c08835",
+      "result": "Corrected observer/focus run FAILED at pane width movement after successful committed response loss and trusted pointerdown/capture",
+      "disposition": "Native mouseMove omitted held-button modifier. Existing first-message native drag sets leftButtonDown. Corrected event injection, additional real trusted buttons1 observation and failure diagnostics address confirmed setup gap. Prior exact capture/event sequence absent; do not assert confirmed Chromium release cause."
+    },
+    {
+      "log": "/private/tmp/pr707-premerge-portable-node-input-fourth-failure.log",
+      "sourceDigest": "43c14f11fdff38a3b34db82e1190ef25af2f737f8c3113cef5a09a2f6d3d6caf",
+      "result": "FAILED at newly added native WebContents focus-getter precondition before pointer assertions",
+      "disposition": "No Product/native gate pass. Actual isolated Electron diagnostic later shows this getter false alongside focused document and trusted capture/held-button drag delivery; final fixture retains visible/document focus and actual pointer assertions, logs native getters without treating this proxy as an additional product promise."
+    },
+    {
+      "log": "/private/tmp/pr707-premerge-portable-node-input-fifth-failure.log",
+      "sourceDigest": "b77e00d45dc9c693792221ac5c237168996fdae031a9a2afdf13d1176abf490a",
+      "result": "FAILED at newly added native WebContents focus-getter precondition before pointer assertions",
+      "disposition": "No Product/native gate pass. Actual isolated Electron diagnostic later shows this getter false alongside focused document and trusted capture/held-button drag delivery; final fixture retains visible/document focus and actual pointer assertions, logs native getters without treating this proxy as an additional product promise."
+    }
+  ],
+  "testsDeleted": false,
+  "ownedTestEdits": [
+    "test/node-detail-assets.test.mjs14sourcepinSVGboundaries",
+    "test/navigation-history.test.mjsnarrowtaggedpositive15invalidboundaries",
+    "scripts/test-desktop-node-input-actions.mjs explicit actual POST identity/response barrier and visible focused painted native-pointer setup only"
+  ],
+  "logsSha256": {
+    "/private/tmp/pr707-premerge-source-review-final-df3-renderer.log": "888f76931398b8f5b78d4a79482468bcde7f8852a82e43e3b01574f7b34b0f78",
+    "/private/tmp/pr707-premerge-source-history-assets.log": "f79444734c2d466907c253879b1462b35bf8de8a92b3be9914af1195ec052cfe",
+    "/private/tmp/pr707-premerge-source-review-renderer.log": "f0464d4815d7296417b37b182818e64bf1ecb11b8b10341109172439c843fdbe",
+    "/private/tmp/pr707-premerge-source-review-renderer2.log": "12760e6f9f8eeddd4d7f7d41aa1fc4870aecd6984dd63b78f83714f7dcc06a45",
+    "/private/tmp/pr707-premerge-source-review-final-renderer.log": "9f7a192c5ee7bb6f4a0cfc13ea288de1e2142a3a79a3cdf7b8e872601759683b",
+    "/private/tmp/pr707-premerge-source-review-final-renderer2.log": "70e7cd0c343cfe5808d2d855b6b7acdf58938fe4187986fcc89b52a9dcd1985a",
+    "/private/tmp/pr707-draft-source-native-final-2.log": "76974f0b4c2b8fed01b0430fe5ba0cc3814bc077aca0630692b7b2cf0e9afb27",
+    "/private/tmp/pr707-premerge-integrity-rust-green.log": "27baeef78fa9d3e73be0524d2f45c549e4c198f6cbf92b977d96c15db1c7b62b",
+    "/private/tmp/pr707-premerge-integrity-js-red.log": "82920c760f576a3b28fb678739c4ac9cbbb2c4e4bc006e094a9209f91a05d6c9",
+    "/private/tmp/pr707-premerge-portable-check-clippy-failure.log": "e6fc146f8c123524ffa0437bbcdfe2cf6d6dde1d4c3159462f2e31954d360e5e",
+    "/private/tmp/pr707-premerge-portable-node-input-first-failure.log": "577e72c0bee3ff6d820595a241d1a5f3b6f6be2388654deecf6afceb08cb50e2",
+    "/private/tmp/pr707-premerge-portable-node-input-second-failure.log": "79929efd53abe5e33bddce93641b2cf5e9f8ad03a411012d1d1db7582cbb0843",
+    "/private/tmp/pr707-premerge-portable-node-input-third-failure.log": "aae8747c0ed46ca33d7364978c377dcb98c137ea0a580146a41b6f9855511772",
+    "/private/tmp/pr707-premerge-portable-node-input-fourth-failure.log": "8ff57b4817b5e2e498d35aba824c54d40af9e48a9459cfdec60bb30b76325ae5",
+    "/private/tmp/pr707-premerge-portable-node-input-fifth-failure.log": "0b48d05f5f0909d8a3364be92577115468c0dc9237039a2f9b56f6e31a6c9d9e",
+    "/private/tmp/pr707-native-focus-pointer-diagnostic.log": "8e4a58aebddc53e46da3bdf8ef8afe6c298d8a7d2ed4ffb5ebad8d625dd881a6"
+  },
+  "limitations": [
+    "No newreviewerpaid inference/nativeprovider execution/deployment/release/hostedV4publication/humanacceptance. Defaultinference-free paths preserved.",
+    "All237identityverification binds exactbytes; semanticassertionscoverchangedseams ratherthanassertingfreshcomprehensivereviewofeveryunchangedhistoricalfile.",
+    "Nofullscreenartifact/capture orimportednativeannotation/durableexecutionauthority claim.",
+    "Any source changeinvalidatesthisreceipt and requires re-review/hashqualification.",
+    "Revised6aa02ff9 native Input, build and full check are parent-owned and currently pending; this source-only no_source_blockers receipt does not certify those results or merge readiness. Earlier2cb0 failed native runs remain failures; its other retained heavy results require unchanged dependency mapping.",
+    "Fourth/fifth new focus-proxy fixture failures remain failed runs; isolated native diagnostic supports changing fixture proxy but never substitutes for fresh Product drag/persistence proof."
+  ],
+  "retainedHeavyDependencyAssessment": {
+    "priorManifestDigest": "2cb0acbee499701eb038b2b23fe0736d66e2590c692e3fbdc05b053559edbf02",
+    "currentDigest": "6aa02ff996896590ae66a6a8702b680e2fd7a8f97e693713a64677ebe34a7cef",
+    "changedPaths": [
+      "docs/evidence/issue-632-completion-contract/README.md",
+      "scripts/test-desktop-node-input-actions.mjs"
+    ],
+    "assessment": "Only Node Input executable fixture changed. All source manifest identities used by other production/heavy runners, their wrappers, packages and native source remain identical; README is mapping/evidence prose only. Source-byte applicability is preserved for those previously successful2cb0 gates, while exact binaries/environment/result receipts remain parent-owned evidence. Node Input must pass fresh on6aa02ff9.",
+    "gateStatus": "parent fresh corrected native Input/build/fullcheck pending"
+  }
+}

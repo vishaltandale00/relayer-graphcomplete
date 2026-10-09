@@ -34,16 +34,75 @@ function normalizeTemporalCurrent(value) {
   });
 }
 
+export function normalizeInvocationOrigin(value, threadId) {
+  if (value == null) return null;
+  if (value.kind != null && value.kind !== "graph" && value.kind !== "imported") {
+    throw new TypeError("Invocation origin kind is unavailable");
+  }
+  const identity = (item, name) => {
+    const id = requiredId(item, name);
+    if (!/^[1-9]\d*$/.test(id)) throw new TypeError(`${name} must be a canonical identity`);
+    return id;
+  };
+  if (!value.sourceEntry || value.sourceEntry.invocationOrigin != null) {
+    throw new TypeError("Invocation origin requires a source entry without another origin");
+  }
+  const sourceEntry = normalizeNavigationEntry(value.sourceEntry);
+  if (sourceEntry.threadId !== String(threadId)) {
+    throw new TypeError("Invocation origin source must belong to the same thread");
+  }
+  identity(sourceEntry.threadId, "invocationOrigin.sourceEntry.threadId");
+  const frozenSource = value.kind === "imported" && sourceEntry.turnId.startsWith("source:");
+  const portableIdentity = (item, kind) => {
+    const id = requiredId(item, `invocationOrigin.${kind}`);
+    if (id.length > 128 || !new RegExp(`^${kind}:[A-Za-z0-9._-]+$`).test(id)) {
+      throw new TypeError("Frozen imported source requires exact portable identities");
+    }
+    return id;
+  };
+  if (frozenSource) {
+    const callId = portableIdentity(value.invocationId, "invocation");
+    if (sourceEntry.turnId !== `source:${callId}` || value.invocationKey !== callId
+      || value.presentingLayerId !== `source-layer:${callId}`
+      || sourceEntry.navigationPath.length !== 1 || sourceEntry.navigationPath[0].viaActionId != null
+      || sourceEntry.temporalCurrent != null || sourceEntry.selectedNodeId !== String(value.sourceNodeId)) {
+      throw new TypeError("Frozen imported source must retain its exact per-call presentation");
+    }
+  } else identity(sourceEntry.turnId, "invocationOrigin.sourceEntry.turnId");
+  const presentingLayerId = frozenSource ? requiredId(value.presentingLayerId, "invocationOrigin.presentingLayerId")
+    : identity(value.presentingLayerId, "invocationOrigin.presentingLayerId");
+  if (sourceEntry.navigationPath.at(-1)?.layerId !== presentingLayerId) {
+    throw new TypeError("Invocation origin source path must end at its presenting Layer");
+  }
+  const invocationKey = requiredId(value.invocationKey, "invocationOrigin.invocationKey");
+  if (!invocationKey.trim() || invocationKey === "legacy") {
+    throw new TypeError("Invocation origin requires an exact durable call key");
+  }
+  return Object.freeze({
+    sourceEntry,
+    actionId: frozenSource ? portableIdentity(value.actionId, "action") : identity(value.actionId, "invocationOrigin.actionId"),
+    invocationKey,
+    sourceNodeId: frozenSource ? portableIdentity(value.sourceNodeId, "node") : identity(value.sourceNodeId, "invocationOrigin.sourceNodeId"),
+    presentingLayerId,
+    ...(value.kind === "imported" || value.kind === "graph" ? {
+      kind: value.kind,
+      invocationId: requiredId(value.invocationId, "invocationOrigin.invocationId"),
+    } : {}),
+  });
+}
+
 export function normalizeNavigationEntry(entry) {
   if (!entry || typeof entry !== "object") {
     throw new TypeError("navigation entry must be an object");
   }
+  const invocationOrigin = normalizeInvocationOrigin(entry.invocationOrigin, entry.threadId);
   return Object.freeze({
     threadId: requiredId(entry.threadId, "threadId"),
     turnId: requiredId(entry.turnId, "turnId"),
     navigationPath: normalizePath(entry.navigationPath),
     selectedNodeId: optionalId(entry.selectedNodeId),
     temporalCurrent: normalizeTemporalCurrent(entry.temporalCurrent),
+    ...(invocationOrigin == null ? {} : { invocationOrigin }),
   });
 }
 
@@ -55,6 +114,7 @@ export function navigationEntriesEqual(left, right) {
     || String(left.turnId) !== String(right.turnId)
     || optionalId(left.selectedNodeId) !== optionalId(right.selectedNodeId)
     || JSON.stringify(left.temporalCurrent ?? null) !== JSON.stringify(right.temporalCurrent ?? null)
+    || JSON.stringify(left.invocationOrigin ?? null) !== JSON.stringify(right.invocationOrigin ?? null)
     || left.navigationPath?.length !== right.navigationPath?.length
   ) return false;
   return left.navigationPath.every((step, index) => {

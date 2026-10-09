@@ -316,7 +316,7 @@ describe("ClaudeBasicHarness", () => {
       },
     });
 
-    expect(calls[0]?.prompt).toContain("graph.prepareComplete(invokeAction)");
+    expect(calls[0]?.prompt).toContain('graph.prepareComplete(invokeAction, "stable-call-key")');
     expect(calls[0]?.prompt).toContain("Import complete and watchCompletions from");
   });
 

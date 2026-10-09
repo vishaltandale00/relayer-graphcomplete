@@ -159,6 +159,12 @@ pub(super) async fn product_state(
         .filter(|view| view.thread.imported)
         .map(|view| view.thread.id.value())
         .collect::<std::collections::HashSet<_>>();
+    let invocation_sources = product_state
+        .interactions
+        .iter()
+        .filter(|row| !imported_thread_ids.contains(&row.thread_id.value()))
+        .filter_map(|row| row.graph_node_id.map(|node| (row.id, node, row.thread_id)))
+        .collect::<Vec<_>>();
     let product_interactions = std::mem::take(&mut product_state.interactions);
     let graph_deadline = super::interaction_graph::projection_deadline();
     let mut interactions = Vec::with_capacity(product_interactions.len());
@@ -185,7 +191,26 @@ pub(super) async fn product_state(
         Some(id) => Some(state.product.conversation_compatibility(id).await?),
         None => None,
     };
+    let (invocations, inventory_available) = super::threads::project_local_invocations(
+        &state,
+        &product_state.action_invocations,
+        &invocation_sources,
+    )
+    .await?;
+    let mut imported_history = Vec::new();
+    for view in product_state
+        .threads
+        .iter()
+        .filter(|view| view.thread.imported)
+    {
+        imported_history.extend(
+            super::threads::project_imported_invocation_history(&state, view.thread.id).await?,
+        );
+    }
     let response = ProductStateResponse::from(product_state)
+        .with_invocation_inventory_available(inventory_available)
+        .with_action_invocations(invocations)
+        .with_imported_invocation_history(imported_history)
         .with_conversation_compatibility(compatibility)
         .with_interactions(interactions)
         .with_current_projection(current_projection)

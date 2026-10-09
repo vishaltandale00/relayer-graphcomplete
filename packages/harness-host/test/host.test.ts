@@ -1,4 +1,5 @@
 import { NativeExecutionCancelled } from "../src/completion-execution.js";
+import { createHash } from "node:crypto";
 import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { Server } from "node:http";
 import { connect } from "node:net";
@@ -143,6 +144,59 @@ describe("HarnessHost", () => {
       await expect(stat(programDirectory)).rejects.toMatchObject({ code: "ENOENT" });
     } finally {
       await host.close(); vi.unstubAllGlobals(); await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("refuses invalid sealed contracts before executing the harness, while retaining frozen legacy input", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "relayer-sealed-contract-"));
+    const execute = vi.fn(async () => { throw new Error("inference reached"); });
+    const host = new HarnessHost({ stateFile: join(directory, "sessions.json"), controlToken: "control",
+      implementations: { test: () => ({ supportsInvokedComplete: true, complete: execute, state: emptyState }) } });
+    const sealed = {
+      authorities: [], input: { answers: [], context: [], invocationReferences: [], text: "Question" }, interactionNodeId: 1,
+      returnRequirements: [], schemaVersion: 1,
+    };
+    const digest = `sha256:v1:${createHash("sha256").update(JSON.stringify(sealed)).digest("hex")}`;
+    let input: unknown = { ...interactionInput(), completionContractStatus: "sealed" };
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => url.endsWith("/output")
+      ? new Response(JSON.stringify({ error: { code: "completion_not_found" } }), { status: 404 })
+      : url.endsWith("/input") ? new Response(JSON.stringify(input)) : graphReadResponse(url)));
+    try {
+      await host.initialize();
+      await host.createSession({ threadId: 1, permissionProfileId: "auto", configuration: completeEnabledConfiguration, workingDirectory: directory });
+      const invalid = [
+        [undefined, "missing its CompletionContract"],
+        [{ ...sealed, digest, schemaVersion: 2 }, "schema version"],
+        [{ ...sealed, digest, interactionNodeId: 2 }, "interaction node"],
+        [{ ...sealed, digest: "sha256:v1:wrong" }, "digest mismatch"],
+      ] as const;
+      for (const [contract, error] of invalid) {
+        input = { ...interactionInput(), completionContractStatus: "sealed", ...(contract === undefined ? {} : { completionContract: contract }) };
+        await expect(host.complete(1, 1, graph())).rejects.toThrow(error);
+      }
+      expect(execute).not.toHaveBeenCalled();
+      input = { ...interactionInput(), completionContractStatus: "sealed", completionContract: { ...sealed, digest } };
+      await expect(host.complete(1, 1, graph())).rejects.toThrow("inference reached");
+      input = { ...interactionInput(), completionContractStatus: "legacy" };
+      await expect(host.complete(1, 1, graph())).rejects.toThrow("inference reached");
+      expect(execute).toHaveBeenCalledTimes(2);
+      const childContract = { ...sealed, input: { ...sealed.input, invocationReferences: [{
+        actionSnapshot: {}, invocationId: 40, parentNodeId: 20, sourceActionId: 101, sourceCompletionId: 1,
+      }] } };
+      input = { ...interactionInput(), completionContractStatus: "sealed", completionContract: {
+        ...childContract, digest: `sha256:v1:${createHash("sha256").update(JSON.stringify(childContract)).digest("hex")}`,
+      } };
+      await expect(host.complete(1, invoked(graph(), 1, 101))).rejects.toThrow("inference reached");
+      const mismatchedChild = { ...childContract, interactionNodeId: 2 };
+      input = { ...interactionInput(2), completionContractStatus: "sealed", completionContract: {
+        ...mismatchedChild, digest: `sha256:v1:${createHash("sha256").update(JSON.stringify(mismatchedChild)).digest("hex")}`,
+      } };
+      await expect(host.complete(1, invoked(graph(2), 1, 102))).rejects.toThrow("graph-owned Invocation");
+      expect(execute).toHaveBeenCalledTimes(3);
+    } finally {
+      await host.close();
+      vi.unstubAllGlobals();
+      await rm(directory, { recursive: true, force: true });
     }
   });
 
@@ -3096,7 +3150,7 @@ describe("HarnessHost", () => {
         origin: ({ kind: "root", sourceCompletionId: 1, actionId: 104 } as unknown as HarnessInvokedCompletion["origin"]),
       })).rejects.toThrow("invalid trusted origin provenance");
       await expect(host.complete(1, invoked(graph(3, "forged-token"), 1, 999)))
-        .rejects.toThrow("does not match its graph-owned action lease");
+        .rejects.toThrow("does not match its graph-owned Invocation or legacy action lease");
       expect(starts).toBe(0);
       const running = host.complete(1, invoked(graph(2, "child-token")));
       await vi.waitFor(() => expect(starts).toBe(1));

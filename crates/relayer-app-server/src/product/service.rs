@@ -49,6 +49,8 @@ pub(crate) struct RetryInteractionCommand<'a> {
     pub(crate) input_draft_revision: Option<i64>,
     pub(crate) model_selection: &'a InteractionModelSelection,
     pub(crate) harness_configuration_name: &'a str,
+    pub(crate) composer_input_occurrences:
+        Option<&'a [relayer_graph_core::PresentingInputOccurrence]>,
 }
 
 pub(crate) struct CreateIdentifiedInteractionCommand<'a> {
@@ -60,6 +62,8 @@ pub(crate) struct CreateIdentifiedInteractionCommand<'a> {
     pub(crate) input_draft_revision: Option<i64>,
     pub(crate) model_selection: Option<&'a InteractionModelSelection>,
     pub(crate) allow_unselected_model: bool,
+    pub(crate) composer_input_occurrences:
+        Option<&'a [relayer_graph_core::PresentingInputOccurrence]>,
 }
 
 pub(crate) struct AcceptedInteractionCompletion<'a> {
@@ -1519,7 +1523,12 @@ impl ProductService {
                     .action_input_draft(thread_id)
                     .await?
                     .attachments
-                    .is_empty()
+                    .iter()
+                    .all(|input| {
+                        command
+                            .composer_input_occurrences
+                            .is_some_and(|occurrences| !occurrences.contains(&input.occurrence))
+                    })
             };
             if existing.text != command.text
                 || durable.contexts != command.contexts
@@ -1536,6 +1545,7 @@ impl ProductService {
                 .insert_interaction_input(
                     thread_id,
                     crate::storage::NewInteractionInput {
+                        composer_input_occurrences: command.composer_input_occurrences,
                         text: command.text,
                         input_identity,
                         input_digest: &durable.input_digest,
@@ -1554,6 +1564,11 @@ impl ProductService {
         let submitted_inputs = action_input_draft
             .attachments
             .iter()
+            .filter(|input| {
+                command
+                    .composer_input_occurrences
+                    .is_none_or(|occurrences| occurrences.contains(&input.occurrence))
+            })
             .map(submitted_input_from_attachment)
             .collect::<Result<Vec<_>, _>>()?;
         let submitted_input_draft_revision = input_draft_reservation_revision(
@@ -1573,6 +1588,7 @@ impl ProductService {
             .insert_interaction_input(
                 thread_id,
                 crate::storage::NewInteractionInput {
+                    composer_input_occurrences: command.composer_input_occurrences,
                     text: command.text,
                     input_identity,
                     input_digest: &input_digest,
@@ -1807,6 +1823,67 @@ impl ProductService {
             .map_err(Into::into)
     }
 
+    /// Snapshot confirmed answers before successful submission consumes their draft epochs.
+    #[cfg(test)]
+    pub(crate) async fn invocation_input_snapshot(
+        &self,
+        thread_id: ThreadId,
+        expected_revision: i64,
+    ) -> Result<Vec<relayer_graph_core::SubmittedInputDraft>, ProductError> {
+        let attachments = self
+            .invocation_input_attachment_snapshot(thread_id, expected_revision)
+            .await?;
+        Self::invocation_arguments(&attachments)
+    }
+
+    pub(crate) async fn invocation_input_attachment_snapshot(
+        &self,
+        thread_id: ThreadId,
+        expected_revision: i64,
+    ) -> Result<Vec<super::ActionInputAttachment>, ProductError> {
+        let draft = self.storage.action_input_draft(thread_id).await?;
+        input_draft_reservation_revision(
+            Some(expected_revision),
+            draft.revision,
+            !draft.attachments.is_empty(),
+        )?;
+        Ok(draft.attachments)
+    }
+
+    pub(crate) fn input_attachment_matches_action(
+        attachment: &super::ActionInputAttachment,
+        canonical: &relayer_graph_core::GraphAction,
+    ) -> bool {
+        canonical.id == attachment.occurrence.action_id
+            && canonical.source_node_id.value() == attachment.source_node_id
+            && canonical.kind == relayer_graph_core::ActionKind::Input
+            && canonical.state == relayer_graph_core::RecordState::Accepted
+            && canonical.input.as_ref() == Some(&attachment.action)
+            && validate_action_input_value(&attachment.action, &attachment.value).is_ok()
+    }
+
+    pub(crate) fn invocation_arguments(
+        attachments: &[super::ActionInputAttachment],
+    ) -> Result<Vec<relayer_graph_core::SubmittedInputDraft>, ProductError> {
+        attachments
+            .iter()
+            .map(submitted_input_from_attachment)
+            .collect()
+    }
+
+    pub(crate) async fn invocation_input_submission(
+        &self,
+        thread: ThreadId,
+        source: InteractionId,
+        action: i64,
+        key: &str,
+    ) -> Result<Option<(Option<i64>, Vec<super::ActionInputAttachment>)>, ProductError> {
+        Ok(self
+            .storage
+            .invocation_input_submission(thread, source, action, key)
+            .await?)
+    }
+
     pub(crate) async fn commit_action_input_attachment(
         &self,
         thread_id: ThreadId,
@@ -2006,6 +2083,258 @@ impl ProductService {
                 created: false,
             },
         })
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) async fn reserve_user_action_invocation(
+        &self,
+        source: InteractionId,
+        action: i64,
+        text: &str,
+        key: &str,
+        presenting_layer: Option<i64>,
+        revision: Option<i64>,
+        attachments: &[super::ActionInputAttachment],
+    ) -> Result<InvokeActionOutcome, ProductError> {
+        let source_row = self.get_interaction(source).await?;
+        if action <= 0
+            || key.trim().is_empty()
+            || key.len() > 256
+            || key == "legacy"
+            || presenting_layer.is_some_and(|id| id <= 0)
+            || self
+                .storage
+                .thread_is_imported(source_row.thread_id)
+                .await?
+        {
+            return Err(ProductError::Invalid(
+                "Invalid native invocation reservation.".into(),
+            ));
+        }
+        let outcome = self
+            .storage
+            .reserve_user_action_invocation(
+                source,
+                action,
+                required(text, "interactionText")?,
+                key,
+                presenting_layer,
+                revision,
+                attachments,
+            )
+            .await?;
+        Ok(match outcome {
+            ActionInvocationInsertOutcome::Created {
+                invocation,
+                interaction,
+            } => InvokeActionOutcome {
+                invocation,
+                interaction,
+                created: true,
+            },
+            ActionInvocationInsertOutcome::Existing {
+                invocation,
+                interaction,
+            } => InvokeActionOutcome {
+                invocation,
+                interaction,
+                created: false,
+            },
+        })
+    }
+
+    pub(crate) async fn user_invocation_reservation(
+        &self,
+        source: InteractionId,
+        action: i64,
+        key: Option<&str>,
+    ) -> Result<Option<InvokeActionOutcome>, ProductError> {
+        Ok(self
+            .storage
+            .user_invocation_reservation(source, action, key)
+            .await?
+            .map(|(invocation, interaction)| InvokeActionOutcome {
+                invocation,
+                interaction,
+                created: false,
+            }))
+    }
+
+    pub(crate) async fn reject_user_invocation_preparation(
+        &self,
+        result: InteractionId,
+        native_status: u16,
+        error: &str,
+    ) -> Result<(), ProductError> {
+        Ok(self
+            .storage
+            .reject_user_invocation_preparation(result, native_status, error)
+            .await?)
+    }
+
+    pub(crate) async fn user_invocation_preparation_rejected(
+        &self,
+        result: InteractionId,
+    ) -> Result<bool, ProductError> {
+        Ok(self
+            .storage
+            .user_invocation_preparation_rejected(result)
+            .await?)
+    }
+
+    pub(crate) async fn user_invocation_preparation_recoverable(
+        &self,
+        result: InteractionId,
+    ) -> Result<bool, ProductError> {
+        Ok(self
+            .storage
+            .user_invocation_preparation_recoverable(result)
+            .await?)
+    }
+
+    pub(crate) async fn invocation_presentation(
+        &self,
+        result: InteractionId,
+    ) -> Result<Option<i64>, ProductError> {
+        Ok(self.storage.invocation_presentation(result).await?)
+    }
+
+    pub(crate) async fn invoke_durable_action(
+        &self,
+        source: InteractionId,
+        action: i64,
+        text: &str,
+        graph_node: i64,
+        agent_invoked: bool,
+        invocation_key: &str,
+    ) -> Result<InvokeActionOutcome, ProductError> {
+        self.invoke_durable_action_inner(
+            source,
+            action,
+            text,
+            graph_node,
+            agent_invoked,
+            invocation_key,
+            None,
+        )
+        .await
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) async fn invoke_user_durable_action_with_inputs(
+        &self,
+        source: InteractionId,
+        action: i64,
+        text: &str,
+        graph_node: i64,
+        invocation_key: &str,
+        revision: Option<i64>,
+        attachments: &[super::ActionInputAttachment],
+    ) -> Result<InvokeActionOutcome, ProductError> {
+        self.invoke_durable_action_inner(
+            source,
+            action,
+            text,
+            graph_node,
+            false,
+            invocation_key,
+            Some((revision, attachments)),
+        )
+        .await
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    async fn invoke_durable_action_inner(
+        &self,
+        source: InteractionId,
+        action: i64,
+        text: &str,
+        graph_node: i64,
+        agent_invoked: bool,
+        invocation_key: &str,
+        submission: Option<(Option<i64>, &[super::ActionInputAttachment])>,
+    ) -> Result<InvokeActionOutcome, ProductError> {
+        let source_row = self.get_interaction(source).await?;
+        if action <= 0
+            || graph_node <= 0
+            || self
+                .storage
+                .thread_is_imported(source_row.thread_id)
+                .await?
+        {
+            return Err(ProductError::Invalid(
+                "Invalid native invocation source.".into(),
+            ));
+        }
+        let text = required(text, "interactionText")?;
+        let outcome = match submission {
+            Some((revision, attachments)) => {
+                self.storage
+                    .insert_user_durable_action_invocation_with_inputs(
+                        source,
+                        action,
+                        text,
+                        graph_node,
+                        invocation_key,
+                        revision,
+                        attachments,
+                    )
+                    .await?
+            }
+            None => {
+                self.storage
+                    .insert_durable_action_invocation(
+                        source,
+                        action,
+                        text,
+                        graph_node,
+                        agent_invoked,
+                        invocation_key,
+                    )
+                    .await?
+            }
+        };
+        Ok(match outcome {
+            ActionInvocationInsertOutcome::Created {
+                invocation,
+                interaction,
+            } => InvokeActionOutcome {
+                invocation,
+                interaction,
+                created: true,
+            },
+            ActionInvocationInsertOutcome::Existing {
+                invocation,
+                interaction,
+            } => InvokeActionOutcome {
+                invocation,
+                interaction,
+                created: false,
+            },
+        })
+    }
+
+    pub(crate) async fn prepared_invocation_node(
+        &self,
+        result: InteractionId,
+    ) -> Result<Option<i64>, ProductError> {
+        Ok(self.storage.prepared_invocation_node(result).await?)
+    }
+    pub(crate) async fn invocation_for_graph_node(
+        &self,
+        source: InteractionId,
+        action: i64,
+        node: i64,
+    ) -> Result<Option<InvokeActionOutcome>, ProductError> {
+        Ok(self
+            .storage
+            .invocation_for_graph_node(source, action, node)
+            .await?
+            .map(|(invocation, interaction)| InvokeActionOutcome {
+                invocation,
+                interaction,
+                created: false,
+            }))
     }
 
     pub(crate) async fn completion_execution(
@@ -2247,6 +2576,36 @@ impl ProductService {
             .map_err(Into::into)
     }
 
+    pub(crate) async fn imported_invocation_export_records(
+        &self,
+        thread_id: ThreadId,
+    ) -> Result<Vec<crate::conversation_export::ExportInvocation>, ProductError> {
+        Ok(self
+            .storage
+            .imported_invocation_export_records(thread_id)
+            .await?)
+    }
+
+    pub(crate) async fn imported_bound_input_export_records(
+        &self,
+        thread_id: ThreadId,
+    ) -> Result<Vec<crate::conversation_export::ExportAction>, ProductError> {
+        self.storage
+            .imported_bound_input_export_records(thread_id)
+            .await
+            .map_err(Into::into)
+    }
+
+    pub(crate) async fn imported_invocation_asset_contents(
+        &self,
+        thread_id: ThreadId,
+    ) -> Result<Vec<crate::conversation_export::ExportVisualAssetContent>, ProductError> {
+        self.storage
+            .imported_invocation_asset_contents(thread_id)
+            .await
+            .map_err(Into::into)
+    }
+
     pub(crate) async fn staged_conversation_turn(
         &self,
         import_id: &str,
@@ -2420,7 +2779,11 @@ impl ProductService {
             .storage
             .action_input_draft(interaction.thread_id)
             .await?;
-        if !action_input_draft.attachments.is_empty() {
+        if action_input_draft.attachments.iter().any(|input| {
+            command
+                .composer_input_occurrences
+                .is_none_or(|occurrences| occurrences.contains(&input.occurrence))
+        }) {
             return Err(CatalogError::invalid(
                 "submitted_input_retry_requires_new_send",
                 "Send the committed inputs again to create a new immutable root and attempt.",
@@ -2430,6 +2793,11 @@ impl ProductService {
         let submitted_inputs = action_input_draft
             .attachments
             .iter()
+            .filter(|input| {
+                command
+                    .composer_input_occurrences
+                    .is_none_or(|occurrences| occurrences.contains(&input.occurrence))
+            })
             .map(submitted_input_from_attachment)
             .collect::<Result<Vec<_>, _>>()?;
         let submitted_input_draft_revision = input_draft_reservation_revision(
@@ -2450,6 +2818,7 @@ impl ProductService {
                 interaction_id,
                 command.expected_attempt_id,
                 NewInteractionInput {
+                    composer_input_occurrences: command.composer_input_occurrences,
                     text: command.text,
                     input_identity,
                     input_digest: &input_digest,
@@ -3189,7 +3558,36 @@ mod tests {
             )
             .await
             .unwrap();
+        let invocation_inputs = service
+            .invocation_input_snapshot(thread.id, first_draft.revision)
+            .await
+            .unwrap();
+        assert_eq!(invocation_inputs.len(), 1);
+        assert_eq!(invocation_inputs[0].occurrence, occurrence);
+        assert_eq!(invocation_inputs[0].action, action);
+        assert_eq!(
+            invocation_inputs[0].value,
+            relayer_graph_core::SubmittedInputValue::Text {
+                text: "Saturday 02:00 UTC".into(),
+            }
+        );
+        assert_eq!(
+            service.action_input_draft(thread.id).await.unwrap(),
+            first_draft
+        );
+        assert!(matches!(
+            service
+                .invocation_input_snapshot(thread.id, first_draft.revision + 1)
+                .await,
+            Err(ProductError::Storage(
+                crate::storage::StorageError::ActionInputDraftConflict {
+                    code: "input_draft_revision_conflict",
+                    ..
+                }
+            ))
+        ));
         let send = || CreateIdentifiedInteractionCommand {
+            composer_input_occurrences: None,
             text: "Prepare the deployment plan",
             input_identity: "send:stable-replay",
             contexts: &[],
@@ -3240,6 +3638,7 @@ mod tests {
             .create_identified_interaction(
                 thread.id,
                 CreateIdentifiedInteractionCommand {
+                    composer_input_occurrences: None,
                     input_draft_revision: Some(second_draft.revision),
                     ..send()
                 },
@@ -3279,6 +3678,7 @@ mod tests {
             .await
             .unwrap();
         let empty_send = || CreateIdentifiedInteractionCommand {
+            composer_input_occurrences: None,
             text: "Prepare without committed inputs",
             input_identity: "send:empty-replay",
             contexts: &[],
@@ -3315,6 +3715,7 @@ mod tests {
             .create_identified_interaction(
                 empty_thread.id,
                 CreateIdentifiedInteractionCommand {
+                    composer_input_occurrences: None,
                     input_draft_revision: Some(new_draft.revision),
                     ..empty_send()
                 },
@@ -3343,6 +3744,7 @@ mod tests {
             .create_identified_interaction(
                 empty_thread.id,
                 CreateIdentifiedInteractionCommand {
+                    composer_input_occurrences: None,
                     input_draft_revision: Some(new_draft.revision),
                     ..empty_send()
                 },
@@ -3382,6 +3784,7 @@ mod tests {
             .await
             .unwrap();
         let omitted_send = || CreateIdentifiedInteractionCommand {
+            composer_input_occurrences: None,
             text: "Prepare without inspecting the input draft",
             input_identity: "send:omitted-replay",
             contexts: &[],

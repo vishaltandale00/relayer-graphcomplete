@@ -30,6 +30,7 @@ function controlledChild(advanceCurrent) {
   const enteredAdvance = deferred();
   for (const [name, implementation] of Object.entries({
     getCurrent: async () => ({ headRevision: 1 }),
+    getContract: async () => undefined,
     submitNode: async () => undefined,
     submitLayer: async () => undefined,
     addAction: async () => undefined,
@@ -63,6 +64,7 @@ function controlledParent({ childStart, childAdvance, failChildStart = false, pa
 
   const methods = {
     getCurrent: async () => ({ headRevision: currentReads++ === 0 ? 0 : 1 }),
+    getContract: async () => undefined,
     submitNode: async () => undefined,
     submitLayer: async () => undefined,
     addAction: async (_source, action) => action.kind === "invoke" ? { id: 3 } : undefined,
@@ -145,6 +147,7 @@ function controlledRig({ routes, failingStarts = [], failingAdvances = [], onChi
     getCurrent: async function () {
       return { headRevision: childIds.has(this.capability.nodeId) ? 1 : 0 };
     },
+    getContract: async () => undefined,
     submitNode: async () => undefined,
     submitLayer: async () => undefined,
     addAction: async function (_source, action) {
@@ -243,6 +246,7 @@ function replacementGateRig() {
     getCurrent: async function () {
       return { headRevision: this.capability.fixtureParentId === undefined ? 0 : 1 };
     },
+    getContract: async () => undefined,
     submitNode: async () => undefined,
     submitLayer: async () => undefined,
     addAction: async (_source, action) => action.kind === "invoke" ? { id: 2 } : undefined,

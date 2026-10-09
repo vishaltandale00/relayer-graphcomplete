@@ -12,6 +12,11 @@ interface RecursiveChild {
   readonly sourceInteractionId: number | string;
   readonly sourceActionId: number;
   readonly rootLayerId: number;
+  readonly durable?: boolean;
+  readonly reusable?: boolean;
+  readonly invocationKey?: string;
+  readonly sourceCompletionId?: number;
+  readonly resultCompletionStatus?: string;
   readonly acceptedRootNodes?: readonly { readonly title: string; readonly detail: string }[];
 }
 
@@ -96,12 +101,20 @@ export async function gradeRecursiveGraphMemoryExecution(input: {
     if (index === 2) {
       const allChildren = execution.semanticChildren ?? [];
       const finalChildren = allChildren.filter((child) => String(child.sourceInteractionId) === String(interaction.id));
-      const attachedFinalChildren = finalChildren.filter((child) => output.rootLayer.actions.some((action) => action.state === "accepted" && action.kind === "invoke" && action.id === child.sourceActionId && action.sourceLayerId === output.rootLayer.layer.id && action.targetLayerId === child.rootLayerId));
+      const attachedFinalChildren = finalChildren.filter((child) => output.rootLayer.actions.some((action) => (
+        action.state === "accepted" && action.kind === "invoke"
+        && action.id === child.sourceActionId && action.sourceLayerId === output.rootLayer.layer.id
+        && ((child.durable === true || (child.durable == null && child.reusable === true))
+          ? action.targetLayerId == null && typeof child.invocationKey === "string" && child.invocationKey.length > 0
+            && child.sourceCompletionId === interaction.graphNodeId && child.resultCompletionStatus === "accepted"
+            && Number.isSafeInteger(child.rootLayerId) && child.rootLayerId > 0
+          : action.targetLayerId === child.rootLayerId)
+      )));
       const childStopConditions = finalChildren.flatMap((child) => child.acceptedRootNodes ?? []).filter((node) => node.title === "Red-team stop condition" && node.detail.trim() !== "");
       const parentStopConditions = output.rootLayer.nodes.filter((node) => node.title === "Red-team stop condition" && node.detail.trim() !== "");
       checks.push({ name: "final-red-team-stop-condition", passed: parentStopConditions.length === 1, detail: "Every cell must expose exactly one falsifiable Red-team stop condition in the final accepted memo." });
       if (recursionEnabled) checks.push({ name: "semantic-child-observation", passed: true, detail: `Recursion was available; observed ${allChildren.length} descendant execution${allChildren.length === 1 ? "" : "s"}, ${finalChildren.length} from the final turn. Child creation remains observed behavior.` }, {
-        name: "final-child-attached", passed: attachedFinalChildren.length === finalChildren.length, detail: "Any claimed final specialist contribution must retain its settled result through an exact action-bound resolved invoke.",
+        name: "final-child-attached", passed: attachedFinalChildren.length === finalChildren.length, detail: "Any claimed final specialist contribution must retain its settled result through an exact action-bound durable Invocation or historical resolved invoke.",
       }, {
         name: "child-result-text-aligned", passed: finalChildren.length === 0 || childStopConditions.some((child) => parentStopConditions.length === 1 && child.detail === parentStopConditions[0]!.detail), detail: "The final memo and specialist result must expose the same falsifiable stop condition. This is semantic alignment evidence, not broker-delivery proof.",
       });

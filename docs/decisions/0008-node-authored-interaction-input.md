@@ -102,7 +102,7 @@ action snapshot with graph control. Imported, read-only, stale, inaccessible, fo
 occurrences have no mutation authority.
 
 Only the committed value is durable. A staged editor value belongs to the renderer and is neither
-autosaved nor available to GraphComplete. Reopening a control starts from the committed value;
+autosaved nor available to GraphComplete. Reopening a control in the same workspace retains its pending edit; a fresh workspace starts from the committed value.
 Undo restores that value; detaching makes a later reopen empty. Persistence failure leaves the
 prior committed revision authoritative and must not be presented as a successful commit.
 
@@ -357,3 +357,5 @@ safe provenance, attempt state, and digests, but those projections confer no aut
   distributed transaction or permitting inference before binding.
 - Production schema, API, client, recovery, renderer, portability, and evidence work may begin only
   after the throwaway state-model prototype in #219 receives its required human verdict.
+
+The approved 2026-10-07 Input acceptance decision in ADR 0014 supersedes the standard per-input confirmation UI. Send or Invoke persists its current scoped values before reserving immutable input. The storage Commit operation remains the revision-checked persistence seam; it does not imply a separate user confirmation button.

@@ -19,6 +19,7 @@ use thiserror::Error;
 pub const EXPORT_VERSION_V1: u32 = 1;
 pub const EXPORT_VERSION_V2: u32 = 2;
 pub const EXPORT_VERSION_V3: u32 = 3;
+pub const EXPORT_VERSION_V4: u32 = 4;
 pub const MAX_EXPORT_BYTES: usize = 256 * 1024 * 1024;
 /// Public share snapshots use the transport-sized boundary, while ordinary
 /// local exports retain the larger desktop file limit above.
@@ -30,6 +31,8 @@ pub const MAX_NODES_PER_LAYER: usize = 8;
 pub const MAX_EDGES_PER_LAYER: usize = 28;
 pub const MAX_ACTIONS_PER_LAYER: usize = 64;
 pub const MAX_SUBMITTED_INPUTS_PER_TURN: usize = 256;
+/// JSON consumers must retain an Invocation head without numeric precision loss.
+pub const MAX_PORTABLE_HEAD_REVISION: u64 = 9_007_199_254_740_991;
 pub const MAX_STRING_BYTES: usize = 4 * 1024 * 1024;
 pub const MAX_PERMISSION_RECEIPT_BYTES: usize = 64 * 1024;
 
@@ -41,7 +44,7 @@ pub enum ConversationExportRecord {
     Turn(Box<ConversationExportTurn>),
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ConversationExportHeader {
     pub export_version: u32,
@@ -51,6 +54,94 @@ pub struct ConversationExportHeader {
     pub turns: Vec<ExportTurnManifestEntry>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub visual_asset_contents: Vec<ExportVisualAssetContent>,
+    /// Inert per-call provenance. Never an execution or preparation capability.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub invocations: Vec<ExportInvocation>,
+    /// Input definitions referenced by a callable, without inventing Layer membership.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub bound_inputs: Vec<ExportAction>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ExportInvocation {
+    pub schema_version: u32,
+    pub id: String,
+    /// Captured native activation provenance; absence is unknown historical attribution.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub activator: Option<ExportInvocationActivator>,
+    pub source: ExportInvocationSource,
+    pub child_interaction_node_id: String,
+    pub result_turn_id: Option<String>,
+    pub lifecycle: String,
+    pub safe_reason: Option<String>,
+    pub head_revision: u64,
+    pub current_layer_id: Option<String>,
+    pub returned_layer_id: Option<String>,
+    pub arguments: Vec<ExportInvocationArgument>,
+    pub current: Option<ExportInvocationCurrent>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ExportInvocationActivator {
+    Human,
+    Agent,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ExportInvocationCaptureState {
+    Draft,
+    Accepted,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ExportInvocationSource {
+    pub interaction_node_id: String,
+    pub action_id: String,
+    pub parent_node_id: String,
+    pub layer_id: Option<String>,
+    /// Exact occurrence selected at activation, distinct from the authored source Layer.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub presenting_layer_id: Option<String>,
+    /// Native state at freezing; older snapshots did not capture this provenance.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub capture_state: Option<ExportInvocationCaptureState>,
+    pub instruction: String,
+    pub label: String,
+    pub description: Option<String>,
+    #[serde(with = "relayer_graph_core::optional_icon_serde")]
+    pub icon: Option<String>,
+    pub icon_asset: Option<ExportVisualAssetAssociation>,
+    /// The exact historical pin is retained, but its bytes are not part of this snapshot.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub icon_asset_omitted: bool,
+    pub variant: ExportActionVariant,
+    pub input_action_ids: Vec<String>,
+    /// Whether the original frozen source explicitly declared its input bindings.
+    pub input_bindings_defined: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reusable: Option<bool>,
+    pub parent_title: String,
+    pub parent_detail: String,
+    pub state: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ExportInvocationArgument {
+    pub source: ExportInputSource,
+    pub action: ExportInputActionSnapshot,
+    pub value: ExportSubmittedInputValue,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ExportInvocationCurrent {
+    pub root_layer_id: String,
+    pub layers: Vec<ExportResolvedLayer>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -217,6 +308,9 @@ pub struct ExportContextSource {
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum ExportTurnOrigin {
     User,
+    Invocation {
+        invocation_id: String,
+    },
     Action {
         source_turn_id: String,
         source_action_id: String,
@@ -540,6 +634,10 @@ pub struct ExportAction {
     pub interaction_text: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub input: Option<ExportInputActionSnapshot>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub input_action_ids: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reusable: Option<bool>,
     pub state: ExportRecordState,
 }
 
@@ -662,6 +760,8 @@ struct VisualAssetContentMetadata {
 pub struct ConversationExportValidator {
     export_version: u32,
     manifest: Vec<ExportTurnManifestEntry>,
+    invocations: Vec<ExportInvocation>,
+    bound_inputs: Vec<ExportAction>,
     next_turn: usize,
     prior_invokes: HashMap<String, HashMap<String, Option<String>>>,
     converted_origins: HashSet<String>,
@@ -675,6 +775,7 @@ pub struct ConversationExportValidator {
     nodes_by_id: HashMap<String, NodeDefinitionDigest>,
     edges_by_id: HashMap<String, [u8; 32]>,
     actions_by_id: HashMap<String, [u8; 32]>,
+    invocation_source_definitions: HashMap<String, [u8; 32]>,
     context_actions_by_id: HashMap<String, [u8; 32]>,
     input_action_ids: HashSet<String>,
     submitted_input_ids: HashSet<String>,
@@ -708,6 +809,8 @@ impl ConversationExportValidator {
         Ok(Self {
             export_version: header.export_version,
             manifest: header.turns.clone(),
+            invocations: header.invocations.clone(),
+            bound_inputs: header.bound_inputs.clone(),
             next_turn: 0,
             prior_invokes: HashMap::new(),
             converted_origins: HashSet::new(),
@@ -721,6 +824,7 @@ impl ConversationExportValidator {
             nodes_by_id: HashMap::new(),
             edges_by_id: HashMap::new(),
             actions_by_id: HashMap::new(),
+            invocation_source_definitions: HashMap::new(),
             context_actions_by_id: HashMap::new(),
             input_action_ids: HashSet::new(),
             submitted_input_ids: HashSet::new(),
@@ -799,12 +903,37 @@ impl ConversationExportValidator {
             std::iter::once(&view.root_action)
                 .chain(view.layers.iter().flat_map(|layer| &layer.actions))
         }) {
-            if action.converted_from_invoke && self.export_version != EXPORT_VERSION_V3 {
+            if action.converted_from_invoke && self.export_version < EXPORT_VERSION_V3 {
                 return Err(ExportValidationError::new(
                     "converted_invoke_version",
                     &path,
                     "Converted invoke provenance requires export V3.",
                 ));
+            }
+            self.remember_invocation_source(action);
+            // A call can freeze a draft definition before that action is repaired
+            // and accepted. Its source snapshot is provenance, not a replacement
+            // definition of the current canonical action.
+            for argument in self
+                .invocations
+                .iter()
+                .filter(|call| {
+                    call.source.capture_state == Some(ExportInvocationCaptureState::Accepted)
+                        && call.source.input_bindings_defined
+                })
+                .flat_map(|call| &call.arguments)
+                .filter(|argument| argument.source.action_id == action.id)
+            {
+                if action.kind != ExportActionKind::Input
+                    || action.source_node_id != argument.source.node_id
+                    || action.input.as_ref() != Some(&argument.action)
+                {
+                    return Err(ExportValidationError::new(
+                        "invocation_argument_snapshot_mismatch",
+                        &path,
+                        "Included input action must match the frozen argument snapshot.",
+                    ));
+                }
             }
         }
         validate_turn(
@@ -813,7 +942,55 @@ impl ConversationExportValidator {
             &self.prior_invokes,
             self.policy,
             self.export_version,
+            &self.bound_inputs,
         )?;
+        if let ExportTurnOrigin::Invocation { invocation_id } = &turn.origin {
+            let call = self
+                .invocations
+                .iter()
+                .find(|call| &call.id == invocation_id)
+                .ok_or_else(|| {
+                    ExportValidationError::new(
+                        "invocation_origin_missing",
+                        &path,
+                        "Turn origin must identify an included Invocation.",
+                    )
+                })?;
+            if call.result_turn_id.as_deref() != Some(turn.id.as_str())
+                // Product stores required interaction text trimmed, while the
+                // native frozen instruction remains exact historical content.
+                || (turn.text != call.source.instruction
+                    && turn.text != call.source.instruction.trim())
+                || (call.lifecycle == "succeeded"
+                    && (turn.completion.status != ExportCompletionStatus::Accepted
+                        || turn.accepted_view.is_none()))
+                || turn.interaction_node_id.as_ref().or_else(|| {
+                    turn.accepted_view
+                        .as_ref()
+                        .map(|view| &view.interaction_node_id)
+                }) != Some(&call.child_interaction_node_id)
+                || turn.accepted_view.as_ref().is_some_and(|view| {
+                    call.returned_layer_id.as_ref() != Some(&view.root_layer_id)
+                        || call.lifecycle != "succeeded"
+                })
+            {
+                return Err(ExportValidationError::new(
+                    "invocation_result_mismatch",
+                    &path,
+                    "Invocation result turn must match its frozen instruction, exact child and Returned layer.",
+                ));
+            }
+        } else if self
+            .invocations
+            .iter()
+            .any(|call| call.result_turn_id.as_deref() == Some(turn.id.as_str()))
+        {
+            return Err(ExportValidationError::new(
+                "invocation_origin_mismatch",
+                &path,
+                "An included call result must retain its Invocation origin.",
+            ));
+        }
         if let Some(view) = &turn.accepted_view
             && let Some(actions) = self.converted_targets.get(&view.root_layer_id)
             && !matches!(&turn.origin, ExportTurnOrigin::Action { source_turn_id, source_action_id }
@@ -883,7 +1060,7 @@ impl ConversationExportValidator {
                 &path,
             )?;
             if let Some(owner) = &context.source.owner_turn_id {
-                if self.export_version != EXPORT_VERSION_V3 {
+                if self.export_version < EXPORT_VERSION_V3 {
                     return Err(ExportValidationError::new(
                         "context_owner_version",
                         &path,
@@ -1039,7 +1216,7 @@ impl ConversationExportValidator {
                     ExportTurnOrigin::Action {
                         source_action_id, ..
                     } => Some(source_action_id.clone()),
-                    ExportTurnOrigin::User => None,
+                    ExportTurnOrigin::User | ExportTurnOrigin::Invocation { .. } => None,
                 },
             ));
             self.accepted_occurrences.insert(
@@ -1097,7 +1274,7 @@ impl ConversationExportValidator {
         Ok(())
     }
 
-    pub fn finish(self) -> Result<(), ExportValidationError> {
+    pub fn finish(mut self) -> Result<(), ExportValidationError> {
         if self.next_turn != self.manifest.len() {
             return Err(ExportValidationError::new(
                 "turn_inventory_mismatch",
@@ -1133,6 +1310,134 @@ impl ConversationExportValidator {
                 ));
             }
         }
+        for call in self.invocations.clone() {
+            if let Some(current) = &call.current {
+                let view = invocation_validation_view(&call, current);
+                validate_accepted_view(
+                    &view,
+                    "header.invocations.current",
+                    EXPORT_VERSION_V4,
+                    &self.bound_inputs,
+                )?;
+                register_immutable_view_records(
+                    &view,
+                    "header.invocations.current",
+                    &mut self.layers_by_id,
+                    &mut self.nodes_by_id,
+                    &mut self.edges_by_id,
+                    &mut self.actions_by_id,
+                    &self.root_action_ids,
+                )?;
+                for action in view.layers.iter().flat_map(|layer| &layer.actions) {
+                    self.remember_invocation_source(action);
+                }
+                for layer in &view.layers {
+                    for node in &layer.nodes {
+                        self.validate_node_visual_assets(
+                            node,
+                            &view,
+                            "header.invocations.current.nodes",
+                        )?;
+                    }
+                }
+            }
+            if call.source.icon_asset_omitted {
+                if call
+                    .source
+                    .icon
+                    .as_deref()
+                    .and_then(relayer_graph_core::image_icon)
+                    .is_none()
+                    || call.source.icon_asset.is_some()
+                {
+                    return Err(ExportValidationError::new(
+                        "invocation_icon_omission_invalid",
+                        "header.invocations.source.icon",
+                        "Inert omission retains the historical image pin without fabricating an asset association.",
+                    ));
+                }
+            } else {
+                self.validate_icon_carrier(
+                    call.source.icon.as_deref().unwrap_or(""),
+                    call.source.icon_asset.as_ref(),
+                    "header.invocations.source.icon",
+                )?;
+            }
+        }
+        for input in self.bound_inputs.clone() {
+            if !self.nodes_by_id.contains_key(&input.source_node_id) {
+                return Err(ExportValidationError::new(
+                    "bound_input_source_unresolved",
+                    "header.boundInputs",
+                    "Standalone Input source must be a Node in the captured graph.",
+                ));
+            }
+            for argument in self
+                .invocations
+                .iter()
+                .filter(|call| {
+                    call.source.capture_state == Some(ExportInvocationCaptureState::Accepted)
+                        && call.source.input_bindings_defined
+                })
+                .flat_map(|call| &call.arguments)
+                .filter(|argument| argument.source.action_id == input.id)
+            {
+                if input.source_node_id != argument.source.node_id
+                    || input.input.as_ref() != Some(&argument.action)
+                {
+                    return Err(ExportValidationError::new(
+                        "invocation_argument_snapshot_mismatch",
+                        "header.boundInputs",
+                        "Standalone Input must match its exact frozen argument source and question.",
+                    ));
+                }
+            }
+            let mut definition = input.clone();
+            definition.icon_asset = None;
+            register_definition(
+                &mut self.actions_by_id,
+                &input.id,
+                &definition,
+                "header.boundInputs",
+                "action_identity_conflict",
+            )?;
+            self.validate_icon_carrier(
+                input.icon.as_deref().unwrap_or(""),
+                input.icon_asset.as_ref(),
+                "header.boundInputs.icon",
+            )?;
+        }
+        for call in &self.invocations {
+            if call.source.capture_state != Some(ExportInvocationCaptureState::Accepted) {
+                continue;
+            }
+            if let Some(definition) = self
+                .invocation_source_definitions
+                .get(&call.source.action_id)
+            {
+                let source = &call.source;
+                let captured = callable_snapshot_digest(serde_json::json!([
+                    true,
+                    source.parent_node_id,
+                    source.layer_id,
+                    source.instruction,
+                    source.label,
+                    source.description,
+                    source.variant,
+                    source.icon,
+                    source.input_action_ids,
+                    source.reusable,
+                    source.state
+                ]));
+                if definition != &captured {
+                    return Err(ExportValidationError::new(
+                        "invocation_source_snapshot_mismatch",
+                        "header.invocations.source",
+                        "An accepted captured callable must match its included canonical Invoke definition.",
+                    ));
+                }
+            }
+        }
         if let Some(unreachable) = self
             .visual_asset_contents
             .keys()
@@ -1147,6 +1452,32 @@ impl ConversationExportValidator {
             ));
         }
         Ok(())
+    }
+
+    fn remember_invocation_source(&mut self, action: &ExportAction) {
+        if self
+            .invocations
+            .iter()
+            .any(|call| call.source.action_id == action.id)
+        {
+            // Retain only a fingerprint; asset bytes are validated separately.
+            self.invocation_source_definitions.insert(
+                action.id.clone(),
+                callable_snapshot_digest(serde_json::json!([
+                    action.kind == ExportActionKind::Invoke,
+                    action.source_node_id,
+                    action.source_layer_id,
+                    action.interaction_text,
+                    action.label,
+                    action.description,
+                    action.variant,
+                    action.icon,
+                    action.input_action_ids,
+                    action.reusable,
+                    action.state
+                ])),
+            );
+        }
     }
 
     fn validate_root_icon_asset(
@@ -1373,6 +1704,10 @@ impl ConversationExportValidator {
     }
 }
 
+fn callable_snapshot_digest(value: serde_json::Value) -> [u8; 32] {
+    Sha256::digest(value.to_string().as_bytes()).into()
+}
+
 fn register_immutable_view_records(
     view: &ExportAcceptedView,
     path: &str,
@@ -1548,13 +1883,13 @@ fn register_definition<T: Serialize>(
 fn validate_header(header: &ConversationExportHeader) -> Result<(), ExportValidationError> {
     if !matches!(
         header.export_version,
-        EXPORT_VERSION_V1 | EXPORT_VERSION_V2 | EXPORT_VERSION_V3
+        EXPORT_VERSION_V1 | EXPORT_VERSION_V2 | EXPORT_VERSION_V3 | EXPORT_VERSION_V4
     ) {
         return Err(ExportValidationError::new(
             "unsupported_export_version",
             "header.exportVersion",
             format!(
-                "Readers support exportVersion 1, 2 and 3, received {}.",
+                "Readers support exportVersion 1 through 4, received {}.",
                 header.export_version
             ),
         ));
@@ -1565,6 +1900,29 @@ fn validate_header(header: &ConversationExportHeader) -> Result<(), ExportValida
             "header.visualAssetContents",
             "Visual asset bytes must use dedicated bounded content records.",
         ));
+    }
+    validate_invocation_inventory(header)?;
+    if !header.bound_inputs.is_empty() && header.export_version != EXPORT_VERSION_V4 {
+        return Err(ExportValidationError::new(
+            "bound_input_version",
+            "header.boundInputs",
+            "Standalone bound input definitions require export V4.",
+        ));
+    }
+    let mut bound_ids = HashSet::new();
+    for input in &header.bound_inputs {
+        validate_action(input, "header.boundInputs")?;
+        if input.kind != ExportActionKind::Input
+            || input.converted_from_invoke
+            || input.state != ExportRecordState::Accepted
+            || !bound_ids.insert(&input.id)
+        {
+            return Err(ExportValidationError::new(
+                "bound_input_definition_invalid",
+                "header.boundInputs",
+                "Bound definitions must be distinct accepted Input actions, never executable calls or navigation.",
+            ));
+        }
     }
     require_id(
         &header.conversation.id,
@@ -1629,6 +1987,263 @@ fn validate_header(header: &ConversationExportHeader) -> Result<(), ExportValida
         }
     }
     Ok(())
+}
+
+fn validate_invocation_inventory(
+    header: &ConversationExportHeader,
+) -> Result<(), ExportValidationError> {
+    if (!header.invocations.is_empty() && header.export_version != EXPORT_VERSION_V4)
+        || header.invocations.len() > MAX_TURNS
+    {
+        return Err(ExportValidationError::new(
+            "invocation_inventory_version",
+            "header.invocations",
+            "Bounded Invocation inventory requires export V4.",
+        ));
+    }
+    let mut ids = HashSet::new();
+    let mut children = HashSet::new();
+    let mut results = HashSet::new();
+    for call in &header.invocations {
+        let path = format!("header.invocations[{}]", call.id);
+        require_id(&call.id, "invocation", &path)?;
+        require_id(&call.source.interaction_node_id, "node", &path)?;
+        require_id(&call.source.action_id, "action", &path)?;
+        require_id(&call.source.parent_node_id, "node", &path)?;
+        require_id(&call.child_interaction_node_id, "node", &path)?;
+        if let Some(layer) = &call.source.layer_id {
+            require_id(layer, "layer", &path)?;
+        }
+        if call.source.capture_state.is_some() && call.source.presenting_layer_id.is_none() {
+            return Err(ExportValidationError::new(
+                "invocation_presenting_layer_missing",
+                &path,
+                "Known capture state requires its frozen presenting Layer.",
+            ));
+        }
+        if let Some(layer) = &call.source.presenting_layer_id {
+            require_id(layer, "layer", &path)?;
+        }
+        if call.schema_version != 1
+            || !ids.insert(&call.id)
+            || !children.insert(&call.child_interaction_node_id)
+            || call.child_interaction_node_id == call.source.interaction_node_id
+            || !matches!(call.source.state.as_str(), "draft" | "accepted" | "stopped")
+            || !matches!(
+                call.lifecycle.as_str(),
+                "active" | "succeeded" | "stopped" | "failed"
+            )
+        {
+            return Err(ExportValidationError::new(
+                "invocation_identity_invalid",
+                &path,
+                "Calls require distinct identities/children and supported schema, source state, and lifecycle.",
+            ));
+        }
+        if call.head_revision > MAX_PORTABLE_HEAD_REVISION {
+            return Err(ExportValidationError::new(
+                "invocation_head_revision_invalid",
+                &path,
+                "Invocation head revision must be a JSON-safe integer.",
+            ));
+        }
+        if let Some(description) = &call.source.description {
+            require_string(description, format!("{path}.source.description"))?;
+        }
+        if (call.source.variant == ExportActionVariant::Card) != call.source.description.is_some() {
+            return Err(ExportValidationError::new(
+                "invocation_source_invalid",
+                &path,
+                "Only card sources require a nonempty description.",
+            ));
+        }
+        require_string(&call.source.instruction, &path)?;
+        require_string(&call.source.label, &path)?;
+        require_string(&call.source.parent_title, &path)?;
+        if call.source.parent_detail.len() > MAX_STRING_BYTES {
+            return Err(ExportValidationError::new(
+                "string_too_large",
+                &path,
+                "Parent detail exceeds the portable bound.",
+            ));
+        }
+        if call.source.instruction.trim().is_empty()
+            || call.arguments.len() > MAX_SUBMITTED_INPUTS_PER_TURN
+        {
+            return Err(ExportValidationError::new(
+                "invocation_arguments_invalid",
+                &path,
+                "Calls require a nonempty instruction and bounded arguments.",
+            ));
+        }
+        if let Some(reason) = &call.safe_reason {
+            require_string(reason, &path)?;
+        }
+        if matches!(call.lifecycle.as_str(), "failed" | "stopped") != call.safe_reason.is_some()
+            || call
+                .safe_reason
+                .as_ref()
+                .is_some_and(|reason| reason.trim().is_empty())
+        {
+            return Err(ExportValidationError::new(
+                "invocation_lifecycle_reason_mismatch",
+                &path,
+                "Failed and stopped calls require a safe reason; active and succeeded calls omit it.",
+            ));
+        }
+        let bindings = call.source.input_action_ids.iter().collect::<HashSet<_>>();
+        if bindings.len() != call.source.input_action_ids.len() {
+            return Err(ExportValidationError::new(
+                "invocation_binding_duplicate",
+                &path,
+                "Call input bindings must be unique.",
+            ));
+        }
+        for binding in &call.source.input_action_ids {
+            require_id(binding, "action", &path)?;
+        }
+        if let Some(result) = &call.result_turn_id {
+            require_id(result, "turn", &path)?;
+            if !results.insert(result) || !header.turns.iter().any(|turn| &turn.id == result) {
+                return Err(ExportValidationError::new(
+                    "invocation_result_unresolved",
+                    &path,
+                    "Result turn must identify one included turn.",
+                ));
+            }
+        }
+        if (call.lifecycle == "succeeded") != call.returned_layer_id.is_some()
+            || call.current_layer_id.as_ref()
+                != call.current.as_ref().map(|current| &current.root_layer_id)
+            || call
+                .returned_layer_id
+                .as_ref()
+                .is_some_and(|layer| call.current_layer_id.as_ref() != Some(layer))
+        {
+            return Err(ExportValidationError::new(
+                "invocation_current_returned_mismatch",
+                &path,
+                "Current is distinct from Return; only succeeded calls have a Returned layer matching their final Current.",
+            ));
+        }
+        if let Some(layer) = &call.current_layer_id {
+            require_id(layer, "layer", &path)?;
+        }
+        if let Some(layer) = &call.returned_layer_id {
+            require_id(layer, "layer", &path)?;
+        }
+        let mut occurrences = HashSet::new();
+        for argument in &call.arguments {
+            require_id(&argument.source.interaction_node_id, "node", &path)?;
+            require_id(&argument.source.layer_id, "layer", &path)?;
+            require_id(&argument.source.action_id, "action", &path)?;
+            require_id(&argument.source.node_id, "node", &path)?;
+            if !occurrences.insert((
+                &argument.source.interaction_node_id,
+                &argument.source.layer_id,
+                &argument.source.action_id,
+            )) {
+                return Err(ExportValidationError::new(
+                    "invocation_argument_duplicate",
+                    &path,
+                    "One call may answer each exact input occurrence once.",
+                ));
+            }
+            validate_input_action_snapshot(&argument.action, &path)?;
+            match (&argument.action.control, &argument.value) {
+                (ExportInputControl::Text, ExportSubmittedInputValue::Text { text })
+                    if !text.trim().is_empty() =>
+                {
+                    require_string(text, &path)?
+                }
+                (
+                    ExportInputControl::SingleSelect | ExportInputControl::MultiSelect,
+                    ExportSubmittedInputValue::Selected { selected },
+                ) => {
+                    let keys = selected
+                        .iter()
+                        .map(|option| &option.key)
+                        .collect::<HashSet<_>>();
+                    if keys.len() != selected.len()
+                        || (argument.action.control == ExportInputControl::SingleSelect
+                            && selected.len() != 1)
+                        || selected.len() < argument.action.minimum_selections.unwrap_or(0) as usize
+                        || selected
+                            .iter()
+                            .any(|option| !argument.action.options.contains(option))
+                    {
+                        return Err(ExportValidationError::new(
+                            "invocation_argument_value_invalid",
+                            &path,
+                            "Selected values must exactly match the frozen action options and cardinality.",
+                        ));
+                    }
+                }
+                _ => {
+                    return Err(ExportValidationError::new(
+                        "invocation_argument_value_invalid",
+                        &path,
+                        "Argument value must match its frozen input control.",
+                    ));
+                }
+            }
+        }
+        let argument_ids = call
+            .arguments
+            .iter()
+            .map(|argument| &argument.source.action_id)
+            .collect::<HashSet<_>>();
+        if (call.source.input_bindings_defined
+            && (argument_ids != bindings
+                || argument_ids.len() != call.arguments.len()
+                || call
+                    .arguments
+                    .iter()
+                    .any(|argument| argument.source.node_id != call.source.parent_node_id)))
+            || (!call.source.input_bindings_defined
+                && (!bindings.is_empty()
+                    || (call.source.capture_state.is_some() && !call.arguments.is_empty())))
+        {
+            return Err(ExportValidationError::new(
+                "invocation_argument_binding_mismatch",
+                &path,
+                "Arguments must answer exactly the frozen callable input bindings, once each.",
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// Validation-only envelope: it does not assert or persist a terminal root action.
+fn invocation_validation_view(
+    call: &ExportInvocation,
+    current: &ExportInvocationCurrent,
+) -> ExportAcceptedView {
+    ExportAcceptedView {
+        interaction_node_id: call.child_interaction_node_id.clone(),
+        root_layer_id: current.root_layer_id.clone(),
+        layers: current.layers.clone(),
+        root_action: ExportAction {
+            converted_from_invoke: false,
+            id: format!("action:validation-{}", call.id.replace(':', "-")),
+            client_key: None,
+            source_node_id: call.child_interaction_node_id.clone(),
+            source_layer_id: None,
+            kind: ExportActionKind::Navigate,
+            relation: Some(ExportNavigateRelation::Expand),
+            label: "Current".into(),
+            variant: ExportActionVariant::Chip,
+            icon: None,
+            icon_asset: None,
+            description: None,
+            target_layer_id: Some(current.root_layer_id.clone()),
+            interaction_text: None,
+            input: None,
+            reusable: None,
+            input_action_ids: Vec::new(),
+            state: ExportRecordState::Accepted,
+        },
+    }
 }
 
 fn validate_visual_asset_content(
@@ -1700,6 +2315,7 @@ fn validate_turn(
     prior_invokes: &HashMap<String, HashMap<String, Option<String>>>,
     policy: ConversationExportValidationPolicy,
     export_version: u32,
+    bound_inputs: &[ExportAction],
 ) -> Result<(), ExportValidationError> {
     require_string(&turn.created_at, format!("{path}.createdAt"))?;
     if turn.text.len() > MAX_STRING_BYTES {
@@ -1893,6 +2509,20 @@ fn validate_turn(
     }
     match &turn.origin {
         ExportTurnOrigin::User => {}
+        ExportTurnOrigin::Invocation { invocation_id } => {
+            if export_version != EXPORT_VERSION_V4 {
+                return Err(ExportValidationError::new(
+                    "invocation_version",
+                    format!("{path}.origin"),
+                    "Invocation origin requires export V4.",
+                ));
+            }
+            require_id(
+                invocation_id,
+                "invocation",
+                format!("{path}.origin.invocationId"),
+            )?;
+        }
         ExportTurnOrigin::Action {
             source_turn_id,
             source_action_id,
@@ -1938,7 +2568,7 @@ fn validate_turn(
                     "Turn interactionNodeId must match acceptedView.interactionNodeId.",
                 ));
             }
-            validate_accepted_view(view, path, export_version)
+            validate_accepted_view(view, path, export_version, bound_inputs)
         }
         (ExportCompletionStatus::Accepted, None) => Err(ExportValidationError::new(
             "accepted_view_missing",
@@ -2390,6 +3020,7 @@ fn validate_accepted_view(
     view: &ExportAcceptedView,
     turn_path: &str,
     export_version: u32,
+    bound_inputs: &[ExportAction],
 ) -> Result<(), ExportValidationError> {
     let path = format!("{turn_path}.acceptedView");
     require_id(
@@ -2431,7 +3062,7 @@ fn validate_accepted_view(
         }
         // V3 closures can traverse layers authored by distinct completions.
         // Authored keys remain unchanged; portable IDs own snapshot identity.
-        if export_version != EXPORT_VERSION_V3
+        if export_version < EXPORT_VERSION_V3
             && let Some(client_key) = resolved.layer.client_key.as_deref()
             && let Some(existing_id) =
                 layer_client_keys.insert(client_key, resolved.layer.id.as_str())
@@ -2478,7 +3109,7 @@ fn validate_accepted_view(
                     "A portable node ID must have one immutable definition within an accepted view.",
                 ));
             }
-            if export_version != EXPORT_VERSION_V3
+            if export_version < EXPORT_VERSION_V3
                 && let Some(client_key) = node.client_key.as_deref()
                 && let Some(existing_id) = node_client_keys.insert(client_key, node.id.as_str())
                 && existing_id != node.id
@@ -2503,6 +3134,41 @@ fn validate_accepted_view(
         }
         for action in &resolved.actions {
             validate_action(action, &format!("{path}.action[{}]", action.id))?;
+            if action.reusable.is_some() && export_version < EXPORT_VERSION_V4 {
+                return Err(ExportValidationError::new(
+                    "invoke_reuse_policy_version",
+                    path,
+                    "Explicit Invoke reuse policy requires V4 to preserve its meaning.",
+                ));
+            }
+            if !action.input_action_ids.is_empty() {
+                if export_version != EXPORT_VERSION_V4 {
+                    return Err(ExportValidationError::new(
+                        "invoke_input_binding_version",
+                        &path,
+                        "Explicit input bindings require export V4.",
+                    ));
+                }
+                for id in &action.input_action_ids {
+                    if !view
+                        .layers
+                        .iter()
+                        .flat_map(|layer| &layer.actions)
+                        .chain(bound_inputs)
+                        .any(|input| {
+                            &input.id == id
+                                && input.kind == ExportActionKind::Input
+                                && input.source_node_id == action.source_node_id
+                        })
+                    {
+                        return Err(ExportValidationError::new(
+                            "invoke_input_binding_unresolved",
+                            &path,
+                            "Bindings must identify Input actions on the callable's exact source Node and Layer.",
+                        ));
+                    }
+                }
+            }
             if let Some(existing) = actions_by_id.insert(&action.id, action)
                 && existing != action
             {
@@ -2540,7 +3206,7 @@ fn validate_accepted_view(
                 ));
             }
             if action.source_layer_id.is_none()
-                && !(export_version == EXPORT_VERSION_V3
+                && !(export_version >= EXPORT_VERSION_V3
                     && action.kind == ExportActionKind::Navigate)
             {
                 return Err(ExportValidationError::new(
@@ -2576,7 +3242,7 @@ fn validate_accepted_view(
                 let relation = action.relation.expect("validated navigate relation");
                 // V3 resolves accepted invocations across completions. A later
                 // completion can reference any layer expanded by an earlier one.
-                if export_version != EXPORT_VERSION_V3
+                if export_version < EXPORT_VERSION_V3
                     && let Some(existing) = target_relations.insert(target, relation)
                     && existing != relation
                 {
@@ -2606,7 +3272,7 @@ fn validate_accepted_view(
     if has_cycle(
         view.root_layer_id.as_str(),
         &expand_adjacency,
-        export_version == EXPORT_VERSION_V3,
+        export_version >= EXPORT_VERSION_V3,
     ) {
         return Err(ExportValidationError::new(
             "expand_cycle",
@@ -2927,6 +3593,34 @@ fn validate_layer(resolved: &ExportResolvedLayer, path: &str) -> Result<(), Expo
 }
 
 fn validate_action(action: &ExportAction, path: &str) -> Result<(), ExportValidationError> {
+    if action.reusable.is_some()
+        && action.kind != ExportActionKind::Invoke
+        && !action.converted_from_invoke
+    {
+        return Err(ExportValidationError::new(
+            "reusable_requires_invoke",
+            path,
+            "Only Invoke definitions or inert converted Invoke history carry reuse policy.",
+        ));
+    }
+    if !action.input_action_ids.is_empty() && action.kind != ExportActionKind::Invoke {
+        return Err(ExportValidationError::new(
+            "invoke_input_binding_invalid",
+            path,
+            "Only Invoke actions may bind input actions.",
+        ));
+    }
+    let mut input_ids = HashSet::new();
+    for id in &action.input_action_ids {
+        require_id(id, "action", format!("{path}.inputActionIds"))?;
+        if !input_ids.insert(id) {
+            return Err(ExportValidationError::new(
+                "invoke_input_binding_duplicate",
+                path,
+                "Input bindings must be unique.",
+            ));
+        }
+    }
     if action.converted_from_invoke
         && (action.kind != ExportActionKind::Navigate
             || action.relation != Some(ExportNavigateRelation::Expand)
