@@ -121,7 +121,7 @@ option values nor unrelated hidden content. Selection must match an offered
 enabled option; unsupported selection is rejected before dispatch. PRD 13.2.3
 owns the product contract and its evidence mapping.
 
-The actor capability projects only task display context, disables annotations,
+The actor capability projects only task display context, disables evaluator annotations,
 and rejects grading operations. Humans watch and grade through a separate
 read-only review capability. Actor satisfaction is distinct from human grades.
 Cancellation, deadlines, action limits and host interruption preserve evidence
@@ -156,3 +156,14 @@ objective success judgment. Each proposed finish and judge decision is durable.
 Stop, cancellation, failure and existing budgets prevail over continuation.
 Default tests use injected decisions rather than paid inference. PRD 13.2.3 owns
 this opt-in contract; setup lineage remains governed by PRD 13.2.4.
+
+
+### Participant node annotations (approved 2026-10-06)
+
+The simulated participant may use the production context editor to save and
+confirm node annotations for its next ordinary Send. ADR 0007 owns their exact
+accepted occurrence and canonical Complete input. Invoke retains pending composer
+annotations for a later Send. Task write evidence attributes the actions to the
+simulated session. These participant inputs are separate from evaluator comments,
+ratings and rubrics, which remain unavailable to the actor. Completed-turn judge
+review retains read-only authority.

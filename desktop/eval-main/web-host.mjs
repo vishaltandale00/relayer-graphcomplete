@@ -356,7 +356,9 @@ export async function createHumanTaskSurface({ tasks, sessionId, productSession,
     if (url.pathname === "/eval-api/annotate" && request.method === "POST") return json(response, await tasks.annotate(sessionId, JSON.parse((await body(request)).toString())));
     if (url.pathname.startsWith("/eval-api/")) throw fail(404, "Not found.");
     if (url.pathname.startsWith("/api/")) {
-      if (actor && /\/annotations(?:\/|$)/.test(url.pathname)) throw fail(403, "Actor has no annotation authority.");
+      // /annotations is evaluator feedback. Participant notes use the ordinary
+      // context-draft/confirmation routes admitted by tasks.write below.
+      if (actor && /\/annotations(?:\/|$)/.test(url.pathname)) throw fail(403, "Actor has no evaluator annotation authority.");
       const annotation = /^\/api\/threads\/([1-9][0-9]*)\/annotations(?:\/[1-9][0-9]*\/(?:revisions|retract))?$/.exec(url.pathname);
       if (request.method === "POST" && annotation) {
         if (!annotationToken || !annotationThreads.has(annotation[1]) || !session.threadIds.map(String).includes(annotation[1])) throw fail(403, "Annotation is outside this task workspace.");

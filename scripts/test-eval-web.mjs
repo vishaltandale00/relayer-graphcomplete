@@ -268,7 +268,18 @@ try {
   const binaries = resolve(process.env.CARGO_TARGET_DIR || "target", "debug");
   const configurationPaths = [join(root, "harnesses/fixture-task-system.yaml"), join(root, "harnesses/fixture-node-detail.yaml"), join(root, "harnesses/codex-basic.yaml")];
   const data = join(directory, "judge");
-  const runtime = new GraphCompleteRuntimeService({ userDataDirectory: data, graphServerBinary: join(binaries, "relayer-graph-server"), configurationPaths, additionalImplementations: { "fixture.task-system": taskSystemFixtureFactory, "fixture.node-detail": nodeDetailFixtureFactory },
+  const participantInputs = [];
+  const participantFixtureFactory = (...args) => {
+    const harness = taskSystemFixtureFactory(...args);
+    const complete = harness.complete.bind(harness);
+    harness.complete = async context => {
+      participantInputs.push(structuredClone(context.interactionInput));
+      // The fixture independently rereads this exact input through the graph capability.
+      await complete(context);
+    };
+    return harness;
+  };
+  const runtime = new GraphCompleteRuntimeService({ userDataDirectory: data, graphServerBinary: join(binaries, "relayer-graph-server"), configurationPaths, additionalImplementations: { "fixture.task-system": participantFixtureFactory, "fixture.node-detail": nodeDetailFixtureFactory },
     acquireProviderExecution: async (providerId) => ({
       definition: { id: providerId, adapterId: "codex-subscription", accessContract: "managed-runtime@1" },
       descriptor: { adapterId: "codex-subscription", accessContract: "managed-runtime@1", implementationVersion: "1" },
@@ -303,6 +314,7 @@ try {
   const humanProof = await proveHumanTask({ browser, service, productSession, data });
   await proveTaskActor({ browser, service, productSession, data });
   await proveTaskActorInputs({ browser, service, productSession, data });
+  await proveTaskActorAnnotations({ browser, service, productSession, data, participantInputs });
   const fixture = await service.createRun(selection);
   const completed = await until(() => { const value = service.getRun(fixture.id); return ["passed", "failed", "error", "interrupted"].includes(value.status) ? value : null; }, "judge fixture");
   assert.equal(completed.status, "passed");
@@ -1365,4 +1377,132 @@ async function proveTaskActorInputs({ browser, service, productSession, data }) 
   assert.ok(finished.events.some((event) => event.kind === "product_action" && event.path.endsWith("/input-draft/attachments") && event.outcome === "accepted"));
   assert.ok(finished.conversations.some((conversation) => conversation.jsonl.includes("A note entered through the graph")));
   console.log("PASS actor input: visible authored input, draft commit and composer Send through real product routes with preserved answer evidence");
+}
+
+
+async function proveTaskActorAnnotations({ browser, service, productSession, data, participantInputs }) {
+  const options = { stateFile: join(data, "actor-annotation-tasks.json"), evalService: service, productSession };
+  const tasks = await new HumanTaskService(options).open();
+  const notes = ["Please clarify who claims waiting tasks.", "Please keep the results while improving this."];
+  const inputStart = participantInputs.length;
+  const targets = [];
+  let stage = 0, actorPage, firstDraft, secondConfirmation;
+  const actors = new TaskActorService({ tasks, resolveRuntime: async () => ({}),
+    openBrowser: async (sessionId, signal, observationContract) => {
+      const controller = await openTaskActorBrowser({ tasks, sessionId, productSession, browser, signal, observationContract });
+      actorPage = browser.contexts().flatMap(context => context.pages()).find(page => new URL(page.url()).searchParams.get("taskActor") === "1");
+      const observe = controller.observe.bind(controller);
+      controller.observe = async expected => {
+        try {
+        if ([1, 6].includes(stage)) {
+          const presentation = await actorPage.evaluate(() => window.__taskActorPresentation);
+          const detail = await tasks.detail(presentation.threadId);
+          const turn = detail.interactions.find(turn => String(turn.id) === String(presentation.turnId));
+          targets[stage === 1 ? 0 : 1] = { nodeId: Number(presentation.selectedNodeId), sourceInteractionNodeId: Number(turn.graphNodeId), sourceLayerId: Number(presentation.layerId) };
+        }
+        if (stage === 3) {
+          firstDraft = await until(async () => {
+            const saved = await actorPage.evaluate(async id => (await (await fetch(`/api/threads/${id}/context-drafts`)).json()), tasks.get(sessionId).currentThreadId);
+            return saved.drafts?.find(draft => draft.text === notes[0]) ? saved : null;
+          }, "participant draft autosave before reload");
+          assert.equal(firstDraft.drafts[0].text, notes[0]);
+          assert.deepEqual(firstDraft.drafts[0].target, targets[0], "draft owns the selected accepted occurrence");
+          await actorPage.reload();
+          await actorPage.locator(".graph-node").filter({ hasText: "Two-worker pool" }).click();
+          await actorPage.locator("#contextAnnotationEditor").waitFor({ state: "visible" });
+          assert.equal(await actorPage.locator("#contextAnnotationEditor").inputValue(), notes[0]);
+        }
+        if ([5, 11].includes(stage)) {
+          const pending = await actorPage.evaluate(async id => (await (await fetch(`/api/threads/${id}/context-drafts`)).json()), tasks.get(sessionId).currentThreadId);
+          assert.equal(pending.confirmations.length, 0, "ordinary Send consumes its confirmed annotation");
+        }
+        if (stage === 10) {
+          const pending = await actorPage.evaluate(async id => (await (await fetch(`/api/threads/${id}/context-drafts`)).json()), tasks.get(sessionId).currentThreadId);
+          assert.equal(pending.confirmations[0].annotation, notes[1], "Invoke retains confirmed composer annotation");
+          assert.deepEqual(pending.confirmations[0].target, targets[1]);
+          secondConfirmation = pending;
+        }
+        const observation = await observe(expected);
+        if ([3, 4, 10].includes(stage) && process.env.RELAYER_EVAL_PARTICIPANT_ANNOTATION_EVIDENCE) {
+          await mkdir(process.env.RELAYER_EVAL_PARTICIPANT_ANNOTATION_EVIDENCE, { recursive: true });
+          await writeFile(join(process.env.RELAYER_EVAL_PARTICIPANT_ANNOTATION_EVIDENCE, `participant-stage-${stage}.png`), Buffer.from(observation.screenshot, "base64"));
+        }
+        return observation;
+        } catch (error) { console.error("Participant annotation proof stage", stage, error.message); throw error; }
+      };
+      return controller;
+    },
+    createActor: async () => ({ close: async () => {}, decide: async observation => {
+      const find = name => { const control = observation.controls.find(control => control.name === name || control.name.includes(name)); assert.ok(control, JSON.stringify({ stage, controls: observation.controls })); return control.ref; };
+      const action = { kind: "click", ref: "", value: "", reason: "", satisfaction: null, comment: "", endpointStatus: null, remainingWork: "" };
+      if (stage === 0) action.ref = find("Two-worker pool");
+      if ([1, 6].includes(stage)) action.ref = find("Connect node to next message");
+      if ([2, 7].includes(stage)) Object.assign(action, { kind: "fill", ref: find(stage === 2 ? "Annotation for Two-worker pool" : "Annotation for Results store"), value: notes[stage === 2 ? 0 : 1] });
+      if ([3, 8].includes(stage)) action.ref = find("Confirm annotation");
+      if ([4, 10].includes(stage)) action.ref = find("Send");
+      if (stage === 5) action.ref = find("Results store");
+      if (stage === 9) action.ref = find("Plan the next improvement");
+      if (stage === 11) Object.assign(action, { kind: "finish", reason: "satisfied", satisfaction: 3, comment: "My node notes were delivered.", endpointStatus: "incomplete", remainingWork: "More improvements may be useful." });
+      stage++;
+      return { action, usage: null };
+    } }),
+  });
+  resources.push(actors);
+  const task = await actors.create({ testCaseId: "empty-project.task-system.two-turn", harnessConfigurationName: "fixture-task-system", maxCompletions: 4, endpoint: "Clarify this task system", actor: { maxActions: 20 } });
+  await actors.running.get(task.id).done;
+  const finished = tasks.get(task.id);
+  assert.equal(finished.status, "completed", JSON.stringify(finished.events.filter(event => event.kind === "actor_error")));
+  assert.equal(stage, 12);
+  assert.equal(finished.completions, 4);
+  const sends = finished.events.filter(event => event.kind === "submission" && event.path?.endsWith("/interactions"));
+  assert.equal(sends.length, 2, "two ordinary annotation-only Sends");
+  assert.ok(finished.events.some(event => event.kind === "submission" && event.path?.endsWith("/invoke")));
+  for (const event of finished.events.filter(event => ["submission", "product_action"].includes(event.kind) && event.path)) {
+    assert.deepEqual(event.participant, { kind: "simulated_user", sessionId: task.id });
+  }
+  const inputs = participantInputs.slice(inputStart);
+  assert.equal(inputs.length, 4, "exactly four canonical completions in this session");
+  assert.equal(inputs[0].contexts.length, 0);
+  assert.equal(inputs[2].contexts.length, 0, "Invoke receives no pending annotation");
+  const delivered = [inputs[1], inputs[3]];
+  for (const [index, input] of delivered.entries()) {
+    assert.ok(input, "subsequent complete received the participant annotation");
+    const context = input.contexts.find(context => context.annotations.includes(notes[index]));
+    assert.equal(context.targetNode.title, index === 0 ? "Two-worker pool" : "Results store");
+    const submitted = sends[index].request.contexts[0].target;
+    assert.equal(String(context.targetNode.id), String(submitted.nodeId));
+    assert.deepEqual(submitted, targets[index], "Send preserves the exact selected accepted occurrence");
+  }
+  const detail = await tasks.detail(task.currentThreadId);
+  const invoked = detail.interactions.find(turn => String(turn.id) === String(finished.events.find(event => event.path?.endsWith("/invoke")).interactionId));
+  assert.equal(invoked.contexts?.length ?? 0, 0, "Invoke does not submit pending composer context");
+  for (const [index, send] of sends.entries()) {
+    const turn = detail.interactions.find(turn => String(turn.id) === String(send.interactionId));
+    assert.deepEqual(turn.contexts[0].target, targets[index], "chat-turn record retains exact occurrence");
+    assert.deepEqual(turn.contexts[0].annotations, [notes[index]]);
+  }
+  const exported = await tasks.export(task.id);
+  const turns = exported.bundle.session.conversations[0].jsonl.trim().split("\n").map(line => JSON.parse(line)).filter(record => record.recordType === "turn");
+  for (const [index, send] of sends.entries()) {
+    const canonicalTurn = detail.interactions.find(turn => String(turn.id) === String(send.interactionId));
+    const portable = turns.find(turn => turn.sequence === canonicalTurn.sequence);
+    assert.deepEqual(portable.contexts[0].annotations, [notes[index]]);
+    assert.equal(portable.contexts[0].target.title, index === 0 ? "Two-worker pool" : "Results store");
+    const source = detail.interactions.find(turn => Number(turn.graphNodeId) === targets[index].sourceInteractionNodeId);
+    const portableSource = turns.find(turn => turn.sequence === source.sequence);
+    assert.equal(portable.contexts[0].source.interactionNodeId, portableSource.interactionNodeId);
+    assert.equal(portable.contexts[0].source.layerId, portableSource.acceptedView.rootLayerId);
+    const portableNode = portableSource.acceptedView.layers.find(layer => layer.layer.id === portable.contexts[0].source.layerId).nodes.find(node => node.title === portable.contexts[0].target.title);
+    assert.equal(portable.contexts[0].target.id, portableNode.id);
+  }
+  assert.equal(turns.find(turn => turn.sequence === invoked.sequence).contexts?.length ?? 0, 0);
+  for (const note of notes) assert.ok(exported.bundle.session.conversations.some(conversation => conversation.jsonl.includes(note)), "immutable conversation retains participant note");
+  assert.equal(exported.bundle.session.annotations.length, 0, "participant notes are not evaluator feedback");
+  const frozen = await readFile(exported.path, "utf8");
+  const reopened = await new HumanTaskService(options).open();
+  assert.deepEqual(reopened.get(task.id).conversations, finished.conversations);
+  await reopened.export(task.id);
+  assert.equal(await readFile(exported.path, "utf8"), frozen);
+  assert.ok(firstDraft && secondConfirmation);
+  console.log("PASS participant annotations: observed production editor, saved/reloaded draft, confirmation, annotation-only Send, exact complete input, Invoke retention, session attribution and immutable export/reopen");
 }

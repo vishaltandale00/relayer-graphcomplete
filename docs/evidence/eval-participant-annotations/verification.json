@@ -1,0 +1,126 @@
+{
+  "schemaVersion": 1,
+  "baseCommit": "649e06982307f4407c808ce7a4a8bafdf71ab8b0",
+  "sourceDigest": "cc897415f08945581270c4c2fc0a8873f333140c4d184ee2fa5b08b5694dfa23",
+  "sourceFiles": [
+    {
+      "path": "desktop/eval-main/human-task-service.mjs",
+      "sha256": "7e5cc0a7e6119915ca9b3969de9899aef13905235f0190916c639a3b3121104e"
+    },
+    {
+      "path": "desktop/eval-main/web-host.mjs",
+      "sha256": "a0490c0dc157fdbc62eff2c58247d29f34277dc3d36db8f0f4d85b7278378b94"
+    },
+    {
+      "path": "scripts/test-eval-web.mjs",
+      "sha256": "4e4227941b1783679eede778810a62e0a282a49ba40dac82fdb15b7a4b4dac64"
+    },
+    {
+      "path": "test/eval-human-task.test.mjs",
+      "sha256": "ab2883e9d80c140cdcd6dd018a727a94e73e3da166c42d846ea42c98cde4fb19"
+    },
+    {
+      "path": "docs/prd/index.html",
+      "sha256": "321c23555bc060054d8f7165fa6919c204e663d33c1dc1dbd5a236d411bd75f7"
+    },
+    {
+      "path": "docs/decisions/0003-shared-product-eval-workspace.md",
+      "sha256": "f991379ea9c1819d59e02888e4f83a1c6847a4c3f08b04ae28be0fabed8cf516"
+    }
+  ],
+  "platform": "macOS-arm64",
+  "node": "24.19.0",
+  "rust": "1.98.0",
+  "paidInferenceCalls": 0,
+  "commands": [
+    {
+      "command": "focused actor/session/gateway Vitest (98 tests)",
+      "status": "passed",
+      "evidence": "focused.txt"
+    },
+    {
+      "command": "npm run check (3611 Vitest, 2 secret-boundary, 68 Python, native/receipts/readability)",
+      "status": "passed",
+      "evidence": "check-final.txt"
+    },
+    {
+      "command": "npm run build",
+      "status": "passed",
+      "evidence": "build-final.txt"
+    },
+    {
+      "command": "npm run test:eval-web (all chapters)",
+      "status": "passed",
+      "evidence": "browser-final.txt"
+    },
+    {
+      "command": "npm run test:eval-compiled-runtime (4 tests)",
+      "status": "passed",
+      "evidence": "compiled-runtime.txt"
+    }
+  ],
+  "reviews": [
+    {
+      "reviewer": "/root/authority_review",
+      "sourceDigest": "cc897415f08945581270c4c2fc0a8873f333140c4d184ee2fa5b08b5694dfa23",
+      "verdict": "no actionable findings",
+      "unresolvedFindings": []
+    },
+    {
+      "reviewer": "/root/context_trace",
+      "sourceDigest": "cc897415f08945581270c4c2fc0a8873f333140c4d184ee2fa5b08b5694dfa23",
+      "verdict": "no actionable findings",
+      "unresolvedFindings": []
+    }
+  ],
+  "limitations": [
+    "Three existing default Vitest tests skipped; no pass claimed.",
+    "No live model adaptation, human realism, Electron UX or release certification."
+  ],
+  "evidenceFiles": [
+    {
+      "path": "browser-attempt1.txt",
+      "sha256": "60fc8d741483d627e6db3ebd94f50cba89e515e5e7162721a1324c13444977e3"
+    },
+    {
+      "path": "browser-final.txt",
+      "sha256": "a246011e4502ebd11f8b577ac85106c98253988a55c77d3024ecd269874001f5"
+    },
+    {
+      "path": "build-final.txt",
+      "sha256": "19a0c376d4f8ca6e5f0edbe2173611cf366c63f972ef2ee3d0c7c53bd55181d7"
+    },
+    {
+      "path": "check-attempt1.txt",
+      "sha256": "bb3cf9f785ed4f030d33444658cb067aaafa7356af67961fa6471a1b40ff7040"
+    },
+    {
+      "path": "check-final.txt",
+      "sha256": "08a60a00565e40b990780187b5ff42ed6c82f2d3635c1d383524a487fff89704"
+    },
+    {
+      "path": "compiled-runtime.txt",
+      "sha256": "c5152d716aaa6028f3de798a5e6cc70e33a44d518c26ef8cfc179ce1705a5176"
+    },
+    {
+      "path": "focused.txt",
+      "sha256": "aa7b33b1b13928fa1cde9555f4c7fe60a001c0eb541ced4f48ee85d85163628a"
+    },
+    {
+      "path": "participant-stage-10.png",
+      "sha256": "902954515222f882172306de4a8308fac7545a8e594ef59520ac96cf9dd587c1"
+    },
+    {
+      "path": "participant-stage-3.png",
+      "sha256": "2038abcfe54ff4d5a990386dac80708d1793a842054a17c3bcdef7a6b370bb76"
+    },
+    {
+      "path": "participant-stage-4.png",
+      "sha256": "abe8961c660c08876cebba8a98ed86bc80d82c36d5f759bb430492beea353cb7"
+    },
+    {
+      "path": "telemetry-setup-recheck.txt",
+      "sha256": "ef5c1a8403875ee64201bc2e21242c8534f39cef4b46ed43447b40ccc5f71ec1"
+    }
+  ]
+}

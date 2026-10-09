@@ -1,0 +1,55 @@
+
+> relayer-graphcomplete@0.0.0 test:eval-web
+> node scripts/test-eval-web.mjs
+
+PASS interrupted startup: pending native child terminated and profile lock released
+PASS real index human lifecycle: initial graph, finish/export RPCs, process restart, persisted task/read-only review; disconnected actor rejected before candidate creation
+PASS host: real fixture, tab independence, review authority, judge/trace pages, shutdown and restart
+PASS Eval Settings: production Providers, login/cancel/reconnect, model refresh, persisted families/defaults and Harnesses (fake provider; no inference)
+PASS human task: live composer, recorded graph, two completions, finish, read-only review, annotation and export
+PASS actor dispatch race: real renderer redraw requires fresh observation; trusted activation, scroll and document rewrite failures stay terminal
+PASS actor native select: opened-only explicit accessibility, exact enabled unique labels, normal input/change, closed/unowned/stale/presentation/oversized rejection
+PASS actor redraw action: production refresh detached the original and exact replacement activation succeeded
+PASS actor redraw breadcrumb: production refresh detached the original and exact replacement activation succeeded
+PASS actor diagnostic capture: actual Playwright archive, errors, recovery decisions, action correlation and failure screenshots; no raw capability
+PASS setup revisions: actual dashboard publication, predecessor/human lineage, selection, explicit promotion, reopen and original run/export unchanged
+PASS judge config file: selected repository YAML, file-only configuration, exact file snapshot and motivating feedback publication
+PASS actor dispatch race: real renderer redraw requires fresh observation; trusted activation, scroll and document rewrite failures stay terminal
+PASS actor native select: opened-only explicit accessibility, exact enabled unique labels, normal input/change, closed/unowned/stale/presentation/oversized rejection
+PASS actor redraw action: production refresh detached the original and exact replacement activation succeeded
+PASS actor redraw breadcrumb: production refresh detached the original and exact replacement activation succeeded
+PASS actor dispatch race: real renderer redraw requires fresh observation; trusted activation, scroll and document rewrite failures stay terminal
+PASS actor native select: opened-only explicit accessibility, exact enabled unique labels, normal input/change, closed/unowned/stale/presentation/oversized rejection
+PASS actor redraw action: production refresh detached the original and exact replacement activation succeeded
+PASS actor redraw breadcrumb: production refresh detached the original and exact replacement activation succeeded
+PASS independent completion selector: actual form, exact revision/export pin, release locking and unchanged defaults
+PASS evaluator release: file-only completion publication, explicit three-revision release, real form submission with frozen run/export pins and exact stopping evidence; unchanged defaults (fixture inference)
+PASS actor dispatch race: real renderer redraw requires fresh observation; trusted activation, scroll and document rewrite failures stay terminal
+PASS actor native select: opened-only explicit accessibility, exact enabled unique labels, normal input/change, closed/unowned/stale/presentation/oversized rejection
+PASS actor redraw action: production refresh detached the original and exact replacement activation succeeded
+PASS actor redraw breadcrumb: production refresh detached the original and exact replacement activation succeeded
+PASS calibration: frozen native human label/evidence, tuning membership, pinned actor comparison, real second selected-revision run, independent human scores, export/reopen
+PASS task actor: dashboard configuration, production screenshots/node selection/composer/Send/invoke, three-completion admission, active read-only human grading isolated from actor, export (fixture inference)
+PASS actor input: visible authored input, draft commit and composer Send through real product routes with preserved answer evidence
+node:internal/modules/run_main:107
+    triggerUncaughtException(
+    ^
+
+AssertionError [ERR_ASSERTION]: [{"id":"human-5b906550-ca40-4b18-ac3b-fbf2fbf9af31:16","sequence":16,"at":"2026-10-06T05:45:15.118Z","kind":"actor_error","category":"runtime_failure","message":"Actor runtime failed without claiming task success. No action is replayed automatically.","phase":"observe"}]
++ actual - expected
+
++ 'interrupted'
+- 'completed'
+
+    at proveTaskActorAnnotations (file:///Users/vishaltandale/.codex/worktrees/eval-participant-annotations/relayer-graphcomplete/scripts/test-eval-web.mjs:1403:10)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async file:///Users/vishaltandale/.codex/worktrees/eval-participant-annotations/relayer-graphcomplete/scripts/test-eval-web.mjs:285:3 {
+  generatedMessage: false,
+  code: 'ERR_ASSERTION',
+  actual: 'interrupted',
+  expected: 'completed',
+  operator: 'strictEqual',
+  diff: 'simple'
+}
+
+Node.js v24.19.0
