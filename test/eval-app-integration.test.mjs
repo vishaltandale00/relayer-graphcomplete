@@ -232,9 +232,11 @@ describe("Relayer Eval application service", () => {
     expect(visualNodeDetailCheck(partialVisualOutput, "personal-presentation-v3").passed).toBe(false);
     expect(visualNodeDetailCheck(malformedOutput, "personal-presentation-v3").passed).toBe(false);
     expect(visualNodeDetailCheck(visualOutput, "personal-presentation-v3").passed).toBe(true);
-    expect(visualNodeDetailCheck(visualOutput, "personal-presentation-v4").passed).toBe(true);
-    expect(visualNodeDetailCheck(plainOutput, "personal-presentation-v4").passed).toBe(false);
-    expect(visualNodeDetailCheck(partialVisualOutput, "personal-presentation-v4").passed).toBe(false);
+    for (const version of ["personal-presentation-v4", "personal-presentation-v6"]) {
+      expect(visualNodeDetailCheck(visualOutput, version).passed).toBe(true);
+      expect(visualNodeDetailCheck(plainOutput, version).passed).toBe(false);
+      expect(visualNodeDetailCheck(partialVisualOutput, version).passed).toBe(false);
+    }
     const acceptedClosure = acceptedTopologyNodes({ layers: [
       { nodes: [{ id: 1, title: "Root", authoredDetail: compiledDetail }] },
       { nodes: [{ id: 2, title: "Nested" }] },
@@ -279,12 +281,12 @@ describe("Relayer Eval application service", () => {
     ).passed).toBe(false);
   });
 
-  it("fails a plain semantic child under V3", () => {
+  it.each(["personal-presentation-v3", "personal-presentation-v6"])("fails a plain semantic child under %s", (personalPresentationVersion) => {
     const checks = recursiveCompleteChecks({
       harnessConfiguration: {
         implementation: "fixture.task-system",
         complete: { agentAuthored: true },
-        settings: { personalPresentationVersion: "personal-presentation-v3" },
+        settings: { personalPresentationVersion },
       },
       harnessConfigurationDigest: "sha256:config",
       turns: [{ candidateTrace: { completionBrokerAvailable: true } }],

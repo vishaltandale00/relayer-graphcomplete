@@ -661,9 +661,11 @@ controls model instructions; it does not redefine filesystem read permissions.
 
 ### Explanatory presentation delivery
 
-Production Codex and Prime configurations select the immutable V4 presentation
-for new threads. It adds task-adaptive explanatory presentation without changing
-V0–V3 or existing pins. Shared semantics belong in the presentation graph. Each
+Main Codex, Claude and Prime configurations select immutable Structure/V6
+for new threads. It retains authored visual details and adds task-sensitive
+relationships and deeper inspection. Existing versions and pins remain unchanged.
+Internal Prime deep retains V4. Presentation selection is separate from provider-session
+identity; execution settings and permissions still govern reuse. Shared semantics belong in the presentation graph. Each
 harness supplies a compact capability overview and language-appropriate public
 API recipes; examples demonstrate mechanics, not response design. Native
 parents are instructed to pass the pinned preference and applicable recipes to

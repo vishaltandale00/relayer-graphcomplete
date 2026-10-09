@@ -2,7 +2,7 @@ schemaVersion: 1
 name: claude-basic
 implementation: claude.basic
 implementationVersion: 1
-revision: 8
+revision: 9
 complete:
   agentAuthored: true
 permissionBindings:
@@ -31,4 +31,5 @@ modelDefaults:
 graphCapabilityProfile:
   search: query-v1
   preview: enabled
-settings: {}
+settings:
+  personalPresentationVersion: personal-presentation-v6

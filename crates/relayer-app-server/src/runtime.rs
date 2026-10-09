@@ -765,6 +765,7 @@ impl RuntimeClient {
                         | "personal-presentation-v2"
                         | "personal-presentation-v3"
                         | "personal-presentation-v4"
+                        | "personal-presentation-v6"
                 ) =>
             {
                 Ok(Some(value))
@@ -2622,6 +2623,20 @@ const PERSONAL_PRESENTATION_V4_NODES: &[PersonalPresentationNodeDefinition] = &[
     },
 ];
 
+const PERSONAL_PRESENTATION_V6_NODES: &[PersonalPresentationNodeDefinition] = &[
+    PERSONAL_PRESENTATION_V4_NODES[0],
+    PERSONAL_PRESENTATION_V4_NODES[1],
+    PERSONAL_PRESENTATION_V4_NODES[2],
+    PERSONAL_PRESENTATION_V4_NODES[3],
+    PersonalPresentationNodeDefinition {
+        client_key: "explanatory-presentation",
+        kind: "presentation-preference",
+        icon: "palette",
+        title: "Meaningful graph relationships",
+        detail: "Keep the result, material reasons, observed verification and important limits understandable at the root. Give distinct findings, decisions or checks separate nodes when their relationships help understanding; consolidate explanations that repeat. Let edges and placement express those relationships. Keep true sequences linear; group independent causes, paths, outcomes and evidence around the finding they support. Deeper layers should add a mechanism, comparison or inspectable proof, not merely repeat the root. Each authored detail explains its own node's title and purpose. Choose code, diagrams, tables or concise prose for what they communicate. More nodes, branches, layers or actions are not goals by themselves.",
+    },
+];
+
 fn personal_presentation_definition(
     version_key: &str,
 ) -> Result<PersonalPresentationDefinition, RuntimeError> {
@@ -2653,6 +2668,18 @@ fn personal_presentation_definition(
         "personal-presentation-v4" => Ok(PersonalPresentationDefinition {
             interaction_text: "Personal presentation V4",
             nodes: PERSONAL_PRESENTATION_V4_NODES,
+            edges: &[[0, 1], [0, 2], [0, 3], [0, 4]],
+            placements: &[
+                [0.5, 0.15],
+                [0.2, 0.5],
+                [0.8, 0.5],
+                [0.3, 0.85],
+                [0.7, 0.85],
+            ],
+        }),
+        "personal-presentation-v6" => Ok(PersonalPresentationDefinition {
+            interaction_text: "Personal presentation V6",
+            nodes: PERSONAL_PRESENTATION_V6_NODES,
             edges: &[[0, 1], [0, 2], [0, 3], [0, 4]],
             placements: &[
                 [0.5, 0.15],
@@ -4441,6 +4468,44 @@ mod tests {
             !v4.closure.layers[0].nodes[3]
                 .detail
                 .contains("detailAuthoring")
+        );
+        let historical_v4 = serde_json::to_value(&v4.closure).unwrap();
+        let v6 = runtime
+            .ensure_personal_presentation_version("personal-presentation-v6")
+            .await
+            .unwrap();
+        assert_ne!(v4.interaction_node_id, v6.interaction_node_id);
+        assert_eq!(v6.closure.layers[0].nodes.len(), 5);
+        assert_eq!(v6.closure.layers[0].edges.len(), 4);
+        assert_eq!(
+            v6.closure.layers[0].nodes[4].title,
+            "Meaningful graph relationships"
+        );
+        for (old, new) in v4.closure.layers[0].nodes[..4]
+            .iter()
+            .zip(&v6.closure.layers[0].nodes)
+        {
+            assert_eq!(
+                (&old.kind, &old.icon, &old.title, &old.detail),
+                (&new.kind, &new.icon, &new.title, &new.detail)
+            );
+        }
+        let replay_v4 = runtime
+            .ensure_personal_presentation_version("personal-presentation-v4")
+            .await
+            .unwrap();
+        assert_eq!(
+            serde_json::to_value(&replay_v4.closure).unwrap(),
+            historical_v4
+        );
+        let replay_v6 = runtime
+            .ensure_personal_presentation_version("personal-presentation-v6")
+            .await
+            .unwrap();
+        assert_eq!(replay_v6.interaction_node_id, v6.interaction_node_id);
+        assert_eq!(
+            serde_json::to_value(&replay_v6.closure).unwrap(),
+            serde_json::to_value(&v6.closure).unwrap()
         );
         assert_ne!(v3.interaction_node_id, v4.interaction_node_id);
         assert_eq!(v3.closure.layers[0].nodes.len(), 4);
