@@ -12,7 +12,7 @@ import {
   type NativeSessionResetReason,
 } from "../native-session-reset.js";
 import { redactTraceData } from "../trace.js";
-import { CURRENT_WORKSPACE_GUIDANCE, GRAPH_PRESENTATION_GUIDANCE, NODE_ICON_GUIDANCE, scopedAuthoringRecipeJs } from "./graph-presentation-guidance.js";
+import { CURRENT_COMMUNICATION_GUIDANCE_JS, CURRENT_WORKSPACE_GUIDANCE, currentCommunicationAuthoringRecipeJs, GRAPH_PRESENTATION_GUIDANCE, NODE_ICON_GUIDANCE } from "./graph-presentation-guidance.js";
 import { ARTIFACT_LAYER_GUIDANCE } from "./artifact-layer-guidance.js";
 import { LAYER_EDGE_SHAPE_GUIDANCE } from "./layer-edge-shape-guidance.js";
 import {
@@ -748,7 +748,7 @@ ${threadIconGuidance(context, "javascript")}
 ${CODEX_VISUAL_GUIDANCE}
 For Input plus Invoke, declare one InputActionObject field, then set the Invoke's inputActions: [field]. Mount these exact objects on the same Node. After submitting Node and Layer, graph.addAction(node, invoke) writes or recovers the referenced Input first and stores canonical IDs; no ID guessing or proximity inference. Input alone feeds chat; Invoke consumes only its explicit bindings. New Invokes allow one call unless reusable: true is explicitly appropriate.
 ${CODEX_ASSET_GUIDANCE}
-${CURRENT_WORKSPACE_GUIDANCE}${includePersonalPresentation ? personalPresentationPrompt(context) : ""}
+${CURRENT_WORKSPACE_GUIDANCE}\n${CURRENT_COMMUNICATION_GUIDANCE_JS}${includePersonalPresentation ? personalPresentationPrompt(context) : ""}
 
 Current interaction node: ${interactionNode.id}
 Normalized interaction input:
@@ -766,7 +766,9 @@ Use executable JavaScript and the Relayer graph client. Do not return a JSON gra
 ${this.clientModuleUrl}
 ${pinnedExecutionClause}
 
-${scopedAuthoringRecipeJs(interactionNode.id, this.clientModuleUrl)}
+${currentCommunicationAuthoringRecipeJs(interactionNode.id, this.clientModuleUrl)}
+
+${semanticCompletionGuidanceJs(context, this.completeModuleUrl, "Codex")}
 
 ${currentWorkspaceMechanicsJs()}
 
@@ -895,14 +897,14 @@ Do not turn a node, relationship, path, list, record, or arbitrary string into a
     : "";
   return `You are the Relayer layered-navigation harness. ${UNDERLYING_TASK_GUIDANCE}
 
-After doing the underlying work, answer the current user interaction with a useful graph that truthfully presents the result, evidence, and limitations. A flat answer is valid. Add navigation only when opening it would materially improve understanding or support; apply that same test again inside every layer you author.
+While doing the underlying work, publish useful findings through current; finally answer the current user interaction with a useful graph that truthfully presents the result, evidence, and limitations. A flat answer is valid. Add navigation only when opening it would materially improve understanding or support; apply that same test again inside every layer you author.
 
 ${GRAPH_PRESENTATION_GUIDANCE}
 ${threadIconGuidance(context, "javascript")}
 ${CODEX_VISUAL_GUIDANCE}
 For Input plus Invoke, declare one InputActionObject field, then set the Invoke's inputActions: [field]. Mount these exact objects on the same Node. After submitting Node and Layer, graph.addAction(node, invoke) writes or recovers the referenced Input first and stores canonical IDs; no ID guessing or proximity inference. Input alone feeds chat; Invoke consumes only its explicit bindings. New Invokes allow one call unless reusable: true is explicitly appropriate.
 ${CODEX_ASSET_GUIDANCE}
-${CURRENT_WORKSPACE_GUIDANCE}${includePersonalPresentation && context !== undefined ? personalPresentationPrompt(context) : ""}
+${CURRENT_WORKSPACE_GUIDANCE}\n${CURRENT_COMMUNICATION_GUIDANCE_JS}${includePersonalPresentation && context !== undefined ? personalPresentationPrompt(context) : ""}
 
 Current interaction node: ${interactionNode.id}
 Normalized interaction input:
@@ -918,7 +920,7 @@ For a full Node Detail replacement accompanying an authorized addition, first ca
 
 Use executable JavaScript and the Relayer graph client. Do not return a JSON graph in chat. ${authoringInstructions}
 
-${scopedAuthoringRecipeJs(interactionNode.id, clientModuleUrl)}
+${currentCommunicationAuthoringRecipeJs(interactionNode.id, clientModuleUrl)}
 
 ${currentWorkspaceMechanicsJs()}
 ${semanticCompletionGuidanceJs(context, completeModuleUrl, nativeAgentLabel)}

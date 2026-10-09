@@ -93,3 +93,5 @@ For named scoped assembly, use `graph.authoring(snapshot_key)` and
 `await author.write(root_layer)`. See [scoped draft authoring](../../docs/scoped-graph-authoring.md)
 for the TS/Python recipes, captured-write behavior, stable identity and repair
 rules, and the explicit acceptance step. Writing a scope returns drafts.
+
+`GraphSession.extend_node_presentation(node_id, expected_revision, additions)` stages new typed components for an authorized rich attached node. The additions use that persistent node’s exact `client_key` and distinct component/control keys. The host retains accepted HTML, CSS, controls, provenance and pinned assets; it checks the combined package limits. Include all new controls in one additions builder. Repeating the call composes against accepted detail and replaces this completion’s pending presentation. The existing full-replacement endpoint and graph authority remain decisive. Staging is invisible until Return; stale revisions or key conflicts require rereading or an explicit full replacement.
