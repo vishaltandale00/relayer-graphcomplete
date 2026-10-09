@@ -6,6 +6,9 @@ import { join, resolve } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import {
+  css,
+  detailCapability,
+  html,
   LayerLayoutObject,
   LayerObject,
   NodeObject,
@@ -226,6 +229,59 @@ async function graphMetadata(runtimeSession, nodeId) {
 // real exported `complete(inputGraph)`, with no provider and no inference. Every earlier test
 // of this seam mocked the transport, which is why four separate defects survived in it.
 describe("recursive complete end to end", () => {
+  it.each([false, true])("executes the Codex baseline recipe with prior current %s and preserves it at final submission", async (withPrior) => {
+    const observed = {};
+    const stack = await startRecursiveStack(observed, { implementationFactory: () => ({
+      traceSupport: () => ({ prompt: "none", messages: "none", reasoningSummaries: "none", modelCalls: "none", toolCalls: "none", usage: "none", childStreams: "none", nativeArtifacts: "none" }),
+      state: () => ({}),
+      async complete(context) {
+        const { currentCommunicationAuthoringRecipeJs } = await import("../packages/harness-host/src/implementations/graph-presentation-guidance.ts");
+        const recipe = currentCommunicationAuthoringRecipeJs(context.inputGraph.id, "@relayer/graph-client");
+        const program = recipe.match(/```javascript\n([\s\S]*?)\n```/)[1]
+          .replace(/^import [^\n]+\n/, "")
+          .replace("RelayerGraphClient.fromEnv()", "RelayerGraphClient.fromEnv(environment)")
+          .replace("// Continue the underlying work.", "observed.advanced = await graph.getCurrent(); observed.presentation = await graph.getLayer(written.rootLayer);\n// Continue the underlying work.");
+        const capability = context.graph.acquireCapability();
+        const environment = { RELAYER_GRAPH_URL: capability.url, RELAYER_GRAPH_TOKEN: capability.token, RELAYER_NODE_ID: String(context.inputGraph.id) };
+        if (withPrior) {
+          const graph = RelayerGraphClient.fromEnv(environment);
+          const author = graph.authoring("existing-current");
+          const layer = author.layer("prior");
+          const node = layer.node("prior", { icon: "info", title: "Earlier finding", detail: "Previously published evidence" });
+          layer.layout([[node, 0.5, 0.5]], { edgeShape: "default", defaultNode: node });
+          const written = await author.write(layer);
+          await graph.addAction(context.inputGraph.id, { kind: "navigate", relation: "expand", label: "Findings", icon: "info", target: written.rootLayer, clientKey: "root-response" });
+          await graph.advanceCurrent(written.rootLayer, (await graph.getCurrent()).headRevision, "existing-current-publication");
+        }
+        const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
+        try {
+          await new AsyncFunction("RelayerGraphClient", "html", "css", "detailCapability", "environment", "observed", program)(RelayerGraphClient, html, css, detailCapability, environment, observed);
+        } catch (error) { observed.errors = [String(error)]; throw error; }
+      },
+    }) });
+    const thread = await productRequest(stack.session, "/api/threads", {
+      method: "POST", body: JSON.stringify({ title: "Early findings recipe", initialMessage: "Show findings while working", harnessId: "fixture-recursive", permissionProfileId: "auto", modelSelection: stack.selection }),
+    });
+    const detail = await waitForStatus(stack.session, thread.id, 0, "accepted", observed);
+    expect(observed.advanced).toMatchObject({ lifecycle: "active", headRevision: withPrior ? 2 : 1 });
+    expect(observed.presentation.actions.some(action => action.label === "Earlier findings")).toBe(withPrior);
+    const mounts = observed.presentation.nodes[0].authoredDetail.mounts;
+    expect(mounts.map(mount => mount.capability.kind)).toEqual(withPrior ? ["expand", "reference"] : ["expand"]);
+    for (const mount of mounts) {
+      expect(observed.presentation.actions.some(action => action.clientKey === mount.capability.action.clientKey)).toBe(true);
+    }
+    const completionId = detail.interactions[0].graphNodeId;
+    const response = await fetch(new URL(`/api/control/interactions/${completionId}/current`, stack.runtimeSession.graphUrl), {
+      headers: { authorization: `Bearer ${stack.runtimeSession.graphControlToken}` },
+    });
+    expect(response.ok).toBe(true);
+    const finalCurrent = await response.json();
+    expect(finalCurrent).toMatchObject({ lifecycle: "succeeded", headRevision: withPrior ? 3 : 2 });
+    expect(finalCurrent.currentLayerId).not.toBe(observed.advanced.currentLayerId);
+    expect(detail.interactions[0].completionOutput).toBeTruthy();
+  });
+
+
   it("provides broker authority only when temporal provider recursion is enabled", async () => {
     const enabled = {};
     const enabledStack = await startRecursiveStack(enabled, {

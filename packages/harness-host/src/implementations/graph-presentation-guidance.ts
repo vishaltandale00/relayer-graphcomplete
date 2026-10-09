@@ -72,3 +72,55 @@ await graph.submit(${interactionNodeId})
 \`\`\`
 Add connections with layer.edge("connection", first, second). Declare controls before write with layer.action("details", node, kind="navigate", relation="expand", label="Details", target=child_layer), then bind that same returned action with action_capability. Use relation="reference" for evidence and kind="invoke", interaction_text="..." for follow-ups. Node fields are icon, title, detail, and optional kind; do not supply client_key or ref. The scoped API supplies action source_layer and identity; do not pass source_layer, client_key, or ref into layer.action. Declare actions before binding them. Set every selected layer's layout explicitly. layer.object exposes the actual LayerObject for specialized operations. Accepted-node additions and presentation replacement retain their existing grants and revisions.`;
 }
+
+/** Codex baseline: the full communication-contract treatment, including publication mechanics. */
+export const CODEX_CURRENT_WORKSPACE_GUIDANCE = CURRENT_WORKSPACE_GUIDANCE
+  .replace("consider updating it as the work evolves, when the user would gain a more useful view rather than on every change", "advance it when the first useful finding or consequential question is ready, then when the user would gain a materially more useful view")
+  .replace("Advancing is optional; final graph.submit remains required.", "Publish useful working state before the work finishes; final graph.submit remains required. Do not fabricate findings or publish empty status merely to advance.");
+
+export const CODEX_CURRENT_COMMUNICATION_GUIDANCE = "Your current layer is how you explain the work to the user while doing it. Once you have a useful finding, uncertainty, or question, publish it with graph.advanceCurrent and continue working. Update it when the user's understanding materially changes. When you call a subcompletion through complete(inputGraph), observe its current-pointer updates and read the graph they expose. Incorporate meaningful findings into your own current layer. Use current layers to ask consequential questions as they arise. Explain what decision depends on the answer and provide an appropriate input action.\nSubcompletion guidance applies only when the completion broker is available and you choose semantic child work; native helpers are not separate GraphComplete completions. When using that broker, create watchCompletions(children), await watch.changes(), and read each changed current.currentLayerId with graph.getLayer when it is non-null. Read the published evidence, not only its revision or terminal status. Missing current or observation errors mean unknown work, not invented findings. Questions may be published during work, but input answers arrive through the next ordinary interaction, not an automatic resume of this running completion. Do independent work, then return a useful question layer if dependent work needs that answer; do not wait indefinitely or assume an answer.";
+
+export function currentCommunicationAuthoringRecipeJs(interactionNodeId: number, clientModuleUrl: string): string {
+  return `Use graph.authoring(snapshotKey) for new response drafts with stable local keys. Give graph-authoring native children this recipe and the exact supplied import URL. Choose new snapshots for new accepted explanations. This runnable example shows early publication, further work, and final submission. Replace its placeholder evidence with actual task findings; do not publish an empty progress message.
+
+\`\`\`javascript
+import { RelayerGraphClient, html, css, detailCapability } from ${JSON.stringify(clientModuleUrl)};
+const graph = RelayerGraphClient.fromEnv();
+let current = await graph.getCurrent();
+const author = graph.authoring("first-finding");
+const layer = author.layer("finding");
+const finding = layer.node("finding", { icon: "info", title: "Initial finding", detail: "Replace with supported evidence, remaining uncertainty, and the next useful step." });
+// This optional detail example demonstrates typed control binding, not required topology.
+const evidenceLayer = author.layer("evidence");
+const evidence = evidenceLayer.node("evidence", { icon: "info", title: "Evidence", detail: "Replace with useful support for the finding." });
+const expand = layer.action("evidence", finding, { kind: "navigate", relation: "expand", label: "Evidence", target: evidenceLayer });
+const sharedStyles = css\`section { display: grid; gap: 0.75rem; background-color: transparent; }\`;
+finding.detailAuthoring.setComponent("main", html\`<section><h2>Initial finding</h2><p>Replace with supported evidence and uncertainty.</p><button gc=\${detailCapability.expand("evidence-control", expand)}>Evidence</button></section>\`, sharedStyles);
+evidence.detailAuthoring.setComponent("main", html\`<section><h2>Evidence</h2><p>Replace with useful supporting detail.</p></section>\`, sharedStyles);
+evidenceLayer.layout([[evidence, 0.5, 0.5]], { edgeShape: "default", defaultNode: evidence });
+if (current.currentLayerId != null) {
+  const prior = await graph.getLayer(current.currentLayerId);
+  const earlier = layer.action("prior", finding, { kind: "navigate", relation: "reference", label: "Earlier findings", target: prior.layer });
+  finding.detailAuthoring.setComponent("earlier", html\`<button gc=\${detailCapability.reference("earlier-control", earlier)}>Earlier findings</button>\`, sharedStyles);
+}
+layer.layout([[finding, 0.5, 0.5]], { edgeShape: "default", defaultNode: finding });
+const written = await author.write(layer);
+await graph.addAction(${interactionNodeId}, { kind: "navigate", relation: "expand", label: "Task findings", icon: "info", target: written.rootLayer, clientKey: "root-response" });
+await graph.advanceCurrent(written.rootLayer, current.headRevision, "first-finding-publication");
+// Continue the underlying work. Read evidence and observe any semantic children.
+// Publish further material findings or questions as new snapshots, preserving prior current.
+current = await graph.getCurrent();
+const finalAuthor = graph.authoring("final-findings");
+const finalLayer = finalAuthor.layer("summary");
+const summary = finalLayer.node("summary", { icon: "info", title: "Result", detail: "Replace with the completed result or the consequential question requiring the user's answer." });
+const prior = await graph.getLayer(current.currentLayerId);
+finalLayer.action("prior", summary, { kind: "navigate", relation: "reference", label: "Earlier findings", target: prior.layer });
+finalLayer.layout([[summary, 0.5, 0.5]], { edgeShape: "default", defaultNode: summary });
+const finalWritten = await finalAuthor.write(finalLayer);
+// Advance leaves the interaction's root response action draft; retarget that same stable action.
+await graph.addAction(${interactionNodeId}, { kind: "navigate", relation: "expand", label: "Task findings", icon: "info", target: finalWritten.rootLayer, clientKey: "root-response" });
+await graph.submit(${interactionNodeId});
+\`\`\`
+Add a connection with layer.edge("connection", first, second). Declare node controls before write with layer.action("details", node, { kind: "navigate", relation: "expand", label: "Details", target: childLayer }); bind that same returned action with detailCapability.expand("stable-control-key", action) in an unquoted gc= template interpolation, as shown above. The key and action are both required. For references use relation: "reference" and detailCapability.reference; for follow-ups use kind: "invoke", interactionText, and detailCapability.invoke. layer.node(localKey, fields) accepts only icon, title, detail, and optional kind: do not pass clientKey or ref in fields. layer.action(localKey, sourceNode, fields) supplies sourceLayer, clientKey, and ref: do not author these fields. Declare actions before binding them, and reuse the returned action without cloning or adding identity fields. Set each selected layer's layout explicitly, including routes or sizeJustification when needed, with layer.layout(...); written.rootLayer is available only after author.write(...), and has no .layer wrapper. For specialized low-level calls, layer.object is the actual LayerObject. Accepted-node additions and replacements still use their existing authorized low-level APIs and presentation revisions.
+For real content, use the same scoped action and detailCapability binding APIs as the ordinary authoring contract. Register every action before publication. Accepted nodes and layers stay immutable. Each later current must retain navigation to the exact prior current. Refresh getCurrent after each successful advance; save each transition's layer, expected headRevision and stable operation key for exact retries. When asking a question, author an input action on its draft explanation node with layer.action("question", finding, { kind: "input", label: "Answer", control: "text", prompt: "A task-specific question" }), or an appropriate select control. Publishing the question does not consume the user's answer. A terminal submit ends all graph access.`;
+}

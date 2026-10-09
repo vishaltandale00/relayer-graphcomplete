@@ -84,7 +84,7 @@ describe("CodexBasicHarness", () => {
     expect(baseline).toContain("live, user-facing workspace");
     // The graph is the user's interface, so mechanics never appear in its content.
     expect(baseline).toContain("Never expose execution mechanics in graph content");
-    expect(baseline).toContain("rather than on every change");
+    expect(baseline).toContain("when the user would gain a materially more useful view");
     expect(baseline).toContain("await graph.getCurrent()");
     expect(baseline).toContain("await graph.advanceCurrent(");
     expect(baseline).toContain("After submitting the complete closure and registering all its actions, publish it with await graph.advanceCurrent(");
@@ -130,6 +130,48 @@ describe("CodexBasicHarness", () => {
     expect(brokerAuthorized).toContain("Each change is { child, current }, or { child, error } once the watch can no longer observe that child");
     // Such a child's result may reject with a plain error; the root must neither invent its findings nor leak the error.
     expect(brokerAuthorized).toContain("If child.result rejects with any other error, as it may for a child reported with an error, you cannot read that child's work; present that part as not done, without quoting the error or inventing findings.");
+  });
+
+  it.each([undefined, "layered-navigation-v1", "layered-navigation-multi-agent-v1"])("uses the communication contract by default in actual %s turns", async (promptProfile) => {
+    for (const brokerAvailable of [false, true]) {
+      let prompt = "";
+      const harness = new CodexBasicHarness({
+        ...context("auto"),
+        configuration: { ...codexBasicConfiguration, settings: {
+          ...codexBasicConfiguration.settings, ...(promptProfile === undefined ? {} : { promptProfile }),
+        } },
+      }, { codexPathOverride: "/managed/codex", runAppServerTurn: async (options) => {
+        prompt = options.prompt;
+        options.onThreadId("communication-thread");
+        return { threadId: "communication-thread", turnId: "turn-1", status: "completed" };
+      } });
+      await harness.complete({ ...runContext(1, "token"), ...(brokerAvailable ? { completionBroker: {
+        url: "http://127.0.0.1:43125/api/completions", token: "fixture-broker-token-1234567890123456",
+      } } : {}) });
+      expect(prompt).toContain("Your current layer is how you explain the work to the user while doing it.");
+      expect(prompt).toContain("read each changed current.currentLayerId with graph.getLayer");
+      expect(prompt).toContain("input answers arrive through the next ordinary interaction");
+      expect(prompt).toContain("native helpers are not separate GraphComplete completions");
+      expect(prompt).toContain("Do not fabricate findings or publish empty status merely to advance.");
+      expect(prompt).toContain('await graph.advanceCurrent(written.rootLayer, current.headRevision, "first-finding-publication")');
+      expect(prompt).toContain('target: prior.layer');
+      expect(prompt).toContain('graph.authoring("final-findings")');
+      expect(prompt).toContain('kind: "input", label: "Answer", control: "text"');
+      expect(prompt).toContain("Register every action before publication");
+      expect(prompt).not.toContain("Advancing is optional");
+      expect(prompt).not.toContain("After doing the underlying work, answer");
+      expect(prompt).not.toContain('graph.authoring("response-v1")');
+      expect(prompt).not.toContain("fixture-broker-token");
+      expect(prompt).not.toContain("Follow this publish, observe, continue sequence");
+      expect(prompt).not.toContain("Advance your current when you establish");
+    }
+  });
+
+  it("preserves Claude's shared layered prompt while promoting the Codex default", () => {
+    const claude = buildLayeredNavigationPrompt(runContext(1, "token"), "@relayer/graph-client", undefined, "@relayer/graphcomplete", "Claude");
+    expect(claude).toContain("Advancing is optional; final graph.submit remains required.");
+    expect(claude).toContain('graph.authoring("response-v1")');
+    expect(claude).not.toContain("Your current layer is how you explain the work");
   });
 
   it("reuses a native Codex thread only while its pinned presentation version is unchanged", async () => {
@@ -507,17 +549,17 @@ describe("CodexBasicHarness", () => {
     expect(submitted?.prompt).toContain("pass the program through standard input");
     expect(submitted?.prompt).toContain("never place authored graph code in a --eval argument");
     expect(submitted?.prompt).toContain("do not create a script in either the project checkout or a temporary directory");
-    expect(submitted?.prompt).toContain('kind: "navigate", relation: "expand", label: "Answer", target: written.rootLayer');
+    expect(submitted?.prompt).toContain('kind: "navigate", relation: "expand", label: "Task findings", icon: "info", target: written.rootLayer');
     expect(submitted?.prompt).toContain("including follow-ups and annotation-only or input-only interactions");
     expect(submitted?.prompt).toContain("Node and action icons accept supported symbol names or registered image references");
     expect(submitted?.prompt).toContain("Set each selected layer's layout explicitly");
     expect(submitted?.prompt).toContain("Place a one-node layer at (0.5, 0.5)");
     expect(submitted?.prompt).toContain("independently of the viewport");
     expect(submitted?.prompt).toContain("graph.icons.discover");
-    expect(submitted?.prompt).toContain('layer.node("finding", { icon: "info", title: "Answer", detail: "Replace with the supported answer." })');
+    expect(submitted?.prompt).toContain('layer.node("finding", { icon: "info", title: "Initial finding", detail: "Replace with supported evidence, remaining uncertainty, and the next useful step." })');
     expect(submitted?.prompt).not.toContain('new NodeObject("lightbulb"');
     expect(submitted?.prompt).toContain('layer.edge("connection", first, second)');
-    expect(submitted?.prompt).toContain('const layer = author.layer("answer")');
+    expect(submitted?.prompt).toContain('const layer = author.layer("finding")');
     expect(submitted?.prompt).toContain('relation: "expand"');
     expect(submitted?.prompt).toContain("sourceLayer: layer");
     expect(submitted?.prompt).toContain('clientKey: "root-response"');
@@ -759,7 +801,7 @@ describe("CodexBasicHarness", () => {
     expect(submittedPrompt).toContain("Never mention or expose the size justification");
     expect(submittedPrompt).toContain("Every new root, expansion, and reference layer requires a version-1 LayerLayoutObject");
     expect(submittedPrompt).toContain("align comparisons deliberately");
-    expect(submittedPrompt).toContain('layer.node("finding", { icon: "info", title: "Answer", detail: "Replace with the supported answer." })');
+    expect(submittedPrompt).toContain('layer.node("finding", { icon: "info", title: "Initial finding", detail: "Replace with supported evidence, remaining uncertainty, and the next useful step." })');
     expect(submittedPrompt).not.toContain('new NodeObject("lightbulb"');
     expect(submittedPrompt).toContain('clientKey: "root-response"');
     expect(submittedPrompt).toContain('clientKey: "node-detail"');
