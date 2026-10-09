@@ -53,7 +53,7 @@ export const PRIME_AGENT_ASSET_SHA256 = Object.freeze({
   harnessConfigurations: Object.freeze({
     "prime-agent-basic.yaml": "72b38a160c5b805b3235488deee20d4097ad427df5cb5f26b56ea9c6aada484e",
   }),
-  pythonPackageTree: "26bb1eda18bc5982fbd696bd4cb5b20d274b9793a8cd94835d078857c70ea1a8",
+  pythonPackageTree: "e1d27c379688aec008859987c7fc0cf99b1867a7ac5006965c18e24285a8f42b",
 });
 
 export function selectPrimeAgentDependencyClosureSha256({ isPackaged, javascriptContract }) {

@@ -6,7 +6,7 @@ import base64
 import json
 import math
 from dataclasses import dataclass, replace
-from typing import Any, Callable, Awaitable, Mapping, Sequence
+from typing import Any, Callable, Awaitable, Sequence
 
 from .actions import ActionObject
 from .authoring import (EdgeEndObject, EdgeObject, EdgeRouteObject, GraphEdge,
@@ -113,7 +113,7 @@ class ScopedAuthoringLayer:
                                   _identity(owner.snapshot_key, key, "l", ""))
 
     def node(self, local_key: str, *, icon: Any, title: str, detail: str,
-             kind: str = "concept", artifact: Mapping[str, Any] | None = None) -> NodeObject:
+             kind: str = "concept", artifact: dict[str, Any] | None = None) -> NodeObject:
         key = _name(local_key)
         if key in self._nodes:
             raise GraphAuthoringValidationError("Duplicate node " + _path(self._key, "nodes", key))
@@ -128,7 +128,7 @@ class ScopedAuthoringLayer:
         return node
 
     def artifact_node(self, local_key: str, *, icon: Any, title: str, detail: str,
-                      artifact: Mapping[str, Any], kind: str = "concept") -> NodeObject:
+                      artifact: dict[str, Any], kind: str = "concept") -> NodeObject:
         """Make this an artifact layer holding one artifact node, like LayerObject.for_artifact."""
         node = self.node(local_key, icon=icon, title=title, detail=detail, kind=kind, artifact=artifact)
         self.object.renderer = "artifact"
