@@ -1,0 +1,579 @@
+<!doctype html>
+<!--
+  THROWAWAY PROTOTYPE (#721): parallel runs in the interaction-graph popover.
+  Every open design question is a toggle in the "Choices" panel; the page
+  recomposes live and the URL keeps the combination, so a link is a proposal.
+  Not wired to anything; all state is in memory.
+
+  Resolved (grilling, 2026-10-09; recorded on #721). Defaults in the panel = the chosen UX:
+  - Run view stays the popover off the turn picker; provenance levelling layout,
+    rows by sequence, provenance-only edges.
+  - Q6 a node's queue folds into its head card as a deck ("then N more on <node>").
+  - Q7 controls are corner icons revealed on hover; a queue head's Resume shows "▶ N";
+    on a queued run the ✕ means Remove.
+  - Q8 only the queue head resumes (it re-queues the rest in order); skip by Discarding.
+  - Q9 Resume all lives only in the relaunch notice inside the popover.
+  - Q10 "Interrupted by restart" (was executing) vs "Paused" (was queued); one verb, Resume;
+    the sidebar badge "N paused" counts both.
+  - Q11 agent children collapse under the parent; running children get Stop; after a
+    resume, old children move to a "previous attempt" chip.
+  - Q12 no auto-open after relaunch; badges only; opening scrolls to the first paused run.
+  - Q13 Stop all is an action in the thread ⋯ menu; it stops running and removes queued.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="color-scheme" content="dark" />
+<title>Parallel runs graph prototype</title>
+<style>
+  :root {
+    --bg:#0b0c0d; --panel:#101214; --raised:#17191c; --hover:#1c1f22; --line:#292c30; --line-strong:#383c42;
+    --text:#f1f2f3; --muted:#969ba2; --faint:#666c74; --ring:#80aef8;
+    --run:#80aef8; --queue:#b9a6ff; --pause:#e7b65c; --fail:#f07a7a; --ok:#6fcf97; --agent:#7fd1c7;
+    font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; font-size:13px; color:var(--text); background:var(--bg);
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; height:100vh; overflow:hidden; background:var(--bg); }
+  button { font:inherit; color:inherit; cursor:default; }
+  button:focus-visible { outline:2px solid var(--ring); outline-offset:1px; }
+  .shell { height:100vh; display:grid; grid-template-columns:230px 1fr; }
+  .sidebar { border-right:1px solid var(--line); background:#0d0f10; padding:40px 9px 9px; }
+  .sb-title { color:var(--faint); font-size:10px; text-transform:uppercase; letter-spacing:.08em; padding:10px 8px 6px; }
+  .thread { display:flex; align-items:center; gap:8px; height:30px; padding:0 8px; border-radius:7px; color:var(--muted); }
+  .thread.on { background:var(--hover); color:var(--text); }
+  .thread .name { flex:1; min-width:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .act { width:14px; height:14px; flex:none; display:grid; place-items:center; }
+  .spin { width:11px; height:11px; border-radius:50%; border:2px solid var(--run); border-right-color:transparent; animation:spin 1s linear infinite; }
+  @keyframes spin { to { transform:rotate(360deg); } }
+  .badge { font-size:10px; padding:1px 6px; border-radius:9px; border:1px solid; white-space:nowrap; }
+  .badge.pause { color:var(--pause); border-color:#6b5428; background:#2a2112; }
+  .main { display:flex; flex-direction:column; min-width:0; }
+  .header { height:58px; display:flex; align-items:center; gap:10px; padding:0 16px; border-bottom:1px solid var(--line); }
+  .header h1 { font-size:14px; font-weight:600; margin:0; flex:1; }
+  .hbtn { height:28px; padding:0 10px; border-radius:7px; border:1px solid var(--line-strong); background:var(--panel); color:var(--text); font-size:12px; }
+  .hbtn:hover { background:var(--hover); }
+  .hbtn.danger { color:var(--fail); }
+  .menu-wrap { position:relative; display:inline-block; }
+  .hbtn.dots { width:30px; padding:0; font-size:15px; line-height:1; color:var(--muted); }
+  .menu { position:absolute; right:0; top:33px; min-width:210px; background:var(--raised); border:1px solid var(--line-strong); border-radius:9px; box-shadow:0 14px 40px #0008; padding:4px; z-index:40; }
+  .menu button { display:flex; width:100%; justify-content:space-between; gap:12px; border:0; background:none; text-align:left; padding:7px 9px; border-radius:6px; font-size:12px; color:var(--text); }
+  .menu button:hover:not(:disabled) { background:var(--hover); }
+  .menu button:disabled { color:var(--faint); }
+  .menu button.danger { color:var(--fail); }
+  .menu kbd { font:10.5px ui-monospace,monospace; color:var(--faint); }
+  .textact { border:0; background:none; color:var(--muted); font-size:11px; font-weight:500; padding:2px 4px; border-radius:5px; }
+  .textact:hover { color:var(--fail); background:var(--hover); }
+  .trigger { position:relative; width:34px; height:30px; border-radius:8px; border:1px solid var(--line-strong); background:var(--panel); display:grid; place-items:center; color:var(--muted); }
+  .trigger[aria-expanded="true"] { background:var(--hover); color:var(--text); }
+  .trigger b { position:absolute; right:-7px; top:-8px; min-width:16px; height:16px; border-radius:9px; font-size:9px; line-height:14px; padding:0 4px; border:1px solid var(--line-strong); background:var(--raised); color:var(--text); }
+  .trigger b.live { border-color:#3d5680; background:#16243a; color:var(--run); }
+  .trigger b.pause { border-color:#6b5428; background:#2a2112; color:var(--pause); }
+  .canvas { flex:1; position:relative; overflow:hidden; background:radial-gradient(circle, #1a1d20 1px, transparent 1px) 0 0/22px 22px; }
+  .viewing { position:absolute; left:24px; top:20px; color:var(--muted); font-size:12px; }
+  .viewing strong { color:var(--text); font-weight:550; }
+  .fake-layer { position:absolute; left:40px; top:70px; display:flex; gap:18px; opacity:.5; }
+  .fake-layer div { width:150px; height:84px; border:1px solid var(--line-strong); border-radius:10px; background:var(--raised); padding:10px; color:var(--muted); font-size:12px; }
+  .composer { margin:0 16px 16px; height:64px; border:1px solid var(--line-strong); border-radius:12px; background:var(--panel); display:flex; align-items:center; padding:0 14px; color:var(--faint); gap:10px; }
+  .composer span { flex:1; }
+  /* popover */
+  .pop { position:absolute; right:16px; top:6px; width:720px; max-height:520px; display:flex; flex-direction:column; background:var(--panel); border:1px solid var(--line-strong); border-radius:12px; box-shadow:0 18px 50px #0007; z-index:20; overflow:hidden; }
+  .pop[hidden] { display:none; }
+  .pop-head { flex:none; display:flex; align-items:center; gap:6px; padding:10px 14px; border-bottom:1px solid var(--line); font-size:12px; font-weight:650; }
+  .pop-head .grow { flex:1; }
+  .chip { font-size:10.5px; font-weight:500; padding:2px 7px; border-radius:9px; border:1px solid var(--line-strong); color:var(--muted); }
+  .chip.run { color:var(--run); } .chip.queue { color:var(--queue); } .chip.pause { color:var(--pause); }
+  .notice { flex:none; margin:8px 10px 0; padding:8px 10px; border-radius:8px; border:1px solid #6b5428; background:#211b10; color:#e9d3a6; font-size:12px; display:flex; gap:8px; align-items:center; }
+  .notice .grow { flex:1; }
+  .viewport { overflow:auto; padding:8px; min-height:0; }
+  .surface { position:relative; }
+  .surface > svg { position:absolute; inset:0; pointer-events:none; overflow:visible; }
+  .surface path { fill:none; stroke:var(--muted); stroke-width:1.5; opacity:.55; }
+  .surface path.invoke { stroke-dasharray:4 3; }
+  .surface path.agent { stroke:var(--agent); stroke-dasharray:2 3; opacity:.6; }
+  .node { position:absolute; width:204px; border:1px solid var(--line-strong); border-radius:10px; background:var(--raised); padding:9px 10px 9px; display:flex; flex-direction:column; gap:6px; text-align:left; }
+  .node:hover { border-color:#5a6068; }
+  .node.sel { border-color:var(--ring); box-shadow:inset 3px 0 var(--ring); }
+  .node.flash { animation:flash 1.4s ease-out 2; }
+  @keyframes flash { 30% { box-shadow:0 0 0 3px var(--pause); } }
+  .node .lbl { font-size:12px; font-weight:550; line-height:1.3; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
+  .node .meta { display:flex; align-items:center; gap:6px; font-size:10.5px; color:var(--muted); }
+  .kind { font-size:9px; text-transform:uppercase; letter-spacing:.07em; color:var(--faint); }
+  .node:has(.corner) .kind { padding-right:50px; }
+  .tgt { font-size:10px; color:var(--faint); }
+  .tgt b { color:var(--muted); font-weight:500; }
+  .st { display:inline-flex; align-items:center; gap:5px; }
+  .dot { width:7px; height:7px; border-radius:50%; flex:none; }
+  .st.running .dot { background:var(--run); box-shadow:0 0 0 3px #80aef833; animation:pulse 1.4s ease-in-out infinite; }
+  .st.stopping .dot { background:var(--fail); animation:pulse .7s infinite; }
+  .st.queued .dot { border:1.5px solid var(--queue); }
+  .st.capacity .dot { border:1.5px dashed var(--queue); }
+  .st.paused .dot { background:var(--pause); border-radius:1px; width:3px; box-shadow:4px 0 var(--pause); margin-right:4px; }
+  .st.interrupted .dot { background:var(--pause); clip-path:polygon(50% 0,100% 100%,0 100%); border-radius:0; width:8px; height:8px; }
+  .st.failed .dot { background:var(--fail); }
+  .st.stopped .dot { background:var(--faint); border-radius:2px; }
+  .st.accepted .dot { background:var(--ok); }
+  @keyframes pulse { 50% { opacity:.4; } }
+  .st.running { color:var(--run); } .st.queued,.st.capacity { color:var(--queue); } .st.paused,.st.interrupted { color:var(--pause); } .st.failed { color:var(--fail); }
+  .ctl { display:flex; gap:4px; flex-wrap:wrap; }
+  .ib { height:22px; padding:0 7px; border-radius:6px; border:1px solid var(--line-strong); background:var(--panel); font-size:11px; color:var(--text); white-space:nowrap; }
+  .ib:hover { background:var(--hover); }
+  .ib.primary { border-color:#6b5428; color:var(--pause); }
+  .ib.stop { color:var(--fail); }
+  /* hover-only controls */
+  /* hover designs: nothing reserves space, nothing floats outside the card */
+  .reveal { opacity:0; pointer-events:none; transition:opacity .12s; }
+  .node:hover .reveal, .node:focus-within .reveal { opacity:1; pointer-events:auto; }
+  .corner { position:absolute; right:7px; top:6px; display:flex; gap:3px; align-items:center; }
+  .icon { min-width:20px; height:20px; width:auto; padding:0 5px; border-radius:6px; border:1px solid var(--line-strong); background:var(--panel); display:grid; place-items:center; font-size:10px; line-height:1; padding:0; color:var(--muted); }
+  .icon:hover { color:var(--text); background:var(--hover); }
+  .icon.stop { color:var(--fail); } .icon.primary { color:var(--pause); border-color:#6b5428; }
+  /* 1 · status morphs into its action */
+  .morph { border:1px solid transparent; background:none; padding:1px 6px 1px 0; border-radius:6px; font-size:10.5px; display:inline-grid; text-align:left; }
+  .morph > * { grid-area:1/1; transition:opacity .12s; }
+  .morph .do { opacity:0; display:inline-flex; align-items:center; gap:5px; font-weight:600; }
+  .node:hover .morph, .morph:focus-visible { border-color:var(--line-strong); background:var(--panel); padding-left:6px; }
+  .node:hover .morph .st, .morph:focus-visible .st { opacity:0; }
+  .node:hover .morph .do, .morph:focus-visible .do { opacity:1; }
+  .morph .do.stop { color:var(--fail); } .morph .do.primary { color:var(--pause); }
+  /* 3 · status ring: always shows state, turns into the action on hover */
+  .ring { width:22px; height:22px; border-radius:50%; border:1px solid var(--line-strong); background:var(--panel); display:grid; place-items:center; padding:0; position:relative; }
+  .ring > * { grid-area:1/1; transition:opacity .12s; }
+  .ring .do { opacity:0; font-size:9px; }
+  .node:hover .ring .glyph, .ring:focus-visible .glyph { opacity:0; }
+  .node:hover .ring .do, .ring:focus-visible .do { opacity:1; }
+  .ring.running { border-color:transparent; } .ring.running .glyph { width:18px; height:18px; border-radius:50%; border:2px solid var(--run); border-right-color:transparent; animation:spin 1s linear infinite; }
+  .ring.queued .glyph { width:10px; height:10px; border-radius:50%; border:1.5px solid var(--queue); }
+  .ring.paused .glyph { width:3px; height:9px; background:var(--pause); box-shadow:4px 0 var(--pause); margin-left:-4px; }
+  .ring.interrupted .glyph { width:10px; height:9px; background:var(--pause); clip-path:polygon(50% 0,100% 100%,0 100%); }
+  .ring.stop .do { color:var(--fail); } .ring.primary .do { color:var(--pause); } .ring.primary { border-color:#6b5428; }
+  /* strict: status stripe so state reads without controls */
+  .q-strict .node { border-left-width:3px; }
+  .q-strict .node.s-running { border-left-color:var(--run); } .q-strict .node.s-queued,.q-strict .node.s-capacity { border-left-color:var(--queue); }
+  .q-strict .node.s-paused,.q-strict .node.s-interrupted { border-left-color:var(--pause); } .q-strict .node.s-accepted { border-left-color:#2c5a40; }
+  /* rail */
+  .rail { position:absolute; width:18px; border-left:2px solid var(--queue); border-radius:8px 0 0 8px; opacity:.6; }
+  .ord { position:absolute; width:17px; height:17px; border-radius:50%; background:var(--panel); border:1.5px solid var(--queue); color:var(--queue); font-size:9.5px; display:grid; place-items:center; font-weight:650; }
+  /* deck */
+  .node.deck { box-shadow:4px 4px 0 -1px var(--raised), 4px 4px 0 0 var(--line-strong), 8px 8px 0 -1px var(--raised), 8px 8px 0 0 var(--line-strong); }
+  .deck-toggle { border:0; background:none; padding:0; color:var(--queue); font-size:10.5px; text-align:left; }
+  .deck-list { border-top:1px solid var(--line); padding-top:6px; display:flex; flex-direction:column; gap:5px; }
+  .deck-item { display:flex; align-items:center; gap:5px; font-size:11px; color:var(--muted); }
+  .deck-item .n { width:14px; height:14px; border-radius:50%; border:1px solid var(--queue); color:var(--queue); font-size:8.5px; display:grid; place-items:center; flex:none; }
+  .deck-item .t { flex:1; min-width:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .mini { border:1px solid var(--line-strong); background:var(--panel); border-radius:5px; color:var(--muted); padding:0 4px; height:18px; font-size:10px; white-space:nowrap; }
+  .mini:hover { color:var(--text); }
+  .mini.primary { color:var(--pause); border-color:#6b5428; }
+  /* agents */
+  .agents { position:absolute; height:26px; border:1px dashed #3e6b66; border-radius:13px; background:#0f1a19; color:var(--agent); font-size:11px; padding:0 10px; display:flex; align-items:center; gap:6px; white-space:nowrap; }
+  .agents.prev { border-color:var(--line-strong); color:var(--faint); background:var(--panel); }
+  .node.agent { border-style:dashed; border-color:#3e6b66; background:#121a19; width:190px; }
+  .node.agent .kind { color:var(--agent); }
+  .node.agent.old { opacity:.55; }
+  .group-label { position:absolute; font-size:9.5px; text-transform:uppercase; letter-spacing:.07em; color:var(--faint); }
+  /* choices panel */
+  .choices { position:fixed; left:242px; bottom:12px; width:350px; z-index:50; background:#f1f2f3; color:#111; border-radius:12px; box-shadow:0 10px 34px #000b; font-size:11.5px; }
+  .choices summary { padding:8px 12px; font-weight:700; display:flex; gap:8px; align-items:center; list-style:none; }
+  .choices summary::-webkit-details-marker { display:none; }
+  .choices .body { padding:0 10px 10px; display:flex; flex-direction:column; gap:7px; max-height:62vh; overflow:auto; }
+  .row .q { font-weight:650; margin-bottom:3px; color:#333; }
+  .seg { display:flex; flex-wrap:wrap; gap:3px; }
+  .seg button { border:0; background:#ddd; color:#111; border-radius:999px; height:22px; padding:0 9px; font-size:11px; }
+  .seg button.on { background:#111; color:#fff; }
+  .scen { display:flex; gap:4px; padding-bottom:6px; border-bottom:1px solid #ccc; }
+  .scen button { border:0; background:#ddd; color:#111; border-radius:999px; height:24px; padding:0 10px; font-size:11.5px; }
+  .scen button.on { background:#111; color:#fff; }
+  .hint { color:#666; font-size:10.5px; font-weight:400; }
+  details.state { position:fixed; right:12px; bottom:12px; z-index:40; background:#000c; border:1px solid var(--line); border-radius:8px; padding:6px 9px; font:11px ui-monospace,monospace; color:var(--muted); }
+  details.state pre { margin:6px 0 0; max-height:260px; overflow:auto; }
+</style>
+</head>
+<body>
+<div class="shell">
+  <aside class="sidebar">
+    <div class="sb-title">Relayer site</div>
+    <div class="thread on"><span class="act" id="sbAct"></span><span class="name">Pricing page redesign</span><span id="sbBadge"></span></div>
+    <div class="thread"><span class="act"></span><span class="name">Onboarding emails</span></div>
+    <div class="thread"><span class="act"></span><span class="name">Changelog for v0.9</span></div>
+  </aside>
+  <main class="main">
+    <div class="header">
+      <h1>Pricing page redesign</h1>
+      <span id="headerActions"></span>
+      <button class="trigger" id="trigger" aria-expanded="true" title="Interaction graph">
+        <svg width="18" height="18" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="2" y="3" width="6" height="5" rx="1.5"/><rect x="12" y="3" width="6" height="5" rx="1.5"/><rect x="12" y="12" width="6" height="5" rx="1.5"/><path d="M8 5.5h4M10 5.5v9h2"/></svg>
+        <b id="trigBadge"></b>
+      </button>
+    </div>
+    <div class="canvas">
+      <div class="viewing" id="viewing"></div>
+      <div class="fake-layer"><div>Hero</div><div>Tiers table</div><div>FAQ</div><div>Accessibility audit ▸</div></div>
+      <div class="pop" id="pop"></div>
+    </div>
+    <div class="composer"><span>Message this thread… (never locks)</span><button class="hbtn">Send</button></div>
+  </main>
+</div>
+<details class="choices" open>
+  <summary>Choices <span class="hint">★ = recommended · flip and watch the graph</span></summary>
+  <div class="body" id="choices"></div>
+</details>
+<details class="state"><summary>run state</summary><pre id="state"></pre></details>
+<script>
+// ---------- choices ----------
+const CHOICES = [
+  { key:"queue", q:"Q6 · A node's queue looks like", opts:[["rail","Rail: grouped, numbered"],["deck","Deck: folded into head ★"],["strict","Strict order: \"2nd in line\""]] },
+  { key:"controls", q:"Q7 · Controls on a card", opts:[["always","Always visible"],["morph","Hover: status turns into action"],["corner","Hover: corner icons ✔ chosen"],["ring","Status ring → action on hover"]] },
+  { key:"queuedVerb", q:"Q7 · Control on a queued run", opts:[["Remove","Remove ★"],["Stop","Stop"]] },
+  { key:"mid", q:"Q8 · Resuming inside a paused queue", opts:[["head","Head only ★"],["upto","Any item: resume up to it"],["from","Any item: skip ahead to it"]] },
+  { key:"resumeAll", q:"Q9 · Resume all lives", opts:[["notice","In a relaunch notice ★"],["header","Always in popover header"],["none","Nowhere"]] },
+  { key:"labels", q:"Q10 · A run that was executing shows", opts:[["distinct","Interrupted by restart ★"],["unified","Paused (same as queued)"]] },
+  { key:"childStop", q:"Q11 · Running agent child (expanded)", opts:[["yes","Has Stop ★"],["no","Status only"]] },
+  { key:"prev", q:"Q11 · After resuming its parent, old children", opts:[["group","Separate \"previous attempt\" ★"],["same","Stay in the same chip"]] },
+  { key:"stopAll", q:"Q13 · Stop all (every running + queued run in the thread)", opts:[["menu","Action in the thread ⋯ menu ★"],["popover","Quiet action in the graph popover"],["header","Header button (current #716 decision)"]] },
+  { key:"landing", q:"Q12 · First look after relaunch", opts:[["closed","Popover closed, badges only ★"],["open","Popover auto-opens"],["openScroll","Auto-opens, scrolls to first paused"]] },
+];
+const params = new URLSearchParams(location.search);
+const opt = Object.fromEntries(CHOICES.map((c) => [c.key, c.opts.some(([v]) => v === params.get(c.key)) ? params.get(c.key) : c.opts.find(([, l]) => l.includes("★") || l.includes("✔"))[0]]));
+let scenario = params.get("scenario") === "live" ? "live" : "relaunch";
+
+// ---------- run model (stub) ----------
+let selected = "t1", expandedAgents = false, expandedPrev = false, expandedDecks = new Set(), popOpen = true, flash = null;
+function liveRuns() {
+  return {
+    t1:{ seq:1, kind:"message", text:"Draft the pricing page structure", status:"accepted" },
+    t2:{ seq:2, kind:"node", target:"Hero", from:"t1", text:"Tighten the hero copy", status:"accepted" },
+    t3:{ seq:3, kind:"node", target:"Tiers table", from:"t1", text:"Make the tiers table responsive", status:"running" },
+    t6:{ seq:4, kind:"invoke", from:"t1", text:"Accessibility audit", status:"running", attempt:1 },
+    t4:{ seq:5, kind:"node", target:"Tiers table", from:"t1", text:"Add an annual billing toggle", status:"queued" },
+    t7:{ seq:6, kind:"message", text:"Summarize competitor pricing", status:"running" },
+    t5:{ seq:7, kind:"node", target:"Tiers table", from:"t1", text:"Highlight the Pro tier", status:"queued" },
+    t9:{ seq:8, kind:"node", target:"Tiers table", from:"t1", text:"Add a feature comparison row", status:"queued" },
+    t8:{ seq:9, kind:"node", target:"FAQ", from:"t1", text:"Answer the refund question", status:"capacity" },
+    c1:{ seq:10, kind:"agent", parent:"t6", attempt:1, text:"Check colour contrast", status:"accepted" },
+    c2:{ seq:11, kind:"agent", parent:"t6", attempt:1, text:"Audit keyboard focus order", status:"running" },
+    c3:{ seq:12, kind:"agent", parent:"t6", attempt:1, text:"Review alt text", status:"running" },
+  };
+}
+function relaunch(runs) {
+  for (const r of Object.values(runs)) {
+    if (r.status === "running" || r.status === "stopping") r.status = r.kind === "agent" ? "failed-restart" : "interrupted";
+    else if (r.status === "queued" || r.status === "capacity") r.status = "paused";
+  }
+  return runs;
+}
+let runs;
+function load() {
+  runs = scenario === "relaunch" ? relaunch(liveRuns()) : liveRuns();
+  selected = "t1"; expandedAgents = false; expandedPrev = false; expandedDecks = new Set(); flash = null;
+  popOpen = scenario === "live" || opt.landing !== "closed";
+}
+const label = (s) => ({ running:"Running", queued:"Queued", capacity:"Waiting for capacity", stopping:"Stopping…", stopped:"Stopped", failed:"Failed",
+  "failed-restart":"Interrupted by restart", accepted:"Response ready", paused:"Paused", discarded:"Discarded",
+  interrupted: opt.labels === "unified" ? "Paused" : "Interrupted by restart" })[s];
+const stClass = (s) => s === "failed-restart" ? "failed" : s === "discarded" ? "stopped" : (s === "interrupted" && opt.labels === "unified") ? "paused" : s;
+const ACTIVE = new Set(["running", "queued", "capacity", "stopping"]);
+const RESUMABLE = new Set(["paused", "interrupted"]);
+const human = () => Object.entries(runs).filter(([, r]) => r.kind !== "agent");
+const chainOf = (id) => { const t = runs[id].target; if (!t) return [id];
+  return human().filter(([, r]) => r.target === t).sort((a, b) => a[1].seq - b[1].seq).map(([k]) => k); };
+const liveChain = (id) => chainOf(id).filter((k) => ACTIVE.has(runs[k].status) || RESUMABLE.has(runs[k].status));
+const isHead = (id) => liveChain(id)[0] === id;
+const ordinal = (n) => n + ({ 1:"st", 2:"nd", 3:"rd" }[n] || "th");
+
+function start(id) {
+  runs[id].status = "running";
+  if (id === "t6") { // a resumed invoke runs fresh on the same node; its new children appear
+    runs.t6.attempt = 2;
+    setTimeout(() => { runs.c4 = { seq:20, kind:"agent", parent:"t6", attempt:2, text:"Check colour contrast", status:"running" };
+      runs.c5 = { seq:21, kind:"agent", parent:"t6", attempt:2, text:"Audit keyboard focus order", status:"running" }; render(); }, 900);
+  }
+}
+// Resume semantics per Q8. Resuming the head starts it; later paused runs re-queue behind it in order.
+function resume(id, mode = "head") {
+  const chain = liveChain(id), at = chain.indexOf(id);
+  if (!runs[id].target) { start(id); return render(); }
+  if (mode === "from") chain.slice(0, at).forEach((k) => { runs[k].status = "discarded"; });
+  const span = mode === "upto" ? chain.slice(0, at + 1) : chain.slice(mode === "from" ? at : 0);
+  span.forEach((k, i) => { if (RESUMABLE.has(runs[k].status)) { if (i === 0) start(k); else runs[k].status = "queued"; } });
+  render();
+}
+function resumeAll() { for (const [k, r] of human()) if (RESUMABLE.has(r.status) && (!r.target || isHead(k))) resume(k); }
+function discard(id) { runs[id].status = "discarded"; render(); }
+function stop(id) {
+  const r = runs[id];
+  if (r.status === "queued" || r.status === "capacity") { r.status = "stopped"; return render(); }
+  r.status = "stopping"; render();
+  setTimeout(() => { r.status = "stopped"; advance(id); render(); }, 900);
+}
+// Stops running runs and removes queued ones; otherwise the queue would start as each head stops.
+function stopAll() { menuOpen = false;
+  for (const r of Object.values(runs)) if (r.status === "queued" || r.status === "capacity") r.status = "stopped";
+  for (const [k, r] of Object.entries(runs)) if (r.status === "running") stop(k);
+  render(); }
+let menuOpen = false;
+function advance(id) { const next = liveChain(id).find((k) => runs[k].status === "queued"); if (next) runs[next].status = "running"; }
+function settle() {
+  const head = human().find(([, r]) => r.status === "running"); if (!head) return;
+  runs[head[0]].status = "accepted"; advance(head[0]);
+  for (const r of Object.values(runs)) if (r.kind === "agent" && r.parent === head[0] && r.status === "running") r.status = "accepted";
+  if (runs.t8.status === "capacity") runs.t8.status = "running";
+  render();
+}
+
+// ---------- rendering ----------
+const COL = 244, X0 = 30, Y0 = 14, GAP = 12;
+function columns() {
+  const level = (r) => r.from ? 1 : 0;
+  const cols = [[], []], placed = new Set();
+  for (const [k, r] of human().sort((a, b) => a[1].seq - b[1].seq)) {
+    if (placed.has(k)) continue;
+    if (opt.queue !== "strict" && r.target) {
+      const chain = chainOf(k), live = liveChain(k);
+      for (const c of chain) {
+        placed.add(c);
+        if (opt.queue === "deck" && live.includes(c) && c !== live[0]) continue;
+        cols[level(r)].push({ id:c, deck: opt.queue === "deck" && c === live[0] ? live.slice(1) : [], rail: opt.queue === "rail" && chain.length > 1 });
+      }
+    } else { cols[level(r)].push({ id:k, deck:[] }); placed.add(k); }
+  }
+  return cols;
+}
+function btn(text, cls, fn, title) { const b = document.createElement("button"); b.className = cls; b.textContent = text; if (title) b.title = title;
+  b.onclick = (e) => { e.stopPropagation(); fn(); }; return b; }
+function resumeButtons(id, mini) {
+  const out = [], chain = liveChain(id), at = chain.indexOf(id), r = runs[id];
+  const pausedIn = (ks) => ks.filter((k) => RESUMABLE.has(runs[k].status)).length;
+  const cls = mini ? "mini primary" : "ib primary";
+  if (!r.target) out.push(btn("Resume", cls, () => resume(id)));
+  else if (at === 0) {
+    const n = opt.mid === "upto" ? 1 : pausedIn(chain);
+    out.push(btn(n > 1 ? `Resume ${n} in order` : "Resume", cls, () => resume(id, opt.mid === "upto" ? "upto" : "head")));
+  } else if (opt.mid === "upto") out.push(btn(mini ? `▶ first ${at + 1}` : `Resume ${at + 1} in order`, cls, () => resume(id, "upto"), `Resume the first ${at + 1} on ${r.target} in order`));
+  else if (opt.mid === "from") out.push(btn(mini ? "▶ skip to" : "Skip ahead to this", cls, () => resume(id, "from"), `Discard the ${at} ahead and resume from here`));
+  return out;
+}
+// One primary action and optional secondary actions per run; each control design renders these.
+function actions(id) {
+  const r = runs[id], a = { primary:null, secondary:[] };
+  const stopA = { text:"Stop", icon:"■", cls:"stop", fn:() => stop(id), title:"Stop this run" };
+  if (r.kind === "agent") { if (r.status === "running" && opt.childStop === "yes") a.primary = stopA; return a; }
+  if (r.status === "running") a.primary = stopA;
+  if (r.status === "queued" || r.status === "capacity") a.primary = { text:opt.queuedVerb, icon:"✕", cls:"stop", fn:() => stop(id), title:`${opt.queuedVerb}: take it out of the queue; its text is kept` };
+  if (RESUMABLE.has(r.status)) {
+    const rb = resumeButtons(id)[0];
+    const discardA = { text:"Discard", icon:"✕", cls:"", fn:() => discard(id), title:"Discard: mark stopped and keep its text" };
+    if (rb) { const n = rb.textContent.match(/(\d+) in order/)?.[1];
+      a.primary = { text:"▶ " + rb.textContent.replace(/^▶ /, ""), icon: n ? `▶ ${n}` : "▶", cls:"primary", fn:rb.onclick, title:rb.title || rb.textContent }; a.secondary.push(discardA); }
+    else a.primary = discardA;
+  }
+  return a;
+}
+function controls(id) {
+  const r = runs[id], c = document.createElement("div"); c.className = "ctl";
+  if (r.kind === "agent") { if (r.status === "running" && opt.childStop === "yes") c.append(btn("Stop", "ib stop", () => stop(id))); return c; }
+  if (r.status === "running") c.append(btn("Stop", "ib stop", () => stop(id)));
+  if (r.status === "queued" || r.status === "capacity") c.append(btn(opt.queuedVerb, "ib stop", () => stop(id), "Take it out of the queue; its text is kept"));
+  if (RESUMABLE.has(r.status)) { c.append(...resumeButtons(id)); c.append(btn("Discard", "ib", () => discard(id), "Mark stopped and keep its text")); }
+  return c;
+}
+function card(id, it) {
+  const r = runs[id], n = document.createElement("div");
+  n.className = `node s-${stClass(r.status)}${selected === id ? " sel" : ""}${r.kind === "agent" ? " agent" : ""}${r.kind === "agent" && r.attempt < (runs.t6.attempt || 1) ? " old" : ""}${it.deck?.length ? " deck" : ""}${flash === id ? " flash" : ""}`;
+  n.tabIndex = 0; n.dataset.id = id;
+  n.onclick = () => { selected = id; render(); };
+  const kind = { message:"Thread message", node:"Node interaction", invoke:"Invoke", agent:"Agent run" }[r.kind];
+  const top = document.createElement("div"); top.className = "kind";
+  top.innerHTML = kind + (r.target ? ` · <span class="tgt"><b>${r.target}</b></span>` : "") + (r.kind === "invoke" && r.attempt > 1 ? ` · <span class="tgt">attempt ${r.attempt}</span>` : "");
+  const lbl = document.createElement("div"); lbl.className = "lbl"; lbl.textContent = r.text;
+  const meta = document.createElement("div"); meta.className = "meta";
+  const st = document.createElement("span"); st.className = "st " + stClass(r.status); st.innerHTML = `<span class="dot"></span>${label(r.status)}`;
+  const acts = actions(id);
+  if (opt.controls === "morph" && acts.primary) {
+    const m = document.createElement("button"); m.className = "morph"; m.title = acts.primary.title;
+    m.onclick = (e) => { e.stopPropagation(); acts.primary.fn(e); };
+    const d = document.createElement("span"); d.className = "do " + acts.primary.cls;
+    d.textContent = acts.primary.cls === "stop" && acts.primary.text === "Stop" ? "■ Stop" : acts.primary.cls === "stop" ? "✕ " + acts.primary.text : acts.primary.text;
+    m.append(st, d); meta.append(m);
+  } else meta.append(st);
+  if (opt.queue === "strict" && r.target && (r.status === "queued" || RESUMABLE.has(r.status)) && !isHead(id)) {
+    const o = document.createElement("span"); o.className = "tgt"; o.textContent = `· ${ordinal(liveChain(id).indexOf(id) + 1)} in line`; meta.append(o);
+  }
+  n.append(top, lbl, meta);
+  const iconBtn = (x, extra = "") => { const b = btn(x.icon, `icon ${x.cls} ${extra}`, x.fn, x.title); b.setAttribute("aria-label", x.title); return b; };
+  if (opt.controls === "always") { const c = controls(id); if (c.children.length) n.append(c); }
+  else if (opt.controls === "morph") { if (acts.secondary.length) { const k = document.createElement("div"); k.className = "corner reveal"; acts.secondary.forEach((x) => k.append(iconBtn(x))); n.append(k); } }
+  else if (opt.controls === "corner") {
+    const k = document.createElement("div"); k.className = "corner reveal";
+    [acts.primary, ...acts.secondary].filter(Boolean).forEach((x) => k.append(iconBtn(x))); if (k.children.length) n.append(k);
+  } else if (opt.controls === "ring") {
+    const k = document.createElement("div"); k.className = "corner";
+    acts.secondary.forEach((x) => k.append(iconBtn(x, "reveal")));
+    const ringState = { running:"running", queued:"queued", capacity:"queued", paused:"paused", interrupted: opt.labels === "unified" ? "paused" : "interrupted" }[r.status];
+    if (ringState) {
+      const g = document.createElement(acts.primary ? "button" : "span"); g.className = `ring ${ringState} ${acts.primary?.cls ?? ""}`;
+      g.innerHTML = `<span class="glyph"></span>${acts.primary ? `<span class="do">${acts.primary.icon}</span>` : ""}`;
+      if (acts.primary) { g.title = acts.primary.title; g.setAttribute("aria-label", acts.primary.title); g.onclick = (e) => { e.stopPropagation(); acts.primary.fn(e); }; }
+      k.append(g);
+    }
+    if (k.children.length) n.append(k);
+  }
+  if (it.deck?.length) {
+    const open = expandedDecks.has(id);
+    const t = document.createElement("button"); t.className = "deck-toggle";
+    const paused = it.deck.filter((k) => RESUMABLE.has(runs[k].status)).length;
+    t.textContent = `${open ? "▾" : "▸"} then ${it.deck.length} more on ${r.target}${paused ? " · paused" : ""}`;
+    t.onclick = (e) => { e.stopPropagation(); open ? expandedDecks.delete(id) : expandedDecks.add(id); render(); };
+    n.append(t);
+    if (open) {
+      const list = document.createElement("div"); list.className = "deck-list";
+      it.deck.forEach((k, i) => {
+        const row = document.createElement("div"); row.className = "deck-item";
+        row.innerHTML = `<span class="n">${i + 2}</span><span class="t" title="${runs[k].text}">${runs[k].text}</span>`;
+        if (RESUMABLE.has(runs[k].status)) { row.append(...resumeButtons(k, true)); row.append(btn("×", "mini", () => discard(k), "Discard")); }
+        else row.append(btn("×", "mini", () => stop(k), opt.queuedVerb));
+        list.append(row);
+      });
+      n.append(list);
+    }
+  }
+  return n;
+}
+
+function renderChoices() {
+  const box = document.getElementById("choices"); box.innerHTML = "";
+  const scen = document.createElement("div"); scen.className = "scen";
+  scen.append(btn("After relaunch", scenario === "relaunch" ? "on" : "", () => { scenario = "relaunch"; load(); land(); }),
+    btn("Live runs", scenario === "live" ? "on" : "", () => { scenario = "live"; load(); render(); }),
+    btn("▶ Simulate: a run finishes", "", settle, "Prototype only: the first running run gets its response accepted, and the next queued run on that node starts"));
+  box.append(scen);
+  for (const c of CHOICES) {
+    const row = document.createElement("div"); row.className = "row";
+    row.innerHTML = `<div class="q">${c.q}</div>`;
+    const seg = document.createElement("div"); seg.className = "seg";
+    for (const [v, l] of c.opts) seg.append(btn(l, opt[c.key] === v ? "on" : "", () => { opt[c.key] = v; if (c.key === "landing") { scenario = "relaunch"; load(); land(); } else render(); }));
+    row.append(seg); box.append(row);
+  }
+}
+
+function render() {
+  const q = new URLSearchParams({ scenario, ...opt }); history.replaceState(null, "", "?" + q);
+  renderChoices();
+  const hs = human().map(([, r]) => r.status);
+  const active = hs.filter((s) => ACTIVE.has(s)).length, running = hs.filter((s) => s === "running").length;
+  const resumable = hs.filter((s) => RESUMABLE.has(s)).length;
+  const count = (s) => hs.filter((x) => x === s).length;
+  document.getElementById("sbAct").innerHTML = active ? '<span class="spin"></span>' : "";
+  document.getElementById("sbBadge").innerHTML = resumable ? `<span class="badge pause">${resumable} paused</span>` : "";
+  const tb = document.getElementById("trigBadge");
+  tb.className = active ? "live" : resumable ? "pause" : ""; tb.textContent = active || resumable || human().length;
+  document.getElementById("trigger").setAttribute("aria-expanded", String(popOpen));
+  const ha = document.getElementById("headerActions"); ha.innerHTML = "";
+  const stoppable = active + Object.values(runs).filter((r) => r.kind === "agent" && r.status === "running").length;
+  if (opt.stopAll === "header" && running >= 2) ha.append(btn(`Stop all (${running})`, "hbtn danger", stopAll));
+  if (opt.stopAll === "menu") {
+    const w = document.createElement("span"); w.className = "menu-wrap";
+    w.append(btn("⋯", "hbtn dots", () => { menuOpen = !menuOpen; render(); }, "Thread actions"));
+    if (menuOpen) {
+      const m = document.createElement("div"); m.className = "menu";
+      const item = (t, k, fn, cls, dis) => { const b = btn("", cls || "", fn); b.innerHTML = `<span>${t}</span><kbd>${k}</kbd>`; b.disabled = !!dis; return b; };
+      m.append(item("Rename thread", "", () => {}), item(stoppable ? `Stop all runs (${active})` : "Stop all runs", "⌘⇧.", stopAll, "danger", !active),
+        item("Archive thread", "", () => {}, "", !!active));
+      w.append(m);
+    }
+    ha.append(w);
+  }
+  document.getElementById("viewing").innerHTML = `Viewing: <strong>${runs[selected].text}</strong> · ${label(runs[selected].status)}`;
+
+  const pop = document.getElementById("pop");
+  const keepScroll = pop.querySelector(".viewport")?.scrollTop ?? 0;
+  pop.hidden = !popOpen;
+  pop.className = `pop q-${opt.queue} c-${opt.controls}`;
+  pop.innerHTML = "";
+  const head = document.createElement("div"); head.className = "pop-head";
+  head.innerHTML = `<span>Interactions</span><span class="grow"></span>`;
+  const unified = opt.labels === "unified";
+  for (const [n, cls, lab] of [[count("running"), "run", "running"], [count("queued"), "queue", "queued"], [count("capacity"), "queue", "waiting for capacity"],
+    [count("paused") + (unified ? count("interrupted") : 0), "pause", "paused"], [unified ? 0 : count("interrupted"), "pause", "interrupted"]])
+    if (n) { const c = document.createElement("span"); c.className = "chip " + cls; c.textContent = `${n} ${lab}`; head.append(c); }
+  if (opt.resumeAll === "header" && resumable) head.append(btn(`Resume all (${resumable})`, "ib primary", resumeAll));
+  if (opt.stopAll === "popover" && active) head.append(btn(`Stop all`, "textact", stopAll, `Stop ${running} running and remove ${active - running} queued`));
+  pop.append(head);
+  if (scenario === "relaunch" && resumable && opt.resumeAll === "notice") {
+    const nt = document.createElement("div"); nt.className = "notice";
+    nt.innerHTML = `<span class="grow">Relayer restarted. ${resumable} runs stopped where they were. Nothing resumes until you do.</span>`;
+    nt.append(btn(`Resume all (${resumable})`, "ib primary", resumeAll)); pop.append(nt);
+  }
+  const vp = document.createElement("div"); vp.className = "viewport";
+  const surf = document.createElement("div"); surf.className = "surface";
+  vp.append(surf); pop.append(vp);
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg"); surf.append(svg);
+  const pos = {};
+  const stack = (items, x, y) => { for (const it of items) { const el = card(it.id, it); const dx = it.rail ? 10 : 0;
+      el.style.left = x + dx + "px"; el.style.top = y + "px"; surf.append(el);
+      pos[it.id] = { x: x + dx, y, h: el.offsetHeight }; y += el.offsetHeight + GAP; } return y; };
+  let bottom = 0;
+  columns().forEach((col, ci) => { bottom = Math.max(bottom, stack(col, X0 + ci * COL, Y0)); });
+  // agent children of the invoke, collapsed by default
+  const attempt = runs.t6.attempt || 1;
+  const kids = Object.entries(runs).filter(([, r]) => r.kind === "agent" && r.parent === "t6");
+  const cur = kids.filter(([, r]) => opt.prev === "same" || r.attempt === attempt);
+  const old = opt.prev === "group" ? kids.filter(([, r]) => r.attempt < attempt) : [];
+  const ax = X0 + COL * 2 + 6;
+  const summary = (list) => { const run = list.filter(([, r]) => r.status === "running").length, intr = list.filter(([, r]) => r.status === "failed-restart").length;
+    return `${list.length} agent runs${run ? ` · ${run} running` : ""}${intr ? ` · ${intr} interrupted` : ""}`; };
+  const chips = [];
+  let y = pos.t6.y + 8;
+  if (expandedAgents && cur.length) y = stack(cur.map(([k]) => ({ id:k })), ax, Y0);
+  if (cur.length) chips.push({ cls:"agents", text: expandedAgents ? "▴ hide agent runs" : "+" + summary(cur), y, fn: () => { expandedAgents = !expandedAgents; render(); } });
+  else if (attempt > 1) chips.push({ cls:"agents", text:"starting agent runs…", y, fn: () => {} });
+  if (old.length) {
+    let prevY = y + 36;
+    if (expandedPrev) { const lbl = document.createElement("div"); lbl.className = "group-label"; lbl.textContent = "Previous attempt";
+      lbl.style.left = ax + "px"; lbl.style.top = prevY + "px"; surf.append(lbl); prevY = stack(old.map(([k]) => ({ id:k })), ax, prevY + 16); }
+    chips.push({ cls:"agents prev", text: expandedPrev ? "▴ hide previous attempt" : `previous attempt · ${summary(old)}`, y: prevY, fn: () => { expandedPrev = !expandedPrev; render(); } });
+  }
+  for (const c of chips) { const b = btn(c.text, c.cls, c.fn); b.style.left = ax + "px"; b.style.top = c.y + "px"; surf.append(b); bottom = Math.max(bottom, c.y + 34); }
+  const W = ax + 200 + 12, H = bottom + 8;
+  surf.style.width = W + "px"; surf.style.height = H + "px"; svg.setAttribute("width", W); svg.setAttribute("height", H);
+  // provenance edges only (never sequence edges)
+  const edge = (a, b, cls) => { if (!a || !b) return; const p = document.createElementNS(svg.namespaceURI, "path");
+    const x = a.x + 204, y1 = a.y + 28, tx = b.x, ty = b.y + (b.h ? 28 : 13);
+    p.setAttribute("d", `M${x} ${y1} C${x + 30} ${y1}, ${tx - 30} ${ty}, ${tx} ${ty}`); if (cls) p.setAttribute("class", cls); svg.append(p); };
+  for (const [k, r] of human()) if (r.from && pos[k]) edge(pos[r.from], pos[k], r.kind === "invoke" ? "invoke" : "");
+  if (expandedAgents) cur.forEach(([k]) => edge(pos.t6, pos[k], "agent")); else if (chips[0]) edge(pos.t6, { x: ax, y: chips[0].y }, "agent");
+  // rail: groups a node's queue; a decoration, not an edge
+  if (opt.queue === "rail") {
+    const groups = new Map();
+    for (const [k, r] of human()) if (r.target && chainOf(k).length > 1) groups.set(r.target, chainOf(k));
+    for (const chain of groups.values()) {
+      const ps = chain.map((k) => pos[k]); const top = ps[0].y + 14, bot = ps[ps.length - 1].y + 40;
+      const rail = document.createElement("div"); rail.className = "rail";
+      rail.style.left = ps[0].x - 14 + "px"; rail.style.top = top + "px"; rail.style.height = bot - top + "px"; surf.append(rail);
+      let n = 0;
+      chain.forEach((k) => { const live = liveChain(k).includes(k); if (live) n++;
+        const o = document.createElement("div"); o.className = "ord"; o.textContent = live ? n : "✓";
+        if (!live) { o.style.borderColor = "var(--line-strong)"; o.style.color = "var(--faint)"; }
+        o.style.left = pos[k].x - 23 + "px"; o.style.top = pos[k].y + 20 + "px"; surf.append(o); });
+    }
+  }
+  vp.scrollTop = keepScroll;
+  document.getElementById("state").textContent = Object.entries(runs).map(([k, r]) => `${k} ${r.status.padEnd(15)} ${r.target ?? r.kind}`).join("\n");
+  return vp;
+}
+// Q12: optionally bring the first run that needs attention into view (in reading order) and flash it.
+function focusFirstPaused() {
+  const ids = human().filter(([k, r]) => RESUMABLE.has(r.status) && (!r.target || isHead(k))).map(([k]) => k);
+  const vp = render();
+  const nodes = ids.map((k) => vp.querySelector(`[data-id="${k}"]`)).filter(Boolean)
+    .sort((a, b) => a.offsetLeft - b.offsetLeft || a.offsetTop - b.offsetTop);
+  if (!nodes.length) return;
+  flash = nodes[0].dataset.id; const vp2 = render(); vp2.scrollTop = Math.max(0, nodes[0].offsetTop - 20);
+}
+function land() { if (opt.landing === "openScroll" && popOpen) focusFirstPaused(); else render(); }
+document.getElementById("trigger").onclick = () => { popOpen = !popOpen;
+  if (popOpen && scenario === "relaunch" && opt.landing !== "open") focusFirstPaused(); else render(); };
+load();
+land();
+</script>
+</body>
+</html>
