@@ -24,12 +24,14 @@ export function interactionActivity(interaction) {
 /**
  * A thread's symbol from its human turns, as the app server computes it for thread lists. Runs
  * from invoke actions run beside the message turns, so the most urgent active turn wins over
- * the latest one; otherwise the latest turn's failure shows.
+ * the latest one; otherwise the latest turn's failure shows. An agent's child never makes the
+ * thread running, but its approval request is the user's to answer.
  */
-export function threadActivity(turns = []) {
+export function threadActivity(turns = [], agentChildren = []) {
   const active = turns.filter(runIsActive);
   const stopping = (turn) => turn.stopRequested && !turn.stopError;
-  if (active.some((turn) => turn.completionStatus === "waiting_for_approval" && !stopping(turn))) return "needs_approval";
+  const needsApproval = (turn) => runIsActive(turn) && turn.completionStatus === "waiting_for_approval" && !stopping(turn);
+  if (turns.some(needsApproval) || agentChildren.some(needsApproval)) return "needs_approval";
   if (active.some(stopping)) return "stopping";
   if (active.length > 0) return "running";
   return turns.at(-1)?.completionStatus === "failed" ? "failed" : null;

@@ -513,7 +513,10 @@ impl InteractionExecutionService {
                     match runtime.approval_events(thread.id.value(), interaction.id.value(), cursor).await {
                         Ok(snapshot) => {
                             if let Err(error) = persist_approval_snapshot(
-                                execution,
+                                ApprovalRecorder {
+                                    product: &execution.product,
+                                    decisions: &execution.approval_decisions,
+                                },
                                 thread.id,
                                 interaction.id,
                                 &mut cursor,
@@ -535,7 +538,10 @@ impl InteractionExecutionService {
                             match final_approval_acknowledgement(cursor, &acknowledgement) {
                                 Ok(true) => {
                                     if let Err(error) = persist_approval_snapshot(
-                                        execution,
+                                        ApprovalRecorder {
+                                            product: &execution.product,
+                                            decisions: &execution.approval_decisions,
+                                        },
                                         thread.id,
                                         interaction.id,
                                         &mut cursor,
@@ -578,7 +584,10 @@ impl InteractionExecutionService {
                     match runtime.approval_events(thread.id.value(), interaction.id.value(), cursor).await {
                         Ok(snapshot) => {
                             if let Err(error) = persist_approval_snapshot(
-                                execution,
+                                ApprovalRecorder {
+                                    product: &execution.product,
+                                    decisions: &execution.approval_decisions,
+                                },
                                 thread.id,
                                 interaction.id,
                                 &mut cursor,
@@ -1300,8 +1309,15 @@ pub(crate) fn final_approval_acknowledgement(
     Err("harness did not acknowledge the exact final approval event cursor".into())
 }
 
-async fn persist_approval_snapshot(
-    execution: &InteractionExecutionService,
+/// Where an observer records a completion's approval events: the product store, and the user
+/// decisions in flight that authorize a user's resolution.
+pub(crate) struct ApprovalRecorder<'a> {
+    pub(crate) product: &'a ProductService,
+    pub(crate) decisions: &'a Mutex<HashMap<String, ApprovalDecision>>,
+}
+
+pub(crate) async fn persist_approval_snapshot(
+    recorder: ApprovalRecorder<'_>,
     thread_id: ThreadId,
     interaction_id: InteractionId,
     cursor: &mut u64,
@@ -1335,7 +1351,7 @@ async fn persist_approval_snapshot(
                     complete_call_id,
                     &request.correlation,
                 )?;
-                execution
+                recorder
                     .product
                     .record_approval_request(&request)
                     .await
@@ -1349,8 +1365,13 @@ async fn persist_approval_snapshot(
                     complete_call_id,
                     &resolution.correlation,
                 )?;
-                validate_event_resolution_authority(execution, &resolution).await?;
-                execution
+                validate_event_resolution_authority(
+                    recorder.product,
+                    recorder.decisions,
+                    &resolution,
+                )
+                .await?;
+                recorder
                     .product
                     .record_approval_resolution(&resolution, true)
                     .await
@@ -1373,7 +1394,7 @@ async fn persist_approval_snapshot(
             complete_call_id,
             &request.correlation,
         )?;
-        execution
+        recorder
             .product
             .record_approval_request(&request)
             .await
@@ -1433,22 +1454,21 @@ pub(crate) fn validate_decision_resolution(
 }
 
 async fn validate_event_resolution_authority(
-    execution: &InteractionExecutionService,
+    product: &ProductService,
+    approval_decisions: &Mutex<HashMap<String, ApprovalDecision>>,
     resolution: &ApprovalResolution,
 ) -> Result<(), String> {
     if resolution.actor != ApprovalActor::User {
         return Ok(());
     }
-    let stored = execution
-        .product
+    let stored = product
         .get_approval(&resolution.request_id)
         .await
         .map_err(|error| error.to_string())?;
     if stored.resolution.as_ref() == Some(resolution) {
         return Ok(());
     }
-    let decision = execution
-        .approval_decisions
+    let decision = approval_decisions
         .lock()
         .expect("approval decision lock poisoned")
         .get(&resolution.request_id)

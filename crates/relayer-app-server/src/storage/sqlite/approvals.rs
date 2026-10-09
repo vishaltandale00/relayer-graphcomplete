@@ -131,6 +131,26 @@ impl SqliteProductStore {
         .await?;
 
         let interaction_id = receipt.request.correlation.interaction_id;
+        // An agent's child ends only through its own graph settlement, which its observers
+        // project onto its row. An approval's end, whatever its outcome, never makes the row
+        // terminal: once nothing is pending the child is running again until it settles.
+        let agent_child: bool = sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM action_invocations WHERE result_interaction_id=?1 AND agent_invoked=1)",
+        )
+        .bind(interaction_id)
+        .fetch_one(&mut *transaction)
+        .await?;
+        if agent_child {
+            sqlx::query(
+                "UPDATE interactions SET completion_status='running' WHERE id=?1 AND completion_status='waiting_for_approval' AND NOT EXISTS(SELECT 1 FROM approval_requests request LEFT JOIN approval_resolutions resolution ON resolution.request_id=request.request_id WHERE request.interaction_id=?1 AND resolution.request_id IS NULL)",
+            )
+            .bind(interaction_id)
+            .execute(&mut *transaction)
+            .await?;
+            receipt.resolution = Some(resolution.clone());
+            transaction.commit().await?;
+            return Ok(receipt);
+        }
         match resolution.outcome {
             ApprovalOutcome::Approved | ApprovalOutcome::Denied => {
                 let pending: i64 = sqlx::query_scalar(
@@ -420,6 +440,75 @@ mod tests {
                 .completion_status,
             "running"
         );
+        drop(store);
+    }
+
+    /// An agent's child ends only through its own graph settlement. An approval that ends as
+    /// aborted, cancelled or expired returns the child to running instead of ending its row,
+    /// so the settlement its observers project never conflicts with it.
+    #[tokio::test]
+    async fn an_agent_childs_approval_never_ends_its_row() {
+        let (store, _directory) = store().await;
+        let thread = store
+            .insert_thread_with_initial_interaction(crate::storage::NewThreadRecord {
+                icon_selection_eligible: true,
+                title: "Thread",
+                project_id: None,
+                initial_message: "Question",
+                harness_configuration_name: "test",
+                permission_profile_id: "ask",
+                model_selection: None,
+                timestamp: "1",
+            })
+            .await
+            .unwrap();
+        let child = sqlx::query("INSERT INTO interactions(thread_id,sequence,text,created_at,completion_status,permission_profile_id) VALUES (?1,2,'Child','2','running','ask')")
+            .bind(thread.id.value())
+            .execute(&store.pool)
+            .await
+            .unwrap()
+            .last_insert_rowid();
+        sqlx::query("INSERT INTO action_invocations(source_interaction_id,action_id,result_interaction_id,created_at,graph_lease_required,authoritative,agent_invoked) VALUES (?1,41,?2,'2',1,1,1)")
+            .bind(thread.root_interaction_id.value())
+            .bind(child)
+            .execute(&store.pool)
+            .await
+            .unwrap();
+        let status = |store: &SqliteProductStore| {
+            let store = store.clone();
+            async move {
+                store
+                    .get_interaction(InteractionId::from_database(child))
+                    .await
+                    .unwrap()
+                    .unwrap()
+                    .completion_status
+            }
+        };
+        for (index, outcome) in [
+            ApprovalOutcome::Aborted,
+            ApprovalOutcome::Cancelled,
+            ApprovalOutcome::Expired,
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let mut pending = request(&thread, &format!("child-request-{index}"));
+            pending.correlation.interaction_id = child;
+            store.record_approval_request(&pending).await.unwrap();
+            assert_eq!(status(&store).await, "waiting_for_approval");
+            let ended = ApprovalResolution {
+                actor: ApprovalActor::Host,
+                decision: None,
+                rationale: Some("The run ended.".into()),
+                ..resolution(&pending, ApprovalOutcome::Approved)
+            };
+            store
+                .record_approval_resolution(&ApprovalResolution { outcome, ..ended }, false)
+                .await
+                .unwrap();
+            assert_eq!(status(&store).await, "running", "{outcome:?}");
+        }
         drop(store);
     }
 

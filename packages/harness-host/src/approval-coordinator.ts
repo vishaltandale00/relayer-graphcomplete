@@ -178,6 +178,47 @@ export class HarnessApprovalCoordinator {
     });
   }
 
+  /**
+   * A completion no product observer reads: an agent's child the product never recorded. Each
+   * request ends at once as aborted with `rationale`, so the provider sees why instead of
+   * waiting for a decision nobody can make. Nothing is retained, so its id never enters `streams`.
+   */
+  beginUnobservedCompletion(authority: HarnessApprovalCompletionAuthority, rationale: string): HarnessApprovalChannel {
+    if (this.closed) throw new HarnessApprovalCoordinatorError("approval_completion_inactive", "Harness approval session is closed");
+    if (!Number.isSafeInteger(authority.interactionId) || authority.interactionId < 1 || authority.completeCallId.trim() === "") {
+      throw new HarnessApprovalCoordinatorError("invalid_approval_request", "Harness approval completion authority is invalid");
+    }
+    const terminationRationale = approvalRationale(rationale, "unobserved completion rationale");
+    return Object.freeze({
+      request: async (input: HarnessApprovalRequestInput) => {
+        let request: HarnessApprovalRequest;
+        try {
+          request = createHarnessApprovalRequest(input, {
+            requestId: this.nextRequestId(),
+            threadId: this.options.threadId,
+            interactionId: authority.interactionId,
+            completeCallId: authority.completeCallId,
+            harnessSessionId: this.harnessSessionId,
+            createdAt: this.now(),
+          });
+        } catch (error) {
+          throw new HarnessApprovalCoordinatorError(
+            "invalid_approval_request",
+            error instanceof Error ? error.message : String(error),
+          );
+        }
+        throw new HarnessApprovalRequestTerminatedError({
+          requestId: request.requestId,
+          correlation: publicCorrelation(request),
+          outcome: "aborted",
+          actor: "host",
+          resolvedAt: this.now(),
+          rationale: terminationRationale,
+        });
+      },
+    });
+  }
+
   endCompletion(
     completeCallId: string,
     outcome: Extract<HarnessApprovalTerminalOutcome, "cancelled" | "aborted"> = "aborted",

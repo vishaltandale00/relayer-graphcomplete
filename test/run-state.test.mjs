@@ -24,6 +24,9 @@ describe("explicit run-state symbols", () => {
     // A run a model failure returned to unsent is not running.
     expect(threadActivity([turn("not_started", { latestAttempt: { outcome: "model_failed" } })])).toBeNull();
     expect(threadActivity([])).toBeNull();
+    // An agent's child never makes the thread running, but its approval request is the user's.
+    expect(threadActivity([turn("accepted")], [turn("running")])).toBeNull();
+    expect(threadActivity([turn("accepted")], [turn("waiting_for_approval")])).toBe("needs_approval");
   });
 
   it("marks a node as draft, or with the latest child run its actions started", () => {
