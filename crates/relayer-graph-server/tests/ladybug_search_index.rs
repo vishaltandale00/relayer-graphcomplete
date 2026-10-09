@@ -137,6 +137,8 @@ async fn build_and_complete(database: &GraphDatabase) -> NodeId {
             description: None,
             target_layer_id: Some(reference_child.id),
             interaction_text: None,
+            reusable: None,
+            input_action_ids: Vec::new(),
             input: None,
         })
         .await
@@ -154,6 +156,8 @@ async fn build_and_complete(database: &GraphDatabase) -> NodeId {
             description: None,
             target_layer_id: Some(child.id),
             interaction_text: None,
+            reusable: None,
+            input_action_ids: Vec::new(),
             input: None,
         })
         .await
@@ -171,6 +175,8 @@ async fn build_and_complete(database: &GraphDatabase) -> NodeId {
             description: None,
             target_layer_id: Some(root.id),
             interaction_text: None,
+            reusable: None,
+            input_action_ids: Vec::new(),
             input: None,
         })
         .await
@@ -218,6 +224,8 @@ fn imported_conversation(project_id: Option<ProjectId>) -> ImportedConversation 
                     description: None,
                     target_layer_id: Some("layer-1".into()),
                     interaction_text: None,
+                    reusable: None,
+                    input_action_ids: Vec::new(),
                     input: None,
                 },
                 root_layer_id: "layer-1".into(),
@@ -960,6 +968,8 @@ async fn an_import_referenced_by_another_thread_is_not_removed_from_either_store
             description: None,
             target_layer_id: Some(imported_layer),
             interaction_text: None,
+            reusable: None,
+            input_action_ids: Vec::new(),
             input: None,
         })
         .await
@@ -977,6 +987,8 @@ async fn an_import_referenced_by_another_thread_is_not_removed_from_either_store
             description: None,
             target_layer_id: Some(root.id),
             interaction_text: None,
+            reusable: None,
+            input_action_ids: Vec::new(),
             input: None,
         })
         .await

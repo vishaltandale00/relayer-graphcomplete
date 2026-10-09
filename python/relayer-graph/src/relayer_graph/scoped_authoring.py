@@ -283,7 +283,21 @@ class ScopedGraphAuthoring:
                             raise GraphAuthoringValidationError("Navigation needs an explicit accepted layer record")
                         else:
                             target = target.id
-                    actions.append((_path(layer._key, "actions", key), source, action, replace(action, target=target, options=_copy(action.options))))
+                    inputs = []
+                    for reference in action.input_actions:
+                        if type(reference) is int and reference > 0:
+                            inputs.append(reference)
+                            continue
+                        if type(reference) is dict and "id" in reference:
+                            if reference.get("kind") != "input" or reference.get("state") != "accepted" or type(reference["id"]) is not int or reference["id"] < 1:
+                                raise GraphAuthoringValidationError("Invoke needs an explicit accepted Input action record")
+                            inputs.append(reference["id"])
+                            continue
+                        declared = next(((owner, candidate) for owner, candidate in layer._actions.values() if candidate is reference), None)
+                        if declared is None or declared[0] is not source or reference.kind != "input":
+                            raise GraphAuthoringValidationError("Invoke Inputs must be declared on the same source Node and scoped Layer")
+                        inputs.append(replace(reference, options=_copy(reference.options), icon=_copy(reference.icon)))
+                    actions.append((_path(layer._key, "actions", key), source, action, replace(action, target=target, options=_copy(action.options), icon=_copy(action.icon), input_actions=tuple(inputs))))
 
             visit(root)
             keys = {key for layer, _, _ in layers for key in [layer.object.client_key,
@@ -329,8 +343,7 @@ class ScopedGraphAuthoring:
                             route.waypoints) for route in captured.layout.edge_routes])
                     result = await self._client.submit_layer(LayerObject([node_ref(node) for node in captured.nodes],
                         [edge_ref(edge) for edge in captured.edges], layout, captured.client_key,
-                        None if captured.default_node is None else node_ref(captured.default_node), renderer=captured.renderer),
-                        size_justification=justification)
+                        None if captured.default_node is None else node_ref(captured.default_node), renderer=captured.renderer), size_justification=justification)
                     layer_results[id(layer.object)] = result
                     layer.object.ref = result
                     return result
@@ -338,7 +351,8 @@ class ScopedGraphAuthoring:
             for action_path, source, original, action in actions:
                 async def submit_action(source: NodeObject = source, original: ActionObject = original, action: ActionObject = action) -> Any:
                     fields = replace(action, source_layer=layer_results[id(action.source_layer)],
-                                     target=layer_results[id(action.target)] if id(action.target) in layer_results else action.target)
+                                     target=layer_results[id(action.target)] if id(action.target) in layer_results else action.target,
+                                     input_actions=tuple(entry if type(entry) is int else replace(entry, source_layer=layer_results[id(entry.source_layer)]) for entry in action.input_actions))
                     response = await self._client._add_captured_action(node_ref(source), original, fields)
                     result = dict(response["action"])
                     action_results.append(result)

@@ -1,4 +1,6 @@
 import { createHash } from "node:crypto";
+import { DatabaseSync } from "node:sqlite";
+import { restoreHistoricalInvokePolicy } from "./support/historical-invoke-policy.mjs";
 import { pathToFileURL } from "node:url";
 import { createShareServiceClient } from "../desktop/main/services/share-service-client.mjs";
 import { renderPublicViewerTemplate } from "../desktop/renderer/src/public-share-viewer/template.js";
@@ -71,6 +73,15 @@ it("preserves accepted attached navigation, converted invokes, rich controls and
   const source = detail.interactions[0];
   const sourceLayer = source.completionOutput.rootLayer;
   const invoke = sourceLayer.actions[0];
+  // This portability checkpoint is specifically about historical converted
+  // invokes. New reusable Invocation replay belongs to its separate protocol.
+  const legacyGraph = new DatabaseSync(join(directory, "graphcomplete-runtime/graph.sqlite3"));
+  try {
+    restoreHistoricalInvokePolicy(legacyGraph, invoke.id);
+    legacyGraph.exec("DROP TRIGGER completion_contract_marker_guard; DROP TRIGGER completion_contract_delete_guard;");
+    legacyGraph.prepare("UPDATE completion_states SET completion_contract_digest=NULL WHERE interaction_node_id=?").run(source.graphNodeId);
+    legacyGraph.prepare("DELETE FROM completion_contracts WHERE interaction_node_id=?").run(source.graphNodeId);
+  } finally { legacyGraph.close(); }
   const invocation = await request(session, `/api/threads/${thread.id}/interactions/${source.id}/actions/${invoke.id}/invoke`, {});
   expect(invocation.created).toBe(true);
   detail = await accepted(session, thread.id, 1);

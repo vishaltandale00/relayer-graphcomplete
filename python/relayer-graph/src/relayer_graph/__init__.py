@@ -1,7 +1,7 @@
 """Object-based Python client for the GraphComplete Rust graph engine."""
 
-from .authoring import (ActionVariant, CompletionInputGraph, EdgeObject, GraphAuthoringClient, GraphEdge,
-                        GraphLayer, GraphNode, InteractionContext, InteractionInput, InteractionPermissions,
+from .authoring import (ActionVariant, CompletionContract, CompletionInputGraph, EdgeObject, GraphAuthoringClient, GraphEdge,
+                        GraphInvocation, GraphLayer, GraphNode, InteractionContext, InteractionInput, InteractionPermissions,
                         InteractionInputNode, SubmittedInput,
                         EdgeEnd, EdgeEndObject, EdgeRoute, EdgeRouteObject, LayerLayout, LayerLayoutObject,
                         InputControl, InputOption, LayerObject, NavigateRelation, NodeObject, NodePlacement,
@@ -37,6 +37,8 @@ __all__ = [
     "MAX_EDGE_ROUTE_WAYPOINTS", "EdgeEndObject", "EdgeRouteObject", "EdgeEnd", "EdgeRoute",
     "ActionVariant", "NavigateRelation", "InputControl", "InputOption",
     "CompletionInputGraph",
+    "CompletionContract",
+    "GraphInvocation",
     "complete", "CompletionHandle", "CompletionCurrent", "CompletionCurrentSnapshot", "CompletionWatch",
     "CompletionTerminalError",
     "RelayerGraphError", "ConfigurationError", "TransportError", "APIError",

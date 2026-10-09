@@ -196,6 +196,21 @@ impl SqliteProductStore {
             .bind(thread_id.value())
             .fetch_all(&mut *tx)
             .await?;
+            let rows = rows
+                .into_iter()
+                .filter(|row| {
+                    input.composer_input_occurrences.is_none_or(|occurrences| {
+                        occurrences.iter().any(|occurrence| {
+                            row.try_get::<i64, _>("presenting_interaction_node_id").ok()
+                                == Some(occurrence.presenting_interaction_node_id.value())
+                                && row.try_get::<i64, _>("presenting_layer_id").ok()
+                                    == Some(occurrence.presenting_layer_id.value())
+                                && row.try_get::<i64, _>("action_id").ok()
+                                    == Some(occurrence.action_id.value())
+                        })
+                    })
+                })
+                .collect::<Vec<_>>();
             if rows.is_empty() {
                 None
             } else {
@@ -311,17 +326,17 @@ impl SqliteProductStore {
             .bind(&timestamp)
             .execute(&mut *tx)
             .await?;
+            // Snapshot and consume only the trusted ordinary-Send occurrence set.
+            let selected = input
+                .composer_input_occurrences
+                .map(serde_json::to_string)
+                .transpose()
+                .map_err(|error| StorageError::Serialization(error.to_string()))?;
             sqlx::query(
-                "INSERT INTO interaction_submitted_input_attachments(interaction_id,presenting_interaction_node_id,presenting_layer_id,action_id,source_node_id,action_json,value_json,committed_at) SELECT ?1,presenting_interaction_node_id,presenting_layer_id,action_id,source_node_id,action_json,value_json,committed_at FROM action_input_attachments WHERE thread_id=?2",
-            )
-            .bind(id)
-            .bind(thread_id.value())
-            .execute(&mut *tx)
-            .await?;
-            sqlx::query("DELETE FROM action_input_attachments WHERE thread_id=?1")
-                .bind(thread_id.value())
-                .execute(&mut *tx)
-                .await?;
+                "INSERT INTO interaction_submitted_input_attachments(interaction_id,presenting_interaction_node_id,presenting_layer_id,action_id,source_node_id,action_json,value_json,committed_at) SELECT ?1,a.presenting_interaction_node_id,a.presenting_layer_id,a.action_id,a.source_node_id,a.action_json,a.value_json,a.committed_at FROM action_input_attachments a WHERE a.thread_id=?2 AND (?3 IS NULL OR EXISTS (SELECT 1 FROM json_each(?3) scope WHERE json_extract(scope.value,'$.presentingInteractionNodeId')=a.presenting_interaction_node_id AND json_extract(scope.value,'$.presentingLayerId')=a.presenting_layer_id AND json_extract(scope.value,'$.actionId')=a.action_id))",
+            ).bind(id).bind(thread_id.value()).bind(selected).execute(&mut *tx).await?;
+            sqlx::query("DELETE FROM action_input_attachments WHERE thread_id=?1 AND EXISTS (SELECT 1 FROM interaction_submitted_input_attachments submitted WHERE submitted.interaction_id=?2 AND submitted.presenting_interaction_node_id=action_input_attachments.presenting_interaction_node_id AND submitted.presenting_layer_id=action_input_attachments.presenting_layer_id AND submitted.action_id=action_input_attachments.action_id)")
+                .bind(thread_id.value()).bind(id).execute(&mut *tx).await?;
             let advanced = sqlx::query(
                 "UPDATE action_input_drafts SET revision=revision+1,updated_at=?1 WHERE thread_id=?2 AND revision=?3",
             )
@@ -570,6 +585,7 @@ mod tests {
             .insert_interaction_input(
                 ThreadId::from_database(clean_thread),
                 NewInteractionInput {
+                    composer_input_occurrences: None,
                     text: "Prompt",
                     input_identity: "empty-revision-zero",
                     input_digest: &input_digest,
@@ -603,6 +619,7 @@ mod tests {
             .insert_interaction_input(
                 ThreadId::from_database(changed_thread),
                 NewInteractionInput {
+                    composer_input_occurrences: None,
                     text: "Prompt",
                     input_identity: "stale-empty-revision",
                     input_digest: &input_digest,
@@ -659,6 +676,7 @@ mod tests {
             .insert_interaction_input(
                 ThreadId::from_database(thread_id),
                 NewInteractionInput {
+                    composer_input_occurrences: None,
                     text: "Use context",
                     input_identity: "send-confirmed",
                     input_digest: "sha256:confirmed",
@@ -796,6 +814,7 @@ mod tests {
         }];
         let confirmation_ids = vec!["draft-replay".to_owned()];
         let input = || NewInteractionInput {
+            composer_input_occurrences: None,
             text: "Use context",
             input_identity: "send-replay",
             input_digest: "sha256:replay",
@@ -839,6 +858,7 @@ mod tests {
             .insert_interaction_input(
                 ThreadId::from_database(thread_id),
                 NewInteractionInput {
+                    composer_input_occurrences: None,
                     input_digest: "sha256:changed",
                     ..input()
                 },
@@ -912,6 +932,7 @@ mod tests {
             .insert_interaction_input(
                 ThreadId::from_database(thread_id),
                 NewInteractionInput {
+                    composer_input_occurrences: None,
                     text: "Use context",
                     input_identity: "send-duplicate-confirmations",
                     input_digest: "sha256:duplicate-confirmations",
@@ -977,6 +998,7 @@ mod tests {
             annotations: vec!["  raw bytes stay  ".into(), "second\nline".into()],
         }];
         let input = NewInteractionInput {
+            composer_input_occurrences: None,
             text: "",
             input_identity: "send-1",
             input_digest: "sha256:v1:one",
@@ -1008,6 +1030,7 @@ mod tests {
             .insert_interaction_input(
                 ThreadId::from_database(thread_id),
                 NewInteractionInput {
+                    composer_input_occurrences: None,
                     text: "",
                     input_identity: "send-1",
                     input_digest: "sha256:v1:one",
@@ -1028,6 +1051,7 @@ mod tests {
             .insert_interaction_input(
                 ThreadId::from_database(thread_id),
                 NewInteractionInput {
+                    composer_input_occurrences: None,
                     text: "changed",
                     input_identity: "send-1",
                     input_digest: "sha256:v1:two",

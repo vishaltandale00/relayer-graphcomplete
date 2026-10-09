@@ -1006,7 +1006,10 @@ describe("managed runtime installer", () => {
     });
     serverChild.stdin.on("finish", () => {
       serverChild.exitCode = 0;
-      queueMicrotask(() => serverChild.emit("exit", 0, null));
+      queueMicrotask(() => {
+        serverChild.emit("exit", 0, null);
+        serverChild.emit("close", 0, null);
+      });
     });
 
     const spawnProcess = vi.fn()
@@ -1015,6 +1018,7 @@ describe("managed runtime installer", () => {
           versionChild.stdout.end("codex-cli 0.147.0\n");
           versionChild.exitCode = 0;
           versionChild.emit("exit", 0, null);
+          versionChild.emit("close", 0, null);
         });
         return versionChild;
       })
@@ -1043,6 +1047,7 @@ describe("managed runtime installer", () => {
         child.stdout.end("claude 0.3.250\n");
         child.exitCode = 0;
         child.emit("exit", 0, null);
+        child.emit("close", 0, null);
       });
       return child;
     });
@@ -1072,6 +1077,7 @@ describe("managed runtime installer", () => {
         child.stdout.end("claude 0.3.250\n");
         child.exitCode = 0;
         child.emit("exit", 0, null);
+        child.emit("close", 0, null);
       });
       return child;
     };
@@ -1098,6 +1104,7 @@ describe("managed runtime installer", () => {
         child.stdout.end("claude 0.3.250\n");
         child.exitCode = 0;
         child.emit("exit", 0, null);
+        child.emit("close", 0, null);
       });
       return child;
     };
@@ -1115,7 +1122,10 @@ describe("managed runtime installer", () => {
     child.stderr = new PassThrough();
     child.exitCode = null;
     child.signalCode = null;
-    child.kill = vi.fn(() => true);
+    child.kill = vi.fn(() => {
+      queueMicrotask(() => child.emit("close", null, "SIGTERM"));
+      return true;
+    });
     const probe = createDefaultRuntimeProbes({
       spawnProcess: () => child,
       importModule: async () => ({ query: () => {} }),

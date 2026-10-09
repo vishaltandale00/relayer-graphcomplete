@@ -4,7 +4,8 @@
 // a video (whole, a segment), an image, Markdown (whole, a heading), a page with a
 // script error, and a deployed https site. No model runs.
 import { EdgeObject, LayerLayoutObject, LayerObject, NodeObject, NodePlacementObject, RelayerGraphClient, type ArtifactDetails } from "@relayer/graph-client";
-import { renderInteractionInput, type Harness, type HarnessConfiguration, type HarnessFactory, type HarnessFactoryContext, type HarnessRunContext, type HarnessSessionState, type HarnessTraceSupport } from "@relayer/harness-host";
+import { renderInteractionInput, type ArtifactNoteInteractionInput, type Harness, type HarnessConfiguration, type HarnessFactory, type HarnessFactoryContext, type HarnessRunContext, type HarnessSessionState, type HarnessTraceSupport } from "@relayer/harness-host";
+import { createHash } from "node:crypto";
 import { appendFile, copyFile, cp, mkdir, readFile, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -89,6 +90,14 @@ export const ARTIFACT_VIEWER_FIXTURE_GROUPS: readonly Group[] = [
       { key: "deployed", icon: "link", title: "Deployed site", detail: "The preview deployment over https.", label: "Deployed site", artifact: { kind: "url", source: { url: "https://example.com/" } } },
     ],
   },
+  {
+    key: "office", icon: "briefcase", title: "Office documents", detail: "The wholesale proposal, the 2027 budget and the seed deck.",
+    views: [
+      { key: "proposal", icon: "file-text", title: "Wholesale proposal", detail: "The Word proposal for the Harbour Hotel.", label: "Proposal", artifact: { kind: "docx", source: { file: "docs/wholesale-proposal.docx" } } },
+      { key: "budget", icon: "file-spreadsheet", title: "Budget 2027", detail: "Quarterly costs with saved totals, and the assumptions sheet.", label: "Budget", artifact: { kind: "xlsx", source: { file: "docs/budget-2027.xlsx" } } },
+      { key: "deck-chart", icon: "presentation", title: "Subscribers by quarter", detail: "Slide 3 of the seed deck: its chart.", label: "Seed deck (slide 3)", artifact: { kind: "pptx", source: { file: "docs/seed-pitch.pptx" }, part: { slide: 3 } } },
+    ],
+  },
 ];
 
 class ArtifactViewerFixtureHarness implements Harness {
@@ -112,11 +121,17 @@ class ArtifactViewerFixtureHarness implements Harness {
     // ART-011: what the agent receives for artifact notes, screenshot files included.
     if (previewEvidence && context.interactionInput.contexts.length) {
       // The turn folder holding the screenshots is removed after the turn, so look now.
-      const screenshots = await Promise.all(context.interactionInput.contexts.flatMap((item) => item.annotations).map(async (note) => {
-        const file = /screenshot (\/\S+\.png)/u.exec(note)?.[1];
-        const head = file ? await readFile(file).then((bytes) => bytes.subarray(0, 4).toString("hex"), () => null) : null;
-        return { note, file, png: head === "89504e47" };
-      }));
+      const input = context.interactionInput as ArtifactNoteInteractionInput;
+      const screenshots = await Promise.all(input.contexts.flatMap(item => item.annotations.map(async (note, annotationIndex) => {
+        const digest = /screenshot sha256:([0-9a-f]{64})$/u.exec(note)?.[1];
+        const materialized = input.artifactNoteScreenshots?.find(screenshot => screenshot.targetNodeId === item.targetNode.id
+          && screenshot.annotationIndex === annotationIndex && screenshot.digestSha256 === digest);
+        const file = input.completionContract ? materialized?.path ?? undefined : /screenshot (\/\S+\.png)/u.exec(note)?.[1];
+        const bytes = file ? await readFile(file).catch(() => Buffer.alloc(0)) : Buffer.alloc(0);
+        const hashMatches = digest === undefined ? undefined : createHash("sha256").update(bytes).digest("hex") === digest;
+        return { note, file, targetNodeId: item.targetNode.id, annotationIndex, digestSha256: digest, hashMatches,
+          png: bytes.subarray(0, 4).toString("hex") === "89504e47" && hashMatches !== false };
+      })));
       await writeFile(join(previewEvidence, `input-${context.inputGraph.id}.json`), JSON.stringify(screenshots, null, 2));
     }
     // A follow-up that carries artifact notes gets a short answer that links back from
@@ -147,7 +162,7 @@ class ArtifactViewerFixtureHarness implements Harness {
       await graph.createEdge(edge);
       edges.push(edge);
     }
-    const spots = [[0.5, 0.2], [0.15, 0.7], [0.32, 0.85], [0.5, 0.88], [0.68, 0.85], [0.85, 0.7]] as const;
+    const spots = [[0.5, 0.18], [0.12, 0.6], [0.24, 0.84], [0.42, 0.9], [0.58, 0.9], [0.76, 0.84], [0.88, 0.6]] as const;
     const root = new LayerObject(
       groups.map(({ node }) => node),
       edges,

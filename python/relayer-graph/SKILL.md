@@ -102,7 +102,7 @@ route's ends are just the edge's two nodes, not a direction.
 
 <!-- Mirrors packages/harness-host/src/implementations/artifact-layer-guidance.ts. -->
 Artifacts: when your work produced something the user should see as itself,
-such as a website, a PDF, a video, an image or a Markdown document in the
+such as a website, a PDF, a video, an image, a Markdown or Office document in the
 thread folder, or a deployed site, give it an artifact layer. Relayer opens that
 layer full screen in its artifact viewer instead of a graph. Create the files
 first, then author the artifact node and its layer, and open the layer from an
@@ -127,10 +127,11 @@ That sets the artifact renderer, centered layout and default node. Target
 
 Kinds: "website" (an entry .html file plus its site root folder), "pdf",
 "video" (.mp4, .webm, .mov), "image" (.png, .jpg, .gif, .webp, .svg),
-"markdown" (.md), and "url" (https, or http only on localhost). File paths are
+"markdown" (.md), "docx", "xlsx" and "pptx" (Office), and "url" (https, or http
+only on localhost). File paths are
 relative to the thread folder and must stay inside it. A part opens the artifact
 at one place: a route for websites, web apps and URLs, a page for PDFs (from 1), start and
-end seconds for a video segment, or a heading for Markdown. A viewport
+end seconds for a video segment, a heading for Markdown, or a slide for a deck. A viewport
 ("desktop", "tablet", "phone") applies to websites, web apps and URLs only. Show two views
 of one artifact as two artifact nodes, each in its own artifact layer. An
 artifact layer holds exactly that one node and no edges; never put an artifact
@@ -144,6 +145,13 @@ folder. Relayer reuses a server that already answers, or runs the command after
 the user approves it once per thread. A website or web app may set a starting
 state that Relayer applies on every open; web apps may also seed cookies. Seeds
 hold test values only, never real credentials or personal data.
+
+Office documents are kind "docx" (Word), "xlsx" (Excel) or "pptx" (PowerPoint);
+a deck can open at a slide (`"part": {"slide": 3}`, from 1). Save spreadsheets
+with their calculated values, for example by recalculating in LibreOffice before
+you finish, because Relayer shows saved values and never recalculates: formulas
+without them render blank. Charts in a deck may draw wrongly, so export a PDF
+next to any deck with charts and point the artifact at the PDF.
 
 ```python
 app = NodeObject("server", "Order desk", "The running checkout app.", client_key="order-desk")

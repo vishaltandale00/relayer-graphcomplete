@@ -29,16 +29,46 @@ A frozen description of the exact graph operations a completion may perform,
 derived from that interaction's product origin and attachments.
 _Avoid_: Runtime token, permission profile
 
+**CompletionContract**:
+The immutable, versioned input, exceptional authority and Return requirements owned by one sealed InteractionNode.
+_Avoid_: Harness configuration, private prompt
+
+**InvokeAction**:
+A callable definition owned by one response Node. It permits one call by default; reusable definitions explicitly permit multiple distinct calls.
+_Avoid_: Invocation, execution attempt
+
+**Invoke input binding**:
+An explicit relationship from an InvokeAction to the input actions whose current values that call accepts and consumes as arguments. Nearby fields are not implicitly bound.
+
+**Invocation**:
+A durable call reference binding one InvokeAction to at most one child InteractionNode and its recorded outcomes.
+_Avoid_: Provider session, action conversion
+
+**SubCompletion Graph**:
+The derived view of source response Nodes, Invocation relationships and their child InteractionNodes within the cumulative graph.
+_Avoid_: Provider subagent topology, separate graph store
+
+**Current Layer**:
+The latest published response Layer of a completion that may still be working.
+
+**Returned Layer**:
+The Layer selected as an interaction's full response when it Returns.
+
+**Accepted-history change**:
+A narrowly authorized change to graph content accepted before the interaction, staged as part of that interaction's response transaction.
+
 **Attached response navigation obligation**:
 A frozen acceptance requirement for every distinct attached native node to expose a new control leading to the interaction's response. It is separate from permission to add navigation.
 
 **Invoke resolution**:
-The one-time acceptance of an invoked interaction's response, turning its exact
-source action into navigation while preserving that action's identity.
+The recording of an Invocation's returned graph while retaining its InvokeAction identity. Historical versions may instead retain a one-time action conversion.
 
 **Context attachment**:
 A user-selected node and its causal occurrence, supplied as input to an interaction.
 It may confer narrowly bounded navigation authority on the node, never general edit authority.
+
+**Input declaration reference**:
+An authoring-time reference from an Invoke declaration to an exact Input declaration on the same response Node, resolved to a canonical Input action identity when persisted.
 
 **Shared thread snapshot**:
 An immutable, public, read-only conversation-export v1 projection of one local

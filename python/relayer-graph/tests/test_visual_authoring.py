@@ -14,6 +14,62 @@ from relayer_graph.exceptions import AuthenticationError, ValidationError
 
 
 class VisualAuthoringTests(unittest.IsolatedAsyncioTestCase):
+    def test_input_binding_does_not_shift_legacy_positional_action_fields(self):
+        action = ActionObject('input', 'Destination', None, 'destination', None, None, None,
+                              'text', 'Where?', (), None, 'pill', None, None)
+        self.assertEqual(action.control, 'text')
+        self.assertEqual(action.prompt, 'Where?')
+        self.assertEqual(action.input_actions, ())
+
+    async def test_invoke_binding_survives_visual_snapshot_and_direct_authoring(self):
+        node = NodeObject('box', 'Vacations', 'Compare', client_key='vacations')
+        layer = LayerObject([node], [], LayerLayoutObject([], 'default'), client_key='vacations-layer')
+        layer.ref = types.SimpleNamespace(id=8)
+        action = ActionObject('invoke', 'Compare', layer, 'compare', interaction_text='Update comparison', input_actions=(21, 22))
+        node.detail_authoring.set_component('main', html(['<button gc=', '>Compare</button>'], action_capability('compare', action)))
+        wire = node.detail_authoring.to_wire(node)
+        self.assertEqual(wire['components'][0]['markup']['values'][0]['action']['inputActions'], [21, 22])
+        self.assertFalse(wire['components'][0]['markup']['values'][0]['action']['reusable'])
+        calls = []
+        async def request(method, path, body=None):
+            calls.append((method, path, body))
+            return {**body, 'id': 40}
+        graph = GraphSession('http://unused', 'run', 1)
+        graph._request = request
+        written = await graph.add_action(7, action)
+        self.assertEqual(calls[0][:2], ('POST', '/api/graph/actions'))
+        self.assertEqual(calls[0][2]['inputActionIds'], [21, 22])
+        self.assertEqual(written['inputActionIds'], [21, 22])
+        self.assertFalse(written['reusable'])
+        reusable = ActionObject('invoke', 'Compare', layer, 'compare', interaction_text='Update comparison', reusable=True)
+        self.assertTrue(reusable.to_detail_wire(node)['reusable'])
+        with self.assertRaises(ValueError):
+            ActionObject('invoke', 'Compare', layer, 'compare', reusable='true').to_detail_wire(node)
+
+    async def test_exact_completion_contract_and_invocation_identity(self):
+        graph = GraphSession("http://unused", "run", 1)
+        contract = {"schemaVersion": 1, "interactionNodeId": 1,
+                    "input": {"text": "Ask", "context": [{"nodeId": 2, "annotations": ["exact"]}], "answers": [], "invocationReferences": []},
+                    "authorities": [{"kind": "navigate.add", "nodeId": 2}],
+                    "returnRequirements": [{"kind": "navigate.response", "nodeId": 2}],
+                    "digest": "sha256:v1:fixture"}
+        async def request(method, path, body=None):
+            if path == "/api/graph/completions/prepare":
+                self.assertEqual(body, {"actionId": 3, "invocationKey": "research-call"})
+                return {"interactionNode": 4, "invocationId": 5}
+            self.assertEqual((method, path), ("GET", "/api/graph/input"))
+            return {"interaction": {"id": 1, "kind": "interaction", "icon": "box", "title": "Ask", "detail": "Ask", "state": "accepted"},
+                    "completionContract": contract, "completionContractStatus": "sealed"}
+        graph._request = request
+        parsed = await graph.get_contract()
+        self.assertEqual(parsed.digest, contract["digest"])
+        self.assertEqual(parsed.input["context"][0]["annotations"], ("exact",))
+        with self.assertRaises(TypeError):
+            parsed.input["text"] = "rewrite"
+        with self.assertRaises(TypeError):
+            parsed.authorities[0]["nodeId"] = 99
+        self.assertEqual((await graph.prepare_complete(3, "research-call")).interaction_node, 4)
+
     async def test_presentation_read_and_frozen_policy_versions(self):
         from relayer_graph import InteractionInput
         node = {"id": 1, "kind": "interaction", "icon": "box", "title": "Ask", "detail": "Ask", "state": "accepted"}
@@ -30,6 +86,22 @@ class VisualAuthoringTests(unittest.IsolatedAsyncioTestCase):
             graph._request = request
             self.assertEqual((await graph.get_interaction_input()).interaction_permissions, policy)
             self.assertEqual((await graph.get_node_presentation(2))["node"]["clientKey"], "persistent")
+
+    async def test_reads_typed_per_call_results(self):
+        graph = GraphSession("http://unused", "run", 1)
+        async def request(method, path, body=None):
+            self.assertEqual((method, path), ("GET", "/api/graph/actions/44/invocations"))
+            return {"invocations": [{"id": 3, "invocationKey": "research", "sourceCompletionId": 1,
+                    "sourceActionId": 44, "parentNodeId": 2, "childInteractionNodeId": 5,
+                    "actionSnapshot": {"instruction": "Research"},
+                    "state": {"lifecycle": "succeeded", "currentLayerId": 6, "finalLayerId": 6}}]}
+        graph._request = request
+        (invocation,) = await graph.get_invocations(44)
+        self.assertEqual(invocation.parent_node_id, 2)
+        self.assertEqual(invocation.child_interaction_node_id, 5)
+        self.assertEqual(invocation.state["finalLayerId"], 6)
+        with self.assertRaises(TypeError):
+            invocation.action_snapshot["instruction"] = "Rewrite"
 
     async def test_session_binding_snapshot_and_frozen_submission(self):
         node = NodeObject('box', 'Answer', 'Fallback', client_key='answer')

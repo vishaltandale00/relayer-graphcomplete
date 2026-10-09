@@ -13,7 +13,10 @@ import { fingerprintPath } from "@relayer/harness-host";
 
 export const ARTIFACT_SCHEME = "relayer-artifact";
 const ORIGIN = `${ARTIFACT_SCHEME}://view`;
-const FILE_KINDS = new Set(["website", "pdf", "video", "image", "markdown"]);
+const OFFICE_KINDS = new Set(["docx", "xlsx", "pptx"]);
+const FILE_KINDS = new Set(["website", "pdf", "video", "image", "markdown", ...OFFICE_KINDS]);
+/** Viewer scripts the artifact scheme serves from the renderer's vendor folder. */
+const VENDOR_SCRIPTS = Object.freeze({ "/__relayer/marked.js": "marked.umd.js", "/__relayer/office.js": "artifact-office.js" });
 
 const MIME = {
   ".html": "text/html; charset=utf-8", ".htm": "text/html; charset=utf-8", ".js": "text/javascript", ".mjs": "text/javascript",
@@ -50,8 +53,12 @@ function routePath(route) {
 /** Media in every frame pauses while the user writes a note, then resumes. */
 const PAUSE_MEDIA_SCRIPT = `window.__relayerNotePaused = [...document.querySelectorAll("video,audio")].filter((m) => !m.paused); window.__relayerNotePaused.forEach((m) => m.pause());`;
 const RESUME_MEDIA_SCRIPT = `(window.__relayerNotePaused || []).forEach((m) => m.play().catch(() => {})); window.__relayerNotePaused = [];`;
-async function eachFrame(contents, script) {
-  await Promise.all(contents.mainFrame.framesInSubtree.map((frame) => frame.executeJavaScript(script).catch(() => {})));
+async function eachFrame(contents, script, timeoutMs = 5_000) {
+  // A busy page may never answer; pausing or resuming media is best effort, never a hang.
+  let timer;
+  const expired = new Promise((done) => { timer = setTimeout(done, timeoutMs); });
+  await Promise.race([Promise.all(contents.mainFrame.framesInSubtree.map((frame) => frame.executeJavaScript(script).catch(() => {}))), expired]);
+  clearTimeout(timer);
 }
 
 /** Distinct page errors reported per open. */
@@ -100,9 +107,10 @@ export function artifactViewPlan(artifact, threadFolder) {
       query.set("end", String(part.end));
     }
     if (kind === "markdown" && typeof part.heading === "string") query.set("heading", part.heading);
+    if (kind === "pptx" && Number.isSafeInteger(part.slide)) query.set("slide", String(part.slide));
     url = `${ORIGIN}/__relayer/view?${query}`;
   }
-  const address = `${file}${kind === "website" ? routePath(part.route) : kind === "pdf" && part.page ? ` · page ${part.page}` : ""}`;
+  const address = `${file}${kind === "website" ? routePath(part.route) : kind === "pdf" && part.page ? ` · page ${part.page}` : kind === "pptx" && part.slide ? ` · slide ${part.slide}` : ""}`;
   return Object.freeze({ kind, url, address, folder, entry, file: resolve(threadFolder, file), source: file, thread: resolve(threadFolder) });
 }
 
@@ -139,8 +147,25 @@ if(heading){const want=heading.toLowerCase();const target=[...doc.querySelectorA
 document.addEventListener("click",(event)=>{const link=event.target.closest?.('a[href^="#"]');if(!link)return;event.preventDefault();document.getElementById(decodeURIComponent(link.getAttribute("href").slice(1)))?.scrollIntoView();});
 }).catch((error)=>{doc.textContent=error.message;console.error(error.message);});</script></body>`);
   }
+  if (OFFICE_KINDS.has(kind)) {
+    const slide = Number(query.get("slide"));
+    return shell(`<main id="office"></main><script src="/__relayer/office.js"></script>
+<script>relayerOffice.render(${scriptJson(kind)}, ${scriptJson(src)}, { slide: ${Number.isSafeInteger(slide) && slide >= 1 ? slide : "null"} });</script>`, `<style>${OFFICE_STYLES}</style>`);
+  }
   return shell(`<p class="center">Unsupported artifact.</p>`);
 }
+
+/** Word pages on grey, Excel as a light sheet with tabs, PowerPoint slides scaled to the width. */
+const OFFICE_STYLES = `#office[data-kind="docx"] .docx-wrapper{background:#2a2b2e;padding:32px 16px}
+#office[data-kind="xlsx"]{min-height:100%;background:#fbfaf7;color:#1d2a2a}
+.office-sheet-tabs{position:sticky;top:0;display:flex;gap:4px;padding:10px 16px;background:#eceae4;border-bottom:1px solid #d6d3cb}
+.office-sheet-tab{border:1px solid transparent;border-radius:6px;padding:4px 12px;background:none;font:inherit;color:inherit;cursor:pointer}
+.office-sheet-tab[aria-selected="true"]{background:#fff;border-color:#d6d3cb;font-weight:600}
+.office-sheet{padding:16px;overflow:auto}.office-sheet-limit{margin:0 0 12px;color:#6b6a65}.office-sheet table{border-collapse:collapse;font-variant-numeric:tabular-nums}
+.office-sheet td{border:1px solid #dcd9d1;padding:4px 10px;white-space:nowrap}.office-sheet td[data-t="n"]{text-align:right}
+#office[data-kind="pptx"]{display:flex;flex-direction:column;align-items:center;padding:24px 0 50vh}
+.office-slide{zoom:var(--slide-zoom,1);position:relative;width:960px;height:540px;margin-bottom:24px;overflow:hidden;background:#fff;box-shadow:0 8px 30px rgba(0,0,0,.45)}
+.office-error{padding:48px;text-align:center}`;
 
 async function respondWithFile(path, request, root) {
   // Open without following a link swapped in after the containment check, then stream
@@ -177,7 +202,8 @@ async function respondWithFile(path, request, root) {
 }
 
 /** Serve one artifact's folder. Every path is resolved through links and must stay inside it. */
-export function createArtifactRequestHandler({ getPlan, markedPath }) {
+/** `vendorDirectory` holds the viewer scripts in VENDOR_SCRIPTS. */
+export function createArtifactRequestHandler({ getPlan, vendorDirectory }) {
   return async (request) => {
     try {
       if (request.method !== "GET" && request.method !== "HEAD") return new Response(null, { status: 405 });
@@ -187,8 +213,8 @@ export function createArtifactRequestHandler({ getPlan, markedPath }) {
       if (url.pathname === SEED_PATH) {
         return new Response("<!doctype html><title></title>", { headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" } });
       }
-      if (url.pathname === "/__relayer/marked.js") {
-        return new Response(await readFile(markedPath), { headers: { "Content-Type": "text/javascript" } });
+      if (Object.hasOwn(VENDOR_SCRIPTS, url.pathname)) {
+        return new Response(await readFile(join(vendorDirectory, VENDOR_SCRIPTS[url.pathname])), { headers: { "Content-Type": "text/javascript; charset=utf-8" } });
       }
       if (url.pathname === "/__relayer/view") {
         return new Response(viewerPage(url.searchParams.get("kind"), url.searchParams.get("file") ?? "", url.searchParams), {
@@ -253,14 +279,26 @@ async function clearSession(ses) {
 
 const hardened = new WeakSet();
 
-/** Serve the session's current plan on the artifact scheme and refuse every permission and download. */
+/**
+ * A website may load internet assets such as fonts (PRD 6.6.4); every other file kind
+ * loads nothing from the network, not even a link an Office document points at.
+ */
+export function blocksNetwork(plan, url) {
+  return plan != null && !addressedByUrl(plan.kind) && plan.kind !== "website" && /^(https?|wss?|ftp):/u.test(url);
+}
+
+/**
+ * Serve the session's current plan on the artifact scheme, keep file kinds off the network,
+ * and refuse every permission and download. The viewer and agent previews both use it.
+ */
 function hardenArtifactSession(ses, { getPlan, rendererDirectory }) {
   if (hardened.has(ses)) return;
   hardened.add(ses);
   ses.protocol.handle(ARTIFACT_SCHEME, createArtifactRequestHandler({
     getPlan,
-    markedPath: join(rendererDirectory, "vendor", "marked.umd.js"),
+    vendorDirectory: join(rendererDirectory, "vendor"),
   }));
+  ses.webRequest.onBeforeRequest((details, callback) => callback({ cancel: blocksNetwork(getPlan(), details.url) }));
   ses.setPermissionRequestHandler((_contents, _permission, callback) => callback(false));
   ses.setPermissionCheckHandler(() => false);
   ses.setDevicePermissionHandler?.(() => false);
@@ -296,9 +334,32 @@ export function artifactPreviewSize(artifact, size) {
   return ["website", "url", "app"].includes(artifact?.kind) ? ARTIFACT_VIEWPORTS[artifact.viewport] ?? size : size;
 }
 
-/** How long a loaded artifact settles before capture: PDFs and video paint late. */
-export function artifactPreviewSettleMs(kind) {
-  return ({ pdf: 1500, video: 1200 })[kind] ?? 600;
+/**
+ * Wait until a loaded artifact is ready to capture. An Office page says when it has drawn,
+ * up to 10 s; other kinds settle for a fixed time, since PDFs and video paint late.
+ * `evaluate` runs a script in the page.
+ */
+export async function artifactPreviewSettled(kind, evaluate, timeoutMs = 10_000) {
+  if (!OFFICE_KINDS.has(kind)) return new Promise((done) => setTimeout(done, ({ pdf: 1500, video: 1200 })[kind] ?? 600));
+  await officeDrawn(evaluate, timeoutMs);
+}
+
+/**
+ * Wait until an Office page says it has drawn (or failed to), up to `timeoutMs`. A page busy
+ * parsing may never answer, so each check races the time left; one still drawing at the
+ * deadline throws, so nothing captures a blank or half-drawn document.
+ */
+async function officeDrawn(evaluate, timeoutMs = 10_000) {
+  const until = Date.now() + timeoutMs;
+  while (Date.now() < until) {
+    let timer;
+    const expired = new Promise((done) => { timer = setTimeout(() => done(null), until - Date.now()); });
+    const ready = await Promise.race([evaluate(`document.getElementById("office")?.dataset.ready ?? null`).catch(() => null), expired]);
+    clearTimeout(timer);
+    if (ready) return;
+    await new Promise((done) => setTimeout(done, 100));
+  }
+  throw new Error("The document did not finish drawing in time.");
 }
 
 /**
@@ -317,11 +378,6 @@ export function createArtifactPreviewCapture({ BrowserWindow, session, rendererD
     plan = artifactViewPlan(artifact, folder);
     if (!addressedByUrl(plan.kind) && !(await stat(plan.file).then((info) => info.isFile(), () => false))) throw new Error("The artifact file is missing.");
     await clearSession(ses);
-    // The preview loads what the viewer would: a website may use internet assets such as
-    // fonts; a PDF, video, image or Markdown file loads nothing from the network.
-    ses.webRequest.onBeforeRequest((details, callback) => callback({
-      cancel: plan !== null && !addressedByUrl(plan.kind) && plan.kind !== "website" && /^(https?|wss?|ftp):/u.test(details.url),
-    }));
     const viewport = artifactPreviewSize(artifact, size);
     const window = new BrowserWindow({
       show: false,
@@ -344,7 +400,7 @@ export function createArtifactPreviewCapture({ BrowserWindow, session, rendererD
           // The agent previews the same starting state the viewer will apply.
           await applySeed(contents, plan, artifact.seed);
           await contents.loadURL(plan.url);
-          await new Promise((done) => setTimeout(done, artifactPreviewSettleMs(plan.kind)));
+          await artifactPreviewSettled(plan.kind, (script) => contents.executeJavaScript(script));
           // Report logical pixels, like graph previews; a photo-heavy page can exceed the cap, so halve it until it fits.
           let image = await contents.capturePage();
           if (image.getSize().width !== viewport.width) image = image.resize({ width: viewport.width, height: viewport.height, quality: "best" });
@@ -362,7 +418,6 @@ export function createArtifactPreviewCapture({ BrowserWindow, session, rendererD
       clearTimeout(deadline);
       if (!window.isDestroyed()) window.destroy();
       plan = null;
-      ses.webRequest.onBeforeRequest(null);
       await clearSession(ses).catch(() => {});
     }
   };
@@ -409,12 +464,14 @@ const NOTE_LOCATION_SCRIPT = `(() => {
   const video = document.querySelector("video");
   const doc = document.querySelector("#doc");
   const headings = doc ? [...doc.querySelectorAll("h1,h2,h3,h4")].filter((h) => h.getBoundingClientRect().top <= 80) : [];
-  return { time: video ? video.currentTime : null, heading: headings.at(-1)?.textContent ?? null, scroll: scrollY };
+  const office = typeof window.relayerOfficeLocation === "function" ? window.relayerOfficeLocation() : {};
+  return { time: video ? video.currentTime : null, heading: office.heading ?? headings.at(-1)?.textContent ?? null, slide: office.slide ?? null, sheet: office.sheet ?? null, scroll: scrollY };
 })()`;
 
 /**
- * The page reports only numbers and, for Markdown, the heading in view; the address comes
- * from the view itself. A site can still choose its own path and hash, so both are bounded.
+ * The page reports numbers, plus the heading in view for Markdown and Word and the sheet
+ * for Excel, each cut to 80 characters; the address comes from the view itself. A site can
+ * still choose its own path and hash, so both are bounded.
  */
 function noteLocation(plan, reported, url) {
   const time = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
@@ -423,10 +480,16 @@ function noteLocation(plan, reported, url) {
   if (plan.kind === "video") return Number.isFinite(seconds) ? `at ${time(seconds)}` : "in the video";
   if (plan.kind === "image") return "the whole image";
   if (plan.kind === "pdf") return `in ${basename(plan.file)}${/#page=(\d+)/u.test(url) ? `, page ${url.match(/#page=(\d+)/u)[1]}` : ""}`;
-  if (plan.kind === "markdown") {
-    const heading = String(reported?.heading ?? "").replace(/\s+/gu, " ").trim().slice(0, 80);
+  const text = (value) => String(value ?? "").replace(/\s+/gu, " ").trim().slice(0, 80);
+  if (plan.kind === "markdown" || plan.kind === "docx") {
+    const heading = text(reported?.heading);
     return heading ? `under “${heading}”` : "at the top";
   }
+  if (plan.kind === "pptx") {
+    const slide = Number(reported?.slide);
+    return Number.isSafeInteger(slide) && slide >= 1 ? `on slide ${slide}` : "in the deck";
+  }
+  if (plan.kind === "xlsx") return text(reported?.sheet) ? `on the “${text(reported.sheet)}” sheet` : "in the spreadsheet";
   let place = url;
   try { const parsed = new URL(url); place = `${parsed.pathname}${parsed.search}${parsed.hash}`; } catch {}
   return `at ${place.slice(0, 160)}${scroll > 0 ? `, scrolled ${scroll} px` : ""}`;
@@ -597,15 +660,19 @@ export function createArtifactViewerService({
     const viewing = current;
     if (!viewing?.view || !notesDirectory) return null;
     const contents = viewing.view.webContents;
-    await eachFrame(contents, PAUSE_MEDIA_SCRIPT);
-    // A capture can stall while Chromium paints no frames; never leave the viewer waiting.
+    // A capture can stall while Chromium paints no frames, and a busy page may never answer
+    // a script; never leave the viewer waiting on either.
     const bounded = (promise) => Promise.race([promise, new Promise((_, reject) => setTimeout(() => reject(new Error("The view could not be captured.")), 5_000))]);
+    // A note on an Office document captures it once drawn, never half-rendered; one that
+    // does not finish drawing fails the note before anything is paused.
+    if (OFFICE_KINDS.has(viewing.plan.kind)) await officeDrawn((script) => contents.executeJavaScript(script));
     // Anything that fails after the pause must resume the media it paused.
     let png;
     let digest;
     let created = false;
     let reported;
     try {
+      await eachFrame(contents, PAUSE_MEDIA_SCRIPT);
       try {
         let image = await bounded(contents.capturePage());
         if (image.getSize().width > 1440) image = image.resize({ width: 1440, quality: "best" });
@@ -626,7 +693,7 @@ export function createArtifactViewerService({
       // Screenshots are content-addressed: one an earlier note already holds stays its own.
       await writeFile(join(notesDirectory, `${digest}.png`), png, { mode: 0o600, flag: "wx" })
         .then(() => { created = true; }, (error) => { if (error.code !== "EEXIST") throw error; });
-      reported = await contents.executeJavaScript(NOTE_LOCATION_SCRIPT).catch(() => null);
+      reported = await bounded(contents.executeJavaScript(NOTE_LOCATION_SCRIPT)).catch(() => null);
     } catch (error) {
       if (current === viewing) await endNote();
       throw error;
@@ -686,4 +753,4 @@ export function createArtifactViewerService({
   return Object.freeze({ open, close, setBounds, openExternally, openLink, beginNote, endNote, isOpen: () => current !== null, currentPlan: () => current?.plan ?? null, currentContents: () => current?.view.webContents ?? null });
 }
 
-export const artifactViewerTesting = Object.freeze({ viewerPage, ORIGIN, basename });
+export const artifactViewerTesting = Object.freeze({ viewerPage, noteLocation, eachFrame, NOTE_LOCATION_SCRIPT, ORIGIN, basename });

@@ -10,6 +10,24 @@ const snapshot = new TextEncoder().encode(`${JSON.stringify({
 })}\n${JSON.stringify({ recordType: "turn" })}\n`);
 
 describe("share publication coordinator", () => {
+  it("never publishes or uploads when native reusable Invocation export is unavailable", async () => {
+    const report = vi.fn();
+    const upload = vi.fn();
+    const service = createShareServiceClient({ endpoint: "https://share.example.test", fetchImpl: upload, uploadFetchImpl: upload });
+    const publish = vi.fn(service.publish);
+    const coordinator = createSharePublishCoordinator({
+      exportSnapshot: async () => { throw new ShareSnapshotExportError("reusable_invocation_portability_unavailable"); },
+      accountSession: async () => ({ ownerKey: "owner-a", authorization: "Bearer a", generation: 1 }),
+      sourceThreadIdentity: async () => "thread:1",
+      publish,
+      issueHandledShareFailureReporter: () => ({ report }),
+    });
+    await expect(coordinator.create({ threadId: 1, title: "Analysis" })).resolves.toMatchObject({ code: "reusable_invocation_portability_unavailable", retryable: false });
+    expect(publish).not.toHaveBeenCalled();
+    expect(upload).not.toHaveBeenCalled();
+    expect(report).not.toHaveBeenCalled();
+  });
+
   it("maps service oversize rejection to a terminal desktop failure across recovery", async () => {
     const client = createShareServiceClient({
       endpoint: "https://share.example.test",

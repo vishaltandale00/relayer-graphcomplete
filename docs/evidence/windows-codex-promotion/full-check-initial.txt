@@ -1,0 +1,471 @@
+
+> relayer-graphcomplete@0.0.0 precheck
+> npm run prepare:renderer
+
+
+> relayer-graphcomplete@0.0.0 prepare:renderer
+> node scripts/prepare-renderer-vendor.mjs
+
+design: H · Sticker × Cocoa (designs/h-sticker-cocoa.json, sha256 dd6ce4a4fc65, 0 floor warnings)
+
+> relayer-graphcomplete@0.0.0 check
+> cargo fmt --all -- --check && cargo clippy --workspace --all-targets --all-features -- -D warnings && cargo test --workspace && npm run check:graph-crash-reconciliation && cargo build -p relayer-app-server -p relayer-graph-server && npm run build:packages && tsc --noEmit && npm run check --workspaces --if-present && vitest run && npm run test:codex-secret-boundary && PYTHONPATH=python/relayer-graph/src python3 -m unittest discover -s python/relayer-graph/tests && npm run lint:ladybug-receipt && npm run prd:check-readability
+
+   Compiling proc-macro2 v1.0.107
+   Compiling unicode-ident v1.0.24
+   Compiling quote v1.0.47
+   Compiling libc v0.2.189
+   Compiling find-msvc-tools v0.1.11
+   Compiling shlex v2.0.1
+   Compiling cc v1.4.3
+    Checking smallvec v1.15.2
+    Checking cfg-if v1.0.4
+   Compiling serde v1.0.229
+    Checking stable_deref_trait v1.2.1
+   Compiling syn v2.0.119
+   Compiling syn v3.0.3
+   Compiling icu_normalizer_data v2.3.0
+   Compiling icu_properties_data v2.3.0
+    Checking itoa v1.0.18
+   Compiling serde_core v1.0.229
+    Checking futures-core v0.3.34
+    Checking pin-project-lite v0.2.17
+   Compiling parking_lot_core v0.9.12
+   Compiling version_check v0.9.5
+    Checking memchr v2.8.3
+   Compiling generic-array v0.14.7
+    Checking bytes v1.12.1
+   Compiling synstructure v0.13.2
+    Checking errno v0.3.14
+   Compiling rand_core v0.6.4
+   Compiling siphasher v1.0.4
+   Compiling phf_shared v0.11.3
+   Compiling rand v0.8.7
+   Compiling zerovec-derive v0.11.5
+   Compiling displaydoc v0.2.7
+   Compiling serde_derive v1.0.229
+   Compiling zerofrom-derive v0.1.7
+   Compiling yoke-derive v0.8.2
+   Compiling tracing-attributes v0.1.31
+    Checking zerofrom v0.1.8
+    Checking yoke v0.8.3
+    Checking litemap v0.8.3
+    Checking writeable v0.6.4
+    Checking futures-sink v0.3.34
+    Checking once_cell v1.21.4
+    Checking zerovec v0.11.7
+    Checking log v0.4.33
+   Compiling autocfg v1.5.1
+    Checking zerotrie v0.2.5
+    Checking tinystr v0.8.4
+    Checking potential_utf v0.1.6
+   Compiling phf_generator v0.11.3
+   Compiling tokio-macros v2.7.2
+    Checking icu_locale_core v2.3.0
+    Checking signal-hook-registry v1.4.8
+    Checking mio v1.2.2
+    Checking socket2 v0.6.5
+    Checking percent-encoding v2.3.2
+    Checking utf8_iter v1.0.4
+   Compiling zmij v1.0.23
+    Checking icu_collections v2.3.0
+    Checking tokio v1.53.1
+    Checking icu_provider v2.3.0
+    Checking scopeguard v1.2.0
+    Checking lock_api v0.4.14
+   Compiling crossbeam-utils v0.8.22
+    Checking icu_properties v2.3.0
+    Checking icu_normalizer v2.3.0
+    Checking form_urlencoded v1.2.2
+    Checking tracing-core v0.1.36
+    Checking slab v0.4.12
+    Checking futures-task v0.3.34
+    Checking futures-io v0.3.34
+    Checking futures-util v0.3.34
+    Checking tracing v0.1.44
+    Checking idna_adapter v1.2.2
+   Compiling thiserror v2.0.20
+   Compiling typenum v1.20.1
+    Checking parking_lot v0.12.5
+    Checking idna v1.1.0
+   Compiling phf_codegen v0.11.3
+   Compiling thiserror-impl v2.0.20
+   Compiling pkg-config v0.3.34
+   Compiling vcpkg v0.2.15
+   Compiling libsqlite3-sys v0.30.1
+    Checking url v2.5.8
+   Compiling serde_json v1.0.151
+    Checking bitflags v2.13.1
+    Checking new_debug_unreachable v1.0.6
+   Compiling equivalent v1.0.2
+   Compiling crypto-common v0.1.7
+   Compiling block-buffer v0.10.4
+   Compiling phf_macros v0.11.3
+   Compiling num-traits v0.2.19
+    Checking futures-channel v0.3.34
+    Checking base64 v0.22.1
+    Checking foldhash v0.1.5
+   Compiling allocator-api2 v0.2.21
+   Compiling hashbrown v0.15.5
+    Checking phf v0.11.3
+   Compiling digest v0.10.7
+   Compiling cpufeatures v0.2.17
+   Compiling string_cache_codegen v0.5.4
+   Compiling crc-catalog v2.5.0
+   Compiling parking v2.2.1
+    Checking precomputed-hash v0.1.1
+   Compiling hashbrown v0.17.1
+   Compiling event-listener v5.4.2
+   Compiling crc v3.4.0
+   Compiling web_atoms v0.1.3
+   Compiling indexmap v2.14.0
+   Compiling crossbeam-queue v0.3.13
+   Compiling tokio-stream v0.1.19
+   Compiling sha2 v0.10.9
+   Compiling futures-intrusive v0.5.0
+   Compiling hashlink v0.10.0
+   Compiling either v1.17.0
+   Compiling spin v0.9.9
+   Compiling heck v0.5.0
+   Compiling ryu v1.0.23
+    Checking mac v0.1.1
+    Checking futf v0.1.5
+    Checking serde_urlencoded v0.7.1
+   Compiling sqlx-core v0.8.6
+   Compiling flume v0.11.1
+   Compiling atoi v2.0.0
+    Checking string_cache v0.8.9
+   Compiling futures-executor v0.3.34
+    Checking dtoa v1.0.11
+    Checking utf-8 v0.7.6
+   Compiling getrandom v0.4.3
+    Checking tendril v0.4.3
+    Checking dtoa-short v0.3.5
+   Compiling sqlx-sqlite v0.8.6
+   Compiling selectors v0.31.0
+   Compiling cssparser-macros v0.6.1
+   Compiling derive_more-impl v2.1.1
+   Compiling dotenvy v0.15.7
+    Checking byteorder v1.5.0
+   Compiling hex v0.4.3
+    Checking fxhash v0.2.1
+    Checking cssparser v0.35.0
+    Checking derive_more v2.1.1
+   Compiling sqlx-macros-core v0.8.6
+    Checking markup5ever v0.35.0
+   Compiling match_token v0.35.0
+    Checking http v1.5.0
+    Checking servo_arc v0.4.3
+    Checking html5ever v0.35.0
+   Compiling sqlx-macros v0.8.6
+    Checking http-body v1.1.0
+   Compiling ring v0.17.14
+    Checking ego-tree v0.10.0
+   Compiling relayer-graph-core v0.0.0 (/Users/vishaltandale/ProjectsDev/relayer-graphcomplete-windows-codex-install-rename/crates/relayer-graph-core)
+    Checking scraper v0.24.0
+   Compiling httparse v1.10.1
+    Checking sqlx v0.8.6
+   Compiling rustix v1.1.4
+    Checking tower-service v0.3.3
+    Checking zeroize v1.9.0
+    Checking rustls-pki-types v1.15.1
+    Checking getrandom v0.2.17
+    Checking try-lock v0.2.5
+    Checking httpdate v1.0.3
+    Checking untrusted v0.9.0
+    Checking want v0.3.1
+    Checking sync_wrapper v1.0.2
+    Checking tower-layer v0.3.3
+    Checking mime v0.3.17
+    Checking atomic-waker v1.1.2
+   Compiling unicase v2.9.0
+   Compiling rustversion v1.0.23
+    Checking fastrand v2.5.0
+   Compiling rustls v0.23.43
+    Checking tempfile v3.27.0
+   Compiling mime_guess v2.0.5
+    Checking hyper v1.11.0
+    Checking http-body-util v0.1.5
+   Compiling link-cplusplus v1.0.12
+   Compiling scratch v1.0.9
+    Checking subtle v2.6.1
+    Checking ipnet v2.12.1
+    Checking utf8parse v0.2.2
+    Checking anstyle-parse v1.0.0
+    Checking hyper-util v0.1.20
+    Checking rustls-webpki v0.103.14
+    Checking tower v0.5.3
+    Checking anstyle-query v1.1.5
+   Compiling unicode-width v0.1.14
+    Checking colorchoice v1.0.5
+   Compiling cxxbridge-flags v1.0.138
+    Checking powerfmt v0.2.0
+    Checking is_terminal_polyfill v1.70.2
+    Checking anstyle v1.0.14
+   Compiling termcolor v1.4.1
+    Checking anstream v1.0.0
+   Compiling codespan-reporting v0.11.1
+    Checking deranged v0.3.11
+   Compiling cxx v1.0.138
+    Checking tokio-rustls v0.26.4
+    Checking webpki-roots v1.0.9
+    Checking tokio-util v0.7.19
+    Checking strsim v0.11.1
+    Checking http-range-header v0.4.2
+    Checking clap_lex v1.1.0
+    Checking time-core v0.1.2
+    Checking num-conv v0.1.0
+   Compiling anyhow v1.0.104
+    Checking tower-http v0.6.11
+    Checking time v0.3.36
+    Checking clap_builder v4.6.6
+    Checking hyper-rustls v0.27.9
+   Compiling cxx-build v1.0.138
+    Checking axum-core v0.5.6
+    Checking uuid v1.24.1
+   Compiling clap_derive v4.6.4
+    Checking relayer-telemetry-capability v0.0.0 (/Users/vishaltandale/ProjectsDev/relayer-graphcomplete-windows-codex-install-rename/crates/relayer-telemetry-capability)
+    Checking serde_path_to_error v0.1.20
+   Compiling cmake v0.1.58
+   Compiling rust_decimal v1.42.1
+    Checking matchit v0.8.4
+   Compiling lbug v0.18.0
+    Checking axum v0.8.9
+    Checking clap v4.6.6
+    Checking reqwest v0.12.28
+   Compiling cxxbridge-macro v1.0.138
+    Checking arrayvec v0.7.8
+   Compiling relayer-graph-server v0.0.0 (/Users/vishaltandale/ProjectsDev/relayer-graphcomplete-windows-codex-install-rename/crates/relayer-graph-server)
+    Checking aho-corasick v1.1.5
+    Checking regex-syntax v0.8.11
+    Checking nix v0.27.1
+    Checking command-group v5.0.1
+    Checking regex-automata v0.4.18
+    Checking regex v1.13.1
+    Checking relayer-app-server v0.0.0 (/Users/vishaltandale/ProjectsDev/relayer-graphcomplete-windows-codex-install-rename/crates/relayer-app-server)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 11m 01s
+   Compiling cfg-if v1.0.4
+   Compiling libc v0.2.189
+   Compiling futures-core v0.3.34
+   Compiling zerofrom v0.1.8
+   Compiling itoa v1.0.18
+   Compiling pin-project-lite v0.2.17
+   Compiling litemap v0.8.3
+   Compiling smallvec v1.15.2
+   Compiling memchr v2.8.3
+   Compiling writeable v0.6.4
+   Compiling stable_deref_trait v1.2.1
+   Compiling utf8_iter v1.0.4
+   Compiling bytes v1.12.1
+   Compiling icu_properties_data v2.3.0
+   Compiling icu_normalizer_data v2.3.0
+   Compiling serde_core v1.0.229
+   Compiling yoke v0.8.3
+   Compiling percent-encoding v2.3.2
+   Compiling scopeguard v1.2.0
+   Compiling zerovec v0.11.7
+   Compiling lock_api v0.4.14
+   Compiling once_cell v1.21.4
+   Compiling log v0.4.33
+   Compiling form_urlencoded v1.2.2
+   Compiling errno v0.3.14
+   Compiling slab v0.4.12
+   Compiling siphasher v1.0.4
+   Compiling futures-task v0.3.34
+   Compiling futures-io v0.3.34
+   Compiling phf_shared v0.11.3
+   Compiling tinystr v0.8.4
+   Compiling potential_utf v0.1.6
+   Compiling icu_locale_core v2.3.0
+   Compiling tracing-core v0.1.36
+   Compiling zerotrie v0.2.5
+   Compiling futures-sink v0.3.34
+   Compiling tracing v0.1.44
+   Compiling icu_collections v2.3.0
+   Compiling serde v1.0.229
+   Compiling icu_provider v2.3.0
+   Compiling phf_generator v0.11.3
+   Compiling signal-hook-registry v1.4.8
+   Compiling socket2 v0.6.5
+   Compiling mio v1.2.2
+   Compiling typenum v1.20.1
+   Compiling zmij v1.0.23
+   Compiling icu_normalizer v2.3.0
+   Compiling tokio v1.53.1
+   Compiling icu_properties v2.3.0
+   Compiling generic-array v0.14.7
+   Compiling equivalent v1.0.2
+   Compiling allocator-api2 v0.2.21
+   Compiling idna_adapter v1.2.2
+   Compiling idna v1.1.0
+   Compiling crypto-common v0.1.7
+   Compiling block-buffer v0.10.4
+   Compiling futures-util v0.3.34
+   Compiling parking_lot_core v0.9.12
+   Compiling digest v0.10.7
+   Compiling parking_lot v0.12.5
+   Compiling url v2.5.8
+   Compiling phf_codegen v0.11.3
+   Compiling ryu v1.0.23
+   Compiling crossbeam-utils v0.8.22
+   Compiling crc-catalog v2.5.0
+   Compiling new_debug_unreachable v1.0.6
+   Compiling hashbrown v0.17.1
+   Compiling bitflags v2.13.1
+   Compiling parking v2.2.1
+   Compiling crc v3.4.0
+   Compiling event-listener v5.4.2
+   Compiling indexmap v2.14.0
+   Compiling thiserror v2.0.20
+   Compiling crossbeam-queue v0.3.13
+   Compiling serde_json v1.0.151
+   Compiling phf_macros v0.11.3
+   Compiling futures-channel v0.3.34
+   Compiling spin v0.9.9
+   Compiling foldhash v0.1.5
+   Compiling base64 v0.22.1
+   Compiling hashbrown v0.15.5
+   Compiling phf v0.11.3
+   Compiling string_cache_codegen v0.5.4
+   Compiling cpufeatures v0.2.17
+   Compiling precomputed-hash v0.1.1
+   Compiling sha2 v0.10.9
+   Compiling web_atoms v0.1.3
+   Compiling libsqlite3-sys v0.30.1
+   Compiling hashlink v0.10.0
+   Compiling futures-intrusive v0.5.0
+   Compiling tokio-stream v0.1.19
+   Compiling num-traits v0.2.19
+   Compiling either v1.17.0
+   Compiling mac v0.1.1
+   Compiling sqlx-core v0.8.6
+   Compiling futf v0.1.5
+   Compiling atoi v2.0.0
+   Compiling futures-executor v0.3.34
+   Compiling string_cache v0.8.9
+   Compiling flume v0.11.1
+   Compiling serde_urlencoded v0.7.1
+   Compiling utf-8 v0.7.6
+   Compiling dtoa v1.0.11
+   Compiling tendril v0.4.3
+   Compiling dtoa-short v0.3.5
+   Compiling sqlx-sqlite v0.8.6
+   Compiling selectors v0.31.0
+   Compiling byteorder v1.5.0
+   Compiling fxhash v0.2.1
+   Compiling derive_more v2.1.1
+   Compiling cssparser v0.35.0
+   Compiling sqlx-macros-core v0.8.6
+   Compiling getrandom v0.4.3
+   Compiling servo_arc v0.4.3
+   Compiling sqlx-macros v0.8.6
+   Compiling markup5ever v0.35.0
+   Compiling http v1.5.0
+   Compiling html5ever v0.35.0
+   Compiling relayer-graph-core v0.0.0 (/Users/vishaltandale/ProjectsDev/relayer-graphcomplete-windows-codex-install-rename/crates/relayer-graph-core)
+   Compiling ego-tree v0.10.0
+   Compiling scraper v0.24.0
+   Compiling sqlx v0.8.6
+   Compiling http-body v1.1.0
+   Compiling zeroize v1.9.0
+   Compiling tower-service v0.3.3
+   Compiling rustls-pki-types v1.15.1
+   Compiling rustix v1.1.4
+   Compiling getrandom v0.2.17
+   Compiling try-lock v0.2.5
+   Compiling fastrand v2.5.0
+   Compiling untrusted v0.9.0
+   Compiling httpdate v1.0.3
+   Compiling ring v0.17.14
+   Compiling tempfile v3.27.0
+   Compiling want v0.3.1
+   Compiling httparse v1.10.1
+   Compiling sync_wrapper v1.0.2
+   Compiling tower-layer v0.3.3
+   Compiling atomic-waker v1.1.2
+   Compiling mime v0.3.17
+   Compiling unicase v2.9.0
+   Compiling mime_guess v2.0.5
+   Compiling hyper v1.11.0
+   Compiling rustls-webpki v0.103.14
+   Compiling http-body-util v0.1.5
+   Compiling ipnet v2.12.1
+   Compiling subtle v2.6.1
+   Compiling utf8parse v0.2.2
+   Compiling anstyle-parse v1.0.0
+   Compiling rustls v0.23.43
+   Compiling hyper-util v0.1.20
+   Compiling tower v0.5.3
+   Compiling anstyle v1.0.14
+   Compiling is_terminal_polyfill v1.70.2
+   Compiling anstyle-query v1.1.5
+   Compiling powerfmt v0.2.0
+   Compiling colorchoice v1.0.5
+   Compiling anstream v1.0.0
+   Compiling deranged v0.3.11
+   Compiling webpki-roots v1.0.9
+   Compiling relayer-telemetry-capability v0.0.0 (/Users/vishaltandale/ProjectsDev/relayer-graphcomplete-windows-codex-install-rename/crates/relayer-telemetry-capability)
+   Compiling tokio-util v0.7.19
+   Compiling strsim v0.11.1
+   Compiling tokio-rustls v0.26.4
+   Compiling clap_lex v1.1.0
+   Compiling http-range-header v0.4.2
+   Compiling num-conv v0.1.0
+   Compiling time-core v0.1.2
+   Compiling tower-http v0.6.11
+   Compiling time v0.3.36
+   Compiling clap_builder v4.6.6
+   Compiling hyper-rustls v0.27.9
+   Compiling axum-core v0.5.6
+   Compiling uuid v1.24.1
+   Compiling serde_path_to_error v0.1.20
+   Compiling matchit v0.8.4
+   Compiling axum v0.8.9
+   Compiling clap v4.6.6
+   Compiling reqwest v0.12.28
+   Compiling anyhow v1.0.104
+   Compiling link-cplusplus v1.0.12
+   Compiling arrayvec v0.7.8
+   Compiling rust_decimal v1.42.1
+   Compiling cxx v1.0.138
+   Compiling relayer-graph-server v0.0.0 (/Users/vishaltandale/ProjectsDev/relayer-graphcomplete-windows-codex-install-rename/crates/relayer-graph-server)
+   Compiling lbug v0.18.0
+   Compiling aho-corasick v1.1.5
+   Compiling regex-syntax v0.8.11
+   Compiling regex-automata v0.4.18
+   Compiling nix v0.27.1
+   Compiling command-group v5.0.1
+   Compiling regex v1.13.1
+warning: field `layout` is never read
+  --> crates/relayer-graph-server/src/search_index.rs:61:5
+   |
+59 | struct LadybugRuntime {
+   |        -------------- field in this struct
+60 |     store: StdRwLock<Arc<LadybugStore>>,
+61 |     layout: StoreLayout,
+   |     ^^^^^^
+   |
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: method `root` is never used
+  --> crates/relayer-graph-server/src/search_index/store.rs:49:12
+   |
+40 | impl StoreLayout {
+   | ---------------- method in this implementation
+...
+49 |     pub fn root(&self) -> &Path {
+   |            ^^^^
+
+warning: function `rows` is never used
+   --> crates/relayer-graph-server/src/search_index/store.rs:671:8
+    |
+671 | pub fn rows(connection: &Connection<'_>, query: &str) -> Result<Vec<Vec<Value>>> {
+    |        ^^^^
+
+   Compiling relayer-app-server v0.0.0 (/Users/vishaltandale/ProjectsDev/relayer-graphcomplete-windows-codex-install-rename/crates/relayer-app-server)
+warning: `relayer-graph-server` (lib) generated 3 warnings
+warning: `relayer-graph-server` (lib test) generated 2 warnings (2 duplicates)
+error: failed to write file '/Users/vishaltandale/ProjectsDev/relayer-graphcomplete-windows-codex-install-rename/target/debug/deps/liblbug-51f77851a839cb55.rlib': No space left on device (os error 28)
+
+error: could not compile `relayer-app-server` (test "product_persistence_flow") due to 1 previous error
+warning: build failed, waiting for other jobs to finish...

@@ -104,17 +104,21 @@ describe("CodexBasicHarness", () => {
     expect(baseline).not.toContain("graph.prepareComplete(");
     expect(baseline).not.toContain("Import complete and watchCompletions from");
     expect(baseline).not.toContain("semantic completion is unavailable");
-    expect(brokerAuthorized).toContain("graph.prepareComplete(invokeAction)");
-    // A root that ends its turn with children in flight fails, so it must await them first.
-    expect(brokerAuthorized).toContain("Your turn ending does not wait for children");
+    expect(brokerAuthorized).toContain('graph.prepareComplete(invokeAction, "stable-call-key")');
+    expect(brokerAuthorized).toContain("reusable defaults to false");
+    expect(brokerAuthorized).toContain("Set reusable: true only for an explicit repeat-use case");
+    expect(brokerAuthorized).toContain("Before launching or waiting for this child");
+    expect(brokerAuthorized).toContain("Advance your enclosing source Layer");
+    // Returning the parent's full response leaves independent child execution intact.
+    expect(brokerAuthorized).toContain("Returning the parent does not stop the children");
     // Each child event is one the root may act on; it moves its own current only when that helps the user.
     expect(brokerAuthorized).toContain("const watch = watchCompletions(children)");
     // The watch takes the array the recipe fills, so the recipe must declare it.
     expect(brokerAuthorized).toContain("Start with const children = [] and launch each child from its own input graph with children.push(complete(inputGraph))");
-    // One prepared input graph identifies one completion, so each child needs its own invoke action.
-    expect(brokerAuthorized).toContain("give each child its own invoke action");
-    expect(brokerAuthorized).toContain("one input graph starts exactly one child");
-    expect(brokerAuthorized).toContain("Only then submit a layer that presents the work itself and advance your current to it; otherwise keep waiting.");
+    // Reusable actions distinguish calls through durable Invocation keys.
+    expect(brokerAuthorized).toContain("another key creates an independent Invocation");
+    expect(brokerAuthorized).toContain("One input graph starts exactly one child");
+    expect(brokerAuthorized).toContain("Only then submit a later improved layer that presents the work itself and advance your current to it; otherwise keep waiting.");
     expect(brokerAuthorized).toContain("Import complete and watchCompletions from");
     expect(brokerAuthorized).toContain("The first current layer may contain visible accepted nodes");
     expect(brokerAuthorized).toContain("Reuse an existing valid path when one already exists");

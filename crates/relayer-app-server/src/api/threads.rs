@@ -102,6 +102,8 @@ pub(super) struct InvokeActionResponse {
     invocation: ActionInvocationResponse,
     interaction: InteractionResponse,
     created: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    input_draft: Option<super::input_drafts::ActionInputDraftResponse>,
 }
 
 #[derive(Serialize)]
@@ -369,6 +371,18 @@ pub(super) async fn get(
         &std::collections::HashSet::from_iter(detail.thread.imported.then_some(detail.thread.id)),
     )
     .await;
+    let sources = if detail.thread.imported {
+        Vec::new()
+    } else {
+        detail
+            .interactions
+            .iter()
+            .filter_map(|row| row.graph_node_id.map(|node| (row.id, node, row.thread_id)))
+            .collect::<Vec<_>>()
+    };
+    let (invocations, inventory_available) =
+        project_local_invocations(&state, &detail.action_invocations, &sources).await?;
+    let imported_history = project_imported_invocation_history(&state, detail.thread.id).await?;
     let imported_thread = detail.thread.imported;
     let mut completion_executions = std::collections::HashMap::new();
     for invocation in &detail.action_invocations {
@@ -392,6 +406,9 @@ pub(super) async fn get(
         .conversation_compatibility(detail.thread.id)
         .await?;
     let response = ThreadDetailResponse::from(detail)
+        .with_invocation_inventory_available(inventory_available)
+        .with_action_invocations(invocations)
+        .with_imported_invocation_history(imported_history)
         .with_conversation_compatibility(Some(compatibility))
         .with_interactions(interactions)
         .with_completion_executions(completion_executions);
@@ -548,7 +565,17 @@ pub(super) async fn project_interaction(
         .as_ref()
         .is_some_and(|input| !input.contexts.is_empty());
     let has_durable_submitted_inputs = !durable_submitted_inputs.is_empty();
-    if has_durable_context || has_durable_submitted_inputs || imported_thread {
+    let has_prepared_invocation_input = graph_node_id.is_some()
+        && state
+            .product
+            .prepared_invocation_node(InteractionId::try_from(id)?)
+            .await?
+            == graph_node_id;
+    if has_durable_context
+        || has_durable_submitted_inputs
+        || imported_thread
+        || has_prepared_invocation_input
+    {
         let Some((runtime, graph_node_id)) = state.runtime.as_ref().zip(graph_node_id) else {
             if has_durable_context || has_durable_submitted_inputs {
                 response.mark_projection_stale();
@@ -560,7 +587,7 @@ pub(super) async fn project_interaction(
         };
         match runtime.interaction_input(graph_node_id).await {
             Ok(input) => {
-                if imported_thread {
+                if imported_thread || has_prepared_invocation_input {
                     response.set_submitted_inputs(input.submitted_inputs.clone());
                 } else if !durable_submitted_inputs.is_empty()
                     && !submitted_input_semantic_multisets_match(
@@ -630,6 +657,18 @@ pub(super) async fn project_interaction(
         }
         response.set_interaction_graph(graph);
     }
+    if let Some(graph_id) = graph_node_id
+        && let Some(layer) = response.completion_root_layer_mut()
+    {
+        super::input_drafts::project_layer_input_availability(
+            state,
+            thread_id,
+            graph_id,
+            layer,
+            graph_deadline,
+        )
+        .await?;
+    }
     Ok(response)
 }
 
@@ -678,6 +717,349 @@ async fn project_interactions(
     Ok(responses)
 }
 
+/// Project validated imported inventory as viewing data, never authoritative
+/// Product invocations. Local identities come only from the inert import mapping.
+pub(super) async fn project_imported_invocation_history(
+    state: &ApiState,
+    thread_id: ThreadId,
+) -> Result<Vec<super::types::ImportedInvocationHistoryResponse>, ApiError> {
+    let records = state
+        .product
+        .imported_invocation_export_records(thread_id)
+        .await?;
+    if records.is_empty() {
+        return Ok(Vec::new());
+    }
+    let turns = state
+        .product
+        .imported_turn_export_records(thread_id)
+        .await?;
+    let mappings = match &state.runtime {
+        Some(runtime) => match tokio::time::timeout_at(
+            super::interaction_graph::projection_deadline(),
+            runtime.imported_invocation_presentations(thread_id.value()),
+        )
+        .await
+        {
+            Ok(Ok(mappings)) => mappings,
+            // Portable history remains readable while local graph presentation
+            // is unavailable. Unknown local IDs never become capabilities.
+            _ => Vec::new(),
+        },
+        None => Vec::new(),
+    };
+    let assets = state
+        .product
+        .imported_invocation_asset_contents(thread_id)
+        .await?;
+    let mut history = Vec::with_capacity(records.len());
+    for record in records {
+        let mapping = mappings
+            .iter()
+            .find(|mapping| mapping["invocationId"].as_str() == Some(record.id.as_str()));
+        let source_graph_id =
+            mapping.and_then(|mapping| mapping["sourceInteractionNodeId"].as_i64());
+        let source_interaction_id = turns
+            .iter()
+            .find(|turn| {
+                turn.turn.interaction_node_id.as_deref()
+                    == Some(record.source.interaction_node_id.as_str())
+            })
+            .map(|turn| turn.interaction_id);
+        let source_verified =
+            if let (Some(id), Some(graph_id)) = (source_interaction_id, source_graph_id) {
+                state.product.get_interaction(id).await?.graph_node_id == Some(graph_id)
+            } else {
+                false
+            };
+        let result_interaction_id = record.result_turn_id.as_ref().and_then(|id| {
+            turns
+                .iter()
+                .find(|turn| &turn.source_turn_id == id)
+                .map(|turn| turn.interaction_id.value())
+        });
+        fn collect_pins(value: &Value, pins: &mut std::collections::HashSet<String>) {
+            match value {
+                Value::Object(fields) => {
+                    if let Some(Value::String(digest)) = fields.get("digestSha256") {
+                        pins.insert(digest.clone());
+                    }
+                    for value in fields.values() {
+                        collect_pins(value, pins);
+                    }
+                }
+                Value::Array(values) => {
+                    for value in values {
+                        collect_pins(value, pins);
+                    }
+                }
+                _ => {}
+            }
+        }
+        let mut pins = std::collections::HashSet::new();
+        collect_pins(
+            &serde_json::to_value(&record)
+                .map_err(|_| ApiError::internal("imported history serialization failed"))?,
+            &mut pins,
+        );
+        let visual_asset_contents = assets
+            .iter()
+            .filter(|asset| pins.contains(&asset.digest_sha256))
+            .cloned()
+            .collect();
+        history.push(super::types::ImportedInvocationHistoryResponse {
+            inert: true,
+            thread_id: thread_id.value(),
+            source_interaction_id: source_verified.then(|| source_interaction_id.unwrap().value()),
+            source_turn: turns
+                .iter()
+                .find(|turn| {
+                    turn.turn.interaction_node_id.as_deref()
+                        == Some(record.source.interaction_node_id.as_str())
+                })
+                .map(|turn| super::types::ImportedInvocationSourceTurnResponse {
+                    id: turn.interaction_id.value(),
+                    sequence: turn.turn.sequence,
+                    interaction_node_id: record.source.interaction_node_id.clone(),
+                    completion: turn.turn.completion.clone(),
+                }),
+            source_node_id: if source_verified {
+                mapping.and_then(|mapping| mapping["sourceNodeId"].as_i64())
+            } else {
+                None
+            },
+            source_action_id: if source_verified {
+                mapping.and_then(|mapping| mapping["sourceActionId"].as_i64())
+            } else {
+                None
+            },
+            presenting_layer_id: if source_verified {
+                mapping.and_then(|mapping| mapping["presentingLayerId"].as_i64())
+            } else {
+                None
+            },
+            result_interaction_id,
+            record,
+            visual_asset_contents,
+        });
+    }
+    Ok(history)
+}
+
+/// Durable call identity and permission to repeat an action are separate facts.
+/// Policy is projected only from an exact graph-owned frozen call snapshot.
+pub(super) async fn project_action_invocations(
+    state: &ApiState,
+    invocations: &[crate::product::ActionInvocation],
+) -> Result<Vec<ActionInvocationResponse>, ApiError> {
+    let deadline = super::interaction_graph::projection_deadline();
+    let mut responses = Vec::with_capacity(invocations.len());
+    for invocation in invocations {
+        let mut response = ActionInvocationResponse::from(invocation.clone());
+        response.preparation_recoverable = state
+            .product
+            .user_invocation_preparation_recoverable(invocation.result_interaction_id)
+            .await?;
+        response.preparation_rejected = state
+            .product
+            .user_invocation_preparation_rejected(invocation.result_interaction_id)
+            .await?;
+        response.presenting_layer_id = state
+            .product
+            .invocation_presentation(invocation.result_interaction_id)
+            .await?;
+        if invocation.durable
+            && let Some(runtime) = &state.runtime
+        {
+            let source = state
+                .product
+                .get_interaction(invocation.source_interaction_id)
+                .await?;
+            let child = state
+                .product
+                .get_interaction(invocation.result_interaction_id)
+                .await?;
+            if let (Some(source_id), Some(child_id)) = (source.graph_node_id, child.graph_node_id)
+                && let Ok(Ok(metadata)) =
+                    tokio::time::timeout_at(deadline, runtime.interaction_metadata(child_id)).await
+                && let Some(call) = metadata.durable_invocation
+                && call.source_completion_id.value() == source_id
+                && call.child_interaction_node_id.value() == child_id
+                && call.source_action_id.value() == invocation.action_id
+                && call.invocation_key == invocation.invocation_key
+            {
+                // A missing historical policy remains unknown. It never
+                // grants repeat-use authority; GraphComplete owns admission.
+                response.presenting_layer_id = response.presenting_layer_id.or_else(|| {
+                    call.action_snapshot
+                        .get("presentingLayerId")
+                        .and_then(Value::as_i64)
+                });
+                response.reusable = call
+                    .action_snapshot
+                    .get("reusable")
+                    .and_then(Value::as_bool);
+            }
+        }
+        responses.push(response);
+    }
+    Ok(responses)
+}
+
+/// Join read-only native calls only to genuine Product identities in this view.
+/// Global occupancy reveals only visible action IDs, never foreign call data.
+pub(super) async fn project_local_invocations(
+    state: &ApiState,
+    invocations: &[crate::product::ActionInvocation],
+    sources: &[(InteractionId, i64, ThreadId)],
+) -> Result<(Vec<ActionInvocationResponse>, bool), ApiError> {
+    let mut responses = project_action_invocations(state, invocations).await?;
+    if sources.is_empty() {
+        return Ok((responses, true));
+    }
+    let roots = sources.iter().map(|(_, node, _)| *node).collect::<Vec<_>>();
+    let Some(runtime) = &state.runtime else {
+        return Ok((responses, false));
+    };
+    let deadline = super::interaction_graph::projection_deadline();
+    let snapshot =
+        match tokio::time::timeout_at(deadline, runtime.local_invocation_inventory(&roots)).await {
+            Ok(Ok(snapshot)) => snapshot,
+            _ => return Ok((responses, false)),
+        };
+    if snapshot.invocations.iter().any(|native| {
+        let call = &native.invocation;
+        native.source_action.id != call.source_action_id
+            || native.source_action.source_node_id != call.parent_node_id
+            || native.parent_node.id != call.parent_node_id
+            || call.state.completion_id != call.child_interaction_node_id
+            || call.action_snapshot.get("actionId").and_then(Value::as_i64)
+                != Some(call.source_action_id.value())
+            || call
+                .action_snapshot
+                .get("sourceNodeId")
+                .and_then(Value::as_i64)
+                != Some(call.parent_node_id.value())
+            || native.current.as_ref().is_some_and(|current| {
+                current.node_id != call.child_interaction_node_id
+                    || Some(current.root_layer_id) != call.state.current_layer_id
+            })
+    }) {
+        return Ok((responses, false));
+    }
+    for native in snapshot.invocations {
+        let call = &native.invocation;
+        let Some((source_id, _, source_thread)) = sources
+            .iter()
+            .find(|(_, node, _)| *node == call.source_completion_id.value())
+        else {
+            continue;
+        };
+        // Product owns launch receipts. An exact existing Product row wins.
+        if responses.iter().any(|row| {
+            row.source_interaction_id == source_id.value()
+                && row.action_id == call.source_action_id.value()
+                && row.invocation_key == call.invocation_key
+                && (row.durable || row.preparation_recoverable)
+        }) {
+            continue;
+        }
+        let result_id = sources
+            .iter()
+            .find(|(_, node, thread)| {
+                *node == call.child_interaction_node_id.value() && thread == source_thread
+            })
+            .map(|(id, _, _)| id.value());
+        let status = match call.state.lifecycle {
+            relayer_graph_core::CompletionLifecycle::Active if call.state.head_revision == 0 => {
+                "not_started"
+            }
+            relayer_graph_core::CompletionLifecycle::Active => "running",
+            relayer_graph_core::CompletionLifecycle::Succeeded => "accepted",
+            relayer_graph_core::CompletionLifecycle::Stopped => "stopped",
+            relayer_graph_core::CompletionLifecycle::Failed => "failed",
+        };
+        responses.push(ActionInvocationResponse {
+            preparation_recoverable: false,
+            preparation_rejected: false,
+            presenting_layer_id: call
+                .action_snapshot
+                .get("presentingLayerId")
+                .and_then(Value::as_i64),
+            durable: true,
+            reusable: call
+                .action_snapshot
+                .get("reusable")
+                .and_then(Value::as_bool),
+            invocation_key: call.invocation_key.clone(),
+            source_interaction_id: source_id.value(),
+            action_id: call.source_action_id.value(),
+            result_interaction_id: result_id,
+            result_completion_status: status.into(),
+            created_at: String::new(),
+            agent_invoked: call
+                .action_snapshot
+                .get("activator")
+                .and_then(Value::as_str)
+                == Some("agent"),
+            graph_only: true,
+            occupancy_only: false,
+            native_invocation: Some(native),
+            execution: None,
+        });
+    }
+    for closure in snapshot.closures.iter().flatten() {
+        let Some((source_id, _, _)) = sources
+            .iter()
+            .find(|(_, node, _)| *node == closure.node_id.value())
+        else {
+            continue;
+        };
+        for occupied in snapshot
+            .exhausted_action_sources
+            .as_ref()
+            .into_iter()
+            .flatten()
+        {
+            let action_id = occupied.action_id;
+            if responses.iter().any(|row| {
+                row.action_id == action_id.value()
+                    && !row.preparation_rejected
+                    && (row.durable || row.preparation_recoverable)
+            }) {
+                continue;
+            }
+            if !closure.layers.iter().any(|layer| {
+                layer
+                    .nodes
+                    .iter()
+                    .any(|node| node.id == occupied.source_node_id)
+            }) {
+                continue;
+            }
+            responses.push(ActionInvocationResponse {
+                preparation_recoverable: false,
+                preparation_rejected: false,
+                presenting_layer_id: None,
+                durable: true,
+                reusable: Some(false),
+                invocation_key: String::new(),
+                source_interaction_id: source_id.value(),
+                action_id: action_id.value(),
+                result_interaction_id: None,
+                result_completion_status: "unavailable".into(),
+                created_at: String::new(),
+                agent_invoked: false,
+                graph_only: true,
+                occupancy_only: true,
+                native_invocation: None,
+                execution: None,
+            });
+        }
+    }
+    Ok((responses, true))
+}
+
 pub(super) async fn create_interaction(
     State(state): State<ApiState>,
     headers: HeaderMap,
@@ -696,6 +1078,13 @@ pub(super) async fn create_interaction(
         None
     };
     let thread_id = ThreadId::try_from(id)?;
+    let mutable_thread = state.product.get_thread(thread_id).await?;
+    if mutable_thread.thread.imported {
+        return Err(ApiError::invalid("imported conversations are immutable"));
+    }
+    let draft = state.product.action_input_draft(thread_id).await?;
+    let composer_input_occurrences =
+        super::input_drafts::composer_occurrences(&state, &draft).await?;
     if let Some(operator) = operator.as_ref() {
         if !request.text.trim().is_empty()
             || request.model_selection.is_some()
@@ -708,14 +1097,11 @@ pub(super) async fn create_interaction(
                 "input operator Send may submit only its scoped committed input draft",
             ));
         }
-        let draft = state.product.action_input_draft(thread_id).await?;
-        if draft.attachments.is_empty()
-            || draft.attachments.iter().any(|attachment| {
+        if composer_input_occurrences.is_empty()
+            || composer_input_occurrences.iter().any(|occurrence| {
                 !operator
                     .occurrences
-                    .contains(&super::input_operator_sessions::occurrence_key(
-                        &attachment.occurrence,
-                    ))
+                    .contains(&super::input_operator_sessions::occurrence_key(occurrence))
             })
         {
             return Err(ApiError::not_found(
@@ -774,6 +1160,7 @@ pub(super) async fn create_interaction(
             .create_identified_interaction(
                 thread_id,
                 crate::product::CreateIdentifiedInteractionCommand {
+                    composer_input_occurrences: Some(&composer_input_occurrences),
                     text: &request.text,
                     input_identity: &input_id,
                     contexts: &request.contexts,
@@ -885,11 +1272,19 @@ pub(super) async fn retry_interaction(
     let context_snapshots = canonical_context_snapshots(&state, &request.contexts)
         .await
         .map_err(context_snapshot_api_error)?;
+    let mutable_thread = state.product.get_thread(thread_id).await?;
+    if mutable_thread.thread.imported {
+        return Err(ApiError::invalid("imported conversations are immutable"));
+    }
+    let draft = state.product.action_input_draft(thread_id).await?;
+    let composer_input_occurrences =
+        super::input_drafts::composer_occurrences(&state, &draft).await?;
     let claimed = state
         .product
         .claim_interaction_retry(
             interaction_id,
             RetryInteractionCommand {
+                composer_input_occurrences: Some(&composer_input_occurrences),
                 expected_attempt_id: request.attempt_id,
                 text: &request.text,
                 input_identity: &request.input_id,
@@ -1095,7 +1490,16 @@ pub(super) async fn get_layer(
         .runtime
         .as_ref()
         .ok_or_else(|| ApiError::invalid("GraphComplete runtime is unavailable"))?;
-    Ok(Json(runtime.get_layer(graph_node_id, layer_id).await?))
+    let mut layer = runtime.get_layer(graph_node_id, layer_id).await?;
+    super::input_drafts::project_layer_input_availability(
+        &state,
+        thread_id,
+        graph_node_id,
+        &mut layer,
+        super::interaction_graph::projection_deadline(),
+    )
+    .await?;
+    Ok(Json(layer))
 }
 
 #[derive(Deserialize)]
@@ -1149,6 +1553,52 @@ pub(super) async fn get_detail_asset(
                         .and_then(Value::as_i64)
                         == Some(graph_node_id)
             })
+    } else if !layer.nodes.iter().any(|node| node.id == node_id) {
+        // A graph-only child's response icon belongs to its canonical anchor,
+        // which is not a content member of Current. The real Product source is
+        // only a read scope: exact native call and accepted Current prove this
+        // one association without creating a Product child or asset capability.
+        let snapshot = runtime.local_invocation_inventory(&[graph_node_id]).await?;
+        let matching = snapshot
+            .invocations
+            .iter()
+            .filter(|native| {
+                let call = &native.invocation;
+                let Some(current) = &native.current else {
+                    return false;
+                };
+                let Some(root) = &current.root_action else {
+                    return false;
+                };
+                let icon = serde_json::to_value(root).ok();
+                call.source_completion_id.value() == graph_node_id
+                    && call.child_interaction_node_id == node_id
+                    && call.state.completion_id == node_id
+                    && call.state.current_layer_id == Some(current.root_layer_id)
+                    && current.node_id == node_id
+                    && current.root_layer_id.value() == query.layer_id
+                    && layer.layer.state == relayer_graph_core::RecordState::Accepted
+                    && native.source_action.id == call.source_action_id
+                    && native.source_action.source_node_id == call.parent_node_id
+                    && native.parent_node.id == call.parent_node_id
+                    && root.state == relayer_graph_core::RecordState::Accepted
+                    && root.kind == relayer_graph_core::ActionKind::Navigate
+                    && root.relation == Some(relayer_graph_core::NavigateRelation::Expand)
+                    && root.source_node_id == node_id
+                    && root.target_layer_id == Some(current.root_layer_id)
+                    && icon
+                        .as_ref()
+                        .and_then(|value| value.pointer("/icon/kind"))
+                        .and_then(Value::as_str)
+                        == Some("image")
+                    && icon
+                        .as_ref()
+                        .and_then(|value| value.pointer("/icon/assetId"))
+                        .and_then(Value::as_str)
+                        == Some(asset_id.as_str())
+            })
+            .count();
+        matching == 1
     } else {
         false
     };
@@ -1605,9 +2055,53 @@ async fn launch_prepared_child(
         .ok_or_else(|| {
             ApiError::invalid("prepared completion does not belong to this execution")
         })?;
-    let action = runtime
-        .get_action(grant.source_completion_id, invocation.source_action_id)
-        .await?;
+    let durable = metadata.durable_invocation;
+    let action = if let Some(call) = &durable {
+        if call.source_completion_id.value() != grant.source_completion_id
+            || call.child_interaction_node_id.value() != input.interaction_node
+        {
+            return Err(ApiError::invalid(
+                "durable invocation does not belong to this execution",
+            ));
+        }
+        crate::runtime::RuntimeAction {
+            source_node_id: call
+                .action_snapshot
+                .get("sourceNodeId")
+                .and_then(Value::as_i64)
+                .ok_or_else(|| ApiError::invalid("invalid frozen Invoke source Node"))?,
+            source_layer_id: call
+                .action_snapshot
+                .get("sourceLayerId")
+                .and_then(Value::as_i64),
+            id: call.source_action_id.value(),
+            reusable: call
+                .action_snapshot
+                .get("reusable")
+                .and_then(Value::as_bool),
+            input_action_ids: serde_json::from_value(
+                call.action_snapshot
+                    .get("inputActionIds")
+                    .cloned()
+                    .unwrap_or_else(|| serde_json::json!([])),
+            )
+            .map_err(|_| ApiError::invalid("invalid Invoke input binding"))?,
+            relation: None,
+            resolved_invoke_interaction_id: None,
+            kind: "invoke".into(),
+            interaction_text: call
+                .action_snapshot
+                .get("instruction")
+                .and_then(Value::as_str)
+                .map(str::to_owned),
+            target_layer_id: None,
+            state: "draft".into(),
+        }
+    } else {
+        runtime
+            .get_action(grant.source_completion_id, invocation.source_action_id)
+            .await?
+    };
     if action.id == invocation.source_action_id
         && action.kind == "navigate"
         && action.state == "accepted"
@@ -1634,7 +2128,7 @@ async fn launch_prepared_child(
             }),
         ));
     }
-    if action.kind != "invoke" || action.state != "accepted" {
+    if action.kind != "invoke" || (durable.is_none() && action.state != "accepted") {
         return Err(ApiError::invalid(
             "prepared completion requires an accepted invoke action",
         ));
@@ -1643,14 +2137,28 @@ async fn launch_prepared_child(
         .interaction_text
         .as_deref()
         .ok_or_else(|| ApiError::invalid("invoke action has no interaction text"))?;
-    let outcome = state
-        .product
-        .invoke_action_recursively(
-            grant.source_interaction_id,
-            invocation.source_action_id,
-            interaction_text,
-        )
-        .await?;
+    let outcome = if let Some(durable) = &durable {
+        state
+            .product
+            .invoke_durable_action(
+                grant.source_interaction_id,
+                invocation.source_action_id,
+                interaction_text,
+                input.interaction_node,
+                true,
+                &durable.invocation_key,
+            )
+            .await?
+    } else {
+        state
+            .product
+            .invoke_action_recursively(
+                grant.source_interaction_id,
+                invocation.source_action_id,
+                interaction_text,
+            )
+            .await?
+    };
     // The action's result belongs to a user's own invoke of it, made from an accepted source
     // whose agent is still unwinding. The product runs and settles that result; the broker
     // never launches it.
@@ -2641,11 +3149,22 @@ async fn authorize_child_completion(
         .invocation
         .filter(|invocation| invocation.source_interaction_node_id == grant.source_completion_id)
         .ok_or_else(|| ApiError::invalid("completion does not belong to this execution"))?;
-    let outcome = state
-        .product
-        .get_action_invocation(grant.source_interaction_id, invocation.source_action_id)
-        .await?
-        .ok_or_else(|| ApiError::invalid("completion has no product invocation binding"))?;
+    let outcome = if metadata.durable_invocation.is_some() {
+        state
+            .product
+            .invocation_for_graph_node(
+                grant.source_interaction_id,
+                invocation.source_action_id,
+                completion_id,
+            )
+            .await?
+    } else {
+        state
+            .product
+            .get_action_invocation(grant.source_interaction_id, invocation.source_action_id)
+            .await?
+    }
+    .ok_or_else(|| ApiError::invalid("completion has no product invocation binding"))?;
     // A user's own invoke of the action owns its result; only an agent's child answers to
     // the broker, even while the source's agent still holds its grant.
     if !outcome.invocation.agent_invoked {
@@ -3069,17 +3588,101 @@ async fn resume_unwinding_children_until_ended(
     while children.join_next().await.is_some() {}
 }
 
+#[derive(Default, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(super) struct InvokeActionRequest {
+    input_draft_revision: Option<i64>,
+    presenting_layer_id: Option<i64>,
+}
+
 pub(super) async fn invoke_action(
     State(state): State<ApiState>,
     headers: HeaderMap,
     Path((thread_id, interaction_id, action_id)): Path<(i64, i64, i64)>,
+    request: Option<Json<InvokeActionRequest>>,
 ) -> Result<(StatusCode, Json<InvokeActionResponse>), ApiError> {
     authorize_write(&state, &headers)?;
-    let result = invoke_action_with_authority(&state, thread_id, interaction_id, action_id).await;
+    let invocation_key = headers
+        .get("idempotency-key")
+        .and_then(|value| value.to_str().ok())
+        .map(str::to_owned)
+        .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+    let request = request.map(|request| request.0).unwrap_or_default();
+    let result = invoke_action_with_authority(
+        &state,
+        thread_id,
+        interaction_id,
+        action_id,
+        &invocation_key,
+        request.input_draft_revision,
+        request.presenting_layer_id,
+    )
+    .await;
     if let Err(error) = &result {
         log_action_invocation_request_failure(thread_id, interaction_id, action_id, error);
     }
     result
+}
+
+/// Select one current answer for each connected field, retaining its exact saved occurrence.
+/// Existing keyed submissions bypass this selection so recovery never recaptures a draft.
+async fn select_invocation_input_attachments(
+    runtime: &crate::runtime::RuntimeClient,
+    thread: &Thread,
+    source_graph_node_id: i64,
+    presenting_layer_id: Option<i64>,
+    action: &crate::runtime::RuntimeAction,
+    attachments: Vec<crate::product::ActionInputAttachment>,
+) -> Result<Vec<crate::product::ActionInputAttachment>, ApiError> {
+    let mut selected = Vec::new();
+    for bound_id in &action.input_action_ids {
+        let mut valid = Vec::new();
+        for attachment in attachments.iter().filter(|input| {
+            input.occurrence.action_id == *bound_id && input.source_node_id == action.source_node_id
+        }) {
+            let canonical = match runtime
+                .canonical_input_action_occurrence(
+                    thread.project_id.map(|id| id.value()),
+                    thread.id.value(),
+                    &attachment.occurrence,
+                )
+                .await
+            {
+                Ok(canonical) => canonical,
+                // Only an explicit canonical refusal proves this saved occurrence invalid.
+                Err(RuntimeError::Remote {
+                    status: 400 | 403 | 404 | 409 | 422,
+                    ..
+                }) => continue,
+                Err(error) => return Err(error.into()),
+            };
+            if !crate::product::ProductService::input_attachment_matches_action(
+                attachment, &canonical,
+            ) {
+                continue;
+            }
+            let epoch = attachment.committed_at.parse::<u128>().map_err(|_| {
+                ApiError::invalid("Saved input occurrence has an invalid commit epoch")
+            })?;
+            let occurrence = &attachment.occurrence;
+            let clicked = occurrence.presenting_interaction_node_id.value() == source_graph_node_id
+                && Some(occurrence.presenting_layer_id.value()) == presenting_layer_id;
+            valid.push((
+                (
+                    clicked,
+                    epoch,
+                    occurrence.presenting_interaction_node_id.value(),
+                    occurrence.presenting_layer_id.value(),
+                    occurrence.action_id.value(),
+                ),
+                attachment,
+            ));
+        }
+        if let Some((_, attachment)) = valid.into_iter().max_by_key(|(priority, _)| *priority) {
+            selected.push(attachment.clone());
+        }
+    }
+    Ok(selected)
 }
 
 async fn invoke_action_with_authority(
@@ -3087,6 +3690,9 @@ async fn invoke_action_with_authority(
     thread_id: i64,
     interaction_id: i64,
     action_id: i64,
+    invocation_key: &str,
+    input_draft_revision: Option<i64>,
+    presenting_layer_id: Option<i64>,
 ) -> Result<(StatusCode, Json<InvokeActionResponse>), ApiError> {
     let thread_id = ThreadId::try_from(thread_id)?;
     let source_interaction_id = InteractionId::try_from(interaction_id)?;
@@ -3131,6 +3737,265 @@ async fn invoke_action_with_authority(
         .as_deref()
         .ok_or_else(|| ApiError::invalid("invoke action has no interaction text"))?
         .to_owned();
+    if runtime
+        .interaction_metadata(graph_node_id)
+        .await?
+        .has_completion_contract
+    {
+        // A default call interrupted before execution handoff recovers its reserved
+        // identity even if a fresh click supplied another UUID. Started work is never retried here.
+        let exact = state
+            .product
+            .user_invocation_reservation(source_interaction_id, action_id, Some(invocation_key))
+            .await?;
+        if let Some(exact) = &exact
+            && state
+                .product
+                .user_invocation_preparation_rejected(exact.interaction.id)
+                .await?
+        {
+            return Err(ApiError::invalid(
+                "Rejected invocation preparation requires a fresh key",
+            ));
+        }
+        let recovered = if exact.is_none() && action.reusable == Some(false) {
+            state
+                .product
+                .user_invocation_reservation(source_interaction_id, action_id, None)
+                .await?
+        } else {
+            None
+        };
+        let prior = exact.as_ref().or(recovered.as_ref());
+        let invocation_key = prior
+            .map(|prior| prior.invocation.invocation_key.as_str())
+            .unwrap_or(invocation_key);
+        // A native prepared call is not a Product user launch receipt. Existing
+        // graph-owned keys can be read natively, but cannot be adopted by a new
+        // human reservation, including after the author repairs its definition.
+        if prior.is_none()
+            && !runtime
+                .native_invocation_key_absent(graph_node_id, invocation_key)
+                .await?
+        {
+            return Err(ApiError::conflict(
+                "invocation_owned_by_graph",
+                "This prepared call has no matching user reservation.",
+            ));
+        }
+        let frozen_layer = match prior {
+            Some(prior) => {
+                state
+                    .product
+                    .invocation_presentation(prior.interaction.id)
+                    .await?
+            }
+            None => None,
+        };
+        if exact.is_some() && presenting_layer_id.is_some() && frozen_layer != presenting_layer_id {
+            return Err(ApiError::invalid(
+                "Invocation presenting layer changed for the same key",
+            ));
+        }
+        let presenting_layer_id = frozen_layer
+            .or(presenting_layer_id)
+            .or(action.source_layer_id);
+        let existing_submission = state
+            .product
+            .invocation_input_submission(
+                thread_id,
+                source_interaction_id,
+                action_id,
+                invocation_key,
+            )
+            .await?;
+        // Exact retry after clearing uses the original submission epochs and arguments.
+        let mut submitted_attachments = match &existing_submission {
+            Some((revision, attachments))
+                if recovered.is_some()
+                    || input_draft_revision.is_none()
+                    || *revision == input_draft_revision =>
+            {
+                attachments.clone()
+            }
+            Some(_) => {
+                return Err(ApiError::invalid(
+                    "Invocation input revision changed for the same key",
+                ));
+            }
+            None => match input_draft_revision {
+                Some(revision) => {
+                    state
+                        .product
+                        .invocation_input_attachment_snapshot(thread_id, revision)
+                        .await?
+                }
+                None => Vec::new(),
+            },
+        };
+        submitted_attachments.retain(|input| {
+            action
+                .input_action_ids
+                .contains(&input.occurrence.action_id)
+        });
+        if existing_submission.is_none() {
+            submitted_attachments = select_invocation_input_attachments(
+                runtime,
+                &thread,
+                graph_node_id,
+                presenting_layer_id,
+                &action,
+                submitted_attachments,
+            )
+            .await?;
+        }
+        let submitted_inputs =
+            crate::product::ProductService::invocation_arguments(&submitted_attachments)?;
+        let receipt_revision = existing_submission
+            .as_ref()
+            .map(|(revision, _)| *revision)
+            .unwrap_or(input_draft_revision);
+        let reservation = state
+            .product
+            .reserve_user_action_invocation(
+                source_interaction_id,
+                action_id,
+                &interaction_text,
+                invocation_key,
+                presenting_layer_id,
+                receipt_revision,
+                &submitted_attachments,
+            )
+            .await?;
+        let node = match runtime
+            .prepare_user_invocation(
+                graph_node_id,
+                action_id,
+                invocation_key,
+                presenting_layer_id,
+                &submitted_inputs,
+            )
+            .await
+        {
+            Ok(node) => node,
+            Err(error) => {
+                // A deterministic preparation rejection spends no graph call. Preserve
+                // the refused receipt and draft, releasing admission for a fresh request.
+                if let RuntimeError::Remote {
+                    status: status @ (400 | 401 | 403 | 404 | 409 | 422),
+                    ..
+                } = &error
+                    && runtime
+                        .native_invocation_request_absent(graph_node_id, action_id, invocation_key)
+                        .await
+                        .unwrap_or(false)
+                {
+                    state
+                        .product
+                        .reject_user_invocation_preparation(
+                            reservation.interaction.id,
+                            *status,
+                            &error.to_string(),
+                        )
+                        .await?;
+                }
+                return Err(error.into());
+            }
+        };
+        // Close a key collision between the absence read and native preparation.
+        // Only the originally frozen human preparation may be bound/launched;
+        // a graph-owned child retains its activator and execution ownership.
+        let proof = runtime.local_invocation_inventory(&[graph_node_id]).await?;
+        let frozen = proof.invocations.iter().find(|entry| {
+            let call = &entry.invocation;
+            call.source_completion_id.value() == graph_node_id
+                && call.source_action_id.value() == action_id
+                && call.invocation_key == invocation_key
+                && call.child_interaction_node_id.value() == node
+        });
+        let Some(frozen) = frozen else {
+            state
+                .product
+                .fail_interaction_completion(
+                    reservation.interaction.id,
+                    &thread.harness_configuration_name,
+                    "Complete native inventory omitted the prepared user call.",
+                )
+                .await?;
+            return Err(ApiError::conflict(
+                "invocation_preparation_unverified",
+                "Native user preparation could not be verified.",
+            ));
+        };
+        if frozen
+            .invocation
+            .action_snapshot
+            .get("activator")
+            .and_then(Value::as_str)
+            != Some("human")
+            || frozen
+                .invocation
+                .action_snapshot
+                .get("instruction")
+                .and_then(Value::as_str)
+                .map(str::trim)
+                != Some(reservation.interaction.text.trim())
+        {
+            state
+                .product
+                .fail_interaction_completion(
+                    reservation.interaction.id,
+                    &thread.harness_configuration_name,
+                    "Native prepared call ownership does not match the user reservation.",
+                )
+                .await?;
+            return Err(ApiError::conflict(
+                "invocation_owned_by_graph",
+                "The frozen native call does not belong to this user reservation.",
+            ));
+        }
+        let mut outcome = state
+            .product
+            .invoke_user_durable_action_with_inputs(
+                source_interaction_id,
+                action_id,
+                &interaction_text,
+                node,
+                invocation_key,
+                input_draft_revision,
+                &submitted_attachments,
+            )
+            .await?;
+        outcome.created = reservation.created;
+        // Native binding and captured-epoch consumption committed together above.
+        let (status, mut response) = spawn_action_handoff(state.clone(), thread, outcome).await?;
+        // The detached handoff already owns execution. A draft read/presentation
+        // outage must not tell the caller that this activation failed.
+        let deadline = super::interaction_graph::projection_deadline();
+        match tokio::time::timeout_at(deadline, state.product.action_input_draft(thread_id)).await {
+            Ok(Ok(draft)) => {
+                response.0.input_draft =
+                    Some(super::input_drafts::committed_response(state, draft, deadline).await);
+            }
+            result => {
+                let reason = if result.is_err() {
+                    "timed_out"
+                } else {
+                    "unavailable"
+                };
+                eprintln!(
+                    "started invocation input response unavailable: thread={} reason={reason}",
+                    thread_id.value()
+                );
+            }
+        }
+        return Ok((status, response));
+    }
+    if action.reusable == Some(true) || !action.input_action_ids.is_empty() {
+        return Err(ApiError::invalid(
+            "reusable Invoke or connected inputs require a sealed source interaction",
+        ));
+    }
     if let Some(outcome) = state
         .product
         .get_action_invocation(source_interaction_id, action_id)
@@ -3204,12 +4069,35 @@ async fn finish_action_handoff(
     } else {
         outcome.interaction
     };
+    let invocation = match tokio::time::timeout_at(
+        super::interaction_graph::projection_deadline(),
+        project_action_invocations(state, std::slice::from_ref(&outcome.invocation)),
+    )
+    .await
+    {
+        Ok(Ok(mut invocations)) => invocations.remove(0),
+        result => {
+            let reason = if result.is_err() {
+                "timed_out"
+            } else {
+                "unavailable"
+            };
+            eprintln!(
+                "started invocation response projection unavailable: interaction={} reason={reason}",
+                interaction.id.value()
+            );
+            // Keep the immutable exact call and child identity. Missing read
+            // enrichment cannot grant repetition or preexecution recovery.
+            ActionInvocationResponse::from(outcome.invocation)
+        }
+    };
     Ok((
         status,
         Json(InvokeActionResponse {
-            invocation: outcome.invocation.into(),
+            invocation,
             interaction: interaction.into(),
             created: outcome.created,
+            input_draft: None,
         }),
     ))
 }
@@ -3245,20 +4133,42 @@ async fn claim_and_start_action_interaction(
             .await
             .map_err(Into::into);
     };
-    let running = state.product.get_interaction(interaction.id).await?;
-
-    // There is no await between the durable claim and spawning execution. Once this detached
-    // handoff owns the interaction, losing the HTTP request cannot strand it as not_started.
-    let state = state.clone();
-    let thread = thread.clone();
+    // A successful claim/activation already proves this exact interaction is
+    // running on this prepared node. Preserve that minimal acknowledgement if
+    // the optional Product reread is unavailable; never invent accepted output.
+    let mut running = interaction.clone();
+    running.completion_status = "running".into();
+    running.graph_node_id = Some(prepared.graph_node_id);
+    // No await after claim/activation and before detached execution ownership.
+    let execution_state = state.clone();
+    let execution_thread = thread.clone();
     tokio::spawn(async move {
-        state
+        execution_state
             .interaction_execution
             .as_ref()
             .expect("runtime-backed interaction execution service")
-            .execute_prepared_interaction(thread, interaction, prepared)
+            .execute_prepared_interaction(execution_thread, interaction, prepared)
             .await;
     });
+    match tokio::time::timeout_at(
+        super::interaction_graph::projection_deadline(),
+        state.product.get_interaction(running.id),
+    )
+    .await
+    {
+        Ok(Ok(current)) => running = current,
+        result => {
+            let reason = if result.is_err() {
+                "timed_out"
+            } else {
+                "unavailable"
+            };
+            eprintln!(
+                "started invocation interaction response unavailable: interaction={} reason={reason}",
+                running.id.value()
+            );
+        }
+    }
     Ok(running)
 }
 
@@ -3582,9 +4492,18 @@ async fn prepare_interaction(
             .unwrap_or(&[]),
     };
     let mut binding_attempt = 0;
+    let prepared_graph_node = state
+        .product
+        .prepared_invocation_node(interaction.id)
+        .await?;
     let prepared = loop {
         binding_attempt += 1;
-        let prepared = match runtime.prepare(&command).await {
+        let preparation = if prepared_graph_node.is_some() {
+            runtime.prepare_bound(&command, prepared_graph_node).await
+        } else {
+            runtime.prepare(&command).await
+        };
+        let prepared = match preparation {
             Ok(prepared) => prepared,
             Err(error)
                 if (invocation.is_some() || durable_input.is_some()) && binding_attempt > 1 =>
@@ -3908,8 +4827,10 @@ mod tests {
         .bind(
             serde_json::json!({
                 "nodeId":101,
-                "rootLayer":{"layer":{"id":1},"nodes":[],"edges":[],"actions":[{
-                    "id":41,"kind":"invoke","interactionText":"Child work",
+                "rootLayer":{"layer":{"id":1},"nodes":[{
+                    "id":102,"kind":"concept","title":"Child work","state":"accepted"
+                }],"edges":[],"actions":[{
+                    "id":41,"sourceNodeId":102,"kind":"invoke","interactionText":"Child work",
                     "state":"accepted","targetLayerId":null
                 }]}
             })
@@ -3931,7 +4852,7 @@ mod tests {
         let transition_refusals = Arc::new(AtomicUsize::new(0));
         let refused_transitions = transition_refusals.clone();
         let action = Arc::new(Mutex::new(
-            serde_json::json!({"id":41,"kind":"invoke","interactionText":"Child work","state":"accepted"}),
+            serde_json::json!({"id":41,"sourceNodeId":102,"kind":"invoke","interactionText":"Child work","state":"accepted"}),
         ));
         let read_action = action.clone();
         let graph = Router::new()
@@ -4515,7 +5436,7 @@ mod tests {
         }
 
         *fixture.action.lock().unwrap() = serde_json::json!({
-            "id":41,"kind":"navigate","relation":"expand","state":"accepted",
+            "id":41,"sourceNodeId":102,"kind":"navigate","relation":"expand","state":"accepted",
             "targetLayerId":1,"resolvedInvokeInteractionId":202
         });
         let retry = complete_prepared_child(

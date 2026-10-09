@@ -8,100 +8,95 @@ function abortReason(signal) {
     : new DOMException("The operation was aborted.", "AbortError");
 }
 
-function waitForExit(child, signal, timeoutMs) {
-  if (signal?.aborted) {
-    child.kill("SIGTERM");
-    return Promise.reject(abortReason(signal));
-  }
-  if (child.exitCode !== null || child.signalCode !== null) {
-    return Promise.resolve({ code: child.exitCode, signal: child.signalCode });
-  }
-  return new Promise((resolve, reject) => {
-    const finish = (callback, value) => {
-      if (timer) clearTimeout(timer);
-      signal?.removeEventListener("abort", onAbort);
+// Observe close as soon as the child is created: exitCode only proves exit,
+// while close also proves its stdio has closed. Keep this observation across
+// handshake completion, cancellation and termination so no event can be missed.
+function observeClose(child) {
+  let closed = false;
+  let error;
+  const promise = new Promise((resolve) => {
+    const onError = (value) => { error = value; };
+    child.on("error", onError);
+    child.once("close", (code, signal) => {
+      closed = true;
       child.off("error", onError);
-      child.off("exit", onExit);
-      callback(value);
-    };
-    const onAbort = () => {
-      child.kill("SIGTERM");
-      finish(reject, abortReason(signal));
-    };
-    const onError = (error) => finish(reject, error);
-    const onExit = (code, exitSignal) => finish(resolve, { code, signal: exitSignal });
-    const timer = timeoutMs === undefined ? null : setTimeout(() => {
-      child.kill("SIGTERM");
-      finish(reject, new Error("Managed runtime version probe timed out."));
-    }, timeoutMs);
-    signal?.addEventListener("abort", onAbort, { once: true });
-    child.once("error", onError);
-    child.once("exit", onExit);
+      resolve({ code, signal, error });
+    });
   });
+  return { promise, isClosed: () => closed };
 }
 
-function waitForExitWithin(child, timeoutMs) {
-  if (child.exitCode !== null || child.signalCode !== null) {
-    return Promise.resolve({ code: child.exitCode, signal: child.signalCode });
-  }
+function waitForClose(completion, { signal, timeoutMs, message }) {
+  signal?.throwIfAborted();
   return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => finish(reject, new Error("Managed runtime did not close in time.")), timeoutMs);
     const finish = (callback, value) => {
       clearTimeout(timer);
-      child.off("error", onError);
-      child.off("exit", onExit);
+      signal?.removeEventListener("abort", onAbort);
       callback(value);
     };
-    const onError = (error) => finish(reject, error);
-    const onExit = (code, exitSignal) => finish(resolve, { code, signal: exitSignal });
-    child.once("error", onError);
-    child.once("exit", onExit);
+    const onAbort = () => finish(reject, abortReason(signal));
+    const timer = setTimeout(() => finish(reject, new Error(message)), timeoutMs);
+    signal?.addEventListener("abort", onAbort, { once: true });
+    completion.promise.then((result) => finish(resolve, result));
   });
 }
 
-async function closeCodexAppServer(child, signal) {
-  if (signal?.aborted) {
-    child.kill("SIGTERM");
-    await waitForExitWithin(child, 1_000).catch(() => undefined);
-    return;
+async function closeProbeChild(child, completion, { graceful = false, shutdownTimeoutMs }) {
+  if (completion.isClosed()) return;
+  const wait = () => waitForClose(completion, {
+    timeoutMs: shutdownTimeoutMs, message: "Managed runtime probe did not close in time.",
+  });
+  if (graceful) {
+    // Codex app-server has no shutdown request. EOF is its protocol close.
+    child.stdin.end();
+    try { await wait(); return; } catch { /* Terminate the owned probe below. */ }
   }
-
-  // Codex app-server has no shutdown request. EOF on stdin is its graceful
-  // protocol close: after the initialize/initialized handshake it exits 0.
-  child.stdin.end();
-  try {
-    await waitForExitWithin(child, 1_000);
-  } catch {
-    child.kill("SIGTERM");
-    await waitForExitWithin(child, 1_000).catch(() => undefined);
-  }
+  child.kill("SIGTERM");
+  try { await wait(); return; } catch { /* Escalate once, still within a bound. */ }
+  child.kill("SIGKILL");
+  // A probe that cannot be confirmed closed must never permit promotion.
+  await wait();
 }
 
-async function executableVersion(executable, { signal, spawnProcess = spawn, timeoutMs = 10_000 } = {}) {
+async function executableVersion(executable, {
+  signal, spawnProcess = spawn, timeoutMs = 10_000, shutdownTimeoutMs = 1_000,
+} = {}) {
+  signal?.throwIfAborted();
   const child = spawnProcess(executable, ["--version"], { stdio: ["ignore", "pipe", "pipe"] });
+  const completion = observeClose(child);
   let stdout = "";
   let stderr = "";
   child.stdout?.on("data", (chunk) => { stdout += String(chunk); });
   child.stderr?.on("data", (chunk) => { stderr += String(chunk); });
-  const result = await waitForExit(child, signal, timeoutMs);
-  if (result.code !== 0) throw new Error("Managed runtime version probe failed.");
-  const match = `${stdout}\n${stderr}`.match(/\b(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)\b/);
-  if (!match) throw new Error("Managed runtime reported an invalid version.");
-  return match[1];
+  try {
+    const result = await waitForClose(completion, {
+      signal, timeoutMs, message: "Managed runtime version probe timed out.",
+    });
+    if (result.error) throw result.error;
+    if (result.code !== 0) throw new Error("Managed runtime version probe failed.");
+    const match = `${stdout}\n${stderr}`.match(/\b(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)\b/);
+    if (!match) throw new Error("Managed runtime reported an invalid version.");
+    return match[1];
+  } finally {
+    await closeProbeChild(child, completion, { shutdownTimeoutMs });
+  }
 }
 
-async function codexInitialize(executable, { signal, spawnProcess = spawn, timeoutMs = 10_000 } = {}) {
+async function codexInitialize(executable, {
+  signal, spawnProcess = spawn, timeoutMs = 10_000, shutdownTimeoutMs = 1_000,
+} = {}) {
   signal?.throwIfAborted();
   const child = spawnProcess(executable, ["app-server", "--listen", "stdio://"], {
     stdio: ["pipe", "pipe", "pipe"],
   });
+  const completion = observeClose(child);
   child.stdin?.on("error", () => {});
   child.stderr?.on("data", () => {});
   const lines = createInterface({ input: child.stdout });
   try {
     await new Promise((resolve, reject) => {
-      const timer = setTimeout(() => reject(new Error("Codex app-server probe timed out.")), timeoutMs);
-      const onAbort = () => reject(abortReason(signal));
+      const timer = setTimeout(() => finish(reject, new Error("Codex app-server probe timed out.")), timeoutMs);
+      const onAbort = () => finish(reject, abortReason(signal));
       const finish = (callback, value) => {
         clearTimeout(timer);
         signal?.removeEventListener("abort", onAbort);
@@ -132,9 +127,13 @@ async function codexInitialize(executable, { signal, spawnProcess = spawn, timeo
     });
     child.stdin.write(`${JSON.stringify({ method: "initialized", params: {} })}\n`);
   } finally {
-    await closeCodexAppServer(child, signal);
-    lines.close();
+    try {
+      await closeProbeChild(child, completion, { graceful: !signal?.aborted, shutdownTimeoutMs });
+    } finally {
+      lines.close();
+    }
   }
+  signal?.throwIfAborted();
 }
 
 async function probeClaudeSdk(modulePath, { importModule, timeoutMs }) {
@@ -162,10 +161,11 @@ export function createDefaultRuntimeProbes({
   spawnProcess = spawn,
   importModule = (moduleUrl) => import(moduleUrl),
   timeoutMs = 10_000,
+  shutdownTimeoutMs = 1_000,
 } = {}) {
   return Object.freeze({
     claude: async ({ executable, modulePath, signal }) => {
-      const version = await executableVersion(executable, { signal, spawnProcess, timeoutMs });
+      const version = await executableVersion(executable, { signal, spawnProcess, timeoutMs, shutdownTimeoutMs });
       if (typeof modulePath !== "string" || modulePath.trim() === "") {
         throw new Error("Managed Claude Agent SDK module is missing.");
       }
@@ -173,8 +173,8 @@ export function createDefaultRuntimeProbes({
       return { version };
     },
     codex: async ({ executable, signal }) => {
-      const version = await executableVersion(executable, { signal, spawnProcess, timeoutMs });
-      await codexInitialize(executable, { signal, spawnProcess, timeoutMs });
+      const version = await executableVersion(executable, { signal, spawnProcess, timeoutMs, shutdownTimeoutMs });
+      await codexInitialize(executable, { signal, spawnProcess, timeoutMs, shutdownTimeoutMs });
       return { version };
     },
     prime: async (runtime) => {

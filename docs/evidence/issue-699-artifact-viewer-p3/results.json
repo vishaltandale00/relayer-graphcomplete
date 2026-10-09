@@ -1,0 +1,237 @@
+{
+  "at": "2026-10-08T20:08:00.365Z",
+  "source": {
+    "commit": "570eac4b52a7a3901767822cde46be7f34bf2746",
+    "clean": true
+  },
+  "entryPoint": "desktop/main/index.mjs",
+  "inference": false,
+  "results": [
+    {
+      "id": "ART-005 agent previews of artifact layers",
+      "ok": true,
+      "observed": "14/14 rendered"
+    },
+    {
+      "id": "ART-007 website",
+      "ok": true,
+      "observed": "relayer-artifact://view/index.html"
+    },
+    {
+      "id": "ART-004 acceptance pins the edited site",
+      "ok": true,
+      "observed": "badges on first open: \"\" (the fixture edited the site after submitting its node)"
+    },
+    {
+      "id": "ART-006 address strip",
+      "ok": true,
+      "observed": "site/index.html"
+    },
+    {
+      "id": "ART-006 no actions in viewer",
+      "ok": true,
+      "observed": "Graph, Annotate, More"
+    },
+    {
+      "id": "ART-010 starting state applied",
+      "ok": true,
+      "observed": "cart count on open: 1"
+    },
+    {
+      "id": "ART-006 toolbar hides, strip stays",
+      "ok": true,
+      "observed": "hidden=true"
+    },
+    {
+      "id": "ART-006 hovering the strip brings the toolbar back",
+      "ok": true,
+      "observed": "revealed=true strip app-region=no-drag"
+    },
+    {
+      "id": "PRD 6.6.4 the page cannot open the browser by itself",
+      "ok": true,
+      "observed": "Open example.org in your browser"
+    },
+    {
+      "id": "PRD 6.6.4 a link waits for the user's choice",
+      "ok": true,
+      "observed": "offered in the toolbar, not opened"
+    },
+    {
+      "id": "PRD 6.6.4 external link leaves the artifact",
+      "ok": true,
+      "observed": "{\"kind\":\"url\",\"url\":\"https://www.instagram.com/\"}"
+    },
+    {
+      "id": "ART-006 Esc returns to the graph",
+      "ok": true,
+      "observed": "viewer closed by Escape inside the artifact"
+    },
+    {
+      "id": "PRD 6.6.4 nothing persists between opens",
+      "ok": true,
+      "observed": "probe after reopen: null"
+    },
+    {
+      "id": "ART-010 starting state resets on every open",
+      "ok": true,
+      "observed": "cart count after the page emptied it and the site reopened: 1"
+    },
+    {
+      "id": "ART-003 isolation",
+      "ok": true,
+      "observed": "{\"api\":\"blocked (TypeError)\",\"cookie\":\"\",\"desktopBridge\":\"undefined\",\"topLevel\":true,\"origin\":\"relayer-artifact://view\"}"
+    },
+    {
+      "id": "ART-007 route and phone viewport",
+      "ok": true,
+      "observed": "{\"width\":390,\"height\":844,\"hash\":\"#pricing\",\"shown\":{\"x\":542,\"y\":100,\"width\":357,\"height\":772}}"
+    },
+    {
+      "id": "ART-003 no shared storage between artifacts",
+      "ok": true,
+      "observed": "artifact-1-29 vs artifact-1-30"
+    },
+    {
+      "id": "ART-007 PDF",
+      "ok": true,
+      "observed": "relayer-artifact://view/investor-brief.pdf viewer started=true"
+    },
+    {
+      "id": "ART-007 PDF page",
+      "ok": true,
+      "observed": "relayer-artifact://view/investor-brief.pdf#page=4 viewer started=true"
+    },
+    {
+      "id": "ART-007 video",
+      "ok": true,
+      "observed": "{\"duration\":20,\"error\":null}"
+    },
+    {
+      "id": "ART-007 video segment (needs byte ranges)",
+      "ok": true,
+      "observed": "currentTime=10"
+    },
+    {
+      "id": "PRD 6.6.3 video segment stops at its end",
+      "ok": true,
+      "observed": "paused at 15 ({\"time\":15,\"paused\":true})"
+    },
+    {
+      "id": "ART-007 image",
+      "ok": true,
+      "observed": "naturalWidth=1600"
+    },
+    {
+      "id": "ART-007 Markdown heading",
+      "ok": true,
+      "observed": "Colour heading top=0px"
+    },
+    {
+      "id": "ART-012 Word",
+      "ok": true,
+      "observed": "{\"ready\":\"true\",\"title\":true,\"network\":\"blocked\"}"
+    },
+    {
+      "id": "ART-012 Excel",
+      "ok": true,
+      "observed": "{\"ready\":\"true\",\"tabs\":[\"Budget\",\"Notes\"],\"total\":\"Total 34300 40200 40900 47600\"}"
+    },
+    {
+      "id": "ART-012 PowerPoint at a slide, its chart drawn",
+      "ok": true,
+      "observed": "{\"ready\":\"true\",\"slides\":4,\"bars\":4,\"address\":\"docs/seed-pitch.pptx · slide 3\"}"
+    },
+    {
+      "id": "ART-012 a note on a deck names its slide",
+      "ok": true,
+      "observed": "Where: on slide 3"
+    },
+    {
+      "id": "PRD 6.6.5 page errors",
+      "ok": true,
+      "observed": "1 page error"
+    },
+    {
+      "id": "ART-007 deployed https site",
+      "ok": true,
+      "observed": "address=https://example.com/ title=Example Domain"
+    },
+    {
+      "id": "ART-004 changed since accepted",
+      "ok": true,
+      "observed": "Changed since this was accepted"
+    },
+    {
+      "id": "ART-004 missing file",
+      "ok": true,
+      "observed": "This file is no longer in the thread folder"
+    },
+    {
+      "id": "PRD 6.6.5 Add to chat",
+      "ok": true,
+      "observed": "composer drafted: true"
+    },
+    {
+      "id": "ART-009 asks before the first run",
+      "ok": true,
+      "observed": "node app/server.mjs 41731"
+    },
+    {
+      "id": "ART-009 starts the app",
+      "ok": true,
+      "observed": "Served by process 79027 since 2026-10-08T20:07:23.471Z"
+    },
+    {
+      "id": "ART-010 web app cookies and storage seeded",
+      "ok": true,
+      "observed": "Signed in as Robin; 1 open order"
+    },
+    {
+      "id": "ART-009 reuses the server without asking again",
+      "ok": true,
+      "observed": "Served by process 79027 since 2026-10-08T20:07:23.471Z (first open: Served by process 79027 since 2026-10-08T20:07:23.471Z)"
+    },
+    {
+      "id": "ART-009 reports a failed start with its log",
+      "ok": true,
+      "observed": "{\"actions\":[\"Retry\",\"Add to chat\"],\"log\":\"node:internal/modules/cjs/loader:1478\\n  throw err;\\n  ^\\n\\nError: Cannot find module '/Users/vishaltandale/ProjectsDev/relayer-graphcomplete/.claude/worktrees/rela\"}"
+    },
+    {
+      "id": "ART-011 Annotate freezes the view and pauses media",
+      "ok": true,
+      "observed": "{\"paused\":true,\"hidden\":true,\"where\":\"Where: at 0:11\"}"
+    },
+    {
+      "id": "ART-011 media resumes when the panel closes",
+      "ok": true,
+      "observed": "playing=true visible=true"
+    },
+    {
+      "id": "ART-011 notes join the chat draft",
+      "ok": true,
+      "observed": "Ship chapter1 annotation⌄"
+    },
+    {
+      "id": "ART-011 one interaction carries the note with where and its screenshot",
+      "ok": true,
+      "observed": "[\"The logo flickers in this shot\\n— at 0:11 · screenshot sha256:8648f2a55eebb108588e98effca7afc5698716c2ba6d327cac7fe552d1616f0d\"]"
+    },
+    {
+      "id": "ART-011 the agent can open the note's screenshot",
+      "ok": true,
+      "observed": "[{\"note\":\"The logo flickers in this shot\\n— at 0:11 · screenshot /var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-graph-programs-AMXF2F4K4p0f/artifact-notes/8648f2a55eebb108588e98effca7afc5698716c2ba6d327cac7fe552d1616f0d.png\",\"file\":\"/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-graph-programs-AMXF2F4K4p0f/artifact-notes/8648f2a55eebb108588e98effca7afc5698716c2ba6d327cac7fe552d1616f0d.png\",\"png\":true}]"
+    },
+    {
+      "id": "ART-011 export and share accept artifact nodes and their notes",
+      "ok": true,
+      "observed": "export 200, share 200"
+    }
+  ],
+  "external": [
+    {
+      "kind": "url",
+      "url": "https://www.instagram.com/"
+    }
+  ]
+}

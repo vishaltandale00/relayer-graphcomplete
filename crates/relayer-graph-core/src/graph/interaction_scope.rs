@@ -25,6 +25,7 @@ impl InteractionScope {
         &self,
         connection: &mut crate::storage::GraphConnection,
     ) -> Result<(), crate::GraphError> {
+        crate::storage::sqlite::contracts::read(connection, self.root_node_id).await?;
         let Some(epoch) = self.authority_epoch else {
             return Ok(());
         };

@@ -1,0 +1,52 @@
+{
+  "reviewer": "/root/input_race_review",
+  "sourceCommitBaseline": "98318b37ad4eb91dc5c7e805733d76a2640b9bc3",
+  "fileSha256": {
+    "desktop/renderer/src/product-workspace/workspace.js": "0567ec281bee809b136c0858667ff90b4cff517d2e22acfa05ae920adf786deb",
+    "desktop/renderer/src/node-input-controls.js": "80228ffbc1d7d49c44583d781f553548d30badac6f1711da39a6a83cd770e3c4",
+    "test/invoke-input-bindings.test.mjs": "4a5c1c47dea9a234eca6fa52be3601a53eed36041b4c4cf75a6ae32dc983da94"
+  },
+  "scope": "Sequential Input draft save ordering and frozen Invoke expected revision; newer authored answer while first captured save is pending, including authored save already pending before click.",
+  "verdict": "No unresolved source blocker in reviewed queue-all repair.",
+  "unresolvedFindings": [],
+  "productAuthority": "docs/prd/index.html Node-authored interaction input: values and exact occurrences frozen before awaiting saves; later edits survive submission.",
+  "observedBeforeRepair": {
+    "productionControllerReproduction": {
+      "apiCalls": [
+        [
+          63,
+          "A1",
+          0
+        ],
+        [
+          64,
+          "B2",
+          1
+        ],
+        [
+          64,
+          "B1",
+          2
+        ]
+      ],
+      "finalB": "B1"
+    },
+    "workspaceRegression": "Both compiled authored snapshot schedules failed before repair; call order was captured A1, newer B2, captured B1 and consuming callback removed wrong draft answer."
+  },
+  "validation": {
+    "targeted": {
+      "file": "/private/tmp/pr707-input-flush-race-green.log",
+      "passed": 2,
+      "skipped": 58
+    },
+    "fullFixture": {
+      "file": "/private/tmp/pr707-input-bindings-adversarial-green.log",
+      "passed": 60,
+      "skipped": 0
+    }
+  },
+  "limitations": [
+    "Read-only review of production repair; edited only the existing Invoke fixture to add two distinct race schedules.",
+    "In-process real workspace and draft controller proof with fixture API expected-revision enforcement, not native process or paid inference certification."
+  ]
+}
