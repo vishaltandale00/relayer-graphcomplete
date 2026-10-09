@@ -167,11 +167,11 @@ describe("CodexBasicHarness", () => {
     }
   });
 
-  it("preserves Claude's shared layered prompt while promoting the Codex default", () => {
+  it("shares the JavaScript communication baseline with Claude", () => {
     const claude = buildLayeredNavigationPrompt(runContext(1, "token"), "@relayer/graph-client", undefined, "@relayer/graphcomplete", "Claude");
-    expect(claude).toContain("Advancing is optional; final graph.submit remains required.");
-    expect(claude).toContain('graph.authoring("response-v1")');
-    expect(claude).not.toContain("Your current layer is how you explain the work");
+    expect(claude).not.toContain("Advancing is optional");
+    expect(claude).toContain('graph.authoring("first-finding")');
+    expect(claude).toContain("Your current layer is how you explain the work");
   });
 
   it("reuses a native Codex thread only while its pinned presentation version is unchanged", async () => {

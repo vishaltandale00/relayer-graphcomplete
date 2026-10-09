@@ -29,7 +29,7 @@ import type {
   HarnessTraceSupport,
   JsonObject,
 } from "../types.js";
-import { CURRENT_WORKSPACE_GUIDANCE, GRAPH_PRESENTATION_GUIDANCE, NODE_ICON_GUIDANCE, scopedAuthoringRecipePython } from "./graph-presentation-guidance.js";
+import { CURRENT_COMMUNICATION_GUIDANCE_PYTHON, CURRENT_WORKSPACE_GUIDANCE, GRAPH_PRESENTATION_GUIDANCE, NODE_ICON_GUIDANCE, currentCommunicationAuthoringRecipePython } from "./graph-presentation-guidance.js";
 import { ARTIFACT_LAYER_GUIDANCE_PYTHON } from "./artifact-layer-guidance.js";
 import { LAYER_EDGE_SHAPE_GUIDANCE } from "./layer-edge-shape-guidance.js";
 import {
@@ -1119,13 +1119,13 @@ export class PrimeAgentHarness implements Harness {
     if (this.context.configuration.settings.promptProfile === "layered-navigation-v1") {
       return this.layeredNavigationPrompt(context, includePersonalPresentation);
     }
-    return `Complete the current Relayer interaction by using Python in IPython to author a useful graph response.
+    return `While doing the underlying work, publish useful findings through current; finally answer the current Relayer interaction by using Python in IPython to author a useful graph response.
 
 ${GRAPH_PRESENTATION_GUIDANCE}
 ${threadIconGuidance(context, "python")}
 ${PRIME_VISUAL_GUIDANCE}
 ${primeVisualExample(interaction.id)}
-${CURRENT_WORKSPACE_GUIDANCE}${includePersonalPresentation ? personalPresentationPrompt(context) : ""}
+${CURRENT_WORKSPACE_GUIDANCE}\n${CURRENT_COMMUNICATION_GUIDANCE_PYTHON}${includePersonalPresentation ? personalPresentationPrompt(context) : ""}
 
 Current interaction node: ${interaction.id}
 Normalized interaction input:
@@ -1165,13 +1165,13 @@ If a graph call fails, edit and rerun the same authoring code with the same clie
 
   private layeredNavigationPrompt(context: HarnessRunContext, includePersonalPresentation: boolean): string {
     const interaction = context.inputGraph;
-    return `Complete the current Relayer interaction by using Python in IPython to author a useful graph response. A flat answer is valid. Add navigation only when opening it would materially improve understanding or support; apply that same test again inside every layer you author.
+    return `While doing the underlying work, publish useful findings through current; finally answer the current Relayer interaction by using Python in IPython to author a useful graph response. A flat answer is valid. Add navigation only when opening it would materially improve understanding or support; apply that same test again inside every layer you author.
 
 ${GRAPH_PRESENTATION_GUIDANCE}
 ${threadIconGuidance(context, "python")}
 ${PRIME_VISUAL_GUIDANCE}
 ${primeVisualExample(interaction.id)}
-${CURRENT_WORKSPACE_GUIDANCE}${includePersonalPresentation ? personalPresentationPrompt(context) : ""}
+${CURRENT_WORKSPACE_GUIDANCE}\n${CURRENT_COMMUNICATION_GUIDANCE_PYTHON}${includePersonalPresentation ? personalPresentationPrompt(context) : ""}
 
 Current interaction node: ${interaction.id}
 Normalized interaction input:
@@ -2082,5 +2082,5 @@ const PRIME_VISUAL_GUIDANCE = `For visual Node Details, import html, asset_ref, 
 Discover assets with graph.visual_assets.scope(), list_assets(scope=scope), list_tags(scope=scope), and inspect(asset_id, scope). Add caller-read bytes with VisualAssetFile(name, media_type, bytes) and await graph.visual_assets.add(file=file, scope=scope, name=name). Bind logical asset IDs with html(['<img asset=', ' alt="Description">'], asset_ref(asset_id)); the host resolves and pins content. Never supply compiled packages, mounts, hashes, raw image URLs, or executable JavaScript.`;
 
 function primeVisualExample(interactionNodeId: number): string {
-  return scopedAuthoringRecipePython(interactionNodeId);
+  return currentCommunicationAuthoringRecipePython(interactionNodeId);
 }

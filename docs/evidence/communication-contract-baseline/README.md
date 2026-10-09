@@ -1,31 +1,37 @@
-# Communication contract as the Codex baseline
+# Communication contract as the harness baseline
 
-The user explicitly selected B on 2026-10-08. Codex now treats current as the way to explain ongoing work: publish a useful finding, uncertainty, or consequential question, then update when understanding materially changes. Authorized semantic children remain optional; when used, their changed currents are observed, read, and meaningfully incorporated. User answers enter the next ordinary interaction.
+The user explicitly selected B on 2026-10-08, then requested it for Codex, Claude, and Prime Agent. All three now treat current as the way to explain ongoing work: publish a useful finding, uncertainty, or consequential question, then update when understanding materially changes. Authorized semantic children remain optional; when used, their changed currents are observed, read, and meaningfully incorporated. User answers enter the next ordinary interaction.
 
-The implementation promotes the tested contract and early-publication recipe onto current main, retaining main's newer scoped-authoring API, root-label/icon, provider, and authority guidance. It changes Codex basic and both layered profiles. Claude's shared layered prompt and Prime's Python prompt retain their baselines. It adds no harness setting, scheduler, graph acceptance rule, presentation-version activation, or paid default test.
+The implementation promotes the tested contract and early-publication recipe onto current main, retaining main's newer scoped-authoring API, root-label/icon, provider, and authority guidance. It covers Codex basic and both layered profiles, Claude's native query prompt, and Prime's basic and layered Python prompts. The same contract uses supported language-specific APIs; providers retain their native helper infrastructure. It adds no harness setting, scheduler, graph acceptance rule, presentation-version activation, or paid default test.
 
 ## Changed seams and verification plan
 
 | Seam / promise or boundary | Smallest production checkpoint |
 | --- | --- |
-| Default basic, layered, and multi-agent Codex native-turn prompt delivery, with and without broker | `packages/harness-host/test/codex-basic.test.ts`: `uses the communication contract by default in actual %s turns` |
+| Default Codex, Claude, and Prime native-turn prompt delivery, with and without broker | Actual-turn checkpoints in `codex-basic.test.ts`, `claude-basic.test.ts`, and `prime-agent.test.ts` |
 | Conditional semantic broker use; no invented child findings or same-completion answer resume; credential exclusion | The same actual-turn test, plus existing broker and normalized-input tests |
-| Shared layered prompt remains provider specific | `preserves Claude's shared layered prompt while promoting the Codex default`, plus actual Claude and Prime harness suites |
+| Shared JavaScript and translated Python contract preserve provider APIs and native recursion | Actual Claude/Prime turn checkpoints plus existing session, broker, and scope suites |
 | Actual runnable early-publication example, active Advance, explicit terminal Return, prior-current integrity | `test/recursive-complete-e2e.test.mjs`: `executes the Codex baseline recipe with prior current %s and preserves it at final submission` through real graph/client/app-server |
-| Existing scoped API, exact prior-layer object target, same root action retarget, stable identity and explicit layouts | Actual recipe checkpoint plus actual-turn prompt assertions and existing graph authority suite |
+| Prime Python scoped authoring, actual visual-host compilation, prior-current and control bindings | `test/graph-authoring-replay.test.mjs`: `writes scoped TS and Python programs through canonical compilation and Rust authority`, including both communication recipe branches |
+| Existing scoped API, exact prior-layer target, same root action retarget, stable identity and explicit layouts | JavaScript/Python recipe checkpoints plus actual-turn prompt assertions and existing graph authority suite |
+| Authored final summary, retained asset/export/reopen/presentation pins, and navigation to working findings | `test/prime-visual-integration.test.mjs`: both shipped basic/deep configuration scenarios, plus final mount/reference assertions in both language recipe checkpoints |
 | Build and assembled runtime | `npm run check`, `npm run build`, `npm run test:eval-compiled-runtime` |
 
 Product meaning follows PRD §4.3 and §12.1, temporal-current ADR 0008, node-authored-input ADR 0008, and personal-presentation ADR 0009. The PRD records the explicitly authorized Codex baseline decision. These are prompt expectations, not deterministic Advance-count requirements. No tests were removed; placeholder assertions now observe the new runnable example while preserving their API/authority boundaries.
 
 Required before commit: full check/build and the compiled runtime entry. The real-runtime recipe is a separate process proof, not an in-process edit-loop test. Release and paid inference proof are outside this change's context.
 
-## Executed verification
+## Initial Codex-only verification
 
-[verification.json](verification.json) binds the five changed source/test/PRD files to digest `80f6f9b25a4bb0e9bb295f63da68e5d942a426853d2be111c4ca68cad33a1b11` and records command results separately from the plan. On this exact source, `npm run check` and `npm run build` passed. The full Vitest suite passed 3,843 tests with three existing skips; the explicit secret-boundary suite passed two and Python passed 77. Native workspace and crash-reconciliation scenarios, package/type checks, receipt lint, and PRD readability also passed. The compiled eval-runtime entry passed six tests. The targeted real recipe and module inventory entry passed seven tests.
+The earlier Codex-only [verification.json](verification.json) binds the five changed source/test/PRD files to digest `80f6f9b25a4bb0e9bb295f63da68e5d942a426853d2be111c4ca68cad33a1b11` and records command results separately from the plan. On this exact source, `npm run check` and `npm run build` passed. The full Vitest suite passed 3,843 tests with three existing skips; the explicit secret-boundary suite passed two and Python passed 77. Native workspace and crash-reconciliation scenarios, package/type checks, receipt lint, and PRD readability also passed. The compiled eval-runtime entry passed six tests. The targeted real recipe and module inventory entry passed seven tests.
 
 The first full check had three failures: test observation used a presentation-edit-authority read, and stale generated output violated the packaged-module inventory. After using ordinary layer reads, an intermediate assertion still expected an authoring key instead of the compiled mount identity. The final assertions verify real expand/reference mounts and accepted action bindings. All failures are preserved separately from the final pass; no production authority was widened.
 
 Before native verification, the official cache verifier rejected the old Ladybug bundle because Cargo.lock identity changed. No compatible sealed runtime was available. A private compiler-object cache clone accelerated ordinary source-based Cargo checks/builds; no cached result supplied proof. Local log hashes and an adversarial review assertion are recorded in the receipt. Hosted PR CI remains separate.
+
+## All-harness verification
+
+The scope extension changes shared JavaScript prompt delivery and the Prime Python recipe. Its required plan is full `npm run check`, `npm run build`, and `npm run test:eval-compiled-runtime`, plus targeted actual native-turn and real recipe checks. The [all-harness receipt](all-harness-verification.json) binds the ten source/test/PRD paths to digest `c4937a818f0b28e2abaa692f7976a3d61a9e694a39b0f63b15887bfc1927e48a`, separately from the earlier Codex-only receipt. Existing pilot measurements remain Codex-only; they do not establish Claude or Prime timing or quality.
 
 ## Live pilot evidence and adoption tradeoff
 
@@ -49,3 +55,8 @@ All 32 original native root deliveries were verified. A/B/D delegation probes ac
 Original failures and unknowns were retained with no replacements. An ENOSPC interruption affected D repair repetition 1. After the first 20 roots, the eval profile moved to SamsungSSD with a verified backup on 2T-SSD; restart and path-only rater requalification were recorded. A subsequent read-only ECONNRESET interrupted the dispatcher; the native judge finished naturally and only the unstarted suffix resumed. Serial shared-account/runtime conditions, storage moves, restarts, and three repetitions confound timing.
 
 The original summary reader rejected accepted mechanism probes because their structural gate receipts had empty evidence references. Its failure is preserved. A supplemental deterministic reader keeps coding reference validation unchanged and derives unique same-execution passing probe-check matches by exact name and detail. It changes no raw receipt or production code and runs no inference. `pilot.json` binds the sealed snapshot, summary, ratings, native-delivery/publication, mechanism and supplemental-reader identities. The primary agent independently reviewed that mapping before using it here.
+
+
+The expanded native-turn suites pass 182 tests; real recipe and production Prime visual scenarios pass ten. Both language recipes retain authored final detail and a bound control to the exact prior current. The first full run exposed the missing final visual summary; that real omission was repaired. The existing asset, export/import, reopen and presentation-pin checks remain intact.
+
+The full `npm run check` passes with the supported `VITEST_MAX_WORKERS=1` environment: 3,847 JavaScript tests, three existing skips, two explicit secret-boundary tests, 77 Python tests, and the native/crash, type, receipt and readability checks. `npm run build` passes; compiled eval runtime passes six tests. The same-source default parallel run failed a public-share 10,000-layer timeout and an eval graph-memory attempt check. Those two files pass unchanged with one worker (81 tests). High machine load and cache waits support possible contention but do not prove its cause. The receipt retains every failure and the one-worker qualification; no test timeout or assertion was weakened.

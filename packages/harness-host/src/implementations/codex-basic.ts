@@ -12,7 +12,7 @@ import {
   type NativeSessionResetReason,
 } from "../native-session-reset.js";
 import { redactTraceData } from "../trace.js";
-import { CODEX_CURRENT_COMMUNICATION_GUIDANCE, CODEX_CURRENT_WORKSPACE_GUIDANCE, currentCommunicationAuthoringRecipeJs, CURRENT_WORKSPACE_GUIDANCE, GRAPH_PRESENTATION_GUIDANCE, NODE_ICON_GUIDANCE, scopedAuthoringRecipeJs } from "./graph-presentation-guidance.js";
+import { CURRENT_COMMUNICATION_GUIDANCE_JS, CURRENT_WORKSPACE_GUIDANCE, currentCommunicationAuthoringRecipeJs, GRAPH_PRESENTATION_GUIDANCE, NODE_ICON_GUIDANCE } from "./graph-presentation-guidance.js";
 import { ARTIFACT_LAYER_GUIDANCE } from "./artifact-layer-guidance.js";
 import { LAYER_EDGE_SHAPE_GUIDANCE } from "./layer-edge-shape-guidance.js";
 import {
@@ -747,7 +747,7 @@ ${GRAPH_PRESENTATION_GUIDANCE}
 ${threadIconGuidance(context, "javascript")}
 ${CODEX_VISUAL_GUIDANCE}
 ${CODEX_ASSET_GUIDANCE}
-${CODEX_CURRENT_WORKSPACE_GUIDANCE}\n${CODEX_CURRENT_COMMUNICATION_GUIDANCE}${includePersonalPresentation ? personalPresentationPrompt(context) : ""}
+${CURRENT_WORKSPACE_GUIDANCE}\n${CURRENT_COMMUNICATION_GUIDANCE_JS}${includePersonalPresentation ? personalPresentationPrompt(context) : ""}
 
 Current interaction node: ${interactionNode.id}
 Normalized interaction input:
@@ -892,13 +892,13 @@ Do not turn a node, relationship, path, list, record, or arbitrary string into a
     : "";
   return `You are the Relayer layered-navigation harness. ${UNDERLYING_TASK_GUIDANCE}
 
-${nativeAgentLabel === "Codex" ? "While doing the underlying work, publish useful findings through current; finally answer" : "After doing the underlying work, answer"} the current user interaction with a useful graph that truthfully presents the result, evidence, and limitations. A flat answer is valid. Add navigation only when opening it would materially improve understanding or support; apply that same test again inside every layer you author.
+While doing the underlying work, publish useful findings through current; finally answer the current user interaction with a useful graph that truthfully presents the result, evidence, and limitations. A flat answer is valid. Add navigation only when opening it would materially improve understanding or support; apply that same test again inside every layer you author.
 
 ${GRAPH_PRESENTATION_GUIDANCE}
 ${threadIconGuidance(context, "javascript")}
 ${CODEX_VISUAL_GUIDANCE}
 ${CODEX_ASSET_GUIDANCE}
-${nativeAgentLabel === "Codex" ? CODEX_CURRENT_WORKSPACE_GUIDANCE + "\n" + CODEX_CURRENT_COMMUNICATION_GUIDANCE : CURRENT_WORKSPACE_GUIDANCE}${includePersonalPresentation && context !== undefined ? personalPresentationPrompt(context) : ""}
+${CURRENT_WORKSPACE_GUIDANCE}\n${CURRENT_COMMUNICATION_GUIDANCE_JS}${includePersonalPresentation && context !== undefined ? personalPresentationPrompt(context) : ""}
 
 Current interaction node: ${interactionNode.id}
 Normalized interaction input:
@@ -912,7 +912,7 @@ For a full Node Detail replacement accompanying an authorized addition, first ca
 
 Use executable JavaScript and the Relayer graph client. Do not return a JSON graph in chat. ${authoringInstructions}
 
-${nativeAgentLabel === "Codex" ? currentCommunicationAuthoringRecipeJs(interactionNode.id, clientModuleUrl) : scopedAuthoringRecipeJs(interactionNode.id, clientModuleUrl)}
+${currentCommunicationAuthoringRecipeJs(interactionNode.id, clientModuleUrl)}
 
 ${currentWorkspaceMechanicsJs()}
 ${semanticCompletionGuidanceJs(context, completeModuleUrl, nativeAgentLabel)}

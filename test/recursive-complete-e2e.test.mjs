@@ -278,7 +278,11 @@ describe("recursive complete end to end", () => {
     const finalCurrent = await response.json();
     expect(finalCurrent).toMatchObject({ lifecycle: "succeeded", headRevision: withPrior ? 3 : 2 });
     expect(finalCurrent.currentLayerId).not.toBe(observed.advanced.currentLayerId);
-    expect(detail.interactions[0].completionOutput).toBeTruthy();
+    const finalLayer = detail.interactions[0].completionOutput.rootLayer;
+    expect(finalLayer.nodes[0].authoredDetail.mounts[0].capability.kind).toBe("reference");
+    const earlier = finalLayer.actions.find(action => action.label === "Earlier findings");
+    expect(earlier.targetLayerId).toBe(observed.advanced.currentLayerId);
+    expect(finalLayer.nodes[0].authoredDetail.mounts[0].capability.action.clientKey).toBe(earlier.clientKey);
   });
 
 

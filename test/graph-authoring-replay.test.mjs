@@ -1,4 +1,4 @@
-import { scopedAuthoringRecipeJs, scopedAuthoringRecipePython } from "../packages/harness-host/dist/implementations/graph-presentation-guidance.js";
+import { currentCommunicationAuthoringRecipePython, scopedAuthoringRecipeJs, scopedAuthoringRecipePython } from "../packages/harness-host/dist/implementations/graph-presentation-guidance.js";
 import { pathToFileURL } from "node:url";
 import { spawn } from "node:child_process";
 import { createServer } from "node:http";
@@ -145,6 +145,7 @@ describe("replay-safe graph authoring", () => {
     const server = await startGraphServer(
       join(directory, "graph.sqlite3"),
       token,
+      ["--temporal-schema-read", "--temporal-root-current-write"],
     );
     processes.push(server.process);
     const interaction = await controlRequest(
@@ -449,6 +450,55 @@ describe("replay-safe graph authoring", () => {
         `/api/control/interactions/${capability.nodeId}/layers/${pyLayerId}`))
         .toMatchObject({ layer: { state: "accepted" }, nodes: [{ icon: "info", authoredDetail: { components: [{ id: "main" }] } }] });
 
+      // Execute Prime's delivered communication recipe through its real visual host bridge.
+      for (const withPrior of [false, true]) {
+        const baselineInteraction = await controlRequest(server.url, token, "/api/control/interactions", {
+          projectId: 41, threadId: 77, text: "Python communication baseline",
+        });
+        capability = { url: server.url, token: baselineInteraction.graphToken, nodeId: baselineInteraction.node.id };
+        let priorLayerId;
+        if (withPrior) {
+          const priorGraph = new RelayerGraphClient(capability);
+          const author = priorGraph.authoring("existing-current");
+          const layer = author.layer("prior");
+          const node = layer.node("prior", { icon: "info", title: "Earlier finding", detail: "Previously published evidence" });
+          layer.layout([[node, .5, .5]], { edgeShape: "default", defaultNode: node });
+          const written = await author.write(layer);
+          await priorGraph.addAction(capability.nodeId, { kind: "navigate", relation: "expand", label: "Task findings", icon: "info", target: written.rootLayer, clientKey: "root-response" });
+          await priorGraph.advanceCurrent(written.rootLayer, 0, "existing-current-publication");
+          priorLayerId = written.rootLayer.id;
+        }
+        const recipe = currentCommunicationAuthoringRecipePython(capability.nodeId).match(/```python\n([\s\S]*?)\n```/)[1]
+          .replace("# Continue the underlying work.", 'print("ADVANCED:" + json.dumps({"current": await graph.get_current(), "layer": await graph.get_layer(written.root_layer)}))\n# Continue the underlying work.');
+        const program = SCOPED_PYTHON.split("async def main():")[0]
+          .replace("host_request(method, payload)", "host_request(method, payload=None)")
+          + "async def main():\n" + recipe.split("\n").map(line => "    " + line).join("\n")
+          + '\nasyncio.run(main())';
+        const output = await runRecipeProcess("python3", ["-c", program], undefined, {
+          PYTHONPATH: join(repositoryRoot, "python/relayer-graph/src"),
+          SCOPED_HOST: `http://127.0.0.1:${host.address().port}`,
+          SCOPED_CAPABILITY: JSON.stringify(capability),
+        });
+        const advanced = JSON.parse(output.match(/ADVANCED:(.+)/)[1]);
+        expect(advanced.current).toMatchObject({ lifecycle: "active", headRevision: withPrior ? 2 : 1 });
+        const mounts = advanced.layer.nodes[0].authoredDetail.mounts;
+        expect(mounts.map(mount => mount.capability.kind)).toEqual(withPrior ? ["expand", "reference"] : ["expand"]);
+        for (const mount of mounts) {
+          expect(advanced.layer.actions.some(action => action.clientKey === mount.capability.action.clientKey)).toBe(true);
+        }
+        const earlier = advanced.layer.actions.find(action => action.label === "Earlier findings");
+        if (withPrior) expect(earlier.targetLayerId).toBe(priorLayerId);
+        else expect(earlier).toBeUndefined();
+        const finalCurrent = await controlRead(server.url, token, `/api/control/interactions/${capability.nodeId}/current`);
+        expect(finalCurrent).toMatchObject({ lifecycle: "succeeded", headRevision: withPrior ? 3 : 2 });
+        const finalLayer = await controlRead(server.url, token, `/api/control/interactions/${capability.nodeId}/layers/${finalCurrent.currentLayerId}`);
+        const finalMount = finalLayer.nodes[0].authoredDetail.mounts[0];
+        const finalEarlier = finalLayer.actions.find(action => action.label === "Earlier findings");
+        expect(finalMount.capability.kind).toBe("reference");
+        expect(finalMount.capability.action.clientKey).toBe(finalEarlier.clientKey);
+        expect(finalEarlier.targetLayerId).toBe(advanced.current.currentLayerId);
+      }
+
     } finally {
       await new Promise((resolve) => host.close(resolve));
     }
@@ -536,10 +586,10 @@ async function authorCompleteProgram(graph, interactionNodeId) {
   };
 }
 
-async function startGraphServer(database, controlToken) {
+async function startGraphServer(database, controlToken, temporalArguments = []) {
   const child = spawn(
     join(repositoryRoot, "target", "debug", "relayer-graph-server"),
-    ["--database", database, "--control-token", controlToken, "--port", "0"],
+    ["--database", database, "--control-token", controlToken, "--port", "0", ...temporalArguments],
     { stdio: ["ignore", "pipe", "pipe"] },
   );
   try {
