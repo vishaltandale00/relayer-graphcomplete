@@ -288,3 +288,60 @@ it.each(["forced-close", "never-close", "cancelled"])("requires owned Codex shut
     expect(await readdir(join(root, ".staging"))).toEqual([]);
   } finally { await rm(root, { recursive: true, force: true }); }
 });
+
+
+describe("provider-authorized installation consumers", () => {
+  it.each(["one remains", "all cancelled", "fresh retry"])("retains exact shared operation ownership: %s", async (scenario) => {
+    const root = await mkdtemp(join(tmpdir(), "relayer-install-consumers-"));
+    let releaseDownload; let downloadSignal; let releaseCleanup;
+    const cleanup = new Promise(resolve => { releaseCleanup = resolve; });
+    let downloads = 0;
+    const { installer, recipe } = codexFixture(root, {
+      downloadArtifactFile: async (_fetch, _artifact, destination, signal) => {
+        downloads++;
+        if (downloads === 1) {
+          downloadSignal = signal;
+          await new Promise((resolve, reject) => {
+            releaseDownload = resolve;
+            signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+          });
+        }
+        signal.throwIfAborted();
+        await writeFile(destination, Buffer.from("reviewed native artifact"));
+      },
+      removeDirectory: async (path, options) => {
+        if (scenario === "fresh retry" && downloadSignal?.aborted) await cleanup;
+        return rm(path, options);
+      },
+    });
+    const first = new AbortController(); const second = new AbortController();
+    try {
+      const old = installer.prepare(recipe.recipeId, { signal: first.signal });
+      const oldOutcome = old.catch(error => error);
+      await vi.waitFor(() => expect(releaseDownload).toBeTypeOf("function"));
+      const shared = scenario !== "fresh retry" ? installer.prepare(recipe.recipeId, { signal: second.signal }) : null;
+      const sharedOutcome = shared?.catch(error => error);
+      first.abort(new DOMException("provider superseded", "AbortError"));
+      expect(await oldOutcome).toMatchObject({ name: "AbortError" });
+      if (scenario === "one remains") {
+        expect(downloadSignal.aborted).toBe(false);
+        releaseDownload();
+        await expect(shared).resolves.toMatchObject({ recipeId: recipe.recipeId });
+        expect(downloads).toBe(1);
+      } else if (scenario === "fresh retry") {
+        expect(downloadSignal.aborted).toBe(true);
+        const fresh = installer.prepare(recipe.recipeId, { signal: second.signal });
+        releaseCleanup();
+        await expect(fresh).resolves.toMatchObject({ recipeId: recipe.recipeId });
+        expect(downloads).toBe(2);
+      } else {
+        expect(downloadSignal.aborted).toBe(false);
+        second.abort(new DOMException("second provider superseded", "AbortError"));
+        expect(await sharedOutcome).toMatchObject({ name: "AbortError" });
+        expect(downloadSignal.aborted).toBe(true);
+        await vi.waitFor(() => expect(installer.activeOperations()).toEqual([]));
+        await expect(installer.validate(recipe.recipeId)).rejects.toMatchObject({ code: "managed_runtime_not_installed" });
+      }
+    } finally { releaseDownload?.(); releaseCleanup(); await installer.cancelAll(); await rm(root, { recursive: true, force: true }); }
+  });
+});

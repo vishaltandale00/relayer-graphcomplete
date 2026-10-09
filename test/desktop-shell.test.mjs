@@ -1015,10 +1015,13 @@ describe("desktop skeleton", () => {
     }
   });
 
-  it("hides and reports a route when restart-local descriptor validation detects corruption", async () => {
+  it.each([
+    ["corruption", null, "harness_readiness_pending"],
+    ["unsupported target", "managed_runtime_unsupported_target", "managed_runtime_unsupported_target"],
+  ])("keeps the unavailable boundary typed when local validation detects %s", async (_, code, reasonCode) => {
     const directory = await mkdtemp(join(tmpdir(), "relayer-graph-runtime-corrupt-readiness-"));
     const configurationPath = fileURLToPath(new URL("../harnesses/codex-basic.yaml", import.meta.url));
-    const corruption = new Error("managed executable is missing");
+    const corruption = Object.assign(new Error("managed executable is missing"), { code });
     const onHarnessRuntimeValidationFailure = vi.fn(async () => {});
     const child = Object.assign(new EventEmitter(), {
       stdin: new Writable({ write(_chunk, _encoding, callback) { callback(); } }),
@@ -1043,10 +1046,11 @@ describe("desktop skeleton", () => {
       const catalog = JSON.parse(await readFile(session.catalogPath, "utf8"));
       expect(catalog.configurations[0]).toMatchObject({
         runtimeAvailable: false,
-        unavailableReason: { code: "harness_readiness_pending" },
+        unavailableReason: { code: reasonCode },
         appServerReadiness: { runtimeFilesValid: false },
       });
-      expect(onHarnessRuntimeValidationFailure).toHaveBeenCalledWith(
+      if (code === "managed_runtime_unsupported_target") expect(onHarnessRuntimeValidationFailure).not.toHaveBeenCalled();
+      else expect(onHarnessRuntimeValidationFailure).toHaveBeenCalledWith(
         expect.objectContaining({ name: "codex-basic" }), corruption,
       );
     } finally {

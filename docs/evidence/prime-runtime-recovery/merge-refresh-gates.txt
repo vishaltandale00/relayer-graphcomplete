@@ -1,0 +1,117 @@
+Merged main: 2a9fe2e9eed6029fd37bcf7ef6c0c37bf802a7c8
+Reviewed 25-path SHA256: dc62ec9262c7f20552afb80d3e7c07973a7d64c5dddcdb308f4e7e404da2eff1
+Node: 22.23.2; macOS arm64
+
+Command: CARGO_BUILD_JOBS=6 fnm exec --using 22.23.2 npm run build
+Exit: 0
+
+Command: CARGO_BUILD_JOBS=6 fnm exec --using 22.23.2 npm run check
+Exit: 0 (after completed build; no concurrent build)
+
+> relayer-graphcomplete@0.0.0 precheck
+> npm run prepare:renderer
+> relayer-graphcomplete@0.0.0 prepare:renderer
+> node scripts/prepare-renderer-vendor.mjs
+> relayer-graphcomplete@0.0.0 check
+> cargo fmt --all -- --check && cargo clippy --workspace --all-targets --all-features -- -D warnings && cargo test --workspace && npm run check:graph-crash-reconciliation && cargo build -p relayer-app-server -p relayer-graph-server && npm run build:packages && tsc --noEmit && npm run check --workspaces --if-present && vitest run && npm run test:codex-secret-boundary && PYTHONPATH=python/relayer-graph/src python3 -m unittest discover -s python/relayer-graph/tests && npm run lint:ladybug-receipt && npm run prd:check-readability
+test result: ok. 391 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 36.52s
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 49 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.69s
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.04s
+test result: ok. 39 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 32.22s
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 4.27s
+test result: ok. 38 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.71s
+test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.52s
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.42s
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.59s
+test result: ok. 116 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 7.33s
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+test result: ok. 17 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.89s
+test result: ok. 47 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.18s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.06s
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.21s
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.10s
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 4.03s
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.05s
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.67s
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.54s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+> relayer-graphcomplete@0.0.0 check:graph-crash-reconciliation
+> cargo test -p relayer-graph-core -p relayer-graph-server --features crash-test-support
+test result: ok. 38 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.73s
+test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.51s
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.55s
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.73s
+test result: ok. 116 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 7.31s
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+test result: ok. 21 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.43s
+test result: ok. 47 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.18s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.06s
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.29s
+test result: ok. 26 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 8.88s
+test result: ok. 14 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.77s
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.17s
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 4.02s
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.05s
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.46s
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.66s
+test result: ok. 14 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.19s
+test result: ok. 24 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 29.53s
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.08s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+> relayer-graphcomplete@0.0.0 build:packages
+> npm run build -w @relayer/graph-client && npm run build -w @relayer/visual-assets && npm run build -w @relayer/harness-host && npm run build -w @relayer/eval-runner
+> @relayer/graph-client@0.0.0 prebuild
+> node scripts/clean-dist.mjs
+> @relayer/graph-client@0.0.0 build
+> node scripts/generate-query-errors.mjs --check && tsc -p tsconfig.build.json && node scripts/package-runtime-deps.mjs
+> @relayer/visual-assets@0.0.0 build
+> tsc -p tsconfig.build.json
+> @relayer/harness-host@0.0.0 build
+> tsc -p tsconfig.build.json
+> @relayer/eval-runner@0.0.0 build
+> tsc -p tsconfig.build.json
+> @relayer/eval-runner@0.0.0 check
+> tsc --noEmit
+> @relayer/graph-client@0.0.0 check
+> node scripts/generate-query-errors.mjs --check && tsc --noEmit
+> @relayer/harness-host@0.0.0 check
+> tsc --noEmit
+> @relayer/visual-assets@0.0.0 check
+> tsc --noEmit && npm run test:built
+> @relayer/visual-assets@0.0.0 test:built
+> npm run build && node test/built-package-smoke.mjs
+> @relayer/visual-assets@0.0.0 build
+> tsc -p tsconfig.build.json
+ Test Files  319 passed | 1 skipped (320)
+      Tests  4189 passed | 3 skipped (4192)
+> relayer-graphcomplete@0.0.0 test:codex-secret-boundary
+> RELAYER_RUN_CODEX_SECRET_BOUNDARY=1 vitest run packages/harness-host/test/codex-secret-provider-process.test.ts
+ Test Files  1 passed (1)
+      Tests  2 passed (2)
+Ran 91 tests in 2.680s
+> relayer-graphcomplete@0.0.0 lint:ladybug-receipt
+> cargo fmt --manifest-path docs/evidence/issue-261-ladybug-probe/Cargo.toml -- --check && rustfmt --edition 2021 --check docs/evidence/issue-261-ladybug-probe/source-build-probe/src/main.rs && node scripts/lint-ladybug-qualification-receipt.mjs && npm run lint:ladybug-native-receipt && npm run lint:ladybug-contract-probe
+Ladybug v0.19.1 qualification receipt lint passed: upstream artifacts NO-GO
+> relayer-graphcomplete@0.0.0 lint:ladybug-native-receipt
+> node scripts/verify-ladybug-native-receipts.mjs
+Ladybug native receipt verified: 27 subtrees inventoried; no release blockers declared
+> relayer-graphcomplete@0.0.0 lint:ladybug-contract-probe
+> node scripts/lint-ladybug-contract-probe.mjs
+> relayer-graphcomplete@0.0.0 prd:check-readability
+> node docs/prd/check-readability.mjs
+PRD readability check passed. No checked sentence has more than 25 words.
+
+Command: fnm exec --using 22.23.2 npm run test:prime-managed-runtime
+Exit: 0; ready=true; recipe/client seal updated from current main.

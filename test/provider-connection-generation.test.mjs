@@ -4,6 +4,7 @@
 // lifecycle event advances it in the same write, and a missing or stale one is refused.
 import { describe, expect, it, vi } from "vitest";
 
+import { createHarnessReadinessCoordinator } from "../desktop/main/services/harness-readiness.mjs";
 import { createProviderAdapterRegistry } from "../desktop/main/providers/provider-adapter-contract.mjs";
 import { createProviderComposition } from "../desktop/main/providers/provider-composition.mjs";
 import { createProviderExecutionAccessBroker } from "../desktop/main/services/graphcomplete-runtime.mjs";
@@ -234,7 +235,9 @@ function managedWorld({ activationFails = false } = {}) {
             hold.reached.resolve();
             await hold.release.promise;
           }
-          return catalog(definition, status);
+          const snapshot = catalog(definition, status);
+          if (world.catalogModels !== undefined) snapshot.models = world.catalogModels;
+          return snapshot;
         },
       },
       executionAccess: async () => {
@@ -435,6 +438,10 @@ describe("PROV-002: a superseded provider result is inert", () => {
       expect(server.connected(managedDefinition.id)).toBe(true);
       expect(server.published.at(-1)).toMatchObject({ connected: true, connectionEvent: "reconnected" });
       expect(stale).toBeNull();
+      // Direct reconnect publication does not resurrect the previous generation cache.
+      expect(await composition.readinessRoutes()).toEqual([]);
+      await composition.modelCatalog.settingsOpened();
+      expect(await composition.readinessRoutes()).toHaveLength(1);
     } finally {
       await composition.close();
     }
@@ -553,6 +560,7 @@ describe("PROV-002: a superseded provider result is inert", () => {
       const refreshed = await composition.modelCatalog.settingsOpened();
       expect(server.connected(managedDefinition.id)).toBe(false);
       expect(refreshed).toEqual([null]);
+      expect(await composition.readinessRoutes()).toEqual([]);
 
       await composition.providerDefinitions.cancelConnection(pending.connectionId);
       expect(world.homeWipes).toBe(1);
@@ -641,6 +649,7 @@ describe("PROV-002: a superseded provider result is inert", () => {
     try {
       await composition.start();
       await composition.providerDefinitions.logout(managedDefinition.id);
+      world.account = "connected"; // Fresh discovery is connected; disconnected refreshes do not evaluate readiness.
       const readiness = { reached: deferred(), release: deferred() };
       holdReadiness = readiness;
       const explicit = composition.modelCatalog.explicitRefresh(managedDefinition.id);
@@ -715,9 +724,11 @@ describe("PROV-002: a superseded provider result is inert", () => {
       reconnecting.catch(() => undefined);
 
       await preparing.reached.promise;
+      expect(await composition.readinessRoutes()).toEqual([]);
       await expect(composition.modelCatalog.settingsOpened()).resolves.toEqual([null]);
       preparing.release.resolve();
       await login.reached.promise;
+      expect(await composition.readinessRoutes()).toEqual([]);
       await expect(composition.modelCatalog.settingsOpened()).resolves.toEqual([null]);
       expect(world.runtimes[0].discoveries).toBe(2);
 
@@ -1184,10 +1195,12 @@ describe("PROV-004: provider lifecycle never runs under a turn's provider access
     const service = composition.providerDefinitions;
     try {
       await composition.start();
+      expect(await composition.readinessRoutes()).toHaveLength(1);
       server.publishFails = true;
       await service.logout(managedDefinition.id);
       await vi.waitFor(() => expect(server.failedPublishes).toBe(2), { timeout: 5_000 });
       await expect(service.acquireExecution(managedDefinition.id)).rejects.toThrow("Provider is signed out.");
+      expect(await composition.readinessRoutes()).toEqual([]);
     } finally {
       await composition.close();
     }
@@ -1215,6 +1228,7 @@ describe("PROV-004: provider lifecycle never runs under a turn's provider access
       await followUp.reached.promise;
       expect(server.connected(managedDefinition.id)).toBe(true);
       await expect(service.acquireExecution(managedDefinition.id)).rejects.toThrow("Provider is signed out.");
+      expect(await composition.readinessRoutes()).toEqual([]);
       followUp.release.resolve();
       await vi.waitFor(() => expect(server.connected(managedDefinition.id)).toBe(false), { timeout: 5_000 });
     } finally {
@@ -1539,5 +1553,99 @@ describe("reconnect setup failure boundaries", () => {
       expect((await reconnecting).status).toBe("pending");
       expect(world.runtimes[0].credentials.login).toHaveBeenCalledOnce();
     } finally { setup.resolve(); await reconnecting?.catch(() => undefined); await composition.close(); }
+  });
+});
+
+
+describe("Prime setup retains its provider authorization", () => {
+  it.each(["explicit-repair", "recipe-update"].flatMap(trigger => ["logout", "remove", "reconnect", "catalog disconnect", "catalog replacement", "unchanged catalog"].map(change => [trigger, change])))
+    ("fences %s preparation on %s with the correct publication outcome", async (trigger, change) => {
+      const world = managedWorld();
+      const server = productServer([managedDefinition]);
+      const preparing = deferred();
+      const release = deferred();
+      const due = new Set(["prime-agent-basic"]);
+      const publishAvailability = vi.fn(async updates => { for (const update of updates) due.delete(update.harnessId); });
+      const readiness = createHarnessReadinessCoordinator({
+        configurations: new Map([["prime-agent-basic", { name: "prime-agent-basic", implementation: "prime.agent",
+          executionAccessContracts: ["managed-runtime@1"], modelRules: { allow: [{ adapterId: managedDefinition.adapterId, modelIdRegex: ".*" }], deny: [] } }]]),
+        digestConfiguration: () => "sha256:prime", runtimeRequirements: { "prime.agent": { recipeId: "prime@0.8.1" } },
+        recipeInstalled: async () => false, recipeSupported: async () => true,
+        prepareRecipe: async (_recipe, { signal }) => {
+          preparing.resolve(signal);
+          await Promise.race([release.promise, new Promise((_resolve, reject) => signal.addEventListener("abort", () => reject(signal.reason), { once: true }))]);
+          signal.throwIfAborted();
+          return {};
+        },
+        checkers: { "prime.agent": vi.fn(async () => ({ available: true })) }, publishAvailability,
+      });
+      const composition = compose({ registry: world.registry, server, evaluateReadiness: request => readiness.evaluate(request) });
+      try {
+        await composition.start();
+        const evaluation = trigger === "explicit-repair" ? composition.modelCatalog.explicitRefresh(managedDefinition.id)
+          : readiness.evaluateRecipeUpdate({ updatesDue: [...due], providers: await composition.readinessRoutes() });
+        const signal = await preparing.promise;
+        if (change === "unchanged catalog") {
+          if (trigger === "recipe-update") await composition.modelCatalog.refresh(managedDefinition.id, "background");
+          else composition.providerDefinitions.catalogPublished(managedDefinition.id, { connected: true, models: [model] });
+        }
+        else if (change === "catalog replacement") {
+          // Catalogs can change models without changing the connection generation.
+          const generation = composition.providerDefinitions.connectionGeneration(managedDefinition.id);
+          if (trigger === "recipe-update") { world.catalogModels = []; await composition.modelCatalog.refresh(managedDefinition.id, "background"); }
+          else { await server.publishCatalog({ providerId: managedDefinition.id, connected: true, models: [] }, { connectionGeneration: generation }); composition.providerDefinitions.catalogPublished(managedDefinition.id, { connected: true }); }
+          expect(composition.providerDefinitions.connectionGeneration(managedDefinition.id)).toBe(generation);
+        }
+        else if (change === "catalog disconnect") {
+          world.account = "disconnected";
+          if (trigger === "recipe-update") await composition.modelCatalog.refresh(managedDefinition.id, "background");
+          else {
+            // Same-provider refreshes queue behind this explicit refresh. Exercise the exact
+            // committed-catalog callback for an independently recorded disconnection instead.
+            await server.publishCatalog({ providerId: managedDefinition.id, connected: false }, { connectionGeneration: composition.providerDefinitions.connectionGeneration(managedDefinition.id) });
+            composition.providerDefinitions.catalogPublished(managedDefinition.id, { connected: false });
+          }
+        }
+        else await composition.providerDefinitions[change](managedDefinition.id);
+        expect(signal.aborted).toBe(change !== "unchanged catalog");
+        release.resolve();
+        await evaluation;
+        expect(publishAvailability).toHaveBeenCalledTimes(change === "unchanged catalog" ? 1 : 0);
+        expect([...due]).toEqual(change === "unchanged catalog" ? [] : ["prime-agent-basic"]);
+      } finally { release.resolve(); await composition.close(); }
+    });
+
+  it("refuses fresh setup while a signed-out catalog commit is pending", async () => {
+    const world = managedWorld(); const server = productServer([managedDefinition]);
+    const evaluateReadiness = vi.fn(); const composition = compose({ registry: world.registry, server, evaluateReadiness });
+    let release; const gate = new Promise(resolve => { release = resolve; });
+    let reached; const entered = new Promise(resolve => { reached = resolve; });
+    const originalPublish = server.publishCatalog;
+    try {
+      await composition.start();
+      const generation = composition.providerDefinitions.connectionGeneration(managedDefinition.id);
+      server.publishCatalog = async (snapshot, options) => { if (options?.connectionEvent === "signed-out") { reached(); await gate; } return originalPublish(snapshot, options); };
+      const logout = composition.providerDefinitions.logout(managedDefinition.id);
+      await entered;
+      // A catalog discovered before logout can answer while its sign-out commit awaits.
+      composition.providerDefinitions.catalogPublished(managedDefinition.id, { connected: true });
+      expect(composition.providerDefinitions.refreshGeneration(managedDefinition.id)).toBeNull();
+      expect(await composition.readinessRoutes()).toEqual([]);
+      await composition.providerDefinitions.evaluateCatalogReadiness(managedDefinition.id, [model], "explicit-repair", { connectionGeneration: generation });
+      expect(evaluateReadiness).not.toHaveBeenCalled();
+      release(); await logout;
+    } finally { release(); await composition.close(); }
+  });
+
+  it("does not lend a new generation to old discovery models", async () => {
+    const world = managedWorld(); const server = productServer([managedDefinition]);
+    const evaluateReadiness = vi.fn(); const composition = compose({ registry: world.registry, server, evaluateReadiness });
+    try {
+      await composition.start();
+      const generation = composition.providerDefinitions.connectionGeneration(managedDefinition.id);
+      await composition.providerDefinitions.logout(managedDefinition.id);
+      await composition.providerDefinitions.evaluateCatalogReadiness(managedDefinition.id, [model], "explicit-repair", { connectionGeneration: generation });
+      expect(evaluateReadiness).not.toHaveBeenCalled();
+    } finally { await composition.close(); }
   });
 });

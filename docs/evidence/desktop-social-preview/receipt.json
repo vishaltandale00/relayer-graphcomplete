@@ -5,7 +5,7 @@
     "desktop/main/services/share-publish-coordinator.mjs": "efa9817a7fb141a08e80a858e6f38ae9f12c76a5d3f8469df1ecb7f7dbdcf2ca",
     "desktop/main/services/share-publish-attempt-store.mjs": "55d555b3e1decc8c543356f66be0c4c1605c7f60dc593287fb84ecd93fb2f7ff",
     "desktop/main/services/share-service-client.mjs": "f30067b00bdb02ac64fbcfc932bafe02428cefd38ef094baa9abf51f5748c501",
-    "desktop/main/index.mjs": "912ada6e394f7445eec18cb0a056fb41412d23c5eb1bed2e7edd8d553c010eea",
+    "desktop/main/index.mjs": "59bfedcabde8f779cd425b46420c1823a9674498df083360629dff6014a90d14",
     "contracts/share-service-v1/contract.json": "d289317c75a44675b9bb6f4b8856f4e8f30cff7948ca27f8cfee72b7ba4b7d8d",
     "scripts/capture-share-preview-evidence.mjs": "4510e3a54f6b658c2df86b1a06afc8ca2428a36693a93648786bd4e075327562",
     "test/fixtures/social-preview.jsonl": "ff4a4545de49ccc20562f2f763b6a120d87fa37f7703a994abeb71b219a405aa",
@@ -13,7 +13,7 @@
   },
   "rendererArtifact": {
     "directory": "desktop/renderer",
-    "digest": "7e2f7bc9deaad092f081cf4a77aa76757cc23ff2f2d23aa115352670a2321e3e",
+    "digest": "0eaac42acda2da795b47e914f07a1b1471aff60a35e0af69c33174222de95066",
     "files": {
       "assets/relayer-logo.svg": {
         "bytes": 509,
@@ -128,12 +128,12 @@
         "sha256": "a5a491ac529a11f6e7326bac81e27d24cec53ee2ddb9679cf27f205e8a44c9c4"
       },
       "src/harness-settings-model.js": {
-        "bytes": 1899,
-        "sha256": "fd49a63b12aa8a358824b92b3b3ccfbed296f455464f7867f120ffd64ede9a9a"
+        "bytes": 2102,
+        "sha256": "e45659faf06ed87a61ae15b01bf6cd9e559847fdc9e5e4bf86991e1428b36bff"
       },
       "src/harness-settings.js": {
-        "bytes": 342,
-        "sha256": "db5a223e5ec42bcaf23667955165d4b4bf22e0622dcfd407933c530d3e3b339f"
+        "bytes": 1991,
+        "sha256": "b08aa7f4008dc06201e03f51ae8ac960ed7bbae45f67aaf7fbb9343775f314c6"
       },
       "src/human-task-grading.js": {
         "bytes": 8129,
@@ -164,8 +164,8 @@
         "sha256": "3ae5aa9d92afa4f6255a3fcf86b65f884f16a012db906700de60d56ab4f496ac"
       },
       "src/model-family-settings.js": {
-        "bytes": 30857,
-        "sha256": "8307c80ede28bff63814cbb3a564ab8d887032782cca22147a66054e45ae4cea"
+        "bytes": 31504,
+        "sha256": "b4cffca5c8d02a8892ca0469fc90fc432f0a35fcd62780960c7c185f852616d6"
       },
       "src/model-picker-model.js": {
         "bytes": 13681,
@@ -320,8 +320,8 @@
         "sha256": "7f0c926e5f3ce83fb7e48939c368bc1c14fbfc6ca85c4604d3353c114374f629"
       },
       "src/provider-ui.js": {
-        "bytes": 18872,
-        "sha256": "9189a49497d7987c38467574e8f4320109e34ab268c14fab65d46368c2c343b6"
+        "bytes": 19580,
+        "sha256": "92dfc51177d51dafe4ebf60a950b82aa3f09700419c7a2f24e8d58b57fce877e"
       },
       "src/public-share-viewer/adapter.js": {
         "bytes": 4757,

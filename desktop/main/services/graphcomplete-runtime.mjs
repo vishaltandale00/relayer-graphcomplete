@@ -474,10 +474,12 @@ export class GraphCompleteRuntimeService {
         const digest = digestHarnessConfiguration(configuration);
         if (!this.#coordinatesReadiness(configuration)) return { configuration, digest };
         let runtimeFilesValid = false;
+        let runtimeUnsupported = false;
         if (typeof this.validateHarnessRuntime === "function") {
           try {
             runtimeFilesValid = await this.#awaitStartupOperation(this.validateHarnessRuntime(configuration)) === true;
           } catch (error) {
+            runtimeUnsupported = error?.code === "managed_runtime_unsupported_target";
             // A runtime that was never installed, or has no recipe for this target, is the
             // normal state of an unused harness.
             if (!MANAGED_RUNTIME_ABSENT_CODES.has(error?.code)) {
@@ -490,8 +492,8 @@ export class GraphCompleteRuntimeService {
           digest,
           runtimeAvailable: false,
           unavailableReason: {
-            code: "harness_readiness_pending",
-            message: "This execution configuration is currently unavailable.",
+            code: runtimeUnsupported ? "managed_runtime_unsupported_target" : "harness_readiness_pending",
+            message: runtimeUnsupported ? "This execution configuration is not supported on this platform." : "This execution configuration is currently unavailable.",
           },
           appServerReadiness: {
             runtimeFilesValid,

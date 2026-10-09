@@ -127,6 +127,10 @@ export class ProviderDefinitionService {
     // Generations learned after load. Kept apart from this.definitions, which queued
     // operations replace wholesale, so a resync outside the queue is never lost.
     this.connectionGenerations = new Map();
+    this.readinessAuthorizations = new Map();
+    this.readinessTransitions = new Set();
+    this.catalogConnections = new Map();
+    this.catalogEligibility = new Map();
     // Providers with a lifecycle write whose answer was lost. It may still commit on the app
     // server, so an advance in their generation proves nothing about a later write. A later
     // answered write that advances the generation clears it: every lost write carried an older
@@ -148,15 +152,16 @@ export class ProviderDefinitionService {
 
   adapters() { return this.registry.list().map(publicDescriptor); }
 
-  async evaluateCatalogReadiness(id, models, trigger) {
+  async evaluateCatalogReadiness(id, models, trigger, { connectionGeneration, signal } = {}) {
     const definition = await this.#initialize().then((definitions) => (
       definitions.find((item) => item.id === id && item.lifecycleState === "active")
     ));
     if (!definition) throw new Error("Unknown active provider definition.");
+    const authorization = this.readinessAuthorization(id, connectionGeneration);
+    if (!authorization.isCurrent()) return null;
     return this.evaluateReadiness({
-      trigger,
-      providerDefinition: publicDefinition(definition),
-      models,
+      trigger, providerDefinition: publicDefinition(definition), models,
+      providers: [{ providerDefinition: publicDefinition(definition), models, ...authorization }], signal,
     });
   }
 
@@ -196,8 +201,37 @@ export class ProviderDefinitionService {
    * user's sign-in (PROV-002). The refresh skips, or drops a result it already has.
    */
   refreshGeneration(id) {
-    if (this.pendingConnections.has(id) || this.reconnectPreparations.has(id)) return null;
+    if (this.pendingConnections.has(id) || this.reconnectPreparations.has(id) || this.readinessTransitions.has(id)) return null;
     return this.connectionGeneration(id);
+  }
+
+  // A saved connected catalog cannot authorize setup after a local sign-out whose
+  // publication failed. Refresh may still run to record the signed-out state.
+  readinessGeneration(id) {
+    if (this.closing || this.readinessTransitions.has(id) || this.unrecordedSignOuts.has(id) || this.catalogConnections.get(id) === false) return null;
+    return this.refreshGeneration(id);
+  }
+
+  readinessAuthorization(id, generation = this.readinessGeneration(id)) {
+    if (generation !== this.readinessGeneration(id) || generation === null) {
+      return { connectionGeneration: generation, signal: AbortSignal.abort(Object.assign(new Error(CONNECTION_SUPERSEDED), { code: CONNECTION_SUPERSEDED })), isCurrent: () => false };
+    }
+    let entry = this.readinessAuthorizations.get(id);
+    if (!entry || entry.generation !== generation || entry.controller.signal.aborted) {
+      this.#invalidateReadiness(id);
+      entry = { generation, controller: new AbortController() };
+      this.readinessAuthorizations.set(id, entry);
+    }
+    const isCurrent = () => generation !== null && generation !== undefined
+      && this.readinessAuthorizations.get(id) === entry
+      && this.readinessGeneration(id) === generation;
+    if (!isCurrent()) entry.controller.abort(Object.assign(new Error(CONNECTION_SUPERSEDED), { code: CONNECTION_SUPERSEDED }));
+    return { connectionGeneration: generation, signal: entry.controller.signal, isCurrent };
+  }
+
+  #invalidateReadiness(id) {
+    this.readinessAuthorizations.get(id)?.controller.abort(Object.assign(new Error(CONNECTION_SUPERSEDED), { code: CONNECTION_SUPERSEDED }));
+    this.readinessAuthorizations.delete(id);
   }
 
   /**
@@ -205,8 +239,18 @@ export class ProviderDefinitionService {
    * records the signed-out state, so provider access may resume. A connected one does not: its
    * discovery may have read the account before a sign-out whose own publish failed.
    */
-  catalogPublished(id, { connected } = {}) {
-    if (connected !== true) this.unrecordedSignOuts.delete(id);
+  catalogPublished(id, { connected, models } = {}) {
+    const eligibility = models?.map(model => [model.id, model.visible !== false,
+      model.available !== false && model.availability !== "unavailable"]).sort(([a], [b]) => a.localeCompare(b));
+    const key = eligibility === undefined ? null : JSON.stringify(eligibility);
+    // Identical background refreshes must not starve a long first installation.
+    // Any changed model eligibility, or an unscoped callback, expires the old routes.
+    if (connected !== true || key === null || key !== this.catalogEligibility.get(id)) this.#invalidateReadiness(id);
+    this.catalogEligibility.set(id, key);
+    this.catalogConnections.set(id, connected === true);
+    if (connected !== true) {
+      this.unrecordedSignOuts.delete(id);
+    }
   }
 
   /** Rereads a generation the app server refused as stale. Generations only increase. */
@@ -216,7 +260,10 @@ export class ProviderDefinitionService {
   }
 
   #recordGeneration(id, generation) {
-    if (generation > (this.connectionGenerations.get(id) ?? 0)) this.connectionGenerations.set(id, generation);
+    if (generation > (this.connectionGenerations.get(id) ?? 0)) {
+      this.#invalidateReadiness(id);
+      this.connectionGenerations.set(id, generation);
+    }
   }
 
   // A lifecycle publish the app server refused because this process held an older
@@ -845,7 +892,10 @@ export class ProviderDefinitionService {
       // have advanced the generation (#reconnectOutcome).
       const reconnecting = this.pendingConnections.get(id);
       const pendingReconnect = reconnecting?.reconnect === true ? reconnecting : null;
-      const account = await runtime.credentials.logout({ signal });
+      this.#invalidateReadiness(id);
+      this.readinessTransitions.add(id);
+      try {
+        const account = await runtime.credentials.logout({ signal });
       this.statusOverrides.set(id, {
         connected: false,
         unavailableReason: {
@@ -871,6 +921,7 @@ export class ProviderDefinitionService {
         .then(() => this.onRuntimeChanged(definition, runtime))
         .catch(logoutFailed);
       return Object.freeze({ ...(account ?? { status: "disconnected" }) });
+      } finally { this.readinessTransitions.delete(id); }
     });
   }
 
@@ -919,6 +970,7 @@ export class ProviderDefinitionService {
         // From here the reconnect prepares the runtime and starts its sign-in on it, before it
         // is pending. No refresh runs through that runtime meanwhile (refreshGeneration).
         preparing = true;
+        this.#invalidateReadiness(id);
         this.reconnectPreparations.set(id, (this.reconnectPreparations.get(id) ?? 0) + 1);
       });
     } finally {
@@ -1152,8 +1204,10 @@ export class ProviderDefinitionService {
       const next = this.definitions.map((item) => (
         item.id === id ? { ...item, lifecycleState: "removal_pending" } : item
       ));
-      await this.definitionStore.save(next);
-      this.definitions = next;
+      this.#invalidateReadiness(id);
+      this.readinessTransitions.add(id);
+      try { await this.definitionStore.save(next); this.definitions = next; }
+      finally { this.readinessTransitions.delete(id); }
       // removal_pending blocks new attempts through this provider at once, so
       // a pending reconnect can no longer complete. Only its entry goes: its
       // runtime is the one in this.runtimes, which admitted turns may still
@@ -1282,6 +1336,7 @@ export class ProviderDefinitionService {
    */
   beginShutdown() {
     this.closing = true;
+    for (const id of this.readinessAuthorizations.keys()) this.#invalidateReadiness(id);
     for (const preparation of this.preparingConnections.values()) {
       if (preparation.cancellable) preparation.cancelled = true;
     }

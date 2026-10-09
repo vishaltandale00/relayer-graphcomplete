@@ -1,0 +1,5 @@
+
+> relayer-graphcomplete@0.0.0 test:prime-managed-runtime
+> node scripts/verify-prime-managed-runtime.mjs
+
+{"recipeId":"prime@0.8.1","recipeDigest":"3e810a5130e71e12a4033eecb9853b3f24bfa045709e3131ea5f38506bf2b319","target":"macos-arm64","javascriptClosureKind":"repository","javascriptClosureSha256":"02f15fb2ce6366f1e9709e66336a94476dc6605bb8618885afea9e7d2e19766f","ready":true}

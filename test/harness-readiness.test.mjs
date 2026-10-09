@@ -5,6 +5,8 @@ import {
   createPostUpgradeReadiness,
   startPostUpgradeReadiness,
 } from "../desktop/main/services/harness-readiness.mjs";
+import { managedRecipeInstalled, managedRecipeSupported } from "../desktop/main/managed-runtimes/resolver.mjs";
+import { resolveManagedRuntimeRecipe } from "../desktop/main/managed-runtimes/recipes.mjs";
 import { checkPrimeManagedRuntime } from "../desktop/main/services/prime-managed-runtime.mjs";
 
 function configuration(name, implementation, adapterId) {
@@ -279,6 +281,43 @@ describe("production harness readiness", () => {
     expect(publishAvailability).not.toHaveBeenCalled();
   });
 
+  it.each([
+    ["connected eligible router", [{ id: "qwen", visible: true, available: true }], "secret@1", true],
+    ["no published models", [], "secret@1", false],
+    ["unavailable model", [{ id: "qwen", available: false }], "secret@1", false],
+    ["wrong access contract", [{ id: "qwen" }], "managed-runtime@1", false],
+    ["unsupported target", [{ id: "qwen", available: true }], "secret@1", false, "macos-x64"],
+  ])("recovers absent Prime only for a current route: %s", async (_, models, accessContract, expected, target = "macos-arm64") => {
+    const runtimes = { validate: async (recipeId) => {
+      resolveManagedRuntimeRecipe(recipeId, target);
+      throw Object.assign(new Error("not installed"), { code: "managed_runtime_not_installed" });
+    } };
+    const due = new Set(["prime-agent-basic"]);
+    const prepareRecipe = vi.fn(async () => ({ runtimeId: "prime" }));
+    const publishAvailability = vi.fn(async (results) => {
+      for (const { harnessId } of results) due.delete(harnessId);
+    });
+    const readiness = createHarnessReadinessCoordinator({
+      configurations: new Map([["prime-agent-basic", configuration("prime-agent-basic", "prime.agent", "openrouter")]]),
+      digestConfiguration: () => "sha256:prime-upgraded",
+      runtimeRequirements: { "prime.agent": { runtimeId: "prime", recipeId: "prime@0.8.1" } },
+      prepareRecipe, checkers: { "prime.agent": async () => ({ available: true }) },
+      publishAvailability,
+      recipeInstalled: (id) => managedRecipeInstalled(runtimes, id),
+      recipeSupported: (id) => managedRecipeSupported(runtimes, id),
+    });
+    const repairProviders = vi.fn(async () => {});
+    const request = { readiness, updatesDue: async () => [...due], repairProviders,
+      routes: async () => [{ providerDefinition: { id: "router", adapterId: "openrouter", accessContract }, models }],
+    };
+    await startPostUpgradeReadiness(request).evaluation;
+    expect(prepareRecipe).toHaveBeenCalledTimes(expected ? 1 : 0);
+    expect(publishAvailability).toHaveBeenCalledTimes(expected ? 1 : 0);
+    expect(repairProviders).not.toHaveBeenCalled();
+    await startPostUpgradeReadiness(request).evaluation;
+    expect(prepareRecipe).toHaveBeenCalledTimes(expected ? 1 : 0);
+  });
+
   function postUpgradeFixture({ checker, prepare } = {}) {
     const configurations = new Map([["codex-basic", configuration("codex-basic", "codex.basic", "openai-api")]]);
     const publishAvailability = vi.fn(async () => {});
@@ -410,4 +449,134 @@ describe("production harness readiness", () => {
     expect(recoverySignal.aborted).toBe(true);
     expect(cancelInstallerOperations).toHaveBeenCalledOnce();
   });
+});
+
+
+describe("readiness route lifetime at asynchronous boundaries", () => {
+  it.each(["target lookup", "checker", "publication queue"])("drops a provider authorization superseded during %s", async boundary => {
+    let release; const gate = new Promise(resolve => { release = resolve; });
+    let reached; const entered = new Promise(resolve => { reached = resolve; });
+    const controller = new AbortController();
+    const publishAvailability = vi.fn(async () => {});
+    const prepareRecipe = vi.fn(async () => ({}));
+    const readiness = createHarnessReadinessCoordinator({
+      configurations: new Map([["prime-agent-basic", configuration("prime-agent-basic", "prime.agent", "openrouter")]]),
+      digestConfiguration: () => "sha256:prime", runtimeRequirements: { "prime.agent": { recipeId: "prime@0.8.1" } },
+      recipeInstalled: async () => false,
+      recipeSupported: async () => { if (boundary === "target lookup") { reached(); await gate; } return true; },
+      prepareRecipe,
+      checkers: { "prime.agent": async () => { if (boundary === "checker") { reached(); await gate; } return { available: true }; } },
+      publishAvailability,
+    });
+    const route = { providerDefinition: { id: "router", adapterId: "openrouter", accessContract: "secret@1" }, models: [{ id: "qwen" }],
+      connectionGeneration: 1, signal: controller.signal, isCurrent: () => !controller.signal.aborted };
+    let prior;
+    if (boundary === "publication queue") {
+      publishAvailability.mockImplementationOnce(async () => { reached(); await gate; });
+      prior = readiness.evaluate({ trigger: "connect", providerDefinition: route.providerDefinition, models: route.models });
+      await entered;
+    }
+    const evaluation = readiness.evaluateRecipeUpdate({ updatesDue: ["prime-agent-basic"], providers: [route] });
+    if (boundary === "publication queue") await vi.waitFor(() => expect(prepareRecipe).toHaveBeenCalledTimes(2));
+    else await entered;
+    controller.abort(new Error("provider superseded")); release();
+    await prior; await expect(evaluation).resolves.toEqual({ readyHarnessIds: [], routeResults: [] });
+    expect(publishAvailability).toHaveBeenCalledTimes(boundary === "publication queue" ? 1 : 0);
+    if (boundary === "target lookup") expect(prepareRecipe).not.toHaveBeenCalled();
+  });
+});
+
+
+it.each(["prepare", "checker", "publication queue"].flatMap(boundary => [false, true].map(allLost => [boundary, allLost])))
+  ("retains every eligible route during %s (allLost=%s)", async (boundary, allLost) => {
+    let release; const gate = new Promise(resolve => { release = resolve; });
+    let reached; const entered = new Promise(resolve => { reached = resolve; });
+    const controllers = [new AbortController(), new AbortController()];
+    const routes = controllers.map((controller, index) => ({ providerDefinition: { id: `router-${index}`, adapterId: "openrouter", accessContract: "secret@1" },
+      models: [{ id: "qwen" }], connectionGeneration: 1, signal: controller.signal, isCurrent: () => !controller.signal.aborted }));
+    let held = boundary !== "publication queue";
+    let preparationSignal;
+    const prepareRecipe = vi.fn(async (_recipe, options) => {
+      if (held && boundary === "prepare") { preparationSignal = options.signal; reached(); await gate; }
+      return {};
+    });
+    const checker = vi.fn(async ({ signal }) => {
+      if (held && boundary === "checker") { preparationSignal = signal; reached(); await gate; }
+      return { available: true };
+    });
+    const publishAvailability = vi.fn(async () => {});
+    const readiness = createHarnessReadinessCoordinator({ configurations: new Map([["prime-agent-basic", configuration("prime-agent-basic", "prime.agent", "openrouter")]]),
+      digestConfiguration: () => "sha256:prime", runtimeRequirements: { "prime.agent": { recipeId: "prime@0.8.1" } },
+      prepareRecipe, checkers: { "prime.agent": checker }, publishAvailability });
+    let prior;
+    if (boundary === "publication queue") {
+      publishAvailability.mockImplementationOnce(async () => { reached(); await gate; });
+      prior = readiness.evaluate({ trigger: "connect", providerDefinition: routes[0].providerDefinition, models: routes[0].models });
+      await entered; held = true;
+    }
+    const evaluation = readiness.evaluate({ trigger: "recipe-update", providers: routes });
+    if (boundary === "publication queue") await vi.waitFor(() => expect(checker).toHaveBeenCalledTimes(2));
+    else await entered;
+    controllers[0].abort();
+    if (allLost) controllers[1].abort();
+    if (preparationSignal) expect(preparationSignal.aborted).toBe(allLost);
+    release(); await prior;
+    const result = await evaluation;
+    if (allLost) {
+      expect(result.readyHarnessIds).toEqual([]);
+      expect(publishAvailability).toHaveBeenCalledTimes(prior ? 1 : 0);
+    } else {
+      expect(result.readyHarnessIds).toEqual(["prime-agent-basic"]);
+      expect(publishAvailability.mock.calls.at(-1)[0][0].providerConnections).toEqual([{ providerId: "router-1", generation: 1, modelIds: ["qwen"] }]);
+      expect(prepareRecipe).toHaveBeenCalledTimes(prior ? 2 : 1);
+      expect(checker).toHaveBeenCalledTimes(prior ? 2 : 1);
+    }
+  });
+
+
+it("commits another guarded harness when a dispatched result loses its only route", async () => {
+  const first = new AbortController(); const second = new AbortController();
+  let reached; const entered = new Promise(resolve => { reached = resolve; });
+  let release; const gate = new Promise(resolve => { release = resolve; });
+  const due = new Set(["prime-agent-basic", "codex-basic"]);
+  const publishAvailability = vi.fn(async updates => {
+    if (updates[0].harnessId === "prime-agent-basic") { reached(); await gate; }
+    for (const update of updates) {
+      if (update.providerConnections.every(({ providerId }) => providerId === "router-0" && first.signal.aborted)) {
+        throw Object.assign(new Error("stale provider"), { code: "provider_connection_superseded" });
+      }
+      due.delete(update.harnessId);
+    }
+  });
+  const readiness = createHarnessReadinessCoordinator({
+    configurations: new Map([["prime-agent-basic", configuration("prime-agent-basic", "prime.agent", "openrouter")], ["codex-basic", configuration("codex-basic", "codex.basic", "openai-api")]]),
+    digestConfiguration: ({ name }) => `sha256:${name}`, runtimeRequirements: { "prime.agent": { recipeId: "prime" }, "codex.basic": { recipeId: "codex" } },
+    prepareRecipe: async () => ({}), checkers: { "prime.agent": async () => ({ available: true }), "codex.basic": async () => ({ available: true }) }, publishAvailability,
+  });
+  const providers = [first, second].map((controller, index) => ({ providerDefinition: { id: `router-${index}`, adapterId: index ? "openai-api" : "openrouter", accessContract: "secret@1" },
+    models: [{ id: "work" }], connectionGeneration: 1, signal: controller.signal, isCurrent: () => !controller.signal.aborted }));
+  const evaluation = readiness.evaluate({ trigger: "recipe-update", providers });
+  await entered; first.abort(); release();
+  expect((await evaluation).readyHarnessIds).toEqual(["codex-basic"]);
+  expect([...due]).toEqual(["prime-agent-basic"]);
+  expect(publishAvailability).toHaveBeenCalledTimes(2);
+});
+
+
+it("remembers a committed guarded result when a later independent publication fails", async () => {
+  const accepted = [];
+  const publishAvailability = vi.fn(async ([update]) => {
+    if (update.harnessId === "codex-basic") throw new Error("backend unavailable");
+    accepted.push(update.harnessId);
+  });
+  const readiness = createHarnessReadinessCoordinator({
+    configurations: new Map([["prime-agent-basic", configuration("prime-agent-basic", "prime.agent", "openrouter")], ["codex-basic", configuration("codex-basic", "codex.basic", "openrouter")]]),
+    digestConfiguration: ({ name }) => `sha256:${name}`, runtimeRequirements: {}, prepareRecipe: async () => ({}),
+    checkers: { "prime.agent": async () => ({ available: true }), "codex.basic": async () => ({ available: true }) }, publishAvailability,
+  });
+  const mark = readiness.publicationMark();
+  await expect(readiness.evaluate({ trigger: "recipe-update", providers: [{ providerDefinition: { id: "router", adapterId: "openrouter", accessContract: "secret@1" },
+    models: [{ id: "qwen" }], connectionGeneration: 1, signal: new AbortController().signal, isCurrent: () => true }] })).rejects.toThrow("backend unavailable");
+  expect(accepted).toEqual(["prime-agent-basic"]);
+  expect(readiness.publishedSince(mark)).toEqual(accepted);
 });
