@@ -140,7 +140,7 @@ describe("harness configuration", () => {
   });
 
   it.each([
-    ["codex-basic", "medium", 14, "layered-navigation-multi-agent-v1"],
+    ["codex-basic", "medium", 15, "layered-navigation-multi-agent-v1"],
     ["codex-basic-high", "high", 4, undefined],
   ])("loads the checked-in %s configuration", async (name, modelReasoningEffort, revision, promptProfile) => {
     await expect(loadHarnessConfiguration(join(repositoryRoot, `harnesses/${name}.yaml`))).resolves.toEqual({
@@ -169,18 +169,23 @@ describe("harness configuration", () => {
       ...(name === "codex-basic" ? { complete: { agentAuthored: true }, graphCapabilityProfile: { search: "query-v1", preview: "enabled" } } : {}),
       settings: {
         modelReasoningEffort,
-        ...(name === "codex-basic" ? { personalPresentationVersion: "personal-presentation-v4" } : {}),
+        ...(name === "codex-basic" ? { personalPresentationVersion: "personal-presentation-v6" } : {}),
         ...(promptProfile === undefined ? {} : { promptProfile }),
         skipGitRepoCheck: true,
       },
     });
   });
 
-  it.each(["codex-basic", "prime-agent-basic", "prime-agent-deep"])(
-    "pins the shipped %s configuration to explanatory presentation V4",
-    async (name) => {
+  it.each([
+    ["codex-basic", "personal-presentation-v6"],
+    ["claude-basic", "personal-presentation-v6"],
+    ["prime-agent-basic", "personal-presentation-v6"],
+    ["prime-agent-deep", "personal-presentation-v4"],
+  ])(
+    "pins the shipped %s configuration to %s",
+    async (name, version) => {
       const configuration = await loadHarnessConfiguration(join(repositoryRoot, `harnesses/${name}.yaml`));
-      expect(configuration.settings.personalPresentationVersion).toBe("personal-presentation-v4");
+      expect(configuration.settings.personalPresentationVersion).toBe(version);
     },
   );
 
@@ -347,14 +352,14 @@ describe("harness configuration", () => {
     expect(digestHarnessConfiguration(base)).not.toBe(digestHarnessConfiguration(changedRules));
   });
 
-  it("keeps presentation selection outside provider-session identity without ignoring execution settings", () => {
-    const base = parseHarnessConfiguration({ schemaVersion: 1, name: "codex-basic", implementation: "codex.basic", implementationVersion: 1, permissionBindings, settings: { modelReasoningEffort: "medium" } });
-    const promoted = parseHarnessConfiguration({ ...base, revision: 8, settings: { ...base.settings, personalPresentationVersion: "personal-presentation-v3" } });
+  it.each(["codex.basic", "claude.basic"])("keeps %s presentation selection outside provider-session identity without ignoring execution settings", (implementation) => {
+    const base = parseHarnessConfiguration({ schemaVersion: 1, name: "fixture-basic", implementation, implementationVersion: 1, permissionBindings, settings: { modelReasoningEffort: "medium" } });
+    const promoted = parseHarnessConfiguration({ ...base, revision: 8, settings: { ...base.settings, personalPresentationVersion: "personal-presentation-v6" } });
     expect(sameHarnessExecutionConfiguration(base, promoted)).toBe(true);
     expect(digestHarnessConfiguration(base)).not.toBe(digestHarnessConfiguration(promoted));
     expect(sameHarnessExecutionConfiguration(
-      { ...base, implementation: "claude.basic" },
-      { ...promoted, implementation: "claude.basic" },
+      { ...base, implementation: "test" },
+      { ...promoted, implementation: "test" },
     )).toBe(false);
     expect(sameHarnessExecutionConfiguration(promoted, { ...promoted, settings: { ...promoted.settings, modelReasoningEffort: "high" } })).toBe(false);
     expect(sameHarnessExecutionConfiguration(promoted, { ...promoted, permissionBindings: { auto: { sandboxMode: "danger-full-access" } } })).toBe(false);
@@ -441,7 +446,7 @@ describe("harness configuration", () => {
     expect(sameHarnessExecutionConfiguration(base, promoted)).toBe(true);
     expect(digestHarnessConfiguration(base)).not.toBe(digestHarnessConfiguration(promoted));
     expect(sameHarnessExecutionConfiguration(base, { ...promoted, settings: { ...promoted.settings, thinkingLevel: "high" } })).toBe(false);
-    expect(sameHarnessExecutionConfiguration({ ...base, implementation: "claude.basic" }, { ...promoted, implementation: "claude.basic" })).toBe(false);
+    expect(sameHarnessExecutionConfiguration({ ...base, implementation: "test" }, { ...promoted, implementation: "test" })).toBe(false);
   });
 
   it("allows many named configurations to select the same implementation", async () => {

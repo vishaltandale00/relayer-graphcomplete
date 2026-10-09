@@ -18,6 +18,85 @@ mod tests {
     use std::borrow::Cow;
 
     #[tokio::test]
+    async fn schema_46_adds_v6_without_changing_published_preferences_or_pins() {
+        let temporary = tempfile::tempdir().unwrap();
+        let file = tempfile::NamedTempFile::new_in(temporary.path()).unwrap();
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect(&format!("sqlite://{}", file.path().display()))
+            .await
+            .unwrap();
+        Migrator {
+            migrations: Cow::Owned(
+                MIGRATOR
+                    .iter()
+                    .filter(|migration| migration.version < 47)
+                    .cloned()
+                    .collect(),
+            ),
+            ..Migrator::DEFAULT
+        }
+        .run(&pool)
+        .await
+        .unwrap();
+        let old = SqliteProductStore {
+            pool,
+            harness_readiness_generations: Default::default(),
+        };
+        old.publish_personal_presentation_version(
+            "personal-presentation-v4",
+            501,
+            601,
+            &serde_json::json!({"nodeId":501,"rootLayer":{"layer":{"id":601}}}),
+            "1",
+        )
+        .await
+        .unwrap();
+        let thread = old
+            .insert_thread_with_initial_interaction_and_personal_presentation(
+                crate::storage::NewThreadRecord {
+                    icon_selection_eligible: true,
+                    title: "Existing",
+                    project_id: None,
+                    initial_message: "Existing question",
+                    harness_configuration_name: "codex-basic",
+                    permission_profile_id: "auto",
+                    model_selection: None,
+                    timestamp: "2",
+                },
+                Some("personal-presentation-v4"),
+            )
+            .await
+            .unwrap();
+        let before = old.personal_presentation_profile().await.unwrap();
+        let pin = old
+            .prepare_personal_presentation_pin(thread.root_interaction_id, None, "3")
+            .await
+            .unwrap();
+        old.pool.close().await;
+        let current = SqliteProductStore::open(file.path()).await.unwrap();
+        let after = current.personal_presentation_profile().await.unwrap();
+        assert_eq!(after.active_version_key, before.active_version_key);
+        assert_eq!(&after.versions[..5], &before.versions);
+        assert_eq!(after.versions.len(), 6);
+        assert_eq!(after.versions[5].version_key, "personal-presentation-v6");
+        assert_eq!(after.versions[5].profile_interaction_id, -7);
+        assert_eq!(
+            current
+                .prepare_personal_presentation_pin(thread.root_interaction_id, None, "4")
+                .await
+                .unwrap(),
+            pin
+        );
+        current.pool.close().await;
+        let reopened = SqliteProductStore::open(file.path()).await.unwrap();
+        assert_eq!(
+            reopened.personal_presentation_profile().await.unwrap(),
+            after
+        );
+    }
+
+    #[tokio::test]
     async fn schema_39_thread_icons_never_backfill_legacy_threads() {
         let temporary = tempfile::tempdir().unwrap();
         let file = tempfile::NamedTempFile::new_in(temporary.path()).unwrap();
@@ -57,7 +136,7 @@ mod tests {
         .fetch_all(&store.pool)
         .await
         .unwrap();
-        assert_eq!(versions, [40, 41, 42, 43, 44, 45, 46]);
+        assert_eq!(versions, [40, 41, 42, 43, 44, 45, 46, 47]);
         assert!(
             store
                 .recover_interaction_accepted(

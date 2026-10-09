@@ -3330,7 +3330,7 @@ function readTraceContext(value: unknown): HarnessCompletionTraceContext | undef
   if (personalPresentationVersionKey !== undefined
     && (personalPresentationVersionId === undefined
       || typeof personalPresentationVersionKey !== "string"
-      || !/^personal-presentation-v[0-4]$/.test(personalPresentationVersionKey))) {
+      || !/^personal-presentation-v[0-46]$/.test(personalPresentationVersionKey))) {
     throw new Error("Harness completion trace context presentation key requires its pinned version id and a supported key");
   }
   return {
