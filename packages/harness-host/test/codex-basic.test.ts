@@ -164,7 +164,7 @@ describe("CodexBasicHarness", () => {
       expect(prompt).not.toContain("fixture-broker-token");
       expect(prompt.includes("Import complete and watchCompletions from")).toBe(brokerAvailable);
       expect(prompt).toContain('error.code !== "feature_disabled"');
-      expect(prompt).toContain('published?.layer.clientKey !== layer.object.clientKey');
+      expect(prompt).toContain('published.layer.clientKey === layer.object.clientKey');
       expect(prompt).not.toContain("Follow this publish, observe, continue sequence");
       expect(prompt).not.toContain("Advance your current when you establish");
     }
@@ -173,7 +173,7 @@ describe("CodexBasicHarness", () => {
   it("shares the JavaScript communication baseline with Claude", () => {
     const claude = buildLayeredNavigationPrompt(runContext(1, "token"), "@relayer/graph-client", undefined, "@relayer/graphcomplete", "Claude");
     expect(claude).not.toContain("Advancing is optional");
-    expect(claude).toContain('graph.authoring("first-finding")');
+    expect(claude).toContain('graph.authoring("first-finding-');
     expect(claude).toContain("Your current layer is how you explain the work");
   });
 

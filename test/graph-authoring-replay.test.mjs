@@ -145,7 +145,6 @@ describe("replay-safe graph authoring", () => {
     const server = await startGraphServer(
       join(directory, "graph.sqlite3"),
       token,
-      ["--temporal-schema-read", "--temporal-root-current-write"],
     );
     processes.push(server.process);
     const interaction = await controlRequest(
@@ -450,10 +449,11 @@ describe("replay-safe graph authoring", () => {
         `/api/control/interactions/${capability.nodeId}/layers/${pyLayerId}`))
         .toMatchObject({ layer: { state: "accepted" }, nodes: [{ icon: "info", authoredDetail: { components: [{ id: "main" }] } }] });
 
+      const temporalServer = await startGraphServer(join(directory, "temporal.sqlite3"), token, ["--temporal-schema-read", "--temporal-root-current-write"]);
+      processes.push(temporalServer.process);
       // Execute Prime's delivered communication recipe through its real visual host bridge.
-      for (const { withPrior, replay, temporal } of [{ withPrior: false, replay: false, temporal: true }, { withPrior: true, replay: false, temporal: true }, { withPrior: false, replay: true, temporal: true }, { withPrior: true, replay: true, temporal: true }, { withPrior: false, replay: false, temporal: false }]) {
-        const baselineServer = temporal ? server : await startGraphServer(join(directory, "all-off.sqlite3"), token);
-        if (!temporal) processes.push(baselineServer.process);
+      for (const { withPrior, replay, temporal, later = false } of [{ withPrior: false, replay: false, temporal: true }, { withPrior: true, replay: false, temporal: true }, { withPrior: false, replay: true, temporal: true }, { withPrior: true, replay: true, temporal: true }, { withPrior: true, replay: true, temporal: true, later: true }, { withPrior: false, replay: false, temporal: false }]) {
+        const baselineServer = temporal ? temporalServer : server;
         const baselineInteraction = await controlRequest(baselineServer.url, token, "/api/control/interactions", {
           projectId: 41, threadId: 77, text: "Python communication baseline",
         });
@@ -482,10 +482,30 @@ describe("replay-safe graph authoring", () => {
           SCOPED_HOST: `http://127.0.0.1:${host.address().port}`,
           SCOPED_CAPABILITY: JSON.stringify(capability),
         };
+        if (temporal && !withPrior && !replay) {
+          const invalidRead = program.replace('    try:\n', '    from relayer_graph import RelayerGraphClient\n    graph.get_current = RelayerGraphClient(cap["url"], "invalid-token", cap["nodeId"]).get_current\n    try:\n').replace('    author =', '    raise RuntimeError("AUTHORING_STARTED")\n    author =');
+          await expect(runRecipeProcess("python3", ["-c", invalidRead], undefined, pythonEnvironment)).rejects.toThrow("AuthenticationError");
+        }
+        let firstPublication;
+        let firstLayer;
         let beforeReplay;
         let acceptedBeforeReplay;
         if (replay) {
           await expect(runRecipeProcess("python3", ["-c", program.replace('    # Advance leaves', '    raise RuntimeError("injected after publication")\n    # Advance leaves')], undefined, pythonEnvironment)).rejects.toThrow("injected after publication");
+          firstPublication = await controlRead(baselineServer.url, token, `/api/control/interactions/${capability.nodeId}/current`);
+          firstLayer = await controlRead(baselineServer.url, token, `/api/control/interactions/${capability.nodeId}/layers/${firstPublication.currentLayerId}`);
+          if (later) {
+            const graph = new RelayerGraphClient(capability);
+            const author = graph.authoring("additional-finding");
+            const layer = author.layer("finding");
+            const node = layer.node("finding", { icon: "info", title: "Further finding", detail: "Additional evidence after first publication" });
+            const action = layer.action("prior", node, { kind: "navigate", relation: "reference", label: "Earlier findings", target: firstLayer.layer });
+            node.detailAuthoring.setComponent("main", html`<button gc=${detailCapability.reference("earlier", action)}>Earlier findings</button>`);
+            layer.layout([[node, .5, .5]], { edgeShape: "default", defaultNode: node });
+            const written = await author.write(layer);
+            await graph.addAction(capability.nodeId, { kind: "navigate", relation: "expand", label: "Task findings", icon: "info", target: written.rootLayer, clientKey: "root-response" });
+            await graph.advanceCurrent(written.rootLayer, firstPublication.headRevision, "additional-publication");
+          }
           beforeReplay = await controlRead(baselineServer.url, token, `/api/control/interactions/${capability.nodeId}/current`);
           acceptedBeforeReplay = await controlRead(baselineServer.url, token, `/api/control/interactions/${capability.nodeId}/layers/${beforeReplay.currentLayerId}`);
         }
@@ -505,18 +525,20 @@ describe("replay-safe graph authoring", () => {
         if (replay) {
           expect(advanced.current).toEqual(beforeReplay);
           expect(advanced.layer).toEqual(acceptedBeforeReplay);
+          expect(await controlRead(baselineServer.url, token, `/api/control/interactions/${capability.nodeId}/layers/${firstPublication.currentLayerId}`)).toEqual(firstLayer);
         }
-        expect(advanced.current).toMatchObject({ lifecycle: "active", headRevision: withPrior ? 2 : 1 });
-        const mounts = advanced.layer.nodes[0].authoredDetail.mounts;
+        expect(advanced.current).toMatchObject({ lifecycle: "active", headRevision: (withPrior ? 2 : 1) + (later ? 1 : 0) });
+        const initialLayer = firstLayer ?? advanced.layer;
+        const mounts = initialLayer.nodes[0].authoredDetail.mounts;
         expect(mounts.map(mount => mount.capability.kind)).toEqual(withPrior ? ["expand", "reference"] : ["expand"]);
         for (const mount of mounts) {
-          expect(advanced.layer.actions.some(action => action.clientKey === mount.capability.action.clientKey)).toBe(true);
+          expect(initialLayer.actions.some(action => action.clientKey === mount.capability.action.clientKey)).toBe(true);
         }
-        const earlier = advanced.layer.actions.find(action => action.label === "Earlier findings");
+        const earlier = initialLayer.actions.find(action => action.label === "Earlier findings");
         if (withPrior) expect(earlier.targetLayerId).toBe(priorLayerId);
         else expect(earlier).toBeUndefined();
         const finalCurrent = await controlRead(baselineServer.url, token, `/api/control/interactions/${capability.nodeId}/current`);
-        expect(finalCurrent).toMatchObject({ lifecycle: "succeeded", headRevision: withPrior ? 3 : 2 });
+        expect(finalCurrent).toMatchObject({ lifecycle: "succeeded", headRevision: (withPrior ? 3 : 2) + (later ? 1 : 0) });
         const finalLayer = await controlRead(baselineServer.url, token, `/api/control/interactions/${capability.nodeId}/layers/${finalCurrent.currentLayerId}`);
         const finalMount = finalLayer.nodes[0].authoredDetail.mounts[0];
         const finalEarlier = finalLayer.actions.find(action => action.label === "Earlier findings");

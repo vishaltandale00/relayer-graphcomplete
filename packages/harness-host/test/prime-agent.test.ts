@@ -38,7 +38,7 @@ describe("PrimeAgentHarness", () => {
         expect(prompt).toContain("read each changed current.current_layer_id with graph.get_layer");
         expect(prompt).toContain("skip Exception values before reading current.current_layer_id");
         expect(prompt).toContain("input answers arrive through the next ordinary interaction");
-        expect(prompt).toContain('graph.authoring("first-finding")');
+        expect(prompt).toContain('graph.authoring("first-finding-');
         expect(prompt).toContain('target=GraphLayer.from_dict(prior["layer"])');
         expect(prompt).toContain('operation_key="first-finding-publication"');
         expect(prompt).toContain('kind="input", label="Answer", control="text"');

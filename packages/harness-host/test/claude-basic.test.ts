@@ -198,7 +198,7 @@ describe("ClaudeBasicHarness", () => {
     expect(prompt).toContain("Your current layer is how you explain the work to the user while doing it.");
     expect(prompt).toContain("read each changed current.currentLayerId with graph.getLayer");
     expect(prompt).toContain("input answers arrive through the next ordinary interaction");
-    expect(prompt).toContain('graph.authoring("first-finding")');
+    expect(prompt).toContain('graph.authoring("first-finding-');
     expect(prompt).toContain('target: prior.layer');
     expect(prompt).not.toContain("Advancing is optional");
     expect(prompt).not.toContain("After doing the underlying work, answer");

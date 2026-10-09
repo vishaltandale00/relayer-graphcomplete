@@ -96,12 +96,27 @@ catch (error) {
   if (!(error instanceof GraphApiError) || error.code !== "feature_disabled") throw error;
   current = null; // Supported all-off compatibility mode: submit the final graph directly.
 }
-const author = graph.authoring("first-finding");
+const author = graph.authoring("first-finding-${interactionNodeId}");
 const layer = author.layer("finding");
 const sharedStyles = css\`section { display: grid; gap: 0.75rem; background-color: transparent; }\`;
-const published = current?.currentLayerId == null ? null : await graph.getLayer(current.currentLayerId);
-// Resume after an acknowledged or uncertain Advance without rewriting accepted records.
-if (current !== null && published?.layer.clientKey !== layer.object.clientKey) {
+// The current closure preserves prior publications even after later Advances.
+// Completion-specific keys avoid matching another interaction's accepted findings.
+const pending = current?.currentLayerId == null ? [] : [current.currentLayerId];
+const visited = new Set();
+let firstPublished = false;
+while (pending.length > 0) {
+  const id = pending.pop();
+  if (visited.has(id)) continue;
+  visited.add(id);
+  const published = await graph.getLayer(id);
+  if (published.layer.state !== "accepted") throw new Error("Current history must be accepted");
+  if (published.layer.clientKey === layer.object.clientKey) { firstPublished = true; break; }
+  for (const action of published.actions) {
+    if (action.kind === "navigate" && action.targetLayerId != null) pending.push(action.targetLayerId);
+  }
+}
+// Skip every write in the committed phase; repair only the remaining drafts.
+if (current !== null && !firstPublished) {
   const finding = layer.node("finding", { icon: "info", title: "Initial finding", detail: "Replace with supported evidence, remaining uncertainty, and the next useful step." });
   // This optional detail example demonstrates typed control binding, not required topology.
   const evidenceLayer = author.layer("evidence");
@@ -139,7 +154,7 @@ await graph.addAction(${interactionNodeId}, { kind: "navigate", relation: "expan
 await graph.submit(${interactionNodeId});
 \`\`\`
 Add a connection with layer.edge("connection", first, second). Declare node controls before write with layer.action("details", node, { kind: "navigate", relation: "expand", label: "Details", target: childLayer }); bind that same returned action with detailCapability.expand("stable-control-key", action) in an unquoted gc= template interpolation, as shown above. The key and action are both required. For references use relation: "reference" and detailCapability.reference; for follow-ups use kind: "invoke", interactionText, and detailCapability.invoke. layer.node(localKey, fields) accepts only icon, title, detail, and optional kind: do not pass clientKey or ref in fields. layer.action(localKey, sourceNode, fields) supplies sourceLayer, clientKey, and ref: do not author these fields. Declare actions before binding them, and reuse the returned action without cloning or adding identity fields. Set each selected layer's layout explicitly, including routes or sizeJustification when needed, with layer.layout(...); written.rootLayer is available only after author.write(...), and has no .layer wrapper. For specialized low-level calls, layer.object is the actual LayerObject. Accepted-node additions and replacements still use their existing authorized low-level APIs and presentation revisions.
-The example probes current before writing. Only a typed feature_disabled rejection selects the submit-only compatibility path. Other errors propagate. On rerun while active, the exact scoped first-layer key identifies an already published phase; skip its writes and Advance, then repair only the final drafts. Do not rerun after a successful or unknown terminal submission; terminal recovery belongs to trusted supervision.
+The example probes current before writing. Only a typed feature_disabled rejection selects the submit-only compatibility path. Other errors propagate. On rerun while active, the completion-specific first-layer key in the reachable current closure identifies an already published phase (including after later advances); skip its writes and Advance, then repair only the final drafts. Do not rerun after a successful or unknown terminal submission; terminal recovery belongs to trusted supervision.
 For real content, use the same scoped action and detailCapability binding APIs as the ordinary authoring contract. Register every action before publication. Accepted nodes and layers stay immutable. Each later current must retain navigation to the exact prior current. Refresh getCurrent after each successful advance; save each transition's layer, expected headRevision and stable operation key for exact retries. When asking a question, author an input action on its draft explanation node with layer.action("question", finding, { kind: "input", label: "Answer", control: "text", prompt: "A task-specific question" }), or an appropriate select control. Publishing the question does not consume the user's answer. A terminal submit ends all graph access.`;
 }
 
@@ -156,12 +171,27 @@ except APIError as error:
     if not isinstance(error.details, dict) or error.details.get("error", {}).get("code") != "feature_disabled":
         raise
     current = None  # Supported all-off compatibility mode: submit the final graph directly.
-author = graph.authoring("first-finding")
+author = graph.authoring("first-finding-${interactionNodeId}")
 layer = author.layer("finding")
 shared_styles = "section { display: grid; gap: 0.75rem; background-color: transparent; }"
-published = await graph.get_layer(current["currentLayerId"]) if current is not None and current["currentLayerId"] is not None else None
-# Skip a committed first phase before any accepted-record writes.
-if current is not None and (published is None or published["layer"]["clientKey"] != layer.object.client_key):
+# Follow the retained closure, not only the latest current; scope the key to this completion.
+pending = [current["currentLayerId"]] if current is not None and current["currentLayerId"] is not None else []
+visited = set()
+first_published = False
+while pending:
+    layer_id = pending.pop()
+    if layer_id in visited:
+        continue
+    visited.add(layer_id)
+    published = await graph.get_layer(layer_id)
+    if published["layer"]["state"] != "accepted":
+        raise RuntimeError("Current history must be accepted")
+    if published["layer"].get("clientKey") == layer.object.client_key:
+        first_published = True
+        break
+    pending.extend(action["targetLayerId"] for action in published["actions"] if action["kind"] == "navigate" and action.get("targetLayerId") is not None)
+# Skip every write in the committed phase; repair only the remaining drafts.
+if current is not None and not first_published:
     finding = layer.node("finding", icon="info", title="Initial finding", detail="Replace with supported evidence, remaining uncertainty, and the next useful step.")
     evidence_layer = author.layer("evidence")
     evidence = evidence_layer.node("evidence", icon="info", title="Evidence", detail="Replace with useful support for the finding.")
@@ -196,6 +226,6 @@ await graph.add_navigate_action(${interactionNodeId}, "Task findings", final_wri
 await graph.submit(${interactionNodeId})
 \`\`\`
 Add connections with layer.edge("connection", first, second). Declare controls before write with layer.action("details", node, kind="navigate", relation="expand", label="Details", target=child_layer), then bind that same returned action with action_capability. Use relation="reference" for evidence and kind="invoke", interaction_text="..." for follow-ups. Node fields are icon, title, detail, and optional kind; do not supply client_key or ref. The scoped API supplies action source_layer and identity; do not pass source_layer, client_key, or ref into layer.action. Declare actions before binding them. Set every selected layer's layout explicitly. layer.object exposes the actual LayerObject for specialized operations. Accepted-node additions and presentation replacement retain their existing grants and revisions.
-The example probes current before writing. Only a typed feature_disabled rejection selects the submit-only compatibility path. Other errors propagate. On rerun while active, the exact scoped first-layer key identifies an already published phase; skip its writes and Advance, then repair only the final drafts. Do not rerun after a successful or unknown terminal submission; terminal recovery belongs to trusted supervision.
+The example probes current before writing. Only a typed feature_disabled rejection selects the submit-only compatibility path. Other errors propagate. On rerun while active, the completion-specific first-layer key in the reachable current closure identifies an already published phase (including after later advances); skip its writes and Advance, then repair only the final drafts. Do not rerun after a successful or unknown terminal submission; terminal recovery belongs to trusted supervision.
 Accepted nodes and layers stay immutable. Each later current must retain navigation to the exact prior current. get_current returns a mapping with currentLayerId and headRevision; CompletionWatch snapshots use current_layer_id and revision. Refresh get_current after each successful advance; save each transition's layer, expected headRevision and stable operation key for exact retries. When asking a question, author an input action on its draft explanation node with layer.action("question", finding, kind="input", label="Answer", control="text", prompt="A task-specific question"), or an appropriate select control. Publishing the question does not consume the user's answer. A terminal submit ends all graph access.`;
 }
