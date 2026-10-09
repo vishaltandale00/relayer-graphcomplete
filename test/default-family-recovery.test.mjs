@@ -68,7 +68,10 @@ function deferred() {
 }
 const source = (path) => readFile(new URL(`../desktop/renderer/${path}`, import.meta.url), "utf8");
 
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => {
+  vi.unstubAllGlobals();
+  vi.useRealTimers();
+});
 
 function mountPicker(settings, { mode = "new", ...options } = {}) {
   vi.stubGlobal("requestAnimationFrame", (callback) => { callback(); return 0; });
@@ -90,6 +93,252 @@ function recoveringWithWorkDefault() {
 }
 
 describe("default family that needs model setup (PROV-008)", () => {
+  it.each(["new", "ongoing"])("cycles compatible families in place with focused arrows in the %s composer", (mode) => {
+    const settings = restored();
+    settings.families.push({
+      ...structuredClone(settings.families[0]),
+      id: 99,
+      name: "Unavailable family",
+      members: [{ providerId: "codex", modelId: "missing", position: 0, roles: [{ name: "orchestrator" }] }],
+    });
+    const changed = vi.fn();
+    const takeover = vi.fn();
+    const { root, picker, document } = mountPicker(settings, {
+      mode,
+      pinnedHarnessId: mode === "ongoing" ? "codex-basic" : null,
+      onSelectionChange: changed,
+      onUserTakeover: takeover,
+    });
+    picker.open();
+    expect(root.querySelector(".model-family-field [data-family-cycle]")).toBeNull();
+    expect(root.querySelector("[data-family-roster] [data-family-cycle]")).not.toBeNull();
+    expect([...root.querySelector("[data-model-family]").options].map((option) => option.value)).toEqual(["1", "2"]);
+    expect(root.querySelector('[data-family-cycle="previous"]').getAttribute("aria-label")).toBe("Previous model family");
+    expect(root.querySelector('[data-family-cycle="next"]').getAttribute("aria-label")).toBe("Next model family");
+    for (const [direction, familyId, providerId, memberCount] of [
+      ["next", 2, "work", 5], ["next", 1, "codex", 1],
+      ["previous", 2, "work", 5], ["previous", 1, "codex", 1],
+    ]) {
+      root.querySelector(`[data-family-cycle="${direction}"]`).click();
+      expect(picker.getSelection()).toMatchObject({ harnessId: "codex-basic", familyId, providerId, modelId: "gpt-5.6-sol" });
+      expect(root.querySelector("[data-model-family]").value).toBe(String(familyId));
+      expect(root.querySelectorAll("[data-family-member]")).toHaveLength(memberCount);
+      expect(root.querySelector(".model-family-members").textContent).toContain("orchestrator");
+      expect(root.querySelector("[data-model-picker-popover]").classList.contains("hidden")).toBe(false);
+      expect(document.activeElement).toBe(root.querySelector(`[data-family-cycle="${direction}"]`));
+    }
+    expect(changed).toHaveBeenCalledTimes(4);
+    expect(takeover).toHaveBeenCalledTimes(4);
+    settings.families = [settings.families[0]];
+    picker.setContext({ settings });
+    changed.mockClear();
+    expect([...root.querySelectorAll("[data-family-cycle]")].every((button) => button.disabled)).toBe(true);
+    root.querySelector('[data-family-cycle="next"]').click();
+    expect(changed).not.toHaveBeenCalled();
+    expect(picker.getSelection()).toMatchObject({ familyId: 1, providerId: "codex" });
+  });
+
+  it("cycles explicitly out of recovery into the only usable family and keeps keyboard focus", () => {
+    const { root, picker, document } = mountPicker(recovering());
+    picker.open();
+    expect(picker.isReady()).toBe(false);
+    expect([...root.querySelectorAll("[data-family-cycle]")].every((button) => !button.disabled)).toBe(true);
+    root.querySelector('[data-family-cycle="previous"]').click();
+    expect(picker.getSelection()).toMatchObject({ familyId: 2, providerId: "work", modelId: "gpt-5.6-sol" });
+    expect(root.querySelectorAll("[data-family-member]")).toHaveLength(5);
+    expect(root.querySelector("[data-model-picker-popover]").classList.contains("hidden")).toBe(false);
+    expect([...root.querySelectorAll("[data-family-cycle]")].every((button) => button.disabled)).toBe(true);
+    expect(document.activeElement).toBe(root.querySelector("[data-model-family]"));
+  });
+
+  it.each(["new", "ongoing"])("handles horizontal roster swipes once per gesture without hijacking other input in the %s composer", (mode) => {
+    const settings = restored();
+    settings.families.push({ ...structuredClone(settings.families[0]), id: 3, name: "Third family", position: 2 });
+    const changed = vi.fn();
+    const { root, picker, document } = mountPicker(settings, {
+      mode,
+      pinnedHarnessId: mode === "ongoing" ? "codex-basic" : null,
+      onSelectionChange: changed,
+    });
+    const wheel = (options, timeStamp, selector = "[data-family-member]") => {
+      const event = new document.defaultView.WheelEvent("wheel", { bubbles: true, cancelable: true, ...options });
+      Object.defineProperty(event, "timeStamp", { value: timeStamp });
+      // Happy DOM omits WheelEvent's inherited MouseEvent modifier properties.
+      Object.defineProperty(event, "ctrlKey", { value: options.ctrlKey ?? false });
+      root.querySelector(selector).dispatchEvent(event);
+      return event;
+    };
+    picker.open();
+    expect(wheel({ deltaX: 10, deltaY: 100 }, 0).defaultPrevented).toBe(false);
+    expect(wheel({ deltaX: 80, ctrlKey: true }, 1).defaultPrevented).toBe(false);
+    wheel({ deltaX: 12 }, 10);
+    wheel({ deltaX: 20 }, 26);
+    expect(changed).not.toHaveBeenCalled();
+    expect(wheel({ deltaX: 20 }, 42).defaultPrevented).toBe(true);
+    expect(picker.getSelection()).toMatchObject({ harnessId: "codex-basic", familyId: 2, providerId: "work" });
+    // Momentum, including a mostly vertical tail, belongs to the same gesture.
+    wheel({ deltaX: 90 }, 58);
+    expect(wheel({ deltaX: 1, deltaY: 3 }, 90).defaultPrevented).toBe(false);
+    wheel({ deltaX: -4 }, 100);
+    expect(changed).toHaveBeenCalledTimes(1);
+    // Deliberate reversal must work before an idle timeout, unlike tiny bounce tails.
+    wheel({ deltaX: -20 }, 116);
+    wheel({ deltaX: -40 }, 132);
+    expect(changed).toHaveBeenCalledTimes(2);
+    expect(picker.getSelection()).toMatchObject({ familyId: 1, providerId: "codex" });
+    wheel({ deltaX: 60 }, 148);
+    expect(changed).toHaveBeenCalledTimes(3);
+    wheel({ deltaX: -60 }, 164);
+    expect(picker.getSelection()).toMatchObject({ familyId: 1 });
+    wheel({ deltaX: 3, deltaMode: 1 }, 650);
+    expect(picker.getSelection()).toMatchObject({ familyId: 2, providerId: "work" });
+    wheel({ deltaX: -1, deltaMode: 2 }, 850);
+    expect(picker.getSelection()).toMatchObject({ familyId: 1, providerId: "codex" });
+    expect(changed).toHaveBeenCalledTimes(6);
+    expect(wheel({ deltaX: 80 }, 855, ".model-family-field").defaultPrevented).toBe(false);
+    picker.close();
+    expect(wheel({ deltaX: 80 }, 860).defaultPrevented).toBe(false);
+    picker.open("advanced");
+    expect(wheel({ deltaX: 80 }, 865).defaultPrevented).toBe(false);
+    picker.open("model");
+    wheel({ deltaX: 60 }, 870);
+    expect(changed).toHaveBeenCalledTimes(7);
+    expect(picker.getSelection()).toMatchObject({ familyId: 2, providerId: "work" });
+    expect(root.querySelectorAll("[data-family-member]")).toHaveLength(5);
+    expect(root.querySelector("[data-model-picker-popover]").classList.contains("hidden")).toBe(false);
+    settings.families = [settings.families.find((family) => family.id === 2)];
+    picker.setContext({ settings });
+    changed.mockClear();
+    wheel({ deltaX: 80 }, 1100);
+    expect(changed).not.toHaveBeenCalled();
+    expect(picker.getSelection()).toMatchObject({ familyId: 2, providerId: "work" });
+    picker.dispose();
+    expect(wheel({ deltaX: 80 }, 1300).defaultPrevented).toBe(false);
+  });
+
+  it.each([false, true])("slides family navigation and settles partial drags with reduced motion = %s", (reducedMotion) => {
+    vi.useFakeTimers();
+    const { root, picker, document } = mountPicker(restored());
+    document.defaultView.matchMedia = () => ({ matches: reducedMotion });
+    const animations = [];
+    document.defaultView.HTMLElement.prototype.animate = vi.fn(function(frames, options) {
+      const animation = { cancel: vi.fn() };
+      animations.push({ element: this, frames, options, animation });
+      return animation;
+    });
+    picker.open();
+    const event = new document.defaultView.WheelEvent("wheel", { bubbles: true, cancelable: true, deltaX: 20 });
+    root.querySelector("[data-family-member]").dispatchEvent(event);
+    expect(picker.getSelection().familyId).toBe(1);
+    expect(root.querySelector(".model-family-members").style.transform).toBe(reducedMotion ? "" : "translateX(-20px)");
+    vi.advanceTimersByTime(120);
+    expect(root.querySelector(".model-family-members").style.transform).toBe("");
+    root.querySelector('[data-family-cycle="next"]').click();
+    expect(picker.getSelection().familyId).toBe(2);
+    if (reducedMotion) {
+      expect(animations).toHaveLength(0);
+      expect(root.querySelector("[data-family-outgoing]")).toBeNull();
+    } else {
+      const outgoing = root.querySelector("[data-family-outgoing]");
+      expect(outgoing.inert).toBe(true);
+      expect(outgoing.getAttribute("aria-hidden")).toBe("true");
+      expect(animations.at(-1).frames[0].transform).toBe("translateX(100%)");
+      expect(animations.at(-2).frames[1].transform).toBe("translateX(-100%)");
+      expect(animations[0].animation.cancel).toHaveBeenCalledOnce();
+      animations.at(-2).animation.onfinish();
+      expect(outgoing.isConnected).toBe(false);
+      root.querySelector('[data-family-cycle="previous"]').click();
+      expect(picker.getSelection().familyId).toBe(1);
+      expect(animations.at(-1).frames[0].transform).toBe("translateX(-100%)");
+      // Rapid navigation cancels the old motion and removes its inert visual copy.
+      root.querySelector('[data-family-cycle="next"]').click();
+      expect(root.querySelectorAll("[data-family-outgoing]")).toHaveLength(1);
+      picker.close();
+      expect(animations.at(-1).animation.cancel).toHaveBeenCalledOnce();
+      expect(root.querySelector("[data-family-outgoing]")).toBeNull();
+    }
+    picker.dispose();
+  });
+
+  it.each(["new", "ongoing"])("shows the complete read-only family roster and roles in the %s composer", (mode) => {
+    const settings = restored();
+    const family = settings.families.find((item) => item.id === 1);
+    const provider = settings.providers.find((item) => item.id === "codex");
+    provider.models.push(
+      { id: "heavy-review", label: "Heavy reviewer", available: true, visible: true },
+      { id: "heavy-code", label: "Heavy implementer", available: false, visible: true },
+    );
+    family.members.push(
+      { providerId: "codex", modelId: "heavy-code", position: 2, roles: [] },
+      { providerId: "codex", modelId: "heavy-review", position: 1, roles: [
+        { name: "reviewer", description: 'Check evidence & "assumptions"' },
+        { name: "security <img src=x onerror=alert(1)>", description: '" onmouseover="alert(1)' },
+      ] },
+    );
+    const changed = vi.fn();
+    const { root, picker, document } = mountPicker(settings, {
+      mode,
+      pinnedHarnessId: mode === "ongoing" ? "codex-basic" : null,
+      onSelectionChange: changed,
+    });
+    picker.open();
+    const rows = [...root.querySelectorAll(".model-family-member")];
+    expect(rows.map((row) => row.querySelector("strong").textContent)).toEqual([
+      provider.models.find((model) => model.id === "gpt-5.6-sol").label,
+      "Heavy reviewer",
+      "Heavy implementer",
+    ]);
+    expect(rows[0].textContent).toContain("orchestrator");
+    expect(rows.map((row) => row.querySelector(".model-family-member-provider").textContent)).toEqual([provider.label, provider.label, provider.label]);
+    expect([...rows[1].querySelectorAll(".model-family-role")].map((role) => [role.textContent, role.title])).toEqual([
+      ["reviewer", 'Check evidence & "assumptions"'],
+      ["security <img src=x onerror=alert(1)>", '" onmouseover="alert(1)'],
+    ]);
+    expect(rows[2].textContent).toContain("Unavailable");
+    expect(rows[2].textContent).toContain("No role assigned");
+    expect(root.querySelector(".model-family-members").getAttribute("aria-label")).toBe("Family models and roles");
+    expect(root.querySelectorAll("[data-model-option], .model-family-members [role=radio], .model-family-members script, .model-family-members img, .model-family-members [onmouseover]")).toHaveLength(0);
+    expect(root.querySelectorAll(".model-family-members button[type=button]")).toHaveLength(3);
+    const selection = picker.getSelection();
+    for (let index = 0; index < rows.length; index += 1) {
+      picker.open();
+      root.querySelectorAll("[data-family-member]")[index].click();
+      expect(picker.getSelection()).toEqual(selection);
+      expect(changed).not.toHaveBeenCalled();
+      expect(root.querySelector("[data-model-picker-popover]").classList.contains("hidden")).toBe(true);
+      expect(root.querySelector("[data-model-picker-trigger]").getAttribute("aria-expanded")).toBe("false");
+      expect(document.activeElement).toBe(root.querySelector("[data-model-picker-trigger]"));
+    }
+    picker.open();
+
+    settings.harnesses.find((harness) => harness.id === "codex-basic").modelCompatibility[0].modelIds = ["gpt-5.6-sol", "heavy-code"];
+    picker.setContext({ settings });
+    expect(root.querySelectorAll(".model-family-member")).toHaveLength(3);
+    expect(root.querySelectorAll(".model-family-member")[1].textContent).toContain("Unavailable");
+    expect(picker.getSelection()).toEqual(selection);
+
+    provider.models.find((model) => model.id === "gpt-5.6-sol").available = false;
+    family.members[0].roles.push({ name: "planner" });
+    picker.setContext({ settings });
+    expect(picker.isReady()).toBe(false);
+    expect(root.querySelectorAll(".model-family-member")).toHaveLength(3);
+    expect(root.querySelector(".model-family-member").textContent).toContain("planner");
+    expect(root.querySelector(".model-family-member").textContent).toContain("Unavailable");
+    root.querySelector("[data-family-member]").click();
+    expect(picker.isReady()).toBe(false);
+    expect(root.querySelector("[data-model-picker-popover]").classList.contains("hidden")).toBe(true);
+    picker.open();
+
+    const select = root.querySelector("[data-model-family]");
+    select.value = "2";
+    select.dispatchEvent(new document.defaultView.Event("change", { bubbles: true }));
+    expect(picker.getSelection()).toMatchObject({ familyId: 2, providerId: "work", modelId: "gpt-5.6-sol" });
+    expect(root.querySelectorAll(".model-family-member")).toHaveLength(5);
+    expect(root.querySelector(".model-family-members").textContent).not.toContain("Heavy reviewer");
+    expect(root.querySelector("[data-model-picker-popover]").classList.contains("hidden")).toBe(true);
+    expect(document.activeElement).toBe(root.querySelector("[data-model-picker-trigger]"));
+  });
+
   it("keeps the default family selected and names its provider's recovery", () => {
     const settings = recovering();
     expect(settings.defaults.familyId).toBe(settings.defaultFamilyRecovery.familyId);
