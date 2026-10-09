@@ -14,6 +14,7 @@ import {
   NodeObject,
   NodePlacementObject,
   RelayerGraphClient,
+  GraphApiError,
 } from "@relayer/graph-client";
 
 import {
@@ -229,9 +230,15 @@ async function graphMetadata(runtimeSession, nodeId) {
 // real exported `complete(inputGraph)`, with no provider and no inference. Every earlier test
 // of this seam mocked the transport, which is why four separate defects survived in it.
 describe("recursive complete end to end", () => {
-  it.each([false, true])("executes the Codex baseline recipe with prior current %s and preserves it at final submission", async (withPrior) => {
+  it.each([
+    { withPrior: false, temporal: true, replay: false },
+    { withPrior: true, temporal: true, replay: false },
+    { withPrior: false, temporal: true, replay: true },
+    { withPrior: true, temporal: true, replay: true },
+    { withPrior: false, temporal: false, replay: false },
+  ])("executes the JS communication recipe: %j", async ({ withPrior, temporal, replay }) => {
     const observed = {};
-    const stack = await startRecursiveStack(observed, { implementationFactory: () => ({
+    const stack = await startRecursiveStack(observed, { temporalFeatures: temporal ? RECURSIVE_TEMPORAL_FEATURES : {}, implementationFactory: () => ({
       traceSupport: () => ({ prompt: "none", messages: "none", reasoningSummaries: "none", modelCalls: "none", toolCalls: "none", usage: "none", childStreams: "none", nativeArtifacts: "none" }),
       state: () => ({}),
       async complete(context) {
@@ -240,7 +247,7 @@ describe("recursive complete end to end", () => {
         const program = recipe.match(/```javascript\n([\s\S]*?)\n```/)[1]
           .replace(/^import [^\n]+\n/, "")
           .replace("RelayerGraphClient.fromEnv()", "RelayerGraphClient.fromEnv(environment)")
-          .replace("// Continue the underlying work.", "observed.advanced = await graph.getCurrent(); observed.presentation = await graph.getLayer(written.rootLayer);\n// Continue the underlying work.");
+          .replace("// Continue the underlying work.", "if (current !== null) { observed.advanced = await graph.getCurrent(); observed.presentation = await graph.getLayer(observed.advanced.currentLayerId); }\n// Continue the underlying work.");
         const capability = context.graph.acquireCapability();
         const environment = { RELAYER_GRAPH_URL: capability.url, RELAYER_GRAPH_TOKEN: capability.token, RELAYER_NODE_ID: String(context.inputGraph.id) };
         if (withPrior) {
@@ -255,7 +262,17 @@ describe("recursive complete end to end", () => {
         }
         const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
         try {
-          await new AsyncFunction("RelayerGraphClient", "html", "css", "detailCapability", "environment", "observed", program)(RelayerGraphClient, html, css, detailCapability, environment, observed);
+          const execute = code => new AsyncFunction("RelayerGraphClient", "GraphApiError", "html", "css", "detailCapability", "environment", "observed", code)(RelayerGraphClient, GraphApiError, html, css, detailCapability, environment, observed);
+          if (replay) {
+            await expect(execute(program.replace('// Advance leaves', 'throw new Error("injected after publication"); // Advance leaves'))).rejects.toThrow("injected after publication");
+            observed.beforeReplay = structuredClone(observed.advanced);
+            observed.acceptedBeforeReplay = structuredClone(observed.presentation);
+          }
+          await execute(program);
+          if (replay) {
+            expect(observed.advanced).toEqual(observed.beforeReplay);
+            expect(observed.presentation).toEqual(observed.acceptedBeforeReplay);
+          }
         } catch (error) { observed.errors = [String(error)]; throw error; }
       },
     }) });
@@ -263,6 +280,14 @@ describe("recursive complete end to end", () => {
       method: "POST", body: JSON.stringify({ title: "Early findings recipe", initialMessage: "Show findings while working", harnessId: "fixture-recursive", permissionProfileId: "auto", modelSelection: stack.selection }),
     });
     const detail = await waitForStatus(stack.session, thread.id, 0, "accepted", observed);
+    if (!temporal) {
+      const root = detail.interactions[0].completionOutput.rootLayer;
+      expect(root.nodes.map(node => node.title)).toEqual(["Result"]);
+      expect(root.actions).toEqual([]);
+      expect(root.nodes[0].authoredDetail.mounts).toEqual([]);
+      expect(observed.advanced).toBeUndefined();
+      return;
+    }
     expect(observed.advanced).toMatchObject({ lifecycle: "active", headRevision: withPrior ? 2 : 1 });
     expect(observed.presentation.actions.some(action => action.label === "Earlier findings")).toBe(withPrior);
     const mounts = observed.presentation.nodes[0].authoredDetail.mounts;

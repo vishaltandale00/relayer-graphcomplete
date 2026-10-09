@@ -88,38 +88,50 @@ export function currentCommunicationAuthoringRecipeJs(interactionNodeId: number,
   return `Use graph.authoring(snapshotKey) for new response drafts with stable local keys. Give graph-authoring native children this recipe and the exact supplied import URL. Choose new snapshots for new accepted explanations. This runnable example shows early publication, further work, and final submission. Replace its placeholder evidence with actual task findings; do not publish an empty progress message.
 
 \`\`\`javascript
-import { RelayerGraphClient, html, css, detailCapability } from ${JSON.stringify(clientModuleUrl)};
+import { RelayerGraphClient, GraphApiError, html, css, detailCapability } from ${JSON.stringify(clientModuleUrl)};
 const graph = RelayerGraphClient.fromEnv();
-let current = await graph.getCurrent();
+let current;
+try { current = await graph.getCurrent(); }
+catch (error) {
+  if (!(error instanceof GraphApiError) || error.code !== "feature_disabled") throw error;
+  current = null; // Supported all-off compatibility mode: submit the final graph directly.
+}
 const author = graph.authoring("first-finding");
 const layer = author.layer("finding");
-const finding = layer.node("finding", { icon: "info", title: "Initial finding", detail: "Replace with supported evidence, remaining uncertainty, and the next useful step." });
-// This optional detail example demonstrates typed control binding, not required topology.
-const evidenceLayer = author.layer("evidence");
-const evidence = evidenceLayer.node("evidence", { icon: "info", title: "Evidence", detail: "Replace with useful support for the finding." });
-const expand = layer.action("evidence", finding, { kind: "navigate", relation: "expand", label: "Evidence", target: evidenceLayer });
 const sharedStyles = css\`section { display: grid; gap: 0.75rem; background-color: transparent; }\`;
-finding.detailAuthoring.setComponent("main", html\`<section><h2>Initial finding</h2><p>Replace with supported evidence and uncertainty.</p><button gc=\${detailCapability.expand("evidence-control", expand)}>Evidence</button></section>\`, sharedStyles);
-evidence.detailAuthoring.setComponent("main", html\`<section><h2>Evidence</h2><p>Replace with useful supporting detail.</p></section>\`, sharedStyles);
-evidenceLayer.layout([[evidence, 0.5, 0.5]], { edgeShape: "default", defaultNode: evidence });
-if (current.currentLayerId != null) {
-  const prior = await graph.getLayer(current.currentLayerId);
-  const earlier = layer.action("prior", finding, { kind: "navigate", relation: "reference", label: "Earlier findings", target: prior.layer });
-  finding.detailAuthoring.setComponent("earlier", html\`<button gc=\${detailCapability.reference("earlier-control", earlier)}>Earlier findings</button>\`, sharedStyles);
+const published = current?.currentLayerId == null ? null : await graph.getLayer(current.currentLayerId);
+// Resume after an acknowledged or uncertain Advance without rewriting accepted records.
+if (current !== null && published?.layer.clientKey !== layer.object.clientKey) {
+  const finding = layer.node("finding", { icon: "info", title: "Initial finding", detail: "Replace with supported evidence, remaining uncertainty, and the next useful step." });
+  // This optional detail example demonstrates typed control binding, not required topology.
+  const evidenceLayer = author.layer("evidence");
+  const evidence = evidenceLayer.node("evidence", { icon: "info", title: "Evidence", detail: "Replace with useful support for the finding." });
+  const expand = layer.action("evidence", finding, { kind: "navigate", relation: "expand", label: "Evidence", target: evidenceLayer });
+  finding.detailAuthoring.setComponent("main", html\`<section><h2>Initial finding</h2><p>Replace with supported evidence and uncertainty.</p><button gc=\${detailCapability.expand("evidence-control", expand)}>Evidence</button></section>\`, sharedStyles);
+  evidence.detailAuthoring.setComponent("main", html\`<section><h2>Evidence</h2><p>Replace with useful supporting detail.</p></section>\`, sharedStyles);
+  evidenceLayer.layout([[evidence, 0.5, 0.5]], { edgeShape: "default", defaultNode: evidence });
+  if (current.currentLayerId != null) {
+    const prior = await graph.getLayer(current.currentLayerId);
+    const earlier = layer.action("prior", finding, { kind: "navigate", relation: "reference", label: "Earlier findings", target: prior.layer });
+    finding.detailAuthoring.setComponent("earlier", html\`<button gc=\${detailCapability.reference("earlier-control", earlier)}>Earlier findings</button>\`, sharedStyles);
+  }
+  layer.layout([[finding, 0.5, 0.5]], { edgeShape: "default", defaultNode: finding });
+  const written = await author.write(layer);
+  await graph.addAction(${interactionNodeId}, { kind: "navigate", relation: "expand", label: "Task findings", icon: "info", target: written.rootLayer, clientKey: "root-response" });
+  await graph.advanceCurrent(written.rootLayer, current.headRevision, "first-finding-publication");
 }
-layer.layout([[finding, 0.5, 0.5]], { edgeShape: "default", defaultNode: finding });
-const written = await author.write(layer);
-await graph.addAction(${interactionNodeId}, { kind: "navigate", relation: "expand", label: "Task findings", icon: "info", target: written.rootLayer, clientKey: "root-response" });
-await graph.advanceCurrent(written.rootLayer, current.headRevision, "first-finding-publication");
 // Continue the underlying work. Read evidence and observe any semantic children.
 // Publish further material findings or questions as new snapshots, preserving prior current.
-current = await graph.getCurrent();
+if (current !== null) current = await graph.getCurrent();
 const finalAuthor = graph.authoring("final-findings");
 const finalLayer = finalAuthor.layer("summary");
 const summary = finalLayer.node("summary", { icon: "info", title: "Result", detail: "Replace with the completed result or the consequential question requiring the user's answer." });
-const prior = await graph.getLayer(current.currentLayerId);
-const earlier = finalLayer.action("prior", summary, { kind: "navigate", relation: "reference", label: "Earlier findings", target: prior.layer });
-summary.detailAuthoring.setComponent("main", html\`<section><h2>Result</h2><p>Replace with the completed result or consequential question.</p><button gc=\${detailCapability.reference("earlier-control", earlier)}>Earlier findings</button></section>\`, sharedStyles);
+summary.detailAuthoring.setComponent("main", html\`<section><h2>Result</h2><p>Replace with the completed result or consequential question.</p></section>\`, sharedStyles);
+if (current?.currentLayerId != null) {
+  const prior = await graph.getLayer(current.currentLayerId);
+  const earlier = finalLayer.action("prior", summary, { kind: "navigate", relation: "reference", label: "Earlier findings", target: prior.layer });
+  summary.detailAuthoring.setComponent("main", html\`<section><h2>Result</h2><p>Replace with the completed result or consequential question.</p><button gc=\${detailCapability.reference("earlier-control", earlier)}>Earlier findings</button></section>\`, sharedStyles);
+}
 finalLayer.layout([[summary, 0.5, 0.5]], { edgeShape: "default", defaultNode: summary });
 const finalWritten = await finalAuthor.write(finalLayer);
 // Advance leaves the interaction's root response action draft; retarget that same stable action.
@@ -127,6 +139,7 @@ await graph.addAction(${interactionNodeId}, { kind: "navigate", relation: "expan
 await graph.submit(${interactionNodeId});
 \`\`\`
 Add a connection with layer.edge("connection", first, second). Declare node controls before write with layer.action("details", node, { kind: "navigate", relation: "expand", label: "Details", target: childLayer }); bind that same returned action with detailCapability.expand("stable-control-key", action) in an unquoted gc= template interpolation, as shown above. The key and action are both required. For references use relation: "reference" and detailCapability.reference; for follow-ups use kind: "invoke", interactionText, and detailCapability.invoke. layer.node(localKey, fields) accepts only icon, title, detail, and optional kind: do not pass clientKey or ref in fields. layer.action(localKey, sourceNode, fields) supplies sourceLayer, clientKey, and ref: do not author these fields. Declare actions before binding them, and reuse the returned action without cloning or adding identity fields. Set each selected layer's layout explicitly, including routes or sizeJustification when needed, with layer.layout(...); written.rootLayer is available only after author.write(...), and has no .layer wrapper. For specialized low-level calls, layer.object is the actual LayerObject. Accepted-node additions and replacements still use their existing authorized low-level APIs and presentation revisions.
+The example probes current before writing. Only a typed feature_disabled rejection selects the submit-only compatibility path. Other errors propagate. On rerun while active, the exact scoped first-layer key identifies an already published phase; skip its writes and Advance, then repair only the final drafts. Do not rerun after a successful or unknown terminal submission; terminal recovery belongs to trusted supervision.
 For real content, use the same scoped action and detailCapability binding APIs as the ordinary authoring contract. Register every action before publication. Accepted nodes and layers stay immutable. Each later current must retain navigation to the exact prior current. Refresh getCurrent after each successful advance; save each transition's layer, expected headRevision and stable operation key for exact retries. When asking a question, author an input action on its draft explanation node with layer.action("question", finding, { kind: "input", label: "Answer", control: "text", prompt: "A task-specific question" }), or an appropriate select control. Publishing the question does not consume the user's answer. A terminal submit ends all graph access.`;
 }
 
@@ -135,36 +148,47 @@ export function currentCommunicationAuthoringRecipePython(interactionNodeId: num
 Before styling and after a CSS rejection, consult the compiler-generated Node Detail reference above. This runnable example shows early publication, further work, and final submission. Replace placeholder evidence with actual task findings; do not publish an empty progress message. Its placeholder content and layout are not a recommended response design. Choose content, topology, layout and controls for the task. Its optional detail branch demonstrates control binding, not required topology.
 
 \`\`\`python
-from relayer_graph import GraphSession, GraphLayer, html, action_capability
+from relayer_graph import GraphSession, GraphLayer, APIError, html, action_capability
 graph = await GraphSession.current()
-current = await graph.get_current()
+try:
+    current = await graph.get_current()
+except APIError as error:
+    if not isinstance(error.details, dict) or error.details.get("error", {}).get("code") != "feature_disabled":
+        raise
+    current = None  # Supported all-off compatibility mode: submit the final graph directly.
 author = graph.authoring("first-finding")
 layer = author.layer("finding")
-finding = layer.node("finding", icon="info", title="Initial finding", detail="Replace with supported evidence, remaining uncertainty, and the next useful step.")
-evidence_layer = author.layer("evidence")
-evidence = evidence_layer.node("evidence", icon="info", title="Evidence", detail="Replace with useful support for the finding.")
-expand = layer.action("evidence", finding, kind="navigate", relation="expand", label="Evidence", target=evidence_layer)
 shared_styles = "section { display: grid; gap: 0.75rem; background-color: transparent; }"
-finding.detail_authoring.set_component("main", html(["<section><h2>Initial finding</h2><p>Replace with supported evidence and uncertainty.</p><button gc=", ">Evidence</button></section>"], action_capability("evidence-control", expand)), shared_styles)
-evidence.detail_authoring.set_component("main", html("<section><h2>Evidence</h2><p>Replace with useful supporting detail.</p></section>"), shared_styles)
-evidence_layer.layout([(evidence, 0.5, 0.5)], edge_shape="default", default_node=evidence)
-if current["currentLayerId"] is not None:
-    prior = await graph.get_layer(current["currentLayerId"])
-    earlier = layer.action("prior", finding, kind="navigate", relation="reference", label="Earlier findings", target=GraphLayer.from_dict(prior["layer"]))
-    finding.detail_authoring.set_component("earlier", html(["<button gc=", ">Earlier findings</button>"], action_capability("earlier-control", earlier)), shared_styles)
-layer.layout([(finding, 0.5, 0.5)], edge_shape="default", default_node=finding)
-written = await author.write(layer)
-await graph.add_navigate_action(${interactionNodeId}, "Task findings", written.root_layer, relation="expand", client_key="root-response", icon="info")
-await graph.advance_current(written.root_layer, expected_revision=current["headRevision"], operation_key="first-finding-publication")
+published = await graph.get_layer(current["currentLayerId"]) if current is not None and current["currentLayerId"] is not None else None
+# Skip a committed first phase before any accepted-record writes.
+if current is not None and (published is None or published["layer"]["clientKey"] != layer.object.client_key):
+    finding = layer.node("finding", icon="info", title="Initial finding", detail="Replace with supported evidence, remaining uncertainty, and the next useful step.")
+    evidence_layer = author.layer("evidence")
+    evidence = evidence_layer.node("evidence", icon="info", title="Evidence", detail="Replace with useful support for the finding.")
+    expand = layer.action("evidence", finding, kind="navigate", relation="expand", label="Evidence", target=evidence_layer)
+    finding.detail_authoring.set_component("main", html(["<section><h2>Initial finding</h2><p>Replace with supported evidence and uncertainty.</p><button gc=", ">Evidence</button></section>"], action_capability("evidence-control", expand)), shared_styles)
+    evidence.detail_authoring.set_component("main", html("<section><h2>Evidence</h2><p>Replace with useful supporting detail.</p></section>"), shared_styles)
+    evidence_layer.layout([(evidence, 0.5, 0.5)], edge_shape="default", default_node=evidence)
+    if current["currentLayerId"] is not None:
+        prior = await graph.get_layer(current["currentLayerId"])
+        earlier = layer.action("prior", finding, kind="navigate", relation="reference", label="Earlier findings", target=GraphLayer.from_dict(prior["layer"]))
+        finding.detail_authoring.set_component("earlier", html(["<button gc=", ">Earlier findings</button>"], action_capability("earlier-control", earlier)), shared_styles)
+    layer.layout([(finding, 0.5, 0.5)], edge_shape="default", default_node=finding)
+    written = await author.write(layer)
+    await graph.add_navigate_action(${interactionNodeId}, "Task findings", written.root_layer, relation="expand", client_key="root-response", icon="info")
+    await graph.advance_current(written.root_layer, expected_revision=current["headRevision"], operation_key="first-finding-publication")
 # Continue the underlying work. Read evidence and observe any semantic children.
 # Publish further material findings or questions as new snapshots, preserving prior current.
-current = await graph.get_current()
+if current is not None:
+    current = await graph.get_current()
 final_author = graph.authoring("final-findings")
 final_layer = final_author.layer("summary")
 summary = final_layer.node("summary", icon="info", title="Result", detail="Replace with the completed result or the consequential question requiring the user's answer.")
-prior = await graph.get_layer(current["currentLayerId"])
-earlier = final_layer.action("prior", summary, kind="navigate", relation="reference", label="Earlier findings", target=GraphLayer.from_dict(prior["layer"]))
-summary.detail_authoring.set_component("main", html(["<section><h2>Result</h2><p>Replace with the completed result or consequential question.</p><button gc=", ">Earlier findings</button></section>"], action_capability("earlier-control", earlier)), shared_styles)
+summary.detail_authoring.set_component("main", html("<section><h2>Result</h2><p>Replace with the completed result or consequential question.</p></section>"), shared_styles)
+if current is not None and current["currentLayerId"] is not None:
+    prior = await graph.get_layer(current["currentLayerId"])
+    earlier = final_layer.action("prior", summary, kind="navigate", relation="reference", label="Earlier findings", target=GraphLayer.from_dict(prior["layer"]))
+    summary.detail_authoring.set_component("main", html(["<section><h2>Result</h2><p>Replace with the completed result or consequential question.</p><button gc=", ">Earlier findings</button></section>"], action_capability("earlier-control", earlier)), shared_styles)
 final_layer.layout([(summary, 0.5, 0.5)], edge_shape="default", default_node=summary)
 final_written = await final_author.write(final_layer)
 # Advance leaves the interaction's root response action draft; retarget that same stable action.
@@ -172,5 +196,6 @@ await graph.add_navigate_action(${interactionNodeId}, "Task findings", final_wri
 await graph.submit(${interactionNodeId})
 \`\`\`
 Add connections with layer.edge("connection", first, second). Declare controls before write with layer.action("details", node, kind="navigate", relation="expand", label="Details", target=child_layer), then bind that same returned action with action_capability. Use relation="reference" for evidence and kind="invoke", interaction_text="..." for follow-ups. Node fields are icon, title, detail, and optional kind; do not supply client_key or ref. The scoped API supplies action source_layer and identity; do not pass source_layer, client_key, or ref into layer.action. Declare actions before binding them. Set every selected layer's layout explicitly. layer.object exposes the actual LayerObject for specialized operations. Accepted-node additions and presentation replacement retain their existing grants and revisions.
+The example probes current before writing. Only a typed feature_disabled rejection selects the submit-only compatibility path. Other errors propagate. On rerun while active, the exact scoped first-layer key identifies an already published phase; skip its writes and Advance, then repair only the final drafts. Do not rerun after a successful or unknown terminal submission; terminal recovery belongs to trusted supervision.
 Accepted nodes and layers stay immutable. Each later current must retain navigation to the exact prior current. get_current returns a mapping with currentLayerId and headRevision; CompletionWatch snapshots use current_layer_id and revision. Refresh get_current after each successful advance; save each transition's layer, expected headRevision and stable operation key for exact retries. When asking a question, author an input action on its draft explanation node with layer.action("question", finding, kind="input", label="Answer", control="text", prompt="A task-specific question"), or an appropriate select control. Publishing the question does not consume the user's answer. A terminal submit ends all graph access.`;
 }

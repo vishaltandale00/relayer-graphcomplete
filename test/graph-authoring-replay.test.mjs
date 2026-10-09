@@ -451,11 +451,13 @@ describe("replay-safe graph authoring", () => {
         .toMatchObject({ layer: { state: "accepted" }, nodes: [{ icon: "info", authoredDetail: { components: [{ id: "main" }] } }] });
 
       // Execute Prime's delivered communication recipe through its real visual host bridge.
-      for (const withPrior of [false, true]) {
-        const baselineInteraction = await controlRequest(server.url, token, "/api/control/interactions", {
+      for (const { withPrior, replay, temporal } of [{ withPrior: false, replay: false, temporal: true }, { withPrior: true, replay: false, temporal: true }, { withPrior: false, replay: true, temporal: true }, { withPrior: true, replay: true, temporal: true }, { withPrior: false, replay: false, temporal: false }]) {
+        const baselineServer = temporal ? server : await startGraphServer(join(directory, "all-off.sqlite3"), token);
+        if (!temporal) processes.push(baselineServer.process);
+        const baselineInteraction = await controlRequest(baselineServer.url, token, "/api/control/interactions", {
           projectId: 41, threadId: 77, text: "Python communication baseline",
         });
-        capability = { url: server.url, token: baselineInteraction.graphToken, nodeId: baselineInteraction.node.id };
+        capability = { url: baselineServer.url, token: baselineInteraction.graphToken, nodeId: baselineInteraction.node.id };
         let priorLayerId;
         if (withPrior) {
           const priorGraph = new RelayerGraphClient(capability);
@@ -469,17 +471,41 @@ describe("replay-safe graph authoring", () => {
           priorLayerId = written.rootLayer.id;
         }
         const recipe = currentCommunicationAuthoringRecipePython(capability.nodeId).match(/```python\n([\s\S]*?)\n```/)[1]
-          .replace("# Continue the underlying work.", 'print("ADVANCED:" + json.dumps({"current": await graph.get_current(), "layer": await graph.get_layer(written.root_layer)}))\n# Continue the underlying work.');
+          .replace("# Continue the underlying work.", 'if current is not None: print("ADVANCED:" + json.dumps({"current": await graph.get_current(), "layer": await graph.get_layer((await graph.get_current())["currentLayerId"])}))\n# Continue the underlying work.')
+          .replace(`await graph.submit(${capability.nodeId})`, `print("FINAL_DRAFT:" + str(final_written.root_layer.id))\nawait graph.submit(${capability.nodeId})`);
         const program = SCOPED_PYTHON.split("async def main():")[0]
           .replace("host_request(method, payload)", "host_request(method, payload=None)")
           + "async def main():\n" + recipe.split("\n").map(line => "    " + line).join("\n")
           + '\nasyncio.run(main())';
-        const output = await runRecipeProcess("python3", ["-c", program], undefined, {
+        const pythonEnvironment = {
           PYTHONPATH: join(repositoryRoot, "python/relayer-graph/src"),
           SCOPED_HOST: `http://127.0.0.1:${host.address().port}`,
           SCOPED_CAPABILITY: JSON.stringify(capability),
-        });
+        };
+        let beforeReplay;
+        let acceptedBeforeReplay;
+        if (replay) {
+          await expect(runRecipeProcess("python3", ["-c", program.replace('    # Advance leaves', '    raise RuntimeError("injected after publication")\n    # Advance leaves')], undefined, pythonEnvironment)).rejects.toThrow("injected after publication");
+          beforeReplay = await controlRead(baselineServer.url, token, `/api/control/interactions/${capability.nodeId}/current`);
+          acceptedBeforeReplay = await controlRead(baselineServer.url, token, `/api/control/interactions/${capability.nodeId}/layers/${beforeReplay.currentLayerId}`);
+        }
+        const output = await runRecipeProcess("python3", ["-c", program], undefined, pythonEnvironment);
+        /* environment is shared across the failed process and its fresh retry */
+        if (!temporal) {
+          const finalId = Number(output.match(/FINAL_DRAFT:(\d+)/)[1]);
+          const finalLayer = await controlRead(baselineServer.url, token, `/api/control/interactions/${capability.nodeId}/layers/${finalId}`);
+          expect(finalLayer.layer.state).toBe("accepted");
+          expect(finalLayer.nodes.map(node => node.title)).toEqual(["Result"]);
+          expect(finalLayer.nodes[0].authoredDetail.mounts).toEqual([]);
+          expect(finalLayer.actions).toEqual([]);
+          expect(output).not.toContain("ADVANCED:");
+          continue;
+        }
         const advanced = JSON.parse(output.match(/ADVANCED:(.+)/)[1]);
+        if (replay) {
+          expect(advanced.current).toEqual(beforeReplay);
+          expect(advanced.layer).toEqual(acceptedBeforeReplay);
+        }
         expect(advanced.current).toMatchObject({ lifecycle: "active", headRevision: withPrior ? 2 : 1 });
         const mounts = advanced.layer.nodes[0].authoredDetail.mounts;
         expect(mounts.map(mount => mount.capability.kind)).toEqual(withPrior ? ["expand", "reference"] : ["expand"]);
@@ -489,9 +515,9 @@ describe("replay-safe graph authoring", () => {
         const earlier = advanced.layer.actions.find(action => action.label === "Earlier findings");
         if (withPrior) expect(earlier.targetLayerId).toBe(priorLayerId);
         else expect(earlier).toBeUndefined();
-        const finalCurrent = await controlRead(server.url, token, `/api/control/interactions/${capability.nodeId}/current`);
+        const finalCurrent = await controlRead(baselineServer.url, token, `/api/control/interactions/${capability.nodeId}/current`);
         expect(finalCurrent).toMatchObject({ lifecycle: "succeeded", headRevision: withPrior ? 3 : 2 });
-        const finalLayer = await controlRead(server.url, token, `/api/control/interactions/${capability.nodeId}/layers/${finalCurrent.currentLayerId}`);
+        const finalLayer = await controlRead(baselineServer.url, token, `/api/control/interactions/${capability.nodeId}/layers/${finalCurrent.currentLayerId}`);
         const finalMount = finalLayer.nodes[0].authoredDetail.mounts[0];
         const finalEarlier = finalLayer.actions.find(action => action.label === "Earlier findings");
         expect(finalMount.capability.kind).toBe("reference");

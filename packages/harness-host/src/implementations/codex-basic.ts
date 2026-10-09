@@ -765,6 +765,8 @@ ${pinnedExecutionClause}
 
 ${currentCommunicationAuthoringRecipeJs(interactionNode.id, this.clientModuleUrl)}
 
+${semanticCompletionGuidanceJs(context, this.completeModuleUrl, "Codex")}
+
 ${currentWorkspaceMechanicsJs()}
 
 The visible layer must contain 1 to 8 nodes and must be connected. Layer edges are exactly what the user sees.

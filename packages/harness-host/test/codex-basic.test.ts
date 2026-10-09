@@ -162,6 +162,9 @@ describe("CodexBasicHarness", () => {
       expect(prompt).not.toContain("After doing the underlying work, answer");
       expect(prompt).not.toContain('graph.authoring("response-v1")');
       expect(prompt).not.toContain("fixture-broker-token");
+      expect(prompt.includes("Import complete and watchCompletions from")).toBe(brokerAvailable);
+      expect(prompt).toContain('error.code !== "feature_disabled"');
+      expect(prompt).toContain('published?.layer.clientKey !== layer.object.clientKey');
       expect(prompt).not.toContain("Follow this publish, observe, continue sequence");
       expect(prompt).not.toContain("Advance your current when you establish");
     }
