@@ -66,7 +66,7 @@ import {
 import { createDesktopUpdater, resolveUpdateChannel } from "./services/updater.mjs";
 import { createManagedRuntimeInstaller, runtimesChangedByActivation } from "./managed-runtimes/installer.mjs";
 import { createModelAvailabilityPublisher } from "./models/model-availability-publisher.mjs";
-import { createManagedRuntimeResolver, managedRecipeInstalled } from "./managed-runtimes/resolver.mjs";
+import { createManagedRuntimeResolver, managedRecipeInstalled, managedRecipeSupported } from "./managed-runtimes/resolver.mjs";
 import { createHarnessReadinessCoordinator, createPostUpgradeReadiness } from "./services/harness-readiness.mjs";
 import { confirmManagedRuntimeQuit } from "./managed-runtimes/quit-guard.mjs";
 import { claimPrimaryDesktopInstance } from "./single-instance.mjs";
@@ -562,6 +562,7 @@ if (primaryInstance) {
       // The app server's record is the only readiness record (PROV-006).
       publishAvailability: modelAvailability.publishReadiness,
       recipeInstalled: (recipeId) => managedRecipeInstalled(managedRuntimeResolver, recipeId),
+      recipeSupported: (recipeId) => managedRecipeSupported(managedRuntimeResolver, recipeId),
       diagnostics: providerDiagnostics,
     });
     const publishCatalog = modelAvailability.publishCatalog;

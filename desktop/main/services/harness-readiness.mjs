@@ -132,6 +132,7 @@ export function createHarnessReadinessCoordinator({
   // Whether a recipe has an installation on disk, valid or not (managedRecipeInstalled).
   // Only the post-upgrade evaluation asks, and it refuses to run without it.
   recipeInstalled = null,
+  recipeSupported = async () => false,
   diagnostics = null,
 }) {
   if (!(configurations instanceof Map) || typeof digestConfiguration !== "function"
@@ -260,10 +261,10 @@ export function createHarnessReadinessCoordinator({
   // #556: after an upgrade, one evaluation through the recipe-update trigger covers every
   // harness whose digest the app server marked due, and every harness whose runtime recipe
   // was newly activated. The app server clears its mark when the result commits.
-  // It never makes a first installation: a harness whose runtime was never installed
-  // waits for Connect or Repair, as on a first launch.
+  // An absent recipe is prepared only for a due harness with a currently published
+  // eligible provider route. Failed managed-provider recovery still requires an installation.
   // The harnesses the post-upgrade step evaluates, and the installed recipes they run.
-  async function recipeUpdateTargets({ updatesDue = [], recipeUpdates = [] }) {
+  async function recipeUpdateTargets({ updatesDue = [], recipeUpdates = [], providers = [] }) {
     if (typeof recipeInstalled !== "function") {
       throw new Error("The post-upgrade readiness evaluation requires an installed-recipe check.");
     }
@@ -271,10 +272,13 @@ export function createHarnessReadinessCoordinator({
     const activated = new Set(recipeUpdates);
     const harnessIds = [];
     const recipeIds = new Set();
-    for (const { name, implementation } of configurations.values()) {
+    for (const configuration of configurations.values()) {
+      const { name, implementation } = configuration;
       const recipeId = runtimeRequirements[implementation]?.recipeId;
       if (!due.has(name) && !activated.has(recipeId)) continue;
-      if (recipeId && !await recipeInstalled(recipeId)) continue;
+      if (recipeId && !await recipeInstalled(recipeId)) {
+        if (!routeProvider(configuration, providers) || !await recipeSupported(recipeId)) continue;
+      }
       harnessIds.push(name);
       if (recipeId) recipeIds.add(recipeId);
     }
@@ -285,7 +289,7 @@ export function createHarnessReadinessCoordinator({
     updatesDue = [], recipeUpdates = [], providers = [], skipHarnessIds = [], signal,
   }) {
     const skipped = new Set(skipHarnessIds);
-    const harnessIds = (await recipeUpdateTargets({ updatesDue, recipeUpdates })).harnessIds
+    const harnessIds = (await recipeUpdateTargets({ updatesDue, recipeUpdates, providers })).harnessIds
       .filter((harnessId) => !skipped.has(harnessId));
     if (harnessIds.length === 0) return Object.freeze({ readyHarnessIds: [], routeResults: [] });
     return evaluate({ trigger: "recipe-update", providers, harnessIds, signal });

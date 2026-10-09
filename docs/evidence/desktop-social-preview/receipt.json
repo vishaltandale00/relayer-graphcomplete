@@ -5,7 +5,7 @@
     "desktop/main/services/share-publish-coordinator.mjs": "f722b04879f31c2ab210c6e1eb2a8bf686af37bea6689cff9f6c4d143728abed",
     "desktop/main/services/share-publish-attempt-store.mjs": "55d555b3e1decc8c543356f66be0c4c1605c7f60dc593287fb84ecd93fb2f7ff",
     "desktop/main/services/share-service-client.mjs": "f30067b00bdb02ac64fbcfc932bafe02428cefd38ef094baa9abf51f5748c501",
-    "desktop/main/index.mjs": "912ada6e394f7445eec18cb0a056fb41412d23c5eb1bed2e7edd8d553c010eea",
+    "desktop/main/index.mjs": "454c0fc5ca53fcf86c557f92c09b400487e5300786d05118bcf96e1a2bb47edd",
     "contracts/share-service-v1/contract.json": "7407c99d32fb04a62ab958257be5525dc3451adc9899d600e07de730dccc89ff",
     "scripts/capture-share-preview-evidence.mjs": "4510e3a54f6b658c2df86b1a06afc8ca2428a36693a93648786bd4e075327562",
     "test/fixtures/social-preview.jsonl": "ff4a4545de49ccc20562f2f763b6a120d87fa37f7703a994abeb71b219a405aa",
@@ -13,7 +13,7 @@
   },
   "rendererArtifact": {
     "directory": "desktop/renderer",
-    "digest": "d0b8f758dd006454682ca50bbafbc492c10bc830c80b1f1db5a7fa63e9d0d5b5",
+    "digest": "0ed704c032f631a9b1fb3b12c68015ae92fed16aad42a620809c57211da9aaa3",
     "files": {
       "assets/relayer-logo.svg": {
         "bytes": 509,
@@ -128,12 +128,12 @@
         "sha256": "0b83971ab28b5de9cb4bb9ae10ff6a49bf1098ead3a7114f81dede02726553a2"
       },
       "src/harness-settings-model.js": {
-        "bytes": 1899,
-        "sha256": "fd49a63b12aa8a358824b92b3b3ccfbed296f455464f7867f120ffd64ede9a9a"
+        "bytes": 2102,
+        "sha256": "e45659faf06ed87a61ae15b01bf6cd9e559847fdc9e5e4bf86991e1428b36bff"
       },
       "src/harness-settings.js": {
-        "bytes": 342,
-        "sha256": "db5a223e5ec42bcaf23667955165d4b4bf22e0622dcfd407933c530d3e3b339f"
+        "bytes": 1368,
+        "sha256": "ab4bcfb139058f4d363265dbf831d66a9cd7a32ed8522a48c4000261e01a8c66"
       },
       "src/human-task-grading.js": {
         "bytes": 8129,
@@ -316,8 +316,8 @@
         "sha256": "7f0c926e5f3ce83fb7e48939c368bc1c14fbfc6ca85c4604d3353c114374f629"
       },
       "src/provider-ui.js": {
-        "bytes": 18872,
-        "sha256": "9189a49497d7987c38467574e8f4320109e34ab268c14fab65d46368c2c343b6"
+        "bytes": 19580,
+        "sha256": "92dfc51177d51dafe4ebf60a950b82aa3f09700419c7a2f24e8d58b57fce877e"
       },
       "src/public-share-viewer/adapter.js": {
         "bytes": 4646,

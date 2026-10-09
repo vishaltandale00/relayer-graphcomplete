@@ -1,0 +1,15 @@
+{
+  "renderer": "production",
+  "provider": "deterministic fixture",
+  "exactProviderId": "router",
+  "phases": [
+    "connected",
+    "missing",
+    "failure",
+    "success",
+    "composer"
+  ],
+  "attempts": 2,
+  "composerAdmitted": true,
+  "defaultsPreserved": true
+}

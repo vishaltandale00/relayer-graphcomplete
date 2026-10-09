@@ -1364,7 +1364,31 @@ async fn project_harness_usability_on(
     )
     .fetch_all(&mut *connection)
     .await?;
+    let repair_routes = sqlx::query(
+        "SELECT p.id,p.adapter_id,p.access_contract,m.model_id FROM model_providers p JOIN provider_models m ON m.provider_id=p.id WHERE p.lifecycle_state='active' AND p.connected=1 AND m.visible=1 AND m.available=1 ORDER BY p.label,p.id,m.provider_order,m.model_id",
+    ).fetch_all(&mut *connection).await?;
+    let repairable: HashSet<String> = sqlx::query(
+        "SELECT configuration_name,runtime_configuration_digest FROM product_harnesses WHERE product_visible=1 AND available=0 AND COALESCE(unavailable_reason_code,'') != 'managed_runtime_unsupported_target'",
+    ).fetch_all(&mut *connection).await?.iter().filter_map(|row| {
+        let digest: String = row.get(1);
+        loaded_runtime_digest(&digest).then(|| row.get(0))
+    }).collect();
     for harness in harnesses {
+        if repairable.contains(&harness.id) {
+            for route in &repair_routes {
+                let provider_id = ProviderId::from_database(route.try_get(0)?);
+                if harness_route_is_usable(
+                    harness,
+                    &provider_id,
+                    &route.try_get::<String, _>(1)?,
+                    &route.try_get::<String, _>(2)?,
+                    &route.try_get::<String, _>(3)?,
+                )? && !harness.repair_provider_ids.contains(&provider_id)
+                {
+                    harness.repair_provider_ids.push(provider_id);
+                }
+            }
+        }
         let mut provider_ids = Vec::new();
         let mut family_ids = Vec::new();
         if harness.available {
@@ -2528,6 +2552,7 @@ async fn load_harnesses(
                 },
                 usable_now: false,
                 usable_provider_ids: Vec::new(),
+                repair_provider_ids: Vec::new(),
                 usable_family_ids: Vec::new(),
                 permission_available: false,
             })
@@ -5618,6 +5643,97 @@ mod provider_definition_tests {
         assert!(!claude.usable_now);
         assert!(claude.usable_provider_ids.is_empty());
         assert!(claude.usable_family_ids.is_empty());
+    }
+
+    #[tokio::test]
+    async fn model_settings_project_repair_routes_without_admitting_execution() {
+        let (directory, store, provider_id) = onboarding_store().await;
+        // This store has a connected compatible provider but no selected family.
+        sqlx::query(
+            "UPDATE product_harnesses SET available=0 WHERE configuration_name='codex-basic'",
+        )
+        .execute(&store.pool)
+        .await
+        .unwrap();
+        let repair_ids = |settings: crate::product::ModelSettings| {
+            settings
+                .harnesses
+                .into_iter()
+                .find(|h| h.id == "codex-basic")
+                .unwrap()
+        };
+        let harness = repair_ids(store.load_model_settings().await.unwrap());
+        assert_eq!(harness.repair_provider_ids, vec![provider_id.clone()]);
+        assert!(!harness.usable_now);
+        assert!(harness.usable_provider_ids.is_empty());
+        assert!(harness.usable_family_ids.is_empty());
+        // Each fixture mutation represents a different authority boundary in the real projection.
+        for (block, restore) in [
+            (
+                "UPDATE product_harnesses SET unavailable_reason_code='managed_runtime_unsupported_target',unavailable_reason_message='Unsupported on this platform.' WHERE configuration_name='codex-basic'",
+                "UPDATE product_harnesses SET unavailable_reason_code=NULL,unavailable_reason_message=NULL WHERE configuration_name='codex-basic'",
+            ),
+            (
+                "UPDATE model_providers SET connected=0",
+                "UPDATE model_providers SET connected=1",
+            ),
+            (
+                "UPDATE model_providers SET lifecycle_state='tombstoned'",
+                "UPDATE model_providers SET lifecycle_state='active'",
+            ),
+            (
+                "UPDATE model_providers SET access_contract='managed-runtime@1'",
+                "UPDATE model_providers SET access_contract='secret@1'",
+            ),
+            (
+                "UPDATE provider_models SET available=0",
+                "UPDATE provider_models SET available=1",
+            ),
+            (
+                "UPDATE provider_models SET visible=0",
+                "UPDATE provider_models SET visible=1",
+            ),
+            (
+                "INSERT INTO harness_model_rules(harness_configuration_name,effect,position,adapter_id,match_kind,model_pattern) VALUES ('codex-basic','deny',0,'openai-api','exact','gpt-work')",
+                "DELETE FROM harness_model_rules WHERE effect='deny'",
+            ),
+            (
+                "UPDATE product_harnesses SET runtime_configuration_digest='sha256:not-loaded' WHERE configuration_name='codex-basic'",
+                "UPDATE product_harnesses SET runtime_configuration_digest='sha256:onboarding-codex' WHERE configuration_name='codex-basic'",
+            ),
+        ] {
+            sqlx::query(block).execute(&store.pool).await.unwrap();
+            assert!(
+                repair_ids(store.load_model_settings().await.unwrap())
+                    .repair_provider_ids
+                    .is_empty(),
+                "{block}"
+            );
+            sqlx::query(restore).execute(&store.pool).await.unwrap();
+            assert_eq!(
+                repair_ids(store.load_model_settings().await.unwrap()).repair_provider_ids,
+                vec![provider_id.clone()],
+                "{restore}"
+            );
+        }
+        let reopened = SqliteProductStore::open(directory.path().join("product.sqlite3"))
+            .await
+            .unwrap();
+        assert_eq!(
+            repair_ids(reopened.load_model_settings().await.unwrap()).repair_provider_ids,
+            vec![provider_id]
+        );
+        sqlx::query(
+            "UPDATE product_harnesses SET available=1 WHERE configuration_name='codex-basic'",
+        )
+        .execute(&reopened.pool)
+        .await
+        .unwrap();
+        assert!(
+            repair_ids(reopened.load_model_settings().await.unwrap())
+                .repair_provider_ids
+                .is_empty()
+        );
     }
 
     #[tokio::test]

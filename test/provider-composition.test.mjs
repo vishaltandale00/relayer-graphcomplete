@@ -315,7 +315,7 @@ describe("injectable production provider composition", () => {
     const configurations = new Map([
       ["codex-basic", harness("codex-basic", "codex.basic", ["codex-subscription", "openrouter"])],
       // Also routes OpenRouter, but its runtime was never installed on this machine.
-      ["claude-basic", harness("claude-basic", "claude.basic", ["openrouter"])],
+      ["prime-agent-basic", harness("prime-agent-basic", "prime.agent", ["openrouter"])],
     ]);
     const record = new Map();
     const publishAvailability = vi.fn(async (updates) => {
@@ -325,14 +325,15 @@ describe("injectable production provider composition", () => {
     const readiness = createHarnessReadinessCoordinator({
       configurations,
       digestConfiguration: ({ name }) => `sha256:${name}-upgraded`,
+      recipeSupported: async () => true,
       runtimeRequirements: {
         "codex.basic": { runtimeId: "codex", recipeId: "codex@0.147.0" },
-        "claude.basic": { runtimeId: "claude", recipeId: "claude@0.3.250" },
+        "prime.agent": { runtimeId: "prime", recipeId: "prime@0.8.1" },
       },
       prepareRecipe,
       checkers: {
         "codex.basic": async ({ runtime: prepared }) => ({ available: prepared?.recipeId === "codex@0.147.0" }),
-        "claude.basic": async () => ({ available: true }),
+        "prime.agent": async () => ({ available: true }),
       },
       publishAvailability,
       recipeInstalled: async (recipeId) => recipeId === "codex@0.147.0",
@@ -383,19 +384,23 @@ describe("injectable production provider composition", () => {
       onError,
     });
     expect(prepareRecipe).not.toHaveBeenCalled();
-    releaseMarks(["codex-basic", "claude-basic"]);
+    releaseMarks(["codex-basic", "prime-agent-basic"]);
     const result = await evaluation;
     expect(onError).not.toHaveBeenCalled();
-    // One evaluation for the shared harness, not one per provider. The due harness whose
-    // runtime was never installed waits for Connect: the upgrade never installs it first.
-    expect(prepareRecipe).toHaveBeenCalledOnce();
+    // The existing connected router authorizes completing missing Prime setup. Codex's
+    // shared recipe still prepares once, and both results publish in one evaluation.
+    expect(prepareRecipe).toHaveBeenCalledTimes(2);
+    expect(prepareRecipe).toHaveBeenCalledWith("prime@0.8.1");
     expect(prepareRecipe).toHaveBeenCalledWith("codex@0.147.0");
     expect(publishAvailability).toHaveBeenCalledOnce();
     expect(publishAvailability).toHaveBeenCalledWith([{
       harnessId: "codex-basic", configurationDigest: "sha256:codex-basic-upgraded",
       generation: 1, available: true, unavailableReason: null,
+    }, {
+      harnessId: "prime-agent-basic", configurationDigest: "sha256:prime-agent-basic-upgraded",
+      generation: 1, available: true, unavailableReason: null,
     }]);
-    expect(result.readyHarnessIds).toEqual(["codex-basic"]);
+    expect(result.readyHarnessIds).toEqual(["codex-basic", "prime-agent-basic"]);
     // Both providers are its routes; the app-server test
     // one_post_upgrade_evaluation_restores_both_providers_sharing_a_route shows this one
     // result makes both ready.
@@ -406,13 +411,13 @@ describe("injectable production provider composition", () => {
     await startPostUpgradeReadiness({
       readiness, updatesDue: async () => [], routes: () => composition.readinessRoutes(),
     }).evaluation;
-    expect(prepareRecipe).toHaveBeenCalledOnce();
+    expect(prepareRecipe).toHaveBeenCalledTimes(2);
     // A newly activated recipe is due too, and only for the harnesses that run it.
     await startPostUpgradeReadiness({
       readiness, updatesDue: async () => [], recipeUpdates: ["codex@0.147.0"],
       routes: () => composition.readinessRoutes(),
     }).evaluation;
-    expect(prepareRecipe).toHaveBeenCalledTimes(2);
+    expect(prepareRecipe).toHaveBeenCalledTimes(3);
     expect(publishAvailability).toHaveBeenLastCalledWith([expect.objectContaining({
       harnessId: "codex-basic", generation: 2, available: true,
     })]);
@@ -426,7 +431,7 @@ describe("injectable production provider composition", () => {
     // Without the installed-recipe check it refuses, rather than skipping every harness.
     const unchecked = createHarnessReadinessCoordinator({
       configurations, digestConfiguration: ({ name }) => name, runtimeRequirements: {},
-      prepareRecipe, checkers: { "codex.basic": async () => ({ available: true }), "claude.basic": async () => ({ available: true }) },
+      prepareRecipe, checkers: { "codex.basic": async () => ({ available: true }), "prime.agent": async () => ({ available: true }) },
       publishAvailability,
     });
     const refused = vi.fn();

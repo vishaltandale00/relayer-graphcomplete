@@ -474,8 +474,11 @@ either Prime configuration to the catalog. Failure leaves the Codex and Claude
 configurations available and records a local diagnostic; explicitly requesting
 an unavailable Prime default fails closed before the product runtime starts.
 The product catalog retains unavailable Prime entries and their stable reason for
-diagnostics and validation, while ordinary Harness Settings, executable
-configuration lookup, onboarding, and the composer exclude them. Harness Settings
+diagnostics and validation, while executable configuration lookup, onboarding, and the composer exclude them.
+Harness Settings also exposes loaded unavailable configurations with an exact eligible
+connected provider, using a repair icon whose tooltip explains the failure. The backend
+projects repair provider IDs independently of runtime readiness and family selection.
+Unsupported configurations stay hidden. Harness Settings
 uses the backend's exact provider, model, family, and access-contract projection
 rather than treating runtime installation as current feasibility. The diagnostic
 and execution trace contain only the reviewed source commit and package name/version
@@ -535,8 +538,10 @@ route through those harnesses, so ChatGPT and OpenRouter share one result for
 `codex-basic`. It goes through the same coordinator and publication chain as Repair
 (PROV-005), and the app server's row stays the only record (PROV-006). Startup does
 not wait for it. Like Repair, it probes the runtime and may install the exact recipe
-again, but it skips a harness whose runtime was never installed on this machine; that
-route waits for Connect or Repair, so an upgrade never installs Prime by itself. A
+again. A due harness with a missing runtime is installed when an active connected
+provider has a current published eligible model route. Without that route, a missing
+runtime waits for Connect or Repair. The cached route must match the current connection
+generation; sign-out, reconnect and removal invalidate it. A
 managed provider whose activation failed on a broken runtime publishes no models and so
 has no route; the step first recovers each such provider, as Repair does, when its
 recipe is installed and due. Recovery reinstalls the exact recipe if needed and publishes

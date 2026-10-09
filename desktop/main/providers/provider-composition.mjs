@@ -45,7 +45,11 @@ export function createProviderComposition({
         }
       }
       const published = await publishCatalog(snapshot, options);
-      publishedModels.set(snapshot.providerId, snapshot.models ?? []);
+      publishedModels.set(snapshot.providerId, {
+        models: snapshot.models ?? [],
+        connected: snapshot.connected === true,
+        generation: options?.connectionGeneration,
+      });
       providerDefinitions.catalogPublished(snapshot.providerId, { connected: snapshot.connected });
       return published;
     },
@@ -135,10 +139,15 @@ export function createProviderComposition({
     // tied to one provider (the recipe-update trigger).
     async readinessRoutes() {
       return (await providerDefinitions.activeDefinitions())
-        .filter(({ id }) => publishedModels.get(id)?.length)
+        .filter(({ id }) => {
+          const snapshot = publishedModels.get(id);
+          const generation = providerDefinitions.readinessGeneration(id);
+          return snapshot?.connected === true && snapshot.models.length > 0
+            && generation !== null && generation === snapshot.generation;
+        })
         .map((providerDefinition) => Object.freeze({
           providerDefinition,
-          models: publishedModels.get(providerDefinition.id),
+          models: publishedModels.get(providerDefinition.id).models,
         }));
     },
     async close() {

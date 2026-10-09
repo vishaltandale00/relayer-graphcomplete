@@ -87,18 +87,26 @@ describe("provider browser evidence", () => {
         "providers",
         "families",
         "harnesses",
+        "harness-repair",
         "recovery",
       ]);
 
       const frames = (await readdir(join(output, "frames")))
         .filter((name) => name.endsWith(".png"))
         .sort();
-      expect(frames).toHaveLength(8);
+      expect(frames).toHaveLength(9);
       for (const frame of frames) {
         const bytes = await readFile(join(output, "frames", frame));
         expect([...bytes.subarray(0, 8)]).toEqual([137, 80, 78, 71, 13, 10, 26, 10]);
         expect(bytes.byteLength).toBeGreaterThan(20_000);
       }
+
+      const repair = JSON.parse(await readFile(join(output, "harness-repair-journey.json"), "utf8"));
+      expect(repair).toMatchObject({
+        renderer: "production", provider: "deterministic fixture", exactProviderId: "router",
+        phases: ["connected", "missing", "failure", "success", "composer"], attempts: 2,
+        composerAdmitted: true, defaultsPreserved: true,
+      });
 
       const variants = (await readdir(join(output, "variants")))
         .filter((name) => name.endsWith(".png"))

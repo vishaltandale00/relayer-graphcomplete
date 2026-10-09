@@ -1,0 +1,30 @@
+{
+  "sha256": "7666f0abb833c55d4e9e5e443653faf1129f55799548624784c8bb79289f664b",
+  "paths": [
+    "crates/relayer-app-server/src/product/catalog.rs",
+    "crates/relayer-app-server/src/storage/sqlite/catalog.rs",
+    "desktop/eval-main/provider-setup.mjs",
+    "desktop/main/index.mjs",
+    "desktop/main/managed-runtimes/resolver.mjs",
+    "desktop/main/providers/provider-composition.mjs",
+    "desktop/main/providers/provider-definition-service.mjs",
+    "desktop/main/services/graphcomplete-runtime.mjs",
+    "desktop/main/services/harness-readiness.mjs",
+    "desktop/renderer/src/harness-settings-model.js",
+    "desktop/renderer/src/harness-settings.js",
+    "desktop/renderer/src/provider-ui.js",
+    "docs/architecture.md",
+    "docs/prd/index.html",
+    "scripts/capture-provider-ux-video.mjs",
+    "scripts/provider-ux-evidence-browser.mjs",
+    "test/desktop-shell.test.mjs",
+    "test/fixtures/model-settings-default-family-disconnected.json",
+    "test/fixtures/model-settings-default-family-recovery.json",
+    "test/harness-readiness.test.mjs",
+    "test/harness-settings-repair.test.mjs",
+    "test/provider-composition.test.mjs",
+    "test/provider-connection-generation.test.mjs",
+    "test/provider-electron-evidence.test.mjs",
+    "test/provider-ui.test.mjs"
+  ]
+}

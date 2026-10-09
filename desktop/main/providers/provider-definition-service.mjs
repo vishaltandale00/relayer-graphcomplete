@@ -200,6 +200,13 @@ export class ProviderDefinitionService {
     return this.connectionGeneration(id);
   }
 
+  // A saved connected catalog cannot authorize setup after a local sign-out whose
+  // publication failed. Refresh may still run to record the signed-out state.
+  readinessGeneration(id) {
+    if (this.unrecordedSignOuts.has(id)) return null;
+    return this.refreshGeneration(id);
+  }
+
   /**
    * The app server accepted a catalog for this provider. A catalog that is not connected
    * records the signed-out state, so provider access may resume. A connected one does not: its

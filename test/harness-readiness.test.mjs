@@ -5,6 +5,8 @@ import {
   createPostUpgradeReadiness,
   startPostUpgradeReadiness,
 } from "../desktop/main/services/harness-readiness.mjs";
+import { managedRecipeInstalled, managedRecipeSupported } from "../desktop/main/managed-runtimes/resolver.mjs";
+import { resolveManagedRuntimeRecipe } from "../desktop/main/managed-runtimes/recipes.mjs";
 import { checkPrimeManagedRuntime } from "../desktop/main/services/prime-managed-runtime.mjs";
 
 function configuration(name, implementation, adapterId) {
@@ -277,6 +279,43 @@ describe("production harness readiness", () => {
     releasePrepare({ recipeId: "codex@0.147.0" });
     await late.evaluation;
     expect(publishAvailability).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["connected eligible router", [{ id: "qwen", visible: true, available: true }], "secret@1", true],
+    ["no published models", [], "secret@1", false],
+    ["unavailable model", [{ id: "qwen", available: false }], "secret@1", false],
+    ["wrong access contract", [{ id: "qwen" }], "managed-runtime@1", false],
+    ["unsupported target", [{ id: "qwen", available: true }], "secret@1", false, "macos-x64"],
+  ])("recovers absent Prime only for a current route: %s", async (_, models, accessContract, expected, target = "macos-arm64") => {
+    const runtimes = { validate: async (recipeId) => {
+      resolveManagedRuntimeRecipe(recipeId, target);
+      throw Object.assign(new Error("not installed"), { code: "managed_runtime_not_installed" });
+    } };
+    const due = new Set(["prime-agent-basic"]);
+    const prepareRecipe = vi.fn(async () => ({ runtimeId: "prime" }));
+    const publishAvailability = vi.fn(async (results) => {
+      for (const { harnessId } of results) due.delete(harnessId);
+    });
+    const readiness = createHarnessReadinessCoordinator({
+      configurations: new Map([["prime-agent-basic", configuration("prime-agent-basic", "prime.agent", "openrouter")]]),
+      digestConfiguration: () => "sha256:prime-upgraded",
+      runtimeRequirements: { "prime.agent": { runtimeId: "prime", recipeId: "prime@0.8.1" } },
+      prepareRecipe, checkers: { "prime.agent": async () => ({ available: true }) },
+      publishAvailability,
+      recipeInstalled: (id) => managedRecipeInstalled(runtimes, id),
+      recipeSupported: (id) => managedRecipeSupported(runtimes, id),
+    });
+    const repairProviders = vi.fn(async () => {});
+    const request = { readiness, updatesDue: async () => [...due], repairProviders,
+      routes: async () => [{ providerDefinition: { id: "router", adapterId: "openrouter", accessContract }, models }],
+    };
+    await startPostUpgradeReadiness(request).evaluation;
+    expect(prepareRecipe).toHaveBeenCalledTimes(expected ? 1 : 0);
+    expect(publishAvailability).toHaveBeenCalledTimes(expected ? 1 : 0);
+    expect(repairProviders).not.toHaveBeenCalled();
+    await startPostUpgradeReadiness(request).evaluation;
+    expect(prepareRecipe).toHaveBeenCalledTimes(expected ? 1 : 0);
   });
 
   function postUpgradeFixture({ checker, prepare } = {}) {

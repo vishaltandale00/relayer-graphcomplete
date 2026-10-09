@@ -2,7 +2,7 @@ import { abortable } from "./abortable.mjs";
 import { join } from "node:path";
 import { mkdir, writeFile, readFile } from "node:fs/promises";
 import { createManagedRuntimeInstaller } from "../main/managed-runtimes/installer.mjs";
-import { createManagedRuntimeResolver, managedRecipeInstalled } from "../main/managed-runtimes/resolver.mjs";
+import { createManagedRuntimeResolver, managedRecipeInstalled, managedRecipeSupported } from "../main/managed-runtimes/resolver.mjs";
 import { createProviderComposition } from "../main/providers/provider-composition.mjs";
 import { productionProviderAdapterRegistry, productionHarnessRuntimeDescriptor, productionProviderRuntimeDependencies } from "../main/providers/provider-adapter-registry.mjs";
 import { createProviderRuntimeStateRemover } from "../main/providers/provider-runtime-state.mjs";
@@ -86,6 +86,7 @@ export function createEvalProviderSetup({ userDataDirectory, productServer, prod
       await productServer.publishHarnessReadiness(updates);
     },
     recipeInstalled: (recipeId) => managedRecipeInstalled(getResolver(), recipeId),
+    recipeSupported: (recipeId) => managedRecipeSupported(getResolver(), recipeId),
   });
   const composition = createComposition({ registry,
     definitionStore: productServer.providerDefinitionStore(), credentialStore,

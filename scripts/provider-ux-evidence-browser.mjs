@@ -50,6 +50,10 @@ const blockedFamilyScenes = ["no-compatible", "repair-execution", "refresh-model
 const onboardingScenes = new Set(["onboarding", "endpoint", "family", "alternate-harness", "loading", "invalid", "error", "authorization", "flow", ...blockedFamilyScenes]);
 let definitions = onboardingScenes.has(scene) ? [] : structuredClone(connectedDefinitions);
 let onboardingComplete = !onboardingScenes.has(scene);
+if (scene === "harness-repair") definitions.push({
+  id: "router", adapterId: "openrouter", adapterLabel: "OpenRouter", label: "OpenRouter",
+  endpoint: "https://openrouter.ai/api/v1", accessContract: "secret@1", lifecycleState: "active", connected: true,
+});
 if (scene === "long-label") {
   definitions[0].label = "OpenAI Work — North America Platform Engineering and Applied Research";
 }
@@ -91,7 +95,18 @@ window.relayerDesktop = {
     onChanged: noopSubscription,
   },
   folder: { choose: async () => null },
-  models: { settingsOpened: async () => ({}), refresh: async () => ({ refreshed: true }) },
+  models: {
+    settingsOpened: async () => ({}),
+    refresh: async (providerId) => {
+      if (scene !== "harness-repair") return { refreshed: true };
+      const response = await fetch("/api/evidence/harness-repair", {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ providerId }),
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.message);
+      return result;
+    },
+  },
   providers: {
     status: async () => ({
       adapters,
@@ -199,6 +214,12 @@ async function prepareScene() {
   label.className = "evidence-caption";
   label.textContent = caption;
   document.body.append(label);
+  if (scene === "harness-repair") {
+    await waitFor("#appShell:not(.hidden)");
+    await waitFor("#desktopAccountOnboarding:not(.hidden)");
+    document.querySelector("#desktopAccountOnboardingNotNow").click();
+    await waitForCondition(() => document.querySelector("#desktopAccountOnboarding").classList.contains("hidden"), "dismissed optional account gate");
+  }
   if (scene.startsWith("sidebar-")) {
     await waitFor("#appShell:not(.hidden)");
     const onboarding = document.querySelector("#desktopAccountOnboarding");
@@ -314,14 +335,14 @@ async function prepareScene() {
       "authorization pending status",
     );
   }
-  if (["providers", "families", "harnesses", "light", "narrow", "long-label", "unavailable", "stale", "removed"].includes(scene)) {
+  if (["providers", "families", "harnesses", "harness-repair", "light", "narrow", "long-label", "unavailable", "stale", "removed"].includes(scene)) {
     await waitFor("#appShell:not(.hidden)");
     await waitForCondition(
       () => document.querySelector("#currentFamilyName")?.textContent === "Work coding",
       "model settings",
     );
     (await waitFor("#settingsButton")).click();
-    const tab = ["families", "stale"].includes(scene) ? "models" : scene === "harnesses" ? "harnesses" : "providers";
+    const tab = ["families", "stale"].includes(scene) ? "models" : ["harnesses", "harness-repair"].includes(scene) ? "harnesses" : "providers";
     (await waitFor(`[data-settings-tab="${tab}"]`)).click();
     document.activeElement?.blur();
   }

@@ -33,6 +33,7 @@ const scenes = [
   ["providers", "Manage independent provider connections"],
   ["families", "Configure harness-agnostic model families"],
   ["harnesses", "Inspect currently usable harnesses"],
+  ["harness-repair", "Repair missing Prime through connected OpenRouter"],
   ["recovery", "Recover the same unsent turn with an explicit model choice"],
 ];
 const variants = [
@@ -269,6 +270,64 @@ async function captureBrowserScene(url, frame, profile, width = 1280, { forcedCo
         await cdp.call("Runtime.evaluate", { expression: "document.querySelector('#collapseSidebar').click()" });
         await new Promise((resolvePromise) => setTimeout(resolvePromise, 250));
         await captureJourneyPhase(37, true);
+      }
+      if (scene === "harness-repair") {
+        const record = async (phase) => {
+          const shot = await cdp.call("Page.captureScreenshot", { format: "png", fromSurface: true });
+          await writeFile(join(outputDirectory, `harness-repair-${phase}.png`), Buffer.from(shot.data, "base64"));
+        };
+        const waitFor = async (expression) => {
+          const until = Date.now() + 5000;
+          while (Date.now() < until) {
+            const value = await cdp.call("Runtime.evaluate", { expression, returnByValue: true });
+            if (value.result.value === true) return;
+            await new Promise((done) => setTimeout(done, 50));
+          }
+          throw new Error(`Repair journey did not reach: ${expression}`);
+        };
+        await waitFor("document.querySelector('[data-harness-repair]')?.dataset.repairProvider === 'router'");
+        const before = await cdp.call("Runtime.evaluate", {
+          expression: "import('/desktop/renderer/src/state.js').then(async ({appState}) => {const {availablePickerFamilies}=await import('/desktop/renderer/src/model-picker-model.js');return {defaults:appState.modelSettings.defaults,primeChoices:availablePickerFamilies(appState.modelSettings,'prime-agent-basic').length}})",
+          awaitPromise: true, returnByValue: true,
+        });
+        if (before.result.value.primeChoices !== 0) throw new Error("Missing Prime was admitted to execution.");
+        await waitFor("document.querySelector('#desktopAccountOnboarding').classList.contains('hidden') && !document.querySelector('#settingsView').classList.contains('hidden')");
+        await cdp.call("Runtime.evaluate", { expression: "document.querySelector('[data-settings-tab=providers]').click()" });
+        await waitFor("document.querySelector('[data-provider-definition=router] .provider-status')?.textContent === 'Connected'");
+        await record("connected");
+        await cdp.call("Runtime.evaluate", { expression: "document.querySelector('[data-settings-tab=harnesses]').click()" });
+        await waitFor("document.querySelector('[data-harness-repair]')?.dataset.repairProvider === 'router'");
+        await record("missing");
+        await cdp.call("Runtime.evaluate", { expression: "document.querySelector('[data-harness-repair]').click()" });
+        await waitFor("document.querySelector('[data-harness-repair]')?.disabled === true");
+        await waitFor("document.querySelector('[data-harness-repair]')?.disabled === false && document.body.innerText.includes('Prime runtime setup failed. Try repair again.')");
+        await record("failure");
+        await cdp.call("Runtime.evaluate", { expression: "document.querySelector('[data-harness-repair]').click()" });
+        await waitFor("!document.querySelector('[data-harness-repair]') && document.body.innerText.includes('Prime Agent basic repaired.')");
+        await record("success");
+        const picker = await cdp.call("Runtime.evaluate", {
+          expression: "import('/desktop/renderer/src/state.js').then(async ({appState}) => {const {availablePickerFamilies}=await import('/desktop/renderer/src/model-picker-model.js');return {defaults:appState.modelSettings.defaults,primeChoices:availablePickerFamilies(appState.modelSettings,'prime-agent-basic').length}})",
+          awaitPromise: true, returnByValue: true,
+        });
+        if (picker.result.value?.primeChoices !== 1) throw new Error("Repaired Prime was not admitted to the composer.");
+        if (JSON.stringify(picker.result.value.defaults) !== JSON.stringify(before.result.value.defaults)) throw new Error("Repair changed saved defaults.");
+        if (harnessRepairState.attempts !== 2) throw new Error("Repair did not use one refresh per click.");
+        await cdp.call("Runtime.evaluate", { expression: "document.querySelector('#settingsBackButton').click()" });
+        await waitFor("document.querySelector('#settingsView').classList.contains('hidden')");
+        await cdp.call("Runtime.evaluate", { expression: "document.querySelector('#newModelControl [data-model-picker-trigger]').click();document.querySelector('#newModelControl [data-model-picker-tab=advanced]').click()" });
+        await waitFor("document.querySelector('#newModelControl [data-harness-option=prime-agent-basic]')?.disabled === false && !document.querySelector('#newModelControl [data-model-picker-panel=advanced]').classList.contains('hidden')");
+        await record("composer");
+        // Return to the Harness Settings surface for the existing scene audit.
+        await cdp.call("Runtime.evaluate", { expression: "document.querySelector('#newModelControl [data-model-picker-trigger]').click();document.querySelector('#settingsButton').click()" });
+        await waitFor("!document.querySelector('#settingsView').classList.contains('hidden')");
+        await cdp.call("Runtime.evaluate", { expression: "document.querySelector('[data-settings-tab=harnesses]').click()" });
+        await writeFile(join(outputDirectory, "harness-repair-journey.json"), JSON.stringify({
+          renderer: "production", provider: "deterministic fixture", exactProviderId: "router",
+          phases: ["connected", "missing", "failure", "success", "composer"], attempts: harnessRepairState.attempts,
+          composerAdmitted: true, defaultsPreserved: true,
+        }, null, 2));
+        await writeFile(join(outputDirectory, "harness-repair-frames.txt"), ["connected", "missing", "failure", "success", "composer"].map(phase => `file 'harness-repair-${phase}.png'\nduration 2`).join("\n") + "\nfile 'harness-repair-composer.png'\n");
+        await run(ffmpeg, ["-y", "-f", "concat", "-safe", "0", "-i", join(outputDirectory, "harness-repair-frames.txt"), "-vf", "fps=15,format=yuv420p", "-c:v", "libx264", join(outputDirectory, "harness-repair.mp4")]);
       }
       const screenshot = await cdp.call("Page.captureScreenshot", { format: "png", fromSurface: true });
       await writeFile(frame, Buffer.from(screenshot.data, "base64"));
@@ -799,6 +858,8 @@ const flowState = {
   retryRequest: null,
 };
 
+const harnessRepairState = { attempts: 0, ready: false };
+
 const modelSettings = (scene) => ({
   defaults: scene === "flow" ? { ...flowState.defaults } : {
     harnessId: "codex-basic",
@@ -806,6 +867,10 @@ const modelSettings = (scene) => ({
     familyId: ["onboarding", "endpoint", "family", "no-compatible"].includes(scene) ? null : 11,
   },
   providers: [
+    ...(scene === "harness-repair" ? [{
+      id: "router", adapterId: "openrouter", label: "OpenRouter", connected: true,
+      models: [{ id: "qwen/qwen3-coder", label: "Qwen3 Coder", visible: true, available: true }],
+    }] : []),
     {
       id: "openai-work",
       adapterId: "openai-api",
@@ -834,6 +899,10 @@ const modelSettings = (scene) => ({
     },
   ],
   families: [
+    ...(scene === "harness-repair" ? [{
+      id: 13, name: "Router coding", kind: "custom", enabled: true, position: 2, revision: 1,
+      members: [{ providerId: "router", modelId: "qwen/qwen3-coder", position: 0 }],
+    }] : []),
     {
       id: 11,
       name: "Work coding",
@@ -858,6 +927,17 @@ const modelSettings = (scene) => ({
     ...(scene === "flow" && flowState.family ? [flowState.family] : []),
   ],
   harnesses: [
+    ...(scene === "harness-repair" ? [{
+      id: "prime-agent-basic", label: "Prime Agent basic", available: harnessRepairState.ready,
+      permissionAvailable: true, revision: 1, executionAccessContracts: ["secret@1"],
+      modelRules: { allow: [{ adapterId: "openrouter", modelIdRegex: "^qwen/" }], deny: [] },
+      usableNow: harnessRepairState.ready, usableProviderIds: harnessRepairState.ready ? ["router"] : [],
+      usableFamilyIds: harnessRepairState.ready ? [13] : [],
+      repairProviderIds: harnessRepairState.ready ? [] : ["router"],
+      unavailableReason: harnessRepairState.ready ? null : {
+        code: "harness_readiness_failed", message: "Prime runtime setup failed. Try repair again.",
+      },
+    }] : []),
     {
       id: "codex-basic",
       label: "Codex basic",
@@ -1077,6 +1157,17 @@ const server = createServer(async (request, response) => {
       response.end(evidenceHtml);
       return;
     }
+    if (url.pathname === "/api/evidence/harness-repair" && request.method === "POST") {
+      const { providerId } = await requestJson(request);
+      if (providerId !== "router") throw new Error("Repair targeted the wrong provider.");
+      harnessRepairState.attempts += 1;
+      await new Promise((done) => setTimeout(done, 400));
+      if (harnessRepairState.attempts === 1) {
+        return json(response, { message: "Prime runtime setup failed. Try repair again." }, 503);
+      }
+      harnessRepairState.ready = true;
+      return json(response, { refreshed: true });
+    }
     if (url.pathname === "/api/model-settings") return json(response, modelSettings(scene));
     if (url.pathname === "/api/provider-onboarding/projection") {
       return json(response, onboardingProjection(scene, url.searchParams.get("providerId") ?? "openai-work"));
@@ -1210,6 +1301,7 @@ try {
       providers: ["OpenAI Work", "gateway.example.com/openai/v1", "Default provider"],
       families: ["Work coding", "Fast review", "GPT-5.6 Sol"],
       harnesses: ["Harnesses", "Codex basic", "Default harness"],
+      "harness-repair": ["Harnesses", "Prime Agent basic", "Codex basic", "Default harness"],
       recovery: ["OpenAI Work is rate limited", "Review the provider adapter architecture"],
     }[scene];
     for (const text of required) {

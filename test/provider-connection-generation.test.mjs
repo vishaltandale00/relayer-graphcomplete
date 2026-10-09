@@ -435,6 +435,10 @@ describe("PROV-002: a superseded provider result is inert", () => {
       expect(server.connected(managedDefinition.id)).toBe(true);
       expect(server.published.at(-1)).toMatchObject({ connected: true, connectionEvent: "reconnected" });
       expect(stale).toBeNull();
+      // Direct reconnect publication does not resurrect the previous generation cache.
+      expect(await composition.readinessRoutes()).toEqual([]);
+      await composition.modelCatalog.settingsOpened();
+      expect(await composition.readinessRoutes()).toHaveLength(1);
     } finally {
       await composition.close();
     }
@@ -553,6 +557,7 @@ describe("PROV-002: a superseded provider result is inert", () => {
       const refreshed = await composition.modelCatalog.settingsOpened();
       expect(server.connected(managedDefinition.id)).toBe(false);
       expect(refreshed).toEqual([null]);
+      expect(await composition.readinessRoutes()).toEqual([]);
 
       await composition.providerDefinitions.cancelConnection(pending.connectionId);
       expect(world.homeWipes).toBe(1);
@@ -715,9 +720,11 @@ describe("PROV-002: a superseded provider result is inert", () => {
       reconnecting.catch(() => undefined);
 
       await preparing.reached.promise;
+      expect(await composition.readinessRoutes()).toEqual([]);
       await expect(composition.modelCatalog.settingsOpened()).resolves.toEqual([null]);
       preparing.release.resolve();
       await login.reached.promise;
+      expect(await composition.readinessRoutes()).toEqual([]);
       await expect(composition.modelCatalog.settingsOpened()).resolves.toEqual([null]);
       expect(world.runtimes[0].discoveries).toBe(2);
 
@@ -1184,10 +1191,12 @@ describe("PROV-004: provider lifecycle never runs under a turn's provider access
     const service = composition.providerDefinitions;
     try {
       await composition.start();
+      expect(await composition.readinessRoutes()).toHaveLength(1);
       server.publishFails = true;
       await service.logout(managedDefinition.id);
       await vi.waitFor(() => expect(server.failedPublishes).toBe(2), { timeout: 5_000 });
       await expect(service.acquireExecution(managedDefinition.id)).rejects.toThrow("Provider is signed out.");
+      expect(await composition.readinessRoutes()).toEqual([]);
     } finally {
       await composition.close();
     }
@@ -1215,6 +1224,7 @@ describe("PROV-004: provider lifecycle never runs under a turn's provider access
       await followUp.reached.promise;
       expect(server.connected(managedDefinition.id)).toBe(true);
       await expect(service.acquireExecution(managedDefinition.id)).rejects.toThrow("Provider is signed out.");
+      expect(await composition.readinessRoutes()).toEqual([]);
       followUp.release.resolve();
       await vi.waitFor(() => expect(server.connected(managedDefinition.id)).toBe(false), { timeout: 5_000 });
     } finally {
