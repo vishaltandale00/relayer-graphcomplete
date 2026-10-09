@@ -6578,7 +6578,10 @@ export function createProductWorkspace({
         const occurrence = inputAction && interaction?.graphNodeId != null && visibleLayer?.layer?.id != null
           ? createInputOccurrence(interaction.graphNodeId, visibleLayer.layer.id, inputAction.id) : null;
         composerInputEdits.set(editKey, !inputAction?.liveInput && (occurrence ? isComposerInputOccurrence(occurrence) : true));
-        if (inputAction?.liveInput) renderAuthoredLiveAnswers(getState(), node, inputActions);
+        // A null edit only clears the authored field's editing bookkeeping.
+        // Replacing Answer on blur detaches its pointer-down target before
+        // pointer-up, so the browser never dispatches the delivery click.
+        if (inputAction?.liveInput && value !== null) renderAuthoredLiveAnswers(getState(), node, inputActions);
         if (submitted) trackAuthoredInputSubmit(threadId, submitted, refusalKey, occurrence);
         syncBoundInvokeControls(getState());
         syncComposer();

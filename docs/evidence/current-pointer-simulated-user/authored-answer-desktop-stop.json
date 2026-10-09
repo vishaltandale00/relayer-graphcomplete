@@ -1,0 +1,18 @@
+{
+  "passed": true,
+  "inference": false,
+  "results": [
+    {
+      "provider": "codex",
+      "duplicateClickAbortCount": 1,
+      "lifecycle": "stopped",
+      "attempt": "cancelled"
+    },
+    {
+      "provider": "prime",
+      "duplicateClickAbortCount": 1,
+      "lifecycle": "stopped",
+      "attempt": "cancelled"
+    }
+  ]
+}

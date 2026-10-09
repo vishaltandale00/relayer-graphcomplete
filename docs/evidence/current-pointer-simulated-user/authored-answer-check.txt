@@ -1,0 +1,13 @@
+Tested source: 61-path digest 97b2014968b5d4123a6443e913dd79be5f00be3385009db5e7ec779d944b8b4f.
+npm run check: PASS, exit 0.
+  cargo fmt, all-target/all-feature Clippy: PASS.
+  Rust workspace/doc: 770 passed, 0 failed.
+  Crash-feature/doc: 361 passed, 0 failed.
+  Native runtime, package builds, TypeScript/workspace/built-package checks: PASS.
+  Vitest: 4,252 passed, 3 skipped; 322 passing files, 1 skipped file.
+  Secret boundary: 2 passed. Python SDK: 97 passed.
+  Ladybug receipt gates and PRD readability: PASS.
+  Full/focused provider video capture finished in 52.361/24.881 seconds.
+  The prior video and Windows-cleanup failures remain historical; this pass does not establish their earlier causes.
+Raw local output: .relayer/authored-live-answer-check.txt
+Raw output SHA-256: 34f03d5a990f544d7f31e0f9d448e8e9fe75f21c9bef8e36178fe00bb76204d0

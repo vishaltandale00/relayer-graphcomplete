@@ -1,0 +1,37 @@
+
+> relayer-graphcomplete@0.0.0 test:eval-web
+> node scripts/test-eval-web.mjs
+
+PASS interrupted startup: pending native child terminated and profile lock released
+PASS real index human lifecycle: initial graph, finish/export RPCs, process restart, persisted task/read-only review; disconnected actor rejected before candidate creation
+PASS host: real fixture, tab independence, review authority, judge/trace pages, shutdown and restart
+PASS Eval Settings: production Providers, login/cancel/reconnect, model refresh, persisted families/defaults and Harnesses (fake provider; no inference)
+PASS human task: live composer, recorded graph, two completions, finish, read-only review, annotation and export
+PASS actor dispatch race: real renderer redraw requires fresh observation; trusted activation, scroll and document rewrite failures stay terminal
+PASS actor native select: opened-only explicit accessibility, exact enabled unique labels, normal input/change, closed/unowned/stale/presentation/oversized rejection
+PASS actor redraw action: production refresh detached the original and exact replacement activation succeeded
+PASS actor redraw breadcrumb: production refresh detached the original and exact replacement activation succeeded
+PASS actor diagnostic capture: actual Playwright archive, errors, recovery decisions, action correlation and failure screenshots; no raw capability
+PASS setup revisions: actual dashboard publication, predecessor/human lineage, selection, explicit promotion, reopen and original run/export unchanged
+PASS judge config file: selected repository YAML, file-only configuration, exact file snapshot and motivating feedback publication
+PASS actor dispatch race: real renderer redraw requires fresh observation; trusted activation, scroll and document rewrite failures stay terminal
+PASS actor native select: opened-only explicit accessibility, exact enabled unique labels, normal input/change, closed/unowned/stale/presentation/oversized rejection
+PASS actor redraw action: production refresh detached the original and exact replacement activation succeeded
+PASS actor redraw breadcrumb: production refresh detached the original and exact replacement activation succeeded
+PASS actor dispatch race: real renderer redraw requires fresh observation; trusted activation, scroll and document rewrite failures stay terminal
+PASS actor native select: opened-only explicit accessibility, exact enabled unique labels, normal input/change, closed/unowned/stale/presentation/oversized rejection
+PASS actor redraw action: production refresh detached the original and exact replacement activation succeeded
+PASS actor redraw breadcrumb: production refresh detached the original and exact replacement activation succeeded
+PASS independent completion selector: actual form, exact revision/export pin, release locking and unchanged defaults
+PASS evaluator release: file-only completion publication, explicit three-revision release, real form submission with frozen run/export pins and exact stopping evidence; unchanged defaults (fixture inference)
+PASS actor dispatch race: real renderer redraw requires fresh observation; trusted activation, scroll and document rewrite failures stay terminal
+PASS actor native select: opened-only explicit accessibility, exact enabled unique labels, normal input/change, closed/unowned/stale/presentation/oversized rejection
+PASS actor redraw action: production refresh detached the original and exact replacement activation succeeded
+PASS actor redraw breadcrumb: production refresh detached the original and exact replacement activation succeeded
+PASS calibration: frozen native human label/evidence, tuning membership, pinned actor comparison, real second selected-revision run, independent human scores, export/reopen
+PASS task actor: dashboard configuration, production screenshots/node selection/composer/Send/invoke, three-completion admission, active read-only human grading isolated from actor, export (fixture inference)
+PASS actor input: visible authored input, draft commit and composer Send through real product routes with preserved answer evidence
+PASS current-pointer actor (native input): two real Advances with a live UI answer consumed through the candidate SDK, sealed input unchanged, response-loss reconciliation, one inference/one admission, ordered screenshot/reaction export, fresh settled decision, hidden/zero-width exclusion, capture cancellation/race, historical Delivered after navigation/reload, composer exclusion and ordinary navigation pin exclusion (fixture inference)
+PASS current-pointer actor (authored input): two real Advances with a live UI answer consumed through the candidate SDK, sealed input unchanged, response-loss reconciliation, one inference/one admission, ordered screenshot/reaction export, fresh settled decision, hidden/zero-width exclusion, capture cancellation/race, historical Delivered after navigation/reload, composer exclusion and ordinary navigation pin exclusion (fixture inference)
+PASS judge: isolated context, exact execution/turn readiness, viewport/full capture and restoration
+PASS human persistence: native product restart, task-service reopen, accepted turns and verified route preserved

@@ -307,6 +307,7 @@ try {
   await proveTaskActor({ browser, service, productSession, data });
   await proveTaskActorInputs({ browser, service, productSession, data });
   await proveCurrentActor({ browser, directory });
+  await proveCurrentActor({ browser, directory, authored: true });
   const fixture = await service.createRun(selection);
   const completed = await until(() => { const value = service.getRun(fixture.id); return ["passed", "failed", "error", "interrupted"].includes(value.status) ? value : null; }, "judge fixture");
   assert.equal(completed.status, "passed");

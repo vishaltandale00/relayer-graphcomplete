@@ -44,6 +44,47 @@ function mountedCss(shadowRoot, index) {
 afterEach(() => vi.unstubAllGlobals());
 
 describe("compiled Node Detail product runtime", () => {
+  it("delivers an authored live answer when leaving the field to press Answer", async () => {
+    const window = new Window({ url: "http://127.0.0.1:3000" });
+    vi.stubGlobal("document", window.document);
+    vi.stubGlobal("window", window);
+    vi.stubGlobal("lucide", new Proxy({ createElement: () => window.document.createElement("svg") }, { get: (target, key) => target[key] ?? {} }));
+    window.document.body.innerHTML = '<section id="threadView"></section><div id="toast" class="hidden"></div>';
+    const node = { id: 7, clientKey: "question", kind: "concept", icon: "box", title: "Question", detail: "Choose a boundary", authoredDetail: compiledPackage({
+      version: 1, components: [{ id: "form", order: 0, html: '<textarea aria-label="Your answer" data-gc-mount="input"></textarea>', css: "" }],
+      mounts: [{ id: "input", componentId: "form", kind: "capability", host: "textarea", capability: { kind: "input", action: { clientKey: "answer", sourceNode: { clientKey: "question" }, sourceLayer: { clientKey: "working" } } } }], assets: [],
+    }) };
+    const action = { id: 13, clientKey: "answer", sourceNodeId: 7, sourceLayerId: 101, sourceLayerClientKey: "working", kind: "input", control: "text", prompt: "Your answer", liveInput: { eligible: true, attemptId: 10, authorityEpoch: 2, currentRevision: 1 } };
+    const layer = { layer: { id: 101, clientKey: "working" }, nodes: [node], edges: [], actions: [action] };
+    const thread = { id: 3, rootInteractionId: 5, harnessId: "fixture" };
+    const state = { conversationCompatibility: { threadId: 3, status: "unrestricted", harnessId: "fixture" }, status: "accepted", currentInteractionId: 5,
+      interactions: [{ id: 5, threadId: 3, graphNodeId: 50, text: "Investigate", completionStatus: "running", completionOutput: { rootLayer: layer } }],
+      visibleLayer: layer, nodes: [node], actions: [action], projects: [], permissionProfiles: [], modelSettings: { defaults: { harnessId: "fixture" }, harnesses: [{ id: "fixture", available: true }], providers: [], families: [] }, modelCatalog: [], actionInvocations: [], pendingActionInvocations: [] };
+    const commit = vi.fn();
+    const answer = vi.fn(async (_threadId, _interactionId, request) => ({ ...request, currentRevision: request.expectedRevision, sequence: 1, completionId: 50 }));
+    const workspace = createProductWorkspace({ root: window.document, getState: () => state, getThread: () => thread,
+      selection: { currentThreadId: 3, currentInteractionId: 5, selectedNodeId: 7, layerPath: [] }, showThread() {}, showEmpty() {},
+      implicitInputAcceptance: true, inputDraftApi: { get: async () => ({ threadId: 3, revision: 0, attachments: [], updatedAt: "2026-10-09T00:00:00Z" }), commit, answer } });
+    try {
+      workspace.render();
+      await vi.waitFor(() => expect(window.document.querySelector("[data-node-detail-runtime]")?.shadowRoot?.querySelector("textarea")?.disabled).toBe(false));
+      const field = window.document.querySelector("[data-node-detail-runtime]").shadowRoot.querySelector("textarea");
+      field.focus();
+      field.value = "Worker";
+      field.dispatchEvent(new window.Event("input", { bubbles: true }));
+      const button = window.document.querySelector('[data-input-control-role="answer"]');
+      // Native pointer activation leaves the field between mouse-down and
+      // mouse-up. The browser portfolio also exercises that actual gesture.
+      field.dispatchEvent(new window.Event("change", { bubbles: true }));
+      field.blur();
+      expect(button.isConnected).toBe(true);
+      button.click();
+      await vi.waitFor(() => expect(window.document.querySelector('[data-input-control-role="answer"]')?.textContent).toBe("Delivered"));
+      expect(answer).toHaveBeenCalledTimes(1);
+      expect(answer.mock.calls[0]).toEqual([3, 5, expect.objectContaining({ value: { text: "Worker" }, occurrence: { presentingInteractionNodeId: 50, presentingLayerId: 101, actionId: 13 } })]);
+      expect(commit).not.toHaveBeenCalled();
+    } finally { workspace.dispose(); await window.happyDOM.close(); }
+  });
   it.each([false, true])("uses one canonical result control and source-node navigation (authored=%s)", async (authored) => {
     const window = new Window({ url: "http://127.0.0.1:3000" });
     vi.stubGlobal("document", window.document);

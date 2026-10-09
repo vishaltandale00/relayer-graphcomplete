@@ -1,4 +1,4 @@
-Final reviewed source: 61 paths, digest d9737a6b12dffcd121423334f7bb653a0352c3dad52ff2f4386ec0c2a81b4410
+Historical pre-repair reviewed source: 61 paths, digest d9737a6b12dffcd121423334f7bb653a0352c3dad52ff2f4386ec0c2a81b4410
 
 npm run build (build-v6): PASS, exit 0.
 npm run check (check-v10): FAIL, exit 1.
@@ -24,3 +24,6 @@ Feature/secondary declared proof:
   Annotation: actual zero-paid recapture, four PNGs visually inspected; current renderer/capture script and 4 PNG hashes match. Original capture-time binary hashes are historical provenance, not final binary identity.
 
 Execution verdict: declared feature dimensions PASS in deterministic fixtures; repository full check FAIL. No overall-pass, calibrated coherence, candidate incorporation, paid-model realism, TTFG gain, packaged equivalence or release claim.
+
+Authored Answer repair: current source digest 97b2014968b5d4123a6443e913dd79be5f00be3385009db5e7ec779d944b8b4f. Build and full check PASS; 4,252 Vitest passed, 3 skipped. See authored-answer-check.txt and README follow-up for exact proof and retained live failures.
+Repair final desktop input PASS with 0 paid calls; Codex/Prime Stop PASS with abortCount=1, stopped/cancelled. Final adversarial source/mapping/deterministic execution PASS; actual-model Answer confirmation and separate navigation race remain unresolved.

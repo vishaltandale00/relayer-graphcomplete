@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { join, resolve } from "node:path";
 import { mkdir, writeFile } from "node:fs/promises";
-import { RelayerGraphClient, LayerObject, LayerLayoutObject, NodeObject, NodePlacementObject } from "@relayer/graph-client";
+import { RelayerGraphClient, LayerObject, LayerLayoutObject, NodeObject, NodePlacementObject, html, detailCapability } from "@relayer/graph-client";
 import { GraphCompleteRuntimeService, RECURSIVE_TEMPORAL_FEATURES } from "../desktop/main/services/graphcomplete-runtime.mjs";
 import { RelayerAppServerService } from "../desktop/main/services/relayer-app-server.mjs";
 import { EvalService } from "../desktop/eval-main/eval-service.mjs";
@@ -10,8 +10,8 @@ import { TaskActorService } from "../desktop/eval-main/task-actor-service.mjs";
 import { openTaskActorBrowser } from "../desktop/eval-main/task-actor-browser.mjs";
 
 const deferred = () => { let resolve; const promise = new Promise(done => { resolve = done; }); return { promise, resolve }; };
-export async function proveCurrentActor({ browser, directory }) {
-  const data = join(directory, "current-actor");
+export async function proveCurrentActor({ browser, directory, authored = false }) {
+  const data = join(directory, authored ? "current-actor-authored" : "current-actor");
   await mkdir(data, { recursive: true });
   const configuration = join(data, "fixture-current-actor.yaml");
   await writeFile(configuration, "schemaVersion: 1\nname: fixture-current-actor\nimplementation: fixture.current-actor\nimplementationVersion: 1\npermissionBindings:\n  ask: {}\n  auto: {}\n  full: {}\nmodelCompatibility:\n  - providerId: codex\nexecutionAccessContracts: [managed-runtime@1]\nsettings: {}\n");
@@ -39,10 +39,12 @@ export async function proveCurrentActor({ browser, directory }) {
           let revision = 0;
           for (let index = 1; index <= 2; index++) {
             const node = new NodeObject("search", `Working finding ${index}`, index === 1 ? "I found the queue and am checking the worker boundary." : "The worker boundary explains the delay. Earlier findings remain linked.", "concept", `finding-${index}`);
-            await graph.submitNode(node);
             const layer = new LayerObject([node], [], new LayerLayoutObject([new NodePlacementObject(node, 0.5, 0.5)], "default"), `working-${index}`);
+            const question = { kind: "input", control: "text", prompt: "Which boundary should I inspect?", label: "Investigation boundary", sourceLayer: layer, clientKey: "boundary" };
+            if (authored && index === 1) node.detailAuthoring.setComponent("question", html`<label>Which boundary should I inspect?<textarea aria-label="Which boundary should I inspect?" gc=${detailCapability.input("boundary", question)}></textarea></label>`);
+            await graph.submitNode(node);
             await graph.submitLayer(layer);
-            if (index === 1) await graph.addAction(node, { kind: "input", control: "text", prompt: "Which boundary should I inspect?", label: "Investigation boundary", sourceLayer: layer, clientKey: "boundary" });
+            if (index === 1) await graph.addAction(node, question);
             if (index === 2) await graph.addAction(node, { kind: "navigate", relation: "reference", sourceLayer: layer, label: "Earlier finding", target: layers[0], clientKey: "earlier" });
             await graph.addAction(context.inputGraph.id, { kind: "navigate", relation: "expand", label: "Response", target: layer, clientKey: "response" });
             layers.push(layer);
@@ -85,7 +87,12 @@ export async function proveCurrentActor({ browser, directory }) {
         controller = await openTaskActorBrowser({ tasks, sessionId, productSession, browser, signal, observationContract });
         actorPage = browser.contexts().at(-1).pages()[0];
         const originalAct = controller.act.bind(controller);
-        controller.act = async (...args) => { try { return await originalAct(...args); } catch (error) { console.error("CURRENT_ACTOR_ACTION_FAILURE", error.message, error.code, error.actionDispatched); throw error; } };
+        controller.act = async (...args) => {
+          try {
+            await originalAct(...args);
+            if (args[0].kind === "click" && !receivedAnswer) assert.equal(answerRequests, 1, "one explicit Answer click must deliver the staged value");
+          } catch (error) { console.error("CURRENT_ACTOR_ACTION_FAILURE", error.message, error.code, error.actionDispatched); throw error; }
+        };
         await actorPage.route("**/api/threads/*/interactions/*/live-answers", async route => {
           if (route.request().method() !== "POST") return route.continue();
           answerRequests++;
@@ -225,7 +232,7 @@ export async function proveCurrentActor({ browser, directory }) {
     assert.equal(bundle.actorScreenshots.length, 5);
     assert.deepEqual(bundle.session.events.find(event => event.id === delivery[0].id).liveAnswerReceipt, receivedAnswer);
     assert.equal(bundle.session.events.filter(event => event.kind === "actor_current_reaction").length, 4);
-    console.log("PASS current-pointer actor: two real Advances with a live UI answer consumed through the candidate SDK, sealed input unchanged, response-loss reconciliation, one inference/one admission, ordered screenshot/reaction export, fresh settled decision, hidden/zero-width exclusion, capture cancellation/race, historical Delivered after navigation/reload, composer exclusion and ordinary navigation pin exclusion (fixture inference)");
+    console.log(`PASS current-pointer actor (${authored ? "authored" : "native"} input): two real Advances with a live UI answer consumed through the candidate SDK, sealed input unchanged, response-loss reconciliation, one inference/one admission, ordered screenshot/reaction export, fresh settled decision, hidden/zero-width exclusion, capture cancellation/race, historical Delivered after navigation/reload, composer exclusion and ordinary navigation pin exclusion (fixture inference)`);
   } catch (error) {
     console.error("CURRENT_ACTOR_PROOF_FAILURE", error.message);
     if (actorPage && !actorPage.isClosed()) await actorPage.screenshot({ path: resolve(".relayer/current-pointers-live-failure.png") }).catch(() => {});
