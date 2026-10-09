@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { DETAIL_AUTHORING_LIMITS, EdgeObject, GraphApiError, LayerLayoutObject, LayerObject, NodeObject, NodePlacementObject, RelayerGraphClient, html, type ActionObject } from "../src/index.js";
+import { DETAIL_AUTHORING_LIMITS, EdgeObject, GraphApiError, LayerLayoutObject, LayerObject, NodeObject, NodePlacementObject, RelayerGraphClient, detailCapability, html, type ActionObject, type GraphNode } from "../src/index.js";
 import { assetRef } from "../src/detail.js";
 import { edgeId, layerId, nodeId } from "../src/objects.js";
 
@@ -16,6 +16,68 @@ function nodeResponse(init: RequestInit, node: Record<string, unknown>): Respons
 
 describe("agent-facing graph objects", () => {
   afterEach(() => vi.unstubAllGlobals());
+
+  it.each(["components", "mounts", "assets", "bytes"])("rejects a combined presentation %s limit before replacement transport", async (kind) => {
+    let retained: unknown;
+    const replacements: unknown[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.endsWith("/detail-assets/resolve")) {
+        const body = JSON.parse(String(init?.body)) as { logicalIds: string[] };
+        return Response.json({ assets: body.logicalIds.map(logicalId => ({ logicalId, authority: "current", availability: "available", digestSha256: "d".repeat(64), mediaType: "image/png", representation: { kind: "image", sanitized: true } })) });
+      }
+      if (init?.method === "POST") replacements.push(JSON.parse(String(init.body)));
+      return Response.json({ node: { id: 2, clientKey: "saved", kind: "concept", icon: "info", title: "Saved", detail: "Evidence", state: "accepted", authoredDetail: retained }, revision: 0, actions: [] });
+    }));
+    const graph = new RelayerGraphClient({ url: "http://graph.test", token: "run", nodeId: 1 });
+    const make = (prefix: string, full: boolean) => {
+      const node = new NodeObject("info", "Saved", "Evidence", "concept", "saved");
+      if (kind === "components" || kind === "bytes") {
+        const count = kind === "bytes" ? 2 : full ? DETAIL_AUTHORING_LIMITS.maxComponents : 1;
+        for (let index = 0; index < count; index += 1) node.detailAuthoring.setComponent(`${prefix}-${index}`, html(Object.assign([kind === "bytes" ? "<p>" + "x".repeat(135_000) + "</p>" : "<p>Evidence</p>"], { raw: [] })));
+      } else {
+        const count = full ? kind === "assets" ? DETAIL_AUTHORING_LIMITS.maxAssetsPerPackage : DETAIL_AUTHORING_LIMITS.maxMountsPerPackage : 1;
+        const values = Array.from({ length: count }, (_, index) => kind === "assets" ? assetRef(`${prefix}-${index}`) : detailCapability.externalLink(`${prefix}-${index}`, "https://example.com/evidence"));
+        const strings = Object.assign(Array.from({ length: count + 1 }, (_, index) => kind === "assets" ? index === 0 ? '<img alt="Evidence" asset=' : index === count ? '>' : '><img alt="Evidence" asset=' : index === 0 ? '<a gc=' : index === count ? '>Evidence</a>' : '>Evidence</a><a gc='), { raw: [] });
+        node.detailAuthoring.setComponent(prefix, html(strings, ...values));
+      }
+      return node;
+    };
+    const base = make("saved", true);
+    retained = await graph.checkpointNodeDetail(base);
+    const additions = make("addition", false);
+    await graph.checkpointNodeDetail(additions); // Each package separately satisfies the compiler.
+    const pending = graph.extendNodePresentation(2, 0, additions);
+    if (kind === "bytes") await expect(pending).rejects.toMatchObject({ issues: [{ code: "compiled_package_byte_limit_exceeded" }] });
+    else await expect(pending).rejects.toThrow("extended_detail_limit_exceeded");
+    expect(replacements).toEqual([]);
+  });
+
+  it("captures presentation target and additions before an asynchronous snapshot read", async () => {
+    const graph = new RelayerGraphClient({ url: "http://graph.test", token: "run", nodeId: 1 });
+    const saved = new NodeObject("info", "Saved", "Evidence", "concept", "saved");
+    saved.detailAuthoring.setComponent("saved", html`<p>Keep the existing explanation</p>`);
+    const retained = await graph.checkpointNodeDetail(saved);
+    let releaseRead!: () => void;
+    const gate = new Promise<void>(resolve => { releaseRead = resolve; });
+    const bodies: { authoredDetail: { components: { id: string }[] } }[] = [];
+    const routes: string[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
+      routes.push(url);
+      if (init?.method === "POST") { bodies.push(JSON.parse(String(init.body))); return Response.json({}); }
+      await gate;
+      return Response.json({ node: { id: 2, clientKey: "saved", authoredDetail: retained }, revision: 0, actions: [] });
+    }));
+    const additions = new NodeObject("info", "Saved", "Evidence", "concept", "saved");
+    additions.detailAuthoring.setComponent("early", html`<p>The captured addition</p>`);
+    const target = { id: 2, clientKey: "saved", kind: "concept", icon: "info", title: "Saved", detail: "Evidence", state: "accepted" } satisfies GraphNode;
+    const pending = graph.extendNodePresentation(target, 0, additions);
+    target.id = 99;
+    additions.detailAuthoring.setComponent("late", html`<p>A later edit</p>`);
+    releaseRead();
+    await pending;
+    expect(bodies[0]?.authoredDetail.components.map(component => component.id)).toEqual(["saved", "early"]);
+    expect(routes).toEqual(["http://graph.test/api/graph/nodes/2/presentation", "http://graph.test/api/graph/nodes/2/presentation"]);
+  });
 
   it("identifies the captured icon field after a positional mistake without replacing the server error", async () => {
     const node = new NodeObject("finding", "Finding", "Evidence", "bug", "finding");
@@ -867,6 +929,20 @@ describe("agent-facing graph objects", () => {
     expect(requests[0]).toMatchObject({ variant: "pill", icon: null, description: null });
   });
 
+  it("writes explicit Invoke input bindings from persisted actions and IDs", async () => {
+    const input = { id: 21, sourceNodeId: 1, sourceLayerId: 2, kind: "input" as const, label: "Destination", variant: "pill" as const, state: "draft" as const };
+    const fetch = vi.fn(async (_url: string, init: RequestInit) => Response.json({ action: { ...JSON.parse(String(init.body)), id: 40, state: "draft" } }));
+    vi.stubGlobal("fetch", fetch);
+    const graph = new RelayerGraphClient({ url: "http://graph.test", token: "test", nodeId: 1 });
+    const invoke: ActionObject = { kind: "invoke", label: "Compare", interactionText: "Update the overall comparison", sourceLayer: 2, inputActions: [input, 22], clientKey: "compare" };
+    const written = await graph.addAction(1, invoke);
+    expect(JSON.parse(String(fetch.mock.calls[0]![1].body))).toMatchObject({ kind: "invoke", inputActionIds: [21, 22], interactionText: "Update the overall comparison" });
+    expect(written.inputActionIds).toEqual([21, 22]);
+    expect(written.reusable).toBe(false);
+    const reusable = await graph.addAction(1, { ...invoke, reusable: true });
+    expect(reusable.reusable).toBe(true);
+  });
+
   it("prepares a canonical child pointer from one persisted invoke action", async () => {
     let observed: { url: string; body: unknown; authorization: string | null } | undefined;
     vi.stubGlobal("fetch", vi.fn(async (url: string, init: RequestInit) => {
@@ -898,10 +974,10 @@ describe("agent-facing graph objects", () => {
       },
     };
 
-    await expect(graph.prepareComplete(action)).resolves.toEqual({ interactionNode: 91 });
+    await expect(graph.prepareComplete(action, "stable-child")).resolves.toEqual({ interactionNode: 91 });
     expect(observed).toEqual({
       url: "http://127.0.0.1:1/api/graph/completions/prepare",
-      body: { actionId: 44 },
+      body: { actionId: 44, invocationKey: "stable-child" },
       authorization: "Bearer parent",
     });
   });
@@ -995,6 +1071,46 @@ describe("agent-facing graph objects", () => {
       "http://127.0.0.1:1/api/graph/input",
       expect.objectContaining({ headers: expect.objectContaining({ authorization: "Bearer token" }) }),
     );
+  });
+
+  it("reads the sealed contract exactly and forwards durable Invocation identities", async () => {
+    const contract = { schemaVersion: 1, interactionNodeId: 10,
+      input: { text: "Compare", context: [], answers: [], invocationReferences: [] }, authorities: [], returnRequirements: [], digest: "sha256:v1:fixture" };
+    const request = vi.fn(async (url: string) => new Response(JSON.stringify(url.endsWith("/input")
+      ? { completionContract: contract, completionContractStatus: "sealed" }
+      : { interactionNode: 11, invocationId: 12 }), { headers: { "content-type": "application/json" } }));
+    vi.stubGlobal("fetch", request);
+    const graph = new RelayerGraphClient({ url: "http://127.0.0.1:1", token: "token", nodeId: 10 });
+    expect(await graph.getContract()).toEqual(contract);
+    expect(await graph.prepareComplete(20, "research-call")).toEqual({ interactionNode: 11, invocationId: 12 });
+    expect(request).toHaveBeenLastCalledWith("http://127.0.0.1:1/api/graph/completions/prepare",
+      expect.objectContaining({ body: JSON.stringify({ actionId: 20, invocationKey: "research-call" }) }));
+  });
+
+  it("creates independent keyed Invocations when a call key is omitted", async () => {
+    const bodies: Array<{ actionId: number; invocationKey: string }> = [];
+    vi.stubGlobal("fetch", vi.fn(async (_url: string, init: RequestInit) => {
+      bodies.push(JSON.parse(String(init.body)));
+      return new Response(JSON.stringify({ interactionNode: 10 + bodies.length }));
+    }));
+    const graph = new RelayerGraphClient({ url: "http://127.0.0.1:1", token: "parent", nodeId: 1 });
+    await graph.prepareComplete(44);
+    await graph.prepareComplete(44);
+    expect(bodies.map(({ actionId }) => actionId)).toEqual([44, 44]);
+    expect(bodies[0]!.invocationKey).toMatch(/^[a-f0-9-]{36}$/);
+    expect(bodies[1]!.invocationKey).not.toBe(bodies[0]!.invocationKey);
+  });
+
+  it("reads the full per-call collection through ordinary action visibility", async () => {
+    const invocation = { id: 3, invocationKey: "research", sourceCompletionId: 1, sourceActionId: 44,
+      parentNodeId: 2, childInteractionNodeId: 5, actionSnapshot: { instruction: "Research" },
+      state: { completionId: 5, lifecycle: "succeeded", headRevision: 1, currentLayerId: 6, finalLayerId: 6 } };
+    const request = vi.fn(async () => new Response(JSON.stringify({ invocations: [invocation] })));
+    vi.stubGlobal("fetch", request);
+    const graph = new RelayerGraphClient({ url: "http://127.0.0.1:1", token: "parent", nodeId: 1 });
+    expect(await graph.getInvocations(44)).toEqual([invocation]);
+    expect(request).toHaveBeenCalledWith("http://127.0.0.1:1/api/graph/actions/44/invocations",
+      expect.objectContaining({ headers: expect.objectContaining({ authorization: "Bearer parent" }) }));
   });
 
   it("reads the hidden personal presentation graph through its dedicated capability boundary", async () => {

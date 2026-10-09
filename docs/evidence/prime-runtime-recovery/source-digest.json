@@ -1,5 +1,5 @@
 {
-  "sha256": "7666f0abb833c55d4e9e5e443653faf1129f55799548624784c8bb79289f664b",
+  "sha256": "dc62ec9262c7f20552afb80d3e7c07973a7d64c5dddcdb308f4e7e404da2eff1",
   "paths": [
     "crates/relayer-app-server/src/product/catalog.rs",
     "crates/relayer-app-server/src/storage/sqlite/catalog.rs",

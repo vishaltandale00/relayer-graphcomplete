@@ -24,6 +24,7 @@ import {
   type GraphEdge,
   type GraphLayer,
   type GraphNode,
+  type LayerRenderer,
 } from "./types.js";
 
 /** Private client seam: a captured node still uses the client's compiler and retry state. */
@@ -423,6 +424,7 @@ interface CapturedLayer {
   readonly edges: readonly EdgeReference[];
   readonly layout: LayerLayoutObject;
   readonly defaultNode?: NodeReference | undefined;
+  readonly renderer?: LayerRenderer | undefined;
   readonly sizeJustification?: string | undefined;
 }
 
@@ -620,6 +622,7 @@ export class ScopedGraphAuthoring {
           edges,
           layout: new LayerLayoutObject(placements, layout.edgeShape, routes),
           defaultNode: declaration.object.defaultNode,
+          renderer: declaration.object.renderer,
           sizeJustification: declaration.sizeJustification,
         });
         for (const [key, node] of declaration.nodes)
@@ -691,10 +694,29 @@ export class ScopedGraphAuthoring {
               id: Number(targetFields.id),
             } as unknown as GraphLayer;
           }
+          const inputActions = fields.kind === "invoke" ? array((fields.inputActions ?? []) as readonly unknown[]).map((reference) => {
+            if (typeof reference === "number") {
+              if (!Number.isSafeInteger(reference) || reference < 1) invalid("Input action ID must be positive.");
+              return reference;
+            }
+            if (typeof reference !== "object" || reference === null)
+              invalid("Invoke needs an Input declaration or accepted Input action record.");
+            const canonical = data(reference);
+            if (Object.hasOwn(canonical, "id")) {
+              if (canonical.kind !== "input" || canonical.state !== "accepted" || !Number.isSafeInteger(canonical.id) || Number(canonical.id) < 1)
+                invalid("Invoke needs an explicit accepted Input action record.");
+              return Number(canonical.id);
+            }
+            const declared = [...declaration.actions.values()].find(candidate => candidate.action === reference);
+            if (!declared || declared.source !== source || declared.action.kind !== "input")
+              invalid("Invoke Inputs must be declared on the same source Node and scoped Layer.");
+            const input = data(declared.action);
+            return { ...Object.fromEntries(Object.entries(input).filter(([field]) => !["sourceLayer", "ref"].includes(field)).map(([field, value]) => [field, copyValue(value)])), sourceLayer: declaration.object } as ActionObject;
+          }) : undefined;
           const copied = Object.fromEntries(
             Object.entries(fields)
               .filter(
-                ([field]) => !["sourceLayer", "target", "ref"].includes(field),
+                ([field]) => !["sourceLayer", "target", "ref", "inputActions"].includes(field),
               )
               .map(([field, value]) => [field, copyValue(value)]),
           );
@@ -704,6 +726,7 @@ export class ScopedGraphAuthoring {
             captured: {
               ...copied,
               sourceLayer: declaration.object,
+              ...(inputActions === undefined ? {} : { inputActions }),
               ...(target === undefined
                 ? {}
                 : {
@@ -809,6 +832,7 @@ export class ScopedGraphAuthoring {
                   capture.defaultNode === undefined
                     ? undefined
                     : nodeRef(capture.defaultNode),
+                  capture.renderer,
                 ),
                 capture.sizeJustification === undefined
                   ? {}
@@ -838,7 +862,7 @@ export class ScopedGraphAuthoring {
                       ? layerResults.get(action.target as LayerObject)!
                       : action.target,
                   }
-                : { ...action, sourceLayer };
+                : { ...action, sourceLayer, ...(action.kind === "invoke" ? { inputActions: (action.inputActions ?? []).map(input => typeof input === "number" || "id" in input ? input : { ...input, sourceLayer }) } : {}) };
             const value = freezeRecord(
               await this.#transport.addAction(
                 nodeRef(capture.source),

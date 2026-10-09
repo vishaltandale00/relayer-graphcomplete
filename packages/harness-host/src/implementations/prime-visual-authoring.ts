@@ -7,7 +7,7 @@ const presentation = { variant: z.enum(["chip", "pill", "wide", "card"]).optiona
 const common = { clientKey: identity, label: z.string(), sourceLayer: layer, ...presentation };
 const action = z.discriminatedUnion("kind", [
   z.object({ ...common, kind: z.literal("navigate"), sourceLayer: layer.optional(), relation: z.enum(["expand", "reference"]), target: z.union([z.number().int().positive(), layer]) }).strict(),
-  z.object({ ...common, kind: z.literal("invoke"), interactionText: z.string() }).strict(),
+  z.object({ ...common, kind: z.literal("invoke"), interactionText: z.string(), reusable: z.boolean().optional(), inputActions: z.array(z.union([z.number().int().positive(), z.object({ inputActionClientKey: identity }).strict()])).max(128).optional() }).strict(),
   z.object({ ...common, kind: z.literal("input"), control: z.enum(["text", "single_select", "multi_select"]), prompt: z.string(), options: z.array(z.object({ key: z.string(), label: z.string() }).strict()).max(50).optional(), minimumSelections: z.number().int().optional() }).strict(),
 ]);
 const binding = z.discriminatedUnion("kind", [
@@ -19,7 +19,7 @@ const template = z.object({ strings: z.array(z.string()).min(1).max(129), values
   .refine((value) => value.strings.length === value.values.length + 1, "Template must have one more string than bindings");
 const request = z.object({
   version: z.literal(1), objectId: identity, token: z.string(), nodeId: z.number().int().positive(),
-  operation: z.enum(["checkpoint", "submit", "replace"]),
+  operation: z.enum(["checkpoint", "submit", "replace", "extend"]),
   replacement: z.object({ nodeId: z.number().int().positive(), expectedRevision: z.number().int().nonnegative() }).strict().optional(),
   // Artifact details are shape-checked by graph-core; this boundary only bounds and forwards them.
   node: z.object({ clientKey: identity, icon: z.string(), title: z.string(), detail: z.string(), kind: z.string(), artifact: z.record(z.string(), z.unknown()).optional() }).strict(),
@@ -48,10 +48,10 @@ export class PrimeVisualAuthoring {
       return authoringFailure(error, false);
     }
     if (input.token !== capability.token || input.nodeId !== capability.nodeId) throw new Error("The graph session belongs to another run");
-    if ((input.operation === "replace") !== (input.replacement !== undefined)) return authoringFailure(new Error("Replacement target is required only for replacement operations"), false);
+    if ((["replace", "extend"].includes(input.operation)) !== (input.replacement !== undefined)) return authoringFailure(new Error("Replacement target is required only for replacement operations"), false);
     const signature = JSON.stringify({ node: input.node, detail: input.detail });
     const existing = this.submissions.get(input.objectId);
-    if (existing !== undefined && input.operation !== "replace") {
+    if (existing !== undefined && !["replace", "extend"].includes(input.operation)) {
       if (existing.signature !== signature) throw new Error("detail_finalized: create a fresh NodeObject to replace a draft");
       if (input.operation === "checkpoint") {
         const value = await existing.client.checkpointNodeDetail(existing.node);
@@ -66,13 +66,36 @@ export class PrimeVisualAuthoring {
       value.nodes.map((key) => key === node.clientKey ? node : new NodeObject("", "", "", "concept", key)),
       [], new LayerLayoutObject([], "default"), value.clientKey,
     );
+    const declarations = new Map<string, ActionObject>();
+    const signatures = new Map<string, string>();
+    try {
+      const actions = input.detail.components.flatMap((component) => component.markup.values).filter((value) => value.kind === "action");
+      for (const value of actions) {
+        const declaration = value.action;
+        const signature = JSON.stringify(declaration);
+        if (signatures.has(declaration.clientKey) && signatures.get(declaration.clientKey) !== signature) throw new Error("Conflicting action declarations share a clientKey");
+        signatures.set(declaration.clientKey, signature);
+        if (!declarations.has(declaration.clientKey)) declarations.set(declaration.clientKey, { ...declaration,
+          ...(declaration.sourceLayer === undefined ? {} : { sourceLayer: makeLayer(declaration.sourceLayer) }),
+          ...(declaration.kind === "navigate" ? { target: typeof declaration.target === "number" ? declaration.target : makeLayer(declaration.target) } : {}),
+        } as ActionObject);
+      }
+      for (const value of actions) {
+        if (value.action.kind !== "invoke") continue;
+        const inputs = (value.action.inputActions ?? []).map((reference) => {
+          if (typeof reference === "number") return reference;
+          const input = declarations.get(reference.inputActionClientKey);
+          if (!input || input.kind !== "input") throw new Error("Invoke must reference a mounted Input declaration");
+          return input;
+        });
+        const native = declarations.get(value.action.clientKey)!;
+        if (native.kind === "invoke") declarations.set(value.action.clientKey, { ...native, inputActions: inputs });
+      }
+    } catch (error) { return authoringFailure(error, false); }
     const makeBinding = (value: z.infer<typeof binding>): unknown => {
       if (value.kind === "asset") return assetRef(value.logicalId);
       if (value.kind === "link") return detailCapability.externalLink(value.key, value.href);
-      const declaration = value.action;
-      const native = { ...declaration, ...(declaration.sourceLayer === undefined ? {} : { sourceLayer: makeLayer(declaration.sourceLayer) }),
-        ...(declaration.kind === "navigate" ? { target: typeof declaration.target === "number" ? declaration.target : makeLayer(declaration.target) } : {}),
-      } as ActionObject;
+      const native = declarations.get(value.action.clientKey)!;
       if (native.kind === "invoke") return detailCapability.invoke(value.key, native);
       if (native.kind === "input") return detailCapability.input(value.key, native);
       return native.relation === "expand" ? detailCapability.expand(value.key, { ...native, relation: "expand" }) : detailCapability.reference(value.key, { ...native, relation: "reference" });
@@ -83,9 +106,11 @@ export class PrimeVisualAuthoring {
       const styles = Object.assign([component.styles], { raw: [component.styles] });
       node.detailAuthoring.setComponent(component.id, html(strings, ...component.markup.values.map(makeBinding)), css(styles));
     }
-    if (input.operation === "replace") {
+    if (input.operation === "replace" || input.operation === "extend") {
       try {
-        await new RelayerGraphClient(capability, { beforeRequest: active, signal }).replaceNodePresentation(input.replacement!.nodeId, input.replacement!.expectedRevision, node);
+        const client = new RelayerGraphClient(capability, { beforeRequest: active, signal });
+        if (input.operation === "extend") await client.extendNodePresentation(input.replacement!.nodeId, input.replacement!.expectedRevision, node);
+        else await client.replaceNodePresentation(input.replacement!.nodeId, input.replacement!.expectedRevision, node);
         active();
         return { ok: true, value: null, frozen: false };
       } catch (error) {

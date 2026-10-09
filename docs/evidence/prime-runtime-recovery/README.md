@@ -100,6 +100,8 @@ and independently reproduced the failure through the real recipe resolver.
 After correction, their same macOS x64 scenario prepared nothing. Final review:
 no blocking findings across the 25 changed production, test, fixture, PRD, architecture and
 capture-script files, digest
+`dc62ec9262c7f20552afb80d3e7c07973a7d64c5dddcdb308f4e7e404da2eff1`.
+This is the refreshed review against main `2a9fe2e9`; the original review used
 `7666f0abb833c55d4e9e5e443653faf1129f55799548624784c8bb79289f664b`.
 They also inspected all five retained screenshots and the genuine secondary
 social-preview recapture. This is a non-certifying
@@ -116,3 +118,17 @@ fnm exec --using 22.23.2 npm run evidence:provider-ux -- --scene=harness-repair 
 Chrome and ffmpeg are required. The recording verifies OpenRouter appears connected, missing Prime is excluded
 from the picker, exactly one refresh per click targets OpenRouter, failure retains
 the icon, success exposes the actual Prime option in the composer, and saved defaults remain equal.
+
+## Merge refresh on October 9, 2026
+
+Main advanced through sealed CompletionContracts and the communication baseline.
+The sole merge conflict was the generated social-preview receipt. The real
+Electron recapture regenerated it against combined source; both PNGs remained
+byte-identical. No repair production code required conflict resolution.
+
+The source reviewer rechecked the combined 25-path digest above and found no
+remaining interaction or authority issue. The newer Prime client seal required
+fresh runtime proof: the retained kernel log now records the combined recipe.
+[Merge-refresh gates](merge-refresh-gates.txt) record passing build, full check,
+319 Vitest files / 4,189 tests, two secret-boundary tests, 91 Python tests, and
+clean exact Prime assembly/kernel. The earlier gate summary remains historical.

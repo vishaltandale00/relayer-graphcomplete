@@ -135,6 +135,8 @@ async fn author(database: &GraphDatabase) -> NodeId {
             description: None,
             target_layer_id: Some(reference_child.id),
             interaction_text: None,
+            reusable: None,
+            input_action_ids: Vec::new(),
             input: None,
         })
         .await
@@ -152,6 +154,8 @@ async fn author(database: &GraphDatabase) -> NodeId {
             description: None,
             target_layer_id: Some(child.id),
             interaction_text: None,
+            reusable: None,
+            input_action_ids: Vec::new(),
             input: None,
         })
         .await
@@ -169,6 +173,8 @@ async fn author(database: &GraphDatabase) -> NodeId {
             description: None,
             target_layer_id: Some(root.id),
             interaction_text: None,
+            reusable: None,
+            input_action_ids: Vec::new(),
             input: None,
         })
         .await

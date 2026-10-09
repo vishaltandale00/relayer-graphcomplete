@@ -120,7 +120,7 @@ export function observeAuthoringMethods<T extends object>(client: T, scope: Grap
   if (!scope.authoringErrors) return client;
   const promises = new WeakMap<Promise<unknown>, Promise<unknown>>();
   const methods = new Map<string, unknown>();
-  const authoring = new Set(["authoring", "layer", "node", "edge", "action", "include", "layout", "write", "bindNode", "checkpointNodeDetail", "submitNode", "createEdge", "createEdges", "submitLayer", "addAction", "discardLayer", "replaceNodePresentation", "advanceCurrent", "returnCurrent", "stopCurrent", "prepareComplete", "proposeThreadIcon", "submit"]);
+  const authoring = new Set(["authoring", "layer", "node", "edge", "action", "include", "layout", "write", "bindNode", "checkpointNodeDetail", "submitNode", "createEdge", "createEdges", "submitLayer", "addAction", "discardLayer", "replaceNodePresentation", "extendNodePresentation", "advanceCurrent", "returnCurrent", "stopCurrent", "prepareComplete", "proposeThreadIcon", "submit"]);
   return new Proxy(client, {
     get(target, property) {
       const value: unknown = Reflect.get(target, property);

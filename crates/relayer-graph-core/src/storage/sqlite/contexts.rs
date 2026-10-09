@@ -222,6 +222,8 @@ impl<'connection> ContextTable<'connection> {
             });
         }
         Ok(InteractionInput {
+            completion_contract: super::contracts::read(self.connection, scope.root_node_id).await?,
+            completion_contract_status: if sqlx::query_scalar::<_, bool>("SELECT completion_contract_digest IS NOT NULL FROM completion_states WHERE interaction_node_id=?1").bind(scope.root_node_id.value()).fetch_optional(&mut *self.connection).await?.unwrap_or(false) { "sealed".into() } else { "legacy".into() },
             interaction_permissions: super::permissions::read(self.connection, scope.root_node_id)
                 .await?,
             interaction: interaction.into(),

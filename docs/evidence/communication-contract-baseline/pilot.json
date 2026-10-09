@@ -1,0 +1,1180 @@
+{
+  "pilotSourceCommit": "00148dd59e7338f046c46079d5988f1b4220b11f",
+  "newDefaultDecision": "User authorized B communication-contract promotion on 2026-10-08; evidence does not establish quality superiority.",
+  "scope": "24 coding roots plus 8 single-run mechanism probes, no replacements; source predates current main.",
+  "metricAvailability": {
+    "terminalAttempts": 32,
+    "taskCheckResults": 31,
+    "qualitativeTaskScores": 0,
+    "completedGraphScores": 20,
+    "observedAuthoringCounts": 32,
+    "firstBackendPublicationTimes": 31
+  },
+  "originalAttemptsTerminal": 32,
+  "sourceReceiptsSha256": {
+    "state-snapshot.json": "9b3591493055a7430d194cab91fb479c0a6346e772080855fb91e400ff60e89a",
+    "summary.json": "5a484ffb59c31f5e9941214688a9e24b26a8685bc03fbddffd8c0a5e5c4c972c",
+    "first-view-ratings.json": "934c318965573190eb9a8ed6902fdbcfd7360a3cf99aee732c4d13c7a5ace54d",
+    "native-delivery-and-publications.json": "5a5c77d0d8ffd11cde9b10ebb3ee564943c019ce01c620ee569a8481cc885f63",
+    "mechanism-receipts.json": "12733eb08f2c06878f6c4e69fb603f597be64d292711c3191b740497f371c436"
+  },
+  "measurementReaderAmendment": {
+    "kind": "probe-gate-reader-v1",
+    "originalReaderSha256": "06063c6e6fcbde87945b3800149faea7435bdff2d3ab442e90a00922f21bd64c",
+    "supplementalReaderSha256": "899c07b4c7d19ad6fc3c043bfc3ea07e26402d114eeb23d555a5bdf91e2c4f32",
+    "sourceCommit": "00148dd59e7338f046c46079d5988f1b4220b11f",
+    "sealedSnapshotSha256": "9b3591493055a7430d194cab91fb479c0a6346e772080855fb91e400ff60e89a",
+    "ratingSha256": "934c318965573190eb9a8ed6902fdbcfd7360a3cf99aee732c4d13c7a5ace54d",
+    "meaning": "Coding evidenceRefs validation unchanged; empty probe refs derive unique same-execution passing name/detail mapping, without changing raw receipts."
+  },
+  "samples": [
+    {
+      "caseId": "autonomous.h3.sanitize-status-code",
+      "cell": "a",
+      "repetition": 1,
+      "caseKind": "coding",
+      "candidateAccepted": true,
+      "firstPublicationSeconds": 42.7,
+      "finalAcceptanceSeconds": 42.7,
+      "firstTransition": "return",
+      "observedRootAuthoringErrors": 1,
+      "rootAuthoringByCause": {
+        "server_rejection": 1
+      },
+      "rootLedgerVerified": true,
+      "timingVerified": true,
+      "taskGateResult": true,
+      "graphQuality": {
+        "status": "completed",
+        "score": 4,
+        "answerQuality": 5,
+        "maximum": 8,
+        "scoreCeiling": 8
+      },
+      "firstView": [
+        {
+          "status": "completed",
+          "overall": 2,
+          "meaningfulInsight": false,
+          "modelVerified": true,
+          "closedNativeItemAudit": true
+        }
+      ],
+      "semanticChildren": 0,
+      "successfulHistoricalChildLayerReads": 0,
+      "preterminalInputPublished": false
+    },
+    {
+      "caseId": "autonomous.h3.sanitize-status-code",
+      "cell": "b",
+      "repetition": 1,
+      "caseKind": "coding",
+      "candidateAccepted": true,
+      "firstPublicationSeconds": 33.1,
+      "finalAcceptanceSeconds": 77.1,
+      "firstTransition": "advance",
+      "observedRootAuthoringErrors": 2,
+      "rootAuthoringByCause": {
+        "compiler": 2
+      },
+      "rootLedgerVerified": true,
+      "timingVerified": true,
+      "taskGateResult": true,
+      "graphQuality": {
+        "status": "completed",
+        "score": 3,
+        "answerQuality": 3,
+        "maximum": 8,
+        "scoreCeiling": 8
+      },
+      "firstView": [
+        {
+          "status": "completed",
+          "overall": 2,
+          "meaningfulInsight": true,
+          "modelVerified": true,
+          "closedNativeItemAudit": true
+        }
+      ],
+      "semanticChildren": 0,
+      "successfulHistoricalChildLayerReads": 0,
+      "preterminalInputPublished": false
+    },
+    {
+      "caseId": "autonomous.h3.sanitize-status-code",
+      "cell": "c",
+      "repetition": 1,
+      "caseKind": "coding",
+      "candidateAccepted": true,
+      "firstPublicationSeconds": 36.9,
+      "finalAcceptanceSeconds": 70,
+      "firstTransition": "advance",
+      "observedRootAuthoringErrors": 1,
+      "rootAuthoringByCause": {
+        "client": 1
+      },
+      "rootLedgerVerified": true,
+      "timingVerified": true,
+      "taskGateResult": true,
+      "graphQuality": {
+        "status": "completed",
+        "score": 3,
+        "answerQuality": 4,
+        "maximum": 8,
+        "scoreCeiling": 8
+      },
+      "firstView": [
+        {
+          "status": "completed",
+          "overall": 2,
+          "meaningfulInsight": true,
+          "modelVerified": true,
+          "closedNativeItemAudit": true
+        }
+      ],
+      "semanticChildren": 0,
+      "successfulHistoricalChildLayerReads": 0,
+      "preterminalInputPublished": false
+    },
+    {
+      "caseId": "autonomous.h3.sanitize-status-code",
+      "cell": "d",
+      "repetition": 1,
+      "caseKind": "coding",
+      "candidateAccepted": true,
+      "firstPublicationSeconds": 32.5,
+      "finalAcceptanceSeconds": 88.9,
+      "firstTransition": "advance",
+      "observedRootAuthoringErrors": 2,
+      "rootAuthoringByCause": {
+        "client": 2
+      },
+      "rootLedgerVerified": true,
+      "timingVerified": true,
+      "taskGateResult": null,
+      "graphQuality": {
+        "status": "partial",
+        "score": null,
+        "answerQuality": null,
+        "maximum": 4,
+        "scoreCeiling": null
+      },
+      "firstView": [
+        {
+          "status": "completed",
+          "overall": 2,
+          "meaningfulInsight": true,
+          "modelVerified": true,
+          "closedNativeItemAudit": true
+        }
+      ],
+      "semanticChildren": 0,
+      "successfulHistoricalChildLayerReads": 0,
+      "preterminalInputPublished": false
+    },
+    {
+      "caseId": "autonomous.h3.investigate-status-code",
+      "cell": "b",
+      "repetition": 1,
+      "caseKind": "coding",
+      "candidateAccepted": true,
+      "firstPublicationSeconds": 39,
+      "finalAcceptanceSeconds": 42,
+      "firstTransition": "advance",
+      "observedRootAuthoringErrors": 0,
+      "rootAuthoringByCause": {},
+      "rootLedgerVerified": true,
+      "timingVerified": true,
+      "taskGateResult": true,
+      "graphQuality": {
+        "status": "completed",
+        "score": 3,
+        "answerQuality": 3,
+        "maximum": 8,
+        "scoreCeiling": 8
+      },
+      "firstView": [
+        {
+          "status": "completed",
+          "overall": 2,
+          "meaningfulInsight": true,
+          "modelVerified": true,
+          "closedNativeItemAudit": true
+        }
+      ],
+      "semanticChildren": 0,
+      "successfulHistoricalChildLayerReads": 0,
+      "preterminalInputPublished": false
+    },
+    {
+      "caseId": "autonomous.h3.investigate-status-code",
+      "cell": "c",
+      "repetition": 1,
+      "caseKind": "coding",
+      "candidateAccepted": true,
+      "firstPublicationSeconds": 76.9,
+      "finalAcceptanceSeconds": 98,
+      "firstTransition": "advance",
+      "observedRootAuthoringErrors": 2,
+      "rootAuthoringByCause": {
+        "server_rejection": 1,
+        "client": 1
+      },
+      "rootLedgerVerified": true,
+      "timingVerified": true,
+      "taskGateResult": true,
+      "graphQuality": {
+        "status": "completed",
+        "score": 4,
+        "answerQuality": 5,
+        "maximum": 8,
+        "scoreCeiling": 8
+      },
+      "firstView": [
+        {
+          "status": "completed",
+          "overall": 2,
+          "meaningfulInsight": true,
+          "modelVerified": true,
+          "closedNativeItemAudit": true
+        }
+      ],
+      "semanticChildren": 0,
+      "successfulHistoricalChildLayerReads": 0,
+      "preterminalInputPublished": false
+    },
+    {
+      "caseId": "autonomous.h3.investigate-status-code",
+      "cell": "d",
+      "repetition": 1,
+      "caseKind": "coding",
+      "candidateAccepted": true,
+      "firstPublicationSeconds": 69.3,
+      "finalAcceptanceSeconds": 113.7,
+      "firstTransition": "advance",
+      "observedRootAuthoringErrors": 1,
+      "rootAuthoringByCause": {
+        "compiler": 1
+      },
+      "rootLedgerVerified": true,
+      "timingVerified": true,
+      "taskGateResult": true,
+      "graphQuality": {
+        "status": "failed",
+        "score": null,
+        "answerQuality": null,
+        "maximum": 4,
+        "scoreCeiling": null
+      },
+      "firstView": [
+        {
+          "status": "completed",
+          "overall": 2,
+          "meaningfulInsight": true,
+          "modelVerified": true,
+          "closedNativeItemAudit": true
+        }
+      ],
+      "semanticChildren": 0,
+      "successfulHistoricalChildLayerReads": 0,
+      "preterminalInputPublished": false
+    },
+    {
+      "caseId": "autonomous.h3.investigate-status-code",
+      "cell": "a",
+      "repetition": 1,
+      "caseKind": "coding",
+      "candidateAccepted": true,
+      "firstPublicationSeconds": 60.2,
+      "finalAcceptanceSeconds": 60.2,
+      "firstTransition": "return",
+      "observedRootAuthoringErrors": 2,
+      "rootAuthoringByCause": {
+        "client": 2
+      },
+      "rootLedgerVerified": true,
+      "timingVerified": true,
+      "taskGateResult": true,
+      "graphQuality": {
+        "status": "completed",
+        "score": 4,
+        "answerQuality": 4,
+        "maximum": 8,
+        "scoreCeiling": 8
+      },
+      "firstView": [
+        {
+          "status": "completed",
+          "overall": 2,
+          "meaningfulInsight": true,
+          "modelVerified": true,
+          "closedNativeItemAudit": true
+        }
+      ],
+      "semanticChildren": 0,
+      "successfulHistoricalChildLayerReads": 0,
+      "preterminalInputPublished": false
+    },
+    {
+      "caseId": "autonomous.h3.sanitize-status-code",
+      "cell": "c",
+      "repetition": 2,
+      "caseKind": "coding",
+      "candidateAccepted": true,
+      "firstPublicationSeconds": 36.5,
+      "finalAcceptanceSeconds": 77.5,
+      "firstTransition": "advance",
+      "observedRootAuthoringErrors": 0,
+      "rootAuthoringByCause": {},
+      "rootLedgerVerified": true,
+      "timingVerified": true,
+      "taskGateResult": false,
+      "graphQuality": {
+        "status": "completed",
+        "score": 3,
+        "answerQuality": 4,
+        "maximum": 8,
+        "scoreCeiling": 8
+      },
+      "firstView": [
+        {
+          "status": "completed",
+          "overall": 2,
+          "meaningfulInsight": true,
+          "modelVerified": true,
+          "closedNativeItemAudit": true
+        }
+      ],
+      "semanticChildren": 0,
+      "successfulHistoricalChildLayerReads": 0,
+      "preterminalInputPublished": false
+    },
+    {
+      "caseId": "autonomous.h3.sanitize-status-code",
+      "cell": "d",
+      "repetition": 2,
+      "caseKind": "coding",
+      "candidateAccepted": true,
+      "firstPublicationSeconds": 98.1,
+      "finalAcceptanceSeconds": 98.1,
+      "firstTransition": "return",
+      "observedRootAuthoringErrors": 1,
+      "rootAuthoringByCause": {
+        "client": 1
+      },
+      "rootLedgerVerified": true,
+      "timingVerified": true,
+      "taskGateResult": true,
+      "graphQuality": {
+        "status": "completed",
+        "score": 3,
+        "answerQuality": 4,
+        "maximum": 8,
+        "scoreCeiling": 8
+      },
+      "firstView": [
+        {
+          "status": "completed",
+          "overall": 2,
+          "meaningfulInsight": false,
+          "modelVerified": true,
+          "closedNativeItemAudit": true
+        }
+      ],
+      "semanticChildren": 0,
+      "successfulHistoricalChildLayerReads": 0,
+      "preterminalInputPublished": false
+    },
+    {
+      "caseId": "autonomous.h3.sanitize-status-code",
+      "cell": "a",
+      "repetition": 2,
+      "caseKind": "coding",
+      "candidateAccepted": true,
+      "firstPublicationSeconds": 54.3,
+      "finalAcceptanceSeconds": 54.3,
+      "firstTransition": "return",
+      "observedRootAuthoringErrors": 0,
+      "rootAuthoringByCause": {},
+      "rootLedgerVerified": true,
+      "timingVerified": true,
+      "taskGateResult": true,
+      "graphQuality": {
+        "status": "completed",
+        "score": 3,
+        "answerQuality": 3,
+        "maximum": 8,
+        "scoreCeiling": 8
+      },
+      "firstView": [
+        {
+          "status": "completed",
+          "overall": 2,
+          "meaningfulInsight": false,
+          "modelVerified": true,
+          "closedNativeItemAudit": true
+        }
+      ],
+      "semanticChildren": 0,
+      "successfulHistoricalChildLayerReads": 0,
+      "preterminalInputPublished": false
+    },
+    {
+      "caseId": "autonomous.h3.sanitize-status-code",
+      "cell": "b",
+      "repetition": 2,
+      "caseKind": "coding",
+      "candidateAccepted": true,
+      "firstPublicationSeconds": 24.5,
+      "finalAcceptanceSeconds": 85.4,
+      "firstTransition": "advance",
+      "observedRootAuthoringErrors": 2,
+      "rootAuthoringByCause": {
+        "compiler": 2
+      },
+      "rootLedgerVerified": true,
+      "timingVerified": true,
+      "taskGateResult": true,
+      "graphQuality": {
+        "status": "completed",
+        "score": 3,
+        "answerQuality": 4,
+        "maximum": 8,
+        "scoreCeiling": 6
+      },
+      "firstView": [
+        {
+          "status": "completed",
+          "overall": 2,
+          "meaningfulInsight": true,
+          "modelVerified": true,
+          "closedNativeItemAudit": true
+        }
+      ],
+      "semanticChildren": 0,
+      "successfulHistoricalChildLayerReads": 0,
+      "preterminalInputPublished": false
+    },
+    {
+      "caseId": "autonomous.h3.investigate-status-code",
+      "cell": "d",
+      "repetition": 2,
+      "caseKind": "coding",
+      "candidateAccepted": true,
+      "firstPublicationSeconds": 61.9,
+      "finalAcceptanceSeconds": 66.5,
+      "firstTransition": "advance",
+      "observedRootAuthoringErrors": 0,
+      "rootAuthoringByCause": {},
+      "rootLedgerVerified": true,
+      "timingVerified": true,
+      "taskGateResult": true,
+      "graphQuality": {
+        "status": "completed",
+        "score": 3,
+        "answerQuality": 3,
+        "maximum": 8,
+        "scoreCeiling": 8
+      },
+      "firstView": [
+        {
+          "status": "completed",
+          "overall": 1,
+          "meaningfulInsight": false,
+          "modelVerified": true,
+          "closedNativeItemAudit": true
+        }
+      ],
+      "semanticChildren": 0,
+      "successfulHistoricalChildLayerReads": 0,
+      "preterminalInputPublished": false
+    },
+    {
+      "caseId": "autonomous.h3.investigate-status-code",
+      "cell": "a",
+      "repetition": 2,
+      "caseKind": "coding",
+      "candidateAccepted": true,
+      "firstPublicationSeconds": 55.5,
+      "finalAcceptanceSeconds": 55.5,
+      "firstTransition": "return",
+      "observedRootAuthoringErrors": 1,
+      "rootAuthoringByCause": {
+        "client": 1
+      },
+      "rootLedgerVerified": true,
+      "timingVerified": true,
+      "taskGateResult": true,
+      "graphQuality": {
+        "status": "partial",
+        "score": null,
+        "answerQuality": null,
+        "maximum": 4,
+        "scoreCeiling": null
+      },
+      "firstView": [
+        {
+          "status": "completed",
+          "overall": 2,
+          "meaningfulInsight": true,
+          "modelVerified": true,
+          "closedNativeItemAudit": true
+        }
+      ],
+      "semanticChildren": 0,
+      "successfulHistoricalChildLayerReads": 0,
+      "preterminalInputPublished": false
+    },
+    {
+      "caseId": "autonomous.h3.investigate-status-code",
+      "cell": "b",
+      "repetition": 2,
+      "caseKind": "coding",
+      "candidateAccepted": true,
+      "firstPublicationSeconds": 37.1,
+      "finalAcceptanceSeconds": 74.4,
+      "firstTransition": "advance",
+      "observedRootAuthoringErrors": 1,
+      "rootAuthoringByCause": {
+        "client": 1
+      },
+      "rootLedgerVerified": true,
+      "timingVerified": true,
+      "taskGateResult": true,
+      "graphQuality": {
+        "status": "completed",
+        "score": 3,
+        "answerQuality": 4,
+        "maximum": 8,
+        "scoreCeiling": 8
+      },
+      "firstView": [
+        {
+          "status": "completed",
+          "overall": 2,
+          "meaningfulInsight": true,
+          "modelVerified": true,
+          "closedNativeItemAudit": true
+        }
+      ],
+      "semanticChildren": 0,
+      "successfulHistoricalChildLayerReads": 0,
+      "preterminalInputPublished": false
+    },
+    {
+      "caseId": "autonomous.h3.investigate-status-code",
+      "cell": "c",
+      "repetition": 2,
+      "caseKind": "coding",
+      "candidateAccepted": true,
+      "firstPublicationSeconds": 64.7,
+      "finalAcceptanceSeconds": 114.5,
+      "firstTransition": "advance",
+      "observedRootAuthoringErrors": 2,
+      "rootAuthoringByCause": {
+        "compiler": 1,
+        "client": 1
+      },
+      "rootLedgerVerified": true,
+      "timingVerified": true,
+      "taskGateResult": true,
+      "graphQuality": {
+        "status": "completed",
+        "score": 5,
+        "answerQuality": 6,
+        "maximum": 8,
+        "scoreCeiling": 8
+      },
+      "firstView": [
+        {
+          "status": "completed",
+          "overall": 2,
+          "meaningfulInsight": true,
+          "modelVerified": true,
+          "closedNativeItemAudit": true
+        }
+      ],
+      "semanticChildren": 0,
+      "successfulHistoricalChildLayerReads": 0,
+      "preterminalInputPublished": false
+    },
+    {
+      "caseId": "autonomous.h3.sanitize-status-code",
+      "cell": "a",
+      "repetition": 3,
+      "caseKind": "coding",
+      "candidateAccepted": true,
+      "firstPublicationSeconds": 56.2,
+      "finalAcceptanceSeconds": 56.2,
+      "firstTransition": "return",
+      "observedRootAuthoringErrors": 0,
+      "rootAuthoringByCause": {},
+      "rootLedgerVerified": true,
+      "timingVerified": true,
+      "taskGateResult": false,
+      "graphQuality": {
+        "status": "completed",
+        "score": 3,
+        "answerQuality": 3,
+        "maximum": 8,
+        "scoreCeiling": 8
+      },
+      "firstView": [
+        {
+          "status": "completed",
+          "overall": 2,
+          "meaningfulInsight": true,
+          "modelVerified": true,
+          "closedNativeItemAudit": true
+        }
+      ],
+      "semanticChildren": 0,
+      "successfulHistoricalChildLayerReads": 0,
+      "preterminalInputPublished": false
+    },
+    {
+      "caseId": "autonomous.h3.sanitize-status-code",
+      "cell": "b",
+      "repetition": 3,
+      "caseKind": "coding",
+      "candidateAccepted": true,
+      "firstPublicationSeconds": 79.7,
+      "finalAcceptanceSeconds": 79.7,
+      "firstTransition": "return",
+      "observedRootAuthoringErrors": 2,
+      "rootAuthoringByCause": {
+        "client": 1,
+        "compiler": 1
+      },
+      "rootLedgerVerified": true,
+      "timingVerified": true,
+      "taskGateResult": true,
+      "graphQuality": {
+        "status": "partial",
+        "score": null,
+        "answerQuality": null,
+        "maximum": 4,
+        "scoreCeiling": null
+      },
+      "firstView": [
+        {
+          "status": "completed",
+          "overall": 1,
+          "meaningfulInsight": false,
+          "modelVerified": true,
+          "closedNativeItemAudit": true
+        }
+      ],
+      "semanticChildren": 0,
+      "successfulHistoricalChildLayerReads": 0,
+      "preterminalInputPublished": false
+    },
+    {
+      "caseId": "autonomous.h3.sanitize-status-code",
+      "cell": "c",
+      "repetition": 3,
+      "caseKind": "coding",
+      "candidateAccepted": true,
+      "firstPublicationSeconds": 31.3,
+      "finalAcceptanceSeconds": 56.4,
+      "firstTransition": "advance",
+      "observedRootAuthoringErrors": 1,
+      "rootAuthoringByCause": {
+        "client": 1
+      },
+      "rootLedgerVerified": true,
+      "timingVerified": true,
+      "taskGateResult": true,
+      "graphQuality": {
+        "status": "partial",
+        "score": null,
+        "answerQuality": null,
+        "maximum": 4,
+        "scoreCeiling": null
+      },
+      "firstView": [
+        {
+          "status": "completed",
+          "overall": 2,
+          "meaningfulInsight": true,
+          "modelVerified": true,
+          "closedNativeItemAudit": true
+        }
+      ],
+      "semanticChildren": 0,
+      "successfulHistoricalChildLayerReads": 0,
+      "preterminalInputPublished": false
+    },
+    {
+      "caseId": "autonomous.h3.sanitize-status-code",
+      "cell": "d",
+      "repetition": 3,
+      "caseKind": "coding",
+      "candidateAccepted": true,
+      "firstPublicationSeconds": 86.3,
+      "finalAcceptanceSeconds": 86.3,
+      "firstTransition": "return",
+      "observedRootAuthoringErrors": 1,
+      "rootAuthoringByCause": {
+        "server_rejection": 1
+      },
+      "rootLedgerVerified": true,
+      "timingVerified": true,
+      "taskGateResult": true,
+      "graphQuality": {
+        "status": "completed",
+        "score": 3,
+        "answerQuality": 4,
+        "maximum": 8,
+        "scoreCeiling": 8
+      },
+      "firstView": [
+        {
+          "status": "completed",
+          "overall": 1,
+          "meaningfulInsight": false,
+          "modelVerified": true,
+          "closedNativeItemAudit": true
+        }
+      ],
+      "semanticChildren": 0,
+      "successfulHistoricalChildLayerReads": 0,
+      "preterminalInputPublished": false
+    },
+    {
+      "caseId": "autonomous.h3.investigate-status-code",
+      "cell": "b",
+      "repetition": 3,
+      "caseKind": "coding",
+      "candidateAccepted": true,
+      "firstPublicationSeconds": 55.6,
+      "finalAcceptanceSeconds": 55.6,
+      "firstTransition": "return",
+      "observedRootAuthoringErrors": 0,
+      "rootAuthoringByCause": {},
+      "rootLedgerVerified": true,
+      "timingVerified": true,
+      "taskGateResult": true,
+      "graphQuality": {
+        "status": "completed",
+        "score": 3,
+        "answerQuality": 3,
+        "maximum": 8,
+        "scoreCeiling": 8
+      },
+      "firstView": [
+        {
+          "status": "completed",
+          "overall": 1,
+          "meaningfulInsight": false,
+          "modelVerified": true,
+          "closedNativeItemAudit": true
+        }
+      ],
+      "semanticChildren": 0,
+      "successfulHistoricalChildLayerReads": 0,
+      "preterminalInputPublished": false
+    },
+    {
+      "caseId": "autonomous.h3.investigate-status-code",
+      "cell": "c",
+      "repetition": 3,
+      "caseKind": "coding",
+      "candidateAccepted": true,
+      "firstPublicationSeconds": 34.7,
+      "finalAcceptanceSeconds": 83.5,
+      "firstTransition": "advance",
+      "observedRootAuthoringErrors": 2,
+      "rootAuthoringByCause": {
+        "compiler": 2
+      },
+      "rootLedgerVerified": true,
+      "timingVerified": true,
+      "taskGateResult": true,
+      "graphQuality": {
+        "status": "completed",
+        "score": 3,
+        "answerQuality": 4,
+        "maximum": 8,
+        "scoreCeiling": 6
+      },
+      "firstView": [
+        {
+          "status": "completed",
+          "overall": 2,
+          "meaningfulInsight": true,
+          "modelVerified": true,
+          "closedNativeItemAudit": true
+        }
+      ],
+      "semanticChildren": 0,
+      "successfulHistoricalChildLayerReads": 0,
+      "preterminalInputPublished": false
+    },
+    {
+      "caseId": "autonomous.h3.investigate-status-code",
+      "cell": "d",
+      "repetition": 3,
+      "caseKind": "coding",
+      "candidateAccepted": true,
+      "firstPublicationSeconds": 98.6,
+      "finalAcceptanceSeconds": 116.3,
+      "firstTransition": "advance",
+      "observedRootAuthoringErrors": 7,
+      "rootAuthoringByCause": {
+        "client": 3,
+        "compiler": 1,
+        "server_rejection": 3
+      },
+      "rootLedgerVerified": true,
+      "timingVerified": true,
+      "taskGateResult": true,
+      "graphQuality": {
+        "status": "partial",
+        "score": null,
+        "answerQuality": null,
+        "maximum": 4,
+        "scoreCeiling": null
+      },
+      "firstView": [
+        {
+          "status": "completed",
+          "overall": 2,
+          "meaningfulInsight": true,
+          "modelVerified": true,
+          "closedNativeItemAudit": true
+        }
+      ],
+      "semanticChildren": 0,
+      "successfulHistoricalChildLayerReads": 0,
+      "preterminalInputPublished": false
+    },
+    {
+      "caseId": "autonomous.h3.investigate-status-code",
+      "cell": "a",
+      "repetition": 3,
+      "caseKind": "coding",
+      "candidateAccepted": true,
+      "firstPublicationSeconds": 65.7,
+      "finalAcceptanceSeconds": 65.7,
+      "firstTransition": "return",
+      "observedRootAuthoringErrors": 0,
+      "rootAuthoringByCause": {},
+      "rootLedgerVerified": true,
+      "timingVerified": true,
+      "taskGateResult": true,
+      "graphQuality": {
+        "status": "partial",
+        "score": null,
+        "answerQuality": null,
+        "maximum": 4,
+        "scoreCeiling": null
+      },
+      "firstView": [
+        {
+          "status": "completed",
+          "overall": 2,
+          "meaningfulInsight": true,
+          "modelVerified": true,
+          "closedNativeItemAudit": true
+        }
+      ],
+      "semanticChildren": 0,
+      "successfulHistoricalChildLayerReads": 0,
+      "preterminalInputPublished": false
+    },
+    {
+      "caseId": "current-communication.semantic-delegation",
+      "cell": "c",
+      "repetition": 1,
+      "caseKind": "delegation-probe",
+      "candidateAccepted": false,
+      "firstPublicationSeconds": null,
+      "finalAcceptanceSeconds": null,
+      "firstTransition": null,
+      "observedRootAuthoringErrors": 10,
+      "rootAuthoringByCause": {
+        "server_rejection": 1,
+        "client": 1,
+        "compiler": 8
+      },
+      "rootLedgerVerified": true,
+      "timingVerified": true,
+      "taskGateResult": false,
+      "graphQuality": {
+        "status": "failed",
+        "score": null,
+        "answerQuality": null,
+        "maximum": 4,
+        "scoreCeiling": null
+      },
+      "firstView": [],
+      "semanticChildren": 0,
+      "successfulHistoricalChildLayerReads": 0,
+      "preterminalInputPublished": false
+    },
+    {
+      "caseId": "current-communication.semantic-delegation",
+      "cell": "d",
+      "repetition": 1,
+      "caseKind": "delegation-probe",
+      "candidateAccepted": true,
+      "firstPublicationSeconds": 66.7,
+      "finalAcceptanceSeconds": 267.3,
+      "firstTransition": "advance",
+      "observedRootAuthoringErrors": 3,
+      "rootAuthoringByCause": {
+        "server_rejection": 2,
+        "compiler": 1
+      },
+      "rootLedgerVerified": true,
+      "timingVerified": true,
+      "taskGateResult": true,
+      "graphQuality": {
+        "status": "completed",
+        "score": 6,
+        "answerQuality": 7,
+        "maximum": 8,
+        "scoreCeiling": 8
+      },
+      "firstView": [
+        {
+          "status": "completed",
+          "overall": 2,
+          "meaningfulInsight": false,
+          "modelVerified": true,
+          "closedNativeItemAudit": true
+        }
+      ],
+      "semanticChildren": 2,
+      "successfulHistoricalChildLayerReads": 19,
+      "preterminalInputPublished": false
+    },
+    {
+      "caseId": "current-communication.semantic-delegation",
+      "cell": "a",
+      "repetition": 1,
+      "caseKind": "delegation-probe",
+      "candidateAccepted": true,
+      "firstPublicationSeconds": 37.1,
+      "finalAcceptanceSeconds": 225.7,
+      "firstTransition": "advance",
+      "observedRootAuthoringErrors": 8,
+      "rootAuthoringByCause": {
+        "server_rejection": 4,
+        "compiler": 2,
+        "client": 2
+      },
+      "rootLedgerVerified": true,
+      "timingVerified": true,
+      "taskGateResult": true,
+      "graphQuality": {
+        "status": "partial",
+        "score": null,
+        "answerQuality": null,
+        "maximum": 4,
+        "scoreCeiling": null
+      },
+      "firstView": [
+        {
+          "status": "completed",
+          "overall": 2,
+          "meaningfulInsight": false,
+          "modelVerified": true,
+          "closedNativeItemAudit": true
+        }
+      ],
+      "semanticChildren": 2,
+      "successfulHistoricalChildLayerReads": 10,
+      "preterminalInputPublished": false
+    },
+    {
+      "caseId": "current-communication.semantic-delegation",
+      "cell": "b",
+      "repetition": 1,
+      "caseKind": "delegation-probe",
+      "candidateAccepted": true,
+      "firstPublicationSeconds": 52.1,
+      "finalAcceptanceSeconds": 387.3,
+      "firstTransition": "advance",
+      "observedRootAuthoringErrors": 1,
+      "rootAuthoringByCause": {
+        "server_rejection": 1
+      },
+      "rootLedgerVerified": true,
+      "timingVerified": true,
+      "taskGateResult": true,
+      "graphQuality": {
+        "status": "completed",
+        "score": 5,
+        "answerQuality": 6,
+        "maximum": 8,
+        "scoreCeiling": 6
+      },
+      "firstView": [
+        {
+          "status": "completed",
+          "overall": 2,
+          "meaningfulInsight": false,
+          "modelVerified": true,
+          "closedNativeItemAudit": true
+        }
+      ],
+      "semanticChildren": 2,
+      "successfulHistoricalChildLayerReads": 16,
+      "preterminalInputPublished": false
+    },
+    {
+      "caseId": "interactive.planning.group-europe-trip",
+      "cell": "d",
+      "repetition": 1,
+      "caseKind": "question-probe",
+      "candidateAccepted": true,
+      "firstPublicationSeconds": 51.1,
+      "finalAcceptanceSeconds": 51.1,
+      "firstTransition": "advance",
+      "observedRootAuthoringErrors": 2,
+      "rootAuthoringByCause": {
+        "compiler": 2
+      },
+      "rootLedgerVerified": true,
+      "timingVerified": true,
+      "taskGateResult": true,
+      "graphQuality": {
+        "status": "partial",
+        "score": null,
+        "answerQuality": null,
+        "maximum": 4,
+        "scoreCeiling": null
+      },
+      "firstView": [
+        {
+          "status": "completed",
+          "overall": 2,
+          "meaningfulInsight": false,
+          "modelVerified": true,
+          "closedNativeItemAudit": true
+        }
+      ],
+      "semanticChildren": 0,
+      "successfulHistoricalChildLayerReads": 0,
+      "preterminalInputPublished": true
+    },
+    {
+      "caseId": "interactive.planning.group-europe-trip",
+      "cell": "a",
+      "repetition": 1,
+      "caseKind": "question-probe",
+      "candidateAccepted": true,
+      "firstPublicationSeconds": 31.1,
+      "finalAcceptanceSeconds": 31.1,
+      "firstTransition": "return",
+      "observedRootAuthoringErrors": 0,
+      "rootAuthoringByCause": {},
+      "rootLedgerVerified": true,
+      "timingVerified": true,
+      "taskGateResult": true,
+      "graphQuality": {
+        "status": "completed",
+        "score": 4,
+        "answerQuality": 5,
+        "maximum": 8,
+        "scoreCeiling": 8
+      },
+      "firstView": [
+        {
+          "status": "completed",
+          "overall": 1,
+          "meaningfulInsight": false,
+          "modelVerified": true,
+          "closedNativeItemAudit": true
+        }
+      ],
+      "semanticChildren": 0,
+      "successfulHistoricalChildLayerReads": 0,
+      "preterminalInputPublished": false
+    },
+    {
+      "caseId": "interactive.planning.group-europe-trip",
+      "cell": "b",
+      "repetition": 1,
+      "caseKind": "question-probe",
+      "candidateAccepted": true,
+      "firstPublicationSeconds": 34.5,
+      "finalAcceptanceSeconds": 40,
+      "firstTransition": "advance",
+      "observedRootAuthoringErrors": 2,
+      "rootAuthoringByCause": {
+        "compiler": 2
+      },
+      "rootLedgerVerified": true,
+      "timingVerified": true,
+      "taskGateResult": true,
+      "graphQuality": {
+        "status": "partial",
+        "score": null,
+        "answerQuality": null,
+        "maximum": 4,
+        "scoreCeiling": null
+      },
+      "firstView": [
+        {
+          "status": "completed",
+          "overall": 2,
+          "meaningfulInsight": false,
+          "modelVerified": true,
+          "closedNativeItemAudit": true
+        }
+      ],
+      "semanticChildren": 0,
+      "successfulHistoricalChildLayerReads": 0,
+      "preterminalInputPublished": true
+    },
+    {
+      "caseId": "interactive.planning.group-europe-trip",
+      "cell": "c",
+      "repetition": 1,
+      "caseKind": "question-probe",
+      "candidateAccepted": true,
+      "firstPublicationSeconds": 49.9,
+      "finalAcceptanceSeconds": 65.8,
+      "firstTransition": "advance",
+      "observedRootAuthoringErrors": 4,
+      "rootAuthoringByCause": {
+        "compiler": 4
+      },
+      "rootLedgerVerified": true,
+      "timingVerified": true,
+      "taskGateResult": true,
+      "graphQuality": {
+        "status": "partial",
+        "score": null,
+        "answerQuality": null,
+        "maximum": 4,
+        "scoreCeiling": null
+      },
+      "firstView": [
+        {
+          "status": "completed",
+          "overall": 1,
+          "meaningfulInsight": false,
+          "modelVerified": true,
+          "closedNativeItemAudit": true
+        }
+      ],
+      "semanticChildren": 0,
+      "successfulHistoricalChildLayerReads": 0,
+      "preterminalInputPublished": true
+    }
+  ],
+  "limitations": [
+    "First graph times measure backend publication, not renderer visibility.",
+    "Observed authoring counts are partial; exact totals remain unknown.",
+    "Coding gates are not qualitative task scores; missing results are null.",
+    "Overview-only first-view ratings do not prove input usability.",
+    "Final graph scores have missing reviews and differing ceilings.",
+    "Storage move, host restarts and serial shared-runtime conditions confound timing; three repetitions per coding task.",
+    "Delegation and questions are single-run mechanism probes, not spontaneous-recursion or full interactive-quality proof.",
+    "New default is transplanted onto current main and preserves its newer API and provider guidance; live timing is evidence for the earlier pilot snapshot."
+  ]
+}

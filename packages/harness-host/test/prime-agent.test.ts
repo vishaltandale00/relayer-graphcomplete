@@ -22,6 +22,35 @@ const configuration: HarnessConfiguration = {
 const fullPermission = { permissionProfileId: "full", permissionBinding: {} } as const;
 
 describe("PrimeAgentHarness", () => {
+
+  it.each(["basic", "layered-navigation-v1"])("delivers the Python communication baseline in actual %s Prime turns", async (profile) => {
+    const session = primeSession("/tmp/communication-session.jsonl");
+    const harness = await createHarness(session, { ...configuration, settings: {
+      ...configuration.settings, ...(profile === "basic" ? {} : { promptProfile: profile }),
+    } });
+    try {
+      for (const brokerAvailable of [false, true]) {
+        await harness.complete({ ...runContext(brokerAvailable ? 12 : 11, "token"), ...(brokerAvailable ? { completionBroker: {
+          url: "http://127.0.0.1:43125/api/completions", token: "fixture-broker-token-1234567890123456",
+        } } : {}) });
+        const prompt = session.promptAndWait.mock.calls.at(-1)![0];
+        expect(prompt).toContain("Your current layer is how you explain the work to the user while doing it.");
+        expect(prompt).toContain("read each changed current.current_layer_id with graph.get_layer");
+        expect(prompt).toContain("skip Exception values before reading current.current_layer_id");
+        expect(prompt).toContain("input answers arrive through the next ordinary interaction");
+        expect(prompt).toContain('graph.authoring("first-finding-');
+        expect(prompt).toContain('target=GraphLayer.from_dict(prior["layer"])');
+        expect(prompt).toContain('operation_key="first-finding-publication"');
+        expect(prompt).toContain('kind="input", label="Answer", control="text"');
+        expect(prompt).not.toContain("Advancing is optional");
+        expect(prompt).not.toContain("graph.advanceCurrent");
+        expect(prompt).not.toContain("watchCompletions");
+        expect(prompt).not.toContain("fixture-broker-token");
+        expect(prompt.includes("For explicit semantic child work")).toBe(brokerAvailable);
+      }
+    } finally { await harness.dispose(); }
+  });
+
   it.each(["basic", "layered-navigation-v1"])("selects an eligible thread icon in the ordinary %s Prime turn", async (profile) => {
     const session = primeSession("/tmp/thread-icon-session.jsonl");
     const harness = await createHarness(session, { ...configuration, settings: {
@@ -712,27 +741,31 @@ describe("PrimeAgentHarness", () => {
     expect(prompts[0]!.text).toContain("live, user-facing workspace");
     // The graph is the user's interface, so mechanics never appear in its content.
     expect(prompts[0]!.text).toContain("Never expose execution mechanics in graph content");
-    expect(prompts[0]!.text).toContain("rather than on every change");
+    expect(prompts[0]!.text).toContain("when the user would gain a materially more useful view");
     expect(prompts[0]!.text).toContain("await graph.get_current()");
     expect(prompts[0]!.text).toContain("await graph.advance_current(");
     expect(prompts[0]!.text).toContain("Advancing current does not complete the interaction");
     // Only the run the product granted a broker is taught explicit semantic child work.
     expect(prompts[0]!.text).toContain("For explicit semantic child work");
-    expect(prompts[0]!.text).toContain("input_graph = await graph.prepare_complete(invoke_action)");
+    expect(prompts[0]!.text).toContain('input_graph = await graph.prepare_complete(invoke_action, "stable-call-key")');
+    expect(prompts[0]!.text).toContain("reusable defaults to False");
+    expect(prompts[0]!.text).toContain("Set reusable=True only for an explicit repeat-use case");
+    expect(prompts[0]!.text).toContain("Before launching or waiting for this child");
+    expect(prompts[0]!.text).toContain("Advance your enclosing source Layer");
     expect(prompts[0]!.text).toContain("from relayer_graph import complete");
     expect(prompts[0]!.text).toContain("do not create semantic children by themselves");
-    // A root that ends its turn with children in flight fails, so it must await them first.
-    expect(prompts[0]!.text).toContain("Your turn ending does not wait for children");
+    // Returning the parent's full response leaves independent child execution intact.
+    expect(prompts[0]!.text).toContain("Returning the parent does not stop the children");
     // Each child event is one the root may act on; it moves its own current only when that helps the user.
     expect(prompts[0]!.text).toContain("from relayer_graph import complete, CompletionWatch");
     expect(prompts[0]!.text).toContain("changes = await watch.changes()");
     // The watch takes the list the recipe fills, so the recipe must declare it.
     expect(prompts[0]!.text).toContain("Start with children = [] and launch each child from its own input graph with children.append(complete(input_graph))");
-    // One prepared input graph identifies one completion, so each child needs its own invoke action.
-    expect(prompts[0]!.text).toContain("give each child its own invoke action");
-    expect(prompts[0]!.text).toContain("one input graph starts exactly one child");
-    expect(prompts[0]!.text).toContain("Only then submit a layer that presents the work itself and advance your current to it; otherwise keep waiting.");
-    expect(prompts[0]!.text).toContain("never leave them in a background task");
+    // Reusable actions distinguish calls through durable Invocation keys.
+    expect(prompts[0]!.text).toContain("another key creates an independent Invocation");
+    expect(prompts[0]!.text).toContain("One input graph starts exactly one child");
+    expect(prompts[0]!.text).toContain("Only then submit a later improved layer that presents the work itself and advance your current to it; otherwise keep waiting.");
+    expect(prompts[0]!.text).toContain("Returning the parent does not stop the children");
     // A stopped or failed child raises from child.result, so the root must catch it to integrate the rest.
     expect(prompts[0]!.text).toContain("A stopped or failed child raises CompletionTerminalError there instead");
     expect(prompts[0]!.text).toContain("catch it and integrate the work its error.current still retains");
@@ -1892,11 +1925,11 @@ describe("PrimeAgentHarness", () => {
     expect(prompt).toContain("await graph.get_neighbors(11)");
     expect(prompt).toContain("ordinary graph.submit(11) automatically fulfills any lease");
     expect(prompt).toContain("There is no separate resolve_action call");
-    expect(prompt).toContain("input_graph = await graph.prepare_complete(invoke_action)");
+    expect(prompt).toContain('input_graph = await graph.prepare_complete(invoke_action, "stable-call-key")');
     expect(prompt).toContain("Never mention or expose the size justification");
     expect(prompt).toContain("Every new root, expansion, and reference layer requires a version-1 LayerLayoutObject");
     expect(prompt).toContain("align comparisons deliberately");
-    expect(prompt).toContain('layer.node("finding", icon="info", title="Answer", detail="Replace with the supported answer.")');
+    expect(prompt).toContain('layer.node("finding", icon="info", title="Initial finding", detail="Replace with supported evidence, remaining uncertainty, and the next useful step.")');
     expect(prompt).toContain(JSON.stringify(detailAuthoringReference()));
     expect(prompt).toContain("Give graph-authoring RLM children this recipe");
     expect(prompt).not.toContain('NodeObject("lightbulb"');

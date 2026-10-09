@@ -19,6 +19,16 @@ Product host
 
 Product records pin stable provider, model, harness-configuration, and permission identifiers. Harness implementations and provider adapters translate those selections into runtime-specific credentials, sessions, and model calls. Each harness owns any provider-native delegation it uses, including Codex subagents and Prime Agent RLM children. Supporting a new implementation requires an explicit adapter; agnostic does not mean arbitrary runtimes work without integration.
 
+## Sealed interaction completion
+
+For newly prepared interactions, trusted preparation seals one immutable CompletionContract before `complete(inputGraph)` admits execution. The graph server owns its exact input snapshots, authorities, Return requirements, schema version and digest. The complete contract is visible to the executing harness; provider credentials and execution switches are not contract fields. Exact recovery never replaces its original policy. Recognized legacy records retain their frozen semantics rather than receiving a synthetic contract.
+
+Advance validates the full prospective Return plan, but publishes only the completion's Current Layer closure. Accepted-history changes remain staged until Return revalidates and commits them atomically. Return ends this interaction's authoring, not the user's task.
+
+An InvokeAction is a reusable definition, not a child identity. Keyed Invocations store separate child identities, source-action snapshots and the exact source response Node as parent. Calls can be prepared from an owned draft. Returned results are joined per call without converting the source action. GraphComplete records these semantics; each provider still owns native recursive execution. No graph-level scheduler is introduced.
+
+[ADR 0015](decisions/0015-sealed-completion-contract-and-invocations.md) and PRD section 12.1A define the compatibility and delivery boundaries. The first slice stops at its recorded and hands-on human gate; execution retry histories and inert Eval Replay follow in separate gated slices.
+
 ## Working desktop product path
 
 ```text

@@ -311,12 +311,16 @@ class AuthoringClientTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(layer.ref, stopped)
 
     async def test_action_retries_use_the_caller_owned_key(self):
-        await self.client.add_invoke_action(7, "Ask", "Continue", source_layer=8, client_key="ask-again")
-        await self.client.add_invoke_action(7, "Ask", "Continue", source_layer=8, client_key="ask-again")
+        await self.client.add_invoke_action(7, "Ask", "Continue", source_layer=8, client_key="ask-again", input_actions=(21, 22))
+        await self.client.add_invoke_action(7, "Ask", "Continue", source_layer=8, client_key="ask-again", input_actions=(21, 22))
         self.assertEqual(
             [request[2]["clientKey"] for request in Handler.requests[-2:]],
             ["ask-again", "ask-again"],
         )
+        self.assertEqual([request[2]['inputActionIds'] for request in Handler.requests[-2:]], [[21, 22], [21, 22]])
+        self.assertEqual([request[2]['reusable'] for request in Handler.requests[-2:]], [False, False])
+        await self.client.add_invoke_action(7, "Compare", "Continue", source_layer=8, client_key="compare", reusable=True)
+        self.assertTrue(Handler.requests[-1][2]['reusable'])
 
     async def test_input_action_is_sent_as_structured_authoring_data(self):
         await self.client.add_input_action(
@@ -451,12 +455,22 @@ class AuthoringClientTests(unittest.IsolatedAsyncioTestCase):
             await self.client.create_edge(orphan, 7)
 
     async def test_prepares_a_canonical_child_pointer_from_a_persisted_invoke(self):
-        prepared = await self.client.prepare_complete({"action": {"id": 44}})
+        prepared = await self.client.prepare_complete({"action": {"id": 44}}, "stable-child")
         self.assertEqual(prepared.interaction_node, 91)
         path, headers, body = Handler.requests[-1]
         self.assertEqual(path, "/api/graph/completions/prepare")
         self.assertEqual(headers["Authorization"], f"Bearer {self.client.token}")
-        self.assertEqual(body, {"actionId": 44})
+        self.assertEqual(body, {"actionId": 44, "invocationKey": "stable-child"})
+
+    async def test_omitted_invocation_keys_create_independent_calls(self):
+        await self.client.prepare_complete(44)
+        first = Handler.requests[-1][2]
+        await self.client.prepare_complete(44)
+        second = Handler.requests[-1][2]
+        self.assertEqual(first["actionId"], 44)
+        self.assertEqual(second["actionId"], 44)
+        self.assertRegex(first["invocationKey"], r"^[a-f0-9-]{36}$")
+        self.assertNotEqual(first["invocationKey"], second["invocationKey"])
 
     async def test_complete_returns_a_live_handle_before_broker_settlement(self):
         previous = os.environ.copy()

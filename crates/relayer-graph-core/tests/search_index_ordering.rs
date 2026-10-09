@@ -328,6 +328,8 @@ async fn author(
             description: None,
             target_layer_id: Some(root.id),
             interaction_text: None,
+            reusable: None,
+            input_action_ids: Vec::new(),
             input: None,
         })
         .await?;
@@ -371,6 +373,24 @@ async fn author_current(
                 "default",
             )),
             size_justification: None,
+        })
+        .await?;
+    writer
+        .add_action(&ActionDraft {
+            client_key: "return-response".into(),
+            source_node_id: interaction.id,
+            source_layer_id: None,
+            kind: ActionKind::Navigate,
+            relation: Some(NavigateRelation::Expand),
+            label: "Response".into(),
+            variant: Default::default(),
+            icon: None,
+            description: None,
+            target_layer_id: Some(layer.id),
+            interaction_text: None,
+            reusable: None,
+            input_action_ids: Vec::new(),
+            input: None,
         })
         .await?;
     Ok((interaction.id, writer, layer.id))
@@ -437,6 +457,8 @@ async fn author_leased_return(
             description: None,
             target_layer_id: None,
             interaction_text: Some("Produce the delegated result".into()),
+            reusable: None,
+            input_action_ids: Vec::new(),
             input: None,
         })
         .await
@@ -454,6 +476,8 @@ async fn author_leased_return(
             description: None,
             target_layer_id: Some(source_layer.id),
             interaction_text: None,
+            reusable: None,
+            input_action_ids: Vec::new(),
             input: None,
         })
         .await
@@ -502,16 +526,6 @@ async fn author_leased_return(
         .await
         .unwrap();
     child_writer
-        .transition_current(
-            0,
-            &format!("{key}-advance"),
-            CurrentTransition::Advance {
-                layer_id: child_layer.id,
-            },
-        )
-        .await
-        .unwrap();
-    child_writer
         .add_action(&ActionDraft {
             client_key: format!("{key}-child-response"),
             source_node_id: child.id,
@@ -524,8 +538,21 @@ async fn author_leased_return(
             description: None,
             target_layer_id: Some(child_layer.id),
             interaction_text: None,
+            reusable: None,
+            input_action_ids: Vec::new(),
             input: None,
         })
+        .await
+        .unwrap();
+
+    child_writer
+        .transition_current(
+            0,
+            &format!("{key}-advance"),
+            CurrentTransition::Advance {
+                layer_id: child_layer.id,
+            },
+        )
         .await
         .unwrap();
 
@@ -697,6 +724,8 @@ async fn return_after_advance_adds_the_terminal_root_action_once() {
             description: None,
             target_layer_id: Some(layer_id),
             interaction_text: None,
+            reusable: None,
+            input_action_ids: Vec::new(),
             input: None,
         })
         .await
@@ -1204,6 +1233,8 @@ fn imported_conversation() -> ImportedConversation {
             accepted_view: Some(ImportedAcceptedView {
                 interaction_node_id: "interaction-1".into(),
                 root_action: ImportedAction {
+                    reusable: None,
+                    input_action_ids: Vec::new(),
                     icon_asset: None,
                     converted_from_invoke: false,
                     id: "action-1".into(),

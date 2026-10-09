@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { humanTurns } from "../desktop/renderer/src/product-workspace/model.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 let requestImplementation;
@@ -7,6 +9,7 @@ let throwOnRender;
 let tutorialActionSucceeded;
 let tutorialFollowupSubmitted;
 const ownedControllers = new Set();
+const invocationKey = "70c6e3d5-cc62-4b10-8588-9e21f091f851";
 
 function retireOwnedControllers() {
   for (const controller of ownedControllers) controller.cancelNavigationHistory();
@@ -35,6 +38,7 @@ function interaction(id, threadId, layer, sequence = 1) {
 
 function productState(threads, interactions) {
   return {
+    invocationInventoryAvailable: true,
     projects: [],
     threads,
     interactions,
@@ -100,8 +104,47 @@ async function loadModules(url = "http://127.0.0.1:43123/") {
 }
 
 describe("workspace navigation integration", () => {
+  it.each([true, false])("retains the invoking Node when a result is followed, refreshed and restored (reuse %s)", async (reusable) => {
+    const root = rootLayer(101, 11);
+    root.nodes[0].title = "Choose a vacation destination";
+    root.actions = [
+      { id: 501, kind: "invoke", sourceNodeId: 11, label: "Analyze destination", reusable },
+      { id: 502, kind: "navigate", relation: "reference", sourceNodeId: 11, targetLayerId: 201, label: "Overall analysis · Kyoto" },
+    ];
+    const result = rootLayer(201, 21);
+    const source = interaction(1, 10, root);
+    const child = interaction(2, 10, result, 2);
+    const state = productState([{ id: 10, title: "Vacation comparison" }], [source, child]);
+    state.actionInvocations = [{ reusable: true, sourceInteractionId: 1, actionId: 501, resultInteractionId: 2, resultCompletionStatus: "accepted" }];
+    requestImplementation = vi.fn(async (path) => {
+      if (path.startsWith("/api/state?threadId=10")) return state;
+      if (path === "/api/threads/10") return { invocationInventoryAvailable: state.invocationInventoryAvailable, thread: state.threads[0], interactions: state.interactions, actionInvocations: state.actionInvocations };
+      if (path.endsWith("/layers/201")) return result;
+      throw new Error(`Unexpected request: ${path}`);
+    });
+    const controller = await loadModules();
+    await controller.loadThread(10);
+    controller.selectTurnById(1);
+    await controller.navigateLayer(201, { action: root.actions[reusable ? 1 : 0], sourceNode: root.nodes[0] });
+    const expectOrigin = () => {
+      expect(controller.appState.visibleLayer.layer.id).toBe(201);
+      expect(controller.viewState.layerPath.map(({ layerId }) => layerId)).toEqual([101, 201]);
+      expect(controller.viewState.layerPath[1]).toMatchObject({ label: "Choose a vacation destination", sourceNodeId: 11, actionId: reusable ? 502 : 501 });
+      expect(controller.appState.currentInteractionId).toBe(1);
+    };
+    expectOrigin();
+    await controller.refreshState(10);
+    expectOrigin();
+    await controller.navigateHistory("back");
+    expect(controller.appState.visibleLayer.layer.id).toBe(101);
+    await controller.navigateHistory("forward");
+    expectOrigin();
+    expect(state.interactions).toHaveLength(2);
+    expect(requestImplementation.mock.calls.every(([, options]) => !options?.method || options.method === "GET")).toBe(true);
+  });
   beforeEach(() => {
     vi.restoreAllMocks();
+    vi.spyOn(globalThis.crypto, "randomUUID").mockReturnValue(invocationKey);
   });
 
   afterEach(() => {
@@ -1020,6 +1063,7 @@ describe("workspace navigation integration", () => {
     controller.replaceCurrentSelection(22);
     expect(controller.viewState.layerPath.map(({ layerId }) => layerId)).toEqual([7]);
     await controller.invokeAction(action);
+    await vi.waitFor(() => expect(controller.appState.interactions.some(turn => turn.id === 2)).toBe(true));
     expect(controller.viewState.currentInteractionId).toBe(outcome === "already-accepted" ? 2 : 1);
     expect(controller.appState.visibleLayer.layer.id).toBe(outcome === "already-accepted" ? 8 : 7);
     if (backToSource) {
@@ -1043,25 +1087,378 @@ describe("workspace navigation integration", () => {
     expect(controller.appState.actions[0]).toMatchObject({ id: 6, kind: "navigate", targetLayerId: 8 });
   });
 
-  it("retries a project-visible submitted invocation through the same source action", async () => {
+  it.each([true, false])("recovers response loss only for the exact reusable Invocation key (matches=%s)", async (matches) => {
+    vi.useFakeTimers();
+    const sourceRoot = rootLayer(7, 22);
+    const action = { id: 6, kind: "invoke", sourceNodeId: 22, targetLayerId: null };
+    sourceRoot.actions = [action];
+    const source = interaction(1, 10, sourceRoot);
+    const result = interaction(2, 10, rootLayer(8, 26), 2);
+    const state = { ...productState([{ id: 10, title: "Recover exact call" }], [source]), inputDraftRevision: 12 };
+    let posted = false;
+    requestImplementation = vi.fn(async (path, options) => {
+      if (path.startsWith("/api/state?threadId=10")) return posted ? {
+        ...state, interactions: [source, result], actionInvocations: [{
+          reusable: true, invocationKey: matches ? invocationKey : "another-call",
+          sourceInteractionId: 1, actionId: 6, resultInteractionId: 2, resultCompletionStatus: "accepted",
+        }],
+      } : state;
+      if (path === "/api/threads/10/interactions/1/actions/6/invoke") {
+        expect(options).toEqual({ method: "POST", headers: { "Idempotency-Key": invocationKey }, body: JSON.stringify({ inputDraftRevision: 13, presentingLayerId: 7 }) });
+        posted = true;
+        throw new Error("response lost");
+      }
+      if (path.endsWith("/layers/7")) return sourceRoot;
+      throw new Error(`Unexpected request: ${path}`);
+    });
+    const controller = await loadModules();
+    const toast = { textContent: "", classList: { add: vi.fn(), remove: vi.fn() } };
+    document.querySelector = (selector) => selector === "#toast" ? toast : null;
+    await controller.loadThread(10);
+    controller.viewState.mainView = "thread";
+    const recovered = await controller.invokeAction(action, { inputDraftRevision: 13 });
+    expect(recovered).toEqual(matches ? { interaction: { id: 2 }, recovered: true } : null);
+    expect(controller.viewState.currentInteractionId).toBe(matches ? 2 : 1);
+    expect(tutorialActionSucceeded).toHaveBeenCalledTimes(matches ? 1 : 0);
+    expect(controller.appState.pendingActionInvocations).toEqual([]);
+  });
+
+  it.each(["503", "held", "browsed"])("returns the exact acknowledged Invoke before optional %s refresh, without activating twice", async refreshMode => {
+    const root = rootLayer(7, 22); root.layer.state = "accepted"; root.nodes[0].state = "accepted";
+    const action = { id: 6, kind: "invoke", sourceNodeId: 22, state: "accepted", reusable: false };
+    root.actions = [action];
+    const source = interaction(1, 10, root);
+    const state = productState([{ id: 10, title: "Acknowledged activation" }], [source]);
+    const acknowledgment = { created: true, interaction: { id: 2, threadId: 10, completionStatus: "running" },
+      invocation: { durable: true, reusable: false, invocationKey, sourceInteractionId: 1, actionId: 6, sourceNodeId: 22,
+        presentingLayerId: 7, resultInteractionId: 2, resultCompletionStatus: "running" },
+      inputDraft: { threadId: 10, revision: 5, attachments: [{ occurrence: { actionId: 14 }, value: { text: "Unrelated notes" } }] } };
+    let activated = false;
+    const stateRead = deferred();
+    const resultRoot = rootLayer(8, 26);
+    requestImplementation = vi.fn(async (path, options) => {
+      if (path.startsWith("/api/state?threadId=10")) {
+        if (activated) {
+          if (refreshMode === "503") throw Object.assign(new Error("State temporarily unavailable"), { status: 503 });
+          return stateRead.promise;
+        }
+        return state;
+      }
+      if (path === "/api/threads/10/interactions/1/actions/6/invoke") {
+        expect(options.headers["Idempotency-Key"]).toBe(invocationKey);
+        expect(JSON.parse(options.body)).toEqual({ inputDraftRevision: 4, presentingLayerId: 7 });
+        activated = true; return acknowledgment;
+      }
+      if (path.endsWith("/layers/7")) return root;
+      if (path.endsWith("/layers/8")) return resultRoot;
+      throw new Error(`Unexpected request: ${path}`);
+    });
+    const controller = await loadModules();
+    await controller.loadThread(10);
+    controller.viewState.mainView = "thread";
+    const response = await controller.invokeAction(action, { inputDraftRevision: 4 });
+    expect(response).toBe(acknowledgment);
+    expect(response.inputDraft).toBe(acknowledgment.inputDraft);
+    expect(controller.appState.actionInvocations).toEqual([acknowledgment.invocation]);
+    expect(controller.appState.pendingActionInvocations).toEqual([]);
+    expect(controller.appState.pendingTurn).toMatchObject({ interactionId: 2, invocationSource: { origin: {
+      invocationKey, sourceNodeId: 22, presentingLayerId: 7, sourceEntry: { turnId: "1", selectedNodeId: 22 },
+    } } });
+    expect(controller.viewState.currentInteractionId).toBe(1);
+    expect(controller.appState.visibleLayer).toBe(root);
+    expect(tutorialActionSucceeded).toHaveBeenCalledTimes(1);
+    expect(await controller.invokeAction(action, { inputDraftRevision: 5 })).toBeNull();
+    expect(requestImplementation.mock.calls.filter(([, options]) => options?.method === "POST")).toHaveLength(1);
+    if (refreshMode !== "503") {
+      if (refreshMode === "browsed") controller.replaceCurrentSelection(22);
+      stateRead.resolve({ ...state, interactions: [source, interaction(2, 10, resultRoot, 2)],
+        actionInvocations: [{ ...acknowledgment.invocation, resultCompletionStatus: "accepted" }] });
+      if (refreshMode === "browsed") {
+        await vi.waitFor(() => expect(controller.appState.pendingTurn?.readyLayer?.layer.id).toBe(8));
+        expect(controller.viewState.currentInteractionId).toBe(1);
+        expect(controller.openReadyResult()).toBe(true);
+      } else await vi.waitFor(() => expect(controller.viewState.currentInteractionId).toBe(2));
+      expect(controller.appState.visibleLayer.layer.id).toBe(8);
+      expect(controller.viewState.invocationOrigin).toMatchObject({ sourceNodeId: "22", presentingLayerId: "7", invocationKey });
+      expect(requestImplementation.mock.calls.filter(([, options]) => options?.method === "POST")).toHaveLength(1);
+    }
+  });
+
+  it("retains a native preparation rejection and sends a corrected activation with a fresh key", async () => {
+    const root = rootLayer(7, 22);
+    const action = { id: 6, kind: "invoke", sourceNodeId: 22, reusable: false };
+    root.actions = [action];
+    const source = interaction(1, 10, root);
+    const refused = { sourceInteractionId: 1, actionId: 6, resultInteractionId: 2,
+      durable: false, reusable: false, invocationKey, resultCompletionStatus: "failed",
+      preparationRecoverable: false, preparationRejected: true };
+    const failed = { ...interaction(2, 10, null, 2), completionStatus: "failed", completionOutput: null };
+    const initial = productState([{ id: 10, title: "Correct a refused preparation" }], [source]);
+    const rejected = { ...initial, interactions: [source, failed], actionInvocations: [refused] };
+    const nextKey = "fresh-corrected-gesture";
+    const prepared = { ...refused, durable: true, invocationKey: nextKey, resultInteractionId: 3,
+      preparationRejected: false, resultCompletionStatus: "running" };
+    const running = { ...interaction(3, 10, null, 3), completionStatus: "running", completionOutput: null };
+    let attempts = 0;
+    requestImplementation = vi.fn(async (path, options) => {
+      if (path.startsWith("/api/state?threadId=10")) return attempts === 0 ? initial : attempts === 1 ? rejected
+        : { ...initial, interactions: [source, failed, running], actionInvocations: [refused, prepared] };
+      if (path.endsWith("/layers/7")) return root;
+      if (path === "/api/threads/10/interactions/1/actions/6/invoke") {
+        attempts += 1;
+        expect(options.headers["Idempotency-Key"]).toBe(attempts === 1 ? invocationKey : nextKey);
+        expect(JSON.parse(options.body)).toEqual({ inputDraftRevision: attempts === 1 ? 13 : 14, presentingLayerId: 7 });
+        if (attempts === 1) throw new Error("Native preparation rejected invalid arguments");
+        return { created: true, invocation: prepared, interaction: running };
+      }
+      throw new Error(`Unexpected request: ${path}`);
+    });
+    const controller = await loadModules();
+    const toast = { textContent: "", classList: { add: vi.fn(), remove: vi.fn() } };
+    document.querySelector = selector => selector === "#toast" ? toast : null;
+    await controller.loadThread(10);
+    expect(await controller.invokeAction(action, { inputDraftRevision: 13 })).toBeNull();
+    expect(toast.textContent).toBe("Native preparation rejected invalid arguments");
+    expect(controller.appState.actionInvocations).toEqual([refused]);
+    expect(controller.appState.pendingActionInvocations).toEqual([]);
+    expect(controller.viewState.currentInteractionId).toBe(1);
+    expect(tutorialActionSucceeded).not.toHaveBeenCalled();
+    vi.mocked(globalThis.crypto.randomUUID).mockReturnValue(nextKey);
+    await controller.invokeAction(action, { inputDraftRevision: 14 });
+    expect(attempts).toBe(2);
+    expect(controller.appState.actionInvocations).toEqual([refused, prepared]);
+    expect(controller.viewState.currentInteractionId).toBe(1);
+    expect(tutorialActionSucceeded).toHaveBeenCalledTimes(1);
+  });
+
+  it("opens actual native archived Returned without inventing a Product result turn", async () => {
+    const fixture = JSON.parse(readFileSync(new URL("./fixtures/inert-returned-call.json", import.meta.url), "utf8"));
+    const { detail, sourceLayer } = fixture;
+    const entry = detail.importedInvocationHistory[0];
+    const source = detail.interactions.find(item => item.id === entry.sourceInteractionId);
+    expect(fixture.nativeProductResultBound).toBe(false);
+    expect(entry.record.lifecycle).toBe("succeeded");
+    expect(entry.resultInteractionId).toBeNull();
+    expect(detail.actionInvocations).toEqual([]);
+    const state = { ...productState([detail.thread], detail.interactions), importedInvocationHistory: detail.importedInvocationHistory };
+    requestImplementation = vi.fn(async path => {
+      if (path === `/api/threads/${detail.thread.id}`) return detail;
+      if (path.startsWith(`/api/state?threadId=${detail.thread.id}`)) return state;
+      if (path.endsWith(`/layers/${sourceLayer.layer.id}`)) return sourceLayer;
+      throw new Error(`Unexpected execution or synthetic request: ${path}`);
+    });
+    const controller = await loadModules();
+    await controller.loadThread(detail.thread.id);
+    controller.viewState.mainView = "thread";
+    controller.selectTurnById(source.id);
+    controller.replaceCurrentSelection(entry.sourceNodeId);
+    const expected = `current:${entry.record.id}`;
+    requestImplementation.mockClear();
+    expect(await controller.navigateImportedInvocationHistory(entry)).toBe(true);
+    const expectReturned = () => {
+      expect(controller.viewState.currentInteractionId).toBe(expected);
+      expect(controller.appState.visibleLayer.layer.id).toBe(entry.record.returnedLayerId);
+      expect(controller.appState.interactions.find(item => item.id === expected)).toMatchObject({ inertInvocationCurrent: true, completionStatus: "accepted", invocationSourceInteractionId: source.id });
+      expect(controller.viewState.invocationOrigin).toMatchObject({ kind: "imported", sourceNodeId: String(entry.sourceNodeId), actionId: String(entry.sourceActionId), presentingLayerId: String(entry.presentingLayerId), label: "Source" });
+    };
+    expectReturned();
+    await expect(controller.submitInteraction("Do not launch", { familyId: 1 })).rejects.toThrow("read only");
+    expect(await controller.invokeAction(sourceLayer.actions[0])).toBeNull();
+    expect(requestImplementation).not.toHaveBeenCalled();
+    await controller.refreshState(detail.thread.id);
+    expectReturned();
+    requestImplementation.mockClear();
+    expect(await controller.navigateLayer(null, { invocationOrigin: true })).toBe(true);
+    expect(controller.viewState.currentInteractionId).toBe(source.id);
+    expect(controller.viewState.selectedNodeId).toBe(String(entry.sourceNodeId));
+    expect(controller.appState.visibleLayer.layer.id).toBe(sourceLayer.layer.id);
+    await controller.navigateHistory("back"); expectReturned();
+    await controller.navigateHistory("forward");
+    expect(controller.viewState.currentInteractionId).toBe(source.id);
+    expect(requestImplementation).not.toHaveBeenCalled();
+    expect(controller.appState.actionInvocations).toEqual([]);
+    expect(controller.appState.interactions.filter(item => typeof item.id === "number")).toEqual(detail.interactions);
+    const missingProductAssociation = { ...entry, resultInteractionId: 999 };
+    controller.appState.importedInvocationHistory = [missingProductAssociation];
+    expect(await controller.navigateImportedInvocationHistory(missingProductAssociation)).toBe(false);
+  });
+
+  it.each(["stopped", "succeeded", "native", "native-changed", "native-missing"])("retains the exact source occurrence for inert %s history through refresh, source, Back and Forward", async (kind) => {
+    const isNative = kind.startsWith("native");
+    const root = rootLayer(7, 22);
+    root.layer.state = "accepted"; root.nodes[0].state = "accepted";
+    root.nodes[0].title = "Plan a trip";
+    const invoke = { id: 6, sourceNodeId: 22, sourceLayerId: 7, kind: "invoke", state: "accepted", label: "Build itinerary" };
+    const expand = { id: 60, sourceNodeId: 22, kind: "navigate", state: "accepted", relation: "reference", targetLayerId: 9, label: "Second occurrence" };
+    root.actions = [invoke, expand];
+    const presenting = { ...root, layer: { id: 9, state: "accepted" }, actions: [invoke] };
+    const source = { ...interaction(1, 10, root), graphNodeId: 50 };
+    const thread = { id: 10, title: "Exact inert origin", imported: !isNative };
+    const currentLayer = { layer: { id: "layer:current", state: "accepted" }, nodes: [{ id: "node:current", state: "accepted", title: "Lisbon itinerary" }], edges: [], actions: [] };
+    const returned = interaction(2, 10, rootLayer(8, 23), 2);
+    const entry = { inert: true, threadId: 10, sourceInteractionId: 1, sourceNodeId: 22, sourceActionId: 6, presentingLayerId: 9,
+      resultInteractionId: kind === "succeeded" ? 2 : null, record: { id: "invocation:history", childInteractionNodeId: "node:child", lifecycle: kind,
+        source: { actionId: "action:invoke", layerId: "layer:definition", presentingLayerId: "layer:presenting", label: "Build itinerary" }, arguments: [],
+        currentLayerId: "layer:current", current: kind === "succeeded" ? null : { rootLayerId: "layer:current", layers: [currentLayer] } } };
+    const nativeLayer = { ...currentLayer, layer: { id: 71, state: "accepted" }, nodes: [{ id: 72, state: "accepted", title: "Native retained Current" }] };
+    const call = { graphOnly: true, durable: true, invocationKey: "native-call", sourceInteractionId: 1, actionId: 6, presentingLayerId: 9,
+      resultInteractionId: null, resultCompletionStatus: "stopped", nativeInvocation: {
+        invocation: { id: 70, invocationKey: "native-call", sourceCompletionId: 50, sourceActionId: 6, parentNodeId: 22, childInteractionNodeId: 700,
+          actionSnapshot: { actionId: 6, sourceNodeId: 22, presentingLayerId: 9, label: "Build itinerary" }, state: { completionId: 700, currentLayerId: 71, lifecycle: "stopped" } },
+        sourceAction: invoke, parentNode: root.nodes[0], submittedInputs: [], current: { nodeId: 700, rootLayerId: 71, layers: [nativeLayer] },
+      } };
+    const state = { ...productState([thread], kind === "succeeded" ? [source, returned] : [source]),
+      actionInvocations: isNative ? [call] : [], importedInvocationHistory: isNative ? [] : [entry] };
+    requestImplementation = vi.fn(async path => {
+      if (path.startsWith("/api/state?threadId=10")) return state;
+      if (path === "/api/threads/10") return { thread, interactions: state.interactions,
+        actionInvocations: state.actionInvocations, importedInvocationHistory: state.importedInvocationHistory };
+      if (path.endsWith("/layers/7")) return root;
+      if (path.endsWith("/layers/9")) return presenting;
+      throw new Error(`Unexpected execution or synthetic request: ${path}`);
+    });
+    const controller = await loadModules();
+    await controller.loadThread(10);
+    controller.viewState.mainView = "thread";
+    controller.selectTurnById(1);
+    await controller.navigateLayer(9, { action: expand, sourceNode: root.nodes[0] });
+    const storage = new Map();
+    window.localStorage = { getItem: key => storage.get(key) ?? null, setItem: (key, value) => storage.set(key, value) };
+    const drafts = await import("../desktop/renderer/src/composer-drafts.js");
+    drafts.persistThreadFollowupDraft("10:1", "Unsent follow-up");
+    requestImplementation.mockClear();
+    expect(await (isNative ? controller.navigateInvocationCurrent(call) : controller.navigateImportedInvocationHistory(entry))).toBe(true);
+    const target = kind === "succeeded" ? 2 : isNative ? "native-current:70" : "current:invocation:history";
+    const expectOrigin = () => {
+      expect(controller.viewState.currentInteractionId).toBe(target);
+      expect(controller.viewState.invocationOrigin).toMatchObject({ kind: isNative ? "graph" : "imported", sourceNodeId: "22", actionId: "6", presentingLayerId: "9", label: "Plan a trip",
+        sourceEntry: { threadId: "10", turnId: "1", selectedNodeId: "22", navigationPath: [{ layerId: "7", viaActionId: null }, { layerId: "9", viaActionId: "60" }] } });
+    };
+    expectOrigin();
+    await expect(controller.submitInteraction("Unsent follow-up", { familyId: 1 })).rejects.toThrow("read only");
+    expect(await controller.invokeAction(invoke)).toBeNull();
+    expect(drafts.threadFollowupDraft("10:1")).toBe("Unsent follow-up");
+    expect(requestImplementation).not.toHaveBeenCalled();
+    await controller.refreshState(10);
+    expectOrigin();
+    requestImplementation.mockClear();
+    expect(await controller.navigateLayer(null, { invocationOrigin: true })).toBe(true);
+    expect(controller.viewState.currentInteractionId).toBe(1);
+    expect(controller.appState.visibleLayer.layer.id).toBe(9);
+    expect(controller.viewState.selectedNodeId).toBe("22");
+    await controller.navigateHistory("back"); expectOrigin();
+    await controller.navigateHistory("back");
+    expect(controller.viewState.currentInteractionId).toBe(1);
+    await controller.navigateHistory("forward"); expectOrigin();
+    await controller.navigateHistory("forward");
+    expect(controller.appState.visibleLayer.layer.id).toBe(9);
+    expect(drafts.threadFollowupDraft("10:1")).toBe("Unsent follow-up");
+    expect(requestImplementation).not.toHaveBeenCalled();
+    expect(controller.appState.actionInvocations).toHaveLength(isNative ? 1 : 0);
+    if (kind === "native-changed" || kind === "native-missing") {
+      await controller.navigateHistory("back"); expectOrigin();
+      const later = interaction(9, 10, rootLayer(909, 919), 9);
+      state.interactions = [source, later];
+      const updated = structuredClone(call);
+      updated.nativeInvocation.invocation.state.currentLayerId = 77;
+      state.actionInvocations = kind === "native-missing" ? [] : [updated];
+      await controller.refreshState(10);
+      expect(controller.viewState.currentInteractionId).toBe(1);
+      expect(controller.appState.visibleLayer.layer.id).toBe(9);
+      expect(controller.viewState.selectedNodeId).toBe("22");
+      expect(controller.viewState.invocationOrigin).toBeNull();
+      expect(controller.viewState.layerPath.map(step => step.layerId)).toEqual([7, 9]);
+      expect(drafts.threadFollowupDraft("10:1")).toBe("Unsent follow-up");
+      expect(controller.appState.interactions.some(item => item.id === "native-current:70")).toBe(false);
+      await expect(controller.navigateHistory("back")).rejects.toThrow("turn is unavailable");
+      expect(requestImplementation.mock.calls.every(([path]) => !path.includes("native-current"))).toBe(true);
+    }
+  });
+
+  it("reads imported Current and restores its local history without native requests or Invoke", async () => {
+    const sourceRoot = rootLayer(7, 22);
+    sourceRoot.layer.state = "accepted";
+    Object.assign(sourceRoot.nodes[0], { state: "accepted", kind: "concept", icon: "box", detail: "Source" });
+    sourceRoot.actions.push({ id: 41, kind: "invoke", sourceNodeId: 22, sourceLayerId: 7,
+      interactionText: "Explore", label: "Explore", state: "accepted", variant: "pill", inputActionIds: [], reusable: true });
+    const source = interaction(1, 10, sourceRoot);
+    const imported = { id: 10, title: "Inert imported call", imported: true };
+    const currentLayer = { layer: { id: "layer:current" }, nodes: [{ id: "node:current", title: "Current draft", detail: "Read only" }], edges: [],
+      actions: [{ id: "action:detail", sourceNodeId: "node:current", kind: "navigate", relation: "reference", label: "Detail", targetLayerId: "layer:detail" }] };
+    const detailLayer = { layer: { id: "layer:detail" }, nodes: [{ id: "node:detail", title: "Current detail", detail: "Read only" }], edges: [], actions: [] };
+    const entry = { inert: true, threadId: 10, sourceInteractionId: 1, sourceNodeId: 22, sourceActionId: 41, presentingLayerId: 7, resultInteractionId: null,
+      record: { id: "invocation:history", childInteractionNodeId: "node:child", lifecycle: "stopped", currentLayerId: "layer:current", returnedLayerId: null,
+        source: { interactionNodeId: "node:source", actionId: "action:explore", parentNodeId: "node:source-parent",
+          layerId: "layer:source", presentingLayerId: "layer:source", captureState: "accepted", instruction: "Explore", label: "Explore",
+          description: null, icon: null, iconAsset: null, variant: "pill", inputActionIds: [], inputBindingsDefined: true,
+          reusable: true, parentTitle: "Node 22", parentDetail: "Source", state: "accepted" },
+        arguments: [], safeReason: "Stopped", current: { rootLayerId: "layer:current", layers: [currentLayer, detailLayer] } } };
+    const agentResult = interaction(2, 10, rootLayer(8, 23), 2);
+    const agentHistory = { ...entry, resultInteractionId: 2, record: { ...entry.record, id: "invocation:agent", activator: "agent", lifecycle: "succeeded", current: null } };
+    const state = { ...productState([imported], [source, agentResult]), importedInvocationHistory: [entry, agentHistory] };
+    requestImplementation = vi.fn(async path => {
+      if (path.startsWith("/api/state?threadId=10")) return state;
+      if (path.endsWith("/layers/7")) return sourceRoot;
+      throw new Error(`Unexpected native request: ${path}`);
+    });
+    const controller = await loadModules();
+    await controller.loadThread(10);
+    controller.viewState.mainView = "thread";
+    requestImplementation.mockClear();
+    expect(await controller.navigateImportedInvocationHistory(entry)).toBe(true);
+    expect(controller.viewState.currentInteractionId).toBe("current:invocation:history");
+    expect(controller.appState.status).toBe("stopped");
+    expect(controller.appState.actionInvocations).toEqual([]);
+    expect(humanTurns(controller.appState, imported).map(turn => turn.id)).toEqual([1]);
+    expect(String(location.href)).not.toContain("current%3A");
+    requestImplementation.mockClear();
+    await controller.refreshState(10);
+    expect(controller.viewState.currentInteractionId).toBe("current:invocation:history");
+    expect(controller.appState.visibleLayer.layer.id).toBe("layer:current");
+    expect(humanTurns(controller.appState, imported).map(turn => turn.id)).toEqual([1]);
+    expect(requestImplementation.mock.calls.every(([path]) => path.startsWith("/api/state?threadId=10") && !path.includes("current%3A"))).toBe(true);
+    requestImplementation.mockClear();
+    const currentAction = controller.appState.actions[0];
+    expect(await controller.navigateLayer("layer:detail", { action: currentAction, sourceNode: currentLayer.nodes[0] })).toBe(true);
+    expect(await controller.navigateLayer("layer:unknown")).toBe(false);
+    await controller.navigateHistory("back");
+    expect(controller.appState.visibleLayer.layer.id).toBe("layer:current");
+    await controller.navigateHistory("back");
+    expect(controller.viewState.currentInteractionId).toBe(1);
+    await controller.navigateHistory("forward");
+    expect(controller.appState.visibleLayer.layer.id).toBe("layer:current");
+    await controller.navigateHistory("forward");
+    expect(controller.appState.visibleLayer.layer.id).toBe("layer:detail");
+    expect(await controller.invokeAction({ id: "action:mutation", kind: "invoke" })).toBeNull();
+    expect(await controller.navigateImportedInvocationHistory({ record: { id: "invocation:forged" } })).toBe(false);
+    expect(requestImplementation).not.toHaveBeenCalled();
+  });
+
+  it.each([false, "reservation", "not_started", "submitted", "failed"])("recovers submitted invocation without replacing a durable key (durable=%s)", async (durable) => {
     vi.useFakeTimers();
     try {
       const root = rootLayer(101, 11);
+      root.layer.state = "accepted"; root.nodes[0].state = "accepted";
       const action = {
+        state: "accepted",
         id: 777,
         kind: "invoke",
         sourceNodeId: 11,
         targetLayerId: null,
         interactionText: "Resume the leased result",
+        ...(durable ? { reusable: false } : {}),
       };
-      root.actions = [action];
+      const navigate = { id: 778, kind: "navigate", state: "accepted", sourceNodeId: 11, targetLayerId: 202 };
+      root.actions = [action, navigate];
+      const original = { ...root, layer: { ...root.layer, id: 202 }, actions: [action] };
       const source = interaction(1, 10, root);
       const submitted = productState([{ id: 10, title: "Recovery source" }], [source]);
       submitted.actionInvocations = [{
-        sourceInteractionId: 99,
+        sourceInteractionId: durable ? 1 : 99,
+        ...(durable ? { durable: durable !== "reservation", reusable: false, invocationKey: "saved-gesture", preparationRecoverable: true, presentingLayerId: 202 } : {}),
         actionId: 777,
         resultInteractionId: 100,
-        resultCompletionStatus: "submitted",
+        resultCompletionStatus: durable === "reservation" ? "not_started" : durable || "submitted",
       }];
       const running = productState([{ id: 10, title: "Recovery source" }], [source]);
       running.actionInvocations = [{
@@ -1072,8 +1469,10 @@ describe("workspace navigation integration", () => {
       requestImplementation = vi.fn(async (path, options) => {
         if (path.startsWith("/api/state?threadId=10")) return retried ? running : submitted;
         if (path.endsWith("/layers/101")) return root;
+        if (path.endsWith("/layers/202")) return original;
+        if (path === "/api/threads/10") return { invocationInventoryAvailable: true, thread: submitted.threads[0], interactions: [source], actionInvocations: submitted.actionInvocations };
         if (path === "/api/threads/10/interactions/1/actions/777/invoke") {
-          expect(options).toEqual({ method: "POST" });
+          expect(options).toEqual({ method: "POST", headers: { "Idempotency-Key": durable ? "saved-gesture" : invocationKey }, body: JSON.stringify({ presentingLayerId: durable ? 202 : 101 }) });
           retried = true;
           return {
             created: false,
@@ -1086,12 +1485,16 @@ describe("workspace navigation integration", () => {
       const controller = await loadModules();
 
       await controller.loadThread(10);
-      await controller.invokeAction(action);
+      if (durable) {
+        await controller.navigateLayer(202, { action: navigate, sourceNode: root.nodes[0] });
+        await controller.navigateLayer(101, { restore: true, pathIndex: 0 });
+      }
+      await controller.invokeAction(action, { inputDraftRevision: durable ? 999 : undefined });
 
       expect(retried).toBe(true);
       expect(requestImplementation).toHaveBeenCalledWith(
         "/api/threads/10/interactions/1/actions/777/invoke",
-        { method: "POST" },
+        { method: "POST", headers: { "Idempotency-Key": durable ? "saved-gesture" : invocationKey }, body: JSON.stringify({ presentingLayerId: durable ? 202 : 101 }) },
       );
       expect(controller.appState.actionInvocations[0].resultCompletionStatus).toBe("running");
       expect(controller.viewState).toMatchObject({ currentThreadId: 10, currentInteractionId: 1 });
@@ -1142,7 +1545,7 @@ describe("workspace navigation integration", () => {
         if (path.startsWith("/api/state?threadId=10")) return invoked ? afterInvoke : beforeInvoke;
         if (path.endsWith("/layers/101")) return root;
         if (path === "/api/threads/10/interactions/1/actions/777/invoke") {
-          expect(options).toEqual({ method: "POST" });
+          expect(options).toEqual({ method: "POST", headers: { "Idempotency-Key": invocationKey }, body: JSON.stringify({ presentingLayerId: 101 }) });
           invoked = true;
           return {
             created: true,
@@ -1353,6 +1756,16 @@ describe("workspace navigation integration", () => {
       if (path.endsWith("/layers/102")) return child;
       throw new Error(`Unexpected request: ${path}`);
     });
+    // Native keys and genuine Product result IDs are separate namespaces.
+    const calls = [
+      { sourceInteractionId: 1, actionId: 502, resultInteractionId: 42, durable: true, invocationKey: "human-key" },
+      { sourceInteractionId: 1, actionId: 502, resultInteractionId: null, durable: true, graphOnly: true, invocationKey: "42" },
+    ];
+    state.actionInvocations = calls;
+    const originalRequest = requestImplementation;
+    requestImplementation = vi.fn(async (path, options) => path === "/api/threads/10"
+      ? { thread: state.threads[0], interactions: [turn], actionInvocations: calls, invocationInventoryAvailable: true }
+      : originalRequest(path, options));
     const controller = await loadModules();
     await controller.loadThread(10);
     await controller.navigateLayer(102, {
@@ -1367,20 +1780,22 @@ describe("workspace navigation integration", () => {
     await controller.navigateHistory(-1);
 
     expect(controller.appState.visibleLayer.layer.id).toBe(102);
+    expect(controller.appState.actionInvocations).toEqual(calls);
     expect(requestImplementation.mock.calls.filter(([path]) => path.endsWith("/layers/102")))
       .toHaveLength(2);
   });
 
-  it("rolls back the presentation without advancing the cursor when application fails", async () => {
+  it.each([true, false])("rolls back the presentation without advancing the cursor when application fails (inventory=%s)", async (priorAvailable) => {
     const turn1 = interaction(1, 10, rootLayer(101, 11));
     const turn2 = interaction(2, 20, rootLayer(201, 21));
     const state1 = productState([{ id: 10, title: "First" }, { id: 20, title: "Second" }], [turn1]);
     const state2 = productState([{ id: 10, title: "First" }, { id: 20, title: "Second" }], [turn2]);
+    state2.invocationInventoryAvailable = priorAvailable;
     requestImplementation = vi.fn(async (path) => {
       if (path.startsWith("/api/state?threadId=10")) return state1;
       if (path.startsWith("/api/state?threadId=20")) return state2;
       if (path === "/api/threads/10") {
-        return { thread: state1.threads[0], interactions: [turn1], actionInvocations: [] };
+        return { thread: state1.threads[0], interactions: [turn1], actionInvocations: [], invocationInventoryAvailable: !priorAvailable };
       }
       throw new Error(`Unexpected request: ${path}`);
     });
@@ -1393,6 +1808,7 @@ describe("workspace navigation integration", () => {
     await expect(controller.navigateHistory(-1, { beforeCommit }))
       .rejects.toThrow("injected render failure");
     expect(beforeCommit).not.toHaveBeenCalled();
+    expect(controller.appState.invocationInventoryAvailable).toBe(priorAvailable);
 
     expect(controller.viewState).toMatchObject({ currentThreadId: 20, currentInteractionId: 2 });
     expect(controller.getNavigationHistory()).toMatchObject({
@@ -1741,7 +2157,7 @@ it.each(["failed", "stopped", "running", "pending"])("navigates to a local %s in
   const state = productState([{ id: 10, title: "Thread" }], [accepted, unfinished]);
   requestImplementation = vi.fn(async (path) => {
     if (path.startsWith("/api/state?threadId=10")) return state;
-    if (path === "/api/threads/10") return { thread: state.threads[0], interactions: state.interactions, actionInvocations: [] };
+    if (path === "/api/threads/10") return { invocationInventoryAvailable: state.invocationInventoryAvailable, thread: state.threads[0], interactions: state.interactions, actionInvocations: [] };
     throw new Error(`Unexpected request: ${path}`);
   });
   const controller = await loadModules();

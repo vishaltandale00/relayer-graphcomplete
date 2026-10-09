@@ -1,0 +1,355 @@
+{
+  "archiveSha256": "0f7811d118bb29ebcb6e66213cb2aee9a4f30d06d8cecc5f610f953355b5e1a4",
+  "detail": {
+    "actionInvocations": [],
+    "approvals": [],
+    "conversationCompatibility": {
+      "harnessId": "codex-basic",
+      "message": "This conversation's original execution route cannot be verified. Its history is preserved, but continuing it is unavailable.",
+      "providerId": null,
+      "status": "blocked",
+      "threadId": 2
+    },
+    "importedInvocationHistory": [
+      {
+        "inert": true,
+        "presentingLayerId": 3,
+        "record": {
+          "activator": "agent",
+          "arguments": [],
+          "childInteractionNodeId": "node:4",
+          "current": {
+            "layers": [
+              {
+                "actions": [],
+                "edges": [],
+                "layer": {
+                  "clientKey": "current-answer",
+                  "defaultNodeId": "node:3",
+                  "edges": [],
+                  "id": "layer:2",
+                  "layout": {
+                    "edgeShape": "default",
+                    "placements": [
+                      {
+                        "nodeId": "node:3",
+                        "x": 0.5,
+                        "y": 0.5
+                      }
+                    ],
+                    "version": 1
+                  },
+                  "nodes": [
+                    "node:3"
+                  ],
+                  "state": "accepted"
+                },
+                "nodes": [
+                  {
+                    "authoredDetailAssets": [
+                      {
+                        "assetId": "current-icon",
+                        "byteLength": 93,
+                        "digestSha256": "f86dae5ef0366e833baf5b4d787721acf63f21b6758883fca0ecf8b47635dc08",
+                        "mediaType": "image/svg+xml",
+                        "provenance": {
+                          "fileName": "current.svg",
+                          "source": "user"
+                        }
+                      }
+                    ],
+                    "clientKey": "current-answer",
+                    "detail": "Still working",
+                    "icon": {
+                      "assetId": "current-icon",
+                      "digestSha256": "f86dae5ef0366e833baf5b4d787721acf63f21b6758883fca0ecf8b47635dc08",
+                      "kind": "image",
+                      "mediaType": "image/svg+xml"
+                    },
+                    "id": "node:3",
+                    "kind": "concept",
+                    "state": "accepted",
+                    "title": "Current contribution"
+                  }
+                ]
+              }
+            ],
+            "rootLayerId": "layer:2"
+          },
+          "currentLayerId": "layer:2",
+          "headRevision": 2,
+          "id": "invocation:1",
+          "lifecycle": "succeeded",
+          "resultTurnId": null,
+          "returnedLayerId": "layer:2",
+          "safeReason": null,
+          "schemaVersion": 1,
+          "source": {
+            "actionId": "action:2",
+            "captureState": "accepted",
+            "description": null,
+            "icon": null,
+            "iconAsset": null,
+            "inputActionIds": [],
+            "inputBindingsDefined": false,
+            "instruction": "Child work",
+            "interactionNodeId": "node:1",
+            "label": "Investigate",
+            "layerId": "layer:1",
+            "parentDetail": "Source",
+            "parentNodeId": "node:2",
+            "parentTitle": "Source",
+            "presentingLayerId": "layer:1",
+            "reusable": true,
+            "state": "accepted",
+            "variant": "pill"
+          }
+        },
+        "resultInteractionId": null,
+        "sourceActionId": 6,
+        "sourceInteractionId": 3,
+        "sourceNodeId": 6,
+        "threadId": 2,
+        "visualAssetContents": [
+          {
+            "byteLength": 93,
+            "contentBase64": "PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA4IDgiPjxjaXJjbGUgY3g9IjQiIGN5PSI0IiByPSIzIi8+PC9zdmc+",
+            "digestSha256": "f86dae5ef0366e833baf5b4d787721acf63f21b6758883fca0ecf8b47635dc08",
+            "mediaType": "image/svg+xml"
+          }
+        ]
+      }
+    ],
+    "interactions": [
+      {
+        "completionError": null,
+        "completionOutput": {
+          "nodeId": 5,
+          "rootAction": {
+            "clientKey": "root",
+            "description": null,
+            "icon": null,
+            "id": 5,
+            "interactionText": null,
+            "kind": "navigate",
+            "label": "Response",
+            "relation": "expand",
+            "sourceLayerId": null,
+            "sourceNodeId": 5,
+            "state": "accepted",
+            "targetLayerId": 3,
+            "variant": "pill"
+          },
+          "rootLayer": {
+            "actions": [
+              {
+                "clientKey": "child",
+                "description": null,
+                "icon": null,
+                "id": 6,
+                "interactionText": "Child work",
+                "kind": "invoke",
+                "label": "Investigate",
+                "relation": null,
+                "reusable": true,
+                "sourceLayerClientKey": "current",
+                "sourceLayerId": 3,
+                "sourceNodeId": 6,
+                "state": "accepted",
+                "targetLayerId": null,
+                "variant": "pill"
+              },
+              {
+                "clientKey": "source-current",
+                "description": null,
+                "icon": null,
+                "id": 7,
+                "interactionText": null,
+                "kind": "navigate",
+                "label": "Current contribution",
+                "relation": "reference",
+                "sourceLayerClientKey": "current",
+                "sourceLayerId": 3,
+                "sourceNodeId": 6,
+                "state": "accepted",
+                "targetLayerId": 4,
+                "variant": "pill"
+              }
+            ],
+            "edges": [],
+            "layer": {
+              "clientKey": "current",
+              "edges": [],
+              "id": 3,
+              "layout": {
+                "edgeShape": "default",
+                "placements": [
+                  {
+                    "nodeId": 6,
+                    "x": 0.5,
+                    "y": 0.5
+                  }
+                ],
+                "version": 1
+              },
+              "nodes": [
+                6
+              ],
+              "state": "accepted"
+            },
+            "nodes": [
+              {
+                "clientKey": "source",
+                "detail": "Source",
+                "icon": "box",
+                "id": 6,
+                "kind": "concept",
+                "leasedActionId": null,
+                "state": "accepted",
+                "title": "Source"
+              }
+            ]
+          }
+        },
+        "completionStatus": "accepted",
+        "contexts": [],
+        "createdAt": "1791498110580",
+        "effectiveExecutionDigest": null,
+        "effectivePermissionReceipt": null,
+        "graphNodeId": 5,
+        "harnessConfigurationDigest": null,
+        "harnessConfigurationName": null,
+        "id": 3,
+        "latestAttempt": null,
+        "modelSelection": null,
+        "permissionProfileId": "auto",
+        "projectionFresh": true,
+        "sequence": 1,
+        "stopError": null,
+        "stopRequested": false,
+        "submittedInputs": [],
+        "text": "Root",
+        "threadId": 2
+      },
+      {
+        "completionError": null,
+        "completionOutput": null,
+        "completionStatus": "not_started",
+        "contexts": [],
+        "createdAt": "1791498110642",
+        "effectiveExecutionDigest": null,
+        "effectivePermissionReceipt": null,
+        "graphNodeId": null,
+        "harnessConfigurationDigest": null,
+        "harnessConfigurationName": null,
+        "id": 4,
+        "latestAttempt": null,
+        "modelSelection": null,
+        "permissionProfileId": "auto",
+        "projectionFresh": true,
+        "sequence": 2,
+        "stopError": null,
+        "stopRequested": false,
+        "submittedInputs": [],
+        "text": "Child work",
+        "threadId": 2
+      }
+    ],
+    "invocationInventoryAvailable": true,
+    "thread": {
+      "activity": "running",
+      "archiveBlocked": true,
+      "archivedAt": null,
+      "checkoutContext": null,
+      "createdAt": "1791498110580",
+      "groupedProjectId": null,
+      "harnessConfigurationName": "codex-basic",
+      "harnessId": "codex-basic",
+      "icon": null,
+      "id": 2,
+      "imported": true,
+      "permissionProfileId": "auto",
+      "projectId": null,
+      "rootInteractionId": 3,
+      "title": "Root",
+      "updatedAt": "1791498110642",
+      "workingDirectory": null
+    }
+  },
+  "nativeProductResultBound": false,
+  "sourceLayer": {
+    "actions": [
+      {
+        "clientKey": "child",
+        "description": null,
+        "icon": null,
+        "id": 6,
+        "interactionText": "Child work",
+        "kind": "invoke",
+        "label": "Investigate",
+        "relation": null,
+        "reusable": true,
+        "sourceLayerClientKey": "current",
+        "sourceLayerId": 3,
+        "sourceNodeId": 6,
+        "state": "accepted",
+        "targetLayerId": null,
+        "variant": "pill"
+      },
+      {
+        "clientKey": "source-current",
+        "description": null,
+        "icon": null,
+        "id": 7,
+        "interactionText": null,
+        "kind": "navigate",
+        "label": "Current contribution",
+        "relation": "reference",
+        "sourceLayerClientKey": "current",
+        "sourceLayerId": 3,
+        "sourceNodeId": 6,
+        "state": "accepted",
+        "targetLayerId": 4,
+        "variant": "pill"
+      }
+    ],
+    "edges": [],
+    "layer": {
+      "clientKey": "current",
+      "edges": [],
+      "id": 3,
+      "layout": {
+        "edgeShape": "default",
+        "placements": [
+          {
+            "nodeId": 6,
+            "x": 0.5,
+            "y": 0.5
+          }
+        ],
+        "version": 1
+      },
+      "nodes": [
+        6
+      ],
+      "state": "accepted"
+    },
+    "nodes": [
+      {
+        "clientKey": "source",
+        "detail": "Source",
+        "icon": "box",
+        "id": 6,
+        "kind": "concept",
+        "leasedActionId": null,
+        "state": "accepted",
+        "title": "Source"
+      }
+    ]
+  },
+  "provenance": {
+    "producer": "imported_returned_call_without_product_result_is_read_only",
+    "boundary": "Actual native Succeeded call exported and reimported with no Product result binding; API detail/source Layer fixture, no inference.",
+    "baseCommit": "f10b853ccfce143b10da0afc25897f0df1dd6014"
+  }
+}

@@ -1,0 +1,129 @@
+{
+  "schemaVersion": 1,
+  "testedSource": {
+    "baseCommit": "b39604ccc0d6bd43f70a35e77b14940c549f1459",
+    "files": [
+      {
+        "path": "packages/harness-host/src/implementations/codex-basic.ts",
+        "sha256": "c9302d94f5924976df66065e67da958c712206e17c61e8dccb0e80c762a5c1af"
+      },
+      {
+        "path": "packages/harness-host/src/implementations/graph-presentation-guidance.ts",
+        "sha256": "7f0534a2b6c73f9acb56c64eeedd16408bd4dc724a335df57d9194f18b71a0f3"
+      },
+      {
+        "path": "packages/harness-host/test/codex-basic.test.ts",
+        "sha256": "3af21ff69e62e9eb0e68fbc9bb2295344bf0c8c6e4145d5c71f9014593c4e1e6"
+      },
+      {
+        "path": "test/recursive-complete-e2e.test.mjs",
+        "sha256": "a4fd35c261deffcaedb2a4df77d2cab25c8e2001f660adb31f83b7b769cbf523"
+      },
+      {
+        "path": "docs/prd/index.html",
+        "sha256": "89f387ee64646f1c383dab68d1889eaed399e874b889814967b9c53f5adb649e"
+      }
+    ],
+    "digest": "80f6f9b25a4bb0e9bb295f63da68e5d942a426853d2be111c4ca68cad33a1b11"
+  },
+  "requiredPlan": [
+    "npm run check",
+    "npm run build",
+    "npm run test:eval-compiled-runtime"
+  ],
+  "results": [
+    {
+      "command": "npx vitest run test/recursive-complete-e2e.test.mjs test/desktop-telemetry-module-inventory.test.mjs",
+      "exitCode": 0,
+      "passed": 7,
+      "log": "recipe-final.log"
+    },
+    {
+      "command": "npm run check",
+      "exitCode": 0,
+      "log": "check-final.log",
+      "innerResults": {
+        "rustWorkspace": "passed",
+        "graphCrashReconciliation": "passed",
+        "packagesAndTypes": "passed",
+        "vitest": {
+          "passed": 3843,
+          "skipped": 3
+        },
+        "codexSecretBoundary": {
+          "passed": 2
+        },
+        "python": {
+          "passed": 77
+        },
+        "ladybugReceiptLint": "passed",
+        "prdReadability": "passed"
+      }
+    },
+    {
+      "command": "npm run build",
+      "exitCode": 0,
+      "log": "build-final.log",
+      "innerResults": "default-feature native runtime, root TypeScript and all four package builds completed"
+    },
+    {
+      "command": "npm run test:eval-compiled-runtime",
+      "exitCode": 0,
+      "log": "compiled-final.log",
+      "passed": 6
+    }
+  ],
+  "priorFailures": [
+    {
+      "log": "check.log",
+      "exitCode": 1,
+      "failed": 3,
+      "passed": 3840,
+      "skipped": 3,
+      "cause": "Both new recipe fixtures used a presentation-edit-authority read for test observation; one inventory fixture found stale generated output from a removed experimental module."
+    },
+    {
+      "log": "diagnose-recipe.log",
+      "exitCode": 1,
+      "failed": 3,
+      "passed": 4,
+      "cause": "Targeted reproduction of the same observation-authority and stale-output failures."
+    },
+    {
+      "log": "recipe-fixed.log",
+      "exitCode": 1,
+      "failed": 2,
+      "passed": 5,
+      "cause": "Recipes accepted, but assertions expected an authoring key that compilation correctly replaces with a hashed mount identity."
+    }
+  ],
+  "repairs": "Observe accepted layers through normal graph.getLayer authority; verify compiled mount kinds and their accepted action identities; remove only obsolete generated module outputs. Production authority and recipe behavior were not weakened.",
+  "cache": {
+    "prebuiltLadybug": "Official verifier rejected Cargo.lock identity mismatch; rejected bundle was not adopted.",
+    "sealedRuntime": "No compatible local sealed artifact found.",
+    "fallback": "Private compiler-object cache clone with ordinary source-based Cargo verification/build. No cached test result accepted.",
+    "reasonLog": "cache-verification.log"
+  },
+  "logSha256": {
+    "check.log": "f9c7b611954a37f51f596a6026d49c03f02a6670941505faeddaa99f74e953ac",
+    "diagnose-recipe.log": "9123b771777ad7dba96a8f8ef97407e208c87c5b89e6ad3b3d205498671c7c50",
+    "recipe-fixed.log": "46a2b8b742ca0b0054d7e5b25c132d6d14006aeafcc38394ab6e3bd2156b3465",
+    "recipe-final.log": "013616b4a73622c385f14c024dac609c158f89cb26f486954306a92d2564b81e",
+    "check-final.log": "e281a4c9e0abb66d487f266e4c5164518ff225a4ed520669f079fb49fa9d7b65",
+    "build-final.log": "5bd98fdbad913327b001a3317509a65f71f17d80ef0db3e775ad8ccc94c4a9a0",
+    "compiled-final.log": "caf61a0165c4823b73587f12426f0198bf362dfcc87ad5c7bd3153310ff30863",
+    "cache-verification.log": "ff7fc4fdfb7e4a5a9d1ce7758f6f4284d515724db58db174f26a7f72aa715596"
+  },
+  "limitations": [
+    "Live pilot binds older source 00148dd59e7338f046c46079d5988f1b4220b11f, not this adoption source.",
+    "No new paid inference or release proof was run.",
+    "Local logs are preserved in the managed worktree; these hashes do not make them hosted CI proof."
+  ],
+  "adversarialReview": {
+    "reviewer": "design_authority_review",
+    "sourceDigest": "80f6f9b25a4bb0e9bb295f63da68e5d942a426853d2be111c4ca68cad33a1b11",
+    "scope": "Codex default prompt delivery; provider isolation; scoped recipe controls, layouts, prior-current navigation and authority; checkpoint mapping; sanitized pilot provenance; final deterministic proof",
+    "verdict": "PASS for exact source, checkpoint mapping and retained deterministic verification evidence; no live quality or causal certification",
+    "unresolvedFindings": []
+  }
+}

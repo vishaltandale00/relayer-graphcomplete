@@ -121,9 +121,20 @@ describe("first-message composer integration", () => {
       expect(trace.personalPresentationVersionId).toBe(oldPresentation.attachment.versionInteractionNodeId);
       expect(trace.personalPresentationVersionKey).toBe(previousVersion);
     }
-    const expectedSourceOutput = structuredClone(source.completionOutput);
-    expectedSourceOutput.rootLayer.actions.find(({ id }) => id === invoke.id).targetLayerId = child.completionOutput.rootLayer.layer.id;
-    expect(invokedThread.interactions.find(({ id }) => id === source.id).completionOutput).toEqual(expectedSourceOutput);
+    const refreshedSource = invokedThread.interactions.find(({ id }) => id === source.id).completionOutput;
+    const originalActionIds = new Set(source.completionOutput.rootLayer.actions.map(({ id }) => id));
+    expect({ ...refreshedSource, rootLayer: { ...refreshedSource.rootLayer,
+      actions: refreshedSource.rootLayer.actions.filter(({ id }) => originalActionIds.has(id)),
+    } }).toEqual(source.completionOutput);
+    expect(refreshedSource.rootLayer.actions.filter(({ id }) => !originalActionIds.has(id))).toEqual([
+      expect.objectContaining({ kind: "navigate", relation: "reference", sourceNodeId: invoke.sourceNodeId,
+        targetLayerId: child.completionOutput.rootLayer.layer.id, state: "accepted" }),
+    ]);
+    expect(invokedThread.actionInvocations).toContainEqual(expect.objectContaining({
+      durable: true, reusable: false, sourceInteractionId: source.id, actionId: invoke.id,
+      resultInteractionId: child.id, resultCompletionStatus: "accepted",
+    }));
+    expect(child.completionOutput.rootLayer.layer.id).not.toBe(source.completionOutput.rootLayer.layer.id);
     const newThread = await createThread(after.session);
     const newAccepted = await waitForAcceptedThread(after.session, newThread.id);
     const newPresentation = observed.find(({ graphNodeId }) => graphNodeId === newAccepted.interactions[0].graphNodeId).presentation;
@@ -276,7 +287,8 @@ describe("first-message composer integration", () => {
     });
 
     const invocationPath = `/api/threads/${createdThreads[0]}/interactions/${source.id}/actions/${invoke.id}/invoke`;
-    const invoked = await productRequest(productSession, invocationPath, { method: "POST" });
+    const callHeaders = { "Idempotency-Key": "first-message-invoke" };
+    const invoked = await productRequest(productSession, invocationPath, { method: "POST", headers: callHeaders });
     expect(invoked).toMatchObject({
       invocation: {
         sourceInteractionId: source.id,
@@ -300,9 +312,13 @@ describe("first-message composer integration", () => {
     ]);
     const refreshedInvoke = completed.interactions[0].completionOutput.rootLayer.actions
       .find((action) => action.id === invoke.id);
-    expect(refreshedInvoke.targetLayerId).toBe(result.completionOutput.rootLayer.layer.id);
+    expect(refreshedInvoke).toEqual(invoke);
+    expect(completed.actionInvocations).toContainEqual(expect.objectContaining({
+      durable: true, reusable: false, invocationKey: "first-message-invoke", sourceInteractionId: source.id,
+      actionId: invoke.id, resultInteractionId: result.id, resultCompletionStatus: "accepted",
+    }));
 
-    const replay = await productRequest(productSession, invocationPath, { method: "POST" });
+    const replay = await productRequest(productSession, invocationPath, { method: "POST", headers: callHeaders });
     expect(replay.invocation.resultInteractionId).toBe(result.id);
     expect((await productRequest(productSession, `/api/threads/${createdThreads[0]}`)).interactions).toHaveLength(2);
   }, 15_000);
