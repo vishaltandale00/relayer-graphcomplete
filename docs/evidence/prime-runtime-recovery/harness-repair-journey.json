@@ -11,5 +11,7 @@
   ],
   "attempts": 2,
   "composerAdmitted": true,
-  "defaultsPreserved": true
+  "defaultsPreserved": true,
+  "keyboardRepair": true,
+  "focusPreserved": true
 }

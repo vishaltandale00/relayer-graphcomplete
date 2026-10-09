@@ -38,7 +38,7 @@ export function createProviderComposition({
         connected: snapshot.connected === true,
         generation: options?.connectionGeneration,
       });
-      providerDefinitions.catalogPublished(snapshot.providerId, { connected: snapshot.connected });
+      providerDefinitions.catalogPublished(snapshot.providerId, { connected: snapshot.connected, models: snapshot.models ?? [] });
       if (options?.reason === "explicit" && snapshot.connected === true) {
         await providerDefinitions.evaluateCatalogReadiness(
           snapshot.providerId,

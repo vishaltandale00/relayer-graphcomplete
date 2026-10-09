@@ -1,5 +1,5 @@
 {
-  "sha256": "c1267eef021cff013eabfa5d225f0cb9e91a8b245d1fe821672cc1f587d32c74",
+  "sha256": "5e3ae00f4f71a97e3665e18d100aa4f4024a403cc3397f3de25a9333c58da23e",
   "paths": [
     "crates/relayer-app-server/src/product/catalog.rs",
     "crates/relayer-app-server/src/storage/sqlite/catalog.rs",
@@ -13,6 +13,7 @@
     "desktop/main/services/harness-readiness.mjs",
     "desktop/renderer/src/harness-settings-model.js",
     "desktop/renderer/src/harness-settings.js",
+    "desktop/renderer/src/model-family-settings.js",
     "desktop/renderer/src/provider-ui.js",
     "docs/architecture.md",
     "docs/prd/index.html",
@@ -25,6 +26,8 @@
     "test/harness-readiness.test.mjs",
     "test/harness-settings-repair.test.mjs",
     "test/managed-runtime-promotion.test.mjs",
+    "test/model-availability-refresh.test.mjs",
+    "test/model-family-settings-refresh.test.mjs",
     "test/provider-composition.test.mjs",
     "test/provider-connection-generation.test.mjs",
     "test/provider-electron-evidence.test.mjs",

@@ -117,6 +117,7 @@ pub(crate) struct RuntimeProductHarness {
 pub(crate) struct HarnessReadinessProviderConnection {
     pub(crate) provider_id: ProviderId,
     pub(crate) generation: i64,
+    pub(crate) model_ids: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -126,7 +127,7 @@ pub(crate) struct HarnessRuntimeAvailabilityUpdate {
     pub(crate) configuration_digest: String,
     pub(crate) generation: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub(crate) provider_connection: Option<HarnessReadinessProviderConnection>,
+    pub(crate) provider_connections: Option<Vec<HarnessReadinessProviderConnection>>,
     pub(crate) available: bool,
     pub(crate) unavailable_reason: Option<UnavailableReason>,
 }

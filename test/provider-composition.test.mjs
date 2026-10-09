@@ -392,13 +392,14 @@ describe("injectable production provider composition", () => {
     expect(prepareRecipe).toHaveBeenCalledTimes(2);
     expect(prepareRecipe).toHaveBeenCalledWith("prime@0.8.1", expect.objectContaining({ signal: expect.any(AbortSignal) }));
     expect(prepareRecipe).toHaveBeenCalledWith("codex@0.147.0", expect.objectContaining({ signal: expect.any(AbortSignal) }));
-    expect(publishAvailability).toHaveBeenCalledOnce();
-    expect(publishAvailability).toHaveBeenCalledWith([{
+    expect(publishAvailability).toHaveBeenCalledTimes(2);
+    expect(publishAvailability).toHaveBeenNthCalledWith(1, [{
       harnessId: "codex-basic", configurationDigest: "sha256:codex-basic-upgraded",
-      generation: 1, available: true, unavailableReason: null, providerConnection: { providerId: "chatgpt", generation: 1 },
-    }, {
+      generation: 1, available: true, unavailableReason: null, providerConnections: [{ providerId: "chatgpt", generation: 1, modelIds: ["work-chatgpt"] }, { providerId: "openrouter", generation: 1, modelIds: ["work-openrouter"] }],
+    }], expect.objectContaining({ signal: expect.any(AbortSignal) }));
+    expect(publishAvailability).toHaveBeenNthCalledWith(2, [{
       harnessId: "prime-agent-basic", configurationDigest: "sha256:prime-agent-basic-upgraded",
-      generation: 1, available: true, unavailableReason: null, providerConnection: { providerId: "openrouter", generation: 1 },
+      generation: 1, available: true, unavailableReason: null, providerConnections: [{ providerId: "openrouter", generation: 1, modelIds: ["work-openrouter"] }],
     }], expect.objectContaining({ signal: expect.any(AbortSignal) }));
     expect(result.readyHarnessIds).toEqual(["codex-basic", "prime-agent-basic"]);
     // Both providers are its routes; the app-server test

@@ -130,6 +130,7 @@ export class ProviderDefinitionService {
     this.readinessAuthorizations = new Map();
     this.readinessTransitions = new Set();
     this.catalogConnections = new Map();
+    this.catalogEligibility = new Map();
     // Providers with a lifecycle write whose answer was lost. It may still commit on the app
     // server, so an advance in their generation proves nothing about a later write. A later
     // answered write that advances the generation clears it: every lost write carried an older
@@ -238,10 +239,16 @@ export class ProviderDefinitionService {
    * records the signed-out state, so provider access may resume. A connected one does not: its
    * discovery may have read the account before a sign-out whose own publish failed.
    */
-  catalogPublished(id, { connected } = {}) {
+  catalogPublished(id, { connected, models } = {}) {
+    const eligibility = models?.map(model => [model.id, model.visible !== false,
+      model.available !== false && model.availability !== "unavailable"]).sort(([a], [b]) => a.localeCompare(b));
+    const key = eligibility === undefined ? null : JSON.stringify(eligibility);
+    // Identical background refreshes must not starve a long first installation.
+    // Any changed model eligibility, or an unscoped callback, expires the old routes.
+    if (connected !== true || key === null || key !== this.catalogEligibility.get(id)) this.#invalidateReadiness(id);
+    this.catalogEligibility.set(id, key);
     this.catalogConnections.set(id, connected === true);
     if (connected !== true) {
-      this.#invalidateReadiness(id);
       this.unrecordedSignOuts.delete(id);
     }
   }

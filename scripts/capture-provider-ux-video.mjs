@@ -288,7 +288,8 @@ async function captureBrowserScene(url, frame, profile, width = 1280, { forcedCo
             if (value.result.value === true) return;
             await new Promise((done) => setTimeout(done, 50));
           }
-          throw new Error(`Repair journey did not reach: ${expression}`);
+          const diagnostic = await cdp.call("Runtime.evaluate", { expression: "JSON.stringify({busyFocus:window.__repairBusyFocused,active:document.activeElement?.outerHTML,repair:document.querySelector('[data-harness-repair]')?.outerHTML,toast:document.querySelector('#toast')?.textContent})", returnByValue: true });
+          throw new Error(`Repair journey did not reach: ${expression}: ${diagnostic.result.value}`);
         };
         await waitFor("document.querySelector('[data-harness-repair]')?.dataset.repairProvider === 'router'");
         const before = await cdp.call("Runtime.evaluate", {
@@ -303,12 +304,17 @@ async function captureBrowserScene(url, frame, profile, width = 1280, { forcedCo
         await cdp.call("Runtime.evaluate", { expression: "document.querySelector('[data-settings-tab=harnesses]').click()" });
         await waitFor("document.querySelector('[data-harness-repair]')?.dataset.repairProvider === 'router'");
         await record("missing");
-        await cdp.call("Runtime.evaluate", { expression: "document.querySelector('[data-harness-repair]').click()" });
-        await waitFor("document.querySelector('[data-harness-repair]')?.disabled === true");
-        await waitFor("document.querySelector('[data-harness-repair]')?.disabled === false && document.body.innerText.includes('Prime runtime setup failed. Try repair again.')");
+        await cdp.call("Runtime.evaluate", { expression: "window.__repairBusyFocused=[]; new MutationObserver(() => {const repair=document.querySelector('[data-harness-repair]'); if(repair?.getAttribute('aria-busy')==='true') window.__repairBusyFocused.push(document.activeElement===repair);}).observe(document.querySelector('#harnessConfigurationList'),{childList:true,subtree:true,attributes:true}); document.querySelector('[data-harness-repair]').focus()" });
+        await cdp.call("Page.bringToFront");
+        await cdp.call("Input.dispatchKeyEvent", { type: "keyDown", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13, text: "\r", unmodifiedText: "\r" });
+        await cdp.call("Input.dispatchKeyEvent", { type: "keyUp", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13 });
+        await waitFor("window.__repairBusyFocused.length > 0 && window.__repairBusyFocused.every(Boolean)");
+        await waitFor("document.querySelector('[data-harness-repair]')?.getAttribute('aria-disabled') === 'false' && document.activeElement?.matches('[data-harness-repair]') && document.body.innerText.includes('Prime runtime setup failed. Try repair again.')");
         await record("failure");
-        await cdp.call("Runtime.evaluate", { expression: "document.querySelector('[data-harness-repair]').click()" });
-        await waitFor("!document.querySelector('[data-harness-repair]') && document.body.innerText.includes('Prime Agent basic repaired.')");
+        await cdp.call("Page.bringToFront");
+        await cdp.call("Input.dispatchKeyEvent", { type: "keyDown", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13, text: "\r", unmodifiedText: "\r" });
+        await cdp.call("Input.dispatchKeyEvent", { type: "keyUp", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13 });
+        await waitFor("!document.querySelector('[data-harness-repair]') && document.activeElement?.id === 'harnessConfigurationList' && document.body.innerText.includes('Prime Agent basic repaired.')");
         await record("success");
         const picker = await cdp.call("Runtime.evaluate", {
           expression: "import('/desktop/renderer/src/state.js').then(async ({appState}) => {const {availablePickerFamilies}=await import('/desktop/renderer/src/model-picker-model.js');return {defaults:appState.modelSettings.defaults,primeChoices:availablePickerFamilies(appState.modelSettings,'prime-agent-basic').length}})",
@@ -329,7 +335,7 @@ async function captureBrowserScene(url, frame, profile, width = 1280, { forcedCo
         await writeFile(join(outputDirectory, "harness-repair-journey.json"), JSON.stringify({
           renderer: "production", provider: "deterministic fixture", exactProviderId: "router",
           phases: ["connected", "missing", "failure", "success", "composer"], attempts: harnessRepairState.attempts,
-          composerAdmitted: true, defaultsPreserved: true,
+          composerAdmitted: true, defaultsPreserved: true, keyboardRepair: true, focusPreserved: true,
         }, null, 2));
         await writeFile(join(outputDirectory, "harness-repair-frames.txt"), ["connected", "missing", "failure", "success", "composer"].map(phase => `file 'harness-repair-${phase}.png'\nduration 2`).join("\n") + "\nfile 'harness-repair-composer.png'\n");
         await run(ffmpeg, ["-y", "-f", "concat", "-safe", "0", "-i", join(outputDirectory, "harness-repair-frames.txt"), "-vf", "fps=15,format=yuv420p", "-c:v", "libx264", join(outputDirectory, "harness-repair.mp4")]);

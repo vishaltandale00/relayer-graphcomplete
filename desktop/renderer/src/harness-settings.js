@@ -8,15 +8,18 @@ const repairing = new Set();
 export function renderHarnessSettings(settings = appState.modelSettings) {
   const target = $("#harnessConfigurationList");
   if (!target) return;
+  const focusedHarness = target.contains(document.activeElement) ? document.activeElement?.dataset.harnessRepair : null;
   target.innerHTML = harnessConfigurationsMarkup(settings);
   for (const button of target.querySelectorAll("[data-harness-repair]")) {
     const harnessId = button.dataset.harnessRepair;
-    button.disabled = repairing.has(harnessId);
-    button.setAttribute("aria-busy", String(button.disabled));
+    button.setAttribute("aria-disabled", String(repairing.has(harnessId)));
+    button.setAttribute("aria-busy", String(repairing.has(harnessId)));
     button.onclick = async () => {
       if (repairing.has(harnessId)) return;
       repairing.add(harnessId);
-      renderHarnessSettings();
+      // Keep the native activation target in place through the keyboard/click event.
+      button.setAttribute("aria-disabled", "true");
+      button.setAttribute("aria-busy", "true");
       try {
         await refreshProviderModels(button.dataset.repairProvider);
         const harness = appState.modelSettings?.harnesses?.find(({ id }) => id === harnessId);
@@ -31,5 +34,10 @@ export function renderHarnessSettings(settings = appState.modelSettings) {
         renderHarnessSettings();
       }
     };
+  }
+  if (focusedHarness) {
+    const replacement = [...target.querySelectorAll("[data-harness-repair]")].find(button => button.dataset.harnessRepair === focusedHarness);
+    if (replacement) replacement.focus({ preventScroll: true });
+    else { target.tabIndex = -1; target.focus({ preventScroll: true }); }
   }
 }

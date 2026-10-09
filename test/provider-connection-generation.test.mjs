@@ -235,7 +235,9 @@ function managedWorld({ activationFails = false } = {}) {
             hold.reached.resolve();
             await hold.release.promise;
           }
-          return catalog(definition, status);
+          const snapshot = catalog(definition, status);
+          if (world.catalogModels !== undefined) snapshot.models = world.catalogModels;
+          return snapshot;
         },
       },
       executionAccess: async () => {
@@ -1556,8 +1558,8 @@ describe("reconnect setup failure boundaries", () => {
 
 
 describe("Prime setup retains its provider authorization", () => {
-  it.each(["explicit-repair", "recipe-update"].flatMap(trigger => ["logout", "remove", "reconnect", "catalog disconnect"].map(change => [trigger, change])))
-    ("cancels %s preparation on %s without publishing or clearing the due mark", async (trigger, change) => {
+  it.each(["explicit-repair", "recipe-update"].flatMap(trigger => ["logout", "remove", "reconnect", "catalog disconnect", "catalog replacement", "unchanged catalog"].map(change => [trigger, change])))
+    ("fences %s preparation on %s with the correct publication outcome", async (trigger, change) => {
       const world = managedWorld();
       const server = productServer([managedDefinition]);
       const preparing = deferred();
@@ -1583,7 +1585,18 @@ describe("Prime setup retains its provider authorization", () => {
         const evaluation = trigger === "explicit-repair" ? composition.modelCatalog.explicitRefresh(managedDefinition.id)
           : readiness.evaluateRecipeUpdate({ updatesDue: [...due], providers: await composition.readinessRoutes() });
         const signal = await preparing.promise;
-        if (change === "catalog disconnect") {
+        if (change === "unchanged catalog") {
+          if (trigger === "recipe-update") await composition.modelCatalog.refresh(managedDefinition.id, "background");
+          else composition.providerDefinitions.catalogPublished(managedDefinition.id, { connected: true, models: [model] });
+        }
+        else if (change === "catalog replacement") {
+          // Catalogs can change models without changing the connection generation.
+          const generation = composition.providerDefinitions.connectionGeneration(managedDefinition.id);
+          if (trigger === "recipe-update") { world.catalogModels = []; await composition.modelCatalog.refresh(managedDefinition.id, "background"); }
+          else { await server.publishCatalog({ providerId: managedDefinition.id, connected: true, models: [] }, { connectionGeneration: generation }); composition.providerDefinitions.catalogPublished(managedDefinition.id, { connected: true }); }
+          expect(composition.providerDefinitions.connectionGeneration(managedDefinition.id)).toBe(generation);
+        }
+        else if (change === "catalog disconnect") {
           world.account = "disconnected";
           if (trigger === "recipe-update") await composition.modelCatalog.refresh(managedDefinition.id, "background");
           else {
@@ -1594,11 +1607,11 @@ describe("Prime setup retains its provider authorization", () => {
           }
         }
         else await composition.providerDefinitions[change](managedDefinition.id);
-        expect(signal.aborted).toBe(true);
+        expect(signal.aborted).toBe(change !== "unchanged catalog");
         release.resolve();
         await evaluation;
-        expect(publishAvailability).not.toHaveBeenCalled();
-        expect([...due]).toEqual(["prime-agent-basic"]);
+        expect(publishAvailability).toHaveBeenCalledTimes(change === "unchanged catalog" ? 1 : 0);
+        expect([...due]).toEqual(change === "unchanged catalog" ? [] : ["prime-agent-basic"]);
       } finally { release.resolve(); await composition.close(); }
     });
 

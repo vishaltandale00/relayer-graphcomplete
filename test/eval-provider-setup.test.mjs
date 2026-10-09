@@ -150,7 +150,7 @@ describe("Eval production provider setup", () => {
     await fixture.service.start();
     expect(fixture.publishHarnessReadiness).toHaveBeenCalledOnce();
     expect(fixture.publishHarnessReadiness).toHaveBeenCalledWith([expect.objectContaining({
-      harnessId: "codex-basic", available: true, providerConnection: { providerId: "codex", generation: 1 },
+      harnessId: "codex-basic", available: true, providerConnections: [{ providerId: "codex", generation: 1, modelIds: ["gpt-test"] }],
     })], expect.objectContaining({ signal: expect.any(AbortSignal) }));
     expect(fixture.due.size).toBe(0);
   });

@@ -195,3 +195,72 @@ Clippy, TypeScript, Ladybug receipt gates and PRD readability passed.
 [Compact gate record](review-fix-gates.txt) and [actual capture run](review-fix-capture.txt)
 retain the results. Clean exact Prime assembly and its actual isolated kernel
 reported `ready=true`; no inference was used.
+
+## Second review corrections
+
+CI succeeded on `2d1bb6f4`, but four later review threads exposed catalog model
+changes without a lifecycle generation, first-route-only setup, lost keyboard focus,
+and a Repair judgment reading stale UI state during overlapping reloads. Merge was
+held again. The earlier `c1267eef` review assertion is withdrawn and superseded by
+the final second-correction source assertion recorded below.
+
+| Changed executable seam | Boundary | Real deterministic checkpoint |
+| --- | --- | --- |
+| Composition catalog eligibility and service authorization | Connected catalog model changes expire old routes without changing lifecycle generation; identical refreshes do not starve long setup. | Actual composition delayed-preparation table for explicit Repair and upgrade, changed and unchanged catalogs |
+| Coordinator route groups and publication | Preserve every originally eligible provider during preparation, checking and queued publication; stop only after all are lost. A dispatched expired result cannot roll back another harness. | Six multi-provider async-boundary scenarios and independent guarded-commit scenario in `harness-readiness.test.mjs` |
+| Readiness wire and SQLite transaction | `providerConnections` includes all surviving providers and eligible model IDs; guarded empty lists refuse. At least one current generation/model/rule/contract route authorizes each commit. | Existing real SQLite transaction scenario extended with hidden/unavailable models, changed contracts and a surviving second provider |
+| Renderer native action and focus | Busy retains native activation target; rerender preserves focus for retry or its stable destination after success, without stealing later navigation. | Existing realistic Repair scenarios plus actual browser Enter/failure/retry/success focus assertions |
+| Renderer authoritative Repair outcome | A superseded notification/UI read cannot cause false failure. Explicit refresh joins the current settings read through success or failure, preserving the latest-wins gate. | Real Settings module overlap scenarios, both result/response orders, failed notification read, existing family draft and live availability scenarios |
+| Keyboard evidence capture | Native Enter activates the exact Repair; transient busy focus is observed inside Chrome. Capture failures retain diagnostic state. | Actual focused renderer recording and full capture subprocess suite |
+
+The first warm assertions required the new all-provider/model-ID stamps. The
+SQLite fixture then exposed its unique provider-label constraint; the second
+provider now has a distinct label. The combined eight-file focused portfolio
+passed 176 tests. The actual atomic SQLite scenario passed. No tests were removed.
+The first browser attempts sent Enter without its character payload and did not
+activate Repair. The final CDP native Enter includes its carriage-return payload
+and focuses the target page; the complete five-phase journey and keyboard/focus
+assertions pass. The capture retains the native activation target in place during
+busy state, and observes that short-lived state with a browser MutationObserver.
+
+The later source review reproduced a committed result lost from the in-process
+publication mark when a subsequent independent write failed. Each successful
+guarded publication now records its mark immediately; its regression retains the
+accepted harness while propagating the later backend error. The renderer correction
+was tightened from an independent judgment GET to joining the latest settings
+request. It waits for the accepted visible snapshot and propagates that request's
+error, with no extra read or weakened stale-response gate. A qualification run was
+stopped before completion to include these corrections; it is not passing evidence.
+
+### Final second-correction source review
+
+Reviewer `/root/recovery_review` independently verified the 31-path digest
+`5e3ae00f4f71a97e3665e18d100aa4f4024a403cc3397f3de25a9333c58da23e`.
+Scope: catalog/model authority, provider lifetime and cancellation, independent
+guarded commits and accepted publication tracking, settled Settings reads, keyboard
+focus, actual renderer journey and checkpoint mapping. Verdict: no unresolved
+blocking findings. The reviewer independently ran 230 tests across ten named files,
+repeated the accepted-result/later-backend-error reproduction and inspected all
+five current actual Chrome captures. Earlier assertions are superseded. This is
+a non-certifying source review; full gates and clean Prime kernel proof remain
+separate evidence.
+
+Second independent reviewer `/root/final_recovery_audit` verified the same 31-path
+digest after review. Scope: eligibility/lifetime/cancellation, transactional model
+and contract authority, independent publication tracking, latest settings reads,
+retry/focus and mappings. Verdict: no unresolved blocking findings. Its four-file
+focused run passed 110 tests; it inspected the five retained screenshots and
+keyboard journey assertions. This remains a non-certifying source review.
+
+### Final second-correction gates
+
+`npm run build` and `npm run check` passed sequentially on the final 31-path
+reviewed digest. Broad Vitest passed 319 files / 4,222 tests; one file / three
+tests skipped. Both actual capture subprocess scenarios passed. Secret-boundary
+tests passed two cases; Python passed 91. Native workspace/crash tests, formatting,
+Clippy, TypeScript, Ladybug receipts and PRD readability passed. Clean exact Prime
+assembly/kernel passed with `ready=true` and no inference. The genuine Electron
+social-preview receipt was refreshed; both PNGs stayed byte-identical.
+[Compact final gates](second-review-gates.txt), [focused portfolio](second-review-focused.txt),
+and [real SQLite scenario](second-review-catalog.txt) retain those results separately
+from source review assertions and historical failed/interrupted runs.
