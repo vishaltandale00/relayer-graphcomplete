@@ -1,0 +1,26 @@
+Final reviewed source: 61 paths, digest d9737a6b12dffcd121423334f7bb653a0352c3dad52ff2f4386ec0c2a81b4410
+
+npm run build (build-v6): PASS, exit 0.
+npm run check (check-v10): FAIL, exit 1.
+  cargo fmt and all-target/all-feature Clippy: PASS.
+  native workspace/doc results: 770 passed, 0 failed.
+  crash-feature/doc results: 361 passed, 0 failed.
+  runtime build, package builds, root/workspace TypeScript and built-package smoke: PASS.
+  Vitest: 4,249 passed, 2 failed, 3 skipped; 320 passing files, 2 failing files, 1 skipped file.
+  Failures: full provider video capture exceeded existing 120s; Windows candidate signing fixture cleanup ENOTEMPTY.
+  Both scenarios passed in preceding check-v9; causes remain unresolved. No assertion or timeout was weakened.
+  The failed Vitest command prevented later gates from running inside check-v10.
+  Standalone final tail gates: secret boundary 2 passed; Python SDK 97 passed; Ladybug qualification/native/contract receipt lints PASS; PRD readability PASS.
+  Targeted unchanged Windows boundary: 1 passed, 9 deliberately filtered; this does not convert the full check into a pass.
+
+Feature/secondary declared proof:
+  compiled-runtime-v2: 12 passed, 1 file.
+  web-v4: every declared browser chapter PASS, including two Current Advances, actual live UI Answer/SDK consumption, immutable initial input, response-loss reconciliation, one inference/admission, chronological export/reopen, stale/read-only/model-authority refusal and historical Delivered composer exclusion.
+  node-input-v3: real Electron PASS, 0 paid inference calls; input-v2 failure retained. Nonfatal missing fixture IPC/cache diagnostics do not certify those other subsystems.
+  stop-v2: Codex and Prime PASS, duplicate-click abortCount=1, lifecycle=stopped, attempt=cancelled.
+  Prime: fresh exact macOS ARM64 recipe ready=true; recorded recipe/runtime seals unchanged since proof.
+  Telemetry: 184 deterministic tests plus native privacy checkpoints PASS; actual loopback-only privacy receipt retained. Live Auth0/Sentry/release remain indeterminate.
+  Social previews: actual light/dark recapture, both PNGs visually inspected; 111 source/renderer hashes and 2 PNG hashes match current tracked files.
+  Annotation: actual zero-paid recapture, four PNGs visually inspected; current renderer/capture script and 4 PNG hashes match. Original capture-time binary hashes are historical provenance, not final binary identity.
+
+Execution verdict: declared feature dimensions PASS in deterministic fixtures; repository full check FAIL. No overall-pass, calibrated coherence, candidate incorporation, paid-model realism, TTFG gain, packaged equivalence or release claim.

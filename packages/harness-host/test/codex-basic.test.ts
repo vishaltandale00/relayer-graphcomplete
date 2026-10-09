@@ -154,7 +154,11 @@ describe("CodexBasicHarness", () => {
       } } : {}) });
       expect(prompt).toContain("Your current layer is how you explain the work to the user while doing it.");
       expect(prompt).toContain("read each changed current.currentLayerId with graph.getLayer");
-      expect(prompt).toContain("input answers arrive through the next ordinary interaction");
+      expect(prompt).toContain("an ordinary Input on your current root layer exposes an explicit Answer control");
+      expect(prompt).toContain("graph.getLiveAnswers(cursor)");
+      expect(prompt).toContain("graph.waitForLiveAnswers(cursor)");
+      expect(prompt).toContain("The sealed initial contract remains unchanged");
+      expect(prompt).toContain("Semantic children and Invoke-bound inputs use the next ordinary interaction");
       expect(prompt).toContain("native helpers are not separate GraphComplete completions");
       expect(prompt).toContain("Do not fabricate findings or publish empty status merely to advance.");
       expect(prompt).toContain('await graph.advanceCurrent(written.rootLayer, current.headRevision, "first-finding-publication")');

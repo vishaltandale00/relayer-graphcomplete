@@ -39,6 +39,7 @@ pub use graph::{
     interaction_input_semantic_digest, is_supported_icon, map_authored_detail_actions,
     normalize_icon_name, publication_targets, resolve_icon_name,
 };
+pub use graph::{LiveAnswer, LiveAnswerPage, LiveAnswerRequest};
 
 pub use graph::artifact;
 pub use graph::{ImageIcon, image_icon};

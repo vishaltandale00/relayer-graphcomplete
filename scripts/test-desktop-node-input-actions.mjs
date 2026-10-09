@@ -853,6 +853,13 @@ async function run() {
   if (await evaluate("document.querySelector('.node-input-text').value") !== "Concurrent server value") throw new Error("Failed save changed Undo's authoritative baseline.");
   await click("[aria-label='Detach Choose supporting evidence']");
   await waitFor("detach removes authoritative occurrence", async () => (await productRequest(`/api/threads/${thread.id}/input-draft`)).attachments.length === 2);
+  // Storage commits before the renderer finishes clearing its detached stage.
+  // Begin the next edit only after that actual mutation and repaint settle.
+  await waitFor("detach settles renderer stage before the next edit", () => evaluate(`
+    !document.querySelector("[aria-label='Detach Choose supporting evidence']")
+      && document.querySelectorAll('.composer-input-pill').length === 2
+      && [...document.querySelectorAll('.node-input-option-rail')[1].querySelectorAll('.node-input-option')].every(option => !option.disabled)
+  `));
   await evaluate(`(() => { const options = document.querySelectorAll('.node-input-option-rail')[1].querySelectorAll('.node-input-option'); options[0].click(); options[1].click(); })()`);
   await setValue(".node-input-text", submittedTextValue);
 
@@ -903,7 +910,9 @@ async function run() {
   const draftBeforeReconciliation = await productRequest(`/api/threads/${thread.id}/input-draft`);
   const createdDuringLoss = (await productRequest(`/api/threads/${thread.id}`)).interactions.find(interaction => interaction.id === committedDuringLoss.id);
   if (!createdDuringLoss) throw new Error(`Committed interaction ${committedDuringLoss.id} is missing during response-loss reconciliation.`);
-  const evidenceAtClick = { selectedKeys: createdDuringLoss.submittedInputs.find(input => input.action.prompt === "Choose supporting evidence").value.selected.map(option => String(option.key)) };
+  const submittedEvidence = createdDuringLoss.submittedInputs.find(input => input.action.prompt === "Choose supporting evidence");
+  if (!submittedEvidence) throw new Error("Click-time submission omitted the edited supporting-evidence input.");
+  const evidenceAtClick = { selectedKeys: submittedEvidence.value.selected.map(option => String(option.key)) };
   const textAdvanced = await productRequest(`/api/threads/${thread.id}/input-draft/attachments`, {
     method: "PUT", body: JSON.stringify({ occurrence: textAttachment.occurrence, value: { text: submittedTextValue }, expectedRevision: draftBeforeReconciliation.revision }),
   });
@@ -928,6 +937,10 @@ async function run() {
     const current = await productRequest(`/api/threads/${thread.id}/input-draft`);
     return current.revision > reconciledDraft.revision && !current.attachments.some(input => input.action.prompt === "Name the governing constraint") ? current : false;
   });
+  await waitFor("reconciled detach settles renderer stage", () => evaluate(`
+    !document.querySelector("[aria-label='Detach Name the governing constraint']")
+      && !document.querySelector('.node-input-text')?.disabled
+  `));
   // A new edit, even to the same text, is a new input generation. It must not
   // reuse the earlier consumed Send identity or change its frozen record.
   await setValue(".node-input-text", submittedTextValue);

@@ -290,6 +290,8 @@ function initialCapabilityState(capabilityState, mountId) {
 }
 
 function applyCapabilityState(host, state = {}) {
+  if (state.liveAnswerScope) host.dataset.liveAnswerScope = state.liveAnswerScope;
+  else delete host.dataset.liveAnswerScope;
   host.disabled = state.disabled === true || state.busy === true;
   host.setAttribute("aria-disabled", String(host.disabled));
   host.setAttribute("aria-busy", String(state.busy === true));

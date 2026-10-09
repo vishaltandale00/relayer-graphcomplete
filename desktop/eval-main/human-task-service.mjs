@@ -253,15 +253,16 @@ export class HumanTaskService {
       const route = pathname.startsWith(`${prefix}/`) ? pathname.slice(prefix.length) : "";
       const retries = method === "POST" && /^\/interactions\/[1-9][0-9]*\/retry$/.test(route);
       const starts = method === "POST" && completionRoute.test(pathname);
+      const liveAnswer = method === "POST" && /^\/interactions\/[1-9][0-9]*\/live-answers$/.test(route);
       const allowed = (starts && (route === "/interactions" || retries || /^\/interactions\/[1-9][0-9]*\/actions\/[1-9][0-9]*\/invoke$/.test(route)))
         || (method === "POST" && /^\/interactions\/[1-9][0-9]*\/(?:stop|approvals\/[^/%]+\/decision)$/.test(route))
         || (method === "PUT" && route === "/input-draft/attachments")
         || (method === "DELETE" && /^\/input-draft\/attachments\/[1-9][0-9]*\/[1-9][0-9]*\/[1-9][0-9]*$/.test(route))
         || (["PUT", "DELETE"].includes(method) && /^\/(?:context-drafts|context-confirmations)\/[^/%]+$/.test(route))
         || (method === "POST" && /^\/context-drafts\/[^/%]+\/confirm$/.test(route));
-      if (!allowed) throw failure("Write is outside this task session.", 403);
+      if (!allowed && !liveAnswer) throw failure("Write is outside this task session.", 403);
       const controlDuringRun = method === "POST" && /^\/interactions\/[1-9][0-9]*\/(?:stop|approvals\/[^/%]+\/decision)$/.test(route);
-      if (!controlDuringRun) await this.settled(session, { signal });
+      if (!controlDuringRun && !liveAnswer) await this.settled(session, { signal });
       const previousCompletions = session.completions;
       const previousEventCount = session.events.length;
       if (starts) {
@@ -306,6 +307,7 @@ export class HumanTaskService {
         if (response.ok && bytes) {
           try {
             const result = JSON.parse(bytes);
+            if (liveAnswer) event.liveAnswerReceipt = clone(result);
             event.interactionId = result.interaction?.id ?? (starts ? result.id : undefined);
             // Retry admits a new attempt on the same interaction. Only replaying
             // the same expected attempt may refund that reservation.
@@ -332,6 +334,7 @@ export class HumanTaskService {
         session.termination = { reason: "product_write_unknown", at: new Date().toISOString(), success: null };
         this.event(session, "error", { message: "Product write outcome unknown; session locked against replay." });
         await this.persist();
+        if (liveAnswer) throw failure("Answer delivery is unconfirmed. Reopen the question to check its receipt.", 503);
         throw error;
       }
     });
@@ -427,7 +430,9 @@ export class HumanTaskService {
           committed.set(`${threadId}:${turn.id}`, turn);
         }
       }
-      const candidates = session.events.filter(event => ["submission", "actor_action"].includes(event.kind));
+      const currentNative = session.actorSetup?.behaviorContract?.observationContract?.id === "task-actor-observation-v3";
+      const candidates = session.events.filter(event => ["submission", "actor_action"].includes(event.kind)
+        || (currentNative && event.kind === "product_action" && event.path?.endsWith("/live-answers")));
       const projected = candidates.slice(-80).map(event => {
         const item = { id: event.id, kind: event.kind, at: event.at };
         if (event.kind === "submission") {
@@ -442,8 +447,18 @@ export class HumanTaskService {
             ...(turn ? { committedAt: text(turn.createdAt, 100), submittedInputs: inputs,
               ...(turn.submittedInputs?.length > inputs.length ? { inputsOmitted: turn.submittedInputs.length - inputs.length } : {}) } : { committedInputsUnavailable: true }) };
         }
+        if (event.kind === "product_action") {
+          const answer = event.outcome === "accepted" ? event.liveAnswerReceipt : null;
+          if (!answer) return { ...item, kind: "live_answer", delivery: "unavailable", outcome: text(event.outcome, 100) };
+          const serialized = JSON.stringify(answer.value);
+          return { ...item, kind: "live_answer", delivery: "accepted", incorporation: "not_established",
+            completionId: answer.completionId, attemptId: answer.attemptId, authorityEpoch: answer.authorityEpoch,
+            currentRevision: answer.currentRevision, sequence: answer.sequence, occurrence: clone(answer.occurrence),
+            prompt: text(answer.question?.prompt), ...(Buffer.byteLength(serialized) <= 2000
+              ? { value: clone(answer.value) } : { valueText: text(serialized), truncated: true }) };
+        }
         const action = event.action ?? {};
-        return { ...item, action: { kind: text(action.kind, 100), value: text(action.value), comment: text(action.comment), reason: text(action.reason, 100), endpointStatus: text(action.endpointStatus, 100), remainingWork: text(action.remainingWork), satisfaction: [1, 2, 3, 4].includes(action.satisfaction) ? action.satisfaction : null } };
+        return { ...item, ...(event.phase === "current" ? { phase: "current", delivery: "intent_only" } : {}), action: { kind: text(action.kind, 100), value: text(action.value), comment: text(action.comment), reason: text(action.reason, 100), endpointStatus: text(action.endpointStatus, 100), remainingWork: text(action.remainingWork), satisfaction: [1, 2, 3, 4].includes(action.satisfaction) ? action.satisfaction : null } };
       });
       const trajectory = [];
       let bytes = 0;

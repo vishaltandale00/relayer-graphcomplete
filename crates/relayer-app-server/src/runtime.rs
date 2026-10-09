@@ -2369,6 +2369,51 @@ impl RuntimeClient {
         Ok(serde_json::from_value(value)?)
     }
 
+    pub(crate) async fn live_answers(
+        &self,
+        node_id: i64,
+    ) -> Result<relayer_graph_core::LiveAnswerPage, RuntimeError> {
+        Ok(serde_json::from_value(
+            self.control_get(&format!("api/control/interactions/{node_id}/live-answers"))
+                .await?,
+        )?)
+    }
+
+    pub(crate) async fn live_answer_receipts(
+        &self,
+        node_id: i64,
+        layer_id: i64,
+    ) -> Result<Vec<relayer_graph_core::LiveAnswer>, RuntimeError> {
+        Ok(serde_json::from_value(
+            self.control_get(&format!(
+                "api/control/interactions/{node_id}/live-answers/layers/{layer_id}"
+            ))
+            .await?,
+        )?)
+    }
+
+    pub(crate) async fn accept_live_answer(
+        &self,
+        node_id: i64,
+        thread_id: i64,
+        answer: &relayer_graph_core::LiveAnswerRequest,
+    ) -> Result<relayer_graph_core::LiveAnswer, RuntimeError> {
+        let response = self
+            .client
+            .post(
+                self.graph_url
+                    .join(&format!("api/control/interactions/{node_id}/live-answers"))?,
+            )
+            .bearer_auth(&self.graph_control_token)
+            .timeout(CONTROL_REQUEST_TIMEOUT)
+            .json(&serde_json::json!({"threadId":thread_id,"answer":answer}))
+            .send()
+            .await?;
+        Ok(serde_json::from_value(
+            response_json(response, StatusCode::OK).await?,
+        )?)
+    }
+
     async fn control_get(&self, path: &str) -> Result<Value, RuntimeError> {
         let response = self
             .client

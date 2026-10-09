@@ -548,6 +548,11 @@ async function boot() {
       completionStatus: appState.interactions.find((item) => String(item.id) === String(viewState.currentInteractionId))?.completionStatus ?? null,
       attemptId: appState.interactions.find((item) => String(item.id) === String(viewState.currentInteractionId))?.latestAttempt?.id ?? null,
       attemptOutcome: appState.interactions.find((item) => String(item.id) === String(viewState.currentInteractionId))?.latestAttempt?.outcome ?? null,
+      currentPointer: viewState.temporalCurrent ? {
+        revision: viewState.temporalCurrent.revision,
+        mode: viewState.temporalCurrent.mode,
+        layerId: appState.currentProjections.get(String(viewState.temporalCurrent.completionId))?.currentLayerId ?? null,
+      } : null,
       navigationPath: viewState.layerPath.map((entry) => ({ layerId: entry.layerId, viaActionId: entry.actionId ?? entry.viaActionId ?? null })),
     }),
   });

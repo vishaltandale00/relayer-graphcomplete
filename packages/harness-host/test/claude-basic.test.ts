@@ -197,7 +197,11 @@ describe("ClaudeBasicHarness", () => {
     } } : {}) });
     expect(prompt).toContain("Your current layer is how you explain the work to the user while doing it.");
     expect(prompt).toContain("read each changed current.currentLayerId with graph.getLayer");
-    expect(prompt).toContain("input answers arrive through the next ordinary interaction");
+    expect(prompt).toContain("an ordinary Input on your current root layer exposes an explicit Answer control");
+    expect(prompt).toContain("graph.getLiveAnswers(cursor)");
+    expect(prompt).toContain("graph.waitForLiveAnswers(cursor)");
+    expect(prompt).toContain("The sealed initial contract remains unchanged");
+    expect(prompt).toContain("Semantic children and Invoke-bound inputs use the next ordinary interaction");
     expect(prompt).toContain('graph.authoring("first-finding-');
     expect(prompt).toContain('target: prior.layer');
     expect(prompt).not.toContain("Advancing is optional");

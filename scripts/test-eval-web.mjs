@@ -16,6 +16,7 @@ import { RelayerAppServerService } from "../desktop/main/services/relayer-app-se
 import { HumanTaskService } from "../desktop/eval-main/human-task-service.mjs";
 import { TaskActorService } from "../desktop/eval-main/task-actor-service.mjs";
 import { openTaskActorBrowser } from "../desktop/eval-main/task-actor-browser.mjs";
+import { proveCurrentActor } from "./eval-current-actor-proof.mjs";
 import { EvalService } from "../desktop/eval-main/eval-service.mjs";
 import { createEvalDashboard, createSettingsSurface, createHumanTaskSurface, openHumanReview } from "../desktop/eval-main/web-host.mjs";
 import { createEvalProviderSetup } from "../desktop/eval-main/provider-setup.mjs";
@@ -105,6 +106,8 @@ try {
   const pageErrors = [];
   page.on("pageerror", (error) => pageErrors.push(error.message));
   await page.goto(host.url);
+  // boot attaches this handler only after the initial catalog/run reads settle.
+  await page.waitForFunction(() => typeof document.querySelector("#emptyNewRun")?.onclick === "function");
   await page.locator("#emptyNewRun").click();
   await page.locator('input[name="cases"]').first().waitFor();
   const catalog = await rpc(host.url, "catalog", []);
@@ -303,6 +306,7 @@ try {
   const humanProof = await proveHumanTask({ browser, service, productSession, data });
   await proveTaskActor({ browser, service, productSession, data });
   await proveTaskActorInputs({ browser, service, productSession, data });
+  await proveCurrentActor({ browser, directory });
   const fixture = await service.createRun(selection);
   const completed = await until(() => { const value = service.getRun(fixture.id); return ["passed", "failed", "error", "interrupted"].includes(value.status) ? value : null; }, "judge fixture");
   assert.equal(completed.status, "passed");
@@ -885,7 +889,13 @@ async function proveTaskActor({ browser, service, productSession, data }) {
     await page.locator("#humanEndpoint").fill("An understandable task system");
     await page.locator("#humanCreate button").click();
     await until(() => tasks.list().length > 0, "actor session created through dashboard");
-    const task = await until(() => { const task = tasks.get(tasks.list()[0].id); return ["completed", "interrupted", "failed"].includes(task.status) ? task : null; }, "actor session terminal");
+    const task = await until(() => { const task = tasks.get(tasks.list()[0].id); return ["completed", "interrupted", "failed"].includes(task.status) ? task : null; }, "actor session terminal").catch(async error => {
+      const active = tasks.get(tasks.list()[0].id);
+      const diagnostic = { status: active.status, decision, events: active.events.slice(-12).map(({ kind, phase, at, category }) => ({ kind, phase, at, category })) };
+      console.error("ACTOR_TERMINAL_DIAGNOSTIC", JSON.stringify(diagnostic));
+      if (controlPage && !controlPage.isClosed()) await controlPage.screenshot({ path: resolve(".relayer/current-pointers-web-terminal-failure.png") }).catch(() => {});
+      throw error;
+    });
     assert.equal(task.status, "completed", JSON.stringify(task.events.map(({ kind, ...event }) => ({ kind, ...(kind === "actor_error" ? event : {}) }))));
     assert.equal(task.completions, 3);
     await actors.running.get(task.id)?.done;

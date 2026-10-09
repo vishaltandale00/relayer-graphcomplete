@@ -374,7 +374,7 @@ export async function createHumanTaskSurface({ tasks, sessionId, productSession,
       const threads = new Set(session.threadIds.map(String));
       const stateRead = url.pathname === "/api/state";
       const threadId = url.searchParams.get("threadId");
-      const threadRead = /^\/api\/threads\/([1-9][0-9]*)(?:\/(?:input-draft|context-drafts|interactions|annotations)|\/interactions\/[1-9][0-9]*\/(?:layers\/[1-9][0-9]*|actions\/[^/%]+\/destination|input-children))?$/.exec(url.pathname) || detailAssetPath.exec(url.pathname);
+      const threadRead = /^\/api\/threads\/([1-9][0-9]*)(?:\/(?:input-draft|context-drafts|interactions|annotations)|\/interactions\/[1-9][0-9]*\/(?:layers\/[1-9][0-9]*|actions\/[^/%]+\/destination|input-children|live-answers))?$/.exec(url.pathname) || detailAssetPath.exec(url.pathname);
       const environment = /^\/api\/projects\/([1-9][0-9]*)\/environment$/.exec(url.pathname);
       const bootstrap = ["/api/capabilities", "/api/model-settings", "/api/permission-profiles", "/api/provider-onboarding/projection", "/api/provider-onboarding/status", "/api/model-selection/default"].includes(url.pathname);
       if (!(stateRead ? url.searchParams.getAll("threadId").length === 1 && threads.has(threadId)

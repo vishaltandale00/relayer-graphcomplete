@@ -490,6 +490,31 @@ class RelayerGraphClient:
         """Read the exact sealed contract; legacy input returns None."""
         return (await self.get_interaction_input()).completion_contract
 
+    async def get_live_answers(self, after_sequence: int = 0) -> Mapping[str, Any]:
+        """Read accepted supplemental answers without changing the sealed contract."""
+        if isinstance(after_sequence, bool) or not isinstance(after_sequence, int) or after_sequence < 0:
+            raise ValueError("Invalid live-answer cursor")
+        return await self._request("GET", f"/api/graph/live-answers?afterSequence={after_sequence}")
+
+    async def wait_for_live_answers(self, after_sequence: int = 0, timeout_seconds: float = 30) -> Mapping[str, Any]:
+        """Bounded provider-authored waiting; cancellation follows the caller's task."""
+        if not 0 <= timeout_seconds <= 300:
+            raise ValueError("Invalid live-answer timeout")
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + timeout_seconds
+        last_page = None
+        while True:
+            try:
+                page = await asyncio.wait_for(self.get_live_answers(after_sequence), timeout=max(0.001, deadline - loop.time()))
+            except TimeoutError:
+                if last_page is not None:
+                    return last_page
+                raise
+            last_page = page
+            if page["answers"] or page["current"]["lifecycle"] != "active" or loop.time() >= deadline:
+                return page
+            await asyncio.sleep(min(0.25, max(0, deadline - loop.time())))
+
     async def get_invocations(self, action: int | Mapping[str, Any]) -> tuple[GraphInvocation, ...]:
         """Inspect reusable action calls under this capability's ordinary graph visibility."""
         value = await self._request("GET", f"/api/graph/actions/{_action_id(action)}/invocations")

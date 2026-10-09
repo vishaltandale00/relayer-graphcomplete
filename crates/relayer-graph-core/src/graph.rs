@@ -4,6 +4,7 @@ mod database;
 mod import;
 mod interaction_scope;
 mod invocation;
+mod live_answers;
 pub(crate) mod model;
 mod personal_presentation;
 mod search_index;
@@ -25,6 +26,7 @@ pub use import::{
     ImportedTurn, ImportedTurnReceipt, ImportedVisualAssetContent, SkippedSubmittedInput,
 };
 pub use invocation::GraphInvocation;
+pub use live_answers::{LiveAnswer, LiveAnswerPage, LiveAnswerRequest};
 pub use model::{
     AcceptedDetailAsset, AcceptedDetailAssetMetadata, ActionDraft, ActionId, ActionKind,
     ActionVariant, AuthoredDetailUpdate, CompletionContract, CompletionContractAnswer,

@@ -201,6 +201,14 @@ pub fn router(state: ServerState) -> Router {
         )
         .route("/api/control/interactions/{id}/input", get(control_input))
         .route(
+            "/api/control/interactions/{id}/live-answers",
+            get(control_live_answers).post(control_live_answer),
+        )
+        .route(
+            "/api/control/interactions/{id}/live-answers/layers/{layer}",
+            get(control_live_answer_receipts),
+        )
+        .route(
             "/api/control/interactions/{id}/input-children",
             get(control_input_children),
         )
@@ -332,6 +340,7 @@ pub fn router(state: ServerState) -> Router {
         )
         .route("/api/graph/nodes/{id}/neighbors", get(neighbors))
         .route("/api/graph/input", get(interaction_input))
+        .route("/api/graph/live-answers", get(graph_live_answers))
         .route(
             "/api/graph/personal-presentation",
             get(graph_personal_presentation),
@@ -2933,6 +2942,84 @@ async fn interaction_input(
             .await?,
     ))
 }
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct LiveAnswerCursor {
+    #[serde(default)]
+    after_sequence: i64,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct ControlLiveAnswerRequest {
+    thread_id: ThreadId,
+    answer: relayer_graph_core::LiveAnswerRequest,
+}
+
+async fn control_live_answer(
+    State(state): State<ServerState>,
+    headers: HeaderMap,
+    Path(id): Path<NodeId>,
+    Json(input): Json<ControlLiveAnswerRequest>,
+) -> Result<Json<relayer_graph_core::LiveAnswer>, ApiError> {
+    require_bearer(&headers, &state.control_token)?;
+    Ok(Json(
+        state
+            .graph
+            .accept_live_answer(id, input.thread_id, &input.answer)
+            .await?,
+    ))
+}
+
+async fn control_live_answers(
+    State(state): State<ServerState>,
+    headers: HeaderMap,
+    Path(id): Path<NodeId>,
+    Query(cursor): Query<LiveAnswerCursor>,
+) -> Result<Json<relayer_graph_core::LiveAnswerPage>, ApiError> {
+    require_bearer(&headers, &state.control_token)?;
+    Ok(Json(
+        state
+            .graph
+            .writer_for_subgraph(id)
+            .await?
+            .live_answers(cursor.after_sequence)
+            .await?,
+    ))
+}
+
+async fn control_live_answer_receipts(
+    State(state): State<ServerState>,
+    headers: HeaderMap,
+    Path((id, layer)): Path<(NodeId, LayerId)>,
+) -> Result<Json<Vec<relayer_graph_core::LiveAnswer>>, ApiError> {
+    require_bearer(&headers, &state.control_token)?;
+    Ok(Json(
+        state
+            .graph
+            .writer_for_subgraph(id)
+            .await?
+            .live_answer_receipts(layer)
+            .await?,
+    ))
+}
+
+async fn graph_live_answers(
+    State(state): State<ServerState>,
+    headers: HeaderMap,
+    Query(cursor): Query<LiveAnswerCursor>,
+) -> Result<Json<relayer_graph_core::LiveAnswerPage>, ApiError> {
+    let authority = session(&state, &headers)?;
+    Ok(Json(
+        state
+            .graph
+            .writer_for_completion_authority(authority.node_id, authority.epoch)
+            .await?
+            .live_answers(cursor.after_sequence)
+            .await?,
+    ))
+}
+
 async fn graph_personal_presentation(
     State(state): State<ServerState>,
     headers: HeaderMap,

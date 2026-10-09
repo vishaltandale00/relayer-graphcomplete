@@ -4,7 +4,7 @@ import { createCompletionJudge as createNativeCompletionJudge, validateCompletio
 import { randomUUID } from "node:crypto";
 import { abortable } from "./abortable.mjs";
 import { setTimeout as delay } from "node:timers/promises";
-import { ACTOR_ACTION_SCHEMA, ACTOR_OBSERVATION_CONTRACT, actorConfiguration, actorPrompt, createCodexTaskActor, validateActorAction } from "./task-actor.mjs";
+import { ACTOR_ACTION_SCHEMA, ACTOR_OBSERVATION_CONTRACT, ACTOR_SETTLED_OBSERVATION_CONTRACT, ACTOR_PROMPT_VERSION, actorConfiguration, actorPrompt, createCodexTaskActor, validateActorAction } from "./task-actor.mjs";
 
 // Classification may inspect native errors, but evidence and UI use only these
 // closed categories and fixed messages; never copy provider text or error.name.
@@ -80,13 +80,14 @@ export class TaskActorService {
     })();
     return started;
   }
-  async settled(id, signal) {
+  async settled(id, signal, observeCurrent = null) {
     while (true) {
       signal.throwIfAborted();
       const task = this.tasks.get(id);
       if (task.status !== "active") throw new Error("Task is no longer active.");
       try { await this.tasks.settled(task, { signal }); return task; }
       catch (error) { if (error.status !== 409) throw error; }
+      if (observeCurrent) await observeCurrent(task);
       await delay(this.pollMs, undefined, { signal });
     }
   }
@@ -101,7 +102,77 @@ export class TaskActorService {
       await this.tasks.actorEvent(id, "actor_started", { configuration: task.actor, prompt });
       actor = await this.createActor({ runtime, config: task.actor, prompt, outputSchema: task.actorSetup?.behaviorContract?.actionSchema });
       signal.throwIfAborted();
-      browser = await this.openBrowser(id, signal, task.actorSetup ? structuredClone(task.actorSetup.behaviorContract?.observationContract ?? null) : structuredClone(ACTOR_OBSERVATION_CONTRACT));
+      const observationContract = task.actorSetup ? task.actorSetup.behaviorContract?.observationContract ?? null
+        : task.actor.promptVersion === ACTOR_PROMPT_VERSION ? ACTOR_OBSERVATION_CONTRACT : ACTOR_SETTLED_OBSERVATION_CONTRACT;
+      browser = await this.openBrowser(id, signal, structuredClone(observationContract));
+      const currentNative = observationContract?.id === "task-actor-observation-v3";
+      let previousPointer = null;
+      let currentCaptures = 0;
+      const currentCaptureLimit = task.actor.maxActions * 2 + 1;
+      let limitRecorded = false;
+      let actionsUsed = 0;
+      let repeatCurrent = false;
+      const observeCurrent = currentNative ? async current => {
+        if (currentCaptures >= currentCaptureLimit) {
+          if (!limitRecorded) {
+            await this.tasks.actorEvent(id, "actor_current_limit", { reason: "current_capture_limit", limit: currentCaptureLimit });
+            limitRecorded = true;
+          }
+          return;
+        }
+        const submission = current.events.findLast(event => event.kind === "submission" && event.interactionId != null
+          && (event.outcome == null || event.outcome === "accepted"));
+        if (!submission) return;
+        const detail = await this.tasks.detail(submission.threadId, { signal });
+        const turn = detail.interactions.find(item => String(item.id) === String(submission.interactionId));
+        if (!turn) throw new Error("Submitted interaction is unavailable.");
+        const expected = { threadId: submission.threadId, turnId: submission.interactionId, submittedAt: Date.parse(submission.at), workingOnly: true,
+          ...(turn.latestAttempt?.id == null ? {} : { attemptId: turn.latestAttempt.id }) };
+        phase = "observe_current";
+        const captured = await abortable(signal, () => browser.observeCurrent(expected, repeatCurrent ? null : previousPointer));
+        signal.throwIfAborted();
+        if (!captured) return;
+        currentCaptures++;
+        if (captured.kind === "gap") {
+          await this.tasks.actorEvent(id, "actor_current_gap", { pointer: captured.pointer, reason: captured.reason });
+          return;
+        }
+        const pointer = captured.pointer;
+        if (actionsUsed >= task.actor.maxActions) captured.observation.availableActions = [];
+        const workingSchema = structuredClone(task.actorSetup?.behaviorContract?.actionSchema ?? ACTOR_ACTION_SCHEMA);
+        workingSchema.properties.kind.enum = workingSchema.properties.kind.enum.filter(kind => captured.observation.availableActions.includes(kind));
+        const sameAttempt = previousPointer && String(pointer.threadId) === String(previousPointer.threadId)
+          && String(pointer.turnId) === String(previousPointer.turnId) && String(pointer.attemptId) === String(previousPointer.attemptId);
+        const missing = pointer.revision - (sameAttempt ? previousPointer.revision : 0) - 1;
+        if (missing > 0) await this.tasks.actorEvent(id, "actor_current_gap", { pointer, reason: "revisions_not_observed", missingRevisions: missing });
+        const observed = await this.tasks.actorEvent(id, "actor_observation", { phase: "current", pointer, submissionEventId: submission.id,
+          observation: captured.observation, actionSchema: workingSchema.properties.kind.enum.length ? workingSchema : null });
+        signal.throwIfAborted();
+        phase = "perceive_current";
+        const reaction = await abortable(signal, () => actor.observe(captured.observation, signal, { actionSchema: workingSchema }));
+        signal.throwIfAborted();
+        if (!reaction || typeof reaction.comment !== "string" || reaction.comment.length > 8000) throw Object.assign(new Error("Invalid current-update reaction."), { code: "actor_invalid_action" });
+        await this.tasks.actorEvent(id, "actor_current_reaction", { observationEventId: observed.id, comment: reaction.comment, usage: reaction.usage ?? null });
+        previousPointer = pointer;
+        repeatCurrent = false;
+        if (reaction.action != null) {
+          validateActorAction(reaction.action);
+          if (!captured.observation.availableActions.includes(reaction.action.kind)
+            || actionsUsed >= task.actor.maxActions) throw Object.assign(new Error("Unavailable working action."), { code: "actor_invalid_action" });
+          actionsUsed++;
+          const intent = await this.tasks.actorEvent(id, "actor_action", { phase: "current", observationEventId: observed.id, action: reaction.action, usage: reaction.usage ?? null });
+          signal.throwIfAborted();
+          phase = "act_current";
+          try {
+            await abortable(signal, () => browser.act(reaction.action, { actionEventId: intent.id, observationEventId: observed.id, current: { expected, pointer } }));
+            await this.tasks.actorEvent(id, "actor_action_completed", { actionEventId: intent.id });
+          } catch (error) {
+            if (error.actionDispatched !== false || !["actor_control_stale", "actor_control_unavailable"].includes(error.code)) throw error;
+            await this.tasks.actorEvent(id, "actor_action_failed", { actionEventId: intent.id, actionDispatched: false, category: actorFailure(error).category, retryAllowed: actionsUsed < task.actor.maxActions, message: "Working control changed before dispatch. Obtain a fresh observation." });
+          }
+          repeatCurrent = true;
+        }
+      } : null;
       let observedSubmission;
       let finishRepairPending = false;
       let controlRepairPending = false;
@@ -109,7 +180,7 @@ export class TaskActorService {
       let completionJudgeFeedback = null;
       for (let index = 0; index <= task.actor.maxActions; index++) {
         phase = "settle";
-        const current = await this.settled(id, signal);
+        const current = await this.settled(id, signal, observeCurrent);
         const submission = current.events.findLast((event) => event.kind === "submission" && event.interactionId != null && (event.outcome == null || event.outcome === "accepted"));
         let expected;
         if (submission && submission.id !== observedSubmission) {
@@ -134,18 +205,19 @@ export class TaskActorService {
         observedSubmission = submission?.id;
         const observed = await this.tasks.actorEvent(id, "actor_observation", { observation, actionSchema });
         signal.throwIfAborted();
-        if (index === task.actor.maxActions) {
+        if (actionsUsed >= task.actor.maxActions) {
           await this.tasks.actorEvent(id, "actor_limit", { reason: "action_limit" });
           await this.tasks.finish(id, { reason: completionJudge ? "budget_exhausted" : "abandoned" }, { signal });
           return;
         }
         phase = "decide";
+        actionsUsed++;
         const { action, usage } = await actor.decide(observation, signal, { outputSchema: actionSchema });
         phase = "validate";
         try { validateActorAction(action); }
         catch (error) {
           if (error.code !== "actor_inconsistent_finish" || action.kind !== "finish") throw error;
-          const retryAllowed = !finishRepairPending && index + 1 < task.actor.maxActions;
+          const retryAllowed = !finishRepairPending && actionsUsed < task.actor.maxActions;
           await this.tasks.actorEvent(id, "actor_action_rejected", { observationEventId: observed.id, action, usage, category: "inconsistent_finish", retryAllowed, message: "Finish fields contradicted each other. No action was executed." });
           if (!retryAllowed) throw error;
           finishRepairPending = true;
@@ -204,7 +276,7 @@ export class TaskActorService {
             // dispatch. Playwright failures and product-write errors are ambiguous.
             if (!["click", "fill", "select"].includes(action.kind) || error.actionDispatched !== false
               || !["actor_control_stale", "actor_control_unavailable"].includes(error.code)) throw error;
-            const retryAllowed = !controlRepairPending && index + 1 < task.actor.maxActions;
+            const retryAllowed = !controlRepairPending && actionsUsed < task.actor.maxActions;
             await this.tasks.actorEvent(id, "actor_action_failed", { actionEventId: intent.id, actionDispatched: false,
               category: actorFailure(error).category, retryAllowed, message: "Observed control unavailable before dispatch. No action was executed." });
             if (!retryAllowed) throw error;

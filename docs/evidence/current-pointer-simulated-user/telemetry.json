@@ -1,0 +1,1576 @@
+{
+  "schema": "relayer.telemetry-evidence/v1",
+  "corpus": {
+    "schema": "relayer.telemetry-privacy-corpus/v1",
+    "sha256": "c9f6ce1075f786aaa9c220d596befbfcdecebf2350a2572b6bf925bc102f1600"
+  },
+  "execution": {
+    "inference": false,
+    "liveAuth0": false,
+    "liveSentry": false,
+    "network": "loopback-only"
+  },
+  "checkpoints": {
+    "positive": [
+      {
+        "component": "renderer",
+        "seam": "authenticated-loopback-receiver",
+        "accepted": true
+      },
+      {
+        "component": "electron-main",
+        "seam": "electron-main-reporter",
+        "accepted": true
+      },
+      {
+        "component": "node-harness-host",
+        "seam": "authenticated-loopback-receiver",
+        "accepted": true
+      },
+      {
+        "component": "rust-app-server",
+        "seam": "authenticated-loopback-receiver",
+        "accepted": true
+      },
+      {
+        "component": "rust-graph-server",
+        "seam": "authenticated-loopback-receiver",
+        "accepted": true
+      },
+      {
+        "component": "electron-main",
+        "seam": "main-owned-handled-share-reporter",
+        "accepted": true,
+        "code": "share.snapshot_too_large"
+      },
+      {
+        "component": "electron-main",
+        "seam": "main-owned-handled-share-reporter",
+        "accepted": true,
+        "code": "share.export_failed"
+      },
+      {
+        "component": "electron-main",
+        "seam": "main-owned-handled-share-reporter",
+        "accepted": true,
+        "code": "share.upload_failed"
+      },
+      {
+        "component": "electron-main",
+        "seam": "main-owned-handled-share-reporter",
+        "accepted": true,
+        "code": "share.service_failed"
+      },
+      {
+        "component": "electron-main",
+        "seam": "main-owned-handled-share-reporter",
+        "accepted": true,
+        "code": "share.delete_failed"
+      }
+    ],
+    "privacy": [
+      {
+        "component": "renderer",
+        "fixture": "absolute-raw-path",
+        "rejected": true
+      },
+      {
+        "component": "renderer",
+        "fixture": "raw-token",
+        "rejected": true
+      },
+      {
+        "component": "renderer",
+        "fixture": "raw-headers",
+        "rejected": true
+      },
+      {
+        "component": "renderer",
+        "fixture": "process-arguments",
+        "rejected": true
+      },
+      {
+        "component": "renderer",
+        "fixture": "prompt-content",
+        "rejected": true
+      },
+      {
+        "component": "renderer",
+        "fixture": "credential-material",
+        "rejected": true
+      },
+      {
+        "component": "renderer",
+        "fixture": "graph-content",
+        "rejected": true
+      },
+      {
+        "component": "renderer",
+        "fixture": "environment-content",
+        "rejected": true
+      },
+      {
+        "component": "renderer",
+        "fixture": "log-content",
+        "rejected": true
+      },
+      {
+        "component": "renderer",
+        "fixture": "raw-error",
+        "rejected": true
+      },
+      {
+        "component": "renderer",
+        "fixture": "filename",
+        "rejected": true
+      },
+      {
+        "component": "renderer",
+        "fixture": "command",
+        "rejected": true
+      },
+      {
+        "component": "renderer",
+        "fixture": "cookie",
+        "rejected": true
+      },
+      {
+        "component": "renderer",
+        "fixture": "url",
+        "rejected": true
+      },
+      {
+        "component": "renderer",
+        "fixture": "provider-state",
+        "rejected": true
+      },
+      {
+        "component": "renderer",
+        "fixture": "model-output",
+        "rejected": true
+      },
+      {
+        "component": "renderer",
+        "fixture": "path-field",
+        "rejected": true
+      },
+      {
+        "component": "renderer",
+        "fixture": "request-data",
+        "rejected": true
+      },
+      {
+        "component": "renderer",
+        "fixture": "windows-absolute-frame",
+        "rejected": true
+      },
+      {
+        "component": "renderer",
+        "fixture": "url-frame",
+        "rejected": true
+      },
+      {
+        "component": "renderer",
+        "fixture": "traversal-frame",
+        "rejected": true
+      },
+      {
+        "component": "renderer",
+        "fixture": "node-modules-frame",
+        "rejected": true
+      },
+      {
+        "component": "renderer",
+        "fixture": "vendor-frame",
+        "rejected": true
+      },
+      {
+        "component": "renderer",
+        "fixture": "protocol-frame",
+        "rejected": true
+      },
+      {
+        "component": "renderer",
+        "fixture": "top-level-dependency-frame",
+        "rejected": true
+      },
+      {
+        "component": "renderer",
+        "fixture": "third-party-rust-frame",
+        "rejected": true
+      },
+      {
+        "component": "renderer",
+        "fixture": "invented-renderer-module",
+        "rejected": true
+      },
+      {
+        "component": "renderer",
+        "fixture": "invented-electron-module",
+        "rejected": true
+      },
+      {
+        "component": "renderer",
+        "fixture": "invented-harness-module",
+        "rejected": true
+      },
+      {
+        "component": "renderer",
+        "fixture": "invented-rust-app-module",
+        "rejected": true
+      },
+      {
+        "component": "renderer",
+        "fixture": "invented-rust-graph-module",
+        "rejected": true
+      },
+      {
+        "component": "renderer",
+        "fixture": "oversized-frames",
+        "rejected": true
+      },
+      {
+        "component": "renderer",
+        "fixture": "oversized-module",
+        "rejected": true
+      },
+      {
+        "component": "electron-main",
+        "fixture": "absolute-raw-path",
+        "rejected": true
+      },
+      {
+        "component": "electron-main",
+        "fixture": "raw-token",
+        "rejected": true
+      },
+      {
+        "component": "electron-main",
+        "fixture": "raw-headers",
+        "rejected": true
+      },
+      {
+        "component": "electron-main",
+        "fixture": "process-arguments",
+        "rejected": true
+      },
+      {
+        "component": "electron-main",
+        "fixture": "prompt-content",
+        "rejected": true
+      },
+      {
+        "component": "electron-main",
+        "fixture": "credential-material",
+        "rejected": true
+      },
+      {
+        "component": "electron-main",
+        "fixture": "graph-content",
+        "rejected": true
+      },
+      {
+        "component": "electron-main",
+        "fixture": "environment-content",
+        "rejected": true
+      },
+      {
+        "component": "electron-main",
+        "fixture": "log-content",
+        "rejected": true
+      },
+      {
+        "component": "electron-main",
+        "fixture": "raw-error",
+        "rejected": true
+      },
+      {
+        "component": "electron-main",
+        "fixture": "filename",
+        "rejected": true
+      },
+      {
+        "component": "electron-main",
+        "fixture": "command",
+        "rejected": true
+      },
+      {
+        "component": "electron-main",
+        "fixture": "cookie",
+        "rejected": true
+      },
+      {
+        "component": "electron-main",
+        "fixture": "url",
+        "rejected": true
+      },
+      {
+        "component": "electron-main",
+        "fixture": "provider-state",
+        "rejected": true
+      },
+      {
+        "component": "electron-main",
+        "fixture": "model-output",
+        "rejected": true
+      },
+      {
+        "component": "electron-main",
+        "fixture": "path-field",
+        "rejected": true
+      },
+      {
+        "component": "electron-main",
+        "fixture": "request-data",
+        "rejected": true
+      },
+      {
+        "component": "electron-main",
+        "fixture": "windows-absolute-frame",
+        "rejected": true
+      },
+      {
+        "component": "electron-main",
+        "fixture": "url-frame",
+        "rejected": true
+      },
+      {
+        "component": "electron-main",
+        "fixture": "traversal-frame",
+        "rejected": true
+      },
+      {
+        "component": "electron-main",
+        "fixture": "node-modules-frame",
+        "rejected": true
+      },
+      {
+        "component": "electron-main",
+        "fixture": "vendor-frame",
+        "rejected": true
+      },
+      {
+        "component": "electron-main",
+        "fixture": "protocol-frame",
+        "rejected": true
+      },
+      {
+        "component": "electron-main",
+        "fixture": "top-level-dependency-frame",
+        "rejected": true
+      },
+      {
+        "component": "electron-main",
+        "fixture": "third-party-rust-frame",
+        "rejected": true
+      },
+      {
+        "component": "electron-main",
+        "fixture": "invented-renderer-module",
+        "rejected": true
+      },
+      {
+        "component": "electron-main",
+        "fixture": "invented-electron-module",
+        "rejected": true
+      },
+      {
+        "component": "electron-main",
+        "fixture": "invented-harness-module",
+        "rejected": true
+      },
+      {
+        "component": "electron-main",
+        "fixture": "invented-rust-app-module",
+        "rejected": true
+      },
+      {
+        "component": "electron-main",
+        "fixture": "invented-rust-graph-module",
+        "rejected": true
+      },
+      {
+        "component": "electron-main",
+        "fixture": "oversized-frames",
+        "rejected": true
+      },
+      {
+        "component": "electron-main",
+        "fixture": "oversized-module",
+        "rejected": true
+      },
+      {
+        "component": "node-harness-host",
+        "fixture": "absolute-raw-path",
+        "rejected": true
+      },
+      {
+        "component": "node-harness-host",
+        "fixture": "raw-token",
+        "rejected": true
+      },
+      {
+        "component": "node-harness-host",
+        "fixture": "raw-headers",
+        "rejected": true
+      },
+      {
+        "component": "node-harness-host",
+        "fixture": "process-arguments",
+        "rejected": true
+      },
+      {
+        "component": "node-harness-host",
+        "fixture": "prompt-content",
+        "rejected": true
+      },
+      {
+        "component": "node-harness-host",
+        "fixture": "credential-material",
+        "rejected": true
+      },
+      {
+        "component": "node-harness-host",
+        "fixture": "graph-content",
+        "rejected": true
+      },
+      {
+        "component": "node-harness-host",
+        "fixture": "environment-content",
+        "rejected": true
+      },
+      {
+        "component": "node-harness-host",
+        "fixture": "log-content",
+        "rejected": true
+      },
+      {
+        "component": "node-harness-host",
+        "fixture": "raw-error",
+        "rejected": true
+      },
+      {
+        "component": "node-harness-host",
+        "fixture": "filename",
+        "rejected": true
+      },
+      {
+        "component": "node-harness-host",
+        "fixture": "command",
+        "rejected": true
+      },
+      {
+        "component": "node-harness-host",
+        "fixture": "cookie",
+        "rejected": true
+      },
+      {
+        "component": "node-harness-host",
+        "fixture": "url",
+        "rejected": true
+      },
+      {
+        "component": "node-harness-host",
+        "fixture": "provider-state",
+        "rejected": true
+      },
+      {
+        "component": "node-harness-host",
+        "fixture": "model-output",
+        "rejected": true
+      },
+      {
+        "component": "node-harness-host",
+        "fixture": "path-field",
+        "rejected": true
+      },
+      {
+        "component": "node-harness-host",
+        "fixture": "request-data",
+        "rejected": true
+      },
+      {
+        "component": "node-harness-host",
+        "fixture": "windows-absolute-frame",
+        "rejected": true
+      },
+      {
+        "component": "node-harness-host",
+        "fixture": "url-frame",
+        "rejected": true
+      },
+      {
+        "component": "node-harness-host",
+        "fixture": "traversal-frame",
+        "rejected": true
+      },
+      {
+        "component": "node-harness-host",
+        "fixture": "node-modules-frame",
+        "rejected": true
+      },
+      {
+        "component": "node-harness-host",
+        "fixture": "vendor-frame",
+        "rejected": true
+      },
+      {
+        "component": "node-harness-host",
+        "fixture": "protocol-frame",
+        "rejected": true
+      },
+      {
+        "component": "node-harness-host",
+        "fixture": "top-level-dependency-frame",
+        "rejected": true
+      },
+      {
+        "component": "node-harness-host",
+        "fixture": "third-party-rust-frame",
+        "rejected": true
+      },
+      {
+        "component": "node-harness-host",
+        "fixture": "invented-renderer-module",
+        "rejected": true
+      },
+      {
+        "component": "node-harness-host",
+        "fixture": "invented-electron-module",
+        "rejected": true
+      },
+      {
+        "component": "node-harness-host",
+        "fixture": "invented-harness-module",
+        "rejected": true
+      },
+      {
+        "component": "node-harness-host",
+        "fixture": "invented-rust-app-module",
+        "rejected": true
+      },
+      {
+        "component": "node-harness-host",
+        "fixture": "invented-rust-graph-module",
+        "rejected": true
+      },
+      {
+        "component": "node-harness-host",
+        "fixture": "oversized-frames",
+        "rejected": true
+      },
+      {
+        "component": "node-harness-host",
+        "fixture": "oversized-module",
+        "rejected": true
+      },
+      {
+        "component": "rust-app-server",
+        "fixture": "absolute-raw-path",
+        "rejected": true
+      },
+      {
+        "component": "rust-app-server",
+        "fixture": "raw-token",
+        "rejected": true
+      },
+      {
+        "component": "rust-app-server",
+        "fixture": "raw-headers",
+        "rejected": true
+      },
+      {
+        "component": "rust-app-server",
+        "fixture": "process-arguments",
+        "rejected": true
+      },
+      {
+        "component": "rust-app-server",
+        "fixture": "prompt-content",
+        "rejected": true
+      },
+      {
+        "component": "rust-app-server",
+        "fixture": "credential-material",
+        "rejected": true
+      },
+      {
+        "component": "rust-app-server",
+        "fixture": "graph-content",
+        "rejected": true
+      },
+      {
+        "component": "rust-app-server",
+        "fixture": "environment-content",
+        "rejected": true
+      },
+      {
+        "component": "rust-app-server",
+        "fixture": "log-content",
+        "rejected": true
+      },
+      {
+        "component": "rust-app-server",
+        "fixture": "raw-error",
+        "rejected": true
+      },
+      {
+        "component": "rust-app-server",
+        "fixture": "filename",
+        "rejected": true
+      },
+      {
+        "component": "rust-app-server",
+        "fixture": "command",
+        "rejected": true
+      },
+      {
+        "component": "rust-app-server",
+        "fixture": "cookie",
+        "rejected": true
+      },
+      {
+        "component": "rust-app-server",
+        "fixture": "url",
+        "rejected": true
+      },
+      {
+        "component": "rust-app-server",
+        "fixture": "provider-state",
+        "rejected": true
+      },
+      {
+        "component": "rust-app-server",
+        "fixture": "model-output",
+        "rejected": true
+      },
+      {
+        "component": "rust-app-server",
+        "fixture": "path-field",
+        "rejected": true
+      },
+      {
+        "component": "rust-app-server",
+        "fixture": "request-data",
+        "rejected": true
+      },
+      {
+        "component": "rust-app-server",
+        "fixture": "windows-absolute-frame",
+        "rejected": true
+      },
+      {
+        "component": "rust-app-server",
+        "fixture": "url-frame",
+        "rejected": true
+      },
+      {
+        "component": "rust-app-server",
+        "fixture": "traversal-frame",
+        "rejected": true
+      },
+      {
+        "component": "rust-app-server",
+        "fixture": "node-modules-frame",
+        "rejected": true
+      },
+      {
+        "component": "rust-app-server",
+        "fixture": "vendor-frame",
+        "rejected": true
+      },
+      {
+        "component": "rust-app-server",
+        "fixture": "protocol-frame",
+        "rejected": true
+      },
+      {
+        "component": "rust-app-server",
+        "fixture": "top-level-dependency-frame",
+        "rejected": true
+      },
+      {
+        "component": "rust-app-server",
+        "fixture": "third-party-rust-frame",
+        "rejected": true
+      },
+      {
+        "component": "rust-app-server",
+        "fixture": "invented-renderer-module",
+        "rejected": true
+      },
+      {
+        "component": "rust-app-server",
+        "fixture": "invented-electron-module",
+        "rejected": true
+      },
+      {
+        "component": "rust-app-server",
+        "fixture": "invented-harness-module",
+        "rejected": true
+      },
+      {
+        "component": "rust-app-server",
+        "fixture": "invented-rust-app-module",
+        "rejected": true
+      },
+      {
+        "component": "rust-app-server",
+        "fixture": "invented-rust-graph-module",
+        "rejected": true
+      },
+      {
+        "component": "rust-app-server",
+        "fixture": "oversized-frames",
+        "rejected": true
+      },
+      {
+        "component": "rust-app-server",
+        "fixture": "oversized-module",
+        "rejected": true
+      },
+      {
+        "component": "rust-graph-server",
+        "fixture": "absolute-raw-path",
+        "rejected": true
+      },
+      {
+        "component": "rust-graph-server",
+        "fixture": "raw-token",
+        "rejected": true
+      },
+      {
+        "component": "rust-graph-server",
+        "fixture": "raw-headers",
+        "rejected": true
+      },
+      {
+        "component": "rust-graph-server",
+        "fixture": "process-arguments",
+        "rejected": true
+      },
+      {
+        "component": "rust-graph-server",
+        "fixture": "prompt-content",
+        "rejected": true
+      },
+      {
+        "component": "rust-graph-server",
+        "fixture": "credential-material",
+        "rejected": true
+      },
+      {
+        "component": "rust-graph-server",
+        "fixture": "graph-content",
+        "rejected": true
+      },
+      {
+        "component": "rust-graph-server",
+        "fixture": "environment-content",
+        "rejected": true
+      },
+      {
+        "component": "rust-graph-server",
+        "fixture": "log-content",
+        "rejected": true
+      },
+      {
+        "component": "rust-graph-server",
+        "fixture": "raw-error",
+        "rejected": true
+      },
+      {
+        "component": "rust-graph-server",
+        "fixture": "filename",
+        "rejected": true
+      },
+      {
+        "component": "rust-graph-server",
+        "fixture": "command",
+        "rejected": true
+      },
+      {
+        "component": "rust-graph-server",
+        "fixture": "cookie",
+        "rejected": true
+      },
+      {
+        "component": "rust-graph-server",
+        "fixture": "url",
+        "rejected": true
+      },
+      {
+        "component": "rust-graph-server",
+        "fixture": "provider-state",
+        "rejected": true
+      },
+      {
+        "component": "rust-graph-server",
+        "fixture": "model-output",
+        "rejected": true
+      },
+      {
+        "component": "rust-graph-server",
+        "fixture": "path-field",
+        "rejected": true
+      },
+      {
+        "component": "rust-graph-server",
+        "fixture": "request-data",
+        "rejected": true
+      },
+      {
+        "component": "rust-graph-server",
+        "fixture": "windows-absolute-frame",
+        "rejected": true
+      },
+      {
+        "component": "rust-graph-server",
+        "fixture": "url-frame",
+        "rejected": true
+      },
+      {
+        "component": "rust-graph-server",
+        "fixture": "traversal-frame",
+        "rejected": true
+      },
+      {
+        "component": "rust-graph-server",
+        "fixture": "node-modules-frame",
+        "rejected": true
+      },
+      {
+        "component": "rust-graph-server",
+        "fixture": "vendor-frame",
+        "rejected": true
+      },
+      {
+        "component": "rust-graph-server",
+        "fixture": "protocol-frame",
+        "rejected": true
+      },
+      {
+        "component": "rust-graph-server",
+        "fixture": "top-level-dependency-frame",
+        "rejected": true
+      },
+      {
+        "component": "rust-graph-server",
+        "fixture": "third-party-rust-frame",
+        "rejected": true
+      },
+      {
+        "component": "rust-graph-server",
+        "fixture": "invented-renderer-module",
+        "rejected": true
+      },
+      {
+        "component": "rust-graph-server",
+        "fixture": "invented-electron-module",
+        "rejected": true
+      },
+      {
+        "component": "rust-graph-server",
+        "fixture": "invented-harness-module",
+        "rejected": true
+      },
+      {
+        "component": "rust-graph-server",
+        "fixture": "invented-rust-app-module",
+        "rejected": true
+      },
+      {
+        "component": "rust-graph-server",
+        "fixture": "invented-rust-graph-module",
+        "rejected": true
+      },
+      {
+        "component": "rust-graph-server",
+        "fixture": "oversized-frames",
+        "rejected": true
+      },
+      {
+        "component": "rust-graph-server",
+        "fixture": "oversized-module",
+        "rejected": true
+      },
+      {
+        "component": "electron-main",
+        "fixture": "share-httpStatus",
+        "rejected": true
+      },
+      {
+        "component": "electron-main",
+        "fixture": "share-httpStatus",
+        "rejected": true
+      },
+      {
+        "component": "electron-main",
+        "fixture": "share-networkCode",
+        "rejected": true
+      },
+      {
+        "component": "electron-main",
+        "fixture": "share-frames",
+        "rejected": true
+      },
+      {
+        "component": "electron-main",
+        "fixture": "share-frames",
+        "rejected": true
+      },
+      {
+        "component": "electron-main",
+        "fixture": "share-title",
+        "rejected": true
+      },
+      {
+        "component": "electron-main",
+        "fixture": "share-projectName",
+        "rejected": true
+      },
+      {
+        "component": "electron-main",
+        "fixture": "share-conversationContent",
+        "rejected": true
+      },
+      {
+        "component": "electron-main",
+        "fixture": "share-credential",
+        "rejected": true
+      },
+      {
+        "component": "electron-main",
+        "fixture": "share-rawError",
+        "rejected": true
+      },
+      {
+        "component": "electron-main",
+        "fixture": "share-request",
+        "rejected": true
+      }
+    ],
+    "adapterPrivacy": [
+      {
+        "component": "renderer",
+        "fixture": "absolute-raw-path",
+        "crossed": false
+      },
+      {
+        "component": "renderer",
+        "fixture": "raw-token",
+        "crossed": false
+      },
+      {
+        "component": "renderer",
+        "fixture": "raw-headers",
+        "crossed": false
+      },
+      {
+        "component": "renderer",
+        "fixture": "process-arguments",
+        "crossed": false
+      },
+      {
+        "component": "renderer",
+        "fixture": "prompt-content",
+        "crossed": false
+      },
+      {
+        "component": "renderer",
+        "fixture": "credential-material",
+        "crossed": false
+      },
+      {
+        "component": "renderer",
+        "fixture": "graph-content",
+        "crossed": false
+      },
+      {
+        "component": "renderer",
+        "fixture": "environment-content",
+        "crossed": false
+      },
+      {
+        "component": "renderer",
+        "fixture": "log-content",
+        "crossed": false
+      },
+      {
+        "component": "renderer",
+        "fixture": "raw-error",
+        "crossed": false
+      },
+      {
+        "component": "renderer",
+        "fixture": "filename",
+        "crossed": false
+      },
+      {
+        "component": "renderer",
+        "fixture": "command",
+        "crossed": false
+      },
+      {
+        "component": "renderer",
+        "fixture": "cookie",
+        "crossed": false
+      },
+      {
+        "component": "renderer",
+        "fixture": "url",
+        "crossed": false
+      },
+      {
+        "component": "renderer",
+        "fixture": "provider-state",
+        "crossed": false
+      },
+      {
+        "component": "renderer",
+        "fixture": "model-output",
+        "crossed": false
+      },
+      {
+        "component": "renderer",
+        "fixture": "path-field",
+        "crossed": false
+      },
+      {
+        "component": "renderer",
+        "fixture": "request-data",
+        "crossed": false
+      },
+      {
+        "component": "renderer",
+        "fixture": "windows-absolute-frame",
+        "crossed": false
+      },
+      {
+        "component": "renderer",
+        "fixture": "url-frame",
+        "crossed": false
+      },
+      {
+        "component": "renderer",
+        "fixture": "traversal-frame",
+        "crossed": false
+      },
+      {
+        "component": "renderer",
+        "fixture": "node-modules-frame",
+        "crossed": false
+      },
+      {
+        "component": "renderer",
+        "fixture": "vendor-frame",
+        "crossed": false
+      },
+      {
+        "component": "renderer",
+        "fixture": "protocol-frame",
+        "crossed": false
+      },
+      {
+        "component": "renderer",
+        "fixture": "top-level-dependency-frame",
+        "crossed": false
+      },
+      {
+        "component": "renderer",
+        "fixture": "third-party-rust-frame",
+        "crossed": false
+      },
+      {
+        "component": "renderer",
+        "fixture": "invented-renderer-module",
+        "crossed": false
+      },
+      {
+        "component": "renderer",
+        "fixture": "invented-electron-module",
+        "crossed": false
+      },
+      {
+        "component": "renderer",
+        "fixture": "invented-harness-module",
+        "crossed": false
+      },
+      {
+        "component": "renderer",
+        "fixture": "invented-rust-app-module",
+        "crossed": false
+      },
+      {
+        "component": "renderer",
+        "fixture": "invented-rust-graph-module",
+        "crossed": false
+      },
+      {
+        "component": "renderer",
+        "fixture": "oversized-frames",
+        "crossed": false
+      },
+      {
+        "component": "renderer",
+        "fixture": "oversized-module",
+        "crossed": false
+      },
+      {
+        "component": "electron-main",
+        "fixture": "absolute-raw-path",
+        "crossed": false
+      },
+      {
+        "component": "electron-main",
+        "fixture": "raw-token",
+        "crossed": false
+      },
+      {
+        "component": "electron-main",
+        "fixture": "raw-headers",
+        "crossed": false
+      },
+      {
+        "component": "electron-main",
+        "fixture": "process-arguments",
+        "crossed": false
+      },
+      {
+        "component": "electron-main",
+        "fixture": "prompt-content",
+        "crossed": false
+      },
+      {
+        "component": "electron-main",
+        "fixture": "credential-material",
+        "crossed": false
+      },
+      {
+        "component": "electron-main",
+        "fixture": "graph-content",
+        "crossed": false
+      },
+      {
+        "component": "electron-main",
+        "fixture": "environment-content",
+        "crossed": false
+      },
+      {
+        "component": "electron-main",
+        "fixture": "log-content",
+        "crossed": false
+      },
+      {
+        "component": "electron-main",
+        "fixture": "raw-error",
+        "crossed": false
+      },
+      {
+        "component": "electron-main",
+        "fixture": "filename",
+        "crossed": false
+      },
+      {
+        "component": "electron-main",
+        "fixture": "command",
+        "crossed": false
+      },
+      {
+        "component": "electron-main",
+        "fixture": "cookie",
+        "crossed": false
+      },
+      {
+        "component": "electron-main",
+        "fixture": "url",
+        "crossed": false
+      },
+      {
+        "component": "electron-main",
+        "fixture": "provider-state",
+        "crossed": false
+      },
+      {
+        "component": "electron-main",
+        "fixture": "model-output",
+        "crossed": false
+      },
+      {
+        "component": "electron-main",
+        "fixture": "path-field",
+        "crossed": false
+      },
+      {
+        "component": "electron-main",
+        "fixture": "request-data",
+        "crossed": false
+      },
+      {
+        "component": "electron-main",
+        "fixture": "windows-absolute-frame",
+        "crossed": false
+      },
+      {
+        "component": "electron-main",
+        "fixture": "url-frame",
+        "crossed": false
+      },
+      {
+        "component": "electron-main",
+        "fixture": "traversal-frame",
+        "crossed": false
+      },
+      {
+        "component": "electron-main",
+        "fixture": "node-modules-frame",
+        "crossed": false
+      },
+      {
+        "component": "electron-main",
+        "fixture": "vendor-frame",
+        "crossed": false
+      },
+      {
+        "component": "electron-main",
+        "fixture": "protocol-frame",
+        "crossed": false
+      },
+      {
+        "component": "electron-main",
+        "fixture": "top-level-dependency-frame",
+        "crossed": false
+      },
+      {
+        "component": "electron-main",
+        "fixture": "third-party-rust-frame",
+        "crossed": false
+      },
+      {
+        "component": "electron-main",
+        "fixture": "invented-renderer-module",
+        "crossed": false
+      },
+      {
+        "component": "electron-main",
+        "fixture": "invented-electron-module",
+        "crossed": false
+      },
+      {
+        "component": "electron-main",
+        "fixture": "invented-harness-module",
+        "crossed": false
+      },
+      {
+        "component": "electron-main",
+        "fixture": "invented-rust-app-module",
+        "crossed": false
+      },
+      {
+        "component": "electron-main",
+        "fixture": "invented-rust-graph-module",
+        "crossed": false
+      },
+      {
+        "component": "electron-main",
+        "fixture": "oversized-frames",
+        "crossed": false
+      },
+      {
+        "component": "electron-main",
+        "fixture": "oversized-module",
+        "crossed": false
+      },
+      {
+        "component": "node-harness-host",
+        "fixture": "absolute-raw-path",
+        "crossed": false
+      },
+      {
+        "component": "node-harness-host",
+        "fixture": "raw-token",
+        "crossed": false
+      },
+      {
+        "component": "node-harness-host",
+        "fixture": "raw-headers",
+        "crossed": false
+      },
+      {
+        "component": "node-harness-host",
+        "fixture": "process-arguments",
+        "crossed": false
+      },
+      {
+        "component": "node-harness-host",
+        "fixture": "prompt-content",
+        "crossed": false
+      },
+      {
+        "component": "node-harness-host",
+        "fixture": "credential-material",
+        "crossed": false
+      },
+      {
+        "component": "node-harness-host",
+        "fixture": "graph-content",
+        "crossed": false
+      },
+      {
+        "component": "node-harness-host",
+        "fixture": "environment-content",
+        "crossed": false
+      },
+      {
+        "component": "node-harness-host",
+        "fixture": "log-content",
+        "crossed": false
+      },
+      {
+        "component": "node-harness-host",
+        "fixture": "raw-error",
+        "crossed": false
+      },
+      {
+        "component": "node-harness-host",
+        "fixture": "filename",
+        "crossed": false
+      },
+      {
+        "component": "node-harness-host",
+        "fixture": "command",
+        "crossed": false
+      },
+      {
+        "component": "node-harness-host",
+        "fixture": "cookie",
+        "crossed": false
+      },
+      {
+        "component": "node-harness-host",
+        "fixture": "url",
+        "crossed": false
+      },
+      {
+        "component": "node-harness-host",
+        "fixture": "provider-state",
+        "crossed": false
+      },
+      {
+        "component": "node-harness-host",
+        "fixture": "model-output",
+        "crossed": false
+      },
+      {
+        "component": "node-harness-host",
+        "fixture": "path-field",
+        "crossed": false
+      },
+      {
+        "component": "node-harness-host",
+        "fixture": "request-data",
+        "crossed": false
+      },
+      {
+        "component": "node-harness-host",
+        "fixture": "windows-absolute-frame",
+        "crossed": false
+      },
+      {
+        "component": "node-harness-host",
+        "fixture": "url-frame",
+        "crossed": false
+      },
+      {
+        "component": "node-harness-host",
+        "fixture": "traversal-frame",
+        "crossed": false
+      },
+      {
+        "component": "node-harness-host",
+        "fixture": "node-modules-frame",
+        "crossed": false
+      },
+      {
+        "component": "node-harness-host",
+        "fixture": "vendor-frame",
+        "crossed": false
+      },
+      {
+        "component": "node-harness-host",
+        "fixture": "protocol-frame",
+        "crossed": false
+      },
+      {
+        "component": "node-harness-host",
+        "fixture": "top-level-dependency-frame",
+        "crossed": false
+      },
+      {
+        "component": "node-harness-host",
+        "fixture": "third-party-rust-frame",
+        "crossed": false
+      },
+      {
+        "component": "node-harness-host",
+        "fixture": "invented-renderer-module",
+        "crossed": false
+      },
+      {
+        "component": "node-harness-host",
+        "fixture": "invented-electron-module",
+        "crossed": false
+      },
+      {
+        "component": "node-harness-host",
+        "fixture": "invented-harness-module",
+        "crossed": false
+      },
+      {
+        "component": "node-harness-host",
+        "fixture": "invented-rust-app-module",
+        "crossed": false
+      },
+      {
+        "component": "node-harness-host",
+        "fixture": "invented-rust-graph-module",
+        "crossed": false
+      },
+      {
+        "component": "node-harness-host",
+        "fixture": "oversized-frames",
+        "crossed": false
+      },
+      {
+        "component": "node-harness-host",
+        "fixture": "oversized-module",
+        "crossed": false
+      }
+    ],
+    "outbound": {
+      "requestCount": 10,
+      "components": [
+        "electron-main",
+        "electron-main",
+        "electron-main",
+        "electron-main",
+        "electron-main",
+        "electron-main",
+        "node-harness-host",
+        "renderer",
+        "rust-app-server",
+        "rust-graph-server"
+      ],
+      "exactEventKeys": [
+        "environment",
+        "event_id",
+        "exception",
+        "level",
+        "release",
+        "tags",
+        "timestamp",
+        "user"
+      ],
+      "forbiddenQueuePersistence": false
+    },
+    "releaseSymbols": {
+      "status": "not-run",
+      "context": "preview-or-stable-release-candidate-only",
+      "deterministicFinding": "release-upload-authority-present-but-not-executed",
+      "inspected": [
+        {
+          "path": "desktop/packaging/electron-builder.mjs",
+          "sha256": "9d7716148c9c6b9a0d2b8d68db12322f856f8082aa0598672c5e7de00fadb83a"
+        },
+        {
+          "path": "desktop/packaging/build-cache.mjs",
+          "sha256": "46b6bbdf933a543c8cced73eb9a3c27d287b9d21b039860ec087a92636f938ab"
+        },
+        {
+          "path": "desktop/packaging/signed-native-cache.mjs",
+          "sha256": "dc06eb248b1d885b94f6b3eefbbe5e2d9ecba6a894f2c065913256b152b95ecf"
+        },
+        {
+          "path": "desktop/packaging/signed-native-transport.mjs",
+          "sha256": "aa7c3a3f02beb93b3a4ba325ac5d456201fff1a4e271653ad2483c3135e2c151"
+        },
+        {
+          "path": "desktop/release/build-release.mjs",
+          "sha256": "187342a0e3591fc94d8a8ee68977867d5047c6a34aae6c099c4f0a175f2faabf"
+        },
+        {
+          "path": "desktop/release/build-native-release.mjs",
+          "sha256": "f80968456fbc28e9068e7a6b9845d273f41cfc04c18ebee2821226f2dcf4897c"
+        },
+        {
+          "path": "desktop/release/windows-native-build.mjs",
+          "sha256": "61a4b178de77de232f3306680933723d55946f569c51cbf68ad98631c07a07e4"
+        },
+        {
+          "path": "desktop/release/windows-native-cache.mjs",
+          "sha256": "4d420dc327f1db6e40de0251c00d21a95f98a057a31ff1a18d7ba91098c015f8"
+        },
+        {
+          "path": "desktop/release/windows-native-identity.mjs",
+          "sha256": "59b41e5ad1d0c8e8c6c2e2166791b9e3a16e220f4767a2cc1ee3bf9b66822805"
+        },
+        {
+          "path": "desktop/release/windows-rust-debug.mjs",
+          "sha256": "fcfd023769a84412e0f014bac85a1f8efd9b7eecbb8396c5e31f70c5e3562713"
+        },
+        {
+          "path": ".github/workflows/desktop-windows-candidate.yml",
+          "sha256": "df70b51b1e6bedfe5eeaa3a57b32291d6c06eb97339c4e67c5e7688c985f4aee"
+        },
+        {
+          "path": "desktop/release/telemetry-artifacts.mjs",
+          "sha256": "247a575970b622077349304a41712512ee73b86abb8621d27d5a1d986a78ab9a"
+        },
+        {
+          "path": ".github/workflows/desktop-signed-preview.yml",
+          "sha256": "c3cd958fcd4e637c9e64104282d021942ac4e31e2b021470f293ca8ec2411243"
+        }
+      ],
+      "signals": {
+        "sourceMapProduction": true,
+        "rustSymbolProduction": true,
+        "sentryUploadCommand": true,
+        "sentryUploadCredential": true
+      },
+      "networkUsed": false
+    },
+    "productionAdapters": {
+      "status": "pass",
+      "fidelity": "deterministic-adapters-and-shared-rust-seam",
+      "commands": [
+        "cargo test -p relayer-telemetry-capability --test panic_capability",
+        "vitest run test/desktop-account-session.test.mjs test/desktop-authenticated-error-gateway.test.mjs test/desktop-authenticated-error-receiver.test.mjs test/desktop-authenticated-error-reporting.test.mjs test/desktop-authenticated-error-startup.test.mjs test/desktop-error-domain-adapters.test.mjs test/desktop-error-stack-sanitizer.test.mjs test/desktop-renderer-error-reporting.test.mjs test/desktop-rust-error-capabilities.test.mjs test/desktop-telemetry-release.test.mjs test/desktop-telemetry-release-artifacts.test.mjs test/signed-native-cache.test.mjs test/windows-native-cache.test.mjs test/windows-candidate.test.mjs test/desktop-telemetry-module-inventory.test.mjs test/sentry-error-transport.test.mjs test/share-error-diagnostics.test.mjs test/share-publish-coordinator.test.mjs test/share-service-client.test.mjs"
+      ],
+      "files": [
+        "test/desktop-account-session.test.mjs",
+        "test/desktop-authenticated-error-gateway.test.mjs",
+        "test/desktop-authenticated-error-receiver.test.mjs",
+        "test/desktop-authenticated-error-reporting.test.mjs",
+        "test/desktop-authenticated-error-startup.test.mjs",
+        "test/desktop-error-domain-adapters.test.mjs",
+        "test/desktop-error-stack-sanitizer.test.mjs",
+        "test/desktop-renderer-error-reporting.test.mjs",
+        "test/desktop-rust-error-capabilities.test.mjs",
+        "test/desktop-telemetry-release.test.mjs",
+        "test/desktop-telemetry-release-artifacts.test.mjs",
+        "test/signed-native-cache.test.mjs",
+        "test/windows-native-cache.test.mjs",
+        "test/windows-candidate.test.mjs",
+        "test/desktop-telemetry-module-inventory.test.mjs",
+        "test/sentry-error-transport.test.mjs",
+        "test/share-error-diagnostics.test.mjs",
+        "test/share-publish-coordinator.test.mjs",
+        "test/share-service-client.test.mjs"
+      ],
+      "limitations": [
+        "spawned-production-rust-panic-not-run"
+      ]
+    }
+  },
+  "verdict": "local-gateway-privacy-pass-release-indeterminate"
+}

@@ -33,6 +33,13 @@ _Avoid_: Runtime token, permission profile
 The immutable, versioned input, exceptional authority and Return requirements owned by one sealed InteractionNode.
 _Avoid_: Harness configuration, private prompt
 
+**Live answer**:
+An accepted supplemental user answer to a published question in the same still-active completion. It is separate from that completion's immutable initial input.
+_Avoid_: Draft input, new interaction, automatic resume
+
+**Answer receipt**:
+The durable acknowledgment that a live answer was accepted for its exact question and execution attempt. It confirms delivery, not the model's consumption or incorporation.
+
 **InvokeAction**:
 A callable definition owned by one response Node. It permits one call by default; reusable definitions explicitly permit multiple distinct calls.
 _Avoid_: Invocation, execution attempt

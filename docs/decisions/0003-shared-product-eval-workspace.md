@@ -156,3 +156,22 @@ objective success judgment. Each proposed finish and judge decision is durable.
 Stop, cancellation, failure and existing budgets prevail over continuation.
 Default tests use injected decisions rather than paid inference. PRD 13.2.3 owns
 this opt-in contract; setup lineage remains governed by PRD 13.2.4.
+
+
+### Current-pointer-native simulated user (approved 2026-10-09)
+
+A newly versioned actor setup may observe the displayed Current while the candidate
+works. The same restricted native session produces experience comments before later updates become available, and may use visible
+controls to deliver an explicit live answer under ADR 0016. Other ordinary actions
+follow settlement and a fresh observation. This supersedes the settled-only
+observation limitation for that setup, with supplemental input admission defined separately in ADR 0016.
+
+After-paint screenshots are bound to the displayed thread, turn, attempt, Current
+revision, selection and navigation. Explicit navigation stays pinned. Capture
+races, skipped revisions and exhausted capture budgets are omissions, not
+reconstructed history. Latest-state backpressure keeps capture bounded; the
+configured action limit also bounds capture attempts independently of action
+count, and the existing deadline and Stop apply to both. Recorded reactions are
+the actor's own experience, not independent grader feedback. They are not independent grades; optional working control actions remain inside
+the existing ordinary action budget and Product authority. Historical setup pins remain immutable, with explicit
+publication and promotion. PRD 13.2.3 owns this behavior.

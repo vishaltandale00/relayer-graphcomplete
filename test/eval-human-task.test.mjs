@@ -562,3 +562,37 @@ it("only the versioned participant-stop contract permits a judged unfinished sto
   const finished = await f.tasks.finish(id, input);
   expect(finished.termination).toMatchObject({ reason: "satisfied", endpointAttainment: "not_claimed", success: null, completionJudgeEventId: input.completionJudgeEventId, actorClaim: { endpointStatus: "incomplete", remainingWork: "User thinks work remains" } });
 });
+
+it("current-native stopping evidence separates live delivery receipts from intents, ambiguity and incorporation", async () => {
+  const f = await gatedTask(); const id = f.session.id;
+  const session = f.tasks.find(id);
+  session.actorSetup.behaviorContract.observationContract = { id: "task-actor-observation-v3" };
+  f.options.evalService.completionJudgeArtifactEvidence = async () => ({ files: [] });
+  await f.tasks.actorEvent(id, "actor_action", { phase: "current", action: { kind: "fill", value: "Private stage" } });
+  await f.tasks.actorEvent(id, "product_action", { path: "/api/threads/1/interactions/10/live-answers", outcome: "accepted", liveAnswerReceipt: {
+    sequence: 1, completionId: 7, attemptId: 8, authorityEpoch: 1, currentRevision: 2,
+    occurrence: { presentingInteractionNodeId: 7, presentingLayerId: 9, actionId: 11 }, question: { prompt: "Which city?" }, value: { text: "Boston" }, operationKey: "answer-1" } });
+  await f.tasks.actorEvent(id, "product_action", { path: "/api/threads/1/interactions/10/live-answers", outcome: "unknown", request: { value: { text: "UNCONFIRMED_VALUE" } } });
+  const trajectory = (await f.tasks.completionJudgeEvidence(id)).trajectory;
+  expect(trajectory.find(item => item.phase === "current")).toMatchObject({ delivery: "intent_only" });
+  expect(trajectory.find(item => item.kind === "live_answer" && item.delivery === "accepted")).toMatchObject({ incorporation: "not_established", attemptId: 8, value: { text: "Boston" }, prompt: "Which city?" });
+  expect(trajectory.find(item => item.kind === "live_answer" && item.delivery === "unavailable")).toMatchObject({ outcome: "unknown" });
+  expect(JSON.stringify(trajectory)).not.toContain("UNCONFIRMED_VALUE");
+  session.actorSetup.behaviorContract.observationContract = { id: "task-actor-observation-v2" };
+  expect((await f.tasks.completionJudgeEvidence(id)).trajectory.some(item => item.kind === "live_answer")).toBe(false);
+});
+
+it("live-answer gateway transport uncertainty is retry-ambiguous HTTP 503 rather than a known refusal", async () => {
+  const f = await fixture(); f.threads.get(1)[0].completionStatus = "running";
+  const surface = await createHumanTaskSurface({ tasks: f.tasks, sessionId: f.session.id, productSession: f.options.productSession });
+  cleanups.push(() => surface.close());
+  f.failTransport();
+  const response = await fetch(new URL("/api/threads/1/interactions/10/live-answers", surface.url), {
+    method: "POST", headers: { Authorization: `Bearer ${new URL(surface.url).hash.slice(1)}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ operationKey: "answer-1", value: { text: "Boston" } }),
+  });
+  expect(response.status).toBe(503);
+  expect(await response.json()).toMatchObject({ error: expect.stringContaining("unconfirmed") });
+  expect(f.tasks.get(f.session.id)).toMatchObject({ completions: 1, status: "interrupted", termination: { reason: "product_write_unknown" } });
+  expect(f.tasks.get(f.session.id).events.find(event => event.kind === "product_action")).toMatchObject({ outcome: "unknown", request: { operationKey: "answer-1" } });
+});

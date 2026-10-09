@@ -475,6 +475,34 @@ async fn imported_conversation_is_materialized_read_only_and_removable() {
         .writer_for_subgraph(NodeId::new(turn.graph_node_id.unwrap()).unwrap())
         .await
         .unwrap();
+    assert!(writer.live_answers(0).await.is_err());
+    let root = NodeId::new(turn.graph_node_id.unwrap()).unwrap();
+    assert!(matches!(
+        database
+            .accept_live_answer(
+                root,
+                input.thread_id,
+                &LiveAnswerRequest {
+                    attempt_id: 1,
+                    authority_epoch: 1,
+                    expected_revision: 1,
+                    operation_key: "imported-answer".into(),
+                    occurrence: PresentingInputOccurrence {
+                        presenting_interaction_node_id: root,
+                        presenting_layer_id: restored.layer.id,
+                        action_id: ActionId::new(1).unwrap()
+                    },
+                    value: SubmittedInputValue::Text {
+                        text: "Cannot answer imported work".into()
+                    },
+                }
+            )
+            .await,
+        Err(GraphError::Validation {
+            code: "live_answer_root_only",
+            ..
+        })
+    ));
     assert!(
         writer
             .authorize_interaction_permission(&InteractionPermission::NavigateAdd {

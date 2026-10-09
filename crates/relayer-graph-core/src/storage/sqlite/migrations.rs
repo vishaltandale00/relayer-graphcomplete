@@ -1443,14 +1443,14 @@ mod tests {
         assert_eq!((shape, routes), (None, None));
         // Merged migrations retain each distinct version: shipped edge metadata
         // completion-local topic proposals, artifact layers, sealed completion contracts,
-        // Invoke bindings, and inert imported definitions must coexist.
+        // Invoke bindings, inert imported definitions, and live answers must coexist.
         let versions: Vec<i64> = sqlx::query_scalar(
             "SELECT version FROM _sqlx_migrations WHERE version >= 30 ORDER BY version",
         )
         .fetch_all(&pool)
         .await
         .unwrap();
-        assert_eq!(versions, [30, 31, 32, 33, 34, 35, 36, 37, 38, 39]);
+        assert_eq!(versions, [30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40]);
         sqlx::query(
             "INSERT INTO thread_icon_proposals(interaction_node_id,icon) VALUES (1,'compass')",
         )

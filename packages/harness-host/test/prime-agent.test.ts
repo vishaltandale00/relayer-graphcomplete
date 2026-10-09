@@ -37,7 +37,11 @@ describe("PrimeAgentHarness", () => {
         expect(prompt).toContain("Your current layer is how you explain the work to the user while doing it.");
         expect(prompt).toContain("read each changed current.current_layer_id with graph.get_layer");
         expect(prompt).toContain("skip Exception values before reading current.current_layer_id");
-        expect(prompt).toContain("input answers arrive through the next ordinary interaction");
+        expect(prompt).toContain("an ordinary Input on your current root layer exposes an explicit Answer control");
+        expect(prompt).toContain("graph.get_live_answers(cursor)");
+        expect(prompt).toContain("graph.wait_for_live_answers(cursor)");
+        expect(prompt).toContain("The sealed initial contract remains unchanged");
+        expect(prompt).toContain("Semantic children and Invoke-bound inputs use the next ordinary interaction");
         expect(prompt).toContain('graph.authoring("first-finding-');
         expect(prompt).toContain('target=GraphLayer.from_dict(prior["layer"])');
         expect(prompt).toContain('operation_key="first-finding-publication"');

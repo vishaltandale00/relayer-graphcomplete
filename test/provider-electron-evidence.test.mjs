@@ -20,6 +20,31 @@ function pngDimensions(bytes) {
   return { width: bytes.readUInt32BE(16), height: bytes.readUInt32BE(20) };
 }
 
+function startCaptureDiagnostics(output, capture) {
+  const startedAt = performance.now();
+  const report = (fields) => {
+    try { process.stderr.write(`Provider capture progress ${JSON.stringify({ capture, elapsedMs: Math.round(performance.now() - startedAt), ...fields })}\n`); } catch {}
+  };
+  report({ phase: "started" });
+  const progressTimers = [60_000, 90_000].map((delay) => setTimeout(async () => {
+    report({ phase: "sampling" });
+    const captures = await Promise.all(["frames", "variants", "motion"].map(async (directory) => {
+      try {
+        const names = (await readdir(join(output, directory))).filter((name) => /^[a-zA-Z0-9-]+\.png$/.test(name));
+        const files = (await Promise.all(names.map(async (name) => {
+          try { return { name, modifiedAt: (await stat(join(output, directory, name))).mtimeMs }; }
+          catch { return null; }
+        }))).filter(Boolean).sort((a, b) => a.modifiedAt - b.modifiedAt);
+        const latest = files.at(-1);
+        return { directory, count: names.length, latest: latest?.name ?? null,
+          latestAgeMs: latest ? Math.round(Date.now() - latest.modifiedAt) : null };
+      } catch { return { directory, unavailable: true }; }
+    }));
+    report({ phase: "sampled", captures });
+  }, delay));
+  return () => { for (const timer of progressTimers) clearTimeout(timer); report({ phase: "finished" }); };
+}
+
 describe("provider browser evidence", () => {
   it("locks every committed frame, variant, poster, and video to the evidence manifest", async () => {
     const manifest = JSON.parse(await readFile(new URL("manifest.json", evidenceDirectory), "utf8"));
@@ -68,6 +93,7 @@ describe("provider browser evidence", () => {
 
   it.skipIf(!mediaToolsAvailable)("renders the actual desktop UI against fake APIs and encodes deterministic video evidence", async () => {
     const output = await mkdtemp(join(tmpdir(), "relayer-provider-video-test-"));
+    const stopProgress = startCaptureDiagnostics(output, "full");
     try {
       const { stdout } = await run(process.execPath, [
         "scripts/capture-provider-ux-video.mjs",
@@ -175,12 +201,14 @@ describe("provider browser evidence", () => {
       expect(parsed.streams[0]).toMatchObject({ width: 1280, height: 800, codec_name: "h264" });
       expect(Number(parsed.format.duration)).toBeGreaterThan(16);
     } finally {
+      stopProgress();
       await rm(output, { recursive: true, force: true });
     }
   }, 120_000);
 
   it.skipIf(!mediaToolsAvailable)("captures focused main scenes and excludes omitted files from reused sidebar-only output", async () => {
     const output = await mkdtemp(join(tmpdir(), "relayer-focused-evidence-"));
+    const stopProgress = startCaptureDiagnostics(output, "focused");
     const capture = async (...args) => run(process.execPath, ["scripts/capture-provider-ux-video.mjs", "--output-dir", output, ...args], {
       cwd: new URL("..", import.meta.url), timeout: 120_000, maxBuffer: 1024 * 1024 * 8,
     });
@@ -206,7 +234,7 @@ describe("provider browser evidence", () => {
       expect(gesture.map(({ ending, passed }) => ({ ending, passed }))).toEqual([
         { ending: "release", passed: true }, { ending: "cancel", passed: true },
       ]);
-    } finally { await rm(output, { recursive: true, force: true }); }
+    } finally { stopProgress(); await rm(output, { recursive: true, force: true }); }
   }, 120_000);
 
   // The capture flow above needs macOS media tools and skips elsewhere, but

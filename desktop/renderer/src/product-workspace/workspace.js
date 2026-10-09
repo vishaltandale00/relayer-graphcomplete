@@ -36,6 +36,7 @@ import {
   restoredDraftForInteraction,
 } from "../interaction-failure-model.js";
 import { createNodeContextDraftController } from "../node-context-drafts.js";
+import { createLiveAnswerController } from "../live-answers.js";
 import {
   captureTextControlState,
   committedInputAttachment,
@@ -1767,6 +1768,7 @@ export function createProductWorkspace({
   const inputDraftController = inputDraftApi
     ? createNodeInputDraftController({ api: inputDraftApi })
     : null;
+  const liveAnswerController = inputDraftApi?.answer ? createLiveAnswerController({ api: inputDraftApi }) : null;
   const inputDraftLoads = inputDraftController
     ? createNodeInputDraftLoadQueue({ load: (threadId) => inputDraftController.load(threadId) })
     : null;
@@ -5756,6 +5758,8 @@ export function createProductWorkspace({
   }
 
   function inputConsumersExhausted(state, input) {
+    if (input.liveInput && liveAnswerController?.receipt(getThread()?.id,
+      createInputOccurrence(currentInteraction(state)?.graphNodeId, currentLayerId(state, getThread()), input.id))) return true;
     if (typeof input.inputCanAcceptAnswer === "boolean") return !input.inputCanAcceptAnswer;
     const consumers = (state.actions ?? []).filter(action => action.kind === "invoke"
       && action.inputActionIds?.some(id => String(id) === String(input.id)));
@@ -5876,6 +5880,63 @@ export function createProductWorkspace({
     syncBoundInvokeControls(state);
   }
 
+  function liveAnswerButton(state, node, action, occurrence) {
+    const thread = getThread();
+    const interaction = currentInteraction(state, thread);
+    const stageKey = threadInputOccurrenceKey(thread.id, occurrence);
+    const semantic = action.input ?? action;
+    const receipt = action.liveInput?.receipt ?? liveAnswerController?.receipt(thread.id, occurrence);
+    const button = graphDocument.createElement("button");
+    button.type = "button";
+    button.className = "node-input-operator-send";
+    button.dataset.inputControlRole = "answer";
+    button.dataset.liveAnswerScope = JSON.stringify(occurrence);
+    button.textContent = receipt ? "Delivered" : "Answer";
+    button.setAttribute("aria-label", `${receipt ? "Delivered answer for" : "Answer"} ${semantic.prompt}`);
+    button.disabled = mode !== "interactive" || !capabilities.canCompose || !liveAnswerController || Boolean(receipt)
+      || !action.liveInput?.eligible || inputPending.has(stageKey)
+      || Boolean(validateInputStage(semantic, inputStages.get(stageKey)));
+    button.onclick = async () => {
+      if (button.disabled) return;
+      const staged = inputStages.get(stageKey);
+      const value = semantic.control === "text" ? { text: staged }
+        : { selected: semantic.options.filter(option => staged.includes(String(option.key))).sort((a, b) => a.key.localeCompare(b.key)) };
+      inputPending.begin(stageKey);
+      button.disabled = true;
+      inputErrors.delete(stageKey);
+      try {
+        await liveAnswerController.answer(thread.id, interaction.id, {
+          occurrence, attemptId: action.liveInput.attemptId, authorityEpoch: action.liveInput.authorityEpoch,
+          expectedRevision: action.liveInput.currentRevision,
+        }, value);
+        inputTouched.delete(stageKey);
+      } catch (error) { inputErrors.set(stageKey, error.message); }
+      finally {
+        inputPending.end(stageKey);
+        if (String(getThread()?.id) === String(thread.id) && String(selection.selectedNodeId) === String(node.id)) {
+          await selectNode(getState(), node.id, { notify: false });
+        }
+      }
+    };
+    return button;
+  }
+
+  function renderAuthoredLiveAnswers(state, node, actions) {
+    const thread = getThread();
+    const interaction = currentInteraction(state, thread);
+    const layerId = currentLayerId(state, thread);
+    const host = $("#nodeInputActions");
+    const live = actions.filter(action => action.liveInput);
+    host.classList.toggle("hidden", !live.length);
+    host.replaceChildren(...live.flatMap(action => {
+      const occurrence = createInputOccurrence(interaction.graphNodeId, layerId, action.id);
+      const error = graphDocument.createElement("p");
+      error.className = "node-input-error";
+      error.textContent = inputErrors.get(threadInputOccurrenceKey(thread.id, occurrence)) || "";
+      return [liveAnswerButton(state, node, action, occurrence), error];
+    }));
+  }
+
   function renderNodeInputActions(state, node, actions, { groupInvokes = true } = {}) {
     restoreGroupedInvokeControls();
     const host = $("#nodeInputActions");
@@ -5926,14 +5987,16 @@ export function createProductWorkspace({
       const occurrence = createInputOccurrence(interaction.graphNodeId, layerId, action.id);
       const stageKey = threadInputOccurrenceKey(thread.id, occurrence);
       const attachment = displayedInputAttachment(draft, action, occurrence);
-      const committedValue = initialInputStageValue(semantic, attachment);
+      const liveReceipt = action.liveInput?.receipt ?? liveAnswerController?.receipt(thread.id, occurrence);
+      const committedValue = liveReceipt ? (semantic.control === "text" ? liveReceipt.value.text : liveReceipt.value.selected.map(option => String(option.key))) : initialInputStageValue(semantic, attachment);
       implicitInputEntries.set(stageKey, { occurrence, semantic, action,
-        composerEligible: !(state.actions ?? []).some(candidate => candidate.kind === "invoke"
+        composerEligible: !action.liveInput && !(state.actions ?? []).some(candidate => candidate.kind === "invoke"
           && candidate.inputActionIds?.some(id => String(id) === String(action.id))) });
       if (!inputStages.has(stageKey) || !inputTouched.has(stageKey)) inputStages.set(stageKey, committedValue);
       const fieldset = graphDocument.createElement("fieldset");
       fieldset.className = "node-input-editor";
       fieldset.dataset.inputOccurrenceKey = stageKey;
+      if (action.liveInput) fieldset.dataset.liveAnswerScope = JSON.stringify(occurrence);
       fieldset.dataset.reviewCapture = inputActionReviewRef(occurrence);
       fieldset.dataset.reviewActionId = String(action.id);
       fieldset.setAttribute("aria-label", `Input action: ${semantic.prompt}`);
@@ -6040,7 +6103,7 @@ export function createProductWorkspace({
         const persistedError = inputErrors.get(stageKey);
         error.textContent = persistedError || (inputTouched.has(stageKey) ? issue?.message : "") || "";
         const pending = inputPending.has(stageKey);
-        const locked = contextStagingDisabled() || pending || inputConsumersExhausted(state, action);
+        const locked = (action.liveInput ? mode !== "interactive" || !capabilities.canCompose : contextStagingDisabled()) || pending || inputConsumersExhausted(state, action);
         control.disabled = locked;
         for (const option of control.querySelectorAll?.("button") || []) option.disabled = locked;
         undo.disabled = locked || inputStageValuesEqual(semantic, staged, committedValue);
@@ -6058,6 +6121,7 @@ export function createProductWorkspace({
           inputErrors.delete(stageKey);
           inputTouched.add(stageKey);
           sync();
+          if (action.liveInput) actionsHost.replaceChildren(liveAnswerButton(state, node, action, occurrence));
           syncComposer();
         };
       }
@@ -6130,7 +6194,8 @@ export function createProductWorkspace({
           });
         }
       };
-      if (implicitInputAcceptance) actionsHost.append(undo);
+      if (action.liveInput) actionsHost.append(liveAnswerButton(state, node, action, occurrence));
+      else if (implicitInputAcceptance) actionsHost.append(undo);
       else actionsHost.append(undo, commit);
       footer.append(error, actionsHost);
       fieldset.append(footer);
@@ -6359,10 +6424,12 @@ export function createProductWorkspace({
         const occurrence = createInputOccurrence(interaction.graphNodeId, visibleLayer.layer.id, action.id);
         const key = threadInputOccurrenceKey(getThread()?.id, occurrence);
         implicitInputEntries.set(key, { occurrence, action, semantic: action.input ?? action,
-          composerEligible: !(state.actions ?? []).some(candidate => candidate.kind === "invoke"
+          composerEligible: !action.liveInput && !(state.actions ?? []).some(candidate => candidate.kind === "invoke"
             && candidate.inputActionIds?.some(id => String(id) === String(action.id))) });
-        if (!inputStages.has(key) || !inputTouched.has(key)) inputStages.set(key, initialInputStageValue(action.input ?? action,
-          displayedInputAttachment(inputDraftController.current(getThread()?.id), action, occurrence)));
+        const liveReceipt = action.liveInput?.receipt ?? liveAnswerController?.receipt(getThread()?.id, occurrence);
+        if (!inputStages.has(key) || !inputTouched.has(key)) inputStages.set(key, liveReceipt
+          ? (action.control === "text" ? liveReceipt.value.text : liveReceipt.value.selected.map(option => String(option.key)))
+          : initialInputStageValue(action.input ?? action, displayedInputAttachment(inputDraftController.current(getThread()?.id), action, occurrence)));
       }
     }
     const authoredCapabilityState = {};
@@ -6401,6 +6468,7 @@ export function createProductWorkspace({
           ? authoredInputErrors.get(`${getThread()?.id}\u0000${authoredInputKey(occurrence)}`)
           : null;
         authoredCapabilityState[mount.id] = {
+          ...(action.liveInput && occurrence ? { liveAnswerScope: JSON.stringify(occurrence) } : {}),
           // A presentation replacement transfers an existing pending standard
           // value. The same occurrence registry continues to own its epoch;
           // authored edit callbacks below keep it current until submission.
@@ -6509,12 +6577,14 @@ export function createProductWorkspace({
         else authoredInputEdits.delete(editKey);
         const occurrence = inputAction && interaction?.graphNodeId != null && visibleLayer?.layer?.id != null
           ? createInputOccurrence(interaction.graphNodeId, visibleLayer.layer.id, inputAction.id) : null;
-        composerInputEdits.set(editKey, occurrence ? isComposerInputOccurrence(occurrence) : true);
+        composerInputEdits.set(editKey, !inputAction?.liveInput && (occurrence ? isComposerInputOccurrence(occurrence) : true));
+        if (inputAction?.liveInput) renderAuthoredLiveAnswers(getState(), node, inputActions);
         if (submitted) trackAuthoredInputSubmit(threadId, submitted, refusalKey, occurrence);
         syncBoundInvokeControls(getState());
         syncComposer();
       },
       onInput: async (action, value, context) => {
+        if (action.liveInput) return;
         const thread = getThread();
         const interactionNodeId = currentInteraction(state, thread)?.graphNodeId;
         const layerId = currentLayerId(state, thread);
@@ -6577,8 +6647,7 @@ export function createProductWorkspace({
     }
     mountedAuthoredDetail = authoredDetail.authored ? authoredDetail : null;
     if (authoredDetail.authored) {
-      $("#nodeInputActions").replaceChildren();
-      $("#nodeInputActions").classList.add("hidden");
+      renderAuthoredLiveAnswers(state, node, inputActions);
       $("#detailActions").replaceChildren();
       $("#detailActions").classList.add("hidden");
     } else {

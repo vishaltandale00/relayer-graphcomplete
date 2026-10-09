@@ -511,6 +511,7 @@ describe("compiled Node Detail product runtime", () => {
   it.each([
     ["executable markup", '<script>globalThis.escaped = true</script>', ""],
     ["raw network content", '<img src="https://attacker.example/pixel.png" alt="Pixel">', ""],
+    ["forged live-answer authority", '<button data-live-answer-scope="forged" data-input-control-role="answer">Answer</button>', ""],
     ["auxiliary network attributes", '<a data-gc-mount="link" ping="https://attacker.example/pixel">Documentation</a>', ""],
     ["CSS resource functions", "<p>Remote visual</p>", 'p{background-image:image-set("https://attacker.example/pixel.png" 1x)}'],
     ["escaped CSS resource functions", "<p>Remote visual</p>", 'p{background-image:u\\72l("https://attacker.example/pixel.png")}'],

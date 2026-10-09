@@ -4,6 +4,27 @@ import type { CompiledNodeDetail } from "./detail.js";
 
 export type GraphId = number;
 
+export interface LiveAnswer {
+  readonly sequence: number;
+  readonly completionId: GraphId;
+  readonly attemptId: number;
+  readonly authorityEpoch: number;
+  readonly currentRevision: number;
+  readonly operationKey: string;
+  readonly occurrence: { readonly presentingInteractionNodeId: GraphId; readonly presentingLayerId: GraphId; readonly actionId: GraphId };
+  readonly question: SubmittedInputAction;
+  readonly value: SubmittedInputValue;
+}
+
+export interface LiveAnswerPage {
+  readonly current: CompletionState;
+  readonly authorityEpoch: number;
+  readonly answers: readonly LiveAnswer[];
+  readonly currentAnswers: readonly LiveAnswer[];
+  readonly nextSequence: number;
+  readonly eligibleActionIds: readonly GraphId[];
+}
+
 export interface CompletionInputGraph {
   readonly interactionNode: GraphId;
 }

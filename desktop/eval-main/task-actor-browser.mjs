@@ -1,4 +1,5 @@
 import { createActorDiagnostics } from "./task-actor-diagnostics.mjs";
+import { abortable } from "./abortable.mjs";
 import { randomUUID } from "node:crypto";
 import { createHumanTaskSurface } from "./web-host.mjs";
 
@@ -12,7 +13,30 @@ export function taskActorPresentationReady({ expected, presentation = globalThis
       || (presentation.completionStatus === "not_started" && presentation.attemptOutcome === "model_failed"));
 }
 
+// Correlation only: never read hidden layers or a child's graph inventory.
+export function taskActorCurrentIdentity({ expected, presentation = globalThis.window?.__taskActorPresentation }) {
+  const p = presentation;
+  const pointer = p?.currentPointer;
+  if (String(p?.threadId) !== String(expected.threadId) || String(p?.turnId) !== String(expected.turnId)
+    || p.graphVisible !== true
+    || !Number.isFinite(p?.observedAt) || !Number.isFinite(expected.submittedAt)
+    || p.observedAt < expected.submittedAt
+    || (expected.attemptId != null && String(p.attemptId) !== String(expected.attemptId))
+    || pointer?.mode !== "following" || !Number.isSafeInteger(pointer.revision) || pointer.revision < 1
+    || pointer.layerId == null || String(pointer.layerId) !== String(p.layerId)) return null;
+  return { threadId: p.threadId, turnId: p.turnId, attemptId: p.attemptId ?? null,
+    revision: pointer.revision, layerId: p.layerId, observedAt: p.observedAt,
+    completionStatus: p.completionStatus, selectedNodeId: p.selectedNodeId, navigationPath: p.navigationPath };
+}
+
 // These functions are serialized by Playwright; keep their dependencies local.
+export function taskActorWorkingControlAllowed(element, kind) {
+  if (kind === "scroll") return true;
+  const live = element?.closest?.("[data-live-answer-scope]");
+  if (live && (element.matches("textarea,input,select") || ["answer", "option"].includes(element.dataset.inputControlRole))) return true;
+  return kind === "click" && Boolean(element?.matches?.("#nodeLayer .graph-node[data-node],#detailActions button[data-review-kind=navigate-action],#workspaceBreadcrumb button[data-review-kind=layer-navigation],#inspectorClose"));
+}
+
 export function taskActorControlIdentity(element) {
   const p = element.ownerDocument.defaultView.__taskActorPresentation;
   if (!p?.threadId || !p?.turnId || !p?.layerId) return null;
@@ -31,6 +55,12 @@ export function taskActorControlIdentity(element) {
       || element.dataset.reviewKind !== "layer-navigation"
       || element.dataset.reviewRef !== `breadcrumb-layer:${index}:${entry.layerId}`) return null;
     kind = "breadcrumb"; keys = ["data-review-ref", "data-review-kind", "data-review-path-index", "aria-label", "title", "aria-current"];
+  } else if (element.closest?.("[data-live-answer-scope]")) {
+    kind = "live-input"; keys = ["data-input-control-role", "data-option-key", "aria-label", "data-gc-mount"];
+    const live = element.closest("[data-live-answer-scope]");
+    return { kind, attributes: Object.fromEntries(keys.map(key => [key, element.getAttribute(key)])),
+      liveScope: live.dataset.liveAnswerScope, tag: element.tagName,
+      scope: JSON.stringify([p.threadId, p.turnId, p.layerId, p.attemptId, p.selectedNodeId, p.navigationPath]) };
   } else return null;
   return { kind, attributes: Object.fromEntries(keys.map(key => [key, element.getAttribute(key)])),
     text: element.textContent, scope: JSON.stringify([p.threadId, p.turnId, p.layerId, p.attemptId, p.selectedNodeId, p.navigationPath]) };
@@ -38,6 +68,15 @@ export function taskActorControlIdentity(element) {
 export function taskActorRebindControl(identity, document = globalThis.document) {
   const p = document.defaultView.__taskActorPresentation;
   if (!p || JSON.stringify([p.threadId, p.turnId, p.layerId, p.attemptId, p.selectedNodeId, p.navigationPath]) !== identity.scope) return null;
+  if (identity.kind === "live-input") {
+    const elements = [];
+    function collect(root) { for (const element of root.querySelectorAll("*")) { elements.push(element); if (element.shadowRoot) collect(element.shadowRoot); } }
+    collect(document);
+    const matches = elements.filter(element => element.tagName === identity.tag
+      && element.closest?.("[data-live-answer-scope]")?.dataset.liveAnswerScope === identity.liveScope
+      && Object.entries(identity.attributes).every(([key, value]) => element.getAttribute(key) === value));
+    return matches.length === 1 ? matches[0] : null;
+  }
   const selector = ({ node: ".workspace-layout #nodeLayer .graph-node[data-node]",
     action: ".workspace-layout #detailActions button.action-control[data-action-id]",
     breadcrumb: ".workspace-layout #workspaceBreadcrumb button.breadcrumb-segment[data-review-path-index]" })[identity.kind];
@@ -126,21 +165,21 @@ export async function openTaskActorBrowser({ tasks, sessionId, productSession, b
     page.on("popup", (popup) => { void popup.close(); });
     await page.goto(surface.url);
     await page.locator(".workspace-layout").waitFor({ state: "visible" });
-    const nativeMenuObservation = observationContract?.id === "task-actor-observation-v2"
+    const nativeMenuObservation = ["task-actor-observation-v2", "task-actor-observation-v3"].includes(observationContract?.id)
       && observationContract.optionObservation === "opened-native-select-accessibility";
     let openedSelect = null;
     let openedMenuSignature = null;
     let menuAuthorities = new Map();
     let handles = new Map();
     let controlIdentities = new Map();
-    async function observe(expected) {
+    async function observe(expected, working = false) {
       signal?.throwIfAborted();
       if (expected) await page.waitForFunction(taskActorPresentationReady, { expected }, { timeout: 30000 });
       for (const handle of handles.values()) await handle.dispose();
       handles = new Map();
       controlIdentities = new Map();
       menuAuthorities = new Map();
-      const snapshot = await page.evaluateHandle(async () => {
+      const snapshot = await page.evaluateHandle(async working => {
         const { isVisibleElement, accessibleControlName } = await import("/src/review-tools.js");
         const root = document.querySelector(".workspace-layout");
         const elements = [];
@@ -172,12 +211,17 @@ export async function openTaskActorBrowser({ tasks, sessionId, productSession, b
           return (element.getAttribute("aria-label") || labels || element.getAttribute("title") || element.getAttribute("placeholder") || "").replace(/\s+/g, " ").trim();
         }
         const visible = elements.filter(visibleRect);
-        const controls = visible.filter((element) => element.matches("button,input:not([type=hidden]):not([type=file]),textarea,select,[role=button],[role=tab],summary") && !element.disabled && element.getAttribute("aria-disabled") !== "true");
+        let controls = visible.filter((element) => element.matches("button,input:not([type=hidden]):not([type=file]),textarea,select,[role=button],[role=tab],summary") && !element.disabled && element.getAttribute("aria-disabled") !== "true");
+        if (working) controls = controls.filter(element => {
+          const live = element.closest?.("[data-live-answer-scope]");
+          return (live && (element.matches("textarea,input,select") || ["answer", "option"].includes(element.dataset.inputControlRole)))
+            || element.matches("#nodeLayer .graph-node[data-node],#detailActions button[data-review-kind=navigate-action],#workspaceBreadcrumb button[data-review-kind=layer-navigation],#inspectorClose");
+        });
         // Pixels are the content observation. Accessible names identify controls;
         // never flatten full DOM paragraphs hidden under scroll/clipping.
         const text = "Use the attached screenshot and these currently visible controls.";
         return { text, elements: controls, controls: controls.map((element) => ({ name: actorControlName(element), role: element.getAttribute("role") || element.tagName.toLowerCase() })) };
-      });
+      }, working);
       try {
         const text = await (await snapshot.getProperty("text")).jsonValue();
         const controls = await (await snapshot.getProperty("controls")).jsonValue();
@@ -204,12 +248,39 @@ export async function openTaskActorBrowser({ tasks, sessionId, productSession, b
       } finally { await snapshot.dispose(); }
     }
     return {
+      async observeCurrent(expected, previous) {
+        return abortable(signal, async () => {
+          signal?.throwIfAborted();
+          await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+          const pointer = await page.evaluate(taskActorCurrentIdentity, { expected });
+          if (!pointer || (expected.workingOnly && ["accepted", "failed", "stopped", "not_started"].includes(pointer.completionStatus)) || (previous && pointer.revision === previous.revision
+            && String(pointer.threadId) === String(previous.threadId)
+            && String(pointer.attemptId) === String(previous.attemptId) && String(pointer.turnId) === String(previous.turnId))) return null;
+          const observation = await observe(undefined, true);
+          await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+          const after = await page.evaluate(taskActorCurrentIdentity, { expected });
+          // A paint, selection or pointer change during capture makes the pixels
+          // unbound. Keep the gap; never relabel them as an earlier revision.
+          if (JSON.stringify(pointer) !== JSON.stringify(after)) return { kind: "gap", pointer, reason: "presentation_changed_during_capture" };
+          return { kind: "observation", pointer, observation: { ...observation,
+            text: "Current working update. You may answer visible questions using the explicit Answer control. Send starts a later interaction after settlement.",
+            currentUpdate: { revision: pointer.revision, observedAt: pointer.observedAt, completionStatus: pointer.completionStatus },
+            availableActions: ["click", "fill", "select", "scroll"] } };
+        });
+      },
       async observe(expected) { try { return await observe(expected); } catch (error) { await diagnostics?.operationError("observe", error); throw error; } },
       async act(action, correlation = {}) {
         const actionId = randomUUID();
         let stage = "preflight"; let diagnosticTarget = null;
         await diagnostics?.record("action_started", { actionId, actionEventId: correlation.actionEventId ?? null, observationEventId: correlation.observationEventId ?? null, kind: action.kind, ref: action.ref ?? null });
         try {
+        if (correlation.current) {
+          const now = await page.evaluate(taskActorCurrentIdentity, { expected: correlation.current.expected });
+          if (!now || ["revision", "layerId", "attemptId", "selectedNodeId"].some(key => String(now[key]) !== String(correlation.current.pointer[key]))
+            || JSON.stringify(now.navigationPath) !== JSON.stringify(correlation.current.pointer.navigationPath)) {
+            throw Object.assign(new Error("The working question changed before dispatch."), { code: "actor_control_stale", actionDispatched: false });
+          }
+        }
         signal?.throwIfAborted();
         if (!["click", "select"].includes(action.kind) && openedSelect) {
           await openedSelect.dispose(); openedSelect = null; menuAuthorities.clear();
@@ -230,6 +301,9 @@ export async function openTaskActorBrowser({ tasks, sessionId, productSession, b
             const rebound = replacement.asElement();
             if (rebound) { await handle.dispose(); handles.set(action.ref, replacement); handle = rebound; }
             else await replacement.dispose();
+          }
+          if (correlation.current && (!handle || !await handle.evaluate(taskActorWorkingControlAllowed, action.kind))) {
+            throw Object.assign(new Error("This control is unavailable during working observation."), { code: "actor_control_unavailable", actionDispatched: false });
           }
           diagnosticTarget = handle;
           stage = "validate_target";
