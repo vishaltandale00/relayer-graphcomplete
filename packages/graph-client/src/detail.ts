@@ -239,6 +239,32 @@ export function snapshotRetainedCompiledNodeDetail(value: unknown): CompiledNode
   return deepFreezeJson(JSON.parse(JSON.stringify(value))) as CompiledNodeDetail;
 }
 
+/** Compose an authenticated retained package with newly compiled components. @internal */
+export function extendRetainedCompiledNodeDetail(retained: unknown, additions: CompiledNodeDetail): CompiledNodeDetail {
+  const base = snapshotRetainedCompiledNodeDetail(retained);
+  if (!base) throw new TypeError("retained_detail_invalid: reread the accepted presentation");
+  const componentIds = new Set(base.components.map(component => component.id));
+  const mountIds = new Set(base.mounts.map(mount => mount.id));
+  if (additions.components.some(component => componentIds.has(component.id))
+    || additions.mounts.some(mount => mountIds.has(mount.id))) {
+    throw new TypeError("retained_detail_conflict: choose new component and control keys");
+  }
+  const assets = new Map(base.assets.map(asset => [asset.id, asset]));
+  for (const asset of additions.assets) {
+    const prior = assets.get(asset.id);
+    if (prior && canonicalJson(prior) !== canonicalJson(asset)) throw new TypeError("retained_asset_conflict");
+    assets.set(asset.id, asset);
+  }
+  const content = { version: 1 as const,
+    components: [...base.components, ...additions.components.map((component, index) => ({ ...component, order: base.components.length + index }))],
+    mounts: [...base.mounts, ...additions.mounts], assets: [...assets.values()] };
+  const packageValue = { ...content, integritySha256: createHash("sha256").update(canonicalJson(content)).digest("hex") };
+  if (Buffer.byteLength(canonicalJson(packageValue), "utf8") > DETAIL_AUTHORING_LIMITS.maxCompiledPackageBytes) throw compiledPackageByteLimitError();
+  const result = snapshotRetainedCompiledNodeDetail(packageValue);
+  if (!result) throw new TypeError("extended_detail_limit_exceeded: use a complete authorized replacement");
+  return result;
+}
+
 function isCanonicalCapability(value: unknown): boolean {
   if (!isPlainRecord(value) || typeof value.kind !== "string") return false;
   if (value.kind === "link") return hasExactKeys(value, ["href", "kind"]) && typeof value.href === "string";

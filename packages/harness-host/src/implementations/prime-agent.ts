@@ -1295,6 +1295,7 @@ function currentWorkspaceMechanicsPython(): string {
 export const PYTHON_GRAPH_API_REFERENCE = `Graph client reference (every graph method is async; always await it):
 - await graph.get_node_presentation(node): authorized current node, revision and existing actions.
 - await graph.replace_node_presentation(node, expected_revision, presentation): GraphSession compiles and stages a full attached-node presentation replacement.
+- await graph.extend_node_presentation(node, expected_revision, additions): GraphSession compiles added components and preserves the authenticated accepted components, controls, and assets; distinct component keys are required.
 - (await graph.get_interaction_input()).interaction_permissions: frozen read-only version, enabled flag and exact permission entries; None for absent legacy snapshots.
 - NodeObject(icon, title, detail, kind="concept", client_key=...), EdgeObject((left_node, right_node), client_key=...), LayerObject(nodes, edges, layout, client_key=...), LayerLayoutObject(placements, edge_shape, edge_routes=()), EdgeRouteObject(edge, shape=None, ends=None, waypoints=()), EdgeEndObject(node, side=None), NodePlacementObject(node, x, y); import them from relayer_graph.
 - await graph.submit_node(node) -> node; await graph.create_edge(left, right, client_key=...) -> edge; await graph.submit_layer(layer, size_justification=None) -> layer.

@@ -34,6 +34,8 @@ import {
   recursiveCompleteFixtureFactory as recursiveFixtureFactory,
 } from "./support/recursive-complete-fixture.mjs";
 
+import { seedCommunicationSource } from "./support/communication-contract-fixture.mjs";
+
 const repositoryRoot = resolve(import.meta.dirname, "..");
 const services = [];
 const directories = [];
@@ -112,6 +114,7 @@ function brokerScopeFixtureFactory(observed) {
 async function startRecursiveStack(observed, {
   temporalFeatures = RECURSIVE_TEMPORAL_FEATURES,
   implementationFactory,
+  interactionPermissions = false,
 } = {}) {
   const dataDirectory = await mkdtemp(join(tmpdir(), "relayer-recursive-e2e-"));
   directories.push(dataDirectory);
@@ -140,6 +143,7 @@ async function startRecursiveStack(observed, {
     graphServerBinary: join(repositoryRoot, "target", "debug", "relayer-graph-server"),
     configurationPaths: [configurationPath],
     temporalFeatures,
+    interactionPermissions,
     additionalImplementations: {
       "fixture.recursive": implementationFactory ?? recursiveFixtureFactory(
         observed,
@@ -236,13 +240,19 @@ describe("recursive complete end to end", () => {
     { withPrior: false, temporal: true, replay: true },
     { withPrior: true, temporal: true, replay: true },
     { withPrior: true, temporal: true, replay: true, later: true },
+    { withPrior: false, temporal: true, replay: true, attached: true, rich: false },
+    { withPrior: false, temporal: true, replay: true, attached: true, rich: true },
     { withPrior: false, temporal: false, replay: false },
-  ])("executes the JS communication recipe: %j", async ({ withPrior, temporal, replay, later = false }) => {
+  ])("executes the JS communication recipe: %j", async ({ withPrior, temporal, replay, later = false, attached = false, rich = false }) => {
     const observed = {};
-    const stack = await startRecursiveStack(observed, { temporalFeatures: temporal ? RECURSIVE_TEMPORAL_FEATURES : {}, implementationFactory: () => ({
+    const stack = await startRecursiveStack(observed, { temporalFeatures: temporal ? RECURSIVE_TEMPORAL_FEATURES : {}, interactionPermissions: attached, implementationFactory: () => ({
       traceSupport: () => ({ prompt: "none", messages: "none", reasoningSummaries: "none", modelCalls: "none", toolCalls: "none", usage: "none", childStreams: "none", nativeArtifacts: "none" }),
       state: () => ({}),
       async complete(context) {
+        if (context.inputGraph.detail === "Seed attached evidence") {
+          observed.source = await seedCommunicationSource(new RelayerGraphClient(context.graph.acquireCapability()), rich);
+          return;
+        }
         const { currentCommunicationAuthoringRecipeJs } = await import("../packages/harness-host/src/implementations/graph-presentation-guidance.ts");
         const recipe = currentCommunicationAuthoringRecipeJs(context.inputGraph.id, "@relayer/graph-client");
         const program = recipe.match(/```javascript\n([\s\S]*?)\n```/)[1]
@@ -264,7 +274,7 @@ describe("recursive complete end to end", () => {
         }
         const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
         try {
-          const execute = code => new AsyncFunction("RelayerGraphClient", "GraphApiError", "html", "css", "detailCapability", "environment", "observed", code)(RelayerGraphClient, GraphApiError, html, css, detailCapability, environment, observed);
+          const execute = code => new AsyncFunction("RelayerGraphClient", "GraphApiError", "NodeObject", "html", "css", "detailCapability", "environment", "observed", code)(RelayerGraphClient, GraphApiError, NodeObject, html, css, detailCapability, environment, observed);
           if (temporal && !withPrior && !replay) {
             const invalidRead = program.replace('let current;', 'graph.getCurrent = () => new RelayerGraphClient({ url: environment.RELAYER_GRAPH_URL, token: "invalid-token", nodeId: Number(environment.RELAYER_NODE_ID) }).getCurrent(); let current;').replace('const author =', 'observed.authoringStarted = true; const author =');
             await expect(execute(invalidRead)).rejects.toMatchObject({ status: 401 });
@@ -287,6 +297,13 @@ describe("recursive complete end to end", () => {
               observed.advanced = await graph.getCurrent();
               observed.presentation = await graph.getLayer(written.rootLayer);
             }
+            if (attached) {
+              // Use the active scope's node read for immutable detail; source-layer action is unchanged.
+              const acceptedSource = await new RelayerGraphClient(capability).getNode(observed.source.nodeId);
+              expect(acceptedSource).toEqual(observed.source.accepted.nodes[0]);
+              const contract = await new RelayerGraphClient(capability).getContract();
+              expect(contract.returnRequirements).toEqual([{ kind: "navigate.response", nodeId: observed.source.nodeId }]);
+            }
             observed.beforeReplay = structuredClone(observed.advanced);
             observed.acceptedBeforeReplay = structuredClone(observed.presentation);
           }
@@ -299,10 +316,24 @@ describe("recursive complete end to end", () => {
         } catch (error) { observed.errors = [String(error)]; throw error; }
       },
     }) });
+    const project = attached ? await productRequest(stack.session, "/api/projects", { method: "POST", body: JSON.stringify({ path: directories.at(-1) }) }) : undefined;
     const thread = await productRequest(stack.session, "/api/threads", {
-      method: "POST", body: JSON.stringify({ title: "Early findings recipe", initialMessage: "Show findings while working", harnessId: "fixture-recursive", permissionProfileId: "auto", modelSelection: stack.selection }),
+      method: "POST", body: JSON.stringify({ title: "Early findings recipe", ...(project ? { projectId: project.id } : {}), initialMessage: attached ? "Seed attached evidence" : "Show findings while working", harnessId: "fixture-recursive", permissionProfileId: "auto", modelSelection: stack.selection }),
     });
-    const detail = await waitForStatus(stack.session, thread.id, 0, "accepted", observed);
+    if (attached) {
+      await waitForStatus(stack.session, thread.id, 0, "accepted", observed);
+      if (rich) {
+        const assetId = observed.source.accepted.nodes[0].authoredDetail.assets[0].id;
+        const response = await fetch(new URL(`/api/control/nodes/${observed.source.nodeId}/detail-assets/${assetId}`, stack.runtimeSession.graphUrl), { headers: { authorization: `Bearer ${stack.runtimeSession.graphControlToken}` } });
+        expect(response.ok).toBe(true);
+        observed.savedAsset = await response.json();
+      }
+      await productRequest(stack.session, `/api/threads/${thread.id}/interactions`, {
+        method: "POST", body: JSON.stringify({ text: "Show findings while working", modelSelection: stack.selection, inputId: "attached-recipe", contexts: [{ target: { nodeId: observed.source.nodeId, sourceInteractionNodeId: observed.source.interactionNodeId, sourceLayerId: observed.source.layerId }, annotations: [] }] }),
+      });
+    }
+    const detail = await waitForStatus(stack.session, thread.id, attached ? 1 : 0, "accepted", observed);
+    const resultTurn = detail.interactions[attached ? 1 : 0];
     if (!temporal) {
       const root = detail.interactions[0].completionOutput.rootLayer;
       expect(root.nodes.map(node => node.title)).toEqual(["Result"]);
@@ -319,7 +350,7 @@ describe("recursive complete end to end", () => {
     for (const mount of mounts) {
       expect(observed.firstPresentation.actions.some(action => action.clientKey === mount.capability.action.clientKey)).toBe(true);
     }
-    const completionId = detail.interactions[0].graphNodeId;
+    const completionId = resultTurn.graphNodeId;
     const response = await fetch(new URL(`/api/control/interactions/${completionId}/current`, stack.runtimeSession.graphUrl), {
       headers: { authorization: `Bearer ${stack.runtimeSession.graphControlToken}` },
     });
@@ -327,11 +358,30 @@ describe("recursive complete end to end", () => {
     const finalCurrent = await response.json();
     expect(finalCurrent).toMatchObject({ lifecycle: "succeeded", headRevision: (withPrior ? 3 : 2) + (later ? 1 : 0) });
     expect(finalCurrent.currentLayerId).not.toBe(observed.advanced.currentLayerId);
-    const finalLayer = detail.interactions[0].completionOutput.rootLayer;
+    const finalLayer = resultTurn.completionOutput.rootLayer;
     expect(finalLayer.nodes[0].authoredDetail.mounts[0].capability.kind).toBe("reference");
     const earlier = finalLayer.actions.find(action => action.label === "Earlier findings");
     expect(earlier.targetLayerId).toBe(observed.advanced.currentLayerId);
     expect(finalLayer.nodes[0].authoredDetail.mounts[0].capability.action.clientKey).toBe(earlier.clientKey);
+    if (attached) {
+      const response = await fetch(new URL(`/api/control/interactions/${observed.source.interactionNodeId}/layers/${observed.source.layerId}`, stack.runtimeSession.graphUrl), { headers: { authorization: `Bearer ${stack.runtimeSession.graphControlToken}` } });
+      expect(response.ok).toBe(true);
+      const saved = await response.json();
+      const original = observed.source.accepted.nodes[0];
+      expect(saved.nodes[0]).toMatchObject({ id: original.id, title: original.title, detail: original.detail, clientKey: original.clientKey });
+      const backlink = saved.actions.find(action => action.clientKey === `response-${completionId}-${observed.source.nodeId}`);
+      expect(backlink).toMatchObject({ targetLayerId: finalLayer.layer.id, sourceLayerId: null, kind: "navigate", relation: "reference" });
+      expect(saved.actions.find(action => action.id === observed.source.accepted.actions[0].id)).toEqual(observed.source.accepted.actions[0]);
+      if (rich) {
+        expect(saved.nodes[0].authoredDetail.components.slice(0, original.authoredDetail.components.length)).toEqual(original.authoredDetail.components);
+        expect(saved.nodes[0].authoredDetail.mounts.slice(0, original.authoredDetail.mounts.length)).toEqual(original.authoredDetail.mounts);
+        expect(saved.nodes[0].authoredDetail.assets).toEqual(original.authoredDetail.assets);
+        expect(saved.nodes[0].authoredDetail.mounts.at(-1).capability.action.clientKey).toBe(backlink.clientKey);
+        const assetResponse = await fetch(new URL(`/api/control/nodes/${observed.source.nodeId}/detail-assets/${observed.savedAsset.assetId}`, stack.runtimeSession.graphUrl), { headers: { authorization: `Bearer ${stack.runtimeSession.graphControlToken}` } });
+        expect(assetResponse.ok).toBe(true);
+        expect(await assetResponse.json()).toEqual(observed.savedAsset);
+      }
+    }
   });
 
 

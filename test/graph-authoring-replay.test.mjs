@@ -22,6 +22,8 @@ import {
 } from "@relayer/graph-client";
 import { afterEach, describe, expect, it } from "vitest";
 
+import { seedCommunicationSource } from "./support/communication-contract-fixture.mjs";
+
 const repositoryRoot = resolve(import.meta.dirname, "..");
 const processes = [];
 const directories = [];
@@ -449,15 +451,37 @@ describe("replay-safe graph authoring", () => {
         `/api/control/interactions/${capability.nodeId}/layers/${pyLayerId}`))
         .toMatchObject({ layer: { state: "accepted" }, nodes: [{ icon: "info", authoredDetail: { components: [{ id: "main" }] } }] });
 
-      const temporalServer = await startGraphServer(join(directory, "temporal.sqlite3"), token, ["--temporal-schema-read", "--temporal-root-current-write"]);
+      const temporalServer = await startGraphServer(join(directory, "temporal.sqlite3"), token, ["--temporal-schema-read", "--temporal-root-current-write", "--interaction-permissions"]);
       processes.push(temporalServer.process);
       // Execute Prime's delivered communication recipe through its real visual host bridge.
-      for (const { withPrior, replay, temporal, later = false } of [{ withPrior: false, replay: false, temporal: true }, { withPrior: true, replay: false, temporal: true }, { withPrior: false, replay: true, temporal: true }, { withPrior: true, replay: true, temporal: true }, { withPrior: true, replay: true, temporal: true, later: true }, { withPrior: false, replay: false, temporal: false }]) {
+      for (const { withPrior, replay, temporal, later = false, attached = false, rich = false } of [{ withPrior: false, replay: false, temporal: true }, { withPrior: true, replay: false, temporal: true }, { withPrior: false, replay: true, temporal: true }, { withPrior: true, replay: true, temporal: true }, { withPrior: true, replay: true, temporal: true, later: true }, { withPrior: false, replay: true, temporal: true, attached: true, rich: false }, { withPrior: false, replay: true, temporal: true, attached: true, rich: true }, { withPrior: false, replay: false, temporal: false }]) {
         const baselineServer = temporal ? temporalServer : server;
+        let source;
+        if (attached) {
+          const seed = await controlRequest(baselineServer.url, token, "/api/control/interactions", { projectId: 41, threadId: 77, text: "Accepted context source" });
+          source = await seedCommunicationSource(new RelayerGraphClient({ url: baselineServer.url, token: seed.graphToken, nodeId: seed.node.id }), rich, false);
+          const unrelated = await controlRequest(baselineServer.url, token, "/api/control/interactions", { projectId: 41, threadId: 77, text: "Ordinary reuse grants no edits" });
+          const reader = new RelayerGraphClient({ url: baselineServer.url, token: unrelated.graphToken, nodeId: unrelated.node.id });
+          expect((await reader.getNode(source.nodeId)).id).toBe(source.nodeId);
+          await expect(reader.extendNodePresentation(source.nodeId, 0, new NodeObject("info", "Saved", "Saved", "concept", source.accepted.nodes[0].clientKey))).rejects.toMatchObject({ status: 403 });
+        }
         const baselineInteraction = await controlRequest(baselineServer.url, token, "/api/control/interactions", {
           projectId: 41, threadId: 77, text: "Python communication baseline",
+          ...(attached ? { contexts: [{ target: { nodeId: source.nodeId, sourceInteractionNodeId: source.interactionNodeId, sourceLayerId: source.layerId }, annotations: [] }] } : {}),
         });
         capability = { url: baselineServer.url, token: baselineInteraction.graphToken, nodeId: baselineInteraction.node.id };
+        if (rich) {
+          const graph = new RelayerGraphClient(capability);
+          const snapshot = await graph.getNodePresentation(source.nodeId);
+          const original = snapshot.node;
+          const wrong = new NodeObject(original.icon, original.title, original.detail, original.kind, "wrong-owner");
+          await expect(graph.extendNodePresentation(source.nodeId, snapshot.revision, wrong)).rejects.toThrow("presentation_identity_mismatch");
+          const collision = new NodeObject(original.icon, original.title, original.detail, original.kind, original.clientKey);
+          collision.detailAuthoring.setComponent("saved", html`<p>Do not replace existing evidence</p>`);
+          await expect(graph.extendNodePresentation(source.nodeId, snapshot.revision, collision)).rejects.toThrow("retained_detail_conflict");
+          await expect(graph.extendNodePresentation(source.nodeId, snapshot.revision + 1, collision)).rejects.toMatchObject({ code: "stale_presentation_revision" });
+          expect(await graph.getNodePresentation(source.nodeId)).toEqual(snapshot);
+        }
         let priorLayerId;
         if (withPrior) {
           const priorGraph = new RelayerGraphClient(capability);
@@ -494,6 +518,11 @@ describe("replay-safe graph authoring", () => {
           await expect(runRecipeProcess("python3", ["-c", later ? program.replace('    final_author =', '    raise RuntimeError("injected after publication")\n    final_author =') : program.replace('    # Advance leaves', '    raise RuntimeError("injected after publication")\n    # Advance leaves')], undefined, pythonEnvironment)).rejects.toThrow("injected after publication");
           firstPublication = await controlRead(baselineServer.url, token, `/api/control/interactions/${capability.nodeId}/current`);
           firstLayer = await controlRead(baselineServer.url, token, `/api/control/interactions/${capability.nodeId}/layers/${firstPublication.currentLayerId}`);
+          if (attached) {
+            const originalLayer = await controlRead(baselineServer.url, token, `/api/control/interactions/${source.interactionNodeId}/layers/${source.layerId}`);
+            expect(originalLayer).toEqual(source.accepted);
+            expect((await new RelayerGraphClient(capability).getContract()).returnRequirements).toEqual([{ kind: "navigate.response", nodeId: source.nodeId }]);
+          }
           if (later) {
             const graph = new RelayerGraphClient(capability);
             const author = graph.authoring("additional-finding");
@@ -545,6 +574,20 @@ describe("replay-safe graph authoring", () => {
         expect(finalMount.capability.kind).toBe("reference");
         expect(finalMount.capability.action.clientKey).toBe(finalEarlier.clientKey);
         expect(finalEarlier.targetLayerId).toBe(advanced.current.currentLayerId);
+        if (attached) {
+          const saved = await controlRead(baselineServer.url, token, `/api/control/interactions/${source.interactionNodeId}/layers/${source.layerId}`);
+          const original = source.accepted.nodes[0];
+          expect(saved.nodes[0]).toMatchObject({ id: original.id, title: original.title, detail: original.detail, clientKey: original.clientKey });
+          const backlink = saved.actions.find(action => action.clientKey === `response-${capability.nodeId}-${source.nodeId}`);
+          expect(backlink).toMatchObject({ targetLayerId: finalLayer.layer.id, sourceLayerId: null, kind: "navigate", relation: "reference" });
+          expect(saved.actions.find(action => action.id === source.accepted.actions[0].id)).toEqual(source.accepted.actions[0]);
+          if (rich) {
+            expect(saved.nodes[0].authoredDetail.components.slice(0, original.authoredDetail.components.length)).toEqual(original.authoredDetail.components);
+            expect(saved.nodes[0].authoredDetail.mounts.slice(0, original.authoredDetail.mounts.length)).toEqual(original.authoredDetail.mounts);
+            expect(saved.nodes[0].authoredDetail.assets).toEqual(original.authoredDetail.assets);
+            expect(saved.nodes[0].authoredDetail.mounts.at(-1).capability.action.clientKey).toBe(backlink.clientKey);
+          }
+        }
       }
 
     } finally {

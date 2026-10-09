@@ -88,13 +88,29 @@ export function currentCommunicationAuthoringRecipeJs(interactionNodeId: number,
   return `Use graph.authoring(snapshotKey) for new response drafts with stable local keys. Give graph-authoring native children this recipe and the exact supplied import URL. Choose new snapshots for new accepted explanations. This runnable example shows early publication, further work, and final submission. Replace its placeholder evidence with actual task findings; do not publish an empty progress message.
 
 \`\`\`javascript
-import { RelayerGraphClient, GraphApiError, html, css, detailCapability } from ${JSON.stringify(clientModuleUrl)};
+import { RelayerGraphClient, GraphApiError, NodeObject, html, css, detailCapability } from ${JSON.stringify(clientModuleUrl)};
 const graph = RelayerGraphClient.fromEnv();
 let current;
 try { current = await graph.getCurrent(); }
 catch (error) {
   if (!(error instanceof GraphApiError) || error.code !== "feature_disabled") throw error;
   current = null; // Supported all-off compatibility mode: submit the final graph directly.
+}
+const contract = await graph.getContract();
+async function stageResponseLinks(responseLayer) {
+  for (const requirement of contract?.returnRequirements ?? []) {
+    if (requirement.kind !== "navigate.response") throw new Error("Unsupported Return requirement");
+    const snapshot = await graph.getNodePresentation(requirement.nodeId);
+    const addition = { kind: "navigate", relation: "reference", label: "Task findings", target: responseLayer, clientKey: "response-${interactionNodeId}-" + requirement.nodeId };
+    await graph.addAction(requirement.nodeId, addition);
+    if (snapshot.node.authoredDetail) {
+      const prior = snapshot.node;
+      const additions = new NodeObject(prior.icon, prior.title, prior.detail, prior.kind, prior.clientKey);
+      additions.detailAuthoring.setComponent("response-${interactionNodeId}", html\`<button gc=\${detailCapability.reference("response-control", addition)}>Task findings</button>\`);
+      // The typed extension retains all accepted components, assets and control provenance.
+      await graph.extendNodePresentation(requirement.nodeId, snapshot.revision, additions);
+    }
+  }
 }
 const author = graph.authoring("first-finding-${interactionNodeId}");
 const layer = author.layer("finding");
@@ -133,6 +149,7 @@ if (current !== null && !firstPublished) {
   layer.layout([[finding, 0.5, 0.5]], { edgeShape: "default", defaultNode: finding });
   const written = await author.write(layer);
   await graph.addAction(${interactionNodeId}, { kind: "navigate", relation: "expand", label: "Task findings", icon: "info", target: written.rootLayer, clientKey: "root-response" });
+  await stageResponseLinks(written.rootLayer);
   await graph.advanceCurrent(written.rootLayer, current.headRevision, "first-finding-publication");
 }
 // Continue the underlying work. Read evidence and observe any semantic children.
@@ -151,10 +168,11 @@ finalLayer.layout([[summary, 0.5, 0.5]], { edgeShape: "default", defaultNode: su
 const finalWritten = await finalAuthor.write(finalLayer);
 // Advance leaves the interaction's root response action draft; retarget that same stable action.
 await graph.addAction(${interactionNodeId}, { kind: "navigate", relation: "expand", label: "Task findings", icon: "info", target: finalWritten.rootLayer, clientKey: "root-response" });
+await stageResponseLinks(finalWritten.rootLayer);
 await graph.submit(${interactionNodeId});
 \`\`\`
 Add a connection with layer.edge("connection", first, second). Declare node controls before write with layer.action("details", node, { kind: "navigate", relation: "expand", label: "Details", target: childLayer }); bind that same returned action with detailCapability.expand("stable-control-key", action) in an unquoted gc= template interpolation, as shown above. The key and action are both required. For references use relation: "reference" and detailCapability.reference; for follow-ups use kind: "invoke", interactionText, and detailCapability.invoke. layer.node(localKey, fields) accepts only icon, title, detail, and optional kind: do not pass clientKey or ref in fields. layer.action(localKey, sourceNode, fields) supplies sourceLayer, clientKey, and ref: do not author these fields. Declare actions before binding them, and reuse the returned action without cloning or adding identity fields. Set each selected layer's layout explicitly, including routes or sizeJustification when needed, with layer.layout(...); written.rootLayer is available only after author.write(...), and has no .layer wrapper. For specialized low-level calls, layer.object is the actual LayerObject. Accepted-node additions and replacements still use their existing authorized low-level APIs and presentation revisions.
-The example probes current before writing. Only a typed feature_disabled rejection selects the submit-only compatibility path. Other errors propagate. On rerun while active, the completion-specific first-layer key in the reachable current closure identifies an already published phase (including after later advances); skip its writes and Advance, then repair only the final drafts. Do not rerun after a successful or unknown terminal submission; terminal recovery belongs to trusted supervision.
+The example reads the sealed contract and stages every required attached-node link to each exact candidate response root, including the final retarget. For rich accepted nodes, the typed presentation extension preserves existing components, assets and controls while compiling the new control. Advance validates these staged changes but only Return publishes them. Use unique component/control keys; stale revisions and extension conflicts require rereading or an explicit full replacement, never dropping existing content. The example probes current before writing. Only a typed feature_disabled rejection selects the submit-only compatibility path. Other errors propagate. On rerun while active, the completion-specific first-layer key in the reachable current closure identifies an already published phase (including after later advances); skip its writes and Advance, then repair only the final drafts. Do not rerun after a successful or unknown terminal submission; terminal recovery belongs to trusted supervision.
 For real content, use the same scoped action and detailCapability binding APIs as the ordinary authoring contract. Register every action before publication. Accepted nodes and layers stay immutable. Each later current must retain navigation to the exact prior current. Refresh getCurrent after each successful advance; save each transition's layer, expected headRevision and stable operation key for exact retries. When asking a question, author an input action on its draft explanation node with layer.action("question", finding, { kind: "input", label: "Answer", control: "text", prompt: "A task-specific question" }), or an appropriate select control. Publishing the question does not consume the user's answer. A terminal submit ends all graph access.`;
 }
 
@@ -163,7 +181,7 @@ export function currentCommunicationAuthoringRecipePython(interactionNodeId: num
 Before styling and after a CSS rejection, consult the compiler-generated Node Detail reference above. This runnable example shows early publication, further work, and final submission. Replace placeholder evidence with actual task findings; do not publish an empty progress message. Its placeholder content and layout are not a recommended response design. Choose content, topology, layout and controls for the task. Its optional detail branch demonstrates control binding, not required topology.
 
 \`\`\`python
-from relayer_graph import GraphSession, GraphLayer, APIError, html, action_capability
+from relayer_graph import GraphSession, GraphLayer, NodeObject, ActionObject, APIError, html, action_capability
 graph = await GraphSession.current()
 try:
     current = await graph.get_current()
@@ -171,6 +189,21 @@ except APIError as error:
     if not isinstance(error.details, dict) or error.details.get("error", {}).get("code") != "feature_disabled":
         raise
     current = None  # Supported all-off compatibility mode: submit the final graph directly.
+contract = await graph.get_contract()
+async def stage_response_links(response_layer):
+    for requirement in contract.return_requirements if contract is not None else ():
+        if requirement["kind"] != "navigate.response":
+            raise RuntimeError("Unsupported Return requirement")
+        node_id = requirement["nodeId"]
+        snapshot = await graph.get_node_presentation(node_id)
+        addition = ActionObject("navigate", "Task findings", None, "response-${interactionNodeId}-" + str(node_id), target=response_layer, relation="reference")
+        await graph.add_action(node_id, addition)
+        if snapshot["node"].get("authoredDetail") is not None:
+            prior = snapshot["node"]
+            additions = NodeObject(prior["icon"], prior["title"], prior["detail"], prior["kind"], client_key=prior["clientKey"])
+            additions.detail_authoring.set_component("response-${interactionNodeId}", html(["<button gc=", ">Task findings</button>"], action_capability("response-control", addition)))
+            # The typed extension retains accepted components, assets and control provenance.
+            await graph.extend_node_presentation(node_id, snapshot["revision"], additions)
 author = graph.authoring("first-finding-${interactionNodeId}")
 layer = author.layer("finding")
 shared_styles = "section { display: grid; gap: 0.75rem; background-color: transparent; }"
@@ -206,6 +239,7 @@ if current is not None and not first_published:
     layer.layout([(finding, 0.5, 0.5)], edge_shape="default", default_node=finding)
     written = await author.write(layer)
     await graph.add_navigate_action(${interactionNodeId}, "Task findings", written.root_layer, relation="expand", client_key="root-response", icon="info")
+    await stage_response_links(written.root_layer)
     await graph.advance_current(written.root_layer, expected_revision=current["headRevision"], operation_key="first-finding-publication")
 # Continue the underlying work. Read evidence and observe any semantic children.
 # Publish further material findings or questions as new snapshots, preserving prior current.
@@ -223,9 +257,10 @@ final_layer.layout([(summary, 0.5, 0.5)], edge_shape="default", default_node=sum
 final_written = await final_author.write(final_layer)
 # Advance leaves the interaction's root response action draft; retarget that same stable action.
 await graph.add_navigate_action(${interactionNodeId}, "Task findings", final_written.root_layer, relation="expand", client_key="root-response", icon="info")
+await stage_response_links(final_written.root_layer)
 await graph.submit(${interactionNodeId})
 \`\`\`
 Add connections with layer.edge("connection", first, second). Declare controls before write with layer.action("details", node, kind="navigate", relation="expand", label="Details", target=child_layer), then bind that same returned action with action_capability. Use relation="reference" for evidence and kind="invoke", interaction_text="..." for follow-ups. Node fields are icon, title, detail, and optional kind; do not supply client_key or ref. The scoped API supplies action source_layer and identity; do not pass source_layer, client_key, or ref into layer.action. Declare actions before binding them. Set every selected layer's layout explicitly. layer.object exposes the actual LayerObject for specialized operations. Accepted-node additions and presentation replacement retain their existing grants and revisions.
-The example probes current before writing. Only a typed feature_disabled rejection selects the submit-only compatibility path. Other errors propagate. On rerun while active, the completion-specific first-layer key in the reachable current closure identifies an already published phase (including after later advances); skip its writes and Advance, then repair only the final drafts. Do not rerun after a successful or unknown terminal submission; terminal recovery belongs to trusted supervision.
+The example reads the sealed contract and stages every required attached-node link to each exact candidate response root, including the final retarget. For rich accepted nodes, the typed presentation extension preserves existing components, assets and controls while compiling the new control. Advance validates these staged changes but only Return publishes them. Use unique component/control keys; stale revisions and extension conflicts require rereading or an explicit full replacement, never dropping existing content. The example probes current before writing. Only a typed feature_disabled rejection selects the submit-only compatibility path. Other errors propagate. On rerun while active, the completion-specific first-layer key in the reachable current closure identifies an already published phase (including after later advances); skip its writes and Advance, then repair only the final drafts. Do not rerun after a successful or unknown terminal submission; terminal recovery belongs to trusted supervision.
 Accepted nodes and layers stay immutable. Each later current must retain navigation to the exact prior current. get_current returns a mapping with currentLayerId and headRevision; CompletionWatch snapshots use current_layer_id and revision. Refresh get_current after each successful advance; save each transition's layer, expected headRevision and stable operation key for exact retries. When asking a question, author an input action on its draft explanation node with layer.action("question", finding, kind="input", label="Answer", control="text", prompt="A task-specific question"), or an appropriate select control. Publishing the question does not consume the user's answer. A terminal submit ends all graph access.`;
 }
