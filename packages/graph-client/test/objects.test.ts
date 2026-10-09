@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { DETAIL_AUTHORING_LIMITS, EdgeObject, GraphApiError, LayerLayoutObject, LayerObject, NodeObject, NodePlacementObject, RelayerGraphClient, html, type ActionObject } from "../src/index.js";
+import { DETAIL_AUTHORING_LIMITS, EdgeObject, GraphApiError, LayerLayoutObject, LayerObject, NodeObject, NodePlacementObject, RelayerGraphClient, detailCapability, html, type ActionObject, type GraphNode } from "../src/index.js";
 import { assetRef } from "../src/detail.js";
 import { edgeId, layerId, nodeId } from "../src/objects.js";
 
@@ -16,6 +16,68 @@ function nodeResponse(init: RequestInit, node: Record<string, unknown>): Respons
 
 describe("agent-facing graph objects", () => {
   afterEach(() => vi.unstubAllGlobals());
+
+  it.each(["components", "mounts", "assets", "bytes"])("rejects a combined presentation %s limit before replacement transport", async (kind) => {
+    let retained: unknown;
+    const replacements: unknown[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.endsWith("/detail-assets/resolve")) {
+        const body = JSON.parse(String(init?.body)) as { logicalIds: string[] };
+        return Response.json({ assets: body.logicalIds.map(logicalId => ({ logicalId, authority: "current", availability: "available", digestSha256: "d".repeat(64), mediaType: "image/png", representation: { kind: "image", sanitized: true } })) });
+      }
+      if (init?.method === "POST") replacements.push(JSON.parse(String(init.body)));
+      return Response.json({ node: { id: 2, clientKey: "saved", kind: "concept", icon: "info", title: "Saved", detail: "Evidence", state: "accepted", authoredDetail: retained }, revision: 0, actions: [] });
+    }));
+    const graph = new RelayerGraphClient({ url: "http://graph.test", token: "run", nodeId: 1 });
+    const make = (prefix: string, full: boolean) => {
+      const node = new NodeObject("info", "Saved", "Evidence", "concept", "saved");
+      if (kind === "components" || kind === "bytes") {
+        const count = kind === "bytes" ? 2 : full ? DETAIL_AUTHORING_LIMITS.maxComponents : 1;
+        for (let index = 0; index < count; index += 1) node.detailAuthoring.setComponent(`${prefix}-${index}`, html(Object.assign([kind === "bytes" ? "<p>" + "x".repeat(135_000) + "</p>" : "<p>Evidence</p>"], { raw: [] })));
+      } else {
+        const count = full ? kind === "assets" ? DETAIL_AUTHORING_LIMITS.maxAssetsPerPackage : DETAIL_AUTHORING_LIMITS.maxMountsPerPackage : 1;
+        const values = Array.from({ length: count }, (_, index) => kind === "assets" ? assetRef(`${prefix}-${index}`) : detailCapability.externalLink(`${prefix}-${index}`, "https://example.com/evidence"));
+        const strings = Object.assign(Array.from({ length: count + 1 }, (_, index) => kind === "assets" ? index === 0 ? '<img alt="Evidence" asset=' : index === count ? '>' : '><img alt="Evidence" asset=' : index === 0 ? '<a gc=' : index === count ? '>Evidence</a>' : '>Evidence</a><a gc='), { raw: [] });
+        node.detailAuthoring.setComponent(prefix, html(strings, ...values));
+      }
+      return node;
+    };
+    const base = make("saved", true);
+    retained = await graph.checkpointNodeDetail(base);
+    const additions = make("addition", false);
+    await graph.checkpointNodeDetail(additions); // Each package separately satisfies the compiler.
+    const pending = graph.extendNodePresentation(2, 0, additions);
+    if (kind === "bytes") await expect(pending).rejects.toMatchObject({ issues: [{ code: "compiled_package_byte_limit_exceeded" }] });
+    else await expect(pending).rejects.toThrow("extended_detail_limit_exceeded");
+    expect(replacements).toEqual([]);
+  });
+
+  it("captures presentation target and additions before an asynchronous snapshot read", async () => {
+    const graph = new RelayerGraphClient({ url: "http://graph.test", token: "run", nodeId: 1 });
+    const saved = new NodeObject("info", "Saved", "Evidence", "concept", "saved");
+    saved.detailAuthoring.setComponent("saved", html`<p>Keep the existing explanation</p>`);
+    const retained = await graph.checkpointNodeDetail(saved);
+    let releaseRead!: () => void;
+    const gate = new Promise<void>(resolve => { releaseRead = resolve; });
+    const bodies: { authoredDetail: { components: { id: string }[] } }[] = [];
+    const routes: string[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
+      routes.push(url);
+      if (init?.method === "POST") { bodies.push(JSON.parse(String(init.body))); return Response.json({}); }
+      await gate;
+      return Response.json({ node: { id: 2, clientKey: "saved", authoredDetail: retained }, revision: 0, actions: [] });
+    }));
+    const additions = new NodeObject("info", "Saved", "Evidence", "concept", "saved");
+    additions.detailAuthoring.setComponent("early", html`<p>The captured addition</p>`);
+    const target = { id: 2, clientKey: "saved", kind: "concept", icon: "info", title: "Saved", detail: "Evidence", state: "accepted" } satisfies GraphNode;
+    const pending = graph.extendNodePresentation(target, 0, additions);
+    target.id = 99;
+    additions.detailAuthoring.setComponent("late", html`<p>A later edit</p>`);
+    releaseRead();
+    await pending;
+    expect(bodies[0]?.authoredDetail.components.map(component => component.id)).toEqual(["saved", "early"]);
+    expect(routes).toEqual(["http://graph.test/api/graph/nodes/2/presentation", "http://graph.test/api/graph/nodes/2/presentation"]);
+  });
 
   it("identifies the captured icon field after a positional mistake without replacing the server error", async () => {
     const node = new NodeObject("finding", "Finding", "Evidence", "bug", "finding");

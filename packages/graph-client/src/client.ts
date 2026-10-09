@@ -4,7 +4,7 @@ import { isImageIcon, type GraphIcon } from "./image-icons.js";
 import { randomUUID } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 import { isProxy } from "node:util/types";
-import { DetailCompilationError, NodeDetailAuthoring, bindNodeDetailOwner, beginNodeDetailAuthoringFinalization, cancelNodeDetailAuthoringFinalization, compileAuthenticatedNodeDetail, compileAttachedNodeDetail, finalizedNodeDetailAuthoring, freezeNodeDetailAuthoring, isNodeDetailAuthoringCleared, isNodeDetailAuthoringOwner, snapshotAuthoredNodeDetailProgram, snapshotRetainedCompiledNodeDetail, type AuthenticatedNodeDetailOwnerSnapshot, type AuthenticatedNodeDetailProgramSnapshot, type CompiledNodeDetail } from "./detail.js";
+import { DetailCompilationError, NodeDetailAuthoring, bindNodeDetailOwner, beginNodeDetailAuthoringFinalization, cancelNodeDetailAuthoringFinalization, compileAuthenticatedNodeDetail, compileAttachedNodeDetail, extendRetainedCompiledNodeDetail, finalizedNodeDetailAuthoring, freezeNodeDetailAuthoring, isNodeDetailAuthoringCleared, isNodeDetailAuthoringOwner, snapshotAuthoredNodeDetailProgram, snapshotRetainedCompiledNodeDetail, type AuthenticatedNodeDetailOwnerSnapshot, type AuthenticatedNodeDetailProgramSnapshot, type CompiledNodeDetail } from "./detail.js";
 import { isRelayerIconName } from "./icons.js";
 import { applyAcceptedNodeResponse } from "./node-response.js";
 import { EdgeObject, LayerObject, NodeObject, actionId, edgeId, layerId, nodeId, type ActionObject, type ActionReference, type EdgeReference, type LayerReference, type NodeReference } from "./objects.js";
@@ -97,6 +97,24 @@ export class RelayerGraphClient {
     const program = snapshotAuthoredNodeDetailProgram(envelope.detailAuthoring, envelope.owner);
     const authoredDetail = compileAttachedNodeDetail(program, await this.resolveDetailAssets(program));
     await this.request(`/api/graph/nodes/${nodeId(reference)}/presentation`, {
+      method: "POST", body: JSON.stringify({ expectedRevision, authoredDetail }),
+    });
+  }
+
+  /** Stage all new components against the accepted package; repeating replaces this completion's pending presentation. */
+  async extendNodePresentation(reference: NodeReference, expectedRevision: number, additions: NodeObject): Promise<void> {
+    const targetNodeId = nodeId(reference);
+    this.bindSubmissionNode(additions);
+    const envelope = materializeNodeSubmissionEnvelope(additions);
+    if (isNodeDetailAuthoringCleared(envelope.detailAuthoring)) throw new TypeError("presentation_extension_cannot_clear");
+    const program = snapshotAuthoredNodeDetailProgram(envelope.detailAuthoring, envelope.owner);
+    const snapshot = await this.getNodePresentation(targetNodeId);
+    if (snapshot.revision !== expectedRevision) throw new GraphApiError(422, "stale_presentation_revision", "expectedRevision", "Reread the node presentation before extending it.");
+    if (envelope.clientKey !== snapshot.node.clientKey) throw new TypeError("presentation_identity_mismatch");
+    if (!snapshot.node.authoredDetail) throw new TypeError("retained_detail_required: plain details use native action controls");
+    const compiled = compileAttachedNodeDetail(program, await this.resolveDetailAssets(program));
+    const authoredDetail = extendRetainedCompiledNodeDetail(snapshot.node.authoredDetail, compiled);
+    await this.request(`/api/graph/nodes/${targetNodeId}/presentation`, {
       method: "POST", body: JSON.stringify({ expectedRevision, authoredDetail }),
     });
   }

@@ -1,0 +1,272 @@
+{
+  "source": {
+    "baseCommit": "a283c0d00a04e8b039bab1733ad00d5f99cbe51e",
+    "previousHead": "a194f554a919e1d27815a0c15dc605df8ea236cd",
+    "files": [
+      {
+        "path": "packages/harness-host/src/implementations/codex-basic.ts",
+        "sha256": "3084dac1383e7443455c23eba465e1680e670427f2023282b82c9b41e65d7665"
+      },
+      {
+        "path": "packages/harness-host/src/implementations/graph-presentation-guidance.ts",
+        "sha256": "9c63f7a2cf38ac4f8a357a5cb1858d50dd8f179b8835f9ec4425e2bcf6acac3d"
+      },
+      {
+        "path": "packages/harness-host/src/implementations/prime-agent.ts",
+        "sha256": "add5834cf15ea8397880d8b0cc912028f4a41b0cb0aeb7688beb4609445115d1"
+      },
+      {
+        "path": "packages/harness-host/test/codex-basic.test.ts",
+        "sha256": "92ea088555c65b974e1fa2e8a00ccfffabe9b8a7c6435104590fa0df810e67a6"
+      },
+      {
+        "path": "packages/harness-host/test/claude-basic.test.ts",
+        "sha256": "2bc47feb990fb142304c17b3477e0adad27814917daf02f452c79ca77dc62263"
+      },
+      {
+        "path": "packages/harness-host/test/prime-agent.test.ts",
+        "sha256": "30fb0dc8cb36e4b748c439184c57b05d6671695d69e5698201e6a422e3d5077b"
+      },
+      {
+        "path": "test/recursive-complete-e2e.test.mjs",
+        "sha256": "031c33ed7222764da3eb3b94aa5a03ecbc7db3813731188c9a87094e68823bb6"
+      },
+      {
+        "path": "test/graph-authoring-replay.test.mjs",
+        "sha256": "1f78b4bfa2d150eb6a5aacbd6654204cc2e88a5bfd25e1bb2ec60445c9f7f174"
+      },
+      {
+        "path": "docs/prd/index.html",
+        "sha256": "e891c8a09101b71f724de6995aeef2305df4479ff587e603c7777f5d15fe4697"
+      },
+      {
+        "path": "test/prime-visual-integration.test.mjs",
+        "sha256": "16a1534b79ce655afa0341b29dd2a81c8f3bed194617ec66307dcc02c48bdad0"
+      },
+      {
+        "path": "crates/relayer-app-server/tests/support/completion_traces.rs",
+        "sha256": "981f6f780081753282e7f50537db3b281dcdb4795b9381862a052169bd2c9642"
+      }
+    ],
+    "digestAlgorithm": "SHA-256 of files JSON with sorted object keys and compact separators, manifest order preserved",
+    "digest": "fdf9f2e184d83adf092f2af73bd52611f59cfad75377ed504b05ebdbf6498ff6"
+  },
+  "decision": "User authorized all-harness communication contract baseline and merge. Integrate existing sealed Advance semantics from main; no new product rule.",
+  "changedExecutableSeams": [
+    "shared JS and Python communication recipe completion-qualified first-snapshot identity and accepted-current navigation traversal",
+    "existing scoped fixture restored to all-off; temporal recipe fixtures use separate server",
+    "Later-history JS/Python test interruption precedes final draft creation; independent post-final-draft replay cases retained.",
+    "Inherited activation-failure native test awaits durable settled phase before checking its existing terminal assertions; production unchanged."
+  ],
+  "checkpoints": [
+    {
+      "boundary": "Broker imports/preparation/watch/result guidance present only with broker authority, all Codex profiles",
+      "test": "packages/harness-host/test/codex-basic.test.ts: uses the communication contract by default in actual %s turns"
+    },
+    {
+      "boundary": "Initial all-off rejection permits submit-only accepted authored result; other errors propagate",
+      "tests": [
+        "test/recursive-complete-e2e.test.mjs: executes the JS communication recipe: %j",
+        "test/graph-authoring-replay.test.mjs: writes scoped TS and Python programs through canonical compilation and Rust authority"
+      ]
+    },
+    {
+      "boundary": "Failure after first Advance and final draft writes can be repaired in a fresh invocation without changing accepted phase/current revision; final preserves exact prior current",
+      "tests": [
+        "test/recursive-complete-e2e.test.mjs: executes the JS communication recipe: %j",
+        "test/graph-authoring-replay.test.mjs: writes scoped TS and Python programs through canonical compilation and Rust authority"
+      ]
+    },
+    {
+      "boundary": "Actual provider delivery and Prime authored visual/export/import/reopen/presentation pins retained",
+      "tests": [
+        "packages/harness-host/test/claude-basic.test.ts",
+        "packages/harness-host/test/prime-agent.test.ts",
+        "test/prime-visual-integration.test.mjs"
+      ]
+    },
+    {
+      "boundary": "After additional Advance, exact retained first phase and latest accepted phase/head remain unchanged on replay; final references latest prior",
+      "tests": [
+        "test/recursive-complete-e2e.test.mjs: later mode",
+        "test/graph-authoring-replay.test.mjs: later scenario"
+      ]
+    },
+    {
+      "boundary": "Real initial authentication failure propagates before authoring; does not enter all-off fallback",
+      "tests": [
+        "test/recursive-complete-e2e.test.mjs: initial real GraphApiError401",
+        "test/graph-authoring-replay.test.mjs: initial real AuthenticationError"
+      ]
+    },
+    {
+      "boundary": "JS initial reference target equals exact seeded prior ID",
+      "test": "test/recursive-complete-e2e.test.mjs: withPrior modes"
+    },
+    {
+      "boundary": "Original scoped compiler and authority coverage remains all-off",
+      "test": "test/graph-authoring-replay.test.mjs: original scoped server, separate temporal recipe server"
+    },
+    {
+      "boundary": "Background child cleanup reaches durable settlement before exact retry and terminal result assertions; timeout and failures unchanged",
+      "test": "crates/relayer-app-server/tests/support/completion_traces.rs: a_failed_activation_fails_the_child_in_both_stores_and_an_exact_retry_reports_it"
+    }
+  ],
+  "requiredVerificationPlan": [
+    "targeted six-file provider and real recipe suite",
+    "focused native activation-failure settlement test",
+    "npm run check with VITEST_MAX_WORKERS=1",
+    "npm run build",
+    "npm run test:eval-compiled-runtime"
+  ],
+  "environment": {
+    "node": "22.23.2",
+    "VITEST_MAX_WORKERS": "1",
+    "CARGO_BUILD_JOBS": "2",
+    "CMAKE_BUILD_PARALLEL_LEVEL": "2",
+    "nativeCache": "Declined hosted runtime bundle before download because Linux-X64 cannot run on this macOS-ARM64 host. No compatible sealed Mac bundle found. Cargo.lock/Cargo.toml/.cargo unchanged from b396; retain same private Cargo compiler-object cache and source fingerprints; rebuild changed Rust crates from source. No cached result replaces tests. Ladybug native compilation inputs remain unchanged; no new cold native C++ build requested."
+  },
+  "cacheDecision": {
+    "mainCommit": "a283c0d00a04e8b039bab1733ad00d5f99cbe51e",
+    "mainCiRun": 37865416154,
+    "availableRuntimeArtifact": {
+      "id": 11588136730,
+      "platform": "Linux-X64",
+      "sha256": "1ebba7ca15cde7d11bc6d9e68c673ae1f3b125384fb1f8fe1b5a6e39fcd3f3b0"
+    },
+    "reuseDecision": "Declined hosted runtime bundle before download because Linux-X64 cannot run on this macOS-ARM64 host. No compatible sealed Mac bundle found. Cargo.lock/Cargo.toml/.cargo unchanged from b396; retain same private Cargo compiler-object cache and source fingerprints; rebuild changed Rust crates from source. No cached result replaces tests. Ladybug native compilation inputs remain unchanged; no new cold native C++ build requested."
+  },
+  "actualResults": [
+    {
+      "command": "npx vitest run packages/harness-host/test/codex-basic.test.ts packages/harness-host/test/claude-basic.test.ts packages/harness-host/test/prime-agent.test.ts test/recursive-complete-e2e.test.mjs test/graph-authoring-replay.test.mjs test/prime-visual-integration.test.mjs --maxWorkers=1",
+      "sourceDigest": "ed7b13febb613ee849894ebec87221dfd669d64281b237b49f192c946a9a2e1e",
+      "scope": "Same ten-path production/JS-test/PRD projection; later native-test-only predicate formatting is covered by full check on final source.",
+      "exitCode": 0,
+      "innerResults": {
+        "passed": 196,
+        "testFilesPassed": 6
+      },
+      "log": "main-integration-targeted-final.log",
+      "logSha256": "f289bd2361b073b310ab88512a683e5e1b68b95f8f8ee251f0dbf2429eb83d53"
+    },
+    {
+      "command": "cargo test -p relayer-app-server --lib api::threads::completion_traces::a_failed_activation_fails_the_child_in_both_stores_and_an_exact_retry_reports_it -- --exact",
+      "sourceDigest": "359e5e5f3017a882b4d2f470197b12e738934f9f945ac60c8071f73cd405258a",
+      "scope": "Before rustfmt-only single-line condition change; final full check independently passes same test on final source.",
+      "exitCode": 0,
+      "innerResults": {
+        "passed": 1,
+        "filteredOut": 389
+      },
+      "log": "main-integration-settlement-targeted.log",
+      "logSha256": "9f39c5edcf40a6cd63e0a44ad39b3332e49a1d91da70a1eeefdc03ef30b03580"
+    },
+    {
+      "command": "npm run check",
+      "exitCode": 0,
+      "elapsedSeconds": 1091.81,
+      "log": "main-integration-check.log",
+      "sourceDigest": "fdf9f2e184d83adf092f2af73bd52611f59cfad75377ed504b05ebdbf6498ff6",
+      "logSha256": "3a11f2cc49bd6c69f8454ed918522198a6c1da5cabf90af4ab3397c83735b5c0",
+      "innerResults": {
+        "vitest": {
+          "passed": 4169,
+          "skipped": 7,
+          "testFilesPassed": 318,
+          "testFilesSkipped": 1
+        },
+        "secretBoundaryPassed": 2,
+        "pythonPassed": 91,
+        "nativeWorkspace": "passed",
+        "crashReconciliation": "passed",
+        "types": "passed",
+        "receiptLint": "passed",
+        "prdReadability": "passed"
+      }
+    },
+    {
+      "command": "npm run build",
+      "exitCode": 0,
+      "elapsedSeconds": 6.33,
+      "log": "main-integration-build.log",
+      "sourceDigest": "fdf9f2e184d83adf092f2af73bd52611f59cfad75377ed504b05ebdbf6498ff6",
+      "logSha256": "6173037bbc07514763d5e295e0fa9594740d5ba3541eaa69ccec7789cd347afc"
+    },
+    {
+      "command": "npm run test:eval-compiled-runtime",
+      "exitCode": 0,
+      "elapsedSeconds": 21.98,
+      "log": "main-integration-compiled.log",
+      "sourceDigest": "fdf9f2e184d83adf092f2af73bd52611f59cfad75377ed504b05ebdbf6498ff6",
+      "logSha256": "a720186a41ea4435f0248336c56951d4c2759c27665100b48f804ce04624af16",
+      "innerResults": {
+        "passed": 10,
+        "testFilesPassed": 1
+      }
+    }
+  ],
+  "preservedFailures": [
+    {
+      "context": "Hosted CI synthetic merge of a194 onto main a283",
+      "runId": 37873446044,
+      "url": "https://github.com/vishaltandale00/relayer-graphcomplete/actions/runs/37873446044",
+      "innerResults": {
+        "passed": 4140,
+        "failed": 2,
+        "skipped": 34
+      },
+      "cause": "Both later-history fixtures authored an orphan final draft before additional Advance; sealed prospective Return integrity correctly rejected it. Fixed fixture ordering, no rule relaxation or unchanged retry.",
+      "log": "history-fixes-ci-vitest-job.log",
+      "logSha256": "62301d795d11329218584ad4482c671831cd7b12ea19aaa4afa8fa3600cef81d"
+    },
+    {
+      "context": "Initial local targeted run after integrating main, before rebuilding generated packages",
+      "innerResults": {
+        "passed": 191,
+        "failed": 5
+      },
+      "cause": "Stale package distributions: three graph.getContract missing failures and two stale reusable visual-schema failures. Rebuilt runtime and packages, no source edits.",
+      "log": "main-integration-targeted.log",
+      "logSha256": "ebf16d8c2119c5f97b787c17d352969b6a188fabec46c89135d7908977130b23"
+    },
+    {
+      "context": "First full local check on integrated main",
+      "command": "npm run check",
+      "exitCode": 101,
+      "innerResults": {
+        "appServerLibPassed": 389,
+        "appServerLibFailed": 1
+      },
+      "cause": "Activation-failure test observed failed graph/product status before separate asynchronous execution settlement. Test now awaits phase==settled, preserving timeout and all assertions.",
+      "log": "main-integration-check-before-settlement-fix.log",
+      "logSha256": "34e77025c259c12a865690f5a7844c77053c84381728797b3b90d86deaa2b337"
+    },
+    {
+      "context": "Formatting gate after native wait-predicate repair",
+      "command": "npm run check",
+      "exitCode": 1,
+      "cause": "rustfmt required single-line condition; corrected formatting only before final verification.",
+      "log": "main-integration-check-formatting.log",
+      "logSha256": "ab9bf9f2d8e7bc877d2d749f3a61b6110b8c1f173a643a2efc7fa1c2c795a181"
+    }
+  ],
+  "limits": [
+    "Earlier receipts certify their recorded old base only.",
+    "No paid inference or release proof; frozen pilot does not certify this integrated source.",
+    "Hosted CI for final pushed head remains separately required."
+  ],
+  "review": {
+    "reviewer": "design_authority_review",
+    "sourceDigest": "fdf9f2e184d83adf092f2af73bd52611f59cfad75377ed504b05ebdbf6498ff6",
+    "base": "a283c0d00a04e8b039bab1733ad00d5f99cbe51e",
+    "scope": "PR-owned prompt/recipe delta and fixture ordering against merged sealed-Advance backend; incoming main implementation excluded; inherited activation-failure test observation repair",
+    "verdict": "PASS exact merged source, checkpoint mappings and retained local deterministic evidence",
+    "unresolvedFindings": [],
+    "limitations": [
+      "Earlier receipts certify their recorded old base only.",
+      "No paid inference or release proof; frozen pilot does not certify this integrated source.",
+      "Hosted CI for final pushed head remains separately required."
+    ],
+    "reviewSha256": "38a0156337cd8582aaeebeb4f925a4dc83ff5ef67bcd03a33aeb646b4d554ea6"
+  }
+}

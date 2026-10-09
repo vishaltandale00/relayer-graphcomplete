@@ -1,0 +1,241 @@
+{
+  "source": {
+    "baseCommit": "b39604ccc0d6bd43f70a35e77b14940c549f1459",
+    "previousHead": "4d8abd7bc858725cc8ef043c1b696bde5ccaa419",
+    "files": [
+      {
+        "path": "packages/harness-host/src/implementations/codex-basic.ts",
+        "sha256": "af343b3ce481967aeedc0e313079653b226e143772e7fdeccd59fcbfd7b49361"
+      },
+      {
+        "path": "packages/harness-host/src/implementations/graph-presentation-guidance.ts",
+        "sha256": "957f581be3c0f7fe23c294cef889d58773c81a2726b50307de772df014f4929e"
+      },
+      {
+        "path": "packages/harness-host/src/implementations/prime-agent.ts",
+        "sha256": "7481effe52a1c8abbbfafb423ede47c8319611aca6170e4c24183ca30e41dcdf"
+      },
+      {
+        "path": "packages/harness-host/test/codex-basic.test.ts",
+        "sha256": "9dbe5742f362ebe30dac3acdf6f92ee12bb43afcbe847d09f04c611c4a004241"
+      },
+      {
+        "path": "packages/harness-host/test/claude-basic.test.ts",
+        "sha256": "589cad5884b2168df7aabc65b0c6e5d2e49d9b796ae10bd9ff6ee752e660a128"
+      },
+      {
+        "path": "packages/harness-host/test/prime-agent.test.ts",
+        "sha256": "4ba187653d5897ad902392d830d6ad976fb3278543f8a41ebbbf8bc04e2f2520"
+      },
+      {
+        "path": "test/recursive-complete-e2e.test.mjs",
+        "sha256": "d746ba0a9df755787835f9357fd0de938c33977dfbf4cc25e2fd11a0f436a8cc"
+      },
+      {
+        "path": "test/graph-authoring-replay.test.mjs",
+        "sha256": "3a6eb0ad6c7e7f9a6392c4c825a447bf24761edb6778aa8b0e480b3fd4d3657a"
+      },
+      {
+        "path": "docs/prd/index.html",
+        "sha256": "dfd1afa75f973e1e470a255ddf886987338ee8a396cdea1f3d3b09f527049be3"
+      },
+      {
+        "path": "test/prime-visual-integration.test.mjs",
+        "sha256": "16a1534b79ce655afa0341b29dd2a81c8f3bed194617ec66307dcc02c48bdad0"
+      }
+    ],
+    "digestAlgorithm": "SHA-256 of files JSON with sorted object keys and compact separators, manifest order preserved",
+    "digest": "dbeef786d460f52fd4cd4cdb1656de4bb6249da107e2e8a6307106b5a96fa2c6"
+  },
+  "decision": "User authorized merge of all-harness communication baseline. Pre-merge review repairs preserve existing compatibility and accepted-history boundaries; no new product rule.",
+  "changedExecutableSeams": [
+    "basic Codex authorized semantic broker guidance",
+    "shared Codex/Claude JavaScript communication recipe initial temporal availability and committed-phase recovery",
+    "Prime Python communication recipe initial temporal availability and committed-phase recovery"
+  ],
+  "checkpoints": [
+    {
+      "boundary": "Broker imports/preparation/watch/result guidance present only with broker authority, all Codex profiles",
+      "test": "packages/harness-host/test/codex-basic.test.ts: uses the communication contract by default in actual %s turns"
+    },
+    {
+      "boundary": "Initial all-off rejection permits submit-only accepted authored result; other errors propagate",
+      "tests": [
+        "test/recursive-complete-e2e.test.mjs: executes the JS communication recipe: %j",
+        "test/graph-authoring-replay.test.mjs: writes scoped TS and Python programs through canonical compilation and Rust authority"
+      ]
+    },
+    {
+      "boundary": "Failure after first Advance and final draft writes can be repaired in a fresh invocation without changing accepted phase/current revision; final preserves exact prior current",
+      "tests": [
+        "test/recursive-complete-e2e.test.mjs: executes the JS communication recipe: %j",
+        "test/graph-authoring-replay.test.mjs: writes scoped TS and Python programs through canonical compilation and Rust authority"
+      ]
+    },
+    {
+      "boundary": "Actual provider delivery and Prime authored visual/export/import/reopen/presentation pins retained",
+      "tests": [
+        "packages/harness-host/test/claude-basic.test.ts",
+        "packages/harness-host/test/prime-agent.test.ts",
+        "test/prime-visual-integration.test.mjs"
+      ]
+    }
+  ],
+  "requiredVerificationPlan": [
+    "targeted six-file provider and real recipe suite",
+    "npm run check with VITEST_MAX_WORKERS=1",
+    "npm run build",
+    "npm run test:eval-compiled-runtime"
+  ],
+  "environment": {
+    "node": "22.23.2",
+    "VITEST_MAX_WORKERS": "1",
+    "CARGO_BUILD_JOBS": "2",
+    "CMAKE_BUILD_PARALLEL_LEVEL": "2",
+    "nativeCache": "Same private compiler-object target as prior verified all-harness runs; no new cold build/cache installation and no cached test results."
+  },
+  "actualResults": [
+    {
+      "command": "npx vitest run packages/harness-host/test/codex-basic.test.ts packages/harness-host/test/claude-basic.test.ts packages/harness-host/test/prime-agent.test.ts test/recursive-complete-e2e.test.mjs test/graph-authoring-replay.test.mjs test/prime-visual-integration.test.mjs --maxWorkers=1",
+      "exitCode": 0,
+      "elapsedSeconds": 36.99,
+      "log": "merge-fixes-targeted-final.log",
+      "logSha256": "b506b10367c125f5081f8da725503868e3c87f8e3f989712630a4c177877155e",
+      "innerResults": {
+        "testFilesPassed": 6,
+        "passed": 195
+      }
+    },
+    {
+      "command": "npm run check",
+      "exitCode": 0,
+      "elapsedSeconds": 780.06,
+      "log": "merge-fixes-check.log",
+      "logSha256": "189afc3928f5c7bac08487c34fce0bc52c2d24dcbd589a31987600e092939e24",
+      "innerResults": {
+        "rustWorkspace": "passed",
+        "crashReconciliation": "passed",
+        "packagesAndTypes": "passed",
+        "vitest": {
+          "passed": 3850,
+          "skipped": 3
+        },
+        "secretBoundary": {
+          "passed": 2
+        },
+        "python": {
+          "passed": 77
+        },
+        "receiptLint": "passed",
+        "prdReadability": "passed"
+      }
+    },
+    {
+      "command": "npm run build",
+      "exitCode": 0,
+      "elapsedSeconds": 6.71,
+      "log": "merge-fixes-build.log",
+      "logSha256": "603396f2d52ec8f851dfd1f101d641679082ef0c219700e4b02fb4c1fb67c683",
+      "innerResults": "Native default-feature runtime, root TypeScript and all four package builds completed."
+    },
+    {
+      "command": "npm run test:eval-compiled-runtime",
+      "exitCode": 0,
+      "elapsedSeconds": 17.18,
+      "log": "merge-fixes-compiled.log",
+      "logSha256": "5771ad39a2f46bab28d58047651751f29426ba72f6b62fdac327167fd2c18fba",
+      "innerResults": {
+        "passed": 9,
+        "testFilesPassed": 1
+      }
+    }
+  ],
+  "priorEvidence": "verification.json and all-harness-verification.json remain historical exact-source receipts, including retained failures and one-worker qualification. Hosted CI passed previous head4d8abd7; does not certify repaired source.",
+  "limitations": [
+    "No paid inference or release proof",
+    "Local log hashes are private-worktree evidence, not hosted CI artifacts",
+    "Terminal submission recovery remains trusted supervision; no model replay after successful/unknown Return"
+  ],
+  "adversarialReview": {
+    "reviewer": "design_authority_review",
+    "sourceDigest": "dbeef786d460f52fd4cd4cdb1656de4bb6249da107e2e8a6307106b5a96fa2c6",
+    "sourceManifest": ".relayer/communication-baseline/merge-fixes-source.json",
+    "scope": "Initial typed feature-disabled compatibility, exact current-layer phase guard, final-draft rerun, basic Codex broker delivery and real JS/Python checkpoint modes",
+    "verdict": "PASS exact source, checkpoint mapping and retained local deterministic execution evidence",
+    "unresolvedFindings": [],
+    "findings": [
+      "Feature-disabled fallback is restricted to initial getCurrent/get_current before writes; Advance exceptions propagate.",
+      "Published exact first-layer key is checked before authoring/write/reattachment; final drafts retain current backreference.",
+      "Basic Codex now receives broker-gated semantic completion guidance.",
+      "Recovery tests inject after final draft write, preserving previously accepted phase/current revision while rerunning final draft phase."
+    ],
+    "limitations": [
+      "No paid inference or release proof",
+      "Local log hashes are private-worktree evidence, not hosted CI artifacts",
+      "Terminal submission recovery remains trusted supervision; no model replay after successful/unknown Return"
+    ],
+    "targetedEvidence": {
+      "log": "merge-fixes-targeted-final.log",
+      "sha256": "b506b10367c125f5081f8da725503868e3c87f8e3f989712630a4c177877155e",
+      "testsPassed": 195,
+      "filesPassed": 6,
+      "scenarioAudit": "JS five table cases and Python five-loop cases explicitly include all-off real servers and prior/no-prior interrupted final-draft retries; accepted phase and revision equality asserted."
+    },
+    "executionEvidence": [
+      {
+        "command": "npx vitest run packages/harness-host/test/codex-basic.test.ts packages/harness-host/test/claude-basic.test.ts packages/harness-host/test/prime-agent.test.ts test/recursive-complete-e2e.test.mjs test/graph-authoring-replay.test.mjs test/prime-visual-integration.test.mjs --maxWorkers=1",
+        "exitCode": 0,
+        "elapsedSeconds": 36.99,
+        "log": "merge-fixes-targeted-final.log",
+        "logSha256": "b506b10367c125f5081f8da725503868e3c87f8e3f989712630a4c177877155e",
+        "innerResults": {
+          "testFilesPassed": 6,
+          "passed": 195
+        }
+      },
+      {
+        "command": "npm run check",
+        "exitCode": 0,
+        "elapsedSeconds": 780.06,
+        "log": "merge-fixes-check.log",
+        "logSha256": "189afc3928f5c7bac08487c34fce0bc52c2d24dcbd589a31987600e092939e24",
+        "innerResults": {
+          "rustWorkspace": "passed",
+          "crashReconciliation": "passed",
+          "packagesAndTypes": "passed",
+          "vitest": {
+            "passed": 3850,
+            "skipped": 3
+          },
+          "secretBoundary": {
+            "passed": 2
+          },
+          "python": {
+            "passed": 77
+          },
+          "receiptLint": "passed",
+          "prdReadability": "passed"
+        }
+      },
+      {
+        "command": "npm run build",
+        "exitCode": 0,
+        "elapsedSeconds": 6.71,
+        "log": "merge-fixes-build.log",
+        "logSha256": "603396f2d52ec8f851dfd1f101d641679082ef0c219700e4b02fb4c1fb67c683",
+        "innerResults": "Native default-feature runtime, root TypeScript and all four package builds completed."
+      },
+      {
+        "command": "npm run test:eval-compiled-runtime",
+        "exitCode": 0,
+        "elapsedSeconds": 17.18,
+        "log": "merge-fixes-compiled.log",
+        "logSha256": "5771ad39a2f46bab28d58047651751f29426ba72f6b62fdac327167fd2c18fba",
+        "innerResults": {
+          "passed": 9,
+          "testFilesPassed": 1
+        }
+      }
+    ]
+  }
+}

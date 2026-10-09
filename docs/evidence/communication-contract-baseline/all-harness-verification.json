@@ -1,0 +1,181 @@
+{
+  "schemaVersion": 1,
+  "decision": "The user explicitly extends B communication contract to Codex, Claude and Prime Agent.",
+  "testedSource": {
+    "baseCommit": "b39604ccc0d6bd43f70a35e77b14940c549f1459",
+    "files": [
+      {
+        "path": "packages/harness-host/src/implementations/codex-basic.ts",
+        "sha256": "9ba51b1495d6e88aa2c2befe4105390b3825d4272eef027202a2ae6b0b23cca4"
+      },
+      {
+        "path": "packages/harness-host/src/implementations/graph-presentation-guidance.ts",
+        "sha256": "7f43f7d05e2da25d8ee03bcad40a48451ea1a60e9053bf261ddeadc1b8d7e4ce"
+      },
+      {
+        "path": "packages/harness-host/src/implementations/prime-agent.ts",
+        "sha256": "7481effe52a1c8abbbfafb423ede47c8319611aca6170e4c24183ca30e41dcdf"
+      },
+      {
+        "path": "packages/harness-host/test/codex-basic.test.ts",
+        "sha256": "7f571a20effa24db78c6cae9aff1cc28c5cdaf9ed0c0703784fbaaceaa43a6f1"
+      },
+      {
+        "path": "packages/harness-host/test/claude-basic.test.ts",
+        "sha256": "589cad5884b2168df7aabc65b0c6e5d2e49d9b796ae10bd9ff6ee752e660a128"
+      },
+      {
+        "path": "packages/harness-host/test/prime-agent.test.ts",
+        "sha256": "4ba187653d5897ad902392d830d6ad976fb3278543f8a41ebbbf8bc04e2f2520"
+      },
+      {
+        "path": "test/recursive-complete-e2e.test.mjs",
+        "sha256": "946828fc86417e0c788d82a726b12addda20ee82224ad809bbb3ab21e409828c"
+      },
+      {
+        "path": "test/graph-authoring-replay.test.mjs",
+        "sha256": "5e4bca76165361beb32eff91b7cff3aa7cf47e3256c9d3421b2c90f29514001d"
+      },
+      {
+        "path": "docs/prd/index.html",
+        "sha256": "dfd1afa75f973e1e470a255ddf886987338ee8a396cdea1f3d3b09f527049be3"
+      },
+      {
+        "path": "test/prime-visual-integration.test.mjs",
+        "sha256": "16a1534b79ce655afa0341b29dd2a81c8f3bed194617ec66307dcc02c48bdad0"
+      }
+    ],
+    "digest": "c4937a818f0b28e2abaa692f7976a3d61a9e694a39b0f63b15887bfc1927e48a"
+  },
+  "requiredPlan": [
+    "npm run check",
+    "npm run build",
+    "npm run test:eval-compiled-runtime",
+    "Actual provider-turn and real authoring recipe checkpoints"
+  ],
+  "results": [
+    {
+      "command": "npm run check",
+      "environment": {
+        "VITEST_MAX_WORKERS": "1"
+      },
+      "exitCode": 0,
+      "log": "all-harness-check-serial.log",
+      "innerResults": {
+        "rustWorkspace": "passed",
+        "graphCrashReconciliation": "passed",
+        "packagesAndTypes": "passed",
+        "vitest": {
+          "passed": 3847,
+          "skipped": 3
+        },
+        "codexSecretBoundary": {
+          "passed": 2
+        },
+        "python": {
+          "passed": 77
+        },
+        "ladybugReceiptLint": "passed",
+        "prdReadability": "passed"
+      }
+    },
+    {
+      "command": "npm run build",
+      "exitCode": 0,
+      "log": "all-harness-build.log",
+      "innerResults": "Native default-feature runtime, root TypeScript and all four package builds completed."
+    },
+    {
+      "command": "npm run test:eval-compiled-runtime",
+      "exitCode": 0,
+      "passed": 6,
+      "log": "all-harness-compiled.log"
+    },
+    {
+      "command": "npx vitest run packages/harness-host/test/codex-basic.test.ts packages/harness-host/test/claude-basic.test.ts packages/harness-host/test/prime-agent.test.ts",
+      "exitCode": 0,
+      "passed": 182,
+      "log": "all-harness-warm-v2.log",
+      "sourceScope": "Actual provider-turn test and imported source paths match the final manifest; subsequent edits only strengthened process recipe assertions. Full final check reruns these tests."
+    },
+    {
+      "command": "npx vitest run test/graph-authoring-replay.test.mjs test/recursive-complete-e2e.test.mjs test/prime-visual-integration.test.mjs",
+      "exitCode": 0,
+      "passed": 10,
+      "log": "all-harness-recipes-final-source.log"
+    }
+  ],
+  "retainedFailures": [
+    {
+      "log": "all-harness-warm.log",
+      "exitCode": 1,
+      "failed": 2,
+      "passed": 180,
+      "cause": "Prime V3 guidance checkpoint required the existing model-design warning; restored it in the new recipe."
+    },
+    {
+      "log": "all-harness-recipes.log",
+      "exitCode": 1,
+      "failed": 1,
+      "passed": 7,
+      "cause": "Scoped-authoring process fixture lacked declared temporal root-current-write flags; enabled those only for that fixture, retaining the separate legacy fixture."
+    },
+    {
+      "log": "all-harness-check.log",
+      "exitCode": 1,
+      "failed": 2,
+      "passed": 3845,
+      "skipped": 3,
+      "cause": "Both Prime visual integration scenarios caught a real missing authored final summary. Both language recipes now bind a prior-reference control in authored final detail; integration assertions preserve asset/export/import/reopen/pin checks and follow the new actual finding graph."
+    },
+    {
+      "log": "all-harness-prime-diagnose.log",
+      "exitCode": 1,
+      "failed": 2,
+      "cause": "Targeted reproduction of the missing final authored summary."
+    },
+    {
+      "log": "all-harness-check-final.log",
+      "exitCode": 1,
+      "failed": 2,
+      "passed": 3845,
+      "skipped": 3,
+      "sourceDigest": "c4937a818f0b28e2abaa692f7976a3d61a9e694a39b0f63b15887bfc1927e48a",
+      "cause": "Public share 10,000-layer depth scenario exceeded its unchanged 15-second timeout. Eval graph-memory scenario returned failed attempt checks. The failure cause was not proven."
+    }
+  ],
+  "contentionDiagnostic": {
+    "command": "npx vitest run test/public-share-viewer.test.mjs test/eval-app-integration.test.mjs --maxWorkers=1",
+    "exitCode": 0,
+    "passed": 81,
+    "log": "all-harness-contention-diagnose.log",
+    "interpretation": "Same source, assertions and timeouts passed with one worker. High machine load and Cargo cache waits support possible contention; this does not prove the cause of the two parallel failures. The canonical full check also passes with the supported one-worker environment."
+  },
+  "cache": "Reuse of the same private compiler-object target. The rejected Ladybug bundle and source-build fallback remain recorded in the initial verification.json; no cached test result supplies proof.",
+  "logSha256": {
+    "all-harness-warm.log": "cff6d374e7dd0c9f1f1032cd19a6d249e1963257a9e6e95ac6f6067df9309098",
+    "all-harness-recipes.log": "d7afd2badc8561481da0239f3da22d0c100371a603c07914d53e7b8550a36a5b",
+    "all-harness-warm-v2.log": "bafa6fab8e5b81a236d599c21d0ae477c448038f17c8ae01d5f4a738ce3849c0",
+    "all-harness-recipes-final-source.log": "0337169cc54fb5e93c93096d6498986cbc686cd74961eb5cb0deed0360748f78",
+    "all-harness-check.log": "455870052da436792560db83efb1569213fb7189523634aa7a8ea79e278b7ab2",
+    "all-harness-prime-diagnose.log": "feb130eb52bcb8a4052b17086f0a00a9a1e61e79c60bf5977440d6514c03317d",
+    "all-harness-check-final.log": "118afef987d4216eb2551d3e227ee60d149f995d8ea1f14f68b41685fa4df943",
+    "all-harness-contention-diagnose.log": "b62e984a486152504a58358fd6e6cad856c90435ef28684bccdfe3afd3fc2828",
+    "all-harness-check-serial.log": "458050b5673291fef8b681b1749084cea27d2fee6768ff124d3d443bffb4c7fb",
+    "all-harness-build.log": "8f93c34a9fc560d55b0f358a1e5dcbcda5e3239c6a6356c327658889759cca61",
+    "all-harness-compiled.log": "5c260d32772cc58b15a8a7c295fde51dff6c944d69c25a8fdb815c74bc16b848"
+  },
+  "limitations": [
+    "Successful full-check result is for VITEST_MAX_WORKERS=1; same-source default parallel failures are retained.",
+    "Codex-only pilot binds older frozen source and certifies no Claude/Prime live performance or quality.",
+    "No new paid inference, release, or hosted CI proof was run.",
+    "Local log hashes refer to preserved worktree logs, not hosted CI artifacts."
+  ],
+  "adversarialReview": {
+    "reviewer": "design_authority_review",
+    "sourceDigest": "c4937a818f0b28e2abaa692f7976a3d61a9e694a39b0f63b15887bfc1927e48a",
+    "scope": "All provider prompt delivery, supported JS/Python APIs, broker gating, native recursion, input timing, scoped early/final publication, authored controls, prior-current integrity, checkpoint mappings and retained verification evidence",
+    "verdict": "PASS for exact all-harness source, checkpoint mappings and qualified local deterministic evidence; same-source parallel failures retained, causal explanation unproven",
+    "unresolvedFindings": []
+  }
+}

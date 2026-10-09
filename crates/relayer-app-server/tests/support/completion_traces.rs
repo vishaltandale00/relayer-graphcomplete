@@ -2453,7 +2453,10 @@ async fn a_failed_activation_fails_the_child_in_both_stores_and_an_exact_retry_r
     );
 
     let state = world
-        .await_state(|state| state["life"] != "active" && state["status"] == "failed")
+        // Graph failure and product settlement are separate background cleanup steps.
+        .await_state(|state| {
+            state["life"] != "active" && state["status"] == "failed" && state["phase"] == "settled"
+        })
         .await;
     assert_eq!(state["life"], "failed", "the graph current ends: {state}");
     assert_eq!(state["why"], "capability_activation_failed", "{state}");

@@ -185,6 +185,28 @@ it("uses packaged Windows Node through Claude's Bash without granting launcher e
 });
 
 describe("ClaudeBasicHarness", () => {
+
+  it.each([false, true])("delivers the communication baseline in actual Claude turns with broker %s", async (brokerAvailable) => {
+    let prompt = "";
+    const harness = new ClaudeBasicHarness(factoryContext("acceptEdits"), {
+      browserSdk: browserSdk(),
+      query: sdkQuery([{ type: "result", subtype: "success", result: "done", session_id: "communication-session" }], input => { prompt = input.prompt; }),
+    });
+    await harness.complete({ ...runContext(managedAccess()), ...(brokerAvailable ? { completionBroker: {
+      url: "http://127.0.0.1:43125/api/completions", token: "fixture-broker-token-1234567890123456",
+    } } : {}) });
+    expect(prompt).toContain("Your current layer is how you explain the work to the user while doing it.");
+    expect(prompt).toContain("read each changed current.currentLayerId with graph.getLayer");
+    expect(prompt).toContain("input answers arrive through the next ordinary interaction");
+    expect(prompt).toContain('graph.authoring("first-finding-');
+    expect(prompt).toContain('target: prior.layer');
+    expect(prompt).not.toContain("Advancing is optional");
+    expect(prompt).not.toContain("After doing the underlying work, answer");
+    expect(prompt).not.toContain("Codex");
+    expect(prompt).not.toContain("fixture-broker-token");
+    expect(prompt.includes("Import complete and watchCompletions from")).toBe(brokerAvailable);
+  });
+
   it("maps product approval modes onto supported Claude SDK permission modes", () => {
     expect(claudePermissionMode("ask")).toBe("default");
     expect(claudePermissionMode("auto")).toBe("acceptEdits");
@@ -230,7 +252,7 @@ describe("ClaudeBasicHarness", () => {
       expect(prompt).toContain("live, user-facing workspace");
       // The graph is the user's interface, so mechanics never appear in its content.
       expect(prompt).toContain("Never expose execution mechanics in graph content");
-      expect(prompt).toContain("rather than on every change");
+      expect(prompt).toContain("when the user would gain a materially more useful view");
       expect(prompt).toContain("await graph.getCurrent()");
       expect(prompt).toContain("await graph.advanceCurrent(");
       expect(prompt).toContain("every distinct attached native node must receive a NEW navigate action");
