@@ -3648,6 +3648,13 @@ async fn approval_wait_is_durable_and_the_product_decision_resumes_the_same_comp
                 let epoch_reset = events_epoch_reset.clone();
                 async move {
                     let after = query.get("after").and_then(|value| value.parse::<u64>().ok()).unwrap_or(0);
+                    // Interactions in a thread can run at once: each observer reads only its own
+                    // interaction's approval stream.
+                    let polled = query.get("interactionId").and_then(|value| value.parse::<i64>().ok());
+                    assert!(polled.is_some_and(|id| id > 0), "approval events must be read per interaction");
+                    if interaction_id != 0 {
+                        assert_eq!(polled, Some(interaction_id), "approval events must be read per interaction");
+                    }
                     if epoch_reset.load(Ordering::SeqCst) {
                         return axum::Json(json!({
                             "harnessSessionId": "session-1",

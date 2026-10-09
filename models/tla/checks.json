@@ -205,7 +205,8 @@
       "PrepareCanBeAmbiguous": "TRUE",
       "RefusedLaunchFailsChild": "TRUE",
       "ChildrenOutsideRootGate": "TRUE",
-      "ProductLeavesChildren": "TRUE"
+      "ProductLeavesChildren": "TRUE",
+      "InvokesOutsideRootGate": "TRUE"
     },
     "readiness-repair-today": {
       "Providers": "{chatgpt, openrouter}",
@@ -1437,10 +1438,11 @@
         "StartupFailsActiveChildren",
         "SendNeverWaitsOnChild",
         "OneHumanTurn",
-        "ProductLeavesChildAlone"
+        "ProductLeavesChildAlone",
+        "InvokeNeverWaits"
       ],
       "expect": "pass",
-      "finding": "With every fix, a settled execution row has a terminal current and product row, and startup leaves no interrupted child active. The user can send whenever no human turn runs, two human turns never run at once, and the product neither stops nor runs an agent's child."
+      "finding": "With every fix, a settled execution row has a terminal current and product row, and startup leaves no interrupted child active. The user can send whenever no message turn runs, two message turns never run at once, a run the user invokes never waits, and the product neither stops nor runs an agent's child."
     },
     {
       "id": "launch-liveness",
@@ -1584,6 +1586,23 @@
         "violated": "SendNeverWaitsOnChild"
       },
       "finding": "Before the decision, a child that still runs after its parent is done refuses the user's next message (the gate counted it as a turn)."
+    },
+    {
+      "id": "launch-invoke-gate-reverted",
+      "module": "CompletionLaunchWindows",
+      "preset": "launch-today",
+      "constants": {
+        "InvokesOutsideRootGate": "FALSE"
+      },
+      "invariants": [
+        "TypeOK",
+        "OneHumanTurn",
+        "InvokeNeverWaits"
+      ],
+      "expect": {
+        "violated": "InvokeNeverWaits"
+      },
+      "finding": "Before the decision (#717), the gate counted a user's invoked run as the thread's one active turn: an invoke waited for the running message turn, and the next message waited for the invoke."
     },
     {
       "id": "launch-product-child-reverted",

@@ -42,6 +42,22 @@ export function humanTurns(state, thread) {
   return workspaceTurns(state, thread).filter((turn) => !children.has(String(turn.id)));
 }
 
+/** Every run an invoke action started, whether a user clicked it or an agent launched it. */
+export function invokedRunIds(state) {
+  return new Set((state.actionInvocations || [])
+    .map((invocation) => String(invocation.resultInteractionId)));
+}
+
+/**
+ * The thread's message turns in order. They resume the thread's native root session, so they
+ * run one at a time. A run an invoke action started runs beside them in a fresh session, so it
+ * never decides the composer's state, what the composer's Stop targets, or what it retries.
+ */
+export function messageTurns(state, thread) {
+  const invoked = invokedRunIds(state);
+  return workspaceTurns(state, thread).filter((turn) => !invoked.has(String(turn.id)));
+}
+
 function sameId(left, right) {
   return left != null && right != null && String(left) === String(right);
 }

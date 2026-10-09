@@ -29,7 +29,7 @@ import {
   createLayerNavigationCoordinator,
   layerPathForVisibleLayer,
   reconcileCurrentProjection,
-  humanTurns,
+  messageTurns,
   workspaceTurns,
 } from "./product-workspace/model.js";
 import {
@@ -944,8 +944,8 @@ export async function submitInteraction(
     inputIdentityRevision,
   );
   try {
-    // A child an agent launched is not a human turn: a follow-up or retry never targets it.
-    const latestInteraction = humanTurns(appState, { id: threadId }).at(-1);
+    // An invoked run is not a message turn: a follow-up or retry never targets it.
+    const latestInteraction = messageTurns(appState, { id: threadId }).at(-1);
     const { path, body: retryBody } = interactionSubmissionTarget(
       threadId,
       latestInteraction,
@@ -1508,15 +1508,17 @@ export async function invokeAction(action) {
       durable?.resultInteractionId
       && !invokeResultIsRetryable(durable.resultCompletionStatus)
     ) {
-      onboardingTutorialController()?.actionSucceeded({
+      const followsResult = tutorialFollowsInvokeResult(onboardingTutorialController()?.actionSucceeded({
         threadId,
         interactionId: sourceInteractionId,
         actionId: action.id,
         resultInteractionId: durable.resultInteractionId,
-      });
-      supersedePendingHistory({ presentationChanged: true });
-      trackPendingTurn(threadId, durable.resultInteractionId, intent);
-      await refreshState(threadId, { historyMode: "push" }).catch(() => {});
+      }), durable.resultInteractionId);
+      if (followsResult) {
+        supersedePendingHistory({ presentationChanged: true });
+        trackPendingTurn(threadId, durable.resultInteractionId, intent);
+      }
+      await refreshState(threadId, { historyMode: followsResult ? "push" : "replace" }).catch(() => {});
       return { interaction: { id: durable.resultInteractionId }, recovered: true };
     } else {
       renderThread();
@@ -1544,24 +1546,33 @@ export async function invokeAction(action) {
     && response.interaction?.id
     && !invokeResultIsRetryable(response.interaction.completionStatus)
     && sourceIsStillSelected;
+  let followsResult = false;
   if (createdResultCanAdvance) {
-    onboardingTutorialController()?.actionSucceeded({
+    followsResult = tutorialFollowsInvokeResult(onboardingTutorialController()?.actionSucceeded({
       threadId,
       interactionId: sourceInteractionId,
       actionId: action.id,
       resultInteractionId: response.interaction.id,
-    });
-    supersedePendingHistory({ presentationChanged: true });
+    }), response.interaction.id);
+    if (followsResult) supersedePendingHistory({ presentationChanged: true });
   }
-  if (response.created && response.interaction?.id && !invokeResultIsRetryable(response.interaction.completionStatus)) {
-    trackPendingTurn(threadId, response.interaction.id, intent);
-  }
+  if (followsResult) trackPendingTurn(threadId, response.interaction.id, intent);
   if (String(viewState.currentThreadId) === String(threadId)) {
     await refreshState(threadId, {
-      historyMode: createdResultCanAdvance ? "push" : "replace",
+      historyMode: followsResult ? "push" : "replace",
     });
   }
   return response;
+}
+
+/**
+ * Invoked runs run beside each other, so an invoke keeps the reader on the layer it came from:
+ * the node shows its run's state and Stop, and the reader can invoke more. Only the guided
+ * tutorial, which waits for this exact result, follows it.
+ */
+export function tutorialFollowsInvokeResult(tutorial, resultInteractionId) {
+  return tutorial?.phase === "awaiting-accepted-response"
+    && String(tutorial.interactionId) === String(resultInteractionId);
 }
 
 async function createOrReuseProject(selectedScope) {

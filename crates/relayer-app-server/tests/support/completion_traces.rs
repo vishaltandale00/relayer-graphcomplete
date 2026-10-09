@@ -652,6 +652,7 @@ impl World {
                     thread_icon_selection_eligible: false,
                     require_native_continuity: false,
                     native_history_anchor: None,
+                    fresh_native_session: None,
                     project_id: None,
                     product_interaction_id: child.id.value(),
                     thread_id: thread.id.value(),

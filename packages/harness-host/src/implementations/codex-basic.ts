@@ -5,7 +5,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { mkdir, rename, rm, unlink, writeFile } from "node:fs/promises";
 import { isAbsolute, join, resolve } from "node:path";
 import { nativeExecutionHandle, type NativeExecutionHandle } from "../completion-execution.js";
-import { INTERACTION_INPUT_GUIDANCE, renderInteractionInput } from "../interaction-input.js";
+import { INTERACTION_INPUT_GUIDANCE, renderInteractionInput, renderThreadHistory } from "../interaction-input.js";
 import {
   parseNativeSessionResetReason,
   reportNativeSessionReset,
@@ -289,7 +289,10 @@ export class CodexBasicHarness implements Harness {
     signal?: AbortSignal,
   ): Promise<void> {
     const personalPresentationVersionId = context.personalPresentation?.attachment.versionInteractionNodeId ?? null;
-    const persistentRootSession = kind === "root" && this.resolved.settings.rootSessionMode !== "fresh";
+    // A fresh root run starts its own Codex thread and leaves the thread's root conversation alone.
+    const persistentRootSession = kind === "root"
+      && this.resolved.settings.rootSessionMode !== "fresh"
+      && context.nativeSession !== "fresh";
     if (kind === "root" && context.requireNativeContinuity && (!persistentRootSession || this.codexThreadId === undefined)) {
       throw new Error("This conversation's native history is unavailable. Continuing with a fresh session would lose context; its saved history was preserved.");
     }
@@ -754,7 +757,7 @@ Normalized interaction input:
 ${renderInteractionInput(context.interactionInput)}
 
 ${INTERACTION_INPUT_GUIDANCE} In JavaScript, call graph.getInteractionInput() to re-read it.
-
+${renderThreadHistory(context, "javascript")}
 ${ATTACHED_NAVIGATION_GUIDANCE}
 For a full Node Detail replacement accompanying an authorized addition, first call await graph.getNodePresentation(nodeId) to read the current node, revision, and actions. Author a complete compiled NodeObject presentation with the persistent node's existing clientKey, preserving every existing action binding and adding usable controls for the new actions. Call await graph.replaceNodePresentation(nodeId, revision, presentationBuilder); this stages presentation only, not the builder's title/detail. Retain original action clientKey, kind, and sourceLayer provenance when rebuilding controls; new actions with omitted provenance must omit it in their bindings too. On stale_presentation_revision, reread and repair the full presentation against the current actions. Do not synthesize supplemental controls. If retained rich HTML cannot expose a new action, provide an explicit full replacement before submitting.
 
@@ -905,7 +908,7 @@ Normalized interaction input:
 ${normalizedInput}
 
 ${INTERACTION_INPUT_GUIDANCE} In JavaScript, call graph.getInteractionInput() to re-read it.
-
+${renderThreadHistory(context, "javascript")}
 ${ATTACHED_NAVIGATION_GUIDANCE}
 For a full Node Detail replacement accompanying an authorized addition, first call await graph.getNodePresentation(nodeId) to read the current node, revision, and actions. Author a complete compiled NodeObject presentation with the persistent node's existing clientKey, preserving every existing action binding and adding usable controls for the new actions. Call await graph.replaceNodePresentation(nodeId, revision, presentationBuilder); this stages presentation only, not the builder's title/detail. Retain original action clientKey, kind, and sourceLayer provenance when rebuilding controls; new actions with omitted provenance must omit it in their bindings too. On stale_presentation_revision, reread and repair the full presentation against the current actions. Do not synthesize supplemental controls. If retained rich HTML cannot expose a new action, provide an explicit full replacement before submitting.
 

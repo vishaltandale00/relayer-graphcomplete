@@ -1116,6 +1116,43 @@ describe("CodexBasicHarness", () => {
     });
   });
 
+  it("starts a fresh root run in its own Codex thread and shows it the thread's history", async () => {
+    const submissions: CodexAppServerTurnOptions[] = [];
+    const harness = new CodexBasicHarness({
+      ...context("auto"),
+      savedState: {
+        codexThreadId: "root-thread",
+        codexThreadPersonalPresentationVersionId: null,
+      },
+    }, {
+      codexPathOverride: "/managed/codex",
+      runAppServerTurn: async (options) => {
+        submissions.push(options);
+        const threadId = options.savedThreadId ?? `fresh-thread-${submissions.length}`;
+        await options.onThreadId(threadId);
+        return { threadId, turnId: `turn-${submissions.length}`, status: "completed" };
+      },
+    });
+
+    await harness.complete({
+      ...runContext(2, "fresh-token"),
+      nativeSession: "fresh",
+      threadHistory: [{ interactionNodeId: 1, message: "Compare the two options", responseLayerId: 9 }],
+    });
+    expect(submissions[0]?.savedThreadId).toBeUndefined();
+    expect(submissions[0]?.prompt).toContain("This run starts a fresh session");
+    expect(submissions[0]?.prompt).toContain('"message": "Compare the two options"');
+    expect(submissions[0]?.prompt).toContain("await graph.getLayer(responseLayerId)");
+    expect(harness.state()).toEqual({
+      codexThreadId: "root-thread",
+      codexThreadPersonalPresentationVersionId: null,
+    });
+
+    await harness.complete(runContext(3, "root-token"));
+    expect(submissions[1]?.savedThreadId).toBe("root-thread");
+    expect(submissions[1]?.prompt).not.toContain("This run starts a fresh session");
+  });
+
   it("fails recursive Codex execution closed without fresh admission and access", async () => {
     const runAppServerTurn = vi.fn(async () => ({
       threadId: "unreachable",

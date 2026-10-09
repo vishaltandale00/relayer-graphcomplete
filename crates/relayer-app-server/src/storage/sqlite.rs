@@ -27,14 +27,14 @@ use tokio::sync::Mutex;
 
 pub(crate) use personal_presentation::PersonalPresentationPin;
 
-/// Whether thread ?1 has a human turn in progress: a user's message or a user's invoke action.
-/// A child an agent launched runs beside human turns and never holds the thread; only its
-/// parent agent controls it.
 /// The model selection of thread ?1's latest human turn, which a new turn inherits. A child an
 /// agent launched is not a human turn, so its selection is never inherited.
 const LATEST_HUMAN_TURN_MODEL: &str = "SELECT turn.model_provider_id,turn.provider_model_id,turn.model_family_id FROM interactions turn WHERE turn.thread_id=?1 AND NOT EXISTS(SELECT 1 FROM action_invocations child WHERE child.result_interaction_id=turn.id AND child.agent_invoked=1) ORDER BY turn.sequence DESC LIMIT 1";
 
-const HUMAN_TURN_IN_PROGRESS: &str = "SELECT EXISTS(SELECT 1 FROM interactions turn WHERE turn.thread_id=?1 AND turn.completion_status IN ('not_started','running','submitted') AND NOT EXISTS(SELECT 1 FROM action_invocations child WHERE child.result_interaction_id=turn.id AND child.agent_invoked=1))";
+/// Whether thread ?1 has a message turn in progress. Message turns resume the thread's native
+/// root session, so they still run one at a time. A run started by an invoke action, whether a
+/// user clicked it or an agent launched it, starts a fresh session and runs beside them.
+const MESSAGE_TURN_IN_PROGRESS: &str = "SELECT EXISTS(SELECT 1 FROM interactions turn WHERE turn.thread_id=?1 AND turn.completion_status IN ('not_started','running','submitted') AND NOT EXISTS(SELECT 1 FROM action_invocations run WHERE run.result_interaction_id=turn.id))";
 
 #[derive(Clone)]
 pub(crate) struct SqliteProductStore {

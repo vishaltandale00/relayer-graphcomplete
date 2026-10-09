@@ -164,7 +164,7 @@ impl SqliteProductStore {
         }
 
         if enforce_single_active_interaction {
-            let active: bool = sqlx::query_scalar(super::HUMAN_TURN_IN_PROGRESS)
+            let active: bool = sqlx::query_scalar(super::MESSAGE_TURN_IN_PROGRESS)
                 .bind(thread_id.value())
                 .fetch_one(&mut *tx)
                 .await?;

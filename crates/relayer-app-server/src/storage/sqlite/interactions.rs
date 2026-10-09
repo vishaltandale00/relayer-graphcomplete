@@ -3,7 +3,8 @@ use super::{
 };
 use crate::product::{
     AcceptedInteractionCompletion, Interaction, InteractionId, InteractionModelSelection,
-    ModelFamilyId, PreparedInteractionBinding, ProviderId, ThreadId, ValidateModelSelectionCommand,
+    ModelFamilyId, PreparedInteractionBinding, ProviderId, ThreadHistoryEntry, ThreadId,
+    ValidateModelSelectionCommand,
 };
 use crate::storage::{NewInteractionInput, StorageError};
 use sqlx::{Row, SqliteConnection, sqlite::SqliteRow};
@@ -241,6 +242,50 @@ impl SqliteProductStore {
             .transpose()
     }
 
+    /// Thread ?1's accepted human turns created before interaction ?2, in order. An agent's child
+    /// belongs to its parent's work, not to the thread's conversation.
+    pub(crate) async fn accepted_thread_history(
+        &self,
+        thread_id: ThreadId,
+        excluding: InteractionId,
+    ) -> Result<Vec<ThreadHistoryEntry>, StorageError> {
+        let rows: Vec<(i64, String, Option<String>)> = sqlx::query_as(
+            "SELECT turn.graph_node_id,turn.text,turn.completion_output_json FROM interactions turn WHERE turn.thread_id=?1 AND turn.sequence<(SELECT sequence FROM interactions WHERE id=?2) AND turn.completion_status='accepted' AND turn.graph_node_id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM action_invocations child WHERE child.result_interaction_id=turn.id AND child.agent_invoked=1) ORDER BY turn.sequence",
+        )
+        .bind(thread_id.value())
+        .bind(excluding.value())
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows
+            .into_iter()
+            .map(
+                |(interaction_node_id, message, output)| ThreadHistoryEntry {
+                    interaction_node_id,
+                    message,
+                    response_layer_id: output
+                        .and_then(|json| serde_json::from_str::<serde_json::Value>(&json).ok())
+                        .and_then(|output| output["rootLayer"]["layer"]["id"].as_i64()),
+                },
+            )
+            .collect())
+    }
+
+    /// Whether interaction ?1 is a run an invoke action started. This is the admission gate's own
+    /// test (`MESSAGE_TURN_IN_PROGRESS`), so a run the gate admits beside a message turn always
+    /// starts a fresh native session.
+    pub(crate) async fn is_invoked_run(
+        &self,
+        interaction_id: InteractionId,
+    ) -> Result<bool, StorageError> {
+        sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM action_invocations WHERE result_interaction_id=?1)",
+        )
+        .bind(interaction_id.value())
+        .fetch_one(&self.pool)
+        .await
+        .map_err(Into::into)
+    }
+
     #[cfg(test)]
     pub(crate) async fn list_interactions(
         &self,
@@ -265,7 +310,7 @@ impl SqliteProductStore {
                 .fetch_one(&mut *transaction)
                 .await?;
         if enforce_single_active_interaction {
-            let interaction_in_progress: bool = sqlx::query_scalar(super::HUMAN_TURN_IN_PROGRESS)
+            let interaction_in_progress: bool = sqlx::query_scalar(super::MESSAGE_TURN_IN_PROGRESS)
                 .bind(thread_id.value())
                 .fetch_one(&mut *transaction)
                 .await?;
@@ -674,7 +719,7 @@ impl SqliteProductStore {
         .await?;
         catalog::validate_model_selection_on(&mut transaction, &command).await?;
         let result = sqlx::query(
-            "UPDATE interactions SET text=?1,model_provider_id=?2,provider_model_id=?3,model_family_id=?4,completion_status='submitted',harness_configuration_name=?5,harness_configuration_digest=NULL,effective_execution_digest=NULL,effective_permission_receipt_json=NULL,completion_output_json=NULL,completion_error=NULL,input_identity=?6,input_digest=?7 WHERE id=?8 AND completion_status='not_started' AND NOT EXISTS(SELECT 1 FROM interactions later WHERE later.thread_id=interactions.thread_id AND later.sequence>interactions.sequence)",
+            "UPDATE interactions SET text=?1,model_provider_id=?2,provider_model_id=?3,model_family_id=?4,completion_status='submitted',harness_configuration_name=?5,harness_configuration_digest=NULL,effective_execution_digest=NULL,effective_permission_receipt_json=NULL,completion_output_json=NULL,completion_error=NULL,input_identity=?6,input_digest=?7 WHERE id=?8 AND completion_status='not_started' AND NOT EXISTS(SELECT 1 FROM interactions later WHERE later.thread_id=interactions.thread_id AND later.sequence>interactions.sequence AND NOT EXISTS(SELECT 1 FROM action_invocations run WHERE run.result_interaction_id=later.id))",
         )
         .bind(input.text)
         .bind(model_selection.provider_id.as_str())
@@ -1401,10 +1446,11 @@ mod tests {
         store.pool.close().await;
     }
 
-    /// Only human root turns count toward a thread's one active turn: a user's message and
-    /// a user's invoke action do; a child an agent launched does not.
+    /// Only message turns hold the thread, because they resume its native root session. A run
+    /// started by an invoke action starts fresh: a user's invoke and an agent's child both run
+    /// beside message turns.
     #[tokio::test]
-    async fn only_human_turns_hold_the_thread() {
+    async fn only_message_turns_hold_the_thread() {
         let temporary = tempfile::Builder::new()
             .prefix("relayer-human-turn-gate-")
             .tempdir()
@@ -1494,8 +1540,17 @@ mod tests {
             .execute(&store.pool)
             .await
             .unwrap();
-        let held = store
+        let after_action = store
             .insert_interaction(thread.id, "After the action", None, true, true)
+            .await
+            .unwrap_or_else(|error| panic!("a user's running invoke held the thread: {error}"));
+        sqlx::query("UPDATE interactions SET completion_status='running' WHERE id=?1")
+            .bind(after_action.id.value())
+            .execute(&store.pool)
+            .await
+            .unwrap();
+        let held = store
+            .insert_interaction(thread.id, "Second message", None, true, true)
             .await
             .err()
             .unwrap();
@@ -1508,6 +1563,103 @@ mod tests {
             .request_interaction_stop(thread.id, invoked.id)
             .await
             .unwrap();
+        store.pool.close().await;
+    }
+
+    /// A fresh run reads its thread through the accepted human turns, in order, with each turn's
+    /// returned layer. Unfinished turns, the run itself, and an agent's children are not part of
+    /// the thread's conversation.
+    #[tokio::test]
+    async fn accepted_thread_history_lists_accepted_human_turns_in_order() {
+        let temporary = tempfile::Builder::new()
+            .prefix("relayer-thread-history-")
+            .tempdir()
+            .unwrap();
+        let store = SqliteProductStore::open(&temporary.path().join("product.sqlite3"))
+            .await
+            .unwrap();
+        seed_test_models(&store).await;
+        let model = selection("first-model");
+        let thread = store
+            .insert_thread_with_initial_interaction(NewThreadRecord {
+                icon_selection_eligible: true,
+                title: "History",
+                project_id: None,
+                initial_message: "Compare the options",
+                harness_configuration_name: "codex-basic",
+                permission_profile_id: "auto",
+                model_selection: Some(&model),
+                timestamp: "1",
+            })
+            .await
+            .unwrap();
+        sqlx::query(
+            "UPDATE interactions SET completion_status='accepted',graph_node_id=701,harness_configuration_name='codex-basic',completion_output_json=?2 WHERE id=?1",
+        )
+        .bind(thread.root_interaction_id.value())
+        .bind(r#"{"nodeId":701,"rootLayer":{"layer":{"id":702}}}"#)
+        .execute(&store.pool)
+        .await
+        .unwrap();
+        let child = match store
+            .insert_recursive_action_invocation(thread.root_interaction_id, 41, "Child work")
+            .await
+            .unwrap()
+        {
+            crate::storage::ActionInvocationInsertOutcome::Created { interaction, .. } => {
+                interaction
+            }
+            _ => panic!("the child is new"),
+        };
+        let invoked = match store
+            .insert_action_invocation(thread.root_interaction_id, 42, "Use the second option")
+            .await
+            .unwrap()
+        {
+            crate::storage::ActionInvocationInsertOutcome::Created { interaction, .. } => {
+                interaction
+            }
+            _ => panic!("the invoke's result is new"),
+        };
+        let running = store
+            .insert_interaction(thread.id, "Still running", None, true, false)
+            .await
+            .unwrap();
+        for (interaction, node) in [(child.id, 711), (invoked.id, 721)] {
+            sqlx::query(
+                "UPDATE interactions SET completion_status='accepted',graph_node_id=?2 WHERE id=?1",
+            )
+            .bind(interaction.value())
+            .bind(node)
+            .execute(&store.pool)
+            .await
+            .unwrap();
+        }
+
+        let history = store
+            .accepted_thread_history(thread.id, running.id)
+            .await
+            .unwrap();
+        assert_eq!(
+            history,
+            [
+                ThreadHistoryEntry {
+                    interaction_node_id: 701,
+                    message: "Compare the options".into(),
+                    response_layer_id: Some(702),
+                },
+                ThreadHistoryEntry {
+                    interaction_node_id: 721,
+                    message: "Use the second option".into(),
+                    response_layer_id: None,
+                },
+            ]
+        );
+        let without_invoked = store
+            .accepted_thread_history(thread.id, invoked.id)
+            .await
+            .unwrap();
+        assert_eq!(without_invoked.len(), 1);
         store.pool.close().await;
     }
 

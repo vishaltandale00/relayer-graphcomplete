@@ -434,7 +434,7 @@ describe("Codex approval bridge", () => {
     const context = bridgeFixture("deny").context;
     const bridged = { ...context, approvals };
     const first = answerCodexServerRequest(permissionRequest(fileWritePermission("/workspace/CaseSensitive")), bridged);
-    const firstPending = coordinator.snapshot(0).pendingRequests[0]!;
+    const firstPending = coordinator.snapshot(2, 0).pendingRequests[0]!;
     coordinator.decide(firstPending.requestId, { decision: "approve_always" });
     await expect(first).resolves.toEqual({
       permissions: normalizedFileWritePermission("/workspace/CaseSensitive"),
@@ -448,14 +448,14 @@ describe("Codex approval bridge", () => {
       permissions: normalizedFileWritePermission("/workspace/CaseSensitive"),
       scope: "turn",
     });
-    const exactResolution = coordinator.snapshot(0).events.filter((event) => event.type === "resolved").at(-1);
+    const exactResolution = coordinator.snapshot(2, 0).events.filter((event) => event.type === "resolved").at(-1);
     expect(exactResolution).toMatchObject({ resolution: { actor: "session_grant", decision: "approve_once" } });
 
     const near = answerCodexServerRequest(
       permissionRequest(fileWritePermission("/workspace/casesensitive"), { id: "provider-request-3", itemId: "permission-3" }),
       bridged,
     );
-    const nearPending = coordinator.snapshot(0).pendingRequests;
+    const nearPending = coordinator.snapshot(2, 0).pendingRequests;
     expect(nearPending).toHaveLength(1);
     expect(nearPending[0]!.scopeKeys).not.toEqual(firstPending.scopeKeys);
     coordinator.decide(nearPending[0]!.requestId, { decision: "deny" });

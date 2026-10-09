@@ -152,7 +152,8 @@ export class ClaudeBasicHarness implements Harness {
       throw new Error("claude.basic requires execution access for the selected provider definition");
     }
     const providerDefinitionId = context.model.providerId;
-    const isRoot = context.origin.kind === "root";
+    // A fresh root run starts its own Claude session and leaves the thread's root session alone.
+    const isRoot = context.origin.kind === "root" && context.nativeSession !== "fresh";
     const personalPresentationVersionId = context.personalPresentation?.attachment.versionInteractionNodeId ?? null;
     if (isRoot && context.requireNativeContinuity && (this.sessionId === undefined || this.sessionProviderDefinitionId !== providerDefinitionId || (this.sessionPersonalPresentationVersionId !== undefined && this.sessionPersonalPresentationVersionId !== personalPresentationVersionId))) {
       throw new Error("This conversation's native history cannot be verified for the selected route. Its saved history was preserved; a fresh session was not started.");
@@ -192,7 +193,7 @@ export class ClaudeBasicHarness implements Harness {
       isRoot,
     );
     if (!isRoot && result.sessionId === undefined) {
-      throw new Error("Claude invoked completion did not expose a durable native session identity");
+      throw new Error("Claude fresh or invoked completion did not expose a durable native session identity");
     }
     await context.trace.emit({
       type: "message",

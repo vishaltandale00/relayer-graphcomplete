@@ -985,7 +985,9 @@ describe("workspace navigation integration", () => {
     }
   });
 
-  it.each([["created", false], ["response-loss", false], ["already-accepted", false], ["created", true]])("shows the distinct invoke result without overriding explicit source navigation (%s, back=%s)", async (outcome, backToSource) => {
+  // Invoked runs run beside each other, so an invoke never moves the reader: the source node shows
+  // the run, and its accepted result becomes navigation the reader opens when they choose.
+  it.each([["created", false], ["response-loss", false], ["already-accepted", false], ["created", true]])("keeps the reader on the source while and after the invoked run settles (%s, back=%s)", async (outcome, backToSource) => {
     const sourceRoot = rootLayer(7, 22);
     const action = { id: 6, kind: "invoke", sourceNodeId: 22, targetLayerId: null, interactionText: "Prepare launch" };
     sourceRoot.actions = [action];
@@ -1020,8 +1022,8 @@ describe("workspace navigation integration", () => {
     controller.replaceCurrentSelection(22);
     expect(controller.viewState.layerPath.map(({ layerId }) => layerId)).toEqual([7]);
     await controller.invokeAction(action);
-    expect(controller.viewState.currentInteractionId).toBe(outcome === "already-accepted" ? 2 : 1);
-    expect(controller.appState.visibleLayer.layer.id).toBe(outcome === "already-accepted" ? 8 : 7);
+    expect(controller.viewState.currentInteractionId).toBe(1);
+    expect(controller.appState.visibleLayer.layer.id).toBe(7);
     if (backToSource) {
       // Pending work now preserves the source. Exercise actual browsing to the
       // pending turn and back, not a no-op selection of the already-open source.
@@ -1033,11 +1035,11 @@ describe("workspace navigation integration", () => {
       resolvedInvokeInteractionId: 25, interactionText: null, state: "accepted" }];
     await controller.refreshState(10);
     expect(controller.appState.status).toBe("accepted");
-    expect(controller.viewState.currentInteractionId).toBe(backToSource ? 1 : 2);
-    expect(controller.appState.visibleLayer.layer.id).toBe(backToSource ? 7 : 8);
-    expect(controller.viewState.layerPath.map(({ layerId }) => layerId)).toEqual([backToSource ? 7 : 8]);
-    expect(controller.appState.nodes.map(({ id }) => id)).toEqual(backToSource ? [22] : [26, 27, 28]);
-    expect(String(controller.viewState.selectedNodeId)).toBe(backToSource ? "22" : "27");
+    expect(controller.viewState.currentInteractionId).toBe(1);
+    expect(controller.appState.visibleLayer.layer.id).toBe(7);
+    expect(controller.viewState.layerPath.map(({ layerId }) => layerId)).toEqual([7]);
+    expect(controller.appState.nodes.map(({ id }) => id)).toEqual([22]);
+    expect(String(controller.viewState.selectedNodeId)).toBe("22");
     controller.selectTurnById(1);
     expect(controller.appState.visibleLayer.layer.id).toBe(7);
     expect(controller.appState.actions[0]).toMatchObject({ id: 6, kind: "navigate", targetLayerId: 8 });
@@ -1153,12 +1155,16 @@ describe("workspace navigation integration", () => {
         throw new Error(`Unexpected request: ${path}`);
       });
       const controller = await loadModules();
+      // The guided tutorial waits for this exact result, so the reader follows it there; every
+      // other invoke keeps the reader on the source layer.
+      tutorialActionSucceeded.mockReturnValue({ phase: "awaiting-accepted-response", threadId: 10, interactionId: 100 });
 
       await controller.loadThread(10);
       await controller.invokeAction(action);
 
       expect(tutorialActionSucceeded).toHaveBeenCalledTimes(shouldAdvance ? 1 : 0);
       expect(controller.viewState.currentInteractionId).toBe(expectedInteractionId);
+      expect(controller.appState.pendingTurn?.interactionId ?? null).toBe(shouldAdvance ? 100 : null);
       expect(controller.appState.actionInvocations[0].resultCompletionStatus)
         .toBe(resultCompletionStatus);
     } finally {

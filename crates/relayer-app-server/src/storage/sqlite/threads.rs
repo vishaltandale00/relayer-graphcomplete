@@ -10,13 +10,24 @@ const THREAD_COLUMNS: &str = r#"
            (SELECT id FROM interactions WHERE thread_id=t.id ORDER BY sequence ASC LIMIT 1),
            t.conversation_import_id IS NOT NULL, t.icon, t.icon_selection_eligible, t.working_directory,
            COALESCE((SELECT group_project_id FROM projects WHERE id=t.project_id),t.project_id),t.checkout_context_json,
-           (SELECT CASE
-                WHEN i.completion_status IN ('not_started','running','submitted','waiting_for_approval')
-                     AND EXISTS(SELECT 1 FROM interaction_stop_requests stop WHERE stop.interaction_id=i.id AND stop.error IS NULL) THEN 'stopping'
-                WHEN i.completion_status='waiting_for_approval' THEN 'needs_approval'
-                WHEN i.completion_status IN ('not_started','running','submitted') THEN 'running'
-                WHEN i.completion_status='failed' THEN 'failed'
-            END FROM interactions i WHERE i.thread_id=t.id ORDER BY i.sequence DESC LIMIT 1)
+           (WITH turn AS (
+                -- The thread's human turns. Runs from invoke actions run beside the message
+                -- turns, so the most urgent active turn wins over the latest one. A turn a
+                -- model failure returned to unsent is not running.
+                SELECT i.sequence,i.completion_status,
+                       i.completion_status IN ('not_started','running','submitted','waiting_for_approval')
+                         AND NOT (i.completion_status='not_started' AND (SELECT a.outcome FROM interaction_attempts a WHERE a.interaction_id=i.id ORDER BY a.attempt_number DESC LIMIT 1)='model_failed') AS active,
+                       EXISTS(SELECT 1 FROM interaction_stop_requests stop WHERE stop.interaction_id=i.id AND stop.error IS NULL) AS stopping
+                FROM interactions i
+                WHERE i.thread_id=t.id
+                  AND NOT EXISTS(SELECT 1 FROM action_invocations child WHERE child.result_interaction_id=i.id AND child.agent_invoked=1)
+            )
+            SELECT CASE
+                WHEN EXISTS(SELECT 1 FROM turn WHERE active AND NOT stopping AND completion_status='waiting_for_approval') THEN 'needs_approval'
+                WHEN EXISTS(SELECT 1 FROM turn WHERE active AND stopping) THEN 'stopping'
+                WHEN EXISTS(SELECT 1 FROM turn WHERE active) THEN 'running'
+                WHEN (SELECT completion_status FROM turn ORDER BY sequence DESC LIMIT 1)='failed' THEN 'failed'
+            END)
  ,t.archived_at, (SELECT busy FROM thread_archive_activity WHERE id=t.id)
     FROM threads t
 "#;
@@ -611,6 +622,8 @@ mod tests {
             .await
             .unwrap();
         set_status(&store, &thread, "running").await;
+        // The earlier turn still runs, and its stop request still stands: the most urgent human
+        // turn shows, not the newer idle one.
         assert_eq!(
             store
                 .get_thread(thread.id)
@@ -619,7 +632,7 @@ mod tests {
                 .unwrap()
                 .activity
                 .as_deref(),
-            Some("failed")
+            Some("stopping")
         );
         assert!(matches!(
             store.set_thread_archived(thread.id, true).await,
@@ -657,7 +670,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn thread_lists_report_the_latest_interactions_live_state_only() {
+    async fn thread_lists_report_the_most_urgent_human_turns_live_state() {
         let directory = tempfile::tempdir().unwrap();
         let store = SqliteProductStore::open(&directory.path().join("product.sqlite3"))
             .await
@@ -712,5 +725,38 @@ mod tests {
             .unwrap();
         let listed = store.list_threads().await.unwrap();
         assert_eq!(listed[0].activity.as_deref(), Some("stopping"));
+
+        // Runs from invoke actions run beside the message turn: an earlier turn that needs
+        // approval stays visible after a later run is accepted.
+        sqlx::query("DELETE FROM interaction_stop_requests WHERE interaction_id=?1")
+            .bind(thread.root_interaction_id.value())
+            .execute(&store.pool)
+            .await
+            .unwrap();
+        set_status(&store, &thread, "waiting_for_approval").await;
+        let later = sqlx::query("INSERT INTO interactions(thread_id,sequence,text,created_at,completion_status,permission_profile_id) VALUES (?1,2,'Invoked','2','accepted','ask')")
+            .bind(thread.id.value())
+            .execute(&store.pool)
+            .await
+            .unwrap()
+            .last_insert_rowid();
+        sqlx::query("INSERT INTO action_invocations(source_interaction_id,action_id,result_interaction_id,created_at,graph_lease_required,authoritative,agent_invoked) VALUES (?1,41,?2,'2',1,1,0)")
+            .bind(thread.root_interaction_id.value())
+            .bind(later)
+            .execute(&store.pool)
+            .await
+            .unwrap();
+        assert_eq!(
+            activity(&store, &thread).await.as_deref(),
+            Some("needs_approval")
+        );
+        // A run a model failure returned to unsent is not running.
+        set_status(&store, &thread, "not_started").await;
+        sqlx::query("INSERT INTO interaction_attempts(interaction_id,attempt_number,started_at,finished_at,family_id,family_revision,harness_configuration_name,harness_configuration_revision,harness_configuration_digest,provider_id,adapter_id,adapter_implementation_version,model_id,access_contract,outcome,effect_boundary) VALUES (?1,1,'2','3',1,1,'test',1,'sha256:h','codex','codex-subscription',1,'test-model','managed-runtime@1','model_failed','none')")
+            .bind(thread.root_interaction_id.value())
+            .execute(&store.pool)
+            .await
+            .unwrap();
+        assert_eq!(activity(&store, &thread).await, None);
     }
 }

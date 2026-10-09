@@ -766,7 +766,7 @@ describe("HarnessHost", () => {
       expect(host.cancel(1)).toBe(true);
 
       await expect(completing).rejects.toThrow("cancelled");
-      expect(host.approvalEvents(1)).toMatchObject({
+      expect(host.approvalEvents(1, 44)).toMatchObject({
         pendingRequests: [],
         events: [
           { sequence: 1, type: "requested" },
@@ -798,6 +798,52 @@ describe("HarnessHost", () => {
       expect(host.sessionCount()).toBe(0);
       await expect(host.createSession(descriptor)).rejects.toThrow("closed");
     } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("waits for a fresh root run to unwind before disposing during shutdown", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "relayer-harness-close-fresh-"));
+    let completionStarted!: () => void;
+    const started = new Promise<void>((resolveStarted) => { completionStarted = resolveStarted; });
+    let finishUnwinding!: () => void;
+    const unwound = new Promise<void>((resolveUnwound) => { finishUnwinding = resolveUnwound; });
+    const order: string[] = [];
+    const dispose = vi.fn(async () => { order.push("disposed"); });
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => url.endsWith("/output")
+      ? new Response(JSON.stringify({ error: { code: "completion_not_found" } }), { status: 404, headers: { "content-type": "application/json" } })
+      : graphReadResponse(url, 2)));
+    try {
+      const host = new HarnessHost({
+        stateFile: join(directory, "sessions.json"),
+        controlToken: "control",
+        implementations: { test: () => ({
+          complete(_context, signal) {
+            completionStarted();
+            // The native run takes a while to tear down after it is aborted.
+            return new Promise<never>((_resolve, reject) => signal?.addEventListener("abort", () => {
+              void unwound.then(() => { order.push("unwound"); reject(signal.reason); });
+            }, { once: true }));
+          },
+          state: emptyState,
+          dispose,
+        }) },
+      });
+      await host.initialize();
+      await host.createSession({ threadId: 1, permissionProfileId: "auto", configuration: testConfiguration, workingDirectory: directory });
+
+      const fresh = host.complete(1, 2, graph(2, "fresh-token"), undefined, undefined, { productInteractionId: 2, nativeSession: "fresh" });
+      await started;
+      const closing = host.close();
+      await new Promise((resolveTurn) => setTimeout(resolveTurn, 20));
+      expect(dispose).not.toHaveBeenCalled();
+
+      finishUnwinding();
+      await expect(fresh).rejects.toThrow("closed");
+      await closing;
+      expect(order).toEqual(["unwound", "disposed"]);
+    } finally {
+      vi.unstubAllGlobals();
       await rm(directory, { recursive: true, force: true });
     }
   });
@@ -2719,6 +2765,97 @@ describe("HarnessHost", () => {
     }
   });
 
+  it("runs a fresh root beside the thread's root turn and cancels each exactly", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "relayer-harness-fresh-root-"));
+    const started = new Map<number, () => void>();
+    const running = new Map<number, Promise<void>>();
+    const contexts = new Map<number, HarnessRunContext>();
+    const accepted = new Set<number>();
+    for (const nodeId of [1, 2]) running.set(nodeId, new Promise<void>((resolve) => { started.set(nodeId, resolve); }));
+    vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => url.endsWith("/output")
+      ? (accepted.has(Number(/nodes\/(\d+)/.exec(url)?.[1]))
+        ? new Response(JSON.stringify(completion), { status: 200, headers: { "content-type": "application/json" } })
+        : new Response(JSON.stringify({ error: { code: "completion_not_found" } }), { status: 404, headers: { "content-type": "application/json" } }))
+      : graphReadResponse(url, new Headers(init?.headers).get("authorization") === "Bearer fresh-token" ? 2 : 1)));
+    try {
+      const host = new HarnessHost({
+        stateFile: join(directory, "sessions.json"),
+        controlToken: "control",
+        implementations: { test: () => ({
+          async complete(context, signal) {
+            contexts.set(context.inputGraph.id, context);
+            started.get(context.inputGraph.id)!();
+            await new Promise<void>((_resolve, reject) => {
+              signal?.addEventListener("abort", () => reject(signal.reason), { once: true });
+            });
+          },
+          state: emptyState,
+        }) },
+      });
+      await host.initialize();
+      const registration = { threadId: 1, permissionProfileId: "auto", configuration: testConfiguration, workingDirectory: directory };
+      await host.createSession(registration);
+
+      const root = host.complete(1, 1, graph(1, "first-token"));
+      await running.get(1);
+      // The product registers the session before every run; an unchanged registration must not
+      // wait for the root turn that holds the session.
+      await expect(Promise.race([
+        host.createSession(registration).then(() => "registered"),
+        new Promise((resolve) => setTimeout(() => resolve("waited"), 1_000)),
+      ])).resolves.toBe("registered");
+      const history = [{ interactionNodeId: 1, message: "First question", responseLayerId: 5 }];
+      const fresh = host.complete(1, 2, graph(2, "fresh-token"), undefined, undefined, {
+        productInteractionId: 2,
+        nativeSession: "fresh",
+        threadHistory: history,
+      });
+      await running.get(2);
+      expect(contexts.get(2)).toMatchObject({ origin: { kind: "root" }, nativeSession: "fresh", threadHistory: history });
+      expect(contexts.get(1)?.nativeSession).toBeUndefined();
+
+      // Without a completion ID, cancel still targets the thread's root turn, never a fresh run.
+      expect(host.cancel(1)).toBe(true);
+      await expect(root).rejects.toThrow("cancelled");
+      expect(host.cancel(1)).toBe(false);
+      expect(host.cancel(1, 2)).toBe(true);
+      await expect(fresh).rejects.toThrow("cancelled");
+    } finally {
+      vi.unstubAllGlobals();
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it.each([
+    [{ nativeSession: "fresh", requireNativeContinuity: true }, "A fresh native session cannot require native continuity"],
+    [{ threadHistory: [] }, "Thread history is sent only with a fresh native session"],
+    [{ nativeSession: "resume" }, "Invalid native session mode"],
+    [{ nativeSession: "fresh", threadHistory: [{ interactionNodeId: 1, message: "Hi", extra: true }] }, "unsupported fields: extra"],
+  ])("rejects an inconsistent fresh-run trace context %#", async (fields, message) => {
+    const directory = await mkdtemp(join(tmpdir(), "relayer-harness-fresh-validation-"));
+    const complete = vi.fn(async () => undefined);
+    let running: Awaited<ReturnType<typeof startHarnessHost>> | undefined;
+    try {
+      running = await startHarnessHost({
+        stateFile: join(directory, "sessions.json"),
+        controlToken: "control",
+        implementations: { test: () => ({ complete, state: emptyState }) },
+      });
+      await running.host.createSession({ threadId: 1, permissionProfileId: "auto", configuration: testConfiguration, workingDirectory: directory });
+      const response = await fetch(`${running.url}/sessions/1/complete`, {
+        method: "POST",
+        headers: { authorization: "Bearer control", "content-type": "application/json" },
+        body: JSON.stringify({ interactionId: 1, graph: graph(), traceContext: { productInteractionId: 1, ...fields } }),
+      });
+      expect(response.status).toBe(500);
+      expect((await response.json() as { error: string }).error).toContain(message);
+      expect(complete).not.toHaveBeenCalled();
+    } finally {
+      await running?.close();
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
   it("lets provider-owned invoked completions run concurrently and cancels one exact completion", async () => {
     const directory = await mkdtemp(join(tmpdir(), "relayer-harness-recursive-concurrency-"));
     const started = new Set<number>();
@@ -4555,7 +4692,7 @@ describe("HarnessHost", () => {
         body: JSON.stringify({ interactionId: 91, graph: graph() }),
       });
       await started;
-      const snapshotResponse = await fetch(`${running.url}/sessions/1/approval-events?after=0`, {
+      const snapshotResponse = await fetch(`${running.url}/sessions/1/approval-events?interactionId=91&after=0`, {
         headers: { authorization: "Bearer control" },
       });
       const snapshot = await snapshotResponse.json() as {
@@ -4590,7 +4727,7 @@ describe("HarnessHost", () => {
       expect(await completionResponse.json()).toMatchObject({ output: completion });
       expect(observedDecisions).toEqual([expect.objectContaining({ requestId, decision: "approve_once", actor: "user" })]);
 
-      const terminalSnapshot = await fetch(`${running.url}/sessions/1/approval-events?after=1`, {
+      const terminalSnapshot = await fetch(`${running.url}/sessions/1/approval-events?interactionId=91&after=1`, {
         headers: { authorization: "Bearer control" },
       });
       expect(await terminalSnapshot.json()).toMatchObject({
@@ -4668,11 +4805,11 @@ describe("HarnessHost", () => {
         signal: controller.signal,
       });
       await started;
-      expect(running.host.approvalEvents(1).pendingRequests).toHaveLength(1);
+      expect(running.host.approvalEvents(1, 91).pendingRequests).toHaveLength(1);
 
       controller.abort();
       await expect(completing).rejects.toThrow();
-      await vi.waitFor(() => expect(running!.host.approvalEvents(1)).toMatchObject({
+      await vi.waitFor(() => expect(running!.host.approvalEvents(1, 91)).toMatchObject({
         pendingRequests: [],
         events: [
           { type: "requested" },
@@ -4701,7 +4838,7 @@ describe("HarnessHost", () => {
       });
       await first.initialize();
       await first.createSession(descriptor);
-      const firstSessionId = first.approvalEvents(1).harnessSessionId;
+      const firstSessionId = first.approvalEvents(1, 1).harnessSessionId;
       await first.close();
 
       const restored = new HarnessHost({
@@ -4712,7 +4849,7 @@ describe("HarnessHost", () => {
       await restored.initialize();
       await restored.createSession(descriptor);
 
-      expect(restored.approvalEvents(1).harnessSessionId).not.toBe(firstSessionId);
+      expect(restored.approvalEvents(1, 1).harnessSessionId).not.toBe(firstSessionId);
       expect(await readFile(stateFile, "utf8")).not.toContain(firstSessionId);
       await restored.close();
     } finally {

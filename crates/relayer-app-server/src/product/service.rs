@@ -2495,6 +2495,27 @@ impl ProductService {
             .map_err(Into::into)
     }
 
+    pub(crate) async fn is_invoked_run(
+        &self,
+        interaction_id: InteractionId,
+    ) -> Result<bool, ProductError> {
+        self.storage
+            .is_invoked_run(interaction_id)
+            .await
+            .map_err(Into::into)
+    }
+
+    pub(crate) async fn accepted_thread_history(
+        &self,
+        thread_id: ThreadId,
+        excluding: InteractionId,
+    ) -> Result<Vec<crate::product::ThreadHistoryEntry>, ProductError> {
+        self.storage
+            .accepted_thread_history(thread_id, excluding)
+            .await
+            .map_err(Into::into)
+    }
+
     pub(crate) async fn invocation_graph_source(
         &self,
         interaction_id: InteractionId,

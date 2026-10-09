@@ -182,10 +182,27 @@ export interface HarnessTraceSink {
   attach(input: HarnessTraceAttachmentInput): Promise<TraceAttachmentRef>;
 }
 
+/** One accepted earlier interaction of the thread. A fresh native session reads its thread through these. */
+export interface HarnessThreadHistoryEntry {
+  readonly interactionNodeId: number;
+  readonly message: string;
+  /** The returned layer, read through the graph capability. Absent when the turn returned none. */
+  readonly responseLayerId?: number;
+}
+
+/**
+ * Product-owned: this root run starts a fresh native session. It runs beside the thread's other
+ * runs and never resumes or replaces the thread's native root session.
+ */
+export type HarnessNativeSessionMode = "fresh";
+
 export interface HarnessCompletionTraceContext {
   readonly threadIconSelection?: { readonly eligible: true };
   readonly requireNativeContinuity?: boolean;
   readonly nativeHistoryAnchor?: { readonly interactionNodeId: number; readonly message: string };
+  readonly nativeSession?: HarnessNativeSessionMode;
+  /** The thread's accepted interactions in order, sent with a fresh root run. */
+  readonly threadHistory?: readonly HarnessThreadHistoryEntry[];
   readonly productInteractionId: number;
   readonly personalPresentationVersionId?: number;
   /** Product-owned key for the same stored pin, never the current configuration default. */
@@ -254,6 +271,10 @@ export interface HarnessRunContext {
   /** Trusted product assertion: a fresh native root would lose legacy context. */
   readonly requireNativeContinuity?: boolean;
   readonly nativeHistoryAnchor?: { readonly interactionNodeId: number; readonly message: string };
+  /** A fresh root run never resumes or replaces the thread's native root session. */
+  readonly nativeSession?: HarnessNativeSessionMode;
+  /** The thread's accepted interactions in order. Present for a fresh root run. */
+  readonly threadHistory?: readonly HarnessThreadHistoryEntry[];
   /** GraphComplete provenance; provider session identity is deliberately separate. */
   readonly origin: CompletionOrigin;
   readonly inputGraph: GraphNode;

@@ -15,13 +15,13 @@ describe("HarnessApprovalCoordinator", () => {
     const coordinator = coordinatorFixture();
     const channel = coordinator.beginCompletion({ interactionId: 17, completeCallId: "complete-1" });
     const waiting = channel.request(commandRequest("provider-1"));
-    const request = coordinator.snapshot().pendingRequests[0]!;
+    const request = coordinator.snapshot(17).pendingRequests[0]!;
 
     const resolution = coordinator.decide(request.requestId, { decision: choice, rationale: "Reviewed." });
 
     await expect(waiting).resolves.toMatchObject({ requestId: request.requestId, decision: choice, actor: "user" });
     expect(resolution).toMatchObject({ requestId: request.requestId, outcome, actor: "user", decision: choice });
-    expect(coordinator.snapshot()).toMatchObject({
+    expect(coordinator.snapshot(17)).toMatchObject({
       latestSequence: 2,
       pendingRequests: [],
       events: [
@@ -35,13 +35,13 @@ describe("HarnessApprovalCoordinator", () => {
     const coordinator = coordinatorFixture();
     const channel = coordinator.beginCompletion({ interactionId: 17, completeCallId: "complete-1" });
     const first = channel.request(commandRequest("provider-1"));
-    const firstRequest = coordinator.snapshot().pendingRequests[0]!;
+    const firstRequest = coordinator.snapshot(17).pendingRequests[0]!;
 
     coordinator.decide(firstRequest.requestId, { decision: "approve_once" });
     await expect(first).resolves.toMatchObject({ decision: "approve_once", actor: "user" });
 
     const later = channel.request(commandRequest("provider-2"));
-    const pending = coordinator.snapshot().pendingRequests;
+    const pending = coordinator.snapshot(17).pendingRequests;
     expect(pending).toHaveLength(1);
     expect(pending[0]).toMatchObject({
       correlation: { interactionId: 17, completeCallId: "complete-1" },
@@ -57,7 +57,7 @@ describe("HarnessApprovalCoordinator", () => {
     const source = channel.request(commandRequest("provider-source", ["command:npm test", "cwd:/workspace"]));
     const matchingPending = channel.request(commandRequest("provider-pending", ["command:npm test"]));
     const nearPending = channel.request(commandRequest("provider-near", ["command:npm test -- --watch"]));
-    const [sourceRequest, matchingRequest, nearRequest] = coordinator.snapshot().pendingRequests;
+    const [sourceRequest, matchingRequest, nearRequest] = coordinator.snapshot(17).pendingRequests;
 
     coordinator.decide(sourceRequest!.requestId, { decision: "approve_always" });
 
@@ -67,7 +67,7 @@ describe("HarnessApprovalCoordinator", () => {
       actor: "session_grant",
       sourceRequestId: sourceRequest!.requestId,
     });
-    expect(coordinator.snapshot().pendingRequests.map(({ requestId }) => requestId)).toEqual([nearRequest!.requestId]);
+    expect(coordinator.snapshot(17).pendingRequests.map(({ requestId }) => requestId)).toEqual([nearRequest!.requestId]);
 
     const matchingFuture = channel.request(commandRequest("provider-future", ["cwd:/workspace"]));
     await expect(matchingFuture).resolves.toMatchObject({
@@ -81,7 +81,7 @@ describe("HarnessApprovalCoordinator", () => {
     const newLiveSession = coordinatorFixture("session-new");
     const newChannel = newLiveSession.beginCompletion({ interactionId: 18, completeCallId: "complete-2" });
     void newChannel.request(commandRequest("provider-new", ["command:npm test"]));
-    expect(newLiveSession.snapshot().pendingRequests).toHaveLength(1);
+    expect(newLiveSession.snapshot(18).pendingRequests).toHaveLength(1);
   });
 
   it("keeps concurrent requests independently addressable and rejects stale or duplicate decisions", async () => {
@@ -89,12 +89,12 @@ describe("HarnessApprovalCoordinator", () => {
     const channel = coordinator.beginCompletion({ interactionId: 17, completeCallId: "complete-1" });
     const first = channel.request(commandRequest("provider-1"));
     const second = channel.request(commandRequest("provider-2", ["network:example.com:443"]));
-    const [firstRequest, secondRequest] = coordinator.snapshot().pendingRequests;
+    const [firstRequest, secondRequest] = coordinator.snapshot(17).pendingRequests;
 
     coordinator.decide(secondRequest!.requestId, { decision: "deny" });
 
     await expect(second).resolves.toMatchObject({ decision: "deny" });
-    expect(coordinator.snapshot().pendingRequests[0]?.requestId).toBe(firstRequest!.requestId);
+    expect(coordinator.snapshot(17).pendingRequests[0]?.requestId).toBe(firstRequest!.requestId);
     expect(() => coordinator.decide(secondRequest!.requestId, { decision: "approve_once" }))
       .toThrowError(expect.objectContaining({ code: "approval_request_resolved" }));
     expect(() => coordinator.decide("unknown", { decision: "approve_once" }))
@@ -115,7 +115,7 @@ describe("HarnessApprovalCoordinator", () => {
         terminationRationale: "Provider request expired.",
       });
       await vi.advanceTimersByTimeAsync(60 * 60 * 1000);
-      expect(coordinator.snapshot().pendingRequests).toHaveLength(1);
+      expect(coordinator.snapshot(17).pendingRequests).toHaveLength(1);
       expect(vi.getTimerCount()).toBe(0);
 
       provider.abort(new Error("provider expired"));
@@ -123,7 +123,7 @@ describe("HarnessApprovalCoordinator", () => {
       await expect(waiting).rejects.toMatchObject({
         resolution: expect.objectContaining({ outcome: "expired", actor: "harness" }),
       });
-      expect(coordinator.snapshot().events.at(-1)).toMatchObject({
+      expect(coordinator.snapshot(17).events.at(-1)).toMatchObject({
         type: "resolved",
         resolution: { outcome: "expired", actor: "harness", rationale: "Provider request expired." },
       });
@@ -143,7 +143,7 @@ describe("HarnessApprovalCoordinator", () => {
     await expect(waiting).rejects.toMatchObject({
       resolution: expect.objectContaining({ outcome: "aborted", actor: "harness", rationale: "Provider session ended." }),
     });
-    expect(coordinator.snapshot()).toMatchObject({
+    expect(coordinator.snapshot(17)).toMatchObject({
       latestSequence: 2,
       pendingRequests: [],
       events: [{ type: "requested" }, { type: "resolved", resolution: { outcome: "aborted" } }],
@@ -180,15 +180,15 @@ describe("HarnessApprovalCoordinator", () => {
     const coordinator = coordinatorFixture();
     const channel = coordinator.beginCompletion({ interactionId: 91, completeCallId: "complete-1" });
     const waiting = channel.request(commandRequest("provider-secret"));
-    const request = coordinator.snapshot().pendingRequests[0]!;
+    const request = coordinator.snapshot(91).pendingRequests[0]!;
     coordinator.decide(request.requestId, { decision: "approve_once" });
     await waiting;
 
-    const snapshot = coordinator.snapshot(1);
+    const snapshot = coordinator.snapshot(91, 1);
     expect(snapshot.latestSequence).toBe(2);
     expect(snapshot.events).toEqual([expect.objectContaining({ sequence: 2, type: "resolved" })]);
-    expect(JSON.stringify(coordinator.snapshot())).not.toContain("provider-secret");
-    expect(() => coordinator.snapshot(-1)).toThrowError(expect.objectContaining({ code: "invalid_approval_request" }));
+    expect(JSON.stringify(coordinator.snapshot(91))).not.toContain("provider-secret");
+    expect(() => coordinator.snapshot(91, -1)).toThrowError(expect.objectContaining({ code: "invalid_approval_request" }));
   });
 
   it("rejects adapter attempts to inject host authority", async () => {
@@ -199,7 +199,7 @@ describe("HarnessApprovalCoordinator", () => {
     await expect(channel.request(forged as unknown as HarnessApprovalRequestInput)).rejects.toMatchObject({
       code: "invalid_approval_request",
     });
-    expect(coordinator.snapshot()).toMatchObject({ latestSequence: 0, pendingRequests: [], events: [] });
+    expect(coordinator.snapshot(17)).toMatchObject({ latestSequence: 0, pendingRequests: [], events: [] });
   });
 
   it("runtime-validates provider termination options before exposing a request", async () => {
@@ -213,7 +213,7 @@ describe("HarnessApprovalCoordinator", () => {
     } as never)).rejects.toMatchObject({ code: "invalid_approval_request" });
 
     provider.abort();
-    expect(coordinator.snapshot()).toMatchObject({ latestSequence: 0, pendingRequests: [], events: [] });
+    expect(coordinator.snapshot(17)).toMatchObject({ latestSequence: 0, pendingRequests: [], events: [] });
   });
 
   it("fails an active completion closed when its terminal arguments are invalid at runtime", async () => {
@@ -227,7 +227,7 @@ describe("HarnessApprovalCoordinator", () => {
     await expect(waiting).rejects.toMatchObject({
       resolution: expect.objectContaining({ outcome: "aborted", actor: "host" }),
     });
-    expect(coordinator.snapshot().events.at(-1)).toMatchObject({
+    expect(coordinator.snapshot(17).events.at(-1)).toMatchObject({
       type: "resolved",
       resolution: { outcome: "aborted", actor: "host" },
     });
@@ -236,33 +236,56 @@ describe("HarnessApprovalCoordinator", () => {
     });
   });
 
-  it("resets an acknowledged idle event epoch but never across a racing completion", async () => {
+  it("gives each interaction its own event stream and resets only an acknowledged idle one", async () => {
     const coordinator = coordinatorFixture();
     const firstChannel = coordinator.beginCompletion({ interactionId: 17, completeCallId: "complete-1" });
+    const racingChannel = coordinator.beginCompletion({ interactionId: 18, completeCallId: "complete-2" });
     const first = firstChannel.request(commandRequest("provider-1"));
-    const firstRequest = coordinator.snapshot().pendingRequests[0]!;
-    coordinator.decide(firstRequest.requestId, { decision: "approve_once" });
+    const racing = racingChannel.request(commandRequest("provider-2"));
+    // Each observer sees only its own interaction's requests, sequenced from 1.
+    for (const interactionId of [17, 18]) {
+      expect(coordinator.snapshot(interactionId)).toMatchObject({
+        latestSequence: 1,
+        events: [{ sequence: 1, type: "requested", request: { correlation: { interactionId } } }],
+        pendingRequests: [{ correlation: { interactionId } }],
+      });
+    }
+    coordinator.decide(coordinator.snapshot(17).pendingRequests[0]!.requestId, { decision: "approve_once" });
     await first;
     coordinator.endCompletion("complete-1");
 
-    const racingChannel = coordinator.beginCompletion({ interactionId: 18, completeCallId: "complete-2" });
-    expect(coordinator.snapshot(2)).toMatchObject({ latestSequence: 2, events: [] });
-    const racing = racingChannel.request(commandRequest("provider-2"));
-    expect(coordinator.snapshot(2).events).toEqual([
-      expect.objectContaining({ sequence: 3, type: "requested" }),
-    ]);
-    const racingRequest = coordinator.snapshot().pendingRequests[0]!;
-    coordinator.decide(racingRequest.requestId, { decision: "deny" });
+    // Interaction 17's final acknowledgement resets only its own stream.
+    expect(coordinator.snapshot(17, 2)).toMatchObject({ latestSequence: 2, events: [] });
+    expect(coordinator.snapshot(17)).toMatchObject({ latestSequence: 0, events: [], pendingRequests: [] });
+    expect(coordinator.snapshot(18)).toMatchObject({ latestSequence: 1, pendingRequests: [{ correlation: { interactionId: 18 } }] });
+    // An acknowledgement never resets the stream of a completion that can still race it.
+    expect(coordinator.snapshot(18, 1)).toMatchObject({ latestSequence: 1, events: [] });
+    coordinator.decide(coordinator.snapshot(18).pendingRequests[0]!.requestId, { decision: "deny" });
     await racing;
+    expect(coordinator.snapshot(18, 1).events).toEqual([expect.objectContaining({ sequence: 2, type: "resolved" })]);
     coordinator.endCompletion("complete-2");
+    expect(coordinator.snapshot(18, 2)).toMatchObject({ latestSequence: 2, events: [] });
+    expect(coordinator.snapshot(18)).toMatchObject({ latestSequence: 0, events: [] });
+    expect(() => coordinator.snapshot(0)).toThrowError(expect.objectContaining({ code: "invalid_approval_request" }));
+  });
 
-    expect(coordinator.snapshot(4)).toMatchObject({ latestSequence: 4, events: [] });
-    expect(coordinator.snapshot()).toMatchObject({ latestSequence: 0, events: [] });
-    const nextChannel = coordinator.beginCompletion({ interactionId: 19, completeCallId: "complete-3" });
-    const next = nextChannel.request(commandRequest("provider-3"));
-    expect(coordinator.snapshot().events[0]).toMatchObject({ sequence: 1, type: "requested" });
-    coordinator.endCompletion("complete-3");
-    await expect(next).rejects.toMatchObject({ resolution: { outcome: "aborted" } });
+  it("starts a new attempt of an interaction from an empty stream", async () => {
+    const coordinator = coordinatorFixture();
+    const earlier = coordinator.beginCompletion({ interactionId: 17, completeCallId: "complete-1" });
+    const abandoned = earlier.request(commandRequest("provider-1"));
+    coordinator.endCompletion("complete-1");
+    await expect(abandoned).rejects.toMatchObject({ resolution: { outcome: "aborted" } });
+    // Nothing acknowledged the earlier attempt's events; the next attempt must not inherit them.
+    expect(coordinator.snapshot(17).latestSequence).toBe(2);
+
+    const next = coordinator.beginCompletion({ interactionId: 17, completeCallId: "complete-2" });
+    expect(coordinator.snapshot(17)).toMatchObject({ latestSequence: 0, events: [] });
+    const waiting = next.request(commandRequest("provider-2"));
+    expect(coordinator.snapshot(17).events).toEqual([
+      expect.objectContaining({ sequence: 1, request: expect.objectContaining({ correlation: expect.objectContaining({ completeCallId: "complete-2" }) }) }),
+    ]);
+    coordinator.endCompletion("complete-2");
+    await expect(waiting).rejects.toMatchObject({ resolution: { outcome: "aborted" } });
   });
 
   it("bounds terminal tombstones and session grants without widening authority", async () => {
@@ -271,7 +294,7 @@ describe("HarnessApprovalCoordinator", () => {
     let firstRequestId = "";
     for (let index = 0; index <= MAX_HARNESS_APPROVAL_TERMINAL_TOMBSTONES; index += 1) {
       const waiting = channel.request(commandRequest(`provider-terminal-${index}`, [`terminal:${index}`]));
-      const request = coordinator.snapshot().pendingRequests.at(-1)!;
+      const request = coordinator.snapshot(17).pendingRequests.at(-1)!;
       if (index === 0) firstRequestId = request.requestId;
       coordinator.decide(request.requestId, { decision: "approve_once" });
       await waiting;
@@ -281,12 +304,12 @@ describe("HarnessApprovalCoordinator", () => {
 
     for (let index = 0; index <= MAX_HARNESS_APPROVAL_SESSION_GRANTS; index += 1) {
       const waiting = channel.request(commandRequest(`provider-grant-${index}`, [`grant:${index}`]));
-      const request = coordinator.snapshot().pendingRequests.at(-1)!;
+      const request = coordinator.snapshot(17).pendingRequests.at(-1)!;
       coordinator.decide(request.requestId, { decision: "approve_always" });
       await waiting;
     }
     const noLongerGranted = channel.request(commandRequest("provider-old-grant", ["grant:0"]));
-    const pending = coordinator.snapshot().pendingRequests.at(-1)!;
+    const pending = coordinator.snapshot(17).pendingRequests.at(-1)!;
     expect(pending.scopeKeys).toEqual(["grant:0"]);
     coordinator.decide(pending.requestId, { decision: "deny" });
     await expect(noLongerGranted).resolves.toMatchObject({ decision: "deny", actor: "user" });
@@ -297,20 +320,20 @@ describe("HarnessApprovalCoordinator", () => {
     const channel = coordinator.beginCompletion({ interactionId: 17, completeCallId: "complete-1" });
     for (let index = 0; index < MAX_HARNESS_APPROVAL_RETAINED_EVENTS / 2; index += 1) {
       const waiting = channel.request(commandRequest(`provider-${index}`, [`request:${index}`]));
-      const request = coordinator.snapshot().pendingRequests.at(-1)!;
+      const request = coordinator.snapshot(17).pendingRequests.at(-1)!;
       coordinator.decide(request.requestId, { decision: "approve_once" });
       await waiting;
     }
-    expect(coordinator.snapshot().events).toHaveLength(MAX_HARNESS_APPROVAL_RETAINED_EVENTS);
+    expect(coordinator.snapshot(17).events).toHaveLength(MAX_HARNESS_APPROVAL_RETAINED_EVENTS);
     await expect(channel.request(commandRequest("provider-overflow", ["request:overflow"])))
       .rejects.toMatchObject({ code: "approval_event_backlog_full" });
 
     coordinator.endCompletion("complete-1");
-    expect(coordinator.snapshot(MAX_HARNESS_APPROVAL_RETAINED_EVENTS)).toMatchObject({
+    expect(coordinator.snapshot(17, MAX_HARNESS_APPROVAL_RETAINED_EVENTS)).toMatchObject({
       latestSequence: MAX_HARNESS_APPROVAL_RETAINED_EVENTS,
       events: [],
     });
-    expect(coordinator.snapshot()).toMatchObject({ latestSequence: 0, events: [] });
+    expect(coordinator.snapshot(17)).toMatchObject({ latestSequence: 0, events: [] });
   });
 });
 

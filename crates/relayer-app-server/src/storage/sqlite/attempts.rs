@@ -1977,6 +1977,74 @@ mod tests {
         );
     }
 
+    /// An invoked run runs beside the message turns, so a message returned to unsent stays
+    /// retryable after a later invoke; only a later message turn makes its draft stale.
+    #[tokio::test]
+    async fn a_later_invoked_run_never_makes_a_returned_message_stale() {
+        for later_is_invoke in [true, false] {
+            let (_database, store, interaction_id, route) = seeded_store().await;
+            let attempt = store
+                .begin_interaction_attempt(receipt(interaction_id, &route), "10")
+                .await
+                .unwrap();
+            store
+                .fail_interaction_completion_with_attempt(
+                    FailedInteractionCompletion {
+                        attempt_id: attempt,
+                        interaction_id,
+                        harness_configuration_name: "codex-basic",
+                        error: "provider timeout",
+                        outcome: "model_failed",
+                        failure_category: "provider_timeout",
+                        effect_boundary: "none",
+                        return_to_unsent: true,
+                        graph_node_id: None,
+                    },
+                    "11",
+                )
+                .await
+                .unwrap();
+            let later = sqlx::query("INSERT INTO interactions(thread_id,sequence,text,created_at,completion_status) SELECT thread_id,1,'later','12','running' FROM interactions WHERE id=?1")
+                .bind(interaction_id.value())
+                .execute(&store.pool)
+                .await
+                .unwrap()
+                .last_insert_rowid();
+            if later_is_invoke {
+                sqlx::query("INSERT INTO action_invocations(source_interaction_id,action_id,result_interaction_id,created_at,graph_lease_required,authoritative,agent_invoked) VALUES (?1,41,?2,'12',1,1,0)")
+                    .bind(interaction_id.value())
+                    .bind(later)
+                    .execute(&store.pool)
+                    .await
+                    .unwrap();
+            }
+            let selection = crate::product::InteractionModelSelection {
+                family_id: route.family_id,
+                provider_id: route.provider_id.clone(),
+                model_id: route.model_id.clone(),
+            };
+            let retried = store
+                .claim_interaction_retry(
+                    interaction_id,
+                    attempt,
+                    retry_input("retry"),
+                    &selection,
+                    "codex-basic",
+                )
+                .await;
+            if later_is_invoke {
+                assert!(retried.unwrap(), "a later invoked run made the draft stale");
+            } else {
+                match retried {
+                    Err(StorageError::Catalog(error)) => {
+                        assert_eq!(error.code(), "interaction_retry_stale")
+                    }
+                    other => panic!("a later message turn left the draft retryable: {other:?}"),
+                }
+            }
+        }
+    }
+
     #[tokio::test]
     async fn model_failures_restore_the_same_draft_after_every_effect_boundary() {
         for boundary in ["partial_output", "graph_write", "tool_effect", "unknown"] {

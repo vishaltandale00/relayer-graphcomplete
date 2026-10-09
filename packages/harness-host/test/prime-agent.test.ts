@@ -869,6 +869,55 @@ describe("PrimeAgentHarness", () => {
     expect(root.disposeAsync).not.toHaveBeenCalled();
   });
 
+  it("runs a fresh root run in its own session and shows it the thread's history", async () => {
+    const scopes: ControlledRunScope[] = [];
+    const root = primeSession("/tmp/root-prime-session.jsonl");
+    const fresh = primeSession("/tmp/fresh-root.jsonl");
+    const sessions = [root, fresh];
+    const create = vi.fn(() => "fresh-root");
+    const open = vi.fn(() => "saved-root");
+    const harness = await PrimeAgentHarness.create({
+      threadId: 7,
+      workingDirectory: "/tmp/project",
+      ...fullPermission,
+      configuration,
+      savedState: {
+        primeAgentSessionFile: "/tmp/root-prime-session.jsonl",
+        primeAgentSessionPersonalPresentationVersionId: null,
+      },
+    }, { loadModule: async () => ({
+      ...controlledRunScopeApi(scopes),
+      SessionManager: { create, open },
+      createHostRequestHandler: (handler: unknown) => handler,
+      createAgentSessionServices: vi.fn(async () => nativeServices()),
+      createAgentSessionFromServices: vi.fn(async () => {
+        const session = sessions.shift();
+        if (session === undefined) throw new Error("unexpected Prime session creation");
+        return { session };
+      }),
+    }) as never });
+
+    await harness.complete({
+      ...familyRunContext(41, "fresh-token", 0),
+      nativeSession: "fresh",
+      threadHistory: [{ interactionNodeId: 1, message: "Compare the two options", responseLayerId: 9 }],
+    });
+    expect(root.promptAndWait).not.toHaveBeenCalled();
+    expect(fresh.promptAndWait).toHaveBeenCalledOnce();
+    const prompt = String(vi.mocked(fresh.promptAndWait).mock.calls[0]?.[0]);
+    expect(prompt).toContain('"message": "Compare the two options"');
+    expect(prompt).toContain("await graph.get_layer(response_layer_id)");
+    expect(fresh.disposeAsync).toHaveBeenCalledOnce();
+    expect(harness.state()).toEqual({
+      primeAgentSessionFile: "/tmp/root-prime-session.jsonl",
+      primeAgentSessionPersonalPresentationVersionId: null,
+    });
+
+    await harness.complete(runContext(43, "root-token"));
+    expect(root.promptAndWait).toHaveBeenCalledOnce();
+    expect(String(vi.mocked(root.promptAndWait).mock.calls[0]?.[0])).not.toContain("This run starts a fresh session");
+  });
+
   it("cancels and quiesces only the exact invoked Prime session before disposing it", async () => {
     let releasePrompt!: () => void;
     const promptGate = new Promise<void>((resolve) => { releasePrompt = resolve; });

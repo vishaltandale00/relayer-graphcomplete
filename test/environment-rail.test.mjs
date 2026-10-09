@@ -468,9 +468,11 @@ describe("desktop environment rail", () => {
     const state = { interactions: [root, child], actionInvocations: [{ resultInteractionId: "9", agentInvoked: true }] };
     expect(productStopTarget(state, { id: 10 })).toBe(root);
     expect(productStopTarget({ ...state, interactions: [{ ...root, completionStatus: "accepted" }, child] }, { id: 10 })).toBeNull();
-    // A user's own invoke action is a human turn, so the product can stop it.
+    // A user's own invoke runs beside message turns with its own Stop on its node, so the
+    // composer's Stop never targets it.
     const userAction = { ...state, actionInvocations: [{ resultInteractionId: "9", agentInvoked: false }] };
-    expect(productStopTarget({ ...userAction, interactions: [{ ...root, completionStatus: "accepted" }, child] }, { id: 10 })).toBe(child);
+    expect(productStopTarget({ ...userAction, interactions: [{ ...root, completionStatus: "accepted" }, child] }, { id: 10 })).toBeNull();
+    expect(productStopTarget(userAction, { id: 10 })).toBe(root);
     const stopping = { ...running, stopRequested: true };
     expect(viewedInteractionStatus(stopping, "running", "stopped")).toBe("stopping");
     expect(interactionStatusRenderKey(stopping, "running", "stopped"))

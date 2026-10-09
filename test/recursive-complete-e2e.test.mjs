@@ -22,7 +22,7 @@ import { interactionModelSelection } from "../desktop/renderer/src/model-picker.
 import {
   composerDisabledForState,
   composerStatusForThread,
-  latestHumanTurn,
+  latestMessageTurn,
   productStopTarget,
 } from "../desktop/renderer/src/product-workspace/workspace.js";
 import {
@@ -379,10 +379,10 @@ describe("recursive complete end to end", () => {
     const viewedThread = { id: thread.id };
     expect(composerStatusForThread(view, viewedThread)).toBe("accepted");
     expect(composerDisabledForState(composerStatusForThread(view, viewedThread))).toBe(false);
-    expect(latestHumanTurn(view, viewedThread).id).toBe(detail.interactions[0].id);
+    expect(latestMessageTurn(view, viewedThread).id).toBe(detail.interactions[0].id);
     expect(productStopTarget(view, viewedThread)).toBeNull();
     // The next turn's model is inherited from this turn (selectionForNextInteraction's input).
-    expect(interactionModelSelection(latestHumanTurn(view, viewedThread))).toEqual(selection);
+    expect(interactionModelSelection(latestMessageTurn(view, viewedThread))).toEqual(selection);
 
     // Only its parent may stop an agent's child; the product refuses with a client error.
     const stop = await fetch(new URL(`/api/threads/${thread.id}/interactions/${child.id}/stop`, session.origin), {

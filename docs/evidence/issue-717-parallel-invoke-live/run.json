@@ -1,0 +1,94 @@
+{
+  "schemaVersion": 1,
+  "issue": 717,
+  "runId": "8c5d0530-1d35-4fd1-b2e9-6306fb5b256f",
+  "profile": "prime-openrouter",
+  "harness": "prime-agent-basic",
+  "implementation": "prime.agent",
+  "modelId": "openai/gpt-6-luna",
+  "rootTask": "Compare three ways to learn a new programming language: building a small project, working through exercises, and reading other people's code. Present one node per approach. Give each node an invoke action labelled \"Plan a first week\" whose interaction text asks for a seven-day plan for that approach. Leave those invoke actions for me to click; do not run them yourself.",
+  "followUp": "In one sentence, which approach suits someone with only twenty minutes a day?",
+  "startedAt": "2026-10-09T05:28:59.640Z",
+  "root": {
+    "interactionId": 1,
+    "completionStatus": "accepted",
+    "invokeActions": [
+      {
+        "id": 6,
+        "label": "Plan a first week"
+      },
+      {
+        "id": 7,
+        "label": "Plan a first week"
+      },
+      {
+        "id": 8,
+        "label": "Plan a first week"
+      }
+    ]
+  },
+  "admission": {
+    "allAdmitted": true,
+    "admittedWithinMs": 36
+  },
+  "runs": [
+    {
+      "kind": "invoke",
+      "interactionId": 3,
+      "completionStatus": "accepted",
+      "graphNodeId": 26,
+      "freshNativeSession": true,
+      "promptCarriesFirstTurn": true
+    },
+    {
+      "kind": "invoke",
+      "interactionId": 2,
+      "completionStatus": "accepted",
+      "graphNodeId": 27,
+      "freshNativeSession": true,
+      "promptCarriesFirstTurn": true
+    },
+    {
+      "kind": "message",
+      "interactionId": 4,
+      "completionStatus": "accepted",
+      "graphNodeId": 25,
+      "freshNativeSession": false,
+      "promptCarriesFirstTurn": false
+    }
+  ],
+  "concurrency": {
+    "windows": {
+      "2": {
+        "firstActiveAtMs": 1791523818468,
+        "lastActiveAtMs": 1791523894105
+      },
+      "3": {
+        "firstActiveAtMs": 1791523818468,
+        "lastActiveAtMs": 1791523881281
+      },
+      "4": {
+        "firstActiveAtMs": 1791523818468,
+        "lastActiveAtMs": 1791523848426
+      }
+    },
+    "maxActiveAtOnce": 3,
+    "allActiveTogetherMs": 30231
+  },
+  "traceStatuses": [
+    "complete",
+    "complete",
+    "complete"
+  ],
+  "checks": {
+    "allAdmitted": true,
+    "ranSideBySide": true,
+    "allAccepted": true,
+    "invokedRunsFresh": true,
+    "invokedRunsSawHistory": true,
+    "messageResumedRootSession": true
+  },
+  "passed": true,
+  "finishedAt": "2026-10-09T05:31:34.442Z",
+  "samples": 566
+}

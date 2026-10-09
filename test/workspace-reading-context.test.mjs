@@ -183,6 +183,8 @@ describe("follow-up reading context at the production thread controller", () => 
   });
 
 
+  // The thread tracks one pending turn, for its message turns. Invoked runs run beside each other,
+  // so an invoked result stays on its source node and in the turn list instead of a ready prompt.
   it("keeps an invoked result discoverable after browsing during its POST", async () => {
     const invokePost = deferred();
     const fixture = await setup({ invokePost });
@@ -203,8 +205,8 @@ describe("follow-up reading context at the production thread controller", () => 
     await invoking;
     await controller.refreshState(10);
     expect(controller.viewState.currentInteractionId).toBe(3);
-    expect(controller.appState.pendingTurn?.readyLayer).toEqual(resultLayer);
-    await controller.openReadyResult();
+    expect(controller.appState.pendingTurn ?? null).toBeNull();
+    controller.selectTurnById(2);
     expect(controller.viewState.currentInteractionId).toBe(2);
   });
 

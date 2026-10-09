@@ -3,8 +3,9 @@
 (* One recursive child from the parent's prepareComplete to settlement,   *)
 (* focused on the launch windows the CompletionCurrent model abstracts:   *)
 (* product preparation and binding, the execution row before `launching`, *)
-(* capability activation, the thread's one active human turn, the user's  *)
-(* re-invoke and Stop, and startup reconciliation of each window.         *)
+(* capability activation, the thread's one active message turn, the       *)
+(* user's re-invoke, invoke of another action, and Stop, and startup      *)
+(* reconciliation of each window.                                         *)
 (*                                                                         *)
 (*   THR = crates/relayer-app-server/src/api/threads.rs                    *)
 (*   APP = crates/relayer-app-server/src/app_server.rs                     *)
@@ -35,8 +36,11 @@ CONSTANTS
                         \* fails it in both stores in the background
   ChildrenOutsideRootGate, \* decision: a child never holds the thread's one active
                         \* human turn (the gate on the user's next message)
-  ProductLeavesChildren \* decision: the product's Stop refuses an agent's child, and
+  ProductLeavesChildren, \* decision: the product's Stop refuses an agent's child, and
                         \* a user's invoke never runs it
+  InvokesOutsideRootGate \* decision (#717): a run the user starts from another invoke
+                        \* action starts a fresh native session, so it never holds the
+                        \* thread's one active message turn nor waits for it
 
 Interrupted == {"not_started", "submitted", "running"}   \* HUMAN_TURN_IN_PROGRESS
 Terminal == {"succeeded", "failed", "stopped"}
@@ -59,10 +63,11 @@ VARIABLES
   startupLeftActive, \* the last startup left the child's current active
   called,     \* the parent has called the broker for this child
   cleanup,    \* a refused launch's background failure of the child is pending
-  hturn       \* the user's next human root turn: none | running | ended
+  hturn,      \* the user's next message turn: none | running | ended
+  uinvoke     \* a run the user started from another invoke action: none | running | ended
 
 vars == <<parent, pdead, life, status, bound, phase, run, hrun, obs, stopReq, lpc,
-          appUp, restarts, startupLeftActive, called, cleanup, hturn>>
+          appUp, restarts, startupLeftActive, called, cleanup, hturn, uinvoke>>
 
 Init ==
   /\ parent = "running" /\ pdead = FALSE
@@ -70,7 +75,7 @@ Init ==
   /\ run = "none" /\ hrun = "none" /\ obs = FALSE /\ stopReq = FALSE
   /\ lpc = [l \in Launchers |-> "idle"]
   /\ appUp = TRUE /\ restarts = 0 /\ startupLeftActive = FALSE /\ called = FALSE /\ cleanup = FALSE
-  /\ hturn = "none"
+  /\ hturn = "none" /\ uinvoke = "none"
 
 ParentAlive == parent = "running" /\ ~pdead /\ appUp
 
@@ -82,7 +87,7 @@ ParentPrepares ==
   /\ ParentAlive /\ life = "none"
   /\ life' = "active"
   /\ UNCHANGED <<parent, pdead, status, bound, phase, run, hrun, obs, stopReq, lpc,
-                 appUp, restarts, startupLeftActive, called, cleanup, hturn>>
+                 appUp, restarts, startupLeftActive, called, cleanup, hturn, uinvoke>>
 
 \* The parent's native run ends (Return, giving up after a refusal, or
 \* fire-and-forget), or the user stops it. Either revokes its broker grant.
@@ -90,7 +95,7 @@ ParentEnds(outcome) ==
   /\ ParentAlive
   /\ parent' = outcome
   /\ UNCHANGED <<pdead, life, status, bound, phase, run, hrun, obs, stopReq, lpc,
-                 appUp, restarts, startupLeftActive, called, cleanup, hturn>>
+                 appUp, restarts, startupLeftActive, called, cleanup, hturn, uinvoke>>
 
 \* handle.stop (THR stop_completion): stop the current, then cancel the run.
 ParentStopsChild ==
@@ -98,7 +103,7 @@ ParentStopsChild ==
   /\ life' = "stopped"
   /\ run' = IF run = "running" THEN "ended" ELSE run
   /\ UNCHANGED <<parent, pdead, status, bound, phase, hrun, obs, stopReq, lpc, appUp,
-                 restarts, startupLeftActive, called, cleanup, hturn>>
+                 restarts, startupLeftActive, called, cleanup, hturn, uinvoke>>
 
 -----------------------------------------------------------------------------
 (* One broker POST /api/completions (THR launch_prepared_child).          *)
@@ -108,7 +113,7 @@ BrokerCall(l) ==
   /\ ParentAlive /\ lpc[l] = "idle" /\ life /= "none"
   /\ Set(l, "check") /\ called' = TRUE
   /\ UNCHANGED <<parent, pdead, life, status, bound, phase, run, hrun, obs, stopReq,
-                 appUp, restarts, startupLeftActive, cleanup, hturn>>
+                 appUp, restarts, startupLeftActive, cleanup, hturn, uinvoke>>
 
 \* invoke_action_recursively creates the product child. An execution row past
 \* `reserved`, or a child that already ended, answers 200 with no launch.
@@ -119,7 +124,7 @@ LaunchCheck(l) ==
                 /\ status \notin {"accepted", "failed", "pending"}
             THEN "prepare" ELSE "done")
   /\ UNCHANGED <<parent, pdead, life, bound, phase, run, hrun, obs, stopReq, appUp,
-                 restarts, startupLeftActive, called, cleanup, hturn>>
+                 restarts, startupLeftActive, called, cleanup, hturn, uinvoke>>
 
 \* THR prepare_interaction: claim `submitted`, then the idempotent graph
 \* preparation. An ambiguous one (timeout, transport, undecodable answer) is
@@ -132,20 +137,20 @@ LaunchPrepare(l, ok) ==
           /\ Set(l, IF ok THEN "bind" ELSE "done")
           /\ cleanup' = IF ~ok /\ RefusedLaunchFailsChild THEN TRUE ELSE cleanup
   /\ UNCHANGED <<parent, pdead, life, bound, phase, run, hrun, obs, stopReq, appUp,
-                 restarts, startupLeftActive, called, hturn>>
+                 restarts, startupLeftActive, called, hturn, uinvoke>>
 
 LaunchBind(l) ==                                           \* bind_prepared_interaction
   /\ appUp /\ lpc[l] = "bind"
   /\ bound' = TRUE /\ Set(l, "reserve")
   /\ UNCHANGED <<parent, pdead, life, status, phase, run, hrun, obs, stopReq, appUp,
-                 restarts, startupLeftActive, called, cleanup, hturn>>
+                 restarts, startupLeftActive, called, cleanup, hturn, uinvoke>>
 
 LaunchReserve(l) ==                                        \* reserve_completion_execution
   /\ appUp /\ lpc[l] = "reserve"
   /\ phase' = IF phase = "none" THEN "reserved" ELSE phase
   /\ Set(l, "claim")
   /\ UNCHANGED <<parent, pdead, life, status, bound, run, hrun, obs, stopReq, appUp,
-                 restarts, startupLeftActive, called, cleanup, hturn>>
+                 restarts, startupLeftActive, called, cleanup, hturn, uinvoke>>
 
 LaunchClaim(l) ==                                          \* claim ..._launching (CAS)
   /\ appUp /\ lpc[l] = "claim"
@@ -153,7 +158,7 @@ LaunchClaim(l) ==                                          \* claim ..._launchin
      THEN phase' = "launching" /\ Set(l, "activate")
      ELSE UNCHANGED phase /\ Set(l, "done")
   /\ UNCHANGED <<parent, pdead, life, status, bound, run, hrun, obs, stopReq, appUp,
-                 restarts, startupLeftActive, called, cleanup, hturn>>
+                 restarts, startupLeftActive, called, cleanup, hturn, uinvoke>>
 
 \* THR claim_and_activate_prepared_interaction: the claim needs `submitted`;
 \* activation can fail (graph 5xx, visual-asset cutover, a terminal current).
@@ -172,7 +177,7 @@ LaunchActivate(l, ok) ==
                   /\ status' = "failed"
              ELSE UNCHANGED <<life, status>>
   /\ UNCHANGED <<parent, pdead, bound, run, hrun, obs, stopReq, appUp, restarts,
-                 startupLeftActive, called, cleanup, hturn>>
+                 startupLeftActive, called, cleanup, hturn, uinvoke>>
 
 \* Admission, start, attach and spawning the observers.
 LaunchStart(l) ==
@@ -180,14 +185,14 @@ LaunchStart(l) ==
   /\ run' = "running" /\ phase' = "attached" /\ obs' = TRUE
   /\ Set(l, "done")
   /\ UNCHANGED <<parent, pdead, life, status, bound, hrun, stopReq, appUp, restarts,
-                 startupLeftActive, called, cleanup, hturn>>
+                 startupLeftActive, called, cleanup, hturn, uinvoke>>
 
 \* The child Returns, or the exit observer fails a run that ended without Return.
 ChildEnds(outcome) ==
   /\ run = "running" /\ life = "active"
   /\ life' = outcome /\ run' = "ended"
   /\ UNCHANGED <<parent, pdead, status, bound, phase, hrun, obs, stopReq, lpc, appUp,
-                 restarts, startupLeftActive, called, cleanup, hturn>>
+                 restarts, startupLeftActive, called, cleanup, hturn, uinvoke>>
 
 \* The semantic observer projects the terminal current (THR spawn_recursive_completion_observers).
 ObserverSettles ==
@@ -196,7 +201,7 @@ ObserverSettles ==
   /\ phase' = "settled" /\ obs' = FALSE
   /\ status' = IF life = "succeeded" THEN "accepted" ELSE "failed"
   /\ UNCHANGED <<parent, pdead, life, bound, run, hrun, stopReq, lpc, appUp, restarts,
-                 startupLeftActive, called, cleanup, hturn>>
+                 startupLeftActive, called, cleanup, hturn, uinvoke>>
 
 \* THR spawn_refused_launch_cleanup: retries until the product row and then the
 \* graph current are both failed (CEX fail_unlaunched_recursive_child), and a
@@ -213,7 +218,7 @@ RefusedCleanup ==
           /\ phase' = IF phase = "reserved" THEN "settled" ELSE phase
      ELSE UNCHANGED <<life, status, phase>>
   /\ UNCHANGED <<parent, pdead, bound, run, hrun, obs, stopReq, lpc, appUp,
-                 restarts, startupLeftActive, called, hturn>>
+                 restarts, startupLeftActive, called, hturn, uinvoke>>
 
 -----------------------------------------------------------------------------
 (* The user.                                                               *)
@@ -227,14 +232,14 @@ UserReinvokes ==
   /\ life = "active"
   /\ status' = "running" /\ hrun' = "running" /\ bound' = TRUE
   /\ UNCHANGED <<parent, pdead, life, phase, run, obs, stopReq, lpc, appUp, restarts,
-                 startupLeftActive, called, cleanup, hturn>>
+                 startupLeftActive, called, cleanup, hturn, uinvoke>>
 
 HumanRunEnds(outcome) ==
   /\ appUp /\ hrun = "running" /\ life = "active"
   /\ life' = outcome /\ hrun' = "ended"
   /\ status' = IF outcome = "succeeded" THEN "accepted" ELSE "failed"
   /\ UNCHANGED <<parent, pdead, bound, phase, run, obs, stopReq, lpc, appUp, restarts,
-                 startupLeftActive, called, cleanup, hturn>>
+                 startupLeftActive, called, cleanup, hturn, uinvoke>>
 
 \* Product Stop (STP request_interaction_stop). Before the decision it was
 \* accepted for a child without an execution row, and nothing in-session acted
@@ -244,27 +249,46 @@ UserStopsChild ==
   /\ appUp /\ phase = "none" /\ status \in {"submitted", "running"} /\ hrun /= "running"
   /\ stopReq' = TRUE
   /\ UNCHANGED <<parent, pdead, life, status, bound, phase, run, hrun, obs, lpc, appUp,
-                 restarts, startupLeftActive, called, cleanup, hturn>>
+                 restarts, startupLeftActive, called, cleanup, hturn, uinvoke>>
 
 \* The user sends the thread's next message (INT insert_interaction). The gate
-\* (HUMAN_TURN_IN_PROGRESS) refuses it while a human turn is in progress: the
-\* parent's own turn, and before the decision also the child.
+\* (MESSAGE_TURN_IN_PROGRESS) refuses it while a message turn is in progress: the
+\* parent's own turn, and before the decisions also the child and the user's
+\* invoked run.
 HumanTurnInProgress ==
   \/ parent = "running"
   \/ hturn = "running"
   \/ (~ChildrenOutsideRootGate /\ status \in Interrupted)
+  \/ (~InvokesOutsideRootGate /\ uinvoke = "running")
 
 UserSends ==
   /\ appUp /\ hturn = "none" /\ ~HumanTurnInProgress
   /\ hturn' = "running"
   /\ UNCHANGED <<parent, pdead, life, status, bound, phase, run, hrun, obs, stopReq, lpc,
-                 appUp, restarts, startupLeftActive, called, cleanup>>
+                 appUp, restarts, startupLeftActive, called, cleanup, uinvoke>>
+
+\* The user invokes another accepted action (AI insert_action_invocation). Its run
+\* starts a fresh native session (THR execute_prepared_interaction sends
+\* nativeSession: fresh) and runs beside the message turns. Before the decision
+\* the gate refused it while a human turn ran.
+UserInvokes ==
+  /\ appUp /\ uinvoke = "none"
+  /\ (InvokesOutsideRootGate \/ ~HumanTurnInProgress)
+  /\ uinvoke' = "running"
+  /\ UNCHANGED <<parent, pdead, life, status, bound, phase, run, hrun, obs, stopReq, lpc,
+                 appUp, restarts, startupLeftActive, called, cleanup, hturn>>
+
+UserInvokeEnds ==
+  /\ appUp /\ uinvoke = "running"
+  /\ uinvoke' = "ended"
+  /\ UNCHANGED <<parent, pdead, life, status, bound, phase, run, hrun, obs, stopReq, lpc,
+                 appUp, restarts, startupLeftActive, called, cleanup, hturn>>
 
 HumanTurnEnds ==
   /\ appUp /\ hturn = "running"
   /\ hturn' = "ended"
   /\ UNCHANGED <<parent, pdead, life, status, bound, phase, run, hrun, obs, stopReq, lpc,
-                 appUp, restarts, startupLeftActive, called, cleanup>>
+                 appUp, restarts, startupLeftActive, called, cleanup, uinvoke>>
 
 -----------------------------------------------------------------------------
 (* Crash and startup.                                                      *)
@@ -277,6 +301,7 @@ Crash ==
   /\ lpc' = [l \in Launchers |-> IF lpc[l] \in {"idle", "done"} THEN lpc[l] ELSE "dead"]
   /\ cleanup' = FALSE
   /\ hturn' = IF hturn = "running" THEN "ended" ELSE hturn   \* the turn fails with the app
+  /\ uinvoke' = IF uinvoke = "running" THEN "ended" ELSE uinvoke
   /\ UNCHANGED <<parent, life, status, bound, phase, stopReq, restarts, startupLeftActive, called>>
 
 \* APP reconcile_interrupted_work, in order.
@@ -321,7 +346,7 @@ Startup ==
   \* 4. ordinary running interactions fail (INT recover_interrupted_interactions).
   /\ parent' = IF parent = "running" THEN "failed" ELSE parent
   /\ appUp' = TRUE /\ restarts' = restarts + 1
-  /\ UNCHANGED <<pdead, run, hrun, obs, stopReq, lpc, called, cleanup, hturn>>
+  /\ UNCHANGED <<pdead, run, hrun, obs, stopReq, lpc, called, cleanup, hturn, uinvoke>>
 
 -----------------------------------------------------------------------------
 LaunchStep(l) ==
@@ -337,7 +362,7 @@ Next ==
   \/ ChildEnds("succeeded") \/ ChildEnds("failed") \/ ObserverSettles
   \/ UserReinvokes \/ HumanRunEnds("succeeded") \/ HumanRunEnds("failed")
   \/ UserStopsChild \/ RefusedCleanup
-  \/ UserSends \/ HumanTurnEnds
+  \/ UserSends \/ HumanTurnEnds \/ UserInvokes \/ UserInvokeEnds
   \/ Crash \/ Startup
 
 \* The code's own steps run while enabled; a provider run eventually ends.
@@ -382,8 +407,12 @@ StartupFailsActiveChildren == ~startupLeftActive
 SendNeverWaitsOnChild ==
   (appUp /\ parent /= "running" /\ hturn = "none") => ENABLED UserSends
 
-\* The one-active-human-turn gate still holds: two human root turns never run at once.
+\* The one-active-message-turn gate still holds: two message turns never run at once.
 OneHumanTurn == ~(parent = "running" /\ hturn = "running")
+
+\* PRD 12.2 (decision, #717): a run the user starts from an invoke action never
+\* waits for a message turn, the child, or another run.
+InvokeNeverWaits == (appUp /\ uinvoke = "none") => ENABLED UserInvokes
 
 \* PRD 12.2 (decision): only the parent agent stops or runs its child. The product
 \* neither records a Stop for it nor runs it on the product path.

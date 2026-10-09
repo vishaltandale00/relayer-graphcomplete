@@ -226,10 +226,47 @@ impl InteractionExecutionService {
                 return;
             }
         };
+        // A run started from an invoke action starts a fresh native session beside the thread's
+        // other turns. It has no native memory of the thread, so it receives the accepted turns.
+        let invoked_run = match execution.product.is_invoked_run(interaction.id).await {
+            Ok(value) => value,
+            Err(error) => {
+                record_background_failure(
+                    &execution.product,
+                    &thread,
+                    &interaction,
+                    error.to_string(),
+                )
+                .await;
+                return;
+            }
+        };
+        let fresh_history = if invoked_run {
+            match execution
+                .product
+                .accepted_thread_history(thread.id, interaction.id)
+                .await
+            {
+                Ok(history) => Some(history),
+                Err(error) => {
+                    record_background_failure(
+                        &execution.product,
+                        &thread,
+                        &interaction,
+                        error.to_string(),
+                    )
+                    .await;
+                    return;
+                }
+            }
+        } else {
+            None
+        };
         let command = CompleteInteraction {
             thread_icon_selection_eligible: thread.icon_selection_eligible && thread.icon.is_none(),
             require_native_continuity: false,
             native_history_anchor: None,
+            fresh_native_session: fresh_history.as_deref(),
             project_id: thread.project_id.map(ProjectId::value),
             product_interaction_id: interaction.id.value(),
             thread_id: thread.id.value(),
@@ -427,6 +464,7 @@ impl InteractionExecutionService {
             .ok();
         let require_native_continuity = execution_model_selection.is_some()
             && invocation.is_none()
+            && command.fresh_native_session.is_none()
             && continuity
                 .as_ref()
                 .is_none_or(|value| value.status != "unrestricted");
@@ -472,7 +510,7 @@ impl InteractionExecutionService {
         let completion_result: Result<RuntimeCompletion, RuntimeError> = loop {
             tokio::select! {
                 result = &mut completion => {
-                    match runtime.approval_events(thread.id.value(), cursor).await {
+                    match runtime.approval_events(thread.id.value(), interaction.id.value(), cursor).await {
                         Ok(snapshot) => {
                             if let Err(error) = persist_approval_snapshot(
                                 execution,
@@ -486,7 +524,7 @@ impl InteractionExecutionService {
                                 break Err(RuntimeError::Protocol(error));
                             }
                             let acknowledgement = match runtime
-                                .approval_events(thread.id.value(), cursor)
+                                .approval_events(thread.id.value(), interaction.id.value(), cursor)
                                 .await
                             {
                                 Ok(snapshot) => snapshot,
@@ -537,7 +575,7 @@ impl InteractionExecutionService {
                             _ => {}
                         }
                     }
-                    match runtime.approval_events(thread.id.value(), cursor).await {
+                    match runtime.approval_events(thread.id.value(), interaction.id.value(), cursor).await {
                         Ok(snapshot) => {
                             if let Err(error) = persist_approval_snapshot(
                                 execution,
@@ -548,7 +586,9 @@ impl InteractionExecutionService {
                                 &mut complete_call_id,
                                 snapshot,
                             ).await {
-                                let cancellation = runtime.cancel_completion(thread.id.value()).await;
+                                let cancellation = runtime
+                                    .cancel_invoked_completion(thread.id.value(), prepared_graph_node_id)
+                                    .await;
                                 let cleanup = tokio::time::timeout(
                                     std::time::Duration::from_secs(2),
                                     &mut completion,
