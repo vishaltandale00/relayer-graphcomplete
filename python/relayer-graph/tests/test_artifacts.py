@@ -8,7 +8,9 @@ import types
 import unittest
 from unittest.mock import patch
 
-from relayer_graph import GraphAuthoringWriteError, GraphSession, RelayerGraphClient
+from collections.abc import Mapping
+
+from relayer_graph import GraphAuthoringValidationError, GraphAuthoringWriteError, GraphSession, RelayerGraphClient
 from relayer_graph.authoring import GraphLayer, GraphNode, LayerObject, NodeObject, _layer_payload
 from relayer_graph.exceptions import ValidationError
 
@@ -107,6 +109,22 @@ class ScopedArtifactAuthoringTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(repaired.client_key, site.client_key)
         written = await author.write(answer)
         self.assertTrue(any(layer.renderer == "artifact" for layer in written.layers))
+
+    async def test_capture_refuses_artifact_mappings_without_running_them(self) -> None:
+        graph = RelayerGraphClient("http://unused", "run", 1)
+        requests, graph._request = self.wire()
+        ran = []
+        class Recording(Mapping):
+            def __getitem__(self, key): ran.append(key); return SITE[key]
+            def __iter__(self): ran.append("iter"); return iter(SITE)
+            def __len__(self): return len(SITE)
+        class Subclass(dict):
+            def items(self): ran.append("items"); return super().items()
+        for artifact in (Recording(), Subclass(SITE), {**SITE, "part": Recording()}):
+            author, answer, _, _ = _assemble(graph, artifact)
+            with self.assertRaises(GraphAuthoringValidationError):
+                await author.write(answer)
+        self.assertEqual((ran, requests), ([], []))
 
     async def test_prime_bridge_receives_artifact_and_renderer(self) -> None:
         graph = GraphSession("http://unused", "run", 1)

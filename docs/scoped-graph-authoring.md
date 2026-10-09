@@ -73,9 +73,10 @@ answer.action("open-site", finding, {kind:"navigate",relation:"expand",label:"Op
 ```
 
 `layer.node` also accepts optional `artifact` details. The scoped API adds no
-local artifact checks: the client captures the details as on the direct path,
-and graph-core rejects malformed artifacts or artifact layers with repairable
-issues reported at the node or layer path.
+local artifact shape checks. Artifact details must be plain data (in Python, an
+exact `dict` of ordinary values), so capture runs no author code; otherwise the
+client captures them as on the direct path, and graph-core rejects malformed
+artifacts or artifact layers with repairable issues at the node or layer path.
 
 ## Identity and repair
 

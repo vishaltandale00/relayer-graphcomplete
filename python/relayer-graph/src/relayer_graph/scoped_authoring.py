@@ -262,6 +262,11 @@ class ScopedGraphAuthoring:
                 for key, node in layer._nodes.items():
                     if node.client_key != _identity(self.snapshot_key, layer._key, "n", key):
                         raise GraphAuthoringValidationError("A declared node identity changed")
+                    # Like the TypeScript client: plain data only, so capture runs no author code.
+                    if node.artifact is not None:
+                        if type(node.artifact) is not dict:
+                            raise GraphAuthoringValidationError("Artifact details must be a plain dict of ordinary data")
+                        _copy(node.artifact)
                 for key, edge in layer._edges.items():
                     endpoints = layer._endpoints[key]
                     if edge.client_key != _identity(self.snapshot_key, layer._key, "e", key) or not _same(edge.endpoints, endpoints):
