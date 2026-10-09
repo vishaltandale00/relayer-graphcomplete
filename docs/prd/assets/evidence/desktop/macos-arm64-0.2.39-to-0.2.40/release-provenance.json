@@ -1,0 +1,82 @@
+{
+  "target": "macos-arm64",
+  "version": "0.2.40",
+  "sourceCommit": "8201faac88c7d979909517ddace51f6f46d25c07",
+  "sourceTree": "774fd1e8145b19ce8628d8673c0a4bfe73161c93",
+  "sourcePullRequest": 726,
+  "sourcePrCiRun": "37900119292/1",
+  "sourceMainCiRun": "37901025996/1",
+  "localCheck": {
+    "passed": true,
+    "javascriptPassed": 4233,
+    "javascriptSkipped": 3,
+    "secretBoundaryPassed": 2,
+    "pythonPassed": 95,
+    "rustAndCrashReconciliationPassed": true
+  },
+  "localBuild": {
+    "passed": true,
+    "nodeVersion": "22.23.2"
+  },
+  "managedPrime": {
+    "ready": true,
+    "recipeId": "prime@0.8.1",
+    "recipeDigest": "a0fd0c1bc98b707f6c692eb6c57c6058b8031670ced621f5b7ccb1aca2b8d12a",
+    "javascriptClosureSha256": "02f15fb2ce6366f1e9709e66336a94476dc6605bb8618885afea9e7d2e19766f"
+  },
+  "candidateRun": "37901872320/1",
+  "status": "reviewed-canary-ready-for-stable-promotion",
+  "seed": {
+    "version": "0.2.39",
+    "sourceCommit": "dfd2b2888193fdaf34ff7b2ec2ecda7b42a44eb4",
+    "candidateRun": "37232292435/1",
+    "publicationRun": "37234508105/1",
+    "artifactId": 11314673354,
+    "archiveDigest": "sha256:f1fb0f414502b03755e9e1964087a53574b3278466d272e3e9399042204a2d1d"
+  },
+  "candidate": {
+    "run": "37901872320/1",
+    "artifactId": 11603854373,
+    "archiveDigest": "sha256:e12ff0080b57a0a54cf3d13ede88d3b9950b60eb1f3808eeeb82f5febad2d0f9",
+    "signedAppVerified": true,
+    "gatekeeperNotarized": true,
+    "dmgStaplerVerified": true
+  },
+  "publication": {
+    "run": "37905737364/1",
+    "artifactId": 11604422285,
+    "archiveDigest": "sha256:94b73d96f1050e943f320f83363be0cc93bcbdfe6af80e2001c70753e4e36439",
+    "publicObjectsVerified": 6,
+    "manifestVerified": true
+  },
+  "nativeCache": {
+    "restore": "miss: fresh source compilation",
+    "cargoReleaseDuration": "20m51s",
+    "save": "unavailable: incomplete dSYM generation diagnostics",
+    "cacheHitAcceptance": false
+  },
+  "canary": {
+    "run": "37906128296/1",
+    "implementationCommit": "8201faac88c7d979909517ddace51f6f46d25c07",
+    "artifactId": 11603994229,
+    "archiveDigest": "sha256:3176a8e72e40d508ffc498d2721ebfb8a07394da62546dc1fd7696abc85bbaf7",
+    "evidenceSha256": "921212783487f3a88b9964f561ee2d8a8588db4baa058c3d9aa0dd5056ecb6cb",
+    "productionValidatorPassed": true,
+    "fourScreenshotsVisuallyReviewed": true,
+    "traceRecords": 19,
+    "seedProcessId": 3822,
+    "targetProcessId": 4497
+  },
+  "review": {
+    "reviewer": "Codex local self-review",
+    "certification": "non-certifying; user prohibits subagents in this side conversation",
+    "sourceCommit": "8201faac88c7d979909517ddace51f6f46d25c07",
+    "sourceTree": "774fd1e8145b19ce8628d8673c0a4bfe73161c93",
+    "scope": "Immutable artifact archive digests; signed source and version; publication receipt and all six public bytes; production canary validation and four screenshot pixels",
+    "verdict": "passed within recorded scope",
+    "unresolved": [
+      "Existing connected-provider profile signed-upgrade acceptance not established",
+      "Hosted compatible native-cache hit and end-to-end symbolication acceptance not established"
+    ]
+  }
+}

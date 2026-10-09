@@ -35,3 +35,11 @@ The user prohibits subagents in this side conversation. Local self-review theref
 - Earlier attempts exposed a missing Prime configuration integrity hash (fixed and covered by packaged tests), Node 25 permission behavior (replaced by the pinned toolchain), contention timeouts, a shared build-cache lock, and incoherent copied project objects (discarded before source compilation). Those attempts are not full passing proof.
 
 Required hosted CI, exact-candidate managed Prime proof, signing, Preview publication, the native updater canary, and Stable promotion remain pending at this source handoff. This record distinguishes completed local observations from the remaining release gates.
+
+## Final merged-source and release observations
+
+The later isolated rerun on merged source `8201faac88c7d979909517ddace51f6f46d25c07` passed the complete `npm run check` and `npm run build` with pinned Node 22.23.2. It passed all Rust and crash-reconciliation checks, 4233 JavaScript tests (3 skipped), 2 secret-boundary tests and 95 Python tests, plus formatting, lint and PRD readability. This supersedes the incomplete local outcome for that exact final snapshot without erasing the failed attempts above.
+
+Source PR #726 and exact-main CI `37901025996/1` passed and merged. Clean managed Prime assembly/probe passed on the exact candidate source before signing. Signed candidate `37901872320/1`, Preview publication `37905737364/1`, and native 0.2.39-to-0.2.40 canary `37906128296/1` passed. Downloaded archive identities, signed application/notarization checks, all six public artifact bytes, the updater trace and four visually reviewed screenshots are preserved in [the release evidence](../../prd/assets/evidence/desktop/macos-arm64-0.2.39-to-0.2.40/README.md).
+
+Stable promotion remains pending at this evidence handoff and is a separate protected action. The evidence-only additions change no executable seams; source proof remains bound to the exact merged source and copied evidence is checked separately by the production promotion validator. No paid inference, existing connected-profile upgrade acceptance, compatible hosted native-cache hit or full symbolication acceptance is claimed.
