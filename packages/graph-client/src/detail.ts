@@ -486,6 +486,31 @@ export function snapshotAuthoredNodeDetailProgram(
     const styles = materializeDetailTemplate(id, component.styles, "css", owner, referencesByObject, invalidReferences, ids, issues);
     return Object.freeze({ id, markup, styles, order: component.order });
   }));
+  const mounted = new Map<object, MaterializedAction>();
+  const actionKeys = new Map<unknown, object>();
+  for (const component of components) for (const binding of component.markup.bindings) {
+    const capability = binding.capability.capability;
+    if (!capability || capability.kind === "link") continue;
+    const action = capability.action;
+    const origin = ACTION_ORIGINS.get(action);
+    if (!origin) continue;
+    const previous = actionKeys.get(action.clientKey);
+    if (previous && previous !== origin) invalidNodeDetailProgram("input_reference_invalid", component.id, "inputActions", "Distinct action declarations cannot share a clientKey");
+    actionKeys.set(action.clientKey, origin); mounted.set(origin, action);
+  }
+  for (const component of components) for (const binding of component.markup.bindings) {
+    const capability = binding.capability.capability;
+    if (!capability || capability.kind !== "invoke") continue;
+    for (const input of (capability.action.inputActions ?? []) as readonly (number | MaterializedAction)[]) {
+      const origin = typeof input === "number" ? undefined : ACTION_ORIGINS.get(input);
+      const matches = typeof input === "number" ? [...mounted.values()].filter(action => ACTION_IDS.get(action) === input) : [];
+      const declaration = typeof input === "number" ? matches.length === 1 ? matches[0] : undefined : origin && mounted.get(origin);
+      if (!declaration || declaration.kind !== "input" || !isMaterializedSourceLayer(declaration.sourceLayer) || !declaration.sourceLayer.containsOwner
+        || capabilityValidationCodes({ kind: "input", key: String(declaration.clientKey), action: declaration }, owner?.clientKey, false).length) {
+        invalidNodeDetailProgram("input_reference_invalid", component.id, "inputActions", "Invoke must reference an exact mounted Input declaration on its source Node");
+      }
+    }
+  }
   if (references > DETAIL_AUTHORING_LIMITS.maxAssetReferencesPerPackage) {
     issues.push(Object.freeze({
       code: "asset_reference_limit_exceeded",
@@ -1609,6 +1634,10 @@ function hasExactDescriptorFields(
   });
 }
 
+const ACTION_ORIGINS = new WeakMap<object, object>();
+// Capture the canonical reference alongside the declaration, before later edits.
+const ACTION_IDS = new WeakMap<object, number>();
+
 function materializeAction(value: unknown, owner: NodeObject | undefined, repairSource?: NodeObject): MaterializedAction | undefined {
   if (!isOrdinaryRecord(value)) return undefined;
   const descriptors = Object.getOwnPropertyDescriptors(value) as unknown as Record<PropertyKey, PropertyDescriptor>;
@@ -1619,16 +1648,50 @@ function materializeAction(value: unknown, owner: NodeObject | undefined, repair
     if (!("value" in descriptor) || descriptor.enumerable !== true) return undefined;
     snapshot[field] = field === "options" && descriptor.value !== undefined
       ? materializeOptions(descriptor.value)
+      : field === "inputActions" && descriptor.value !== undefined
+        ? materializeInvokeInputs(descriptor.value, owner, repairSource)
       : field === "sourceLayer"
         ? materializeSourceLayer(descriptor.value, owner, repairSource)
         : field === "target"
           ? materializeLayerTarget(descriptor.value)
         : descriptor.value;
     if (field === "options" && descriptor.value !== undefined && snapshot[field] === undefined) return undefined;
+    if (field === "inputActions" && descriptor.value !== undefined && snapshot[field] === undefined) return undefined;
     if (field === "sourceLayer" && snapshot[field] === undefined) return undefined;
     if (field === "target" && snapshot[field] === undefined) return undefined;
   }
+  if (snapshot.kind === "invoke" && snapshot.reusable === undefined) snapshot.reusable = false;
+  ACTION_ORIGINS.set(snapshot, value);
+  if (isOrdinaryRecord(snapshot.ref)) {
+    const id = Object.getOwnPropertyDescriptor(snapshot.ref, "id")?.value;
+    const kind = Object.getOwnPropertyDescriptor(snapshot.ref, "kind")?.value;
+    if (Number.isSafeInteger(id) && id > 0 && kind === snapshot.kind) ACTION_IDS.set(snapshot, id);
+  }
   return Object.freeze(snapshot);
+}
+
+function materializeInvokeInputs(value: unknown, owner?: NodeObject, repairSource?: NodeObject): readonly (number | MaterializedAction)[] | undefined {
+  if (!Array.isArray(value) || isProxy(value) || Object.getPrototypeOf(value) !== Array.prototype) return undefined;
+  const descriptors = Object.getOwnPropertyDescriptors(value) as unknown as Record<PropertyKey, PropertyDescriptor>;
+  const length = descriptors.length?.value;
+  if (!Number.isSafeInteger(length) || length < 0 || Reflect.ownKeys(descriptors).length !== length + 1) return undefined;
+  const ids: (number | MaterializedAction)[] = [];
+  const seen = new Set<unknown>();
+  for (let index = 0; index < length; index += 1) {
+    const descriptor = descriptors[String(index)];
+    if (!descriptor || !("value" in descriptor)) return undefined;
+    const entry = descriptor.value;
+    if (isOrdinaryRecord(entry) && Object.getOwnPropertyDescriptor(entry, "kind")?.value === "input" && !Object.hasOwn(entry, "id")) {
+      const input = materializeAction(entry, owner, repairSource);
+      if (!input || !isStableIdentity(input.clientKey) || seen.has(entry) || seen.has(input.clientKey)) return undefined;
+      seen.add(entry); seen.add(input.clientKey); ids.push(input); continue;
+    }
+    if (isOrdinaryRecord(entry) && Object.getOwnPropertyDescriptor(entry, "kind")?.value !== undefined && Object.getOwnPropertyDescriptor(entry, "kind")?.value !== "input") return undefined;
+    const id = typeof entry === "number" ? entry : isOrdinaryRecord(entry) ? Object.getOwnPropertyDescriptor(entry, "id")?.value : undefined;
+    if (!Number.isSafeInteger(id) || id <= 0 || ids.includes(id)) return undefined;
+    ids.push(id);
+  }
+  return Object.freeze(ids);
 }
 
 function materializeOptions(value: unknown): readonly MaterializedAction[] | undefined {
@@ -1783,7 +1846,8 @@ function hasExactActionFields(action: Record<string, unknown>): boolean {
     return hasOnlyEnumerableFields(action, [...ACTION_COMMON_FIELDS, "relation", "target"]);
   }
   if (action.kind === "invoke") {
-    return hasOnlyEnumerableFields(action, [...ACTION_COMMON_FIELDS, "interactionText"]);
+    return (action.reusable === undefined || typeof action.reusable === "boolean")
+      && hasOnlyEnumerableFields(action, [...ACTION_COMMON_FIELDS, "interactionText", "inputActions", "reusable"]);
   }
   if (action.kind === "input") {
     return hasOnlyEnumerableFields(action, [

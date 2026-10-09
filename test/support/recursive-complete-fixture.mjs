@@ -4,6 +4,7 @@ import {
   NodeObject,
   NodePlacementObject,
   RelayerGraphClient,
+  detailCapability,
   css,
   html,
 } from "@relayer/graph-client";
@@ -114,7 +115,7 @@ export function recursiveCompleteFixtureFactory(
           childReadiness,
         ).catch((error) => {
           if (isChild) childReadiness?.reject(error);
-          (observed.errors ??= []).push(`${context.inputGraph.detail}: [${error?.code}] ${error?.message}`);
+          (observed.errors ??= []).push(`${context.inputGraph.detail}: [${error?.code}] ${error?.message} ${JSON.stringify(error?.issues ?? [])}`);
           throw error;
         });
         return nativeExecutionHandle(execution, undefined, Promise.resolve({
@@ -153,6 +154,25 @@ async function runRecursiveFixture(
     await graph.addAction(context.inputGraph.id, {
       kind: "navigate", relation: "expand", label: "Response", target: layer, clientKey: "child-root",
     });
+    const contract = await graph.getContract();
+    for (const requirement of contract?.returnRequirements ?? []) {
+      if (requirement.kind !== "navigate.response") continue;
+      const snapshot = await graph.getNodePresentation(requirement.nodeId);
+      const addition = { kind: "navigate", relation: "reference", label: "Updated overall analysis", target: layer, clientKey: `integrated-response-${requirement.nodeId}` };
+      await graph.addAction(requirement.nodeId, addition);
+      if (snapshot.node.authoredDetail) {
+        const prior = snapshot.node;
+        const replacement = new NodeObject(prior.icon, prior.title, prior.detail, prior.kind, prior.clientKey);
+        authorVisualNodeDetail(replacement, "integrated-analysis", html`<section><h2>Plan and delegated finding</h2><p>The delegated finding is now available in the updated overall analysis.</p><button gc=${detailCapability.reference("integrated", addition)}>Updated overall analysis</button></section>`);
+        for (const action of snapshot.actions) {
+          if (action.kind !== "invoke") throw new Error("Unexpected recursive fixture source action");
+          const sourceLayer = new LayerObject([replacement], [], centered(replacement), action.sourceLayerClientKey);
+          const retained = { kind: "invoke", sourceLayer, label: action.label, interactionText: action.interactionText, clientKey: action.clientKey };
+          authorVisualNodeDetail(replacement, `retained-${action.id}`, html`<section><button gc=${detailCapability.invoke(`retained-${action.id}`, retained)}>Delegate</button></section>`);
+        }
+        await graph.replaceNodePresentation(requirement.nodeId, snapshot.revision, replacement);
+      }
+    }
     await graph.advanceCurrent(layer, current.headRevision, "child-advance");
     await observed.afterChildPublication?.(context);
     if (observed.childBlocks) {

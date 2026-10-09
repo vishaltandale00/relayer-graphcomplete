@@ -20,8 +20,8 @@ use crate::{
 };
 
 pub struct GraphWriter {
-    database: GraphDatabase,
-    scope: InteractionScope,
+    pub(crate) database: GraphDatabase,
+    pub(crate) scope: InteractionScope,
 }
 
 impl GraphWriter {
@@ -57,6 +57,16 @@ impl GraphWriter {
         self.scope
             .require_active_authority(&mut transaction)
             .await?;
+        if crate::storage::sqlite::contracts::read(&mut transaction, self.scope.root_node_id)
+            .await?
+            .is_some()
+        {
+            return Err(GraphError::validation(
+                "invocation_key_required",
+                "invocationKey",
+                "Sealed completions require a stable invocationKey. Use the durable Invocation preparation API; reuse the same key to recover the same call.",
+            ));
+        }
         let child = NodeTable::new(&mut transaction)
             .insert_interaction(
                 self.scope.project_id,
@@ -612,6 +622,9 @@ impl GraphWriter {
         let draft = &normalized_draft;
         let mut transaction = self.database.storage.begin_write().await?;
         self.ensure_writable(&mut transaction).await?;
+        ActionTable::new(&mut transaction)
+            .validate_invoke_inputs(&self.scope, draft.source_node_id, &draft.input_action_ids)
+            .await?;
         let source = NodeTable::new(&mut transaction)
             .record(draft.source_node_id)
             .await?

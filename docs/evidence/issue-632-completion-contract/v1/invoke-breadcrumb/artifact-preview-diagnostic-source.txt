@@ -1,0 +1,35 @@
+// External diagnostic entry point: preserves the real fixture and renderer result/error.
+import { GraphCompleteRuntimeService } from "/private/tmp/relayer-interactive-inputs-v1-merge/desktop/main/services/graphcomplete-runtime.mjs";
+
+const originalStart = GraphCompleteRuntimeService.prototype.start;
+const wrapped = new WeakSet();
+GraphCompleteRuntimeService.prototype.start = function (...args) {
+  const renderer = this.draftPreviewRenderer;
+  if (renderer && !wrapped.has(renderer)) {
+    wrapped.add(renderer);
+    const originalRender = renderer.render;
+    renderer.render = async function (...renderArgs) {
+      const request = renderArgs[0];
+      const snapshot = request?.snapshot;
+      const artifact = snapshot?.nodes?.[0]?.artifact;
+      const metadata = { interactionNodeId: request?.interactionNodeId, target: snapshot?.target,
+        artifactKind: artifact?.kind, artifactSource: artifact?.source, artifactPage: artifact?.page };
+      const started = performance.now();
+      process.stdout.write(`ARTIFACT_PREVIEW_DIAGNOSTIC_START ${JSON.stringify(metadata)}\n`);
+      try {
+        const result = await originalRender.apply(this, renderArgs);
+        process.stdout.write(`ARTIFACT_PREVIEW_DIAGNOSTIC_SUCCESS ${JSON.stringify({ ...metadata,
+          elapsedMs: Math.round(performance.now() - started), width: result.width, height: result.height })}\n`);
+        return result;
+      } catch (error) {
+        process.stderr.write(`ARTIFACT_PREVIEW_DIAGNOSTIC_ERROR ${JSON.stringify({ ...metadata,
+          elapsedMs: Math.round(performance.now() - started), name: error?.name,
+          code: error?.code, message: error?.message, stack: error?.stack })}\n`);
+        throw error;
+      }
+    };
+  }
+  return originalStart.apply(this, args);
+};
+
+await import("/private/tmp/relayer-interactive-inputs-v1-merge/scripts/test-desktop-artifact-viewer.mjs");

@@ -1,0 +1,968 @@
+{
+  "schemaVersion": 1,
+  "date": "2026-10-07",
+  "baseCommit": "677035322f33ee61327f0737d50b4db8e91e8ae9",
+  "previousHead": "63582111701357242ed5e2bddf3fed6cf50cd2a6",
+  "sourceDigest": "ee204f8de3a496b072b8cb7bee823b6112422b2aa1cf558972017b90686b3fac",
+  "sourceScope": "Union of prior changed executable/test/config/contract manifest, upstream main merge changes and current candidate delta; documentation/evidence excluded",
+  "manifest": [
+    {
+      "path": "CONTEXT.md",
+      "sha256": "ba273d82882a05b90f90c04c601ec33b71929929e3ee6f9498772e77d9e5844c"
+    },
+    {
+      "path": "Cargo.lock",
+      "sha256": "83e8d4708f40f698ee161bb6178f0fe4f58a67284e30a36450799acd3d735b98"
+    },
+    {
+      "path": "contracts/share-service-v1/contract.json",
+      "sha256": "d289317c75a44675b9bb6f4b8856f4e8f30cff7948ca27f8cfee72b7ba4b7d8d"
+    },
+    {
+      "path": "crates/relayer-app-server/src/api.rs",
+      "sha256": "873526ba919574174fde2bf2ffd0e73d29aec529924778d5acb4f24a1f63d63a"
+    },
+    {
+      "path": "crates/relayer-app-server/src/api/conversation_imports.rs",
+      "sha256": "1be6393d4e645ed5990834b84e7a165ce420f8cd57edcb754aaad716386d9542"
+    },
+    {
+      "path": "crates/relayer-app-server/src/api/input_drafts.rs",
+      "sha256": "92d2f2517dc125b56fe753beb9ea844254147714cfc0824b183baa2eb6752360"
+    },
+    {
+      "path": "crates/relayer-app-server/src/api/state.rs",
+      "sha256": "331bf6f557268d206b0328c6bb84ee7c9059248fa6e1d792953cb2f6426c5d95"
+    },
+    {
+      "path": "crates/relayer-app-server/src/api/threads.rs",
+      "sha256": "5324a26ffad40bbfd8f2f141ec8ae55c1b089fe1edbd7eb0bb1f040b2a8a6ac9"
+    },
+    {
+      "path": "crates/relayer-app-server/src/api/types.rs",
+      "sha256": "b21de1de7f4465b4b57e3de302b7a83aa36d9008009c72d80af41ccdbaff8a8e"
+    },
+    {
+      "path": "crates/relayer-app-server/src/app_server.rs",
+      "sha256": "1e1d886e2e83e4f51ac25a642dd593f81e91d61b3303fe2d058baff681fe04cc"
+    },
+    {
+      "path": "crates/relayer-app-server/src/conversation_export.rs",
+      "sha256": "37b76af8486a2dd1a10ca2c590c3a011022dfa93492e6f7b3eb80dad71bfb1c5"
+    },
+    {
+      "path": "crates/relayer-app-server/src/conversation_export_service.rs",
+      "sha256": "e09204bba98b3b76b63b5d4459fddb9548f443deffdc6075386f33ad3bf70f98"
+    },
+    {
+      "path": "crates/relayer-app-server/src/conversation_import_service.rs",
+      "sha256": "5b595261b21db4c2a4f307a1feb5dce084cc448add61a1ba6cc0a797a2718588"
+    },
+    {
+      "path": "crates/relayer-app-server/src/product/models.rs",
+      "sha256": "7a5ba534c307086d7f9f1bcb6b5e714506cc1dcd7b616daf35517fb688568841"
+    },
+    {
+      "path": "crates/relayer-app-server/src/product/service.rs",
+      "sha256": "79bb34a031e401d2ad556523828f81d617fdf06b4375f2709e04e74d3bfba218"
+    },
+    {
+      "path": "crates/relayer-app-server/src/runtime.rs",
+      "sha256": "1ac0bdfc476f9fd88ecc0388e157e8a8004bb9c18eb426b32730f976663cb60b"
+    },
+    {
+      "path": "crates/relayer-app-server/src/storage.rs",
+      "sha256": "2cbe0fb87f53a4c9176a2d24193efcdfa292e84ea882a306116e10c0b1ffefa5"
+    },
+    {
+      "path": "crates/relayer-app-server/src/storage/sqlite/action_invocations.rs",
+      "sha256": "1756af92ae77e5879dec644e17072e6666318db61b331b8da6466d3540ff2313"
+    },
+    {
+      "path": "crates/relayer-app-server/src/storage/sqlite/attempts.rs",
+      "sha256": "30cdc4bb9ad0ddccd25210653f824d3fcdbf05c6f16fb315ea15dff1a4970a08"
+    },
+    {
+      "path": "crates/relayer-app-server/src/storage/sqlite/conversation_imports.rs",
+      "sha256": "76d6f41725021910a73603aebf8bb00a0c59c5273adac08c5096404653e3c8fd"
+    },
+    {
+      "path": "crates/relayer-app-server/src/storage/sqlite/input_drafts.rs",
+      "sha256": "4380e08524404c723a82ea2611e1b6379d1d194f92e55cd6aa5ae14562579986"
+    },
+    {
+      "path": "crates/relayer-app-server/src/storage/sqlite/interaction_contexts.rs",
+      "sha256": "6fb000ec08141ed10d6c140fb8f93558150c10d6db991569af326e7962e7fe59"
+    },
+    {
+      "path": "crates/relayer-app-server/src/storage/sqlite/interactions.rs",
+      "sha256": "545a533d7b64740516eede63313eb3ba3e5596a01f57188f863c3233c443d68c"
+    },
+    {
+      "path": "crates/relayer-app-server/src/storage/sqlite/migrations.rs",
+      "sha256": "0e94874beabe7d368d9f17b50b88381e2c0c249b290c009c6dbd6e0bf7fe9747"
+    },
+    {
+      "path": "crates/relayer-app-server/src/storage/sqlite/migrations/0043_durable_invocation_calls.sql",
+      "sha256": "1856ad24ec85c8af67704fefab07a3348b5b3d7fbd0c304d7435234402ca8706"
+    },
+    {
+      "path": "crates/relayer-app-server/src/storage/sqlite/migrations/0044_invocation_input_submission_receipts.sql",
+      "sha256": "82bce624ff66481d79df72580fa6213f5c1148ebbbecbb37f0599ce89319de32"
+    },
+    {
+      "path": "crates/relayer-app-server/src/storage/sqlite/schema.rs",
+      "sha256": "7c9c6c35a02b1b2b61da1ec64b70287119b2a8104d6ea22c0d66b4dd621f9be4"
+    },
+    {
+      "path": "crates/relayer-app-server/tests/conversation_export_contract.rs",
+      "sha256": "0bdd23a22275c5cfb479726f20b3bf490611a6d7644347ed5934bcacdc15288b"
+    },
+    {
+      "path": "crates/relayer-app-server/tests/product_persistence_flow.rs",
+      "sha256": "9af23e1afbe26f6085a20d85b211711793dd69c0aa1136304ca229c27d1bf2d7"
+    },
+    {
+      "path": "crates/relayer-app-server/tests/support/completion_traces.rs",
+      "sha256": "e28eddb2de8f16d29a08a1f36f9c92fe9cabc53728d8f4da8afafdea787b38eb"
+    },
+    {
+      "path": "crates/relayer-graph-core/Cargo.toml",
+      "sha256": "049ad24447fcb27aac0d3c31324dd3dfd6bc01e10ece105c8c46f2f4130c1782"
+    },
+    {
+      "path": "crates/relayer-graph-core/src/graph.rs",
+      "sha256": "c75ee46b004a44837c2e21c036fad525deb1388013667c91f8311055a634b36f"
+    },
+    {
+      "path": "crates/relayer-graph-core/src/graph/completion.rs",
+      "sha256": "235f40c9790a7a6df76b5c3aaab4c4bec096d44d39331fbfdc3fa96169418c2b"
+    },
+    {
+      "path": "crates/relayer-graph-core/src/graph/completion/plan.rs",
+      "sha256": "a6d6d8221d91169756768fa30f226111cd7309a31daab9f441b7d160a8bc0ded"
+    },
+    {
+      "path": "crates/relayer-graph-core/src/graph/database.rs",
+      "sha256": "18656cad8606118d6e3f743867e60120a2511a9f645c8eaab1209d4f985c1305"
+    },
+    {
+      "path": "crates/relayer-graph-core/src/graph/import.rs",
+      "sha256": "592791fab20b91d5721a53cc7024c5126652c88852336eeff18f3e7cf0333a72"
+    },
+    {
+      "path": "crates/relayer-graph-core/src/graph/interaction_scope.rs",
+      "sha256": "d7a467390641e278ae84d87b479139df99e4a85533727c6068b5332e945953e8"
+    },
+    {
+      "path": "crates/relayer-graph-core/src/graph/invocation.rs",
+      "sha256": "eedb3a38271e0c43219d0b7a2fbf8cc4928de44bcfd63c541dd6ae7447cdd636"
+    },
+    {
+      "path": "crates/relayer-graph-core/src/graph/model.rs",
+      "sha256": "af0ba1ddb42869d0871cb36454d4ff250fbccfe62ceb93524a5d3baab2727c07"
+    },
+    {
+      "path": "crates/relayer-graph-core/src/graph/model/action.rs",
+      "sha256": "93e5b07179b3df8f26cff4b8002565844edb0913f33835521f455735ff4b22fe"
+    },
+    {
+      "path": "crates/relayer-graph-core/src/graph/model/artifact.rs",
+      "sha256": "34bd4efd4f5ff38a4d3d8baebdc9c1276a2bd288c1d29945a9bdf1147f784bb4"
+    },
+    {
+      "path": "crates/relayer-graph-core/src/graph/model/context.rs",
+      "sha256": "8aec2eb59ef8c1c0d292605d37725d6045d63af3d757ed97a1b5fd75db50120a"
+    },
+    {
+      "path": "crates/relayer-graph-core/src/graph/model/contract.rs",
+      "sha256": "9d9ffbfaf0d6c3aaa90cda3a27d90a4d2713c80ca5918b63ae234f8915696639"
+    },
+    {
+      "path": "crates/relayer-graph-core/src/graph/model/layer.rs",
+      "sha256": "20e12b53b32c911c1d0cc5e9412cf0c2479440fb993c713980a63af3ca38f14f"
+    },
+    {
+      "path": "crates/relayer-graph-core/src/graph/model/node.rs",
+      "sha256": "5b3ac3fd64fd4976186a20e025e5d582d6e52dd1b11e797a4d558d09a3e71600"
+    },
+    {
+      "path": "crates/relayer-graph-core/src/graph/search_index.rs",
+      "sha256": "22515f0c9be0d7c905d31f4c8bf4ee49c9eddd217b806d49710f4f738c01223d"
+    },
+    {
+      "path": "crates/relayer-graph-core/src/graph/writer.rs",
+      "sha256": "b1436cc999b4c40a36e8f7133c3e3dcc3f79d7e7c8786eaaa1636ab2092eaea4"
+    },
+    {
+      "path": "crates/relayer-graph-core/src/lib.rs",
+      "sha256": "1537d09b10cc58c00175b7132e5b14efe5fa02052e1b479af603ef89462cb0c2"
+    },
+    {
+      "path": "crates/relayer-graph-core/src/storage/sqlite.rs",
+      "sha256": "732e3af90bfd2dcfd7caea195d4654d7a930625fd24fb093c927b9be8da7d944"
+    },
+    {
+      "path": "crates/relayer-graph-core/src/storage/sqlite/actions.rs",
+      "sha256": "b6db6db6a0efbe6dc44c3b507a0f89483fec535191c5d37ecac73e43b88af501"
+    },
+    {
+      "path": "crates/relayer-graph-core/src/storage/sqlite/contexts.rs",
+      "sha256": "0eff72b9f8db595d5823868a0d278e9871b1c98c5080ea439221af20c42e2e46"
+    },
+    {
+      "path": "crates/relayer-graph-core/src/storage/sqlite/contracts.rs",
+      "sha256": "24a6ca3aeb5068f033663438f9c1ee2826c56834c1fc4cee923ff8a3829bd0d9"
+    },
+    {
+      "path": "crates/relayer-graph-core/src/storage/sqlite/input_children.rs",
+      "sha256": "cff72984a401756371b624fd84e3e58d84baa98e4e3a938205d0e115d1c9b4a6"
+    },
+    {
+      "path": "crates/relayer-graph-core/src/storage/sqlite/invocations.rs",
+      "sha256": "c511c5abcc58cedfef1b0398935fadf9b1f3adcb638e127a6ebb63964a2b52dc"
+    },
+    {
+      "path": "crates/relayer-graph-core/src/storage/sqlite/layers.rs",
+      "sha256": "c2a92110b39c7555ee3babf344f4ebf06daa29fef584143b75ea3951c8c77d2e"
+    },
+    {
+      "path": "crates/relayer-graph-core/src/storage/sqlite/migrations.rs",
+      "sha256": "fec3025e5340440477299e925a56e2f9d96fe356a5517e11331c407dfbd93faf"
+    },
+    {
+      "path": "crates/relayer-graph-core/src/storage/sqlite/migrations/0034_artifact_layers.sql",
+      "sha256": "9a7133e7e846b1676095eb1a4cb678005a4c4bb46a623f70790c0926a88dcf77"
+    },
+    {
+      "path": "crates/relayer-graph-core/src/storage/sqlite/migrations/0035_completion_contracts.sql",
+      "sha256": "2cd080ad8a10a53c6590b8811f275ee3f605cd9415ed2d3d342e136c78572e23"
+    },
+    {
+      "path": "crates/relayer-graph-core/src/storage/sqlite/migrations/0036_durable_invocations.sql",
+      "sha256": "c75b09c5b50546bf484200d19f3a21400e7912f8a143693d91d25e71ada53a6b"
+    },
+    {
+      "path": "crates/relayer-graph-core/src/storage/sqlite/migrations/0037_invoke_input_bindings.sql",
+      "sha256": "ade43b620f3432c0a08c4bc2e60d052f67eff0c3a384a05f4bbcfd2541698bf0"
+    },
+    {
+      "path": "crates/relayer-graph-core/src/storage/sqlite/migrations/0038_inert_imported_invocations.sql",
+      "sha256": "b14b54e27152cfc61919ae5402d65bb906ff23d58ef6f64a981d2262ae2030fc"
+    },
+    {
+      "path": "crates/relayer-graph-core/src/storage/sqlite/migrations/0039_invoke_reuse_policy.sql",
+      "sha256": "d5ae92b4a3441d45fe6eac9db59cead0190f7886138abe639052d9141d8ca5ff"
+    },
+    {
+      "path": "crates/relayer-graph-core/src/storage/sqlite/nodes.rs",
+      "sha256": "e6921d6828354f06ebe48b88fa84faf6a0925af8ca9d9a6b99985a97558ce51d"
+    },
+    {
+      "path": "crates/relayer-graph-core/src/storage/sqlite/permissions.rs",
+      "sha256": "9a1fff211b496f0bd8f5e45c4face1c5511f329e0020bd9e90e068d1e8df58ef"
+    },
+    {
+      "path": "crates/relayer-graph-core/tests/artifact_layers.rs",
+      "sha256": "29069d719a378ea7b49ec2e2cfda4e930e2a3f901aad3be2eafc759a00ef19fe"
+    },
+    {
+      "path": "crates/relayer-graph-core/tests/completion_contract.rs",
+      "sha256": "c718c59aa3dd6142db424234f23a9f49d4ff41877f1e0020871ca7dafa0f7bca"
+    },
+    {
+      "path": "crates/relayer-graph-core/tests/durable_invocations.rs",
+      "sha256": "125b1d67978b3176c3ee10df09ebf970b5714399491554da95298c96ca2bed14"
+    },
+    {
+      "path": "crates/relayer-graph-core/tests/graph_database.rs",
+      "sha256": "6a03faff5c1d6868dc4d14968cd7803a1d51af2ad91e79cec993b555eb2aea7e"
+    },
+    {
+      "path": "crates/relayer-graph-core/tests/search_index_ordering.rs",
+      "sha256": "4e1b183a1b9f0e651227be2cd9867310b4b460db98e3ac234a44ae4670a7a32d"
+    },
+    {
+      "path": "crates/relayer-graph-server/src/lib.rs",
+      "sha256": "c06b3a590087eb417a0cc2290737bcfb7d83acdbae3c0fd377db4c1d924f766a"
+    },
+    {
+      "path": "crates/relayer-graph-server/src/search_index/interaction_permissions_tests.rs",
+      "sha256": "fa1bcda3f0c3464d382b932fef9e0bc2fb13a9033f0a72b268db609555ada523"
+    },
+    {
+      "path": "crates/relayer-graph-server/tests/graph_query_v1_conformance.rs",
+      "sha256": "e2c512e08f9c2e080f7b953202e0c394aeef699d2940e960c485a808ad3755bb"
+    },
+    {
+      "path": "crates/relayer-graph-server/tests/graph_search_route.rs",
+      "sha256": "4ff012955c57936f01771752f83f97df47c11b3ff1c2c7ce4f54138d2fa89702"
+    },
+    {
+      "path": "crates/relayer-graph-server/tests/ladybug_crash_reconciliation.rs",
+      "sha256": "fbaae18ef1f4bb65469235354cbfbc4925aa2680e2e6678eab80c5a30d350c35"
+    },
+    {
+      "path": "crates/relayer-graph-server/tests/ladybug_search_index.rs",
+      "sha256": "fed28897fc543a021239149ed27877635fbb27b018342ffcac8dbac220f5e2ec"
+    },
+    {
+      "path": "crates/relayer-graph-server/tests/ladybug_search_lifecycle.rs",
+      "sha256": "8cece72bd89dc2f8806d10b0a641779ccc0e52998d44ccfd6d61e81bac11d5c6"
+    },
+    {
+      "path": "crates/relayer-graph-server/tests/support/search_index_corpus.rs",
+      "sha256": "ee707ea2ecee837052a9b6aca1b665156fdfeef9e4db63ccf298294d17befa44"
+    },
+    {
+      "path": "desktop/eval-main/draft-preview-renderer.mjs",
+      "sha256": "d8f1b41e15404f2d349ae82ba50968d69010e59ef74b3df157a712663abfc2f4"
+    },
+    {
+      "path": "desktop/eval-main/eval-service.mjs",
+      "sha256": "bf5746fe228d0ca44662d38ce4aa8b193a67a4da144b5b287e11ef95d2dc266a"
+    },
+    {
+      "path": "desktop/eval-main/web-host.mjs",
+      "sha256": "6e6aa992155f635990aee92c77a64031c7370b3f570077d37937cec3f874e460"
+    },
+    {
+      "path": "desktop/main/index.mjs",
+      "sha256": "912ada6e394f7445eec18cb0a056fb41412d23c5eb1bed2e7edd8d553c010eea"
+    },
+    {
+      "path": "desktop/main/ipc/register-ipc.mjs",
+      "sha256": "939523a415317de43d5477e2eef53873356365b1150ef32be08afb687237a609"
+    },
+    {
+      "path": "desktop/main/managed-runtimes/recipes.mjs",
+      "sha256": "d86420de8ffd46941819fdeab4c01685d395e2f256986a5ecf8ae78279bd1912"
+    },
+    {
+      "path": "desktop/main/services/artifact-server.mjs",
+      "sha256": "b86905ef761f570b0ccdf3f1ce5994d4e14db039becb81815bf5aae0bd55a685"
+    },
+    {
+      "path": "desktop/main/services/artifact-viewer.mjs",
+      "sha256": "e7a28d35ffcd6b67d97ae789699e68a268052f101a39c87816fce111fb003e77"
+    },
+    {
+      "path": "desktop/main/services/draft-preview-renderer.mjs",
+      "sha256": "a5c936abd909270e2c042ef10141d66ab9cb2ee326208672e0304bed94068aa3"
+    },
+    {
+      "path": "desktop/main/services/graphcomplete-runtime.mjs",
+      "sha256": "79f448ba074ba04cd9569118693e37af54298c8fafb04ba3e4b65c855b0dcc74"
+    },
+    {
+      "path": "desktop/main/services/prime-agent-runtime.mjs",
+      "sha256": "83aa6ee1a9cc09c080de576fcaa2314c3b9fef8c97b52e1049296cb61e8c02e0"
+    },
+    {
+      "path": "desktop/main/services/relayer-app-server.mjs",
+      "sha256": "d3de79edb6485903e695c04ecc403af770156c4c753e11599e57caf45ab46291"
+    },
+    {
+      "path": "desktop/main/services/share-publish-coordinator.mjs",
+      "sha256": "efa9817a7fb141a08e80a858e6f38ae9f12c76a5d3f8469df1ecb7f7dbdcf2ca"
+    },
+    {
+      "path": "desktop/preload/index.cjs",
+      "sha256": "95102af294600548f563729954fed1ff0be58400d643c9d601f98b37e1034363"
+    },
+    {
+      "path": "desktop/renderer/src/action-invocation-state.js",
+      "sha256": "85574d803a0bd120a075a4aa4edfac90d2dcbb9ea330296d92e030283ea07c46"
+    },
+    {
+      "path": "desktop/renderer/src/artifact-viewer.js",
+      "sha256": "5d64c8f1f66a95d96594d63611769089d3de5340cc941c65b7a0fef9b4cbaa45"
+    },
+    {
+      "path": "desktop/renderer/src/graph.js",
+      "sha256": "493553b115afaa93946c784d26a48f7eac2263fc58941f51136e4a23b12fe9ca"
+    },
+    {
+      "path": "desktop/renderer/src/node-input-controls.js",
+      "sha256": "8436b56321b0bdf46a779a0954aa0b26e3f09acc4151126ad75bdbcd5d2227fa"
+    },
+    {
+      "path": "desktop/renderer/src/product-workspace/invoke-inputs.js",
+      "sha256": "0c2fe7281acd4140e33f83dfc4a0ea4a7f1ac5dac9050dc848550849cde14c2e"
+    },
+    {
+      "path": "desktop/renderer/src/product-workspace/model.js",
+      "sha256": "a3ab3a4867a11244442d001345c4ec2836f4572f693ad7b5118fa4a4fa0e7ccc"
+    },
+    {
+      "path": "desktop/renderer/src/product-workspace/node-detail-runtime.js",
+      "sha256": "c1c6e8a2627e20298a7f88c7516febc4c0f7317b00ec00713372bd24202cdcfd"
+    },
+    {
+      "path": "desktop/renderer/src/product-workspace/workspace.js",
+      "sha256": "28d47b582266ed416f7b59517b1e5f93b2669d92d2bc82d554b4833b96b64d4a"
+    },
+    {
+      "path": "desktop/renderer/src/public-share-viewer/adapter.js",
+      "sha256": "d0935c86c02000355628622fa456442cb0c2a8d9bc57f255b0b8a2aa2ef1c33d"
+    },
+    {
+      "path": "desktop/renderer/src/public-share-viewer/main.js",
+      "sha256": "1c139afe5b6ab2b50919bbd48f7dbe1654756fc2bdd9926951bdb1d0596053f2"
+    },
+    {
+      "path": "desktop/renderer/src/public-share-viewer/snapshot.js",
+      "sha256": "7b725beda5cbe9db22208b27255f2a5f96b6973c1ef00c49916e5cd647cf2ca1"
+    },
+    {
+      "path": "desktop/renderer/src/public-share-viewer/template.js",
+      "sha256": "b729964932b6f212b5b74c2cb68d5b0a468694479aaefa824c8d84287e4afc6b"
+    },
+    {
+      "path": "desktop/renderer/src/threads.js",
+      "sha256": "070859553f58ee7c5964df3baa7cc2661f424bfad40720a0f03153d5366708ab"
+    },
+    {
+      "path": "desktop/renderer/src/workspace-navigation.js",
+      "sha256": "56f877d1495153845af7b290884a2f8029948a87a2eaa4eeae2557db02d868cc"
+    },
+    {
+      "path": "desktop/renderer/styles.css",
+      "sha256": "7dde959d261ce585e7dbe415cebcfe999b5d8ca5ca93633b6f93317c297ef7e0"
+    },
+    {
+      "path": "desktop/shared/telemetry-module-inventory.mjs",
+      "sha256": "d5044478959abcd261274fd184193c7ae91c8d4f0a00ab702a7c91f1cc0a7937"
+    },
+    {
+      "path": "harnesses/claude-basic.yaml",
+      "sha256": "dcad78a9d6f67e45beab46d8c8fb4e9c927cbfd9c4c8bc24df14250b1067c7a0"
+    },
+    {
+      "path": "harnesses/codex-basic.yaml",
+      "sha256": "f61bb6f5139ef03a92d6370842e36e66094ea102f744f56a48d37c1e20138dde"
+    },
+    {
+      "path": "harnesses/prime-agent-basic.yaml",
+      "sha256": "7511e84a916cf9697a542ea581686ce106acd045a56af1c8f60861756da36d20"
+    },
+    {
+      "path": "package-lock.json",
+      "sha256": "465e5ee2e1bfbf11b8cdc831cd457d9e6c846adebb84e8f3f97575a4390dcb45"
+    },
+    {
+      "path": "package.json",
+      "sha256": "b52cf7db68ebbbef12b232905d62f37f75e16e6723c5846ee5ce92c5a054d8e4"
+    },
+    {
+      "path": "packages/eval-runner/src/cases/recursive-graph-memory-grading.ts",
+      "sha256": "7c23954ad727920922ebccc8db6b59a62f7317de6a730358fff389ef5cd62cba"
+    },
+    {
+      "path": "packages/eval-runner/src/fixtures/artifact-viewer.ts",
+      "sha256": "d205534174ec08129163377e1195cf6946b650dfc9a34490c9b9401692d68d5d"
+    },
+    {
+      "path": "packages/eval-runner/src/fixtures/task-system.ts",
+      "sha256": "4ab0c846d58d673a63c8c476c009946f6b78eca275c3f38009ef5280a5b68051"
+    },
+    {
+      "path": "packages/eval-runner/src/index.ts",
+      "sha256": "c2de27e08c0992f445dc5ba13570ae3e909bfb770a3218ab038115d8adaa0b49"
+    },
+    {
+      "path": "packages/graph-client/src/action-declarations.ts",
+      "sha256": "1a9181b6eb8a62e07c4e61789aa48712272ea9eb4bb9d656ea3db71ec3c4ffb6"
+    },
+    {
+      "path": "packages/graph-client/src/client.ts",
+      "sha256": "09a4c9fce73db74da0c4de447e8b19b9c5c9704d2311a0df1cfde951daa9fbcf"
+    },
+    {
+      "path": "packages/graph-client/src/detail.ts",
+      "sha256": "b38d4b6b331d2ddbb6d98e39ef466a48c118bf4df6ab56fc48be6fa511b9a942"
+    },
+    {
+      "path": "packages/graph-client/src/objects.ts",
+      "sha256": "f5f09a875c10f5769557e2c5763a0c570de74edca47063238a1970352321d5bd"
+    },
+    {
+      "path": "packages/graph-client/src/scoped-authoring.ts",
+      "sha256": "35234ac4b3d81f70c0f509206443d1e899885b094b0a5bc7d0cf43f333e7167c"
+    },
+    {
+      "path": "packages/graph-client/src/types.ts",
+      "sha256": "c6e274b8d82ab8e90d4d559bebfd82a814183b0c12dd801a9f35bdfa31f5d6c9"
+    },
+    {
+      "path": "packages/graph-client/test/artifacts.test.ts",
+      "sha256": "bf9676c2491fd7fac0cd443b4b0c16e8cfe6beeee080c1c965052ee7ada0b45a"
+    },
+    {
+      "path": "packages/graph-client/test/detail.test.ts",
+      "sha256": "a7ef22802c44ed81125fb1dcb8f2213df874fa37a67195b98d1c123affe396a8"
+    },
+    {
+      "path": "packages/graph-client/test/input-declarations.test.ts",
+      "sha256": "61407d3e1ec1850ab9d9521d394e75347c9ff5ca8b7541f9d013489fe63d544b"
+    },
+    {
+      "path": "packages/graph-client/test/objects.test.ts",
+      "sha256": "d186780ad133995f757ea09436e79920d7060cb5d69abadfc58446e016b2c156"
+    },
+    {
+      "path": "packages/graph-client/test/scoped-authoring.test.ts",
+      "sha256": "617a1f2a253349af985570bb7ca9fccfb7e1742810a375a04fa734109af46148"
+    },
+    {
+      "path": "packages/harness-host/src/artifact-files.ts",
+      "sha256": "2c2f8566b44c54342234443d44a01eaffce02106fa6bc967a70a9412650638c5"
+    },
+    {
+      "path": "packages/harness-host/src/artifact-notes.ts",
+      "sha256": "b2ada438b607c91e004c1a53ffa66b4e2d0b6d9c3b8107791d489336da3ffdb3"
+    },
+    {
+      "path": "packages/harness-host/src/completion-contract.ts",
+      "sha256": "6f1236b9055110c804f227642a4aa9eea5516eb20241760f94ab35ec08a5356d"
+    },
+    {
+      "path": "packages/harness-host/src/host.ts",
+      "sha256": "c5c9b1926caa17a4c33367428f63e09970ecb9a1aed5a1e746c1e54d023c6e27"
+    },
+    {
+      "path": "packages/harness-host/src/implementations/artifact-layer-guidance.ts",
+      "sha256": "b7bb6dc1a809259523544b648b1ce2ee7d0e20884b0e9fd05df77dac0e91e7e3"
+    },
+    {
+      "path": "packages/harness-host/src/implementations/codex-basic.ts",
+      "sha256": "5849c1a54fdc0805d5b4751c47eb184f3ac7646e990f6979ffcbc65d3c8c2c0c"
+    },
+    {
+      "path": "packages/harness-host/src/implementations/prime-agent.ts",
+      "sha256": "3939426319e972b2688e95f863ce8a6e7392c9aea2c63d188ba3a5d71c0dc817"
+    },
+    {
+      "path": "packages/harness-host/src/implementations/prime-visual-authoring.ts",
+      "sha256": "3dad8b56fe5be0e219f699a754aa233be1e18f8df612d84f997f3885f5cee170"
+    },
+    {
+      "path": "packages/harness-host/src/index.ts",
+      "sha256": "5f53ed0460c597d395f13ce5bdd8c9d75a44734787d5e25d4901fc2e7e43a82e"
+    },
+    {
+      "path": "packages/harness-host/src/interaction-input.ts",
+      "sha256": "81be5290fe4a99c3c4f70e5b4f529edc07dbc7b88c54b50e8bb360991b8da871"
+    },
+    {
+      "path": "packages/harness-host/src/types.ts",
+      "sha256": "22ff99dde0a2d616ac87f2eead800ac6610b496cc6ec7b65514d2bebd72d3c35"
+    },
+    {
+      "path": "packages/harness-host/test/artifact-files.test.ts",
+      "sha256": "e5f08743939de04fa3e7e4d7eedc325087c5b400042878a1ccba2cef4e2303be"
+    },
+    {
+      "path": "packages/harness-host/test/artifact-layer-guidance.test.ts",
+      "sha256": "a468057c494f2f58deda2b5e62af61173e55e663e789dd9a1109f329bd9a9d33"
+    },
+    {
+      "path": "packages/harness-host/test/artifact-notes.test.ts",
+      "sha256": "c0690f7a2a9e0e9e791c1f5bacb859afed50b2c0bcbc83750d34fc32512a7264"
+    },
+    {
+      "path": "packages/harness-host/test/claude-basic.test.ts",
+      "sha256": "f01e2cd0b83070be691fd108fc377e4f77213e9528bd448f40dc9d2df415743d"
+    },
+    {
+      "path": "packages/harness-host/test/codex-basic.test.ts",
+      "sha256": "d2c9dc7aa33aa8a17ef316718a65ab02843ed81cf0048fa8b5593160e6328fe8"
+    },
+    {
+      "path": "packages/harness-host/test/completion-contract.test.ts",
+      "sha256": "a951cab943e628661809e547569b1ab39003720ef5b1a0665c7432e56afc622e"
+    },
+    {
+      "path": "packages/harness-host/test/configuration.test.ts",
+      "sha256": "22abb259dd291db91418c72d27d3da639fd19f572ebc5d6a38ad4af5d5f8d544"
+    },
+    {
+      "path": "packages/harness-host/test/draft-preview-bridge.test.ts",
+      "sha256": "d20b3f5ff0dffd6e0cc2bafb0d196c1fd936bf5c20199e22a60cf8e9525cbb7c"
+    },
+    {
+      "path": "packages/harness-host/test/host.test.ts",
+      "sha256": "8e1413f0063b35c977f13aa267d45fa457a8d16dd14ec4aecac98c052a934de4"
+    },
+    {
+      "path": "packages/harness-host/test/interaction-input.test.ts",
+      "sha256": "50d2e8dd0a2f9d0feea6e072ed2bd0cf64a036b2d54c6dc0a7d22d81a5534a33"
+    },
+    {
+      "path": "packages/harness-host/test/prime-agent.test.ts",
+      "sha256": "564fe05bf7e2d0f8547d4fc08845ae465ae92ec0f6265c121c5597b32ecf259b"
+    },
+    {
+      "path": "packages/harness-host/test/prime-visual-authoring.test.ts",
+      "sha256": "c1b5e798c665ffb442c31d2ea6cc221022d8c1b6bef460d77ed8f77366633a85"
+    },
+    {
+      "path": "python/relayer-graph/README.md",
+      "sha256": "21b80157df27c6ab2519d73a1bcf2d2f719a8aecba24007c4aa655f11d455fc9"
+    },
+    {
+      "path": "python/relayer-graph/SKILL.md",
+      "sha256": "8e8caf06f40abaa3917357085b87bcf1e1f201357c5093e5aa9373789a6e2667"
+    },
+    {
+      "path": "python/relayer-graph/src/relayer_graph/__init__.py",
+      "sha256": "d9ebb93366b29a91b9c0f082d64fceb7866e2a3dda9a47688cc158da17f87eee"
+    },
+    {
+      "path": "python/relayer-graph/src/relayer_graph/actions.py",
+      "sha256": "3a72b84f4d3c7d49d182eae3015d2110127ea5d9ffc3107207ec649ea0ddd083"
+    },
+    {
+      "path": "python/relayer-graph/src/relayer_graph/authoring.py",
+      "sha256": "da886976ce75b03648f12ee2825c529a1d39f1a42679688d4e438847ad6a0c59"
+    },
+    {
+      "path": "python/relayer-graph/src/relayer_graph/scoped_authoring.py",
+      "sha256": "ca86eabf0c4f6dad5de5c2cb172036624deac82947b914986eaf883d27b66205"
+    },
+    {
+      "path": "python/relayer-graph/src/relayer_graph/session.py",
+      "sha256": "25c5b13f9677c4d07f3d65ceb14cb5226bd3931ee28caf439e5f7b0da04308e6"
+    },
+    {
+      "path": "python/relayer-graph/tests/test_artifacts.py",
+      "sha256": "3ab450ef30c2e4ec1990ec943d4ccaedef3dfecef3c78ce3e5fbb673a7bfafb5"
+    },
+    {
+      "path": "python/relayer-graph/tests/test_authoring.py",
+      "sha256": "923d12a4fdd67504ac21f182593b97ec3ff54de99fcc5b36df41e901de802454"
+    },
+    {
+      "path": "python/relayer-graph/tests/test_input_declarations.py",
+      "sha256": "3dece5aed969d24918b1126aed698786944d0233e819e0aa4eba7ccdafb0cf3f"
+    },
+    {
+      "path": "python/relayer-graph/tests/test_scoped_authoring.py",
+      "sha256": "fa9a0ac9489733a7a25114eeca3774ef2a3e1b56ba02f50f78b7ea3e43bf80eb"
+    },
+    {
+      "path": "python/relayer-graph/tests/test_visual_authoring.py",
+      "sha256": "ac25a1130281a410fe72b030743a25c17660c509f25328e09fa12672134a572b"
+    },
+    {
+      "path": "scripts/artifact-viewer-video.mjs",
+      "sha256": "e84b2b6dba0234286f0fc031c7a984987861f2afded9be989dc29080b08789be"
+    },
+    {
+      "path": "scripts/build-public-share-viewer-artifact.mjs",
+      "sha256": "b3ac24cc3174519b0716ab96d8610cc2276554fc7d7f5af26a7a7278cc4cdeb5"
+    },
+    {
+      "path": "scripts/fixtures/completion-contract-harness.mjs",
+      "sha256": "2c1bf6ed7531a8c50af1734df27262ecdabc9c2b6bb222bcda4838c4ed3dec79"
+    },
+    {
+      "path": "scripts/run-completion-contract-human-gate.mjs",
+      "sha256": "d6d5cf80062ebfa744ab078210a4396b86d3fa6a79a8dc710326662801f34780"
+    },
+    {
+      "path": "scripts/run-invoke-behavior-live.mjs",
+      "sha256": "d21516678309b707059d4346d4846b51ca956776c055105640ff76145465a42d"
+    },
+    {
+      "path": "scripts/test-desktop-artifact-viewer.mjs",
+      "sha256": "2dcfe1280f2bb04731e8bd24c2420f9de0dfa90fe07b4926c29b312b48f7622f"
+    },
+    {
+      "path": "scripts/test-desktop-first-message.mjs",
+      "sha256": "d1e1bb44611025907015601c9e6ee30943271cdfdff25d1e86ca1da007391c8f"
+    },
+    {
+      "path": "scripts/test-desktop-node-input-actions.mjs",
+      "sha256": "e63fc999fc865e67d27a8ff0c123911ce1b95d12fb5dc0352e24a04de645e34d"
+    },
+    {
+      "path": "test/action-invocation-state.test.mjs",
+      "sha256": "ac1164b2587c01eef8e3f46c305b0f01a2fe5955d8df6dd6d45764702c619902"
+    },
+    {
+      "path": "test/artifact-server.test.mjs",
+      "sha256": "e4b9c3166e4554b351903953fa144a0bd7f8c217a733128a54ba6576c2009e41"
+    },
+    {
+      "path": "test/artifact-viewer-main.test.mjs",
+      "sha256": "a1f8e836c52bb33e90aa747057b9e985f12e96c39a0929d943860d377d0e9c29"
+    },
+    {
+      "path": "test/artifact-viewer-renderer.test.mjs",
+      "sha256": "fc54e3ff9a4cb79c0e5f65364c8157e9a47c2c20b312ac4be3f46beef5500a08"
+    },
+    {
+      "path": "test/attached-portability-e2e.test.mjs",
+      "sha256": "ef0b1b84e797f0f28c6b262ec90404bfc393befe957017ce393dd4ce6f6f868b"
+    },
+    {
+      "path": "test/conversation-export-eval-e2e.test.mjs",
+      "sha256": "d0d5445b249200f531fe981d9f43403a5d941a18755bb0af77b857a15a89390a"
+    },
+    {
+      "path": "test/eval-recursive-graph-memory.test.mjs",
+      "sha256": "fcb4e3d636de696de7bb78fed7354147bf4dfa955fcbfca7d28332bd764d3143"
+    },
+    {
+      "path": "test/first-message-composer-integration.test.mjs",
+      "sha256": "14f5501c119ed8bffa1bc7be88b3c6ba925bca55a017c0f571fbc05205ebfe0f"
+    },
+    {
+      "path": "test/fixtures/artifact-viewer/thread-folder/app/server.mjs",
+      "sha256": "cc1588e53220cd2e225b7040b028b3aea57430fc7ac8813586594b4f7bbf6a09"
+    },
+    {
+      "path": "test/fixtures/artifact-viewer/thread-folder/brand/hero.png",
+      "sha256": "e68b6a44748e5a4e335992c948286ec79d1c5651af2c90969e66f57192646b29"
+    },
+    {
+      "path": "test/fixtures/artifact-viewer/thread-folder/docs/brand-guide.md",
+      "sha256": "173b29828026dc721f54b4e2d80d41c87c2359165ca2800ea3d53fa5975c7d5f"
+    },
+    {
+      "path": "test/fixtures/artifact-viewer/thread-folder/docs/investor-brief.pdf",
+      "sha256": "71a37da9dcdae9b94d5d2570d80d7eb327e279b34bc5fb2d1f708b3d1267fa5a"
+    },
+    {
+      "path": "test/fixtures/artifact-viewer/thread-folder/media/promo.mp4",
+      "sha256": "b12afd1d9283f36e4259e152ef16636bb9e99658e4cf611ac8cd04c30e2a2917"
+    },
+    {
+      "path": "test/fixtures/artifact-viewer/thread-folder/media/promo.webm",
+      "sha256": "35b77436ece02367b0cad0a662d96b94a0e2a0efdcd5dec26a89fd8f71e31155"
+    },
+    {
+      "path": "test/fixtures/artifact-viewer/thread-folder/site-broken/index.html",
+      "sha256": "beb97f93bad5ae76f3849d90880f824c30ca281e0f875d34f6fda4b36ba06213"
+    },
+    {
+      "path": "test/fixtures/artifact-viewer/thread-folder/site/app.js",
+      "sha256": "6a4eeada4bd387f10473b0b484abaf072873484e6725afb019ec45b70bf44bbd"
+    },
+    {
+      "path": "test/fixtures/artifact-viewer/thread-folder/site/index.html",
+      "sha256": "5ceacc0043d7217a2a1e93f5977bd4a80e0245eb3a55262f52a1f6d036f92c50"
+    },
+    {
+      "path": "test/fixtures/artifact-viewer/thread-folder/site/logo.svg",
+      "sha256": "c143d72d3c458e7cd7551bcab2595bed6eccdfc923b8172b0d7bc7b6aa30b505"
+    },
+    {
+      "path": "test/fixtures/artifact-viewer/thread-folder/site/styles.css",
+      "sha256": "e74c81812349277215275f561b13055e0ca185d33e3138a9c17f24b2825c45d2"
+    },
+    {
+      "path": "test/implicit-input-send.test.mjs",
+      "sha256": "bc30c38dfc247fe93297097994b782bd6b7b2cfacaaafc010342b9575b9cefe7"
+    },
+    {
+      "path": "test/invoke-input-bindings.test.mjs",
+      "sha256": "29219f7f39c5415dd5f3a18984276e89a56166909ffd3876d5d81dbf2fc54aca"
+    },
+    {
+      "path": "test/invoke-input-product-integration.test.mjs",
+      "sha256": "bfbdd1ab5bc02ba411c9288eba1d275bcc0b72532ae77225ef0a6e3464db0e93"
+    },
+    {
+      "path": "test/node-detail-runtime.test.mjs",
+      "sha256": "7ba05578535e2af924a514fbced04af051adad4bc3d86d4efb377a14d717d4cd"
+    },
+    {
+      "path": "test/node-input-controls.test.mjs",
+      "sha256": "39f07bee739a1dd4d5aa521775cfbfa61b223c2a38a2fa8e580cd57ed0822505"
+    },
+    {
+      "path": "test/onboarding-tutorial-controller.test.mjs",
+      "sha256": "c12068ba92b6ece4543456c95c4405d5f840420f2a49dd75163c24e6f406dd30"
+    },
+    {
+      "path": "test/public-share-viewer-artifact.test.mjs",
+      "sha256": "1c1cfa5ed23c26f3b06f376f4f1d5ead7c4df252489a15cd8db30062871a5dac"
+    },
+    {
+      "path": "test/public-share-viewer.test.mjs",
+      "sha256": "fdd83f3656654dc909fe6f652b0329e2276873c3beaf36a85cdce14e27d50e08"
+    },
+    {
+      "path": "test/recursive-complete-fixture-abort.test.mjs",
+      "sha256": "7200c7996acdefd4fdff57aa604f43a2f27365f3976e8872e0a04ef923172271"
+    },
+    {
+      "path": "test/share-publish-coordinator.test.mjs",
+      "sha256": "51b1eed88e3144dbbcbad8107328d02a8d697fc1388167d8db496d30672323b1"
+    },
+    {
+      "path": "test/support/historical-invoke-policy.mjs",
+      "sha256": "2c52039eccd7575900072c151997ae20df6561f81fde0660086a3da78249f104"
+    },
+    {
+      "path": "test/support/lantern-2x2-fixture.mjs",
+      "sha256": "c0b66c45b5790247339a3ea4d0255be29d447fa2be9dd1784680bbba332dc2a4"
+    },
+    {
+      "path": "test/support/recursive-complete-fixture.mjs",
+      "sha256": "a6b6b15bc66d918abd2ca53f73d60a443dad08d8352e798b0e8bfec251f4ae6b"
+    },
+    {
+      "path": "test/support/stop-run-fixture.mjs",
+      "sha256": "005977a639328831d09ccc17d791cd6000cd2cd809efefa372d3d357764ce413"
+    },
+    {
+      "path": "test/workspace-navigation-integration.test.mjs",
+      "sha256": "c95574d485b2ad0b465dde06b6529211e872390f15b0ad0e9f9f349038b577b8"
+    },
+    {
+      "path": "test/workspace-navigation.test.mjs",
+      "sha256": "6b1355c0392b9c5b3062aeac7df598d02603cce5699efd95017d2d1b9a39f872"
+    },
+    {
+      "path": "vendor/prime-agent/manifest.json",
+      "sha256": "abc50b5bce0b0c587d2f52f40ad2297f27c54370e7fea66a09b224e2407663ca"
+    }
+  ],
+  "status": "local qualification passed for exact source manifest; current-head hosted CI required",
+  "requiredPlan": [
+    "npm run check",
+    "npm run build",
+    "desktop first-message navigation-only",
+    "desktop interaction-context",
+    "desktop node-input actions",
+    "compiled Eval",
+    "desktop artifact-viewer P1/P2",
+    "annotation and multiple-input native recordings",
+    "three adversarial reviews"
+  ],
+  "results": [
+    {
+      "command": "npm run check",
+      "exitCode": 0,
+      "javascriptTestsPassed": 3946,
+      "javascriptTestsSkipped": 3,
+      "javascriptFilesPassed": 313,
+      "javascriptFilesSkipped": 1,
+      "secretBoundaryTestsPassed": 2,
+      "pythonTestsPassed": 90,
+      "native": "workspace plus crash/reopen portfolios passed",
+      "log": "/private/tmp/interactive-inputs-main-merge-check-2.log",
+      "logSha256": "d792db54b72f939ffaeedba355e8da2978645ae62d1e504445b9df3d2693f1c8",
+      "committedLog": "v1/main-merge/interactive-inputs-main-merge-check-2.log.gz"
+    },
+    {
+      "command": "npm run build",
+      "exitCode": 0,
+      "log": "/private/tmp/interactive-inputs-main-merge-build-3.log",
+      "logSha256": "a4d524cb0cb11f4eb6d99fb7a1f122bbd7f05a3043fabd6287b41bb61d140d89",
+      "committedLog": "v1/main-merge/interactive-inputs-main-merge-build-3.log.gz"
+    },
+    {
+      "command": "RELAYER_INVOKE_EVIDENCE_SKIP_NATIVE_KEYBOARD=1 electron scripts/test-desktop-first-message.mjs",
+      "exitCode": 0,
+      "log": "/private/tmp/interactive-inputs-main-merge-first-message.log",
+      "logSha256": "f2d7ca5960f8e5ab298cb652bb20aa4d08d194842a43931be3bb2aa3f702208d",
+      "innerReceipt": "RELAYER_FIRST_MESSAGE_SMOKE passed:true",
+      "nativeKeyboardVerified": false,
+      "committedLog": "v1/main-merge/interactive-inputs-main-merge-first-message.log.gz"
+    },
+    {
+      "command": "node scripts/run-interaction-context-lifecycle-test.mjs",
+      "exitCode": 0,
+      "log": "/private/tmp/interactive-inputs-main-merge-context.log",
+      "logSha256": "c8e480efa9101d98d27bbd442a802f3358cf6bdf01cf8f9e64eb5f5d23b8305c",
+      "innerReceipt": "Interaction-context lifecycle smoke passed",
+      "inferenceCalls": 0,
+      "committedLog": "v1/main-merge/interactive-inputs-main-merge-context.log.gz"
+    },
+    {
+      "command": "node scripts/run-node-input-actions-test.mjs",
+      "exitCode": 0,
+      "log": "/private/tmp/interactive-inputs-main-merge-node-input.log",
+      "logSha256": "7d5fdf924d05dfea2108eebc2c844338f1c8384a5ec458bc2f7eb1fe2864fc54",
+      "innerReceipt": "Node-input Electron proof passed; wrapper checks passed:true",
+      "inferenceCalls": 0,
+      "committedLog": "v1/main-merge/interactive-inputs-main-merge-node-input.log.gz"
+    },
+    {
+      "command": "npm run test:eval-compiled-runtime",
+      "exitCode": 0,
+      "log": "/private/tmp/interactive-inputs-main-merge-compiled-eval.log",
+      "logSha256": "e144ed68cb6606f805359b9749a4afca77bc55b4938c985526a75aa0d3d92217",
+      "testsPassed": 4,
+      "committedLog": "v1/main-merge/interactive-inputs-main-merge-compiled-eval.log.gz"
+    },
+    {
+      "command": "RELAYER_ARTIFACT_EVIDENCE_DIR=/private/tmp/interactive-inputs-main-merge-artifact-evidence electron scripts/test-desktop-artifact-viewer.mjs",
+      "exitCode": 0,
+      "checkpointsPassed": 40,
+      "checkpointsFailed": 0,
+      "sealedAnnotationPreserved": true,
+      "advisoryScreenshotPngAndSha256Verified": true,
+      "log": "/private/tmp/interactive-inputs-main-merge-artifact-desktop.log",
+      "logSha256": "39e49c408d10ec2320b45df13e655d8ba867b9555cf063ebf88fbbb150b29624",
+      "committedLog": "v1/main-merge/interactive-inputs-main-merge-artifact-desktop.log.gz"
+    },
+    {
+      "command": "electron scripts/run-completion-contract-human-gate.mjs --record",
+      "manifest": "v1/main-merge/annotation-manifest.json",
+      "status": "mechanical journey passed; saved native human review pending",
+      "frames": 63,
+      "acceptedInteractionIds": [
+        1,
+        2,
+        3,
+        4
+      ],
+      "binaryHashesMatchFinalBuild": true,
+      "processExitCode": 1,
+      "processExitContext": "After HUMAN_GATE_READY and immutable media manifest saved, the interactive capture app was explicitly closed with Ctrl-C. This shutdown exit is not claimed as a passing outer test."
+    },
+    {
+      "command": "electron scripts/run-completion-contract-human-gate.mjs --multiple --record",
+      "exitCode": 0,
+      "manifest": "v1/main-merge/multiple-inputs-manifest.json",
+      "status": "mechanical journey passed; saved native human review pending",
+      "frames": 65,
+      "acceptedInteractionIds": [
+        1,
+        2,
+        3,
+        4
+      ],
+      "binaryHashesMatchFinalBuild": true
+    }
+  ],
+  "preservedFailures": [
+    "Fullcheck1 failed local fixture socket binds with Operation not permitted; fullcheck2 required fixture access and passed without changing those assertions.",
+    "Build1 attempted during unfinished conflict and failed at diff marker; build2/build3 passed.",
+    "Initial main-added artifact helper lacked new ActionDraft fields; extended fixture fixed.",
+    "Main artifact orphan-draft scenario was incompatible with explicit sealed prospectiveReturn; strengthened fixture observes Advance refusal, discard, exact selected publication and retained unrelated draft.",
+    "Earlier sandboxed Python scoped suite local HTTP setup failed; approved actual fixture suite passed63."
+  ],
+  "unknowns": [
+    "Native keyboard focus unavailable; navigation-only mode does not certify keyboard focus.",
+    "One earlier node-input operator page had a blank body. Instrumented final unchanged assertions passed; cause remains unknown.",
+    "Earlier fixture graph.submit visual_assets_unavailable503 disappeared in a later changed-source runner; causal explanation remains unknown.",
+    "Missing fixture IPC handlers and known inline-style CSP console warnings remain; absence is not claimed.",
+    "Hosted V4, paid model behavior, installer/release qualification and durable-execution retries are outside this qualification."
+  ],
+  "inferenceCalls": 0,
+  "reviews": [
+    "review-authority-main-merge-2026-10-07.json",
+    "review-contract-main-merge-2026-10-07.json",
+    "review-ui-main-merge-2026-10-07.json"
+  ],
+  "binaries": {
+    "relayer-app-server": "68362f32e9a18d5fe54c4eefc50de660876e8686a873bcd381955c25d17b49e3",
+    "relayer-graph-server": "cf47cbe36bdb487eecb5de30ca2aa5ad94dae07bf37b3cc7e3c104bfebe39834"
+  }
+}

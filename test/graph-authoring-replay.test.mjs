@@ -491,7 +491,7 @@ describe("replay-safe graph authoring", () => {
         let beforeReplay;
         let acceptedBeforeReplay;
         if (replay) {
-          await expect(runRecipeProcess("python3", ["-c", program.replace('    # Advance leaves', '    raise RuntimeError("injected after publication")\n    # Advance leaves')], undefined, pythonEnvironment)).rejects.toThrow("injected after publication");
+          await expect(runRecipeProcess("python3", ["-c", later ? program.replace('    final_author =', '    raise RuntimeError("injected after publication")\n    final_author =') : program.replace('    # Advance leaves', '    raise RuntimeError("injected after publication")\n    # Advance leaves')], undefined, pythonEnvironment)).rejects.toThrow("injected after publication");
           firstPublication = await controlRead(baselineServer.url, token, `/api/control/interactions/${capability.nodeId}/current`);
           firstLayer = await controlRead(baselineServer.url, token, `/api/control/interactions/${capability.nodeId}/layers/${firstPublication.currentLayerId}`);
           if (later) {

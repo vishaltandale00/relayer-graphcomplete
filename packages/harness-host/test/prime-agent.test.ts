@@ -747,21 +747,25 @@ describe("PrimeAgentHarness", () => {
     expect(prompts[0]!.text).toContain("Advancing current does not complete the interaction");
     // Only the run the product granted a broker is taught explicit semantic child work.
     expect(prompts[0]!.text).toContain("For explicit semantic child work");
-    expect(prompts[0]!.text).toContain("input_graph = await graph.prepare_complete(invoke_action)");
+    expect(prompts[0]!.text).toContain('input_graph = await graph.prepare_complete(invoke_action, "stable-call-key")');
+    expect(prompts[0]!.text).toContain("reusable defaults to False");
+    expect(prompts[0]!.text).toContain("Set reusable=True only for an explicit repeat-use case");
+    expect(prompts[0]!.text).toContain("Before launching or waiting for this child");
+    expect(prompts[0]!.text).toContain("Advance your enclosing source Layer");
     expect(prompts[0]!.text).toContain("from relayer_graph import complete");
     expect(prompts[0]!.text).toContain("do not create semantic children by themselves");
-    // A root that ends its turn with children in flight fails, so it must await them first.
-    expect(prompts[0]!.text).toContain("Your turn ending does not wait for children");
+    // Returning the parent's full response leaves independent child execution intact.
+    expect(prompts[0]!.text).toContain("Returning the parent does not stop the children");
     // Each child event is one the root may act on; it moves its own current only when that helps the user.
     expect(prompts[0]!.text).toContain("from relayer_graph import complete, CompletionWatch");
     expect(prompts[0]!.text).toContain("changes = await watch.changes()");
     // The watch takes the list the recipe fills, so the recipe must declare it.
     expect(prompts[0]!.text).toContain("Start with children = [] and launch each child from its own input graph with children.append(complete(input_graph))");
-    // One prepared input graph identifies one completion, so each child needs its own invoke action.
-    expect(prompts[0]!.text).toContain("give each child its own invoke action");
-    expect(prompts[0]!.text).toContain("one input graph starts exactly one child");
-    expect(prompts[0]!.text).toContain("Only then submit a layer that presents the work itself and advance your current to it; otherwise keep waiting.");
-    expect(prompts[0]!.text).toContain("never leave them in a background task");
+    // Reusable actions distinguish calls through durable Invocation keys.
+    expect(prompts[0]!.text).toContain("another key creates an independent Invocation");
+    expect(prompts[0]!.text).toContain("One input graph starts exactly one child");
+    expect(prompts[0]!.text).toContain("Only then submit a later improved layer that presents the work itself and advance your current to it; otherwise keep waiting.");
+    expect(prompts[0]!.text).toContain("Returning the parent does not stop the children");
     // A stopped or failed child raises from child.result, so the root must catch it to integrate the rest.
     expect(prompts[0]!.text).toContain("A stopped or failed child raises CompletionTerminalError there instead");
     expect(prompts[0]!.text).toContain("catch it and integrate the work its error.current still retains");
@@ -1921,7 +1925,7 @@ describe("PrimeAgentHarness", () => {
     expect(prompt).toContain("await graph.get_neighbors(11)");
     expect(prompt).toContain("ordinary graph.submit(11) automatically fulfills any lease");
     expect(prompt).toContain("There is no separate resolve_action call");
-    expect(prompt).toContain("input_graph = await graph.prepare_complete(invoke_action)");
+    expect(prompt).toContain('input_graph = await graph.prepare_complete(invoke_action, "stable-call-key")');
     expect(prompt).toContain("Never mention or expose the size justification");
     expect(prompt).toContain("Every new root, expansion, and reference layer requires a version-1 LayerLayoutObject");
     expect(prompt).toContain("align comparisons deliberately");

@@ -222,6 +222,11 @@ export function bootPublicViewer({
         if (changed) render();
         return changed;
       },
+      onNavigateInvocationCurrent: async call => {
+        const changed = await adapter.navigateInvocationCurrent(call);
+        if (changed) render();
+        return changed;
+      },
       onInvokeAction: adapter.onInvokeAction,
       resolveNodeDetailAsset: (asset) => snapshot.resolveNodeDetailAsset(asset),
       onDecideApproval: async () => false,

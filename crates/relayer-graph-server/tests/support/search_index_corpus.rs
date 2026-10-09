@@ -181,6 +181,8 @@ pub async fn prepare_case(
                 description: None,
                 target_layer_id: Some(layers[layer_index + 1].id),
                 interaction_text: None,
+                reusable: None,
+                input_action_ids: Vec::new(),
                 input: None,
             })
             .await?;
@@ -198,6 +200,8 @@ pub async fn prepare_case(
             description: None,
             target_layer_id: Some(layers[0].id),
             interaction_text: None,
+            reusable: None,
+            input_action_ids: Vec::new(),
             input: None,
         })
         .await?;

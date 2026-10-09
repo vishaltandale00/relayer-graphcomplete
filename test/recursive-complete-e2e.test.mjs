@@ -271,7 +271,7 @@ describe("recursive complete end to end", () => {
             expect(observed.authoringStarted).toBeUndefined();
           }
           if (replay) {
-            await expect(execute(program.replace('// Advance leaves', 'throw new Error("injected after publication"); // Advance leaves'))).rejects.toThrow("injected after publication");
+            await expect(execute(later ? program.replace('const finalAuthor =', 'throw new Error("injected after publication"); const finalAuthor =') : program.replace('// Advance leaves', 'throw new Error("injected after publication"); // Advance leaves'))).rejects.toThrow("injected after publication");
             if (later) {
               const graph = RelayerGraphClient.fromEnv(environment);
               const author = graph.authoring("additional-finding");
