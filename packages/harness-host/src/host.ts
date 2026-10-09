@@ -185,6 +185,7 @@ const HARNESS_CLOSE_SESSION_TIMEOUT_MS = 5_000;
 export const CANCELLED_TURN_FORCE_STOP_MS = 2 * 60_000;
 /** How long the host waits for a force-stopped turn to settle before releasing its access. */
 export const FORCE_STOPPED_TURN_SETTLE_MS = 10_000;
+const UNOBSERVED_CHILD_APPROVAL_RATIONALE = "No product interaction records this child, so nobody can review its approval request.";
 const FORCE_STOPPED_TURN_MESSAGE = "The turn did not stop within two minutes of cancellation, so it was force-stopped.";
 
 export type HarnessEffectBoundary = "none" | "partial_output" | "graph_write" | "tool_effect" | "unknown";
@@ -896,7 +897,13 @@ export class HarnessHost {
     forceController.signal.addEventListener("abort", recordForcedState, { once: true });
     const detachSignal = forwardAbort(input.signal, controller);
     const completeCallId = randomUUID();
-    const approvals = session.approvals.beginCompletion({ interactionId, completeCallId });
+    // Approvals are keyed by product interaction, the stream its product observer reads. A
+    // root's interactionId is one; an agent's child carries its own product row in the trace
+    // context. A child the product never recorded has no observer, so its requests end at once.
+    const approvalInteractionId = input.origin.kind === "root" ? interactionId : input.traceContext?.productInteractionId;
+    const approvals = approvalInteractionId === undefined
+      ? session.approvals.beginUnobservedCompletion({ interactionId, completeCallId }, UNOBSERVED_CHILD_APPROVAL_RATIONALE)
+      : session.approvals.beginCompletion({ interactionId: approvalInteractionId, completeCallId });
     session.activeCompletions.set(capability.nodeId, { completeCallId, interactionId, controller });
     if (input.origin.kind === "root" && input.traceContext?.nativeSession !== "fresh") {
       session.activeHumanRootCompletionId = capability.nodeId;

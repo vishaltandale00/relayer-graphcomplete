@@ -269,6 +269,33 @@ describe("HarnessApprovalCoordinator", () => {
     expect(() => coordinator.snapshot(0)).toThrowError(expect.objectContaining({ code: "invalid_approval_request" }));
   });
 
+  it("ends an unobserved completion's requests at once without touching any stream", async () => {
+    const coordinator = coordinatorFixture();
+    const observed = coordinator.beginCompletion({ interactionId: 17, completeCallId: "complete-1" });
+    const waiting = observed.request(commandRequest("provider-1"));
+    // An unrecorded child keyed by a graph node id equal to product interaction 17.
+    const unobserved = coordinator.beginUnobservedCompletion(
+      { interactionId: 17, completeCallId: "complete-child" },
+      "Nobody can review this request.",
+    );
+    await expect(unobserved.request(commandRequest("provider-child"))).rejects.toMatchObject({
+      name: "HarnessApprovalRequestTerminatedError",
+      resolution: {
+        outcome: "aborted",
+        actor: "host",
+        rationale: "Nobody can review this request.",
+        correlation: { completeCallId: "complete-child" },
+      },
+    });
+    expect(coordinator.snapshot(17)).toMatchObject({
+      latestSequence: 1,
+      pendingRequests: [{ correlation: { completeCallId: "complete-1" } }],
+    });
+    coordinator.endCompletion("complete-child");
+    coordinator.endCompletion("complete-1");
+    await expect(waiting).rejects.toMatchObject({ resolution: { outcome: "aborted" } });
+  });
+
   it("starts a new attempt of an interaction from an empty stream", async () => {
     const coordinator = coordinatorFixture();
     const earlier = coordinator.beginCompletion({ interactionId: 17, completeCallId: "complete-1" });

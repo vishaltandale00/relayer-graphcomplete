@@ -100,6 +100,55 @@ struct HarnessControl {
     /// Once armed, a cancellation waits for the replay to release it.
     cancel_gated: AtomicBool,
     cancel_gate: tokio::sync::Semaphore,
+    /// The (thread, product interaction) whose stream holds one approval request.
+    approval: Mutex<Option<(i64, i64)>>,
+    /// Whether the user's decision resolved that request.
+    approval_decided: AtomicBool,
+    /// Whether a cancel ended that request as aborted instead, as the host does.
+    approval_aborted: AtomicBool,
+    /// Whether the host dropped the stream: its run ended and every event was acknowledged.
+    approval_dropped: AtomicBool,
+}
+
+/// The one approval request the fake harness serves, and its resolution, for `owner`.
+fn fixture_approval(owner: (i64, i64), aborted: bool) -> (Value, Value) {
+    let correlation = serde_json::json!({
+        "threadId": owner.0,
+        "interactionId": owner.1,
+        "completeCallId": "complete-child",
+        "harnessSessionId": "session-1"
+    });
+    (
+        serde_json::json!({
+            "requestId": "request-child",
+            "correlation": correlation,
+            "title": "Run tests",
+            "reason": "The child needs to run tests.",
+            "action": { "kind": "command", "command": "npm test", "workingDirectory": "/workspace" },
+            "scopeKeys": ["command:npm test"],
+            "scopeDescription": "Run npm test in /workspace",
+            "createdAt": "2026-10-09T12:00:00Z"
+        }),
+        if aborted {
+            serde_json::json!({
+                "requestId": "request-child",
+                "correlation": correlation,
+                "outcome": "aborted",
+                "actor": "host",
+                "resolvedAt": "2026-10-09T12:01:00Z",
+                "rationale": "Harness completion cancelled."
+            })
+        } else {
+            serde_json::json!({
+                "requestId": "request-child",
+                "correlation": correlation,
+                "outcome": "approved",
+                "actor": "user",
+                "resolvedAt": "2026-10-09T12:01:00Z",
+                "decision": "approve_once"
+            })
+        },
+    )
 }
 
 /// Faults the graph server injects, set by a test.
@@ -397,7 +446,13 @@ impl World {
             completion_id: Mutex::new(0),
             cancel_gated: AtomicBool::new(false),
             cancel_gate: tokio::sync::Semaphore::new(0),
+            approval: Mutex::new(None),
+            approval_decided: AtomicBool::new(false),
+            approval_aborted: AtomicBool::new(false),
+            approval_dropped: AtomicBool::new(false),
         });
+        let events_control = harness_control.clone();
+        let decision_control = harness_control.clone();
         let start_control = harness_control.clone();
         let cancel_control = harness_control.clone();
         let admission_control = harness_control.clone();
@@ -405,6 +460,60 @@ impl World {
         let admission_pool = pool.clone();
         let observe_control = harness_control.clone();
         let harness = Router::new()
+            // Like the host: each product interaction reads only its own approval stream.
+            .route(
+                "/sessions/{id}/approval-events",
+                routing::get(
+                    move |axum::extract::Query(query): axum::extract::Query<HashMap<String, String>>| {
+                        let control = events_control.clone();
+                        async move {
+                            let polled = query.get("interactionId").and_then(|id| id.parse::<i64>().ok());
+                            let after = query.get("after").and_then(|after| after.parse::<u64>().ok()).unwrap_or(0);
+                            let owner = *control.approval.lock().unwrap();
+                            let dropped = control.approval_dropped.load(Ordering::SeqCst);
+                            let Some(owner) = owner.filter(|owner| Some(owner.1) == polled && !dropped) else {
+                                return axum::Json(serde_json::json!({
+                                    "harnessSessionId": "session-1",
+                                    "latestSequence": 0,
+                                    "pendingRequests": [],
+                                    "events": []
+                                }));
+                            };
+                            let aborted = control.approval_aborted.load(Ordering::SeqCst);
+                            let decided = control.approval_decided.load(Ordering::SeqCst) || aborted;
+                            // Like the host, an acknowledged stream whose run ended is dropped.
+                            if decided && after == 2 && *control.prov.lock().unwrap() != "running" {
+                                control.approval_dropped.store(true, Ordering::SeqCst);
+                            }
+                            let (request, resolution) = fixture_approval(owner, aborted);
+                            let mut events = Vec::new();
+                            if after < 1 {
+                                events.push(serde_json::json!({"sequence": 1, "type": "requested", "request": request}));
+                            }
+                            if decided && after < 2 {
+                                events.push(serde_json::json!({"sequence": 2, "type": "resolved", "resolution": resolution}));
+                            }
+                            axum::Json(serde_json::json!({
+                                "harnessSessionId": "session-1",
+                                "latestSequence": if decided { 2 } else { 1 },
+                                "pendingRequests": if decided { Vec::new() } else { vec![request] },
+                                "events": events
+                            }))
+                        }
+                    },
+                ),
+            )
+            .route(
+                "/sessions/{id}/approvals/{request_id}/decision",
+                routing::post(move || {
+                    let control = decision_control.clone();
+                    async move {
+                        control.approval_decided.store(true, Ordering::SeqCst);
+                        let owner = control.approval.lock().unwrap().expect("an approval was requested");
+                        axum::Json(fixture_approval(owner, false).1)
+                    }
+                }),
+            )
             // Like the host: a run it never registered is an error, a live run is
             // answered only when it ends, and an ended run answers at once.
             .route(
@@ -574,6 +683,12 @@ impl World {
                         let mut prov = control.prov.lock().unwrap();
                         if *prov == "running" {
                             *prov = "cancelled";
+                            // Like the host, ending a run aborts its pending approval.
+                            if control.approval.lock().unwrap().is_some()
+                                && !control.approval_decided.load(Ordering::SeqCst)
+                            {
+                                control.approval_aborted.store(true, Ordering::SeqCst);
+                            }
                         }
                         axum::Json(serde_json::json!({"cancelled":true}))
                     }
@@ -2441,6 +2556,142 @@ async fn a_running_child_does_not_hold_the_next_human_turn_and_product_stop_refu
         "not_started",
         "the child's settlement leaves the new turn alone"
     );
+    world.finish().await;
+}
+
+/// An agent's child has no execution observer, so its approval reaches the user through its
+/// own product row: the request is recorded there, and the product's decision resumes it.
+#[tokio::test]
+async fn a_childs_approval_is_recorded_on_its_own_row_and_its_decision_resumes_it() {
+    let world = World::new("child-approval", false).await;
+    let (broker, _lease) = world.broker();
+    *world.harness.start.lock().unwrap() = "ok";
+    *world.harness.approval.lock().unwrap() =
+        Some((world.thread.id.value(), world.child.id.value()));
+    let (status, _) = world
+        .launch(&broker)
+        .await
+        .unwrap_or_else(|error| panic!("launch: {}", error.message()));
+    assert_eq!(status, StatusCode::CREATED);
+
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while world.child_row().await.completion_status != "waiting_for_approval" {
+        assert!(
+            Instant::now() < deadline,
+            "the child's approval was never recorded"
+        );
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    let stored = world.product.get_approval("request-child").await.unwrap();
+    assert_eq!(
+        stored.request.correlation.interaction_id,
+        world.child.id.value()
+    );
+    assert!(stored.resolution.is_none());
+    let thread_activity = world
+        .product
+        .get_thread(world.thread.id)
+        .await
+        .unwrap()
+        .thread
+        .activity;
+    assert_eq!(thread_activity.as_deref(), Some("needs_approval"));
+
+    let mut control = HeaderMap::new();
+    control.insert(
+        header::COOKIE,
+        format!("{}=control", crate::api::CONTROL_COOKIE)
+            .parse()
+            .unwrap(),
+    );
+    let Json(decided) = decide_approval(
+        State(world.state.clone()),
+        control,
+        Path((
+            world.thread.id.value(),
+            world.child.id.value(),
+            "request-child".to_owned(),
+        )),
+        Json(crate::approval::ApprovalDecisionSubmission {
+            decision: crate::approval::ApprovalDecision::ApproveOnce,
+            rationale: None,
+        }),
+    )
+    .await
+    .unwrap_or_else(|error| panic!("decision: {}", error.message()));
+    assert!(decided.approval.resolution.is_some());
+    assert_eq!(world.child_row().await.completion_status, "running");
+
+    // The same child goes on and settles on its own current.
+    let mut world = world;
+    world
+        .apply(&[serde_json::json!("ChildReturn")], false)
+        .await;
+    let state = world.await_state(|state| state["phase"] == "settled").await;
+    assert_eq!(state["status"], "accepted", "{state}");
+    assert!(world.harness.approval_decided.load(Ordering::SeqCst));
+    assert_ne!(
+        *world.harness.prov.lock().unwrap(),
+        "cancelled",
+        "the approval observer never ends the child"
+    );
+    world.finish().await;
+}
+
+/// A child whose approval request ends without a decision, here aborted by its provider,
+/// keeps running: the approval's end returns its row to running and never decides how the
+/// child ends. Its own Return then settles it, as any child's does.
+#[tokio::test]
+async fn a_child_whose_approval_ends_without_a_decision_keeps_running_and_settles() {
+    let mut world = World::new("child-approval-aborted", false).await;
+    let (broker, _lease) = world.broker();
+    *world.harness.start.lock().unwrap() = "ok";
+    *world.harness.approval.lock().unwrap() =
+        Some((world.thread.id.value(), world.child.id.value()));
+    let (status, _) = world
+        .launch(&broker)
+        .await
+        .unwrap_or_else(|error| panic!("launch: {}", error.message()));
+    assert_eq!(status, StatusCode::CREATED);
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while world.child_row().await.completion_status != "waiting_for_approval" {
+        assert!(
+            Instant::now() < deadline,
+            "the child's approval was never recorded"
+        );
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+
+    // The provider ends its own request and goes on running.
+    world.harness.approval_aborted.store(true, Ordering::SeqCst);
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let resolution = loop {
+        if let Some(resolution) = world
+            .product
+            .get_approval("request-child")
+            .await
+            .unwrap()
+            .resolution
+        {
+            break resolution;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "the aborted approval was never recorded"
+        );
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    };
+    assert_eq!(
+        resolution.outcome,
+        crate::approval::ApprovalOutcome::Aborted
+    );
+    assert_eq!(world.child_row().await.completion_status, "running");
+
+    world
+        .apply(&[serde_json::json!("ChildReturn")], false)
+        .await;
+    let state = world.await_state(|state| state["phase"] == "settled").await;
+    assert_eq!(state["status"], "accepted", "{state}");
     world.finish().await;
 }
 

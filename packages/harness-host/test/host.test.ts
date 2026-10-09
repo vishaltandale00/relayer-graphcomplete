@@ -2856,6 +2856,72 @@ describe("HarnessHost", () => {
     }
   });
 
+  it("routes a child's approvals to its own product interaction and ends an unrecorded child's at once", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "relayer-harness-child-approvals-"));
+    const outcomes = new Map<number, unknown>();
+    const accepted = new Set<number>();
+    vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.endsWith("/output")) {
+        const nodeId = Number(/nodes\/(\d+)/.exec(url)?.[1]);
+        return accepted.has(nodeId)
+          ? new Response(JSON.stringify(completion), { status: 200, headers: { "content-type": "application/json" } })
+          : new Response(JSON.stringify({ error: { code: "completion_not_found" } }), { status: 404, headers: { "content-type": "application/json" } });
+      }
+      const nodeId = new Headers(init?.headers).get("authorization") === "Bearer orphan-token" ? 3 : 2;
+      return graphReadResponse(url, nodeId, [], nodeId + 100);
+    }));
+    try {
+      const host = new HarnessHost({
+        stateFile: join(directory, "sessions.json"),
+        controlToken: "control",
+        implementations: { test: () => ({
+          supportsInvokedComplete: true,
+          async complete(context) {
+            const id = context.inputGraph.id;
+            try {
+              outcomes.set(id, await context.approvals.request({
+                providerItemId: `provider-${id}`,
+                title: "Run tests",
+                reason: "Verify the change.",
+                action: { kind: "command", command: "npm test", workingDirectory: directory },
+                scopeKeys: ["command:npm test"],
+                scopeDescription: "Run npm test for this session.",
+              }));
+            } catch (error) {
+              outcomes.set(id, error);
+            }
+            accepted.add(id);
+          },
+          state: emptyState,
+        }) },
+      });
+      await host.initialize();
+      await host.createSession({ threadId: 1, permissionProfileId: "ask", configuration: completeEnabledConfiguration, workingDirectory: directory });
+
+      // Graph node 2 is the child of product interaction 40; its approval belongs to 40's stream.
+      const recorded = host.complete(1, { ...invoked(graph(2, "child-token")), traceContext: { productInteractionId: 40 } });
+      await vi.waitFor(() => expect(host.approvalEvents(1, 40).pendingRequests).toHaveLength(1));
+      const [pending] = host.approvalEvents(1, 40).pendingRequests;
+      expect(pending!.correlation.interactionId).toBe(40);
+      // A graph node id never keys a stream, even one equal to a product interaction id.
+      expect(host.approvalEvents(1, 2)).toMatchObject({ latestSequence: 0, pendingRequests: [], events: [] });
+      host.decideApproval(1, pending!.requestId, { decision: "approve_once" });
+      await expect(recorded).resolves.toEqual({ completionId: 2 });
+      expect(outcomes.get(2)).toMatchObject({ decision: "approve_once", actor: "user" });
+
+      // A child the product never recorded has no observer: its request ends at once.
+      await expect(host.complete(1, invoked(graph(3, "orphan-token")))).resolves.toEqual({ completionId: 3 });
+      expect(outcomes.get(3)).toMatchObject({
+        name: "HarnessApprovalRequestTerminatedError",
+        resolution: { outcome: "aborted", actor: "host", rationale: expect.stringContaining("nobody can review") },
+      });
+      expect(host.approvalEvents(1, 3)).toMatchObject({ latestSequence: 0, pendingRequests: [], events: [] });
+    } finally {
+      vi.unstubAllGlobals();
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
   it("lets provider-owned invoked completions run concurrently and cancels one exact completion", async () => {
     const directory = await mkdtemp(join(tmpdir(), "relayer-harness-recursive-concurrency-"));
     const started = new Set<number>();

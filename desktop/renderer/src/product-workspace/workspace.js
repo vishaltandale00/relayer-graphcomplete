@@ -17,6 +17,7 @@ import {
   responseNodesForThread,
   workspaceBreadcrumbItems,
   workspaceModeCapabilities,
+  agentChildIds,
   humanTurns,
   messageTurns,
   workspaceTurns,
@@ -4770,7 +4771,11 @@ export function createProductWorkspace({
     // An invoked run runs beside the message turns: the composer's scopes follow message turns.
     const turns = messageTurns(state, thread);
     const latestInteraction = turns.at(-1);
-    renderThreadStatusSymbol(threadActivity(humanTurns(state, thread)));
+    const agentChildren = agentChildIds(state);
+    renderThreadStatusSymbol(threadActivity(
+      humanTurns(state, thread),
+      workspaceTurns(state, thread).filter((turn) => agentChildren.has(String(turn.id))),
+    ));
     if (inputDraftController && latestInteraction) {
       const statusKey = `${latestInteraction.id}:${latestInteraction.completionStatus || ""}`;
       const priorStatusKey = renderedInputDraftStatusKeys.get(threadId);

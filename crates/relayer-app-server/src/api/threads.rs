@@ -2687,6 +2687,118 @@ fn completion_timestamp() -> String {
         .to_string()
 }
 
+/// An agent's child has no execution observer of its own, so its approvals reach a person
+/// through its own product row: the host keys the child's approval stream by that row, and this
+/// records it there, where the product's approval decision already resolves it. The row's
+/// terminal state is never this observer's to write; its graph settlement owns that.
+///
+/// It reads until the row is terminal and the stream is drained: empty, or dropped by the host
+/// once its run ended and every event was acknowledged. A run whose stream never drains stops
+/// being read a bounded time after its row ended.
+fn spawn_recursive_approval_observer(
+    state: ApiState,
+    thread: Thread,
+    interaction: Interaction,
+    completion_id: i64,
+) {
+    const DRAIN_AFTER_SETTLEMENT: std::time::Duration = std::time::Duration::from_secs(30);
+    const PERSISTENCE_FAILURE_LIMIT: u8 = 20;
+    tokio::spawn(async move {
+        let Some(runtime) = state.runtime.as_ref() else {
+            return;
+        };
+        let mut cursor = 0;
+        let mut harness_session_id = None;
+        let mut complete_call_id = None;
+        let mut persistence_failures = 0_u8;
+        let mut settled_at = None;
+        loop {
+            let settled = matches!(
+                state.product.get_interaction(interaction.id).await,
+                Ok(row) if matches!(row.completion_status.as_str(), "accepted" | "failed" | "stopped")
+            );
+            if settled && settled_at.is_none() {
+                settled_at = Some(tokio::time::Instant::now());
+            }
+            let drained = match runtime
+                .approval_events(thread.id.value(), interaction.id.value(), cursor)
+                .await
+            {
+                // The host drops a stream once its run ended and every event was
+                // acknowledged; nothing more can arrive on it.
+                Ok(snapshot)
+                    if cursor > 0
+                        && snapshot.latest_sequence == 0
+                        && snapshot.events.is_empty()
+                        && snapshot.pending_requests.is_empty() =>
+                {
+                    cursor = 0;
+                    complete_call_id = None;
+                    true
+                }
+                Ok(snapshot) => {
+                    let empty = snapshot.pending_requests.is_empty();
+                    match crate::product::persist_approval_snapshot(
+                        crate::product::ApprovalRecorder {
+                            product: &state.product,
+                            decisions: &state.approval_decisions,
+                        },
+                        thread.id,
+                        interaction.id,
+                        &mut cursor,
+                        &mut harness_session_id,
+                        &mut complete_call_id,
+                        snapshot,
+                    )
+                    .await
+                    {
+                        Ok(()) => {
+                            persistence_failures = 0;
+                            cursor == 0 && empty
+                        }
+                        Err(error) => {
+                            persistence_failures += 1;
+                            if persistence_failures >= PERSISTENCE_FAILURE_LIMIT {
+                                eprintln!(
+                                    "recursive completion {completion_id} approvals could not be recorded: {error}"
+                                );
+                                // A request nobody can see must not hold the child. Fail the
+                                // graph first, as a stop does, then end the run.
+                                let _ = runtime
+                                    .fail_graph_completion(
+                                        completion_id,
+                                        &format!("recursive-approval-failed:{}", interaction.id),
+                                        "approval_observation_failed",
+                                    )
+                                    .await;
+                                let _ = runtime
+                                    .cancel_invoked_completion(thread.id.value(), completion_id)
+                                    .await;
+                                return;
+                            }
+                            false
+                        }
+                    }
+                }
+                // The live session is gone, so nothing more can be requested.
+                Err(RuntimeError::Remote { status: 404, .. }) => true,
+                Err(error) => {
+                    eprintln!(
+                        "recursive completion {completion_id} approvals could not be read: {error}"
+                    );
+                    false
+                }
+            };
+            if settled
+                && (drained || settled_at.is_some_and(|at| at.elapsed() >= DRAIN_AFTER_SETTLEMENT))
+            {
+                return;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        }
+    });
+}
+
 fn spawn_recursive_completion_observers(
     state: ApiState,
     thread: Thread,
@@ -2701,6 +2813,12 @@ fn spawn_recursive_completion_observers(
     let semantic_interaction = interaction.clone();
     let semantic_prepared = prepared.clone();
     let completion_id = prepared.graph_node_id;
+    spawn_recursive_approval_observer(
+        state.clone(),
+        thread.clone(),
+        interaction.clone(),
+        completion_id,
+    );
     let semantic_origin_digest = permission_origin_digest.clone();
     let supervision = semantic_state
         .completion_observations

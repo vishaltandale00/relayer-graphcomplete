@@ -11,22 +11,23 @@ const THREAD_COLUMNS: &str = r#"
            t.conversation_import_id IS NOT NULL, t.icon, t.icon_selection_eligible, t.working_directory,
            COALESCE((SELECT group_project_id FROM projects WHERE id=t.project_id),t.project_id),t.checkout_context_json,
            (WITH turn AS (
-                -- The thread's human turns. Runs from invoke actions run beside the message
-                -- turns, so the most urgent active turn wins over the latest one. A turn a
-                -- model failure returned to unsent is not running.
+                -- The thread's turns. Runs from invoke actions run beside the message turns,
+                -- so the most urgent active turn wins over the latest one. A turn a model
+                -- failure returned to unsent is not running. An agent's child never makes the
+                -- thread running, but its approval request is the user's to answer.
                 SELECT i.sequence,i.completion_status,
+                       EXISTS(SELECT 1 FROM action_invocations child WHERE child.result_interaction_id=i.id AND child.agent_invoked=1) AS agent_child,
                        i.completion_status IN ('not_started','running','submitted','waiting_for_approval')
                          AND NOT (i.completion_status='not_started' AND (SELECT a.outcome FROM interaction_attempts a WHERE a.interaction_id=i.id ORDER BY a.attempt_number DESC LIMIT 1)='model_failed') AS active,
                        EXISTS(SELECT 1 FROM interaction_stop_requests stop WHERE stop.interaction_id=i.id AND stop.error IS NULL) AS stopping
                 FROM interactions i
                 WHERE i.thread_id=t.id
-                  AND NOT EXISTS(SELECT 1 FROM action_invocations child WHERE child.result_interaction_id=i.id AND child.agent_invoked=1)
             )
             SELECT CASE
                 WHEN EXISTS(SELECT 1 FROM turn WHERE active AND NOT stopping AND completion_status='waiting_for_approval') THEN 'needs_approval'
-                WHEN EXISTS(SELECT 1 FROM turn WHERE active AND stopping) THEN 'stopping'
-                WHEN EXISTS(SELECT 1 FROM turn WHERE active) THEN 'running'
-                WHEN (SELECT completion_status FROM turn ORDER BY sequence DESC LIMIT 1)='failed' THEN 'failed'
+                WHEN EXISTS(SELECT 1 FROM turn WHERE active AND stopping AND NOT agent_child) THEN 'stopping'
+                WHEN EXISTS(SELECT 1 FROM turn WHERE active AND NOT agent_child) THEN 'running'
+                WHEN (SELECT completion_status FROM turn WHERE NOT agent_child ORDER BY sequence DESC LIMIT 1)='failed' THEN 'failed'
             END)
  ,t.archived_at, (SELECT busy FROM thread_archive_activity WHERE id=t.id)
     FROM threads t
@@ -750,6 +751,40 @@ mod tests {
             activity(&store, &thread).await.as_deref(),
             Some("needs_approval")
         );
+        // An agent's child never makes the thread running, but its approval request is the
+        // user's to answer.
+        sqlx::query("UPDATE interactions SET completion_status='accepted' WHERE id=?1")
+            .bind(thread.root_interaction_id.value())
+            .execute(&store.pool)
+            .await
+            .unwrap();
+        let child = sqlx::query("INSERT INTO interactions(thread_id,sequence,text,created_at,completion_status,permission_profile_id) VALUES (?1,3,'Child','3','running','ask')")
+            .bind(thread.id.value())
+            .execute(&store.pool)
+            .await
+            .unwrap()
+            .last_insert_rowid();
+        sqlx::query("INSERT INTO action_invocations(source_interaction_id,action_id,result_interaction_id,created_at,graph_lease_required,authoritative,agent_invoked) VALUES (?1,42,?2,'3',1,1,1)")
+            .bind(thread.root_interaction_id.value())
+            .bind(child)
+            .execute(&store.pool)
+            .await
+            .unwrap();
+        assert_eq!(activity(&store, &thread).await, None);
+        sqlx::query("UPDATE interactions SET completion_status='waiting_for_approval' WHERE id=?1")
+            .bind(child)
+            .execute(&store.pool)
+            .await
+            .unwrap();
+        assert_eq!(
+            activity(&store, &thread).await.as_deref(),
+            Some("needs_approval")
+        );
+        sqlx::query("UPDATE interactions SET completion_status='accepted' WHERE id=?1")
+            .bind(child)
+            .execute(&store.pool)
+            .await
+            .unwrap();
         // A run a model failure returned to unsent is not running.
         set_status(&store, &thread, "not_started").await;
         sqlx::query("INSERT INTO interaction_attempts(interaction_id,attempt_number,started_at,finished_at,family_id,family_revision,harness_configuration_name,harness_configuration_revision,harness_configuration_digest,provider_id,adapter_id,adapter_implementation_version,model_id,access_contract,outcome,effect_boundary) VALUES (?1,1,'2','3',1,1,'test',1,'sha256:h','codex','codex-subscription',1,'test-model','managed-runtime@1','model_failed','none')")
