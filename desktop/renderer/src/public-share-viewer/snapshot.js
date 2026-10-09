@@ -754,6 +754,7 @@ function validateInvocations(header, turns) {
     for (const field of ["interactionNodeId", "parentNodeId"]) requirePortableId(source[field], "node", `${path}.source.${field}`);
     requirePortableId(source.actionId, "action", `${path}.source.actionId`);
     if (source.layerId != null) requirePortableId(source.layerId, "layer", `${path}.source.layerId`);
+    if (source.captureState != null && source.presentingLayerId == null) fail("invocation_presenting_layer_missing", path, "Known capture state requires its frozen presenting Layer.");
     if (source.presentingLayerId != null) requirePortableId(source.presentingLayerId, "layer", `${path}.source.presentingLayerId`);
     for (const field of ["instruction", "label", "parentTitle", "parentDetail"]) requireString(source[field], `${path}.source.${field}`, { allowEmpty: field === "parentDetail" });
     if (source.description != null) requireString(source.description, `${path}.source.description`);
@@ -811,8 +812,8 @@ function validateInvocations(header, turns) {
         const optionKeys = options.map(option => { exactFields(option, ["key", "label"], path); requireString(option.key, path); requireString(option.label, path); return option.key; });
         if (question.minimumSelections != null) requireInteger(question.minimumSelections, path, { minimum: 1 });
         if (!options.length || options.length > 50 || (question.control === "single_select" && question.minimumSelections != null)
-          || (question.minimumSelections ?? 1) > options.length || new Set(optionKeys).size !== options.length || !selected.length || new Set(selected.map(option => option.key)).size !== selected.length
-          || (question.control === "single_select" && selected.length !== 1) || selected.length < (question.minimumSelections ?? 1)
+          || (question.minimumSelections ?? 0) > options.length || new Set(optionKeys).size !== options.length || new Set(selected.map(option => option.key)).size !== selected.length
+          || (question.control === "single_select" && selected.length !== 1) || selected.length < (question.minimumSelections ?? 0)
           || selected.some(option => !options.some(accepted => stableJson(accepted) === stableJson(option)))) fail("invocation_argument_value_invalid", path, "Selections must exactly match frozen options.");
       }
     }
@@ -857,6 +858,7 @@ function validateBoundInputs(header, turns, invocations) {
     if (prior && stableJson(prior) !== stableJson(action)) fail("bound_input_definition_conflict", "header.boundInputs", "A canonical action cannot have conflicting definitions.");
     definitions.set(action.id, action);
   };
+  for (const turn of turns) if (turn.acceptedView) register(turn.acceptedView.rootAction);
   const views = [...turns.map(turn => turn.acceptedView).filter(Boolean), ...invocations.map(call => call.current).filter(Boolean)];
   for (const view of views) for (const layer of view.layers) for (const action of layer.actions) register(action);
   const declared = new Set();
@@ -887,6 +889,16 @@ function validateBoundInputs(header, turns, invocations) {
       const input = definitions.get(id);
       if (!input || input.kind !== "input" || input.sourceNodeId !== invoke.sourceNodeId) fail("bound_input_unresolved", "actions.inputActionIds", "An Invoke binding requires its exact same-Node canonical input definition.");
     }
+  }
+  for (const call of invocations) {
+    const source = call.source, action = definitions.get(source.actionId);
+    if (!action || source.captureState !== "accepted") continue;
+    const canonical = [action.kind === "invoke", action.sourceNodeId, action.sourceLayerId ?? null,
+      action.interactionText ?? null, action.label, action.description ?? null, action.variant,
+      action.icon ?? null, action.inputActionIds ?? [], action.reusable ?? null, action.state];
+    const captured = [true, source.parentNodeId, source.layerId, source.instruction,
+      source.label, source.description, source.variant, source.icon, source.inputActionIds, source.reusable ?? null, source.state];
+    if (stableJson(canonical) !== stableJson(captured)) fail("invocation_source_snapshot_mismatch", "header.invocations.source", "An accepted captured callable must match its included canonical Invoke definition.");
   }
   // Frozen answers are allowed to outlive definition inventory in legacy
   // exports. When a canonical definition is included it must agree exactly.
@@ -1016,7 +1028,7 @@ export function inertInvocationCurrent(call, { threadId, id = `current:${call.id
 // A call can freeze an own-draft source that never reaches an accepted view.
 // Render its frozen identity as an inert per-call source, without creating a
 // portable accepted record, canonical Layer membership, or execution authority.
-function inertInvocationSource(call, turns, threadId) {
+export function inertInvocationSource(call, turns, threadId) {
   const source = call.source;
   const turn = turns.find(candidate => candidate.interactionNodeId === source.interactionNodeId);
   const layerId = `source-layer:${call.id}`;

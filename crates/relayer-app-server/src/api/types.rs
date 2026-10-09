@@ -403,12 +403,23 @@ pub(crate) struct ImportedInvocationHistoryResponse {
     pub(super) inert: bool,
     pub(super) thread_id: i64,
     pub(super) source_interaction_id: Option<i64>,
+    pub(super) source_turn: Option<ImportedInvocationSourceTurnResponse>,
     pub(super) source_node_id: Option<i64>,
     pub(super) source_action_id: Option<i64>,
     pub(super) presenting_layer_id: Option<i64>,
     pub(super) result_interaction_id: Option<i64>,
     pub(super) record: crate::conversation_export::ExportInvocation,
     pub(super) visual_asset_contents: Vec<crate::conversation_export::ExportVisualAssetContent>,
+}
+
+/// Viewing provenance only; this does not grant a canonical graph occurrence.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ImportedInvocationSourceTurnResponse {
+    pub(super) id: i64,
+    pub(super) sequence: u32,
+    pub(super) interaction_node_id: String,
+    pub(super) completion: crate::conversation_export::ExportCompletionReceipt,
 }
 
 #[derive(Serialize)]

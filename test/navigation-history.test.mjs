@@ -23,6 +23,58 @@ function layerIdentity(layerId, threadId = 1, turnId = 10) {
   return { threadId, turnId, layerId };
 }
 
+function frozenImportedOrigin() {
+  return { kind: "imported", invocationId: "invocation:call-a", invocationKey: "invocation:call-a",
+    actionId: "action:invoke", sourceNodeId: "node:parent", presentingLayerId: "source-layer:invocation:call-a",
+    sourceEntry: entry({ turnId: "source:invocation:call-a", selectedNodeId: "node:parent",
+      navigationPath: [{ layerId: "source-layer:invocation:call-a", viaActionId: null }] }) };
+}
+
+describe("frozen imported source history identity", () => {
+  it("retains one tagged per-call presentation without changing canonical numeric origins", () => {
+    const origin = frozenImportedOrigin();
+    const normalized = normalizeNavigationEntry({ ...entry(), invocationOrigin: origin });
+    expect(normalized.invocationOrigin).toEqual({ ...origin, sourceEntry: normalizeNavigationEntry(origin.sourceEntry) });
+    expect(Object.isFrozen(normalized.invocationOrigin.sourceEntry.navigationPath)).toBe(true);
+    const history = createNavigationHistory();
+    history.seed(normalized);
+    history.push(entry());
+    const transition = history.go(-1);
+    expect(history.commit(transition)).toBe(true);
+    expect(history.current.invocationOrigin).toEqual(normalized.invocationOrigin);
+    for (const kind of [undefined, "imported", "graph"]) {
+      const canonical = { sourceEntry: entry({ turnId: 9, selectedNodeId: 7 }), actionId: 41,
+        sourceNodeId: 7, presentingLayerId: 100, invocationKey: "call-native", ...(kind ? { kind, invocationId: "71" } : {}) };
+      expect(normalizeNavigationEntry({ ...entry(), invocationOrigin: canonical }).invocationOrigin).toMatchObject({
+        sourceEntry: { turnId: "9" }, actionId: "41", sourceNodeId: "7", presentingLayerId: "100" });
+    }
+  });
+
+  it.each([
+    "swapped-call", "swapped-layer", "wrong-key", "graph-kind", "untagged", "temporal",
+    "invalid-action", "invalid-node", "invalid-call", "oversized-call", "selected-node",
+    "extra-ancestor", "via-action", "cross-thread", "portable-canonical-turn",
+  ])("rejects a frozen source with %s provenance", corruption => {
+    const origin = frozenImportedOrigin();
+    if (corruption === "swapped-call") origin.invocationId = "invocation:call-b";
+    if (corruption === "swapped-layer") origin.presentingLayerId = origin.sourceEntry.navigationPath[0].layerId = "source-layer:invocation:call-b";
+    if (corruption === "wrong-key") origin.invocationKey = "invocation:call-b";
+    if (corruption === "graph-kind") origin.kind = "graph";
+    if (corruption === "untagged") delete origin.kind;
+    if (corruption === "temporal") origin.sourceEntry.temporalCurrent = { completionId: "node:parent", revision: 1, mode: "pinned" };
+    if (corruption === "invalid-action") origin.actionId = "action:path/to/invoke";
+    if (corruption === "invalid-node") origin.sourceNodeId = origin.sourceEntry.selectedNodeId = "node:";
+    if (corruption === "invalid-call") origin.invocationId = "invocation:call/a";
+    if (corruption === "oversized-call") origin.invocationId = `invocation:${"a".repeat(128)}`;
+    if (corruption === "selected-node") origin.sourceEntry.selectedNodeId = "node:other";
+    if (corruption === "extra-ancestor") origin.sourceEntry.navigationPath.unshift({ layerId: "source-layer:other", viaActionId: null });
+    if (corruption === "via-action") origin.sourceEntry.navigationPath[0].viaActionId = "action:ancestor";
+    if (corruption === "cross-thread") origin.sourceEntry.threadId = 2;
+    if (corruption === "portable-canonical-turn") origin.sourceEntry.turnId = 9;
+    expect(() => normalizeNavigationEntry({ ...entry(), invocationOrigin: origin })).toThrow();
+  });
+});
+
 describe("navigation history", () => {
   it("preserves exact invocation origin in history while rejecting nested or cross-thread identity", () => {
     const sourceEntry = entry({ turnId: 9, selectedNodeId: 7 });

@@ -864,10 +864,19 @@ async function run() {
   await setValue("#threadPrompt", "Preserve this click-time prompt through reconciliation.");
   await evaluate(`(() => {
     const original = window.fetch.bind(window); window.__implicitAttempts = []; window.__loseImplicitResponse = true;
+    window.__implicitCommittedInteraction = null; window.__releaseImplicitResponse = null;
     window.fetch = async (input, init = {}) => {
       if (init.method === 'POST' && new URL(typeof input === 'string' ? input : input.url, location.href).pathname.endsWith('/interactions')) {
         window.__implicitAttempts.push(JSON.parse(init.body));
-        if (window.__loseImplicitResponse) { window.__loseImplicitResponse = false; await original(input, init); throw new TypeError('Injected lost interaction response'); }
+        if (window.__loseImplicitResponse) {
+          window.__loseImplicitResponse = false;
+          const response = await original(input, init);
+          if (!response.ok) throw new Error('Interaction was refused before response loss: ' + response.status);
+          window.__implicitCommittedInteraction = await response.clone().json();
+          // Let the fixture arm reconciliation after this real POST has committed.
+          await new Promise(resolve => { window.__releaseImplicitResponse = resolve; });
+          throw new TypeError('Injected lost interaction response');
+        }
         if (window.__recordImplicitPostedDraft) {
           const path = new URL(typeof input === 'string' ? input : input.url, location.href).pathname;
           window.__implicitPostedDraft = await (await original(path.slice(0, -'/interactions'.length) + '/input-draft')).json();
@@ -876,20 +885,24 @@ async function run() {
       return original(input, init);
     };
   })()`);
-  let heldReconciliation, releaseReconciliation;
+  let heldReconciliation, releaseReconciliation, holdReconciliationAfterCommit = false;
   const reloadFilter = { urls: [`${productSession.origin}/api/threads/${thread.id}/input-draft`] };
   window.webContents.session.webRequest.onBeforeRequest(reloadFilter, (details, callback) => {
-    if (!heldReconciliation && details.method === "GET") { heldReconciliation = true; releaseReconciliation = () => callback({}); return; }
+    if (holdReconciliationAfterCommit && !heldReconciliation && details.method === "GET") { heldReconciliation = true; releaseReconciliation = () => callback({}); return; }
     callback({});
   });
   await click("#sendInteraction");
+  const committedDuringLoss = await waitFor("real interaction POST commits before response loss", () => evaluate("window.__implicitCommittedInteraction?.id && window.__releaseImplicitResponse ? window.__implicitCommittedInteraction : false"));
+  holdReconciliationAfterCommit = true;
+  await evaluate("window.__releaseImplicitResponse()");
   await waitFor("lost response holds authoritative reconciliation", () => heldReconciliation);
   await evaluate("document.querySelector('#sendInteraction').dispatchEvent(new MouseEvent('click', { bubbles: true }))");
   if (await evaluate("window.__implicitAttempts.length") !== 1) throw new Error("Reentry escaped pending input reconciliation.");
   // Reconciliation must adopt storage authority even when another client
   // advances and then detaches occurrences while the renderer's GET is held.
   const draftBeforeReconciliation = await productRequest(`/api/threads/${thread.id}/input-draft`);
-  const createdDuringLoss = (await productRequest(`/api/threads/${thread.id}`)).interactions.at(-1);
+  const createdDuringLoss = (await productRequest(`/api/threads/${thread.id}`)).interactions.find(interaction => interaction.id === committedDuringLoss.id);
+  if (!createdDuringLoss) throw new Error(`Committed interaction ${committedDuringLoss.id} is missing during response-loss reconciliation.`);
   const evidenceAtClick = { selectedKeys: createdDuringLoss.submittedInputs.find(input => input.action.prompt === "Choose supporting evidence").value.selected.map(option => String(option.key)) };
   const textAdvanced = await productRequest(`/api/threads/${thread.id}/input-draft/attachments`, {
     method: "PUT", body: JSON.stringify({ occurrence: textAttachment.occurrence, value: { text: submittedTextValue }, expectedRevision: draftBeforeReconciliation.revision }),
@@ -978,6 +991,16 @@ async function run() {
   window.setSize(1280, 820);
   await waitFor("interactive reading workspace", () => evaluate("document.querySelectorAll('.graph-node').length === 2"));
   await clickNode("Input grammar");
+  // Native pointer delivery requires a visible, focused WebContents; focus()
+  // on the fixture's hidden BrowserWindow does not establish that boundary.
+  window.show();
+  app.focus({ steal: true });
+  window.focus();
+  window.webContents.focus();
+  await waitFor("visible focused native split document", async () => window.isVisible()
+    && await evaluate("document.hasFocus()"));
+  process.stdout.write(`RELAYER_NATIVE_SPLIT_FOCUS ${JSON.stringify({ visible: window.isVisible(), windowFocused: window.isFocused(), contentsFocused: window.webContents.isFocused(), documentFocused: await evaluate("document.hasFocus()") })}\n`);
+  await waitForPaint();
   const readSplit = () => evaluate(`(() => {
     const rect = selector => { const value = document.querySelector(selector).getBoundingClientRect(); return { x: value.x, y: value.y, width: value.width, height: value.height }; };
     return { graph: rect('#graphStage'), detail: rect('#inspector'), divider: rect('#workspaceDivider'),
@@ -991,26 +1014,42 @@ async function run() {
   }
   const dividerX = Math.round(beforeResize.divider.x + beforeResize.divider.width / 2);
   const dividerY = Math.round(beforeResize.divider.y + beforeResize.divider.height / 2);
-  window.focus();
+  if (!await evaluate(`document.elementFromPoint(${dividerX}, ${dividerY})?.id === 'workspaceDivider'`)) {
+    throw new Error(`Native split pointer coordinates do not hit the divider: ${JSON.stringify(beforeResize)}`);
+  }
   await evaluate(`(() => { window.__nativeSplitPointerEvents = []; const divider = document.querySelector('#workspaceDivider');
-    for (const type of ['pointerdown', 'pointermove', 'pointerup', 'pointercancel']) document.addEventListener(type, event => {
+    for (const type of ['pointerdown', 'pointermove', 'pointerup', 'pointercancel', 'gotpointercapture', 'lostpointercapture']) document.addEventListener(type, event => {
       window.__nativeSplitPointerEvents.push({ type, pointerId: event.pointerId, x: event.clientX, buttons: event.buttons, target: event.target.id, trusted: event.isTrusted });
     }, true); })()`);
+  const nativeSplitCheckpoint = async (label, check) => {
+    try { return await waitFor(label, check); }
+    catch (error) {
+      const diagnostics = await Promise.all([readSplit(), evaluate("window.__nativeSplitPointerEvents")])
+        .then(([current, events]) => ({ before: beforeResize, current, events, focused: window.webContents.isFocused() }))
+        .catch(diagnosticError => ({ diagnosticError: diagnosticError.message }));
+      process.stderr.write(`RELAYER_NATIVE_SPLIT_FAILURE ${JSON.stringify({ label, ...diagnostics })}\n`);
+      throw error;
+    }
+  };
   window.webContents.sendInputEvent({ type: "mouseMove", x: dividerX, y: dividerY });
   await evaluate("new Promise(resolve => requestAnimationFrame(resolve))");
   window.webContents.sendInputEvent({ type: "mouseDown", x: dividerX, y: dividerY, button: "left", clickCount: 1 });
-  await waitFor("native divider pointer-down capture", () => evaluate(`(() => {
+  await nativeSplitCheckpoint("native divider pointer-down capture", () => evaluate(`(() => {
     const down = window.__nativeSplitPointerEvents.find(event => event.type === 'pointerdown' && event.target === 'workspaceDivider' && event.trusted);
     return down && document.querySelector('#workspaceDivider').hasPointerCapture(down.pointerId);
   })()`));
-  window.webContents.sendInputEvent({ type: "mouseMove", x: dividerX + 90, y: dividerY });
-  const resized = await waitFor("drag changes both rendered pane widths", async () => {
+  window.webContents.sendInputEvent({ type: "mouseMove", x: dividerX + 90, y: dividerY, modifiers: ["leftButtonDown"] });
+  const resized = await nativeSplitCheckpoint("drag changes both rendered pane widths", async () => {
     const value = await readSplit();
-    return value.graph.width > beforeResize.graph.width + 50
+    const heldMove = await evaluate(`(() => {
+      const down = window.__nativeSplitPointerEvents.find(event => event.type === 'pointerdown' && event.target === 'workspaceDivider' && event.trusted);
+      return down && window.__nativeSplitPointerEvents.some(event => event.type === 'pointermove' && event.pointerId === down.pointerId && event.buttons === 1 && event.trusted);
+    })()`);
+    return heldMove && value.graph.width > beforeResize.graph.width + 50
       && value.detail.width < beforeResize.detail.width - 50 ? value : false;
   });
   window.webContents.sendInputEvent({ type: "mouseUp", x: dividerX + 90, y: dividerY, button: "left", clickCount: 1 });
-  await waitFor("native divider pointer-up delivered", () => evaluate(`(() => {
+  await nativeSplitCheckpoint("native divider pointer-up delivered", () => evaluate(`(() => {
     const down = window.__nativeSplitPointerEvents.find(event => event.type === 'pointerdown' && event.target === 'workspaceDivider' && event.trusted);
     return down && window.__nativeSplitPointerEvents.some(event => event.type === 'pointerup' && event.pointerId === down.pointerId && event.trusted);
   })()`));

@@ -1,4 +1,4 @@
-import { inertInvocationCurrent } from "./public-share-viewer/snapshot.js";
+import { inertInvocationCurrent, inertInvocationSource } from "./public-share-viewer/snapshot.js";
 import { expandThreadProject } from "./project-sidebar.js";
 import { restoreArchivedForNavigation, threadActivityOrder } from "./thread-archive.js";
 import { checkoutController, setCheckoutSubmitting } from "./checkout.js";
@@ -528,9 +528,12 @@ export async function refreshState(
   stateQuery.set("currentProjectionAfter", String(appState.currentProjectionCursor || 0));
   const pendingBeforeRefresh = pendingTurns.get(String(threadId));
   const visibleInteraction = appState.interactions.find(interaction => String(interaction.id) === String(viewState.currentInteractionId));
-  const projectionInteractionId = pendingBeforeRefresh?.interactionId ?? (visibleInteraction?.inertInvocationCurrent
-    ? visibleInteraction.invocationSourceInteractionId : viewState.currentInteractionId);
-  if (projectionInteractionId != null) {
+  const projectionInteractionId = pendingBeforeRefresh?.interactionId ?? ((visibleInteraction?.inertInvocationSource || visibleInteraction?.inertInvocationCurrent && !visibleInteraction?.nativeInvocationCurrent)
+    ? null : visibleInteraction?.inertInvocationCurrent
+      ? visibleInteraction.invocationSourceInteractionId : viewState.currentInteractionId);
+  // URL-restored inert IDs are local presentation keys, never numeric API routes.
+  if (projectionInteractionId != null && /^[1-9][0-9]*$/.test(String(projectionInteractionId))
+    && Number.isSafeInteger(Number(projectionInteractionId))) {
     stateQuery.set("currentProjectionInteractionId", String(projectionInteractionId));
   }
   const selectedBeforeRefresh = appState.interactions.find((interaction) => (
@@ -544,6 +547,7 @@ export async function refreshState(
     !refreshGate.isCurrent(refreshToken)
     || (requestedThreadId && String(viewState.currentThreadId) !== String(requestedThreadId))
   ) return false;
+  projectImportedInvocationSources(state);
   // The visible layer belongs to the hydrated presentation, not a pending
   // turn-selection intent (invoke advances that intent before this refresh).
   const previousInteractionId = appState.currentInteractionId;
@@ -568,7 +572,7 @@ export async function refreshState(
   } else if (visibleInteraction?.inertInvocationCurrent) {
     const retained = nextImportedHistory.find(entry => entry.inert === true
       && String(entry.threadId) === String(threadId)
-      && String(entry.sourceInteractionId) === String(visibleInteraction.invocationSourceInteractionId)
+      && String(entry.presentationSource?.interactionId ?? entry.sourceInteractionId) === String(visibleInteraction.invocationSourceInteractionId)
       && entry.record?.id === visibleInteraction.invocationId);
     const local = inertInvocationPresentations.get(inertPresentationKey(threadId, visibleInteraction.id));
     const previous = local?.detail.importedInvocationHistory.find(entry => entry.record?.id === retained?.record?.id);
@@ -650,8 +654,13 @@ export async function refreshState(
       restoredInvocationSource = await resolveNavigationPresentation(sourceEntry, {
         loadThread: async () => ({ thread: nextThreads.find(thread => String(thread.id) === String(nextThreadId)),
           interactions: threadInteractions, actionInvocations: nextActionInvocations, importedInvocationHistory: nextImportedHistory }),
-        loadLayer: ({ threadId, turnId, layerId }) => request(`/api/threads/${encodeURIComponent(threadId)}/interactions/${encodeURIComponent(turnId)}/layers/${encodeURIComponent(layerId)}`),
-        layerCache: acceptedLayerCache,
+        loadLayer: ({ threadId, turnId, layerId }) => {
+          const local = inertInvocationPresentations.get(inertPresentationKey(threadId, turnId));
+          if (local) return local.layers.has(String(layerId)) ? Promise.resolve(local.layers.get(String(layerId)))
+            : Promise.reject(new Error("Frozen source Layer is unavailable."));
+          return request(`/api/threads/${encodeURIComponent(threadId)}/interactions/${encodeURIComponent(turnId)}/layers/${encodeURIComponent(layerId)}`);
+        },
+        layerCache: selected?.inertInvocationSource ? null : acceptedLayerCache,
       });
     } catch { /* An unavailable source path falls back to its canonical turn. */ }
     if (!refreshGate.isCurrent(refreshToken) || readingIntent !== refreshReadingIntent
@@ -763,6 +772,7 @@ export async function refreshState(
   if (
     selected
     && !selected.inertInvocationCurrent
+    && !selected.inertInvocationSource
     && visibleLayerId != null
     // A successful temporal read already supplies this exact canonical layer.
     // Do not add another await after reconciling its node selection.
@@ -971,7 +981,9 @@ export async function selectInteractionGraphSource(threadId, interactionId, { in
   const requestToken = resolvedInvokeNavigationGate.begin();
   pendingResolvedInvokeNavigation = true;
   try {
-    const local = invocationOrigin ? inertInvocationPresentations.get(inertPresentationKey(threadId, interactionId)) : null;
+    const cached = inertInvocationPresentations.get(inertPresentationKey(threadId, interactionId));
+    const local = invocationOrigin || cached?.detail.interactions.some(item => String(item.id) === String(interactionId)
+      && item.inertInvocationSource) ? cached : null;
     let resolved = await resolveNavigationPresentation(invocationOrigin?.sourceEntry ?? {
       threadId, turnId: interactionId, navigationPath: [], selectedNodeId: null,
     }, {
@@ -1210,6 +1222,35 @@ function artifactViewer() {
 const inertInvocationPresentations = new Map();
 const inertPresentationKey = (threadId, turnId) => `${threadId}\u0000${turnId}`;
 
+// Frozen sources are presentation only. Canonical source IDs from the API stay null.
+function projectImportedInvocationSources(state) {
+  const interactions = [...(state.interactions ?? [])];
+  const history = (state.importedInvocationHistory ?? []).map(entry => {
+    const thread = state.threads?.find(thread => thread.imported === true && String(thread.id) === String(entry.threadId));
+    if (!thread || entry.inert !== true || !entry.record || entry.sourceInteractionId != null
+      && entry.sourceNodeId != null && entry.sourceActionId != null && entry.presentingLayerId != null) return entry;
+    const source = inertInvocationSource(entry.record, entry.sourceTurn ? [entry.sourceTurn] : [], thread.id);
+    const layer = source.completionOutput.rootLayer;
+    interactions.push(source);
+    return { ...entry, presentationSource: { interactionId: source.id, nodeId: entry.record.source.parentNodeId,
+      actionId: entry.record.source.actionId, layerId: layer.layer.id } };
+  });
+  state.interactions = interactions;
+  state.importedInvocationHistory = history;
+  for (const entry of history) {
+    if (!entry.presentationSource) continue;
+    const source = interactions.find(item => String(item.threadId) === String(entry.threadId) && item.id === entry.presentationSource.interactionId);
+    const thread = state.threads.find(thread => String(thread.id) === String(entry.threadId));
+    inertInvocationPresentations.set(inertPresentationKey(thread.id, source.id), {
+      detail: { thread, interactions: interactions.filter(item => String(item.threadId) === String(thread.id)),
+        actionInvocations: state.actionInvocations ?? [], invocationInventoryAvailable: false,
+        importedInvocationHistory: history.filter(item => String(item.threadId) === String(thread.id)), approvals: [] },
+      layers: new Map([[String(source.completionOutput.rootLayer.layer.id), source.completionOutput.rootLayer]]),
+      nativeCall: null, importedCall: entry,
+    });
+  }
+}
+
 function retainInvocationPresentation(thread, source, interaction, layers, origin, nativeCall = null, importedCall = null) {
   const sourceLayers = new Map([source?.completionOutput?.rootLayer, appState.visibleLayer].filter(Boolean).map(layer => [String(layer.layer.id), layer]));
   for (const step of viewState.layerPath) {
@@ -1234,9 +1275,9 @@ function retainInvocationPresentation(thread, source, interaction, layers, origi
 }
 
 function retainedInvocationOrigin(thread, source, call, resultId, kind) {
-  const presentingLayerId = call.presentingLayerId;
-  const sourceNodeId = kind === "graph" ? call.nativeInvocation?.invocation?.parentNodeId : call.sourceNodeId;
-  const actionId = kind === "graph" ? call.actionId : call.sourceActionId;
+  const presentingLayerId = call.presentationSource?.layerId ?? call.presentingLayerId;
+  const sourceNodeId = kind === "graph" ? call.nativeInvocation?.invocation?.parentNodeId : call.presentationSource?.nodeId ?? call.sourceNodeId;
+  const actionId = kind === "graph" ? call.actionId : call.presentationSource?.actionId ?? call.sourceActionId;
   const invocationId = kind === "graph" ? call.nativeInvocation?.invocation?.id : call.record?.id;
   const key = kind === "graph" ? call.invocationKey : call.record?.id;
   if (presentingLayerId == null || actionId == null || sourceNodeId == null) return null;
@@ -1275,10 +1316,11 @@ export async function navigateImportedInvocationHistory(historyEntry) {
   const thread = appState.threads.find(thread => String(thread.id) === String(viewState.currentThreadId));
   const retained = (appState.importedInvocationHistory ?? []).find(entry => entry.inert === true
     && String(entry.threadId) === String(thread?.id)
-    && String(entry.sourceInteractionId) === String(viewState.currentInteractionId)
+    && String(entry.presentationSource?.interactionId ?? entry.sourceInteractionId) === String(viewState.currentInteractionId)
     && entry.record?.id === historyEntry?.record?.id);
-  if (!thread?.imported || !retained || retained.sourceInteractionId == null || retained.sourceNodeId == null) return false;
-  const source = appState.interactions.find(interaction => String(interaction.id) === String(retained.sourceInteractionId));
+  if (!thread?.imported || !retained || (retained.presentationSource == null && (retained.sourceInteractionId == null || retained.sourceNodeId == null))) return false;
+  const source = appState.interactions.find(interaction => String(interaction.id) === String(retained.presentationSource?.interactionId ?? retained.sourceInteractionId));
+  if (!source) return false;
   const result = appState.interactions.find(interaction => String(interaction.threadId) === String(thread.id)
     && String(interaction.id) === String(retained.resultInteractionId) && interaction.completionStatus === "accepted");
   if (retained.record.lifecycle === "succeeded" && result) {
@@ -1288,7 +1330,7 @@ export async function navigateImportedInvocationHistory(historyEntry) {
   }
   if (retained.record.lifecycle === "succeeded" && retained.resultInteractionId != null) return false;
   const current = inertInvocationCurrent(retained.record, { threadId: thread.id,
-    id: `current:${retained.record.id}`, sourceInteractionId: retained.sourceInteractionId, allowReturned: true });
+    id: `current:${retained.record.id}`, sourceInteractionId: source.id, allowReturned: true });
   if (!current) return false;
   const origin = retainedInvocationOrigin(thread, source, retained, current.interaction.id, "imported");
   return retainInvocationPresentation(thread, source, current.interaction, current.layers, origin, null, retained);
@@ -1636,7 +1678,7 @@ export async function navigateHistory(deltaOrDirection, { beforeCommit } = {}) {
         const presentation = local ? inertInvocationPresentations.get(inertPresentationKey(threadId, turnId)) : null;
         if (local && presentation?.layers.has(String(layerId))) return Promise.resolve(presentation.layers.get(String(layerId)));
         const target = local?.detail.interactions.find(item => String(item.id) === String(turnId));
-        if (local && (!target || target.inertInvocationCurrent)) return Promise.reject(new Error("Inert Current layer is unavailable."));
+        if (local && (!target || target.inertInvocationCurrent || target.inertInvocationSource)) return Promise.reject(new Error("Inert Current layer is unavailable."));
         return request(
           `/api/threads/${encodeURIComponent(threadId)}/interactions/${encodeURIComponent(turnId)}/layers/${encodeURIComponent(layerId)}`,
         );

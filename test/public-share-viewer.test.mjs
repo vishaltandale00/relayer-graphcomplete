@@ -178,7 +178,7 @@ function reusableInvocationRecords() {
   const makeCall = (id, turn, destination) => ({
     schemaVersion: 1, id,
     source: { interactionNodeId: "node:interaction", actionId: "action:invoke", parentNodeId: "node:root", layerId: "layer:root", instruction: "Continue", label: invoke.label,
-      description: null, icon: null, iconAsset: null, variant: "pill", inputActionIds: ["action:input"], inputBindingsDefined: true, parentTitle: "Node node:root", parentDetail: "Details for node:root", state: "accepted", captureState: "accepted" },
+      description: null, icon: null, iconAsset: null, variant: "pill", inputActionIds: ["action:input"], inputBindingsDefined: true, parentTitle: "Node node:root", parentDetail: "Details for node:root", state: "accepted", captureState: "accepted", presentingLayerId: "layer:root" },
     childInteractionNodeId: turn.interactionNodeId, resultTurnId: turn.id, lifecycle: "succeeded", headRevision: 1, safeReason: null,
     currentLayerId: turn.acceptedView.rootLayerId, returnedLayerId: turn.acceptedView.rootLayerId,
     arguments: [{ source: { interactionNodeId: "node:interaction", layerId: "layer:root", actionId: "action:input", nodeId: "node:root" }, action: { control: "text", prompt: "Destination" }, value: { kind: "text", text: destination } }],
@@ -196,6 +196,70 @@ function reusableInvocationRecords() {
 }
 
 describe("V4 inert reusable Invocation snapshots", () => {
+  it.each(["instruction", "label", "presentation", "icon", "source-node", "authored-layer", "bindings", "reuse", "state", "kind", "root-kind"])(
+    "rejects accepted callable capture contradicting canonical %s", field => {
+      const records = reusableInvocationRecords(), call = records[0].invocations[0];
+      if (field === "instruction") { call.source.instruction = "A forged instruction"; records[2].text = call.source.instruction; }
+      if (field === "label") call.source.label = "A forged label";
+      if (field === "presentation") { call.source.variant = "card"; call.source.description = "A forged card"; }
+      if (field === "icon") call.source.icon = "circle";
+      if (field === "source-node") { call.source.parentNodeId = "node:nested"; call.arguments[0].source.nodeId = "node:nested"; }
+      if (field === "authored-layer") call.source.layerId = "layer:nested";
+      if (field === "bindings") { call.source.inputActionIds = []; call.arguments = []; }
+      if (field === "reuse") call.source.reusable = false;
+      if (field === "state") call.source.state = "stopped";
+      if (field === "kind") call.source.actionId = "action:input";
+      if (field === "root-kind") call.source.actionId = records[1].acceptedView.rootAction.id;
+      expect(() => parsePublicSnapshot(recordsJsonl(records))).toThrow(expect.objectContaining({ code: "invocation_source_snapshot_mismatch" }));
+    });
+
+  it("checks canonical callable definitions carried only by another call's Current", () => {
+    const records = reusableInvocationRecords(), call = records[0].invocations[0];
+    call.current = { rootLayerId: "layer:root", layers: structuredClone(records[1].acceptedView.layers) };
+    call.currentLayerId = "layer:root"; call.returnedLayerId = null; call.resultTurnId = null; call.lifecycle = "active";
+    records[1].completion.status = "stopped"; records[1].acceptedView = null;
+    records[2].origin = { kind: "user" }; records[2].completion.status = "failed"; records[2].acceptedView = null;
+    expect(parsePublicSnapshot(recordsJsonl(records)).invocations[0].current.rootLayerId).toBe("layer:root");
+    call.source.label = "A contradictory Current-only source";
+    expect(() => parsePublicSnapshot(recordsJsonl(records))).toThrow(expect.objectContaining({ code: "invocation_source_snapshot_mismatch" }));
+  });
+
+  it.each(["draft", "accepted"])("requires selected presenting layer for a known %s capture", captureState => {
+    const records = reusableInvocationRecords(), call = records[0].invocations[0];
+    call.source.captureState = captureState;
+    for (const presentingLayerId of [null, undefined]) {
+      if (presentingLayerId === undefined) delete call.source.presentingLayerId;
+      else call.source.presentingLayerId = presentingLayerId;
+      expect(() => parsePublicSnapshot(recordsJsonl(records))).toThrow(expect.objectContaining({ code: "invocation_presenting_layer_missing" }));
+    }
+    delete call.source.captureState;
+    expect(parsePublicSnapshot(recordsJsonl(records)).invocations[0].source.presentingLayerId).toBeUndefined();
+  });
+
+  it.each(["draft", undefined])("preserves repaired historical callable with capture state %s", captureState => {
+    const records = reusableInvocationRecords(), call = records[0].invocations[0];
+    if (captureState === undefined) { delete call.source.captureState; delete call.source.presentingLayerId; }
+    else call.source.captureState = captureState;
+    call.source.instruction = "Earlier frozen instructions"; call.source.label = "Earlier label"; call.source.reusable = false;
+    records[2].text = call.source.instruction;
+    const snapshot = parsePublicSnapshot(recordsJsonl(records));
+    expect(snapshot.invocations[0].source.instruction).toBe(call.source.instruction);
+    expect(snapshot.layersByTurn.get("turn:1").get("layer:root").actions.find(action => action.kind === "invoke").interactionText).toBe("Continue");
+  });
+
+  it("preserves valid empty multi-select arguments when the native minimum is unset", () => {
+    const records = reusableInvocationRecords(), input = records[1].acceptedView.layers[0].actions.find(action => action.kind === "input");
+    input.input = { control: "multi_select", prompt: "Optional destinations", options: [{ key: "a", label: "A" }] };
+    for (const call of records[0].invocations) { call.arguments[0].action = structuredClone(input.input); call.arguments[0].value = { kind: "selected", selected: [] }; }
+    expect(parsePublicSnapshot(recordsJsonl(records)).invocations[0].arguments[0].value.selected).toEqual([]);
+    input.input.minimumSelections = 1;
+    for (const call of records[0].invocations) call.arguments[0].action.minimumSelections = 1;
+    expect(() => parsePublicSnapshot(recordsJsonl(records))).toThrow(expect.objectContaining({ code: "invocation_argument_value_invalid" }));
+    input.input.minimumSelections = 0;
+    for (const call of records[0].invocations) call.arguments[0].action.minimumSelections = 0;
+    expect(() => parsePublicSnapshot(recordsJsonl(records))).toThrow();
+  });
+
   it.each(["false", 0, {}, []])("rejects malformed canonical callable reuse policy (%s)", (reusable) => {
     const records = reusableInvocationRecords();
     records[1].acceptedView.layers[0].actions.find(action => action.kind === "invoke").reusable = reusable;
@@ -224,7 +288,7 @@ describe("V4 inert reusable Invocation snapshots", () => {
     const invoke = records[1].acceptedView.layers[0].actions.find(action => action.kind === "invoke");
     if (reusable !== undefined) {
       invoke.reusable = reusable;
-      records[0].invocations[0].source.reusable = reusable;
+      for (const call of records[0].invocations) call.source.reusable = reusable;
     }
     const snapshot = parsePublicSnapshot(recordsJsonl(records));
     expect(snapshot.layersByTurn.get("turn:1").get("layer:root").actions.find(action => action.kind === "invoke").reusable).toBe(reusable);
@@ -553,6 +617,7 @@ describe("V4 inert reusable Invocation snapshots", () => {
   it("preserves explicit unavailable historical image pins without inventing replacement bytes", async () => {
     const records = reusableInvocationRecords();
     const source = records[0].invocations[0].source;
+    source.captureState = "draft"; // The unavailable historical pin predates a parent repair.
     source.icon = { kind: "image", assetId: "historical-icon", digestSha256: "a".repeat(64), mediaType: "image/png" };
     source.iconAssetOmitted = true;
     const snapshot = parsePublicSnapshot(recordsJsonl(records));
@@ -1656,6 +1721,7 @@ describe("V4 Rust/browser portable boundary concordance", () => {
     const records = reusableInvocationRecords();
     const call = records[0].invocations[0];
     call.headRevision = Number.MAX_SAFE_INTEGER;
+    call.source.captureState = "draft";
     call.source.variant = "card"; call.source.description = "Frozen card explanation";
     expect(parsePublicSnapshot(recordsJsonl(records)).header.invocations[0].source.description).toBe(call.source.description);
     for (const patch of [{ headRevision: Number.MAX_SAFE_INTEGER + 1 }, { source: { ...call.source, description: null } }, { source: { ...call.source, variant: "pill" } }, { source: { ...call.source, description: " " } }]) {
@@ -1669,8 +1735,8 @@ describe("V4 Rust/browser portable boundary concordance", () => {
     const call = records[0].invocations[0];
     records[0].conversation.title = "\ufeff";
     Object.assign(invoke, { interactionText: "\ufeff", variant: "card", description: "\ufeff" });
-    Object.assign(call.source, { instruction: "\ufeff", variant: "card", description: "\ufeff" });
-    records[2].text = "\ufeff";
+    for (const frozen of records[0].invocations) Object.assign(frozen.source, { instruction: "\ufeff", variant: "card", description: "\ufeff" });
+    records[2].text = "\ufeff"; records[3].text = "\ufeff";
     const parsed = parsePublicSnapshot(recordsJsonl(records));
     expect(parsed.header.conversation.title).toBe("\ufeff");
     expect(parsed.header.invocations[0].source.instruction).toBe("\ufeff");
@@ -1689,7 +1755,7 @@ describe("V4 Rust/browser portable boundary concordance", () => {
   it("joins result text to the raw or Product Unicode White_Space-trimmed frozen instruction", () => {
     for (const instruction of ["\u0085\u2003 Continue [project]/private.txt \u0085", "\ufeffContinue [project]/private.txt\ufeff", "Cafe\u0301"]) {
       const records = reusableInvocationRecords();
-      const call = records[0].invocations[0]; call.source.instruction = instruction;
+      const call = records[0].invocations[0]; call.source.captureState = "draft"; call.source.instruction = instruction;
       const result = records.find(turn => turn.id === call.resultTurnId);
       for (const text of [instruction, instruction.replace(/^\p{White_Space}+|\p{White_Space}+$/gu, "")]) {
         result.text = text;

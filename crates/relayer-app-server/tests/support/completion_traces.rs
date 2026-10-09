@@ -4583,6 +4583,367 @@ async fn the_broker_refuses_every_request_for_a_users_result() {
     world.finish().await;
 }
 
+// The archive-only compatibility fixture above supplies an invented portable
+// source. This fixture observes native own-draft preparation, independent child
+// progress, parent terminality and the local API after a real import/reopen.
+#[tokio::test]
+async fn imported_own_draft_sources_preserve_per_call_history_without_authority() {
+    use crate::conversation_export::ExportInvocationCaptureState;
+    use crate::conversation_import_service::ConversationImportStager;
+    use sha2::{Digest, Sha256};
+    let mut fixtures = Vec::new();
+    for stopped in [true, false] {
+        let status = if stopped { "stopped" } else { "failed" };
+        let world = World::build_program_mode(
+            "frozen-draft-source",
+            false,
+            false,
+            Some(true),
+            true,
+            "First frozen instruction",
+            false,
+        )
+        .await;
+        let parent = NodeId::new(world.invocation.source_interaction_node_id).unwrap();
+        let source = world.graph.writer_for_subgraph(parent).await.unwrap();
+        let inventory = world
+            .graph
+            .conversation_graph_snapshot(&[parent])
+            .await
+            .unwrap();
+        let original = &inventory.invocations[0].source_action;
+        // Repairing a still-owned draft must not rewrite the earlier call.
+        let repaired = source
+            .add_action(&ActionDraft {
+                client_key: "child".into(),
+                source_node_id: original.source_node_id,
+                source_layer_id: original.source_layer_id,
+                kind: ActionKind::Invoke,
+                relation: None,
+                label: "Second frozen request".into(),
+                variant: ActionVariant::Pill,
+                icon: None,
+                description: None,
+                target_layer_id: None,
+                interaction_text: Some("Second frozen instruction".into()),
+                reusable: Some(true),
+                input_action_ids: vec![],
+                input: None,
+            })
+            .await
+            .unwrap();
+        let second = source
+            .prepare_recursive_invocation(repaired.id, "second-draft-call")
+            .await
+            .unwrap()
+            .0;
+        // Calls capture draft provenance. The child can publish only after the
+        // enclosing source is Current; the parent still never Returns.
+        source
+            .transition_current(
+                0,
+                "parent-progress",
+                CurrentTransition::Advance {
+                    layer_id: original.source_layer_id.unwrap(),
+                },
+            )
+            .await
+            .unwrap();
+        for (child_id, title) in [
+            (
+                NodeId::new(world.completion_id).unwrap(),
+                "First contribution",
+            ),
+            (second.id, "Second contribution"),
+        ] {
+            let child = world.graph.writer_for_subgraph(child_id).await.unwrap();
+            let answer = child
+                .submit_node(&NodeDraft {
+                    client_key: "answer".into(),
+                    kind: "concept".into(),
+                    icon: "box".into(),
+                    title: title.into(),
+                    detail: format!("{title} retained independently"),
+                })
+                .await
+                .unwrap();
+            let current = child
+                .submit_layer(&LayerDraft {
+                    client_key: "current".into(),
+                    default_node_id: Some(answer.id),
+                    nodes: vec![answer.id],
+                    edges: vec![],
+                    size_justification: None,
+                    layout: Some(LayerLayout::v1(
+                        vec![NodePlacement {
+                            node_id: answer.id,
+                            x: 0.5,
+                            y: 0.5,
+                        }],
+                        "default",
+                    )),
+                })
+                .await
+                .unwrap();
+            child
+                .add_action(&ActionDraft {
+                    client_key: "response".into(),
+                    source_node_id: child_id,
+                    source_layer_id: None,
+                    kind: ActionKind::Navigate,
+                    relation: Some(NavigateRelation::Expand),
+                    label: title.into(),
+                    variant: ActionVariant::Pill,
+                    icon: None,
+                    description: None,
+                    target_layer_id: Some(current.id),
+                    interaction_text: None,
+                    reusable: None,
+                    input_action_ids: vec![],
+                    input: None,
+                })
+                .await
+                .unwrap();
+            child
+                .add_action(&ActionDraft {
+                    client_key: format!("enclosing-contribution-{}", child_id.value()),
+                    source_node_id: original.source_node_id,
+                    source_layer_id: original.source_layer_id,
+                    kind: ActionKind::Navigate,
+                    relation: Some(NavigateRelation::Reference),
+                    label: title.into(),
+                    variant: ActionVariant::Pill,
+                    icon: None,
+                    description: None,
+                    target_layer_id: Some(current.id),
+                    interaction_text: None,
+                    reusable: None,
+                    input_action_ids: vec![],
+                    input: None,
+                })
+                .await
+                .unwrap();
+            child
+                .transition_current(
+                    0,
+                    "progress",
+                    CurrentTransition::Advance {
+                        layer_id: current.id,
+                    },
+                )
+                .await
+                .unwrap();
+        }
+        source
+            .transition_current(
+                1,
+                "parent-terminal",
+                if stopped {
+                    CurrentTransition::Stop {
+                        reason: "cancelled_by_user".into(),
+                    }
+                } else {
+                    CurrentTransition::Fail {
+                        reason: "provider_timeout".into(),
+                    }
+                },
+            )
+            .await
+            .unwrap();
+        sqlx::query("UPDATE interactions SET completion_status=?1,completion_output_json=NULL,completion_error=?2 WHERE id=?3")
+            .bind(status).bind(if stopped { "cancelled_by_user" } else { "provider_timeout" })
+            .bind(world.thread.root_interaction_id.value()).execute(&world.pool).await.unwrap();
+        let bytes = crate::conversation_export_service::build_conversation_export(
+            &world.product,
+            &world.runtime,
+            world.thread.id,
+            world.state.export_producer.clone(),
+            "2026-10-08T00:00:00Z".into(),
+        )
+        .await
+        .unwrap();
+        let records = crate::conversation_export::decode_export_jsonl(&bytes).unwrap();
+        let ConversationExportRecord::Header(header) = &records[0] else {
+            panic!("header")
+        };
+        assert_eq!(header.invocations.len(), 2);
+        let frozen = header.invocations.clone();
+        assert_eq!(
+            frozen[0].source.parent_node_id,
+            frozen[1].source.parent_node_id
+        );
+        assert_ne!(frozen[0].id, frozen[1].id);
+        assert_ne!(frozen[0].source.instruction, frozen[1].source.instruction);
+        assert_ne!(frozen[0].current_layer_id, frozen[1].current_layer_id);
+        assert!(frozen.iter().all(|call| call.source.capture_state
+            == Some(ExportInvocationCaptureState::Draft)
+            && call.current.is_some()
+            && call.returned_layer_id.is_none()
+            && call.result_turn_id.is_none()));
+        assert!(
+            records
+                .iter()
+                .filter_map(|record| match record {
+                    ConversationExportRecord::Turn(turn) => Some(turn),
+                    _ => None,
+                })
+                .filter(|turn| turn.interaction_node_id.as_deref()
+                    == Some(frozen[0].source.interaction_node_id.as_str()))
+                .all(|turn| turn.accepted_view.is_none()
+                    && serde_json::to_value(turn.completion.status).unwrap() == status)
+        );
+        let mut stager = ConversationImportStager::begin(*header.clone(), &world.product)
+            .await
+            .unwrap();
+        for record in records.iter().skip(1) {
+            match record {
+                ConversationExportRecord::Turn(turn) => {
+                    stager.push_turn(turn, &world.product).await.unwrap()
+                }
+                ConversationExportRecord::VisualAssetContent(content) => stager
+                    .push_visual_asset_content(content, &world.product)
+                    .await
+                    .unwrap(),
+                _ => unreachable!(),
+            }
+        }
+        let receipt = stager
+            .finish(format!("sha256:draft-source-{status}"), &world.product)
+            .await
+            .unwrap();
+        let imported = crate::conversation_import_service::materialize_and_publish_conversation(
+            &receipt.import_id,
+            &world.product,
+            &world.runtime,
+        )
+        .await
+        .unwrap();
+        let imported_id = crate::product::ThreadId::from_database(imported.thread_id);
+        let mut state = world.state.clone();
+        state.product = ProductService::new(
+            SqliteProductStore::open(&world.root.path().join("product.sqlite3"))
+                .await
+                .unwrap(),
+            true,
+        );
+        let detail = state.product.get_thread(imported_id).await.unwrap();
+        assert!(
+            detail.action_invocations.is_empty(),
+            "read import cannot invent a Product invocation receipt"
+        );
+        let anchor = imported.turns[0].graph_node_id.unwrap();
+        let graph_pool = sqlx::SqlitePool::connect(&format!(
+            "sqlite://{}",
+            world.root.path().join("legacy-graph.sqlite3").display()
+        ))
+        .await
+        .unwrap();
+        let author_eligible: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM completion_authorities WHERE interaction_node_id=?1 AND author_eligible=1",
+        ).bind(anchor).fetch_one(&graph_pool).await.unwrap();
+        assert_eq!(author_eligible, 0, "import cannot mint execution authority");
+        let accepted_sources: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM completions WHERE interaction_node_id=?1")
+                .bind(anchor)
+                .fetch_one(&graph_pool)
+                .await
+                .unwrap();
+        assert_eq!(
+            accepted_sources, 0,
+            "frozen source is not an accepted canonical response"
+        );
+        let native_calls: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM durable_invocations WHERE source_completion_id=?1",
+        )
+        .bind(anchor)
+        .fetch_one(&graph_pool)
+        .await
+        .unwrap();
+        assert_eq!(
+            native_calls, 0,
+            "portable calls are never native executable calls"
+        );
+        graph_pool.close().await;
+        let imported_reader = world
+            .graph
+            .writer_for_subgraph(NodeId::new(anchor).unwrap())
+            .await
+            .unwrap();
+        assert!(matches!(
+            imported_reader
+                .submit_node(&NodeDraft {
+                    client_key: "forbidden-import-edit".into(),
+                    kind: "concept".into(),
+                    icon: "box".into(),
+                    title: "Forbidden edit".into(),
+                    detail: "Inert history is read-only".into(),
+                })
+                .await,
+            Err(relayer_graph_core::GraphError::Forbidden(_))
+        ));
+
+        let headers =
+            HeaderMap::from_iter([(header::COOKIE, "relayer_control=control".parse().unwrap())]);
+        let query =
+            serde_json::from_value(serde_json::json!({"threadId": imported.thread_id})).unwrap();
+        let response =
+            crate::api::state::product_state(State(state.clone()), headers.clone(), Query(query))
+                .await
+                .unwrap_or_else(|error| panic!("state: {}", error.message()));
+        let state_json = serde_json::to_value(response.0).unwrap();
+        let history = state_json["importedInvocationHistory"].as_array().unwrap();
+        assert_eq!(history.len(), 2);
+        for entry in history {
+            assert!(
+                entry["sourceNodeId"].is_null()
+                    && entry["sourceActionId"].is_null()
+                    && entry["presentingLayerId"].is_null()
+            );
+            assert_eq!(entry["sourceTurn"]["id"], imported.turns[0].interaction_id);
+            assert_eq!(
+                entry["sourceTurn"]["interactionNodeId"],
+                frozen[0].source.interaction_node_id
+            );
+            assert_eq!(entry["sourceTurn"]["completion"]["status"], status);
+            assert!(entry["resultInteractionId"].is_null());
+        }
+        let response = get(State(state.clone()), headers, Path(imported.thread_id))
+            .await
+            .unwrap_or_else(|error| panic!("detail: {}", error.message()));
+        let detail_json = serde_json::to_value(response.0).unwrap();
+        assert_eq!(
+            detail_json["importedInvocationHistory"],
+            state_json["importedInvocationHistory"]
+        );
+        let reexport = crate::conversation_export_service::build_conversation_export(
+            &state.product,
+            &world.runtime,
+            imported_id,
+            world.state.export_producer.clone(),
+            "2026-10-08T00:00:01Z".into(),
+        )
+        .await
+        .unwrap();
+        let records = crate::conversation_export::decode_export_jsonl(&reexport).unwrap();
+        let ConversationExportRecord::Header(header) = &records[0] else {
+            panic!("reexport header")
+        };
+        assert_eq!(
+            header.invocations, frozen,
+            "synthetic presentation cannot alter portable provenance"
+        );
+        fixtures.push(serde_json::json!({
+            "state": state_json, "detail": detail_json, "parentStatus": status,
+            "archiveSha256": format!("{:x}", Sha256::digest(&bytes)),
+            "nativeProductResultBound": false,
+        }));
+        world.finish().await;
+    }
+    if let Ok(path) = std::env::var("RELAYER_INERT_DRAFT_SOURCE_FIXTURE_PATH") {
+        fs::write(path, serde_json::to_vec_pretty(&fixtures).unwrap()).unwrap();
+    }
+}
+
 #[tokio::test]
 async fn imported_current_call_history_is_projected_without_execution_authority() {
     imported_call_history_round_trip(false).await;
@@ -7106,8 +7467,8 @@ async fn local_call_occupancy_is_private_and_isolated_across_unrelated_roots() {
 #[tokio::test]
 async fn native_invocation_argument_bound_preserves_exportable_calls_and_uncalled_definitions() {
     use relayer_graph_core::{
-        GraphError, InputAction, InputControl, PresentingInputOccurrence, SubmittedInputDraft,
-        SubmittedInputValue,
+        GraphError, InputAction, InputControl, InputOption, PresentingInputOccurrence,
+        SubmittedInputDraft, SubmittedInputValue,
     };
     let world = World::build_mode("native-argument-bound", false, false, Some(true)).await;
     let thread = world
@@ -7208,9 +7569,21 @@ async fn native_invocation_argument_bound_preserves_exportable_calls_and_uncalle
     let mut inputs = Vec::new();
     for index in 0..257 {
         let question = InputAction {
-            control: InputControl::Text,
+            control: if index == 0 {
+                InputControl::MultiSelect
+            } else {
+                InputControl::Text
+            },
             prompt: format!("Question {index}"),
-            options: vec![],
+            options: if index == 0 {
+                vec![InputOption {
+                    key: "optional".into(),
+                    label: "Optional destination".into(),
+                    unsupported_fields: Default::default(),
+                }]
+            } else {
+                vec![]
+            },
             minimum_selections: None,
             unsupported_fields: Default::default(),
         };
@@ -7241,8 +7614,12 @@ async fn native_invocation_argument_bound_preserves_exportable_calls_and_uncalle
                 action_id: field.id,
             },
             action: question,
-            value: SubmittedInputValue::Text {
-                text: format!("Answer {index}"),
+            value: if index == 0 {
+                SubmittedInputValue::Selected { selected: vec![] }
+            } else {
+                SubmittedInputValue::Text {
+                    text: format!("Answer {index}"),
+                }
             },
         });
     }
@@ -7298,6 +7675,38 @@ async fn native_invocation_argument_bound_preserves_exportable_calls_and_uncalle
     .execute(&world.pool)
     .await
     .unwrap();
+    // The optional selection crosses real Product validation and SQLite before
+    // graph preparation. It is an answer even when no option is selected.
+    let accepted_optional = writer
+        .get_layer(question_layers[0])
+        .await
+        .unwrap()
+        .actions
+        .into_iter()
+        .find(|action| action.id == inputs[0])
+        .unwrap();
+    let saved = world
+        .product
+        .commit_action_input_attachment(
+            thread.id,
+            &arguments[0].occurrence,
+            &accepted_optional,
+            &crate::product::ActionInputValue::Selected {
+                selected_keys: vec![],
+            },
+            0,
+        )
+        .await
+        .unwrap();
+    assert_eq!(saved.attachments.len(), 1);
+    assert_eq!(
+        saved.attachments[0].value,
+        crate::product::ActionInputValue::Selected {
+            selected_keys: vec![]
+        }
+    );
+    assert_eq!(saved.attachments[0].action.minimum_selections, None);
+    arguments[0].action = saved.attachments[0].action.clone();
     assert_eq!(writer.get_layer(layer.id).await.unwrap().actions.len(), 7);
     let (child, call) = writer
         .prepare_user_invocation_with_inputs(invokes[0].id, "bounded-call", &arguments[..256])
@@ -7378,6 +7787,16 @@ async fn native_invocation_argument_bound_preserves_exportable_calls_and_uncalle
     assert_eq!(header.export_version, 4);
     assert_eq!(header.invocations.len(), 1);
     assert_eq!(header.invocations[0].arguments.len(), 256);
+    let frozen_optional = &header.invocations[0].arguments[0];
+    assert_eq!(
+        frozen_optional.action.control,
+        crate::conversation_export::ExportInputControl::MultiSelect
+    );
+    assert_eq!(frozen_optional.action.minimum_selections, None);
+    assert_eq!(
+        frozen_optional.value,
+        crate::conversation_export::ExportSubmittedInputValue::Selected { selected: vec![] }
+    );
     let exported_inputs: Vec<_> = records
         .iter()
         .filter_map(|record| match record {
@@ -7407,6 +7826,54 @@ async fn native_invocation_argument_bound_preserves_exportable_calls_and_uncalle
             .input_action_ids
             .iter()
             .all(|id| exported_inputs.iter().any(|input| &input.id == id))
+    );
+    use crate::conversation_import_service::ConversationImportStager;
+    let mut stager = ConversationImportStager::begin(*header.clone(), &world.product)
+        .await
+        .unwrap();
+    for record in records.iter().skip(1) {
+        match record {
+            ConversationExportRecord::Turn(turn) => {
+                stager.push_turn(turn, &world.product).await.unwrap()
+            }
+            ConversationExportRecord::VisualAssetContent(content) => stager
+                .push_visual_asset_content(content, &world.product)
+                .await
+                .unwrap(),
+            _ => unreachable!(),
+        }
+    }
+    let receipt = stager
+        .finish(
+            format!("sha256:{:x}", Sha256::digest(&bytes)),
+            &world.product,
+        )
+        .await
+        .unwrap();
+    let imported = crate::conversation_import_service::materialize_and_publish_conversation(
+        &receipt.import_id,
+        &world.product,
+        &world.runtime,
+    )
+    .await
+    .unwrap();
+    let reexport = crate::conversation_export_service::build_conversation_export(
+        &world.product,
+        &world.runtime,
+        crate::product::ThreadId::from_database(imported.thread_id),
+        world.state.export_producer.clone(),
+        "2026-10-08T00:00:01Z".into(),
+    )
+    .await
+    .unwrap();
+    let reopened = crate::conversation_export::decode_export_jsonl(&reexport).unwrap();
+    crate::conversation_export::validate_export_records(&reopened).unwrap();
+    let ConversationExportRecord::Header(reopened_header) = &reopened[0] else {
+        panic!("header")
+    };
+    assert_eq!(
+        reopened_header.invocations[0].arguments[0], *frozen_optional,
+        "Actual import and re-export must retain the empty optional answer and frozen question"
     );
     world.finish().await;
 }

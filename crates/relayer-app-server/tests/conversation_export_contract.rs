@@ -273,7 +273,7 @@ fn reusable_call(id: &str, child: &str) -> ExportInvocation {
             action_id: "action:invoke-1".into(),
             parent_node_id: "node:1".into(),
             layer_id: Some("layer:1".into()),
-            presenting_layer_id: None,
+            presenting_layer_id: Some("layer:1".into()),
             capture_state: Some(ExportInvocationCaptureState::Accepted),
             instruction: "Continue".into(),
             label: "Follow up".into(),
@@ -298,6 +298,261 @@ fn reusable_call(id: &str, child: &str) -> ExportInvocation {
         returned_layer_id: None,
         arguments: vec![],
         current: None,
+    }
+}
+
+fn accepted_callable_records(current_only: bool) -> Vec<ConversationExportRecord> {
+    let mut fixture = records();
+    let mut call = reusable_call("invocation:source-check", "node:source-check-child");
+    if current_only {
+        let ConversationExportRecord::Turn(turn) = &mut fixture[1] else {
+            unreachable!()
+        };
+        let view = turn.accepted_view.take().unwrap();
+        turn.completion = receipt(ExportCompletionStatus::Stopped);
+        call.head_revision = 1;
+        call.current_layer_id = Some(view.root_layer_id.clone());
+        call.current = Some(ExportInvocationCurrent {
+            root_layer_id: view.root_layer_id,
+            layers: view.layers,
+        });
+    }
+    let ConversationExportRecord::Header(header) = &mut fixture[0] else {
+        unreachable!()
+    };
+    header.export_version = EXPORT_VERSION_V4;
+    header.invocations = vec![call];
+    fixture
+}
+
+#[test]
+fn v4_accepted_callable_matches_canonical_definition_in_turn_or_current_inventory() {
+    for current_only in [false, true] {
+        let baseline = accepted_callable_records(current_only);
+        validate_export_records(&baseline).unwrap();
+        assert_validation_parity(&baseline);
+        for field in [
+            "instruction",
+            "label",
+            "presentation",
+            "icon",
+            "source-node",
+            "authored-layer",
+            "bindings",
+            "reuse",
+            "state",
+            "kind",
+        ] {
+            let mut invalid = baseline.clone();
+            let ConversationExportRecord::Header(header) = &mut invalid[0] else {
+                unreachable!()
+            };
+            let source = &mut header.invocations[0].source;
+            match field {
+                "instruction" => source.instruction = "Forged instruction".into(),
+                "label" => source.label = "Forged label".into(),
+                "presentation" => {
+                    source.variant = ExportActionVariant::Card;
+                    source.description = Some("Forged card".into());
+                }
+                "icon" => source.icon = Some("circle".into()),
+                "source-node" => source.parent_node_id = "node:another-parent".into(),
+                "authored-layer" => source.layer_id = Some("layer:another-source".into()),
+                "bindings" => source.input_action_ids = vec!["action:unexpected".into()],
+                "reuse" => source.reusable = Some(false),
+                "state" => source.state = "stopped".into(),
+                "kind" => source.action_id = "action:root-1".into(),
+                _ => unreachable!(),
+            }
+            if field == "bindings" {
+                let question = input("action:unexpected", "node:1", "layer:1");
+                let call = &mut header.invocations[0];
+                call.arguments = vec![ExportInvocationArgument {
+                    source: ExportInputSource {
+                        interaction_node_id: call.source.interaction_node_id.clone(),
+                        layer_id: "layer:1".into(),
+                        action_id: question.id.clone(),
+                        node_id: "node:1".into(),
+                    },
+                    action: question.input.clone().unwrap(),
+                    value: ExportSubmittedInputValue::Text {
+                        text: "A valid but undeclared answer".into(),
+                    },
+                }];
+                header.bound_inputs.push(question);
+            }
+            // Current carries no root action, so use an included Input with the
+            // same ID to test wrong-kind resolution in that inventory as well.
+            if current_only && field == "kind" {
+                let call = &mut header.invocations[0];
+                call.source.action_id = "action:wrong-kind".into();
+                call.current.as_mut().unwrap().layers[0].actions.push(input(
+                    "action:wrong-kind",
+                    "node:1",
+                    "layer:1",
+                ));
+            }
+            assert_rejected_with_parity(&invalid, "invocation_source_snapshot_mismatch");
+        }
+    }
+}
+
+#[test]
+fn v4_known_captures_require_a_presenting_layer_but_historical_unknowns_remain_readable() {
+    for capture in [
+        ExportInvocationCaptureState::Draft,
+        ExportInvocationCaptureState::Accepted,
+    ] {
+        let mut fixture = accepted_callable_records(false);
+        let ConversationExportRecord::Header(header) = &mut fixture[0] else {
+            unreachable!()
+        };
+        header.invocations[0].source.capture_state = Some(capture);
+        header.invocations[0].source.presenting_layer_id = None;
+        assert_rejected_with_parity(&fixture, "invocation_presenting_layer_missing");
+        let ConversationExportRecord::Header(header) = &mut fixture[0] else {
+            unreachable!()
+        };
+        header.invocations[0].source.capture_state = None;
+        validate_export_records(&fixture).unwrap();
+        assert_validation_parity(&fixture);
+    }
+}
+
+#[test]
+fn v4_draft_and_unknown_calls_retain_original_definitions_after_parent_repair() {
+    for capture in [None, Some(ExportInvocationCaptureState::Draft)] {
+        let mut fixture = accepted_callable_records(false);
+        let ConversationExportRecord::Header(header) = &mut fixture[0] else {
+            unreachable!()
+        };
+        let source = &mut header.invocations[0].source;
+        source.capture_state = capture;
+        source.instruction = "Earlier draft instruction".into();
+        source.label = "Earlier draft label".into();
+        source.reusable = Some(false);
+        // Display state may already be accepted after repair. Capture state is
+        // the separate provenance that prevents history from being rewritten.
+        source.state = "accepted".into();
+        if capture.is_none() {
+            source.presenting_layer_id = None;
+        }
+        validate_export_records(&fixture).unwrap();
+        assert_validation_parity(&fixture);
+        let encoded = fixture
+            .iter()
+            .map(|record| serde_json::to_string(record).unwrap())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert_eq!(decode_export_jsonl(encoded.as_bytes()).unwrap(), fixture);
+    }
+}
+
+#[test]
+fn v4_empty_multi_select_preserves_native_unset_minimum_and_refuses_explicit_positive_minimum() {
+    let mut fixture = accepted_callable_records(false);
+    let mut question = input("action:optional", "node:1", "layer:1");
+    question.input.as_mut().unwrap().control = ExportInputControl::MultiSelect;
+    question.input.as_mut().unwrap().options = vec![option("a", "A")];
+    let ConversationExportRecord::Turn(turn) = &mut fixture[1] else {
+        unreachable!()
+    };
+    let layer = &mut turn.accepted_view.as_mut().unwrap().layers[0];
+    layer
+        .actions
+        .iter_mut()
+        .find(|action| action.kind == ExportActionKind::Invoke)
+        .unwrap()
+        .input_action_ids = vec![question.id.clone()];
+    layer.actions.push(question.clone());
+    let ConversationExportRecord::Header(header) = &mut fixture[0] else {
+        unreachable!()
+    };
+    let call = &mut header.invocations[0];
+    call.source.input_action_ids = vec![question.id.clone()];
+    call.arguments = vec![ExportInvocationArgument {
+        source: ExportInputSource {
+            interaction_node_id: call.source.interaction_node_id.clone(),
+            layer_id: "layer:1".into(),
+            action_id: question.id.clone(),
+            node_id: "node:1".into(),
+        },
+        action: question.input.unwrap(),
+        value: ExportSubmittedInputValue::Selected { selected: vec![] },
+    }];
+    validate_export_records(&fixture).unwrap();
+    assert_validation_parity(&fixture);
+    let encoded = fixture
+        .iter()
+        .map(|record| serde_json::to_string(record).unwrap())
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert_eq!(decode_export_jsonl(encoded.as_bytes()).unwrap(), fixture);
+    let ConversationExportRecord::Header(header) = &mut fixture[0] else {
+        unreachable!()
+    };
+    header.invocations[0].arguments[0].action.minimum_selections = Some(1);
+    assert_rejected_with_parity(&fixture, "invocation_argument_value_invalid");
+}
+
+#[test]
+fn v4_aggregate_frozen_arguments_retain_the_existing_jsonl_header_byte_limit() {
+    for count in [5, 6] {
+        let mut fixture = accepted_callable_records(false);
+        let question = input("action:large-answer", "node:1", "layer:1");
+        let ConversationExportRecord::Turn(turn) = &mut fixture[1] else {
+            unreachable!()
+        };
+        let layer = &mut turn.accepted_view.as_mut().unwrap().layers[0];
+        let invoke = layer
+            .actions
+            .iter_mut()
+            .find(|action| action.kind == ExportActionKind::Invoke)
+            .unwrap();
+        invoke.reusable = Some(true);
+        invoke.input_action_ids = vec![question.id.clone()];
+        layer.actions.push(question.clone());
+        let ConversationExportRecord::Header(header) = &mut fixture[0] else {
+            unreachable!()
+        };
+        header.invocations = (0..count)
+            .map(|index| {
+                let mut call = reusable_call(
+                    &format!("invocation:large-{index}"),
+                    &format!("node:large-child-{index}"),
+                );
+                call.source.reusable = Some(true);
+                call.source.input_action_ids = vec![question.id.clone()];
+                call.arguments = vec![ExportInvocationArgument {
+                    source: ExportInputSource {
+                        interaction_node_id: call.source.interaction_node_id.clone(),
+                        layer_id: "layer:1".into(),
+                        action_id: question.id.clone(),
+                        node_id: "node:1".into(),
+                    },
+                    action: question.input.clone().unwrap(),
+                    value: ExportSubmittedInputValue::Text {
+                        text: "x".repeat(3 * 1024 * 1024),
+                    },
+                }];
+                call
+            })
+            .collect();
+        // Each argument is individually valid; only the encoded aggregate
+        // header encounters the existing resource refusal. No invocation is lost.
+        validate_export_records(&fixture).unwrap();
+        assert_validation_parity(&fixture);
+        let line = serde_json::to_vec(&fixture[0]).unwrap();
+        if count == 5 {
+            assert!(line.len() < MAX_JSONL_LINE_BYTES);
+            assert_eq!(decode_export_record_line(&line, 1).unwrap(), fixture[0]);
+        } else {
+            assert!(line.len() > MAX_JSONL_LINE_BYTES);
+            assert!(matches!(
+                decode_export_record_line(&line, 1),
+                Err(ExportReadError::LineTooLarge { line: 1 })
+            ));
+        }
     }
 }
 
@@ -498,6 +753,7 @@ fn v4_frozen_presentation_and_head_revision_match_portable_json_readers() {
     header.export_version = EXPORT_VERSION_V4;
     let mut call = reusable_call("invocation:card", "node:card-call");
     call.head_revision = MAX_PORTABLE_HEAD_REVISION;
+    call.source.capture_state = Some(ExportInvocationCaptureState::Draft);
     call.source.variant = ExportActionVariant::Card;
     call.source.description = Some("Frozen card explanation".into());
     header.invocations = vec![call];
@@ -595,6 +851,7 @@ fn v4_call_history_is_not_a_canonical_action_replacement_or_an_authority_carrier
     };
     header.export_version = EXPORT_VERSION_V4;
     let mut prior = reusable_call("invocation:1", "node:call-1");
+    prior.source.capture_state = Some(ExportInvocationCaptureState::Draft);
     prior.source.instruction = "Earlier draft instruction".into();
     prior.source.label = "Earlier draft label".into();
     header.invocations = vec![prior];
@@ -867,6 +1124,7 @@ fn v4_call_result_requires_an_accepted_turn_and_exact_returned_root() {
         let ConversationExportRecord::Header(header) = &mut whitespace[0] else {
             unreachable!()
         };
+        header.invocations[0].source.capture_state = Some(ExportInvocationCaptureState::Draft);
         header.invocations[0].source.instruction = instruction.into();
         for text in [instruction, instruction.trim()] {
             let ConversationExportRecord::Turn(turn) = &mut whitespace[2] else {

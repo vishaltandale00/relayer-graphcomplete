@@ -775,6 +775,7 @@ pub struct ConversationExportValidator {
     nodes_by_id: HashMap<String, NodeDefinitionDigest>,
     edges_by_id: HashMap<String, [u8; 32]>,
     actions_by_id: HashMap<String, [u8; 32]>,
+    invocation_source_definitions: HashMap<String, [u8; 32]>,
     context_actions_by_id: HashMap<String, [u8; 32]>,
     input_action_ids: HashSet<String>,
     submitted_input_ids: HashSet<String>,
@@ -823,6 +824,7 @@ impl ConversationExportValidator {
             nodes_by_id: HashMap::new(),
             edges_by_id: HashMap::new(),
             actions_by_id: HashMap::new(),
+            invocation_source_definitions: HashMap::new(),
             context_actions_by_id: HashMap::new(),
             input_action_ids: HashSet::new(),
             submitted_input_ids: HashSet::new(),
@@ -908,6 +910,7 @@ impl ConversationExportValidator {
                     "Converted invoke provenance requires export V3.",
                 ));
             }
+            self.remember_invocation_source(action);
             // A call can freeze a draft definition before that action is repaired
             // and accepted. Its source snapshot is provenance, not a replacement
             // definition of the current canonical action.
@@ -1325,6 +1328,9 @@ impl ConversationExportValidator {
                     &mut self.actions_by_id,
                     &self.root_action_ids,
                 )?;
+                for action in view.layers.iter().flat_map(|layer| &layer.actions) {
+                    self.remember_invocation_source(action);
+                }
                 for layer in &view.layers {
                     for node in &layer.nodes {
                         self.validate_node_visual_assets(
@@ -1401,6 +1407,37 @@ impl ConversationExportValidator {
                 "header.boundInputs.icon",
             )?;
         }
+        for call in &self.invocations {
+            if call.source.capture_state != Some(ExportInvocationCaptureState::Accepted) {
+                continue;
+            }
+            if let Some(definition) = self
+                .invocation_source_definitions
+                .get(&call.source.action_id)
+            {
+                let source = &call.source;
+                let captured = callable_snapshot_digest(serde_json::json!([
+                    true,
+                    source.parent_node_id,
+                    source.layer_id,
+                    source.instruction,
+                    source.label,
+                    source.description,
+                    source.variant,
+                    source.icon,
+                    source.input_action_ids,
+                    source.reusable,
+                    source.state
+                ]));
+                if definition != &captured {
+                    return Err(ExportValidationError::new(
+                        "invocation_source_snapshot_mismatch",
+                        "header.invocations.source",
+                        "An accepted captured callable must match its included canonical Invoke definition.",
+                    ));
+                }
+            }
+        }
         if let Some(unreachable) = self
             .visual_asset_contents
             .keys()
@@ -1415,6 +1452,32 @@ impl ConversationExportValidator {
             ));
         }
         Ok(())
+    }
+
+    fn remember_invocation_source(&mut self, action: &ExportAction) {
+        if self
+            .invocations
+            .iter()
+            .any(|call| call.source.action_id == action.id)
+        {
+            // Retain only a fingerprint; asset bytes are validated separately.
+            self.invocation_source_definitions.insert(
+                action.id.clone(),
+                callable_snapshot_digest(serde_json::json!([
+                    action.kind == ExportActionKind::Invoke,
+                    action.source_node_id,
+                    action.source_layer_id,
+                    action.interaction_text,
+                    action.label,
+                    action.description,
+                    action.variant,
+                    action.icon,
+                    action.input_action_ids,
+                    action.reusable,
+                    action.state
+                ])),
+            );
+        }
     }
 
     fn validate_root_icon_asset(
@@ -1639,6 +1702,10 @@ impl ConversationExportValidator {
         }
         Ok(())
     }
+}
+
+fn callable_snapshot_digest(value: serde_json::Value) -> [u8; 32] {
+    Sha256::digest(value.to_string().as_bytes()).into()
 }
 
 fn register_immutable_view_records(
@@ -1947,6 +2014,13 @@ fn validate_invocation_inventory(
         if let Some(layer) = &call.source.layer_id {
             require_id(layer, "layer", &path)?;
         }
+        if call.source.capture_state.is_some() && call.source.presenting_layer_id.is_none() {
+            return Err(ExportValidationError::new(
+                "invocation_presenting_layer_missing",
+                &path,
+                "Known capture state requires its frozen presenting Layer.",
+            ));
+        }
         if let Some(layer) = &call.source.presenting_layer_id {
             require_id(layer, "layer", &path)?;
         }
@@ -2090,11 +2164,10 @@ fn validate_invocation_inventory(
                         .iter()
                         .map(|option| &option.key)
                         .collect::<HashSet<_>>();
-                    if selected.is_empty()
-                        || keys.len() != selected.len()
+                    if keys.len() != selected.len()
                         || (argument.action.control == ExportInputControl::SingleSelect
                             && selected.len() != 1)
-                        || selected.len() < argument.action.minimum_selections.unwrap_or(1) as usize
+                        || selected.len() < argument.action.minimum_selections.unwrap_or(0) as usize
                         || selected
                             .iter()
                             .any(|option| !argument.action.options.contains(option))

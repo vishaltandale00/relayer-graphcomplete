@@ -53,10 +53,10 @@ function workspace() {
         const sourceInteraction = appState.interactions.find(source => String(source.id) === String(interaction.invocationSourceInteractionId));
         return resolveNativeInvocationAsset(asset, call, { threadId: thread?.id, sourceInteraction, interaction, nodeId: node.id, layerId });
       }
-      if (interaction?.inertInvocationCurrent) {
+      if (interaction?.inertInvocationCurrent || interaction?.inertInvocationSource) {
         const history = (appState.importedInvocationHistory ?? []).find(entry => entry.inert === true
           && String(entry.threadId) === String(thread?.id) && entry.record?.id === interaction.invocationId);
-        return resolveImportedInvocationAsset(asset, history, { nodeId: node.id, layerId });
+        return resolveImportedInvocationAsset(asset, history, { nodeId: node.id, layerId, frozenSource: interaction.inertInvocationSource === true });
       }
       return resolveAcceptedNodeDetailAsset(asset, {
         threadId: thread?.id, interactionId: interaction?.id, nodeId: node.id, layerId,

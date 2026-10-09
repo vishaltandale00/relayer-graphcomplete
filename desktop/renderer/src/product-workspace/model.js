@@ -241,7 +241,7 @@ export function workspaceModeCapabilities(mode) {
 
 export function productWorkspaceMode({ evalReviewContext, reviewRequested, thread, interaction }) {
   return evalReviewContext || reviewRequested || thread?.imported === true
-    || interaction?.inertInvocationCurrent === true ? "review" : "interactive";
+    || interaction?.inertInvocationCurrent === true || interaction?.inertInvocationSource === true ? "review" : "interactive";
 }
 
 // A graph-owned call can publish accepted progress without a Product launch row.

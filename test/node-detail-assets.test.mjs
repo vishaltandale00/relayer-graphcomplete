@@ -70,6 +70,48 @@ describe("inert imported Current asset delivery", () => {
   });
 });
 
+describe("inert imported frozen-source icon delivery", () => {
+  it.each([
+    "valid", "wrong-node", "wrong-layer", "wrong-call", "not-inert", "wrong-icon",
+    "wrong-pin", "wrong-digest", "wrong-media", "missing-pin", "omitted", "missing-content",
+    "changed-bytes", "oversized-bytes",
+  ])("resolves only the retained per-call SVG without native reads (%s)", async scenario => {
+    const { asset, response, dependencies } = fixture();
+    const context = { frozenSource: true, nodeId: "node:source", layerId: "source-layer:invocation:a" };
+    const source = {
+      parentNodeId: context.nodeId,
+      icon: { kind: "image", assetId: asset.id, digestSha256: asset.digestSha256, mediaType: asset.mediaType },
+      iconAsset: { assetId: asset.id, digestSha256: asset.digestSha256, mediaType: asset.mediaType, byteLength: response.byteLength },
+    };
+    const history = { inert: true, record: { id: "invocation:a", source }, visualAssetContents: [structuredClone(response)] };
+    if (scenario === "wrong-node") context.nodeId = "node:other";
+    if (scenario === "wrong-layer") context.layerId = "source-layer:invocation:b";
+    if (scenario === "wrong-call") history.record.id = "invocation:b";
+    if (scenario === "not-inert") history.inert = false;
+    if (scenario === "wrong-icon") source.icon.assetId = "other";
+    if (scenario === "wrong-pin") source.iconAsset.assetId = "other";
+    if (scenario === "wrong-digest") source.iconAsset.digestSha256 = "0".repeat(64);
+    if (scenario === "wrong-media") source.iconAsset.mediaType = "text/html";
+    if (scenario === "missing-pin") delete source.iconAsset;
+    if (scenario === "omitted") source.iconAssetOmitted = true;
+    if (scenario === "missing-content") history.visualAssetContents = [];
+    if (scenario === "changed-bytes") history.visualAssetContents[0].contentBase64 = Buffer.alloc(response.byteLength, 65).toString("base64");
+    if (scenario === "oversized-bytes") source.iconAsset.byteLength = history.visualAssetContents[0].byteLength = 8 * 1024 * 1024 + 1;
+    if (scenario === "valid") {
+      const result = await resolveImportedInvocationAsset(asset, history, context, dependencies);
+      const blob = dependencies.URL.createObjectURL.mock.calls[0][0];
+      expect(blob.type).toBe("image/svg+xml");
+      expect(Buffer.from(await blob.arrayBuffer()).toString()).toBe('<svg xmlns="http://www.w3.org/2000/svg"/>');
+      result.release(); result.release();
+      expect(dependencies.URL.revokeObjectURL).toHaveBeenCalledExactlyOnceWith("blob:accepted");
+    } else {
+      await expect(resolveImportedInvocationAsset(asset, history, context, dependencies)).rejects.toThrow();
+      expect(dependencies.URL.createObjectURL).not.toHaveBeenCalled();
+    }
+    expect(dependencies.request).not.toHaveBeenCalled();
+  });
+});
+
 describe("graph-owned native Current asset delivery", () => {
   it.each(["valid", "returned-root-valid", "wrong-source", "wrong-key", "wrong-node", "wrong-layer", "child-anchor"])("uses only the real source Product read scope (%s)", async scenario => {
     const { asset, dependencies, context } = fixture();

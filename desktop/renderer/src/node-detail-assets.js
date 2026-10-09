@@ -38,10 +38,17 @@ export async function resolveNativeInvocationAsset(asset, call, { threadId, sour
 // Imported Current has only portable viewing identities. Its validated frozen
 // associations and retained bytes are resolved locally, never through native
 // accepted-node routes.
-export async function resolveImportedInvocationAsset(asset, history, { nodeId, layerId }, dependencies = {}) {
+export async function resolveImportedInvocationAsset(asset, history, { nodeId, layerId, frozenSource = false }, dependencies = {}) {
   const layer = history?.inert === true && history.record?.current?.layers.find(layer => String(layer.layer.id) === String(layerId));
   const node = layer?.nodes.find(node => String(node.id) === String(nodeId));
-  const association = node?.authoredDetailAssets?.find(pin => pin.assetId === asset?.id
+  const source = history?.record?.source;
+  const sourcePin = history?.inert === true && frozenSource
+    && String(layerId) === `source-layer:${history.record.id}`
+    && String(nodeId) === String(source?.parentNodeId) && !source.iconAssetOmitted
+    && source.icon?.kind === "image" && source.icon.assetId === asset?.id
+    && source.icon.digestSha256 === asset.digestSha256 && source.icon.mediaType === asset.mediaType
+    ? source.iconAsset : null;
+  const association = (frozenSource ? [sourcePin].filter(Boolean) : node?.authoredDetailAssets)?.find(pin => pin.assetId === asset?.id
     && pin.digestSha256 === asset.digestSha256 && pin.mediaType === asset.mediaType);
   const content = history?.visualAssetContents?.find(content => content.digestSha256 === asset?.digestSha256
     && content.mediaType === asset.mediaType && content.byteLength === association?.byteLength);

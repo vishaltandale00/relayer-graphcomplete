@@ -52,8 +52,25 @@ export function normalizeInvocationOrigin(value, threadId) {
     throw new TypeError("Invocation origin source must belong to the same thread");
   }
   identity(sourceEntry.threadId, "invocationOrigin.sourceEntry.threadId");
-  identity(sourceEntry.turnId, "invocationOrigin.sourceEntry.turnId");
-  const presentingLayerId = identity(value.presentingLayerId, "invocationOrigin.presentingLayerId");
+  const frozenSource = value.kind === "imported" && sourceEntry.turnId.startsWith("source:");
+  const portableIdentity = (item, kind) => {
+    const id = requiredId(item, `invocationOrigin.${kind}`);
+    if (id.length > 128 || !new RegExp(`^${kind}:[A-Za-z0-9._-]+$`).test(id)) {
+      throw new TypeError("Frozen imported source requires exact portable identities");
+    }
+    return id;
+  };
+  if (frozenSource) {
+    const callId = portableIdentity(value.invocationId, "invocation");
+    if (sourceEntry.turnId !== `source:${callId}` || value.invocationKey !== callId
+      || value.presentingLayerId !== `source-layer:${callId}`
+      || sourceEntry.navigationPath.length !== 1 || sourceEntry.navigationPath[0].viaActionId != null
+      || sourceEntry.temporalCurrent != null || sourceEntry.selectedNodeId !== String(value.sourceNodeId)) {
+      throw new TypeError("Frozen imported source must retain its exact per-call presentation");
+    }
+  } else identity(sourceEntry.turnId, "invocationOrigin.sourceEntry.turnId");
+  const presentingLayerId = frozenSource ? requiredId(value.presentingLayerId, "invocationOrigin.presentingLayerId")
+    : identity(value.presentingLayerId, "invocationOrigin.presentingLayerId");
   if (sourceEntry.navigationPath.at(-1)?.layerId !== presentingLayerId) {
     throw new TypeError("Invocation origin source path must end at its presenting Layer");
   }
@@ -63,9 +80,9 @@ export function normalizeInvocationOrigin(value, threadId) {
   }
   return Object.freeze({
     sourceEntry,
-    actionId: identity(value.actionId, "invocationOrigin.actionId"),
+    actionId: frozenSource ? portableIdentity(value.actionId, "action") : identity(value.actionId, "invocationOrigin.actionId"),
     invocationKey,
-    sourceNodeId: identity(value.sourceNodeId, "invocationOrigin.sourceNodeId"),
+    sourceNodeId: frozenSource ? portableIdentity(value.sourceNodeId, "node") : identity(value.sourceNodeId, "invocationOrigin.sourceNodeId"),
     presentingLayerId,
     ...(value.kind === "imported" || value.kind === "graph" ? {
       kind: value.kind,

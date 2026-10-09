@@ -1377,14 +1377,22 @@ describe("workspace navigation integration", () => {
 
   it("reads imported Current and restores its local history without native requests or Invoke", async () => {
     const sourceRoot = rootLayer(7, 22);
+    sourceRoot.layer.state = "accepted";
+    Object.assign(sourceRoot.nodes[0], { state: "accepted", kind: "concept", icon: "box", detail: "Source" });
+    sourceRoot.actions.push({ id: 41, kind: "invoke", sourceNodeId: 22, sourceLayerId: 7,
+      interactionText: "Explore", label: "Explore", state: "accepted", variant: "pill", inputActionIds: [], reusable: true });
     const source = interaction(1, 10, sourceRoot);
     const imported = { id: 10, title: "Inert imported call", imported: true };
     const currentLayer = { layer: { id: "layer:current" }, nodes: [{ id: "node:current", title: "Current draft", detail: "Read only" }], edges: [],
       actions: [{ id: "action:detail", sourceNodeId: "node:current", kind: "navigate", relation: "reference", label: "Detail", targetLayerId: "layer:detail" }] };
     const detailLayer = { layer: { id: "layer:detail" }, nodes: [{ id: "node:detail", title: "Current detail", detail: "Read only" }], edges: [], actions: [] };
-    const entry = { inert: true, threadId: 10, sourceInteractionId: 1, sourceNodeId: 22, resultInteractionId: null,
+    const entry = { inert: true, threadId: 10, sourceInteractionId: 1, sourceNodeId: 22, sourceActionId: 41, presentingLayerId: 7, resultInteractionId: null,
       record: { id: "invocation:history", childInteractionNodeId: "node:child", lifecycle: "stopped", currentLayerId: "layer:current", returnedLayerId: null,
-        source: { label: "Explore" }, arguments: [], safeReason: "Stopped", current: { rootLayerId: "layer:current", layers: [currentLayer, detailLayer] } } };
+        source: { interactionNodeId: "node:source", actionId: "action:explore", parentNodeId: "node:source-parent",
+          layerId: "layer:source", presentingLayerId: "layer:source", captureState: "accepted", instruction: "Explore", label: "Explore",
+          description: null, icon: null, iconAsset: null, variant: "pill", inputActionIds: [], inputBindingsDefined: true,
+          reusable: true, parentTitle: "Node 22", parentDetail: "Source", state: "accepted" },
+        arguments: [], safeReason: "Stopped", current: { rootLayerId: "layer:current", layers: [currentLayer, detailLayer] } } };
     const agentResult = interaction(2, 10, rootLayer(8, 23), 2);
     const agentHistory = { ...entry, resultInteractionId: 2, record: { ...entry.record, id: "invocation:agent", activator: "agent", lifecycle: "succeeded", current: null } };
     const state = { ...productState([imported], [source, agentResult]), importedInvocationHistory: [entry, agentHistory] };

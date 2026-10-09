@@ -811,6 +811,18 @@ pub(super) async fn project_imported_invocation_history(
             inert: true,
             thread_id: thread_id.value(),
             source_interaction_id: source_verified.then(|| source_interaction_id.unwrap().value()),
+            source_turn: turns
+                .iter()
+                .find(|turn| {
+                    turn.turn.interaction_node_id.as_deref()
+                        == Some(record.source.interaction_node_id.as_str())
+                })
+                .map(|turn| super::types::ImportedInvocationSourceTurnResponse {
+                    id: turn.interaction_id.value(),
+                    sequence: turn.turn.sequence,
+                    interaction_node_id: record.source.interaction_node_id.clone(),
+                    completion: turn.turn.completion.clone(),
+                }),
             source_node_id: if source_verified {
                 mapping.and_then(|mapping| mapping["sourceNodeId"].as_i64())
             } else {

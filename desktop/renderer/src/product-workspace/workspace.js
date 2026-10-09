@@ -6752,8 +6752,8 @@ export function createProductWorkspace({
     }
     const importedCalls = (state.importedInvocationHistory ?? []).filter(entry => entry.inert === true
       && String(entry.threadId) === String(getThread()?.id)
-      && String(entry.sourceInteractionId) === String(interaction?.id)
-      && String(entry.sourceNodeId) === String(node.id));
+      && String(entry.presentationSource?.interactionId ?? entry.sourceInteractionId) === String(interaction?.id)
+      && String(entry.presentationSource?.nodeId ?? entry.sourceNodeId) === String(node.id));
     if (importedCalls.length) {
       const controls = $("#detailActions");
       controls.classList.remove("hidden");

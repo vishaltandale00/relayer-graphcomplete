@@ -1,3 +1,4 @@
+import { inertInvocationSource } from "./public-share-viewer/snapshot.js";
 import { normalizeInvocationOrigin, normalizeNavigationEntry } from "./navigation-history.js";
 import {
   layerPathForVisibleLayer,
@@ -52,8 +53,24 @@ export function invocationOriginForSource(origin, sourceLayer, actionInvocations
   if (!identity || resultTurnId == null
     || sameId(resultTurnId, identity.sourceEntry.turnId)
     || !sameId(identity.sourceEntry.selectedNodeId, identity.sourceNodeId)
-    || !sameId(sourceLayer?.layer?.id, identity.presentingLayerId)
-    || sourceLayer.layer.state !== "accepted") return null;
+    || !sameId(sourceLayer?.layer?.id, identity.presentingLayerId)) return null;
+  if (identity.kind === "imported" && sourceLayer.layer.state === "draft") {
+    const calls = importedInvocationHistory.filter(call => call.inert === true
+      && sameId(call.threadId, identity.sourceEntry.threadId)
+      && call.record?.id === identity.invocationId && identity.invocationKey === call.record.id
+      && sameId(call.presentationSource?.interactionId, identity.sourceEntry.turnId)
+      && sameId(call.presentationSource?.nodeId, identity.sourceNodeId)
+      && sameId(call.presentationSource?.actionId, identity.actionId)
+      && sameId(call.presentationSource?.layerId, identity.presentingLayerId)
+      && (call.record.lifecycle === "succeeded" && call.resultInteractionId != null
+        ? sameId(call.resultInteractionId, resultTurnId)
+        : String(resultTurnId) === `current:${call.record.id}` && call.record.current != null));
+    if (calls.length !== 1) return null;
+    const expected = inertInvocationSource(calls[0].record, calls[0].sourceTurn ? [calls[0].sourceTurn] : [], identity.sourceEntry.threadId);
+    if (JSON.stringify(sourceLayer) !== JSON.stringify(expected.completionOutput.rootLayer)) return null;
+    return Object.freeze({ ...identity, label: expected.frozenInvocationSource.parentTitle, icon: "box" });
+  }
+  if (sourceLayer.layer.state !== "accepted") return null;
   const node = sourceLayer.nodes?.find(node => sameId(node.id, identity.sourceNodeId) && node.state === "accepted");
   const action = sourceLayer.actions?.find(action => sameId(action.id, identity.actionId)
     && sameId(action.sourceNodeId, identity.sourceNodeId)
