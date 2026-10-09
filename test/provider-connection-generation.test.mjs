@@ -4,6 +4,7 @@
 // lifecycle event advances it in the same write, and a missing or stale one is refused.
 import { describe, expect, it, vi } from "vitest";
 
+import { createHarnessReadinessCoordinator } from "../desktop/main/services/harness-readiness.mjs";
 import { createProviderAdapterRegistry } from "../desktop/main/providers/provider-adapter-contract.mjs";
 import { createProviderComposition } from "../desktop/main/providers/provider-composition.mjs";
 import { createProviderExecutionAccessBroker } from "../desktop/main/services/graphcomplete-runtime.mjs";
@@ -646,6 +647,7 @@ describe("PROV-002: a superseded provider result is inert", () => {
     try {
       await composition.start();
       await composition.providerDefinitions.logout(managedDefinition.id);
+      world.account = "connected"; // Fresh discovery is connected; disconnected refreshes do not evaluate readiness.
       const readiness = { reached: deferred(), release: deferred() };
       holdReadiness = readiness;
       const explicit = composition.modelCatalog.explicitRefresh(managedDefinition.id);
@@ -1549,5 +1551,88 @@ describe("reconnect setup failure boundaries", () => {
       expect((await reconnecting).status).toBe("pending");
       expect(world.runtimes[0].credentials.login).toHaveBeenCalledOnce();
     } finally { setup.resolve(); await reconnecting?.catch(() => undefined); await composition.close(); }
+  });
+});
+
+
+describe("Prime setup retains its provider authorization", () => {
+  it.each(["explicit-repair", "recipe-update"].flatMap(trigger => ["logout", "remove", "reconnect", "catalog disconnect"].map(change => [trigger, change])))
+    ("cancels %s preparation on %s without publishing or clearing the due mark", async (trigger, change) => {
+      const world = managedWorld();
+      const server = productServer([managedDefinition]);
+      const preparing = deferred();
+      const release = deferred();
+      const due = new Set(["prime-agent-basic"]);
+      const publishAvailability = vi.fn(async updates => { for (const update of updates) due.delete(update.harnessId); });
+      const readiness = createHarnessReadinessCoordinator({
+        configurations: new Map([["prime-agent-basic", { name: "prime-agent-basic", implementation: "prime.agent",
+          executionAccessContracts: ["managed-runtime@1"], modelRules: { allow: [{ adapterId: managedDefinition.adapterId, modelIdRegex: ".*" }], deny: [] } }]]),
+        digestConfiguration: () => "sha256:prime", runtimeRequirements: { "prime.agent": { recipeId: "prime@0.8.1" } },
+        recipeInstalled: async () => false, recipeSupported: async () => true,
+        prepareRecipe: async (_recipe, { signal }) => {
+          preparing.resolve(signal);
+          await Promise.race([release.promise, new Promise((_resolve, reject) => signal.addEventListener("abort", () => reject(signal.reason), { once: true }))]);
+          signal.throwIfAborted();
+          return {};
+        },
+        checkers: { "prime.agent": vi.fn(async () => ({ available: true })) }, publishAvailability,
+      });
+      const composition = compose({ registry: world.registry, server, evaluateReadiness: request => readiness.evaluate(request) });
+      try {
+        await composition.start();
+        const evaluation = trigger === "explicit-repair" ? composition.modelCatalog.explicitRefresh(managedDefinition.id)
+          : readiness.evaluateRecipeUpdate({ updatesDue: [...due], providers: await composition.readinessRoutes() });
+        const signal = await preparing.promise;
+        if (change === "catalog disconnect") {
+          world.account = "disconnected";
+          if (trigger === "recipe-update") await composition.modelCatalog.refresh(managedDefinition.id, "background");
+          else {
+            // Same-provider refreshes queue behind this explicit refresh. Exercise the exact
+            // committed-catalog callback for an independently recorded disconnection instead.
+            await server.publishCatalog({ providerId: managedDefinition.id, connected: false }, { connectionGeneration: composition.providerDefinitions.connectionGeneration(managedDefinition.id) });
+            composition.providerDefinitions.catalogPublished(managedDefinition.id, { connected: false });
+          }
+        }
+        else await composition.providerDefinitions[change](managedDefinition.id);
+        expect(signal.aborted).toBe(true);
+        release.resolve();
+        await evaluation;
+        expect(publishAvailability).not.toHaveBeenCalled();
+        expect([...due]).toEqual(["prime-agent-basic"]);
+      } finally { release.resolve(); await composition.close(); }
+    });
+
+  it("refuses fresh setup while a signed-out catalog commit is pending", async () => {
+    const world = managedWorld(); const server = productServer([managedDefinition]);
+    const evaluateReadiness = vi.fn(); const composition = compose({ registry: world.registry, server, evaluateReadiness });
+    let release; const gate = new Promise(resolve => { release = resolve; });
+    let reached; const entered = new Promise(resolve => { reached = resolve; });
+    const originalPublish = server.publishCatalog;
+    try {
+      await composition.start();
+      const generation = composition.providerDefinitions.connectionGeneration(managedDefinition.id);
+      server.publishCatalog = async (snapshot, options) => { if (options?.connectionEvent === "signed-out") { reached(); await gate; } return originalPublish(snapshot, options); };
+      const logout = composition.providerDefinitions.logout(managedDefinition.id);
+      await entered;
+      // A catalog discovered before logout can answer while its sign-out commit awaits.
+      composition.providerDefinitions.catalogPublished(managedDefinition.id, { connected: true });
+      expect(composition.providerDefinitions.refreshGeneration(managedDefinition.id)).toBeNull();
+      expect(await composition.readinessRoutes()).toEqual([]);
+      await composition.providerDefinitions.evaluateCatalogReadiness(managedDefinition.id, [model], "explicit-repair", { connectionGeneration: generation });
+      expect(evaluateReadiness).not.toHaveBeenCalled();
+      release(); await logout;
+    } finally { release(); await composition.close(); }
+  });
+
+  it("does not lend a new generation to old discovery models", async () => {
+    const world = managedWorld(); const server = productServer([managedDefinition]);
+    const evaluateReadiness = vi.fn(); const composition = compose({ registry: world.registry, server, evaluateReadiness });
+    try {
+      await composition.start();
+      const generation = composition.providerDefinitions.connectionGeneration(managedDefinition.id);
+      await composition.providerDefinitions.logout(managedDefinition.id);
+      await composition.providerDefinitions.evaluateCatalogReadiness(managedDefinition.id, [model], "explicit-repair", { connectionGeneration: generation });
+      expect(evaluateReadiness).not.toHaveBeenCalled();
+    } finally { await composition.close(); }
   });
 });

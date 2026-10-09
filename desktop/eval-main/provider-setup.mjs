@@ -59,8 +59,8 @@ export function createEvalProviderSetup({ userDataDirectory, productServer, prod
     resolver = createManagedRuntimeResolver(installer);
     return resolver;
   };
-  const runtime = async (recipeId, prepare = false) => productionHarnessRuntimeDescriptor(
-    await getResolver()[prepare ? "prepare" : "get"](recipeId), { environment });
+  const runtime = async (recipeId, prepare = false, options) => productionHarnessRuntimeDescriptor(
+    await getResolver()[prepare ? "prepare" : "get"](recipeId, ...(options ? [options] : [])), { environment });
   const configurations = new Map([...runtimeSession.configurations].filter(([, value]) => (
     Object.hasOwn(HARNESS_MANAGED_RUNTIME_REQUIREMENTS, value.implementation)
   )));
@@ -76,14 +76,14 @@ export function createEvalProviderSetup({ userDataDirectory, productServer, prod
   const readiness = createHarnessReadinessCoordinator({ configurations,
     digestConfiguration: runtimeSession.digestConfiguration,
     runtimeRequirements: HARNESS_MANAGED_RUNTIME_REQUIREMENTS,
-    prepareRecipe: (recipeId) => runtime(recipeId, true),
+    prepareRecipe: (recipeId, options) => runtime(recipeId, true, options),
     checkers: {
       "codex.basic": async ({ runtime: value }) => ({ available: value?.runtimeId === "codex" && !!value.executable }),
       "claude.basic": async ({ runtime: value }) => ({ available: value?.runtimeId === "claude" && !!value.executable && !!value.moduleUrl }),
       "prime.agent": ({ runtime: value, signal }) => checkPrime({ runtime: value, signal }),
     },
-    publishAvailability: async (updates) => {
-      await productServer.publishHarnessReadiness(updates);
+    publishAvailability: async (updates, options) => {
+      await productServer.publishHarnessReadiness(updates, options);
     },
     recipeInstalled: (recipeId) => managedRecipeInstalled(getResolver(), recipeId),
     recipeSupported: (recipeId) => managedRecipeSupported(getResolver(), recipeId),

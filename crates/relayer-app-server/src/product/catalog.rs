@@ -114,10 +114,19 @@ pub(crate) struct RuntimeProductHarness {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub(crate) struct HarnessReadinessProviderConnection {
+    pub(crate) provider_id: ProviderId,
+    pub(crate) generation: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub(crate) struct HarnessRuntimeAvailabilityUpdate {
     pub(crate) harness_id: String,
     pub(crate) configuration_digest: String,
     pub(crate) generation: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) provider_connection: Option<HarnessReadinessProviderConnection>,
     pub(crate) available: bool,
     pub(crate) unavailable_reason: Option<UnavailableReason>,
 }

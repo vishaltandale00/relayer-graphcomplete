@@ -450,3 +450,38 @@ describe("production harness readiness", () => {
     expect(cancelInstallerOperations).toHaveBeenCalledOnce();
   });
 });
+
+
+describe("readiness route lifetime at asynchronous boundaries", () => {
+  it.each(["target lookup", "checker", "publication queue"])("drops a provider authorization superseded during %s", async boundary => {
+    let release; const gate = new Promise(resolve => { release = resolve; });
+    let reached; const entered = new Promise(resolve => { reached = resolve; });
+    const controller = new AbortController();
+    const publishAvailability = vi.fn(async () => {});
+    const prepareRecipe = vi.fn(async () => ({}));
+    const readiness = createHarnessReadinessCoordinator({
+      configurations: new Map([["prime-agent-basic", configuration("prime-agent-basic", "prime.agent", "openrouter")]]),
+      digestConfiguration: () => "sha256:prime", runtimeRequirements: { "prime.agent": { recipeId: "prime@0.8.1" } },
+      recipeInstalled: async () => false,
+      recipeSupported: async () => { if (boundary === "target lookup") { reached(); await gate; } return true; },
+      prepareRecipe,
+      checkers: { "prime.agent": async () => { if (boundary === "checker") { reached(); await gate; } return { available: true }; } },
+      publishAvailability,
+    });
+    const route = { providerDefinition: { id: "router", adapterId: "openrouter", accessContract: "secret@1" }, models: [{ id: "qwen" }],
+      connectionGeneration: 1, signal: controller.signal, isCurrent: () => !controller.signal.aborted };
+    let prior;
+    if (boundary === "publication queue") {
+      publishAvailability.mockImplementationOnce(async () => { reached(); await gate; });
+      prior = readiness.evaluate({ trigger: "connect", providerDefinition: route.providerDefinition, models: route.models });
+      await entered;
+    }
+    const evaluation = readiness.evaluateRecipeUpdate({ updatesDue: ["prime-agent-basic"], providers: [route] });
+    if (boundary === "publication queue") await vi.waitFor(() => expect(prepareRecipe).toHaveBeenCalledTimes(2));
+    else await entered;
+    controller.abort(new Error("provider superseded")); release();
+    await prior; await expect(evaluation).resolves.toEqual({ readyHarnessIds: [], routeResults: [] });
+    expect(publishAvailability).toHaveBeenCalledTimes(boundary === "publication queue" ? 1 : 0);
+    if (boundary === "target lookup") expect(prepareRecipe).not.toHaveBeenCalled();
+  });
+});

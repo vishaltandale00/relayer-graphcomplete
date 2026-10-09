@@ -32,18 +32,6 @@ export function createProviderComposition({
       resync: (providerId) => providerDefinitions.resyncConnectionGeneration(providerId),
     },
     publishSnapshot: async (snapshot, options) => {
-      if (options?.reason === "explicit") {
-        await providerDefinitions.evaluateCatalogReadiness(
-          snapshot.providerId,
-          snapshot.models ?? [],
-          "explicit-repair",
-        );
-        // The readiness evaluation awaits, so a reconnect may have started, or the generation
-        // moved, since the catalog service checked. Recheck at the write, as a stale publish.
-        if (providerDefinitions.refreshGeneration(snapshot.providerId) !== options.connectionGeneration) {
-          throw Object.assign(new Error("provider_connection_superseded"), { code: "provider_connection_superseded" });
-        }
-      }
       const published = await publishCatalog(snapshot, options);
       publishedModels.set(snapshot.providerId, {
         models: snapshot.models ?? [],
@@ -51,6 +39,19 @@ export function createProviderComposition({
         generation: options?.connectionGeneration,
       });
       providerDefinitions.catalogPublished(snapshot.providerId, { connected: snapshot.connected });
+      if (options?.reason === "explicit" && snapshot.connected === true) {
+        await providerDefinitions.evaluateCatalogReadiness(
+          snapshot.providerId,
+          snapshot.models ?? [],
+          "explicit-repair",
+          options,
+        );
+        // The catalog committed before readiness, so its exact generation authorizes setup.
+        // A lifecycle change during setup still makes the refresh result superseded.
+        if (providerDefinitions.refreshGeneration(snapshot.providerId) !== options.connectionGeneration) {
+          throw Object.assign(new Error("provider_connection_superseded"), { code: "provider_connection_superseded" });
+        }
+      }
       return published;
     },
     ...modelCatalogOptions,
@@ -148,6 +149,7 @@ export function createProviderComposition({
         .map((providerDefinition) => Object.freeze({
           providerDefinition,
           models: publishedModels.get(providerDefinition.id).models,
+          ...providerDefinitions.readinessAuthorization(providerDefinition.id, publishedModels.get(providerDefinition.id).generation),
         }));
     },
     async close() {

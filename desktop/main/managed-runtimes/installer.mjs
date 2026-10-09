@@ -1372,28 +1372,53 @@ export function createManagedRuntimeInstaller({
 
   const installedRecipe = (recipeId) => validateInstalledRecipe(recipeId);
 
-  function prepare(recipeId) {
+  function subscribePreparation(operation, signal) {
+    const consumer = Symbol();
+    operation.consumers.add(consumer);
+    let abort;
+    const cancelled = signal ? new Promise((_resolve, reject) => {
+      abort = () => {
+        operation.consumers.delete(consumer);
+        if (operation.consumers.size === 0) operation.controller.abort(signal.reason);
+        reject(signal.reason);
+      };
+      signal.addEventListener("abort", abort, { once: true });
+      if (signal.aborted) abort();
+    }) : null;
+    return (cancelled ? Promise.race([operation.promise, cancelled]) : operation.promise)
+      .then((result) => publicInstallationDescriptor(result)).finally(() => {
+        operation.consumers.delete(consumer);
+        if (abort) signal.removeEventListener("abort", abort);
+      });
+  }
+
+  function prepare(recipeId, { signal } = {}) {
+    if (signal?.aborted) return Promise.reject(signal.reason);
     let recipe;
     try { recipe = validateResolvedRecipe(resolveRecipe(recipeId, target.key), recipeId, target.key); } catch (error) { return Promise.reject(error); }
     let operation = operations.get(recipe.runtimeId);
     if (operation) {
-      if (operation.recipe?.recipeId !== recipe.recipeId) {
-        return operation.promise.then(() => prepare(recipeId));
+      if (operation.controller.signal.aborted) {
+        return operation.promise.catch(() => undefined).then(() => prepare(recipeId, { signal }));
       }
-      return operation.promise.then((result) => publicInstallationDescriptor(result));
+      if (operation.recipe?.recipeId !== recipe.recipeId || !operation.consumers) {
+        return operation.promise.then(() => prepare(recipeId, { signal }));
+      }
+      return subscribePreparation(operation, signal);
     }
     operation = {
       controller: new AbortController(),
       minimumVersion: recipe.version,
       resolvedVersion: recipe.version,
       recipe,
+      consumers: new Set(),
       promise: null,
     };
     operation.promise = install(recipe.runtimeId, operation).finally(() => {
       if (operations.get(recipe.runtimeId) === operation) operations.delete(recipe.runtimeId);
     });
     operations.set(recipe.runtimeId, operation);
-    return operation.promise.then((result) => publicInstallationDescriptor(result));
+    return subscribePreparation(operation, signal);
   }
 
   // The exact identity of a recipe on this target: its id and the digest of its lock. It

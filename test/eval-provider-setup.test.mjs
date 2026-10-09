@@ -150,8 +150,8 @@ describe("Eval production provider setup", () => {
     await fixture.service.start();
     expect(fixture.publishHarnessReadiness).toHaveBeenCalledOnce();
     expect(fixture.publishHarnessReadiness).toHaveBeenCalledWith([expect.objectContaining({
-      harnessId: "codex-basic", available: true,
-    })]);
+      harnessId: "codex-basic", available: true, providerConnection: { providerId: "codex", generation: 1 },
+    })], expect.objectContaining({ signal: expect.any(AbortSignal) }));
     expect(fixture.due.size).toBe(0);
   });
 
@@ -234,7 +234,7 @@ describe("Eval production provider setup", () => {
     await fixture.service.settingsOpened();
     expect(fixture.runtimeResolver.prepare).not.toHaveBeenCalled();
     await fixture.service.refresh(null);
-    expect(fixture.runtimeResolver.prepare).toHaveBeenCalledWith("codex@0.159.3");
+    expect(fixture.runtimeResolver.prepare).toHaveBeenCalledWith("codex@0.159.3", expect.objectContaining({ signal: expect.any(AbortSignal) }));
     const judge = await fixture.service.resolveCodexJudgeRuntime();
     expect(judge.environment.CODEX_HOME).toBe(join(fixture.directory, "provider-runtime", "chosen", "codex-home"));
     expect(judge.environment.API_KEY).toBeUndefined();

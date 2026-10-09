@@ -12,6 +12,10 @@ function unavailableReason(error) {
   });
 }
 
+function routeCurrent(route) {
+  return !route.signal?.aborted && route.isCurrent?.() !== false;
+}
+
 function modelAvailable(model) {
   return model?.visible !== false
     && model?.available !== false
@@ -152,13 +156,16 @@ export function createHarnessReadinessCoordinator({
   const publishedGenerations = new Map();
 
   function routeProvider(configuration, providers) {
-    return providers.find(({ providerDefinition, models = [] }) => (
+    return providers.find((route) => {
+      const { providerDefinition, models = [] } = route;
+      return routeCurrent(route) && (
       configuration.executionAccessContracts?.includes(providerDefinition.accessContract)
       && models.some((model) => modelAvailable(model) && harnessAllowsModel(configuration.modelRules, {
         adapterId: providerDefinition.adapterId,
         modelId: model.id,
       }))
-    ))?.providerDefinition ?? null;
+      );
+    }) ?? null;
   }
 
   // One evaluation with one generation. A provider trigger evaluates the routes of one
@@ -171,44 +178,60 @@ export function createHarnessReadinessCoordinator({
     const routes = providers ?? [{ providerDefinition, models }];
     const named = harnessIds ? new Set(harnessIds) : null;
     const candidates = [];
-    const candidateProviders = new Map();
+    const candidateRoutes = new Map();
     for (const configuration of configurations.values()) {
       if (named && !named.has(configuration.name)) continue;
       const provider = routeProvider(configuration, routes);
       if (!provider) continue;
       candidates.push(configuration);
-      candidateProviders.set(configuration.name, provider);
+      candidateRoutes.set(configuration.name, provider);
     }
     if (candidates.length === 0 || signal?.aborted) {
       return Object.freeze({ readyHarnessIds: [], routeResults: [] });
     }
     const currentGeneration = ++generation;
     const recipes = new Map();
+    const recipeRoutes = new Map();
     for (const configuration of candidates) {
       harnessGenerations.set(configuration.name, currentGeneration);
-      const requirement = runtimeRequirements[configuration.implementation];
-      if (requirement && !recipes.has(requirement.recipeId)) {
-        // Started in this turn, right after the stop check above, so a preparation is
-        // either never started or already an installer operation the quit guard sees.
-        recipes.set(requirement.recipeId, (async () => prepareRecipe(requirement.recipeId))());
-      }
+      const recipeId = runtimeRequirements[configuration.implementation]?.recipeId;
+      if (recipeId) recipeRoutes.set(recipeId, [...(recipeRoutes.get(recipeId) ?? []), candidateRoutes.get(configuration.name)]);
+    }
+    const subscriptions = [];
+    for (const [recipeId, recipeConsumers] of recipeRoutes) {
+      const controller = new AbortController();
+      const check = () => {
+        if (signal?.aborted || !recipeConsumers.some(routeCurrent)) {
+          controller.abort(signal?.reason ?? recipeConsumers.find((route) => route.signal?.aborted)?.signal.reason);
+        }
+      };
+      const signals = [...new Set([signal, ...recipeConsumers.map((route) => route.signal)].filter(Boolean))];
+      for (const source of signals) source.addEventListener("abort", check);
+      subscriptions.push(() => { for (const source of signals) source.removeEventListener("abort", check); });
+      check();
+      // Preserve the old unscoped call for connect/reconnect; guarded routes own cancellable preparation.
+      recipes.set(recipeId, controller.signal.aborted ? Promise.reject(controller.signal.reason)
+        : prepareRecipe(recipeId, ...(signals.length ? [{ signal: controller.signal }] : [])));
     }
     const routeResults = await Promise.all(candidates.map(async (configuration) => {
       const requirement = runtimeRequirements[configuration.implementation];
       let result;
       try {
         const runtime = requirement ? await recipes.get(requirement.recipeId) : null;
+        const route = candidateRoutes.get(configuration.name);
+        if (!routeCurrent(route) || signal?.aborted) return null;
         result = await checkers[configuration.implementation]({
           configuration,
           runtime,
           // A stopped post-upgrade evaluation stops a checker still running, such as the
           // Prime kernel probe, so it cannot hold shutdown.
-          ...(signal ? { signal } : {}),
+          ...((signal || route.signal) ? { signal: signal && route.signal ? AbortSignal.any([signal, route.signal]) : signal ?? route.signal } : {}),
         });
         if (result?.available !== true && result?.available !== false) {
           throw new Error("Harness readiness checker returned an invalid result.");
         }
       } catch (error) {
+        if (!routeCurrent(candidateRoutes.get(configuration.name)) || signal?.aborted) return null;
         result = { available: false, reason: unavailableReason(error) };
         await diagnostics?.write({
           level: "error",
@@ -216,7 +239,7 @@ export function createHarnessReadinessCoordinator({
           // A recipe-update result belongs to the harness, not to one of its providers.
           ...(trigger === "recipe-update"
             ? { trigger }
-            : { providerId: candidateProviders.get(configuration.name).id }),
+            : { providerId: candidateRoutes.get(configuration.name).providerDefinition.id }),
           harnessId: configuration.name,
           code: result.reason.code,
         }).catch(() => undefined);
@@ -227,10 +250,14 @@ export function createHarnessReadinessCoordinator({
         generation: currentGeneration,
         available: result.available,
         unavailableReason: result.available ? null : (result.reason ?? unavailableReason()),
+        ...(candidateRoutes.get(configuration.name).connectionGeneration === undefined ? {} : {
+          providerConnection: { providerId: candidateRoutes.get(configuration.name).providerDefinition.id, generation: candidateRoutes.get(configuration.name).connectionGeneration },
+        }),
       });
     }));
-    const currentRouteResults = routeResults.filter(({ harnessId }) => (
-      harnessGenerations.get(harnessId) === currentGeneration
+    for (const dispose of subscriptions) dispose();
+    const currentRouteResults = routeResults.filter((result) => result !== null).filter(({ harnessId }) => (
+      harnessGenerations.get(harnessId) === currentGeneration && routeCurrent(candidateRoutes.get(harnessId))
     ));
     // A stopped evaluation publishes nothing, so a cancelled preparation is never recorded.
     if (currentRouteResults.length === 0 || signal?.aborted) {
@@ -240,12 +267,13 @@ export function createHarnessReadinessCoordinator({
       // A stop that landed while this waited behind an earlier publication records nothing.
       if (signal?.aborted) return [];
       const publishable = currentRouteResults.filter(({ harnessId }) => (
-        harnessGenerations.get(harnessId) === currentGeneration
+        harnessGenerations.get(harnessId) === currentGeneration && routeCurrent(candidateRoutes.get(harnessId))
       ));
       if (publishable.length === 0) return [];
-      await publishAvailability(publishable);
+      const signals = [...new Set([signal, ...publishable.map(({ harnessId }) => candidateRoutes.get(harnessId).signal)].filter(Boolean))];
+      await publishAvailability(publishable, ...(signals.length ? [{ signal: AbortSignal.any(signals) }] : []));
       for (const { harnessId } of publishable) publishedGenerations.set(harnessId, currentGeneration);
-      return publishable.filter(({ harnessId }) => harnessGenerations.get(harnessId) === currentGeneration);
+      return publishable.filter(({ harnessId }) => harnessGenerations.get(harnessId) === currentGeneration && routeCurrent(candidateRoutes.get(harnessId)));
     });
     publication = publish;
     const published = await publish;

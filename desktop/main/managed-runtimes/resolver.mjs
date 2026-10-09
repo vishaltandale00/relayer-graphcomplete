@@ -54,9 +54,9 @@ export function createManagedRuntimeResolver(installer) {
       if (existing) return existing.promise;
       return remember(recipeId, installer.installed(recipeId));
     },
-    prepare(recipeId) {
+    prepare(recipeId, options) {
       cache.delete(recipeId);
-      return remember(recipeId, installer.prepare(recipeId));
+      return remember(recipeId, installer.prepare(recipeId, options));
     },
     invalidate(recipeId) {
       cache.delete(recipeId);

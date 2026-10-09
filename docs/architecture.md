@@ -488,7 +488,7 @@ diagnostics and validation, while executable configuration lookup, onboarding, a
 Harness Settings also exposes loaded unavailable configurations with an exact eligible
 connected provider, using a repair icon whose tooltip explains the failure. The backend
 projects repair provider IDs independently of runtime readiness and family selection.
-Unsupported configurations stay hidden. Harness Settings
+Unsupported configurations and configurations without an execution access contract stay hidden. Harness Settings
 uses the backend's exact provider, model, family, and access-contract projection
 rather than treating runtime installation as current feasibility. The diagnostic
 and execution trace contain only the reviewed source commit and package name/version
@@ -551,7 +551,14 @@ not wait for it. Like Repair, it probes the runtime and may install the exact re
 again. A due harness with a missing runtime is installed when an active connected
 provider has a current published eligible model route. Without that route, a missing
 runtime waits for Connect or Repair. The cached route must match the current connection
-generation; sign-out, reconnect and removal invalidate it. A
+generation; sign-out, reconnect, removal and disconnected catalogs invalidate its live
+setup authorization. Preparation and readiness checks receive that authorization's abort
+signal. Shared installations continue while any consumer retains authority; cancellation
+of every consumer stops the installer before activation. Explicit refresh commits its
+fresh connected catalog before evaluating readiness, retaining the original discovery
+generation. Guarded readiness publications carry transient provider connection stamps;
+Rust checks active, connected and exact generation in the same readiness transaction.
+The stamp is not persisted as a provider-by-harness record. A
 managed provider whose activation failed on a broken runtime publishes no models and so
 has no route; the step first recovers each such provider, as Repair does, when its
 recipe is installed and due. Recovery reinstalls the exact recipe if needed and publishes

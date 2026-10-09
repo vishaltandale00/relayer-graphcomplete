@@ -63,6 +63,16 @@ impl SqliteProductStore {
         let mut transaction = self.pool.begin_with("BEGIN IMMEDIATE").await?;
         let mut seen = HashSet::new();
         for update in updates {
+            if let Some(provider) = &update.provider_connection {
+                let current: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM model_providers WHERE id=?1 AND lifecycle_state='active' AND connected=1 AND connection_generation=?2)")
+                    .bind(provider.provider_id.as_str()).bind(provider.generation).fetch_one(&mut *transaction).await?;
+                if provider.generation <= 0 || !current {
+                    return Err(StorageError::Catalog(CatalogError::invalid(
+                        "provider_connection_superseded",
+                        "The provider connection that authorized readiness changed.",
+                    )));
+                }
+            }
             if !seen.insert(&update.harness_id) || update.generation == 0 {
                 return Err(StorageError::Catalog(CatalogError::invalid(
                     "harness_readiness_invalid",
@@ -1368,13 +1378,13 @@ async fn project_harness_usability_on(
         "SELECT p.id,p.adapter_id,p.access_contract,m.model_id FROM model_providers p JOIN provider_models m ON m.provider_id=p.id WHERE p.lifecycle_state='active' AND p.connected=1 AND m.visible=1 AND m.available=1 ORDER BY p.label,p.id,m.provider_order,m.model_id",
     ).fetch_all(&mut *connection).await?;
     let repairable: HashSet<String> = sqlx::query(
-        "SELECT configuration_name,runtime_configuration_digest FROM product_harnesses WHERE product_visible=1 AND available=0 AND COALESCE(unavailable_reason_code,'') != 'managed_runtime_unsupported_target'",
+        "SELECT configuration_name,runtime_configuration_digest FROM product_harnesses WHERE product_visible=1 AND available=0 AND COALESCE(unavailable_reason_code,'') NOT IN ('managed_runtime_unsupported_target','harness_access_contract_missing')",
     ).fetch_all(&mut *connection).await?.iter().filter_map(|row| {
         let digest: String = row.get(1);
         loaded_runtime_digest(&digest).then(|| row.get(0))
     }).collect();
     for harness in harnesses {
-        if repairable.contains(&harness.id) {
+        if repairable.contains(&harness.id) && !harness.execution_access_contracts.is_empty() {
             for route in &repair_routes {
                 let provider_id = ProviderId::from_database(route.try_get(0)?);
                 if harness_route_is_usable(
@@ -3621,6 +3631,7 @@ mod provider_definition_tests {
         store
             .update_harness_runtime_availability(&[
                 HarnessRuntimeAvailabilityUpdate {
+                    provider_connection: None,
                     harness_id: "codex-basic".into(),
                     configuration_digest: "sha256:codex-basic".into(),
                     generation: 1,
@@ -3628,6 +3639,7 @@ mod provider_definition_tests {
                     unavailable_reason: None,
                 },
                 HarnessRuntimeAvailabilityUpdate {
+                    provider_connection: None,
                     harness_id: "claude-basic".into(),
                     configuration_digest: "sha256:claude-basic".into(),
                     generation: 1,
@@ -3651,6 +3663,7 @@ mod provider_definition_tests {
         let stale = store
             .update_harness_runtime_availability(&[
                 HarnessRuntimeAvailabilityUpdate {
+                    provider_connection: None,
                     harness_id: "codex-basic".into(),
                     configuration_digest: "sha256:codex-basic".into(),
                     generation: 2,
@@ -3661,6 +3674,7 @@ mod provider_definition_tests {
                     }),
                 },
                 HarnessRuntimeAvailabilityUpdate {
+                    provider_connection: None,
                     harness_id: "claude-basic".into(),
                     configuration_digest: "sha256:stale".into(),
                     generation: 2,
@@ -3774,6 +3788,7 @@ mod provider_definition_tests {
         available: bool,
     ) -> HarnessRuntimeAvailabilityUpdate {
         HarnessRuntimeAvailabilityUpdate {
+            provider_connection: None,
             harness_id: "codex-basic".into(),
             configuration_digest: digest.into(),
             generation,
@@ -4367,6 +4382,7 @@ mod provider_definition_tests {
             ("openrouter".to_owned(), no_route),
         ];
         let update = |digest: &str| HarnessRuntimeAvailabilityUpdate {
+            provider_connection: None,
             harness_id: "codex-basic".into(),
             configuration_digest: digest.into(),
             generation: 1,
@@ -5674,6 +5690,14 @@ mod provider_definition_tests {
                 "UPDATE product_harnesses SET unavailable_reason_code=NULL,unavailable_reason_message=NULL WHERE configuration_name='codex-basic'",
             ),
             (
+                "UPDATE product_harnesses SET unavailable_reason_code='harness_access_contract_missing',unavailable_reason_message='Missing access contract.' WHERE configuration_name='codex-basic'",
+                "UPDATE product_harnesses SET unavailable_reason_code=NULL,unavailable_reason_message=NULL WHERE configuration_name='codex-basic'",
+            ),
+            (
+                "UPDATE product_harnesses SET execution_access_contracts_json='[]' WHERE configuration_name='codex-basic'",
+                "UPDATE product_harnesses SET execution_access_contracts_json='[\"secret@1\"]' WHERE configuration_name='codex-basic'",
+            ),
+            (
                 "UPDATE model_providers SET connected=0",
                 "UPDATE model_providers SET connected=1",
             ),
@@ -5732,6 +5756,81 @@ mod provider_definition_tests {
         assert!(
             repair_ids(reopened.load_model_settings().await.unwrap())
                 .repair_provider_ids
+                .is_empty()
+        );
+    }
+
+    #[tokio::test]
+    async fn readiness_provider_generation_is_checked_in_the_commit_transaction() {
+        let (_directory, store, provider_id) = onboarding_store().await;
+        sqlx::query("UPDATE product_harnesses SET available=0,readiness_update_due=1 WHERE configuration_name='codex-basic'").execute(&store.pool).await.unwrap();
+        let mut update = readiness("sha256:onboarding-codex", 1, true);
+        let generation: i64 =
+            sqlx::query_scalar("SELECT connection_generation FROM model_providers WHERE id=?1")
+                .bind(provider_id.as_str())
+                .fetch_one(&store.pool)
+                .await
+                .unwrap();
+        update.provider_connection = serde_json::from_value(
+            serde_json::json!({ "providerId": provider_id, "generation": generation }),
+        )
+        .unwrap();
+        sqlx::query(
+            "UPDATE model_providers SET connection_generation=connection_generation+1 WHERE id=?1",
+        )
+        .bind(provider_id.as_str())
+        .execute(&store.pool)
+        .await
+        .unwrap();
+        assert!(
+            store
+                .update_harness_runtime_availability(&[update.clone()])
+                .await
+                .is_err()
+        );
+        assert_eq!(
+            store.harness_readiness_updates_due().await.unwrap(),
+            vec!["codex-basic"]
+        );
+        let settings = store.load_model_settings().await.unwrap();
+        assert!(
+            !settings
+                .harnesses
+                .iter()
+                .find(|h| h.id == "codex-basic")
+                .unwrap()
+                .available
+        );
+        update.provider_connection.as_mut().unwrap().generation += 1;
+        sqlx::query("UPDATE model_providers SET connected=0 WHERE id=?1")
+            .bind(provider_id.as_str())
+            .execute(&store.pool)
+            .await
+            .unwrap();
+        assert!(
+            store
+                .update_harness_runtime_availability(&[update.clone()])
+                .await
+                .is_err()
+        );
+        assert_eq!(
+            store.harness_readiness_updates_due().await.unwrap(),
+            vec!["codex-basic"]
+        );
+        sqlx::query("UPDATE model_providers SET connected=1 WHERE id=?1")
+            .bind(provider_id.as_str())
+            .execute(&store.pool)
+            .await
+            .unwrap();
+        store
+            .update_harness_runtime_availability(&[update])
+            .await
+            .unwrap();
+        assert!(
+            store
+                .harness_readiness_updates_due()
+                .await
+                .unwrap()
                 .is_empty()
         );
     }

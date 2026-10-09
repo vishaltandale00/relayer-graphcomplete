@@ -529,7 +529,7 @@ if (primaryInstance) {
     });
     const productSession = await productServer.start();
     const modelAvailability = createModelAvailabilityPublisher({
-      publishReadiness: (updates) => productServer.publishHarnessReadiness(updates),
+      publishReadiness: (updates, options) => productServer.publishHarnessReadiness(updates, options),
       publishCatalog: (snapshot, options) => productServer.publishProviderCatalog(snapshot, options),
       getWindow: () => mainWindow,
     });
@@ -537,8 +537,8 @@ if (primaryInstance) {
       configurations: runtimeSession.configurations,
       digestConfiguration: runtimeSession.digestConfiguration,
       runtimeRequirements: HARNESS_MANAGED_RUNTIME_REQUIREMENTS,
-      prepareRecipe: async (recipeId) => managedRuntimeDescriptor(
-        await managedRuntimeResolver.prepare(recipeId),
+      prepareRecipe: async (recipeId, options) => managedRuntimeDescriptor(
+        await managedRuntimeResolver.prepare(recipeId, options),
       ),
       checkers: {
         "codex.basic": async ({ runtime }) => ({

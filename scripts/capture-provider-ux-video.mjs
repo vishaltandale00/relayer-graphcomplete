@@ -141,17 +141,22 @@ function cdpClient(webSocketUrl) {
 }
 
 async function stopCaptureBrowser(child) {
-  if (child.exitCode !== null) return;
-  await new Promise((resolvePromise) => {
-    const finish = () => {
-      clearTimeout(timeout);
-      resolvePromise();
-    };
-    child.once("exit", finish);
-    child.kill("SIGKILL");
-    const timeout = setTimeout(finish, 2_000);
-    timeout.unref();
-  });
+  try {
+    if (child.exitCode !== null) return;
+    await new Promise((resolvePromise) => {
+      const finish = () => {
+        clearTimeout(timeout);
+        resolvePromise();
+      };
+      child.once("exit", finish);
+      child.kill("SIGKILL");
+      const timeout = setTimeout(finish, 2_000);
+      timeout.unref();
+    });
+  } finally {
+    // Chrome's crash reporter can retain this inherited pipe after browser exit.
+    child.stderr.destroy();
+  }
 }
 
 async function captureBrowserScene(url, frame, profile, width = 1280, { forcedColors = false } = {}) {
@@ -825,7 +830,7 @@ async function recordBrowserFlow(url, directory, profile) {
       cdp.close();
     }
   } finally {
-    child.kill("SIGKILL");
+    await stopCaptureBrowser(child);
   }
 }
 

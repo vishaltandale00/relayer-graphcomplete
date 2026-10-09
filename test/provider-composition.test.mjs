@@ -390,16 +390,16 @@ describe("injectable production provider composition", () => {
     // The existing connected router authorizes completing missing Prime setup. Codex's
     // shared recipe still prepares once, and both results publish in one evaluation.
     expect(prepareRecipe).toHaveBeenCalledTimes(2);
-    expect(prepareRecipe).toHaveBeenCalledWith("prime@0.8.1");
-    expect(prepareRecipe).toHaveBeenCalledWith("codex@0.147.0");
+    expect(prepareRecipe).toHaveBeenCalledWith("prime@0.8.1", expect.objectContaining({ signal: expect.any(AbortSignal) }));
+    expect(prepareRecipe).toHaveBeenCalledWith("codex@0.147.0", expect.objectContaining({ signal: expect.any(AbortSignal) }));
     expect(publishAvailability).toHaveBeenCalledOnce();
     expect(publishAvailability).toHaveBeenCalledWith([{
       harnessId: "codex-basic", configurationDigest: "sha256:codex-basic-upgraded",
-      generation: 1, available: true, unavailableReason: null,
+      generation: 1, available: true, unavailableReason: null, providerConnection: { providerId: "chatgpt", generation: 1 },
     }, {
       harnessId: "prime-agent-basic", configurationDigest: "sha256:prime-agent-basic-upgraded",
-      generation: 1, available: true, unavailableReason: null,
-    }]);
+      generation: 1, available: true, unavailableReason: null, providerConnection: { providerId: "openrouter", generation: 1 },
+    }], expect.objectContaining({ signal: expect.any(AbortSignal) }));
     expect(result.readyHarnessIds).toEqual(["codex-basic", "prime-agent-basic"]);
     // Both providers are its routes; the app-server test
     // one_post_upgrade_evaluation_restores_both_providers_sharing_a_route shows this one
@@ -420,7 +420,7 @@ describe("injectable production provider composition", () => {
     expect(prepareRecipe).toHaveBeenCalledTimes(3);
     expect(publishAvailability).toHaveBeenLastCalledWith([expect.objectContaining({
       harnessId: "codex-basic", generation: 2, available: true,
-    })]);
+    })], expect.objectContaining({ signal: expect.any(AbortSignal) }));
     // A failed read only reports; it never rejects into startup.
     const failure = new Error("app server unavailable");
     const reported = vi.fn();
@@ -543,7 +543,7 @@ describe("injectable production provider composition", () => {
       expect(publishAvailability).toHaveBeenCalledOnce();
       expect(publishAvailability).toHaveBeenCalledWith([expect.objectContaining({
         harnessId: "codex-basic", available: true,
-      })]);
+      })], expect.objectContaining({ signal: expect.any(AbortSignal) }));
       expect(due.size).toBe(0);
       expect(published.at(-1)).toMatchObject({ providerId: "chatgpt", connected: true, models: [{ id: "work-chatgpt" }] });
       const lease = await composition.providerDefinitions.acquireExecution("chatgpt");

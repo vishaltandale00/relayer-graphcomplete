@@ -97,12 +97,11 @@ still protect the installed-only preliminary provider recovery boundary.
 
 Reviewer `/root/recovery_review` found the missing/unsupported-target conflation
 and independently reproduced the failure through the real recipe resolver.
-After correction, their same macOS x64 scenario prepared nothing. Final review:
-no blocking findings across the 25 changed production, test, fixture, PRD, architecture and
-capture-script files, digest
-`dc62ec9262c7f20552afb80d3e7c07973a7d64c5dddcdb308f4e7e404da2eff1`.
-This is the refreshed review against main `2a9fe2e9`; the original review used
-`7666f0abb833c55d4e9e5e443653faf1129f55799548624784c8bb79289f664b`.
+After correction, their same macOS x64 scenario prepared nothing. Those original review assertions at
+`7666f0abb833c55d4e9e5e443653faf1129f55799548624784c8bb79289f664b` and
+`dc62ec9262c7f20552afb80d3e7c07973a7d64c5dddcdb308f4e7e404da2eff1`
+are withdrawn: they checked admission but missed authorization expiration during
+installation. The final source review below supersedes them.
 They also inspected all five retained screenshots and the genuine secondary
 social-preview recapture. This is a non-certifying
 source review; heavy checks and actual kernel evidence are separate. It excludes
@@ -132,3 +131,67 @@ fresh runtime proof: the retained kernel log now records the combined recipe.
 [Merge-refresh gates](merge-refresh-gates.txt) record passing build, full check,
 319 Vitest files / 4,189 tests, two secret-boundary tests, 91 Python tests, and
 clean exact Prime assembly/kernel. The earlier gate summary remains historical.
+
+## Review corrections before merge
+
+GitHub's unresolved reviews identified provider authorization expiring during first
+installation, and missing access contracts exposing an impossible Repair. Merge was
+held while these findings were reproduced and corrected.
+
+| Additional production seam | Boundary | Deterministic checkpoint |
+| --- | --- | --- |
+| Provider lifecycle authorization | Original discovery generation survives async work; sign-out, removal, reconnect, shutdown and disconnected catalogs invalidate setup. A late connected callback cannot reopen setup during a pending sign-out commit. | Actual composition lifecycle scenarios and delayed sign-out commit in `provider-connection-generation.test.mjs` |
+| Explicit catalog/readiness order | A fresh connected catalog commits before guarded readiness; disconnected catalogs run no readiness. | Existing disconnected-provider recovery and superseded-refresh composition scenarios |
+| Coordinator async boundaries | Expiration during target validation, checking or queued publication records nothing and retains due marks. | `harness-readiness.test.mjs` lifetime boundary table |
+| Resolver and shared installer | Forward cancellation through Desktop and Eval. One valid consumer preserves shared work; all cancelled consumers stop installation. A new consumer waits for cancelled cleanup then retries. | Real installer/immutable activation scenarios in `managed-runtime-promotion.test.mjs`, plus full Desktop/Eval gates |
+| Rust readiness update wire and transaction | Transient provider stamps require active, connected and exact generation in the readiness commit; rejected writes retain unavailable and due. No provider-by-harness persistence is added. | Real SQLite `readiness_provider_generation_is_checked_in_the_commit_transaction`, including same-generation disconnection |
+| Evidence subprocess cleanup | Both browser paths close inherited stderr after bounded browser shutdown; Chrome crash-reporters cannot retain the capture process. | Actual full-video and focused/onboarding/sidebar subprocess scenarios in `provider-electron-evidence.test.mjs` exit with intact artifacts and manifests |
+| Repair projection | Missing reason and empty access-contract declarations produce no repair provider. Existing legacy usable-route semantics remain unchanged. | Existing real SQLite repair scenario extended with independent reason/list boundaries |
+
+The focused suite passed 160 scenarios across eight files; both named SQLite
+checkpoints passed. No tests were deleted. Existing mock assertions now check the
+forwarded signal and exact provider stamp. The old superseded-refresh scenario
+uses connected discovery so it still exercises readiness after the explicit
+connected-catalog gate. An explicit refresh queues another refresh for the same
+provider; the independent committed-disconnection callback tests that separate
+boundary directly.
+
+Reviewer `/root/recovery_review` independently verified the final 28-path digest
+`c1267eef021cff013eabfa5d225f0cb9e91a8b245d1fe821672cc1f587d32c74`,
+repeated the late-catalog public-service reproduction and ran the actual delayed
+sign-out regression. Verdict: no remaining findings. This supersedes the withdrawn
+review assertions and remains a non-certifying source review; required full gates
+are reported separately. Genuine Electron recapture refreshed the source receipt;
+both retained images stayed byte-identical.
+
+The first full review-fix run passed 4,202 JavaScript scenarios and failed three
+Eval fixture assertions around cancellation options. A follow-up focused run
+also caught a changed logged-out status. The final implementation keeps existing
+status overrides unchanged; lifetime safety rests on the complete sign-out
+transition, unrecorded-sign-out fence and committed catalog state. Eval retains
+the unscoped preparation call shape and forwards exact guarded preparation and
+publication options. All 20 Eval setup scenarios and the combined 160-scenario
+focused suite pass. A broad run started before that focused correction completed
+was stopped; it is not evidence of a complete pass.
+
+The subsequent full run passed 4,204 JavaScript scenarios but timed out in the
+focused capture subprocess. An isolated reproduction completed all artifacts yet
+kept running: `lsof` identified a Chrome crash-reporter retaining the inherited
+stderr socket after browser exit. The runner now destroys that pipe after bounded
+browser shutdown in both capture paths. The actual five-scenario capture file
+passed in 61.96 seconds without changing timeouts or artifact assertions. The
+reviewer independently verified the refreshed digest above and this cleanup seam;
+no remaining findings. The reproduction was interrupted after confirming the
+leaked pipe, and is not a passing gate.
+
+### Final review-fix gates
+
+The final sequential `npm run build` and `npm run check` passed on the 28-path
+source digest above. The full Vitest portfolio passed 319 files / 4,205 scenarios,
+with one file / three scenarios skipped. Both real capture subprocess scenarios
+passed within that full run. Secret-boundary verification passed two tests;
+Python passed 91 tests. Native workspace and crash-reconciliation tests, formatting,
+Clippy, TypeScript, Ladybug receipt gates and PRD readability passed.
+[Compact gate record](review-fix-gates.txt) and [actual capture run](review-fix-capture.txt)
+retain the results. Clean exact Prime assembly and its actual isolated kernel
+reported `ready=true`; no inference was used.
