@@ -18,7 +18,7 @@ const THREAD_COLUMNS: &str = r#"
                 SELECT i.sequence,i.completion_status,
                        EXISTS(SELECT 1 FROM action_invocations child WHERE child.result_interaction_id=i.id AND child.agent_invoked=1) AS agent_child,
                        i.completion_status IN ('not_started','running','submitted','waiting_for_approval')
-                         AND NOT (i.completion_status='not_started' AND (SELECT a.outcome FROM interaction_attempts a WHERE a.interaction_id=i.id ORDER BY a.attempt_number DESC LIMIT 1)='model_failed') AS active,
+                         AND NOT (i.completion_status='not_started' AND (SELECT a.outcome FROM interaction_attempts a WHERE a.interaction_id=i.id ORDER BY a.attempt_number DESC LIMIT 1) IS 'model_failed') AS active,
                        EXISTS(SELECT 1 FROM interaction_stop_requests stop WHERE stop.interaction_id=i.id AND stop.error IS NULL) AS stopping
                 FROM interactions i
                 WHERE i.thread_id=t.id
@@ -689,6 +689,9 @@ mod tests {
             })
             .await
             .unwrap();
+        // A new turn has no attempt yet; it is starting, so the thread is running.
+        set_status(&store, &thread, "not_started").await;
+        assert_eq!(activity(&store, &thread).await.as_deref(), Some("running"));
         for (status, expected) in [
             ("running", Some("running")),
             ("waiting_for_approval", Some("needs_approval")),

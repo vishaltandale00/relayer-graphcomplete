@@ -1,20 +1,32 @@
 {
   "schemaVersion": 1,
   "issue": 717,
-  "runId": "8c5d0530-1d35-4fd1-b2e9-6306fb5b256f",
+  "runId": "4c771920-6dd2-4b65-a772-7618a614a42b",
   "profile": "prime-openrouter",
   "harness": "prime-agent-basic",
   "implementation": "prime.agent",
   "modelId": "openai/gpt-6-luna",
   "rootTask": "Compare three ways to learn a new programming language: building a small project, working through exercises, and reading other people's code. Present one node per approach. Give each node an invoke action labelled \"Plan a first week\" whose interaction text asks for a seven-day plan for that approach. Leave those invoke actions for me to click; do not run them yourself.",
   "followUp": "In one sentence, which approach suits someone with only twenty minutes a day?",
-  "startedAt": "2026-10-09T05:28:59.640Z",
+  "source": {
+    "commit": "7eb6d8d08566af5b5c152c92ab0572b6248f60b1",
+    "clean": true,
+    "workspaceDigest": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "startedAt": "2026-10-13T21:22:49.721Z",
+  "temporalFeatures": {
+    "schemaRead": true,
+    "rootCurrentWrite": true,
+    "projectionUi": true,
+    "invokeResolution": true,
+    "providerRecursion": true
+  },
   "root": {
     "interactionId": 1,
     "completionStatus": "accepted",
     "invokeActions": [
       {
-        "id": 6,
+        "id": 8,
         "label": "Plan a first week"
       },
       {
@@ -22,37 +34,37 @@
         "label": "Plan a first week"
       },
       {
-        "id": 8,
+        "id": 9,
         "label": "Plan a first week"
       }
     ]
   },
   "admission": {
     "allAdmitted": true,
-    "admittedWithinMs": 36
+    "admittedWithinMs": 66
   },
   "runs": [
     {
       "kind": "invoke",
       "interactionId": 3,
       "completionStatus": "accepted",
-      "graphNodeId": 26,
+      "graphNodeId": 32,
       "freshNativeSession": true,
       "promptCarriesFirstTurn": true
     },
     {
       "kind": "invoke",
-      "interactionId": 2,
+      "interactionId": 4,
       "completionStatus": "accepted",
-      "graphNodeId": 27,
+      "graphNodeId": 33,
       "freshNativeSession": true,
       "promptCarriesFirstTurn": true
     },
     {
       "kind": "message",
-      "interactionId": 4,
+      "interactionId": 2,
       "completionStatus": "accepted",
-      "graphNodeId": 25,
+      "graphNodeId": 31,
       "freshNativeSession": false,
       "promptCarriesFirstTurn": false
     }
@@ -60,35 +72,51 @@
   "concurrency": {
     "windows": {
       "2": {
-        "firstActiveAtMs": 1791523818468,
-        "lastActiveAtMs": 1791523894105
+        "firstActiveAtMs": 1791926650775,
+        "lastActiveAtMs": 1791926669800
       },
       "3": {
-        "firstActiveAtMs": 1791523818468,
-        "lastActiveAtMs": 1791523881281
+        "firstActiveAtMs": 1791926650775,
+        "lastActiveAtMs": 1791926749557
       },
       "4": {
-        "firstActiveAtMs": 1791523818468,
-        "lastActiveAtMs": 1791523848426
+        "firstActiveAtMs": 1791926650775,
+        "lastActiveAtMs": 1791926836504
       }
     },
     "maxActiveAtOnce": 3,
-    "allActiveTogetherMs": 30231
+    "allActiveTogetherMs": 19327
   },
-  "traceStatuses": [
-    "complete",
-    "complete",
-    "complete"
+  "traces": [
+    {
+      "productInteractionId": 3,
+      "status": "complete",
+      "coverageComplete": false,
+      "truncated": false
+    },
+    {
+      "productInteractionId": 4,
+      "status": "complete",
+      "coverageComplete": false,
+      "truncated": false
+    },
+    {
+      "productInteractionId": 2,
+      "status": "complete",
+      "coverageComplete": false,
+      "truncated": false
+    }
   ],
   "checks": {
     "allAdmitted": true,
     "ranSideBySide": true,
+    "tracesComplete": true,
     "allAccepted": true,
     "invokedRunsFresh": true,
     "invokedRunsSawHistory": true,
     "messageResumedRootSession": true
   },
   "passed": true,
-  "finishedAt": "2026-10-09T05:31:34.442Z",
-  "samples": 566
+  "finishedAt": "2026-10-13T21:27:16.872Z",
+  "samples": 894
 }

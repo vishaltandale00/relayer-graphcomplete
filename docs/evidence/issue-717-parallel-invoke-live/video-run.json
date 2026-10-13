@@ -1,0 +1,78 @@
+{
+  "schemaVersion": 1,
+  "issue": 717,
+  "runId": "3e4ba9ee-9db3-4b2c-9998-aa5d805d4cc6",
+  "profile": "prime-openrouter",
+  "harness": "prime-agent-basic",
+  "modelId": "openai/gpt-6-luna",
+  "source": {
+    "commit": "7eb6d8d08566af5b5c152c92ab0572b6248f60b1",
+    "clean": true,
+    "workspaceDigest": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "startedAt": "2026-10-13T21:28:15.898Z",
+  "temporalFeatures": {
+    "schemaRead": true,
+    "rootCurrentWrite": true,
+    "projectionUi": true,
+    "invokeResolution": true,
+    "providerRecursion": true
+  },
+  "invokeActions": [
+    {
+      "id": 7,
+      "label": "Plan a first week",
+      "sourceNodeId": 28
+    },
+    {
+      "id": 8,
+      "label": "Plan a first week",
+      "sourceNodeId": 29
+    },
+    {
+      "id": 9,
+      "label": "Plan a first week",
+      "sourceNodeId": 30
+    }
+  ],
+  "clickedInvokes": [
+    {
+      "actionId": 7,
+      "sourceNodeId": 28,
+      "clicked": true
+    },
+    {
+      "actionId": 8,
+      "sourceNodeId": 29,
+      "clicked": true
+    }
+  ],
+  "admittedWithinMs": 512,
+  "nodeRunRowsDuringRuns": 1,
+  "runs": [
+    {
+      "interactionId": 2,
+      "completionStatus": "accepted"
+    },
+    {
+      "interactionId": 3,
+      "completionStatus": "accepted"
+    },
+    {
+      "interactionId": 4,
+      "completionStatus": "accepted"
+    }
+  ],
+  "maxActiveAtOnce": 3,
+  "allActiveTogetherMs": 14461,
+  "checks": {
+    "bothInvokesClickedInTheUi": true,
+    "allAdmitted": true,
+    "ranSideBySide": true,
+    "nodeShowedItsOwnStop": true,
+    "allAccepted": true
+  },
+  "passed": true,
+  "openedResult": true,
+  "finishedAt": "2026-10-13T21:32:41.752Z"
+}

@@ -2880,6 +2880,77 @@ describe("HarnessHost", () => {
     }
   });
 
+  it("joins a duplicate fresh delivery and keeps its admitted configuration across a registration change", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "relayer-harness-fresh-duplicate-"));
+    let starts = 0;
+    let finish!: () => void;
+    const finished = new Promise<void>((resolve) => { finish = resolve; });
+    let started!: () => void;
+    const running = new Promise<void>((resolve) => { started = resolve; });
+    let releaseReads!: () => void;
+    const readsReleased = new Promise<void>((resolve) => { releaseReads = resolve; });
+    const previewDirectories: unknown[] = [];
+    const accepted = new Set<number>();
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => {
+      if (url.endsWith("/output")) {
+        return accepted.has(Number(/nodes\/(\d+)/.exec(url)?.[1]))
+          ? new Response(JSON.stringify(completion), { status: 200, headers: { "content-type": "application/json" } })
+          : new Response(JSON.stringify({ error: { code: "completion_not_found" } }), { status: 404, headers: { "content-type": "application/json" } });
+      }
+      // The run's graph reads wait until the registration has changed under it.
+      await readsReleased;
+      return graphReadResponse(url, 2);
+    }));
+    try {
+      const host = new HarnessHost({
+        stateFile: join(directory, "sessions.json"),
+        controlToken: "control",
+        draftPreviews: { token: "p".repeat(32), renderer: { render: async () => ({ png: new Uint8Array(), width: 1, height: 1 }) } },
+        // Previews can be switched on in place only for the production adapters, so the fake
+        // harness stands in for codex.basic here.
+        implementations: { "codex.basic": () => ({
+          async complete(context) {
+            starts += 1;
+            previewDirectories.push(context.graph.acquireCapability().previewDirectory);
+            started();
+            await finished;
+            accepted.add(context.inputGraph.id);
+          },
+          state: emptyState,
+        }) },
+      });
+      await host.initialize();
+      const configuration = { ...testConfiguration, name: "fresh-preview", implementation: "codex.basic" };
+      const registration = { threadId: 1, permissionProfileId: "auto", configuration, workingDirectory: directory };
+      await host.createSession(registration);
+      const fresh = { productInteractionId: 2, nativeSession: "fresh" as const };
+
+      const first = host.complete(1, 2, graph(2, "fresh-token"), undefined, undefined, fresh);
+      // A retried delivery of the same prepared run joins it instead of starting another.
+      const duplicate = host.complete(1, 2, graph(2, "fresh-token"), undefined, undefined, fresh);
+      await expect(host.complete(1, 2, graph(2, "fresh-token"), undefined, undefined, { ...fresh, productInteractionId: 3 }))
+        .rejects.toThrow("already active under a different graph binding");
+
+      // A resumable change that enables previews lands while the run is admitted but has
+      // not reached its preview grant. It neither waits for the run nor widens it.
+      await host.createSession({
+        ...registration,
+        configuration: { ...configuration, revision: 2, graphCapabilityProfile: { search: "disabled", preview: "enabled" } },
+      });
+      releaseReads();
+      await running;
+      expect(previewDirectories).toEqual([undefined]);
+
+      finish();
+      await expect(first).resolves.toMatchObject({ output: completion });
+      await expect(duplicate).resolves.toMatchObject({ output: completion });
+      expect(starts).toBe(1);
+    } finally {
+      vi.unstubAllGlobals();
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
   it.each([
     [{ nativeSession: "fresh", requireNativeContinuity: true }, "A fresh native session cannot require native continuity"],
     [{ threadHistory: [] }, "Thread history is sent only with a fresh native session"],

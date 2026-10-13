@@ -113,6 +113,13 @@ function pendingInvocationOrigin(pending, actionInvocations = appState.actionInv
     source.origin, source.layer, actionInvocations, pending.interactionId,
   );
 }
+/**
+ * The turn a thread opens on. Invoked runs run beside the message turns and are reached from
+ * their source node, so the latest message turn opens; its nodes carry each run's state and Stop.
+ */
+function defaultTurn(state, thread) {
+  return messageTurns(state, thread).at(-1) ?? humanTurns(state, thread).at(-1);
+}
 function displayableLayer(layer) {
   return layer?.layer?.id != null && layer.layer.state !== "draft" && layer.layer.state !== "stopped"
     && layer.nodes?.length > 0;
@@ -643,7 +650,7 @@ export async function refreshState(
     String(interaction.id) === String(viewState.currentInteractionId)
   )) || (visibleInteraction?.inertInvocationCurrent ? threadInteractions.find(interaction =>
     String(interaction.id) === String(visibleInteraction.invocationSourceInteractionId)) : null)
-    || humanTurns({ interactions: threadInteractions, actionInvocations: nextActionInvocations, importedInvocationHistory: nextImportedHistory }, { id: nextThreadId }).at(-1);
+    || defaultTurn({ interactions: threadInteractions, actionInvocations: nextActionInvocations, importedInvocationHistory: nextImportedHistory }, { id: nextThreadId });
   let restoredInvocationSource = null;
   const sourceEntry = visibleInteraction?.inertInvocationCurrent
     && String(selected?.id) === String(visibleInteraction.invocationSourceInteractionId)

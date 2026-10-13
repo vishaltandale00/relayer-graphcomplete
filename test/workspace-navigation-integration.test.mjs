@@ -991,6 +991,36 @@ describe("workspace navigation integration", () => {
     }
   });
 
+  it("reopens a thread on its latest message turn while an invoked run is still running", async () => {
+    vi.useFakeTimers();
+    try {
+      const root = rootLayer(101, 11);
+      root.actions = [{ id: 777, kind: "invoke", sourceNodeId: 11, targetLayerId: null, interactionText: "Plan a week" }];
+      const source = interaction(1, 10, root);
+      const running = { id: 2, threadId: 10, sequence: 2, completionStatus: "running", completionOutput: null };
+      const state = productState([{ id: 10, title: "Parallel runs" }], [source, running]);
+      state.actionInvocations = [{ sourceInteractionId: 1, actionId: 777, resultInteractionId: 2, resultCompletionStatus: "running" }];
+      requestImplementation = vi.fn(async (path) => {
+        if (path.startsWith("/api/state?threadId=10")) return state;
+        if (path.endsWith("/layers/101")) return root;
+        return {};
+      });
+      const controller = await loadModules();
+
+      await controller.loadThread(10);
+
+      // The source node, with its run's state and Stop, stays in view.
+      expect(controller.viewState.currentInteractionId).toBe(1);
+      expect(controller.appState.visibleLayer.layer.id).toBe(101);
+    } finally {
+      try {
+        retireOwnedControllers();
+      } finally {
+        vi.useRealTimers();
+      }
+    }
+  });
+
   it("retries an imported thread until its server projection is fresh", async () => {
     vi.useFakeTimers();
     try {

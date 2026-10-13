@@ -14,25 +14,22 @@ import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync } f
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
-import { productionHarnessRuntimeDescriptor } from "../desktop/main/providers/provider-adapter-registry.mjs";
-import { GraphCompleteRuntimeService } from "../desktop/main/services/graphcomplete-runtime.mjs";
-import { RelayerAppServerService } from "../desktop/main/services/relayer-app-server.mjs";
-import { managedRuntimeRequirementForHarness } from "../desktop/shared/managed-runtime-requirements.mjs";
-
 import {
-  managedRuntimeResolver,
   preparePrimeEnvironment,
   prepareRoute,
-  providerExecution,
   readProfile,
+  startLiveProduct,
 } from "./live-run-setup.mjs";
 import { productRequest } from "./recursive-live-run-transport.mjs";
-import { liveRunTimeoutMs, writeJsonAtomic } from "./recursive-live-run-provenance.mjs";
+import { liveRunTimeoutMs, workspaceProvenance, writeJsonAtomic } from "./recursive-live-run-provenance.mjs";
 import { exportTraceEvidence } from "./recursive-live-run-trace.mjs";
 
 const OPT_IN = "RELAYER_PARALLEL_INVOKE_LIVE_RUN";
 const repositoryRoot = resolve(import.meta.dirname, "..");
 const ACTIVE = new Set(["not_started", "submitted", "running", "waiting_for_approval"]);
+// Overlap counts only runs that started: a queued or still-starting run is not running beside
+// the others, so it cannot satisfy the side-by-side check.
+const RUNNING = new Set(["running", "waiting_for_approval"]);
 const FRESH_MARKER = "This run starts a fresh session";
 
 const ROOT_TASK = [
@@ -85,13 +82,13 @@ async function sampleUntil(session, threadId, done, timeoutMs, samples) {
 /** When each run was seen active, and the most runs seen active in one sample. */
 function concurrency(samples, ids) {
   const windows = Object.fromEntries(ids.map((id) => {
-    const active = samples.filter(({ statuses }) => ACTIVE.has(statuses[id]));
+    const active = samples.filter(({ statuses }) => RUNNING.has(statuses[id]));
     return [id, active.length === 0 ? null : { firstActiveAtMs: active[0].atMs, lastActiveAtMs: active.at(-1).atMs }];
   }));
-  const maxActiveAtOnce = Math.max(0, ...samples.map(({ statuses }) => ids.filter((id) => ACTIVE.has(statuses[id])).length));
+  const maxActiveAtOnce = Math.max(0, ...samples.map(({ statuses }) => ids.filter((id) => RUNNING.has(statuses[id])).length));
   const overlapMs = samples.reduce((total, sample, index) => {
     const next = samples[index + 1];
-    const allActive = ids.every((id) => ACTIVE.has(sample.statuses[id]));
+    const allActive = ids.every((id) => RUNNING.has(sample.statuses[id]));
     return next && allActive ? total + (next.atMs - sample.atMs) : total;
   }, 0);
   return { windows, maxActiveAtOnce, allActiveTogetherMs: overlapMs };
@@ -111,40 +108,8 @@ async function main() {
   const outputDirectory = resolve(singleArgument("--output-dir", join(".relayer", "live", "parallel-invoke", runId)));
   mkdirSync(outputDirectory, { recursive: true });
   const dataDirectory = mkdtempSync(join(tmpdir(), "relayer-parallel-invoke-live-"));
-  const resolver = managedRuntimeResolver();
-  const runtime = new GraphCompleteRuntimeService({
-    userDataDirectory: dataDirectory,
-    graphServerBinary: join(repositoryRoot, "target", "debug", "relayer-graph-server"),
-    configurationPaths: [configurationPath],
-    ...(profile.codexExecutable === undefined ? {} : { codexPathOverride: profile.codexExecutable }),
-    ...(profile.implementation === "prime.agent" ? {
-      resolvePrimeRuntime: async () => productionHarnessRuntimeDescriptor(await resolver.get(
-        managedRuntimeRequirementForHarness("prime.agent").recipeId,
-      )),
-    } : {}),
-    // No completion broker: the agent cannot run the invoke actions itself, so they stay the user's.
-    temporalFeatures: {},
-    candidateTrace: {
-      directory: join(dataDirectory, "candidate-trace-spool"),
-      policy: {
-        mode: "required",
-        requiredFeatures: {},
-        includeNativeArtifacts: false,
-        maxBytesPerTurn: 10 * 1024 * 1024,
-        maxEventsPerTurn: 50_000,
-      },
-    },
-    acquireProviderExecution: providerExecution(profile),
-  });
-  const productServer = new RelayerAppServerService({
-    userDataDirectory: dataDirectory,
-    binaryPath: join(repositoryRoot, "target", "debug", "relayer-app-server"),
-    webDirectory: join(repositoryRoot, "desktop", "renderer"),
-    permissionCatalogPath: join(repositoryRoot, "permissions", "desktop.json"),
-    runtimeSession: await runtime.start(),
-    defaultHarnessConfiguration: profile.harness,
-    allowHarnessOverride: true,
-  });
+  let runtime;
+  let productServer;
   const samples = [];
   const artifact = {
     schemaVersion: 1,
@@ -156,9 +121,14 @@ async function main() {
     modelId: profile.modelId,
     rootTask: ROOT_TASK,
     followUp: FOLLOW_UP,
+    // The exact source this run executed: its commit and a digest of any uncommitted change.
+    source: workspaceProvenance(repositoryRoot),
     startedAt: new Date().toISOString(),
   };
   try {
+    let resolver;
+    ({ runtime, productServer, resolver } = await startLiveProduct({ profile, configurationPath, dataDirectory }));
+    artifact.temporalFeatures = runtime.temporalFeatures;
     const session = await productServer.start();
     const family = await prepareRoute({ session, productServer, runtime, resolver, profile });
     const modelSelection = { familyId: family.id, providerId: profile.providerId, modelId: profile.modelId };
@@ -229,14 +199,24 @@ async function main() {
       run.freshNativeSession = text.includes(FRESH_MARKER);
       run.promptCarriesFirstTurn = text.includes("Compare three ways to learn a new programming language");
     }
-    artifact.traceStatuses = traces.map((trace) => trace.status ?? trace.descriptor?.status ?? "exported");
+    artifact.traces = traces.map(({ productInteractionId, status, coverageComplete, truncated }) => ({
+      productInteractionId, status, coverageComplete, truncated: truncated === true,
+    }));
+    // A prompt check proves something only on a complete trace: a truncated one may lack the
+    // prompt, so a missing fresh-session marker would prove nothing.
+    const tracesComplete = traces.every(({ status, coverage, truncated }) => (
+      status === "complete" && coverage?.prompt === "full" && truncated !== true
+    ));
     const checks = {
       allAdmitted: true,
-      ranSideBySide: artifact.concurrency.maxActiveAtOnce >= 2,
+      // The message and both invokes, all active in the same samples.
+      ranSideBySide: artifact.concurrency.maxActiveAtOnce >= 3 && artifact.concurrency.allActiveTogetherMs > 0,
+      tracesComplete,
       allAccepted: runs.every(({ completionStatus }) => completionStatus === "accepted"),
       invokedRunsFresh: runs.filter(({ kind }) => kind === "invoke").every(({ freshNativeSession }) => freshNativeSession),
       invokedRunsSawHistory: runs.filter(({ kind }) => kind === "invoke").every(({ promptCarriesFirstTurn }) => promptCarriesFirstTurn),
-      messageResumedRootSession: runs.filter(({ kind }) => kind === "message").every(({ freshNativeSession }) => !freshNativeSession),
+      messageResumedRootSession: tracesComplete
+        && runs.filter(({ kind }) => kind === "message").every(({ freshNativeSession }) => !freshNativeSession),
     };
     artifact.checks = checks;
     artifact.passed = Object.values(checks).every(Boolean);
@@ -249,8 +229,8 @@ async function main() {
     artifact.samples = samples.length;
     writeJsonAtomic(join(outputDirectory, "run.json"), artifact);
     console.log(JSON.stringify(artifact, null, 2));
-    await productServer.close().catch(() => {});
-    await runtime.close().catch(() => {});
+    await productServer?.close().catch(() => {});
+    await runtime?.close().catch(() => {});
     if (process.argv.includes("--keep-data")) console.error(`Kept live-run data in ${dataDirectory}`);
     else rmSync(dataDirectory, { recursive: true, force: true });
   }

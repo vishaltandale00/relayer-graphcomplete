@@ -69,5 +69,10 @@ describe("explicit run-state symbols", () => {
     // Only its parent agent stops an agent's child; another node's run is not this node's.
     expect(nodeActiveRuns(node, actions, [invocation(11, 6, "running", true)], [run(6, "running")])).toEqual([]);
     expect(nodeActiveRuns(node, actions, [invocation(20, 9, "running")])).toEqual([]);
+    // Stop is offered only for what the product's Stop accepts: a run still starting, or a
+    // preparation waiting for its action's Retry, has nothing to stop.
+    expect(nodeActiveRuns(node, actions, [invocation(11, 6, "not_started")], [run(6, "not_started")])).toEqual([]);
+    expect(nodeActiveRuns(node, actions, [{ ...invocation(11, 6, "submitted"), preparationRecoverable: true }], [run(6, "submitted")])).toEqual([]);
+    expect(nodeRunState(node, actions, [{ ...invocation(11, 6, "not_started"), preparationRecoverable: true }], [run(6, "not_started")])).toBeNull();
   });
 });

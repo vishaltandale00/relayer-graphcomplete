@@ -64,15 +64,19 @@ function runIsActive(run) {
   return ACTIVE_STATUSES.has(run.completionStatus) && !interactionReturnsToUnsent(run);
 }
 
+// The statuses the product's Stop accepts. A run still starting has nothing to stop yet.
+const STOPPABLE_STATUSES = new Set(["submitted", "running", "waiting_for_approval"]);
+
 /**
  * The active runs a person started from the node's invoke actions, oldest first: each gets its
- * own Stop on the node. An agent's child is never one, because only its parent agent may stop it.
+ * own Stop on the node. An agent's child is never one, because only its parent agent may stop it,
+ * and neither is a preparation waiting for its action's Retry.
  */
 export function nodeActiveRuns(node, actions = [], invocations = [], interactions = []) {
   return nodeInvocations(node, actions, invocations)
-    .filter((invocation) => invocation.agentInvoked !== true)
+    .filter((invocation) => invocation.agentInvoked !== true && invocation.preparationRecoverable !== true)
     .map((invocation) => ({ invocation, run: invocationRun(invocation, interactions) }))
-    .filter(({ run }) => runIsActive(run))
+    .filter(({ run }) => runIsActive(run) && STOPPABLE_STATUSES.has(run.completionStatus))
     .sort((left, right) => Number(left.run.id) - Number(right.run.id));
 }
 
@@ -81,9 +85,10 @@ export function nodeActiveRuns(node, actions = [], invocations = [], interaction
 export function nodeRunState(node, actions = [], invocations = [], interactions = []) {
   if (node?.state === "draft") return "draft";
   const runs = nodeInvocations(node, actions, invocations)
-    .map((invocation) => invocationRun(invocation, interactions));
-  if (runs.some(runIsActive)) return "running";
-  const latest = runs.reduce((newest, run) => (
+    .map((invocation) => ({ invocation, run: invocationRun(invocation, interactions) }));
+  // A preparation waiting for its action's Retry is not running.
+  if (runs.some(({ invocation, run }) => invocation.preparationRecoverable !== true && runIsActive(run))) return "running";
+  const latest = runs.map(({ run }) => run).reduce((newest, run) => (
     !newest || Number(run.id) > Number(newest.id) ? run : newest
   ), null);
   if (latest?.completionStatus === "stopped") return "stopped";
