@@ -544,9 +544,26 @@ async function proveTaskActor({ browser, service, productSession, data }) {
       actorCapability = new URL(actorPage.url()).hash.slice(1);
       await actorPage.locator(".graph-node").first().waitFor({ state: "visible" });
       try {
-      // Force the actual renderer's refresh in the gap after preflight, before
-      // native click. This is intentionally later than the rebind tests below.
+      // Same-view polling must preserve the target even during native dispatch.
       {
+        const stable = await controller.observe();
+        const target = await actorPage.locator(".graph-node").first().elementHandle();
+        const stableLabel = await target.getAttribute("aria-label");
+        const clickPrototype = Object.getPrototypeOf(target);
+        const originalClick = clickPrototype.click;
+        clickPrototype.click = async function (options) {
+          await actorPage.evaluate(async () => { const { refreshState } = await import("/src/threads.js"); await refreshState(window.__taskActorPresentation.threadId); });
+          assert.equal(await this.evaluate(element => element.isConnected), true);
+          return originalClick.call(this, options);
+        };
+        try {
+          await controller.act({ kind: "click", ref: stable.controls.find(control => control.name === stableLabel).ref });
+          const nodeId = await target.getAttribute("data-node");
+          await until(async () => String(await actorPage.evaluate(() => window.__taskActorPresentation.selectedNodeId)) === nodeId, "refresh during click retains and activates the exact node");
+        } finally { clickPrototype.click = originalClick; await target.dispose(); }
+        // Still exercise genuine detachment after preflight. A removed target
+        // gets a new canonical element when the production renderer refreshes.
+        await actorPage.mouse.move(0, 0);
         const observed = await controller.observe();
         const original = await actorPage.locator(".graph-node").first().elementHandle();
         const label = await original.getAttribute("aria-label");
@@ -557,6 +574,7 @@ async function proveTaskActor({ browser, service, productSession, data }) {
         prototype.click = async function (options) {
           if (inject) {
             inject = false;
+            await this.evaluate(element => element.remove());
             await actorPage.evaluate(async () => { const { refreshState } = await import("/src/threads.js"); await refreshState(window.__taskActorPresentation.threadId); });
             await until(() => original.evaluate(element => !element.isConnected), "pre-dispatch renderer refresh detached target");
           }
@@ -707,8 +725,8 @@ async function proveTaskActor({ browser, service, productSession, data }) {
       assert.ok(nodeChoice, "real graph node is observed before model latency");
       const observedNode = await actorPage.locator('.graph-node').filter({ hasText: "Two-worker" }).elementHandle();
       await observedNode.evaluate(element => {
-        // renderGraph replaces nodeLayer children. Reproduce that same DOM
-        // replacement while retaining the real product activation callback.
+        // Reproduce replacement of a changed control while retaining its
+        // real product activation callback and exact rebinding boundaries.
         const replacement = element.cloneNode(true);
         replacement.onclick = element.onclick;
         element.replaceWith(replacement);
@@ -806,7 +824,13 @@ async function proveTaskActor({ browser, service, productSession, data }) {
       await actorPage.locator("#actor-hidden-test").evaluate((element) => element.remove());
       return controller;
     },
-    createActor: async () => ({ close: async () => {}, decide: async (observation) => {
+    createActor: async () => ({ close: async () => {},
+      observe: async (observation) => {
+        assert.ok(observation.screenshot, "current-native fixture receives a rendered working observation");
+        assert.ok(!observation.availableActions.includes("finish"));
+        return { comment: "I can see the work progressing.", action: null, usage: null };
+      },
+      decide: async (observation) => {
       snapshots.push(observation);
       if (decision <= 1) {
         const active = tasks.get(tasks.list()[0].id);
@@ -1351,7 +1375,9 @@ async function proveTaskActorInputs({ browser, service, productSession, data }) 
     resolveCompletionJudgeRuntime: async () => ({}),
     createCompletionJudge: async () => ({ close: async () => {}, evaluate: async () => ({ verdict: "complete", evidenceExplanation: "Fixture input was incorporated.", continuationHint: "", usage: null }) }),
     openBrowser: (sessionId, signal) => openTaskActorBrowser({ tasks, sessionId, productSession, browser, signal }),
-    createActor: async () => ({ close: async () => {}, decide: async ({ controls }) => {
+    createActor: async () => ({ close: async () => {},
+      observe: async () => ({ comment: "I can see the work progressing.", action: null, usage: null }),
+      decide: async ({ controls }) => {
       const action = { kind: "scroll", ref: "", value: "down", reason: "", satisfaction: null, comment: "", endpointStatus: "incomplete", remainingWork: "Further choices remain." };
       const note = controls.find((control) => control.name === "Review note" && control.role === "input");
       if (stage === 0 && note) { Object.assign(action, { kind: "fill", ref: note.ref, value: "A note entered through the graph" }); stage++; }

@@ -1688,8 +1688,18 @@ export function createProductWorkspace({
   function releaseDetachedIcons() {
     for (const mount of iconMounts) if (!mount.isConnected) { mount.disposeIcon(); iconMounts.delete(mount); }
   }
+  function mountGraphNodeIcon(element, node, presentation) {
+    const icon = createRelayerIcon(node.icon || node.metadata?.relayer?.icon,
+      { class: "relayer-node-icon" }, node);
+    element.querySelector(".glyph").replaceChildren(icon);
+    presentation.iconStatus = "pending";
+    icon.readyIcon?.then(status => {
+      if (element.querySelector(".glyph").firstElementChild === icon) presentation.iconStatus = status;
+    });
+  }
   const capabilities = workspaceModeCapabilities(mode);
   let graphNodes = [];
+  const graphNodeElements = new WeakMap();
   let graphEdges = [];
   let graphEdgeShape = resolveEdgeShape(undefined);
   // Agent-authored per-edge routes by edge ID, with waypoints projected into the world plane.
@@ -5322,7 +5332,9 @@ export function createProductWorkspace({
       ? cachedView.signature === nextSignature
       : !enteringView && graphSignature === nextSignature;
     graphSignature = nextSignature;
-    $("#nodeLayer").innerHTML = graphNodes.map((node) => {
+    const nodeLayer = $("#nodeLayer");
+    const priorElements = new Map(enteringView ? [] : [...nodeLayer.children].map(element => [element.dataset.node, element]));
+    const nextElements = graphNodes.map((node) => {
       const count = annotationCount(subjectAnchor("node", { nodeId: node.id }, state, thread));
       const badge = annotationEnabled && count
         ? `<span class="graph-annotation-badge" aria-label="${count} comment${count === 1 ? "" : "s"}">${count}</span>`
@@ -5336,18 +5348,37 @@ export function createProductWorkspace({
         ? `${runState.icon ? '<span class="graph-node-state-badge" aria-hidden="true"></span>' : ""}<span class="graph-node-caption" aria-hidden="true">${runState.label}</span>`
         : "";
       const runStateLabel = runState ? `. ${runState.label}` : "";
-      return `<div class="graph-node ${String(node.id) === String(selection.selectedNodeId) ? "selected" : ""}" data-node="${escapeHtml(node.id)}" data-family="${family}"${imageIcon ? ' data-image-icon="true"' : ""}${runState ? ` data-run-state="${runStateKey}"` : ""} data-review-ref="node-${escapeHtml(node.id)}" data-review-kind="node" role="button" tabindex="0" aria-label="Open ${escapeHtml(node.title)}${runStateLabel}${annotationLabel}"><div class="glyph"></div>${badge}<div class="copy"><b>${escapeHtml(node.title)}</b></div>${runStateMarks}</div>`;
-    }).join("");
+      const markup = `<div class="graph-node" data-node="${escapeHtml(node.id)}" data-family="${family}"${imageIcon ? ' data-image-icon="true"' : ""}${runState ? ` data-run-state="${runStateKey}"` : ""} data-review-ref="node-${escapeHtml(node.id)}" data-review-kind="node" role="button" tabindex="0" aria-label="Open ${escapeHtml(node.title)}${runStateLabel}${annotationLabel}"><div class="glyph"></div>${badge}<div class="copy"><b>${escapeHtml(node.title)}</b></div>${runStateMarks}</div>`;
+      const signature = JSON.stringify([markup, node.icon || node.metadata?.relayer?.icon]);
+      let element = priorElements.get(String(node.id));
+      if (!element || graphNodeElements.get(element)?.signature !== signature) {
+        const template = graphDocument.createElement("template");
+        template.innerHTML = markup;
+        element = template.content.firstElementChild;
+        const presentation = { signature, suppressClickAfterDrag: false };
+        graphNodeElements.set(element, presentation);
+        mountGraphNodeIcon(element, node, presentation);
+        if (runState?.icon) element.querySelector(".graph-node-state-badge").replaceChildren(createLucideIcon(runState.icon));
+      } else if (["fallback", "disposed"].includes(graphNodeElements.get(element).iconStatus)) {
+        // Retry unavailable image content on refresh without replacing the
+        // observed control or restarting a pending/loaded image request.
+        mountGraphNodeIcon(element, node, graphNodeElements.get(element));
+      }
+      element.classList.toggle("selected", String(node.id) === String(selection.selectedNodeId));
+      return element;
+    });
+    // Unchanged refreshes must not detach a control or release pointer capture
+    // between browser preflight and dispatch. A new view never reuses controls.
+    const retained = new Set(nextElements);
+    for (const element of [...nodeLayer.children]) if (!retained.has(element)) element.remove();
+    nextElements.forEach((element, index) => {
+      if (nodeLayer.children[index] !== element) nodeLayer.insertBefore(element, nodeLayer.children[index] ?? null);
+    });
     releaseDetachedIcons();
     $$('[data-node]').forEach((element) => {
       const authoredNode = graphNodes.find((candidate) => String(candidate.id) === element.dataset.node);
-      let suppressClickAfterDrag = false;
-      element.querySelector(".glyph").replaceChildren(createRelayerIcon(
-        authoredNode?.icon || authoredNode?.metadata?.relayer?.icon,
-        { class: "relayer-node-icon" }, authoredNode,
-      ));
+      const gesture = graphNodeElements.get(element);
       const runState = NODE_RUN_STATE[element.dataset.runState];
-      if (runState?.icon) element.querySelector(".graph-node-state-badge").replaceChildren(createLucideIcon(runState.icon));
       if (authoredNode) {
         authoredNode.layoutBounds = graphNodeLayoutBounds(
           element.offsetWidth,
@@ -5357,8 +5388,8 @@ export function createProductWorkspace({
         authoredNode.pillBox = { halfWidth: element.offsetWidth / 2, halfHeight: element.offsetHeight / 2 };
       }
       element.onclick = () => {
-        if (!shouldActivateGraphNodeAfterPointerGesture(suppressClickAfterDrag)) {
-          suppressClickAfterDrag = false;
+        if (!shouldActivateGraphNodeAfterPointerGesture(gesture.suppressClickAfterDrag)) {
+          gesture.suppressClickAfterDrag = false;
           return;
         }
         void selectNode(state, element.dataset.node);
@@ -5412,9 +5443,9 @@ export function createProductWorkspace({
         drawGraph();
       };
       element.onpointerup = () => {
-        suppressClickAfterDrag = Boolean(dragging?.moved);
-        if (suppressClickAfterDrag) {
-          graphWindow?.setTimeout?.(() => { suppressClickAfterDrag = false; }, 0);
+        gesture.suppressClickAfterDrag = Boolean(dragging?.moved);
+        if (gesture.suppressClickAfterDrag) {
+          graphWindow?.setTimeout?.(() => { gesture.suppressClickAfterDrag = false; }, 0);
         }
         dragging = null;
         fitAfterDrop();
