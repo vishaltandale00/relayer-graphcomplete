@@ -1,0 +1,467 @@
+{
+  "source": {
+    "baseCommit": "a283c0d00a04e8b039bab1733ad00d5f99cbe51e",
+    "previousHead": "506aebeeb7193cd9eb51df4f8a1a5d62745376d6",
+    "files": [
+      {
+        "path": "packages/harness-host/src/implementations/codex-basic.ts",
+        "sha256": "3084dac1383e7443455c23eba465e1680e670427f2023282b82c9b41e65d7665"
+      },
+      {
+        "path": "packages/harness-host/src/implementations/graph-presentation-guidance.ts",
+        "sha256": "f3e84eccfd0f1e3a11e76e99a33b7869363670402577bce86c02faa73b366688"
+      },
+      {
+        "path": "packages/harness-host/src/implementations/prime-agent.ts",
+        "sha256": "6bb95a87ba0a87b5dd44313738e83fe483d668216fe4a73fb2528e5880424ba8"
+      },
+      {
+        "path": "packages/harness-host/test/codex-basic.test.ts",
+        "sha256": "92ea088555c65b974e1fa2e8a00ccfffabe9b8a7c6435104590fa0df810e67a6"
+      },
+      {
+        "path": "packages/harness-host/test/claude-basic.test.ts",
+        "sha256": "2bc47feb990fb142304c17b3477e0adad27814917daf02f452c79ca77dc62263"
+      },
+      {
+        "path": "packages/harness-host/test/prime-agent.test.ts",
+        "sha256": "30fb0dc8cb36e4b748c439184c57b05d6671695d69e5698201e6a422e3d5077b"
+      },
+      {
+        "path": "test/recursive-complete-e2e.test.mjs",
+        "sha256": "990db6c7da9eb6acf0519bad08f67c5f99302d7fff48cc654ec78c35c49a185b"
+      },
+      {
+        "path": "test/graph-authoring-replay.test.mjs",
+        "sha256": "6183471d02e9c85c733d792e5bd139f16b4a4df1cfa2bb7de62eaebe41723285"
+      },
+      {
+        "path": "docs/prd/index.html",
+        "sha256": "e891c8a09101b71f724de6995aeef2305df4479ff587e603c7777f5d15fe4697"
+      },
+      {
+        "path": "test/prime-visual-integration.test.mjs",
+        "sha256": "16a1534b79ce655afa0341b29dd2a81c8f3bed194617ec66307dcc02c48bdad0"
+      },
+      {
+        "path": "crates/relayer-app-server/tests/support/completion_traces.rs",
+        "sha256": "981f6f780081753282e7f50537db3b281dcdb4795b9381862a052169bd2c9642"
+      },
+      {
+        "path": "packages/graph-client/src/authoring-errors.ts",
+        "sha256": "5a54d5cbc74265aa2b75850a0198e57564bce94d91243b91afd0059fc849bfa1"
+      },
+      {
+        "path": "packages/graph-client/src/client.ts",
+        "sha256": "c71d2a206a484efb71ab721fad018b80bd479a23c7ec45b56569e1ef192f6be8"
+      },
+      {
+        "path": "packages/graph-client/src/detail.ts",
+        "sha256": "f5c544830efb6ce2661553dfdfd9a17f59239b3d5cf08d2ed6d6a03bb10cf534"
+      },
+      {
+        "path": "packages/graph-client/test/objects.test.ts",
+        "sha256": "a48bfef824ff77e4152927e84ce262c03239b754aac14fa0d987ed32185ad14a"
+      },
+      {
+        "path": "packages/harness-host/src/implementations/prime-visual-authoring.ts",
+        "sha256": "fe67f99cb4a4f56b187c3b9c81f8f7882589e0f587edb583074c6efdc9bc0841"
+      },
+      {
+        "path": "python/relayer-graph/src/relayer_graph/session.py",
+        "sha256": "d6e3ed8b65767c204699be3c764ca01279b3e3994048eb9ad9c8dc13a658528a"
+      },
+      {
+        "path": "test/support/communication-contract-fixture.mjs",
+        "sha256": "e22e1f9c48f6c4c6fc21bf828731220b9750f1f5cf85d01fb768aad881ae1e93"
+      },
+      {
+        "path": "python/relayer-graph/README.md",
+        "sha256": "d004eea94ea30e916f0a4e0f7307c591bca5993a61016152c5a5bc51d1a48007"
+      },
+      {
+        "path": "desktop/main/services/prime-agent-runtime.mjs",
+        "sha256": "827d9882da8c182dd3e46f8975ed41719e8eead7f41159f3b0b835f302341517"
+      },
+      {
+        "path": "desktop/main/managed-runtimes/recipes.mjs",
+        "sha256": "eca4550af7bd3f79b7ec41a0a1bfb79c517b97700705655338316c9511b2cef3"
+      },
+      {
+        "path": "vendor/prime-agent/manifest.json",
+        "sha256": "9559e7103d3d8219d9d36ff76e56f9db73f92d049cac801581f1625392ed50d6"
+      }
+    ],
+    "digestAlgorithm": "SHA-256 of files JSON with sorted object keys and compact separators, manifest order preserved",
+    "digest": "228ccd6ae984df00f02ecbfb121a8f3f594576b7512740cf2c351bd5a1787817"
+  },
+  "productAuthority": [
+    "PRD \u00a77.2B accepted-node presentation replacement AN-001/AN-002/AN-003",
+    "PRD \u00a712.1A sealed prospective Return requirements",
+    "ADR 0015 sealed completion contracts"
+  ],
+  "checkpoints": [
+    {
+      "boundary": "Read exact sealed navigate.response requirements; stage each required accepted-node link before Advance and retarget the same stable action to final Return root",
+      "tests": [
+        "test/recursive-complete-e2e.test.mjs attached plain and rich recipe scenarios",
+        "test/graph-authoring-replay.test.mjs Python attached plain and rich recipe scenarios"
+      ]
+    },
+    {
+      "boundary": "Advance validates staged changes without publishing accepted node changes; interrupted fresh-process replay keeps accepted current/history immutable",
+      "tests": [
+        "same real JS app/server and Python visual-host/server recipe scenarios"
+      ]
+    },
+    {
+      "boundary": "Typed rich extension retains exact accepted components, existing control/source-layer provenance and asset pins; new bound reference targets final root",
+      "tests": [
+        "same rich JS and Python scenarios",
+        "JS rich scenario real project asset readback bytes/provenance before and after Return",
+        "test/prime-visual-integration.test.mjs existing export/import/reopen and pinned asset scenarios"
+      ]
+    },
+    {
+      "boundary": "Read authority alone cannot extend presentation; stale revision, wrong owner and conflicting component reject without changing accepted state",
+      "tests": [
+        "test/graph-authoring-replay.test.mjs real server negative extension scenarios"
+      ]
+    },
+    {
+      "boundary": "Combined package bounds apply to components, mounts, assets and bytes; additions are captured before asynchronous reads; guard failures never POST a replacement; target ID is captured before reads and reused for replacement despite reference mutation",
+      "tests": [
+        "packages/graph-client/test/objects.test.ts extension guard and capture scenarios"
+      ]
+    },
+    {
+      "boundary": "Prime/Python accepts only typed additions and delegates authenticated composition to the same JS client; no raw retained package or new server authority",
+      "tests": [
+        "test/graph-authoring-replay.test.mjs actual Python GraphSession and PrimeVisualAuthoring seam",
+        "packages/harness-host/test/prime-visual-authoring.test.ts existing wire validation boundaries"
+      ]
+    },
+    {
+      "boundary": "All three provider-native prompts, all-off fallback, prior/history replay, compiler authority and original native settlement observations remain covered",
+      "tests": [
+        "packages/harness-host/test/codex-basic.test.ts",
+        "packages/harness-host/test/claude-basic.test.ts",
+        "packages/harness-host/test/prime-agent.test.ts",
+        "test/recursive-complete-e2e.test.mjs",
+        "test/graph-authoring-replay.test.mjs",
+        "crates/relayer-app-server/tests/support/completion_traces.rs"
+      ]
+    },
+    {
+      "boundary": "Reviewed Python package tree must equal runtime, vendor manifest and managed recipe pins; changed helper must remain installable/ready in real isolated runtime",
+      "tests": [
+        "test/prime-agent-packaging.test.mjs",
+        "test/prime-managed-runtime.test.mjs",
+        "npm run test:prime-managed-runtime"
+      ]
+    }
+  ],
+  "requiredVerificationPlan": [
+    "npm run check (VITEST_MAX_WORKERS=1)",
+    "npm run build",
+    "npm run test:eval-compiled-runtime",
+    "npm run test:desktop:first-message (interaction permissions enabled)",
+    "npm run test:desktop:first-message (interaction permissions disabled)",
+    "npm run test:desktop:interaction-context",
+    "npm run test:desktop:project-new-thread",
+    "npm run test:desktop:visual-node-details (real Prime export generated by full check)",
+    "npm run test:prime-managed-runtime (clean macOS-arm64 root, provider-free kernel)"
+  ],
+  "environment": {
+    "node": "22.23.2",
+    "VITEST_MAX_WORKERS": "1",
+    "CARGO_BUILD_JOBS": "2",
+    "CMAKE_BUILD_PARALLEL_LEVEL": "2",
+    "nativeCache": "Same private compiler-object cache; native/Cargo inputs unchanged from verified main-integration source. No cold native build, no cached test results.",
+    "desktop": "Isolated deterministic Electron fixtures; RELAYER_INVOKE_EVIDENCE_SKIP_NATIVE_KEYBOARD=1. No native-keyboard/human usability, paid inference, signed package or release claim."
+  },
+  "actualResults": [
+    {
+      "command": "npx vitest run packages/graph-client/test/objects.test.ts --maxWorkers=1",
+      "sourceDigest": "1631e516571934f1e174e9081fef8edb7211e04db2cb492589c9f6bd3d422f91",
+      "scope": "Before later Python pin-only changes; graph-client/test projection unchanged",
+      "exitCode": 0,
+      "innerResults": {
+        "passed": 46,
+        "testFilesPassed": 1
+      },
+      "log": "required-links-target-capture.log",
+      "logSha256": "d8adac15bc37b5d53a1e8864663bc1f4d636d709a769e375141a945b11e4d9a3"
+    },
+    {
+      "command": "npx vitest run test/prime-agent-packaging.test.mjs test/prime-managed-runtime.test.mjs --maxWorkers=1",
+      "sourceDigest": "228ccd6ae984df00f02ecbfb121a8f3f594576b7512740cf2c351bd5a1787817",
+      "exitCode": 0,
+      "innerResults": {
+        "passed": 22,
+        "testFilesPassed": 2
+      },
+      "log": "required-links-python-pins.log",
+      "logSha256": "ebefeaf8b1dcb313cbe2ce394dbc24bf5c7a9721822ec9cf5edcee922309419d"
+    },
+    {
+      "command": "npm run test:prime-managed-runtime",
+      "exitCode": 0,
+      "elapsedSeconds": 49.57,
+      "log": "required-links-prime-managed-independent.log",
+      "sourceDigest": "228ccd6ae984df00f02ecbfb121a8f3f594576b7512740cf2c351bd5a1787817",
+      "logSha256": "b02d308c71e9b23eb3829ba000e2e2f81574002d2fee5acaf5f096411e1b45d6",
+      "innerResults": {
+        "recipeId": "prime@0.8.1",
+        "recipeDigest": "3e810a5130e71e12a4033eecb9853b3f24bfa045709e3131ea5f38506bf2b319",
+        "target": "macos-arm64",
+        "javascriptClosureKind": "repository",
+        "ready": true,
+        "paidInferenceCalls": 0
+      }
+    },
+    {
+      "command": "npm run check",
+      "exitCode": 0,
+      "elapsedSeconds": 943.72,
+      "log": "required-links-check.log",
+      "sourceDigest": "228ccd6ae984df00f02ecbfb121a8f3f594576b7512740cf2c351bd5a1787817",
+      "logSha256": "cb3e4e9f86ad6008d9813fc5988a3998b4a485759ebac81112706fe7b980c9f1",
+      "innerResults": {
+        "vitest": {
+          "passed": 4176,
+          "skipped": 7,
+          "testFilesPassed": 318,
+          "testFilesSkipped": 1
+        },
+        "secretBoundaryPassed": 2,
+        "pythonPassed": 91,
+        "nativeWorkspace": "passed",
+        "crashReconciliation": "passed",
+        "types": "passed",
+        "receiptLint": "passed",
+        "prdReadability": "passed"
+      }
+    },
+    {
+      "command": "npm run build",
+      "exitCode": 0,
+      "elapsedSeconds": 6.05,
+      "log": "required-links-build.log",
+      "sourceDigest": "228ccd6ae984df00f02ecbfb121a8f3f594576b7512740cf2c351bd5a1787817",
+      "logSha256": "d3d9f5d2108b97264c43e9fdfa10b074ef518d92194116ffdfbd7baf12382989"
+    },
+    {
+      "command": "npm run test:eval-compiled-runtime",
+      "exitCode": 0,
+      "elapsedSeconds": 20.93,
+      "log": "required-links-compiled.log",
+      "sourceDigest": "228ccd6ae984df00f02ecbfb121a8f3f594576b7512740cf2c351bd5a1787817",
+      "logSha256": "0bc92423bb267492e4c9a38f7bd417e4c4a0628b1dda6f8b507feeb2b527fe2f",
+      "innerResults": {
+        "passed": 12,
+        "testFilesPassed": 1
+      }
+    },
+    {
+      "command": "npm run test:desktop:first-message",
+      "exitCode": 0,
+      "elapsedSeconds": 20.67,
+      "log": "required-links-desktop-enabled.log",
+      "sourceDigest": "228ccd6ae984df00f02ecbfb121a8f3f594576b7512740cf2c351bd5a1787817",
+      "logSha256": "47d364f7c6b034d7d7502f866a428f142abeab2234fc8a6064929a13ac4415fb",
+      "innerResults": {
+        "passed": true,
+        "typedPermissions": true,
+        "requiredResponseJourney": {
+          "rejectedOmission": true,
+          "reopenedNavigationPassed": true
+        },
+        "nativeKeyboardVerified": false,
+        "inferenceCalls": 0,
+        "completionStatus": "accepted"
+      }
+    },
+    {
+      "command": "npm run test:desktop:first-message",
+      "exitCode": 0,
+      "elapsedSeconds": 16.52,
+      "log": "required-links-desktop-disabled.log",
+      "sourceDigest": "228ccd6ae984df00f02ecbfb121a8f3f594576b7512740cf2c351bd5a1787817",
+      "logSha256": "5d5301fb73269d199633f39793d6430e6b23a6b109932af59dae257350986152",
+      "innerResults": {
+        "passed": true,
+        "typedPermissions": false,
+        "requiredResponseJourney": null,
+        "nativeKeyboardVerified": false,
+        "inferenceCalls": 0,
+        "completionStatus": "accepted"
+      }
+    },
+    {
+      "command": "npm run test:desktop:interaction-context",
+      "exitCode": 0,
+      "elapsedSeconds": 32.93,
+      "log": "required-links-desktop-context.log",
+      "sourceDigest": "228ccd6ae984df00f02ecbfb121a8f3f594576b7512740cf2c351bd5a1787817",
+      "logSha256": "4c1bfca758ec3653ff1b4d944e4b2784b65f1cb80ff6b4f7cf95811dbf384137",
+      "innerResults": {
+        "passed": true,
+        "paidInferenceCalls": 0,
+        "resultFileValidatedByDeclaredWrapper": true
+      }
+    },
+    {
+      "command": "npm run test:desktop:project-new-thread",
+      "exitCode": 0,
+      "elapsedSeconds": 13.84,
+      "log": "required-links-desktop-project.log",
+      "sourceDigest": "228ccd6ae984df00f02ecbfb121a8f3f594576b7512740cf2c351bd5a1787817",
+      "logSha256": "2c3e83a5486d2bdce6aa2eb42e50c9b2d81e8ba09993ac731f6c02320ee665e9",
+      "innerResults": {
+        "passed": true,
+        "restartPersistence": true
+      }
+    },
+    {
+      "command": "npm run test:desktop:visual-node-details",
+      "sourceDigest": "228ccd6ae984df00f02ecbfb121a8f3f594576b7512740cf2c351bd5a1787817",
+      "exitCode": 0,
+      "log": "required-links-desktop-visual.log",
+      "logSha256": "41cfd08784ee26c952a85473e2f356ca64bf07fc6970353658b8bb0af329f44e",
+      "innerResults": {
+        "declaredWrapperValidatedPassedCleanupAndManifest": true,
+        "paidInferenceCalls": 0,
+        "reopened": true,
+        "primeImportedFromFactoryPython": true,
+        "primeRenderedAsset": {
+          "alt": "Prime proof",
+          "assetState": "available",
+          "sourceProtocol": "blob:",
+          "complete": true,
+          "naturalWidth": 150
+        },
+        "manifestSha256": "5742eb799b2f00e176839e20a3c195e5c333b0a49d00462623196f6f54592987"
+      },
+      "qualification": "First declared attempt failed with an empty diagnostic object and stale stage label; minimal fixture and stage-instrumented full copy passed without a production change; original declared entry passed once. Initial cause remains unconfirmed."
+    }
+  ],
+  "preservedFailures": [
+    {
+      "log": "required-links-warm-fixture-failure.log",
+      "passed": 74,
+      "failed": 3,
+      "cause": "Shared seed fixture incorrectly used .object.ref instead of .ref; corrected fixture access.",
+      "logSha256": "0830c867cfe6595c15460a1535f68a5334b09e5da55f4a0115ba0bfb7fe583c7"
+    },
+    {
+      "log": "required-links-warm-assets-fixture-failure.log",
+      "passed": 77,
+      "failed": 5,
+      "cause": "Raw server has no registry bridge; real app seed lacked project provisioning; typed-template fixtures had invalid scalar HTML interpolation/button link host. Corrected realistic fixtures, no validation relaxation.",
+      "logSha256": "fc148b1e77b0a5bd0bf87be44713b6d5f28f5d3f6c15b613853c3eb2f9a146ea"
+    },
+    {
+      "log": "required-links-warm-byte-expectation-failure.log",
+      "passed": 59,
+      "failed": 1,
+      "cause": "Byte guard correctly returned structured compiler error; changed expectation to code compiled_package_byte_limit_exceeded.",
+      "logSha256": "e0139ce2ea2fda70787ae223f20dd951939f1b75ee200c76f8f6e0de67bce98e"
+    },
+    {
+      "log": "required-links-target-capture-edit-failure.log",
+      "passed": 45,
+      "failed": 1,
+      "cause": "Overbroad edit temporarily changed original replace method route to undefined variable. Restored original method exactly.",
+      "logSha256": "a65c5ee4e8b2bc1fead09b817c523d8e7a723ee87775a5d1fb695c85156e30bd"
+    },
+    {
+      "log": "required-links-target-capture-fixture-failure.log",
+      "passed": 45,
+      "failed": 1,
+      "cause": "Fixture tried mutating getter-only NodeObject.ref. Changed to mutable supported GraphNode-shaped reference.",
+      "logSha256": "79f9f2f589b03b3a191efd52a375bbdd741f4f68d2bef7974670f1025d72c3ea"
+    },
+    {
+      "command": "npm run check",
+      "sourceDigest": "1631e516571934f1e174e9081fef8edb7211e04db2cb492589c9f6bd3d422f91",
+      "log": "required-links-check-before-python-pins.log",
+      "logSha256": "3eef182f8f74156edf262979c9846d3536b2ef46d83885d52fff3519d9d71d52",
+      "passed": 4172,
+      "failed": 4,
+      "skipped": 7,
+      "cause": "Three reviewed Python package tree pins still named pre-extension source; real packaging admission and managed recipe checks rejected it. Recomputed exact .py tree using production digestFilesystemTree and updated only those pins."
+    },
+    {
+      "command": "npm run test:desktop:visual-node-details",
+      "sourceDigest": "228ccd6ae984df00f02ecbfb121a8f3f594576b7512740cf2c351bd5a1787817",
+      "exitCode": 1,
+      "log": "required-links-desktop-visual-first-failure.log",
+      "logSha256": "8ea1a7e408ecebcb4aef25725d22c0b74dcc72806ad34b3f7a8e6d7e76f3e716",
+      "cause": "Unknown. Empty diagnostic object; stage label fixture-run-complete is not updated during later rendering. Minimized fixture accepted/cloned; stage-instrumented full copy and original declared entry subsequently passed without production edits. No source fix or proven root cause claimed."
+    }
+  ],
+  "review": {
+    "reviewer": "design_authority_review",
+    "sourceDigest": "228ccd6ae984df00f02ecbfb121a8f3f594576b7512740cf2c351bd5a1787817",
+    "scope": "sealed links, authenticated rich extension, aggregate bounds, target/additions capture, Python package-tree admission and checkpoint mappings",
+    "verdict": "PASS exact source, checkpoint mappings and retained local deterministic evidence",
+    "reviewSha256": "cebb72958d97d9c6ce826831a212d0d28ba8b3f33d701e294deeaa335192ab9e",
+    "unresolvedFindings": [],
+    "evidenceInputSha256": "ace9dba64c75b3033dede10ccf0d07d65de83b5bf0b6908a5b8154364b7b7c6d",
+    "limitations": [
+      "Hosted CI for final pushed head remains separately required.",
+      "Python raw-server rich case has no registry bridge; real image bytes/provenance are proved by JS app/server case using same compiler seam.",
+      "Historical pilot does not certify this source or all-provider timing/quality.",
+      "First desktop visual attempt failed for an unconfirmed reason; only the successful final declared attempt is certified. Native keyboard automation remains skipped."
+    ]
+  },
+  "limits": [
+    "Hosted CI for final pushed head remains separately required.",
+    "Python raw-server rich case has no registry bridge; real image bytes/provenance are proved by JS app/server case using same compiler seam.",
+    "Historical pilot does not certify this source or all-provider timing/quality.",
+    "First desktop visual attempt failed for an unconfirmed reason; only the successful final declared attempt is certified. Native keyboard automation remains skipped."
+  ],
+  "interruptedVerification": [
+    {
+      "log": "required-links-check-interrupted-reference-capture.log",
+      "logSha256": "be6ab57fcd7a997518a0c2ca30c4de249eab1baa81121f38944f110cc053bfc9",
+      "reason": "Stopped before completion because source/test capture fix changed tested snapshot; no pass claimed."
+    },
+    {
+      "log": "required-links-check-interrupted-fixture-repair.log",
+      "logSha256": "215a9c41d852e16b4f356500c213b6ef6f1eebfbb748dcb12248ce5bf04683e3",
+      "reason": "Stopped before completion because source/test capture fix changed tested snapshot; no pass claimed."
+    }
+  ],
+  "visualInspection": [
+    {
+      "path": "desktop-enabled-invoke/14-required-reopened-button.png",
+      "sha256": "a336862c209eec5684b31512e64bf84c6c09bcc6a4d123f828312f26932f3132",
+      "observation": "Reopened Results store detail visibly retains the new attached-response control alongside existing controls; driver independently activates it and verifies exact target."
+    },
+    {
+      "path": ".relayer/evidence/visual-node-details/run-2026-10-09T04-10-40.579Z-c3e44ba0/shot-754dda3d-6dbf-47fe-af0f-d7031851fbdb/shot-754dda3d-6dbf-47fe-af0f-d7031851fbdb-001.png",
+      "sha256": "82709ca3122a0c9fb5a7c5fbd0cc5b5682f8e9e08b4c5012c7148571762efd1e",
+      "observation": "Prime-authored detail shows pinned solid-color fixture SVG and retained controls; read-only input and Continue are disabled. Functional rendering only, no design-quality rating."
+    }
+  ],
+  "builtOutputs": [
+    {
+      "path": "packages/graph-client/dist/client.js",
+      "sha256": "ead44529734ccf41842e54510fc844e44261e3c32b5ec3149fea4511e5739cdb"
+    },
+    {
+      "path": "packages/harness-host/dist/implementations/prime-visual-authoring.js",
+      "sha256": "240167a5102274914675bdc6d61af1718e2842b5602240f6a0f5d0e8866a4832"
+    },
+    {
+      "path": "target/debug/relayer-graph-server",
+      "sha256": "dbc29df789e0f253805b922ef47199080a17ede5cc6768177c3f27c37d65ed40"
+    },
+    {
+      "path": "target/debug/relayer-app-server",
+      "sha256": "bcf3eaeee70a1a5eea3d9b2314fd0d732bbcf772dc64c47bd6715f920885eb67"
+    }
+  ]
+}

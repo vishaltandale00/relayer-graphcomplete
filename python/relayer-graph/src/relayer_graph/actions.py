@@ -33,6 +33,8 @@ class ActionObject:
     variant: str = "pill"
     icon: str | None = None
     description: str | None = None
+    input_actions: tuple[int | ActionObject, ...] = ()
+    reusable: bool = False
 
     def to_detail_wire(self, owner: NodeObject, *, _repair_source: NodeObject | None = None) -> dict[str, Any]:
         value: dict[str, Any] = {
@@ -53,6 +55,27 @@ class ActionObject:
             value.update(relation=self.relation, target=_layer_declaration(self.target))
         elif self.kind == "invoke":
             value["interactionText"] = self.interaction_text
+            if not isinstance(self.reusable, bool):
+                raise ValueError("Invoke reusable must be a boolean")
+            value["reusable"] = self.reusable
+            if self.input_actions:
+                references: list[Any] = []
+                seen: set[int | str] = set()
+                for entry in self.input_actions:
+                    if type(entry) is int and entry > 0:
+                        identity: int | str = entry
+                        reference: Any = entry
+                    elif type(entry) is ActionObject and entry.kind == "input":
+                        _layer_declaration(entry.source_layer, owner, _repair_source=_repair_source)
+                        identity = entry.client_key
+                        reference = {"inputActionClientKey": entry.client_key}
+                    else:
+                        raise ValueError("Invoke references must name Input declarations or positive action IDs")
+                    if identity in seen:
+                        raise ValueError("Duplicate Invoke Input reference")
+                    seen.add(identity)
+                    references.append(reference)
+                value["inputActions"] = references
         elif self.kind == "input":
             value.update(control=self.control, prompt=self.prompt)
             if self.control != "text":

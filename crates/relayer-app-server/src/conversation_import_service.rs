@@ -159,6 +159,20 @@ pub(crate) async fn materialize_conversation(
         thread_id: relayer_graph_core::ThreadId::new(staged.thread_id.value())
             .expect("stored thread ID is positive"),
         created_at: staged.header.exported_at.clone(),
+        standalone_inputs: staged
+            .header
+            .bound_inputs
+            .iter()
+            .cloned()
+            .map(import_action)
+            .collect(),
+        inert_invocations: staged
+            .header
+            .invocations
+            .iter()
+            .map(serde_json::to_value)
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|error| ConversationImportError::Input(error.to_string()))?,
     };
     if let Err(operation) = runtime.begin_imported_conversation(&graph_stage).await {
         return cleanup_failed_materialization(import_id, operation.to_string(), product, runtime)
@@ -460,6 +474,8 @@ fn retain_materialized_submitted_inputs(
 fn import_turn(turn: ConversationExportTurn) -> ImportedTurn {
     let invoke_origin = match turn.origin {
         crate::conversation_export::ExportTurnOrigin::User => None,
+        // Reusable-call evidence is inert inventory, not legacy action resolution.
+        crate::conversation_export::ExportTurnOrigin::Invocation { .. } => None,
         crate::conversation_export::ExportTurnOrigin::Action {
             source_turn_id,
             source_action_id,
@@ -632,6 +648,7 @@ fn import_turn(turn: ConversationExportTurn) -> ImportedTurn {
 fn import_action(action: ExportAction) -> ImportedAction {
     let input = action.input.map(import_input_action);
     ImportedAction {
+        reusable: action.reusable,
         icon_asset: action
             .icon_asset
             .map(|asset| relayer_graph_core::ImportedDetailAsset {
@@ -672,6 +689,7 @@ fn import_action(action: ExportAction) -> ImportedAction {
         description: action.description,
         target_layer_id: action.target_layer_id,
         interaction_text: action.interaction_text,
+        input_action_ids: action.input_action_ids,
         input,
     }
 }
@@ -737,6 +755,8 @@ mod tests {
 
     fn header() -> ConversationExportHeader {
         ConversationExportHeader {
+            invocations: Vec::new(),
+            bound_inputs: Vec::new(),
             export_version: EXPORT_VERSION_V1,
             exported_at: "1770000000000".into(),
             producer: ExportProducer {

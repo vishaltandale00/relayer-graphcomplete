@@ -141,6 +141,10 @@ impl From<ConversationExportBuildError> for ApiError {
                 StatusCode::UNPROCESSABLE_ENTITY,
                 json!({ "code": "share_imported_conversation", "error": "Imported conversations cannot be shared." }),
             ),
+            ConversationExportBuildError::ReusableInvocationPortabilityUnavailable => Self(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                json!({ "code": "reusable_invocation_portability_unavailable", "error": "This conversation requires a share format that is not yet supported by the hosted viewer." }),
+            ),
             ConversationExportBuildError::ShareNoAcceptedCompletion => Self(
                 StatusCode::UNPROCESSABLE_ENTITY,
                 json!({ "code": "share_no_accepted_completion", "error": "The conversation has no accepted completion to share." }),
@@ -302,6 +306,19 @@ impl IntoResponse for ApiError {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn unqualified_share_format_exposes_the_closed_capability_refusal() {
+        let response =
+            ApiError::from(ConversationExportBuildError::ReusableInvocationPortabilityUnavailable)
+                .into_response();
+        assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+        let bytes = axum::body::to_bytes(response.into_body(), 1024)
+            .await
+            .unwrap();
+        let body: Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(body["code"], "reusable_invocation_portability_unavailable");
+    }
 
     #[test]
     fn nested_graph_validation_keeps_exact_internal_diagnostic() {

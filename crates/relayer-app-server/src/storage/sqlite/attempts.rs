@@ -496,6 +496,7 @@ mod tests {
 
     fn retry_input(text: &str) -> crate::storage::NewInteractionInput<'_> {
         crate::storage::NewInteractionInput {
+            composer_input_occurrences: None,
             text,
             input_identity: "retry-input",
             input_digest: "sha256:retry-input",
@@ -719,6 +720,7 @@ mod tests {
         }];
         let confirmations = ["legacy-context".to_owned()];
         let input = crate::storage::NewInteractionInput {
+            composer_input_occurrences: None,
             text: "Keep my draft",
             input_identity: "legacy-send",
             input_digest: "fixture-digest",

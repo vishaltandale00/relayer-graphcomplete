@@ -73,6 +73,20 @@ pub(crate) async fn prepare(
                 .ok_or_else(|| GraphError::Internal("Invalid context identity".into()))?,
         });
     }
+    // Answers are canonical accepted occurrences, validated before this trusted
+    // preparation. Like annotations, they require a response link on their
+    // exact source node. Deduplicate shared nodes without granting other writes.
+    let answered_nodes: Vec<i64> = sqlx::query_scalar("SELECT DISTINCT input.source_node_id FROM interaction_input_children input JOIN nodes source ON source.id=input.source_node_id WHERE input.parent_interaction_node_id=?1 AND source.state='accepted' AND NOT EXISTS(SELECT 1 FROM graph_imports imported WHERE imported.thread_id=source.thread_id) ORDER BY input.source_node_id")
+        .bind(interaction.value()).fetch_all(&mut *connection).await?;
+    for node in answered_nodes {
+        let permission = InteractionPermission::NavigateAdd {
+            node_id: NodeId::new(node)
+                .ok_or_else(|| GraphError::Internal("Invalid input source identity".into()))?,
+        };
+        if !permissions.contains(&permission) {
+            permissions.push(permission);
+        }
+    }
     let description = serde_json::to_string(&InteractionPermissions::V2 {
         enabled,
         permissions,
@@ -112,12 +126,13 @@ pub(crate) async fn authorize(
     }
     let active: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM completion_states WHERE interaction_node_id=?1 AND lifecycle='active')")
         .bind(scope.root_node_id.value()).fetch_one(&mut *connection).await?;
-    if scope.read_only
-        || !active
-        || !read(connection, scope.root_node_id)
+    let permitted = match super::contracts::read(connection, scope.root_node_id).await? {
+        Some(contract) => contract.authorities.contains(permission),
+        None => read(connection, scope.root_node_id)
             .await?
-            .is_some_and(|snapshot| snapshot.permits(permission))
-    {
+            .is_some_and(|snapshot| snapshot.permits(permission)),
+    };
+    if scope.read_only || !active || !permitted {
         return Err(GraphError::Forbidden(
             "This interaction does not authorize the exact operation.".into(),
         ));

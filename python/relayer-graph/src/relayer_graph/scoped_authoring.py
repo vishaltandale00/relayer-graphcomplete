@@ -113,16 +113,26 @@ class ScopedAuthoringLayer:
                                   _identity(owner.snapshot_key, key, "l", ""))
 
     def node(self, local_key: str, *, icon: Any, title: str, detail: str,
-             kind: str = "concept") -> NodeObject:
+             kind: str = "concept", artifact: dict[str, Any] | None = None) -> NodeObject:
         key = _name(local_key)
         if key in self._nodes:
             raise GraphAuthoringValidationError("Duplicate node " + _path(self._key, "nodes", key))
         if any(type(value) is not str for value in (title, detail, kind)):
             raise GraphAuthoringValidationError("Node title, detail, and kind must be strings")
-        node = NodeObject(icon, title, detail, kind, _identity(self._owner.snapshot_key, self._key, "n", key))
+        # The client captures artifact details at write, as on the direct path.
+        node = NodeObject(icon, title, detail, kind, _identity(self._owner.snapshot_key, self._key, "n", key),
+                          artifact=artifact)
         self._nodes[key] = node
         self._members.append(node)
         self.object.nodes = list(self._members)
+        return node
+
+    def artifact_node(self, local_key: str, *, icon: Any, title: str, detail: str,
+                      artifact: dict[str, Any], kind: str = "concept") -> NodeObject:
+        """Make this an artifact layer holding one artifact node, like LayerObject.for_artifact."""
+        node = self.node(local_key, icon=icon, title=title, detail=detail, kind=kind, artifact=artifact)
+        self.object.renderer = "artifact"
+        self.layout([(node, 0.5, 0.5)], edge_shape="default", default_node=node)
         return node
 
     def include(self, record: GraphNode | GraphEdge) -> None:
@@ -247,11 +257,16 @@ class ScopedGraphAuthoring:
                     routes.append(EdgeRouteObject(route.edge, route.shape, ends, _copy(route.waypoints)))
                 captured = LayerObject(list(layer._members), list(layer._connections),
                                        LayerLayoutObject(placements, layer.object.layout.edge_shape, routes),
-                                       layer.object.client_key, layer.object.default_node)
+                                       layer.object.client_key, layer.object.default_node, renderer=layer.object.renderer)
                 layers.append((layer, captured, layer._size_justification))
                 for key, node in layer._nodes.items():
                     if node.client_key != _identity(self.snapshot_key, layer._key, "n", key):
                         raise GraphAuthoringValidationError("A declared node identity changed")
+                    # Like the TypeScript client: plain data only, so capture runs no author code.
+                    if node.artifact is not None:
+                        if type(node.artifact) is not dict:
+                            raise GraphAuthoringValidationError("Artifact details must be a plain dict of ordinary data")
+                        _copy(node.artifact)
                 for key, edge in layer._edges.items():
                     endpoints = layer._endpoints[key]
                     if edge.client_key != _identity(self.snapshot_key, layer._key, "e", key) or not _same(edge.endpoints, endpoints):
@@ -273,7 +288,21 @@ class ScopedGraphAuthoring:
                             raise GraphAuthoringValidationError("Navigation needs an explicit accepted layer record")
                         else:
                             target = target.id
-                    actions.append((_path(layer._key, "actions", key), source, action, replace(action, target=target, options=_copy(action.options))))
+                    inputs = []
+                    for reference in action.input_actions:
+                        if type(reference) is int and reference > 0:
+                            inputs.append(reference)
+                            continue
+                        if type(reference) is dict and "id" in reference:
+                            if reference.get("kind") != "input" or reference.get("state") != "accepted" or type(reference["id"]) is not int or reference["id"] < 1:
+                                raise GraphAuthoringValidationError("Invoke needs an explicit accepted Input action record")
+                            inputs.append(reference["id"])
+                            continue
+                        declared = next(((owner, candidate) for owner, candidate in layer._actions.values() if candidate is reference), None)
+                        if declared is None or declared[0] is not source or reference.kind != "input":
+                            raise GraphAuthoringValidationError("Invoke Inputs must be declared on the same source Node and scoped Layer")
+                        inputs.append(replace(reference, options=_copy(reference.options), icon=_copy(reference.icon)))
+                    actions.append((_path(layer._key, "actions", key), source, action, replace(action, target=target, options=_copy(action.options), icon=_copy(action.icon), input_actions=tuple(inputs))))
 
             visit(root)
             keys = {key for layer, _, _ in layers for key in [layer.object.client_key,
@@ -319,7 +348,7 @@ class ScopedGraphAuthoring:
                             route.waypoints) for route in captured.layout.edge_routes])
                     result = await self._client.submit_layer(LayerObject([node_ref(node) for node in captured.nodes],
                         [edge_ref(edge) for edge in captured.edges], layout, captured.client_key,
-                        None if captured.default_node is None else node_ref(captured.default_node)), size_justification=justification)
+                        None if captured.default_node is None else node_ref(captured.default_node), renderer=captured.renderer), size_justification=justification)
                     layer_results[id(layer.object)] = result
                     layer.object.ref = result
                     return result
@@ -327,7 +356,8 @@ class ScopedGraphAuthoring:
             for action_path, source, original, action in actions:
                 async def submit_action(source: NodeObject = source, original: ActionObject = original, action: ActionObject = action) -> Any:
                     fields = replace(action, source_layer=layer_results[id(action.source_layer)],
-                                     target=layer_results[id(action.target)] if id(action.target) in layer_results else action.target)
+                                     target=layer_results[id(action.target)] if id(action.target) in layer_results else action.target,
+                                     input_actions=tuple(entry if type(entry) is int else replace(entry, source_layer=layer_results[id(entry.source_layer)]) for entry in action.input_actions))
                     response = await self._client._add_captured_action(node_ref(source), original, fields)
                     result = dict(response["action"])
                     action_results.append(result)

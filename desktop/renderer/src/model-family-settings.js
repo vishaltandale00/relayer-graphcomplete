@@ -48,6 +48,7 @@ let savingDefaults = false;
 let refreshingDefaultFamily = false;
 const familyVisibilityGate = createFamilyVisibilityGate();
 const settingsRefreshGate = createLatestRequestGate();
+let settingsRefreshPromise = Promise.resolve(false);
 
 function provider(providerId) {
   return settings.providers.find((candidate) => candidate.id === providerId);
@@ -136,7 +137,13 @@ function setStatus(message = "", kind = "") {
   status.className = `model-settings-status${kind ? ` ${kind}` : ""}`;
 }
 
-export async function refreshModelSettings({ preserveIndex = true, preserveEdit = false } = {}) {
+export function refreshModelSettings(options = {}) {
+  const request = performModelSettingsRefresh(options);
+  settingsRefreshPromise = request;
+  return request;
+}
+
+async function performModelSettingsRefresh({ preserveIndex = true, preserveEdit = false } = {}) {
   const refreshToken = settingsRefreshGate.begin();
   let response;
   try {
@@ -687,5 +694,14 @@ export async function initializeModelFamilySettings() {
 
 export async function refreshModelFamilySettings() {
   if (!settings) return initializeModelFamilySettings();
-  return refreshModelSettings({ preserveEdit: true });
+  let request = refreshModelSettings({ preserveEdit: true });
+  // An explicit action must not judge stale UI while a notification supersedes its read.
+  // Keep the latest-wins gate, but join the current read through success or failure.
+  while (true) {
+    let result;
+    try { result = await request; }
+    catch (error) { if (request === settingsRefreshPromise) throw error; }
+    if (request === settingsRefreshPromise) return result;
+    request = settingsRefreshPromise;
+  }
 }

@@ -378,7 +378,7 @@ export function visualNodeDetailCheck(output, personalPresentationVersion) {
     && Array.isArray(authoredDetail.assets)
     && /^[a-f0-9]{64}$/.test(authoredDetail.integritySha256 || "")
   ));
-  const treatment = ["personal-presentation-v3", "personal-presentation-v4"].includes(personalPresentationVersion);
+  const treatment = ["personal-presentation-v3", "personal-presentation-v4", "personal-presentation-v6"].includes(personalPresentationVersion);
   return {
     name: "visual-node-detail:authored-output",
     passed: treatment ? nodes.length > 0 && compiledNodes.length === nodes.length : authoredNodes.length === 0,
@@ -455,7 +455,8 @@ export function recursiveCompleteChecks(execution, { requireChildWhenEnabled = f
   const personalPresentationVersion = execution.harnessConfiguration?.settings?.personalPresentationVersion;
   if ((personalPresentationVersion === "personal-presentation-v2"
     || personalPresentationVersion === "personal-presentation-v3"
-    || personalPresentationVersion === "personal-presentation-v4") && children.length > 0) {
+    || personalPresentationVersion === "personal-presentation-v4"
+    || personalPresentationVersion === "personal-presentation-v6") && children.length > 0) {
     for (const child of children.filter((candidate) => candidate.status === "accepted")) {
       checks.push({
         ...visualNodeDetailCheck(
@@ -3021,6 +3022,10 @@ export class EvalService {
             threadId,
             sourceInteractionId: invocation.sourceInteractionId,
             sourceActionId: invocation.actionId,
+            durable: invocation.durable === true,
+            reusable: invocation.reusable === true,
+            invocationKey: invocation.invocationKey,
+            sourceCompletionId: interactionsById.get(String(invocation.sourceInteractionId))?.graphNodeId,
             interactionId: child.id,
             graphNodeId: child.graphNodeId,
             status: child.completionStatus,

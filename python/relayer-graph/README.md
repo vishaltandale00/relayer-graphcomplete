@@ -31,6 +31,26 @@ async with RelayerGraphClient.from_env() as graph:
     output = await graph.submit()
 ```
 
+Input-plus-Invoke uses an explicit declaration reference, not the field's position:
+
+```python
+from relayer_graph import ActionObject
+
+destination = ActionObject("input", "Destination", layer, "destination",
+                           control="text", prompt="Destination")
+analyze = ActionObject("invoke", "Analyze", layer, "analyze",
+                       interaction_text="Analyze the confirmed destination",
+                       input_actions=(destination,))
+# After submitting node and layer, this writes or recovers the Input first:
+await graph.add_action(node, analyze)
+```
+
+Mount these same objects in visual markup with `action_capability`. Referenced
+Inputs must be mounted on the same owning Node. Compilation alone does not create
+actions. Use `reusable=True` only for intentionally repeatable workflows; the
+default remains one call. A late write failure can leave draft Inputs; retry with
+the same keys. Existing positive numeric Input IDs also remain supported.
+
 Configuration is read from `RELAYER_GRAPH_URL`, `RELAYER_GRAPH_TOKEN`, and
 `RELAYER_NODE_ID`. The client uses only Python's standard library.
 
@@ -73,3 +93,5 @@ For named scoped assembly, use `graph.authoring(snapshot_key)` and
 `await author.write(root_layer)`. See [scoped draft authoring](../../docs/scoped-graph-authoring.md)
 for the TS/Python recipes, captured-write behavior, stable identity and repair
 rules, and the explicit acceptance step. Writing a scope returns drafts.
+
+`GraphSession.extend_node_presentation(node_id, expected_revision, additions)` stages new typed components for an authorized rich attached node. The additions use that persistent node’s exact `client_key` and distinct component/control keys. The host retains accepted HTML, CSS, controls, provenance and pinned assets; it checks the combined package limits. Include all new controls in one additions builder. Repeating the call composes against accepted detail and replaces this completion’s pending presentation. The existing full-replacement endpoint and graph authority remain decisive. Staging is invisible until Return; stale revisions or key conflicts require rereading or an explicit full replacement.

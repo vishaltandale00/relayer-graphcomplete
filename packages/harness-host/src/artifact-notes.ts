@@ -10,11 +10,23 @@ import type { InteractionInput } from "@relayer/graph-client";
 // Only the suffix the viewer writes: "\n— <where> · screenshot sha256:<digest>" at the end.
 const SCREENSHOT = /(\n— [^\n]* · )screenshot sha256:([0-9a-f]{64})$/u;
 
+/** Host-local file materialization; it is advisory and carries no graph authority. */
+export interface ArtifactNoteScreenshot {
+  readonly targetNodeId: number;
+  readonly annotationIndex: number;
+  readonly digestSha256: string;
+  readonly path: string | null;
+}
+
+export interface ArtifactNoteInteractionInput extends InteractionInput {
+  readonly artifactNoteScreenshots?: readonly ArtifactNoteScreenshot[];
+}
+
 export async function withArtifactNoteScreenshots(
   input: InteractionInput,
   notesDirectory: string | undefined,
   turnDirectory: string,
-): Promise<InteractionInput> {
+): Promise<ArtifactNoteInteractionInput> {
   if (notesDirectory === undefined || !input.contexts.some((context) => context.annotations.some((note) => SCREENSHOT.test(note)))) return input;
   const folder = join(turnDirectory, "artifact-notes");
   await mkdir(folder, { recursive: true, mode: 0o700 });
@@ -29,6 +41,15 @@ export async function withArtifactNoteScreenshots(
     }
     return copied.get(digest) ?? null;
   };
+  if (input.completionContract !== undefined) {
+    const screenshots = await Promise.all(input.contexts.flatMap(context => context.annotations.flatMap((note, annotationIndex) => {
+      const match = SCREENSHOT.exec(note);
+      return match ? [fileFor(match[2]!).then(path => ({ targetNodeId: context.targetNode.id, annotationIndex, digestSha256: match[2]!, path }))] : [];
+    })));
+    // The normalized contexts and their sealed digest are canonical. Materialized
+    // filenames must never replace any part of that immutable semantic input.
+    return { ...input, artifactNoteScreenshots: screenshots };
+  }
   const contexts = await Promise.all(input.contexts.map(async (context) => ({
     ...context,
     annotations: await Promise.all(context.annotations.map(async (note) => {

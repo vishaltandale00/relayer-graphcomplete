@@ -32,21 +32,26 @@ export function createProviderComposition({
       resync: (providerId) => providerDefinitions.resyncConnectionGeneration(providerId),
     },
     publishSnapshot: async (snapshot, options) => {
-      if (options?.reason === "explicit") {
+      const published = await publishCatalog(snapshot, options);
+      publishedModels.set(snapshot.providerId, {
+        models: snapshot.models ?? [],
+        connected: snapshot.connected === true,
+        generation: options?.connectionGeneration,
+      });
+      providerDefinitions.catalogPublished(snapshot.providerId, { connected: snapshot.connected, models: snapshot.models ?? [] });
+      if (options?.reason === "explicit" && snapshot.connected === true) {
         await providerDefinitions.evaluateCatalogReadiness(
           snapshot.providerId,
           snapshot.models ?? [],
           "explicit-repair",
+          options,
         );
-        // The readiness evaluation awaits, so a reconnect may have started, or the generation
-        // moved, since the catalog service checked. Recheck at the write, as a stale publish.
+        // The catalog committed before readiness, so its exact generation authorizes setup.
+        // A lifecycle change during setup still makes the refresh result superseded.
         if (providerDefinitions.refreshGeneration(snapshot.providerId) !== options.connectionGeneration) {
           throw Object.assign(new Error("provider_connection_superseded"), { code: "provider_connection_superseded" });
         }
       }
-      const published = await publishCatalog(snapshot, options);
-      publishedModels.set(snapshot.providerId, snapshot.models ?? []);
-      providerDefinitions.catalogPublished(snapshot.providerId, { connected: snapshot.connected });
       return published;
     },
     ...modelCatalogOptions,
@@ -135,10 +140,16 @@ export function createProviderComposition({
     // tied to one provider (the recipe-update trigger).
     async readinessRoutes() {
       return (await providerDefinitions.activeDefinitions())
-        .filter(({ id }) => publishedModels.get(id)?.length)
+        .filter(({ id }) => {
+          const snapshot = publishedModels.get(id);
+          const generation = providerDefinitions.readinessGeneration(id);
+          return snapshot?.connected === true && snapshot.models.length > 0
+            && generation !== null && generation === snapshot.generation;
+        })
         .map((providerDefinition) => Object.freeze({
           providerDefinition,
-          models: publishedModels.get(providerDefinition.id),
+          models: publishedModels.get(providerDefinition.id).models,
+          ...providerDefinitions.readinessAuthorization(providerDefinition.id, publishedModels.get(providerDefinition.id).generation),
         }));
     },
     async close() {

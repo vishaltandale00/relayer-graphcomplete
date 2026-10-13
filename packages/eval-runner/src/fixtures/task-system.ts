@@ -37,7 +37,8 @@ class TaskSystemFixtureHarness implements Harness {
     }
     context.trace.emit({ type: "prompt", data: { text: renderInteractionInput(context.interactionInput), kind: "fixture-input" } });
     context.trace.emit({ type: "tool.call.started", data: { tool: "fixture.graph-authoring" } });
-    await waitForInvokeEvidenceRelease(context.inputGraph.leasedActionId);
+    await waitForInvokeEvidenceRelease(context.inputGraph.leasedActionId
+      ?? rereadInput.completionContract?.input.invocationReferences[0]?.sourceActionId);
     const interaction = context.inputGraph;
     const queue = new NodeObject("list", "Incoming queue", "Every task first enters the incoming queue. The queue preserves extra work while both workers are busy.", "concept", "queue");
     const workers = new NodeObject("users", "Two-worker pool", "An available worker claims the next queued task. At most two tasks run concurrently; additional tasks wait until a worker finishes.", "concept", "workers");
@@ -93,6 +94,24 @@ class TaskSystemFixtureHarness implements Harness {
     await graph.addAction(queue, { kind: "navigate", relation: "expand", sourceLayer: layer, label: "See queue behavior", target: queueDetail, clientKey: "queue-detail" });
     await graph.addAction(results, nextImprovement);
     await graph.addAction(interaction.id, { kind: "navigate", relation: "expand", label: "Response", target: layer, clientKey: "response" });
+    for (const requirement of rereadInput.completionContract?.returnRequirements ?? []) {
+      if (requirement.kind !== "navigate.response") continue;
+      const snapshot = await graph.getNodePresentation(requirement.nodeId);
+      const response = { kind: "navigate", relation: "reference", label: "Updated task-system analysis", target: layer, clientKey: `integrated-response-${interaction.id}-${requirement.nodeId}` } as const;
+      await graph.addAction(requirement.nodeId, response);
+      if (snapshot.node.authoredDetail) {
+        const prior = snapshot.node;
+        const replacement = new NodeObject(prior.icon, prior.title, prior.detail, prior.kind, prior.clientKey);
+        replacement.detailAuthoring.setComponent("integrated-analysis", html`<section><p>The task-system analysis now incorporates the next improvement.</p><button gc=${detailCapability.reference("response", response)}>Updated task-system analysis</button></section>`);
+        for (const action of snapshot.actions) {
+          if (action.kind !== "invoke" || !action.clientKey || !action.sourceLayerClientKey || !action.interactionText) throw new Error("Unexpected task-system fixture attached source action");
+          const sourceLayer = new LayerObject([replacement], [], new LayerLayoutObject([new NodePlacementObject(replacement, 0.5, 0.5)], "default"), action.sourceLayerClientKey);
+          const retained = { kind: "invoke", sourceLayer, label: action.label, interactionText: action.interactionText, clientKey: action.clientKey } as const;
+          replacement.detailAuthoring.setComponent(`retained-${action.id}`, html`<section><button gc=${detailCapability.invoke(`retained-${action.id}`, retained)}>Plan the next improvement</button></section>`);
+        }
+        await graph.replaceNodePresentation(requirement.nodeId, snapshot.revision, replacement);
+      }
+    }
     await graph.submit(interaction.id);
     context.trace.emit({ type: "tool.call.completed", data: { tool: "fixture.graph-authoring", status: "completed" } });
     context.trace.emit({ type: "message", data: { role: "assistant", text: "Authored and accepted the task-system graph." } });

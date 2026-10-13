@@ -441,6 +441,8 @@ async fn author_answer(graph: &GraphDatabase, interaction: &CreateInteractionRes
             description: None,
             target_layer_id: Some(layer.id),
             interaction_text: None,
+            reusable: None,
+            input_action_ids: Vec::new(),
             input: None,
         })
         .await
@@ -741,6 +743,8 @@ async fn a_different_retry_cannot_confirm_an_orphaned_publication() {
             description: None,
             target_layer_id: Some(replacement_layer.id),
             interaction_text: None,
+            reusable: None,
+            input_action_ids: Vec::new(),
             input: None,
         })
         .await
@@ -961,6 +965,25 @@ async fn advance_acknowledgement_is_immediately_searchable_through_the_public_ro
         .await
         .unwrap();
 
+    writer
+        .add_action(&ActionDraft {
+            client_key: "advance-search-response".into(),
+            source_node_id: interaction.node.id,
+            source_layer_id: None,
+            kind: ActionKind::Navigate,
+            relation: Some(NavigateRelation::Expand),
+            label: "Response".into(),
+            variant: Default::default(),
+            icon: None,
+            description: None,
+            target_layer_id: Some(layer.id),
+            interaction_text: None,
+            reusable: None,
+            input_action_ids: Vec::new(),
+            input: None,
+        })
+        .await
+        .unwrap();
     let advanced = post(
         &fixture.app,
         "/api/graph/current/transitions",

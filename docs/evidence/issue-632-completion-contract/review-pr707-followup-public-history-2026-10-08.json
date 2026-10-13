@@ -1,0 +1,1115 @@
+{
+  "schemaVersion": 1,
+  "date": "2026-10-08",
+  "reviewer": "context_trace",
+  "workspace": "/private/tmp/relayer-interactive-inputs-v1-merge",
+  "pullRequestNumber": 707,
+  "digestMethod": "SHA256 over sorted UTF8 repository-relative path + NUL + exact file bytes + NUL; receipt itself excluded",
+  "sourceDigest": "ff0d48687147435eea1fab553dd5fa0c9439b2656a7f5b80973cb1d9ee2f2c3c",
+  "manifest": [
+    {
+      "path": "crates/relayer-app-server/src/api/error.rs",
+      "sha256": "0488a29a3f24bfcf69e2fc6840dfbefb2c63fca4c152d950fcb8067a95df8bfa"
+    },
+    {
+      "path": "crates/relayer-app-server/src/api/input_drafts.rs",
+      "sha256": "86a91e9d37629dc94456eb5c92334b17d197abad7e71eacbcfd2273953e882ca"
+    },
+    {
+      "path": "crates/relayer-app-server/src/api/state.rs",
+      "sha256": "67e0c924b5884a893f3aa03ede6d64ea5c605221007ae7973acf14afd414485f"
+    },
+    {
+      "path": "crates/relayer-app-server/src/api/threads.rs",
+      "sha256": "821669d0cbe3f0fb5c16377d9883a670df3f336b5e1e5757e5c45656c860bce7"
+    },
+    {
+      "path": "crates/relayer-app-server/src/api/types.rs",
+      "sha256": "f18f7e190086605f1c979f93658c72d00fbfa1d6c8995823ce0a9cf2f62e0d09"
+    },
+    {
+      "path": "crates/relayer-app-server/src/app_server.rs",
+      "sha256": "2e310843d3d385363768aba3df1867c36420dc1f6a92b60ed76541c20fcd9680"
+    },
+    {
+      "path": "crates/relayer-app-server/src/conversation_export.rs",
+      "sha256": "735b984bd8706fbe07a141ce5e5cef5d1c7fb644eb04702917cd787357b807c1"
+    },
+    {
+      "path": "crates/relayer-app-server/src/conversation_export_service.rs",
+      "sha256": "e5d8d7421645bb396fa8616abea6bafbe3ffb4b7465d4129fd04a8a25f56deee"
+    },
+    {
+      "path": "crates/relayer-app-server/src/product/service.rs",
+      "sha256": "b2eda63fe60a797a21af8c7642d640daa4eaf73c6cf131bfca9b137e11782e7a"
+    },
+    {
+      "path": "crates/relayer-app-server/src/runtime.rs",
+      "sha256": "c11f68b5ceab521473f778584929bb105b62ffe1b60dcecde898e86f07ccfd6d"
+    },
+    {
+      "path": "crates/relayer-app-server/src/storage/sqlite/action_invocations.rs",
+      "sha256": "67549f970dc3d6d9754643bf5a2131d920fdcbc389c260b9d69c69719eb8dda5"
+    },
+    {
+      "path": "crates/relayer-app-server/src/storage/sqlite/conversation_imports.rs",
+      "sha256": "76d6f41725021910a73603aebf8bb00a0c59c5273adac08c5096404653e3c8fd"
+    },
+    {
+      "path": "crates/relayer-app-server/src/storage/sqlite/migrations/0046_invocation_preparation_refusals.sql",
+      "sha256": "4baf94e8470f3c8223b90b6aef68fd6aa5c2b4846d5f4aa45b461be4ed1ffebf"
+    },
+    {
+      "path": "crates/relayer-app-server/src/storage/sqlite/schema.rs",
+      "sha256": "df90c8e5646d33acd8d3f325b4163ddbd2fa3a8e1bfe31e87781624e49fffc54"
+    },
+    {
+      "path": "crates/relayer-app-server/tests/conversation_export_contract.rs",
+      "sha256": "78368e5145295b84ef09056b828f39b6d14e99a4b9425c43686c888730000150"
+    },
+    {
+      "path": "crates/relayer-app-server/tests/product_persistence_flow.rs",
+      "sha256": "d5696b487f981ead93d0541eab3914bde499cddb969698eefdb20aa1c7c7e8fa"
+    },
+    {
+      "path": "crates/relayer-app-server/tests/support/completion_traces.rs",
+      "sha256": "b85160dd5ed104fb5df9b634859fae9740f14f61ba353d479c917e287fee5557"
+    },
+    {
+      "path": "crates/relayer-graph-core/src/graph/database.rs",
+      "sha256": "38196cd3fa667c5f200eb591528e919dd485b807cc0bcde61b38637a367a6f88"
+    },
+    {
+      "path": "crates/relayer-graph-core/src/graph/invocation.rs",
+      "sha256": "872744ef3eb501bb9794c00eac09b178d88dc029eb9b0dabddaee42a9ed53b5b"
+    },
+    {
+      "path": "desktop/renderer/src/action-invocation-state.js",
+      "sha256": "81ab2c3afb5292ec3a6ea7584d5e5bf514d9725e34a1a7ed2c2ef17bbb40f7f2"
+    },
+    {
+      "path": "desktop/renderer/src/draft-preview/snapshot.js",
+      "sha256": "49ea7d513eb493579772edb27b6027476f74daf3cfe1e01b54647f0e07d6a5bf"
+    },
+    {
+      "path": "desktop/renderer/src/graph.js",
+      "sha256": "4b343b1b6815b42987674395d9edb0126aaae1d44feb55d92f065141e527aeeb"
+    },
+    {
+      "path": "desktop/renderer/src/node-detail-assets.js",
+      "sha256": "ea46ef2d431d7a0e3bb79156e638092ce31176594e723691d500dba9f5cbc3aa"
+    },
+    {
+      "path": "desktop/renderer/src/product-workspace/invoke-inputs.js",
+      "sha256": "c40975e8364f71b4d9b7448277c3e457979117873876d9a99153f57899c3164c"
+    },
+    {
+      "path": "desktop/renderer/src/product-workspace/model.js",
+      "sha256": "7797cc82ec7d6c8eec0d44f0e7499c5c4818fff524030f21369ae5df310282bb"
+    },
+    {
+      "path": "desktop/renderer/src/product-workspace/workspace.js",
+      "sha256": "d8a1632b7d6e9c0ac15e7a0a4ae5c24caa7e0322f8913014da2adb0ba93f2f4d"
+    },
+    {
+      "path": "desktop/renderer/src/public-share-viewer/adapter.js",
+      "sha256": "0d16e80ffb77eeedb058c46c75755050877475d87e6b690126fc273d4cff910a"
+    },
+    {
+      "path": "desktop/renderer/src/public-share-viewer/main.js",
+      "sha256": "14f9e26730fb4028b8349517519881dbe62ff6798ea2aaad0f7c57a356073918"
+    },
+    {
+      "path": "desktop/renderer/src/public-share-viewer/snapshot.js",
+      "sha256": "f1f099ad7778a0abf6117896be0444edfb68e29d60c19bfe9d9cec5fa08f0eaa"
+    },
+    {
+      "path": "desktop/renderer/src/state.js",
+      "sha256": "e7879f6681500ed8bc90aa069ddb8c3931afd42ae4dd8cd4d9acb21385d10ca8"
+    },
+    {
+      "path": "desktop/renderer/src/threads.js",
+      "sha256": "3e15c08997ea1520f2ed2ce54b8d0bd95d56a3955a6c27a87b7c2e1f0be6a037"
+    },
+    {
+      "path": "docs/decisions/0015-sealed-completion-contract-and-invocations.md",
+      "sha256": "bcc37d822bb5a96f0e092a1ad6908b743acceb4e0932f4dce57e9272ebcba0a7"
+    },
+    {
+      "path": "docs/prd/index.html",
+      "sha256": "352d3992b3ea8f97c06ce17483a346eeb279640102a84f80728e5a968c13020b"
+    },
+    {
+      "path": "packages/graph-client/src/detail.ts",
+      "sha256": "701e8cfc6bad26ec5033b6df1118de74624896ff8b9622213ad8e41bec25e7dd"
+    },
+    {
+      "path": "packages/graph-client/src/scoped-authoring.ts",
+      "sha256": "bc14463cd7ae75f815059f816a9a88798419ae2547bd77cf4d590b2ade93b113"
+    },
+    {
+      "path": "packages/graph-client/test/detail.test.ts",
+      "sha256": "68b5c57ffc01dfd623df759a42cd34a5791cc1da17fd687774fdba61542ef033"
+    },
+    {
+      "path": "packages/graph-client/test/input-declarations.test.ts",
+      "sha256": "6a7f4a173e1816655caebe4a78c247c711384b35598acc34297574f1bf41332b"
+    },
+    {
+      "path": "packages/graph-client/test/scoped-authoring.test.ts",
+      "sha256": "eea41584e44d0f01d7006d38c332a2d27e5a6892352fb569adeb9607a95cc2e2"
+    },
+    {
+      "path": "packages/harness-host/src/implementations/prime-visual-authoring.ts",
+      "sha256": "3dad8b56fe5be0e219f699a754aa233be1e18f8df612d84f997f3885f5cee170"
+    },
+    {
+      "path": "packages/harness-host/test/prime-visual-authoring.test.ts",
+      "sha256": "3ebf0c3f78145e60d82a14911ab4b47f980eb924435802b71cd658b6d23c69d8"
+    },
+    {
+      "path": "python/relayer-graph/src/relayer_graph/actions.py",
+      "sha256": "3a72b84f4d3c7d49d182eae3015d2110127ea5d9ffc3107207ec649ea0ddd083"
+    },
+    {
+      "path": "python/relayer-graph/src/relayer_graph/scoped_authoring.py",
+      "sha256": "c74a2c400fdda188f6b931d4123050434eb5c8997a3bcc2567f5c4f43be0f057"
+    },
+    {
+      "path": "python/relayer-graph/tests/test_scoped_authoring.py",
+      "sha256": "b3b03d57f441d5a3e324573cd200fd714893500a16f2c98bc0a644b7d0cbfed3"
+    },
+    {
+      "path": "test/action-invocation-state.test.mjs",
+      "sha256": "6dcfe08448bc63c7a6b6b67088e6c52cbd2f9707520bd8f7efe5867a9d58ffe6"
+    },
+    {
+      "path": "test/draft-preview-read-model.test.mjs",
+      "sha256": "a6f96a5d36c2556a814520cbf146bf8365a3ce28cbb278ce89de6eba2b56591e"
+    },
+    {
+      "path": "test/implicit-input-send.test.mjs",
+      "sha256": "bc30c38dfc247fe93297097994b782bd6b7b2cfacaaafc010342b9575b9cefe7"
+    },
+    {
+      "path": "test/invoke-input-bindings.test.mjs",
+      "sha256": "df95eec26e45b5e09a24c8ee069b42b2ae43c25aba2b89ecc9dcdb3f0983469a"
+    },
+    {
+      "path": "test/invoke-input-product-integration.test.mjs",
+      "sha256": "20dead72f9e34fae1de774f7effe732dddba05d03e4d434cd7caa7ea3cc27021"
+    },
+    {
+      "path": "test/node-detail-assets.test.mjs",
+      "sha256": "ca9414715070ebb7f64546ec0a368c83a935b3142fde12edf502b008555ff9fe"
+    },
+    {
+      "path": "test/public-share-viewer.test.mjs",
+      "sha256": "64d0b41bf8b1268e8af376618c403c35dc164c72fb8083037ea103fe4075fea3"
+    },
+    {
+      "path": "test/workspace-navigation-integration.test.mjs",
+      "sha256": "363c7bf566c7188423eb5484b67f88d5997ba8165799b529a7329b757ccfd565"
+    }
+  ],
+  "priorReviewedEnvelopes": [
+    {
+      "path": "docs/evidence/issue-632-completion-contract/review-pr707-context-trace-postreview-2026-10-07.json",
+      "receiptSha256": "39bc4721b4b494c15a155061ab1343594b0bf545169a4ccf24af338d5fa43950",
+      "sourceDigest": "b85e3913eab8a4ec5cd40b6979c663e6bc255bc9adc464388867a0dbce636449",
+      "status": "Prior source assertion preserved unchanged; new source covered only by this follow-up envelope and inherited bounded review scope."
+    },
+    {
+      "path": "docs/evidence/issue-632-completion-contract/review-pr707-renderer-adversarial-2026-10-07.json",
+      "receiptSha256": "e812c4bede8934368863b00124816bd959ce341f199f7ab0c917bb22de982100",
+      "sourceDigest": "2ea63409870569a6692d12ada35fe8f77bb53e82a912cb965fc481f922d9a7cb",
+      "status": "Prior source assertion preserved unchanged; new source covered only by this follow-up envelope and inherited bounded review scope."
+    }
+  ],
+  "reviewedScope": "Inherited bounded context/renderer review envelope identified by prior receipts, plus this executable delta: public parser/state retains unaccepted own-draft Invocation source and exact frozen call; per-call inert source/current relationship and read-only navigation; synthetic presentations excluded human-turn/composer selection. Independent adversarial review of prototype saved Input occurrence/Invoke presenting Layer separation, matched to native selector and exact edit/consumption boundaries. Whole-file hashes identify bytes, not a new review of all preexisting code. Final bounded native API selector and realistic accepted-A/later-B fixture independently reread; final selection7 inner1/1 and prior reservation regression actual inner1/1 observed. Only new follow-up receipt refreshed, old reviewed envelopes untouched. Final shared broker fixture wires independently verified: accepted concept Node102 distinct from interaction root101, exact consistent owner on stored Invoke/runtime Invoke/converted Navigate; strict production RuntimeAction owner remains required. Final broker20 plus final-byte selection8/reservation2 inner outcomes observed, without running tests or editing executable source during receipt refresh. Final independent product_persistence_flow fixture-only owner wire review: accepted canonical resolved source and original/reused Invoke Layers mount concept7; sourceNodeId7 consistently names exact semantic owner distinct from interaction roots90/101/103. Historical pre-selector303 runtime owner307 remains explicit; absent stored output/model-column compatibility not upgraded into authority. No production bytes or existing assertions weakened.",
+  "changedExecutableSeams": [
+    {
+      "path": "desktop/renderer/src/public-share-viewer/snapshot.js",
+      "changes": [
+        "inertInvocationSource constructs per-call frozen presentation with separate original turn identity/status and original frozen source",
+        "invocationSourceFor prefers existing accepted source else exact inert per-call source",
+        "publicState appends inert source/current but preserves accepted arrays; projects durable calls even without accepted source",
+        "projectInteractionGraphs joins exact synthetic call source for included result; Current relation includes threadId",
+        "snapshot layerFor resolves inert source presentation only within selected synthetic source"
+      ]
+    },
+    {
+      "path": "desktop/renderer/src/product-workspace/model.js",
+      "changes": [
+        "humanTurns excludes inertInvocationSource as well as inertInvocationCurrent; workspace navigation remains available"
+      ]
+    },
+    {
+      "path": "desktop/renderer/src/product-workspace/invoke-inputs.js and workspace.js",
+      "changes": [
+        "Independently reviewed prototype exact valid clicked saved occurrence, else latest valid saved same canonical Input/source Node; numeric commit epoch/full identity ordering matches native API",
+        "untouched cross-Layer display/click keeps original saved occurrence; touched field writes selected presenting occurrence",
+        "source and visible control edit epochs/pending-save ownership separate; cleanup selected captured occurrence only for implicit Inputs, legacy explicit/recovery behavior retained"
+      ]
+    }
+  ],
+  "checkpoints": [
+    {
+      "promise": "Own-draft native calls survive a stopped/failed parent even with no Current; no accepted source or execution authority is manufactured.",
+      "test": "public-share-viewer retains an inert own-draft source and visible call when parent stopped/failed (Current false/true)",
+      "assertions": [
+        "Parsed acceptedTurns and snapshot.interactions contain only real accepted turn3; accepted view and original frozen call deep-equal input",
+        "Durable actionInvocations never drops call; exact inert source id points to frozen source record and actual recorded parent status/turn id",
+        "Synthetic presentation Layer is draft; no portable accepted membership inserted",
+        "No-Current call visibly retained with disabled history control; Current call visible/enabled with source-to-Current-to-source DOM navigation",
+        "Actual adapter Invoke and Submit callbacks return false; synthetic source/Current excluded humanTurns and latest human stays turn3"
+      ]
+    },
+    {
+      "promise": "Accepted-source portability, custom draft previews and ordinary public navigation retain their existing behavior.",
+      "tests": [
+        "Full public-share-viewer115 cases and draft-preview-read-model2 cases",
+        "Prototype final seven-file262 portfolio"
+      ],
+      "assertion": "No existing cases removed; full files passed on final source. Synthetic sources added only when accepted source absent; snapshot.interactions/acceptedTurns remain separate accepted inventory."
+    },
+    {
+      "promise": "Saved Input occurrence can differ from Invoke presenting Layer while exact source identity/values and edits remain scoped.",
+      "tests": [
+        "Nine mounted two-layer tests in invoke-input-bindings",
+        "Existing explicit/recovery boundaries in same full portfolio"
+      ],
+      "assertion": "Checked native api threads select_invocation_input_attachments uses clicked occurrence first, then committed numeric epoch/full occurrence. Renderer same priority and canonical action/sourceNode/value validity; preserves original savedA without empty B commit, explicit B edit writesB, Undo restoresA; pending newer displayed edits and unrelated notes survive cleanup. Existing B older saved wins by clicked priority. No added scheduler or native authority."
+    },
+    {
+      "promise": "New Invoke selection validates exact canonical accepted answers, chooses clicked occurrence before deterministic latest saved fallback, and freezes/consumes exact selected epochs; keyed replay never recaptures newer values.",
+      "productionSeams": [
+        "api threads select_invocation_input_attachments and call before reserve_user_action_invocation",
+        "RuntimeClient canonical_input_action_occurrence destination scope",
+        "ProductService input_attachment_matches_action shared value validation"
+      ],
+      "test": "invoke_selects_one_saved_occurrence_and_consumes_only_its_frozen_epoch",
+      "assertions": [
+        "Canonical action ID/kind=Input/state=Accepted/sourceNode/question/value all match before candidate priority; native RuntimeAction carries exact source_node_id.",
+        "Priority clicked selected interaction+Layer, then numeric committed_at and full occurrence IDs; explicit canonical4xx inaccessible candidate skipped, unknown503 propagates before reservation/nativecall/draft mutation.",
+        "Existing saved keyed submission bypasses new selector and uses original immutable receipt.",
+        "Real later accepted interaction B presents same persistent Node/Input/Invoke authored acceptedA without reauthoring identity; latest fallbackA, inaccessible newer candidate and restored full-occurrence tie tested.",
+        "Real API clicked older B overrides newer A; bind-fault native inventory exact1, native submitted child inputs count2, destination exact B/sourceNode/question/Kyoto plus actual frozen presentingLayerB.",
+        "New Oslo editB survives same-key replay; receipt/nativecall unchanged; subsequent atomic bind consumes unchanged companion only, retaining A and newer B with exactly one new draft revision."
+      ]
+    },
+    {
+      "promise": "Test broker follows the same required canonical semantic owner identity as production without weakening missing-owner rejection or converted replay identity checks.",
+      "productionSeam": "RuntimeAction source_node_id remains required i64 without serde default; unchanged production decoder.",
+      "test": "API shared broker 20-test batched suite, including converted replay exact-target refusal",
+      "assertions": [
+        "Stored accepted Layer contains concept Node102, distinct from interaction root101. Stored Invoke41 and fake runtime Invoke41 both name sourceNodeId102.",
+        "Converted Navigate41 retains sourceNodeId102 and exact resolved child202; changing target to203 remains refused and native starts stays1.",
+        "Only fixture bytes changed from prior reviewed source. Earlier missing-owner failures retained; final suite20/20 and final-byte selector/reservation regressions pass."
+      ]
+    },
+    {
+      "promise": "Existing idempotent/restart and cross-thread read-only resolved navigation fixtures use explicit trusted semantic owners without relaxing production decoder or acceptance.",
+      "tests": [
+        "action_invocation_api_is_idempotent_and_survives_restart",
+        "resolved_invoke_destination_is_readable_cross_thread_in_review_mode"
+      ],
+      "assertions": [
+        "Resolved canonical Layer500 mounts accepted concept7; canonical action41 and runtime resolved Navigate sourceNodeId7 agree.",
+        "Original Layer1 stored/native projections and reused Layer3 mount accepted concept7 and Invoke41 sourceNodeId7. Persistent owner stays distinct from root interaction101/103.",
+        "Historical pre-selector root303 retains absent stored output/model-selection compatibility with explicit runtime owner307; no new historical canonical authority inferred.",
+        "No test assertions removed and strict RuntimeAction owner decoder unchanged. Parent unified repaired-source proof remains pending."
+      ]
+    }
+  ],
+  "actualResults": [
+    {
+      "log": "/private/tmp/pr707-public-unaccepted-source-final.log",
+      "sha256": "9447966cf568f0263fc298d16f621ad6d5a06056eec17ee3d9773248630731be",
+      "observedOutcome": "passed",
+      "passedTests": 117,
+      "executedBy": "context_trace",
+      "scope": "Own public renderer+draft-preview full files"
+    },
+    {
+      "log": "/private/tmp/pr707-ui-two-layer-warm-final.log",
+      "sha256": "97465bfeb2885ddbccba42f67db7f15a036b7999fc57d66cddc2c9fe83479f25",
+      "observedOutcome": "passed",
+      "passedTests": 262,
+      "executedBy": "prototype_review; independently inspected source/log",
+      "scope": "Prototype seven-file final warm portfolio; includes own four mounted source fixtures and two-layer Inputs"
+    },
+    {
+      "log": "/private/tmp/pr707-input-occurrence-selection-7.log",
+      "sha256": "380771afeb93d3fa493091c271cd5f13a0ee51aff03c69c5ec905059b7b8fa96",
+      "observedOutcome": "passed",
+      "passedTests": 1,
+      "executedBy": "authority_review; independently inspected final source and actual inner log",
+      "scope": "Final canonical occurrence selection/native frozen children"
+    },
+    {
+      "log": "/private/tmp/pr707-input-occurrence-regression-1.log",
+      "sha256": "92475347953762ca5446267e609e59e58a792cce898cd458d0ad44356ffbea64",
+      "observedOutcome": "passed",
+      "passedTests": 1,
+      "executedBy": "authority_review; independently inspected final source and actual inner log",
+      "scope": "Existing reservation/refusal/restart/no-effect graph-only export regression"
+    },
+    {
+      "log": "/private/tmp/pr707-broker-source-node-fixture-3.log",
+      "sha256": "3b03711d5db2eb90d4ec8dd95b4e5fb3d21fa8e85a1124936ec8c9a1383317ad",
+      "observedOutcome": "passed",
+      "passedTests": 20,
+      "innerSeconds": 1.99,
+      "executedBy": "authority_review; context_trace independently inspected final source and actual inner log without execution",
+      "scope": "Final strict-owner broker fixture full batch"
+    },
+    {
+      "log": "/private/tmp/pr707-input-occurrence-selection-8.log",
+      "sha256": "afea5df8bc00487fc91e7f10a7b7470d8ee8f2261ba1fc8140881062e6d9383a",
+      "observedOutcome": "passed",
+      "passedTests": 1,
+      "innerSeconds": 0.17,
+      "executedBy": "authority_review; context_trace independently inspected final source and actual inner log without execution",
+      "scope": "Final-byte canonical occurrence selection/native frozen children"
+    },
+    {
+      "log": "/private/tmp/pr707-input-occurrence-regression-2.log",
+      "sha256": "2bb8cb6679faffb3121fae75e75b1f9696be5febfbf9c79563e204ea58a9db99",
+      "observedOutcome": "passed",
+      "passedTests": 1,
+      "innerSeconds": 0.24,
+      "executedBy": "authority_review; context_trace independently inspected final source and actual inner log without execution",
+      "scope": "Final-byte existing reservation/refusal/restart/no-effect export regression"
+    },
+    {
+      "log": "/private/tmp/pr707-product-source-node-fixture-1.log",
+      "sha256": "4c8507693025d3fa3b58b72740315767e94107e61bb3a1c9f23b84972531e5e7",
+      "observedOutcome": "passed",
+      "passedTests": 39,
+      "innerSeconds": 31.25,
+      "executedBy": "authority_review; context_trace independently read actual inner log",
+      "scope": "Historical pre-final-concept-mount product persistence owner-wire repair. This is not qualification of final mounted fixture bytes.",
+      "sourceStatus": "pre-final-mount source proof only; final source statically reviewed; parent fullcheck3 required"
+    }
+  ],
+  "independentReview": {
+    "reviewer": "prototype_review",
+    "scope": "Public synthetic source/model/test delta",
+    "verdict": "No blocker found; per-call inert identity, frozen source/status, accepted-array preservation, actual mounted controls and human exclusion independently accepted. Transcript is coordination only; this manifest binds exact source.",
+    "unresolvedFindings": []
+  },
+  "preservedFailures": [
+    {
+      "log": "/private/tmp/pr707-public-unaccepted-source-checkpoint-1.log",
+      "observed": "Three of four new cases failed",
+      "reason": "Fixture shallow-shared completion receipt made child failed status overwrite intended stopped source; label expected native active while Current presentation correctly says running",
+      "disposition": "Fixture receipt copies made independent and assertion matches real Current presentation. No production exception or validation relaxation; targeted4 then full117 passed."
+    },
+    {
+      "log": "/private/tmp/pr707-broker-source-node-fixture-1.log",
+      "sha256": "c6e8b23af2ed9162727d14349092e0f4039b036483b66110b4ccee126104cc90",
+      "observed": "12 passed / 8 failed",
+      "reason": "Initial shared broker stored/runtime actions lacked now-required sourceNodeId.",
+      "disposition": "Fixture-only explicit owner and accepted semantic node repair; production decoder unchanged. Final batch3 all20 passed. Initial unified native369pass8fail remains historical failed source, no whole-check pass inferred."
+    },
+    {
+      "log": "/private/tmp/pr707-broker-source-node-fixture-2.log",
+      "sha256": "4a3b421598140e8c133ca2c410b95f04d759efe11442cc4ab9464cee1f5f066d",
+      "observed": "19 passed / 1 failed",
+      "reason": "Converted Navigate replay wire still lacked required sourceNodeId; independently identified and repaired to same accepted owner102.",
+      "disposition": "Fixture-only explicit owner and accepted semantic node repair; production decoder unchanged. Final batch3 all20 passed. Initial unified native369pass8fail remains historical failed source, no whole-check pass inferred."
+    },
+    {
+      "log": "/private/tmp/interactive-inputs-followup-review-check-2.log",
+      "sha256": "d97e59299e4a707b25e0f89c792dd9a65f310812569ea8ab09773ba4f1bfcfc6",
+      "observed": "Full follow-up check2 stopped after product_persistence_flow37passed/2failed, inner32.27s. Native+earlier phases do not imply whole-command pass.",
+      "failedTests": [
+        "action_invocation_api_is_idempotent_and_survives_restart",
+        "resolved_invoke_destination_is_readable_cross_thread_in_review_mode"
+      ],
+      "sourceEvidenceLines": [
+        506,
+        528,
+        545,
+        546,
+        566
+      ],
+      "reason": "Fake runtime action wire missing now-required sourceNodeId; final fixture repair explicitly supplies owner and accepted semantic nodes in action-bearing Layers.",
+      "disposition": "Fixture-only repair independently reviewed; final parent check3 pending. No production decoder weakening or broad proof claim."
+    }
+  ],
+  "authorityLimits": [
+    "Synthetic source Layer/node is a browser-only frozen presentation, never imported/exported accepted graph state or executable native action authority.",
+    "Portable frozen source captureState/definition Layer and call arguments remain exact original values, independent of synthetic display Layer.",
+    "No changes to canonical complete(inputGraph), graph acceptance, sealed permissions, native recursion, local V4 or hosted V4 capability gate.",
+    "Public snapshot still requires a real accepted turn; this repair retains calls within an otherwise valid public snapshot."
+  ],
+  "noDeletionOrSubsumption": "No tests removed or retired. Four new realistic DOM cases protect previously unobserved unaccepted-source/no-Current and Current relationship boundaries. Existing public and legacy Input/recovery cases retained.",
+  "requiredRemainingVerification": [
+    "Parent final unified npm run check and npm run build on final exact source, declared affected heavy fixtures and current PR CI/freshness",
+    "New source assertion invalidates on any manifested file-byte change; no whole-PR merge/human acceptance/deployment/release qualification inferred"
+  ],
+  "verdict": "No unresolved assigned public-history, two-layer Input UI, native selector/provenance/epoch, broker owner or final product persistence fixture ownership review blocker at this exact source. Previously recorded unchanged production scoped passes retained; fullcheck2 product37/2 failure explicitly preserved and repaired-source parent fullcheck3 pending. Bounded non-certifying until parent final whole-PR qualification; manifested byte changes invalidate assertion.",
+  "unresolvedFindings": [],
+  "supersededSourceAssertions": [
+    {
+      "sourceDigest": "f43887c6fab64992d2db2a96c726b61728fb57d38a4fd2461149a021aa1c0d18",
+      "manifest": [
+        {
+          "path": "crates/relayer-app-server/src/api/error.rs",
+          "sha256": "0488a29a3f24bfcf69e2fc6840dfbefb2c63fca4c152d950fcb8067a95df8bfa"
+        },
+        {
+          "path": "crates/relayer-app-server/src/api/input_drafts.rs",
+          "sha256": "86a91e9d37629dc94456eb5c92334b17d197abad7e71eacbcfd2273953e882ca"
+        },
+        {
+          "path": "crates/relayer-app-server/src/api/state.rs",
+          "sha256": "67e0c924b5884a893f3aa03ede6d64ea5c605221007ae7973acf14afd414485f"
+        },
+        {
+          "path": "crates/relayer-app-server/src/api/threads.rs",
+          "sha256": "beb81ff13adfecc33cfbe88884d37a3075692c5d82f5ee59985abc7653ae8aa9"
+        },
+        {
+          "path": "crates/relayer-app-server/src/api/types.rs",
+          "sha256": "f18f7e190086605f1c979f93658c72d00fbfa1d6c8995823ce0a9cf2f62e0d09"
+        },
+        {
+          "path": "crates/relayer-app-server/src/app_server.rs",
+          "sha256": "2e310843d3d385363768aba3df1867c36420dc1f6a92b60ed76541c20fcd9680"
+        },
+        {
+          "path": "crates/relayer-app-server/src/conversation_export.rs",
+          "sha256": "735b984bd8706fbe07a141ce5e5cef5d1c7fb644eb04702917cd787357b807c1"
+        },
+        {
+          "path": "crates/relayer-app-server/src/conversation_export_service.rs",
+          "sha256": "e5d8d7421645bb396fa8616abea6bafbe3ffb4b7465d4129fd04a8a25f56deee"
+        },
+        {
+          "path": "crates/relayer-app-server/src/product/service.rs",
+          "sha256": "b2eda63fe60a797a21af8c7642d640daa4eaf73c6cf131bfca9b137e11782e7a"
+        },
+        {
+          "path": "crates/relayer-app-server/src/runtime.rs",
+          "sha256": "c11f68b5ceab521473f778584929bb105b62ffe1b60dcecde898e86f07ccfd6d"
+        },
+        {
+          "path": "crates/relayer-app-server/src/storage/sqlite/action_invocations.rs",
+          "sha256": "67549f970dc3d6d9754643bf5a2131d920fdcbc389c260b9d69c69719eb8dda5"
+        },
+        {
+          "path": "crates/relayer-app-server/src/storage/sqlite/conversation_imports.rs",
+          "sha256": "76d6f41725021910a73603aebf8bb00a0c59c5273adac08c5096404653e3c8fd"
+        },
+        {
+          "path": "crates/relayer-app-server/src/storage/sqlite/migrations/0046_invocation_preparation_refusals.sql",
+          "sha256": "4baf94e8470f3c8223b90b6aef68fd6aa5c2b4846d5f4aa45b461be4ed1ffebf"
+        },
+        {
+          "path": "crates/relayer-app-server/src/storage/sqlite/schema.rs",
+          "sha256": "df90c8e5646d33acd8d3f325b4163ddbd2fa3a8e1bfe31e87781624e49fffc54"
+        },
+        {
+          "path": "crates/relayer-app-server/tests/conversation_export_contract.rs",
+          "sha256": "78368e5145295b84ef09056b828f39b6d14e99a4b9425c43686c888730000150"
+        },
+        {
+          "path": "crates/relayer-app-server/tests/product_persistence_flow.rs",
+          "sha256": "42fe5914da58db0f884b5d1c0efcf604622d7ab68352d31ed6176a67d00d8859"
+        },
+        {
+          "path": "crates/relayer-app-server/tests/support/completion_traces.rs",
+          "sha256": "b85160dd5ed104fb5df9b634859fae9740f14f61ba353d479c917e287fee5557"
+        },
+        {
+          "path": "crates/relayer-graph-core/src/graph/database.rs",
+          "sha256": "38196cd3fa667c5f200eb591528e919dd485b807cc0bcde61b38637a367a6f88"
+        },
+        {
+          "path": "crates/relayer-graph-core/src/graph/invocation.rs",
+          "sha256": "872744ef3eb501bb9794c00eac09b178d88dc029eb9b0dabddaee42a9ed53b5b"
+        },
+        {
+          "path": "desktop/renderer/src/action-invocation-state.js",
+          "sha256": "81ab2c3afb5292ec3a6ea7584d5e5bf514d9725e34a1a7ed2c2ef17bbb40f7f2"
+        },
+        {
+          "path": "desktop/renderer/src/draft-preview/snapshot.js",
+          "sha256": "49ea7d513eb493579772edb27b6027476f74daf3cfe1e01b54647f0e07d6a5bf"
+        },
+        {
+          "path": "desktop/renderer/src/graph.js",
+          "sha256": "4b343b1b6815b42987674395d9edb0126aaae1d44feb55d92f065141e527aeeb"
+        },
+        {
+          "path": "desktop/renderer/src/node-detail-assets.js",
+          "sha256": "ea46ef2d431d7a0e3bb79156e638092ce31176594e723691d500dba9f5cbc3aa"
+        },
+        {
+          "path": "desktop/renderer/src/product-workspace/invoke-inputs.js",
+          "sha256": "c40975e8364f71b4d9b7448277c3e457979117873876d9a99153f57899c3164c"
+        },
+        {
+          "path": "desktop/renderer/src/product-workspace/model.js",
+          "sha256": "7797cc82ec7d6c8eec0d44f0e7499c5c4818fff524030f21369ae5df310282bb"
+        },
+        {
+          "path": "desktop/renderer/src/product-workspace/workspace.js",
+          "sha256": "d8a1632b7d6e9c0ac15e7a0a4ae5c24caa7e0322f8913014da2adb0ba93f2f4d"
+        },
+        {
+          "path": "desktop/renderer/src/public-share-viewer/adapter.js",
+          "sha256": "0d16e80ffb77eeedb058c46c75755050877475d87e6b690126fc273d4cff910a"
+        },
+        {
+          "path": "desktop/renderer/src/public-share-viewer/main.js",
+          "sha256": "14f9e26730fb4028b8349517519881dbe62ff6798ea2aaad0f7c57a356073918"
+        },
+        {
+          "path": "desktop/renderer/src/public-share-viewer/snapshot.js",
+          "sha256": "f1f099ad7778a0abf6117896be0444edfb68e29d60c19bfe9d9cec5fa08f0eaa"
+        },
+        {
+          "path": "desktop/renderer/src/state.js",
+          "sha256": "e7879f6681500ed8bc90aa069ddb8c3931afd42ae4dd8cd4d9acb21385d10ca8"
+        },
+        {
+          "path": "desktop/renderer/src/threads.js",
+          "sha256": "3e15c08997ea1520f2ed2ce54b8d0bd95d56a3955a6c27a87b7c2e1f0be6a037"
+        },
+        {
+          "path": "docs/decisions/0015-sealed-completion-contract-and-invocations.md",
+          "sha256": "bcc37d822bb5a96f0e092a1ad6908b743acceb4e0932f4dce57e9272ebcba0a7"
+        },
+        {
+          "path": "docs/prd/index.html",
+          "sha256": "352d3992b3ea8f97c06ce17483a346eeb279640102a84f80728e5a968c13020b"
+        },
+        {
+          "path": "packages/graph-client/src/detail.ts",
+          "sha256": "701e8cfc6bad26ec5033b6df1118de74624896ff8b9622213ad8e41bec25e7dd"
+        },
+        {
+          "path": "packages/graph-client/src/scoped-authoring.ts",
+          "sha256": "bc14463cd7ae75f815059f816a9a88798419ae2547bd77cf4d590b2ade93b113"
+        },
+        {
+          "path": "packages/graph-client/test/detail.test.ts",
+          "sha256": "68b5c57ffc01dfd623df759a42cd34a5791cc1da17fd687774fdba61542ef033"
+        },
+        {
+          "path": "packages/graph-client/test/input-declarations.test.ts",
+          "sha256": "6a7f4a173e1816655caebe4a78c247c711384b35598acc34297574f1bf41332b"
+        },
+        {
+          "path": "packages/graph-client/test/scoped-authoring.test.ts",
+          "sha256": "eea41584e44d0f01d7006d38c332a2d27e5a6892352fb569adeb9607a95cc2e2"
+        },
+        {
+          "path": "packages/harness-host/src/implementations/prime-visual-authoring.ts",
+          "sha256": "3dad8b56fe5be0e219f699a754aa233be1e18f8df612d84f997f3885f5cee170"
+        },
+        {
+          "path": "packages/harness-host/test/prime-visual-authoring.test.ts",
+          "sha256": "3ebf0c3f78145e60d82a14911ab4b47f980eb924435802b71cd658b6d23c69d8"
+        },
+        {
+          "path": "python/relayer-graph/src/relayer_graph/actions.py",
+          "sha256": "3a72b84f4d3c7d49d182eae3015d2110127ea5d9ffc3107207ec649ea0ddd083"
+        },
+        {
+          "path": "python/relayer-graph/src/relayer_graph/scoped_authoring.py",
+          "sha256": "c74a2c400fdda188f6b931d4123050434eb5c8997a3bcc2567f5c4f43be0f057"
+        },
+        {
+          "path": "python/relayer-graph/tests/test_scoped_authoring.py",
+          "sha256": "b3b03d57f441d5a3e324573cd200fd714893500a16f2c98bc0a644b7d0cbfed3"
+        },
+        {
+          "path": "test/action-invocation-state.test.mjs",
+          "sha256": "6dcfe08448bc63c7a6b6b67088e6c52cbd2f9707520bd8f7efe5867a9d58ffe6"
+        },
+        {
+          "path": "test/draft-preview-read-model.test.mjs",
+          "sha256": "a6f96a5d36c2556a814520cbf146bf8365a3ce28cbb278ce89de6eba2b56591e"
+        },
+        {
+          "path": "test/implicit-input-send.test.mjs",
+          "sha256": "bc30c38dfc247fe93297097994b782bd6b7b2cfacaaafc010342b9575b9cefe7"
+        },
+        {
+          "path": "test/invoke-input-bindings.test.mjs",
+          "sha256": "df95eec26e45b5e09a24c8ee069b42b2ae43c25aba2b89ecc9dcdb3f0983469a"
+        },
+        {
+          "path": "test/invoke-input-product-integration.test.mjs",
+          "sha256": "20dead72f9e34fae1de774f7effe732dddba05d03e4d434cd7caa7ea3cc27021"
+        },
+        {
+          "path": "test/node-detail-assets.test.mjs",
+          "sha256": "ca9414715070ebb7f64546ec0a368c83a935b3142fde12edf502b008555ff9fe"
+        },
+        {
+          "path": "test/public-share-viewer.test.mjs",
+          "sha256": "64d0b41bf8b1268e8af376618c403c35dc164c72fb8083037ea103fe4075fea3"
+        },
+        {
+          "path": "test/workspace-navigation-integration.test.mjs",
+          "sha256": "363c7bf566c7188423eb5484b67f88d5997ba8165799b529a7329b757ccfd565"
+        }
+      ],
+      "verdict": "No unresolved assigned public-history or independent two-layer Input review blocker at this exact source. Own117 and prototype262 inner scenarios passed as recorded. Bounded non-certifying review until parent whole-PR final qualification.",
+      "reason": "Final realistic accepted-A/later-B fixture companion setup and direct native submitted-input assertions changed completion_traces dependency only; producer/renderer bytes unchanged."
+    },
+    {
+      "sourceDigest": "f1c2efc10ff347be3c094c7e6c74f4019f6f5a3f7b0bc7b5e75ae83f8f523582",
+      "manifest": [
+        {
+          "path": "crates/relayer-app-server/src/api/error.rs",
+          "sha256": "0488a29a3f24bfcf69e2fc6840dfbefb2c63fca4c152d950fcb8067a95df8bfa"
+        },
+        {
+          "path": "crates/relayer-app-server/src/api/input_drafts.rs",
+          "sha256": "86a91e9d37629dc94456eb5c92334b17d197abad7e71eacbcfd2273953e882ca"
+        },
+        {
+          "path": "crates/relayer-app-server/src/api/state.rs",
+          "sha256": "67e0c924b5884a893f3aa03ede6d64ea5c605221007ae7973acf14afd414485f"
+        },
+        {
+          "path": "crates/relayer-app-server/src/api/threads.rs",
+          "sha256": "beb81ff13adfecc33cfbe88884d37a3075692c5d82f5ee59985abc7653ae8aa9"
+        },
+        {
+          "path": "crates/relayer-app-server/src/api/types.rs",
+          "sha256": "f18f7e190086605f1c979f93658c72d00fbfa1d6c8995823ce0a9cf2f62e0d09"
+        },
+        {
+          "path": "crates/relayer-app-server/src/app_server.rs",
+          "sha256": "2e310843d3d385363768aba3df1867c36420dc1f6a92b60ed76541c20fcd9680"
+        },
+        {
+          "path": "crates/relayer-app-server/src/conversation_export.rs",
+          "sha256": "735b984bd8706fbe07a141ce5e5cef5d1c7fb644eb04702917cd787357b807c1"
+        },
+        {
+          "path": "crates/relayer-app-server/src/conversation_export_service.rs",
+          "sha256": "e5d8d7421645bb396fa8616abea6bafbe3ffb4b7465d4129fd04a8a25f56deee"
+        },
+        {
+          "path": "crates/relayer-app-server/src/product/service.rs",
+          "sha256": "b2eda63fe60a797a21af8c7642d640daa4eaf73c6cf131bfca9b137e11782e7a"
+        },
+        {
+          "path": "crates/relayer-app-server/src/runtime.rs",
+          "sha256": "c11f68b5ceab521473f778584929bb105b62ffe1b60dcecde898e86f07ccfd6d"
+        },
+        {
+          "path": "crates/relayer-app-server/src/storage/sqlite/action_invocations.rs",
+          "sha256": "67549f970dc3d6d9754643bf5a2131d920fdcbc389c260b9d69c69719eb8dda5"
+        },
+        {
+          "path": "crates/relayer-app-server/src/storage/sqlite/conversation_imports.rs",
+          "sha256": "76d6f41725021910a73603aebf8bb00a0c59c5273adac08c5096404653e3c8fd"
+        },
+        {
+          "path": "crates/relayer-app-server/src/storage/sqlite/migrations/0046_invocation_preparation_refusals.sql",
+          "sha256": "4baf94e8470f3c8223b90b6aef68fd6aa5c2b4846d5f4aa45b461be4ed1ffebf"
+        },
+        {
+          "path": "crates/relayer-app-server/src/storage/sqlite/schema.rs",
+          "sha256": "df90c8e5646d33acd8d3f325b4163ddbd2fa3a8e1bfe31e87781624e49fffc54"
+        },
+        {
+          "path": "crates/relayer-app-server/tests/conversation_export_contract.rs",
+          "sha256": "78368e5145295b84ef09056b828f39b6d14e99a4b9425c43686c888730000150"
+        },
+        {
+          "path": "crates/relayer-app-server/tests/product_persistence_flow.rs",
+          "sha256": "42fe5914da58db0f884b5d1c0efcf604622d7ab68352d31ed6176a67d00d8859"
+        },
+        {
+          "path": "crates/relayer-app-server/tests/support/completion_traces.rs",
+          "sha256": "b85160dd5ed104fb5df9b634859fae9740f14f61ba353d479c917e287fee5557"
+        },
+        {
+          "path": "crates/relayer-graph-core/src/graph/database.rs",
+          "sha256": "38196cd3fa667c5f200eb591528e919dd485b807cc0bcde61b38637a367a6f88"
+        },
+        {
+          "path": "crates/relayer-graph-core/src/graph/invocation.rs",
+          "sha256": "872744ef3eb501bb9794c00eac09b178d88dc029eb9b0dabddaee42a9ed53b5b"
+        },
+        {
+          "path": "desktop/renderer/src/action-invocation-state.js",
+          "sha256": "81ab2c3afb5292ec3a6ea7584d5e5bf514d9725e34a1a7ed2c2ef17bbb40f7f2"
+        },
+        {
+          "path": "desktop/renderer/src/draft-preview/snapshot.js",
+          "sha256": "49ea7d513eb493579772edb27b6027476f74daf3cfe1e01b54647f0e07d6a5bf"
+        },
+        {
+          "path": "desktop/renderer/src/graph.js",
+          "sha256": "4b343b1b6815b42987674395d9edb0126aaae1d44feb55d92f065141e527aeeb"
+        },
+        {
+          "path": "desktop/renderer/src/node-detail-assets.js",
+          "sha256": "ea46ef2d431d7a0e3bb79156e638092ce31176594e723691d500dba9f5cbc3aa"
+        },
+        {
+          "path": "desktop/renderer/src/product-workspace/invoke-inputs.js",
+          "sha256": "c40975e8364f71b4d9b7448277c3e457979117873876d9a99153f57899c3164c"
+        },
+        {
+          "path": "desktop/renderer/src/product-workspace/model.js",
+          "sha256": "7797cc82ec7d6c8eec0d44f0e7499c5c4818fff524030f21369ae5df310282bb"
+        },
+        {
+          "path": "desktop/renderer/src/product-workspace/workspace.js",
+          "sha256": "d8a1632b7d6e9c0ac15e7a0a4ae5c24caa7e0322f8913014da2adb0ba93f2f4d"
+        },
+        {
+          "path": "desktop/renderer/src/public-share-viewer/adapter.js",
+          "sha256": "0d16e80ffb77eeedb058c46c75755050877475d87e6b690126fc273d4cff910a"
+        },
+        {
+          "path": "desktop/renderer/src/public-share-viewer/main.js",
+          "sha256": "14f9e26730fb4028b8349517519881dbe62ff6798ea2aaad0f7c57a356073918"
+        },
+        {
+          "path": "desktop/renderer/src/public-share-viewer/snapshot.js",
+          "sha256": "f1f099ad7778a0abf6117896be0444edfb68e29d60c19bfe9d9cec5fa08f0eaa"
+        },
+        {
+          "path": "desktop/renderer/src/state.js",
+          "sha256": "e7879f6681500ed8bc90aa069ddb8c3931afd42ae4dd8cd4d9acb21385d10ca8"
+        },
+        {
+          "path": "desktop/renderer/src/threads.js",
+          "sha256": "3e15c08997ea1520f2ed2ce54b8d0bd95d56a3955a6c27a87b7c2e1f0be6a037"
+        },
+        {
+          "path": "docs/decisions/0015-sealed-completion-contract-and-invocations.md",
+          "sha256": "bcc37d822bb5a96f0e092a1ad6908b743acceb4e0932f4dce57e9272ebcba0a7"
+        },
+        {
+          "path": "docs/prd/index.html",
+          "sha256": "352d3992b3ea8f97c06ce17483a346eeb279640102a84f80728e5a968c13020b"
+        },
+        {
+          "path": "packages/graph-client/src/detail.ts",
+          "sha256": "701e8cfc6bad26ec5033b6df1118de74624896ff8b9622213ad8e41bec25e7dd"
+        },
+        {
+          "path": "packages/graph-client/src/scoped-authoring.ts",
+          "sha256": "bc14463cd7ae75f815059f816a9a88798419ae2547bd77cf4d590b2ade93b113"
+        },
+        {
+          "path": "packages/graph-client/test/detail.test.ts",
+          "sha256": "68b5c57ffc01dfd623df759a42cd34a5791cc1da17fd687774fdba61542ef033"
+        },
+        {
+          "path": "packages/graph-client/test/input-declarations.test.ts",
+          "sha256": "6a7f4a173e1816655caebe4a78c247c711384b35598acc34297574f1bf41332b"
+        },
+        {
+          "path": "packages/graph-client/test/scoped-authoring.test.ts",
+          "sha256": "eea41584e44d0f01d7006d38c332a2d27e5a6892352fb569adeb9607a95cc2e2"
+        },
+        {
+          "path": "packages/harness-host/src/implementations/prime-visual-authoring.ts",
+          "sha256": "3dad8b56fe5be0e219f699a754aa233be1e18f8df612d84f997f3885f5cee170"
+        },
+        {
+          "path": "packages/harness-host/test/prime-visual-authoring.test.ts",
+          "sha256": "3ebf0c3f78145e60d82a14911ab4b47f980eb924435802b71cd658b6d23c69d8"
+        },
+        {
+          "path": "python/relayer-graph/src/relayer_graph/actions.py",
+          "sha256": "3a72b84f4d3c7d49d182eae3015d2110127ea5d9ffc3107207ec649ea0ddd083"
+        },
+        {
+          "path": "python/relayer-graph/src/relayer_graph/scoped_authoring.py",
+          "sha256": "c74a2c400fdda188f6b931d4123050434eb5c8997a3bcc2567f5c4f43be0f057"
+        },
+        {
+          "path": "python/relayer-graph/tests/test_scoped_authoring.py",
+          "sha256": "b3b03d57f441d5a3e324573cd200fd714893500a16f2c98bc0a644b7d0cbfed3"
+        },
+        {
+          "path": "test/action-invocation-state.test.mjs",
+          "sha256": "6dcfe08448bc63c7a6b6b67088e6c52cbd2f9707520bd8f7efe5867a9d58ffe6"
+        },
+        {
+          "path": "test/draft-preview-read-model.test.mjs",
+          "sha256": "a6f96a5d36c2556a814520cbf146bf8365a3ce28cbb278ce89de6eba2b56591e"
+        },
+        {
+          "path": "test/implicit-input-send.test.mjs",
+          "sha256": "bc30c38dfc247fe93297097994b782bd6b7b2cfacaaafc010342b9575b9cefe7"
+        },
+        {
+          "path": "test/invoke-input-bindings.test.mjs",
+          "sha256": "df95eec26e45b5e09a24c8ee069b42b2ae43c25aba2b89ecc9dcdb3f0983469a"
+        },
+        {
+          "path": "test/invoke-input-product-integration.test.mjs",
+          "sha256": "20dead72f9e34fae1de774f7effe732dddba05d03e4d434cd7caa7ea3cc27021"
+        },
+        {
+          "path": "test/node-detail-assets.test.mjs",
+          "sha256": "ca9414715070ebb7f64546ec0a368c83a935b3142fde12edf502b008555ff9fe"
+        },
+        {
+          "path": "test/public-share-viewer.test.mjs",
+          "sha256": "64d0b41bf8b1268e8af376618c403c35dc164c72fb8083037ea103fe4075fea3"
+        },
+        {
+          "path": "test/workspace-navigation-integration.test.mjs",
+          "sha256": "363c7bf566c7188423eb5484b67f88d5997ba8165799b529a7329b757ccfd565"
+        }
+      ],
+      "verdict": "No unresolved assigned public-history, independent two-layer Input UI or native selector/provenance/epoch review blocker at this exact source. Own117/prototype262 scenarios and final native selection7 inner1/1 plus reservation regression inner1/1 passed as recorded. Bounded non-certifying review until parent final whole-PR qualification; any manifested byte change invalidates assertion.",
+      "reason": "Only shared broker test fixture in api/threads.rs changed: explicit accepted concept owner102 in accepted Layer, runtime Invoke and converted Navigate wire. Production source/decoder unchanged; final exact-byte focused suites passed."
+    },
+    {
+      "sourceDigest": "91774d40a3266125523c8d1f9d2003dcf91c9c439a789ee5194e1d73b020db55",
+      "manifest": [
+        {
+          "path": "crates/relayer-app-server/src/api/error.rs",
+          "sha256": "0488a29a3f24bfcf69e2fc6840dfbefb2c63fca4c152d950fcb8067a95df8bfa"
+        },
+        {
+          "path": "crates/relayer-app-server/src/api/input_drafts.rs",
+          "sha256": "86a91e9d37629dc94456eb5c92334b17d197abad7e71eacbcfd2273953e882ca"
+        },
+        {
+          "path": "crates/relayer-app-server/src/api/state.rs",
+          "sha256": "67e0c924b5884a893f3aa03ede6d64ea5c605221007ae7973acf14afd414485f"
+        },
+        {
+          "path": "crates/relayer-app-server/src/api/threads.rs",
+          "sha256": "821669d0cbe3f0fb5c16377d9883a670df3f336b5e1e5757e5c45656c860bce7"
+        },
+        {
+          "path": "crates/relayer-app-server/src/api/types.rs",
+          "sha256": "f18f7e190086605f1c979f93658c72d00fbfa1d6c8995823ce0a9cf2f62e0d09"
+        },
+        {
+          "path": "crates/relayer-app-server/src/app_server.rs",
+          "sha256": "2e310843d3d385363768aba3df1867c36420dc1f6a92b60ed76541c20fcd9680"
+        },
+        {
+          "path": "crates/relayer-app-server/src/conversation_export.rs",
+          "sha256": "735b984bd8706fbe07a141ce5e5cef5d1c7fb644eb04702917cd787357b807c1"
+        },
+        {
+          "path": "crates/relayer-app-server/src/conversation_export_service.rs",
+          "sha256": "e5d8d7421645bb396fa8616abea6bafbe3ffb4b7465d4129fd04a8a25f56deee"
+        },
+        {
+          "path": "crates/relayer-app-server/src/product/service.rs",
+          "sha256": "b2eda63fe60a797a21af8c7642d640daa4eaf73c6cf131bfca9b137e11782e7a"
+        },
+        {
+          "path": "crates/relayer-app-server/src/runtime.rs",
+          "sha256": "c11f68b5ceab521473f778584929bb105b62ffe1b60dcecde898e86f07ccfd6d"
+        },
+        {
+          "path": "crates/relayer-app-server/src/storage/sqlite/action_invocations.rs",
+          "sha256": "67549f970dc3d6d9754643bf5a2131d920fdcbc389c260b9d69c69719eb8dda5"
+        },
+        {
+          "path": "crates/relayer-app-server/src/storage/sqlite/conversation_imports.rs",
+          "sha256": "76d6f41725021910a73603aebf8bb00a0c59c5273adac08c5096404653e3c8fd"
+        },
+        {
+          "path": "crates/relayer-app-server/src/storage/sqlite/migrations/0046_invocation_preparation_refusals.sql",
+          "sha256": "4baf94e8470f3c8223b90b6aef68fd6aa5c2b4846d5f4aa45b461be4ed1ffebf"
+        },
+        {
+          "path": "crates/relayer-app-server/src/storage/sqlite/schema.rs",
+          "sha256": "df90c8e5646d33acd8d3f325b4163ddbd2fa3a8e1bfe31e87781624e49fffc54"
+        },
+        {
+          "path": "crates/relayer-app-server/tests/conversation_export_contract.rs",
+          "sha256": "78368e5145295b84ef09056b828f39b6d14e99a4b9425c43686c888730000150"
+        },
+        {
+          "path": "crates/relayer-app-server/tests/product_persistence_flow.rs",
+          "sha256": "42fe5914da58db0f884b5d1c0efcf604622d7ab68352d31ed6176a67d00d8859"
+        },
+        {
+          "path": "crates/relayer-app-server/tests/support/completion_traces.rs",
+          "sha256": "b85160dd5ed104fb5df9b634859fae9740f14f61ba353d479c917e287fee5557"
+        },
+        {
+          "path": "crates/relayer-graph-core/src/graph/database.rs",
+          "sha256": "38196cd3fa667c5f200eb591528e919dd485b807cc0bcde61b38637a367a6f88"
+        },
+        {
+          "path": "crates/relayer-graph-core/src/graph/invocation.rs",
+          "sha256": "872744ef3eb501bb9794c00eac09b178d88dc029eb9b0dabddaee42a9ed53b5b"
+        },
+        {
+          "path": "desktop/renderer/src/action-invocation-state.js",
+          "sha256": "81ab2c3afb5292ec3a6ea7584d5e5bf514d9725e34a1a7ed2c2ef17bbb40f7f2"
+        },
+        {
+          "path": "desktop/renderer/src/draft-preview/snapshot.js",
+          "sha256": "49ea7d513eb493579772edb27b6027476f74daf3cfe1e01b54647f0e07d6a5bf"
+        },
+        {
+          "path": "desktop/renderer/src/graph.js",
+          "sha256": "4b343b1b6815b42987674395d9edb0126aaae1d44feb55d92f065141e527aeeb"
+        },
+        {
+          "path": "desktop/renderer/src/node-detail-assets.js",
+          "sha256": "ea46ef2d431d7a0e3bb79156e638092ce31176594e723691d500dba9f5cbc3aa"
+        },
+        {
+          "path": "desktop/renderer/src/product-workspace/invoke-inputs.js",
+          "sha256": "c40975e8364f71b4d9b7448277c3e457979117873876d9a99153f57899c3164c"
+        },
+        {
+          "path": "desktop/renderer/src/product-workspace/model.js",
+          "sha256": "7797cc82ec7d6c8eec0d44f0e7499c5c4818fff524030f21369ae5df310282bb"
+        },
+        {
+          "path": "desktop/renderer/src/product-workspace/workspace.js",
+          "sha256": "d8a1632b7d6e9c0ac15e7a0a4ae5c24caa7e0322f8913014da2adb0ba93f2f4d"
+        },
+        {
+          "path": "desktop/renderer/src/public-share-viewer/adapter.js",
+          "sha256": "0d16e80ffb77eeedb058c46c75755050877475d87e6b690126fc273d4cff910a"
+        },
+        {
+          "path": "desktop/renderer/src/public-share-viewer/main.js",
+          "sha256": "14f9e26730fb4028b8349517519881dbe62ff6798ea2aaad0f7c57a356073918"
+        },
+        {
+          "path": "desktop/renderer/src/public-share-viewer/snapshot.js",
+          "sha256": "f1f099ad7778a0abf6117896be0444edfb68e29d60c19bfe9d9cec5fa08f0eaa"
+        },
+        {
+          "path": "desktop/renderer/src/state.js",
+          "sha256": "e7879f6681500ed8bc90aa069ddb8c3931afd42ae4dd8cd4d9acb21385d10ca8"
+        },
+        {
+          "path": "desktop/renderer/src/threads.js",
+          "sha256": "3e15c08997ea1520f2ed2ce54b8d0bd95d56a3955a6c27a87b7c2e1f0be6a037"
+        },
+        {
+          "path": "docs/decisions/0015-sealed-completion-contract-and-invocations.md",
+          "sha256": "bcc37d822bb5a96f0e092a1ad6908b743acceb4e0932f4dce57e9272ebcba0a7"
+        },
+        {
+          "path": "docs/prd/index.html",
+          "sha256": "352d3992b3ea8f97c06ce17483a346eeb279640102a84f80728e5a968c13020b"
+        },
+        {
+          "path": "packages/graph-client/src/detail.ts",
+          "sha256": "701e8cfc6bad26ec5033b6df1118de74624896ff8b9622213ad8e41bec25e7dd"
+        },
+        {
+          "path": "packages/graph-client/src/scoped-authoring.ts",
+          "sha256": "bc14463cd7ae75f815059f816a9a88798419ae2547bd77cf4d590b2ade93b113"
+        },
+        {
+          "path": "packages/graph-client/test/detail.test.ts",
+          "sha256": "68b5c57ffc01dfd623df759a42cd34a5791cc1da17fd687774fdba61542ef033"
+        },
+        {
+          "path": "packages/graph-client/test/input-declarations.test.ts",
+          "sha256": "6a7f4a173e1816655caebe4a78c247c711384b35598acc34297574f1bf41332b"
+        },
+        {
+          "path": "packages/graph-client/test/scoped-authoring.test.ts",
+          "sha256": "eea41584e44d0f01d7006d38c332a2d27e5a6892352fb569adeb9607a95cc2e2"
+        },
+        {
+          "path": "packages/harness-host/src/implementations/prime-visual-authoring.ts",
+          "sha256": "3dad8b56fe5be0e219f699a754aa233be1e18f8df612d84f997f3885f5cee170"
+        },
+        {
+          "path": "packages/harness-host/test/prime-visual-authoring.test.ts",
+          "sha256": "3ebf0c3f78145e60d82a14911ab4b47f980eb924435802b71cd658b6d23c69d8"
+        },
+        {
+          "path": "python/relayer-graph/src/relayer_graph/actions.py",
+          "sha256": "3a72b84f4d3c7d49d182eae3015d2110127ea5d9ffc3107207ec649ea0ddd083"
+        },
+        {
+          "path": "python/relayer-graph/src/relayer_graph/scoped_authoring.py",
+          "sha256": "c74a2c400fdda188f6b931d4123050434eb5c8997a3bcc2567f5c4f43be0f057"
+        },
+        {
+          "path": "python/relayer-graph/tests/test_scoped_authoring.py",
+          "sha256": "b3b03d57f441d5a3e324573cd200fd714893500a16f2c98bc0a644b7d0cbfed3"
+        },
+        {
+          "path": "test/action-invocation-state.test.mjs",
+          "sha256": "6dcfe08448bc63c7a6b6b67088e6c52cbd2f9707520bd8f7efe5867a9d58ffe6"
+        },
+        {
+          "path": "test/draft-preview-read-model.test.mjs",
+          "sha256": "a6f96a5d36c2556a814520cbf146bf8365a3ce28cbb278ce89de6eba2b56591e"
+        },
+        {
+          "path": "test/implicit-input-send.test.mjs",
+          "sha256": "bc30c38dfc247fe93297097994b782bd6b7b2cfacaaafc010342b9575b9cefe7"
+        },
+        {
+          "path": "test/invoke-input-bindings.test.mjs",
+          "sha256": "df95eec26e45b5e09a24c8ee069b42b2ae43c25aba2b89ecc9dcdb3f0983469a"
+        },
+        {
+          "path": "test/invoke-input-product-integration.test.mjs",
+          "sha256": "20dead72f9e34fae1de774f7effe732dddba05d03e4d434cd7caa7ea3cc27021"
+        },
+        {
+          "path": "test/node-detail-assets.test.mjs",
+          "sha256": "ca9414715070ebb7f64546ec0a368c83a935b3142fde12edf502b008555ff9fe"
+        },
+        {
+          "path": "test/public-share-viewer.test.mjs",
+          "sha256": "64d0b41bf8b1268e8af376618c403c35dc164c72fb8083037ea103fe4075fea3"
+        },
+        {
+          "path": "test/workspace-navigation-integration.test.mjs",
+          "sha256": "363c7bf566c7188423eb5484b67f88d5997ba8165799b529a7329b757ccfd565"
+        }
+      ],
+      "verdict": "No unresolved assigned public-history, two-layer Input UI, native selector/provenance/epoch or final broker fixture owner review blocker at this exact source. Own117/prototype262 unchanged renderer scenarios retained; final broker20/20, selector8 inner1/1 and reservation2 inner1/1 passed as recorded. Bounded non-certifying review until parent final whole-PR qualification; any manifested byte change invalidates assertion.",
+      "reason": "Final product_persistence_flow fixture-only owner repair: accepted concept7 in existing canonical resolved/original/reused action Layers, required action sourceNodeId same7; legacy pre-selector runtime owner307 explicit without upgrading absent historical output. Production unchanged."
+    }
+  ],
+  "nativeSelectorIndependentReview": {
+    "reviewer": "context_trace",
+    "verdict": "No unresolved assigned selector/provenance/epoch authority blocker in final source. Explicit invalid vs unknown reads are distinguished, immutable keyed submissions bypass re-selection, real native child input identity/value verified, and no provider scheduler or model judgment replaced.",
+    "finalFixtureSha256": "b85160dd5ed104fb5df9b634859fae9740f14f61ba353d479c917e287fee5557",
+    "changedManifestDependencies": [
+      "crates/relayer-app-server/src/api/threads.rs"
+    ],
+    "fixtureWireReview": {
+      "apiThreadsSha256": "821669d0cbe3f0fb5c16377d9883a670df3f336b5e1e5757e5c45656c860bce7",
+      "acceptedOwnerNodeId": 102,
+      "interactionRootNodeId": 101,
+      "convertedReplayOwnerNodeId": 102,
+      "productionUnchanged": true,
+      "requiredOwnerDecoderUnchanged": true,
+      "unresolvedFindings": []
+    }
+  },
+  "productPersistenceFixtureIndependentReview": {
+    "reviewer": "context_trace",
+    "sourcePath": "crates/relayer-app-server/tests/product_persistence_flow.rs",
+    "sha256": "d5696b487f981ead93d0541eab3914bde499cddb969698eefdb20aa1c7c7e8fa",
+    "verdict": "No assigned ownership/reconciliation blocker; only fixture changes reviewed. Production owner/source validation unchanged.",
+    "unresolvedFindings": [],
+    "execution": "No tests/builds/executable changes by reviewer; parent owns final qualification."
+  }
+}

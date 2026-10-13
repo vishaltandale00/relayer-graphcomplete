@@ -1,0 +1,597 @@
+{
+  "schemaVersion": 1,
+  "demonstration": "deterministic production services and renderer",
+  "inference": false,
+  "sourceCommit": "f10b853ccfce143b10da0afc25897f0df1dd6014",
+  "sourceDigest": "79956b1e2c3ed9c89e2ff83426ce257c18fe13fd6c1912a6d9a3ca8079e8ab62",
+  "binaries": {
+    "relayer-graph-server": "c4d9e66b58873f874e15899a30418e43cf336fac6af0d731eec317e6de787bd9",
+    "relayer-app-server": "019d95a02d2afce6c22845a9f518a0849f385c91dabbf26c3a9f4e4368ccef6b"
+  },
+  "video": {
+    "path": "/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-completion-review-qw904J/evidence/completion-contract.mp4",
+    "sha256": "1eef5ba64d62fb9cb1db9d2210e0e43fd839550c2ac78573836f6360beafc1f4"
+  },
+  "frames": [
+    {
+      "file": "/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-completion-review-qw904J/evidence/frame-00001.png",
+      "capturedAt": 1791499530016,
+      "sha256": "168a2ba4010cb6d5d321c829d8f6ddae2d9bc9ba9240dc8d128cff1b49aa8c4c"
+    },
+    {
+      "file": "/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-completion-review-qw904J/evidence/frame-00002.png",
+      "capturedAt": 1791499530199,
+      "sha256": "7cdc6bcb64071ce4a3542220fb24dab3e10486737e315ca5528070e4999044a3"
+    },
+    {
+      "file": "/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-completion-review-qw904J/evidence/frame-00003.png",
+      "capturedAt": 1791499530457,
+      "sha256": "d7442fe3d6dfe90749cd09a3c4b61a3af85c26f7fdf10980c5abaad74443b888"
+    },
+    {
+      "file": "/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-completion-review-qw904J/evidence/frame-00004.png",
+      "capturedAt": 1791499530706,
+      "sha256": "1011386009eadb370cf2a171698c4900402283cbb0df09522c81b28c326815ae"
+    },
+    {
+      "file": "/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-completion-review-qw904J/evidence/frame-00005.png",
+      "capturedAt": 1791499530985,
+      "sha256": "96e5ea3c2df339ac4d77f40ad96822c82575db7d4cc95f7919451e0d31348719"
+    },
+    {
+      "file": "/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-completion-review-qw904J/evidence/frame-00006.png",
+      "capturedAt": 1791499531217,
+      "sha256": "af7edd52b6e6f804b0bfd5768143a11aca71002e27a04846697e062c2e05ad62"
+    },
+    {
+      "file": "/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-completion-review-qw904J/evidence/frame-00007.png",
+      "capturedAt": 1791499531484,
+      "sha256": "db45d934997eba92df6166d2ece8d6cc09164b6b15a4054ddd6444d8d3f48176"
+    },
+    {
+      "file": "/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-completion-review-qw904J/evidence/frame-00008.png",
+      "capturedAt": 1791499531721,
+      "sha256": "db45d934997eba92df6166d2ece8d6cc09164b6b15a4054ddd6444d8d3f48176"
+    },
+    {
+      "file": "/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-completion-review-qw904J/evidence/frame-00009.png",
+      "capturedAt": 1791499531992,
+      "sha256": "cc5cb373cd5ceebe847441a2f2524a823722c3ab5a1affb7ebfce019d8527f92"
+    },
+    {
+      "file": "/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-completion-review-qw904J/evidence/frame-00010.png",
+      "capturedAt": 1791499532239,
+      "sha256": "85b6eaf91d07798d448b5df72e6e690670e8b93b52d656a65359fada0b42db9c"
+    },
+    {
+      "file": "/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-completion-review-qw904J/evidence/frame-00011.png",
+      "capturedAt": 1791499532498,
+      "sha256": "85b6eaf91d07798d448b5df72e6e690670e8b93b52d656a65359fada0b42db9c"
+    },
+    {
+      "file": "/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-completion-review-qw904J/evidence/frame-00012.png",
+      "capturedAt": 1791499532756,
+      "sha256": "3459c32ffea8de80504702d7d1636e4ccd82d719ff6aa99097b3ce0b4ba1d204"
+    },
+    {
+      "file": "/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-completion-review-qw904J/evidence/frame-00013.png",
+      "capturedAt": 1791499532995,
+      "sha256": "620cce402763dc064f85b350845117a519532d9e0da095901b96de34126a7515"
+    },
+    {
+      "file": "/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-completion-review-qw904J/evidence/frame-00014.png",
+      "capturedAt": 1791499533254,
+      "sha256": "620cce402763dc064f85b350845117a519532d9e0da095901b96de34126a7515"
+    },
+    {
+      "file": "/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-completion-review-qw904J/evidence/frame-00015.png",
+      "capturedAt": 1791499533501,
+      "sha256": "ea3783537dde7f360b063a97da28098b1266ed2941e2e8049e387a3ce00fb1d4"
+    },
+    {
+      "file": "/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-completion-review-qw904J/evidence/frame-00016.png",
+      "capturedAt": 1791499533751,
+      "sha256": "6b90ab7051f18de9a4907ddd14936ab382cd0f061cae12e1c7fceae79019b77a"
+    },
+    {
+      "file": "/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-completion-review-qw904J/evidence/frame-00017.png",
+      "capturedAt": 1791499534002,
+      "sha256": "6b90ab7051f18de9a4907ddd14936ab382cd0f061cae12e1c7fceae79019b77a"
+    },
+    {
+      "file": "/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-completion-review-qw904J/evidence/frame-00018.png",
+      "capturedAt": 1791499534261,
+      "sha256": "0ae561e9c11abce6fc1364a5352d074caa137f154823b868d6b7eb8a6a76622a"
+    },
+    {
+      "file": "/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-completion-review-qw904J/evidence/frame-00019.png",
+      "capturedAt": 1791499534507,
+      "sha256": "9c4e91125e8366e96a12d4148cb38970202b12a4af9b8abd37487aa826623c28"
+    },
+    {
+      "file": "/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-completion-review-qw904J/evidence/frame-00020.png",
+      "capturedAt": 1791499534759,
+      "sha256": "9c4e91125e8366e96a12d4148cb38970202b12a4af9b8abd37487aa826623c28"
+    },
+    {
+      "file": "/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-completion-review-qw904J/evidence/frame-00021.png",
+      "capturedAt": 1791499535013,
+      "sha256": "2d81a4c194f8e913977e5cbe0258d489ecd2fa1c621fbc7aef435558661f9812"
+    },
+    {
+      "file": "/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-completion-review-qw904J/evidence/frame-00022.png",
+      "capturedAt": 1791499535264,
+      "sha256": "2d81a4c194f8e913977e5cbe0258d489ecd2fa1c621fbc7aef435558661f9812"
+    },
+    {
+      "file": "/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-completion-review-qw904J/evidence/frame-00023.png",
+      "capturedAt": 1791499535522,
+      "sha256": "9c4e91125e8366e96a12d4148cb38970202b12a4af9b8abd37487aa826623c28"
+    },
+    {
+      "file": "/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-completion-review-qw904J/evidence/frame-00024.png",
+      "capturedAt": 1791499535768,
+      "sha256": "9c4e91125e8366e96a12d4148cb38970202b12a4af9b8abd37487aa826623c28"
+    },
+    {
+      "file": "/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-completion-review-qw904J/evidence/frame-00025.png",
+      "capturedAt": 1791499536010,
+      "sha256": "2582ae7bd30a39353e2620a6952c3c32c938c3f8afca65f80de9f46d61255434"
+    },
+    {
+      "file": "/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-completion-review-qw904J/evidence/frame-00026.png",
+      "capturedAt": 1791499536261,
+      "sha256": "f767d74ec12de1da457a92321f3b5490cfd7d529520a23690d585130acb97326"
+    },
+    {
+      "file": "/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-completion-review-qw904J/evidence/frame-00027.png",
+      "capturedAt": 1791499536502,
+      "sha256": "f50007116cce523a7387b8741487b2b8b9268186c923c28be46d96eb4d4cf06c"
+    },
+    {
+      "file": "/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-completion-review-qw904J/evidence/frame-00028.png",
+      "capturedAt": 1791499536781,
+      "sha256": "4a4b55765a8abf37b4e0315a1c14dea8dddf83a4778ebcbd3a960911023459db"
+    },
+    {
+      "file": "/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-completion-review-qw904J/evidence/frame-00029.png",
+      "capturedAt": 1791499537043,
+      "sha256": "8d18f3d05d28b33929f976151b08646010107c9aac7a7b6d5ff3e349e8044831"
+    },
+    {
+      "file": "/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-completion-review-qw904J/evidence/frame-00030.png",
+      "capturedAt": 1791499537276,
+      "sha256": "834ff6cc8cff8e587572b7270b3cbeebb07508b30b9fd16eed9e7996ab1471c1"
+    },
+    {
+      "file": "/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-completion-review-qw904J/evidence/frame-00031.png",
+      "capturedAt": 1791499537531,
+      "sha256": "834ff6cc8cff8e587572b7270b3cbeebb07508b30b9fd16eed9e7996ab1471c1"
+    },
+    {
+      "file": "/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-completion-review-qw904J/evidence/frame-00032.png",
+      "capturedAt": 1791499537784,
+      "sha256": "faee4f0f726793ad81fbadea83702dd0ee4c06402788ebc7a0e45e4544ee8eb0"
+    },
+    {
+      "file": "/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-completion-review-qw904J/evidence/frame-00033.png",
+      "capturedAt": 1791499538036,
+      "sha256": "9cef687eb046845e5b89ab07421bd01f87aac9d5df035e189c34ec43901f5c87"
+    },
+    {
+      "file": "/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-completion-review-qw904J/evidence/frame-00034.png",
+      "capturedAt": 1791499538286,
+      "sha256": "8d1f620a39ca7e22756da4d8e018e8ff0b11a4bd95ed82fce00cd6b087e8b7d0"
+    },
+    {
+      "file": "/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-completion-review-qw904J/evidence/frame-00035.png",
+      "capturedAt": 1791499538537,
+      "sha256": "8d1f620a39ca7e22756da4d8e018e8ff0b11a4bd95ed82fce00cd6b087e8b7d0"
+    },
+    {
+      "file": "/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-completion-review-qw904J/evidence/frame-00036.png",
+      "capturedAt": 1791499538791,
+      "sha256": "8d1f620a39ca7e22756da4d8e018e8ff0b11a4bd95ed82fce00cd6b087e8b7d0"
+    },
+    {
+      "file": "/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-completion-review-qw904J/evidence/frame-00037.png",
+      "capturedAt": 1791499539045,
+      "sha256": "8d1f620a39ca7e22756da4d8e018e8ff0b11a4bd95ed82fce00cd6b087e8b7d0"
+    },
+    {
+      "file": "/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-completion-review-qw904J/evidence/frame-00038.png",
+      "capturedAt": 1791499539282,
+      "sha256": "bc355b8b8168c886c315cb3966934c763bd9e5279c67327d60cfbb4bf7c0fcb3"
+    },
+    {
+      "file": "/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-completion-review-qw904J/evidence/frame-00039.png",
+      "capturedAt": 1791499539553,
+      "sha256": "bc355b8b8168c886c315cb3966934c763bd9e5279c67327d60cfbb4bf7c0fcb3"
+    },
+    {
+      "file": "/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-completion-review-qw904J/evidence/frame-00040.png",
+      "capturedAt": 1791499539794,
+      "sha256": "f9fb2c534b8e04abdcb6c0e0a1581c4e7fad202cb602af4a8b01d28f3b43a188"
+    },
+    {
+      "file": "/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-completion-review-qw904J/evidence/frame-00041.png",
+      "capturedAt": 1791499540054,
+      "sha256": "c18a8e3712626386816de6d483ce90a23da40b8cdf5fbd0ef64484865539ad33"
+    },
+    {
+      "file": "/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-completion-review-qw904J/evidence/frame-00042.png",
+      "capturedAt": 1791499540281,
+      "sha256": "65c170d2a45222377dff64664d3a635b69348f1a28a2f44201877ceafd848ce4"
+    },
+    {
+      "file": "/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-completion-review-qw904J/evidence/frame-00043.png",
+      "capturedAt": 1791499540539,
+      "sha256": "0ff15cfc83ca5bdeb00aff9619e3c2a4bee4ae510fe3a7691de22cc69f27c147"
+    },
+    {
+      "file": "/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-completion-review-qw904J/evidence/frame-00044.png",
+      "capturedAt": 1791499540790,
+      "sha256": "9bb9ee01ea547075d773f35459cb485606570b441643dcf9596144a636d557e6"
+    },
+    {
+      "file": "/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-completion-review-qw904J/evidence/frame-00045.png",
+      "capturedAt": 1791499541074,
+      "sha256": "cf49b399d3aca435d99609fbe07cf7eacb7a646c83b51200435a5a6d0bdacb80"
+    },
+    {
+      "file": "/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-completion-review-qw904J/evidence/frame-00046.png",
+      "capturedAt": 1791499541328,
+      "sha256": "2987f8ba04cf437a601c69b1016a718977f76b9a9b67ea772e56903f4737cd62"
+    },
+    {
+      "file": "/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-completion-review-qw904J/evidence/frame-00047.png",
+      "capturedAt": 1791499541606,
+      "sha256": "eb4c4c93527c8cb990521c713b992da53fa3fd772103769bb7616bc22c0ba484"
+    },
+    {
+      "file": "/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-completion-review-qw904J/evidence/frame-00048.png",
+      "capturedAt": 1791499541853,
+      "sha256": "6fa7073ed8d1697ed2eb9667c92c3f82cd2ea2b38d9d5c82256af6b02c0e228c"
+    },
+    {
+      "file": "/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-completion-review-qw904J/evidence/frame-00049.png",
+      "capturedAt": 1791499542103,
+      "sha256": "082f9dfd55fa08c01ff139f561fb6969c80f46b2032201b0296767be7922cd51"
+    },
+    {
+      "file": "/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-completion-review-qw904J/evidence/frame-00050.png",
+      "capturedAt": 1791499542351,
+      "sha256": "c1b9d37b08a036063c4fb46e25b38a6943a64e5883ee63a2678b381f06f40a71"
+    },
+    {
+      "file": "/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-completion-review-qw904J/evidence/frame-00051.png",
+      "capturedAt": 1791499542602,
+      "sha256": "6f2b91521108fd426092e977aea992b576203f82bb3753c6ee823f2677747c11"
+    },
+    {
+      "file": "/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-completion-review-qw904J/evidence/frame-00052.png",
+      "capturedAt": 1791499542853,
+      "sha256": "bccb5fc7e68ba2f40bf0d3875fe1d182c405e67d1488531fcc8a5219b9eee0bc"
+    },
+    {
+      "file": "/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-completion-review-qw904J/evidence/frame-00053.png",
+      "capturedAt": 1791499543084,
+      "sha256": "cbf72bf0c0e7e3ec86452174040f917759088c1db52e23053f4f2f16b3dd413e"
+    },
+    {
+      "file": "/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-completion-review-qw904J/evidence/frame-00054.png",
+      "capturedAt": 1791499543340,
+      "sha256": "820c0fd0ae2355d8ab233e8a8c7eaa409dd1a64d0142eeff685c07379e9aa92c"
+    },
+    {
+      "file": "/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-completion-review-qw904J/evidence/frame-00055.png",
+      "capturedAt": 1791499543591,
+      "sha256": "c5e434cd12a6dddee28ecfd2d9fc65d8776ec7aa58039379d35a0f957d16be9c"
+    },
+    {
+      "file": "/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-completion-review-qw904J/evidence/frame-00056.png",
+      "capturedAt": 1791499543872,
+      "sha256": "463fe68910ad1f9c5e41db6d7df5b24421de9376c0556f4a06156e88d9c64715"
+    },
+    {
+      "file": "/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-completion-review-qw904J/evidence/frame-00057.png",
+      "capturedAt": 1791499544097,
+      "sha256": "636f89a921b560add8b3f1dab8502bc3f7aec60379e1939c6b6110dbdd88f8fe"
+    },
+    {
+      "file": "/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-completion-review-qw904J/evidence/frame-00058.png",
+      "capturedAt": 1791499544367,
+      "sha256": "cbb0c2c801c44baf0ba6b3c54d694a34e6c7f64c8e35c0c54b765876306b41db"
+    },
+    {
+      "file": "/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-completion-review-qw904J/evidence/frame-00059.png",
+      "capturedAt": 1791499544622,
+      "sha256": "5fe0b129efcf0de62f32545078eef7613d6c758dcc5181dfc824959e83e965cb"
+    },
+    {
+      "file": "/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-completion-review-qw904J/evidence/frame-00060.png",
+      "capturedAt": 1791499544866,
+      "sha256": "dd23708bbda7d6f31511eb888936d6cf1a966553c8dbdafeb7d1e5d7bc2d4715"
+    },
+    {
+      "file": "/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-completion-review-qw904J/evidence/frame-00061.png",
+      "capturedAt": 1791499545116,
+      "sha256": "be61b02853bcceebba9fc159b0e1bb23fa5a775bdc964668de5f223b166227a3"
+    },
+    {
+      "file": "/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-completion-review-qw904J/evidence/frame-00062.png",
+      "capturedAt": 1791499545368,
+      "sha256": "ef761c82550907212973aa790887f8a3e1be501328f6ba0f3cfeb29448241e9e"
+    },
+    {
+      "file": "/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-completion-review-qw904J/evidence/frame-00063.png",
+      "capturedAt": 1791499545618,
+      "sha256": "ef761c82550907212973aa790887f8a3e1be501328f6ba0f3cfeb29448241e9e"
+    },
+    {
+      "file": "/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-completion-review-qw904J/evidence/frame-00064.png",
+      "capturedAt": 1791499545871,
+      "sha256": "ef761c82550907212973aa790887f8a3e1be501328f6ba0f3cfeb29448241e9e"
+    },
+    {
+      "file": "/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-completion-review-qw904J/evidence/frame-00065.png",
+      "capturedAt": 1791499546114,
+      "sha256": "1e1a8ca6d1488ca32d678783c2ffc24ed6e5cea80191f374b343bfe356e2ee40"
+    },
+    {
+      "file": "/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-completion-review-qw904J/evidence/frame-00066.png",
+      "capturedAt": 1791499546372,
+      "sha256": "1e1a8ca6d1488ca32d678783c2ffc24ed6e5cea80191f374b343bfe356e2ee40"
+    },
+    {
+      "file": "/var/folders/xn/h0pkhpsx1jv47vgg5gff_ztw0000gn/T/relayer-completion-review-qw904J/evidence/frame-00067.png",
+      "capturedAt": 1791499546630,
+      "sha256": "1e1a8ca6d1488ca32d678783c2ffc24ed6e5cea80191f374b343bfe356e2ee40"
+    }
+  ],
+  "observed": {
+    "errors": [],
+    "contracts": [
+      {
+        "schemaVersion": 1,
+        "interactionNodeId": 21,
+        "input": {
+          "text": "Plan a trip with two separately scoped Invokes and an ordinary input.",
+          "context": [],
+          "answers": [],
+          "invocationReferences": []
+        },
+        "authorities": [],
+        "returnRequirements": [],
+        "digest": "sha256:v1:78d415741d6cbc675c12fe529dd5cc9b3b73f6c939292db6ead3178209fd8e96"
+      },
+      {
+        "schemaVersion": 1,
+        "interactionNodeId": 23,
+        "input": {
+          "text": "",
+          "context": [],
+          "answers": [
+            {
+              "sourceNodeId": 22,
+              "sourceActionId": 12,
+              "question": {
+                "control": "text",
+                "prompt": "Unrelated notes"
+              },
+              "value": {
+                "text": "Prefer morning departures"
+              }
+            }
+          ],
+          "invocationReferences": []
+        },
+        "authorities": [
+          {
+            "kind": "navigate.add",
+            "nodeId": 22
+          }
+        ],
+        "returnRequirements": [
+          {
+            "kind": "navigate.response",
+            "nodeId": 22
+          }
+        ],
+        "digest": "sha256:v1:df9f483aed9f17094084fb28112aa9c6cab153321c58e69392b94db5964a428b"
+      },
+      {
+        "schemaVersion": 1,
+        "interactionNodeId": 25,
+        "input": {
+          "text": "Analyze itinerary inputs",
+          "context": [],
+          "answers": [
+            {
+              "sourceNodeId": 22,
+              "sourceActionId": 6,
+              "question": {
+                "control": "text",
+                "prompt": "Destination"
+              },
+              "value": {
+                "text": "Lisbon"
+              }
+            },
+            {
+              "sourceNodeId": 22,
+              "sourceActionId": 7,
+              "question": {
+                "control": "text",
+                "prompt": "Trip pace"
+              },
+              "value": {
+                "text": "Relaxed"
+              }
+            }
+          ],
+          "invocationReferences": [
+            {
+              "invocationId": 1,
+              "sourceCompletionId": 21,
+              "sourceActionId": 8,
+              "parentNodeId": 22,
+              "actionSnapshot": {
+                "actionId": 8,
+                "activator": "human",
+                "description": null,
+                "icon": null,
+                "inputActionIds": [
+                  6,
+                  7
+                ],
+                "instruction": "Analyze itinerary inputs",
+                "label": "Build itinerary",
+                "presentingLayerId": 6,
+                "reusable": false,
+                "sourceLayerId": 6,
+                "sourceNodeId": 22,
+                "state": "accepted",
+                "variant": "pill"
+              }
+            }
+          ]
+        },
+        "authorities": [
+          {
+            "kind": "navigate.add",
+            "nodeId": 22
+          }
+        ],
+        "returnRequirements": [
+          {
+            "kind": "navigate.response",
+            "nodeId": 22
+          }
+        ],
+        "digest": "sha256:v1:00f01a62fe1ba373d01fe9256a7b63955276894a234fe66ba9db9f4f0f8076c3"
+      },
+      {
+        "schemaVersion": 1,
+        "interactionNodeId": 27,
+        "input": {
+          "text": "Analyze budget inputs",
+          "context": [],
+          "answers": [
+            {
+              "sourceNodeId": 22,
+              "sourceActionId": 9,
+              "question": {
+                "control": "text",
+                "prompt": "Budget"
+              },
+              "value": {
+                "text": "1500"
+              }
+            },
+            {
+              "sourceNodeId": 22,
+              "sourceActionId": 10,
+              "question": {
+                "control": "text",
+                "prompt": "Days"
+              },
+              "value": {
+                "text": "7"
+              }
+            }
+          ],
+          "invocationReferences": [
+            {
+              "invocationId": 2,
+              "sourceCompletionId": 21,
+              "sourceActionId": 11,
+              "parentNodeId": 22,
+              "actionSnapshot": {
+                "actionId": 11,
+                "activator": "human",
+                "description": null,
+                "icon": null,
+                "inputActionIds": [
+                  9,
+                  10
+                ],
+                "instruction": "Analyze budget inputs",
+                "label": "Estimate budget",
+                "presentingLayerId": 6,
+                "reusable": false,
+                "sourceLayerId": 6,
+                "sourceNodeId": 22,
+                "state": "accepted",
+                "variant": "pill"
+              }
+            }
+          ]
+        },
+        "authorities": [
+          {
+            "kind": "navigate.add",
+            "nodeId": 22
+          }
+        ],
+        "returnRequirements": [
+          {
+            "kind": "navigate.response",
+            "nodeId": 22
+          }
+        ],
+        "digest": "sha256:v1:86b10ab68020818dc4814bd95d8ff31751f9aa677cbc188b29e53e5184ca8ad4"
+      }
+    ],
+    "invocations": [],
+    "advances": [
+      {
+        "interactionNode": 21,
+        "revision": 1
+      },
+      {
+        "interactionNode": 23,
+        "revision": 1
+      },
+      {
+        "interactionNode": 25,
+        "revision": 1
+      },
+      {
+        "interactionNode": 27,
+        "revision": 1
+      }
+    ],
+    "results": [],
+    "invocationBreadcrumbs": [
+      {
+        "action": "Build itinerary",
+        "sourceNode": "Plan a trip",
+        "automaticallyOpened": true,
+        "screenshot": "invoke-result-0.png",
+        "screenshotSha256": "604a263c77644ef1ca0031ccb2f680eecbb767471e67a0c0226ffb447404e889",
+        "sourceNodeRestored": true,
+        "backRestoredResult": true,
+        "forwardRestoredSource": true
+      },
+      {
+        "action": "Estimate budget",
+        "sourceNode": "Plan a trip",
+        "automaticallyOpened": true,
+        "screenshot": "invoke-result-1.png",
+        "screenshotSha256": "463fe68910ad1f9c5e41db6d7df5b24421de9376c0556f4a06156e88d9c64715",
+        "sourceNodeRestored": true,
+        "backRestoredResult": true,
+        "forwardRestoredSource": true
+      }
+    ]
+  },
+  "acceptedInteractionIds": [
+    1,
+    2,
+    3,
+    4
+  ],
+  "humanVerdict": "pending",
+  "modelExecutionProof": "not claimed"
+}

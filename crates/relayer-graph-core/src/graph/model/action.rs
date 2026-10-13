@@ -264,6 +264,11 @@ pub struct GraphAction {
     pub description: Option<String>,
     pub target_layer_id: Option<LayerId>,
     pub interaction_text: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub input_action_ids: Vec<ActionId>,
+    /// Absent only on historical definitions; those retain implied reuse.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reusable: Option<bool>,
     #[serde(flatten)]
     pub input: Option<InputAction>,
     pub state: RecordState,
@@ -288,8 +293,16 @@ pub struct ActionDraft {
     pub description: Option<String>,
     pub target_layer_id: Option<LayerId>,
     pub interaction_text: Option<String>,
+    #[serde(default)]
+    pub input_action_ids: Vec<ActionId>,
+    #[serde(default = "default_single_call")]
+    pub reusable: Option<bool>,
     #[serde(default, flatten)]
     pub input: Option<InputAction>,
+}
+
+fn default_single_call() -> Option<bool> {
+    Some(false)
 }
 
 impl ActionDraft {
@@ -303,6 +316,13 @@ impl ActionDraft {
             ));
         }
         super::require_nonempty(&self.label, "label")?;
+        if self.reusable == Some(true) && self.kind != ActionKind::Invoke {
+            return Err(GraphError::validation(
+                "reusable_requires_invoke",
+                "reusable",
+                "Only Invoke actions may opt into reuse.",
+            ));
+        }
         if matches!(self.variant, ActionVariant::Unsupported(_)) {
             return Err(GraphError::validation(
                 "unsupported_action_variant",
@@ -334,6 +354,23 @@ impl ActionDraft {
             (_, None) => {}
         }
         let mut issues = Vec::new();
+        if !self.input_action_ids.is_empty() && self.kind != ActionKind::Invoke {
+            issues.push(ValidationIssue::new(
+                "invoke_inputs_unexpected",
+                "inputActionIds",
+                "Only Invoke actions may bind input actions.",
+            ));
+        }
+        let mut input_ids = std::collections::HashSet::new();
+        for (index, id) in self.input_action_ids.iter().enumerate() {
+            if !input_ids.insert(*id) {
+                issues.push(ValidationIssue::new(
+                    "invoke_input_duplicate",
+                    format!("inputActionIds[{index}]"),
+                    "Bind each input action at most once.",
+                ));
+            }
+        }
         if self.kind != ActionKind::Input && self.input.is_some() {
             issues.push(ValidationIssue::new(
                 "input_action_payload_unexpected",

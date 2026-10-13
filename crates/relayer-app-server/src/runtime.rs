@@ -294,13 +294,20 @@ pub(crate) struct RuntimeInvokedCompletionStart {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct RuntimeAction {
+    pub(crate) source_node_id: i64,
     pub(crate) id: i64,
+    #[serde(default)]
+    pub(crate) source_layer_id: Option<i64>,
     #[serde(default)]
     pub(crate) relation: Option<String>,
     #[serde(default)]
     pub(crate) resolved_invoke_interaction_id: Option<i64>,
     pub(crate) kind: String,
     pub(crate) interaction_text: Option<String>,
+    #[serde(default)]
+    pub(crate) input_action_ids: Vec<relayer_graph_core::ActionId>,
+    #[serde(default)]
+    pub(crate) reusable: Option<bool>,
     #[serde(default)]
     pub(crate) target_layer_id: Option<i64>,
     pub(crate) state: String,
@@ -363,12 +370,61 @@ pub(crate) struct RuntimeInteractionMetadata {
     pub(crate) node_id: i64,
     pub(crate) invocation: Option<PreparedInvocation>,
     #[serde(default)]
+    pub(crate) durable_invocation: Option<relayer_graph_core::GraphInvocation>,
+    #[serde(default)]
+    pub(crate) has_completion_contract: bool,
+    #[serde(default)]
     pub(crate) input_identity: Option<String>,
     #[serde(default)]
     pub(crate) input_digest: Option<String>,
 }
 
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct RuntimeInputConsumerState {
+    pub(crate) composer_eligible: bool,
+    pub(crate) editable: bool,
+}
+
 impl RuntimeClient {
+    pub(crate) async fn prepare_user_invocation(
+        &self,
+        source: i64,
+        action: i64,
+        key: &str,
+        presenting_layer_id: Option<i64>,
+        submitted_inputs: &[relayer_graph_core::SubmittedInputDraft],
+    ) -> Result<i64, RuntimeError> {
+        #[derive(Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct Prepared {
+            interaction_node: i64,
+        }
+        let body = serde_json::json!({ "sourceInteractionNodeId": source, "actionId": action, "invocationKey": key, "presentingLayerId": presenting_layer_id, "submittedInputs": submitted_inputs });
+        let result: Prepared = self
+            .post_idempotent(
+                self.graph_url
+                    .join("api/control/durable-invocations/prepare")?,
+                &body,
+                &self.graph_control_token,
+                StatusCode::OK,
+                "user invocation preparation",
+            )
+            .await?;
+        Ok(result.interaction_node)
+    }
+    pub(crate) async fn imported_invocation_presentations(
+        &self,
+        thread_id: i64,
+    ) -> Result<Vec<Value>, RuntimeError> {
+        Ok(serde_json::from_value(
+            self.control_get(&format!(
+                "api/control/conversation-imports/{thread_id}/invocations"
+            ))
+            .await?,
+        )?)
+    }
+
     pub(crate) async fn begin_imported_conversation(
         &self,
         input: &ImportedConversationStage,
@@ -713,6 +769,7 @@ impl RuntimeClient {
                         | "personal-presentation-v2"
                         | "personal-presentation-v3"
                         | "personal-presentation-v4"
+                        | "personal-presentation-v6"
                 ) =>
             {
                 Ok(Some(value))
@@ -737,6 +794,14 @@ impl RuntimeClient {
         &self,
         command: &CompleteInteraction<'_>,
     ) -> Result<PreparedInteraction, RuntimeError> {
+        self.prepare_bound(command, None).await
+    }
+
+    pub(crate) async fn prepare_bound(
+        &self,
+        command: &CompleteInteraction<'_>,
+        prepared_interaction_node: Option<i64>,
+    ) -> Result<PreparedInteraction, RuntimeError> {
         let selected = self
             .configurations
             .get(command.harness_configuration_name)
@@ -755,6 +820,43 @@ impl RuntimeClient {
                 profile_id: command.permission_profile.id.clone(),
                 configuration_name: selected.configuration.name.clone(),
             })?;
+        // Product chronology stores required text trimmed. A prepared native
+        // call instead owns its original byte-exact instruction, including
+        // surrounding whitespace. Recover those frozen bytes for the exact
+        // bound call without reinterpreting a repaired callable definition.
+        let frozen_instruction = if let Some(node_id) = prepared_interaction_node {
+            let metadata = self.interaction_metadata(node_id).await?;
+            let call = metadata.durable_invocation.ok_or_else(|| {
+                RuntimeError::Protocol("prepared interaction has no durable invocation".into())
+            })?;
+            if metadata.node_id != node_id
+                || call.child_interaction_node_id.value() != node_id
+                || command.invocation
+                    != Some(PreparedInvocation {
+                        source_interaction_node_id: call.source_completion_id.value(),
+                        source_action_id: call.source_action_id.value(),
+                    })
+            {
+                return Err(RuntimeError::Protocol(
+                    "prepared invocation provenance mismatch".into(),
+                ));
+            }
+            let instruction = call
+                .action_snapshot
+                .get("instruction")
+                .and_then(Value::as_str)
+                .ok_or_else(|| {
+                    RuntimeError::Protocol("prepared invocation instruction is missing".into())
+                })?;
+            if command.text != instruction && command.text != instruction.trim() {
+                return Err(RuntimeError::Protocol(
+                    "prepared invocation instruction mismatch".into(),
+                ));
+            }
+            Some(instruction.to_owned())
+        } else {
+            None
+        };
         let invocation = command.invocation.map(|invocation| {
             serde_json::json!({
                 "sourceInteractionNodeId": invocation.source_interaction_node_id,
@@ -765,8 +867,9 @@ impl RuntimeClient {
         let create_body = serde_json::json!({
             "projectId": command.project_id,
             "threadId": command.thread_id,
-            "text": command.text,
+            "text": frozen_instruction.as_deref().unwrap_or(command.text),
             "invocation": invocation,
+            "preparedInteractionNode": prepared_interaction_node,
             "inputIdentity": command.input_identity,
             "inputDigest": command.input_digest,
             "contexts": command.contexts,
@@ -1806,10 +1909,87 @@ impl RuntimeClient {
         )?)
     }
 
-    pub(crate) async fn accepted_graph_closures(
+    pub(crate) async fn conversation_graph_snapshot(
         &self,
         interaction_node_ids: &[i64],
-    ) -> Result<Vec<Option<relayer_graph_core::AcceptedGraphClosure>>, RuntimeError> {
+    ) -> Result<relayer_graph_core::ConversationGraphSnapshot, RuntimeError> {
+        self.conversation_graph_snapshot_with_inventory(interaction_node_ids, false)
+            .await
+    }
+
+    pub(crate) async fn local_invocation_inventory(
+        &self,
+        roots: &[i64],
+    ) -> Result<relayer_graph_core::ConversationGraphSnapshot, RuntimeError> {
+        let snapshot = self
+            .conversation_graph_snapshot_with_inventory(roots, true)
+            .await?;
+        let ids = snapshot.exhausted_action_ids.as_ref();
+        let sources = snapshot.exhausted_action_sources.as_ref();
+        if ids.is_none()
+            || sources.is_none()
+            || ids.is_some_and(|ids| {
+                sources.is_some_and(|sources| {
+                    ids.len() != sources.len()
+                        || ids.iter().collect::<std::collections::BTreeSet<_>>().len() != ids.len()
+                        || sources
+                            .iter()
+                            .map(|source| &source.action_id)
+                            .collect::<std::collections::BTreeSet<_>>()
+                            != ids.iter().collect()
+                })
+            })
+        {
+            return Err(RuntimeError::Configuration(
+                "Runtime omitted authoritative single-call occupancy".into(),
+            ));
+        }
+        Ok(snapshot)
+    }
+
+    pub(crate) async fn native_invocation_key_absent(
+        &self,
+        source: i64,
+        key: &str,
+    ) -> Result<bool, RuntimeError> {
+        self.native_invocation_absent(source, None, key).await
+    }
+
+    /// A deterministic refusal made no call for this request. A different
+    /// action's occupied key remains spent; this never recovers that call.
+    pub(crate) async fn native_invocation_request_absent(
+        &self,
+        source: i64,
+        action: i64,
+        key: &str,
+    ) -> Result<bool, RuntimeError> {
+        self.native_invocation_absent(source, Some(action), key)
+            .await
+    }
+
+    async fn native_invocation_absent(
+        &self,
+        source: i64,
+        action: Option<i64>,
+        key: &str,
+    ) -> Result<bool, RuntimeError> {
+        let snapshot = self
+            .conversation_graph_snapshot_with_inventory(&[source], true)
+            .await?;
+        Ok(snapshot.closures.first().is_some_and(Option::is_some)
+            && !snapshot.invocations.iter().any(|call| {
+                call.invocation.source_completion_id.value() == source
+                    && action
+                        .is_none_or(|action| call.invocation.source_action_id.value() == action)
+                    && call.invocation.invocation_key == key
+            }))
+    }
+
+    async fn conversation_graph_snapshot_with_inventory(
+        &self,
+        interaction_node_ids: &[i64],
+        require_inventory: bool,
+    ) -> Result<relayer_graph_core::ConversationGraphSnapshot, RuntimeError> {
         let response = self
             .client
             .post(self.graph_url.join("api/control/accepted-closures")?)
@@ -1840,7 +2020,43 @@ impl RuntimeClient {
                 "Accepted closure snapshot does not match requested roots".into(),
             ));
         }
-        Ok(closures)
+        if value.get("invocations").is_none()
+            && (require_inventory
+                || closures
+                    .iter()
+                    .flatten()
+                    .any(|closure| closure.has_reusable_invocations))
+        {
+            return Err(RuntimeError::Configuration(
+                "Runtime omitted authoritative Invocation inventory for a reusable-call snapshot"
+                    .into(),
+            ));
+        }
+        let invocations = serde_json::from_value(
+            value
+                .get("invocations")
+                .cloned()
+                .unwrap_or_else(|| serde_json::json!([])),
+        )?;
+        let bound_inputs = serde_json::from_value(
+            value
+                .get("boundInputs")
+                .cloned()
+                .unwrap_or_else(|| serde_json::json!([])),
+        )?;
+        Ok(relayer_graph_core::ConversationGraphSnapshot {
+            closures,
+            invocations,
+            bound_inputs,
+            exhausted_action_ids: value
+                .get("exhaustedActionIds")
+                .map(|value| serde_json::from_value(value.clone()))
+                .transpose()?,
+            exhausted_action_sources: value
+                .get("exhaustedActionSources")
+                .map(|value| serde_json::from_value(value.clone()))
+                .transpose()?,
+        })
     }
 
     pub(crate) async fn accepted_graph_closure(
@@ -2111,6 +2327,58 @@ impl RuntimeClient {
         Ok(serde_json::from_value(value)?)
     }
 
+    pub(crate) async fn canonical_input_action_consumer_state(
+        &self,
+        destination_project_id: Option<i64>,
+        destination_thread_id: i64,
+        occurrence: &relayer_graph_core::PresentingInputOccurrence,
+    ) -> Result<RuntimeInputConsumerState, RuntimeError> {
+        let response = self
+            .client
+            .post(
+                self.graph_url
+                    .join("api/control/input-action-occurrences/canonical")?,
+            )
+            .bearer_auth(&self.graph_control_token)
+            .timeout(CONTROL_REQUEST_TIMEOUT)
+            .json(&serde_json::json!({
+                "destinationProjectId": destination_project_id,
+                "destinationThreadId": destination_thread_id,
+                "occurrence": occurrence,
+                "includeConsumerState": true,
+            }))
+            .send()
+            .await?;
+        let value = response_json(response, StatusCode::OK).await?;
+        Ok(serde_json::from_value(value)?)
+    }
+
+    pub(crate) async fn canonical_editable_input_action_occurrence(
+        &self,
+        destination_project_id: Option<i64>,
+        destination_thread_id: i64,
+        occurrence: &relayer_graph_core::PresentingInputOccurrence,
+    ) -> Result<relayer_graph_core::GraphAction, RuntimeError> {
+        let response = self
+            .client
+            .post(
+                self.graph_url
+                    .join("api/control/input-action-occurrences/canonical")?,
+            )
+            .bearer_auth(&self.graph_control_token)
+            .timeout(CONTROL_REQUEST_TIMEOUT)
+            .json(&serde_json::json!({
+                "destinationProjectId": destination_project_id,
+                "destinationThreadId": destination_thread_id,
+                "occurrence": occurrence,
+                "requireEditable": true,
+            }))
+            .send()
+            .await?;
+        let value = response_json(response, StatusCode::OK).await?;
+        Ok(serde_json::from_value(value)?)
+    }
+
     async fn control_get(&self, path: &str) -> Result<Value, RuntimeError> {
         let response = self
             .client
@@ -2364,6 +2632,20 @@ const PERSONAL_PRESENTATION_V4_NODES: &[PersonalPresentationNodeDefinition] = &[
     },
 ];
 
+const PERSONAL_PRESENTATION_V6_NODES: &[PersonalPresentationNodeDefinition] = &[
+    PERSONAL_PRESENTATION_V4_NODES[0],
+    PERSONAL_PRESENTATION_V4_NODES[1],
+    PERSONAL_PRESENTATION_V4_NODES[2],
+    PERSONAL_PRESENTATION_V4_NODES[3],
+    PersonalPresentationNodeDefinition {
+        client_key: "explanatory-presentation",
+        kind: "presentation-preference",
+        icon: "palette",
+        title: "Meaningful graph relationships",
+        detail: "Keep the result, material reasons, observed verification and important limits understandable at the root. Give distinct findings, decisions or checks separate nodes when their relationships help understanding; consolidate explanations that repeat. Let edges and placement express those relationships. Keep true sequences linear; group independent causes, paths, outcomes and evidence around the finding they support. Deeper layers should add a mechanism, comparison or inspectable proof, not merely repeat the root. Each authored detail explains its own node's title and purpose. Choose code, diagrams, tables or concise prose for what they communicate. More nodes, branches, layers or actions are not goals by themselves.",
+    },
+];
+
 fn personal_presentation_definition(
     version_key: &str,
 ) -> Result<PersonalPresentationDefinition, RuntimeError> {
@@ -2395,6 +2677,18 @@ fn personal_presentation_definition(
         "personal-presentation-v4" => Ok(PersonalPresentationDefinition {
             interaction_text: "Personal presentation V4",
             nodes: PERSONAL_PRESENTATION_V4_NODES,
+            edges: &[[0, 1], [0, 2], [0, 3], [0, 4]],
+            placements: &[
+                [0.5, 0.15],
+                [0.2, 0.5],
+                [0.8, 0.5],
+                [0.3, 0.85],
+                [0.7, 0.85],
+            ],
+        }),
+        "personal-presentation-v6" => Ok(PersonalPresentationDefinition {
+            interaction_text: "Personal presentation V6",
+            nodes: PERSONAL_PRESENTATION_V6_NODES,
             edges: &[[0, 1], [0, 2], [0, 3], [0, 4]],
             placements: &[
                 [0.5, 0.15],
@@ -3519,19 +3813,27 @@ mod tests {
                 let mode = observed.load(Ordering::SeqCst);
                 async move {
                     assert_eq!(headers["authorization"], "Bearer graph-control");
-                    assert_eq!(body, json!({"interactionNodeIds":[1,2]}));
+                    assert_eq!(body, if mode >= 4 { json!({"interactionNodeIds":[1]}) } else { json!({"interactionNodeIds":[1,2]}) });
+                    if mode == 5 {
+                        return (StatusCode::SERVICE_UNAVAILABLE, Json(json!({"error":"inventory unavailable"})));
+                    }
                     if mode == 3 {
                         tokio::time::sleep(Duration::from_millis(5500)).await;
                     }
-                    Json(match mode {
+                    (StatusCode::OK, Json(match mode {
                         0 | 3 => json!({"closures":[null,null]}),
-                        1 => json!({"closures":[null]}),
+                        1 | 4 => json!({"closures":[null]}),
+                        6 => json!({"closures":[null],"invocations":[]}),
+                        7 => json!({"closures":[null],"exhaustedActionIds":[]}),
+                        8 => json!({"closures":[null],"invocations":[],"exhaustedActionIds":[],"exhaustedActionSources":[]}),
+                        9 => json!({"closures":[null],"invocations":[],"exhaustedActionIds":[]}),
+                        10 => json!({"closures":[null],"invocations":[],"exhaustedActionIds":[41],"exhaustedActionSources":[]}),
                         _ => json!({"closures":[null,{
                             "nodeId":3,"interaction":{"id":3,"kind":"user-interaction","icon":"user","title":"Question","detail":"Question","state":"accepted"},
                             "rootAction":{"id":1,"sourceNodeId":3,"kind":"navigate","relation":"expand","label":"Response","variant":"pill","targetLayerId":1,"state":"accepted"},
                             "rootLayerId":1,"layers":[]
                         }]}),
-                    })
+                    }))
                 }
             }),
         )).await;
@@ -3549,19 +3851,79 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(
-            runtime.accepted_graph_closures(&[1, 2]).await.unwrap(),
+            runtime
+                .conversation_graph_snapshot(&[1, 2])
+                .await
+                .unwrap()
+                .closures,
             vec![None, None]
         );
         for scenario in [1, 2] {
             mode.store(scenario, Ordering::SeqCst);
             assert!(matches!(
-                runtime.accepted_graph_closures(&[1, 2]).await.unwrap_err(),
+                runtime
+                    .conversation_graph_snapshot(&[1, 2])
+                    .await
+                    .unwrap_err(),
                 RuntimeError::Configuration(_)
             ));
         }
+        mode.store(4, Ordering::SeqCst);
+        assert!(
+            matches!(
+                runtime
+                    .native_invocation_key_absent(1, "refused")
+                    .await
+                    .unwrap_err(),
+                RuntimeError::Configuration(_)
+            ),
+            "omitted inventory cannot certify an unspent call even for a single-call source"
+        );
+        mode.store(5, Ordering::SeqCst);
+        assert!(
+            matches!(
+                runtime
+                    .native_invocation_key_absent(1, "refused")
+                    .await
+                    .unwrap_err(),
+                RuntimeError::Remote { status: 503, .. }
+            ),
+            "unavailable inventory never certifies absence"
+        );
+        mode.store(6, Ordering::SeqCst);
+        assert!(
+            !runtime
+                .native_invocation_key_absent(1, "refused")
+                .await
+                .unwrap(),
+            "missing source closure never certifies absence"
+        );
+        for scenario in [6, 7, 9, 10] {
+            mode.store(scenario, Ordering::SeqCst);
+            assert!(
+                matches!(
+                    runtime.local_invocation_inventory(&[1]).await.unwrap_err(),
+                    RuntimeError::Configuration(_)
+                ),
+                "missing either native call inventory or global occupancy is unknown"
+            );
+        }
+        mode.store(8, Ordering::SeqCst);
+        assert_eq!(
+            runtime
+                .local_invocation_inventory(&[1])
+                .await
+                .unwrap()
+                .exhausted_action_ids,
+            Some(vec![])
+        );
         mode.store(3, Ordering::SeqCst);
         assert_eq!(
-            runtime.accepted_graph_closures(&[1, 2]).await.unwrap(),
+            runtime
+                .conversation_graph_snapshot(&[1, 2])
+                .await
+                .unwrap()
+                .closures,
             vec![None, None],
             "two roots retain their aggregate read budget rather than sharing one root's timeout"
         );
@@ -4118,6 +4480,44 @@ mod tests {
             !v4.closure.layers[0].nodes[3]
                 .detail
                 .contains("detailAuthoring")
+        );
+        let historical_v4 = serde_json::to_value(&v4.closure).unwrap();
+        let v6 = runtime
+            .ensure_personal_presentation_version("personal-presentation-v6")
+            .await
+            .unwrap();
+        assert_ne!(v4.interaction_node_id, v6.interaction_node_id);
+        assert_eq!(v6.closure.layers[0].nodes.len(), 5);
+        assert_eq!(v6.closure.layers[0].edges.len(), 4);
+        assert_eq!(
+            v6.closure.layers[0].nodes[4].title,
+            "Meaningful graph relationships"
+        );
+        for (old, new) in v4.closure.layers[0].nodes[..4]
+            .iter()
+            .zip(&v6.closure.layers[0].nodes)
+        {
+            assert_eq!(
+                (&old.kind, &old.icon, &old.title, &old.detail),
+                (&new.kind, &new.icon, &new.title, &new.detail)
+            );
+        }
+        let replay_v4 = runtime
+            .ensure_personal_presentation_version("personal-presentation-v4")
+            .await
+            .unwrap();
+        assert_eq!(
+            serde_json::to_value(&replay_v4.closure).unwrap(),
+            historical_v4
+        );
+        let replay_v6 = runtime
+            .ensure_personal_presentation_version("personal-presentation-v6")
+            .await
+            .unwrap();
+        assert_eq!(replay_v6.interaction_node_id, v6.interaction_node_id);
+        assert_eq!(
+            serde_json::to_value(&replay_v6.closure).unwrap(),
+            serde_json::to_value(&v6.closure).unwrap()
         );
         assert_ne!(v3.interaction_node_id, v4.interaction_node_id);
         assert_eq!(v3.closure.layers[0].nodes.len(), 4);

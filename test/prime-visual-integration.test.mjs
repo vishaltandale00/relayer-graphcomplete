@@ -12,8 +12,9 @@ it.each(["prime-agent-basic", "prime-agent-deep"])("%s accepts Python authored a
   const directory = await mkdtemp(join(tmpdir(), 'prime-visual-proof-'));
   const configurationPath = join(directory, 'prime.yaml');
   const shipped = await readFile(join(root, 'harnesses', `${harnessId}.yaml`), 'utf8');
-  expect(shipped).toContain('personalPresentationVersion: personal-presentation-v4');
-  const configuration = shipped.replace('  personalPresentationVersion: personal-presentation-v4\n', '');
+  const promotedVersion = harnessId === 'prime-agent-basic' ? 'personal-presentation-v6' : 'personal-presentation-v4';
+  expect(shipped).toContain(`personalPresentationVersion: ${promotedVersion}`);
+  const configuration = shipped.replace(`  personalPresentationVersion: ${promotedVersion}\n`, '');
   await writeFile(configurationPath, configuration);
   const runtimeOptions = { userDataDirectory: directory,
     temporalFeatures: { schemaRead: true, rootCurrentWrite: true },
@@ -90,18 +91,23 @@ it.each(["prime-agent-basic", "prime-agent-deep"])("%s accepts Python authored a
     const fresh = await request(session, '/api/threads', { method: 'POST', body: JSON.stringify({ title: 'Promoted Prime', initialMessage: 'New visual answer', permissionProfileId: 'full', harnessId: harnessId, modelSelection: { familyId: family.id, providerId: 'openai-work', modelId: 'fixture-model' } }) });
     const freshTurn = await acceptedTurn(session, fresh.id, 0);
     const freshTrace = await runtime.exportCandidateTrace(freshTurn.id, join(directory, 'fresh-trace'));
-    expect(freshTrace.personalPresentationVersionKey).toBe('personal-presentation-v4');
+    expect(freshTrace.personalPresentationVersionKey).toBe(promotedVersion);
     expect(freshTurn.completionOutput.rootLayer.nodes).toHaveLength(1);
     expect(freshTurn.completionOutput.rootLayer.nodes[0].authoredDetail).toBeDefined();
-    expect(freshTurn.completionOutput.rootLayer.nodes[0].title).toBe('Answer');
+    expect(freshTurn.completionOutput.rootLayer.nodes[0].title).toBe('Result');
     expect(freshTurn.completionOutput.rootLayer.nodes[0].authoredDetail.mounts).toHaveLength(1);
     expect(freshTurn.completionOutput.rootLayer.actions).toEqual(expect.arrayContaining([
-      expect.objectContaining({ kind: 'navigate', relation: 'expand', label: 'Details' }),
+      expect.objectContaining({ kind: 'navigate', relation: 'reference', label: 'Earlier findings' }),
     ]));
-    const expansion = freshTurn.completionOutput.rootLayer.actions.find((action) => action.label === 'Details');
+    const expansion = freshTurn.completionOutput.rootLayer.actions.find((action) => action.label === 'Earlier findings');
     const child = await request(session, `/api/threads/${fresh.id}/interactions/${freshTurn.id}/layers/${expansion.targetLayerId}`);
-    expect(child.nodes[0].title).toBe('Details');
-    expect(child.nodes[0].authoredDetail.components[0].html).toContain('Explain the evidence behind the answer.');
+    expect(child.nodes[0].title).toBe('Initial finding');
+    expect(child.nodes[0].authoredDetail.components[0].html).toContain('Replace with supported evidence and uncertainty.');
+    expect(freshTurn.completionOutput.rootLayer.nodes[0].authoredDetail.mounts[0].capability.action.clientKey).toBe(expansion.clientKey);
+    const evidenceAction = child.actions.find((action) => action.label === 'Evidence');
+    expect(evidenceAction).toMatchObject({ kind: 'navigate', relation: 'expand' });
+    const evidence = await request(session, `/api/threads/${fresh.id}/interactions/${freshTurn.id}/layers/${evidenceAction.targetLayerId}`);
+    expect(evidence.nodes[0].authoredDetail.components[0].html).toContain('Replace with useful supporting detail.');
 
   } finally {
     await product?.close(); await runtime.close(); await rm(directory, { recursive: true, force: true });

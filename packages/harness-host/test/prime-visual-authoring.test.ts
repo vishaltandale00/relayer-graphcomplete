@@ -23,6 +23,44 @@ function graphTransport() {
   return { bodies, fetch };
 }
 describe("Prime declarative visual authoring", () => {
+  it("lowers Python declaration references across components and rejects missing/wrong-kind references before transport", async () => {
+    const payload = JSON.parse(execFileSync("python3", ["-c", `
+import json
+from relayer_graph import GraphSession, NodeObject, LayerObject, LayerLayoutObject, ActionObject, html, action_capability
+graph = GraphSession("http://graph.test", "run-one", 1)
+node = NodeObject("compass", "Vacation", "Choose", client_key="answer")
+layer = LayerObject([node], [], LayerLayoutObject([], "default"), client_key="source")
+field = ActionObject("input", "Destination", layer, "destination", control="text", prompt="Destination")
+invoke = ActionObject("invoke", "Analyze", layer, "analyze", interaction_text="Analyze destination", input_actions=(field,))
+node.detail_authoring.set_component("button", html(["<button gc=", ">Analyze</button>"], action_capability("analyze", invoke)))
+node.detail_authoring.set_component("field", html(['<input aria-label="Destination" gc=', ">"], action_capability("destination", field)))
+print(json.dumps(graph._visual_payload("submit", node)))
+`], { encoding: "utf8", env: { ...process.env, PYTHONPATH: resolve("python/relayer-graph/src") } }));
+    expect(payload.detail.components[0].markup.values[0].action.inputActions).toEqual([{ inputActionClientKey: "destination" }]);
+    const { fetch, bodies } = graphTransport();
+    const result = await new PrimeVisualAuthoring().execute(payload, capability, () => {}, signal());
+    expect(result.ok, JSON.stringify(result)).toBe(true);
+    expect((bodies[0]!.authoredDetail as { mounts: unknown[] }).mounts).toHaveLength(2);
+    expect(fetch).toHaveBeenCalledTimes(1);
+    for (const reference of ["missing", "analyze"]) {
+      const invalid = structuredClone(payload);
+      invalid.detail.components[0].markup.values[0].action.inputActions = [{ inputActionClientKey: reference }];
+      expect(await new PrimeVisualAuthoring().execute(invalid, capability, () => {}, signal())).toMatchObject({ ok: false });
+    }
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+  it.each([{ reusable: "true" }, { reusable: 1 }, { reusable: null }, { inputActions: [0] }, { inputActions: ["21"] }, { inputActions: [1.5] }])("rejects malformed Invoke declarations before graph writes (%j)", async (invalidFields) => {
+    const { fetch } = graphTransport();
+    const payload = { ...request(), detail: { clear: false, components: [{ id: "main", styles: "", markup: { strings: ["<button gc=", ">Run</button>"], values: [{ kind: "action", key: "run", action: { kind: "invoke", label: "Run", clientKey: "run", sourceLayer: { clientKey: "source", nodes: ["answer"] }, interactionText: "Run", ...invalidFields } }] } }] } };
+    expect(await new PrimeVisualAuthoring().execute(payload, capability, () => {}, signal())).toMatchObject({ ok: false, frozen: false });
+    expect(fetch).not.toHaveBeenCalled();
+  });
+  it.each([{ reusable: false }, { inputActions: [21] }])("keeps Invoke policy and bindings off Input declarations (%j)", async (invokeFields) => {
+    const { fetch } = graphTransport();
+    const payload = { ...request(), detail: { clear: false, components: [{ id: "main", styles: "", markup: { strings: ["<input gc=", ">"], values: [{ kind: "action", key: "input", action: { kind: "input", label: "Destination", clientKey: "input", sourceLayer: { clientKey: "source", nodes: ["answer"] }, control: "text", prompt: "Destination", ...invokeFields } }] } }] } };
+    expect(await new PrimeVisualAuthoring().execute(payload, capability, () => {}, signal())).toMatchObject({ ok: false, frozen: false });
+    expect(fetch).not.toHaveBeenCalled();
+  });
   it("compiles canonically, shares concurrent submissions, and preserves frozen retries", async () => {
     const { bodies, fetch } = graphTransport();
     const bridge = new PrimeVisualAuthoring();
@@ -37,7 +75,7 @@ describe("Prime declarative visual authoring", () => {
     const edited = request(); edited.node.title = "Changed";
     await expect(bridge.execute(edited, capability, () => {}, signal())).rejects.toThrow("detail_finalized");
   });
-  it("compiles action-bearing Python replacement payloads through checkpoint and submit", async () => {
+  it.each([false, true])("validates mounted Python Invoke declarations and compiles references through checkpoint and submit (reuse %s)", async (reusable) => {
     const payloads = JSON.parse(execFileSync("python3", ["-c", `
 import json
 from relayer_graph import GraphSession, NodeObject, LayerObject, LayerLayoutObject, ActionObject, html, action_capability
@@ -45,12 +83,23 @@ graph = GraphSession("http://graph.test", "run-one", 1)
 original = graph.bind_node(NodeObject("box", "Answer", "Fallback", client_key="answer"))
 replacement = graph.bind_node(NodeObject("box", "Answer", "Fallback", client_key="answer"))
 layer = LayerObject([original], [], LayerLayoutObject([], "default"), client_key="source")
-action = ActionObject("invoke", "Continue", layer, "continue", interaction_text="Continue")
-page = html(["<button gc=", ">Continue</button>"], action_capability("continue", action))
+destination = ActionObject("input", "Destination", layer, "destination", control="text", prompt="Destination")
+pace = ActionObject("input", "Pace", layer, "pace", control="text", prompt="Pace")
+action = ActionObject("invoke", "Continue", layer, "continue", interaction_text="Continue", reusable=${reusable ? "True" : "False"}, input_actions=(destination, pace))
+page = html(["<button gc=", '>Continue</button><input aria-label="Destination" gc=', '><input aria-label="Pace" gc=', ">"], action_capability("continue", action), action_capability("destination", destination), action_capability("pace", pace))
 original.detail_authoring.set_component("main", page)
 replacement.detail_authoring.set_component("main", page)
 print(json.dumps([graph._visual_payload("checkpoint", original), graph._visual_payload("checkpoint", replacement), graph._visual_payload("submit", replacement)]))
 `], { encoding: "utf8", env: { ...process.env, PYTHONPATH: resolve("python/relayer-graph/src") } }));
+    const inputReferences = [{ inputActionClientKey: "destination" }, { inputActionClientKey: "pace" }];
+    for (const payload of payloads) {
+      const actions = payload.detail.components[0].markup.values.map((value: { action: unknown }) => value.action);
+      expect(actions[0]).toMatchObject({ reusable, inputActions: inputReferences });
+      expect(actions.slice(1)).toMatchObject([
+        { kind: "input", clientKey: "destination", sourceLayer: { clientKey: "source", nodes: ["answer"] }, prompt: "Destination" },
+        { kind: "input", clientKey: "pace", sourceLayer: { clientKey: "source", nodes: ["answer"] }, prompt: "Pace" },
+      ]);
+    }
     const { bodies, fetch } = graphTransport();
     const bridge = new PrimeVisualAuthoring();
     const original = await bridge.execute(payloads[0], capability, () => {}, signal());
@@ -59,10 +108,20 @@ print(json.dumps([graph._visual_payload("checkpoint", original), graph._visual_p
     expect(repaired).toMatchObject({ ok: true, value: original.value });
     expect(repaired.value).toMatchObject({ mounts: [{ kind: "capability", capability: {
       kind: "invoke", action: { clientKey: "continue", sourceNode: { clientKey: "answer" }, sourceLayer: { clientKey: "source" } },
-    } }] });
+    } }, { kind: "capability", capability: { kind: "input", action: { clientKey: "destination", sourceNode: { clientKey: "answer" }, sourceLayer: { clientKey: "source" } } } },
+      { kind: "capability", capability: { kind: "input", action: { clientKey: "pace", sourceNode: { clientKey: "answer" }, sourceLayer: { clientKey: "source" } } } }] });
     expect(await bridge.execute(payloads[2], capability, () => {}, signal())).toMatchObject({ ok: true, frozen: true });
     expect(bodies[0]!.authoredDetail).toEqual(repaired.value);
     expect(fetch).toHaveBeenCalledTimes(1);
+
+  });
+  it("rejects valid numeric Invoke bindings without mounted Input identity before transport", async () => {
+    const { fetch } = graphTransport();
+    const payload = { ...request(), detail: { clear: false, components: [{ id: "main", styles: "", markup: { strings: ["<button gc=", ">Run</button>"], values: [{ kind: "action", key: "run", action: { kind: "invoke", label: "Run", clientKey: "run", sourceLayer: { clientKey: "source", nodes: ["answer"] }, interactionText: "Run", reusable: false, inputActions: [21, 22] } }] } }] } };
+    expect(await new PrimeVisualAuthoring().execute(payload, capability, () => {}, signal())).toMatchObject({
+      ok: false, frozen: false, issues: [{ code: "input_reference_invalid", path: "inputActions" }],
+    });
+    expect(fetch).not.toHaveBeenCalled();
   });
   it("compiles Python attached-node replacements with retained and node-owned controls", async () => {
     const payload = JSON.parse(execFileSync("python3", ["-c", `

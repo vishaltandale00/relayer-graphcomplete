@@ -1,0 +1,278 @@
+{
+  "schemaVersion": 1,
+  "reviewer": "final_authority_review",
+  "date": "2026-10-08",
+  "pullRequestNumber": 707,
+  "workspace": "/private/tmp/relayer-interactive-inputs-v1-merge",
+  "baselineHead": "4432809514480873633260099b7ae5466f200bae",
+  "integratedMainHead": "73bfeb18",
+  "sourceDigestAlgorithm": "SHA256 sorted relative path + NUL + file bytes + NUL",
+  "sourceDigest": "2550245250241f24bd2d7ff91732d92e8a9f76ede3383a6ac997e03a8978edb9",
+  "sourceManifest": [
+    {
+      "path": "crates/relayer-app-server/src/api/state.rs",
+      "sha256": "2b963e759b493dc24a91c50f56a3d3c208f1eede289bfd5420dc40e758dca2a2"
+    },
+    {
+      "path": "crates/relayer-app-server/src/api/threads.rs",
+      "sha256": "224f0284fc0f1fe2d89166632aa849360c059b67642123779ce2be3ac5c1e331"
+    },
+    {
+      "path": "crates/relayer-app-server/src/api/types.rs",
+      "sha256": "18529f18a1073e660e843b96322f68ef458f265f79a21be7d50292e1903e7034"
+    },
+    {
+      "path": "crates/relayer-app-server/src/runtime.rs",
+      "sha256": "2d92d9b7bb3187c4ce5c32fa00a6dbcd282b1665ef9202d20c067b473362fbb9"
+    },
+    {
+      "path": "crates/relayer-app-server/tests/support/completion_traces.rs",
+      "sha256": "4325b86bd25999ce6caf20c13a2f59b3efbf6936c8c87e9d32e55c062fe9d14c"
+    },
+    {
+      "path": "crates/relayer-graph-core/src/graph.rs",
+      "sha256": "fd8dfc1c833880726c622a08e4e240c6bcb18126805885820000bb59eb611ecb"
+    },
+    {
+      "path": "crates/relayer-graph-core/src/graph/completion.rs",
+      "sha256": "f77063b4b68452a62f5ee430b8a6645463a7b30aa1ab83b246b276e651b0c2f5"
+    },
+    {
+      "path": "crates/relayer-graph-core/src/graph/invocation.rs",
+      "sha256": "c5afb0e0ee7cb0e2f459f0f164fbda5d400cc01f9e2dcb37488dee0ce90d9fb3"
+    },
+    {
+      "path": "crates/relayer-graph-core/src/graph/model/artifact.rs",
+      "sha256": "7886bd5cb7ca7ffa20a0b594ff5365d3bcb512fe398476aef1952e05babcc3b2"
+    },
+    {
+      "path": "crates/relayer-graph-core/src/lib.rs",
+      "sha256": "68d828144bb4f6e1a754659193513a28d4e8cc4b94031e6f644ca4fc27747534"
+    },
+    {
+      "path": "crates/relayer-graph-core/src/storage/sqlite/invocations.rs",
+      "sha256": "1cdce249079cac5c0b7b40cd0c6973e26a83a8dffb738b2fac6bbf91cd00b3e6"
+    },
+    {
+      "path": "crates/relayer-graph-core/tests/artifact_layers.rs",
+      "sha256": "378fc3bbb07325fb7f6673ee1328300596e9ac1fff877c5f5d3b336bfe0d6f7f"
+    },
+    {
+      "path": "crates/relayer-graph-core/tests/durable_invocations.rs",
+      "sha256": "3c8def583e03df3927e52b582e8c3352a2f96393a44f1bd4797d65962c99cb78"
+    },
+    {
+      "path": "crates/relayer-graph-core/tests/graph_database.rs",
+      "sha256": "6a03faff5c1d6868dc4d14968cd7803a1d51af2ad91e79cec993b555eb2aea7e"
+    },
+    {
+      "path": "crates/relayer-graph-server/src/lib.rs",
+      "sha256": "1fa154269790f31ad73df8df4f1e9a8050ebe81b3cd249acf0316278ce22c5a9"
+    },
+    {
+      "path": "desktop/artifact-office/index.js",
+      "sha256": "bfb4c8c5a863eba8c3e2a754da0fd7e2dd418da1c3bd61ca6fb17de6841f4ac0"
+    },
+    {
+      "path": "desktop/eval-main/draft-preview-renderer.mjs",
+      "sha256": "04f69a6b34acbfc9897cf6e613a5dfb228c2ffd4562d4dc10db639504a601295"
+    },
+    {
+      "path": "desktop/main/services/artifact-viewer.mjs",
+      "sha256": "d7b4a7590293b71c163679fa5b04e358dc285ddb51b4ff302b41e8bb7a35bd8a"
+    },
+    {
+      "path": "desktop/packaging/electron-builder.mjs",
+      "sha256": "9d7716148c9c6b9a0d2b8d68db12322f856f8082aa0598672c5e7de00fadb83a"
+    },
+    {
+      "path": "desktop/packaging/verify-bundled-app-server.mjs",
+      "sha256": "f696731bcbcd6b51f1d225ef98f5b29ea5788873eb1cd38c70147cf21970bb44"
+    },
+    {
+      "path": "desktop/renderer/src/action-invocation-state.js",
+      "sha256": "55e16066f78ee3fa25d5c6ed4753efd7c5b3a7f985c6a4da3ff031ae261be71f"
+    },
+    {
+      "path": "desktop/renderer/src/artifact-viewer.js",
+      "sha256": "cc6826fed6feef115082942452359dacc67681c9df4d1cf2186514cea7bfa3c0"
+    },
+    {
+      "path": "desktop/renderer/src/draft-preview/snapshot.js",
+      "sha256": "103fd5bf3647f64eb450e5ee9c0ea2e05c71cfad0afecf4cf5b8fd3186c8c439"
+    },
+    {
+      "path": "desktop/renderer/src/product-workspace/workspace.js",
+      "sha256": "c8473eab2db555a6631489ed472f92efacbd1831b53e1aadacda85bc55069c66"
+    },
+    {
+      "path": "desktop/renderer/src/public-share-viewer/adapter.js",
+      "sha256": "0d16e80ffb77eeedb058c46c75755050877475d87e6b690126fc273d4cff910a"
+    },
+    {
+      "path": "desktop/renderer/src/state.js",
+      "sha256": "69704fd548590f226acca8f9c36ec07e9cd81a9dc2815b00eebc1276447738f1"
+    },
+    {
+      "path": "desktop/renderer/src/threads.js",
+      "sha256": "05d4392dacffe7e7b23080fab45704dc10119803b46018438149c7168a325ee0"
+    },
+    {
+      "path": "desktop/renderer/src/workspace-navigation.js",
+      "sha256": "1cb611b9045c183d0ba3c21a93caef76d78a378ac506a7f0e666c9bf3604cc36"
+    },
+    {
+      "path": "docs/decisions/0014-artifact-layer-renderer.md",
+      "sha256": "880bde68e5132937f26ad6472fea6bd2fadcb5ffd3fc03187ebb584f2e65ad3a"
+    },
+    {
+      "path": "docs/decisions/0015-sealed-completion-contract-and-invocations.md",
+      "sha256": "bcc37d822bb5a96f0e092a1ad6908b743acceb4e0932f4dce57e9272ebcba0a7"
+    },
+    {
+      "path": "docs/prd/index.html",
+      "sha256": "fad847e5f05a7579523fbc4e378018cf240730d6b8bef69e13e79666a1dd0acb"
+    },
+    {
+      "path": "harnesses/claude-basic.yaml",
+      "sha256": "ce65c631655c3beb04092264974a5a6b4a191995a650ae6f73186fb70d9051fd"
+    },
+    {
+      "path": "harnesses/codex-basic.yaml",
+      "sha256": "2344c365b9681034f1d8a65ade544713efb0ee0644e765243176c4297f9964e4"
+    },
+    {
+      "path": "harnesses/prime-agent-basic.yaml",
+      "sha256": "4fe7c0df2b254b9b69729220163a6d049a8c70bafcb49b0c0179a6fc0cb50d04"
+    },
+    {
+      "path": "package-lock.json",
+      "sha256": "93bc73868aeb8c04093d47041a57bd4bbe78dbb0a8c80fbdc5026eaf88fcef5d"
+    },
+    {
+      "path": "package.json",
+      "sha256": "18a8c430b8913c10b4ce7f1912000937548fe35f5d7d83c3561ff7e0a8a881e9"
+    },
+    {
+      "path": "packages/eval-runner/src/fixtures/artifact-viewer.ts",
+      "sha256": "38a6b7daf965b225a54567cc99573a986cce95fd8c4a081178f98435cd6b1d55"
+    },
+    {
+      "path": "packages/graph-client/src/types.ts",
+      "sha256": "a7e5608c20dc386214c5dad01e70855e14e1f096b46d6f6e5f826671af32a9e5"
+    },
+    {
+      "path": "packages/harness-host/src/artifact-files.ts",
+      "sha256": "dbb71bb8ea2210e8c7d84693b2bf8f414bf26ff9a830c8ef3aafb7cc0f69e4b6"
+    },
+    {
+      "path": "packages/harness-host/src/implementations/artifact-layer-guidance.ts",
+      "sha256": "1732f38b636eeb3b7a346aa19d13b36000faee78d5510984cffda360ca2c6ea3"
+    },
+    {
+      "path": "scripts/prepare-renderer-vendor.mjs",
+      "sha256": "fa046f1e0fcc45fde8c991232e6e002a4ce6f0d93a1e0570c747581081207145"
+    },
+    {
+      "path": "scripts/test-desktop-artifact-viewer.mjs",
+      "sha256": "39a01d74ac918615dea62d53580cbf7736fa716912fa896ff1a328bc6de2c6de"
+    },
+    {
+      "path": "test/action-invocation-state.test.mjs",
+      "sha256": "ff1524f3828a0e607753ed7fdf4c26efcdf304d18c0f3183b5c07869ade70b3d"
+    },
+    {
+      "path": "test/invoke-input-bindings.test.mjs",
+      "sha256": "6c391426b97eb7a51ec737c08a36ab485faadba836213ef8fa8c8d2e43c55b81"
+    },
+    {
+      "path": "test/node-detail-runtime.test.mjs",
+      "sha256": "d21022fb0fea30ef96e9e3286a9774415d833d167a1e46758f676e012ba5ca6e"
+    },
+    {
+      "path": "test/workspace-navigation-integration.test.mjs",
+      "sha256": "e7b05cb40f88cbb0eca09b54e152f3a97bd64b7ee3d1ddfeee8248eb821e3a9a"
+    },
+    {
+      "path": "test/workspace-navigation.test.mjs",
+      "sha256": "38a83d0d441647abf2a4a12ef80e3538646efcc93061a81605a4fb8437aaa171"
+    },
+    {
+      "path": "test/workspace-reading-context.test.mjs",
+      "sha256": "a3bb3adf94bc795dfe9d11acb0c925cf7879c564cf461d157001ee5bde8108f4"
+    }
+  ],
+  "overallSnapshot": {
+    "sourceDigest": "79e175e1f8cbbf25a2bde93d080c83f2744e788efe64a817586fc3ea1a3389b2",
+    "fileCount": 230,
+    "manifest": "/private/tmp/pr707-native-portable-source.json",
+    "verification": "All current manifest bytes independently verified"
+  },
+  "verdict": "No unresolved bounded integration source blocker. Prior authority promises refreshed against combined source; fixture supplies actual required known native capability state without relaxing assertions. Final full build/check/native heavy proof remains parent-owned and pending; this is not a merge, release or human acceptance certification.",
+  "reviewedScope": [
+    "Refresh prior25 native/Product authority files:24 unchanged; PRD changes only existing Office6.6/ART012 meaning and declared evidence, with CC/Input/breadcrumb semantics unchanged.",
+    "Frozen native recovery, exact child/source/action/arguments/presentation guards, no graph-owned human adoption, whole-source/key pregate and request-scoped no-effect predicate remain as previously reviewed.",
+    "Local graph-only history remains inert; canonical visible action/Node occupancy contains no foreign call data or synthetic Product result identity; trusted nondurable preexecution receipt and unknown-inventory refusal retained.",
+    "Canonical authored-detail workspace fixture explicitly declares known invocation inventory and accepted reusable:false callable; warm test preserves real workspace selection, input focus/scroll/value/selection, saved occurrence, original revision and callback counts.",
+    "Main Office integration overlaps artifact admissibility, isolated file viewer, viewer/agent-preview readiness, artifact annotation capture/location, Navigate entry and packaging; it does not replace Product breadcrumb, native Invocation or Input acceptance mechanisms.",
+    "Draft graph preview actionsForLayer repair remains accepted-only; public adapter mutating callbacks still false/readOnly true; new Office preview request handler/readiness use same isolated vendor/file path.",
+    "Main harness revisions and artifact guidance add Office kinds without changing provider-owned recursion or complete(inputGraph) ownership."
+  ],
+  "priorReviewDisposition": {
+    "receipt": "docs/evidence/issue-632-completion-contract/review-pr707-native-portable-authority-final-2026-10-08.json",
+    "priorScopedDigest": "744665d0394b5911e82b94d5c2071de5930af4da468895be4759aa8b517af54e",
+    "priorOverallSnapshot": "272e46d3370fb9d857f6c808b9c1726525f88bcb5dcd2b58a681ac813517994a",
+    "unchangedFiles": 24,
+    "changedFiles": [
+      "docs/prd/index.html"
+    ],
+    "status": "Historical and invalid as an exact25-file final-source assertion because PRD changed; not rewritten. This new receipt refreshes that scope plus bounded integration.",
+    "semanticChange": "Only Office6.6/ART012 sections changed on main; no CC/Input/breadcrumb promise changed."
+  },
+  "fixtureRepair": {
+    "path": "test/node-detail-runtime.test.mjs",
+    "changes": [
+      "Invoke fixture state accepted + reusable false",
+      "Workspace fixture invocationInventoryAvailable true"
+    ],
+    "assertionPreservation": "No assertions removed or relaxed. Existing native callback/revision, Navigate conversion/imported read history, occurrence commit, runtime identity/focus/scroll preservation, incomplete package fallback and accepted actions disclosure assertions retained.",
+    "failureLog": "/private/tmp/pr707-authored-detail-inventory-warm.log",
+    "failure": "52/53 passed; canonical Product workspace Invoke callback0 because unknown inventory correctly disables mutation.",
+    "warmLog": "/private/tmp/pr707-authored-detail-inventory-warm-2.log",
+    "observed": "53/53 PASS,1file,1.49s total; test source and relevant execution mechanisms match frozen combined source. No tests run by this reviewer."
+  },
+  "integrationBoundaries": [
+    {
+      "boundary": "Artifact variants can be accepted in sealed completion layers",
+      "production": "graph/model/artifact.rs adds docx/xlsx/pptx and safe PDF page/PPTX slide bounds",
+      "mapping": "artifact_layers validation, artifact-file fingerprint and guidance tests; parent fullcheck required."
+    },
+    {
+      "boundary": "Viewer and agent preview use new Office vendor route and readiness",
+      "production": "artifact-viewer.mjs + eval draft-preview-renderer use vendorDirectory and artifactPreviewSettled; old call sites replaced, generic graph path remains separate",
+      "mapping": "artifact-viewer-main tests, generic draft-preview adapter tests, evidence:agent-preview and actual desktop artifact runner on final build."
+    },
+    {
+      "boundary": "Actual file preview and artifact annotation meaning on combined source",
+      "production": "Office annotation location uses existing artifact note flow; opening via Navigate still enters artifact viewer through unchanged workspace integration",
+      "mapping": "Desktop runner now14 file previews and explicit Word/Excel/PowerPoint/slide note checks; previous11-preview40-check artifact evidence cannot qualify new combined source."
+    },
+    {
+      "boundary": "No new graph mutation authority from document content",
+      "production": "Office code runs in isolated artifact view, host vendor handlers are fixed; file kinds blocked from network; public adapter Invoke/Send remain unavailable",
+      "mapping": "Main viewer isolation tests and final native/read-only preview evidence; no claim of reauditing all upstream renderer internals."
+    }
+  ],
+  "pendingQualification": [
+    "Full npm run check on frozen combined230-file snapshot",
+    "Final npm run build with Office vendor bundle and licence files",
+    "Final declared artifact/preview/native Input/annotation/breadcrumb recordings on matching combined-source binaries",
+    "Current PR merge-source/main/CI/freshness and unresolved-thread audit"
+  ],
+  "limitations": [
+    "Review is read-only and bounded to interaction authority/integration; not a full independent audit of upstream #709 Office renderer implementation or dependency licences.",
+    "No paid inference, hosted publication, release, push or Git merge action by this reviewer.",
+    "Prior exact-source tests/review receipts remain historical; new full qualification must bind combined source."
+  ],
+  "invalidationRule": "Any listed executable/test/PRD/ADR byte change invalidates this bounded assertion; overall snapshot changes require refreshed context binding. Generated evidence changes alone do not change this source manifest."
+}

@@ -69,6 +69,8 @@ async fn accepted_sqlite_graph(path: &std::path::Path) -> GraphDatabase {
             description: None,
             target_layer_id: Some(layer.id),
             interaction_text: None,
+            reusable: None,
+            input_action_ids: Vec::new(),
             input: None,
         })
         .await
@@ -113,6 +115,25 @@ async fn publish_temporal_current(
                 "default",
             )),
             size_justification: None,
+        })
+        .await
+        .unwrap();
+    writer
+        .add_action(&ActionDraft {
+            client_key: format!("{key}-response"),
+            source_node_id: interaction.id,
+            source_layer_id: None,
+            kind: ActionKind::Navigate,
+            relation: Some(NavigateRelation::Expand),
+            label: "Response".into(),
+            variant: Default::default(),
+            icon: None,
+            description: None,
+            target_layer_id: Some(layer.id),
+            interaction_text: None,
+            reusable: None,
+            input_action_ids: Vec::new(),
+            input: None,
         })
         .await
         .unwrap();
@@ -260,6 +281,8 @@ async fn draft_target(database: &GraphDatabase, thread: ThreadId) -> NodeId {
             description: None,
             target_layer_id: Some(layer.id),
             interaction_text: None,
+            reusable: None,
+            input_action_ids: Vec::new(),
             input: None,
         })
         .await
@@ -383,6 +406,8 @@ async fn accepted_graph_with_an_edge(
             description: None,
             target_layer_id: Some(layer.id),
             interaction_text: None,
+            reusable: None,
+            input_action_ids: Vec::new(),
             input: None,
         })
         .await
@@ -1484,6 +1509,8 @@ async fn attached_navigation_publication_matches_rebuild_without_widening_thread
             description: None,
             target_layer_id: Some(target),
             interaction_text: None,
+            reusable: None,
+            input_action_ids: Vec::new(),
             input: None,
         }
     }

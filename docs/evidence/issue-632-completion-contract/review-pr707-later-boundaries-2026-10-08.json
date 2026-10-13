@@ -1,0 +1,135 @@
+{
+  "schemaVersion": 1,
+  "reviewer": "/root/final_authority_review",
+  "reviewedAtUtc": "2026-10-08T21:32:51.908888+00:00",
+  "pullRequestNumber": 707,
+  "workspace": "/private/tmp/relayer-interactive-inputs-v1-merge",
+  "baselineHead": "98318b37ad4eb91dc5c7e805733d76a2640b9bc3",
+  "integratedMainHead": "73bfeb18a6d10521f120fef5312e6af75601d2d1",
+  "overallSource": {
+    "manifestPath": "/private/tmp/pr707-later-review-source.json",
+    "sourceDigest": "fbd48e0a9c8a07f421fb418527716e25d71c99526a80f84d7acb72ec35766dcb",
+    "fileCount": 230,
+    "verification": "Independently recomputed sorted relative path + NUL + file bytes + NUL SHA256; all 230 file hashes match.",
+    "priorSourceDigest": "bf054e4a2bd39d8e15b22f129d493f41d4ab77ef34c8ab2e61c032f856221a24",
+    "priorComparison": "Exactly six executable/test files changed; 224 source files unchanged; no additions/removals."
+  },
+  "scopeDigestAlgorithm": "SHA256 sorted relative path + NUL + file bytes + NUL",
+  "scopeDigest": "c075e87b685572fecb2628e8671523ebee1d5075fb3c5a3c9cf16018a7c7b3b3",
+  "scopeManifest": [
+    {
+      "path": "crates/relayer-app-server/src/app_server.rs",
+      "sha256": "572f188023e013cffcbb386da76d5750e4ac7ca38abbbaec87c0bec1a7611d6b"
+    },
+    {
+      "path": "crates/relayer-app-server/tests/support/completion_traces.rs",
+      "sha256": "fa585ab9509b9fd8bc2e5b0645500227cc2260d310bd67190cf2869e968614cc"
+    },
+    {
+      "path": "crates/relayer-graph-core/src/graph/invocation.rs",
+      "sha256": "a1b4152048664af533bb3f69ed6f687674b8be2c28b1bf20b979ada226ada8da"
+    },
+    {
+      "path": "desktop/renderer/src/node-input-controls.js",
+      "sha256": "80228ffbc1d7d49c44583d781f553548d30badac6f1711da39a6a83cd770e3c4"
+    },
+    {
+      "path": "desktop/renderer/src/product-workspace/workspace.js",
+      "sha256": "0567ec281bee809b136c0858667ff90b4cff517d2e22acfa05ae920adf786deb"
+    },
+    {
+      "path": "docs/evidence/issue-632-completion-contract/README.md",
+      "sha256": "2486407faae463c963e2d150eefe0f1c2d07c80059700c00cae74a499d7e7421"
+    },
+    {
+      "path": "test/invoke-input-bindings.test.mjs",
+      "sha256": "4a5c1c47dea9a234eca6fa52be3601a53eed36041b4c4cf75a6ae32dc983da94"
+    }
+  ],
+  "verdict": "No unresolved source blocker in the six changed executable/test files and checkpoint mapping. This is source review, not a full qualification or merge approval.",
+  "unresolvedFindings": [],
+  "reviewedBoundaries": [
+    {
+      "seam": "Startup durable prepared-child lookup",
+      "assertion": "Requires a present frozen instruction matching exact Product text or exactly Rust str::trim of native frozen instruction. No trim-both-sides, Unicode normalization, mutable repaired-definition authority, or weakened node/contract/child/source/action/key guard. Reconciliation locates existing work; no provider execution retry or new scheduler.",
+      "checkpoint": "Existing real Product storage reopen/startup reconciliation agent and user Worlds retain exact saved child, graph-only sibling isolation, no harness launch, and second-reopen assertions; raw NEL/EMSPACE/private-path fixture joins trimmed Product text. Negative instruction/key fixture quarantines only Product while native original remains Active and no new call is minted.",
+      "limits": "Negative added fixture executes instruction/key mismatch only; source/action/child/contract guards remain unchanged and inspected, not new startup wrong-source execution proof. Storage reopen is not full Electron process restart."
+    },
+    {
+      "seam": "Implicit Invoke input snapshot and per-thread save queue",
+      "assertion": "All captured occurrence/value commits enter the existing per-thread mutation queue before the first await, behind already-owned pending saves and ahead of later edits. Idempotent skipping requires an actual committed attachment and runs inside that queue. Invoke receives last captured reply revision, so later committed edits survive or optimistic revision refusal prevents consumption. Existing failure, selection, monotonic response, epoch cleanup and exact occurrence guards remain.",
+      "checkpoint": "Two actual compiled/authored two-input workspace race schedules reproduce captured A1/B1 then newer B2, including an already-owned A save. Tests enforce revision and preserve B2; previous schedules retained.",
+      "limits": "API fixture applies expected revision; in-process production workspace/controller proof, not native provider execution."
+    },
+    {
+      "seam": "Secondary ordinary Send and controller commit callers",
+      "assertion": "Shared controller opt-in skip preserves other commit callers by default. Ordinary Send retains its reconciliation path, authored/standard in-flight Send locking, failed-save refusal, composer eligibility exclusion for Invoke-bound inputs, and epoch cleanup. Tentative newer-authored Send concern was resolved by inspecting full authoredCapabilityState Send lock; no demonstrated blocker.",
+      "checkpoint": "Existing implicit-input-send, first-message composer integration and node-input controls remain mapped plus fullcheck deterministic fallback. No tests deleted or boundaries claimed subsumed."
+    },
+    {
+      "seam": "New native invocation submitted-argument limit",
+      "assertion": "More than256 submitted inputs refuses within the existing transaction after exact-key historical recovery and before creating new child/call/answer nodes. Definition bindings remain readable beyond256; Layer membership is separate. Existing frozen argument digest recovery and native source/presentation authority checks unchanged.",
+      "checkpoint": "Real native World with five accepted question Layers seals/export-validates256 answers, refuses257 with unchanged node count and zero oversized call rows, and exports unused257-input binding definition with every referenced Input present.",
+      "limits": "New-call bound does not retrofit/rewrite old prepared records, authorize execution retries, or grant imported execution authority."
+    }
+  ],
+  "actualObservedEvidence": {
+    "durableWarm": {
+      "path": "/private/tmp/pr707-post-ci-durable-warm-2.log",
+      "sha256": "5d45bf5a40c9ce0e09a05b4ac323f3113d4645786a5ccc919354af518f190bc0",
+      "innerResult": "10 passed, 0 failed;1.40s, includes both raw instruction startup cases and negative key/text quarantine"
+    },
+    "inputTargeted": {
+      "path": "/private/tmp/pr707-input-flush-race-green.log",
+      "sha256": "a7e2f0ca75482ed82fb0cfcc92f07e909a7421f60a6bb547713bdb9560cf75a1",
+      "innerResult": "2 passed,58 skipped;788ms total"
+    },
+    "inputPortfolio": {
+      "path": "/private/tmp/pr707-input-bindings-adversarial-green.log",
+      "sha256": "86171b7decff5a78910a2e6e1ef259cea28f1fac4d00f3e3d8e78207031630e5",
+      "innerResult": "60 passed,0 skipped;20.11s total"
+    },
+    "inputAdversarialReceipt": {
+      "path": "/private/tmp/pr707-input-flush-race-review.json",
+      "sha256": "67021895f5738fc5a06530b882a1d51dd83ff0e4e0a1e50a0b2f8a7b3bdeb9ea"
+    },
+    "argumentBoundary": {
+      "log": "/private/tmp/pr707-later-review-final-check.log",
+      "innerObserved": "Exact native_invocation_argument_bound_preserves_exportable_calls_and_uncalled_definitions line174 is ok; app-server lib383 passed result present. Fullcheck is still pending.",
+      "focusedResult": "Agent reported1/1 in0.63s; no persisted focused log supplied, not independent durable evidence."
+    },
+    "build": {
+      "path": "/private/tmp/pr707-later-review-final-build.log",
+      "sha256": "96239fb47f6fbe45d939a2ff71482ec78f3bf3e118ecf82a79a9ddca41bf9ab7",
+      "runnerRecord": {
+        "name": "build",
+        "command": [
+          "npm",
+          "run",
+          "build"
+        ],
+        "environment": {},
+        "exitCode": 0,
+        "log": "/private/tmp/pr707-later-review-final-build.log",
+        "intentionalShutdownAfterHumanGateReady": false,
+        "timedOut": false,
+        "elapsedSeconds": 14.63
+      }
+    }
+  },
+  "requiredQualificationPlan": "Full npm run check/build and declared native context/Input/startup/project, compiled Eval, PREV/artifact and recorded annotation/twoInvoke chapters on this exact source. Current fullcheck and heavy portfolio still running at review; root must record inner scenario results and final source verification separately.",
+  "pendingQualification": [
+    "Complete current fullcheck and native heavy portfolio with exact-source chapter evidence.",
+    "Commit/current-head hosted CI must be refreshed for changed source; previous head98318b37 CI is historical."
+  ],
+  "preservedUnknowns": [
+    "Prior original Electron first-message480s timeout cause remains unknown; unmodified rerun pass does not establish a fix or prove flakiness.",
+    "Prior head98318b37 hosted SQLite fixture lock failure is preserved separately from unchanged retry pass; unrelated to the Electron timeout."
+  ],
+  "limitations": [
+    "No tests/build/CI, executable edits, provider inference, release, merge or publication performed by reviewer.",
+    "Logs reviewed for explicit inner results; planned entrypoints and outer runner status alone are not proof.",
+    "Generated evidence is excluded from the230 source manifest; the README has its own exact hash in this review scope."
+  ],
+  "invalidationRule": "Invalidate this source review if any of the seven scoped files or overall frozen230 source bytes changes; preserve this receipt immutably and create a new one."
+}

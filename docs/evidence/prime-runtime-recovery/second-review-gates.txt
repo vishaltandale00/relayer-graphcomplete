@@ -1,0 +1,14 @@
+Reviewed31-path source SHA256: 5e3ae00f4f71a97e3665e18d100aa4f4024a403cc3397f3de25a9333c58da23e
+
+Sequential gates; Node22.23.2/macOSarm64:
+npm run build: exit0; native app/graph servers, TypeScript/workspace packages passed.
+npm run check: exit0; fmt, Clippy, native workspace, crash reconciliation, TypeScript/workspace checks passed.
+Vitest319files/4222tests passed; 1file/3tests skipped. Both real capture subprocess scenarios passed.
+Secret boundary2passed; Python91passed; Ladybugreceipt and PRDreadability gates passed.
+npm run test:prime-managed-runtime: exit0; clean exact assembly and isolated kernel ready=true without inference.
+
+
+> relayer-graphcomplete@0.0.0 test:prime-managed-runtime
+> node scripts/verify-prime-managed-runtime.mjs
+
+{"recipeId":"prime@0.8.1","recipeDigest":"3e810a5130e71e12a4033eecb9853b3f24bfa045709e3131ea5f38506bf2b319","target":"macos-arm64","javascriptClosureKind":"repository","javascriptClosureSha256":"02f15fb2ce6366f1e9709e66336a94476dc6605bb8618885afea9e7d2e19766f","ready":true}

@@ -1,0 +1,198 @@
+{
+  "schemaVersion": 1,
+  "date": "2026-10-07",
+  "reviewer": "/root/authority_review",
+  "workspace": "/private/tmp/relayer-interactive-inputs-v1-merge",
+  "baseCommit": "fcfacdb0a235451f04d97d760d39948ad406972f",
+  "sourceDigest": "976488967205d8e2140eba1913a810f07d49f3152f73de253bbe24947a5d4159",
+  "digestMethod": "SHA256 of sorted relative UTF8 path + NUL + exact file bytes + NUL for each manifest entry",
+  "manifest": [
+    {
+      "path": "crates/relayer-app-server/src/api/input_drafts.rs",
+      "sha256": "92d2f2517dc125b56fe753beb9ea844254147714cfc0824b183baa2eb6752360"
+    },
+    {
+      "path": "crates/relayer-app-server/src/api/state.rs",
+      "sha256": "331bf6f557268d206b0328c6bb84ee7c9059248fa6e1d792953cb2f6426c5d95"
+    },
+    {
+      "path": "crates/relayer-app-server/src/api/threads.rs",
+      "sha256": "4e2b3b04660addca6f4b345083ae569f0fc38f3982ca59a9acaf85b2d5c57152"
+    },
+    {
+      "path": "crates/relayer-app-server/src/api/types.rs",
+      "sha256": "b21de1de7f4465b4b57e3de302b7a83aa36d9008009c72d80af41ccdbaff8a8e"
+    },
+    {
+      "path": "crates/relayer-app-server/src/product/models.rs",
+      "sha256": "7a5ba534c307086d7f9f1bcb6b5e714506cc1dcd7b616daf35517fb688568841"
+    },
+    {
+      "path": "crates/relayer-app-server/src/product/service.rs",
+      "sha256": "79bb34a031e401d2ad556523828f81d617fdf06b4375f2709e04e74d3bfba218"
+    },
+    {
+      "path": "crates/relayer-app-server/src/storage.rs",
+      "sha256": "2cbe0fb87f53a4c9176a2d24193efcdfa292e84ea882a306116e10c0b1ffefa5"
+    },
+    {
+      "path": "crates/relayer-app-server/src/storage/sqlite/action_invocations.rs",
+      "sha256": "1756af92ae77e5879dec644e17072e6666318db61b331b8da6466d3540ff2313"
+    },
+    {
+      "path": "crates/relayer-app-server/src/storage/sqlite/input_drafts.rs",
+      "sha256": "4380e08524404c723a82ea2611e1b6379d1d194f92e55cd6aa5ae14562579986"
+    },
+    {
+      "path": "crates/relayer-app-server/src/storage/sqlite/interaction_contexts.rs",
+      "sha256": "6fb000ec08141ed10d6c140fb8f93558150c10d6db991569af326e7962e7fe59"
+    },
+    {
+      "path": "crates/relayer-app-server/src/storage/sqlite/interactions.rs",
+      "sha256": "545a533d7b64740516eede63313eb3ba3e5596a01f57188f863c3233c443d68c"
+    },
+    {
+      "path": "crates/relayer-graph-core/src/graph/attached_navigation.rs",
+      "sha256": "1be734fec1d396508f5de23554d17873ce867a16ce8e00db964673e5286a1d9e"
+    },
+    {
+      "path": "crates/relayer-graph-core/src/graph/database.rs",
+      "sha256": "18656cad8606118d6e3f743867e60120a2511a9f645c8eaab1209d4f985c1305"
+    },
+    {
+      "path": "crates/relayer-graph-core/src/graph/invocation.rs",
+      "sha256": "eedb3a38271e0c43219d0b7a2fbf8cc4928de44bcfd63c541dd6ae7447cdd636"
+    },
+    {
+      "path": "crates/relayer-graph-core/src/graph/writer.rs",
+      "sha256": "7413444a64c90309b479bd2d70148fcbe71a235b315129f7541bb2c6c3c7e4f4"
+    },
+    {
+      "path": "crates/relayer-graph-core/src/storage/sqlite/actions.rs",
+      "sha256": "b6db6db6a0efbe6dc44c3b507a0f89483fec535191c5d37ecac73e43b88af501"
+    },
+    {
+      "path": "crates/relayer-graph-core/src/storage/sqlite/contracts.rs",
+      "sha256": "24a6ca3aeb5068f033663438f9c1ee2826c56834c1fc4cee923ff8a3829bd0d9"
+    },
+    {
+      "path": "crates/relayer-graph-core/src/storage/sqlite/input_children.rs",
+      "sha256": "cff72984a401756371b624fd84e3e58d84baa98e4e3a938205d0e115d1c9b4a6"
+    },
+    {
+      "path": "crates/relayer-graph-core/src/storage/sqlite/permissions.rs",
+      "sha256": "9a1fff211b496f0bd8f5e45c4face1c5511f329e0020bd9e90e068d1e8df58ef"
+    },
+    {
+      "path": "crates/relayer-graph-core/tests/graph_database.rs",
+      "sha256": "a8fc316212e19cb3ba193fffa3a2de596eacefb7a8e55a4b0b47c3e41c43e4af"
+    },
+    {
+      "path": "desktop/renderer/src/action-invocation-state.js",
+      "sha256": "85574d803a0bd120a075a4aa4edfac90d2dcbb9ea330296d92e030283ea07c46"
+    },
+    {
+      "path": "desktop/renderer/src/product-workspace/workspace.js",
+      "sha256": "f90ac26db18a001116049ba15cfe2220b518ed492520aaa9c62688921b83a885"
+    },
+    {
+      "path": "docs/decisions/0014-sealed-completion-contract-and-invocations.md",
+      "sha256": "86b7cd9ea40ea6f0b9c7e44031fed4608c5152ef82fc3a98c2803f753a0067a4"
+    },
+    {
+      "path": "docs/prd/index.html",
+      "sha256": "615af35bc079359d45b45b284c64525ac092379529a554631708b1b392fbd77c"
+    },
+    {
+      "path": "scripts/test-desktop-first-message.mjs",
+      "sha256": "d1e1bb44611025907015601c9e6ee30943271cdfdff25d1e86ca1da007391c8f"
+    },
+    {
+      "path": "test/action-invocation-state.test.mjs",
+      "sha256": "ac1164b2587c01eef8e3f46c305b0f01a2fe5955d8df6dd6d45764702c619902"
+    },
+    {
+      "path": "test/first-message-composer-integration.test.mjs",
+      "sha256": "14f5501c119ed8bffa1bc7be88b3c6ba925bca55a017c0f571fbc05205ebfe0f"
+    },
+    {
+      "path": "test/implicit-input-send.test.mjs",
+      "sha256": "bc30c38dfc247fe93297097994b782bd6b7b2cfacaaafc010342b9575b9cefe7"
+    },
+    {
+      "path": "test/invoke-input-product-integration.test.mjs",
+      "sha256": "bfbdd1ab5bc02ba411c9288eba1d275bcc0b72532ae77225ef0a6e3464db0e93"
+    }
+  ],
+  "scope": [
+    "Server-owned ordinary Send selection from canonical accepted Input occurrences and explicit accepted Invoke bindings",
+    "Input-operator authorization of selected ordinary subset; bound-only empty Send refusal",
+    "Product identified Send replay including omitted draft revision; text retry with bound-only vs ordinary pending draft",
+    "SQLite atomic selected snapshot/consumption and snapshot-only restoration/reopen",
+    "Durable Invocation identity separate from reusable policy projected from exact graph-owned source/action/child/key snapshot",
+    "Secondary renderer restored-answer clearing and captured edit epochs",
+    "New ordinary-answer source navigation: graph-owned preparation derives exact native accepted source NavigateAdd grants after canonical child validation and before contract sealing; existing source presentation authority, Return requirement, deduplication and frozen recovery boundaries."
+  ],
+  "verdict": "No remaining blocking authority implementation finding or consequential checkpoint mapping gap in the reviewed scope. Source-navigation mapping is closed by the realistic native two-source plus annotation-overlap scenario. Execution and whole-candidate certification remain separately qualified.",
+  "unresolvedFindings": [],
+  "certification": "Non-certifying until attached to a PR and its current source snapshot is verified. This does not certify the complete production stack, full check/build, heavy renderer proof, live inference, or human acceptance.",
+  "sourceInvalidationRule": "Any byte change to a manifest file invalidates this assertion and requires review of the new snapshot. Changes outside the manifest are outside this assertion; if they affect a reviewed boundary, widen and repeat review before claiming coverage.",
+  "focusedVerification": {
+    "command": "cargo test -p relayer-app-server --lib storage::sqlite::interactions::tests::product_retry_excludes_bound_draft_and_refuses_ordinary_answers -- --exact --nocapture",
+    "exitCode": 0,
+    "testResult": {
+      "passed": 1,
+      "failed": 0,
+      "ignored": 0,
+      "filteredOut": 370,
+      "scenarioSeconds": 0.09
+    },
+    "observedTestFile": "crates/relayer-app-server/src/storage/sqlite/interactions.rs",
+    "observedTestFileSha256": "545a533d7b64740516eede63313eb3ba3e5596a01f57188f863c3233c443d68c",
+    "checkpoint": "Mixed pending draft with ordinary subset refuses retry without mutation; detach ordinary leaves bound-only Some([]); real Product/SQLite text retry claims once, exact replay does not claim again; reopen preserves bound draft, empty submitted arguments and original failed-admission receipt.",
+    "inference": false,
+    "buildContext": "Existing warm target and Ladybug outputs reused; no cold native provisioning.",
+    "nonEvidenceAttempt": "Initial unqualified short-name --exact command selected zero tests; only the qualified command above establishes this pass.",
+    "preservedFailure": {
+      "kind": "test-only Clippy lint",
+      "rule": "cloned_ref_to_slice_refs",
+      "file": "crates/relayer-app-server/src/storage/sqlite/input_drafts.rs",
+      "line": 957,
+      "logs": [
+        "/private/tmp/interactive-inputs-final-check-3.log",
+        "/private/tmp/interactive-inputs-final-check-4.log"
+      ],
+      "repair": "Replace &[answer.clone()] with std::slice::from_ref(&answer). Root clarified the full-check lint occurred here, not in the new retry test."
+    },
+    "testedSourceDigest": "0424b9b6c4a434d1fe4683a18e9fa1677d4ff3c1b9c371b95af38eb31476d786"
+  },
+  "verificationSeparation": "Other scenario source was reviewed statically. Their execution and full portfolio results must be supplied separately against the matching candidate.",
+  "reviewRefresh": {
+    "changedFiles": [
+      "crates/relayer-graph-core/tests/graph_database.rs"
+    ],
+    "change": "Reviewed final submitted_input_children_are_canonical_isolated_and_retry_stable scenario. It prepares native accepted inputs from two Nodes in distinct source threads within the same project; two questions share the first Node and a node annotation overlaps it. Exact contract assertions require precisely two NavigateAdd authorities and two NavigateResponse requirements. No-link Advance/Return and single-link Advance are refused; unrelated native source is denied. Adding both exact links allows Return. Reopen with changed permission configuration recovers both original contracts/child sets and exact accepted source-to-response links. The prior cross-source mapping gap is closed.",
+    "executionQualification": "Reviewer inspected test source and did not rerun this new native graph checkpoint. Parent reports its exact-qualified native run passed 1/1 in 0.12s. That execution receipt/log and full check/build remain separate; previously recorded reviewer-run Rust retry proof retains its original testedSourceDigest."
+  },
+  "sourceNavigationCheckpoint": {
+    "file": "crates/relayer-graph-core/tests/graph_database.rs",
+    "test": "submitted_input_children_are_canonical_isolated_and_retry_stable",
+    "staticReview": "pass",
+    "reportedExecution": {
+      "reportedBy": "/root",
+      "passed": 1,
+      "failed": 0,
+      "scenarioSeconds": 0.12,
+      "independentlyRunByThisReviewer": false
+    },
+    "scope": [
+      "canonical accepted native source provenance",
+      "two-source grant and requirement completeness",
+      "annotation/answer same-node deduplication",
+      "missing first/second link refusal before publication",
+      "unrelated-source authority denial",
+      "both exact source links accepted on Return",
+      "frozen contract and link recovery after permission configuration change"
+    ]
+  }
+}

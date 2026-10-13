@@ -1,0 +1,196 @@
+{
+  "schemaVersion": 1,
+  "reviewer": "final_authority_review",
+  "date": "2026-10-08",
+  "pullRequestNumber": 707,
+  "workspace": "/private/tmp/relayer-interactive-inputs-v1-merge",
+  "baselineHead": "4432809514480873633260099b7ae5466f200bae",
+  "qualifiedSourceSnapshot": {
+    "sourceDigest": "272e46d3370fb9d857f6c808b9c1726525f88bcb5dcd2b58a681ac813517994a",
+    "sourceManifestFile": "/private/tmp/pr707-native-portable-source.json",
+    "fileCount": 219,
+    "status": "Exact current bytes independently verified; final parent suite remains separate"
+  },
+  "digestMethod": "SHA256 sorted relative path + NUL + file bytes + NUL",
+  "sourceDigest": "744665d0394b5911e82b94d5c2071de5930af4da468895be4759aa8b517af54e",
+  "sourceManifest": [
+    {
+      "path": "crates/relayer-app-server/src/api/state.rs",
+      "sha256": "2b963e759b493dc24a91c50f56a3d3c208f1eede289bfd5420dc40e758dca2a2"
+    },
+    {
+      "path": "crates/relayer-app-server/src/api/threads.rs",
+      "sha256": "224f0284fc0f1fe2d89166632aa849360c059b67642123779ce2be3ac5c1e331"
+    },
+    {
+      "path": "crates/relayer-app-server/src/api/types.rs",
+      "sha256": "18529f18a1073e660e843b96322f68ef458f265f79a21be7d50292e1903e7034"
+    },
+    {
+      "path": "crates/relayer-app-server/src/runtime.rs",
+      "sha256": "2d92d9b7bb3187c4ce5c32fa00a6dbcd282b1665ef9202d20c067b473362fbb9"
+    },
+    {
+      "path": "crates/relayer-app-server/tests/support/completion_traces.rs",
+      "sha256": "4325b86bd25999ce6caf20c13a2f59b3efbf6936c8c87e9d32e55c062fe9d14c"
+    },
+    {
+      "path": "crates/relayer-graph-core/src/graph.rs",
+      "sha256": "fd8dfc1c833880726c622a08e4e240c6bcb18126805885820000bb59eb611ecb"
+    },
+    {
+      "path": "crates/relayer-graph-core/src/graph/completion.rs",
+      "sha256": "f77063b4b68452a62f5ee430b8a6645463a7b30aa1ab83b246b276e651b0c2f5"
+    },
+    {
+      "path": "crates/relayer-graph-core/src/graph/invocation.rs",
+      "sha256": "c5afb0e0ee7cb0e2f459f0f164fbda5d400cc01f9e2dcb37488dee0ce90d9fb3"
+    },
+    {
+      "path": "crates/relayer-graph-core/src/lib.rs",
+      "sha256": "68d828144bb4f6e1a754659193513a28d4e8cc4b94031e6f644ca4fc27747534"
+    },
+    {
+      "path": "crates/relayer-graph-core/src/storage/sqlite/invocations.rs",
+      "sha256": "1cdce249079cac5c0b7b40cd0c6973e26a83a8dffb738b2fac6bbf91cd00b3e6"
+    },
+    {
+      "path": "crates/relayer-graph-core/tests/durable_invocations.rs",
+      "sha256": "3c8def583e03df3927e52b582e8c3352a2f96393a44f1bd4797d65962c99cb78"
+    },
+    {
+      "path": "crates/relayer-graph-core/tests/graph_database.rs",
+      "sha256": "6a03faff5c1d6868dc4d14968cd7803a1d51af2ad91e79cec993b555eb2aea7e"
+    },
+    {
+      "path": "crates/relayer-graph-server/src/lib.rs",
+      "sha256": "1fa154269790f31ad73df8df4f1e9a8050ebe81b3cd249acf0316278ce22c5a9"
+    },
+    {
+      "path": "desktop/renderer/src/action-invocation-state.js",
+      "sha256": "55e16066f78ee3fa25d5c6ed4753efd7c5b3a7f985c6a4da3ff031ae261be71f"
+    },
+    {
+      "path": "desktop/renderer/src/product-workspace/workspace.js",
+      "sha256": "c8473eab2db555a6631489ed472f92efacbd1831b53e1aadacda85bc55069c66"
+    },
+    {
+      "path": "desktop/renderer/src/state.js",
+      "sha256": "69704fd548590f226acca8f9c36ec07e9cd81a9dc2815b00eebc1276447738f1"
+    },
+    {
+      "path": "desktop/renderer/src/threads.js",
+      "sha256": "05d4392dacffe7e7b23080fab45704dc10119803b46018438149c7168a325ee0"
+    },
+    {
+      "path": "desktop/renderer/src/workspace-navigation.js",
+      "sha256": "1cb611b9045c183d0ba3c21a93caef76d78a378ac506a7f0e666c9bf3604cc36"
+    },
+    {
+      "path": "docs/decisions/0015-sealed-completion-contract-and-invocations.md",
+      "sha256": "bcc37d822bb5a96f0e092a1ad6908b743acceb4e0932f4dce57e9272ebcba0a7"
+    },
+    {
+      "path": "docs/prd/index.html",
+      "sha256": "94d4aa3545f2aed7b369ed1e8e61f6120802c2e007f93fd050b23358800dca69"
+    },
+    {
+      "path": "test/action-invocation-state.test.mjs",
+      "sha256": "ff1524f3828a0e607753ed7fdf4c26efcdf304d18c0f3183b5c07869ade70b3d"
+    },
+    {
+      "path": "test/invoke-input-bindings.test.mjs",
+      "sha256": "6c391426b97eb7a51ec737c08a36ab485faadba836213ef8fa8c8d2e43c55b81"
+    },
+    {
+      "path": "test/workspace-navigation-integration.test.mjs",
+      "sha256": "e7b05cb40f88cbb0eca09b54e152f3a97bd64b7ee3d1ddfeee8248eb821e3a9a"
+    },
+    {
+      "path": "test/workspace-navigation.test.mjs",
+      "sha256": "38a83d0d441647abf2a4a12ef80e3538646efcc93061a81605a4fb8437aaa171"
+    },
+    {
+      "path": "test/workspace-reading-context.test.mjs",
+      "sha256": "a3bb3adf94bc795dfe9d11acb0c925cf7879c564cf461d157001ee5bde8108f4"
+    }
+  ],
+  "verdict": "No unresolved blocker in reviewed frozen native/Product authority, inert history/privacy, prepared instruction adapter, and affected checkpoint subsumption. This is a bounded read-only source assertion, not merge, release, human acceptance or whole-product certification.",
+  "scope": [
+    "Original native call/key recovers exact frozen child, instruction, activator, arguments and presentation after own-draft callable repair; live source/action authority remains required.",
+    "Product reserves before native preparation and binds only verified original human call; no agent-key adoption, synthetic Product identity, new execution route or provider retry authority.",
+    "Whole-source/key absence refuses an occupied key before a new Product receipt; deterministic rejection uses request(source,action,key) absence and cannot erase a different spent call.",
+    "Bound Runtime preparation reads exact durable child/source/action frozen instruction and sends its raw bytes; Product chronology remains trimmed; normal unbound creation remains unchanged; shared agent and human flows remain valid.",
+    "Native graph server retains exact instruction equality and project/thread/source provenance checks; no weakening of sealed input contract.",
+    "Source-scoped graph-only inventory is inert, global single-use occupancy contains only visible canonical action/Node IDs; no foreign key, arguments or Current; unknown metadata disables mutation.",
+    "Trusted nondurable lost-bind reservation wins graph-only/global occupancy; failed no-effect receipt does not shadow actual global occupancy; atomic navigation restores availability bit.",
+    "Replacement native repair checkpoint subsumes immutability expectations through frozen equality, reopen, source/action/arguments/presentation guards; no deleted test boundary."
+  ],
+  "reviewFindings": [
+    {
+      "finding": "Prepared Runtime command used trimmed Product text against exact raw native child guard",
+      "disposition": "Frozen trusted call instruction restored only for exact prepared child; raw-or-exact-Rust-trim command compatibility; unchanged native guard."
+    },
+    {
+      "finding": "Key absence incorrectly conflated global key occupancy with request effects",
+      "disposition": "Separate whole-source/key pregate from matching-request postrefusal predicate; no broad retry authority."
+    },
+    {
+      "finding": "No-effect failed receipt could conceal foreign global single-use occupancy",
+      "disposition": "Real local refusal joins genuine rejected receipt and separate opaque occupancy marker; GET/state equal, foreign payload absent."
+    }
+  ],
+  "checkpointObservations": [
+    {
+      "checkpoint": "v4_import_reexport_preserves_call_only_own_draft_history",
+      "observedLog": "/private/tmp/pr707-portable-world-frozen-instruction-final.log",
+      "observed": "1/1 PASS, inner0.18s; raw NEL/EMSPACE private-path native input+sealed contract, Product trimmed chronology, same-node raw/trim recovery, altered command and wrong source refusal, unchanged canonical input, actual import/reopen/reexport.",
+      "sourceQualification": "Adapter seam unchanged at frozen snapshot; observed before later independent key predicate and fixture edits. Final whole snapshot rerun belongs to parent suite."
+    },
+    {
+      "checkpoint": "user_cannot_adopt_graph_owned_key_after_callable_repair",
+      "observedLog": "/private/tmp/pr707-cross-action-key-final-2.log",
+      "observed": "1/1 PASS, inner0.30s; same and distinct-action source key refuse before Product write; both absence predicates; stale inventory collision cannot launch agent child.",
+      "sourceQualification": "Passed snapshot bc92f69c6f77bc3b99331f9c1abdee380a8a289f11375fc7422b21432c02131d; only separate occupancy diagnostic fixture subsequently changed. Final compound snapshot qualification remains parent-owned."
+    },
+    {
+      "checkpoint": "local_call_occupancy_is_private_and_isolated_across_unrelated_roots",
+      "observedLog": "/private/tmp/pr707-local-occupancy-final-extension-3.log",
+      "observed": "1/1 PASS, inner0.21s; real deterministic native single-use refusal retains preparationRejected/nonrecoverable/nondurable Product receipt and separate opaque occupancy; unrelated roots available, GET/state equal, no foreign key or native payload.",
+      "sourceQualification": "Observed at previous effd1fecba4dc868873c62dd9c45c5bcfdaca8080023121f9f1184a11e07d751 snapshot. Final snapshot strengthens only this refusal test to exact native invoke_single_call_already_prepared code via existing internal_diagnostic; stronger assertion execution pending parent full suite. Production mechanism bytes unchanged."
+    }
+  ],
+  "checkpointSubsumption": {
+    "replacedTest": "reused_key_cannot_reinterpret_changed_draft_instruction -> reused_key_recovers_frozen_child_across_own_draft_repairs",
+    "assertion": "Frozen child/snapshot/contract equality through changed instruction, label, source Layer, reuse policy and bindings; original activator/argument payload remains; reopen returns one call; fresh single-use call, different-action same key, kind repair and stopped authority refuse.",
+    "sourceNodeIdentity": "Existing graph_database same owner/client key with different source Node produces distinct action IDs; source Node is action identity, not mutable same-ID rebind.",
+    "retainedBoundary": "Existing submitted argument/question/value and presenting occurrence guards stay intact; historical Layer omission fixture preserves canonical accepted callable and actual native call."
+  },
+  "preservedFailures": [
+    {
+      "logs": [
+        "/private/tmp/pr707-cross-action-key-final.log",
+        "/private/tmp/pr707-local-occupancy-final-extension.log"
+      ],
+      "cause": "Compile-time missed old helper arity at completion_traces.rs5440; no scenario ran. Fixed to matching-request absence for actual prepared lost-bind call."
+    },
+    {
+      "log": "/private/tmp/pr707-local-occupancy-final-extension-2.log",
+      "cause": "Inner scenario failed expected message assertion because native structured error envelope is nested; existing ApiError.message reads string only. Changed test to existing internal_diagnostic; original already-spent predicate and production error flow unchanged."
+    }
+  ],
+  "pendingQualification": [
+    "Execution of final exact-native-code refusal assertion in local_call_occupancy_is_private_and_isolated_across_unrelated_roots; previous diagnostic already predicate passed, final stronger predicate still pending",
+    "Parent full npm run check on exact final snapshot",
+    "Parent final npm run build",
+    "Final declared native browser/preview/recording proofs on matching normal binaries",
+    "Current PR head/base/CI/freshness and unresolved review disposition audit"
+  ],
+  "limitations": [
+    "No edits to production by this reviewer; no paid inference, cold build, CI, push or merge.",
+    "Native prepare idempotency is a read of the original frozen call, not provider execution retry.",
+    "Graph-only Current remains inert read payload and does not mint a Product turn, route or launch authority.",
+    "Test logs and earlier receipts do not certify later changed bytes; exact source assertions and actual test observations are distinguished."
+  ],
+  "invalidationRule": "Any listed executable/test/PRD/ADR byte change invalidates this bounded source assertion. Parent qualification source digest changes require a refreshed overall snapshot binding."
+}

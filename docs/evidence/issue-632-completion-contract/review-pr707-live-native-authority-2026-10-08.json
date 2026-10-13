@@ -1,0 +1,222 @@
+{
+  "schemaVersion": 1,
+  "reviewer": "authority_review",
+  "date": "2026-10-08",
+  "baseCommit": "44328095",
+  "workspace": "/private/tmp/relayer-interactive-inputs-v1-merge",
+  "sourceDigestAlgorithm": "SHA256(sorted UTF8 relative path + NUL + exact bytes + NUL)",
+  "sourceDigest": "8ca2d531fafa851dffe43f36c058ede3f4befc4b11d5969abc70cfffa4d2bceb",
+  "sourceManifest": [
+    {
+      "path": "crates/relayer-app-server/src/api/state.rs",
+      "sha256": "2b963e759b493dc24a91c50f56a3d3c208f1eede289bfd5420dc40e758dca2a2"
+    },
+    {
+      "path": "crates/relayer-app-server/src/api/threads.rs",
+      "sha256": "0123cc87dfcb7f140e3c207a1348081adb82dc6268f1cef7ca861c9a65a20426"
+    },
+    {
+      "path": "crates/relayer-app-server/src/api/types.rs",
+      "sha256": "18529f18a1073e660e843b96322f68ef458f265f79a21be7d50292e1903e7034"
+    },
+    {
+      "path": "crates/relayer-app-server/src/runtime.rs",
+      "sha256": "fe6b11d3706b9f81d0f50ee3cc1de0c48de061b01e5c524762c477ba469b6b54"
+    },
+    {
+      "path": "crates/relayer-app-server/tests/support/completion_traces.rs",
+      "sha256": "0f3527948c90721b0b9332d115a8f90252aab39a36a3713ae58353a5cd15a582"
+    },
+    {
+      "path": "crates/relayer-graph-core/src/graph.rs",
+      "sha256": "fd8dfc1c833880726c622a08e4e240c6bcb18126805885820000bb59eb611ecb"
+    },
+    {
+      "path": "crates/relayer-graph-core/src/graph/completion.rs",
+      "sha256": "f77063b4b68452a62f5ee430b8a6645463a7b30aa1ab83b246b276e651b0c2f5"
+    },
+    {
+      "path": "crates/relayer-graph-core/src/graph/invocation.rs",
+      "sha256": "c5afb0e0ee7cb0e2f459f0f164fbda5d400cc01f9e2dcb37488dee0ce90d9fb3"
+    },
+    {
+      "path": "crates/relayer-graph-core/src/lib.rs",
+      "sha256": "68d828144bb4f6e1a754659193513a28d4e8cc4b94031e6f644ca4fc27747534"
+    },
+    {
+      "path": "crates/relayer-graph-core/src/storage/sqlite/invocations.rs",
+      "sha256": "1cdce249079cac5c0b7b40cd0c6973e26a83a8dffb738b2fac6bbf91cd00b3e6"
+    },
+    {
+      "path": "crates/relayer-graph-core/tests/durable_invocations.rs",
+      "sha256": "3c8def583e03df3927e52b582e8c3352a2f96393a44f1bd4797d65962c99cb78"
+    },
+    {
+      "path": "crates/relayer-graph-core/tests/graph_database.rs",
+      "sha256": "6a03faff5c1d6868dc4d14968cd7803a1d51af2ad91e79cec993b555eb2aea7e"
+    },
+    {
+      "path": "crates/relayer-graph-server/src/lib.rs",
+      "sha256": "1fa154269790f31ad73df8df4f1e9a8050ebe81b3cd249acf0316278ce22c5a9"
+    },
+    {
+      "path": "desktop/renderer/src/action-invocation-state.js",
+      "sha256": "55e16066f78ee3fa25d5c6ed4753efd7c5b3a7f985c6a4da3ff031ae261be71f"
+    },
+    {
+      "path": "desktop/renderer/src/product-workspace/workspace.js",
+      "sha256": "c8473eab2db555a6631489ed472f92efacbd1831b53e1aadacda85bc55069c66"
+    },
+    {
+      "path": "desktop/renderer/src/state.js",
+      "sha256": "69704fd548590f226acca8f9c36ec07e9cd81a9dc2815b00eebc1276447738f1"
+    },
+    {
+      "path": "desktop/renderer/src/threads.js",
+      "sha256": "05d4392dacffe7e7b23080fab45704dc10119803b46018438149c7168a325ee0"
+    },
+    {
+      "path": "desktop/renderer/src/workspace-navigation.js",
+      "sha256": "1cb611b9045c183d0ba3c21a93caef76d78a378ac506a7f0e666c9bf3604cc36"
+    },
+    {
+      "path": "docs/decisions/0015-sealed-completion-contract-and-invocations.md",
+      "sha256": "bcc37d822bb5a96f0e092a1ad6908b743acceb4e0932f4dce57e9272ebcba0a7"
+    },
+    {
+      "path": "docs/prd/index.html",
+      "sha256": "94d4aa3545f2aed7b369ed1e8e61f6120802c2e007f93fd050b23358800dca69"
+    },
+    {
+      "path": "test/action-invocation-state.test.mjs",
+      "sha256": "ff1524f3828a0e607753ed7fdf4c26efcdf304d18c0f3183b5c07869ade70b3d"
+    },
+    {
+      "path": "test/invoke-input-bindings.test.mjs",
+      "sha256": "6c391426b97eb7a51ec737c08a36ab485faadba836213ef8fa8c8d2e43c55b81"
+    },
+    {
+      "path": "test/workspace-navigation-integration.test.mjs",
+      "sha256": "e7b05cb40f88cbb0eca09b54e152f3a97bd64b7ee3d1ddfeee8248eb821e3a9a"
+    },
+    {
+      "path": "test/workspace-navigation.test.mjs",
+      "sha256": "38a83d0d441647abf2a4a12ef80e3538646efcc93061a81605a4fb8437aaa171"
+    },
+    {
+      "path": "test/workspace-reading-context.test.mjs",
+      "sha256": "a3bb3adf94bc795dfe9d11acb0c925cf7879c564cf461d157001ee5bde8108f4"
+    }
+  ],
+  "verdict": "No unresolved scoped source blocker. Two new realistic API/native ownership+occupancy checkpoints passed exact final source. Final unified/native browser and remaining reservation/graphOnly process checkpoints remain parent-qualified; non-certifying until PR/current-head qualification.",
+  "scope": [
+    "CC-001/CC-004 native exact-key frozen recovery across own-draft repairs, original source/action/argument/presentation identity and live authority",
+    "CC-004/CC-006/CC-009 local graph-owned inert history with genuine optional Product result identity; no execution or invented Product child",
+    "Source-scoped native call inventory and privacy-safe whole-Node global single-call occupancy across reused Nodes and unrelated roots",
+    "Product reservation ownership before and after native preparation; graph-owned keys cannot become human launch authority",
+    "Strict missing metadata refusal; atomic navigation capability rollback; native/Product history namespaces"
+  ],
+  "dispositions": [
+    {
+      "reviewThreadId": "PRRT_kwDOTyTfxM6qOaOa",
+      "change": "Native snapshot/source ownership maps project graph-owned calls read-only and explicit single-call exhaustion without foreign call payloads."
+    },
+    {
+      "reviewThreadId": "PRRT_kwDOTyTfxM6qOaOv",
+      "change": "Exact native preparation reads original frozen child/snapshot despite mutable own-draft edits, guarded by live native source/action authority and original argument/presentation identity."
+    }
+  ],
+  "checkpoints": [
+    {
+      "promise": "CC-001/CC-004 frozen native repair/reopen and actual argument/presentation/source authority",
+      "command": "cargo test -p relayer-graph-core --test durable_invocations -- --nocapture",
+      "observedLog": "/private/tmp/pr707-own-draft-native-recovery-final-4.log",
+      "observed": "9/9 pass, inner0.74s. Historical Layer omission included. Predates additive occupancy source-map bytes; final rerun/unified qualification pending.",
+      "subsumption": "Retires changed mutable instruction conflict expectation only; original argument/question/value/presentation guards remain. graph_database source-key identity checkpoint plus distinct-action conflict covers attempted source rebind."
+    },
+    {
+      "promise": "Known-source graphOnly history, opaque occupancy, foreign source privacy, genuine reservation recovery, missing inventory and atomic availability rollback",
+      "command": "PATH=/private/tmp/relayer-node22-runtime.GL3kmC:$PATH ./node_modules/.bin/vitest run test/invoke-input-bindings.test.mjs test/action-invocation-state.test.mjs test/workspace-reading-context.test.mjs test/workspace-navigation-integration.test.mjs test/workspace-navigation.test.mjs",
+      "observedLog": "/private/tmp/pr707-graph-only-ui-final-4.log",
+      "observed": "186/186 pass,5files,19.00s. Predates final namespaced identity fixture; final portfolio/unified qualification pending."
+    },
+    {
+      "promise": "Existing broker launch/fence/stop semantics compile with optional Product result",
+      "command": "cargo test -p relayer-app-server --lib api::threads::tests -- --nocapture",
+      "observedLog": "/private/tmp/pr707-graph-only-projection-unit-final-6.log",
+      "observed": "20/20 pass,inner1.89s. Predates source-map forwarding/final adoption proof."
+    },
+    {
+      "promise": "Native inventory/exhaustion metadata missing or unknown never certifies unused",
+      "command": "cargo test -p relayer-app-server --lib runtime::tests::accepted_graph_closures_client_preserves_missing_slots_and_rejects_mismatches -- --nocapture",
+      "observedLog": "/private/tmp/pr707-native-inventory-runtime-final-1.log",
+      "observed": "1/1pass,inner5.52s. Final source adds missing ownership-map and malformed concordance refusal; unified qualification pending."
+    },
+    {
+      "promise": "Actual native wire; graph-owned call knownsource frozen lifecycle/history and null Product result; GET/state no launch writes",
+      "requiredCommand": "cargo test -p relayer-app-server --lib native_reusable_invocations_preserve_conversation_and_share_export_for_single_multiple_and_graph_only_calls -- --nocapture",
+      "status": "Pending parent process qualification"
+    },
+    {
+      "promise": "Exact nondurable bind-loss receipt wins native/global occupation; postprepare503 -> restored mandatory proof -> real bind refusal; captured epoch/draft/reopen stable",
+      "requiredCommand": "cargo test -p relayer-app-server --lib user_reservation_precedes_native_prepare_and_recovers_a_failed_bind -- --nocapture",
+      "status": "Pending parent process qualification"
+    },
+    {
+      "promise": "Own-draft agentOld -> repaired accepted definition does not grant user samekey launch; adversarial one-read stale inventory cannot adopt agent child; Product mismatch failed/no recovery/no false no-effect marker",
+      "requiredCommand": "cargo test -p relayer-app-server --lib user_cannot_adopt_graph_owned_key_after_callable_repair -- --nocapture",
+      "observedLog": "/private/tmp/pr707-agent-key-adoption-api-final-5.log",
+      "status": "1/1 PASS inner0.58s exact final source; sequential draft repair and explicit stale-inventory fault both observed."
+    },
+    {
+      "promise": "Foreign shared-Node single call exposes only canonical local occupancy; unrelated reusable root inventory remains available; GET/state equal",
+      "requiredCommand": "cargo test -p relayer-app-server --lib local_call_occupancy_is_private_and_isolated_across_unrelated_roots -- --nocapture",
+      "observedLog": "/private/tmp/pr707-local-occupancy-api-final-4.log",
+      "status": "1/1 PASS inner40.11s exact final source; cross-thread native occupancy and two unrelated roots via GET/state observed. Host executable assessment stall preserved separately."
+    }
+  ],
+  "preservedFailures": {
+    "nativeRecovery": "/private/tmp/pr707-own-draft-native-recovery-1.log: test Stop reason user_stop invalid; corrected to existing cancelled_by_user",
+    "projectionCompile": [
+      "/private/tmp/pr707-graph-only-projection-unit-1.log: Option Productresult lookup",
+      "/private/tmp/pr707-graph-only-projection-unit-2.log: visibility of optional execution DTO",
+      "/private/tmp/pr707-graph-only-projection-unit-4.log: test i64 invocation ID mistaken value()"
+    ],
+    "restrictedEnvironment": "/private/tmp/pr707-graph-only-projection-unit-3.log:10pass/10loopback PermissionDenied, later allowed20pass",
+    "adoption": [
+      "/private/tmp/pr707-agent-key-adoption-api-1.log: fixture attempted repair already accepted definition",
+      "/private/tmp/pr707-agent-key-adoption-api-2.log",
+      "/private/tmp/pr707-agent-key-adoption-api-3.log: active Current lacks Returned closure; replaced impossible live-agent-afterReturn race with explicit stale inventory fault",
+      "/private/tmp/pr707-agent-key-adoption-api-4.log: real producer omitted native occupancy wire; strict unknown refused"
+    ],
+    "occupancy": [
+      "/private/tmp/pr707-local-occupancy-api-1.log: normal active Product chronology gate",
+      "/private/tmp/pr707-local-occupancy-api-2.log: foreign call missing exact presenting Layer",
+      "/private/tmp/pr707-local-occupancy-api-3.log: real producer missing occupancy wire"
+    ]
+  },
+  "limitations": [
+    "No paid inference or new scheduler.",
+    "Graph-only native Current remains inert payload; no new Product turn, route or executable recovery authority.",
+    "Native exact-key preparation recovery is a read, not provider execution retry.",
+    "Unknown postproof transport retains only exact trusted preexecution receipt; every retry must verify frozen human ownership before binding/handoff. Complete inventory missing/mismatched call is failed nonrecoverable, not no-effect preparationRejected.",
+    "Native stale-inventory collision scenario is explicit fault injection, not claim that a Returned parent can newly author an agent call.",
+    "Parent owns final npm check/build, native browser captures, PR head and freshness qualification."
+  ],
+  "invalidationRule": "Any listed executable/test/PRD/ADR byte change invalidates this source assertion. Mutable evidence metadata changes alone do not. Historical receipts remain preserved; refresh only this current-round receipt.",
+  "peerReview": [
+    {
+      "reviewer": "prototype_review",
+      "scope": "Inert UI/identity/nullresult/privacy/strictunknown/atomicrollback and checkpoint subsumption",
+      "verdict": "No scoped source blocker at frozen source; earlier warm portfolio limitations recorded.",
+      "sourceDigest": "58a51efc0b365c96d06560b352a5c91821e3d1a73e3d104c21ca43030f5e168e",
+      "receipt": "/private/tmp/pr707-post-breadcrumb-adversarial-review.json"
+    },
+    {
+      "reviewer": "context_trace",
+      "scope": "Native frozen recovery subsumption, Product pre/post human ownership and native occupancy privacy",
+      "verdict": "No scoped source blocker; actual pending heavy proof not certified"
+    }
+  ],
+  "environment": "macOS syspolicyd executable assessment stalled native test startup; final scenarios subsequently emitted explicit inner PASS. No policy change or unowned process termination. Parent final unified qualification remains separate."
+}

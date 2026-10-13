@@ -4,7 +4,8 @@
 // a video (whole, a segment), an image, Markdown (whole, a heading), a page with a
 // script error, and a deployed https site. No model runs.
 import { EdgeObject, LayerLayoutObject, LayerObject, NodeObject, NodePlacementObject, RelayerGraphClient, type ArtifactDetails } from "@relayer/graph-client";
-import { renderInteractionInput, type Harness, type HarnessConfiguration, type HarnessFactory, type HarnessFactoryContext, type HarnessRunContext, type HarnessSessionState, type HarnessTraceSupport } from "@relayer/harness-host";
+import { renderInteractionInput, type ArtifactNoteInteractionInput, type Harness, type HarnessConfiguration, type HarnessFactory, type HarnessFactoryContext, type HarnessRunContext, type HarnessSessionState, type HarnessTraceSupport } from "@relayer/harness-host";
+import { createHash } from "node:crypto";
 import { appendFile, copyFile, cp, mkdir, readFile, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -120,11 +121,17 @@ class ArtifactViewerFixtureHarness implements Harness {
     // ART-011: what the agent receives for artifact notes, screenshot files included.
     if (previewEvidence && context.interactionInput.contexts.length) {
       // The turn folder holding the screenshots is removed after the turn, so look now.
-      const screenshots = await Promise.all(context.interactionInput.contexts.flatMap((item) => item.annotations).map(async (note) => {
-        const file = /screenshot (\/\S+\.png)/u.exec(note)?.[1];
-        const head = file ? await readFile(file).then((bytes) => bytes.subarray(0, 4).toString("hex"), () => null) : null;
-        return { note, file, png: head === "89504e47" };
-      }));
+      const input = context.interactionInput as ArtifactNoteInteractionInput;
+      const screenshots = await Promise.all(input.contexts.flatMap(item => item.annotations.map(async (note, annotationIndex) => {
+        const digest = /screenshot sha256:([0-9a-f]{64})$/u.exec(note)?.[1];
+        const materialized = input.artifactNoteScreenshots?.find(screenshot => screenshot.targetNodeId === item.targetNode.id
+          && screenshot.annotationIndex === annotationIndex && screenshot.digestSha256 === digest);
+        const file = input.completionContract ? materialized?.path ?? undefined : /screenshot (\/\S+\.png)/u.exec(note)?.[1];
+        const bytes = file ? await readFile(file).catch(() => Buffer.alloc(0)) : Buffer.alloc(0);
+        const hashMatches = digest === undefined ? undefined : createHash("sha256").update(bytes).digest("hex") === digest;
+        return { note, file, targetNodeId: item.targetNode.id, annotationIndex, digestSha256: digest, hashMatches,
+          png: bytes.subarray(0, 4).toString("hex") === "89504e47" && hashMatches !== false };
+      })));
       await writeFile(join(previewEvidence, `input-${context.inputGraph.id}.json`), JSON.stringify(screenshots, null, 2));
     }
     // A follow-up that carries artifact notes gets a short answer that links back from

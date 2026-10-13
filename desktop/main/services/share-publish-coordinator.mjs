@@ -5,6 +5,7 @@ import { captureShareErrorDiagnostics } from "./share-error-diagnostics.mjs";
 const MAX_ATTEMPTS = 32;
 const MAXIMUM_PREFLIGHT_TITLE = "😀".repeat(120);
 const NON_REPORTED_CODES = new Set([
+  "reusable_invocation_portability_unavailable",
   "share_cancelled",
   "share_sign_in_required",
   "share_imported_conversation",
@@ -24,6 +25,7 @@ const CLOSED_FAILURE_CODES = new Set([
   "share_title_too_long",
   "share_snapshot_too_large",
   "share_export_failed",
+  "reusable_invocation_portability_unavailable",
   "share_upload_failed",
   "share_service_failed",
   "daily_quota_exhausted",
@@ -112,6 +114,7 @@ function closedFailure(error, reference) {
       "share_title_too_long",
       "share_snapshot_too_large",
       "share_export_failed",
+      "reusable_invocation_portability_unavailable",
       "daily_quota_exhausted",
       "reservation_limit_exhausted",
       "share_sign_in_required",

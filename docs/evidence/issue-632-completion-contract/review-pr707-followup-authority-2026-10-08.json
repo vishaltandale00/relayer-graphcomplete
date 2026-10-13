@@ -1,0 +1,426 @@
+{
+  "schemaVersion": 1,
+  "date": "2026-10-08",
+  "reviewer": "/root/authority_review",
+  "workspace": "/private/tmp/relayer-interactive-inputs-v1-merge",
+  "pullRequestNumber": 707,
+  "baselineHead": "8f9bb094853a609d2edc647f2020bc5c07ef2c34",
+  "reviewedScope": "Bounded follow-up API P2 PRRT_kwDOTyTfxM6qNYvk one connected Input answer per clicked Invoke; trusted canonical selection, immutable recovery and atomic epoch cleanup; secondary RuntimeAction frozen sourceNode projection. Independent bounded two-Layer UI and inert public own-draft source review. Prior authority envelope carried forward with exact current bytes; no ordinary Send deduplication, scheduler, import authority or inference changes.",
+  "digestMethod": "SHA256 sorted relative UTF8 path + NUL + exact bytes + NUL; receipt excluded",
+  "sourceDigest": "abb9ad6b7f7809264bcb8c9adee45a3439bec4c24fb105b2f4e4d3da9d9e9591",
+  "manifest": [
+    {
+      "path": "crates/relayer-app-server/src/api/conversation_imports.rs",
+      "sha256": "6edfec36e319aa958c6c8fc7f8134b8f8b0e3dafd186812fae25b380ab5f4988"
+    },
+    {
+      "path": "crates/relayer-app-server/src/api/input_drafts.rs",
+      "sha256": "86a91e9d37629dc94456eb5c92334b17d197abad7e71eacbcfd2273953e882ca"
+    },
+    {
+      "path": "crates/relayer-app-server/src/api/state.rs",
+      "sha256": "67e0c924b5884a893f3aa03ede6d64ea5c605221007ae7973acf14afd414485f"
+    },
+    {
+      "path": "crates/relayer-app-server/src/api/threads.rs",
+      "sha256": "821669d0cbe3f0fb5c16377d9883a670df3f336b5e1e5757e5c45656c860bce7"
+    },
+    {
+      "path": "crates/relayer-app-server/src/api/types.rs",
+      "sha256": "f18f7e190086605f1c979f93658c72d00fbfa1d6c8995823ce0a9cf2f62e0d09"
+    },
+    {
+      "path": "crates/relayer-app-server/src/app_server.rs",
+      "sha256": "2e310843d3d385363768aba3df1867c36420dc1f6a92b60ed76541c20fcd9680"
+    },
+    {
+      "path": "crates/relayer-app-server/src/conversation_export.rs",
+      "sha256": "735b984bd8706fbe07a141ce5e5cef5d1c7fb644eb04702917cd787357b807c1"
+    },
+    {
+      "path": "crates/relayer-app-server/src/conversation_export_service.rs",
+      "sha256": "e5d8d7421645bb396fa8616abea6bafbe3ffb4b7465d4129fd04a8a25f56deee"
+    },
+    {
+      "path": "crates/relayer-app-server/src/product/service.rs",
+      "sha256": "b2eda63fe60a797a21af8c7642d640daa4eaf73c6cf131bfca9b137e11782e7a"
+    },
+    {
+      "path": "crates/relayer-app-server/src/runtime.rs",
+      "sha256": "c11f68b5ceab521473f778584929bb105b62ffe1b60dcecde898e86f07ccfd6d"
+    },
+    {
+      "path": "crates/relayer-app-server/src/storage.rs",
+      "sha256": "2cbe0fb87f53a4c9176a2d24193efcdfa292e84ea882a306116e10c0b1ffefa5"
+    },
+    {
+      "path": "crates/relayer-app-server/src/storage/sqlite/action_invocations.rs",
+      "sha256": "67549f970dc3d6d9754643bf5a2131d920fdcbc389c260b9d69c69719eb8dda5"
+    },
+    {
+      "path": "crates/relayer-app-server/src/storage/sqlite/input_drafts.rs",
+      "sha256": "abe373fc7dcc1654bf90d0566026c2927d7727df816a94656a8c515deca5a930"
+    },
+    {
+      "path": "crates/relayer-app-server/src/storage/sqlite/interaction_contexts.rs",
+      "sha256": "6fb000ec08141ed10d6c140fb8f93558150c10d6db991569af326e7962e7fe59"
+    },
+    {
+      "path": "crates/relayer-app-server/src/storage/sqlite/interactions.rs",
+      "sha256": "545a533d7b64740516eede63313eb3ba3e5596a01f57188f863c3233c443d68c"
+    },
+    {
+      "path": "crates/relayer-app-server/src/storage/sqlite/migrations.rs",
+      "sha256": "107dbfc1ac30d5af01ad17bffd5f8cee23475c271f763881eabdf4b493299590"
+    },
+    {
+      "path": "crates/relayer-app-server/src/storage/sqlite/migrations/0045_invocation_preparation_reservations.sql",
+      "sha256": "fe57f990a5c0a2db53bad9b4149d0b91ba10df22e411f7794623d76593a99c34"
+    },
+    {
+      "path": "crates/relayer-app-server/src/storage/sqlite/migrations/0046_invocation_preparation_refusals.sql",
+      "sha256": "4baf94e8470f3c8223b90b6aef68fd6aa5c2b4846d5f4aa45b461be4ed1ffebf"
+    },
+    {
+      "path": "crates/relayer-app-server/src/storage/sqlite/schema.rs",
+      "sha256": "df90c8e5646d33acd8d3f325b4163ddbd2fa3a8e1bfe31e87781624e49fffc54"
+    },
+    {
+      "path": "crates/relayer-app-server/tests/product_persistence_flow.rs",
+      "sha256": "d5696b487f981ead93d0541eab3914bde499cddb969698eefdb20aa1c7c7e8fa"
+    },
+    {
+      "path": "crates/relayer-app-server/tests/support/completion_traces.rs",
+      "sha256": "b85160dd5ed104fb5df9b634859fae9740f14f61ba353d479c917e287fee5557"
+    },
+    {
+      "path": "crates/relayer-graph-core/src/graph/completion.rs",
+      "sha256": "4afabf1517c446882da24188b3cd228bcbd8818e2d9b36d9c9e59b30d141b198"
+    },
+    {
+      "path": "crates/relayer-graph-core/src/graph/database.rs",
+      "sha256": "38196cd3fa667c5f200eb591528e919dd485b807cc0bcde61b38637a367a6f88"
+    },
+    {
+      "path": "crates/relayer-graph-core/src/graph/import.rs",
+      "sha256": "dbd1065f5935c6b1ecfe31ea1073a19f76abd4249fafcaea0d7688193feb2eaf"
+    },
+    {
+      "path": "crates/relayer-graph-core/src/graph/invocation.rs",
+      "sha256": "872744ef3eb501bb9794c00eac09b178d88dc029eb9b0dabddaee42a9ed53b5b"
+    },
+    {
+      "path": "crates/relayer-graph-core/src/storage/sqlite/actions.rs",
+      "sha256": "7f51076996b8b4e88ae3ba11efa528c19bede7f1c5dcf4f48b07453d32b26d36"
+    },
+    {
+      "path": "crates/relayer-graph-core/tests/durable_invocations.rs",
+      "sha256": "15c2b5a26ff785c1ba86e56b587a8306086baa22595052cf63dc8b9dd2c33550"
+    },
+    {
+      "path": "crates/relayer-graph-server/src/lib.rs",
+      "sha256": "1e4ca5c947367d67fa2b1baf5494c1cd5ddb3b6589a91b1941b6bf64c13cd76f"
+    },
+    {
+      "path": "desktop/renderer/src/action-invocation-state.js",
+      "sha256": "81ab2c3afb5292ec3a6ea7584d5e5bf514d9725e34a1a7ed2c2ef17bbb40f7f2"
+    },
+    {
+      "path": "desktop/renderer/src/draft-preview/snapshot.js",
+      "sha256": "49ea7d513eb493579772edb27b6027476f74daf3cfe1e01b54647f0e07d6a5bf"
+    },
+    {
+      "path": "desktop/renderer/src/node-input-controls.js",
+      "sha256": "8436b56321b0bdf46a779a0954aa0b26e3f09acc4151126ad75bdbcd5d2227fa"
+    },
+    {
+      "path": "desktop/renderer/src/product-workspace/invoke-inputs.js",
+      "sha256": "c40975e8364f71b4d9b7448277c3e457979117873876d9a99153f57899c3164c"
+    },
+    {
+      "path": "desktop/renderer/src/product-workspace/model.js",
+      "sha256": "7797cc82ec7d6c8eec0d44f0e7499c5c4818fff524030f21369ae5df310282bb"
+    },
+    {
+      "path": "desktop/renderer/src/product-workspace/workspace.js",
+      "sha256": "d8a1632b7d6e9c0ac15e7a0a4ae5c24caa7e0322f8913014da2adb0ba93f2f4d"
+    },
+    {
+      "path": "desktop/renderer/src/public-share-viewer/snapshot.js",
+      "sha256": "f1f099ad7778a0abf6117896be0444edfb68e29d60c19bfe9d9cec5fa08f0eaa"
+    },
+    {
+      "path": "desktop/renderer/src/threads.js",
+      "sha256": "3e15c08997ea1520f2ed2ce54b8d0bd95d56a3955a6c27a87b7c2e1f0be6a037"
+    },
+    {
+      "path": "docs/decisions/0015-sealed-completion-contract-and-invocations.md",
+      "sha256": "bcc37d822bb5a96f0e092a1ad6908b743acceb4e0932f4dce57e9272ebcba0a7"
+    },
+    {
+      "path": "docs/prd/index.html",
+      "sha256": "352d3992b3ea8f97c06ce17483a346eeb279640102a84f80728e5a968c13020b"
+    },
+    {
+      "path": "packages/graph-client/src/detail.ts",
+      "sha256": "701e8cfc6bad26ec5033b6df1118de74624896ff8b9622213ad8e41bec25e7dd"
+    },
+    {
+      "path": "packages/harness-host/src/implementations/prime-visual-authoring.ts",
+      "sha256": "3dad8b56fe5be0e219f699a754aa233be1e18f8df612d84f997f3885f5cee170"
+    },
+    {
+      "path": "packages/harness-host/test/prime-visual-authoring.test.ts",
+      "sha256": "3ebf0c3f78145e60d82a14911ab4b47f980eb924435802b71cd658b6d23c69d8"
+    },
+    {
+      "path": "test/draft-preview-read-model.test.mjs",
+      "sha256": "a6f96a5d36c2556a814520cbf146bf8365a3ce28cbb278ce89de6eba2b56591e"
+    },
+    {
+      "path": "test/invoke-input-bindings.test.mjs",
+      "sha256": "df95eec26e45b5e09a24c8ee069b42b2ae43c25aba2b89ecc9dcdb3f0983469a"
+    },
+    {
+      "path": "test/invoke-input-product-integration.test.mjs",
+      "sha256": "20dead72f9e34fae1de774f7effe732dddba05d03e4d434cd7caa7ea3cc27021"
+    },
+    {
+      "path": "test/public-share-viewer.test.mjs",
+      "sha256": "64d0b41bf8b1268e8af376618c403c35dc164c72fb8083037ea103fe4075fea3"
+    }
+  ],
+  "changedExecutableSeams": [
+    "api/threads.rs new-submission selector at trusted Invoke boundary, before Product reservation; keyed receipts bypass it",
+    "runtime.rs canonical sourceNodeId decoding and production canonical occurrence read; frozen agent DTO initializer uses native snapshot identity",
+    "product/service.rs canonical question/source/accepted-state/value comparison reuses existing value validator",
+    "workspace/invoke-inputs.js fallback saved occurrence, capture/cleanup original source and displayed edit epochs",
+    "public-share snapshot/model per-call inert frozen source, Current/source joins and human/latest exclusion"
+  ],
+  "checkpointAssertions": [
+    "One connected action freezes exactly one saved full occurrence: native canonical accepted occurrence, same owning persistent Node, exact question and valid value are mandatory. Prefer clicked sourceGraphNode/presentingLayer, otherwise greatest numeric committed_at and numeric full-occurrence tuple. Bound action order retained; no ordinary Send filter changed.",
+    "Real accepted A then later accepted B reuses the persistent Node and inherits the same Input through normal authoring. Canonical B passes without raw membership/policy writes. Both answers saved; newer A cannot override valid clicked B. Actual API reserves one frozen B answer plus companion field; real native child count, sourceNode, question, Kyoto value and B occurrence are asserted.",
+    "Latest fallback and restored equal-epoch tie are tested through selector using the real native canonical route. Definitely inaccessible newer occurrence is skipped; canonical503 fails closed with no Product reservation/native call/draft mutation.",
+    "Actual native bind fault leaves frozen Product receipt and native inventory; same-key API retry after newer Oslo B preserves original Kyoto B and native one call. Direct real Product binding consumes unchanged companion epoch atomically; unselected A and newer B provenance/value/committed_at survive. Current draft revision advances once, as expected. No provider execution is used in this checkpoint.",
+    "Existing real admission-before-native, deterministic refusal, failed bind recovery, restart, retained drafts and export checkpoint passes at current production bytes. Existing native recursive durable-agent startup recovery also passes after additive sourceNode decoding.",
+    "Renderer uses clicked occurrence before numeric epoch/full tuple; untouched fallback displays original saved A without committing B; explicit B edit persists B and takes precedence, Undo restores saved baseline. Captured source and display edit epochs protect newer edits. Ordinary composer keeps distinct occurrences.",
+    "Public own-draft source is per-call browser-only frozen identity/status, navigable separately from Current. Accepted snapshot.interactions and acceptedTurns remain unchanged; synthetic source excluded from human/latest. Frozen source provenance and read-only mode confer no native mutation or accepted Layer authority.",
+    "Test-wire-only broker repair: stored accepted root Layer explicitly includes concept102; stored Invoke41, fake runtime Invoke41 and converted Navigate41 preserve sourceNodeId102. Production required decoder remains strict. Existing 20 broker launch/fencing/exact retry/conversion/cancellation/configuration authority/parent-only stop/provider-exit/retained Current assertions pass unchanged, covering all eight broad-check failures.",
+    "Product integration test-wire-only extension: resolved Navigate41 runtime owner7 matches canonical accepted concept7. Original stored/native Invoke41 and reused same-project accepted presentation explicitly mount owner concept7; runtime actions41/43 retain that owner. Standalone pre-selector legacy303 retains its absent-output compatibility boundary and explicit runtime owner307, without inventing accepted persisted graph authority. All existing idempotence/restart/cross-thread review/foreign action/refusal assertions remain unchanged."
+  ],
+  "independentReview": {
+    "reviewer": "/root/context_trace",
+    "scope": "New API selector/Product validator/runtime field and real two-layer/native fixture",
+    "verdict": "No blocking finding; clicked/numeric/full-occurrence comparator, canonical unknown refusal, immutable recovery and selected epoch consumption independently accepted. Final direct native argument assertion reviewed after added test bytes.",
+    "fixtureSha256": "b85160dd5ed104fb5df9b634859fae9740f14f61ba353d479c917e287fee5557",
+    "brokerFixtureExtension": "context_trace independently checked explicit accepted concept102 and exact identity in all three fixture wires; no decoder weakening or assertion deletion.",
+    "assertionPath": "docs/evidence/issue-632-completion-contract/review-pr707-followup-public-history-2026-10-08.json",
+    "reviewedSourceDigest": "ff0d48687147435eea1fab553dd5fa0c9439b2656a7f5b80973cb1d9ee2f2c3c",
+    "productFixtureExtension": "context_trace independently accepted owner7 consistency in stored/native original/reused accepted projections and resolved Navigate; special legacy303 explicit runtime307 retains absent-output boundary. Static final-byte review, no new inference/acceptance authority."
+  },
+  "verification": [
+    {
+      "command": "cargo test -p relayer-app-server --lib api::threads::completion_traces::invoke_selects_one_saved_occurrence_and_consumes_only_its_frozen_epoch -- --exact --nocapture",
+      "log": "/private/tmp/pr707-input-occurrence-selection-8.log",
+      "logSha256": "afea5df8bc00487fc91e7f10a7b7470d8ee8f2261ba1fc8140881062e6d9383a",
+      "observedInnerResult": "1 passed; 0 failed; .17s scenario",
+      "ranBy": "authority_review",
+      "paidInferenceCalls": 0
+    },
+    {
+      "command": "cargo test -p relayer-app-server --lib api::threads::completion_traces::user_reservation_precedes_native_prepare_and_recovers_a_failed_bind -- --exact --nocapture",
+      "log": "/private/tmp/pr707-input-occurrence-regression-2.log",
+      "logSha256": "2bb8cb6679faffb3121fae75e75b1f9696be5febfbf9c79563e204ea58a9db99",
+      "observedInnerResult": "1 passed; 0 failed; .24s scenario",
+      "ranBy": "authority_review",
+      "paidInferenceCalls": 0
+    },
+    {
+      "command": "cargo test -p relayer-app-server --lib api::threads::completion_traces::a_restart_recovers_exact_unbound_durable_agent_call -- --exact --nocapture",
+      "log": "/private/tmp/pr707-input-occurrence-agent-regression-2.log",
+      "logSha256": "e09363495d146a844ab3b1d94650ddcf7584d1a72d6cc5ba1e878c20bf9c7d62",
+      "observedInnerResult": "1 passed; 0 failed; .17s scenario",
+      "ranBy": "authority_review",
+      "paidInferenceCalls": 0
+    },
+    {
+      "reviewReceipt": "docs/evidence/issue-632-completion-contract/review-pr707-followup-input-ux-2026-10-08.json",
+      "results": [
+        {
+          "command": "npx vitest run test/implicit-input-send.test.mjs test/invoke-input-bindings.test.mjs test/action-invocation-state.test.mjs test/public-share-viewer.test.mjs test/workspace-navigation-integration.test.mjs test/node-detail-assets.test.mjs test/draft-preview-read-model.test.mjs",
+          "result": "passed",
+          "files": 7,
+          "tests": 262,
+          "log": "/private/tmp/pr707-ui-two-layer-warm-final.log",
+          "logSha256": "97465bfeb2885ddbccba42f67db7f15a036b7999fc57d66cddc2c9fe83479f25",
+          "durationSeconds": 18.82,
+          "paidInferenceCalls": 0
+        },
+        {
+          "command": "npx vitest run test/interaction-graph.test.mjs test/interaction-graph-workspace.test.mjs test/workspace-navigation.test.mjs test/workspace-breadcrumb.test.mjs test/workspace-actions.test.mjs",
+          "result": "passed",
+          "files": 5,
+          "tests": 34,
+          "log": "/private/tmp/pr707-ui-two-layer-model-final.log",
+          "logSha256": "30d6bf2033b84089bf8538e854c9ae37015710c953f76853ff3dc9f8d9c9777b",
+          "durationSeconds": 0.475,
+          "paidInferenceCalls": 0
+        }
+      ],
+      "qualification": "Implementing reviewer ran; authority reviewer read changed source/checkpoint mapping. No duplicate build or paid inference.",
+      "reviewedSourceDigest": "44fb4db104d725419e61484af6ac8dc7b3abd04e9298eab5976a4ec32e2334ab"
+    },
+    {
+      "reviewReceipt": "docs/evidence/issue-632-completion-contract/review-pr707-followup-public-history-2026-10-08.json",
+      "results": [
+        {
+          "log": "/private/tmp/pr707-public-unaccepted-source-final.log",
+          "sha256": "9447966cf568f0263fc298d16f621ad6d5a06056eec17ee3d9773248630731be",
+          "observedOutcome": "passed",
+          "passedTests": 117,
+          "executedBy": "context_trace",
+          "scope": "Own public renderer+draft-preview full files"
+        },
+        {
+          "log": "/private/tmp/pr707-ui-two-layer-warm-final.log",
+          "sha256": "97465bfeb2885ddbccba42f67db7f15a036b7999fc57d66cddc2c9fe83479f25",
+          "observedOutcome": "passed",
+          "passedTests": 262,
+          "executedBy": "prototype_review; independently inspected source/log",
+          "scope": "Prototype seven-file final warm portfolio; includes own four mounted source fixtures and two-layer Inputs"
+        },
+        {
+          "log": "/private/tmp/pr707-input-occurrence-selection-7.log",
+          "sha256": "380771afeb93d3fa493091c271cd5f13a0ee51aff03c69c5ec905059b7b8fa96",
+          "observedOutcome": "passed",
+          "passedTests": 1,
+          "executedBy": "authority_review; independently inspected final source and actual inner log",
+          "scope": "Final canonical occurrence selection/native frozen children"
+        },
+        {
+          "log": "/private/tmp/pr707-input-occurrence-regression-1.log",
+          "sha256": "92475347953762ca5446267e609e59e58a792cce898cd458d0ad44356ffbea64",
+          "observedOutcome": "passed",
+          "passedTests": 1,
+          "executedBy": "authority_review; independently inspected final source and actual inner log",
+          "scope": "Existing reservation/refusal/restart/no-effect graph-only export regression"
+        },
+        {
+          "log": "/private/tmp/pr707-broker-source-node-fixture-3.log",
+          "sha256": "3b03711d5db2eb90d4ec8dd95b4e5fb3d21fa8e85a1124936ec8c9a1383317ad",
+          "observedOutcome": "passed",
+          "passedTests": 20,
+          "innerSeconds": 1.99,
+          "executedBy": "authority_review; context_trace independently inspected final source and actual inner log without execution",
+          "scope": "Final strict-owner broker fixture full batch"
+        },
+        {
+          "log": "/private/tmp/pr707-input-occurrence-selection-8.log",
+          "sha256": "afea5df8bc00487fc91e7f10a7b7470d8ee8f2261ba1fc8140881062e6d9383a",
+          "observedOutcome": "passed",
+          "passedTests": 1,
+          "innerSeconds": 0.17,
+          "executedBy": "authority_review; context_trace independently inspected final source and actual inner log without execution",
+          "scope": "Final-byte canonical occurrence selection/native frozen children"
+        },
+        {
+          "log": "/private/tmp/pr707-input-occurrence-regression-2.log",
+          "sha256": "2bb8cb6679faffb3121fae75e75b1f9696be5febfbf9c79563e204ea58a9db99",
+          "observedOutcome": "passed",
+          "passedTests": 1,
+          "innerSeconds": 0.24,
+          "executedBy": "authority_review; context_trace independently inspected final source and actual inner log without execution",
+          "scope": "Final-byte existing reservation/refusal/restart/no-effect export regression"
+        },
+        {
+          "log": "/private/tmp/pr707-product-source-node-fixture-1.log",
+          "sha256": "4c8507693025d3fa3b58b72740315767e94107e61bb3a1c9f23b84972531e5e7",
+          "observedOutcome": "passed",
+          "passedTests": 39,
+          "innerSeconds": 31.25,
+          "executedBy": "authority_review; context_trace independently read actual inner log",
+          "scope": "Historical pre-final-concept-mount product persistence owner-wire repair. This is not qualification of final mounted fixture bytes.",
+          "sourceStatus": "pre-final-mount source proof only; final source statically reviewed; parent fullcheck3 required"
+        }
+      ],
+      "qualification": "Implementing reviewer ran; authority reviewer read changed source/checkpoint mapping. No duplicate build or paid inference.",
+      "reviewedSourceDigest": "ff0d48687147435eea1fab553dd5fa0c9439b2656a7f5b80973cb1d9ee2f2c3c"
+    },
+    {
+      "command": "cargo test -p relayer-app-server --lib api::threads::tests -- --nocapture",
+      "log": "/private/tmp/pr707-broker-source-node-fixture-3.log",
+      "logSha256": "3b03711d5db2eb90d4ec8dd95b4e5fb3d21fa8e85a1124936ec8c9a1383317ad",
+      "observedInnerResult": "20 passed; 0 failed; 1.99s scenario batch",
+      "ranBy": "authority_review",
+      "paidInferenceCalls": 0
+    },
+    {
+      "command": "cargo test -p relayer-app-server --test product_persistence_flow -- --nocapture",
+      "log": "/private/tmp/pr707-product-source-node-fixture-1.log",
+      "logSha256": "4c8507693025d3fa3b58b72740315767e94107e61bb3a1c9f23b84972531e5e7",
+      "observedInnerResult": "39 passed; 0 failed; 31.25s scenario batch",
+      "ranBy": "authority_review",
+      "paidInferenceCalls": 0,
+      "qualification": "After all sourceNodeId wire repairs, BEFORE final four accepted concept7 mounts. This is pre-mount scope proof, not a final-byte suite pass. Root fullcheck3 runs final mounted fixture bytes; no duplicate native suite started."
+    },
+    {
+      "command": "npm run check (parent unified followup3), native product_persistence_flow inner suite",
+      "log": "/private/tmp/interactive-inputs-followup-review-check-3.log",
+      "observedInnerResult": "39 passed; 0 failed; 32.79s; both repaired named scenarios explicitly PASS",
+      "ranBy": "root",
+      "reviewerObserved": "authority_review read actual inner summary and two named PASS records",
+      "sourceFixtureSha256": "d5696b487f981ead93d0541eab3914bde499cddb969698eefdb20aa1c7c7e8fa",
+      "qualification": "Final concept-mounted fixture bytes. This is the completed native Product suite only; broad outer check still running when recorded. Parent final qualification owns immutable full log hash and whole-check outcome.",
+      "paidInferenceCalls": 0
+    }
+  ],
+  "preservedFailures": [
+    {
+      "log": "/private/tmp/pr707-input-occurrence-selection-1.log",
+      "observed": "Loopback listener sandbox denial before scenario; authorized rerun required."
+    },
+    {
+      "log": "/private/tmp/pr707-input-occurrence-selection-2.log",
+      "observed": "Fixture tried new Node Input without authored sourceLayer; real native missing_source_layer refused. Corrected supported authoring."
+    },
+    {
+      "log": "/private/tmp/pr707-input-occurrence-selection-3.log",
+      "observed": "Two Layers authored simultaneously did not inherit Input membership; canonical B correctly refused. Replaced fixture with later accepted interaction reusing already accepted Node; scope invariant unchanged."
+    },
+    {
+      "log": "/private/tmp/pr707-input-occurrence-selection-5.log",
+      "observed": "Expected row draft_revision ignored intentional current header increment after companion deletion. Values/provenance/epochs already matched; expected header normalized to remaining.revision."
+    },
+    {
+      "observed": "First compile attempt E0277 selector-result unwrap required ApiError Debug; fixture now prints its real message with unwrap_or_else. No production error type change."
+    },
+    {
+      "log": "/private/tmp/interactive-inputs-followup-review-check-1.log",
+      "observed": "Broad native369pass8fail: shared broker fake Action wires omitted now-required sourceNodeId; failure retained, never inferred pass from earlier check."
+    },
+    {
+      "log": "/private/tmp/pr707-broker-source-node-fixture-1.log",
+      "observed": "12pass8fail unchanged source; initial edit used a nonexistent anchor and did not apply. Corrected named broker_fixture_with_options anchor; no production change."
+    },
+    {
+      "log": "/private/tmp/pr707-broker-source-node-fixture-2.log",
+      "observed": "19pass1fail: converted Navigate replay replaced fake Action and still omitted sourceNodeId. Preserved same102 identity on that third wire; all original conversion/exact replay assertions unchanged."
+    },
+    {
+      "log": "/private/tmp/interactive-inputs-followup-review-check-2.log",
+      "observed": "Product persistence37pass2fail: fake getAction Invoke/Navigate responses omitted required sourceNodeId. Field additions removed both failures (39pass); later accepted concept mount realism refinement independently reviewed. Production decoder remains strict."
+    }
+  ],
+  "previousAssertions": [
+    {
+      "path": "docs/evidence/issue-632-completion-contract/review-pr707-authority-validation-fixes-2026-10-08.json",
+      "sha256": "d8eaffad98401e504fb4e47f9734e796be1be9f3555523adf1558a2532d0061a",
+      "status": "Immutable historical assertion; not relabeled as current new-selection qualification."
+    }
+  ],
+  "verdict": "No unresolved blocker in this bounded exact45-file authority and checkpoint review. API P2 repaired and focused real production checkpoints passed.",
+  "unresolvedFindings": [],
+  "noDeletionOrSubsumption": "No existing tests/runners retired or narrowed. One realistic API/native/storage scenario observes multiple distinct admission/selection/replay/cleanup boundaries; existing regression checkpoints retained.",
+  "certification": "Scoped workspace static authority assertion and explicitly qualified focused evidence. Final mounted Product fixture suite observed39/39 in parent fullcheck3; pre-mount39/39 retained separately. Whole npm run check outcome/build, declared heavy/browser acceptance, current PR/CI/freshness and merge are parent-owned gates. Old8f9 certificates remain historical; no release or live inference certification.",
+  "sourceInvalidationRule": "Any byte change to a manifest file invalidates this assertion, including test-only edits. Outside-envelope changes are outside the claim; widen/review if they affect this boundary. Evidence-only updates do not alter source digest."
+}

@@ -101,6 +101,13 @@ class GraphSession(RelayerGraphClient):
         payload["replacement"] = {"nodeId": _node_id(node), "expectedRevision": expected_revision}
         await self._visual_authoring("replace", presentation, payload)
 
+    async def extend_node_presentation(self, node: NodeReference, expected_revision: int,
+                                       additions: NodeObject) -> None:
+        """Stage all additions against accepted detail; repeats replace this completion's pending presentation."""
+        payload = self._visual_payload("extend", additions)
+        payload["replacement"] = {"nodeId": _node_id(node), "expectedRevision": expected_revision}
+        await self._visual_authoring("extend", additions, payload)
+
     def _capture_node_payload(self, node: NodeObject) -> Any:
         key = node.detail_authoring
         submission = self._visual_submissions.get(key)

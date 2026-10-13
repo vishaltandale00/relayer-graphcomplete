@@ -1,0 +1,188 @@
+{
+  "schemaVersion": 1,
+  "date": "2026-10-08",
+  "reviewer": "context_trace",
+  "workspace": "/private/tmp/relayer-interactive-inputs-v1-merge",
+  "pullRequestNumber": 707,
+  "baseCommit": "4432809514480873633260099b7ae5466f200bae",
+  "digestMethod": "SHA256 over sorted relative UTF8 path+NUL+exactbytes+NUL; receipt excluded",
+  "reviewedScope": "Five live-review portable V4 concordance seams and accepted-only generic graph preview adapter contract. Shared completion_traces is a whole-file dependency; this assertion does not independently certify concurrent API/native ownership implementations.",
+  "changedExecutableSeams": [
+    {
+      "path": "crates/relayer-app-server/src/conversation_export_service.rs",
+      "boundary": "Local export selects V4 for retained imported Invocation inventory even without accepted Invoke/Input binding/policy shortcuts; preserves call-only own-draft inert history."
+    },
+    {
+      "path": "crates/relayer-app-server/src/conversation_export.rs",
+      "boundary": "Frozen-call JSON-safe head and variant-description validation; associated Product result text must join exact raw or existing Rust-trimmed frozen instruction; immutable content retained."
+    },
+    {
+      "path": "desktop/renderer/src/public-share-viewer/snapshot.js",
+      "boundary": "Canonical/frozen binding ID sets are distinct and reference-exact without erroneous per-Layer64 cap. Prepared arguments256 and Layer membership64 retained. Rust Unicode White_Space predicate used for string emptiness/card description and raw-or-trim result join, preserving content and byte bounds."
+    },
+    {
+      "path": "desktop/renderer/src/draft-preview/snapshot.js",
+      "boundary": "Accepted-only actionsForLayer fulfills actual public adapter hydrate/navigation contract; Invoke/Send remain unavailable."
+    }
+  ],
+  "checkpointMapping": [
+    {
+      "promise": "Call-only imported own-draft history remains V4 through actual stager/materialize/Product reopen/reexport with no executable Product calls.",
+      "tests": [
+        "api::threads::completion_traces::v4_import_reexport_preserves_call_only_own_draft_history"
+      ],
+      "qualification": "Pending parent process qualification. Real native/Product seed confirms raw frozen vs trimmed Product text; absent own-draft source identities then explicitly constructed archive fixture, not native-authored own-draft provenance."
+    },
+    {
+      "promise": "65/256 prepared arguments readable,257 refused; uncalled257-binding definition readable; actualLayer64 membership remains bounded.",
+      "tests": [
+        "v4_bindings_are_not_layer_membership_but_prepared_arguments_are_bounded",
+        "V4 Rust/browser portable boundary concordance"
+      ],
+      "qualification": "Mirrored Rust/browser actual archive readers; canonical standalone definitions and exact sameNode references, actualLayer<=64; separate overfullLayer refusal."
+    },
+    {
+      "promise": "Safe head max and frozen Card preserved; unsafe next head and malformed variant-description refused.",
+      "tests": [
+        "v4_frozen_presentation_and_head_revision_match_portable_json_readers",
+        "V4 Rust/browser portable boundary concordance"
+      ],
+      "qualification": "Positive validation explicit; native buffered/incremental parity and browser mirrored cases. Rust parity helper alone is not browser proof."
+    },
+    {
+      "promise": "Raw and Product-trimmed instruction joins exact result; contradictions/BOM stripping/composition substitution refused; private redaction preserves join.",
+      "tests": [
+        "v4_call_result_requires_an_accepted_turn_and_exact_returned_root",
+        "project_redaction_keeps_raw_frozen_and_product_trimmed_instruction_join",
+        "V4 Rust/browser portable boundary concordance"
+      ],
+      "qualification": "NEL/EMSPACE,BOM,decomposed accent plus real ProjectPathRedactor; retained raw instruction unchanged."
+    },
+    {
+      "promise": "Secondary portable emptiness follows existing native Rust White_Space: BOM-only accepted, NEL-only refused across title,canonical/frozen instruction,card description.",
+      "tests": [
+        "v4_frozen_presentation_and_head_revision_match_portable_json_readers",
+        "V4 Rust/browser portable boundary concordance"
+      ],
+      "qualification": "No authoringpolicy tightening, Unicode normalization or content rewrite; original byte-length checks retained."
+    },
+    {
+      "promise": "Generic draft preview initially hydrates/navigates/selects response root through actual adapter without missing-helper error and no mutating authority.",
+      "tests": [
+        "test/draft-preview-read-model.test.mjs production createPublicViewerAdapter journey"
+      ],
+      "qualification": "Warm actual adapter callback refusal; declared evidence:agent-preview final-build capture separately pending parent."
+    }
+  ],
+  "resourceBounds": "Existing byte/line/string/turn/layer/node/action/standalone-inventory bounds remain; no native authoring or uncalled-binding limit added. Browser envelope16MiB, native local256MiB/share16MiB, string4MiB, turns/calls10000, layers/turn10000,nodes/layer8,actions/layer64; browser standaloneInput inventory10000. Existing transport differences retained.",
+  "noDeletionOrSubsumption": "No tests removed. Existing own-draft repaired second call fixture result text corrected to its own frozen instruction; native NEL diagnostic expectation corrected only. New realistic multi-step/archive-reader fixtures protect distinct inventory, resource, presentation, string/result and adapter boundaries.",
+  "limitations": [
+    "Whole npm check/build and declared process/Electron heavies remain parent-owned. Pending is not pass.",
+    "Constructed nonpublished source archive demonstrates inert import/reexport preservation, not actual native own-draft preparation.",
+    "Warm suites do not execute World/process scenarios or qualify hosted publication, paid inference, human acceptance, release, or provider execution. Hosted V4 failclosed remains unchanged."
+  ],
+  "verdict": "Owned portable/preview source has no remaining scoped review blocker and passes stated warm checkpoints. Non-certifying for whole PR/process/Electron/human acceptance; any manifested byte change invalidates source assertion.",
+  "unresolvedFindings": [],
+  "actualResults": [
+    {
+      "checkpoint": "js",
+      "log": "/private/tmp/pr707-portable-concordance-unicode-final.log",
+      "sha256": "e09c1b0103da9cfe826f27a4cc50219f61de88956919ff00b836a44ff6672996",
+      "passed": 124,
+      "failed": 0,
+      "totalSeconds": 5.01,
+      "scenarioSeconds": 4.47,
+      "compileSeconds": null
+    },
+    {
+      "checkpoint": "rust-contract",
+      "log": "/private/tmp/pr707-portable-concordance-rust-final-2.log",
+      "sha256": "89969e1be0aaa4454faf20f536c9e017f8e4e124c7c4c16fed31c920ba4ce620",
+      "passed": 44,
+      "failed": 0,
+      "totalSeconds": null,
+      "scenarioSeconds": 1.7,
+      "compileSeconds": 23.06
+    },
+    {
+      "checkpoint": "redactor-unit",
+      "log": "/private/tmp/pr707-portable-concordance-redaction-final.log",
+      "sha256": "0e1a3280f10fdde6cd40c12a929e42d4977ac400b3c313c5a2c6ade0730e3036",
+      "passed": 1,
+      "failed": 0,
+      "totalSeconds": null,
+      "scenarioSeconds": 0.0,
+      "compileSeconds": 0.2
+    }
+  ],
+  "preservedFailures": [
+    {
+      "log": "/private/tmp/pr707-portable-concordance-warm-1.log",
+      "sha256": "baf137ebece6a42885af69309e07b2289b92f1926c8a4fa755196cc402cc342d",
+      "disposition": "First warm iteration: one older own-draft second-call fixture had contradictory result text; repaired exact result text. Three new Layer-membership negative expectations used wrong diagnostic name; retained refusals and corrected to actual layer_member_limit."
+    },
+    {
+      "log": "/private/tmp/pr707-portable-concordance-rust-final.log",
+      "sha256": "cde8bee55b4468e7ec6e91b87cc1625b602117e6867f3c63d6b6e74704652c75",
+      "disposition": "43/44: canonicalInstruction NEL-only interactionText is refused by existing native invalid_action_shape before require_string; corrected diagnostic expectation only. Card-description NEL-only remains string_empty. Complete/incremental refusal retained."
+    }
+  ],
+  "pendingQualification": [
+    {
+      "checkpoint": "api::threads::completion_traces::v4_import_reexport_preserves_call_only_own_draft_history",
+      "entryPoint": "cargo test -p relayer-app-server --lib api::threads::completion_traces::v4_import_reexport_preserves_call_only_own_draft_history -- --exact",
+      "qualification": "Parent process run; compiled but not executed by context_trace."
+    },
+    {
+      "checkpoint": "Generic graph preview",
+      "entryPoint": "evidence:agent-preview",
+      "qualification": "Parent declared final-build capture; adapter warm fixture is not Electron proof."
+    }
+  ],
+  "sourceDigest": "8b141859b055185328f69573a6cb4c54eeff0d7f70fd690b54689bcc77404886",
+  "manifest": [
+    {
+      "path": "crates/relayer-app-server/src/conversation_export.rs",
+      "sha256": "c5dcf5a692eacb0443b94585abaeed87df74c29f50ebe815afd2a96117dd9b3e"
+    },
+    {
+      "path": "crates/relayer-app-server/src/conversation_export_service.rs",
+      "sha256": "bf4e5dada14c7b6498d5fb4a491f75e631a87560310c264072ae9027055c923e"
+    },
+    {
+      "path": "crates/relayer-app-server/tests/conversation_export_contract.rs",
+      "sha256": "b92aab26f13936650737fb941f2291445c0a21efcff184214e47e8b9ee30b64d"
+    },
+    {
+      "path": "crates/relayer-app-server/tests/support/completion_traces.rs",
+      "sha256": "0f3527948c90721b0b9332d115a8f90252aab39a36a3713ae58353a5cd15a582"
+    },
+    {
+      "path": "desktop/renderer/src/draft-preview/snapshot.js",
+      "sha256": "103fd5bf3647f64eb450e5ee9c0ea2e05c71cfad0afecf4cf5b8fd3186c8c439"
+    },
+    {
+      "path": "desktop/renderer/src/public-share-viewer/snapshot.js",
+      "sha256": "b7b9e45d1ae0198c62ce88c4466b37500723d360dd73d20f83a3939ff3d0472a"
+    },
+    {
+      "path": "test/draft-preview-read-model.test.mjs",
+      "sha256": "3a01fa303e95f64c5c99a9dde0abf28b128c57aff0d575146477f2a30cc17c67"
+    },
+    {
+      "path": "test/public-share-viewer.test.mjs",
+      "sha256": "9158cb78b0367b43ae8390a3fad300d270547bc1f5a0976ec41ff3af6dad5f2d"
+    }
+  ],
+  "independentReview": {
+    "reviewer": "prototype_review",
+    "sourceDigest": "8b141859b055185328f69573a6cb4c54eeff0d7f70fd690b54689bcc77404886",
+    "scope": "Portable V4 resource/string/result/frozen-card/head boundary changes, accepted-only actual adapter fixture and call-only import/reexport fixture; shared native API implementations excluded.",
+    "verdict": "Independently recomputed exact manifested eight-file digest; scoped read-only review accepted with no portable/preview source blocker. Independently read actual124/124 browser,44/44 contract and redactor1/1 logs. World/PREV004 remain pending parent qualification.",
+    "unresolvedFindings": [],
+    "pendingQualification": [
+      "Actual World import/reopen/reexport inner pass and declared generic graph preview heavy remain parent-owned."
+    ],
+    "exactDigestIndependentlyRecomputed": true
+  }
+}

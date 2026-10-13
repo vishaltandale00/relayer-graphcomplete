@@ -69,6 +69,7 @@ export async function stopRunFixture() {
         if (!String(text).includes("accept")) {
           const layer = new LayerObject([node], [], new LayerLayoutObject([new NodePlacementObject(node, 0.5, 0.5)], "default"), "working");
           const savedLayer = await graph.submitLayer(layer);
+          await graph.addAction(context.inputGraph.id, { kind: "navigate", relation: "expand", label: "Response", target: layer, clientKey: "working-response" });
           await graph.advanceCurrent(layer, 0, "working-current");
           control.partialLayerId = savedLayer.id;
           await graph.submitNode(new NodeObject("file", "Unaccepted draft", "Must not become a final response", "concept", "draft"));

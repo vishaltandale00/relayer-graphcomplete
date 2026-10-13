@@ -107,6 +107,8 @@ async fn navigate(
             target_layer_id: Some(target.id),
             interaction_text: None,
             input: None,
+            input_action_ids: Vec::new(),
+            reusable: None,
         })
         .await
         .unwrap();
@@ -563,7 +565,8 @@ async fn an_artifact_layer_cannot_be_the_response_root() {
 }
 
 /// Review: acceptance fingerprints only the artifacts that the publish accepts. (A
-/// completion already refuses unreachable draft layers, so its closure is every live layer.)
+/// sealed Advance validates the prospective Return, and explicitly stopped draft layers
+/// remain outside its published closure.)
 #[tokio::test]
 async fn only_the_published_closure_is_fingerprinted() {
     let (_database, interaction, writer) = setup().await;
@@ -580,7 +583,7 @@ async fn only_the_published_closure_is_fingerprinted() {
     let unrelated = artifact_node(&writer, "unrelated", &website())
         .await
         .unwrap();
-    writer
+    let unrelated_layer = writer
         .submit_layer_with_renderer(
             &layer_draft("unrelated-viewer", &[unrelated.id]),
             Some("artifact"),
@@ -590,12 +593,44 @@ async fn only_the_published_closure_is_fingerprinted() {
     navigate(&writer, "response", &interaction, None, &root).await;
     navigate(&writer, "open-shown", &overview, Some(&root), &shown_layer).await;
 
-    // An advance publishes only its target's closure; unrelated draft work may remain.
+    // A sealed Advance first needs a valid prospective Return. An orphan live layer
+    // selects no artifacts and must refuse publication without moving the current.
     let advance = CurrentTransition::Advance { layer_id: root.id };
+    assert!(
+        writer
+            .draft_artifacts_for(Some(&advance))
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    let refused = writer
+        .transition_current(0, "orphan-advance", advance.clone())
+        .await
+        .unwrap_err();
+    assert_eq!(code(refused), "orphan_draft_layers");
+    assert_eq!(writer.current_completion().await.unwrap().head_revision, 0);
+    writer.discard_layer(unrelated_layer.id).await.unwrap();
+    assert_eq!(
+        writer.get_node(unrelated.id).await.unwrap().state,
+        RecordState::Draft
+    );
+    // The retained abandoned artifact draft is excluded; only the shown closure is pinned.
     let selected = writer.draft_artifacts_for(Some(&advance)).await.unwrap();
     assert_eq!(
         selected.iter().map(|(id, _)| *id).collect::<Vec<_>>(),
         vec![shown.id]
+    );
+    writer
+        .transition_current(0, "shown-advance", advance)
+        .await
+        .unwrap();
+    assert_eq!(
+        writer.get_node(shown.id).await.unwrap().state,
+        RecordState::Accepted
+    );
+    assert_eq!(
+        writer.get_node(unrelated.id).await.unwrap().state,
+        RecordState::Draft
     );
     let stop = CurrentTransition::Stop {
         reason: "user".into(),

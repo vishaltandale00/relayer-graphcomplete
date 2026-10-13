@@ -107,6 +107,7 @@
       ],
       "modelRules": null,
       "permissionAvailable": false,
+      "repairProviderIds": [],
       "unavailableReason": null,
       "usableFamilyIds": [
         2

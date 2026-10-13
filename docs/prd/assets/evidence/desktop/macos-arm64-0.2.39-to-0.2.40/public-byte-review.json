@@ -1,0 +1,56 @@
+{
+  "ok": true,
+  "version": "0.2.40",
+  "sourceCommit": "8201faac88c7d979909517ddace51f6f46d25c07",
+  "publicationRun": "37905737364",
+  "manifest": {
+    "key": "desktop/macos/arm64/beta-mac.yml",
+    "size": 697,
+    "sha256": "c4ce70e3173e0d2fbd76f11359417ad168ebe673e614272faddc6978c57ddbd2",
+    "passed": true
+  },
+  "artifacts": [
+    {
+      "name": "Relayer-0.2.40-mac-arm64.dmg",
+      "key": "desktop/macos/arm64/releases/0.2.40/Relayer-0.2.40-mac-arm64.dmg",
+      "size": 207544089,
+      "sha256": "a56f77d0716f3eebdd3f3400f02e8b9d4d45fc2c5e6953cdb6309ebe68252393",
+      "passed": true
+    },
+    {
+      "name": "Relayer-0.2.40-mac-arm64.zip",
+      "key": "desktop/macos/arm64/releases/0.2.40/Relayer-0.2.40-mac-arm64.zip",
+      "size": 207669922,
+      "sha256": "e999a9d7f4836d22138af0faee490914dc9dc7afc359220d2b4a3e8c2bb9d7db",
+      "passed": true
+    },
+    {
+      "name": "Relayer-0.2.40-mac-arm64.dmg.blockmap",
+      "key": "desktop/macos/arm64/releases/0.2.40/Relayer-0.2.40-mac-arm64.dmg.blockmap",
+      "size": 216330,
+      "sha256": "ecfb5f8bb0ed1c0d7c40a99d64233236e8e47544a660c62181b9d1a8101a7207",
+      "passed": true
+    },
+    {
+      "name": "Relayer-0.2.40-mac-arm64.zip.blockmap",
+      "key": "desktop/macos/arm64/releases/0.2.40/Relayer-0.2.40-mac-arm64.zip.blockmap",
+      "size": 216047,
+      "sha256": "1701a4c1ebbf30a0d7fdc1d60d49a52896ae61ac0f37229ff297cd9147bd3d41",
+      "passed": true
+    },
+    {
+      "name": "Relayer-0.2.40-mac-arm64-SHA256SUMS.txt",
+      "key": "desktop/macos/arm64/releases/0.2.40/Relayer-0.2.40-mac-arm64-SHA256SUMS.txt",
+      "size": 190,
+      "sha256": "6aa28a53a93f8e83a9e26b53addb7619ba382dcd215b780dd87d34dfbbce9c9b",
+      "passed": true
+    },
+    {
+      "name": "Relayer-0.2.40-mac-arm64-RELEASE.json",
+      "key": "desktop/macos/arm64/releases/0.2.40/Relayer-0.2.40-mac-arm64-RELEASE.json",
+      "size": 1195,
+      "sha256": "0c9e8c713da25550e2d28af63f5aaaa6b64dee1e0c7007bf1c244b8644971aaf",
+      "passed": true
+    }
+  ]
+}

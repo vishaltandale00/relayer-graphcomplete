@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import { createAcceptedLayerCache } from "../desktop/renderer/src/navigation-history.js";
 import {
   descendantLayerIdentities,
+  invocationOriginForSource,
   navigationDestinationLabel,
   navigationDestinationMetadata,
   navigationEntryFromView,
@@ -11,6 +12,7 @@ import {
   validateResolvedLayer,
   workspaceUrlForPresentation,
 } from "../desktop/renderer/src/workspace-navigation.js";
+import { workspaceBreadcrumbItems } from "../desktop/renderer/src/product-workspace/model.js";
 
 function fixture() {
   const root = {
@@ -45,6 +47,170 @@ function fixture() {
 }
 
 describe("workspace navigation presentation", () => {
+  function invocationFixture(current = false) {
+    const { root, child: sourceLayer, detail } = fixture();
+    root.layer.state = "accepted";
+    sourceLayer.layer.state = "accepted";
+    sourceLayer.nodes[0] = { ...sourceLayer.nodes[0], state: "accepted", icon: "route" };
+    sourceLayer.actions = [{ id: 777, kind: "invoke", state: "accepted", sourceNodeId: 11,
+      sourceLayerId: 100, reusable: true }];
+    const resultLayer = { layer: { id: 301, state: "accepted" },
+      nodes: [{ id: 31, state: "accepted", title: "Result" }], actions: [] };
+    detail.interactions.push({ id: 3, threadId: 7, graphNodeId: 303,
+      completionStatus: current ? "running" : "accepted",
+      ...(current ? {} : { completionOutput: { rootLayer: resultLayer } }) });
+    detail.actionInvocations = [{ durable: true, sourceInteractionId: 2, actionId: 777,
+      invocationKey: "call-a", presentingLayerId: 101, resultInteractionId: 3 }];
+    const sourceEntry = navigationEntryFromView({ threadId: 7, turnId: 2,
+      layerPath: [{ layerId: 100 }, { layerId: 101, actionId: 501 }], selectedNodeId: 11 });
+    const origin = { sourceEntry, actionId: 777, invocationKey: "call-a", sourceNodeId: 11,
+      presentingLayerId: 101, label: "Forged label", icon: "Forged icon" };
+    const childEntry = navigationEntryFromView({ threadId: 7, turnId: 3,
+      layerPath: [{ layerId: 301 }], selectedNodeId: 31, invocationOrigin: origin,
+      temporalCurrent: current ? { completionId: 303, revision: 1, mode: "following" } : null });
+    const loadLayer = vi.fn(async ({ turnId, layerId }) => {
+      if (String(turnId) === "2" && String(layerId) === "101") return sourceLayer;
+      if (String(turnId) === "3" && String(layerId) === "301") return resultLayer;
+      throw new Error("Layer not visible");
+    });
+    return { detail, sourceLayer, resultLayer, origin, childEntry,
+      options: { loadThread: vi.fn(async () => detail), loadLayer } };
+  }
+
+  it.each([false, true])("restores independent child and exact invoking source paths (Current=%s)", async current => {
+    const { detail, sourceLayer, resultLayer, origin, childEntry, options } = invocationFixture(current);
+    const restored = await resolveNavigationPresentation(JSON.parse(JSON.stringify(childEntry)), options);
+    expect(restored.layer).toBe(resultLayer);
+    expect(restored.layerPath.map(step => step.layerId)).toEqual([301]);
+    expect(restored.invocationOrigin).toMatchObject({ label: "API", icon: "route", sourceNodeId: "11",
+      presentingLayerId: "101", invocationKey: "call-a" });
+    expect(restored.entry.invocationOrigin).not.toHaveProperty("label");
+    expect(restored.entry.temporalCurrent).toEqual(childEntry.temporalCurrent);
+    expect(navigationEntryKey(childEntry)).not.toBe(navigationEntryKey({ ...childEntry, invocationOrigin: undefined }));
+    const breadcrumbs = workspaceBreadcrumbItems({ interactions: detail.interactions, nodes: [],
+      currentInteractionId: 3, visibleLayer: resultLayer }, detail.thread,
+    { layerPath: restored.layerPath, invocationOrigin: restored.invocationOrigin });
+    expect(breadcrumbs.map(item => item.kind)).toEqual(["invoke-origin", "layer"]);
+    expect(breadcrumbs[0]).toMatchObject({ label: "API", interactive: true, invocationOrigin: true,
+      sourceNodeId: "11", layerId: "101", sourceEntry: childEntry.invocationOrigin.sourceEntry });
+    expect(breadcrumbs[1]).toMatchObject({ pathIndex: 0, layerId: 301, current: true });
+    const source = await resolveNavigationPresentation(restored.invocationOrigin.sourceEntry, options);
+    expect(source.layer).toBe(sourceLayer);
+    expect(source.selectedNodeId).toBe("11");
+    expect(source.layerPath.map(step => step.layerId)).toEqual([100, 101]);
+    expect(source).not.toHaveProperty("invocationOrigin");
+    expect(invocationOriginForSource(origin, sourceLayer, detail.actionInvocations, 3)).toEqual(restored.invocationOrigin);
+  });
+
+  it.each(["imported", "graph"])("validates %s origins against their own inert inventory without native execution receipts", async kind => {
+    const { detail, sourceLayer, childEntry, options } = invocationFixture();
+    const resultId = kind === "graph" ? "native-current:70" : 3;
+    const origin = { ...childEntry.invocationOrigin, kind, invocationId: kind === "graph" ? "70" : "invocation:call",
+      invocationKey: kind === "graph" ? "call-a" : "invocation:call" };
+    detail.interactions[2].id = resultId;
+    const imported = { inert: true, threadId: 7, sourceInteractionId: 2, sourceNodeId: 11, sourceActionId: 777, presentingLayerId: 101,
+      resultInteractionId: 3, record: { id: "invocation:call", lifecycle: "succeeded" } };
+    const native = { graphOnly: true, sourceInteractionId: 2, actionId: 777, invocationKey: "call-a", presentingLayerId: 101,
+      nativeInvocation: { invocation: { id: 70, parentNodeId: 11, sourceActionId: 777, invocationKey: "call-a", actionSnapshot: { presentingLayerId: 101 } } } };
+    detail.actionInvocations = kind === "graph" ? [native] : [];
+    detail.importedInvocationHistory = kind === "imported" ? [imported] : [];
+    const entry = { ...childEntry, turnId: String(resultId), invocationOrigin: origin };
+    expect(await resolveNavigationPresentation(entry, options)).toMatchObject({ invocationOrigin: { kind, label: "API", presentingLayerId: "101" } });
+    const inventory = kind === "graph" ? detail.actionInvocations : detail.importedInvocationHistory;
+    const baseline = structuredClone(inventory[0]);
+    for (const scenario of ["key", "node", "action", "presenting", "source", "ambiguous"]) {
+      inventory.splice(0, inventory.length, structuredClone(baseline));
+      if (scenario === "key") { if (kind === "graph") inventory[0].invocationKey = "other"; else inventory[0].record.id = "invocation:other"; }
+      if (scenario === "node") { if (kind === "graph") inventory[0].nativeInvocation.invocation.parentNodeId = 12; else inventory[0].sourceNodeId = 12; }
+      if (scenario === "action") { if (kind === "graph") inventory[0].actionId = 778; else inventory[0].sourceActionId = 778; }
+      if (scenario === "presenting") inventory[0].presentingLayerId = 100;
+      if (scenario === "source") inventory[0].sourceInteractionId = 1;
+      if (scenario === "ambiguous") inventory.push(structuredClone(baseline));
+      await expect(resolveNavigationPresentation(entry, options)).rejects.toThrow("Invocation origin source or exact call");
+    }
+    expect(sourceLayer.actions).toHaveLength(1);
+    expect(detail.actionInvocations.every(call => call.durable !== true)).toBe(true);
+  });
+
+  it("restores exact source and child Current history after both return different root Layers", async () => {
+    const { detail, sourceLayer, resultLayer, childEntry, options } = invocationFixture(true);
+    const source = detail.interactions.find(turn => turn.id === 2);
+    const previousSourceRoot = source.completionOutput.rootLayer;
+    source.graphNodeId = 202;
+    source.completionOutput = { rootLayer: { layer: { id: 400, state: "accepted" }, nodes: [], actions: [] } };
+    detail.interactions[2].completionStatus = "accepted";
+    detail.interactions[2].completionOutput = { rootLayer: { layer: { id: 500, state: "accepted" }, nodes: [], actions: [] } };
+    const entry = { ...childEntry, invocationOrigin: { ...childEntry.invocationOrigin,
+      sourceEntry: { ...childEntry.invocationOrigin.sourceEntry,
+        temporalCurrent: { completionId: 202, revision: 1, mode: "pinned" } },
+    } };
+    const loadLayer = vi.fn(async identity => String(identity.layerId) === "100"
+      ? previousSourceRoot : options.loadLayer(identity));
+    const loaders = { ...options, loadLayer };
+    const restored = await resolveNavigationPresentation(entry, loaders);
+    expect(restored.layer).toBe(resultLayer);
+    expect(restored.invocationOrigin.label).toBe("API");
+    const restoredSource = await resolveNavigationPresentation(restored.invocationOrigin.sourceEntry, loaders);
+    expect(restoredSource.layer).toBe(sourceLayer);
+    expect(restoredSource.selectedNodeId).toBe("11");
+    expect(restoredSource.entry.temporalCurrent).toMatchObject({ completionId: "202", mode: "pinned" });
+    expect(loadLayer).toHaveBeenCalledWith({ threadId: "7", turnId: "2", layerId: "100" });
+    await expect(resolveNavigationPresentation({ ...entry, temporalCurrent: null }, loaders))
+      .rejects.toThrow("layer path is no longer available");
+    await expect(resolveNavigationPresentation({ ...entry, temporalCurrent: { completionId: 999,
+      revision: 1, mode: "pinned" } }, loaders)).rejects.toThrow("Current identity is unavailable");
+    const layerCache = createAcceptedLayerCache();
+    await expect(resolveNavigationPresentation(entry, { ...loaders, layerCache, loadLayer: async identity =>
+      String(identity.layerId) === "301" ? { ...resultLayer, layer: { id: 301, state: "draft" } }
+        : loadLayer(identity) })).rejects.toThrow("Current Layer is not accepted");
+    expect(layerCache.get({ threadId: 7, turnId: 3, layerId: 301 })).toBeUndefined();
+    await expect(resolveNavigationPresentation(entry, { ...loaders, layerCache })).resolves.toMatchObject({ layer: resultLayer });
+  });
+
+  it.each(["wrong-key", "wrong-result", "wrong-occurrence", "non-durable", "wrong-node", "missing-action", "draft-source", "ambiguous-call", "wrong-path", "wrong-selection"])("refuses unsupported invocation origin without inventing navigation (%s)", async scenario => {
+    const { detail, sourceLayer, childEntry, options } = invocationFixture();
+    const call = detail.actionInvocations[0];
+    if (scenario === "wrong-key") call.invocationKey = "another-call";
+    if (scenario === "wrong-result") call.resultInteractionId = 4;
+    if (scenario === "wrong-occurrence") call.presentingLayerId = 100;
+    if (scenario === "non-durable") call.durable = false;
+    if (scenario === "wrong-node") sourceLayer.actions[0].sourceNodeId = 12;
+    if (scenario === "missing-action") sourceLayer.actions = [];
+    if (scenario === "draft-source") sourceLayer.nodes[0].state = "draft";
+    if (scenario === "ambiguous-call") detail.actionInvocations.push({ ...call });
+    if (scenario === "wrong-selection") sourceLayer.nodes.push({ id: 12, state: "accepted", title: "Other Node" });
+    const entry = scenario === "wrong-selection" ? { ...childEntry, invocationOrigin: {
+      ...childEntry.invocationOrigin, sourceEntry: { ...childEntry.invocationOrigin.sourceEntry, selectedNodeId: 12 },
+    } } : scenario === "wrong-path" ? { ...childEntry, invocationOrigin: {
+      ...childEntry.invocationOrigin, sourceEntry: { ...childEntry.invocationOrigin.sourceEntry,
+        navigationPath: [{ layerId: 100 }, { layerId: 101, viaActionId: 999 }] },
+    } } : childEntry;
+    await expect(resolveNavigationPresentation(entry, options)).rejects.toThrow(
+      scenario === "wrong-path" ? "layer path is no longer available" : "Invocation origin source or exact call");
+    expect(detail.interactions[2].completionOutput.rootLayer.layer.id).toBe(301);
+    expect(sourceLayer.actions.some(action => action.kind === "navigate")).toBe(false);
+  });
+
+  it.each(["returned", "running", "wrong-call", "wrong-target", "missing-navigation", "wrong-source", "reusable"])("restores only an exactly supported returned single-call path (%s)", async (scenario) => {
+    const { root, child, detail } = fixture();
+    root.actions.push({ id: 502, kind: "invoke", sourceNodeId: 10, reusable: scenario === "reusable", label: "Analyze" });
+    detail.interactions.push({ id: 3, threadId: 7, completionStatus: "accepted", completionOutput: { rootLayer: child } });
+    detail.actionInvocations = [{ reusable: true, sourceInteractionId: 2, actionId: scenario === "wrong-call" ? 999 : 502, resultInteractionId: 3, resultCompletionStatus: scenario === "running" ? "running" : "accepted" }];
+    if (scenario === "wrong-target") root.actions[0].targetLayerId = 999;
+    if (scenario === "missing-navigation") root.actions.shift();
+    if (scenario === "wrong-source") root.actions[0].sourceNodeId = 999;
+    const loadLayer = vi.fn(async () => child);
+    const pending = resolveNavigationPresentation({ threadId: 7, turnId: 2, navigationPath: [{ layerId: 100, viaActionId: null }, { layerId: 101, viaActionId: 502 }] }, { loadThread: async () => detail, loadLayer });
+    if (scenario === "returned") {
+      const restored = await pending;
+      expect(restored.layerPath[1]).toMatchObject({ layerId: 101, actionId: 502, sourceNodeId: 10 });
+      expect(root.actions[1]).toMatchObject({ kind: "invoke", reusable: false });
+      expect(root.actions[1].targetLayerId).toBeUndefined();
+    } else {
+      await expect(pending).rejects.toThrow("Navigation history layer path is no longer available");
+      expect(loadLayer).not.toHaveBeenCalled();
+    }
+  });
   it("captures stable identity from the renderer layer path", () => {
     const entry = navigationEntryFromView({
       threadId: 7,
@@ -149,11 +315,12 @@ describe("workspace navigation presentation", () => {
 
   it("restores a retained temporal current when terminal work has no final output", async () => {
     const { detail, root } = fixture();
+    root.layer.state = "accepted";
     const stoppedDetail = {
       ...detail,
       interactions: detail.interactions.map((interaction) => (
         String(interaction.id) === "2"
-          ? { ...interaction, completionOutput: null, completionStatus: "stopped" }
+          ? { ...interaction, graphNodeId: 42, completionOutput: null, completionStatus: "stopped" }
           : interaction
       )),
     };

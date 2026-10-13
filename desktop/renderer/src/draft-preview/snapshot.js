@@ -48,6 +48,9 @@ export function draftPreviewReadModel(input) {
     header: {},
     state: null,
     layerFor: (_turnId, layerId) => (String(layerId) === String(layer.id) ? rootLayer : null),
+    // Adapter hydration and navigation use the same accepted-only contract as
+    // portable snapshots; a preview never grants callable action authority.
+    actionsForLayer: (resolved) => (resolved?.actions ?? []).filter((action) => action.state === "accepted"),
     invokeDestinationTurnId: () => null,
     async resolveNodeDetailAsset(asset) {
       const content = assets.get(`${asset?.id}\0${asset?.digestSha256}\0${asset?.mediaType}`);

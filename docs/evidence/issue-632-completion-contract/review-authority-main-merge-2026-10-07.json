@@ -1,0 +1,239 @@
+{
+  "schemaVersion": 1,
+  "date": "2026-10-07",
+  "reviewer": "/root/authority_review",
+  "workspace": "/private/tmp/relayer-interactive-inputs-v1-merge",
+  "baseCommit": "63582111701357242ed5e2bddf3fed6cf50cd2a6",
+  "mergedMainCommit": "677035322f33ee61327f0737d50b4db8e91e8ae9",
+  "sourceDigest": "bf7a1118ca9aedc5fe66c4e06280ef35014a4cb294e3b7ab8ffc172def8db00e",
+  "digestMethod": "SHA256 of sorted relative UTF8 path + NUL + exact file bytes + NUL for each manifest entry",
+  "manifest": [
+    {
+      "path": "contracts/share-service-v1/contract.json",
+      "sha256": "d289317c75a44675b9bb6f4b8856f4e8f30cff7948ca27f8cfee72b7ba4b7d8d"
+    },
+    {
+      "path": "crates/relayer-app-server/src/conversation_export.rs",
+      "sha256": "37b76af8486a2dd1a10ca2c590c3a011022dfa93492e6f7b3eb80dad71bfb1c5"
+    },
+    {
+      "path": "crates/relayer-app-server/src/conversation_export_service.rs",
+      "sha256": "e09204bba98b3b76b63b5d4459fddb9548f443deffdc6075386f33ad3bf70f98"
+    },
+    {
+      "path": "crates/relayer-app-server/src/conversation_import_service.rs",
+      "sha256": "5b595261b21db4c2a4f307a1feb5dce084cc448add61a1ba6cc0a797a2718588"
+    },
+    {
+      "path": "crates/relayer-app-server/tests/conversation_export_contract.rs",
+      "sha256": "0bdd23a22275c5cfb479726f20b3bf490611a6d7644347ed5934bcacdc15288b"
+    },
+    {
+      "path": "crates/relayer-graph-core/src/graph/attached_navigation.rs",
+      "sha256": "1be734fec1d396508f5de23554d17873ce867a16ce8e00db964673e5286a1d9e"
+    },
+    {
+      "path": "crates/relayer-graph-core/src/graph/completion.rs",
+      "sha256": "235f40c9790a7a6df76b5c3aaab4c4bec096d44d39331fbfdc3fa96169418c2b"
+    },
+    {
+      "path": "crates/relayer-graph-core/src/graph/completion/accept.rs",
+      "sha256": "96867d5ae8c1172fa8b5a6e1318cdbc145eb9982af2f9b3513c3ec20d7936de2"
+    },
+    {
+      "path": "crates/relayer-graph-core/src/graph/completion/current.rs",
+      "sha256": "08559e95d7e4e98c0a2586a6e0067a1c9acdb52f3580b4f7214245c56c14387c"
+    },
+    {
+      "path": "crates/relayer-graph-core/src/graph/completion/plan.rs",
+      "sha256": "a6d6d8221d91169756768fa30f226111cd7309a31daab9f441b7d160a8bc0ded"
+    },
+    {
+      "path": "crates/relayer-graph-core/src/graph/database.rs",
+      "sha256": "18656cad8606118d6e3f743867e60120a2511a9f645c8eaab1209d4f985c1305"
+    },
+    {
+      "path": "crates/relayer-graph-core/src/graph/import.rs",
+      "sha256": "592791fab20b91d5721a53cc7024c5126652c88852336eeff18f3e7cf0333a72"
+    },
+    {
+      "path": "crates/relayer-graph-core/src/graph/invocation.rs",
+      "sha256": "eedb3a38271e0c43219d0b7a2fbf8cc4928de44bcfd63c541dd6ae7447cdd636"
+    },
+    {
+      "path": "crates/relayer-graph-core/src/graph/model/artifact.rs",
+      "sha256": "34bd4efd4f5ff38a4d3d8baebdc9c1276a2bd288c1d29945a9bdf1147f784bb4"
+    },
+    {
+      "path": "crates/relayer-graph-core/src/graph/model/context.rs",
+      "sha256": "8aec2eb59ef8c1c0d292605d37725d6045d63af3d757ed97a1b5fd75db50120a"
+    },
+    {
+      "path": "crates/relayer-graph-core/src/graph/model/layer.rs",
+      "sha256": "20e12b53b32c911c1d0cc5e9412cf0c2479440fb993c713980a63af3ca38f14f"
+    },
+    {
+      "path": "crates/relayer-graph-core/src/graph/model/node.rs",
+      "sha256": "5b3ac3fd64fd4976186a20e025e5d582d6e52dd1b11e797a4d558d09a3e71600"
+    },
+    {
+      "path": "crates/relayer-graph-core/src/graph/writer.rs",
+      "sha256": "b1436cc999b4c40a36e8f7133c3e3dcc3f79d7e7c8786eaaa1636ab2092eaea4"
+    },
+    {
+      "path": "crates/relayer-graph-core/src/storage/sqlite/actions.rs",
+      "sha256": "b6db6db6a0efbe6dc44c3b507a0f89483fec535191c5d37ecac73e43b88af501"
+    },
+    {
+      "path": "crates/relayer-graph-core/src/storage/sqlite/contracts.rs",
+      "sha256": "24a6ca3aeb5068f033663438f9c1ee2826c56834c1fc4cee923ff8a3829bd0d9"
+    },
+    {
+      "path": "crates/relayer-graph-core/src/storage/sqlite/input_children.rs",
+      "sha256": "cff72984a401756371b624fd84e3e58d84baa98e4e3a938205d0e115d1c9b4a6"
+    },
+    {
+      "path": "crates/relayer-graph-core/src/storage/sqlite/layers.rs",
+      "sha256": "c2a92110b39c7555ee3babf344f4ebf06daa29fef584143b75ea3951c8c77d2e"
+    },
+    {
+      "path": "crates/relayer-graph-core/src/storage/sqlite/migrations.rs",
+      "sha256": "fec3025e5340440477299e925a56e2f9d96fe356a5517e11331c407dfbd93faf"
+    },
+    {
+      "path": "crates/relayer-graph-core/src/storage/sqlite/migrations/0034_artifact_layers.sql",
+      "sha256": "9a7133e7e846b1676095eb1a4cb678005a4c4bb46a623f70790c0926a88dcf77"
+    },
+    {
+      "path": "crates/relayer-graph-core/src/storage/sqlite/migrations/0035_completion_contracts.sql",
+      "sha256": "2cd080ad8a10a53c6590b8811f275ee3f605cd9415ed2d3d342e136c78572e23"
+    },
+    {
+      "path": "crates/relayer-graph-core/src/storage/sqlite/migrations/0036_durable_invocations.sql",
+      "sha256": "c75b09c5b50546bf484200d19f3a21400e7912f8a143693d91d25e71ada53a6b"
+    },
+    {
+      "path": "crates/relayer-graph-core/src/storage/sqlite/migrations/0037_invoke_input_bindings.sql",
+      "sha256": "ade43b620f3432c0a08c4bc2e60d052f67eff0c3a384a05f4bbcfd2541698bf0"
+    },
+    {
+      "path": "crates/relayer-graph-core/src/storage/sqlite/migrations/0038_inert_imported_invocations.sql",
+      "sha256": "b14b54e27152cfc61919ae5402d65bb906ff23d58ef6f64a981d2262ae2030fc"
+    },
+    {
+      "path": "crates/relayer-graph-core/src/storage/sqlite/migrations/0039_invoke_reuse_policy.sql",
+      "sha256": "d5ae92b4a3441d45fe6eac9db59cead0190f7886138abe639052d9141d8ca5ff"
+    },
+    {
+      "path": "crates/relayer-graph-core/src/storage/sqlite/nodes.rs",
+      "sha256": "e6921d6828354f06ebe48b88fa84faf6a0925af8ca9d9a6b99985a97558ce51d"
+    },
+    {
+      "path": "crates/relayer-graph-core/src/storage/sqlite/permissions.rs",
+      "sha256": "9a1fff211b496f0bd8f5e45c4face1c5511f329e0020bd9e90e068d1e8df58ef"
+    },
+    {
+      "path": "crates/relayer-graph-core/tests/artifact_layers.rs",
+      "sha256": "29069d719a378ea7b49ec2e2cfda4e930e2a3f901aad3be2eafc759a00ef19fe"
+    },
+    {
+      "path": "crates/relayer-graph-core/tests/graph_database.rs",
+      "sha256": "6a03faff5c1d6868dc4d14968cd7803a1d51af2ad91e79cec993b555eb2aea7e"
+    },
+    {
+      "path": "crates/relayer-graph-server/src/lib.rs",
+      "sha256": "c06b3a590087eb417a0cc2290737bcfb7d83acdbae3c0fd377db4c1d924f766a"
+    },
+    {
+      "path": "docs/architecture.md",
+      "sha256": "11eefef942bf2a96a8058b79918573f62b8e026d04154b1e2070adf59bcbbc19"
+    },
+    {
+      "path": "docs/decisions/0014-artifact-layer-renderer.md",
+      "sha256": "fe1c1a558b46528680ffd67822ca4d26fad0af995584d7dcf9b257ed4ef4473c"
+    },
+    {
+      "path": "docs/decisions/0015-sealed-completion-contract-and-invocations.md",
+      "sha256": "282dfdc92be18aab304b636d3422521c919fea41da7be2b80ef286faa034d3cb"
+    },
+    {
+      "path": "docs/prd/index.html",
+      "sha256": "352d3992b3ea8f97c06ce17483a346eeb279640102a84f80728e5a968c13020b"
+    }
+  ],
+  "scope": [
+    "Native completion-contract and artifact automatic-merge integration: writer scope, draft/accepted/stopped ownership, acceptance and prospective Return validation, graph-owned contract preservation",
+    "Artifact fingerprint selection at the same scoped prospective publication plan, graph-server completion authority and file-host bridge",
+    "Main schema0034 artifact checksum compatibility; sequential unpublished completion schemas0035\u20130039; immutable sealed contract initialization and frozen reopen without legacy retrofit",
+    "Optional portable artifact/renderer fields, canonical import persistence, immutable duplicate-node definitions, inert imported call semantics and no authority synthesis; V4 call identity/version boundaries remain separate from artifact data"
+  ],
+  "verdict": "No remaining blocking authority finding or unmapped consequential checkpoint in this native merge scope. Native migration and artifact failures were resolved by sequential candidate migration numbering and realistic tests; no production acceptance or fingerprinting rule was relaxed. Imported artifact metadata survives reopen while execution remains forbidden.",
+  "unresolvedFindings": [],
+  "certification": "Non-certifying until attached to PR707 and its current source snapshot is verified. This scoped assertion does not certify renderer/host-view isolation, full check/build, heavy desktop artifact-viewer proof, live inference, deployed share formats, or human acceptance. Earlier authority assertion remains immutable historical evidence and is not a current merged-source assertion.",
+  "sourceInvalidationRule": "Any byte change to a manifest file invalidates this assertion. Changes outside the manifest are outside this scope; if they affect this native authority or portability boundary, widen and repeat review before claiming coverage.",
+  "edits": [
+    "Preserved main0034_artifact_layers.sql byte-identically (sha256 9a7133e7e846b1676095eb1a4cb678005a4c4bb46a623f70790c0926a88dcf77). Renamed unpublished completion migrations0034\u20130038 to0035\u20130039 without changing SQL bytes.",
+    "Resolved migrations.rs version assertion30..39 and pre-reuse-policy cutoff38. Added real shipped-artifact34 upgrade/open/reopen checkpoint preserving accepted artifact metadata, no old contract backfill, and immutable new sealed contract.",
+    "Extended existing only_the_published_closure_is_fingerprinted fixture: invalid live orphan produces no fingerprint selection and real Advance refusal/head0; discard retains unrelated artifact Node draft; selection includes only shown Node; actual Advance accepts shown but leaves excluded Node draft; Stop selectsnone. This preserves artifact closure proof under ADR0015 full prospective Return validation.",
+    "Extended existing imported_artifact_layers_keep_their_identity_and_never_answer_directly fixture with file SQLite reopen, exact persisted renderer/artifact equality, absent sealed contract and refused complete/Advance/authority activation. Existing malicious artifact-root import remains refused. No new overlapping test."
+  ],
+  "focusedVerification": [
+    {
+      "command": "cargo test -p relayer-graph-core --lib storage::sqlite::migrations::tests:: -- --nocapture",
+      "exitCode": 0,
+      "passed": 19,
+      "failed": 0,
+      "ignored": 0,
+      "filteredOut": 19,
+      "scenarioSeconds": 0.67,
+      "observedBy": "/root/authority_review",
+      "sourceDigest": "bf7a1118ca9aedc5fe66c4e06280ef35014a4cb294e3b7ab8ffc172def8db00e",
+      "inference": false
+    },
+    {
+      "command": "cargo test -p relayer-graph-core --test artifact_layers -- --nocapture",
+      "exitCode": 0,
+      "passed": 10,
+      "failed": 0,
+      "ignored": 0,
+      "filteredOut": 0,
+      "scenarioSeconds": 0.52,
+      "observedBy": "/root/authority_review",
+      "sourceDigest": "bf7a1118ca9aedc5fe66c4e06280ef35014a4cb294e3b7ab8ffc172def8db00e",
+      "inference": false
+    },
+    {
+      "command": "cargo test -p relayer-graph-core --test graph_database imported_artifact_layers_keep_their_identity_and_never_answer_directly -- --exact --nocapture",
+      "exitCode": 0,
+      "passed": 1,
+      "failed": 0,
+      "ignored": 0,
+      "filteredOut": 115,
+      "scenarioSeconds": 0.08,
+      "observedBy": "/root/authority_review",
+      "sourceDigest": "bf7a1118ca9aedc5fe66c4e06280ef35014a4cb294e3b7ab8ffc172def8db00e",
+      "inference": false
+    }
+  ],
+  "buildContext": "Reused existing warm target/Ladybug outputs; no cold provisioning and no inference. Parent owns full candidate build/check.",
+  "preservedFailures": [
+    {
+      "kind": "native artifact test compilation",
+      "command": "cargo test -p relayer-graph-core --test artifact_layers -- --nocapture",
+      "exitCode": 101,
+      "finding": "Main-added ActionDraft helper lacked candidate input_action_ids/reusable fields. Parent repaired helper with empty bindings and None; final10/10 pass supersedes failure, failure remains retained."
+    },
+    {
+      "kind": "obsolete pre-contract artifact fixture semantics",
+      "log": "/private/tmp/interactive-inputs-main-merge-artifact-native-2.log",
+      "passed": 9,
+      "failed": 1,
+      "finding": "only_the_published_closure_is_fingerprinted expected shown Node with unrelated orphan live layer; actual selection[] because sealed Advance validates full prospective Return. Repair explicitly discards abandoned layer after proving refusal; production unchanged."
+    }
+  ],
+  "compatibilityBoundary": "Shipped main schema0034 remains immutable. Earlier unpublished candidate-only databases whose schema0034 was completion_contracts are intentionally incompatible with this renumbered candidate and must not be adopted or silently rewritten; fresh candidate profiles are required. Production main artifact34 history upgrades normally. Portable imports retain metadata and inert provenance, never minting native CompletionContract authority.",
+  "remainingRequiredVerification": [
+    "Parent full npm run check and npm run build for exact merged snapshot, including conversation_export_contract and existing inert V4 Invocation integration tests.",
+    "Declared heavy product entry points remain parent-owned; this focused native review does not replace renderer or packaged desktop gates."
+  ]
+}

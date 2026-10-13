@@ -44,10 +44,14 @@ async function authorChild(context, observed) {
     graph.getInteractionInput(),
     graph.getNode(context.inputGraph.id),
   ]);
+  const reference = input.completionContract?.input.invocationReferences.find((value) => (
+    value.sourceCompletionId === context.origin?.sourceCompletionId
+      && value.sourceActionId === context.origin?.actionId
+  ));
   if (input.interaction.id !== context.inputGraph.id
-    || !Number.isSafeInteger(interaction.leasedActionId)
-    || interaction.leasedActionId < 1) {
-    throw new Error("Invoked Lantern child did not receive its exact leased interaction input");
+    || interaction.leasedActionId != null
+    || !reference) {
+    throw new Error("Invoked Lantern child did not receive its exact sealed Invocation reference");
   }
   observed.revokedChildCapabilityProbes.push(() => (
     new RelayerGraphClient(capability).getNode(context.inputGraph.id)
@@ -60,6 +64,13 @@ async function authorChild(context, observed) {
   await graph.addAction(context.inputGraph.id, {
     kind: "navigate", relation: "expand", label: "Response", target: layer, clientKey: "red-team-response",
   });
+  for (const requirement of input.completionContract.returnRequirements) {
+    if (requirement.kind !== "navigate.response") continue;
+    await graph.addAction(requirement.nodeId, {
+      kind: "navigate", relation: "reference", label: "Updated containment analysis", target: layer,
+      clientKey: `red-team-integrated-${requirement.nodeId}`,
+    });
+  }
   const advanced = await graph.advanceCurrent(layer, current.headRevision, "red-team-advance");
   await graph.returnCurrent(layer, advanced.revision, "red-team-return");
 }
