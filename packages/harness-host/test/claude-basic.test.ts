@@ -201,6 +201,11 @@ describe("ClaudeBasicHarness", () => {
     expect(prompt).toContain("graph.getLiveAnswers(cursor)");
     expect(prompt).toContain("graph.waitForLiveAnswers(cursor)");
     expect(prompt).toContain("The sealed initial contract remains unchanged");
+    expect(prompt).not.toContain('value for their next ordinary interaction');
+    expect(prompt).toContain('Preserve the question when repairing its control');
+    expect(prompt).toContain('<textarea');
+    expect(prompt).toContain('viewer.artifactNode');
+    expect(prompt).toContain('discardLayer');
     expect(prompt).toContain("Semantic children and Invoke-bound inputs use the next ordinary interaction");
     expect(prompt).toContain('graph.authoring("first-finding-');
     expect(prompt).toContain('target: prior.layer');

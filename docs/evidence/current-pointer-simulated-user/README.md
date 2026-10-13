@@ -94,3 +94,20 @@ The repair full check passed: Rust workspace/doc 770, crash-feature/doc 361, Vit
 All required repair proof completed on digest `97b2014968b5d4123a6443e913dd79be5f00be3385009db5e7ec779d944b8b4f`: build/full check, warm portfolio, full web, compiled runtime, actual Electron input and Codex/Prime Stop, and source-bound social/annotation recaptures. Input explicitly reports zero paid calls. Stop records one abort per provider, stopped lifecycle and cancelled attempt. The prior exact Prime/Python/telemetry source proof remains historical for those unchanged executable seams.
 
 Final reviewer: `design_authority_review`, exact 61-path digest above. Reviewed scope: authored null-edit handling and click preservation, regression mapping, inner deterministic gate outcomes, source-bound captures and retained live failures. Verdict: PASS for source/mapping/completed deterministic execution; no unresolved source blocker. Remaining limits: earlier timeout causes are unknown; actual-model Answer delivery remains unproved; the live repeat's detached-node navigation race is unresolved. Fixture SDK consumption does not establish model incorporation, evaluator calibration, task attainment or release readiness. PR remains draft.
+
+
+## Authoring guidance repair experiment (2026-10-13)
+
+Product authority remains PRD §13.2.3 and ADR 0016. This changes guidance, not acceptance or actor behavior. Remove broad next-interaction Input wording for eligible human roots; retain the next-interaction boundary for children/Invoke-bound questions. The communication contract emphasizes publishing a useful first finding/question before optional presentation/artifact work. Repair examples retain the Input using a textarea and typed external link; artifact destinations belong to the same scoped author. Connect intended draft layers or explicitly discard abandoned ones. Exact program edits apply sequentially and require a nonempty array; known rejected graph-only code may instead be resent in full. Terminal success/unknown outcomes still prohibit replay.
+
+Changed executable seams and checkpoints:
+
+| Seam/promise | Deterministic checkpoint |
+| --- | --- |
+| Correct Input/publication/repair guidance reaches Codex, Claude and Prime baseline turns | Existing actual-turn tests in codex-basic, claude-basic and prime-agent; fallback program-edit actual-turn test |
+| Example keeps Input on supported host and sources on typed links | Executable JS/Python fragments in graph-authoring-repair-examples; Python uses the real Prime host compiler |
+| Scoped artifact declaration and orphan integrity remain valid | Exact delivered JS artifact fragment in the real graph-authoring-replay acceptance journey; existing graph-core artifact_layers orphan-Advance checkpoint |
+| Revised prompt/configuration identities remain exact | Three baseline revision increments, Prime manifest/production configuration hash and existing runtime/configuration integrity tests |
+| Existing temporal recipes preserve Advance, retry, prior Current and final Return | Existing JS recursive-complete-e2e and Python graph-authoring-replay communication recipe journeys |
+
+Required verification: warm actual-turn/compiler checks; npm run build and npm run check; named real JS/Python recipe and scoped artifact journeys; full Eval web actor chapter and compiled-runtime portfolio. No renderer, graph-core, Python package or actor protocol change is introduced. No test is deleted. Paid proof repeats the same pinned Europe-trip case, candidate gpt-6-luna and actor task-actor-v9/gpt-5.6-luna with three-completion cap. It compares observed authoring origins, Current revisions and Answer evidence; one run does not establish statistical improvement, task quality or calibrated graph quality. Results and source identities are recorded in [guidance-repair-20261013.md](guidance-repair-20261013.md). The initial session spent two completions; the corrected example was checked with the remaining one-completion admission. Total candidate admissions stayed at three.

@@ -1,3 +1,4 @@
+import { AUTHORING_REPAIR_GUIDANCE_JS } from "../packages/harness-host/src/implementations/graph-presentation-guidance.ts";
 import { currentCommunicationAuthoringRecipePython, scopedAuthoringRecipeJs, scopedAuthoringRecipePython } from "../packages/harness-host/dist/implementations/graph-presentation-guidance.js";
 import { pathToFileURL } from "node:url";
 import { spawn } from "node:child_process";
@@ -836,6 +837,25 @@ describe("scoped artifact authoring against the real graph server", () => {
       await graph.addAction(interaction.node.id, { kind: "navigate", relation: "expand", label: "Launch site", target: written.rootLayer, clientKey: "root-response" });
       await graph.submit(interaction.node.id);
       const viewerLayer = written.layers.find((layer) => layer.renderer === "artifact");
+
+      // Execute the delivered repair example, including its literal icon, against the real acceptance seam.
+      await writeFile(join(threadFolder, "itinerary.md"), "# Shareable itinerary\nA planning draft.");
+      const exampleInteraction = await controlRequest(server.url, token, "/api/control/interactions", { projectId: 41, threadId: 77, text: "Show an itinerary" });
+      const exampleGraph = new RelayerGraphClient({ url: server.url, token: exampleInteraction.graphToken, nodeId: exampleInteraction.node.id });
+      const exampleAuthor = exampleGraph.authoring("repair-example");
+      const exampleRoot = exampleAuthor.layer("overview");
+      const exampleFinding = exampleRoot.node("finding", { icon: "info", title: "Trip plan", detail: "A shareable draft" });
+      const fragment = AUTHORING_REPAIR_GUIDANCE_JS.match(/For example, (const viewer =[\s\S]*?);\. artifactNode/)[1];
+      new Function("author", "layer", "finding", fragment)(exampleAuthor, exampleRoot, exampleFinding);
+      exampleRoot.layout([[exampleFinding, .5, .5]], { edgeShape: "default", defaultNode: exampleFinding });
+      const exampleWritten = await exampleAuthor.write(exampleRoot);
+      await exampleGraph.addAction(exampleInteraction.node.id, { kind: "navigate", relation: "expand", label: "Trip plan", target: exampleWritten.rootLayer, clientKey: "root-response" });
+      const exampleAccepted = await exampleGraph.submit(exampleInteraction.node.id);
+      expect(exampleAccepted.rootLayer.layer.state).toBe("accepted");
+      const exampleViewer = exampleWritten.layers.find(layer => layer.renderer === "artifact");
+      const exampleDetail = await controlRead(server.url, token, `/api/control/interactions/${exampleInteraction.node.id}/layers/${exampleViewer.id}`);
+      expect(exampleDetail.nodes[0]).toMatchObject({ icon: "box", artifact: { kind: "markdown" } });
+
       const accepted = await controlRead(server.url, token, `/api/control/interactions/${interaction.node.id}/layers/${viewerLayer.id}`);
       expect(accepted.layer).toMatchObject({ state: "accepted", renderer: "artifact", edges: [] });
       expect(accepted.nodes).toEqual([expect.objectContaining({ title: "Landing page", artifact: expect.objectContaining({ ...site, fingerprint: expect.stringMatching(/^sha256:[0-9a-f]{64}$/) }) })]);

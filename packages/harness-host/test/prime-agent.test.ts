@@ -41,6 +41,11 @@ describe("PrimeAgentHarness", () => {
         expect(prompt).toContain("graph.get_live_answers(cursor)");
         expect(prompt).toContain("graph.wait_for_live_answers(cursor)");
         expect(prompt).toContain("The sealed initial contract remains unchanged");
+        expect(prompt).not.toContain('value for their next ordinary interaction');
+        expect(prompt).toContain('Preserve the question when repairing its control');
+        expect(prompt).toContain('<textarea');
+        expect(prompt).toContain('viewer.artifact_node');
+        expect(prompt).toContain('discard_layer');
         expect(prompt).toContain("Semantic children and Invoke-bound inputs use the next ordinary interaction");
         expect(prompt).toContain('graph.authoring("first-finding-');
         expect(prompt).toContain('target=GraphLayer.from_dict(prior["layer"])');

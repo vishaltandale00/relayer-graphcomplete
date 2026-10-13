@@ -158,6 +158,11 @@ describe("CodexBasicHarness", () => {
       expect(prompt).toContain("graph.getLiveAnswers(cursor)");
       expect(prompt).toContain("graph.waitForLiveAnswers(cursor)");
       expect(prompt).toContain("The sealed initial contract remains unchanged");
+      expect(prompt).not.toContain('value for their next ordinary interaction');
+      expect(prompt).toContain('Preserve the question when repairing its control');
+      expect(prompt).toContain('<textarea');
+      expect(prompt).toContain('viewer.artifactNode');
+      expect(prompt).toContain('discardLayer');
       expect(prompt).toContain("Semantic children and Invoke-bound inputs use the next ordinary interaction");
       expect(prompt).toContain("native helpers are not separate GraphComplete completions");
       expect(prompt).toContain("Do not fabricate findings or publish empty status merely to advance.");
@@ -730,6 +735,8 @@ describe("CodexBasicHarness", () => {
       expect(submittedPrompt).toContain("Prefer a unique exact-match edit for a small fix");
       expect(submittedPrompt).toContain('await rerunGraphProgram("<id>", [{ find: "exact text from that program", replace: "fixed text" }])');
       expect(submittedPrompt).toContain("Each find must match exactly one place in that program");
+      expect(submittedPrompt).toContain('rerunGraphProgram requires a non-empty edits array');
+      expect(submittedPrompt).toContain('Do not delete the same declaration twice');
       expect(submittedPrompt).toContain("Preserve the supplied import URL byte for byte");
       expect(submittedPrompt).toContain("reconstruct a fresh graph-only draft");
       expect(submittedPrompt).toContain("outcome is unknown");
