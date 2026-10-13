@@ -448,6 +448,10 @@ export function createNodeInputDraftController({ api, onChange = () => {} } = {}
   };
   const adopt = (threadId, response) => {
     const draft = normalizedDraft(threadId, response);
+    const current = drafts.get(key(threadId));
+    // Invoke consumption can settle while an earlier load or unrelated input
+    // mutation reply is still in flight. Every response source is monotonic.
+    if (current && current.revision > draft.revision) return current;
     drafts.set(key(threadId), draft);
     onChange(threadId, draft);
     return draft;
@@ -483,10 +487,18 @@ export function createNodeInputDraftController({ api, onChange = () => {} } = {}
     current(threadId) {
       return drafts.get(key(threadId)) ?? null;
     },
-    async commit(threadId, occurrence, action, stagedValue) {
+    adoptResponse(threadId, response) {
+      return adopt(threadId, response);
+    },
+    async commit(threadId, occurrence, action, stagedValue, { skipIfUnchanged = false } = {}) {
       const value = inputStageValueForApi(action, stagedValue);
       return enqueue(threadId, async () => {
         const current = requireCurrent(threadId);
+        const attachment = committedInputAttachment(current, occurrence);
+        if (skipIfUnchanged && attachment && inputStageValuesEqual(action, stagedValue,
+          initialInputStageValue(action, attachment))) {
+          return current;
+        }
         try {
           const response = await api.commit(threadId, occurrence, value, current.revision);
           requireCommitPostcondition(threadId, response, current, occurrence, action, value);

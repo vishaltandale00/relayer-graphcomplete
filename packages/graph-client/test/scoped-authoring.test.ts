@@ -73,6 +73,130 @@ describe("scoped graph authoring", () => {
   });
 
   afterEach(() => vi.unstubAllGlobals());
+  it("captures a scoped artifact destination and preserves its canonical node and renderer through queued writes", async () => {
+    const fixture = wire();
+    const entered = gate();
+    const release = gate();
+    const fingerprint = "a".repeat(64);
+    fixture.fetch.mockImplementation(async (url, init) => {
+      const path = new URL(url).pathname;
+      const body = JSON.parse(String(init.body));
+      fixture.requests.push({ path, body });
+      if (path.endsWith("/nodes")) { entered.release(); await release.promise; }
+      const reply = fixture.reply(path, body);
+      if ("node" in reply && body.artifact) Object.assign(reply.node, { artifact: { ...body.artifact, fingerprint } });
+      return new Response(JSON.stringify(reply));
+    });
+    const author = client().authoring("artifact-capture");
+    const root = author.layer("answer");
+    const viewer = author.layer("viewer");
+    const summary = root.node("summary", { icon: "info", title: "Site", detail: "Open the site" });
+    const artifact = viewer.node("site", { icon: "globe", title: "Site", detail: "Website" });
+    const source = { file: "site/index.html", root: "site" };
+    artifact.artifact = { kind: "website", source, part: { route: "#pricing" }, viewport: "phone" };
+    viewer.object.renderer = "artifact";
+    const open = root.action("open", summary, { kind: "navigate", relation: "expand", label: "Open site", target: viewer });
+    root.layout([[summary, .5, .5]], { edgeShape: "default" });
+    viewer.layout([[artifact, .5, .5]], { edgeShape: "default", defaultNode: artifact });
+    const pending = author.write(root);
+    await entered.promise;
+    source.file = "late/index.html";
+    Reflect.set(artifact.artifact, "part", { route: "#late" });
+    viewer.object.renderer = undefined;
+    release.release();
+    const written = await pending;
+    const artifactWrite = fixture.requests.find(({ body }) => body.artifact)!;
+    expect(artifactWrite.body.artifact).toEqual({ kind: "website", source: { file: "site/index.html", root: "site" }, part: { route: "#pricing" }, viewport: "phone" });
+    const viewerWrite = fixture.requests.find(({ path, body }) => path.endsWith("/layers") && body.clientKey === viewer.object.clientKey)!;
+    expect(viewerWrite.body).toMatchObject({ renderer: "artifact", nodes: [artifact.ref!.id], defaultNodeId: artifact.ref!.id });
+    expect(viewer.object.ref?.renderer).toBe("artifact");
+    expect(artifact.ref?.artifact).toEqual({ ...(artifactWrite.body.artifact as object), fingerprint });
+    expect(written.actions.find(action => action.clientKey === open.clientKey)?.targetLayerId).toBe(viewer.object.ref!.id);
+  });
+
+  it("captures scoped Input bindings before queued transport and writes canonical refs despite later mutation", async () => {
+    const fixture = wire();
+    const entered = gate();
+    const release = gate();
+    fixture.fetch.mockImplementation(async (url, init) => {
+      const path = new URL(url).pathname;
+      const body = JSON.parse(String(init.body));
+      fixture.requests.push({ path, body });
+      if (path.endsWith("/nodes")) {
+        entered.release();
+        await release.promise;
+      }
+      return new Response(JSON.stringify(fixture.reply(path, body)));
+    });
+    const author = client().authoring("inputs");
+    const layer = author.layer("plan");
+    const node = layer.node("plan", { icon: "compass", title: "Plan", detail: "Inputs" });
+    const options = [{ key: "lisbon", label: "Lisbon" }];
+    const input = layer.action("destination", node, { kind: "input", label: "Destination", control: "single_select", prompt: "Destination", options });
+    const invoke = layer.action("analyze", node, { kind: "invoke", label: "Analyze", interactionText: "Analyze", inputActions: [input] });
+    layer.layout([[node, .5, .5]], { edgeShape: "default" });
+    const pending = author.write(layer);
+    await entered.promise;
+    options[0]!.label = "Late option";
+    Reflect.set(input, "label", "Late Input");
+    Reflect.set(input, "sourceLayer", new Object());
+    Reflect.set(input, "ref", { id: 999 });
+    Reflect.set(invoke, "inputActions", [999]);
+    Reflect.set(invoke, "interactionText", "Late instruction");
+    release.release();
+    const result = await pending;
+    const inputWrite = fixture.requests.find(({ body }) => body.kind === "input")!;
+    const invocation = fixture.requests.find(({ body }) => body.kind === "invoke")!;
+    expect(inputWrite.body).toMatchObject({ label: "Destination", options: [{ key: "lisbon", label: "Lisbon" }] });
+    expect(invocation.body.interactionText).toBe("Analyze");
+    expect(invocation.body.inputActionIds).toEqual([result.actions.find(action => action.kind === "input")!.id]);
+    expect(invocation.body.sourceLayerId).toBe(inputWrite.body.sourceLayerId);
+    expect(invocation.body.reusable).toBe(false);
+    expect(input.ref?.id).toBe(result.actions.find(action => action.kind === "input")!.id);
+  });
+
+  it("binds explicit accepted Input records through their canonical IDs without dependency writes", async () => {
+    const fixture = wire();
+    const author = client().authoring("accepted-input");
+    const layer = author.layer("plan");
+    const node = layer.node("plan", { icon: "compass", title: "Plan", detail: "Inputs" });
+    const accepted = { id: 99, kind: "input", state: "accepted", sourceNodeId: 10, label: "Destination", variant: "pill", control: "text", prompt: "Destination" } as const;
+    layer.action("analyze", node, { kind: "invoke", label: "Analyze", interactionText: "Analyze", inputActions: [accepted] });
+    layer.layout([[node, .5, .5]], { edgeShape: "default" });
+    const pending = author.write(layer);
+    Reflect.set(accepted, "id", 999);
+    await pending;
+    expect(fixture.requests.filter(({ body }) => body.kind === "input")).toEqual([]);
+    expect(fixture.requests.find(({ body }) => body.kind === "invoke")!.body.inputActionIds).toEqual([99]);
+  });
+
+  it("rejects forged, cross-source and cross-layer scoped Input declarations before transport", async () => {
+    for (const invalidBinding of ["forged", "cross-source", "cross-layer", "changed-layer"] as const) {
+      const fixture = wire();
+      const author = client().authoring(`invalid-${invalidBinding}`);
+      const layer = author.layer("plan");
+      const node = layer.node("plan", { icon: "compass", title: "Plan", detail: "Inputs" });
+      const input = layer.action("destination", node, { kind: "input", label: "Destination", control: "text", prompt: "Destination" });
+      let binding = input;
+      if (invalidBinding === "forged") binding = { ...input, ref: { id: 999 } } as typeof input;
+      if (invalidBinding === "cross-source") {
+        const other = layer.node("other", { icon: "info", title: "Other", detail: "Other" });
+        binding = layer.action("other-input", other, { kind: "input", label: "Other", control: "text", prompt: "Other" });
+        layer.layout([[node, .2, .5], [other, .8, .5]], { edgeShape: "default" });
+      } else layer.layout([[node, .5, .5]], { edgeShape: "default" });
+      if (invalidBinding === "cross-layer") {
+        const other = author.layer("other");
+        const owner = other.node("owner", { icon: "info", title: "Other", detail: "Other" });
+        binding = other.action("input", owner, { kind: "input", label: "Other", control: "text", prompt: "Other" });
+        other.layout([[owner, .5, .5]], { edgeShape: "default" });
+      }
+      if (invalidBinding === "changed-layer") Reflect.set(input, "sourceLayer", author.layer("other").object);
+      layer.action("analyze", node, { kind: "invoke", label: "Analyze", interactionText: "Analyze", inputActions: [binding] });
+      await expect(author.write(layer)).rejects.toThrow(invalidBinding === "changed-layer" ? "containing source layer" : "same source Node and scoped Layer");
+      expect(fixture.requests).toEqual([]);
+    }
+  });
+
   it("captures a bound two-layer program before queued transport and preserves all selected aliases", async () => {
     const fixture = wire();
     const entered = gate();

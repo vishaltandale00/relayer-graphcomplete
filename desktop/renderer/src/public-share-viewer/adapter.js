@@ -52,7 +52,7 @@ export function createPublicViewerAdapter(snapshot) {
     state.visibleLayer = layer;
     state.nodes = layer?.nodes ? [...layer.nodes] : [];
     state.edges = layer?.edges ? [...layer.edges] : [];
-    state.actions = layer?.actions ? [...layer.actions] : [];
+    state.actions = snapshot.actionsForLayer(layer);
   }
 
   function selectTurnById(interactionId, { responseRoot = false } = {}) {
@@ -85,7 +85,7 @@ export function createPublicViewerAdapter(snapshot) {
       ? selection.layerPath.slice(0, Number(navigation.pathIndex) + 1)
       : existingIndex >= 0
         ? selection.layerPath.slice(0, existingIndex + 1)
-        : appendLayerPath(selection.layerPath, navigation.action, navigation.sourceNode);
+        : appendLayerPath(selection.layerPath, navigation.action, navigation.sourceNode, layerId);
     selection.selectedNodeId = null;
     hydrate(interaction, layer, layerPath);
     navigation.beforeCommit?.();
@@ -118,6 +118,7 @@ export function createPublicViewerAdapter(snapshot) {
     selectTurnById,
     navigateLayer,
     navigateResolvedInvoke,
+    navigateInvocationCurrent: async call => selectTurnById(call.resultInteractionId, { responseRoot: true }),
     onInvokeAction: async () => false,
     onSubmitInteraction: async () => false,
     onExportConversation: null,

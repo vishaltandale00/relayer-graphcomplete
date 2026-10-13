@@ -1,0 +1,167 @@
+{
+  "reviewer": "prototype_review",
+  "date": "2026-10-08",
+  "scope": "PR707 renderer/public browser repairs for threads 1,4,5,11,15,18,19 UI and separate inert imported-history UI for thread9. Implementation checkpoints plus bounded source review; independent final read-only review by context_trace. Follow-up: proven native preparation refusal is immutable history, spends no call, and permits corrected fresh activation without exact-key recovery. Fullcheck6 checkpoint repair: accepted-only custom draft preview compatibility and exact failed-reservation expectations in real Product Input+Invoke fixture.",
+  "sourceDigest": "2cfdf199599c346299621c6f1769304003e0253aecf363aa67f210d6f4fd6841",
+  "reviewedFiles": {
+    "desktop/renderer/src/action-invocation-state.js": "81ab2c3afb5292ec3a6ea7584d5e5bf514d9725e34a1a7ed2c2ef17bbb40f7f2",
+    "desktop/renderer/src/draft-preview/snapshot.js": "49ea7d513eb493579772edb27b6027476f74daf3cfe1e01b54647f0e07d6a5bf",
+    "desktop/renderer/src/graph.js": "4b343b1b6815b42987674395d9edb0126aaae1d44feb55d92f065141e527aeeb",
+    "desktop/renderer/src/node-detail-assets.js": "ea46ef2d431d7a0e3bb79156e638092ce31176594e723691d500dba9f5cbc3aa",
+    "desktop/renderer/src/product-workspace/model.js": "e8a0f0115cd09963972f13dc8c7a50f25a9a8f3a2d385f8e7bba934e4e083462",
+    "desktop/renderer/src/product-workspace/node-detail-runtime.js": "c1c6e8a2627e20298a7f88c7516febc4c0f7317b00ec00713372bd24202cdcfd",
+    "desktop/renderer/src/product-workspace/workspace.js": "ab169473d5e8e6ec04cc95420513606670c4938cf7d52fcf101307e53f931e1b",
+    "desktop/renderer/src/public-share-viewer/adapter.js": "0d16e80ffb77eeedb058c46c75755050877475d87e6b690126fc273d4cff910a",
+    "desktop/renderer/src/public-share-viewer/main.js": "14f9e26730fb4028b8349517519881dbe62ff6798ea2aaad0f7c57a356073918",
+    "desktop/renderer/src/public-share-viewer/snapshot.js": "080e0538a4a7796ac78dbaf42cc6cea1a6181928a84f82c454f1d327900774ed",
+    "desktop/renderer/src/state.js": "e7879f6681500ed8bc90aa069ddb8c3931afd42ae4dd8cd4d9acb21385d10ca8",
+    "desktop/renderer/src/threads.js": "3e15c08997ea1520f2ed2ce54b8d0bd95d56a3955a6c27a87b7c2e1f0be6a037",
+    "test/action-invocation-state.test.mjs": "6dcfe08448bc63c7a6b6b67088e6c52cbd2f9707520bd8f7efe5867a9d58ffe6",
+    "test/draft-preview-read-model.test.mjs": "a6f96a5d36c2556a814520cbf146bf8365a3ce28cbb278ce89de6eba2b56591e",
+    "test/implicit-input-send.test.mjs": "bc30c38dfc247fe93297097994b782bd6b7b2cfacaaafc010342b9575b9cefe7",
+    "test/invoke-input-bindings.test.mjs": "0f45ceb333e10175879f38bf107f8fddeef4d09c95f6ee3694c0936952e004c0",
+    "test/invoke-input-product-integration.test.mjs": "20dead72f9e34fae1de774f7effe732dddba05d03e4d434cd7caa7ea3cc27021",
+    "test/node-detail-assets.test.mjs": "ca9414715070ebb7f64546ec0a368c83a935b3142fde12edf502b008555ff9fe",
+    "test/public-share-viewer.test.mjs": "97e70b5116036d9ab799eb2161df0ab39591fabadb074afcfaaf52c7c145f3fd",
+    "test/workspace-navigation-integration.test.mjs": "363c7bf566c7188423eb5484b67f88d5997ba8165799b529a7329b757ccfd565"
+  },
+  "verdict": "Warm renderer/read-model249 and real Product Input+Invoke integration1 pass at the bound source. Independent read-only context_trace accepted custom snapshot fallbacks and exact allowed-refusal-ID mapping, preserving failure detection. This asserts the tested seams only; full check/build, full native suites, browser/Electron/human UX, live authoring, CI freshness, merge and release are parent-owned separate gates.",
+  "verification": [
+    {
+      "command": "npx vitest run test/implicit-input-send.test.mjs test/invoke-input-bindings.test.mjs test/action-invocation-state.test.mjs test/public-share-viewer.test.mjs test/workspace-navigation-integration.test.mjs test/node-detail-assets.test.mjs test/draft-preview-read-model.test.mjs",
+      "result": "passed",
+      "files": 7,
+      "tests": 249,
+      "log": "/private/tmp/pr707-ui-fullcheck6-warm-final.log",
+      "logSha256": "90d078df91c1da42c41be6de4fa118b89edc6df4a95dbd4184a597db8560e7a1",
+      "paidInferenceCalls": 0,
+      "durationSeconds": 16.95
+    },
+    {
+      "command": "npx vitest run test/interaction-graph.test.mjs test/interaction-graph-workspace.test.mjs test/workspace-navigation.test.mjs test/workspace-breadcrumb.test.mjs test/workspace-actions.test.mjs",
+      "result": "passed",
+      "files": 5,
+      "tests": 34,
+      "log": "/private/tmp/pr707-ui-model-regressions.log",
+      "logSha256": "86c4879e9ef9178ce495482e7acc365c700b4e42e017ae16bb364a9d27d12adc",
+      "qualification": "Model regression pass predates the untouched baseline display correction, which does not edit model.js."
+    },
+    {
+      "command": "npx vitest run test/invoke-input-product-integration.test.mjs",
+      "result": "passed",
+      "files": 1,
+      "tests": 1,
+      "log": "/private/tmp/pr707-ui-fullcheck6-checkpoints-native-final.log",
+      "logSha256": "d01862af3aba11bfb5d51187748d9f15bf806d3b488a1a0000e466839453768f",
+      "durationSeconds": 8.18,
+      "paidInferenceCalls": 0,
+      "proofScope": "Real loopback native/product fixture: both exact refused receipts, empty/mixed/bound inputs, immutable replay keys, actual source graph inventory and consumption, source projection policy faults, export/reopen/offline retained history. No browser rendering or paid inference."
+    }
+  ],
+  "checkpoints": [
+    {
+      "threads": [
+        1
+      ],
+      "boundary": "First authored text/select registers exact occurrence before Invoke readiness; click captures value/epoch, waits only already-owned saves, refuses failed save, preserves later edits.",
+      "tests": "invoke-input-bindings: compiled implicit consume/edit-back/failure/recovered-edit, authored-unblurred/pending/refusal/select."
+    },
+    {
+      "threads": [
+        4,
+        5
+      ],
+      "boundary": "Active/stopped/failed public calls preserve a separately labeled Current view and source read callback; standalone bound definitions resolve controls without adding semantic Layer membership.",
+      "tests": "public-share-viewer: actual public DOM Current journeys, inert public adapter and cross-Layer standalone definition checks."
+    },
+    {
+      "threads": [
+        11
+      ],
+      "boundary": "Trusted no-effect preparation recovery reuses original key and presenting layer, omits new draft revision/writes, adopts consumed input draft. Unknown/postexecution/stopped remain locked.",
+      "tests": "action-invocation-state plus workspace-navigation-integration not_started reservation/submitted/failed gestures; invoke-input-bindings recovery-adoption standard+compiled then ordinary Send sees revision8."
+    },
+    {
+      "threads": [
+        15,
+        18
+      ],
+      "boundary": "Optional trusted activator/captureState/presenting provenance retained, agent children excluded from humanTurns; new accepted capture agrees with canonical Input; historical/draft frozen snapshots remain inert. Saved Input occurrence and Invoke occurrence may differ on same persistent parent.",
+      "tests": "public-share-viewer canonical source/question/value, activator, independent occurrence, new undeclared capture refusals and legacy compatibility."
+    },
+    {
+      "threads": [
+        19
+      ],
+      "boundary": "Input availability prefers whole-catalog Product boolean; fixture fallback disables only when all visible single-call consumers exhausted, including frozen preparation recovery.",
+      "tests": "invoke-input-bindings shared consumer, authoritative hidden live consumer flag, exhausted flag and enabled exact-key recovery."
+    },
+    {
+      "threads": [
+        9
+      ],
+      "boundary": "Imported history stays outside executable call rows; source/thread/node exact match, Current/Result callbacks, local Current Back/Forward/refresh and refusal, owned retained assets verify before Blob with no portable native request.",
+      "tests": "invoke-input-bindings imported-history mounted DOM; workspace-navigation-integration imported Current route/refresh; node-detail-assets exact pin and corruption scenarios."
+    },
+    {
+      "reviewEdge": "deterministic native preparation refusal before any native call",
+      "boundary": "Only preparationRejected=true, preparationRecoverable=false, durable=false, failed, nonempty nonlegacy-key receipt does not consume Invoke/Input availability. Rejected key is immutable and not recoverable; corrected click captures current input and sends a fresh key. Pending, prepared, legacy, unknown/effect-bearing failures remain locked.",
+      "tests": "action-invocation-state trusted refusal/negative statuses; invoke-input-bindings preparation-rejected plain+compiled mounted controls; workspace-navigation-integration native refusal -> corrected fresh key/current draft revision.",
+      "observed": "Mounted standard/authored fields remain editable after trusted rejection, submit Corrected destination with new revision, retain refused record, and lock when a prepared failure appears. Controller stays on source with no recovered/tutorial execution claim after refusal, then sends a fresh key with revision14 and retains both receipts.",
+      "authorityQualification": "Renderer trusts Product preparationRejected marker. Authority reviewer owns persisted deterministic native4xx receipt, authoritative no-call inventory, and no stop/attempt/execution/prepared-node proof."
+    },
+    {
+      "boundary": "Custom accepted-only draft preview snapshot may omit Current records and capability action resolver; publicState uses empty Current and actual root actions. Validated portable snapshot provider keeps its Current and bound-definition resolver.",
+      "tests": "draft-preview-read-model2 existing tests + public-share-viewer existing Current/native binding portfolio."
+    },
+    {
+      "boundary": "Intentional missing input422 and spent single-call refusal add exact failed Product reservation IDs; expected accepted turns remain awaited by ID/count. No blanket failed-history filter.",
+      "tests": "invoke-input-product-integration: recordRefusal validates trusted marker, NULL graph, unchanged draft, native accepted-closure inventory exact keys, no new contract; success/reopen/export/projection checks include exact known histories; unexpected failure or extra turn fails immediately.",
+      "observed": "Real fixture passed exact2 refused and4 accepted turns, both prepared call policy projections, eight metadata modes, export ordinary sequence from actual response and persisted refused history on runtime-unavailable reopen."
+    }
+  ],
+  "observedCounterexamples": [
+    "Authored controls were not registered in implicit occurrence snapshots, so typing remained gated by old strict commit semantics.",
+    "Recovery early-return skipped response inputDraft adoption; realistic replay now clears consumed baseline and sends with updated revision.",
+    "Untouched controls initialized before async draft load displayed empty despite a saved answer; authoritative baseline now refreshes only while untouched.",
+    "Imported Current descendant Forward initially lost its root path; local breadcrumb/closure restoration now preserves the path without native fetch.",
+    "Initial independent review found controller-only imported-history coverage; mounted exact-source UI regression now passes."
+  ],
+  "subsumption": "No preexisting suite or runner was retired. Old explicit-commit fixtures remain alongside approved implicit standard/authored fixtures. Expectations for durable submitted recovery and public canonical contradictions changed only with explicit preparation/capture provenance contracts; historical compatibility fixtures retain absent captureState.",
+  "unresolvedFindings": [],
+  "limitations": [
+    "Heavy native/public-browser entries and full npm check/build belong to parent final qualification.",
+    "Prior failure/debug logs retained under /private/tmp/pr707-ui-*.log; earlier snapshot passes are not evidence for this digest.",
+    "Any reviewed file edit invalidates this source-bound assertion."
+  ],
+  "previousSourceAssertion": "docs/evidence/issue-632-completion-contract/review-pr707-ui-preparation-rejected-initial-2026-10-08.json",
+  "followupReview": {
+    "reviewer": "context_trace",
+    "sourceDigest": "2cfdf199599c346299621c6f1769304003e0253aecf363aa67f210d6f4fd6841",
+    "verdict": "Accepted bounded publicState fallback and exact expected IDs/allowed refusals; unknown failures remain fatal. Native final result supplied for independent assertion."
+  },
+  "preservedFailures": [
+    {
+      "log": "/private/tmp/pr707-ui-preparation-rejected-warm.log",
+      "testsPassed": 246,
+      "testsFailed": 1,
+      "reason": "New controller fixture omitted #toast; refusal branch correctly attempted to display native rejection. Added same toast stub as neighboring fixture; targeted pass plus final247 portfolio passed. No production repair after this fixture error."
+    },
+    {
+      "log": "/private/tmp/pr707-ui-fullcheck6-checkpoints-1.log",
+      "testsPassed": 2,
+      "testsFailed": 1,
+      "reason": "Sandbox refused graph server loopback bind before scenario. Authorized unsandboxed deterministic fixture then ran."
+    },
+    {
+      "log": "/private/tmp/pr707-ui-fullcheck6-checkpoints-native-2.log",
+      "testsFailed": 1,
+      "reason": "New fixture guessed marker false without runtime; native reached final assertion after prior journeys passed. Authority confirmed persisted capture proof remains true. Changed to exact2 marker IDs, final fixture passed; production untouched for this correction."
+    }
+  ],
+  "followupSubsumption": "No tests or runners retired. Existing247 renderer portfolio plus existing draft-preview2 pass. Product integration retains all old success/replay/consumption/policy tests and adds exact refused history checks instead of ignoring any failed status.",
+  "nativeTestBinarySha256": {
+    "target/debug/relayer-app-server": "6934744897ca9c875c3fe3e21fa490a49936814b0d8d1066132bf73ffbafc6ef",
+    "target/debug/relayer-graph-server": "c0e51f4de62d51c8797e19cffaec281f8bc8db396d32f87e879d33ec3ba63d7f"
+  }
+}

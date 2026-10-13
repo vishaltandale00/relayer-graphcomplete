@@ -1,0 +1,1226 @@
+[
+  {
+    "archiveSha256": "5a477c370eaa55f2147c4faf0141bb4b132c0f79edb187c90439e96806874718",
+    "detail": {
+      "actionInvocations": [],
+      "approvals": [],
+      "conversationCompatibility": {
+        "harnessId": "codex-basic",
+        "message": "This conversation's original execution route cannot be verified. Its history is preserved, but continuing it is unavailable.",
+        "providerId": null,
+        "status": "blocked",
+        "threadId": 2
+      },
+      "importedInvocationHistory": [
+        {
+          "inert": true,
+          "presentingLayerId": null,
+          "record": {
+            "activator": "agent",
+            "arguments": [],
+            "childInteractionNodeId": "node:4",
+            "current": {
+              "layers": [
+                {
+                  "actions": [],
+                  "edges": [],
+                  "layer": {
+                    "clientKey": "current",
+                    "defaultNodeId": "node:2",
+                    "edges": [],
+                    "id": "layer:1",
+                    "layout": {
+                      "edgeShape": "default",
+                      "placements": [
+                        {
+                          "nodeId": "node:2",
+                          "x": 0.5,
+                          "y": 0.5
+                        }
+                      ],
+                      "version": 1
+                    },
+                    "nodes": [
+                      "node:2"
+                    ],
+                    "state": "accepted"
+                  },
+                  "nodes": [
+                    {
+                      "clientKey": "answer",
+                      "detail": "First contribution retained independently",
+                      "icon": "box",
+                      "id": "node:2",
+                      "kind": "concept",
+                      "state": "accepted",
+                      "title": "First contribution"
+                    }
+                  ]
+                }
+              ],
+              "rootLayerId": "layer:1"
+            },
+            "currentLayerId": "layer:1",
+            "headRevision": 1,
+            "id": "invocation:1",
+            "lifecycle": "active",
+            "resultTurnId": null,
+            "returnedLayerId": null,
+            "safeReason": null,
+            "schemaVersion": 1,
+            "source": {
+              "actionId": "action:1",
+              "captureState": "draft",
+              "description": null,
+              "icon": null,
+              "iconAsset": null,
+              "inputActionIds": [],
+              "inputBindingsDefined": false,
+              "instruction": "First frozen instruction",
+              "interactionNodeId": "node:1",
+              "label": "Investigate",
+              "layerId": "layer:2",
+              "parentDetail": "Source",
+              "parentNodeId": "node:3",
+              "parentTitle": "Source",
+              "presentingLayerId": "layer:2",
+              "reusable": true,
+              "state": "accepted",
+              "variant": "pill"
+            }
+          },
+          "resultInteractionId": null,
+          "sourceActionId": null,
+          "sourceInteractionId": null,
+          "sourceNodeId": null,
+          "sourceTurn": {
+            "completion": {
+              "error": "cancelled_by_user",
+              "permissionProfileId": "auto",
+              "status": "stopped"
+            },
+            "id": 3,
+            "interactionNodeId": "node:1",
+            "sequence": 1
+          },
+          "threadId": 2,
+          "visualAssetContents": []
+        },
+        {
+          "inert": true,
+          "presentingLayerId": null,
+          "record": {
+            "activator": "agent",
+            "arguments": [],
+            "childInteractionNodeId": "node:6",
+            "current": {
+              "layers": [
+                {
+                  "actions": [],
+                  "edges": [],
+                  "layer": {
+                    "clientKey": "current",
+                    "defaultNodeId": "node:5",
+                    "edges": [],
+                    "id": "layer:3",
+                    "layout": {
+                      "edgeShape": "default",
+                      "placements": [
+                        {
+                          "nodeId": "node:5",
+                          "x": 0.5,
+                          "y": 0.5
+                        }
+                      ],
+                      "version": 1
+                    },
+                    "nodes": [
+                      "node:5"
+                    ],
+                    "state": "accepted"
+                  },
+                  "nodes": [
+                    {
+                      "clientKey": "answer",
+                      "detail": "Second contribution retained independently",
+                      "icon": "box",
+                      "id": "node:5",
+                      "kind": "concept",
+                      "state": "accepted",
+                      "title": "Second contribution"
+                    }
+                  ]
+                }
+              ],
+              "rootLayerId": "layer:3"
+            },
+            "currentLayerId": "layer:3",
+            "headRevision": 1,
+            "id": "invocation:2",
+            "lifecycle": "active",
+            "resultTurnId": null,
+            "returnedLayerId": null,
+            "safeReason": null,
+            "schemaVersion": 1,
+            "source": {
+              "actionId": "action:1",
+              "captureState": "draft",
+              "description": null,
+              "icon": null,
+              "iconAsset": null,
+              "inputActionIds": [],
+              "inputBindingsDefined": false,
+              "instruction": "Second frozen instruction",
+              "interactionNodeId": "node:1",
+              "label": "Second frozen request",
+              "layerId": "layer:2",
+              "parentDetail": "Source",
+              "parentNodeId": "node:3",
+              "parentTitle": "Source",
+              "presentingLayerId": "layer:2",
+              "reusable": true,
+              "state": "accepted",
+              "variant": "pill"
+            }
+          },
+          "resultInteractionId": null,
+          "sourceActionId": null,
+          "sourceInteractionId": null,
+          "sourceNodeId": null,
+          "sourceTurn": {
+            "completion": {
+              "error": "cancelled_by_user",
+              "permissionProfileId": "auto",
+              "status": "stopped"
+            },
+            "id": 3,
+            "interactionNodeId": "node:1",
+            "sequence": 1
+          },
+          "threadId": 2,
+          "visualAssetContents": []
+        }
+      ],
+      "interactions": [
+        {
+          "completionError": "cancelled_by_user",
+          "completionOutput": null,
+          "completionStatus": "stopped",
+          "contexts": [],
+          "createdAt": "1791502977194",
+          "effectiveExecutionDigest": null,
+          "effectivePermissionReceipt": null,
+          "graphNodeId": 7,
+          "harnessConfigurationDigest": null,
+          "harnessConfigurationName": null,
+          "id": 3,
+          "latestAttempt": null,
+          "modelSelection": null,
+          "permissionProfileId": "auto",
+          "projectionFresh": true,
+          "sequence": 1,
+          "stopError": null,
+          "stopRequested": false,
+          "submittedInputs": [],
+          "text": "Root",
+          "threadId": 2
+        },
+        {
+          "completionError": null,
+          "completionOutput": null,
+          "completionStatus": "not_started",
+          "contexts": [],
+          "createdAt": "1791502977245",
+          "effectiveExecutionDigest": null,
+          "effectivePermissionReceipt": null,
+          "graphNodeId": null,
+          "harnessConfigurationDigest": null,
+          "harnessConfigurationName": null,
+          "id": 4,
+          "latestAttempt": null,
+          "modelSelection": null,
+          "permissionProfileId": "auto",
+          "projectionFresh": true,
+          "sequence": 2,
+          "stopError": null,
+          "stopRequested": false,
+          "submittedInputs": [],
+          "text": "First frozen instruction",
+          "threadId": 2
+        }
+      ],
+      "invocationInventoryAvailable": true,
+      "thread": {
+        "activity": "running",
+        "archiveBlocked": true,
+        "archivedAt": null,
+        "checkoutContext": null,
+        "createdAt": "1791502977194",
+        "groupedProjectId": null,
+        "harnessConfigurationName": "codex-basic",
+        "harnessId": "codex-basic",
+        "icon": null,
+        "id": 2,
+        "imported": true,
+        "permissionProfileId": "auto",
+        "projectId": null,
+        "rootInteractionId": 3,
+        "title": "Root",
+        "updatedAt": "1791502977245",
+        "workingDirectory": null
+      }
+    },
+    "nativeProductResultBound": false,
+    "parentStatus": "stopped",
+    "state": {
+      "actionInvocations": [],
+      "approvals": [],
+      "capabilities": {
+        "annotations": false,
+        "credentials": false,
+        "graph": true,
+        "harness": true,
+        "interactions": true,
+        "projects": true,
+        "stopRuns": true,
+        "threads": true
+      },
+      "conversationCompatibility": {
+        "harnessId": "codex-basic",
+        "message": "This conversation's original execution route cannot be verified. Its history is preserved, but continuing it is unavailable.",
+        "providerId": null,
+        "status": "blocked",
+        "threadId": 2
+      },
+      "currentProjection": {
+        "cursor": 8,
+        "events": [
+          {
+            "completionId": 7,
+            "currentLayerId": null,
+            "finalLayerId": null,
+            "lifecycle": "active",
+            "previousRevision": null,
+            "revision": 0,
+            "safeReason": null,
+            "sequence": 8
+          }
+        ],
+        "hasMore": false,
+        "states": [
+          {
+            "completionId": 7,
+            "currentLayerId": null,
+            "finalLayerId": null,
+            "headRevision": 0,
+            "lifecycle": "active",
+            "safeReason": null,
+            "temporalFeatures": {
+              "configVersion": 1,
+              "invokeResolution": true,
+              "projectionUi": true,
+              "providerRecursion": true,
+              "rootCurrentWrite": true,
+              "schemaRead": true
+            }
+          }
+        ]
+      },
+      "importedInvocationHistory": [
+        {
+          "inert": true,
+          "presentingLayerId": null,
+          "record": {
+            "activator": "agent",
+            "arguments": [],
+            "childInteractionNodeId": "node:4",
+            "current": {
+              "layers": [
+                {
+                  "actions": [],
+                  "edges": [],
+                  "layer": {
+                    "clientKey": "current",
+                    "defaultNodeId": "node:2",
+                    "edges": [],
+                    "id": "layer:1",
+                    "layout": {
+                      "edgeShape": "default",
+                      "placements": [
+                        {
+                          "nodeId": "node:2",
+                          "x": 0.5,
+                          "y": 0.5
+                        }
+                      ],
+                      "version": 1
+                    },
+                    "nodes": [
+                      "node:2"
+                    ],
+                    "state": "accepted"
+                  },
+                  "nodes": [
+                    {
+                      "clientKey": "answer",
+                      "detail": "First contribution retained independently",
+                      "icon": "box",
+                      "id": "node:2",
+                      "kind": "concept",
+                      "state": "accepted",
+                      "title": "First contribution"
+                    }
+                  ]
+                }
+              ],
+              "rootLayerId": "layer:1"
+            },
+            "currentLayerId": "layer:1",
+            "headRevision": 1,
+            "id": "invocation:1",
+            "lifecycle": "active",
+            "resultTurnId": null,
+            "returnedLayerId": null,
+            "safeReason": null,
+            "schemaVersion": 1,
+            "source": {
+              "actionId": "action:1",
+              "captureState": "draft",
+              "description": null,
+              "icon": null,
+              "iconAsset": null,
+              "inputActionIds": [],
+              "inputBindingsDefined": false,
+              "instruction": "First frozen instruction",
+              "interactionNodeId": "node:1",
+              "label": "Investigate",
+              "layerId": "layer:2",
+              "parentDetail": "Source",
+              "parentNodeId": "node:3",
+              "parentTitle": "Source",
+              "presentingLayerId": "layer:2",
+              "reusable": true,
+              "state": "accepted",
+              "variant": "pill"
+            }
+          },
+          "resultInteractionId": null,
+          "sourceActionId": null,
+          "sourceInteractionId": null,
+          "sourceNodeId": null,
+          "sourceTurn": {
+            "completion": {
+              "error": "cancelled_by_user",
+              "permissionProfileId": "auto",
+              "status": "stopped"
+            },
+            "id": 3,
+            "interactionNodeId": "node:1",
+            "sequence": 1
+          },
+          "threadId": 2,
+          "visualAssetContents": []
+        },
+        {
+          "inert": true,
+          "presentingLayerId": null,
+          "record": {
+            "activator": "agent",
+            "arguments": [],
+            "childInteractionNodeId": "node:6",
+            "current": {
+              "layers": [
+                {
+                  "actions": [],
+                  "edges": [],
+                  "layer": {
+                    "clientKey": "current",
+                    "defaultNodeId": "node:5",
+                    "edges": [],
+                    "id": "layer:3",
+                    "layout": {
+                      "edgeShape": "default",
+                      "placements": [
+                        {
+                          "nodeId": "node:5",
+                          "x": 0.5,
+                          "y": 0.5
+                        }
+                      ],
+                      "version": 1
+                    },
+                    "nodes": [
+                      "node:5"
+                    ],
+                    "state": "accepted"
+                  },
+                  "nodes": [
+                    {
+                      "clientKey": "answer",
+                      "detail": "Second contribution retained independently",
+                      "icon": "box",
+                      "id": "node:5",
+                      "kind": "concept",
+                      "state": "accepted",
+                      "title": "Second contribution"
+                    }
+                  ]
+                }
+              ],
+              "rootLayerId": "layer:3"
+            },
+            "currentLayerId": "layer:3",
+            "headRevision": 1,
+            "id": "invocation:2",
+            "lifecycle": "active",
+            "resultTurnId": null,
+            "returnedLayerId": null,
+            "safeReason": null,
+            "schemaVersion": 1,
+            "source": {
+              "actionId": "action:1",
+              "captureState": "draft",
+              "description": null,
+              "icon": null,
+              "iconAsset": null,
+              "inputActionIds": [],
+              "inputBindingsDefined": false,
+              "instruction": "Second frozen instruction",
+              "interactionNodeId": "node:1",
+              "label": "Second frozen request",
+              "layerId": "layer:2",
+              "parentDetail": "Source",
+              "parentNodeId": "node:3",
+              "parentTitle": "Source",
+              "presentingLayerId": "layer:2",
+              "reusable": true,
+              "state": "accepted",
+              "variant": "pill"
+            }
+          },
+          "resultInteractionId": null,
+          "sourceActionId": null,
+          "sourceInteractionId": null,
+          "sourceNodeId": null,
+          "sourceTurn": {
+            "completion": {
+              "error": "cancelled_by_user",
+              "permissionProfileId": "auto",
+              "status": "stopped"
+            },
+            "id": 3,
+            "interactionNodeId": "node:1",
+            "sequence": 1
+          },
+          "threadId": 2,
+          "visualAssetContents": []
+        }
+      ],
+      "inputDraftRevision": null,
+      "interactions": [
+        {
+          "completionError": "cancelled_by_user",
+          "completionOutput": null,
+          "completionStatus": "stopped",
+          "contexts": [],
+          "createdAt": "1791502977194",
+          "effectiveExecutionDigest": null,
+          "effectivePermissionReceipt": null,
+          "graphNodeId": 7,
+          "harnessConfigurationDigest": null,
+          "harnessConfigurationName": null,
+          "id": 3,
+          "latestAttempt": null,
+          "modelSelection": null,
+          "permissionProfileId": "auto",
+          "projectionFresh": true,
+          "sequence": 1,
+          "stopError": null,
+          "stopRequested": false,
+          "submittedInputs": [],
+          "text": "Root",
+          "threadId": 2
+        },
+        {
+          "completionError": null,
+          "completionOutput": null,
+          "completionStatus": "not_started",
+          "contexts": [],
+          "createdAt": "1791502977245",
+          "effectiveExecutionDigest": null,
+          "effectivePermissionReceipt": null,
+          "graphNodeId": null,
+          "harnessConfigurationDigest": null,
+          "harnessConfigurationName": null,
+          "id": 4,
+          "latestAttempt": null,
+          "modelSelection": null,
+          "permissionProfileId": "auto",
+          "projectionFresh": true,
+          "sequence": 2,
+          "stopError": null,
+          "stopRequested": false,
+          "submittedInputs": [],
+          "text": "First frozen instruction",
+          "threadId": 2
+        }
+      ],
+      "invocationInventoryAvailable": true,
+      "projects": [],
+      "threads": [
+        {
+          "active": true,
+          "activity": "running",
+          "archiveBlocked": true,
+          "archivedAt": null,
+          "checkoutContext": null,
+          "createdAt": "1791502977194",
+          "groupedProjectId": null,
+          "harnessConfigurationName": "codex-basic",
+          "harnessId": "codex-basic",
+          "icon": null,
+          "id": 2,
+          "imported": true,
+          "permissionProfileId": "auto",
+          "projectId": null,
+          "rootInteractionId": 3,
+          "title": "Root",
+          "updatedAt": "1791502977245",
+          "workingDirectory": null
+        },
+        {
+          "active": false,
+          "activity": "running",
+          "archiveBlocked": true,
+          "archivedAt": null,
+          "checkoutContext": null,
+          "createdAt": "1791502977194",
+          "groupedProjectId": null,
+          "harnessConfigurationName": "codex-basic",
+          "harnessId": "codex-basic",
+          "icon": null,
+          "id": 1,
+          "imported": false,
+          "permissionProfileId": "auto",
+          "projectId": null,
+          "rootInteractionId": 1,
+          "title": "Root",
+          "updatedAt": "1791502977245",
+          "workingDirectory": null
+        }
+      ]
+    }
+  },
+  {
+    "archiveSha256": "b5bfc9ac7dbb24566477f9091c016fb174196c3beb1bfb02e5d8285f52693f5a",
+    "detail": {
+      "actionInvocations": [],
+      "approvals": [],
+      "conversationCompatibility": {
+        "harnessId": "codex-basic",
+        "message": "This conversation's original execution route cannot be verified. Its history is preserved, but continuing it is unavailable.",
+        "providerId": null,
+        "status": "blocked",
+        "threadId": 2
+      },
+      "importedInvocationHistory": [
+        {
+          "inert": true,
+          "presentingLayerId": null,
+          "record": {
+            "activator": "agent",
+            "arguments": [],
+            "childInteractionNodeId": "node:4",
+            "current": {
+              "layers": [
+                {
+                  "actions": [],
+                  "edges": [],
+                  "layer": {
+                    "clientKey": "current",
+                    "defaultNodeId": "node:2",
+                    "edges": [],
+                    "id": "layer:1",
+                    "layout": {
+                      "edgeShape": "default",
+                      "placements": [
+                        {
+                          "nodeId": "node:2",
+                          "x": 0.5,
+                          "y": 0.5
+                        }
+                      ],
+                      "version": 1
+                    },
+                    "nodes": [
+                      "node:2"
+                    ],
+                    "state": "accepted"
+                  },
+                  "nodes": [
+                    {
+                      "clientKey": "answer",
+                      "detail": "First contribution retained independently",
+                      "icon": "box",
+                      "id": "node:2",
+                      "kind": "concept",
+                      "state": "accepted",
+                      "title": "First contribution"
+                    }
+                  ]
+                }
+              ],
+              "rootLayerId": "layer:1"
+            },
+            "currentLayerId": "layer:1",
+            "headRevision": 1,
+            "id": "invocation:1",
+            "lifecycle": "active",
+            "resultTurnId": null,
+            "returnedLayerId": null,
+            "safeReason": null,
+            "schemaVersion": 1,
+            "source": {
+              "actionId": "action:1",
+              "captureState": "draft",
+              "description": null,
+              "icon": null,
+              "iconAsset": null,
+              "inputActionIds": [],
+              "inputBindingsDefined": false,
+              "instruction": "First frozen instruction",
+              "interactionNodeId": "node:1",
+              "label": "Investigate",
+              "layerId": "layer:2",
+              "parentDetail": "Source",
+              "parentNodeId": "node:3",
+              "parentTitle": "Source",
+              "presentingLayerId": "layer:2",
+              "reusable": true,
+              "state": "accepted",
+              "variant": "pill"
+            }
+          },
+          "resultInteractionId": null,
+          "sourceActionId": null,
+          "sourceInteractionId": null,
+          "sourceNodeId": null,
+          "sourceTurn": {
+            "completion": {
+              "error": "provider_timeout",
+              "permissionProfileId": "auto",
+              "status": "failed"
+            },
+            "id": 3,
+            "interactionNodeId": "node:1",
+            "sequence": 1
+          },
+          "threadId": 2,
+          "visualAssetContents": []
+        },
+        {
+          "inert": true,
+          "presentingLayerId": null,
+          "record": {
+            "activator": "agent",
+            "arguments": [],
+            "childInteractionNodeId": "node:6",
+            "current": {
+              "layers": [
+                {
+                  "actions": [],
+                  "edges": [],
+                  "layer": {
+                    "clientKey": "current",
+                    "defaultNodeId": "node:5",
+                    "edges": [],
+                    "id": "layer:3",
+                    "layout": {
+                      "edgeShape": "default",
+                      "placements": [
+                        {
+                          "nodeId": "node:5",
+                          "x": 0.5,
+                          "y": 0.5
+                        }
+                      ],
+                      "version": 1
+                    },
+                    "nodes": [
+                      "node:5"
+                    ],
+                    "state": "accepted"
+                  },
+                  "nodes": [
+                    {
+                      "clientKey": "answer",
+                      "detail": "Second contribution retained independently",
+                      "icon": "box",
+                      "id": "node:5",
+                      "kind": "concept",
+                      "state": "accepted",
+                      "title": "Second contribution"
+                    }
+                  ]
+                }
+              ],
+              "rootLayerId": "layer:3"
+            },
+            "currentLayerId": "layer:3",
+            "headRevision": 1,
+            "id": "invocation:2",
+            "lifecycle": "active",
+            "resultTurnId": null,
+            "returnedLayerId": null,
+            "safeReason": null,
+            "schemaVersion": 1,
+            "source": {
+              "actionId": "action:1",
+              "captureState": "draft",
+              "description": null,
+              "icon": null,
+              "iconAsset": null,
+              "inputActionIds": [],
+              "inputBindingsDefined": false,
+              "instruction": "Second frozen instruction",
+              "interactionNodeId": "node:1",
+              "label": "Second frozen request",
+              "layerId": "layer:2",
+              "parentDetail": "Source",
+              "parentNodeId": "node:3",
+              "parentTitle": "Source",
+              "presentingLayerId": "layer:2",
+              "reusable": true,
+              "state": "accepted",
+              "variant": "pill"
+            }
+          },
+          "resultInteractionId": null,
+          "sourceActionId": null,
+          "sourceInteractionId": null,
+          "sourceNodeId": null,
+          "sourceTurn": {
+            "completion": {
+              "error": "provider_timeout",
+              "permissionProfileId": "auto",
+              "status": "failed"
+            },
+            "id": 3,
+            "interactionNodeId": "node:1",
+            "sequence": 1
+          },
+          "threadId": 2,
+          "visualAssetContents": []
+        }
+      ],
+      "interactions": [
+        {
+          "completionError": "provider_timeout",
+          "completionOutput": null,
+          "completionStatus": "failed",
+          "contexts": [],
+          "createdAt": "1791502977370",
+          "effectiveExecutionDigest": null,
+          "effectivePermissionReceipt": null,
+          "graphNodeId": 7,
+          "harnessConfigurationDigest": null,
+          "harnessConfigurationName": null,
+          "id": 3,
+          "latestAttempt": null,
+          "modelSelection": null,
+          "permissionProfileId": "auto",
+          "projectionFresh": true,
+          "sequence": 1,
+          "stopError": null,
+          "stopRequested": false,
+          "submittedInputs": [],
+          "text": "Root",
+          "threadId": 2
+        },
+        {
+          "completionError": null,
+          "completionOutput": null,
+          "completionStatus": "not_started",
+          "contexts": [],
+          "createdAt": "1791502977414",
+          "effectiveExecutionDigest": null,
+          "effectivePermissionReceipt": null,
+          "graphNodeId": null,
+          "harnessConfigurationDigest": null,
+          "harnessConfigurationName": null,
+          "id": 4,
+          "latestAttempt": null,
+          "modelSelection": null,
+          "permissionProfileId": "auto",
+          "projectionFresh": true,
+          "sequence": 2,
+          "stopError": null,
+          "stopRequested": false,
+          "submittedInputs": [],
+          "text": "First frozen instruction",
+          "threadId": 2
+        }
+      ],
+      "invocationInventoryAvailable": true,
+      "thread": {
+        "activity": "running",
+        "archiveBlocked": true,
+        "archivedAt": null,
+        "checkoutContext": null,
+        "createdAt": "1791502977370",
+        "groupedProjectId": null,
+        "harnessConfigurationName": "codex-basic",
+        "harnessId": "codex-basic",
+        "icon": null,
+        "id": 2,
+        "imported": true,
+        "permissionProfileId": "auto",
+        "projectId": null,
+        "rootInteractionId": 3,
+        "title": "Root",
+        "updatedAt": "1791502977414",
+        "workingDirectory": null
+      }
+    },
+    "nativeProductResultBound": false,
+    "parentStatus": "failed",
+    "state": {
+      "actionInvocations": [],
+      "approvals": [],
+      "capabilities": {
+        "annotations": false,
+        "credentials": false,
+        "graph": true,
+        "harness": true,
+        "interactions": true,
+        "projects": true,
+        "stopRuns": true,
+        "threads": true
+      },
+      "conversationCompatibility": {
+        "harnessId": "codex-basic",
+        "message": "This conversation's original execution route cannot be verified. Its history is preserved, but continuing it is unavailable.",
+        "providerId": null,
+        "status": "blocked",
+        "threadId": 2
+      },
+      "currentProjection": {
+        "cursor": 8,
+        "events": [
+          {
+            "completionId": 7,
+            "currentLayerId": null,
+            "finalLayerId": null,
+            "lifecycle": "active",
+            "previousRevision": null,
+            "revision": 0,
+            "safeReason": null,
+            "sequence": 8
+          }
+        ],
+        "hasMore": false,
+        "states": [
+          {
+            "completionId": 7,
+            "currentLayerId": null,
+            "finalLayerId": null,
+            "headRevision": 0,
+            "lifecycle": "active",
+            "safeReason": null,
+            "temporalFeatures": {
+              "configVersion": 1,
+              "invokeResolution": true,
+              "projectionUi": true,
+              "providerRecursion": true,
+              "rootCurrentWrite": true,
+              "schemaRead": true
+            }
+          }
+        ]
+      },
+      "importedInvocationHistory": [
+        {
+          "inert": true,
+          "presentingLayerId": null,
+          "record": {
+            "activator": "agent",
+            "arguments": [],
+            "childInteractionNodeId": "node:4",
+            "current": {
+              "layers": [
+                {
+                  "actions": [],
+                  "edges": [],
+                  "layer": {
+                    "clientKey": "current",
+                    "defaultNodeId": "node:2",
+                    "edges": [],
+                    "id": "layer:1",
+                    "layout": {
+                      "edgeShape": "default",
+                      "placements": [
+                        {
+                          "nodeId": "node:2",
+                          "x": 0.5,
+                          "y": 0.5
+                        }
+                      ],
+                      "version": 1
+                    },
+                    "nodes": [
+                      "node:2"
+                    ],
+                    "state": "accepted"
+                  },
+                  "nodes": [
+                    {
+                      "clientKey": "answer",
+                      "detail": "First contribution retained independently",
+                      "icon": "box",
+                      "id": "node:2",
+                      "kind": "concept",
+                      "state": "accepted",
+                      "title": "First contribution"
+                    }
+                  ]
+                }
+              ],
+              "rootLayerId": "layer:1"
+            },
+            "currentLayerId": "layer:1",
+            "headRevision": 1,
+            "id": "invocation:1",
+            "lifecycle": "active",
+            "resultTurnId": null,
+            "returnedLayerId": null,
+            "safeReason": null,
+            "schemaVersion": 1,
+            "source": {
+              "actionId": "action:1",
+              "captureState": "draft",
+              "description": null,
+              "icon": null,
+              "iconAsset": null,
+              "inputActionIds": [],
+              "inputBindingsDefined": false,
+              "instruction": "First frozen instruction",
+              "interactionNodeId": "node:1",
+              "label": "Investigate",
+              "layerId": "layer:2",
+              "parentDetail": "Source",
+              "parentNodeId": "node:3",
+              "parentTitle": "Source",
+              "presentingLayerId": "layer:2",
+              "reusable": true,
+              "state": "accepted",
+              "variant": "pill"
+            }
+          },
+          "resultInteractionId": null,
+          "sourceActionId": null,
+          "sourceInteractionId": null,
+          "sourceNodeId": null,
+          "sourceTurn": {
+            "completion": {
+              "error": "provider_timeout",
+              "permissionProfileId": "auto",
+              "status": "failed"
+            },
+            "id": 3,
+            "interactionNodeId": "node:1",
+            "sequence": 1
+          },
+          "threadId": 2,
+          "visualAssetContents": []
+        },
+        {
+          "inert": true,
+          "presentingLayerId": null,
+          "record": {
+            "activator": "agent",
+            "arguments": [],
+            "childInteractionNodeId": "node:6",
+            "current": {
+              "layers": [
+                {
+                  "actions": [],
+                  "edges": [],
+                  "layer": {
+                    "clientKey": "current",
+                    "defaultNodeId": "node:5",
+                    "edges": [],
+                    "id": "layer:3",
+                    "layout": {
+                      "edgeShape": "default",
+                      "placements": [
+                        {
+                          "nodeId": "node:5",
+                          "x": 0.5,
+                          "y": 0.5
+                        }
+                      ],
+                      "version": 1
+                    },
+                    "nodes": [
+                      "node:5"
+                    ],
+                    "state": "accepted"
+                  },
+                  "nodes": [
+                    {
+                      "clientKey": "answer",
+                      "detail": "Second contribution retained independently",
+                      "icon": "box",
+                      "id": "node:5",
+                      "kind": "concept",
+                      "state": "accepted",
+                      "title": "Second contribution"
+                    }
+                  ]
+                }
+              ],
+              "rootLayerId": "layer:3"
+            },
+            "currentLayerId": "layer:3",
+            "headRevision": 1,
+            "id": "invocation:2",
+            "lifecycle": "active",
+            "resultTurnId": null,
+            "returnedLayerId": null,
+            "safeReason": null,
+            "schemaVersion": 1,
+            "source": {
+              "actionId": "action:1",
+              "captureState": "draft",
+              "description": null,
+              "icon": null,
+              "iconAsset": null,
+              "inputActionIds": [],
+              "inputBindingsDefined": false,
+              "instruction": "Second frozen instruction",
+              "interactionNodeId": "node:1",
+              "label": "Second frozen request",
+              "layerId": "layer:2",
+              "parentDetail": "Source",
+              "parentNodeId": "node:3",
+              "parentTitle": "Source",
+              "presentingLayerId": "layer:2",
+              "reusable": true,
+              "state": "accepted",
+              "variant": "pill"
+            }
+          },
+          "resultInteractionId": null,
+          "sourceActionId": null,
+          "sourceInteractionId": null,
+          "sourceNodeId": null,
+          "sourceTurn": {
+            "completion": {
+              "error": "provider_timeout",
+              "permissionProfileId": "auto",
+              "status": "failed"
+            },
+            "id": 3,
+            "interactionNodeId": "node:1",
+            "sequence": 1
+          },
+          "threadId": 2,
+          "visualAssetContents": []
+        }
+      ],
+      "inputDraftRevision": null,
+      "interactions": [
+        {
+          "completionError": "provider_timeout",
+          "completionOutput": null,
+          "completionStatus": "failed",
+          "contexts": [],
+          "createdAt": "1791502977370",
+          "effectiveExecutionDigest": null,
+          "effectivePermissionReceipt": null,
+          "graphNodeId": 7,
+          "harnessConfigurationDigest": null,
+          "harnessConfigurationName": null,
+          "id": 3,
+          "latestAttempt": null,
+          "modelSelection": null,
+          "permissionProfileId": "auto",
+          "projectionFresh": true,
+          "sequence": 1,
+          "stopError": null,
+          "stopRequested": false,
+          "submittedInputs": [],
+          "text": "Root",
+          "threadId": 2
+        },
+        {
+          "completionError": null,
+          "completionOutput": null,
+          "completionStatus": "not_started",
+          "contexts": [],
+          "createdAt": "1791502977414",
+          "effectiveExecutionDigest": null,
+          "effectivePermissionReceipt": null,
+          "graphNodeId": null,
+          "harnessConfigurationDigest": null,
+          "harnessConfigurationName": null,
+          "id": 4,
+          "latestAttempt": null,
+          "modelSelection": null,
+          "permissionProfileId": "auto",
+          "projectionFresh": true,
+          "sequence": 2,
+          "stopError": null,
+          "stopRequested": false,
+          "submittedInputs": [],
+          "text": "First frozen instruction",
+          "threadId": 2
+        }
+      ],
+      "invocationInventoryAvailable": true,
+      "projects": [],
+      "threads": [
+        {
+          "active": true,
+          "activity": "running",
+          "archiveBlocked": true,
+          "archivedAt": null,
+          "checkoutContext": null,
+          "createdAt": "1791502977370",
+          "groupedProjectId": null,
+          "harnessConfigurationName": "codex-basic",
+          "harnessId": "codex-basic",
+          "icon": null,
+          "id": 2,
+          "imported": true,
+          "permissionProfileId": "auto",
+          "projectId": null,
+          "rootInteractionId": 3,
+          "title": "Root",
+          "updatedAt": "1791502977414",
+          "workingDirectory": null
+        },
+        {
+          "active": false,
+          "activity": "running",
+          "archiveBlocked": true,
+          "archivedAt": null,
+          "checkoutContext": null,
+          "createdAt": "1791502977370",
+          "groupedProjectId": null,
+          "harnessConfigurationName": "codex-basic",
+          "harnessId": "codex-basic",
+          "icon": null,
+          "id": 1,
+          "imported": false,
+          "permissionProfileId": "auto",
+          "projectId": null,
+          "rootInteractionId": 1,
+          "title": "Root",
+          "updatedAt": "1791502977414",
+          "workingDirectory": null
+        }
+      ]
+    }
+  }
+]

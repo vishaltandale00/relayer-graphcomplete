@@ -126,6 +126,36 @@ async function gradeFixture(mutate = () => {}) {
 }
 
 describe("recursive graph-memory Eval evidence", () => {
+  it("retains durable child results without converting the callable and rejects mismatched call provenance", async () => {
+    const durable = ({ outputs, execution }) => {
+      outputs[2].rootLayer.actions[2].targetLayerId = null;
+      Object.assign(execution.semanticChildren[0], {
+        durable: true, reusable: false, invocationKey: "red-team-call", sourceCompletionId: 3, resultCompletionStatus: "accepted",
+      });
+    };
+    const grade = await gradeFixture(durable);
+    expect(grade.turns[2].checks.find(({ name }) => name === "final-child-attached")?.passed).toBe(true);
+    const historical = await gradeFixture((fixture) => {
+      durable(fixture);
+      delete fixture.execution.semanticChildren[0].durable;
+      fixture.execution.semanticChildren[0].reusable = true;
+    });
+    expect(historical.turns[2].checks.find(({ name }) => name === "final-child-attached")?.passed).toBe(true);
+    const nonDurable = await gradeFixture((fixture) => {
+      durable(fixture);
+      Object.assign(fixture.execution.semanticChildren[0], { durable: false, reusable: true });
+    });
+    expect(nonDurable.turns[2].checks.find(({ name }) => name === "final-child-attached")?.passed).toBe(false);
+    for (const mismatch of [
+      ({ execution }) => { execution.semanticChildren[0].sourceCompletionId = 999; },
+      ({ execution }) => { execution.semanticChildren[0].sourceActionId = 999; },
+      ({ execution }) => { execution.semanticChildren[0].resultCompletionStatus = "running"; },
+    ]) {
+      const rejected = await gradeFixture((fixture) => { durable(fixture); mismatch(fixture); });
+      expect(rejected.turns[2].checks.find(({ name }) => name === "final-child-attached")?.passed).toBe(false);
+    }
+  });
+
   it("requires each follow-up to search and retain every required prior root plus one final semantic child", async () => {
     const grade = await gradeFixture();
     const failed = grade.turns.flatMap((turn) => turn.checks).filter((check) => !check.passed);

@@ -218,7 +218,7 @@ export function providerDefinitionsMarkup(definitions, defaults = {}, descriptor
 export function harnessConfigurationsMarkup(settings) {
   const presentations = usableHarnessPresentations(settings);
   if (!presentations.length) return `<div class="family-empty harness-empty"><div><strong>No harnesses are usable right now.</strong><span>Connect a provider with an eligible model.</span></div></div>`;
-  return presentations.map(({ harness, isDefault }) => `<article class="harness-configuration-card" data-harness-configuration="${escapeHtmlAttribute(harness.id)}">
-    <div class="provider-definition-heading"><div><h3>${escapeHtml(harness.label)}</h3></div>${isDefault ? `<span class="default-badge">Default harness</span>` : ""}</div>
+  return presentations.map(({ harness, isDefault, repairProviderId }) => `<article class="harness-configuration-card" data-harness-configuration="${escapeHtmlAttribute(harness.id)}">
+    <div class="provider-definition-heading"><div><h3>${escapeHtml(harness.label)}</h3></div>${repairProviderId ? `<button type="button" class="icon-button" data-harness-repair="${escapeHtmlAttribute(harness.id)}" data-repair-provider="${escapeHtmlAttribute(repairProviderId)}" aria-label="${escapeHtmlAttribute(`Repair ${harness.label}`)}" title="${escapeHtmlAttribute(`Repair ${harness.label}${harness.unavailableReason?.message ? `: ${harness.unavailableReason.message}` : ""}`)}"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20.5 7.5a5.5 5.5 0 0 1-7.1 6.1l-7.3 7.3a2.1 2.1 0 0 1-3-3l7.3-7.3a5.5 5.5 0 0 1 6.1-7.1L13 7l4 4z"/></svg></button>` : ""}${isDefault ? `<span class="default-badge">Default harness</span>` : ""}</div>
   </article>`).join("");
 }

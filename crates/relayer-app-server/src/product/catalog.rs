@@ -73,6 +73,8 @@ pub(crate) struct ProductHarness {
     pub(crate) family_policy: Option<FamilyPolicyReference>,
     pub(crate) usable_now: bool,
     pub(crate) usable_provider_ids: Vec<ProviderId>,
+    /// Eligible connected providers for repairing a loaded, unavailable configuration.
+    pub(crate) repair_provider_ids: Vec<ProviderId>,
     pub(crate) usable_family_ids: Vec<ModelFamilyId>,
     /// The harness has an enabled permission profile. Only the API knows the runtime's
     /// permission bindings, so storage reports false and the settings route fills it in.
@@ -112,10 +114,20 @@ pub(crate) struct RuntimeProductHarness {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub(crate) struct HarnessReadinessProviderConnection {
+    pub(crate) provider_id: ProviderId,
+    pub(crate) generation: i64,
+    pub(crate) model_ids: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub(crate) struct HarnessRuntimeAvailabilityUpdate {
     pub(crate) harness_id: String,
     pub(crate) configuration_digest: String,
     pub(crate) generation: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) provider_connections: Option<Vec<HarnessReadinessProviderConnection>>,
     pub(crate) available: bool,
     pub(crate) unavailable_reason: Option<UnavailableReason>,
 }

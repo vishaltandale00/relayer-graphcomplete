@@ -18,6 +18,85 @@ mod tests {
     use std::borrow::Cow;
 
     #[tokio::test]
+    async fn schema_46_adds_v6_without_changing_published_preferences_or_pins() {
+        let temporary = tempfile::tempdir().unwrap();
+        let file = tempfile::NamedTempFile::new_in(temporary.path()).unwrap();
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect(&format!("sqlite://{}", file.path().display()))
+            .await
+            .unwrap();
+        Migrator {
+            migrations: Cow::Owned(
+                MIGRATOR
+                    .iter()
+                    .filter(|migration| migration.version < 47)
+                    .cloned()
+                    .collect(),
+            ),
+            ..Migrator::DEFAULT
+        }
+        .run(&pool)
+        .await
+        .unwrap();
+        let old = SqliteProductStore {
+            pool,
+            harness_readiness_generations: Default::default(),
+        };
+        old.publish_personal_presentation_version(
+            "personal-presentation-v4",
+            501,
+            601,
+            &serde_json::json!({"nodeId":501,"rootLayer":{"layer":{"id":601}}}),
+            "1",
+        )
+        .await
+        .unwrap();
+        let thread = old
+            .insert_thread_with_initial_interaction_and_personal_presentation(
+                crate::storage::NewThreadRecord {
+                    icon_selection_eligible: true,
+                    title: "Existing",
+                    project_id: None,
+                    initial_message: "Existing question",
+                    harness_configuration_name: "codex-basic",
+                    permission_profile_id: "auto",
+                    model_selection: None,
+                    timestamp: "2",
+                },
+                Some("personal-presentation-v4"),
+            )
+            .await
+            .unwrap();
+        let before = old.personal_presentation_profile().await.unwrap();
+        let pin = old
+            .prepare_personal_presentation_pin(thread.root_interaction_id, None, "3")
+            .await
+            .unwrap();
+        old.pool.close().await;
+        let current = SqliteProductStore::open(file.path()).await.unwrap();
+        let after = current.personal_presentation_profile().await.unwrap();
+        assert_eq!(after.active_version_key, before.active_version_key);
+        assert_eq!(&after.versions[..5], &before.versions);
+        assert_eq!(after.versions.len(), 6);
+        assert_eq!(after.versions[5].version_key, "personal-presentation-v6");
+        assert_eq!(after.versions[5].profile_interaction_id, -7);
+        assert_eq!(
+            current
+                .prepare_personal_presentation_pin(thread.root_interaction_id, None, "4")
+                .await
+                .unwrap(),
+            pin
+        );
+        current.pool.close().await;
+        let reopened = SqliteProductStore::open(file.path()).await.unwrap();
+        assert_eq!(
+            reopened.personal_presentation_profile().await.unwrap(),
+            after
+        );
+    }
+
+    #[tokio::test]
     async fn schema_39_thread_icons_never_backfill_legacy_threads() {
         let temporary = tempfile::tempdir().unwrap();
         let file = tempfile::NamedTempFile::new_in(temporary.path()).unwrap();
@@ -57,7 +136,7 @@ mod tests {
         .fetch_all(&store.pool)
         .await
         .unwrap();
-        assert_eq!(versions, [40, 41, 42]);
+        assert_eq!(versions, [40, 41, 42, 43, 44, 45, 46, 47]);
         assert!(
             store
                 .recover_interaction_accepted(
@@ -590,6 +669,11 @@ mod tests {
             .await
             .unwrap();
         pool.execute("PRAGMA foreign_keys=OFF").await.unwrap();
+        // This trigger belongs to 0045's reservation shape, absent in the
+        // historical table we reconstruct. Reapply 0045 on normal reopen below.
+        pool.execute("DROP TRIGGER invocation_preexecution_inputs_restore")
+            .await
+            .unwrap();
         pool.execute("ALTER TABLE action_invocations RENAME TO action_invocations_with_lease")
             .await
             .unwrap();
@@ -642,10 +726,29 @@ mod tests {
             .execute(&pool)
             .await
             .unwrap();
+        sqlx::query("DELETE FROM _sqlx_migrations WHERE version=43")
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query("DELETE FROM _sqlx_migrations WHERE version=45")
+            .execute(&pool)
+            .await
+            .unwrap();
         pool.execute("PRAGMA foreign_keys=ON").await.unwrap();
         pool.close().await;
 
         let reopened = SqliteProductStore::open(&path).await.unwrap();
+        let restoration: String = sqlx::query_scalar("SELECT sql FROM sqlite_schema WHERE type='trigger' AND name='invocation_preexecution_inputs_restore'")
+            .fetch_one(&reopened.pool).await.unwrap();
+        assert!(restoration.contains("action_invocations ai"));
+        assert!(!restoration.contains("action_invocations_with_lease"));
+        let presenting: Vec<Option<i64>> = sqlx::query_scalar(
+            "SELECT presenting_layer_id FROM action_invocations ORDER BY result_interaction_id",
+        )
+        .fetch_all(&reopened.pool)
+        .await
+        .unwrap();
+        assert_eq!(presenting, vec![None, None, None]);
         let mappings: Vec<(i64, i64, i64, bool)> = sqlx::query_as(
             "SELECT source_interaction_id,action_id,result_interaction_id,authoritative FROM action_invocations ORDER BY result_interaction_id",
         )

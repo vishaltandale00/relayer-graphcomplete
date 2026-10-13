@@ -14,11 +14,45 @@ import {
   html,
   type ActionObject,
   type InputActionObject,
+  type InvokeActionObject,
 } from "../src/index.js";
-import { assetRef } from "../src/detail.js";
+import { assetRef, snapshotAuthoredNodeDetailProgram } from "../src/detail.js";
 
 describe("typed Node Detail authoring compiler", () => {
   afterEach(() => vi.unstubAllGlobals());
+
+  it("freezes explicit Invoke input bindings in the compiled authoring snapshot", () => {
+    const owner = new NodeObject("box", "Vacations", "Compare", "concept", "vacations");
+    const layer = new LayerObject([owner], [], new LayerLayoutObject([], "default"), "vacations-layer");
+    const inputIds = [21, 22];
+    const action = { kind: "invoke", label: "Compare", interactionText: "Update comparison", sourceLayer: layer, clientKey: "compare", inputActions: inputIds } satisfies ActionObject;
+    owner.detailAuthoring.setComponent("compare", html`<button gc=${detailCapability.invoke("compare", action)}>Compare</button>`);
+    for (const id of inputIds) {
+      const input: InputActionObject = { kind: "input", clientKey: `input-${id}`, sourceLayer: layer, label: "Destination", control: "text", prompt: "Destination", ref: { id, sourceNodeId: 1, kind: "input", label: "Destination", variant: "pill", state: "accepted" } };
+      owner.detailAuthoring.setComponent(`field-${id}`, html`<input gc=${detailCapability.input(`input-${id}`, input)}>`);
+    }
+    const snapshot = snapshotAuthoredNodeDetailProgram(owner.detailAuthoring, { object: owner, clientKey: owner.clientKey });
+    inputIds[0] = 99;
+    expect(snapshot.components[0]?.markup.bindings[0]).toMatchObject({ capability: { capability: { action: { inputActions: [21, 22], reusable: false } } } });
+    expect(() => owner.detailAuthoring.checkpoint()).toThrow(DetailCompilationError);
+  });
+
+  it.each([true, false, "true"])("freezes only boolean Invoke reuse policy (%s)", (reusable) => {
+    const owner = new NodeObject("box", "Call", "Call", "concept", "call");
+    const layer = new LayerObject([owner], [], new LayerLayoutObject([], "default"), "call-layer");
+    const action = { kind: "invoke", label: "Call", interactionText: "Continue", sourceLayer: layer, clientKey: "invoke", reusable } as InvokeActionObject;
+    owner.detailAuthoring.setComponent("call", html`<button gc=${detailCapability.invoke("call", action)}>Call</button>`);
+    if (typeof reusable !== "boolean") expect(() => owner.detailAuthoring.checkpoint()).toThrow(DetailCompilationError);
+    else expect(snapshotAuthoredNodeDetailProgram(owner.detailAuthoring, { object: owner, clientKey: owner.clientKey }).components[0]?.markup.bindings[0]).toMatchObject({ capability: { capability: { action: { reusable } } } });
+  });
+
+  it.each([{ inputActions: [0] }, { inputActions: [21, 21] }, { inputActions: [true] }, { inputActions: ["21"] }])("rejects invalid Invoke input IDs $inputActions in compiled declarations", ({ inputActions }) => {
+    const owner = new NodeObject("box", "Vacations", "Compare", "concept", "vacations");
+    const layer = new LayerObject([owner], [], new LayerLayoutObject([], "default"), "vacations-layer");
+    const action = { kind: "invoke", label: "Compare", interactionText: "Update comparison", sourceLayer: layer, clientKey: "compare", inputActions } as unknown as InvokeActionObject;
+    owner.detailAuthoring.setComponent("compare", html`<button gc=${detailCapability.invoke("compare", action)}>Compare</button>`);
+    expect(() => owner.detailAuthoring.checkpoint()).toThrow(DetailCompilationError);
+  });
 
   it("allows node-owned navigation only through replacement without seeding ordinary submission", async () => {
     const node = new NodeObject("info", "Attached", "Fallback", "concept", "attached");

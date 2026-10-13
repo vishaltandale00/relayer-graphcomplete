@@ -1,0 +1,193 @@
+{
+  "schemaVersion": 1,
+  "reviewer": "/root/premerge_portable_integrity_review",
+  "reviewMode": "Independent read-only adversarial test mapping review; no execution or edits",
+  "baselineHead": "90a1e4539ec6d06fa53bc1641b2bb54f32f165af",
+  "observedAt": "2026-10-09T00:14:05.251310+00:00",
+  "sourceDigest": "6aa02ff996896590ae66a6a8702b680e2fd7a8f97e693713a64677ebe34a7cef",
+  "sourceManifest": "/private/tmp/pr707-premerge-portable-source.json",
+  "sourceManifestSha256": "10dfa4adaea01c0aa96d8793552fef2b50e7cb2f528e9cba39b5b8cec00d298d",
+  "sourceManifestFiles": 237,
+  "sourceVerification": "All 237 observed file hashes and sorted path NUL filebytes NUL overall digest exactly match manifest",
+  "reviewScopeDigest": "f30392676baf02cd1b4a30524931d37408bc537d2599715c495eca742adc6963",
+  "reviewScopeDigestMethod": "sorted path NUL SHA256 hex NUL",
+  "reviewScopeHashes": {
+    "scripts/test-desktop-node-input-actions.mjs": "4a5da1a7a337696c9ab2f01509c95250feeb1f667f27ee68e328cb6598e637ba",
+    "scripts/electron-workspace-driver.mjs": "da317cb02aa4ffa70bbcddad44b2d2c92667acb431f653643aa41060bac9546f",
+    "scripts/run-node-input-actions-test.mjs": "700fba40ef18b40dfc4488ea18eb4c06ac55125a55a6330faa592c25332f5dbb",
+    "scripts/node-input-actions-proof-result.mjs": "3599b54fe35ae394636a682e1804d45635ff9f310178e0bfdb916a7b5e63ed3e",
+    "desktop/renderer/src/product-workspace/workspace-layout.js": "8e5d307f95b1863fb995606ca32a832de088916716c39476f9d31f2174de002d",
+    "docs/evidence/issue-632-completion-contract/README.md": "c7b503d5753c7eb6a647902352d382bb59b753a2e4402874a4ce34b0d761fd05",
+    "docs/prd/index.html": "fad847e5f05a7579523fbc4e378018cf240730d6b8bef69e13e79666a1dd0acb"
+  },
+  "reviewedScope": "Only native Input fixture corrections and their assertion/dependency mapping: actual successful interaction POST identity and deterministic lost-response injection; real visible/focused painted native split pointer delivery, event trust and durable presentation persistence. No semantic/production implementation certification outside this scope.",
+  "verdict": "No actionable blocker in corrected fixture or assertion/authority mapping. Assertions preserved or strengthened. Current native gate must pass before native proof can be claimed.",
+  "findings": [],
+  "checkpointMapping": [
+    {
+      "checkpoint": "CC-008 / ADR0015 implicit acceptance and response-loss reconciliation; existing Input node heavy journey",
+      "changedSeam": "Fixture holds loss injection until actual POST resolves successfully, records exact response ID, arms input-draft GET hold and releases simulated response loss. Reads exact committed interaction by ID rather than newest chronology.",
+      "productionObserved": "Real fetch to production interaction API and SQLite submission, frozen submitted Input/context/model, reentry guard, authoritative later draft revisions and detach, new edit-generation retry boundaries.",
+      "retainedAssertions": [
+        "Exactly one interaction POST while reconciliation is pending",
+        "Real exact committed interaction exists",
+        "Submitted three frozen Inputs remain on committed turn",
+        "Click-time annotation confirmation and model provider/model remain exact",
+        "Concurrent authoritative text and selected-answer revisions/detach are reconciled",
+        "UI detach advances reconciled revision",
+        "New input generation uses new inputId, exact prior prompt/context/model and settled current inputDraftRevision",
+        "Accepted result reading/input disclosure behavior remains present"
+      ],
+      "authorityAssessment": "Transport fault injection only; original POST is not replaced, synthesized or bypassed, refused response fails explicitly. No forged interaction/storage receipt. Held GET is released and hook removed before downstream proof."
+    },
+    {
+      "checkpoint": "RESP-003 / PRD2520 equal graph/details split and saved presentation ratio",
+      "changedSeam": "Fixture shows/activates/focuses actual Electron window; requires visible and document.hasFocus, logs Electron window/WebContents/document focus getters, waits two paints and real hit-test, sends held-button native move and independently requires trusted same-pointer buttons1 evidence.",
+      "productionObserved": "Unmodified production workspace-layout native pointer handlers, pointer capture, real graph/detail rendered pane widths, real desktop workspaceLayout bridge persistence and renderer reload restoration.",
+      "retainedAssertions": [
+        "Initial painted graph/details widths equal within 1px",
+        "Divider coordinates hit actual divider",
+        "Trusted pointerdown targets divider and production hasPointerCapture",
+        "Same trusted pointerId move reports buttons1",
+        "Actual graph widens more than 50px while detail narrows more than 50px",
+        "Trusted same-pointer pointerup arrives",
+        "Real desktop stored ratio equals resized preference",
+        "Closing details increases graph width",
+        "Reopening selected node restores split",
+        "Loading original reading URL restores ratio and exact node",
+        "Environment overlay preserves pane widths"
+      ],
+      "authorityAssessment": "No DOM width/ratio setter, production drag-handler invocation or fabricated trust/capture. Actual native capture, same-pointer held move/up, geometry and persistence remain required. Isolated diagnostic disproves WebContents.isFocused as a necessary observer of pointer delivery; visible/document focus remain predicates. No production proof inferred from diagnostic."
+    },
+    {
+      "checkpoint": "Heavy result truthfulness / cleanup failure boundary",
+      "changedSeam": "nativeSplitCheckpoint adds only diagnostic capture then rethrows original failure. Existing external runner and completeNodeInputProof result recording/cleanup unchanged.",
+      "productionObserved": "Failed scenario or cleanup keeps passed:false; runner requires actual exit success plus inner passed:true.",
+      "retainedAssertions": [
+        "No timeout swallowed",
+        "No fallback success after missing visible/document focus, native pointer capture/move/release or geometry",
+        "No removal of teardown error aggregation or provisional non-pass receipt",
+        "No extension of outer 120s fixture timeout"
+      ],
+      "authorityAssessment": "No manufactured native pass through diagnostic logging or app activation."
+    }
+  ],
+  "preservedFailures": [
+    {
+      "path": "/private/tmp/pr707-premerge-portable-node-input-first-failure.log",
+      "sha256": "577e72c0bee3ff6d820595a241d1a5f3b6f6be2388654deecf6afceb08cb50e2",
+      "disposition": "Failed unqualified newest-turn read; failure is not native pass."
+    },
+    {
+      "path": "/private/tmp/pr707-premerge-portable-node-input-second-failure.log",
+      "sha256": "79929efd53abe5e33bddce93641b2cf5e9f8ad03a411012d1d1db7582cbb0843",
+      "disposition": "Failed native pointerdown capture in hidden/unfocused fixture; failure is not native pass."
+    },
+    {
+      "path": "/private/tmp/pr707-premerge-portable-node-input-third-failure.log",
+      "sha256": "aae8747c0ed46ca33d7364978c377dcb98c137ea0a580146a41b6f9855511772",
+      "disposition": "Failed pane drag movement; held-button state correction requires new source-bound run."
+    },
+    {
+      "path": "/private/tmp/pr707-premerge-portable-node-input-fourth-failure.log",
+      "sha256": "8ff57b4817b5e2e498d35aba824c54d40af9e48a9459cfdec60bb30b76325ae5",
+      "disposition": "Failed visible/document-focused native-window gate; no pointer chapter started. Explicit app activation requires new source-bound run."
+    },
+    {
+      "path": "/private/tmp/pr707-premerge-portable-node-input-fifth-failure.log",
+      "sha256": "0b48d05f5f0909d8a3364be92577115468c0dc9237039a2f9b56f6e31a6c9d9e",
+      "disposition": "Repeated WebContents focus-getter precondition failure on b77 source; pointer chapter not started. Preserved as failed native gate. Subsequent isolated diagnostic explains the observer mismatch, without proving product drag."
+    }
+  ],
+  "actualReviewWork": [
+    "Read git diff baselineHEAD90a1 versus corrected script",
+    "Inspected retained original submission/Undo/revision/generation/disclosure/operator assertions and split persistence/reload assertions",
+    "Read real production workspace-layout pointer handlers and unchanged Electron driver/proof-result/runner",
+    "Independently recomputed 237 file manifest digest with zero mismatches",
+    "Read all five failed gate logs; none is relabeled as a production/native pass. The isolated diagnostic establishes only the final focus-observer mismatch.",
+    "Read matching isolated native diagnostic source and raw trusted-event output; verified real listener values instead of invented trust records. Rebound complete 237 file manifest and fixture mapping to 6aa02ff source."
+  ],
+  "notExecuted": [
+    "No native or other heavy runner",
+    "No paid inference",
+    "No implementation or test edits",
+    "No merge/push/deploy"
+  ],
+  "unresolvedLimits": [
+    "Fresh 6aa02ff source-bound node-input runner still must pass inner production pointer/geometry/persistence and cleanup before a native pass is claimed.",
+    "Full check/build, hosted current-head CI and final root merge audit remain separate.",
+    "Native keyboard, physical-human drag, full process restart and live provider quality are not certified by this fixture review."
+  ],
+  "invalidateOn": "Any reviewed source change or manifest mismatch requires refreshed scope/receipt.",
+  "previousReceipt": {
+    "path": "/private/tmp/pr707-premerge-input-fixture-adversarial-b77.json",
+    "sha256": "ef8428697905432c549be48d493380a496ad60d31a2286832beda8b4351e8d23",
+    "status": "Historical b77 source; superseded for current fixture scope."
+  },
+  "focusObserverDisposition": {
+    "changedPrecondition": "Removed only newly added window.webContents.isFocused requirement; kept actual visible window and document.hasFocus checks, native app activation/focus calls and all pointer/geometry/persistence assertions. Electron focus getter values now logged.",
+    "diagnosticSource": "/private/tmp/pr707-node-focus-diagnostic.cjs",
+    "diagnosticSourceSha256": "a260ba8232824acfda7c7bb8160ff15374a91b26f0e124f7494af9dfa84acd11",
+    "diagnosticLog": "/private/tmp/pr707-native-focus-pointer-diagnostic.log",
+    "diagnosticLogSha256": "8e4a58aebddc53e46da3bdf8ef8afe6c298d8a7d2ed4ffb5ebad8d625dd881a6",
+    "observedFocus": {
+      "visible": true,
+      "windowFocused": false,
+      "contentsFocused": false,
+      "documentFocused": true
+    },
+    "observedTrustedEvents": [
+      {
+        "type": "pointermove",
+        "buttons": 0,
+        "x": 120,
+        "target": "drag",
+        "trusted": true,
+        "pointer": 1
+      },
+      {
+        "type": "pointerdown",
+        "buttons": 1,
+        "x": 120,
+        "target": "drag",
+        "trusted": true,
+        "pointer": 1
+      },
+      {
+        "type": "gotpointercapture",
+        "buttons": 1,
+        "x": 210,
+        "target": "drag",
+        "trusted": true,
+        "pointer": 1
+      },
+      {
+        "type": "pointermove",
+        "buttons": 1,
+        "x": 210,
+        "target": "drag",
+        "trusted": true,
+        "pointer": 1
+      },
+      {
+        "type": "pointerup",
+        "buttons": 0,
+        "x": 210,
+        "target": "drag",
+        "trusted": true,
+        "pointer": 1
+      },
+      {
+        "type": "lostpointercapture",
+        "buttons": 0,
+        "x": 210,
+        "target": "drag",
+        "trusted": true,
+        "pointer": 1
+      }
+    ],
+    "sourceInspection": "Isolated Electron script creates actual BrowserWindow and div, records e.isTrusted and pointerId/buttons from document event listeners, uses actual sendInputEvent mouseDown/move with leftButtonDown/mouseUp, captures real pointer in div handler; it does not fabricate event records/trust or mutate focus getters.",
+    "reviewConclusion": "Diagnostic establishes WebContents.isFocused is not a necessary observer of native WebContents pointer delivery in this execution environment. Removing that new precondition repairs mapping; it does not erase original production drag proof, which still requires native capture, held same-pointer move, actual pane geometry and durable restoration.",
+    "limitation": "Isolated div diagnostic is observer evidence only, not production pane resizing proof or physical-human pointer/keyboard proof."
+  }
+}

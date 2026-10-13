@@ -331,6 +331,28 @@ describe("provider and harness renderer markup", () => {
     expect(markup).not.toContain(".*");
   });
 
+  it("keeps unavailable Prime visible with an icon to repair its exact eligible provider", () => {
+    const markup = harnessConfigurationsMarkup({
+      defaults: { harnessId: "codex-basic" },
+      harnesses: [
+        { id: "codex-basic", label: "Codex Basic", available: true, usableNow: true },
+        { id: "prime-agent-basic", label: "Prime Agent Basic", available: false,
+          usableNow: false, permissionAvailable: true, repairProviderIds: ["router"],
+          unavailableReason: { message: "Prime setup failed." } },
+        { id: "unsupported", label: "Unsupported Prime", available: false,
+          usableNow: false, permissionAvailable: false, repairProviderIds: ["router"] },
+      ],
+    });
+    expect(markup).toContain('data-harness-configuration="prime-agent-basic"');
+    expect(markup).toContain('data-harness-repair="prime-agent-basic" data-repair-provider="router"');
+    expect(markup).toContain('aria-label="Repair Prime Agent Basic"');
+    expect(markup).toContain('title="Repair Prime Agent Basic: Prime setup failed."');
+    expect(markup).toContain('<svg');
+    expect(markup).not.toContain('>Repair<');
+    expect(markup).not.toContain('Unsupported Prime');
+    expect(markup.match(/data-harness-repair=/g)).toHaveLength(1);
+  });
+
   it("shows one actionable empty state when no harness has a feasible provider and model", () => {
     const markup = harnessConfigurationsMarkup({
       defaults: { harnessId: "claude-basic" },

@@ -1,0 +1,376 @@
+{
+  "schemaVersion": 1,
+  "date": "2026-10-07",
+  "reviewer": "/root/context_trace",
+  "workspace": "/private/tmp/relayer-interactive-inputs-v1-merge",
+  "baseCommit": "fcfacdb0a235451f04d97d760d39948ad406972f",
+  "sourceDigest": "a213d0517625763ffaa4e9ada3bf91aefb2938c4b03086351f4a7e895ff34894",
+  "digestMethod": "SHA256 of sorted relative UTF8 path + NUL + exact file bytes + NUL for each manifest entry; receipt excluded",
+  "manifest": [
+    {
+      "path": "crates/relayer-app-server/src/api/state.rs",
+      "sha256": "331bf6f557268d206b0328c6bb84ee7c9059248fa6e1d792953cb2f6426c5d95"
+    },
+    {
+      "path": "crates/relayer-app-server/src/api/threads.rs",
+      "sha256": "4e2b3b04660addca6f4b345083ae569f0fc38f3982ca59a9acaf85b2d5c57152"
+    },
+    {
+      "path": "crates/relayer-app-server/src/api/types.rs",
+      "sha256": "b21de1de7f4465b4b57e3de302b7a83aa36d9008009c72d80af41ccdbaff8a8e"
+    },
+    {
+      "path": "crates/relayer-app-server/src/conversation_export_service.rs",
+      "sha256": "ac19a02cb9de0909cee3224c27b2797415a8e621f91fa977f1baa7878bac5f6b"
+    },
+    {
+      "path": "crates/relayer-app-server/src/conversation_import_service.rs",
+      "sha256": "3790682ddbceea1d6bd1ea0a47b7ab5a1b9fca2022b2a2f117828dc6c8b29d93"
+    },
+    {
+      "path": "crates/relayer-app-server/src/product/models.rs",
+      "sha256": "7a5ba534c307086d7f9f1bcb6b5e714506cc1dcd7b616daf35517fb688568841"
+    },
+    {
+      "path": "crates/relayer-app-server/src/product/service.rs",
+      "sha256": "79bb34a031e401d2ad556523828f81d617fdf06b4375f2709e04e74d3bfba218"
+    },
+    {
+      "path": "crates/relayer-app-server/src/storage/sqlite/action_invocations.rs",
+      "sha256": "1756af92ae77e5879dec644e17072e6666318db61b331b8da6466d3540ff2313"
+    },
+    {
+      "path": "crates/relayer-app-server/tests/conversation_export_contract.rs",
+      "sha256": "8c55d8a1eadbdabf86c3e0b6c380a5a1e5417875738decfd3bbfb1fddb1ff9ac"
+    },
+    {
+      "path": "crates/relayer-app-server/tests/support/completion_traces.rs",
+      "sha256": "e28eddb2de8f16d29a08a1f36f9c92fe9cabc53728d8f4da8afafdea787b38eb"
+    },
+    {
+      "path": "crates/relayer-graph-core/src/graph/completion/plan.rs",
+      "sha256": "7d602164b7915deefbad51e59e4d9a5d76b276b606a7a58afcb358cb6eebfac5"
+    },
+    {
+      "path": "crates/relayer-graph-core/src/graph/import.rs",
+      "sha256": "9fd4787d9652378a9a58da81ec01f2be7ee4fb665b0ffaf81a56640c4f31a742"
+    },
+    {
+      "path": "crates/relayer-graph-core/src/graph/invocation.rs",
+      "sha256": "eedb3a38271e0c43219d0b7a2fbf8cc4928de44bcfd63c541dd6ae7447cdd636"
+    },
+    {
+      "path": "crates/relayer-graph-core/src/storage/sqlite/contracts.rs",
+      "sha256": "24a6ca3aeb5068f033663438f9c1ee2826c56834c1fc4cee923ff8a3829bd0d9"
+    },
+    {
+      "path": "crates/relayer-graph-core/src/storage/sqlite/permissions.rs",
+      "sha256": "9a1fff211b496f0bd8f5e45c4face1c5511f329e0020bd9e90e068d1e8df58ef"
+    },
+    {
+      "path": "crates/relayer-graph-core/tests/completion_contract.rs",
+      "sha256": "c718c59aa3dd6142db424234f23a9f49d4ff41877f1e0020871ca7dafa0f7bca"
+    },
+    {
+      "path": "crates/relayer-graph-core/tests/durable_invocations.rs",
+      "sha256": "125b1d67978b3176c3ee10df09ebf970b5714399491554da95298c96ca2bed14"
+    },
+    {
+      "path": "crates/relayer-graph-core/tests/graph_database.rs",
+      "sha256": "a8fc316212e19cb3ba193fffa3a2de596eacefb7a8e55a4b0b47c3e41c43e4af"
+    },
+    {
+      "path": "desktop/eval-main/human-task-service.mjs",
+      "sha256": "090e920e36bb91999113cf5ec26469bfaa65ff8d988e38929006e98e3feba271"
+    },
+    {
+      "path": "desktop/renderer/src/action-invocation-state.js",
+      "sha256": "85574d803a0bd120a075a4aa4edfac90d2dcbb9ea330296d92e030283ea07c46"
+    },
+    {
+      "path": "desktop/renderer/src/product-workspace/workspace.js",
+      "sha256": "f90ac26db18a001116049ba15cfe2220b518ed492520aaa9c62688921b83a885"
+    },
+    {
+      "path": "docs/decisions/0014-sealed-completion-contract-and-invocations.md",
+      "sha256": "86b7cd9ea40ea6f0b9c7e44031fed4608c5152ef82fc3a98c2803f753a0067a4"
+    },
+    {
+      "path": "docs/prd/index.html",
+      "sha256": "615af35bc079359d45b45b284c64525ac092379529a554631708b1b392fbd77c"
+    },
+    {
+      "path": "packages/eval-runner/src/cases/recursive-graph-memory-grading.ts",
+      "sha256": "7c23954ad727920922ebccc8db6b59a62f7317de6a730358fff389ef5cd62cba"
+    },
+    {
+      "path": "packages/graph-client/src/action-declarations.ts",
+      "sha256": "1a9181b6eb8a62e07c4e61789aa48712272ea9eb4bb9d656ea3db71ec3c4ffb6"
+    },
+    {
+      "path": "packages/graph-client/src/client.ts",
+      "sha256": "af209244db517f0385b5ab45a15a4d58735b5e121c3e328057c38582f1ff8939"
+    },
+    {
+      "path": "packages/graph-client/src/scoped-authoring.ts",
+      "sha256": "2324d525f7352f0783f2d4568f3e020d6e6af2ac2ab35192474b593f54a23497"
+    },
+    {
+      "path": "packages/graph-client/test/scoped-authoring.test.ts",
+      "sha256": "c7b44b851f44539d7e1921596e3c9c1834e897eb51e1723a7e1b7837ed66d730"
+    },
+    {
+      "path": "packages/harness-host/src/completion-contract.ts",
+      "sha256": "6f1236b9055110c804f227642a4aa9eea5516eb20241760f94ab35ec08a5356d"
+    },
+    {
+      "path": "packages/harness-host/src/host.ts",
+      "sha256": "737573aab617e1fa466b164b8fa5288b4a59be3182573e863cbe27e6473dfaf4"
+    },
+    {
+      "path": "packages/harness-host/src/implementations/codex-basic.ts",
+      "sha256": "a237bd6e07f8e654e1c19c77fcc4b679f98fdacf1ad5ee657d4dc33d737e07b3"
+    },
+    {
+      "path": "packages/harness-host/src/implementations/prime-agent.ts",
+      "sha256": "57953bb3a07cb99fa12ccc2876ff4d40d863250d3a6702c1a89b51584dac134d"
+    },
+    {
+      "path": "packages/harness-host/src/implementations/prime-visual-authoring.ts",
+      "sha256": "cd0a69433a867422a69d5d921ee2812f690b32dc7a4d0b899d3425973ecc7319"
+    },
+    {
+      "path": "python/relayer-graph/src/relayer_graph/actions.py",
+      "sha256": "3a72b84f4d3c7d49d182eae3015d2110127ea5d9ffc3107207ec649ea0ddd083"
+    },
+    {
+      "path": "python/relayer-graph/src/relayer_graph/authoring.py",
+      "sha256": "f0141df6560212e1f032fcf8cc0e03ff8e47e0139bfef8fcdc20ecd2ee7bb027"
+    },
+    {
+      "path": "python/relayer-graph/src/relayer_graph/scoped_authoring.py",
+      "sha256": "30f535d4779479638a1aa6610130d122d9c6a73a5a68343472484f07bd4336f5"
+    },
+    {
+      "path": "python/relayer-graph/tests/test_scoped_authoring.py",
+      "sha256": "3f88c7dd2673027d55214c2c385f211c1a2f5e9b8b6598ba8834337a68475626"
+    },
+    {
+      "path": "test/action-invocation-state.test.mjs",
+      "sha256": "ac1164b2587c01eef8e3f46c305b0f01a2fe5955d8df6dd6d45764702c619902"
+    },
+    {
+      "path": "test/eval-recursive-graph-memory.test.mjs",
+      "sha256": "fcb4e3d636de696de7bb78fed7354147bf4dfa955fcbfca7d28332bd764d3143"
+    },
+    {
+      "path": "test/implicit-input-send.test.mjs",
+      "sha256": "bc30c38dfc247fe93297097994b782bd6b7b2cfacaaafc010342b9575b9cefe7"
+    },
+    {
+      "path": "test/invoke-input-bindings.test.mjs",
+      "sha256": "29219f7f39c5415dd5f3a18984276e89a56166909ffd3876d5d81dbf2fc54aca"
+    },
+    {
+      "path": "test/invoke-input-product-integration.test.mjs",
+      "sha256": "bfbdd1ab5bc02ba411c9288eba1d275bcc0b72532ae77225ef0a6e3464db0e93"
+    }
+  ],
+  "scope": [
+    "Captured TypeScript and Python scoped Input declarations: immutable enqueue snapshot, original TS canonical ref, declaration identity, exact source Node and containing Layer before transport",
+    "Internal durable-call classification separate from repeat policy; exact source completion/action/child/key join for shared thread, state and immediate Invoke DTO projections; runtime missing or metadata unavailable leaves policy unknown",
+    "Renderer isDurableActionInvocation and Eval child association use explicit durable identity with null-only historical reusable fallback",
+    "Workspace untouched restored values derive from current committed attachment; touched local values and edit epochs captured before awaited persistence",
+    "Graph-owned sealed contract activation, exact-key immutable invocation recovery, single-call occupancy, input-set validation, prospective Advance and atomic Return; native provider recursion ownership",
+    "V4 coherent portable call/input records and inert import/re-export, imported execution authority refusal",
+    "New ordinary Input response-navigation promise: trusted preparation derives exact deduplicated NavigateAdd only from validated native accepted source nodes before sealing; initialized recovery returns before rederivation."
+  ],
+  "verdict": "No remaining actionable blocker found within the reviewed manifest and stated scope. New ordinary Input source-navigation authority and sealing behavior now have one realistic existing native input fixture spanning answer-only grants, two sources, annotation overlap, missing links, publication and reopen. Static core/provider/portability review and historical focused passes remain distinct from current whole-portfolio qualification.",
+  "unresolvedFindings": [],
+  "checkpointMapping": [
+    {
+      "checkpoint": "CC-008 scoped binding capture and authority",
+      "seams": [
+        "packages/graph-client/src/scoped-authoring.ts:651-704",
+        "packages/graph-client/src/client.ts:364-395",
+        "python/relayer-graph/src/relayer_graph/scoped_authoring.py:261-285,336-341"
+      ],
+      "tests": [
+        "packages/graph-client/test/scoped-authoring.test.ts:76,117",
+        "python/relayer-graph/tests/test_scoped_authoring.py:36,72"
+      ],
+      "observes": "Real scoped lowering and client transport; barrier at queued node write, then mutate options/labels/sourceLayer/parent bindings/instruction and inject TS fake ref. Canonical bound IDs and source layer retain captured values; forged identical declaration, other Node, other Layer, changed source Layer all reject before any request."
+    },
+    {
+      "checkpoint": "CC-004/006 durable identity and exact policy projection",
+      "seams": [
+        "crates/relayer-app-server/src/storage/sqlite/action_invocations.rs",
+        "crates/relayer-app-server/src/api/threads.rs:676-714",
+        "crates/relayer-app-server/src/api/types.rs",
+        "desktop/renderer/src/action-invocation-state.js"
+      ],
+      "tests": [
+        "test/invoke-input-product-integration.test.mjs",
+        "test/action-invocation-state.test.mjs:39"
+      ],
+      "observes": "Same real terminal calls and persisted storage; immediate result and reopened thread/state distinguish reusable true/false durable calls. A forwarding graph-metadata proxy faults each exact join field, omitted snapshot policy, or HTTP503 only on reads. Both production API read seams retain exact durable call IDs but omit policy; restoration returns true/false. Reopen without runtime also retains durable identity and omits policy."
+    },
+    {
+      "checkpoint": "Secondary Eval exact durable child association",
+      "seams": [
+        "packages/eval-runner/src/cases/recursive-graph-memory-grading.ts:107-111",
+        "desktop/eval-main/human-task-service.mjs"
+      ],
+      "tests": [
+        "test/eval-recursive-graph-memory.test.mjs:129"
+      ],
+      "observes": "Existing realistic grading fixture now passes durable true/reusable false, retains missing-durable historical reusable true, refuses explicit durable false/reusable true and wrong source/action/unsettled child. No duplication of grading conditions."
+    },
+    {
+      "checkpoint": "CC-008 untouched versus edited renderer capture",
+      "seams": [
+        "desktop/renderer/src/product-workspace/workspace.js:5600-5625"
+      ],
+      "tests": [
+        "test/implicit-input-send.test.mjs",
+        "test/invoke-input-bindings.test.mjs"
+      ],
+      "observes": "Untouched restored answers reconstructed from current authoritative committed attachment at capture; visited/consumed restore, edits, Undo, save failure, exact epoch cleanup and newer edit retention exercised in real workspace callback fixture."
+    },
+    {
+      "checkpoint": "CC-001/003/005/007 graph authority and native ownership",
+      "tests": [
+        "crates/relayer-graph-core/tests/completion_contract.rs",
+        "crates/relayer-graph-core/tests/durable_invocations.rs",
+        "packages/harness-host/test/completion-contract.test.ts",
+        "packages/harness-host/test/host.test.ts"
+      ],
+      "status": "Mapped and statically reviewed; native/provider suites not rerun by this reviewer. No scheduler introduced; native handles and canonical complete(inputGraph) still own execution; model turn ending remains distinct from graph Return."
+    },
+    {
+      "checkpoint": "CC-009 inert V4 portability",
+      "tests": [
+        "crates/relayer-app-server/tests/conversation_export_contract.rs",
+        "crates/relayer-app-server/tests/support/completion_traces.rs",
+        "crates/relayer-graph-core/tests/graph_database.rs:2152,2322,8295"
+      ],
+      "status": "Mapped and statically reviewed; native export/import portfolios not rerun by this reviewer. Imported history/bindings remain separate from native invocation authority."
+    },
+    {
+      "checkpoint": "CC-002/003/007/008 ordinary Input answers receive exact source response navigation",
+      "seams": [
+        "crates/relayer-graph-core/src/storage/sqlite/permissions.rs:40-103",
+        "crates/relayer-graph-core/src/storage/sqlite/contracts.rs:120-155",
+        "crates/relayer-graph-core/src/graph/completion/plan.rs:245-335"
+      ],
+      "tests": [
+        "crates/relayer-graph-core/tests/graph_database.rs::submitted_input_children_are_canonical_isolated_and_retry_stable",
+        "crates/relayer-graph-core/tests/graph_database.rs::imported_converted_invoke_reopens_as_inert_navigation_and_is_removable"
+      ],
+      "observes": "Existing file-backed input fixture now enables permissions: two validated questions from one source with no context seal exactly one NavigateAdd and NavigateResponse. Composite with a second source and annotation on the first seals exactly two NavigateAdd grants/requirements (no InvokeResolve or unrelated grant). Unrelated native authorization and write both denied. Advance and Return refuse zero links with no head/state mutation; one link still refuses Advance; two exact source links to root allow Advance and Return. SQL asserts both accepted action/source/target joins after reopen; replay preserves original contracts and children after global permissions disabled. Existing inert import fixture refuses NavigateAdd and native invocation on imported source after reopen."
+    }
+  ],
+  "preservedFailedAttempts": [
+    {
+      "command": "python3 -m unittest discover -s python/relayer-graph/tests -p test_scoped_authoring.py",
+      "exitCode": 1,
+      "kind": "setup",
+      "error": "ModuleNotFoundError: relayer_graph; missing repository PYTHONPATH",
+      "repair": "Use declared PYTHONPATH; scoped suite passed"
+    },
+    {
+      "command": "./node_modules/.bin/vitest run test/invoke-input-product-integration.test.mjs",
+      "exitCode": 1,
+      "kind": "sandbox setup",
+      "error": "Graph server before readiness: Operation not permitted (os error1)",
+      "repair": "Authorized deterministic loopback fixture rerun outside sandbox"
+    },
+    {
+      "command": "Same integration fixture, first metadata proxy version",
+      "exitCode": 1,
+      "kind": "test setup defect",
+      "error": "Proxy dropped POST bodies; upstream readiness returned non-JSON failure, proxy returned502",
+      "repair": "Forward original request bodies and unmodified response bytes outside metadata reads"
+    },
+    {
+      "command": "Same integration fixture, second metadata proxy version",
+      "exitCode": 1,
+      "kind": "overconstrained assertion",
+      "error": "Expected4 graph metadata reads; actual API projection also performs existing completion reads, yielding8",
+      "repair": "Observe exact child-ID set and active fault mode rather than incidental request count; complete scenario passed"
+    }
+  ],
+  "testSubsumption": "No suite, case, or authority assertion retired. Existing scoped happy scenarios were expanded with the capture barrier and retain canonical IDs, source layer, default single-call policy (plus original TS ref). Existing Eval durable scenario expanded for explicit policy and null-only fallback; existing full Product journey retained and extended at terminal read projection seam. Existing native submitted-input fixture retained all canonical child/digest/retry/malformed rollback checks and extended with permission-enabled response navigation, two-source/annotation dedup, exact publication/reopen; no test retired.",
+  "remainingVerification": [
+    "Parent final npm run check and npm run build must include the new permissions preparation seam and expanded graph_database checkpoint, and be reported against final source.",
+    "Applicable declared Desktop first-message, interaction-context, node-input and compiled Eval heavy gates require current-source execution evidence.",
+    "Human V1 acceptance and any live-agent behavior are separate; old videos, old digests and reviewer transcript are not this candidate qualification."
+  ],
+  "certification": "Non-certifying until attached to a stabilized PR and its current source snapshot is verified. No claim for files outside manifest, full stack qualification, native suites not run here, paid inference, shipping or human acceptance.",
+  "sourceInvalidationRule": "Any byte change to a manifest file invalidates this assertion. A change outside the manifest that affects a reviewed boundary requires widening and repeating review.",
+  "priorFocusedVerification": {
+    "sourceDigest": "9978b5967e19082f132135738bed11ebda19d4028a90fb08470e8deab4da1bda",
+    "results": [
+      {
+        "command": "./node_modules/.bin/vitest run packages/graph-client/test/scoped-authoring.test.ts test/eval-recursive-graph-memory.test.mjs",
+        "exitCode": 0,
+        "filesPassed": 2,
+        "testsPassed": 19,
+        "durationSeconds": 1.36
+      },
+      {
+        "command": "PYTHONPATH=python/relayer-graph/src python3 -m unittest discover -s python/relayer-graph/tests -p test_scoped_authoring.py",
+        "exitCode": 0,
+        "testsPassed": 8,
+        "scenarioSeconds": 0.067
+      },
+      {
+        "command": "npm run check --workspace @relayer/graph-client",
+        "exitCode": 0,
+        "observes": "Generated query contract and TypeScript typecheck"
+      },
+      {
+        "command": "./node_modules/.bin/vitest run test/action-invocation-state.test.mjs test/implicit-input-send.test.mjs test/invoke-input-bindings.test.mjs",
+        "exitCode": 0,
+        "filesPassed": 3,
+        "testsPassed": 43,
+        "durationSeconds": 7.35
+      },
+      {
+        "command": "./node_modules/.bin/vitest run test/invoke-input-product-integration.test.mjs",
+        "exitCode": 0,
+        "filesPassed": 1,
+        "testsPassed": 1,
+        "scenarioSeconds": 7.19,
+        "durationSeconds": 7.82,
+        "executionContext": "Local process fixture outside filesystem/network sandbox so Rust servers may bind loopback; existing warm binaries reused; no paid inference"
+      }
+    ],
+    "status": "Executed before the ordinary Input NavigateAdd production change. Preserved historical evidence; not rerun or certified for the new production seam. The new seam has the native checkpoints below; parent owns final production integration/heavy/check/build proof."
+  },
+  "focusedVerification": [
+    {
+      "command": "cargo test -p relayer-graph-core --test graph_database submitted_input_children_are_canonical_isolated_and_retry_stable -- --exact --nocapture",
+      "exitCode": 0,
+      "testsPassed": 1,
+      "testsFailed": 0,
+      "filteredOut": 114,
+      "scenarioSeconds": 0.12,
+      "warmCompileSeconds": 21.1,
+      "buildContext": "Existing warm native target reused; no cold build or paid inference."
+    },
+    {
+      "command": "cargo test -p relayer-graph-core --test graph_database imported_converted_invoke_reopens_as_inert_navigation_and_is_removable -- --exact --nocapture",
+      "exitCode": 0,
+      "testsPassed": 1,
+      "testsFailed": 0,
+      "filteredOut": 114,
+      "scenarioSeconds": 0.25,
+      "buildSeconds": 0.31
+    },
+    {
+      "command": "rustfmt --edition 2024 crates/relayer-graph-core/tests/graph_database.rs",
+      "exitCode": 0
+    }
+  ]
+}

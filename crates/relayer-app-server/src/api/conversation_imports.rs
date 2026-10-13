@@ -243,7 +243,7 @@ pub(super) async fn remove(
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use std::{
         fs,
         path::Path,
@@ -284,6 +284,8 @@ mod tests {
     fn records(text: String) -> Vec<ConversationExportRecord> {
         vec![
             ConversationExportRecord::Header(Box::new(ConversationExportHeader {
+                invocations: Vec::new(),
+                bound_inputs: Vec::new(),
                 export_version: EXPORT_VERSION_V1,
                 exported_at: "1770000000000".into(),
                 producer: ExportProducer {
@@ -400,6 +402,8 @@ mod tests {
         target_layer_id: Option<&str>,
     ) -> ExportAction {
         ExportAction {
+            reusable: None,
+            input_action_ids: Vec::new(),
             converted_from_invoke: false,
             id: id.into(),
             client_key: None,
@@ -473,6 +477,8 @@ mod tests {
         );
         vec![
             ConversationExportRecord::Header(Box::new(ConversationExportHeader {
+                invocations: Vec::new(),
+                bound_inputs: Vec::new(),
                 export_version: EXPORT_VERSION_V1,
                 exported_at: "1770000000000".into(),
                 producer: ExportProducer {
@@ -694,7 +700,7 @@ mod tests {
         (directory, router, store, graph, graph_task)
     }
 
-    struct ChildGuard(Child);
+    pub(crate) struct ChildGuard(Child);
 
     impl Drop for ChildGuard {
         fn drop(&mut self) {
@@ -703,7 +709,7 @@ mod tests {
         }
     }
 
-    fn real_visual_assets_host() -> (tempfile::TempDir, ChildGuard, String, String) {
+    pub(crate) fn real_visual_assets_host() -> (tempfile::TempDir, ChildGuard, String, String) {
         let directory = tempfile::tempdir().unwrap();
         let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
         static HOST_PACKAGES_BUILT: OnceLock<Result<(), String>> = OnceLock::new();
@@ -754,6 +760,7 @@ mod tests {
             await rename(readyFileTemp, readyFile);
             process.on("SIGTERM", () => { void running.close().then(() => process.exit(0)); });
         "#;
+        let stderr_file = directory.path().join("visual-assets-host-stderr.log");
         let mut child = Command::new("node")
             .arg("--input-type=module")
             .arg("-e")
@@ -765,7 +772,9 @@ mod tests {
             .current_dir(root)
             .stdin(Stdio::null())
             .stdout(Stdio::null())
-            .stderr(Stdio::null())
+            .stderr(
+                fs::File::create(&stderr_file).expect("capture visual-assets startup diagnostics"),
+            )
             .spawn()
             .expect("start the real visual-assets host");
         for _ in 0..100 {
@@ -774,13 +783,15 @@ mod tests {
                 return (directory, ChildGuard(child), url, token);
             }
             if let Some(status) = child.try_wait().unwrap() {
-                panic!("real visual-assets host exited during startup: {status}");
+                let diagnostics = fs::read_to_string(&stderr_file).unwrap_or_default();
+                panic!("real visual-assets host exited during startup: {status}\n{diagnostics}");
             }
             std::thread::sleep(std::time::Duration::from_millis(50));
         }
         let _ = child.kill();
         let _ = child.wait();
-        panic!("real visual-assets host did not become ready");
+        let diagnostics = fs::read_to_string(&stderr_file).unwrap_or_default();
+        panic!("real visual-assets host did not become ready\n{diagnostics}");
     }
 
     fn request(method: &str, cookie: &str, body: impl Into<Body>) -> Request<Body> {
@@ -2727,6 +2738,8 @@ mod tests {
         );
         graph
             .begin_imported_conversation(&relayer_graph_core::ImportedConversationStage {
+                inert_invocations: Vec::new(),
+                standalone_inputs: Vec::new(),
                 import_id: import_id.clone(),
                 source_sha256: "sha256:cleanup-probe".into(),
                 project_id: None,

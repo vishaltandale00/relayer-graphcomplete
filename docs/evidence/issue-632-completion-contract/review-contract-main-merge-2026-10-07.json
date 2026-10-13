@@ -1,0 +1,222 @@
+{
+  "schemaVersion": 1,
+  "date": "2026-10-07",
+  "reviewer": "/root/context_trace",
+  "workspace": "/private/tmp/relayer-interactive-inputs-v1-merge",
+  "pullRequestNumber": 707,
+  "preMergeHead": "63582111701357242ed5e2bddf3fed6cf50cd2a6",
+  "mainMergeSource": "677035322f33ee61327f0737d50b4db8e91e8ae9",
+  "mergeState": "No-commit main merge in progress; assertion covers manifest bytes, not a completed merge commit.",
+  "sourceDigest": "1d367aac6acadfbe4c3ab20fcb9e298c34ed68d7b2f3704c643b7e10dde26f6d",
+  "digestMethod": "SHA256 of sorted relative UTF8 path + NUL + exact file bytes + NUL for each manifest entry; receipt excluded",
+  "manifest": [
+    {
+      "path": "docs/decisions/0014-artifact-layer-renderer.md",
+      "sha256": "fe1c1a558b46528680ffd67822ca4d26fad0af995584d7dcf9b257ed4ef4473c"
+    },
+    {
+      "path": "docs/decisions/0015-sealed-completion-contract-and-invocations.md",
+      "sha256": "282dfdc92be18aab304b636d3422521c919fea41da7be2b80ef286faa034d3cb"
+    },
+    {
+      "path": "docs/prd/index.html",
+      "sha256": "352d3992b3ea8f97c06ce17483a346eeb279640102a84f80728e5a968c13020b"
+    },
+    {
+      "path": "packages/eval-runner/src/fixtures/artifact-viewer.ts",
+      "sha256": "d205534174ec08129163377e1195cf6946b650dfc9a34490c9b9401692d68d5d"
+    },
+    {
+      "path": "packages/graph-client/src/action-declarations.ts",
+      "sha256": "1a9181b6eb8a62e07c4e61789aa48712272ea9eb4bb9d656ea3db71ec3c4ffb6"
+    },
+    {
+      "path": "packages/graph-client/src/client.ts",
+      "sha256": "09a4c9fce73db74da0c4de447e8b19b9c5c9704d2311a0df1cfde951daa9fbcf"
+    },
+    {
+      "path": "packages/graph-client/src/detail.ts",
+      "sha256": "b38d4b6b331d2ddbb6d98e39ef466a48c118bf4df6ab56fc48be6fa511b9a942"
+    },
+    {
+      "path": "packages/graph-client/src/objects.ts",
+      "sha256": "f5f09a875c10f5769557e2c5763a0c570de74edca47063238a1970352321d5bd"
+    },
+    {
+      "path": "packages/graph-client/src/scoped-authoring.ts",
+      "sha256": "35234ac4b3d81f70c0f509206443d1e899885b094b0a5bc7d0cf43f333e7167c"
+    },
+    {
+      "path": "packages/graph-client/src/types.ts",
+      "sha256": "c6e274b8d82ab8e90d4d559bebfd82a814183b0c12dd801a9f35bdfa31f5d6c9"
+    },
+    {
+      "path": "packages/graph-client/test/artifacts.test.ts",
+      "sha256": "bf9676c2491fd7fac0cd443b4b0c16e8cfe6beeee080c1c965052ee7ada0b45a"
+    },
+    {
+      "path": "packages/graph-client/test/scoped-authoring.test.ts",
+      "sha256": "617a1f2a253349af985570bb7ca9fccfb7e1742810a375a04fa734109af46148"
+    },
+    {
+      "path": "packages/harness-host/src/artifact-notes.ts",
+      "sha256": "b2ada438b607c91e004c1a53ffa66b4e2d0b6d9c3b8107791d489336da3ffdb3"
+    },
+    {
+      "path": "packages/harness-host/src/completion-contract.ts",
+      "sha256": "6f1236b9055110c804f227642a4aa9eea5516eb20241760f94ab35ec08a5356d"
+    },
+    {
+      "path": "packages/harness-host/src/host.ts",
+      "sha256": "c5c9b1926caa17a4c33367428f63e09970ecb9a1aed5a1e746c1e54d023c6e27"
+    },
+    {
+      "path": "packages/harness-host/src/implementations/artifact-layer-guidance.ts",
+      "sha256": "b7bb6dc1a809259523544b648b1ce2ee7d0e20884b0e9fd05df77dac0e91e7e3"
+    },
+    {
+      "path": "packages/harness-host/src/implementations/codex-basic.ts",
+      "sha256": "5849c1a54fdc0805d5b4751c47eb184f3ac7646e990f6979ffcbc65d3c8c2c0c"
+    },
+    {
+      "path": "packages/harness-host/src/implementations/prime-agent.ts",
+      "sha256": "3939426319e972b2688e95f863ce8a6e7392c9aea2c63d188ba3a5d71c0dc817"
+    },
+    {
+      "path": "packages/harness-host/src/implementations/prime-visual-authoring.ts",
+      "sha256": "3dad8b56fe5be0e219f699a754aa233be1e18f8df612d84f997f3885f5cee170"
+    },
+    {
+      "path": "packages/harness-host/src/index.ts",
+      "sha256": "5f53ed0460c597d395f13ce5bdd8c9d75a44734787d5e25d4901fc2e7e43a82e"
+    },
+    {
+      "path": "packages/harness-host/src/interaction-input.ts",
+      "sha256": "81be5290fe4a99c3c4f70e5b4f529edc07dbc7b88c54b50e8bb360991b8da871"
+    },
+    {
+      "path": "packages/harness-host/test/artifact-files.test.ts",
+      "sha256": "e5f08743939de04fa3e7e4d7eedc325087c5b400042878a1ccba2cef4e2303be"
+    },
+    {
+      "path": "packages/harness-host/test/artifact-layer-guidance.test.ts",
+      "sha256": "a468057c494f2f58deda2b5e62af61173e55e663e789dd9a1109f329bd9a9d33"
+    },
+    {
+      "path": "packages/harness-host/test/artifact-notes.test.ts",
+      "sha256": "c0690f7a2a9e0e9e791c1f5bacb859afed50b2c0bcbc83750d34fc32512a7264"
+    },
+    {
+      "path": "packages/harness-host/test/completion-contract.test.ts",
+      "sha256": "a951cab943e628661809e547569b1ab39003720ef5b1a0665c7432e56afc622e"
+    },
+    {
+      "path": "packages/harness-host/test/interaction-input.test.ts",
+      "sha256": "50d2e8dd0a2f9d0feea6e072ed2bd0cf64a036b2d54c6dc0a7d22d81a5534a33"
+    },
+    {
+      "path": "python/relayer-graph/src/relayer_graph/actions.py",
+      "sha256": "3a72b84f4d3c7d49d182eae3015d2110127ea5d9ffc3107207ec649ea0ddd083"
+    },
+    {
+      "path": "python/relayer-graph/src/relayer_graph/authoring.py",
+      "sha256": "da886976ce75b03648f12ee2825c529a1d39f1a42679688d4e438847ad6a0c59"
+    },
+    {
+      "path": "python/relayer-graph/src/relayer_graph/scoped_authoring.py",
+      "sha256": "ca86eabf0c4f6dad5de5c2cb172036624deac82947b914986eaf883d27b66205"
+    },
+    {
+      "path": "python/relayer-graph/src/relayer_graph/session.py",
+      "sha256": "25c5b13f9677c4d07f3d65ceb14cb5226bd3931ee28caf439e5f7b0da04308e6"
+    },
+    {
+      "path": "python/relayer-graph/tests/test_artifacts.py",
+      "sha256": "3ab450ef30c2e4ec1990ec943d4ccaedef3dfecef3c78ce3e5fbb673a7bfafb5"
+    },
+    {
+      "path": "python/relayer-graph/tests/test_scoped_authoring.py",
+      "sha256": "fa9a0ac9489733a7a25114eeca3774ef2a3e1b56ba02f50f78b7ea3e43bf80eb"
+    }
+  ],
+  "scope": [
+    "Harness host admission, native execution ownership, artifact-file imports and note preparation; no scheduler added; canonical complete(inputGraph) retained.",
+    "Automatic TS/Python artifact node/layer forwarding alongside captured Input definitions, exact source-layer ownership and canonical ref adoption.",
+    "Sealed note materialization, shared provider serializer/guidance, scoped artifact capture/lowering and ART-011 deterministic fixture consumer."
+  ],
+  "verdict": "No remaining actionable blocker found in this bounded merged scope. Both assigned conflicts resolved; canonical artifact-note mutation and scoped artifact renderer loss repaired. Fixture consumer requires declared compiled heavy proof. Whole graph/artifact merge and release qualification remain outside this assertion.",
+  "unresolvedFindings": [],
+  "checkpoints": [
+    {
+      "id": "CC-001/002 + ART-011",
+      "seam": "host.ts contract validation + artifact-notes.ts sealed branch + interaction-input.ts serializer/guidance",
+      "repair": "Digest-verified files supplied via advisory artifactNoteScreenshots keyed by exact targetNodeId, annotationIndex and digestSha256. Sealed canonical contexts/contract objects remain unchanged; unsealed legacy annotation rewrite retained.",
+      "test": "Existing real-file artifact-notes.test.ts expanded sealed/legacy; valid, missing, tampered and quoted note scenarios retained. Source JSON unchanged, exact canonical object identities retained; production validateCompletionContract passes before/after; shared serializer retains canonical text and emits separate advisory mapping.",
+      "result": "Focused source scenario passed."
+    },
+    {
+      "id": "CC-008 + ART-001/004",
+      "seam": "TypeScript/Python scoped layer capture and lowering",
+      "repair": "Capture renderer before first await and forward it into lowered LayerObject. Node artifact payload and canonical returned fingerprint/ref remain captured through existing client boundary.",
+      "test": "One realistic scoped graph summary navigating to artifact destination per language; queued node transport pauses, then source/part/renderer mutated. Original node artifact/source/part, renderer, one exact canonical node/defaultNode and Navigate target survive. Existing Input mutation/authority tests retained.",
+      "result": "Focused TypeScript/Python scenarios passed."
+    },
+    {
+      "id": "ART-011 heavy consumer",
+      "seam": "packages/eval-runner/src/fixtures/artifact-viewer.ts + harness-host index advisory type exports",
+      "repair": "Read advisory file only with matching target node, annotation index and canonical screenshot digest. Verify actual PNG header and SHA256; retain unsealed legacy filepath fallback.",
+      "result": "Statically reviewed; helper source tests prove canonical/advisory delivery. Compiled fixture and artifact-viewer heavy runner remain parent-owned verification, not yet claimed passed here."
+    }
+  ],
+  "focusedVerification": [
+    {
+      "command": "./node_modules/.bin/vitest run packages/graph-client/test/scoped-authoring.test.ts packages/graph-client/test/artifacts.test.ts packages/harness-host/test/artifact-notes.test.ts packages/harness-host/test/interaction-input.test.ts packages/harness-host/test/completion-contract.test.ts packages/harness-host/test/artifact-files.test.ts packages/harness-host/test/artifact-layer-guidance.test.ts",
+      "exitCode": 0,
+      "filesPassed": 7,
+      "testsPassed": 35,
+      "durationSeconds": 0.429
+    },
+    {
+      "command": "PYTHONPATH=python/relayer-graph/src python3 -m unittest discover -s python/relayer-graph/tests -p 'test_*authoring.py'",
+      "exitCode": 0,
+      "testsPassed": 63,
+      "scenarioSeconds": 1.076,
+      "context": "Existing deterministic HTTP fixture outside sandbox; no paid inference."
+    },
+    {
+      "command": "PYTHONPATH=python/relayer-graph/src python3 -m unittest discover -s python/relayer-graph/tests -p test_artifacts.py",
+      "exitCode": 0,
+      "testsPassed": 3
+    },
+    {
+      "command": "npm run check --workspace @relayer/graph-client",
+      "exitCode": 0
+    },
+    {
+      "command": "npm run check --workspace @relayer/harness-host",
+      "exitCode": 0,
+      "context": "Repeated after advisory type export; final host source typecheck passed."
+    }
+  ],
+  "preservedFailedAttempts": [
+    {
+      "command": "PYTHONPATH=python/relayer-graph/src python3 -m unittest discover -s python/relayer-graph/tests -p 'test_*authoring.py'",
+      "exitCode": 1,
+      "kind": "sandbox setup",
+      "error": "Existing authoring HTTP fixture bind denied PermissionError1. 26 remaining scenarios ran, but outer portfolio failed.",
+      "repair": "Same authorized deterministic fixture outside sandbox; complete63tests passed."
+    }
+  ],
+  "pythonPackageTreeSha256": "486273b4697a08006ee4f03c616fdeb8c5e4489597762b74a150bed0ad457956",
+  "pythonIntegrityCheck": "Independently computed with production digestFilesystemTree over relayer_graph .py files; matches parent refreshed integrity pins.",
+  "testSubsumption": "No test or assertion retired. Existing screenshot fixture expanded sealed/legacy and retains original assertions. New scoped artifact journey protects renderer/metadata capture alongside existing Input authority fixtures.",
+  "oldEvidencePreserved": "review-contract-2026-10-07.json remains unchanged as immutable prior-source evidence. Its assertion is invalidated for merged source files; ADR0014 completion-contract was renamed0015 during reconciliation.",
+  "remainingVerification": [
+    "Parent final full npm run check/build must include final source and Python pins.",
+    "Declared artifact viewer heavy runner must prove ART-011 PNG/hashMatches for sealed notes using compiled fixture.",
+    "Completion-contract/Input heavy scenarios require newly built native binaries; historical captures remain separate.",
+    "Native artifact isolation, server execution, screenshot portability and human acceptance require their owning reviewers/gates; no release or paid inference certified."
+  ],
+  "certification": "Bounded non-certifying review until exact merged snapshot is attached to stabilized PR707 and required qualification is reported.",
+  "sourceInvalidationRule": "Any byte change to manifest invalidates assertion; outside-manifest boundary changes require widening/review."
+}

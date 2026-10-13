@@ -19,11 +19,13 @@ import {
 import type { EdgeShape } from "./edge-shapes.js";
 import {
   GraphApiError,
+  type ArtifactDetails,
   type GraphAction,
   type GraphCapability,
   type GraphEdge,
   type GraphLayer,
   type GraphNode,
+  type LayerRenderer,
 } from "./types.js";
 
 /** Private client seam: a captured node still uses the client's compiler and retry state. */
@@ -54,6 +56,8 @@ export interface AuthoringNodeFields {
   readonly title: string;
   readonly detail: string;
   readonly kind?: string;
+  /** Artifact details; declare artifact nodes with `layer.artifactNode`. */
+  readonly artifact?: ArtifactDetails;
 }
 export type AuthoringActionFields =
   | (Omit<
@@ -284,10 +288,10 @@ export class ScopedAuthoringLayer {
       invalid(`Duplicate node ${path(declaration.name, "nodes", key)}.`);
     const values = data(fields);
     const unknownField = Object.keys(values).find(
-      (field) => !["icon", "title", "detail", "kind"].includes(field),
+      (field) => !["icon", "title", "detail", "kind", "artifact"].includes(field),
     );
     if (unknownField !== undefined)
-      invalid(`Unknown node field ${JSON.stringify(unknownField.slice(0, 128))}. Use layer.node(localKey, { icon, title, detail }) with optional kind; the scoped API supplies clientKey and ref.`);
+      invalid(`Unknown node field ${JSON.stringify(unknownField.slice(0, 128))}. Use layer.node(localKey, { icon, title, detail }) with optional kind and artifact; the scoped API supplies clientKey and ref.`);
     if (
       typeof values.title !== "string" ||
       typeof values.detail !== "string" ||
@@ -301,9 +305,24 @@ export class ScopedAuthoringLayer {
       values.kind,
       identity(this.#owner.snapshotKey, declaration.name, "n", key),
     );
+    // The client snapshots and checks artifact details at capture, as on the direct path.
+    if (values.artifact !== undefined) node.artifact = values.artifact as ArtifactDetails;
     declaration.nodes.set(key, node);
     declaration.members.push(node);
     declaration.object.nodes = [...declaration.members];
+    return node;
+  }
+  /**
+   * Makes this an artifact layer holding one artifact node, like
+   * `LayerObject.forArtifact`: centered, default, and read by the artifact viewer.
+   */
+  artifactNode(
+    localKey: string,
+    fields: AuthoringNodeFields & { readonly artifact: ArtifactDetails },
+  ): NodeObject {
+    const node = this.node(localKey, fields);
+    this.#declaration.object.renderer = "artifact";
+    this.layout([[node, 0.5, 0.5]], { edgeShape: "default", defaultNode: node });
     return node;
   }
   include(record: GraphNode | GraphEdge): void {
@@ -423,6 +442,7 @@ interface CapturedLayer {
   readonly edges: readonly EdgeReference[];
   readonly layout: LayerLayoutObject;
   readonly defaultNode?: NodeReference | undefined;
+  readonly renderer?: LayerRenderer | undefined;
   readonly sizeJustification?: string | undefined;
 }
 
@@ -620,6 +640,7 @@ export class ScopedGraphAuthoring {
           edges,
           layout: new LayerLayoutObject(placements, layout.edgeShape, routes),
           defaultNode: declaration.object.defaultNode,
+          renderer: declaration.object.renderer,
           sizeJustification: declaration.sizeJustification,
         });
         for (const [key, node] of declaration.nodes)
@@ -691,10 +712,29 @@ export class ScopedGraphAuthoring {
               id: Number(targetFields.id),
             } as unknown as GraphLayer;
           }
+          const inputActions = fields.kind === "invoke" ? array((fields.inputActions ?? []) as readonly unknown[]).map((reference) => {
+            if (typeof reference === "number") {
+              if (!Number.isSafeInteger(reference) || reference < 1) invalid("Input action ID must be positive.");
+              return reference;
+            }
+            if (typeof reference !== "object" || reference === null)
+              invalid("Invoke needs an Input declaration or accepted Input action record.");
+            const canonical = data(reference);
+            if (Object.hasOwn(canonical, "id")) {
+              if (canonical.kind !== "input" || canonical.state !== "accepted" || !Number.isSafeInteger(canonical.id) || Number(canonical.id) < 1)
+                invalid("Invoke needs an explicit accepted Input action record.");
+              return Number(canonical.id);
+            }
+            const declared = [...declaration.actions.values()].find(candidate => candidate.action === reference);
+            if (!declared || declared.source !== source || declared.action.kind !== "input")
+              invalid("Invoke Inputs must be declared on the same source Node and scoped Layer.");
+            const input = data(declared.action);
+            return { ...Object.fromEntries(Object.entries(input).filter(([field]) => !["sourceLayer", "ref"].includes(field)).map(([field, value]) => [field, copyValue(value)])), sourceLayer: declaration.object } as ActionObject;
+          }) : undefined;
           const copied = Object.fromEntries(
             Object.entries(fields)
               .filter(
-                ([field]) => !["sourceLayer", "target", "ref"].includes(field),
+                ([field]) => !["sourceLayer", "target", "ref", "inputActions"].includes(field),
               )
               .map(([field, value]) => [field, copyValue(value)]),
           );
@@ -704,6 +744,7 @@ export class ScopedGraphAuthoring {
             captured: {
               ...copied,
               sourceLayer: declaration.object,
+              ...(inputActions === undefined ? {} : { inputActions }),
               ...(target === undefined
                 ? {}
                 : {
@@ -809,6 +850,7 @@ export class ScopedGraphAuthoring {
                   capture.defaultNode === undefined
                     ? undefined
                     : nodeRef(capture.defaultNode),
+                  capture.renderer,
                 ),
                 capture.sizeJustification === undefined
                   ? {}
@@ -838,7 +880,7 @@ export class ScopedGraphAuthoring {
                       ? layerResults.get(action.target as LayerObject)!
                       : action.target,
                   }
-                : { ...action, sourceLayer };
+                : { ...action, sourceLayer, ...(action.kind === "invoke" ? { inputActions: (action.inputActions ?? []).map(input => typeof input === "number" || "id" in input ? input : { ...input, sourceLayer }) } : {}) };
             const value = freezeRecord(
               await this.#transport.addAction(
                 nodeRef(capture.source),

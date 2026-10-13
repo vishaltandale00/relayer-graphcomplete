@@ -548,6 +548,7 @@ export class RelayerAppServerService {
       "share_title_required",
       "share_title_too_long",
       "share_snapshot_too_large",
+      "reusable_invocation_portability_unavailable",
     ]);
     const code = closedCodes.has(detail?.code) ? detail.code : "share_export_failed";
     const snapshotBytes = code === "share_snapshot_too_large" && Number.isSafeInteger(detail?.snapshotBytes)

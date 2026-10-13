@@ -1,4 +1,5 @@
 import { NativeExecutionCancelled } from "./completion-execution.js";
+import { validateCompletionContract } from "./completion-contract.js";
 import { ArtifactFileError, checkArtifactFiles } from "./artifact-files.js";
 import { withArtifactNoteScreenshots } from "./artifact-notes.js";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
@@ -1257,10 +1258,18 @@ export class HarnessHost {
         throw error;
       }),
     ]);
+    validateCompletionContract(interactionInput, interactionNodeId);
     if (origin.kind === "invoke") {
-      if (interaction.leasedActionId !== origin.actionId) {
+      const invocationMatches = interactionInput.completionContract?.input.invocationReferences.some((reference) =>
+        reference.sourceActionId === origin.actionId && reference.sourceCompletionId === origin.sourceCompletionId);
+      const sealedLegacyLeaseMatches = interaction.leasedActionId === origin.actionId
+        && interactionInput.completionContract?.authorities.some((authority) =>
+          authority.kind === "invoke.resolve" && authority.actionId === origin.actionId);
+      if (interactionInput.completionContract === undefined
+        ? interaction.leasedActionId !== origin.actionId
+        : !invocationMatches && !sealedLegacyLeaseMatches) {
         throw new HarnessExecutionFailure(
-          "Invoked completion does not match its graph-owned action lease",
+          "Invoked completion does not match its graph-owned Invocation or legacy action lease",
           "configuration",
           "none",
         );
@@ -3353,7 +3362,7 @@ function readTraceContext(value: unknown): HarnessCompletionTraceContext | undef
   if (personalPresentationVersionKey !== undefined
     && (personalPresentationVersionId === undefined
       || typeof personalPresentationVersionKey !== "string"
-      || !/^personal-presentation-v[0-4]$/.test(personalPresentationVersionKey))) {
+      || !/^personal-presentation-v[0-46]$/.test(personalPresentationVersionKey))) {
     throw new Error("Harness completion trace context presentation key requires its pinned version id and a supported key");
   }
   return {

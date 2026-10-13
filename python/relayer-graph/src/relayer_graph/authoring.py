@@ -9,6 +9,7 @@ import os
 import socket
 import uuid
 from dataclasses import dataclass, field, replace
+from types import MappingProxyType
 from typing import Any, Awaitable, Callable, Literal, Mapping, Sequence, TYPE_CHECKING, TypedDict
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
@@ -121,12 +122,61 @@ class InteractionPermissions(TypedDict):
     permissions: Sequence[NavigateAddPermission | InvokeResolvePermission]
 
 
+def _freeze_contract_value(value: Any) -> Any:
+    if isinstance(value, Mapping):
+        return MappingProxyType({key: _freeze_contract_value(item) for key, item in value.items()})
+    if isinstance(value, list):
+        return tuple(_freeze_contract_value(item) for item in value)
+    return value
+
+
+@dataclass(frozen=True, slots=True)
+class CompletionContract:
+    """Exact read-only trusted preparation; no client API can author a contract."""
+    schema_version: int
+    interaction_node_id: int
+    input: Mapping[str, Any]
+    authorities: tuple[Mapping[str, Any], ...]
+    return_requirements: tuple[Mapping[str, Any], ...]
+    digest: str
+
+    @classmethod
+    def from_dict(cls, value: Mapping[str, Any]) -> "CompletionContract":
+        return cls(int(value["schemaVersion"]), int(value["interactionNodeId"]),
+                   _freeze_contract_value(value["input"]),
+                   tuple(_freeze_contract_value(item) for item in value["authorities"]),
+                   tuple(_freeze_contract_value(item) for item in value["returnRequirements"]),
+                   str(value["digest"]))
+
+
+@dataclass(frozen=True, slots=True)
+class GraphInvocation:
+    id: int
+    invocation_key: str
+    source_completion_id: int
+    source_action_id: int
+    parent_node_id: int
+    child_interaction_node_id: int
+    action_snapshot: Mapping[str, Any]
+    state: Mapping[str, Any]
+
+    @classmethod
+    def from_dict(cls, value: Mapping[str, Any]) -> "GraphInvocation":
+        return cls(int(value["id"]), str(value["invocationKey"]),
+                   int(value["sourceCompletionId"]), int(value["sourceActionId"]),
+                   int(value["parentNodeId"]), int(value["childInteractionNodeId"]),
+                   _freeze_contract_value(value["actionSnapshot"]),
+                   _freeze_contract_value(value["state"]))
+
+
 @dataclass(frozen=True, slots=True)
 class InteractionInput:
     interaction: InteractionInputNode
     contexts: tuple[InteractionContext, ...]
     submitted_inputs: tuple[SubmittedInput, ...] = ()
     interaction_permissions: InteractionPermissions | None = None
+    completion_contract: CompletionContract | None = None
+    completion_contract_status: Literal["sealed", "legacy"] | None = None
 
     @classmethod
     def from_dict(cls, value: Mapping[str, Any]) -> "InteractionInput":
@@ -135,6 +185,8 @@ class InteractionInput:
             tuple(InteractionContext.from_dict(item) for item in value.get("contexts", ())),
             tuple(SubmittedInput.from_dict(item) for item in value.get("submittedInputs", ())),
             value.get("interactionPermissions"),
+            None if value.get("completionContract") is None else CompletionContract.from_dict(value["completionContract"]),
+            value.get("completionContractStatus"),
         )
 
 
@@ -402,6 +454,7 @@ class RelayerGraphClient:
         self._captured_nodes: dict[NodeDetailAuthoring, _CapturedNodeWrite] = {}
         self._scoped_identities: dict[str, str] = {}
         self._scoped_writes: set[str] = set()
+        self._pending_inputs: dict[tuple[int, str], tuple[str, asyncio.Task[Any]]] = {}
 
     async def __aenter__(self) -> "RelayerGraphClient":
         return self
@@ -432,6 +485,15 @@ class RelayerGraphClient:
 
     async def get_interaction_input(self) -> InteractionInput:
         return InteractionInput.from_dict(await self._request("GET", "/api/graph/input"))
+
+    async def get_contract(self) -> CompletionContract | None:
+        """Read the exact sealed contract; legacy input returns None."""
+        return (await self.get_interaction_input()).completion_contract
+
+    async def get_invocations(self, action: int | Mapping[str, Any]) -> tuple[GraphInvocation, ...]:
+        """Inspect reusable action calls under this capability's ordinary graph visibility."""
+        value = await self._request("GET", f"/api/graph/actions/{_action_id(action)}/invocations")
+        return tuple(GraphInvocation.from_dict(item) for item in value["invocations"])
 
     def bind_node(self, node: NodeObject) -> NodeObject:
         """Bind a repair object before reusing the same logical node's HTML."""
@@ -519,15 +581,17 @@ class RelayerGraphClient:
 
     async def add_invoke_action(self, source: NodeReference, label: str, interaction_text: str,
                                 *, source_layer: LayerReference, client_key: str,
+                                input_actions: Sequence[Any] = (),
+                                reusable: bool = False,
                                 variant: ActionVariant = "pill",
                                 icon: GraphIcon | None = None,
                                 description: str | None = None) -> Mapping[str, Any]:
-        return await self._request("POST", "/api/graph/actions", {
-            "clientKey": client_key, "sourceNodeId": _node_id(source),
-            "sourceLayerId": _layer_id(source_layer),
-            "kind": "invoke", "label": label, "interactionText": interaction_text,
-            **_action_presentation(variant, icon, description),
-        })
+        if not isinstance(reusable, bool):
+            raise ValueError("Invoke reusable must be a boolean")
+        from .actions import ActionObject
+        return await self.add_action(source, ActionObject("invoke", label, source_layer, client_key,
+            interaction_text=interaction_text, input_actions=tuple(input_actions), reusable=reusable,
+            variant=variant, icon=icon, description=description))
 
     async def add_input_action(
         self,
@@ -566,16 +630,92 @@ class RelayerGraphClient:
         return await self._add_captured_action(source, action, action)
 
     async def _add_captured_action(self, source: NodeReference, original: Any, action: Any) -> Mapping[str, Any]:
-        presentation = {"variant": action.variant, "icon": action.icon, "description": action.description}
-        common = {"source_layer": action.source_layer, "client_key": action.client_key, **presentation}
-        if action.kind == "navigate":
-            return await self.add_navigate_action(source, action.label, action.target, relation=action.relation, **common)
-        if action.kind == "invoke":
-            return await self.add_invoke_action(source, action.label, action.interaction_text, **common)
-        if action.kind == "input":
-            return await self.add_input_action(source, action.label, action.prompt, control=action.control,
-                options=action.options, minimum_selections=action.minimum_selections, **common)
-        raise ValueError("Unknown graph action kind")
+        from .actions import ActionObject
+        source_id = _node_id(source)
+        seen: set[int | str] = set()
+
+        def capture(declaration: Any, dependency: bool = False) -> tuple[dict[str, Any], list[Any]]:
+            if type(declaration) is not ActionObject or (dependency and declaration.kind != "input"):
+                raise ValueError("Invoke references must name Input declarations")
+            if not isinstance(declaration.client_key, str) or not declaration.client_key.strip() or declaration.client_key != declaration.client_key.strip() or "\0" in declaration.client_key or len(declaration.client_key.encode()) > 128:
+                raise ValueError("Action client_key must be a stable identity")
+            if declaration.client_key in seen:
+                raise ValueError("Duplicate Input declaration")
+            seen.add(declaration.client_key)
+            if not isinstance(declaration.label, str) or not declaration.label.strip():
+                raise ValueError("Action label is required")
+            source_layer = declaration.source_layer
+            if dependency and isinstance(source_layer, LayerObject) and not any(node is source or _node_id(node) == source_id for node in source_layer.nodes):
+                raise ValueError("Input declaration belongs to another source Node")
+            payload: dict[str, Any] = {"clientKey": declaration.client_key, "sourceNodeId": source_id,
+                "sourceLayerId": None if source_layer is None else _layer_id(source_layer),
+                "kind": declaration.kind, "label": declaration.label,
+                **_action_presentation(declaration.variant, declaration.icon, declaration.description)}
+            inputs: list[Any] = []
+            if declaration.kind == "invoke":
+                if not isinstance(declaration.reusable, bool) or not isinstance(declaration.interaction_text, str) or not declaration.interaction_text.strip():
+                    raise ValueError("Invalid Invoke declaration")
+                payload.update(interactionText=declaration.interaction_text, reusable=declaration.reusable)
+                for entry in declaration.input_actions:
+                    if type(entry) is int and entry > 0:
+                        if entry in seen:
+                            raise ValueError("Duplicate Input action ID")
+                        seen.add(entry)
+                        inputs.append(entry)
+                    else:
+                        inputs.append(capture(entry, True))
+            elif declaration.kind == "input":
+                if declaration.control not in ("text", "single_select", "multi_select") or not isinstance(declaration.prompt, str) or not declaration.prompt.strip():
+                    raise ValueError("Input control and prompt are required")
+                payload.update(control=declaration.control, prompt=declaration.prompt)
+                if declaration.control == "text":
+                    if declaration.options or declaration.minimum_selections is not None:
+                        raise ValueError("Text Inputs cannot declare selection options")
+                else:
+                    payload["options"] = [{"key": key, "label": label} for key, label in declaration.options]
+                    if declaration.minimum_selections is not None:
+                        payload["minimumSelections"] = declaration.minimum_selections
+            elif declaration.kind == "navigate":
+                payload.update(relation=declaration.relation, targetLayerId=_layer_id(declaration.target))
+            else:
+                raise ValueError("Unknown graph action kind")
+            # Detach mutable option/icon values before the first dependency await.
+            return json.loads(json.dumps(payload, allow_nan=False)), inputs
+
+        async def write(recipe: tuple[dict[str, Any], list[Any]]) -> Mapping[str, Any]:
+            payload, inputs = recipe
+            signature = json.dumps(payload, sort_keys=True)
+            key = (source_id, payload["clientKey"])
+            pending = self._pending_inputs.get(key) if payload["kind"] == "input" else None
+            if pending is not None:
+                if pending[0] != signature:
+                    raise ValueError("Conflicting concurrent Input declarations")
+                return await _wait_shared_input(pending[1])
+            async def send() -> Mapping[str, Any]:
+                if payload["kind"] == "invoke":
+                    ids = [entry if type(entry) is int else int((await write(entry))["action"]["id"]) for entry in inputs]
+                    if len(set(ids)) != len(ids):
+                        raise ValueError("Duplicate canonical Input action ID")
+                    payload["inputActionIds"] = ids
+                return await self._request("POST", "/api/graph/actions", payload)
+            if payload["kind"] != "input":
+                return await send()
+            task = asyncio.create_task(send())
+            self._pending_inputs[key] = (signature, task)
+            def settled(done: asyncio.Task[Any]) -> None:
+                if self._pending_inputs.get(key, (None, None))[1] is done:
+                    del self._pending_inputs[key]
+                # A cancelled consumer must not leave an unobserved exception.
+                if not done.cancelled():
+                    done.exception()
+            task.add_done_callback(settled)
+            try:
+                return await _wait_shared_input(task)
+            finally:
+                if task.done() and self._pending_inputs.get(key, (None, None))[1] is task:
+                    del self._pending_inputs[key]
+
+        return await write(capture(action))
 
     async def get_layer(self, layer: LayerReference) -> Mapping[str, Any]:
         return await self._request("GET", f"/api/graph/layers/{_layer_id(layer)}")
@@ -609,11 +749,15 @@ class RelayerGraphClient:
         """Read this completion's durable current head."""
         return await self._request("GET", "/api/graph/current")
 
-    async def prepare_complete(self, action: int | Mapping[str, Any]) -> CompletionInputGraph:
-        """Prepare or exactly recover one semantic child from a published invoke action."""
+    async def prepare_complete(self, action: int | Mapping[str, Any],
+                               invocation_key: str | None = None) -> CompletionInputGraph:
+        """A stable key recovers one call; omitting it creates an independent Invocation."""
         action_id = _action_id(action)
         value = await self._request(
-            "POST", "/api/graph/completions/prepare", {"actionId": action_id}
+            "POST", "/api/graph/completions/prepare", {
+                "actionId": action_id,
+                "invocationKey": str(uuid.uuid4()) if invocation_key is None else invocation_key,
+            }
         )
         return CompletionInputGraph.from_dict(value)
 
@@ -747,6 +891,25 @@ def _layer_id(value: LayerReference) -> int:
             raise ValueError(f"LayerObject {value.client_key} must be submitted first")
         return value.ref.id
     return value.id
+
+
+async def _wait_shared_input(task: asyncio.Task[Any]) -> Any:
+    """Cancel one waiter without cancelling a shared write or logging its late failure."""
+    waiter = asyncio.get_running_loop().create_future()
+    def complete(done: asyncio.Task[Any]) -> None:
+        if waiter.done():
+            return
+        if done.cancelled():
+            waiter.cancel()
+        elif (error := done.exception()) is not None:
+            waiter.set_exception(error)
+        else:
+            waiter.set_result(done.result())
+    task.add_done_callback(complete)
+    try:
+        return await waiter
+    finally:
+        task.remove_done_callback(complete)
 
 
 def _required(value: NodeReference | None) -> NodeReference:

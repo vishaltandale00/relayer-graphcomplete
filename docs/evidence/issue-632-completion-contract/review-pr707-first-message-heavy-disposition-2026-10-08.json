@@ -1,0 +1,158 @@
+{
+  "schemaVersion": 1,
+  "reviewer": "final_authority_review",
+  "date": "2026-10-08",
+  "pullRequestNumber": 707,
+  "sourceDigest": "bf054e4a2bd39d8e15b22f129d493f41d4ab77ef34c8ab2e61c032f856221a24",
+  "sourceFileCount": 230,
+  "verdict": "Separate actual unmodified declared navigation-only journey inner PASS observed at unchanged exact source. Original timeout remains failed with unknown cause. No timeout repair or confirmed flaky/infrastructure diagnosis claimed.",
+  "originalAttempt": {
+    "log": "/private/tmp/pr707-native-portable-final-first-message.log",
+    "status": "outer480s timeout/SIGTERM; no final scenario marker",
+    "cause": "unknown",
+    "proofLimit": "Earlier partial frames cannot establish later Eval/reopen completion; original capture attribution requires retained per-attempt copies/hashes."
+  },
+  "diagnostics": {
+    "wrapper": "/private/tmp/pr707-first-message-diagnostic.mjs",
+    "wrapperSha256": "a5dca6b9a06a7267f4f4affba3babeb478f42d96d3a18865af7b1db0cf0b2758",
+    "log": "/private/tmp/pr707-first-message-diagnostic.log",
+    "scope": "Timing-only external wrapper delegates unchanged executeJavaScript/capturePage arguments and results/rejections; reads window metadata, logs code hashes and waits over1s. Adds scheduling/Promise wrapping; not a cause-isolation experiment.",
+    "observed": "Original script reached full innerPASS under observer, with no over1s-await logs.",
+    "paintProbe": "Parent reports hidden/resized/shown requestAnimationFrame probe passed; hidden-frame starvation hypothesis not confirmed.",
+    "interpretation": "Diagnostic corroboration only; neither proves why initial run stalled."
+  },
+  "unmodifiedDeclaredRerun": {
+    "log": "/private/tmp/pr707-native-portable-final-first-message-rerun.log",
+    "logSha256": "f2d7ca5960f8e5ab298cb652bb20aa4d08d194842a43931be3bb2aa3f702208d",
+    "marker": {
+      "typedPermissions": true,
+      "requiredResponseJourney": {
+        "responseNodeId": 46,
+        "responseLayerId": 14,
+        "productCapture": "/private/tmp/relayer-interactive-inputs-v1-merge/.relayer/evidence/invoke-navigation/12-required-product-button.png",
+        "evalCapture": "/private/tmp/relayer-interactive-inputs-v1-merge/.relayer/evidence/invoke-navigation/13-required-eval-button.png",
+        "rejectedOmission": true,
+        "reopenedCapture": "/private/tmp/relayer-interactive-inputs-v1-merge/.relayer/evidence/invoke-navigation/14-required-reopened-button.png",
+        "reopenedNavigationPassed": true
+      },
+      "nativeKeyboardVerified": false,
+      "passed": true,
+      "typedPermissionJourneyPassed": true,
+      "ancillaryFailures": [],
+      "harness": "fixture-task-system",
+      "inferenceCalls": 0,
+      "shiftEnterValue": null,
+      "threadCount": 1,
+      "completionStatus": "accepted",
+      "renderedNodes": [
+        "Incoming queue",
+        "Two-worker pool",
+        "Results store"
+      ],
+      "screenshotPath": "/private/tmp/relayer-interactive-inputs-v1-merge/.relayer/evidence/first-message-enter-smoke.png",
+      "evalScreenshotPath": "/private/tmp/relayer-interactive-inputs-v1-merge/.relayer/evidence/first-message-enter-smoke-eval.png",
+      "evalNarrowScreenshotPath": "/private/tmp/relayer-interactive-inputs-v1-merge/.relayer/evidence/first-message-enter-smoke-eval-narrow.png",
+      "productNavigationState": {
+        "rows": 4,
+        "scrollable": false,
+        "backEnabled": true,
+        "breadcrumbSegments": 2,
+        "selectedNodeId": "43",
+        "inspectorFit": {
+          "initialContained": true,
+          "restoredContained": true,
+          "openToOpenPreserved": true,
+          "closeCanonicalLayoutPreserved": true,
+          "closedContained": true,
+          "dragSelectionSuppressed": true
+        }
+      },
+      "evalNavigationState": {
+        "rows": 4,
+        "scrollable": false,
+        "backEnabled": true,
+        "breadcrumbSegments": 2,
+        "readOnlyCopy": "Read-only evaluation result\n    \u2726Model\u2304\n    \n      \n        Model\n        Advanced\n      \n      \n      \n      \n    \n  \u2191",
+        "viewportWidth": 1480,
+        "inspectorFit": {
+          "desktopContained": true,
+          "narrowPreservedStageWidth": true,
+          "narrowStageResized": true,
+          "narrowCameraPreserved": false,
+          "narrowContained": true,
+          "redockedContained": true
+        }
+      },
+      "layoutEvidence": {
+        "rootProductEvalParity": true,
+        "childProductEvalParity": true,
+        "narrowViewportPreservedCanonicalLayout": true,
+        "productRootLayout": [
+          [
+            "40",
+            223.8,
+            320,
+            "authored"
+          ],
+          [
+            "41",
+            480,
+            320,
+            "authored"
+          ],
+          [
+            "42",
+            736.1999999999999,
+            320,
+            "authored"
+          ]
+        ],
+        "productChildLayout": [
+          [
+            "42",
+            480,
+            482,
+            "authored"
+          ],
+          [
+            "43",
+            297,
+            320,
+            "authored"
+          ],
+          [
+            "44",
+            663,
+            320,
+            "authored"
+          ]
+        ]
+      },
+      "invokeResultInteractionId": 2,
+      "invokeEvidencePaths": {
+        "unresolved": "/private/tmp/relayer-interactive-inputs-v1-merge/.relayer/evidence/invoke-navigation/01-unresolved.png",
+        "runningDisabled": "/private/tmp/relayer-interactive-inputs-v1-merge/.relayer/evidence/invoke-navigation/02-running-disabled.png",
+        "resolved": "/private/tmp/relayer-interactive-inputs-v1-merge/.relayer/evidence/invoke-navigation/03-resolved.png",
+        "crossInteraction": "/private/tmp/relayer-interactive-inputs-v1-merge/.relayer/evidence/invoke-navigation/04-cross-interaction-destination.png",
+        "revisited": "/private/tmp/relayer-interactive-inputs-v1-merge/.relayer/evidence/invoke-navigation/05-revisited-source.png",
+        "graphClosed": "/private/tmp/relayer-interactive-inputs-v1-merge/.relayer/evidence/invoke-navigation/09-interaction-graph-closed.png",
+        "graphOpen": "/private/tmp/relayer-interactive-inputs-v1-merge/.relayer/evidence/invoke-navigation/10-interaction-graph-open.png",
+        "graphSelected": "/private/tmp/relayer-interactive-inputs-v1-merge/.relayer/evidence/invoke-navigation/11-interaction-graph-selected-root.png",
+        "evalCrossInteraction": "/private/tmp/relayer-interactive-inputs-v1-merge/.relayer/evidence/invoke-navigation/06-eval-cross-interaction-destination.png",
+        "reopenedSecondOccurrence": "/private/tmp/relayer-interactive-inputs-v1-merge/.relayer/evidence/invoke-navigation/07-reopened-second-occurrence.png",
+        "reopenedDestination": "/private/tmp/relayer-interactive-inputs-v1-merge/.relayer/evidence/invoke-navigation/08-reopened-destination.png"
+      }
+    },
+    "status": "Inner PASS independently parsed; parent owns final outer exit/result and exact binary receipt",
+    "captureAttribution": "Default screenshot paths refer to this final rerun after being overwritten; do not label these files as failed-attempt captures."
+  },
+  "remainingGates": [
+    "Native context, Input, project/settings restart, compiled Eval, PREV, artifact and recorded journeys on final matching binaries",
+    "Final PR current-head/base/freshness and unresolved review audit"
+  ],
+  "limitations": [
+    "Native keyboard not verified: marker nativeKeyboardVerified=false; this is navigation-only qualification.",
+    "No new production or test edits; no paid inference, provider retry, hosted or release certification.",
+    "Fullcheck/build completion is separately parent-qualified; remaining native gates not certified by this first-message pass."
+  ]
+}

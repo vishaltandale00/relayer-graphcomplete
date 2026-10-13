@@ -1,6 +1,8 @@
 import { mkdtemp, mkdir, readFile, realpath, rm, writeFile } from "node:fs/promises";
+import { restoreHistoricalInvokePolicy } from "./support/historical-invoke-policy.mjs";
 import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
+import { DatabaseSync } from "node:sqlite";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
@@ -141,13 +143,41 @@ describe("conversation export to Eval end to end", () => {
     const invoke = first.completionOutput.rootLayer.actions.find((action) => action.kind === "invoke");
     expect(invoke).toBeTruthy();
 
+    // Preserve the historical converted-invoke portability checkpoint. Seed an
+    // actual pre-contract source and leased graph child plus its old Product
+    // record; the normal endpoint must recover it, not create a reusable call.
+    const legacyGraph = new DatabaseSync(join(dataDirectory, "graphcomplete-runtime/graph.sqlite3"));
+    try {
+      restoreHistoricalInvokePolicy(legacyGraph, invoke.id);
+      legacyGraph.exec("DROP TRIGGER completion_contract_marker_guard; DROP TRIGGER completion_contract_delete_guard;");
+      legacyGraph.prepare("UPDATE completion_states SET completion_contract_digest=NULL WHERE interaction_node_id=?").run(first.graphNodeId);
+      legacyGraph.prepare("DELETE FROM completion_contracts WHERE interaction_node_id=?").run(first.graphNodeId);
+    } finally { legacyGraph.close(); }
+    const legacyPreparation = await fetch(`${runtimeSession.graphUrl}/api/control/interactions`, {
+      method: "POST", headers: { authorization: `Bearer ${runtimeSession.graphControlToken}`, "content-type": "application/json" },
+      body: JSON.stringify({ projectId: project.id, threadId: thread.id, text: invoke.interactionText,
+        invocation: { sourceInteractionNodeId: first.graphNodeId, sourceActionId: invoke.id }, mintCapability: false }),
+    });
+    const legacyPrepared = await legacyPreparation.json();
+    expect(legacyPreparation.status, JSON.stringify(legacyPrepared)).toBe(200);
+    expect(legacyPrepared.node.leasedActionId).toBe(invoke.id);
+    const legacyProduct = new DatabaseSync(join(dataDirectory, "product-data/product.sqlite3"));
+    try {
+      legacyProduct.exec("BEGIN IMMEDIATE");
+      const inserted = legacyProduct.prepare(`INSERT INTO interactions(thread_id,sequence,text,created_at,completion_status,model_provider_id,provider_model_id,model_family_id)
+        SELECT thread_id,(SELECT MAX(sequence)+1 FROM interactions WHERE thread_id=?),?,?,'not_started',model_provider_id,provider_model_id,model_family_id FROM interactions WHERE id=?`).run(thread.id, invoke.interactionText, String(Date.now()), first.id);
+      legacyProduct.prepare("INSERT INTO action_invocations(source_interaction_id,action_id,result_interaction_id,created_at,graph_lease_required) VALUES (?,?,?,?,1)").run(first.id, invoke.id, Number(inserted.lastInsertRowid), String(Date.now()));
+      legacyProduct.exec("COMMIT");
+    } finally { legacyProduct.close(); }
+
     const invoked = await productRequest(
       productSession,
       `/api/threads/${thread.id}/interactions/${first.id}/actions/${invoke.id}/invoke`,
       { method: "POST" },
     );
-    expect(invoked).toMatchObject({ created: true, invocation: { sourceInteractionId: first.id, actionId: invoke.id } });
+    expect(invoked).toMatchObject({ created: false, invocation: { sourceInteractionId: first.id, actionId: invoke.id, reusable: false, invocationKey: "legacy" } });
     detail = await waitForStatus(productSession, thread.id, 1, "accepted");
+    expect(detail.interactions[1].graphNodeId).toBe(legacyPrepared.node.id);
 
     await productRequest(productSession, `/api/threads/${thread.id}/interactions`, {
       method: "POST",

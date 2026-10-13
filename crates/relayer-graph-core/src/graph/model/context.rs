@@ -54,11 +54,19 @@ pub struct InteractionContextAction {
 #[serde(rename_all = "camelCase")]
 pub struct InteractionInput {
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub completion_contract: Option<crate::CompletionContract>,
+    #[serde(default = "legacy_contract_status")]
+    pub completion_contract_status: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub interaction_permissions: Option<crate::InteractionPermissions>,
     pub interaction: InteractionInputNode,
     pub contexts: Vec<InteractionContext>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub submitted_inputs: Vec<SubmittedInput>,
+}
+
+fn legacy_contract_status() -> String {
+    "legacy".into()
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

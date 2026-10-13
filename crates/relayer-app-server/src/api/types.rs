@@ -301,6 +301,10 @@ impl InteractionResponse {
         Ok(())
     }
 
+    pub(super) fn completion_root_layer_mut(&mut self) -> Option<&mut serde_json::Value> {
+        self.completion_output.as_mut()?.get_mut("rootLayer")
+    }
+
     pub(crate) fn set_submitted_inputs(
         &mut self,
         submitted_inputs: Vec<relayer_graph_core::SubmittedInput>,
@@ -391,26 +395,75 @@ mod attempt_response_tests {
     }
 }
 
+/// Imported call history has portable frozen data and optional local viewing
+/// identities. It is deliberately outside executable action invocation state.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ImportedInvocationHistoryResponse {
+    pub(super) inert: bool,
+    pub(super) thread_id: i64,
+    pub(super) source_interaction_id: Option<i64>,
+    pub(super) source_turn: Option<ImportedInvocationSourceTurnResponse>,
+    pub(super) source_node_id: Option<i64>,
+    pub(super) source_action_id: Option<i64>,
+    pub(super) presenting_layer_id: Option<i64>,
+    pub(super) result_interaction_id: Option<i64>,
+    pub(super) record: crate::conversation_export::ExportInvocation,
+    pub(super) visual_asset_contents: Vec<crate::conversation_export::ExportVisualAssetContent>,
+}
+
+/// Viewing provenance only; this does not grant a canonical graph occurrence.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ImportedInvocationSourceTurnResponse {
+    pub(super) id: i64,
+    pub(super) sequence: u32,
+    pub(super) interaction_node_id: String,
+    pub(super) completion: crate::conversation_export::ExportCompletionReceipt,
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct ActionInvocationResponse {
+    pub(super) preparation_recoverable: bool,
+    pub(super) preparation_rejected: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(super) presenting_layer_id: Option<i64>,
+    pub(super) durable: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(super) reusable: Option<bool>,
+    pub(super) invocation_key: String,
     pub(super) source_interaction_id: i64,
     pub(super) action_id: i64,
-    pub(super) result_interaction_id: i64,
+    pub(super) result_interaction_id: Option<i64>,
+    /// Inert graph inventory; never a Product launch/recovery receipt.
+    pub(super) graph_only: bool,
+    pub(super) occupancy_only: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(super) native_invocation: Option<relayer_graph_core::InvocationGraphSnapshot>,
     pub(super) result_completion_status: String,
     pub(super) created_at: String,
     /// An agent's child: it never holds the thread's one active human turn.
     pub(super) agent_invoked: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
-    execution: Option<CompletionExecutionEvidenceResponse>,
+    pub(super) execution: Option<CompletionExecutionEvidenceResponse>,
 }
 
 impl From<ActionInvocation> for ActionInvocationResponse {
     fn from(invocation: ActionInvocation) -> Self {
         Self {
+            preparation_recoverable: false,
+            preparation_rejected: false,
+            presenting_layer_id: None,
+            durable: invocation.durable,
+            reusable: (!invocation.durable).then_some(false),
+            invocation_key: invocation.invocation_key,
             source_interaction_id: invocation.source_interaction_id.value(),
             action_id: invocation.action_id,
-            result_interaction_id: invocation.result_interaction_id.value(),
+            result_interaction_id: Some(invocation.result_interaction_id.value()),
+            graph_only: false,
+            occupancy_only: false,
+            native_invocation: None,
             result_completion_status: invocation.result_completion_status,
             created_at: invocation.created_at,
             agent_invoked: invocation.agent_invoked,
@@ -421,7 +474,7 @@ impl From<ActionInvocation> for ActionInvocationResponse {
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
-struct CompletionExecutionEvidenceResponse {
+pub(super) struct CompletionExecutionEvidenceResponse {
     interaction_id: i64,
     graph_completion_id: i64,
     harness_configuration_name: String,
@@ -548,13 +601,20 @@ pub(crate) struct ProductStateResponse {
     threads: Vec<ThreadViewResponse>,
     interactions: Vec<InteractionResponse>,
     action_invocations: Vec<ActionInvocationResponse>,
+    imported_invocation_history: Vec<ImportedInvocationHistoryResponse>,
     approvals: Vec<ApprovalReceipt>,
     capabilities: CapabilitiesResponse,
     current_projection: Option<relayer_graph_core::CurrentProjectionPage>,
     input_draft_revision: Option<i64>,
+    invocation_inventory_available: bool,
 }
 
 impl ProductStateResponse {
+    pub(crate) fn with_invocation_inventory_available(mut self, available: bool) -> Self {
+        self.invocation_inventory_available = available;
+        self
+    }
+
     pub(crate) fn with_conversation_compatibility(
         mut self,
         value: Option<crate::storage::ConversationCompatibility>,
@@ -594,7 +654,9 @@ impl ProductStateResponse {
 impl From<ProductState> for ProductStateResponse {
     fn from(state: ProductState) -> Self {
         Self {
+            invocation_inventory_available: true,
             conversation_compatibility: None,
+            imported_invocation_history: Vec::new(),
             projects: state.projects.into_iter().map(Into::into).collect(),
             threads: state.threads.into_iter().map(Into::into).collect(),
             interactions: state.interactions.into_iter().map(Into::into).collect(),
@@ -618,13 +680,17 @@ pub(crate) struct ThreadDetailResponse {
     thread: ThreadResponse,
     interactions: Vec<InteractionResponse>,
     action_invocations: Vec<ActionInvocationResponse>,
+    imported_invocation_history: Vec<ImportedInvocationHistoryResponse>,
     approvals: Vec<ApprovalReceipt>,
+    invocation_inventory_available: bool,
 }
 
 impl From<ThreadDetail> for ThreadDetailResponse {
     fn from(detail: ThreadDetail) -> Self {
         Self {
+            invocation_inventory_available: true,
             conversation_compatibility: None,
+            imported_invocation_history: Vec::new(),
             thread: detail.thread.into(),
             interactions: detail.interactions.into_iter().map(Into::into).collect(),
             action_invocations: detail
@@ -638,6 +704,11 @@ impl From<ThreadDetail> for ThreadDetailResponse {
 }
 
 impl ThreadDetailResponse {
+    pub(crate) fn with_invocation_inventory_available(mut self, available: bool) -> Self {
+        self.invocation_inventory_available = available;
+        self
+    }
+
     pub(crate) fn with_conversation_compatibility(
         mut self,
         value: Option<crate::storage::ConversationCompatibility>,
@@ -650,8 +721,9 @@ impl ThreadDetailResponse {
         executions: HashMap<i64, crate::storage::CompletionExecution>,
     ) -> Self {
         for invocation in &mut self.action_invocations {
-            invocation.execution = executions
-                .get(&invocation.result_interaction_id)
+            invocation.execution = invocation
+                .result_interaction_id
+                .and_then(|id| executions.get(&id))
                 .cloned()
                 .map(Into::into);
         }
@@ -759,5 +831,41 @@ mod tests {
                 .unwrap()
                 .contains("rate limited")
         );
+    }
+}
+
+impl ProductStateResponse {
+    pub(crate) fn with_imported_invocation_history(
+        mut self,
+        history: Vec<ImportedInvocationHistoryResponse>,
+    ) -> Self {
+        self.imported_invocation_history = history;
+        self
+    }
+
+    pub(crate) fn with_action_invocations(
+        mut self,
+        invocations: Vec<ActionInvocationResponse>,
+    ) -> Self {
+        self.action_invocations = invocations;
+        self
+    }
+}
+
+impl ThreadDetailResponse {
+    pub(crate) fn with_imported_invocation_history(
+        mut self,
+        history: Vec<ImportedInvocationHistoryResponse>,
+    ) -> Self {
+        self.imported_invocation_history = history;
+        self
+    }
+
+    pub(crate) fn with_action_invocations(
+        mut self,
+        invocations: Vec<ActionInvocationResponse>,
+    ) -> Self {
+        self.action_invocations = invocations;
+        self
     }
 }

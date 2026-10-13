@@ -47,6 +47,7 @@ impl<'connection> InputChildTable<'connection> {
         let mut drafts = drafts.to_vec();
         drafts.sort_by_key(|draft| draft.occurrence.clone());
         let mut occurrences = HashSet::new();
+        let mut actions = HashSet::new();
         let semantic_digest = interaction_input_semantic_digest(text, &drafts)
             .map_err(|error| GraphError::Internal(error.to_string()))?;
         let mut canonical = Vec::with_capacity(drafts.len());
@@ -56,6 +57,13 @@ impl<'connection> InputChildTable<'connection> {
                     "input_attachment_duplicate",
                     format!("attachments[{index}]"),
                     "Send at most one value for each exact occurrence.",
+                ));
+            }
+            if !actions.insert(draft.occurrence.action_id) {
+                return Err(GraphError::validation(
+                    "input_action_duplicate",
+                    format!("attachments[{index}]"),
+                    "Send at most one answer to an exact accepted InputAction within an interaction.",
                 ));
             }
             let accepted = ActionTable::new(&mut *self.connection)

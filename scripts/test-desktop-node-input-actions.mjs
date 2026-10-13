@@ -81,7 +81,7 @@ function nodeInputFixtureFactory() {
       const node = new NodeObject(
         "settings",
         "Input grammar",
-        "These authored inputs belong directly to this Node Details page.\n\n" + "Review the governing constraint, primary route, and supporting evidence before committing the authored controls.\n\n".repeat(8),
+        "These authored inputs belong directly to this Node Details page.\n\n" + "Review the governing constraint, primary route, and supporting evidence before sending the answers.\n\n".repeat(8),
         "concept",
         `input-grammar-${completionCount}`,
       );
@@ -102,7 +102,7 @@ function nodeInputFixtureFactory() {
       const navigationNode = new NodeObject(
         "route",
         "Navigation destination",
-        "Opening this accepted child layer clears renderer-local staged input.",
+        "Opening this accepted child layer preserves pending input answers in this workspace.",
         "concept",
         `navigation-destination-${completionCount}`,
       );
@@ -178,6 +178,13 @@ function nodeInputFixtureFactory() {
         target: layer,
         clientKey: `response-${completionCount}`,
       });
+      const contract = await graph.getContract();
+      for (const requirement of contract?.returnRequirements ?? []) {
+        if (requirement.kind === "navigate.response") await graph.addAction(requirement.nodeId, {
+          kind: "navigate", relation: "reference", label: "See the new response", target: layer,
+          clientKey: `attached-response-${interaction.id}-${requirement.nodeId}`,
+        });
+      }
       await graph.submit(interaction.id);
         context.trace.emit({ type: "message", data: { role: "assistant", text: "Accepted deterministic node-input fixture." } });
       } catch (error) {
@@ -275,6 +282,40 @@ async function run() {
     getAppearance: () => "dark",
     updater: { status: () => ({ phase: "development" }) },
     openExternal: async () => undefined,
+    onWindowCreated: (created) => {
+      const contents = created.webContents;
+      let navigation = 0;
+      const diagnostic = (kind, details = {}) => process.stderr.write(`${JSON.stringify({
+        fixture: "node-input", diagnostic: kind, navigation,
+        time: new Date().toISOString(),
+        url: contents.isDestroyed() ? null : contents.getURL(), ...details,
+      })}\n`);
+      contents.on("did-start-navigation", (_event, url, inPlace, isMainFrame) => {
+        if (isMainFrame) { navigation += 1; diagnostic("navigation-start", { target: url, inPlace }); }
+      });
+      contents.on("did-navigate", (_event, url, httpResponseCode, httpStatusText) => {
+        diagnostic("navigation-committed", { target: url, httpResponseCode, httpStatusText });
+      });
+      contents.on("console-message", (event, level, message, line, sourceId) => {
+        // Electron's current event contains structured details; the positional
+        // arguments retain compatibility with older verified desktop runtimes.
+        const record = typeof level === "number" ? { level, message, line, sourceId }
+          : { level: event.level, message: event.message, line: event.lineNumber, sourceId: event.sourceId };
+        if (record.level === "error" || record.level === "warning" || record.level >= 2) diagnostic("renderer-console", record);
+      });
+      contents.on("did-fail-load", (_event, code, description, validatedURL, isMainFrame) => {
+        diagnostic("load-failed", { code, description, validatedURL, isMainFrame });
+      });
+      contents.on("render-process-gone", (_event, details) => diagnostic("renderer-process-gone", details));
+      contents.on("unresponsive", () => diagnostic("renderer-unresponsive"));
+      contents.on("did-finish-load", () => {
+        diagnostic("load-finished");
+        void contents.executeJavaScript(`({ readyState: document.readyState, title: document.title,
+          bodyChildren: document.body?.children.length, bodyLength: document.body?.innerHTML.length,
+          scriptSources: [...document.scripts].map(script => script.src) })`)
+          .then(state => diagnostic("loaded-document", state), error => diagnostic("document-probe-failed", { error: String(error) }));
+      });
+    },
   });
   window = await createWindow(productSession);
   const nativeMinimumSize = window.getMinimumSize();
@@ -333,12 +374,7 @@ async function run() {
   ))()`));
   window.webContents.session.webRequest.onBeforeRequest(initialDraftLoadFilter, null);
   await setValue(".node-input-text", "Recovered after initial draft load retry");
-  await click("[aria-label='Commit Name the governing constraint']");
-  await waitFor("recovered input authority accepts a real commit and unlocks Send", async () => (
-    (await productRequest(`/api/threads/${thread.id}/input-draft`)).attachments?.some(
-      (attachment) => attachment.value?.text === "Recovered after initial draft load retry",
-    ) && await evaluate(`document.querySelector('#sendInteraction')?.disabled === false`)
-  ));
+  await waitFor("recovered authority accepts the current stage without confirmation", () => evaluate("!document.querySelector('#sendInteraction').disabled"));
   const grammar = await evaluate(`(() => ({
     attachedToDetails: document.querySelector('#inspectorContent')?.contains(document.querySelector('#nodeInputActions')),
     prompts: [...document.querySelectorAll('.node-input-editor legend')].map((item) => item.textContent),
@@ -346,7 +382,7 @@ async function run() {
     forbiddenCopy: document.body.innerText.includes('Not attached to the composer'),
   }))()`);
   if (!grammar.attachedToDetails || grammar.prompts.length !== 3 || grammar.forbiddenCopy
-    || grammar.symbols.some(({ text, label, width, height }) => !["✓", "↶"].includes(text) || !label || width > 30 || height > 30)) {
+    || grammar.symbols.some(({ text, label, width, height }) => text !== "↶" || !label || width > 30 || height > 30)) {
     throw new Error(`Node Details input grammar is wrong: ${JSON.stringify(grammar)}`);
   }
   const detailViewportBeforeAnnotation = await evaluate(`(() => {
@@ -656,7 +692,7 @@ async function run() {
       && selectedBounds.right <= railBounds.right + 1;
   })()`));
 
-  await setValue(".node-input-text", "Discard this staged value on navigation");
+  await setValue(".node-input-text", "Preserve this staged value on navigation");
   await evaluate(`(() => {
     const action = [...document.querySelectorAll('#detailActions .action-control')]
       .find((button) => button.textContent.includes('Open navigation destination'));
@@ -690,42 +726,20 @@ async function run() {
   await click("[aria-label='Go to Response']");
   await waitFor("root input layer restored after navigation", () => evaluate(`document.querySelectorAll('.graph-node').length === 2`));
   await clickNode("Input grammar");
-  await waitFor("navigation discarded renderer-local staged input", () => evaluate(`(
-    document.querySelector('.node-input-text')?.value === 'Recovered after initial draft load retry'
+  await waitFor("navigation preserves renderer-local staged input", () => evaluate(`(
+    document.querySelector('.node-input-text')?.value === 'Preserve this staged value on navigation'
   )`));
 
-  let releaseDelayedCommit;
-  let delayedCommitObserved = false;
-  const delayedCommitFilter = { urls: [`${productSession.origin}/api/threads/*/input-draft/attachments`] };
-  window.webContents.session.webRequest.onBeforeRequest(delayedCommitFilter, (details, callback) => {
-    if (!delayedCommitObserved && details.method === "PUT") {
-      delayedCommitObserved = true;
-      releaseDelayedCommit = () => callback({});
-      return;
-    }
-    callback({});
-  });
-  await setValue(".node-input-text", "Commit while selecting another node");
-  await click("[aria-label='Commit Name the governing constraint']");
-  await waitFor("input commit request held in flight", () => delayedCommitObserved);
-  await clickNode("Selection guard");
-  releaseDelayedCommit();
-  await waitFor("settled commit does not repaint the stale input node", async () => (
-    (await productRequest(`/api/threads/${thread.id}/input-draft`)).attachments?.some(
-      (attachment) => attachment.value?.text === "Commit while selecting another node",
-    )
-    && await evaluate(`(() => (
-      document.querySelector('#detailTitle')?.textContent === 'Selection guard'
-        && document.querySelector('#nodeInputActions')?.classList.contains('hidden')
-        && document.querySelectorAll('#nodeInputActions .node-input-editor').length === 0
-    ))()`)
-  ));
-  window.webContents.session.webRequest.onBeforeRequest(delayedCommitFilter, null);
-  await clickNode("Input grammar");
-
+  // Implicit acceptance replaces the old per-field Commit UI. Keep the same
+  // assembled persistence, conflict, response-loss, thread and layout boundaries.
   await setValue(".node-input-text", submittedTextValue);
-  await evaluate(`(() => { const rails = document.querySelectorAll('.node-input-option-rail'); rails[0].scrollLeft = 160; rails[1].querySelectorAll('.node-input-option')[2].click(); })()`);
+  await evaluate(`(() => {
+    const rails = document.querySelectorAll('.node-input-option-rail');
+    rails[0].querySelectorAll('.node-input-option')[5].click();
+    rails[1].querySelectorAll('.node-input-option')[2].click();
+  })()`);
   await waitForPaint();
+  await evaluate(`document.querySelectorAll('.node-input-option-rail')[0].scrollLeft = 160`);
   const stacked = await evaluate(`(() => { const rails = document.querySelectorAll('.node-input-option-rail'); return { count: rails.length, firstScroll: rails[0].scrollLeft, secondSelected: rails[1].querySelectorAll('[aria-checked="true"]').length }; })()`);
   if (stacked.count !== 2 || stacked.firstScroll < 100 || stacked.secondSelected !== 1) {
     throw new Error(`Stacked horizontal rails lost independent state: ${JSON.stringify(stacked)}`);
@@ -741,131 +755,6 @@ async function run() {
       });
   })()`);
   if (!compactFits) throw new Error("Three ordinary input choices require horizontal discovery.");
-  await evaluate(`document.querySelectorAll('.node-input-option-rail')[0].querySelectorAll('.node-input-option')[5].click()`);
-  for (const prompt of ["Name the governing constraint", "Choose the primary route"]) {
-    await click(`[aria-label='Commit ${prompt}']`);
-    await waitFor(`${prompt} committed`, async () => {
-      const draft = await productRequest(`/api/threads/${thread.id}/input-draft`);
-      return draft.attachments?.some((attachment) => attachment.action.prompt === prompt);
-    });
-  }
-  await waitFor("multi-select minimum error", () => evaluate(`(() => (
-    document.querySelector("[aria-label='Input action: Choose supporting evidence'] .node-input-error")?.textContent.includes('minimum')
-      && document.querySelector("[aria-label='Commit Choose supporting evidence']")?.disabled
-      && document.querySelectorAll('.composer-input-pill').length === 2
-  ))()`));
-  await evaluate(`document.querySelectorAll('.node-input-option-rail')[1].querySelectorAll('.node-input-option')[1].click()`);
-  await click("[aria-label='Commit Choose supporting evidence']");
-  await waitFor("Choose supporting evidence committed", async () => {
-    const draft = await productRequest(`/api/threads/${thread.id}/input-draft`);
-    return draft.attachments?.some((attachment) => attachment.action.prompt === "Choose supporting evidence");
-  });
-  await waitFor("three exact committed attachments", async () => {
-    const draft = await productRequest(`/api/threads/${thread.id}/input-draft`);
-    return draft.attachments?.length === 3 && new Set(draft.attachments.map((item) => JSON.stringify(item.occurrence))).size === 3;
-  });
-  await waitFor("three composer input pills and input-only Send", () => evaluate(`(() => (
-    document.querySelectorAll('.composer-input-pill').length === 3
-      && document.querySelector('#threadPrompt')?.value === ''
-      && !document.querySelector('#sendInteraction')?.disabled
-  ))()`));
-  window.webContents.reload();
-  await waitFor("committed inputs after renderer reopen", () => evaluate(`(() => (
-    !document.body.classList.contains('desktop-account-pending')
-      && document.querySelectorAll('.graph-node').length === 2
-      && document.querySelectorAll('.composer-input-pill').length === 3
-  ))()`));
-  await waitFor("Node Details restores committed values", () => evaluate(`(() => (
-    document.querySelector('.node-input-text')?.value === ${JSON.stringify(submittedTextValue)}
-      && document.querySelectorAll('.node-input-option[aria-checked="true"]').length === 3
-  ))()`));
-  await click(".composer-input-pill");
-  await waitFor("explicit composer input inspection", () => evaluate(`Boolean(document.querySelector('.composer-input-preview'))`));
-  await click("[aria-label='Close Name the governing constraint input details']");
-  await setValue(".node-input-text", "Local replacement");
-  await click("[aria-label='Undo Name the governing constraint']");
-  const undone = await evaluate(`document.querySelector('.node-input-text')?.value`);
-  if (undone !== submittedTextValue) throw new Error(`Undo did not restore committed text: ${JSON.stringify(undone)}`);
-
-  await setValue(".node-input-text", "Local value survives a revision conflict");
-  const draftBeforeConflict = await productRequest(`/api/threads/${thread.id}/input-draft`);
-  const textAttachmentBeforeConflict = draftBeforeConflict.attachments.find(
-    (attachment) => attachment.action.prompt === "Name the governing constraint",
-  );
-  const serverAdvancedDraft = await productRequest(
-    `/api/threads/${thread.id}/input-draft/attachments`,
-    {
-      method: "PUT",
-      body: JSON.stringify({
-        occurrence: textAttachmentBeforeConflict.occurrence,
-        value: { text: "Concurrent server value" },
-        expectedRevision: draftBeforeConflict.revision,
-      }),
-    },
-  );
-  await click("[aria-label='Commit Name the governing constraint']");
-  await waitFor("revision conflict reload preserves the staged text", async () => (
-    await evaluate(`(() => (
-      document.querySelector('.node-input-error')?.textContent
-        && document.querySelector('.node-input-text')?.value === 'Local value survives a revision conflict'
-    ))()`)
-    && (await productRequest(`/api/threads/${thread.id}/input-draft`)).revision === serverAdvancedDraft.revision
-  ));
-  await click("[aria-label='Commit Name the governing constraint']");
-  await waitFor("staged text commits against reloaded revision authority", async () => (
-    (await productRequest(`/api/threads/${thread.id}/input-draft`)).attachments.find(
-      (attachment) => attachment.action.prompt === "Name the governing constraint",
-    )?.value?.text === "Local value survives a revision conflict"
-  ));
-  await setValue(".node-input-text", submittedTextValue);
-  await click("[aria-label='Commit Name the governing constraint']");
-  await waitFor("original submitted text restored after conflict proof", async () => (
-    (await productRequest(`/api/threads/${thread.id}/input-draft`)).attachments.find(
-      (attachment) => attachment.action.prompt === "Name the governing constraint",
-    )?.value?.text === submittedTextValue
-  ));
-
-  let rejectedCommit = false;
-  const commitFilter = { urls: [`${productSession.origin}/api/threads/*/input-draft/attachments`] };
-  window.webContents.session.webRequest.onBeforeRequest(commitFilter, (details, callback) => {
-    if (!rejectedCommit && details.method === "PUT") {
-      rejectedCommit = true;
-      callback({ cancel: true });
-      return;
-    }
-    callback({});
-  });
-  await setValue(".node-input-text", "Unsaved replacement");
-  await click("[aria-label='Commit Name the governing constraint']");
-  await waitFor("inline input persistence failure", () => evaluate(`(() => (
-    document.querySelector('.node-input-error')?.textContent
-      && document.querySelector('.node-input-text')?.value === 'Unsaved replacement'
-  ))()`));
-  window.webContents.session.webRequest.onBeforeRequest(commitFilter, null);
-  if (!rejectedCommit) throw new Error("The input persistence failure interceptor was not exercised.");
-  const afterRejectedCommit = await productRequest(`/api/threads/${thread.id}/input-draft`);
-  if (afterRejectedCommit.attachments.find((item) => item.action.prompt === "Name the governing constraint")?.value?.text !== submittedTextValue) {
-    throw new Error("A rejected input commit changed the authoritative attachment.");
-  }
-  await click("[aria-label='Undo Name the governing constraint']");
-
-  await click("[aria-label='Detach Choose supporting evidence']");
-  await waitFor("composer input detached", async () => {
-    const draft = await productRequest(`/api/threads/${thread.id}/input-draft`);
-    return draft.attachments?.length === 2
-      && !draft.attachments.some((item) => item.action.prompt === "Choose supporting evidence")
-      && await evaluate(`document.querySelectorAll('.composer-input-pill').length === 2`);
-  });
-  await evaluate(`(() => {
-    const options = document.querySelectorAll('.node-input-option-rail')[1].querySelectorAll('.node-input-option');
-    options[0].click();
-    document.querySelectorAll('.node-input-option-rail')[1].querySelectorAll('.node-input-option')[1].click();
-  })()`);
-  await click("[aria-label='Commit Choose supporting evidence']");
-  await waitFor("detached input recommitted", async () => (
-    (await productRequest(`/api/threads/${thread.id}/input-draft`)).attachments?.length === 3
-  ));
-
   window.webContents.setZoomFactor(1.5);
   await waitForPaint();
   const largeTextFits = await evaluate(`(() => [...document.querySelectorAll('.node-input-editor')].every((editor) => {
@@ -885,351 +774,189 @@ async function run() {
   window.webContents.setZoomFactor(1);
   await waitForPaint();
 
-  let pendingInputCommitHeld = false;
-  let releasePendingInputCommit;
-  const pendingInputCommitFilter = {
-    urls: [`${productSession.origin}/api/threads/${thread.id}/input-draft/attachments`],
-  };
-  window.webContents.session.webRequest.onBeforeRequest(
-    pendingInputCommitFilter,
-    (details, callback) => {
-      if (!pendingInputCommitHeld && details.method === "PUT") {
-        pendingInputCommitHeld = true;
-        releasePendingInputCommit = () => callback({});
-        return;
-      }
-      callback({});
-    },
-  );
-  await setValue("#threadPrompt", "Thread A is ready except for its pending input commit.");
-  await setValue(".node-input-text", "Thread A pending input replacement.");
-  await click("[aria-label='Commit Name the governing constraint']");
-  await waitFor("thread A input commit held in flight", () => pendingInputCommitHeld);
-  await waitFor("thread A Send can wait for its pending input", () => evaluate(`(
-    document.querySelector('#sendInteraction')?.disabled === false
-  )`));
-  await click(`[data-thread='${idleThread.id}']`);
-  await waitFor("thread B opens while A input commit is pending", () => evaluate(`(() => (
-    document.querySelector("[data-thread='${idleThread.id}']")?.classList.contains('active')
-      && document.querySelectorAll('.graph-node').length === 2
-      && document.querySelector('#threadPrompt')?.disabled === false
-  ))()`));
-  await setValue("#threadPrompt", "Thread B remains independently sendable.");
-  await waitFor("thread B Send remains enabled", () => evaluate(`(
-    document.querySelector('#sendInteraction')?.disabled === false
-  )`));
-  await click(`[data-thread='${thread.id}']`);
-  await waitFor("thread A restored with pending input", () => evaluate(`(() => (
-    document.querySelector("[data-thread='${thread.id}']")?.classList.contains('active')
-      && document.querySelectorAll('.graph-node').length === 2
-  ))()`));
-  await clickNode("Input grammar");
-  await waitFor("thread A Send remains available with a pending commit", () => evaluate(`(
-    document.querySelector('#sendInteraction')?.disabled === false
-  )`));
-
-  let pendingThreadSendHeld = false;
-  let pendingThreadSendBody;
-  let cancelPendingThreadSend;
-  const pendingThreadSendFilter = {
-    urls: [`${productSession.origin}/api/threads/${thread.id}/interactions`],
-  };
-  window.webContents.session.webRequest.onBeforeRequest(
-    pendingThreadSendFilter,
-    (details, callback) => {
-      if (!pendingThreadSendHeld && details.method === "POST") {
-        pendingThreadSendHeld = true;
-        pendingThreadSendBody = JSON.parse(Buffer.concat((details.uploadData || []).map(({ bytes }) => bytes)).toString());
-        cancelPendingThreadSend = () => callback({ cancel: true });
-        return;
-      }
-      callback({});
-    },
-  );
-  await setValue("#threadPrompt", "Hold the owning thread Send while editing another thread.");
+  const beforeInvalid = await productRequest(`/api/threads/${thread.id}/input-draft`);
   await click("#sendInteraction");
-  await waitFor("thread A Send waits for its held input commit", () => evaluate(`(
-    document.querySelector('#sendInteraction')?.disabled === true
-  )`));
-  if (pendingThreadSendHeld) throw new Error("Send posted before its input commit settled.");
-  releasePendingInputCommit();
-  await waitFor("thread A Send held in flight", () => pendingThreadSendHeld);
-  const committedBeforeSend = await productRequest(`/api/threads/${thread.id}/input-draft`);
-  if (pendingThreadSendBody.inputDraftRevision !== committedBeforeSend.revision
-    || !committedBeforeSend.attachments?.some((attachment) => attachment.value?.text === "Thread A pending input replacement.")) {
-    throw new Error("Send did not include the exact settled input composition.");
+  await waitFor("invalid implicit selection refuses Send", () => evaluate(`document.querySelector('#toast')?.textContent.includes('minimum')`));
+  if ((await productRequest(`/api/threads/${thread.id}`)).interactions.length !== 1
+    || (await productRequest(`/api/threads/${thread.id}/input-draft`)).revision !== beforeInvalid.revision) {
+    throw new Error("Invalid multi-select performed a write before boundary validation.");
   }
-  await click(`[data-thread='${idleThread.id}']`);
-  await waitFor("idle thread B remains composable while A Send is pending", () => evaluate(`(() => (
-    document.querySelector("[data-thread='${idleThread.id}']")?.classList.contains('active')
-      && document.querySelectorAll('.graph-node').length === 2
-      && document.querySelector('#threadPrompt')?.disabled === false
-  ))()`));
-  await clickNode("Input grammar");
-  await click("#attachNodeContext");
-  await waitFor("thread B context staging remains usable", () => evaluate(`Boolean(
-    document.querySelector("[aria-label='Annotation for Input grammar']")
-  )`));
-  await click("[aria-label='Discard annotation draft for Input grammar']");
-  await waitFor("thread B context draft discarded", () => evaluate(`(
-    !document.querySelector("[aria-label='Annotation for Input grammar']")
-  )`));
-  await setValue(".node-input-text", "Thread B remains independently editable.");
-  await waitFor("thread B input commit remains enabled", () => evaluate(`(
-    document.querySelector("[aria-label='Commit Name the governing constraint']")?.disabled === false
-  )`));
-  await click("[aria-label='Commit Name the governing constraint']");
-  await waitFor("thread B input committed", async () => (
-    (await productRequest(`/api/threads/${idleThread.id}/input-draft`)).attachments?.some(
-      (attachment) => attachment.value?.text === "Thread B remains independently editable.",
-    )
-  ));
-  await click("[aria-label='Detach Name the governing constraint']");
-  await waitFor("thread B input detached", async () => (
-    (await productRequest(`/api/threads/${idleThread.id}/input-draft`)).attachments?.length === 0
-  ));
-
-  await click(`[data-thread='${thread.id}']`);
-  await waitFor("pending thread A restored", () => evaluate(`(() => (
-    document.querySelector("[data-thread='${thread.id}']")?.classList.contains('active')
-      && document.querySelectorAll('.graph-node').length === 2
-  ))()`));
-  await clickNode("Input grammar");
-  await waitFor("pending thread A input staging remains locked", () => evaluate(`(() => {
-    const controls = [...document.querySelectorAll('#nodeInputActions button, #nodeInputActions textarea')];
-    return controls.length > 0 && controls.every((control) => control.disabled);
-  })()`));
-  await evaluate(`document.querySelector('#attachNodeContext')?.click()`);
-  await waitForPaint();
-  if (await evaluate(`Boolean(document.querySelector("[aria-label='Annotation for Input grammar']"))`)) {
-    throw new Error("Pending thread A opened context staging while its Send was in flight.");
-  }
-  cancelPendingThreadSend();
-  window.webContents.session.webRequest.onBeforeRequest(pendingThreadSendFilter, null);
-  await waitFor("thread A staging unlocks after its Send settles", () => evaluate(`(() => (
-    document.querySelector('.node-input-text')?.disabled === false
-      && document.querySelector("[aria-label='Detach Name the governing constraint']")?.disabled === false
-      && document.querySelector('#threadPrompt')?.disabled === false
-  ))()`));
-
-  await click("#attachNodeContext");
-  await waitFor("replay snapshot annotation editor", () => evaluate(`Boolean(
-    document.querySelector("[aria-label='Annotation for Input grammar']")
-  )`));
-  await setValue(
-    "[aria-label='Annotation for Input grammar']",
-    "Preserve this click-time context through reconciliation.",
-  );
-  await click("[aria-label='Confirm annotation']");
-  await waitFor("replay snapshot context confirmed", () => evaluate(`(
-    document.querySelectorAll('.composer-context-pill:not(.composer-input-pill)').length === 1
-  )`));
-  await setValue("#threadPrompt", "Preserve this click-time prompt through reconciliation.");
-  const draftAtClick = await productRequest(`/api/threads/${thread.id}/input-draft`);
+  await evaluate(`document.querySelectorAll('.node-input-option-rail')[1].querySelectorAll('.node-input-option')[1].click()`);
+  await waitFor("valid staged inputs enable Send without confirmation", () => evaluate(`!document.querySelector('#sendInteraction').disabled`));
 
   await evaluate(`(() => {
-    const originalFetch = window.fetch.bind(window);
-    window.__nodeInputInteractionAttempts = [];
-    window.__nodeInputLoseNextInteraction = true;
+    const original = window.fetch.bind(window);
+    window.__implicitAttempts = []; window.__implicitCancelPosts = true;
     window.fetch = async (input, init = {}) => {
-      const url = typeof input === 'string' ? input : input.url;
-      const method = init.method || (typeof input === 'object' ? input.method : 'GET') || 'GET';
-      if (method === 'POST' && new URL(url, location.href).pathname.endsWith('/interactions')) {
-        window.__nodeInputInteractionAttempts.push(JSON.parse(init.body));
-        if (window.__nodeInputLoseNextInteraction) {
-          window.__nodeInputLoseNextInteraction = false;
-          await originalFetch(input, init);
-          throw new TypeError('Injected lost interaction response');
-        }
+      if (init.method === 'POST' && new URL(typeof input === 'string' ? input : input.url, location.href).pathname.endsWith('/interactions')) {
+        window.__implicitAttempts.push(JSON.parse(init.body));
+        if (window.__implicitCancelPosts) throw new TypeError('Injected refused Send transport');
       }
-      return originalFetch(input, init);
+      return original(input, init);
     };
   })()`);
-  let reconciliationHeld = false;
-  let releaseReconciliation;
-  const reconciliationFilter = { urls: [`${productSession.origin}/api/threads/*/input-draft`] };
-  window.webContents.session.webRequest.onBeforeRequest(reconciliationFilter, (details, callback) => {
-    if (!reconciliationHeld && details.method === "GET") {
-      reconciliationHeld = true;
-      releaseReconciliation = () => callback({});
-      return;
-    }
+  let heldSave, releaseSave;
+  const saveFilter = { urls: [`${productSession.origin}/api/threads/${thread.id}/input-draft/attachments`] };
+  window.webContents.session.webRequest.onBeforeRequest(saveFilter, (details, callback) => {
+    if (!heldSave && details.method === "PUT") { heldSave = true; releaseSave = () => callback({}); return; }
     callback({});
   });
-
   await click("#sendInteraction");
-  await waitFor("ambiguous Send queues forced input reconciliation", async () => (
-    reconciliationHeld
-      && await evaluate(`(
-        window.__nodeInputInteractionAttempts.length === 1
-          && document.querySelector('#sendInteraction')?.disabled === true
-      )`)
-  ));
-  await evaluate(`document.querySelector('#sendInteraction').dispatchEvent(new MouseEvent('click', { bubbles: true }))`);
-  await waitForPaint();
-  const prematureAttempts = await evaluate(`window.__nodeInputInteractionAttempts.length`);
-  const prematureThread = await productRequest(`/api/threads/${thread.id}`);
-  if (prematureAttempts !== 1 || prematureThread.interactions.length !== 2
-    || prematureThread.interactions.at(-1)?.submittedInputs?.length !== 3) {
-    throw new Error(`Send escaped pending input reconciliation: ${JSON.stringify({ prematureAttempts, interactions: prematureThread.interactions.length, latest: prematureThread.interactions.at(-1) })}`);
-  }
+  await waitFor("implicit Send holds its first actual input save", () => heldSave);
+  if (await evaluate("window.__implicitAttempts.length")) throw new Error("Send posted before its inputs settled.");
+  await clickNode("Selection guard");
+  await click(`[data-thread='${idleThread.id}']`);
+  await waitFor("thread B remains editable during A save", () => evaluate(`document.querySelector("[data-thread='${idleThread.id}']")?.classList.contains('active') && !document.querySelector('#threadPrompt').disabled`));
+  await clickNode("Input grammar");
+  await setValue(".node-input-text", "Thread B independent stage");
+  await click("[aria-label='Undo Name the governing constraint']");
+  await click(`[data-thread='${thread.id}']`);
+  await waitFor("thread A restored", () => evaluate(`document.querySelector("[data-thread='${thread.id}']")?.classList.contains('active')`));
+  await clickNode("Selection guard");
+  releaseSave();
+  await waitFor("held save settles without stale node repaint", () => evaluate(`document.querySelector('#detailTitle').textContent === 'Selection guard' && document.querySelector('#nodeInputActions').classList.contains('hidden') && !document.querySelector('#threadPrompt').disabled`));
+  window.webContents.session.webRequest.onBeforeRequest(saveFilter, null);
+  await clickNode("Input grammar");
+  await waitFor("owning Send becomes available after interrupted boundary", () => evaluate("!document.querySelector('#sendInteraction').disabled"));
+  await click("#sendInteraction");
+  await waitFor("retained answers post only after explicit Send in owning thread", () => evaluate("window.__implicitAttempts.length === 1 && !document.querySelector('#threadPrompt').disabled"));
+  const saved = await productRequest(`/api/threads/${thread.id}/input-draft`);
+  if (saved.attachments.length !== 3 || new Set(saved.attachments.map(a => JSON.stringify(a.occurrence))).size !== 3) throw new Error("Implicit save did not persist three exact answers.");
+  if ((await evaluate("window.__implicitAttempts"))[0].inputDraftRevision !== saved.revision) throw new Error("Send did not name the settled input revision.");
+  window.webContents.reload();
+  await waitFor("committed inputs survive renderer reopen", () => evaluate(`document.querySelectorAll('.composer-input-pill').length === 3`));
+  await clickNode("Input grammar");
+  await waitFor("reopen restores authoritative saved text", () => evaluate(`document.querySelector('.node-input-text')?.value === ${JSON.stringify(submittedTextValue)}`));
+  await setValue(".node-input-text", "Undo local replacement");
+  await click("[aria-label='Undo Name the governing constraint']");
+  if (await evaluate("document.querySelector('.node-input-text').value") !== submittedTextValue) throw new Error("Undo did not restore the saved baseline.");
 
-  const draftBeforeReconciliation = await productRequest(`/api/threads/${thread.id}/input-draft`);
-  const committedForReconciliation = draftAtClick.attachments.find(
-    (attachment) => attachment.action.prompt === "Name the governing constraint",
-  );
-  const detachedForReconciliation = draftAtClick.attachments.find(
-    (attachment) => attachment.action.prompt === "Choose supporting evidence",
-  );
-  const committedDraft = await productRequest(
-    `/api/threads/${thread.id}/input-draft/attachments`,
-    {
-      method: "PUT",
-      body: JSON.stringify({
-        occurrence: committedForReconciliation.occurrence,
-        value: committedForReconciliation.value,
-        expectedRevision: draftBeforeReconciliation.revision,
-      }),
-    },
-  );
-  const detachableDraft = await productRequest(
-    `/api/threads/${thread.id}/input-draft/attachments`,
-    {
-      method: "PUT",
-      body: JSON.stringify({
-        occurrence: detachedForReconciliation.occurrence,
-        value: detachedForReconciliation.value,
-        expectedRevision: committedDraft.revision,
-      }),
-    },
-  );
-  const detachedOccurrence = detachedForReconciliation.occurrence;
-  let reconciledDraft = await productRequest(
-    `/api/threads/${thread.id}/input-draft/attachments/${encodeURIComponent(detachedOccurrence.presentingInteractionNodeId)}/${encodeURIComponent(detachedOccurrence.presentingLayerId)}/${encodeURIComponent(detachedOccurrence.actionId)}?expectedRevision=${encodeURIComponent(detachableDraft.revision)}`,
-    { method: "DELETE" },
-  );
-  releaseReconciliation();
-  await waitFor("advanced input revision adopted before retry", async () => {
-    const authoritative = await productRequest(`/api/threads/${thread.id}/input-draft`);
-    return authoritative.revision === reconciledDraft.revision
-      && await evaluate(`document.querySelector('#sendInteraction')?.disabled === false`);
+  // Renderer reload intentionally removes the old transport injection.
+  const textAttachment = saved.attachments.find(a => a.action.prompt === "Name the governing constraint");
+  await productRequest(`/api/threads/${thread.id}/input-draft/attachments`, { method: "PUT", body: JSON.stringify({ occurrence: textAttachment.occurrence, value: { text: "Concurrent server value" }, expectedRevision: saved.revision }) });
+  await setValue(".node-input-text", "Local value survives a revision conflict");
+  await click("#sendInteraction");
+  await waitFor("implicit save conflict preserves current answer", () => evaluate(`document.querySelector('#toast')?.textContent && document.querySelector('.node-input-text')?.value === 'Local value survives a revision conflict' && !document.querySelector('#threadPrompt').disabled`));
+  if ((await productRequest(`/api/threads/${thread.id}`)).interactions.length !== 1) throw new Error("Conflict escaped into a completion.");
+
+  let refusedSave = false;
+  window.webContents.session.webRequest.onBeforeRequest(saveFilter, (details, callback) => {
+    if (!refusedSave && details.method === "PUT") { refusedSave = true; callback({ cancel: true }); return; }
+    callback({});
   });
-  const revisionBeforeUiMutation = reconciledDraft.revision;
-  await click("[aria-label='Detach Name the governing constraint']");
-  reconciledDraft = await waitFor("UI detach advances reconciled input composition", async () => {
-    const draft = await productRequest(`/api/threads/${thread.id}/input-draft`);
-    return draft.revision > revisionBeforeUiMutation
-      && !draft.attachments.some((attachment) => (
-        attachment.action.prompt === "Name the governing constraint"
-      ))
-      ? draft
-      : false;
-  });
-  await waitFor("UI detach settles before editing the reconciled value", () => evaluate(`(
-    !document.querySelector("[aria-label='Detach Name the governing constraint']")
-      && document.querySelector("[aria-label='Input action: Name the governing constraint']")?.getAttribute('aria-busy') === 'false'
-  )`));
+  await setValue(".node-input-text", "Unsaved replacement");
+  await click("#sendInteraction");
+  await waitFor("failed implicit save retains stage and prevents dispatch", () => evaluate(`document.querySelector('#toast')?.textContent && document.querySelector('.node-input-text')?.value === 'Unsaved replacement' && !document.querySelector('#threadPrompt').disabled`));
+  window.webContents.session.webRequest.onBeforeRequest(saveFilter, null);
+  if (!refusedSave || (await productRequest(`/api/threads/${thread.id}`)).interactions.length !== 1) throw new Error("Failed implicit save was not exercised or dispatched work.");
+  await click("[aria-label='Undo Name the governing constraint']");
+  if (await evaluate("document.querySelector('.node-input-text').value") !== "Concurrent server value") throw new Error("Failed save changed Undo's authoritative baseline.");
+  await click("[aria-label='Detach Choose supporting evidence']");
+  await waitFor("detach removes authoritative occurrence", async () => (await productRequest(`/api/threads/${thread.id}/input-draft`)).attachments.length === 2);
+  await evaluate(`(() => { const options = document.querySelectorAll('.node-input-option-rail')[1].querySelectorAll('.node-input-option'); options[0].click(); options[1].click(); })()`);
   await setValue(".node-input-text", submittedTextValue);
-  await waitFor("UI commit ready after response-loss reconciliation", () => evaluate(`(
-    document.querySelector("[aria-label='Commit Name the governing constraint']")?.disabled === false
-  )`));
-  await click("[aria-label='Commit Name the governing constraint']");
-  const revisionBeforeUiCommit = reconciledDraft.revision;
-  reconciledDraft = await waitFor("UI commit advances reconciled input composition", async () => {
-    const draft = await productRequest(`/api/threads/${thread.id}/input-draft`);
-    return draft.revision > revisionBeforeUiCommit
-      && draft.attachments.some((attachment) => (
-        attachment.action.prompt === "Name the governing constraint"
-          && attachment.value?.text === submittedTextValue
-      ))
-      ? draft
-      : false;
+
+  await click("#attachNodeContext");
+  await waitFor("response-loss annotation editor", () => evaluate(`Boolean(document.querySelector("[aria-label='Annotation for Input grammar']"))`));
+  await setValue("[aria-label='Annotation for Input grammar']", "Preserve this click-time context through reconciliation.");
+  await click("[aria-label='Confirm annotation']");
+  await waitFor("annotation confirmed", () => evaluate(`document.querySelectorAll('.composer-context-pill:not(.composer-input-pill)').length === 1`));
+  await setValue("#threadPrompt", "Preserve this click-time prompt through reconciliation.");
+  await evaluate(`(() => {
+    const original = window.fetch.bind(window); window.__implicitAttempts = []; window.__loseImplicitResponse = true;
+    window.__implicitCommittedInteraction = null; window.__releaseImplicitResponse = null;
+    window.fetch = async (input, init = {}) => {
+      if (init.method === 'POST' && new URL(typeof input === 'string' ? input : input.url, location.href).pathname.endsWith('/interactions')) {
+        window.__implicitAttempts.push(JSON.parse(init.body));
+        if (window.__loseImplicitResponse) {
+          window.__loseImplicitResponse = false;
+          const response = await original(input, init);
+          if (!response.ok) throw new Error('Interaction was refused before response loss: ' + response.status);
+          window.__implicitCommittedInteraction = await response.clone().json();
+          // Let the fixture arm reconciliation after this real POST has committed.
+          await new Promise(resolve => { window.__releaseImplicitResponse = resolve; });
+          throw new TypeError('Injected lost interaction response');
+        }
+        if (window.__recordImplicitPostedDraft) {
+          const path = new URL(typeof input === 'string' ? input : input.url, location.href).pathname;
+          window.__implicitPostedDraft = await (await original(path.slice(0, -'/interactions'.length) + '/input-draft')).json();
+        }
+      }
+      return original(input, init);
+    };
+  })()`);
+  let heldReconciliation, releaseReconciliation, holdReconciliationAfterCommit = false;
+  const reloadFilter = { urls: [`${productSession.origin}/api/threads/${thread.id}/input-draft`] };
+  window.webContents.session.webRequest.onBeforeRequest(reloadFilter, (details, callback) => {
+    if (holdReconciliationAfterCommit && !heldReconciliation && details.method === "GET") { heldReconciliation = true; releaseReconciliation = () => callback({}); return; }
+    callback({});
   });
-
-  // The lost response still created an interaction. Finish that fixture turn
-  // before exercising a new input identity with the reconciled draft.
-  await waitForAcceptedInteractions(thread.id, 2);
   await click("#sendInteraction");
-  await waitFor("retry request dispatched", () => evaluate(`window.__nodeInputInteractionAttempts.length === 2`));
-  const [originalAttempt, retryAttempt] = await evaluate(`window.__nodeInputInteractionAttempts`);
-  const retryPreservedSnapshot = originalAttempt.text
-      === "Preserve this click-time prompt through reconciliation."
-    && originalAttempt.inputDraftRevision === draftAtClick.revision
-    && originalAttempt.contexts?.[0]?.annotations?.[0]
-      === "Preserve this click-time context through reconciliation."
-    && originalAttempt.contextConfirmationIds?.length === 1
-    && originalAttempt.modelSelection?.providerId === "codex"
-    && originalAttempt.modelSelection?.modelId === "fixture-model"
-    && retryAttempt.inputId !== originalAttempt.inputId
-    && retryAttempt.text === originalAttempt.text
-    && retryAttempt.inputDraftRevision === reconciledDraft.revision
-    && retryAttempt.contexts?.[0]?.annotations?.[0]
-      === originalAttempt.contexts[0].annotations[0]
-    && retryAttempt.contextConfirmationIds?.length === 0
-    && retryAttempt.modelSelection?.providerId === originalAttempt.modelSelection.providerId
-    && retryAttempt.modelSelection?.modelId === originalAttempt.modelSelection.modelId;
-  if (!retryPreservedSnapshot) {
-    releaseFourthCompletion();
-    throw new Error(`Post-commit response-loss retry did not rotate identity and preserve the click-time snapshot: ${JSON.stringify({ originalAttempt, retryAttempt, reconciledRevision: reconciledDraft.revision })}`);
-  }
-  window.webContents.session.webRequest.onBeforeRequest(reconciliationFilter, null);
-
-  await waitFor("input controls locked during send", () => evaluate(`(() => (
-    document.querySelectorAll('#nodeInputActions button:not(:disabled), #nodeInputActions textarea:not(:disabled)').length === 0
-  ))()`));
-  await waitFor("pending turn retains accepted details and shows running status", () => evaluate(`(() => (
-    !document.querySelector('#pendingTurnNotice')?.classList.contains('hidden')
-      && /running/i.test(document.querySelector('#pendingTurnText')?.textContent || '')
-      && document.querySelector('#detailTitle')?.textContent === 'Input grammar'
-  ))()`));
-  if (process.env.RELAYER_NODE_DETAIL_EVIDENCE_DIR) {
-    await waitFor("transient reconciliation toast settles", () => evaluate("document.querySelector('#toast')?.classList.contains('hidden')"));
-    await waitForPaint();
-    await writeFile(join(process.env.RELAYER_NODE_DETAIL_EVIDENCE_DIR, "reading-pending.png"), (await window.webContents.capturePage()).toPNG());
-  }
+  const committedDuringLoss = await waitFor("real interaction POST commits before response loss", () => evaluate("window.__implicitCommittedInteraction?.id && window.__releaseImplicitResponse ? window.__implicitCommittedInteraction : false"));
+  holdReconciliationAfterCommit = true;
+  await evaluate("window.__releaseImplicitResponse()");
+  await waitFor("lost response holds authoritative reconciliation", () => heldReconciliation);
+  await evaluate("document.querySelector('#sendInteraction').dispatchEvent(new MouseEvent('click', { bubbles: true }))");
+  if (await evaluate("window.__implicitAttempts.length") !== 1) throw new Error("Reentry escaped pending input reconciliation.");
+  // Reconciliation must adopt storage authority even when another client
+  // advances and then detaches occurrences while the renderer's GET is held.
+  const draftBeforeReconciliation = await productRequest(`/api/threads/${thread.id}/input-draft`);
+  const createdDuringLoss = (await productRequest(`/api/threads/${thread.id}`)).interactions.find(interaction => interaction.id === committedDuringLoss.id);
+  if (!createdDuringLoss) throw new Error(`Committed interaction ${committedDuringLoss.id} is missing during response-loss reconciliation.`);
+  const evidenceAtClick = { selectedKeys: createdDuringLoss.submittedInputs.find(input => input.action.prompt === "Choose supporting evidence").value.selected.map(option => String(option.key)) };
+  const textAdvanced = await productRequest(`/api/threads/${thread.id}/input-draft/attachments`, {
+    method: "PUT", body: JSON.stringify({ occurrence: textAttachment.occurrence, value: { text: submittedTextValue }, expectedRevision: draftBeforeReconciliation.revision }),
+  });
+  const evidenceOccurrence = saved.attachments.find(input => input.action.prompt === "Choose supporting evidence").occurrence;
+  const evidenceAdvanced = await productRequest(`/api/threads/${thread.id}/input-draft/attachments`, {
+    method: "PUT", body: JSON.stringify({ occurrence: evidenceOccurrence, value: evidenceAtClick, expectedRevision: textAdvanced.revision }),
+  });
+  const reconciledDraft = await productRequest(`/api/threads/${thread.id}/input-draft/attachments/${encodeURIComponent(evidenceOccurrence.presentingInteractionNodeId)}/${encodeURIComponent(evidenceOccurrence.presentingLayerId)}/${encodeURIComponent(evidenceOccurrence.actionId)}?expectedRevision=${encodeURIComponent(evidenceAdvanced.revision)}`, { method: "DELETE" });
+  releaseReconciliation();
+  window.webContents.session.webRequest.onBeforeRequest(reloadFilter, null);
+  const lostThread = await waitForAcceptedInteractions(thread.id, 2);
+  await waitFor("failed transport unlocks preserved input stage", () => evaluate("!document.querySelector('#threadPrompt').disabled"));
+  const originalAttempt = (await evaluate("window.__implicitAttempts"))[0];
+  if (lostThread.interactions.at(-1).submittedInputs.length !== 3
+    || originalAttempt.contexts?.[0]?.annotations?.[0] !== "Preserve this click-time context through reconciliation."
+    || originalAttempt.contextConfirmationIds?.length !== 1
+    || originalAttempt.modelSelection?.providerId !== "codex" || originalAttempt.modelSelection?.modelId !== "fixture-model") throw new Error("Lost response did not retain exact input/context/model submission.");
+  await clickNode("Input grammar");
+  await waitFor("reconciliation exposes externally retained text", () => evaluate("Boolean(document.querySelector('[aria-label=\"Detach Name the governing constraint\"]'))"));
+  await click("[aria-label='Detach Name the governing constraint']");
+  const detachedDraft = await waitFor("UI detach advances reconciled composition", async () => {
+    const current = await productRequest(`/api/threads/${thread.id}/input-draft`);
+    return current.revision > reconciledDraft.revision && !current.attachments.some(input => input.action.prompt === "Name the governing constraint") ? current : false;
+  });
+  // A new edit, even to the same text, is a new input generation. It must not
+  // reuse the earlier consumed Send identity or change its frozen record.
+  await setValue(".node-input-text", submittedTextValue);
+  await evaluate("window.__recordImplicitPostedDraft = true");
+  await click("#sendInteraction");
+  await waitFor("new-generation retry dispatches", () => evaluate("window.__implicitAttempts.length === 2"));
+  await waitFor("retry observes settled authoritative draft", () => evaluate("Boolean(window.__implicitPostedDraft)"));
+  const retryAttempt = (await evaluate("window.__implicitAttempts"))[1];
+  const postedDraft = await evaluate("window.__implicitPostedDraft");
+  if (retryAttempt.inputId === originalAttempt.inputId || retryAttempt.text !== originalAttempt.text
+    || retryAttempt.inputDraftRevision !== postedDraft?.revision || postedDraft.revision <= detachedDraft.revision
+    || retryAttempt.contexts?.[0]?.annotations?.[0] !== originalAttempt.contexts[0].annotations[0]
+    || retryAttempt.contextConfirmationIds?.length !== 0
+    || retryAttempt.modelSelection?.providerId !== originalAttempt.modelSelection.providerId
+    || retryAttempt.modelSelection?.modelId !== originalAttempt.modelSelection.modelId) throw new Error(`Changed input generation lost the exact replay payload: ${JSON.stringify({ originalAttempt, retryAttempt, postedDraft })}`);
+  await waitFor("running response preserves accepted reading", () => evaluate(`!document.querySelector('#pendingTurnNotice').classList.contains('hidden')`));
   await clickNode("Selection guard");
   releaseFourthCompletion();
   const acceptedThread = await waitForAcceptedInteractions(thread.id, 3);
-  await waitFor("ready result preserves explicit browsing", () => evaluate(`(() => (
-    !document.querySelector('#openReadyResult')?.classList.contains('hidden')
-      && document.querySelector('#detailTitle')?.textContent === 'Selection guard'
-  ))()`));
-  if (process.env.RELAYER_NODE_DETAIL_EVIDENCE_DIR) {
-    await waitForPaint();
-    await writeFile(join(process.env.RELAYER_NODE_DETAIL_EVIDENCE_DIR, "reading-result-ready.png"), (await window.webContents.capturePage()).toPNG());
-  }
+  await waitFor("ready response preserves explicit browsing", () => evaluate(`!document.querySelector('#openReadyResult').classList.contains('hidden') && document.querySelector('#detailTitle').textContent === 'Selection guard'`));
   await click("#openReadyResult");
-  await waitFor("submitted inputs rendered read-only", () => evaluate(`(() => (
-    document.querySelectorAll('#interactionInputHistory .interaction-input-history-item').length === 1
-      && document.querySelectorAll('.composer-input-pill').length === 0
-  ))()`));
-  const historyDisclosure = await evaluate(`(() => {
-    const details = document.querySelector('#interactionInputHistory .interaction-input-history-disclosure');
-    const summary = details?.querySelector('summary');
-    const full = details?.querySelector('p');
-    return {
-      tagName: details?.tagName,
-      open: details?.open,
-      summaryTagName: summary?.tagName,
-      summaryText: summary?.textContent,
-      summaryName: summary?.getAttribute('aria-label'),
-      summaryWidth: summary?.getBoundingClientRect().width,
-      fullValue: full?.textContent,
-    };
-  })()`);
-  if (historyDisclosure.tagName !== "DETAILS"
-    || historyDisclosure.summaryTagName !== "SUMMARY"
-    || historyDisclosure.open !== false
-    || [...historyDisclosure.summaryText].length !== 80
-    || historyDisclosure.summaryWidth > 241
-    || historyDisclosure.summaryName !== "Show full submitted value for Name the governing constraint"
-    || historyDisclosure.fullValue !== submittedTextValue) {
-    throw new Error(`Submitted text history disclosure is invalid: ${JSON.stringify(historyDisclosure)}`);
-  }
-  await evaluate(`document.querySelector('#interactionInputHistory .interaction-input-history-disclosure>summary').click()`);
-  await waitFor("submitted text history opens through native summary activation", () => evaluate(`(
-    document.querySelector('#interactionInputHistory .interaction-input-history-disclosure')?.open === true
-  )`));
+  await waitFor("accepted Send clears composer inputs", () => evaluate("document.querySelectorAll('.composer-input-pill').length === 0 && document.querySelectorAll('#interactionInputHistory .interaction-input-history-item').length >= 1 && Boolean(document.querySelector('.interaction-input-history-disclosure'))"));
+  const disclosure = await evaluate(`(() => { const d = document.querySelector('.interaction-input-history-disclosure'); const summary = d?.querySelector('summary'); return { tag: d?.tagName, open: d?.open, summaryTag: summary?.tagName, summary: summary?.textContent, summaryName: summary?.getAttribute('aria-label'), summaryWidth: summary?.getBoundingClientRect().width, full: d?.querySelector('p')?.textContent }; })()`);
+  if (disclosure.tag !== "DETAILS" || disclosure.open || disclosure.summaryTag !== "SUMMARY"
+    || [...disclosure.summary].length !== 80 || disclosure.full !== submittedTextValue
+    || disclosure.summaryName !== "Show full submitted value for Name the governing constraint"
+    || disclosure.summaryWidth > 241) throw new Error(`Submitted long input disclosure is wrong: ${JSON.stringify(disclosure)}`);
+  await evaluate("document.querySelector('.interaction-input-history-disclosure>summary').click()");
+  await waitFor("submitted input full text opens", () => evaluate("document.querySelector('.interaction-input-history-disclosure').open"));
 
   const authoredTurnId = acceptedThread.interactions[0].id;
   await window.loadURL(`${productSession.origin}/?threadId=${encodeURIComponent(thread.id)}&interactionId=${encodeURIComponent(authoredTurnId)}&review=1`);
@@ -1264,6 +991,16 @@ async function run() {
   window.setSize(1280, 820);
   await waitFor("interactive reading workspace", () => evaluate("document.querySelectorAll('.graph-node').length === 2"));
   await clickNode("Input grammar");
+  // Native pointer delivery requires a visible, focused WebContents; focus()
+  // on the fixture's hidden BrowserWindow does not establish that boundary.
+  window.show();
+  app.focus({ steal: true });
+  window.focus();
+  window.webContents.focus();
+  await waitFor("visible focused native split document", async () => window.isVisible()
+    && await evaluate("document.hasFocus()"));
+  process.stdout.write(`RELAYER_NATIVE_SPLIT_FOCUS ${JSON.stringify({ visible: window.isVisible(), windowFocused: window.isFocused(), contentsFocused: window.webContents.isFocused(), documentFocused: await evaluate("document.hasFocus()") })}\n`);
+  await waitForPaint();
   const readSplit = () => evaluate(`(() => {
     const rect = selector => { const value = document.querySelector(selector).getBoundingClientRect(); return { x: value.x, y: value.y, width: value.width, height: value.height }; };
     return { graph: rect('#graphStage'), detail: rect('#inspector'), divider: rect('#workspaceDivider'),
@@ -1277,15 +1014,46 @@ async function run() {
   }
   const dividerX = Math.round(beforeResize.divider.x + beforeResize.divider.width / 2);
   const dividerY = Math.round(beforeResize.divider.y + beforeResize.divider.height / 2);
+  if (!await evaluate(`document.elementFromPoint(${dividerX}, ${dividerY})?.id === 'workspaceDivider'`)) {
+    throw new Error(`Native split pointer coordinates do not hit the divider: ${JSON.stringify(beforeResize)}`);
+  }
+  await evaluate(`(() => { window.__nativeSplitPointerEvents = []; const divider = document.querySelector('#workspaceDivider');
+    for (const type of ['pointerdown', 'pointermove', 'pointerup', 'pointercancel', 'gotpointercapture', 'lostpointercapture']) document.addEventListener(type, event => {
+      window.__nativeSplitPointerEvents.push({ type, pointerId: event.pointerId, x: event.clientX, buttons: event.buttons, target: event.target.id, trusted: event.isTrusted });
+    }, true); })()`);
+  const nativeSplitCheckpoint = async (label, check) => {
+    try { return await waitFor(label, check); }
+    catch (error) {
+      const diagnostics = await Promise.all([readSplit(), evaluate("window.__nativeSplitPointerEvents")])
+        .then(([current, events]) => ({ before: beforeResize, current, events, focused: window.webContents.isFocused() }))
+        .catch(diagnosticError => ({ diagnosticError: diagnosticError.message }));
+      process.stderr.write(`RELAYER_NATIVE_SPLIT_FAILURE ${JSON.stringify({ label, ...diagnostics })}\n`);
+      throw error;
+    }
+  };
   window.webContents.sendInputEvent({ type: "mouseMove", x: dividerX, y: dividerY });
+  await evaluate("new Promise(resolve => requestAnimationFrame(resolve))");
   window.webContents.sendInputEvent({ type: "mouseDown", x: dividerX, y: dividerY, button: "left", clickCount: 1 });
-  window.webContents.sendInputEvent({ type: "mouseMove", x: dividerX + 90, y: dividerY });
-  window.webContents.sendInputEvent({ type: "mouseUp", x: dividerX + 90, y: dividerY, button: "left", clickCount: 1 });
-  const resized = await waitFor("drag changes both rendered pane widths", async () => {
+  await nativeSplitCheckpoint("native divider pointer-down capture", () => evaluate(`(() => {
+    const down = window.__nativeSplitPointerEvents.find(event => event.type === 'pointerdown' && event.target === 'workspaceDivider' && event.trusted);
+    return down && document.querySelector('#workspaceDivider').hasPointerCapture(down.pointerId);
+  })()`));
+  window.webContents.sendInputEvent({ type: "mouseMove", x: dividerX + 90, y: dividerY, modifiers: ["leftButtonDown"] });
+  const resized = await nativeSplitCheckpoint("drag changes both rendered pane widths", async () => {
     const value = await readSplit();
-    return value.graph.width > beforeResize.graph.width + 50
+    const heldMove = await evaluate(`(() => {
+      const down = window.__nativeSplitPointerEvents.find(event => event.type === 'pointerdown' && event.target === 'workspaceDivider' && event.trusted);
+      return down && window.__nativeSplitPointerEvents.some(event => event.type === 'pointermove' && event.pointerId === down.pointerId && event.buttons === 1 && event.trusted);
+    })()`);
+    return heldMove && value.graph.width > beforeResize.graph.width + 50
       && value.detail.width < beforeResize.detail.width - 50 ? value : false;
   });
+  window.webContents.sendInputEvent({ type: "mouseUp", x: dividerX + 90, y: dividerY, button: "left", clickCount: 1 });
+  await nativeSplitCheckpoint("native divider pointer-up delivered", () => evaluate(`(() => {
+    const down = window.__nativeSplitPointerEvents.find(event => event.type === 'pointerdown' && event.target === 'workspaceDivider' && event.trusted);
+    return down && window.__nativeSplitPointerEvents.some(event => event.type === 'pointerup' && event.pointerId === down.pointerId && event.trusted);
+  })()`));
+  process.stdout.write(`RELAYER_NATIVE_SPLIT_POINTER ${JSON.stringify(await evaluate("window.__nativeSplitPointerEvents"))}\n`);
   let persistedRatio;
   try {
     await waitFor("desktop durable ratio is written", async () => {

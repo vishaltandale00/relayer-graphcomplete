@@ -120,6 +120,11 @@ html[data-theme="light"] .tutorial-target{outline-color:#527baa!important;box-sh
 .node-input-actions{display:grid;gap:14px;margin-top:18px;padding-top:16px;border-top:1px solid var(--line)}
 .node-input-loading{margin:0;color:var(--muted);font-size:10px}
 .node-input-editor{min-width:0;margin:0;padding:0;border:0}
+.invoke-input-group{min-width:0;padding:14px;border:1px solid var(--line-strong);border-radius:12px;background:var(--panel)}
+.invoke-input-group+.invoke-input-group{margin-top:14px}
+.invoke-input-controls{display:flex;flex-wrap:wrap;gap:12px;margin-top:14px;padding-top:14px;border-top:1px solid var(--line)}
+.invoke-input-controls .action-annotation-wrap{display:flex;flex-direction:column;align-items:flex-start;gap:4px;max-width:100%}
+.invoke-input-hint{color:var(--muted);font-size:11px;line-height:1.5}
 .node-input-editor+.node-input-editor{padding-top:14px;border-top:1px solid var(--line)}
 .node-input-editor legend{width:100%;padding:0;color:var(--text);font-size:11px;font-weight:700;line-height:1.4;overflow-wrap:anywhere}
 .node-input-editor textarea{width:100%;min-height:82px;margin-top:9px;resize:vertical;padding:9px 10px;border:1px solid var(--line-strong);border-radius:9px;background:var(--panel);color:var(--text);font:inherit;line-height:1.45;outline:0}

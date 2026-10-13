@@ -1,0 +1,171 @@
+{
+  "reviewer": "prototype_review adversarial subagent",
+  "date": "2026-10-07",
+  "scope": "Implicit Send/Invoke snapshots, exact occurrence and edit epochs, restored cleanup, standard/compiled/fallback ownership, navigation stage lifetime, durable single-call rendering, native runner test subsumption.",
+  "reviewedFiles": {
+    "desktop/renderer/src/product-workspace/workspace.js": "f90ac26db18a001116049ba15cfe2220b518ed492520aaa9c62688921b83a885",
+    "desktop/renderer/src/product-workspace/node-detail-runtime.js": "c1c6e8a2627e20298a7f88c7516febc4c0f7317b00ec00713372bd24202cdcfd",
+    "desktop/renderer/src/action-invocation-state.js": "85574d803a0bd120a075a4aa4edfac90d2dcbb9ea330296d92e030283ea07c46",
+    "desktop/renderer/src/graph.js": "53bdd97b622c514885d344c9e0c8ad679726e990c609e3b312fe8a0f0ff819cd",
+    "test/implicit-input-send.test.mjs": "bc30c38dfc247fe93297097994b782bd6b7b2cfacaaafc010342b9575b9cefe7",
+    "test/invoke-input-bindings.test.mjs": "29219f7f39c5415dd5f3a18984276e89a56166909ffd3876d5d81dbf2fc54aca",
+    "scripts/test-desktop-node-input-actions.mjs": "e63fc999fc865e67d27a8ff0c123911ce1b95d12fb5dc0352e24a04de645e34d"
+  },
+  "comparison": {
+    "nativeRunnerSource": "/private/tmp/relayer-interactive-actions-gate-20261006/scripts/test-desktop-node-input-actions.mjs",
+    "sha256": "213df8da37bd6125c1d7fc7445f157d036ae67e22b9efc3a3b5262a4519be86f"
+  },
+  "verdict": "No reproducible consequential behavior blocker in reviewed UI scope after fixes and regressions; 31 focused tests and the instrumented native runner pass. Prior operator blank-page timeout cause remains unknown. Source-scoped assertion only; no entire-stack, paid-authoring, process-recovery, release-artifact or user-acceptance certification.",
+  "verification": [
+    {
+      "command": "./node_modules/.bin/vitest run test/implicit-input-send.test.mjs test/invoke-input-bindings.test.mjs",
+      "result": "passed",
+      "files": 2,
+      "tests": 31,
+      "log": "/private/tmp/relayer-ui-review-focused-20261007.log",
+      "logSha256": "f59368eec697a0e4a471c11b79ab5c69d7443cb01e0b1a89358aad23bc91d819"
+    },
+    {
+      "command": "node --check scripts/test-desktop-node-input-actions.mjs",
+      "result": "passed"
+    },
+    {
+      "command": "node scripts/run-node-input-actions-test.mjs",
+      "executionContext": "macOS application registration outside filesystem sandbox; existing built runtime artifacts; no rebuild",
+      "result": "passed",
+      "outerExitCode": 0,
+      "innerResult": {
+        "passed": true
+      },
+      "paidInferenceCalls": 0,
+      "log": "/private/tmp/relayer-ui-review-native-final-20261007.log",
+      "logSha256": "333e43c035c194a2995fc21d573bd9f4d0a57210af01f44d21c79693899381c1",
+      "runnerSha256": "f0a500360d001f5268d8ce503013931491c9bacf58bba5b46d34deeae1d6532c"
+    },
+    {
+      "command": "node scripts/run-node-input-actions-test.mjs",
+      "result": "passed",
+      "outerExitCode": 0,
+      "innerResult": {
+        "passed": true
+      },
+      "paidInferenceCalls": 0,
+      "runnerSha256": "e63fc999fc865e67d27a8ff0c123911ce1b95d12fb5dc0352e24a04de645e34d",
+      "executionContext": "Single authorized instrumented attempt after task-owned capture apps closed; before fullcheck package build stage; existing built artifacts.",
+      "log": "/private/tmp/interactive-inputs-node-input-diagnostic.log",
+      "logSha256": "927bd5a846f63df241671c8563e13c4c7322685d6a6d80e87528e226af770105"
+    }
+  ],
+  "regressionsAdded": [
+    "Standard Relaxed selection bridges into compiled select; authored Packed change saves; incompatible package falls back to standard Packed; Invoke carries exactly Packed without an old Relaxed rewrite; successful consumption clears it.",
+    "Consumed input restored while its source remains unselected sends the exact saved baseline without a new commit.",
+    "Consumed input rendered once as empty, then restored with source unselected, adopts the authoritative saved baseline unless a newer user edit touched the stage."
+  ],
+  "subsumption": [
+    {
+      "before": "Per-field Commit validity and persistence",
+      "replacement": "Boundary Send validates every captured stage before any PUT, refuses invalid multi-select without writes or dispatch, then persists exact values and settled revision."
+    },
+    {
+      "before": "Delayed Commit while selecting another node",
+      "replacement": "Held first implicit Send PUT plus node and thread switching preserves selected details; owning-thread explicit Send persists all three occurrences; thread B remains editable."
+    },
+    {
+      "before": "Committed reopen, Undo, conflict, rejected PUT, detach/recommit",
+      "replacement": "Refused POST leaves successfully saved draft; renderer reload restores it; Undo restores saved baseline; revision conflict and rejected boundary save retain user stage and prevent dispatch; detach plus implicit reaccept preserves authority."
+    },
+    {
+      "before": "Lost-response held reconciliation with external PUT/PUT/DELETE and UI detach/recommit",
+      "replacement": "Retained assembled Electron scenario advances server composition during held GET using exact immutable submitted selection normalized to draft API; UI detach then new implicit edit accepts at Send."
+    },
+    {
+      "before": "Replay identity and exact text/context/model/confirmation/revision",
+      "replacement": "Retained double-click fence and rotated new-generation input identity; retry asserts exact prompt, annotation, cleared confirmation IDs, model choice, and revision equal to authoritative pre-POST draft."
+    },
+    {
+      "before": "Stacked rails, compact three-choice fit, 150 percent zoom",
+      "replacement": "Retained native rendered rail state and geometry checks."
+    },
+    {
+      "before": "Submitted history native disclosure and accessibility/width",
+      "replacement": "Retained DETAILS/SUMMARY, closed state, 80-character summary, exact full text, aria-label, maximum 241px width, and native activation."
+    },
+    {
+      "before": "Review/operator authority and detail/annotation/split geometry",
+      "replacement": "Retained read-only review controls, separately disabled operator Send, annotation overlay/independent scrolling, splitter persistence and Environment overlay checks."
+    },
+    {
+      "before": "Navigation discards renderer-local stage",
+      "replacement": "Explicit approved behavior changed to preserving pending standard stages while navigating; runner asserts the new promise."
+    }
+  ],
+  "priorFailures": [
+    {
+      "result": "failed before any scenario",
+      "reason": "Sandbox Electron launch aborted in macOS RegisterApplication; retry outside sandbox launched normally."
+    },
+    {
+      "result": "failed",
+      "reason": "First restored interference setup captured an empty UI selection; fixed to use immutable submitted value."
+    },
+    {
+      "result": "failed",
+      "reason": "Next setup passed submitted Selected shape to draft API instead of selectedKeys; fixed normalization. That prior run also emitted visual_assets_unavailable at fixture graph.submit (completion3).",
+      "log": "/private/tmp/relayer-ui-review-native-20261007.log"
+    },
+    {
+      "result": "resolved regression",
+      "reason": "Initial restored-input test exposed untouched empty stage overriding restored authority; production capture now uses saved baseline for untouched stages. Both absent and initialized-empty lifetimes pass."
+    },
+    {
+      "result": "unknown prior failure; instrumented successor passed",
+      "reason": "Later parent final-source run timed out at operator-capable review reload with empty body; single instrumented attempt passed, no causal failure reproduced.",
+      "log": "/private/tmp/interactive-inputs-node-input-4.log"
+    }
+  ],
+  "unresolved": [
+    "Causal diagnosis of the earlier operator blank-page timeout remains unknown; it did not reproduce in the single instrumented attempt."
+  ],
+  "limitations": [
+    "Native proof used existing built artifacts and renderer source; this assertion does not attest those binaries as exact Rust sources. Parent qualification must bind required artifact identities.",
+    "Pending input durability across a cold process restart is not asserted.",
+    "Future edits to a reviewed file invalidate its hash-scoped assertion.",
+    "Agent transcripts are not the durable review assertion; this JSON is."
+  ],
+  "diagnosis": {
+    "priorFailure": "Operator-capable review navigation timed out with empty body at runner line931.",
+    "priorLog": "/private/tmp/interactive-inputs-node-input-4.log",
+    "instrumentation": "Renderer warning/error console, navigation start and HTTP commit status, completed-document probe, did-fail-load, render-process-gone and unresponsive diagnostics. All assertions unchanged.",
+    "operatorObservations": [
+      {
+        "fixture": "node-input",
+        "diagnostic": "navigation-committed",
+        "navigation": 24,
+        "time": "2026-10-08T01:13:16.186Z",
+        "url": "http://127.0.0.1:63460/?threadId=1&interactionId=1&review=1&inputOperator=1",
+        "target": "http://127.0.0.1:63460/?threadId=1&interactionId=1&review=1&inputOperator=1",
+        "httpResponseCode": 200,
+        "httpStatusText": "OK"
+      },
+      {
+        "fixture": "node-input",
+        "diagnostic": "loaded-document",
+        "navigation": 24,
+        "time": "2026-10-08T01:13:16.195Z",
+        "url": "http://127.0.0.1:63460/?threadId=1&interactionId=1&review=1&inputOperator=1",
+        "readyState": "complete",
+        "title": "Relayer",
+        "bodyChildren": 9,
+        "bodyLength": 21356,
+        "scriptSources": [
+          "http://127.0.0.1:63460/theme-bootstrap.js",
+          "http://127.0.0.1:63460/vendor/lucide.min.js",
+          "http://127.0.0.1:63460/vendor/marked.umd.js",
+          "http://127.0.0.1:63460/src/main.js"
+        ]
+      }
+    ],
+    "observedFailures": "No load failure, renderer termination, unresponsive or uncaught error observed in instrumented pass. Console errors were the existing inline-style CSP family.",
+    "causalVerdict": "Prior blank-page cause unknown. Capture app closure preceded passing attempt but does not prove causality. No further retries performed."
+  }
+}

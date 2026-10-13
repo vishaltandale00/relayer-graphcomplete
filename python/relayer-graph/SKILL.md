@@ -119,6 +119,12 @@ await graph.add_navigate_action(overview_node, "Open the site", site_viewer, rel
                                 source_layer=root_layer, client_key="open-landing-page")
 ```
 
+With scoped authoring, give the artifact its own layer and declare its only node
+with `viewer = author.layer("site-viewer")` and
+`viewer.artifact_node("site", icon="globe", title=..., detail=..., artifact={...})`.
+That sets the artifact renderer, centered layout and default node. Target
+`viewer` from an ordinary node's navigate action.
+
 Kinds: "website" (an entry .html file plus its site root folder), "pdf",
 "video" (.mp4, .webm, .mov), "image" (.png, .jpg, .gif, .webp, .svg),
 "markdown" (.md), "docx", "xlsx" and "pptx" (Office), and "url" (https, or http

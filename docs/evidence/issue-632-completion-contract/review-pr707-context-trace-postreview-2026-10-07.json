@@ -1,0 +1,1088 @@
+{
+  "schemaVersion": 1,
+  "date": "2026-10-07",
+  "reviewer": "/root/context_trace",
+  "workspace": "/private/tmp/relayer-interactive-inputs-v1-merge",
+  "pullRequestNumber": 707,
+  "baselineHead": "2ad0b83726d839c3981b93cd56ec49cafdbb585f",
+  "sourceDigest": "b85e3913eab8a4ec5cd40b6979c663e6bc255bc9adc464388867a0dbce636449",
+  "digestMethod": "SHA256 of sorted relative UTF8 path + NUL + exact bytes + NUL; receipt excluded",
+  "manifest": [
+    {
+      "path": "crates/relayer-app-server/src/api/error.rs",
+      "sha256": "0488a29a3f24bfcf69e2fc6840dfbefb2c63fca4c152d950fcb8067a95df8bfa"
+    },
+    {
+      "path": "crates/relayer-app-server/src/api/state.rs",
+      "sha256": "67e0c924b5884a893f3aa03ede6d64ea5c605221007ae7973acf14afd414485f"
+    },
+    {
+      "path": "crates/relayer-app-server/src/api/threads.rs",
+      "sha256": "85cbeee658a196e6740cf9bab2b27c537d0c43b543c09bb01bb76b36a20b2198"
+    },
+    {
+      "path": "crates/relayer-app-server/src/api/types.rs",
+      "sha256": "f18f7e190086605f1c979f93658c72d00fbfa1d6c8995823ce0a9cf2f62e0d09"
+    },
+    {
+      "path": "crates/relayer-app-server/src/app_server.rs",
+      "sha256": "2e310843d3d385363768aba3df1867c36420dc1f6a92b60ed76541c20fcd9680"
+    },
+    {
+      "path": "crates/relayer-app-server/src/conversation_export.rs",
+      "sha256": "735b984bd8706fbe07a141ce5e5cef5d1c7fb644eb04702917cd787357b807c1"
+    },
+    {
+      "path": "crates/relayer-app-server/src/conversation_export_service.rs",
+      "sha256": "e5d8d7421645bb396fa8616abea6bafbe3ffb4b7465d4129fd04a8a25f56deee"
+    },
+    {
+      "path": "crates/relayer-app-server/src/product/service.rs",
+      "sha256": "b8272b19f073f49323ae19090ef5bd117840245b35d24a4785d5840bd812ccc0"
+    },
+    {
+      "path": "crates/relayer-app-server/src/runtime.rs",
+      "sha256": "952e635554ec1150e0f03268cd797e2b98ea35e6eb1bf65d48bf511c92c40678"
+    },
+    {
+      "path": "crates/relayer-app-server/src/storage/sqlite/action_invocations.rs",
+      "sha256": "67549f970dc3d6d9754643bf5a2131d920fdcbc389c260b9d69c69719eb8dda5"
+    },
+    {
+      "path": "crates/relayer-app-server/src/storage/sqlite/conversation_imports.rs",
+      "sha256": "76d6f41725021910a73603aebf8bb00a0c59c5273adac08c5096404653e3c8fd"
+    },
+    {
+      "path": "crates/relayer-app-server/src/storage/sqlite/migrations/0046_invocation_preparation_refusals.sql",
+      "sha256": "4baf94e8470f3c8223b90b6aef68fd6aa5c2b4846d5f4aa45b461be4ed1ffebf"
+    },
+    {
+      "path": "crates/relayer-app-server/src/storage/sqlite/schema.rs",
+      "sha256": "df90c8e5646d33acd8d3f325b4163ddbd2fa3a8e1bfe31e87781624e49fffc54"
+    },
+    {
+      "path": "crates/relayer-app-server/tests/conversation_export_contract.rs",
+      "sha256": "78368e5145295b84ef09056b828f39b6d14e99a4b9425c43686c888730000150"
+    },
+    {
+      "path": "crates/relayer-app-server/tests/product_persistence_flow.rs",
+      "sha256": "42fe5914da58db0f884b5d1c0efcf604622d7ab68352d31ed6176a67d00d8859"
+    },
+    {
+      "path": "crates/relayer-app-server/tests/support/completion_traces.rs",
+      "sha256": "43f15f63192f84d27347cdd11400f1bba43911d1819263dca26bd96cf8eb0fed"
+    },
+    {
+      "path": "crates/relayer-graph-core/src/graph/invocation.rs",
+      "sha256": "872744ef3eb501bb9794c00eac09b178d88dc029eb9b0dabddaee42a9ed53b5b"
+    },
+    {
+      "path": "desktop/renderer/src/draft-preview/snapshot.js",
+      "sha256": "49ea7d513eb493579772edb27b6027476f74daf3cfe1e01b54647f0e07d6a5bf"
+    },
+    {
+      "path": "desktop/renderer/src/public-share-viewer/snapshot.js",
+      "sha256": "080e0538a4a7796ac78dbaf42cc6cea1a6181928a84f82c454f1d327900774ed"
+    },
+    {
+      "path": "docs/decisions/0015-sealed-completion-contract-and-invocations.md",
+      "sha256": "bcc37d822bb5a96f0e092a1ad6908b743acceb4e0932f4dce57e9272ebcba0a7"
+    },
+    {
+      "path": "docs/prd/index.html",
+      "sha256": "352d3992b3ea8f97c06ce17483a346eeb279640102a84f80728e5a968c13020b"
+    },
+    {
+      "path": "packages/graph-client/src/detail.ts",
+      "sha256": "701e8cfc6bad26ec5033b6df1118de74624896ff8b9622213ad8e41bec25e7dd"
+    },
+    {
+      "path": "packages/graph-client/src/scoped-authoring.ts",
+      "sha256": "bc14463cd7ae75f815059f816a9a88798419ae2547bd77cf4d590b2ade93b113"
+    },
+    {
+      "path": "packages/graph-client/test/detail.test.ts",
+      "sha256": "68b5c57ffc01dfd623df759a42cd34a5791cc1da17fd687774fdba61542ef033"
+    },
+    {
+      "path": "packages/graph-client/test/input-declarations.test.ts",
+      "sha256": "6a7f4a173e1816655caebe4a78c247c711384b35598acc34297574f1bf41332b"
+    },
+    {
+      "path": "packages/graph-client/test/scoped-authoring.test.ts",
+      "sha256": "eea41584e44d0f01d7006d38c332a2d27e5a6892352fb569adeb9607a95cc2e2"
+    },
+    {
+      "path": "packages/harness-host/src/implementations/prime-visual-authoring.ts",
+      "sha256": "3dad8b56fe5be0e219f699a754aa233be1e18f8df612d84f997f3885f5cee170"
+    },
+    {
+      "path": "packages/harness-host/test/prime-visual-authoring.test.ts",
+      "sha256": "3ebf0c3f78145e60d82a14911ab4b47f980eb924435802b71cd658b6d23c69d8"
+    },
+    {
+      "path": "python/relayer-graph/src/relayer_graph/actions.py",
+      "sha256": "3a72b84f4d3c7d49d182eae3015d2110127ea5d9ffc3107207ec649ea0ddd083"
+    },
+    {
+      "path": "python/relayer-graph/src/relayer_graph/scoped_authoring.py",
+      "sha256": "c74a2c400fdda188f6b931d4123050434eb5c8997a3bcc2567f5c4f43be0f057"
+    },
+    {
+      "path": "python/relayer-graph/tests/test_scoped_authoring.py",
+      "sha256": "b3b03d57f441d5a3e324573cd200fd714893500a16f2c98bc0a644b7d0cbfed3"
+    },
+    {
+      "path": "test/draft-preview-read-model.test.mjs",
+      "sha256": "a6f96a5d36c2556a814520cbf146bf8365a3ce28cbb278ce89de6eba2b56591e"
+    },
+    {
+      "path": "test/invoke-input-product-integration.test.mjs",
+      "sha256": "20dead72f9e34fae1de774f7effe732dddba05d03e4d434cd7caa7ea3cc27021"
+    }
+  ],
+  "reviewedScope": "Assigned scoped/detail client and native V4/export consistency repairs, plus producer provenance integration and ADR clarification. Does not certify other PR707 repairs or hosted deployment. Updated2026-10-08: bounded startup trusted-reservation guard, four local/hosted export expectation repairs, and real shared-Node second-thread portable builder joins/foreign-call omission. Final read-only2026-10-08: persisted native-preparation rejection marker, strict inventory absence check, DTO projection, exact old-key refusal/fresh-key retry, and three renderer consumer joins. Product schema/migration hashes identify persisted marker dependency; full migration portfolio remains authority/root owned. Final bounded repair: legacy-key-only portable origin classification, refused/pending native graph-only export, and valid published-import fixture metadata with exact hosted V4 refusal. Consumer state intentionally includes all visible imported threads. Bounded fullcheck6 Prime visual fixture reconciliation and supported Python declaration lowering; separate numeric unmounted refusal. Final independent read-only review of fullcheck6 publicState custom-model fallback and real native integration exact refused chronology; honest Prime detail/reference checkpoint scope preserved.",
+  "dispositions": [
+    {
+      "threadIndex": 6,
+      "threadId": "PRRT_kwDOTyTfxM6qKRwf",
+      "disposition": "repaired",
+      "assertion": "Scoped Invoke captures explicit accepted Input records as positive canonical IDs; native same-source ownership remains authoritative. Forged local declarations still fail before transport.",
+      "checkpoint": "TS binds explicit accepted Input records through their canonical IDs without dependency writes; Python scoped accepted record captured through queued mutation; existing forged/cross-source/cross-layer refusal"
+    },
+    {
+      "threadIndex": 10,
+      "threadId": "PRRT_kwDOTyTfxM6qKRwv",
+      "disposition": "repaired",
+      "assertion": "Numeric visual bindings require one exact mounted Input declaration with a matching canonical ID and kind, owner-contained source Layer and valid Input capability. Ordinary numeric action writes remain compatible.",
+      "checkpoint": "numeric visual fixture: unmounted refusal, mounted success, wrong canonical kind refusal, other-ID refusal; existing two-mounted-Input immutable snapshot and later unmounted mutation refusal"
+    },
+    {
+      "threadIndex": 12,
+      "threadId": "PRRT_kwDOTyTfxM6qKRw8",
+      "disposition": "repaired",
+      "assertion": "Hosted export refuses snapshots requiring V4 before serialization with reusable_invocation_portability_unavailable. Local V4 and legacy public snapshots retain their declared paths.",
+      "checkpoint": "production export builder with real local HTTP runtime: both legacy builders recapture on revision race; local explicit single-call V4 succeeds; public builder refuses; production API converter exposes exact closed code"
+    },
+    {
+      "threadIndex": 13,
+      "threadId": "PRRT_kwDOTyTfxM6qKRxA",
+      "disposition": "repaired with historical qualification",
+      "assertion": "For proven accepted captures with explicit bindings, standalone Input source Node and complete question snapshot must match the frozen argument. Draft and unknown historical capture states do not substitute current parent definitions for frozen input.",
+      "checkpoint": "V4 batch/stream parity fixture: matching standalone input succeeds, changed prompt/control/source refuses, draft and unknown historical frozen arguments remain readable"
+    },
+    {
+      "threadIndex": 14,
+      "threadId": "PRRT_kwDOTyTfxM6qKRxG",
+      "disposition": "repaired",
+      "assertion": "Succeeded call result turns require accepted status, acceptedView and the exact Returned root; graph-only calls need not invent a Product result turn.",
+      "checkpoint": "V4 batch/stream parity result fixture: accepted exact returned root succeeds, other valid returned root refuses, stopped Product turn without acceptedView refuses"
+    },
+    {
+      "threadIndex": 16,
+      "threadId": "PRRT_kwDOTyTfxM6qKiH4",
+      "disposition": "repaired for new captures; historical compatibility retained",
+      "assertion": "New captures without declared bindings require empty arguments. Genuine historical snapshots lacking captureState may retain internally valid exact occurrence-based arguments; absence never synthesizes binding or native authority.",
+      "checkpoint": "V4 argument fixture: newly captured undeclared arguments refuse; historical absence with two distinct occurrences succeeds; duplicate historical occurrence refuses; unknown capture enum is rejected by typed schema; saved Input Layer/interaction distinct from Invoke activation is accepted without weakening same-Node or question integrity"
+    },
+    {
+      "threadIndex": 17,
+      "threadId": "PRRT_kwDOTyTfxM6qKiH8",
+      "disposition": "repaired",
+      "assertion": "Failed/stopped calls require nonempty safeReason; active/succeeded calls omit terminal reasons.",
+      "checkpoint": "V4 batch/stream parity: stopped/failed missing reason and active extra reason refuse; empty reason retains string_empty; valid stopped Current history passes"
+    }
+  ],
+  "sharedCheckpoints": [
+    {
+      "threads": [
+        15,
+        18
+      ],
+      "assertion": "Portable activator and presentingLayerId are copied from immutable native snapshot; captureState is copied from original native state at preparation. All are optional for historical snapshots. Exact accepted-capture Input consistency applies equally to accepted-layer and standalone definitions; own-draft repairs retain original frozen snapshots.",
+      "checkpoint": "Native DTO roundtrip and typed enum; native accepted-layer question mismatch refusal and draft exemption. Real export/import/reopen mapper assertions belong to parent-owned Current fixture. Parent-owned actual native Current export/import/reopen projection passed log4 with Agent activator, Accepted captureState and presenting-Layer presence; exact default Layer identity assertion requested separately."
+    }
+  ],
+  "actualResults": [
+    {
+      "command": "npx vitest run packages/graph-client/test/scoped-authoring.test.ts packages/graph-client/test/input-declarations.test.ts packages/graph-client/test/detail.test.ts packages/graph-client/test/objects.test.ts packages/harness-host/test/prime-visual-authoring.test.ts",
+      "outcome": "passed",
+      "files": 5,
+      "tests": 150
+    },
+    {
+      "command": "PYTHONPATH=python/relayer-graph/src python3 -m unittest discover -s python/relayer-graph/tests -p test_scoped_authoring.py",
+      "outcome": "passed",
+      "tests": 10
+    },
+    {
+      "command": "npx tsc --noEmit -p packages/graph-client/tsconfig.json",
+      "outcome": "passed"
+    },
+    {
+      "command": "cargo test -p relayer-app-server --test conversation_export_contract",
+      "outcome": "passed",
+      "tests": 42
+    },
+    {
+      "command": "cargo test -p relayer-app-server --lib export_builders_recapture_graph_after_asset_revision_conflict",
+      "outcome": "passed",
+      "tests": 1,
+      "execution": "approved local loopback server outside sandbox after sandbox bind failure"
+    },
+    {
+      "command": "cargo test -p relayer-app-server --lib unqualified_share_format_exposes_the_closed_capability_refusal",
+      "outcome": "passed",
+      "tests": 1
+    },
+    {
+      "command": "rustfmt --edition 2024 --config skip_children=true owned native files; git diff --check",
+      "outcome": "passed"
+    },
+    {
+      "command": "cargo test -p relayer-app-server --lib imported_current_call_history_is_projected_without_execution_authority",
+      "outcome": "passed",
+      "tests": 1,
+      "ownership": "parent-owned; observed actual retained log /private/tmp/interactive-inputs-review-imported-current-4.log",
+      "limitation": "presentingLayerId presence; exact identity strengthening requested"
+    }
+  ],
+  "preservedFailures": [
+    {
+      "stage": "initial graph-client typecheck",
+      "reason": "unknown reference needed explicit object guard before descriptor capture",
+      "disposition": "fixed; final typecheck passed"
+    },
+    {
+      "stage": "initial native compile",
+      "reason": "concurrent authority seam missing RuntimeAction source layer and private submission helper; concurrent parent lib fixture signature/type/debug issues",
+      "disposition": "owners repaired; focused native scenarios subsequently passed"
+    },
+    {
+      "stage": "native counterexample setup",
+      "reason": "first other-source node not captured, then second-source graph disconnected; empty reason correctly returned string_empty",
+      "disposition": "fixture made two-node connected graph; original semantic checks retained; final DTO42 passed"
+    },
+    {
+      "stage": "real builder fixture sandbox execution",
+      "reason": "loopback listener bind PermissionDenied",
+      "disposition": "same deterministic fixture passed after approved outside-sandbox execution"
+    },
+    {
+      "stage": "full deterministic check3",
+      "log": "/private/tmp/interactive-inputs-postreview-check-3.log",
+      "observed": "369 passed, 6 failed",
+      "disposition": "Four assigned hosted success expectations contradicted newly explicit hosted V4 failclosed capability; corrected tests preserve local V4 and assert exact refusal. Two migration failures were parent/authority owned; this reviewer did not modify them."
+    },
+    {
+      "stage": "new portable fixture setup",
+      "logs": [
+        "/private/tmp/pr707-portable-shared-node-1.log",
+        "/private/tmp/pr707-portable-shared-node-2.log",
+        "/private/tmp/pr707-portable-shared-node-loopback-3.log"
+      ],
+      "reasons": [
+        "Initial export value enum typo (fixed)",
+        "Sandbox loopback bind PermissionDenied; same deterministic fixture ran with approved local socket access",
+        "Two child staged Navigate additions shared a persistent-Node clientKey; fixed distinct call-derived keys, without reauthoring accepted Input/Invoke"
+      ],
+      "disposition": "Final loopback4 passed1/1; failures retained."
+    },
+    {
+      "stage": "parent full check4",
+      "log": "/private/tmp/interactive-inputs-postreview-check-4.log",
+      "observed": "Parent reported375 passed,1 failed: imported Current visual-assets host startup exit1 with stderr suppressed",
+      "disposition": "Unknown host startup cause. Concurrent independent fixture process is a possible package-build race, not established cause. This reviewer stopped all tests/builds; parent owns stderr diagnostic and isolated unified rerun."
+    },
+    {
+      "stage": "refusal portable checkpoint initial compile",
+      "log": "/private/tmp/pr707-refusal-portable-export-checkpoint-1.log",
+      "reason": "New test helper omitted required share title argument",
+      "disposition": "Test argument corrected; final checkpoint4 passed."
+    },
+    {
+      "stage": "refusal portable checkpoint association assertion",
+      "log": "/private/tmp/pr707-refusal-portable-export-checkpoint-2.log",
+      "reason": "Test expected a result link from durable reservation, but real no-effect restore correctly clears graph_node_id",
+      "disposition": "No production change; assertion now directly checks graph_node_id None and preserved graph-only native call. Final checkpoint4 passed."
+    },
+    {
+      "stage": "Product export state exact diagnosis",
+      "log": "/private/tmp/pr707-product-export-state-diagnosis-1.log",
+      "reason": "HTTP500 stored product JSON invalid missing exportVersion from fixture published header {}",
+      "disposition": "Fixture repaired with typed valid V1 portable Header; strict production deserialization retained."
+    },
+    {
+      "stage": "Product export hidden hosted expectation",
+      "log": "/private/tmp/pr707-product-export-state-checkpoint-2.log",
+      "reason": "After header repair all state/local checks passed; final stale hosted V4 success assertion expected200 while actual422",
+      "disposition": "Local converted graph assertions retained; hosted exact refusal now checked; final checkpoint3 passed."
+    },
+    {
+      "stage": "parent fullcheck5",
+      "log": "/private/tmp/interactive-inputs-postreview-check-5.log",
+      "observed": "Native376 passed; Product37 passed and2 failed (parent report)",
+      "disposition": "Assigned malformed-import and hidden hosted expectation repaired by Product checkpoint3; parent destination flags independently passed. Final unified run remains required."
+    },
+    {
+      "stage": "parent fullcheck6 Prime visual fixture",
+      "log": "/private/tmp/interactive-inputs-postreview-check-6.log",
+      "observed": "Two false/true policy fixture successes failed because numeric21/22 were not mounted accepted Input identities",
+      "disposition": "Fixture-only repair uses real Python declaration refs and mounts both fields. All prior policy/replacement/checkpoint/frozen submission checks retained; numeric-unmounted refusal now separate. No production change."
+    },
+    {
+      "stage": "parent fullcheck6",
+      "log": "/private/tmp/interactive-inputs-postreview-check-6.log",
+      "observed": "Native and TS passed; Vitest7 failures in5 files (parent report)",
+      "disposition": "Assigned Prime fixture numeric-unmounted success repaired without production authority change; prototype draft-preview and exact refused-history fixture repaired. Final separate portfolio logs passed; parent fullcheck7 remains required."
+    },
+    {
+      "stage": "Prime added forwarding-spy attempt",
+      "log": "/private/tmp/pr707-prime-mounted-inputs-checkpoint-3.log",
+      "observed": "No tests ran; graph-client package entry unavailable during source build",
+      "disposition": "No cause inferred. Authority schema review found canonical mounts intentionally contain references only; unnecessary spy removed and test renamed honestly. Final checkpoint4 passed22/22 after package build."
+    }
+  ],
+  "testDeletionOrSubsumption": {
+    "removedTests": [],
+    "modifiedExistingFixture": "Positive numeric visual fixture now mounts its referenced Inputs and refuses an edited unmounted ID. Snapshot freeze assertion preserved. Existing stopped-call fixture now includes required cancelled reason. Historical occurrence compatibility assertions retained.",
+    "distinctBoundaries": "DTO batch/stream integrity, real exporter capability admission, and API safe error presentation are separate boundaries.",
+    "modifiedExportFixtureRationale": "Four existing fixture functions no longer unwrap hosted V4 output: each retains/strengthens local records validation and exact lifecycle/input/pin assertions, then asserts ReusableInvocationPortabilityUnavailable. Imported share still refuses ShareImportedConversation. Returned child settling while provider unwinds is checked through local exporter with local admitted metadata retained; legacy hosted redaction stays independently covered. No test removed or skipped. One isolated two-thread portable fixture adds the distinct builder alias/privacy boundary beyond native inventory isolation."
+  },
+  "pythonProductionTreeSha256": "c6b8a3346c308f53bacf00fd723a69463488721de3b165811b89160bad6fbd84",
+  "requiredRemainingVerification": [
+    "Parent final unified npm run check/fullcheck7 and npm run build, with source freshness and current PR CI",
+    "Declared deterministic heavy qualification; receipts do not certify human acceptance, hosted deployment or release"
+  ],
+  "verdict": "No unresolved assigned production blocker or checkpoint mapping gap at this exact reviewed source. Own Prime22/22, prototype renderer249/249 and native integration1/1 passed at recorded snapshots. Independent final renderer delta review found no additional blocker. Parent fullcheck7/build/CI and declared qualification remain required; non-certifying for whole-PR merge, human acceptance, hosted deployment or release. Any manifested byte change invalidates assertion.",
+  "unresolvedFindings": [],
+  "supersededWorkingAssertions": [
+    {
+      "sourceDigest": "09f46e5f23daed78daee72382cc52de6559dfdd06cc806dc269fd6dccf9407f2",
+      "changedPaths": [
+        "crates/relayer-app-server/src/conversation_export.rs",
+        "crates/relayer-app-server/tests/conversation_export_contract.rs",
+        "crates/relayer-graph-core/src/graph/invocation.rs"
+      ],
+      "reason": "Trusted producer now preserves original activator on exact recovery; final native/browser presenting-occurrence parity and typed unknown-enum counterexamples."
+    },
+    {
+      "sourceDigest": "b90928196837289a993164c073aec14c8aeb931e676cc136fa01f63bb22c72c4",
+      "changedPaths": [
+        "crates/relayer-app-server/src/conversation_export.rs",
+        "crates/relayer-app-server/tests/conversation_export_contract.rs",
+        "docs/decisions/0015-sealed-completion-contract-and-invocations.md"
+      ],
+      "reason": "Authority review corrected mistaken coincidence restriction: saved Input occurrence and Invoke activation are independent exact identities on the same persistent Node. Incorrect validator restriction removed and fixture now proves independent occurrences are accepted."
+    }
+  ],
+  "semanticCorrection": "An interim native/browser validator required Input and Invoke occurrence identities to coincide. The trusted authority review confirmed independent saved Input and activation occurrences are valid; both validators were corrected, and compatibility is explicitly exercised. No migration or execution authority added.",
+  "supersededSourceAssertions": [
+    {
+      "sourceDigest": "9cf0c2f4dfe1a7909c514d64be5e387fee2727a2ad7a33141a56a5aad092cc75",
+      "manifest": [
+        {
+          "path": "crates/relayer-app-server/src/api/error.rs",
+          "sha256": "0488a29a3f24bfcf69e2fc6840dfbefb2c63fca4c152d950fcb8067a95df8bfa"
+        },
+        {
+          "path": "crates/relayer-app-server/src/conversation_export.rs",
+          "sha256": "735b984bd8706fbe07a141ce5e5cef5d1c7fb644eb04702917cd787357b807c1"
+        },
+        {
+          "path": "crates/relayer-app-server/src/conversation_export_service.rs",
+          "sha256": "75ea340c726152023ab579e16b66c36e9835974756ebd0266cc33a6e5950716e"
+        },
+        {
+          "path": "crates/relayer-app-server/tests/conversation_export_contract.rs",
+          "sha256": "78368e5145295b84ef09056b828f39b6d14e99a4b9425c43686c888730000150"
+        },
+        {
+          "path": "crates/relayer-graph-core/src/graph/invocation.rs",
+          "sha256": "872744ef3eb501bb9794c00eac09b178d88dc029eb9b0dabddaee42a9ed53b5b"
+        },
+        {
+          "path": "docs/decisions/0015-sealed-completion-contract-and-invocations.md",
+          "sha256": "bcc37d822bb5a96f0e092a1ad6908b743acceb4e0932f4dce57e9272ebcba0a7"
+        },
+        {
+          "path": "docs/prd/index.html",
+          "sha256": "352d3992b3ea8f97c06ce17483a346eeb279640102a84f80728e5a968c13020b"
+        },
+        {
+          "path": "packages/graph-client/src/detail.ts",
+          "sha256": "701e8cfc6bad26ec5033b6df1118de74624896ff8b9622213ad8e41bec25e7dd"
+        },
+        {
+          "path": "packages/graph-client/src/scoped-authoring.ts",
+          "sha256": "bc14463cd7ae75f815059f816a9a88798419ae2547bd77cf4d590b2ade93b113"
+        },
+        {
+          "path": "packages/graph-client/test/detail.test.ts",
+          "sha256": "68b5c57ffc01dfd623df759a42cd34a5791cc1da17fd687774fdba61542ef033"
+        },
+        {
+          "path": "packages/graph-client/test/input-declarations.test.ts",
+          "sha256": "6a7f4a173e1816655caebe4a78c247c711384b35598acc34297574f1bf41332b"
+        },
+        {
+          "path": "packages/graph-client/test/scoped-authoring.test.ts",
+          "sha256": "eea41584e44d0f01d7006d38c332a2d27e5a6892352fb569adeb9607a95cc2e2"
+        },
+        {
+          "path": "python/relayer-graph/src/relayer_graph/scoped_authoring.py",
+          "sha256": "c74a2c400fdda188f6b931d4123050434eb5c8997a3bcc2567f5c4f43be0f057"
+        },
+        {
+          "path": "python/relayer-graph/tests/test_scoped_authoring.py",
+          "sha256": "b3b03d57f441d5a3e324573cd200fd714893500a16f2c98bc0a644b7d0cbfed3"
+        }
+      ],
+      "preservedReceipt": "review-pr707-context-trace-postreview-2026-10-07-initial.json"
+    },
+    {
+      "sourceDigest": "8069ac7502790401dc79bfde2a42526e111ce8a53fe9df3d6ae973fd8ee92c38",
+      "manifest": [
+        {
+          "path": "crates/relayer-app-server/src/api/error.rs",
+          "sha256": "0488a29a3f24bfcf69e2fc6840dfbefb2c63fca4c152d950fcb8067a95df8bfa"
+        },
+        {
+          "path": "crates/relayer-app-server/src/app_server.rs",
+          "sha256": "2e310843d3d385363768aba3df1867c36420dc1f6a92b60ed76541c20fcd9680"
+        },
+        {
+          "path": "crates/relayer-app-server/src/conversation_export.rs",
+          "sha256": "735b984bd8706fbe07a141ce5e5cef5d1c7fb644eb04702917cd787357b807c1"
+        },
+        {
+          "path": "crates/relayer-app-server/src/conversation_export_service.rs",
+          "sha256": "75ea340c726152023ab579e16b66c36e9835974756ebd0266cc33a6e5950716e"
+        },
+        {
+          "path": "crates/relayer-app-server/src/storage/sqlite/action_invocations.rs",
+          "sha256": "223eb64915296b548e9aeb927e737a6b8591bb95a0d93687dca186793a29c630"
+        },
+        {
+          "path": "crates/relayer-app-server/tests/conversation_export_contract.rs",
+          "sha256": "78368e5145295b84ef09056b828f39b6d14e99a4b9425c43686c888730000150"
+        },
+        {
+          "path": "crates/relayer-app-server/tests/support/completion_traces.rs",
+          "sha256": "43f299adf03adbc5220dac350ef4a1cab948e9041d758ac20ab2e2717d058d23"
+        },
+        {
+          "path": "crates/relayer-graph-core/src/graph/invocation.rs",
+          "sha256": "872744ef3eb501bb9794c00eac09b178d88dc029eb9b0dabddaee42a9ed53b5b"
+        },
+        {
+          "path": "docs/decisions/0015-sealed-completion-contract-and-invocations.md",
+          "sha256": "bcc37d822bb5a96f0e092a1ad6908b743acceb4e0932f4dce57e9272ebcba0a7"
+        },
+        {
+          "path": "docs/prd/index.html",
+          "sha256": "352d3992b3ea8f97c06ce17483a346eeb279640102a84f80728e5a968c13020b"
+        },
+        {
+          "path": "packages/graph-client/src/detail.ts",
+          "sha256": "701e8cfc6bad26ec5033b6df1118de74624896ff8b9622213ad8e41bec25e7dd"
+        },
+        {
+          "path": "packages/graph-client/src/scoped-authoring.ts",
+          "sha256": "bc14463cd7ae75f815059f816a9a88798419ae2547bd77cf4d590b2ade93b113"
+        },
+        {
+          "path": "packages/graph-client/test/detail.test.ts",
+          "sha256": "68b5c57ffc01dfd623df759a42cd34a5791cc1da17fd687774fdba61542ef033"
+        },
+        {
+          "path": "packages/graph-client/test/input-declarations.test.ts",
+          "sha256": "6a7f4a173e1816655caebe4a78c247c711384b35598acc34297574f1bf41332b"
+        },
+        {
+          "path": "packages/graph-client/test/scoped-authoring.test.ts",
+          "sha256": "eea41584e44d0f01d7006d38c332a2d27e5a6892352fb569adeb9607a95cc2e2"
+        },
+        {
+          "path": "python/relayer-graph/src/relayer_graph/scoped_authoring.py",
+          "sha256": "c74a2c400fdda188f6b931d4123050434eb5c8997a3bcc2567f5c4f43be0f057"
+        },
+        {
+          "path": "python/relayer-graph/tests/test_scoped_authoring.py",
+          "sha256": "b3b03d57f441d5a3e324573cd200fd714893500a16f2c98bc0a644b7d0cbfed3"
+        }
+      ],
+      "verdict": "HOLD: previous bounded assertion invalidated by newly observed deterministic native-preparation refusal projection gap. Focused local/hosted and shared-Node builder passes remain retained evidence; pending trusted marker repair and independent review are required before final handoff.",
+      "unresolvedFindings": [
+        {
+          "code": "deterministic_preparation_refusal_projected_as_spent_call",
+          "reportedBy": "parent adversarial boundary follow-up",
+          "finding": "Native preparation 4xx rejects without spending a native call, but failed keyed Product reservation can project as consumed legacy/durable call and prevent corrected Invoke. Required explicit trusted refusal provenance must distinguish this from prepared, historical and uncertain failures; renderer occupancy/input availability/catch recovery must preserve that distinction.",
+          "status": "owners repairing; independent final source review and checkpoint results pending"
+        }
+      ],
+      "reason": "Superseded by explicit deterministic native-refusal marker and renderer consumers; earlier HOLD was correct until final checkpoints passed."
+    },
+    {
+      "updatedDate": "2026-10-08",
+      "sourceDigest": "88902bd4517765bfd27183db7c0f60747e7b9194ed1f89d5d899af505277c62e",
+      "manifest": [
+        {
+          "path": "crates/relayer-app-server/src/api/error.rs",
+          "sha256": "0488a29a3f24bfcf69e2fc6840dfbefb2c63fca4c152d950fcb8067a95df8bfa"
+        },
+        {
+          "path": "crates/relayer-app-server/src/api/threads.rs",
+          "sha256": "85cbeee658a196e6740cf9bab2b27c537d0c43b543c09bb01bb76b36a20b2198"
+        },
+        {
+          "path": "crates/relayer-app-server/src/api/types.rs",
+          "sha256": "f18f7e190086605f1c979f93658c72d00fbfa1d6c8995823ce0a9cf2f62e0d09"
+        },
+        {
+          "path": "crates/relayer-app-server/src/app_server.rs",
+          "sha256": "2e310843d3d385363768aba3df1867c36420dc1f6a92b60ed76541c20fcd9680"
+        },
+        {
+          "path": "crates/relayer-app-server/src/conversation_export.rs",
+          "sha256": "735b984bd8706fbe07a141ce5e5cef5d1c7fb644eb04702917cd787357b807c1"
+        },
+        {
+          "path": "crates/relayer-app-server/src/conversation_export_service.rs",
+          "sha256": "75ea340c726152023ab579e16b66c36e9835974756ebd0266cc33a6e5950716e"
+        },
+        {
+          "path": "crates/relayer-app-server/src/product/service.rs",
+          "sha256": "b8272b19f073f49323ae19090ef5bd117840245b35d24a4785d5840bd812ccc0"
+        },
+        {
+          "path": "crates/relayer-app-server/src/runtime.rs",
+          "sha256": "952e635554ec1150e0f03268cd797e2b98ea35e6eb1bf65d48bf511c92c40678"
+        },
+        {
+          "path": "crates/relayer-app-server/src/storage/sqlite/action_invocations.rs",
+          "sha256": "67549f970dc3d6d9754643bf5a2131d920fdcbc389c260b9d69c69719eb8dda5"
+        },
+        {
+          "path": "crates/relayer-app-server/src/storage/sqlite/migrations/0046_invocation_preparation_refusals.sql",
+          "sha256": "4baf94e8470f3c8223b90b6aef68fd6aa5c2b4846d5f4aa45b461be4ed1ffebf"
+        },
+        {
+          "path": "crates/relayer-app-server/src/storage/sqlite/schema.rs",
+          "sha256": "df90c8e5646d33acd8d3f325b4163ddbd2fa3a8e1bfe31e87781624e49fffc54"
+        },
+        {
+          "path": "crates/relayer-app-server/tests/conversation_export_contract.rs",
+          "sha256": "78368e5145295b84ef09056b828f39b6d14e99a4b9425c43686c888730000150"
+        },
+        {
+          "path": "crates/relayer-app-server/tests/support/completion_traces.rs",
+          "sha256": "2f7030a37cb72211d4c5a28371641695b3a9fa41460b38e6a89d18127a32087a"
+        },
+        {
+          "path": "crates/relayer-graph-core/src/graph/invocation.rs",
+          "sha256": "872744ef3eb501bb9794c00eac09b178d88dc029eb9b0dabddaee42a9ed53b5b"
+        },
+        {
+          "path": "docs/decisions/0015-sealed-completion-contract-and-invocations.md",
+          "sha256": "bcc37d822bb5a96f0e092a1ad6908b743acceb4e0932f4dce57e9272ebcba0a7"
+        },
+        {
+          "path": "docs/prd/index.html",
+          "sha256": "352d3992b3ea8f97c06ce17483a346eeb279640102a84f80728e5a968c13020b"
+        },
+        {
+          "path": "packages/graph-client/src/detail.ts",
+          "sha256": "701e8cfc6bad26ec5033b6df1118de74624896ff8b9622213ad8e41bec25e7dd"
+        },
+        {
+          "path": "packages/graph-client/src/scoped-authoring.ts",
+          "sha256": "bc14463cd7ae75f815059f816a9a88798419ae2547bd77cf4d590b2ade93b113"
+        },
+        {
+          "path": "packages/graph-client/test/detail.test.ts",
+          "sha256": "68b5c57ffc01dfd623df759a42cd34a5791cc1da17fd687774fdba61542ef033"
+        },
+        {
+          "path": "packages/graph-client/test/input-declarations.test.ts",
+          "sha256": "6a7f4a173e1816655caebe4a78c247c711384b35598acc34297574f1bf41332b"
+        },
+        {
+          "path": "packages/graph-client/test/scoped-authoring.test.ts",
+          "sha256": "eea41584e44d0f01d7006d38c332a2d27e5a6892352fb569adeb9607a95cc2e2"
+        },
+        {
+          "path": "python/relayer-graph/src/relayer_graph/scoped_authoring.py",
+          "sha256": "c74a2c400fdda188f6b931d4123050434eb5c8997a3bcc2567f5c4f43be0f057"
+        },
+        {
+          "path": "python/relayer-graph/tests/test_scoped_authoring.py",
+          "sha256": "b3b03d57f441d5a3e324573cd200fd714893500a16f2c98bc0a644b7d0cbfed3"
+        }
+      ],
+      "verdict": "No unresolved production blocker or assigned checkpoint gap found at this final bounded reviewed source. Non-certifying for whole-PR merge, human acceptance, hosted deployment or release. Final unified npm check/build and parent visual-assets host-startup diagnostic remain open until parent evidence closes them. Any manifested source change invalidates assertion.",
+      "reason": "Bounded exporter legacy-key classification and actual refused/pending export checkpoint; realistic Product published-import header and hosted capability expectation repair invalidate prior source assertion."
+    },
+    {
+      "sourceDigest": "b3b4ad3fffdfed14cf5e96a3354ba31a3e634f49f647187e53622404fd1ccd46",
+      "manifest": [
+        {
+          "path": "crates/relayer-app-server/src/api/error.rs",
+          "sha256": "0488a29a3f24bfcf69e2fc6840dfbefb2c63fca4c152d950fcb8067a95df8bfa"
+        },
+        {
+          "path": "crates/relayer-app-server/src/api/state.rs",
+          "sha256": "67e0c924b5884a893f3aa03ede6d64ea5c605221007ae7973acf14afd414485f"
+        },
+        {
+          "path": "crates/relayer-app-server/src/api/threads.rs",
+          "sha256": "85cbeee658a196e6740cf9bab2b27c537d0c43b543c09bb01bb76b36a20b2198"
+        },
+        {
+          "path": "crates/relayer-app-server/src/api/types.rs",
+          "sha256": "f18f7e190086605f1c979f93658c72d00fbfa1d6c8995823ce0a9cf2f62e0d09"
+        },
+        {
+          "path": "crates/relayer-app-server/src/app_server.rs",
+          "sha256": "2e310843d3d385363768aba3df1867c36420dc1f6a92b60ed76541c20fcd9680"
+        },
+        {
+          "path": "crates/relayer-app-server/src/conversation_export.rs",
+          "sha256": "735b984bd8706fbe07a141ce5e5cef5d1c7fb644eb04702917cd787357b807c1"
+        },
+        {
+          "path": "crates/relayer-app-server/src/conversation_export_service.rs",
+          "sha256": "e5d8d7421645bb396fa8616abea6bafbe3ffb4b7465d4129fd04a8a25f56deee"
+        },
+        {
+          "path": "crates/relayer-app-server/src/product/service.rs",
+          "sha256": "b8272b19f073f49323ae19090ef5bd117840245b35d24a4785d5840bd812ccc0"
+        },
+        {
+          "path": "crates/relayer-app-server/src/runtime.rs",
+          "sha256": "952e635554ec1150e0f03268cd797e2b98ea35e6eb1bf65d48bf511c92c40678"
+        },
+        {
+          "path": "crates/relayer-app-server/src/storage/sqlite/action_invocations.rs",
+          "sha256": "67549f970dc3d6d9754643bf5a2131d920fdcbc389c260b9d69c69719eb8dda5"
+        },
+        {
+          "path": "crates/relayer-app-server/src/storage/sqlite/conversation_imports.rs",
+          "sha256": "76d6f41725021910a73603aebf8bb00a0c59c5273adac08c5096404653e3c8fd"
+        },
+        {
+          "path": "crates/relayer-app-server/src/storage/sqlite/migrations/0046_invocation_preparation_refusals.sql",
+          "sha256": "4baf94e8470f3c8223b90b6aef68fd6aa5c2b4846d5f4aa45b461be4ed1ffebf"
+        },
+        {
+          "path": "crates/relayer-app-server/src/storage/sqlite/schema.rs",
+          "sha256": "df90c8e5646d33acd8d3f325b4163ddbd2fa3a8e1bfe31e87781624e49fffc54"
+        },
+        {
+          "path": "crates/relayer-app-server/tests/conversation_export_contract.rs",
+          "sha256": "78368e5145295b84ef09056b828f39b6d14e99a4b9425c43686c888730000150"
+        },
+        {
+          "path": "crates/relayer-app-server/tests/product_persistence_flow.rs",
+          "sha256": "42fe5914da58db0f884b5d1c0efcf604622d7ab68352d31ed6176a67d00d8859"
+        },
+        {
+          "path": "crates/relayer-app-server/tests/support/completion_traces.rs",
+          "sha256": "43f15f63192f84d27347cdd11400f1bba43911d1819263dca26bd96cf8eb0fed"
+        },
+        {
+          "path": "crates/relayer-graph-core/src/graph/invocation.rs",
+          "sha256": "872744ef3eb501bb9794c00eac09b178d88dc029eb9b0dabddaee42a9ed53b5b"
+        },
+        {
+          "path": "docs/decisions/0015-sealed-completion-contract-and-invocations.md",
+          "sha256": "bcc37d822bb5a96f0e092a1ad6908b743acceb4e0932f4dce57e9272ebcba0a7"
+        },
+        {
+          "path": "docs/prd/index.html",
+          "sha256": "352d3992b3ea8f97c06ce17483a346eeb279640102a84f80728e5a968c13020b"
+        },
+        {
+          "path": "packages/graph-client/src/detail.ts",
+          "sha256": "701e8cfc6bad26ec5033b6df1118de74624896ff8b9622213ad8e41bec25e7dd"
+        },
+        {
+          "path": "packages/graph-client/src/scoped-authoring.ts",
+          "sha256": "bc14463cd7ae75f815059f816a9a88798419ae2547bd77cf4d590b2ade93b113"
+        },
+        {
+          "path": "packages/graph-client/test/detail.test.ts",
+          "sha256": "68b5c57ffc01dfd623df759a42cd34a5791cc1da17fd687774fdba61542ef033"
+        },
+        {
+          "path": "packages/graph-client/test/input-declarations.test.ts",
+          "sha256": "6a7f4a173e1816655caebe4a78c247c711384b35598acc34297574f1bf41332b"
+        },
+        {
+          "path": "packages/graph-client/test/scoped-authoring.test.ts",
+          "sha256": "eea41584e44d0f01d7006d38c332a2d27e5a6892352fb569adeb9607a95cc2e2"
+        },
+        {
+          "path": "python/relayer-graph/src/relayer_graph/scoped_authoring.py",
+          "sha256": "c74a2c400fdda188f6b931d4123050434eb5c8997a3bcc2567f5c4f43be0f057"
+        },
+        {
+          "path": "python/relayer-graph/tests/test_scoped_authoring.py",
+          "sha256": "b3b03d57f441d5a3e324573cd200fd714893500a16f2c98bc0a644b7d0cbfed3"
+        }
+      ],
+      "verdict": "No unresolved assigned production blocker or checkpoint gap at this exact bounded reviewed source. Final narrow tests passed; parent final unified check/build and declared qualification gates remain required. Non-certifying for whole-PR merge, human acceptance, hosted deployment or release. Any manifested source change invalidates assertion.",
+      "reason": "Fullcheck6 exposed Prime visual fixture numeric Input IDs lacking mounted identity; test-only realistic declaration-binding repair invalidates scope digest."
+    },
+    {
+      "sourceDigest": "adc458de9fd75ef1dd2a21359173926d0f12302ce15ef72d20187882845c7cd4",
+      "manifest": [
+        {
+          "path": "crates/relayer-app-server/src/api/error.rs",
+          "sha256": "0488a29a3f24bfcf69e2fc6840dfbefb2c63fca4c152d950fcb8067a95df8bfa"
+        },
+        {
+          "path": "crates/relayer-app-server/src/api/state.rs",
+          "sha256": "67e0c924b5884a893f3aa03ede6d64ea5c605221007ae7973acf14afd414485f"
+        },
+        {
+          "path": "crates/relayer-app-server/src/api/threads.rs",
+          "sha256": "85cbeee658a196e6740cf9bab2b27c537d0c43b543c09bb01bb76b36a20b2198"
+        },
+        {
+          "path": "crates/relayer-app-server/src/api/types.rs",
+          "sha256": "f18f7e190086605f1c979f93658c72d00fbfa1d6c8995823ce0a9cf2f62e0d09"
+        },
+        {
+          "path": "crates/relayer-app-server/src/app_server.rs",
+          "sha256": "2e310843d3d385363768aba3df1867c36420dc1f6a92b60ed76541c20fcd9680"
+        },
+        {
+          "path": "crates/relayer-app-server/src/conversation_export.rs",
+          "sha256": "735b984bd8706fbe07a141ce5e5cef5d1c7fb644eb04702917cd787357b807c1"
+        },
+        {
+          "path": "crates/relayer-app-server/src/conversation_export_service.rs",
+          "sha256": "e5d8d7421645bb396fa8616abea6bafbe3ffb4b7465d4129fd04a8a25f56deee"
+        },
+        {
+          "path": "crates/relayer-app-server/src/product/service.rs",
+          "sha256": "b8272b19f073f49323ae19090ef5bd117840245b35d24a4785d5840bd812ccc0"
+        },
+        {
+          "path": "crates/relayer-app-server/src/runtime.rs",
+          "sha256": "952e635554ec1150e0f03268cd797e2b98ea35e6eb1bf65d48bf511c92c40678"
+        },
+        {
+          "path": "crates/relayer-app-server/src/storage/sqlite/action_invocations.rs",
+          "sha256": "67549f970dc3d6d9754643bf5a2131d920fdcbc389c260b9d69c69719eb8dda5"
+        },
+        {
+          "path": "crates/relayer-app-server/src/storage/sqlite/conversation_imports.rs",
+          "sha256": "76d6f41725021910a73603aebf8bb00a0c59c5273adac08c5096404653e3c8fd"
+        },
+        {
+          "path": "crates/relayer-app-server/src/storage/sqlite/migrations/0046_invocation_preparation_refusals.sql",
+          "sha256": "4baf94e8470f3c8223b90b6aef68fd6aa5c2b4846d5f4aa45b461be4ed1ffebf"
+        },
+        {
+          "path": "crates/relayer-app-server/src/storage/sqlite/schema.rs",
+          "sha256": "df90c8e5646d33acd8d3f325b4163ddbd2fa3a8e1bfe31e87781624e49fffc54"
+        },
+        {
+          "path": "crates/relayer-app-server/tests/conversation_export_contract.rs",
+          "sha256": "78368e5145295b84ef09056b828f39b6d14e99a4b9425c43686c888730000150"
+        },
+        {
+          "path": "crates/relayer-app-server/tests/product_persistence_flow.rs",
+          "sha256": "42fe5914da58db0f884b5d1c0efcf604622d7ab68352d31ed6176a67d00d8859"
+        },
+        {
+          "path": "crates/relayer-app-server/tests/support/completion_traces.rs",
+          "sha256": "43f15f63192f84d27347cdd11400f1bba43911d1819263dca26bd96cf8eb0fed"
+        },
+        {
+          "path": "crates/relayer-graph-core/src/graph/invocation.rs",
+          "sha256": "872744ef3eb501bb9794c00eac09b178d88dc029eb9b0dabddaee42a9ed53b5b"
+        },
+        {
+          "path": "docs/decisions/0015-sealed-completion-contract-and-invocations.md",
+          "sha256": "bcc37d822bb5a96f0e092a1ad6908b743acceb4e0932f4dce57e9272ebcba0a7"
+        },
+        {
+          "path": "docs/prd/index.html",
+          "sha256": "352d3992b3ea8f97c06ce17483a346eeb279640102a84f80728e5a968c13020b"
+        },
+        {
+          "path": "packages/graph-client/src/detail.ts",
+          "sha256": "701e8cfc6bad26ec5033b6df1118de74624896ff8b9622213ad8e41bec25e7dd"
+        },
+        {
+          "path": "packages/graph-client/src/scoped-authoring.ts",
+          "sha256": "bc14463cd7ae75f815059f816a9a88798419ae2547bd77cf4d590b2ade93b113"
+        },
+        {
+          "path": "packages/graph-client/test/detail.test.ts",
+          "sha256": "68b5c57ffc01dfd623df759a42cd34a5791cc1da17fd687774fdba61542ef033"
+        },
+        {
+          "path": "packages/graph-client/test/input-declarations.test.ts",
+          "sha256": "6a7f4a173e1816655caebe4a78c247c711384b35598acc34297574f1bf41332b"
+        },
+        {
+          "path": "packages/graph-client/test/scoped-authoring.test.ts",
+          "sha256": "eea41584e44d0f01d7006d38c332a2d27e5a6892352fb569adeb9607a95cc2e2"
+        },
+        {
+          "path": "packages/harness-host/src/implementations/prime-visual-authoring.ts",
+          "sha256": "3dad8b56fe5be0e219f699a754aa233be1e18f8df612d84f997f3885f5cee170"
+        },
+        {
+          "path": "packages/harness-host/test/prime-visual-authoring.test.ts",
+          "sha256": "e9bbdb374eec78b3d55e7f1a5d54562aed3b9c1123abbe7854e10340ef989194"
+        },
+        {
+          "path": "python/relayer-graph/src/relayer_graph/actions.py",
+          "sha256": "3a72b84f4d3c7d49d182eae3015d2110127ea5d9ffc3107207ec649ea0ddd083"
+        },
+        {
+          "path": "python/relayer-graph/src/relayer_graph/scoped_authoring.py",
+          "sha256": "c74a2c400fdda188f6b931d4123050434eb5c8997a3bcc2567f5c4f43be0f057"
+        },
+        {
+          "path": "python/relayer-graph/tests/test_scoped_authoring.py",
+          "sha256": "b3b03d57f441d5a3e324573cd200fd714893500a16f2c98bc0a644b7d0cbfed3"
+        }
+      ],
+      "verdict": "No unresolved assigned production blocker or checkpoint gap at this exact bounded reviewed source. Final narrow tests passed; parent final unified check/build and declared qualification gates remain required. Non-certifying for whole-PR merge, human acceptance, hosted deployment or release. Any manifested source change invalidates assertion.",
+      "reason": "Final fullcheck6 fixture reconciliation plus custom draft-preview publicState regression repair; old source assertion preserved."
+    }
+  ],
+  "updatedDate": "2026-10-08",
+  "checkpoints": [
+    {
+      "promise": "Backend restart preserves preparation-only reservations without creating a new native child or retrying inference",
+      "productionSeams": [
+        "app_server reconcile_interrupted_interaction",
+        "storage action_invocations user_preparation_recoverable_on"
+      ],
+      "tests": [
+        "user_reservation_precedes_native_prepare_and_recovers_a_failed_bind with World.restart"
+      ],
+      "assertion": "Startup uses the same trusted flag as recovery projection: authoritative human nonlegacy key, exact immutable input receipt, no bound graph-node, stop, execution or effect-bearing attempt. It returns before legacy preparation/quarantine. Later explicit recovery retains original result/key/native child and frozen input receipt; already-admitted/unknown/stopped states do not gain this shortcut."
+    },
+    {
+      "promise": "Reusing one accepted Node across two threads does not leak calls; selected Invoke Layer and definition provenance remain distinct",
+      "productionSeams": [
+        "real build_conversation_export builder and V4 alias mapping",
+        "graph conversation snapshot source-completion inventory"
+      ],
+      "tests": [
+        "portable_builder_isolates_shared_node_calls_and_preserves_selected_layer"
+      ],
+      "assertion": "Two real same-project Product and graph threads share one immutable accepted Node/Input/Invoke. Original saved Input occurrence A remains frozen while B activates from Layer B. Both exports decode and validate, retain one own graph-only call, frozen expected argument/Current, exact source-turn/definition/presentation joins, and omit foreign arguments/Current/private keys. B does not invent authored Layer A in its closure."
+    },
+    {
+      "promise": "Deterministic native preparation rejection leaves a readable failed receipt without consuming a call; corrected activation uses fresh identity and inputs",
+      "productionSeams": [
+        "API invoke_action_with_authority and project_action_invocations",
+        "runtime native_invocation_key_absent with strict inventory",
+        "storage reject_user_invocation_preparation/user_invocation_preparation_rejected and Product migration0046",
+        "renderer isRejectedActionPreparation/actionWasInvoked",
+        "workspace inputConsumersExhausted fallback",
+        "threads invokeAction catch recovery"
+      ],
+      "tests": [
+        "user_reservation_precedes_native_prepare_and_recovers_a_failed_bind: rejected-native preparation, projection, restart, rejected-key refusal, corrected fresh key, existing native key after failed Product bind",
+        "accepted_graph_closures_client_preserves_missing_slots_and_rejects_mismatches: strict inventory missing/503/missing source closure",
+        "action-invocation-state rejection marker adversarial guards",
+        "invoke-input-bindings plain and compiled preparation-rejected correction and durable failure locked",
+        "workspace-navigation-integration refusal then fresh-key/current-revision activation"
+      ],
+      "assertion": "Only persisted deterministic400/401/403/404/409/422 plus trusted native exact source/action/key absence and untouched authoritative human receipt can mark rejection. Inventory omission/error/missing source and an existing native call cannot certify absence. Marker transition is atomic and never backfills historical failures. Exact rejected key cannot recapture; new key is a new reservation. Renderer requires explicit marker, nonrecoverable, nondurable, failed and nonlegacy key, retains refused history, skips false recovery/tutorial success, snapshots corrected inputs with fresh revision/key, and keeps prepared/historical/unknown failures locked."
+    },
+    {
+      "promise": "Only true legacy Product action links synthesize legacy Action origins; refused and pending keyed native reservations remain chronology without fabricated call authority.",
+      "productionSeams": [
+        "conversation_export_service build_conversation_export_once legacy origin filter",
+        "conversation_export_service build_share_conversation_export_once legacy origin filter"
+      ],
+      "tests": [
+        "user_reservation_precedes_native_prepare_and_recovers_a_failed_bind"
+      ],
+      "assertion": "Real refused and corrected keyed receipts are retained. Local export decodes and validates one frozen Kyoto native call before recovery and after no-effect admission refusal; both graph-unbound Product turns retain User origins. Exact hosted V4 refusal remains. No new native call or inferred result binding from durable flag."
+    },
+    {
+      "promise": "No-effect model admission restores unsent state while retaining exact prepared native call and immutable reservation.",
+      "productionSeams": [
+        "normal execution no-effect return-to-unsent",
+        "native graph inventory joining"
+      ],
+      "tests": [
+        "user_reservation_precedes_native_prepare_and_recovers_a_failed_bind"
+      ],
+      "assertion": "Direct final not_started and graph_node_id=None, model_failed/none immutable attempt, durable reservation, exact native child/frozen Kyoto inventory and graph-only export all observed."
+    },
+    {
+      "promise": "Workspace history projection reads valid imported portable metadata for all visible imported threads; local accepted graph export, read-only refusal, conversion and archive preservation coexist with hosted V4 capability refusal.",
+      "productionSeams": [
+        "api state project_imported_invocation_history",
+        "storage imported_invocation_export_records",
+        "Product local export and share-export API"
+      ],
+      "tests": [
+        "conversation_export_uses_real_accepted_graph_and_rejects_read_only_authority"
+      ],
+      "assertion": "Published V1 fixture now retains a typed Header and producer instead of malformed empty JSON. Existing state/local export/redaction/read-only/converted target/repeat/archive assertions remain; final hosted request checks422 and exact reusable_invocation_portability_unavailable code."
+    },
+    {
+      "promise": "Visual Invoke numeric bindings require exact mounted Input identity; Python declaration bindings survive source replacement, checkpoint and frozen submit.",
+      "productionSeams": [
+        "PrimeVisualAuthoring wire validation and declaration resolution",
+        "Python ActionObject.to_detail_wire",
+        "graph-client Detail mounted Input identity check"
+      ],
+      "test": "Prime compiles Python Invoke policy and bindings through checkpoint and submit, false/true plus numeric-unmounted refusal",
+      "assertion": "Two actual Input declarations are mounted with Invoke on owner answer, layer source, for original and replacement. Each wire payload retains exact declaration clientKey references and boolean reuse policy; compiled mounts identify all three same-owner/layer actions; repaired snapshots and frozen submission remain equal; single transport. Separate well-shaped numeric21/22 unmounted fixture refuses exact input_reference_invalid/inputActions before transport. Prime wire carries no accepted id/ref; no authority fabricated to retain unrealistic numeric success."
+    },
+    {
+      "promise": "Custom draft preview read models retain root actions without Current inventory or portable actionsForLayer; real portable parser Current validation remains strict.",
+      "productionSeams": [
+        "public-share-viewer publicState custom optional fields",
+        "draft-preview draftPreviewReadModel"
+      ],
+      "tests": [
+        "draft-preview-read-model layer and node target fixtures",
+        "full249 warm renderer portfolio"
+      ],
+      "assertion": "Fallback only for absent currentInteractions/actionsForLayer; genuine parser populates these fields. Default returns existing root action list, no new mutation/authority or acceptance."
+    },
+    {
+      "promise": "Native integration chronology permits only exact recorded no-effect refusal IDs; accepted success count/IDs and immutable calls remain exact through reopen/runtime loss.",
+      "productionSeams": [
+        "actual Product/native Invoke API, draft commit and projection",
+        "real integration accepted waiter and exported sequence lookup"
+      ],
+      "test": "invoke-input-product-integration seals connected inputs, clears exact submissions, recovers key and projects native metadata",
+      "assertion": "Each expected refusal records exact key/source/action/result ID and trusted flags, graphNode null/output null, unchanged draft, exact native inventory and no new contract. Unknown failed turns fatal; accepted waiter checks exact accepted IDs/count including only registered refused IDs. Ordinary turn lookup uses actual ID/sequence. Reopen preserves exact four records/two native calls and persisted refusal proof even without runtime."
+    }
+  ],
+  "verificationActuallyRan": [
+    {
+      "owner": "context_trace focused test or authority prior checkpoint; no additional tests after parent concurrency stop",
+      "log": "/private/tmp/pr707-portable-shared-node-loopback-4.log",
+      "sha256": "8e8cc9475b5bc70edb79ec852ec33d8ff055105189c455c2011e54e8b5fcb66d",
+      "passedTests": 1,
+      "observedOutcome": "passed",
+      "meaning": "Real two-thread shared-Node portable builder alias joins and foreign call/argument/Current isolation"
+    },
+    {
+      "owner": "context_trace focused test or authority prior checkpoint; no additional tests after parent concurrency stop",
+      "log": "/private/tmp/pr707-export-capability-expectations-5.log",
+      "sha256": "f3f2a40c520aa1a596893d347745a0b38c2402fabe52f260b8e38f78c76c85e6",
+      "passedTests": 4,
+      "observedOutcome": "passed",
+      "meaning": "Four existing fixtures preserve local V4 and inert roundtrip while exact hosted capability refusal is asserted"
+    },
+    {
+      "owner": "context_trace focused test or authority prior checkpoint; no additional tests after parent concurrency stop",
+      "log": "/private/tmp/interactive-inputs-authority-api-ordering-checkpoint-loopback-5.log",
+      "sha256": "6a12e69936ff52233375f1d9ab7f7ebf53569b5bb93d05a8eb3b7ab046777ddb",
+      "passedTests": 1,
+      "observedOutcome": "passed",
+      "meaning": "Authority-owned actual API/native preparation, restart preservation, newer edit retention and no-effect recovery; prior focused source snapshot"
+    },
+    {
+      "owner": "prototype or authority reviewer; read actual final logs, no concurrent test launch by this reviewer",
+      "log": "/private/tmp/pr707-ui-preparation-rejected-final.log",
+      "sha256": "aadd2cc2f07286c90e38ba666694e12378f4a894d7728c3a452aa39fc6723dc8",
+      "passedTests": 247,
+      "observedOutcome": "passed",
+      "meaning": "Final six-file renderer portfolio, including plain/compiled and actual controller correction"
+    },
+    {
+      "owner": "prototype or authority reviewer; read actual final logs, no concurrent test launch by this reviewer",
+      "log": "/private/tmp/pr707-native-refusal-inventory-checkpoint.log",
+      "sha256": "18c8560f8d789b4ab1635585199cadd194e633822ce2ee5f5268992dcd88b6f9",
+      "passedTests": 1,
+      "observedOutcome": "passed",
+      "meaning": "Strict trusted inventory absent/error/source-missing guard checkpoint"
+    },
+    {
+      "owner": "prototype or authority reviewer; read actual final logs, no concurrent test launch by this reviewer",
+      "log": "/private/tmp/pr707-native-preparation-refusal-checkpoint-4.log",
+      "sha256": "5d9485e1e4b48ac297b592404d3f5f8016e6d54a4c5231b65b1756eedc646cb9",
+      "passedTests": 1,
+      "observedOutcome": "passed",
+      "meaning": "Real API/native refusal receipt persistence, restart, old-key refusal, corrected new key, lost-bind existing native key and exact recovery"
+    },
+    {
+      "owner": "context_trace focused deterministic execution",
+      "log": "/private/tmp/pr707-refusal-portable-export-checkpoint-4.log",
+      "sha256": "73bd5ffab679f52b4d11596caa20b26000466dcc8b7964ffc66f161bb93eecda",
+      "passedTests": 1,
+      "observedOutcome": "passed",
+      "meaning": "Native exact refusal, lost-bind graph-only export, restart/recovery and direct restored-unsent state"
+    },
+    {
+      "owner": "context_trace focused deterministic execution",
+      "log": "/private/tmp/pr707-product-export-state-checkpoint-3.log",
+      "sha256": "bb06dfb61cd49e58ab25fe3d8f9e2b005f32e92772f57696335ea577e5bc00f8",
+      "passedTests": 1,
+      "observedOutcome": "passed",
+      "meaning": "Typed imported metadata plus local graph/export authority/archive preservation and exact hosted V4 refusal"
+    },
+    {
+      "owner": "context_trace focused deterministic execution",
+      "log": "/private/tmp/pr707-prime-mounted-inputs-checkpoint-2.log",
+      "sha256": "9c822b6e8b291f2a97bcf02235bbd42e07d3e454de96d00e40ea4dc5a290360c",
+      "passedTests": 22,
+      "observedOutcome": "passed",
+      "duration": "912ms"
+    },
+    {
+      "owner": "context_trace direct execution",
+      "log": "/private/tmp/pr707-prime-mounted-inputs-checkpoint-4.log",
+      "sha256": "7f48541bc36779b5df0d6836086420e6cdc59eb305fab44dc1ef34e88dccf115",
+      "passedTests": 22,
+      "observedOutcome": "passed",
+      "meaning": "Own test-only Prime mounted declaration/reference fixture and exact numeric unmounted refusal"
+    },
+    {
+      "owner": "prototype execution; independently read exact log/source only",
+      "log": "/private/tmp/pr707-ui-fullcheck6-warm-final.log",
+      "sha256": "90d078df91c1da42c41be6de4fa118b89edc6df4a95dbd4184a597db8560e7a1",
+      "passedTests": 249,
+      "observedOutcome": "passed",
+      "meaning": "Prototype-owned seven-file real renderer portfolio plus draft-preview fixtures"
+    },
+    {
+      "owner": "prototype execution; independently read exact log/source only",
+      "log": "/private/tmp/pr707-ui-fullcheck6-checkpoints-native-final.log",
+      "sha256": "d01862af3aba11bfb5d51187748d9f15bf806d3b488a1a0000e466839453768f",
+      "passedTests": 1,
+      "observedOutcome": "passed",
+      "meaning": "Prototype-owned real native integration exact refused/history checkpoint"
+    }
+  ],
+  "resolvedFollowUpFindings": [
+    {
+      "code": "deterministic_preparation_refusal_projected_as_spent_call",
+      "disposition": "Explicit persisted trusted marker plus renderer occupancy/input fallback/controller recovery fixes; final realistic native/runtime and mounted/controller checkpoints passed. Earlier HOLD preserved in supersededSourceAssertions."
+    },
+    {
+      "code": "nondurable_keyed_reservation_misclassified_as_legacy_export",
+      "disposition": "Both local/share origin maps now require nondurable AND invocation_key=legacy. Native inventory joining unchanged; real refusal/lost-bind/no-effect fixture exports exact1 native call and retains keyed Product chronology without Action origin."
+    }
+  ],
+  "modifiedFixtureRationale": {
+    "obsoleteWorldLegacyLink": "Only original World legacy action link was removed immediately before exporter assertions because this fixture had already replaced its source Product graph with a new accepted root. Rejected/corrected keyed receipts and all native inventory remain; no tested evidence deleted.",
+    "publishedImportHeader": "The prior {} header cannot represent any valid published import. Typed V1 Header preserves historical no-call compatibility; production parse is not relaxed.",
+    "hostedExpectation": "Local V4 converted Navigate target already checked; unqualified hosted format must refuse422 rather than satisfy obsolete200 expectation."
+  },
+  "primeVisualCheckpointScope": {
+    "test": "validates mounted Python Invoke declarations and compiles references through checkpoint and submit (reuse false/true)",
+    "proof": "Original+replacement Python payloads preserve exact two declaration clientKey refs and reusable bool. Both actual Input declarations mount same owner/layer; checkpoint and frozen submit preserve canonical three scoped references. Separate numeric21/22-unmounted exact invalid-input issue and no fetch.",
+    "limitation": "CompiledGraphActionReference contains clientKey/sourceNode/sourceLayer only. This detail compiler fixture does not prove submission of executable native Input/Invoke definitions or persisted reuse policy; GraphClient.addAction and native preparation fixtures own that separate boundary. No production schema reshaping or fabricated accepted IDs."
+  }
+}

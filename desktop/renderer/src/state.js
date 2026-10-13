@@ -8,6 +8,8 @@ export const appState = {
   threads: [],
   interactions: [],
   actionInvocations: [],
+  invocationInventoryAvailable: false,
+  importedInvocationHistory: [],
   pendingActionInvocations: [],
   approvals: [],
   inputDraftRevision: null,
@@ -39,6 +41,7 @@ export const viewState = {
   nodeDetailsClosed: false,
   layerPath: [],
   temporalCurrent: null,
+  invocationOrigin: null,
   evalContext: null,
 };
 

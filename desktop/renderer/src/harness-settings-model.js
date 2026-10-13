@@ -39,9 +39,13 @@ export function validateHarnessRules(rules) {
 
 export function usableHarnessPresentations(settings) {
   return (settings?.harnesses ?? []).flatMap((harness) => {
-    if (!harness.usableNow) return [];
+    const repairProviderId = !harness.available && harness.permissionAvailable !== false
+      ? harness.repairProviderIds?.[0] ?? null
+      : null;
+    if (!harness.usableNow && repairProviderId === null) return [];
     return [{
       harness,
+      repairProviderId,
       isDefault: harness.id === settings?.defaults?.harnessId,
     }];
   });
