@@ -12,6 +12,7 @@ import {
   productionHarnessRuntimeDescriptor,
   productionProviderAdapterRegistry,
 } from "../desktop/main/providers/provider-adapter-registry.mjs";
+import { GraphCompleteRuntimeService, productTemporalFeatures } from "../desktop/main/services/graphcomplete-runtime.mjs";
 import { createHarnessReadinessCoordinator } from "../desktop/main/services/harness-readiness.mjs";
 import {
   PRIME_AGENT_ASSET_SHA256,
@@ -24,7 +25,11 @@ import {
   checkPrimeManagedRuntime,
   createPrimeReviewedTreeCopier,
 } from "../desktop/main/services/prime-managed-runtime.mjs";
-import { HARNESS_MANAGED_RUNTIME_REQUIREMENTS } from "../desktop/shared/managed-runtime-requirements.mjs";
+import { RelayerAppServerService } from "../desktop/main/services/relayer-app-server.mjs";
+import {
+  HARNESS_MANAGED_RUNTIME_REQUIREMENTS,
+  managedRuntimeRequirementForHarness,
+} from "../desktop/shared/managed-runtime-requirements.mjs";
 import { digestHarnessConfiguration, loadHarnessConfigurations } from "@relayer/harness-host";
 
 import { liveRunProfileNames, resolveRunProfile } from "./recursive-live-run-model.mjs";
@@ -254,4 +259,51 @@ export async function prepareRoute({ session, productServer, runtime, resolver, 
     body: JSON.stringify({ harnessId: profile.harness, familyId: family.id, providerId, modelId }),
   });
   return family;
+}
+
+/**
+ * Boots the GraphComplete runtime and app server the desktop uses, with the profile's provider
+ * and, by default, the temporal features the desktop ships (current pointers, Stop, recursion).
+ */
+export async function startLiveProduct({ profile, configurationPath, dataDirectory, temporalFeatures = productTemporalFeatures() }) {
+  const resolver = managedRuntimeResolver();
+  const runtime = new GraphCompleteRuntimeService({
+    userDataDirectory: dataDirectory,
+    graphServerBinary: join(repositoryRoot, "target", "debug", "relayer-graph-server"),
+    configurationPaths: [configurationPath],
+    ...(profile.codexExecutable === undefined ? {} : { codexPathOverride: profile.codexExecutable }),
+    ...(profile.implementation === "prime.agent" ? {
+      resolvePrimeRuntime: async () => productionHarnessRuntimeDescriptor(await resolver.get(
+        managedRuntimeRequirementForHarness("prime.agent").recipeId,
+      )),
+    } : {}),
+    temporalFeatures,
+    candidateTrace: {
+      directory: join(dataDirectory, "candidate-trace-spool"),
+      policy: {
+        mode: "required",
+        requiredFeatures: {},
+        includeNativeArtifacts: false,
+        maxBytesPerTurn: 10 * 1024 * 1024,
+        maxEventsPerTurn: 50_000,
+      },
+    },
+    acquireProviderExecution: providerExecution(profile),
+  });
+  const runtimeSession = await runtime.start();
+  try {
+    const productServer = new RelayerAppServerService({
+      userDataDirectory: dataDirectory,
+      binaryPath: join(repositoryRoot, "target", "debug", "relayer-app-server"),
+      webDirectory: join(repositoryRoot, "desktop", "renderer"),
+      permissionCatalogPath: join(repositoryRoot, "permissions", "desktop.json"),
+      runtimeSession,
+      defaultHarnessConfiguration: profile.harness,
+      allowHarnessOverride: true,
+    });
+    return { runtime, productServer, resolver };
+  } catch (error) {
+    await runtime.close().catch(() => {});
+    throw error;
+  }
 }

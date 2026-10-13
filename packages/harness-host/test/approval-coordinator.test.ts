@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   MAX_HARNESS_APPROVAL_RETAINED_EVENTS,
+  MAX_HARNESS_APPROVAL_SESSION_RETAINED_EVENTS,
   MAX_HARNESS_APPROVAL_SESSION_GRANTS,
   MAX_HARNESS_APPROVAL_TERMINAL_TOMBSTONES,
   HarnessApprovalCoordinator,
@@ -313,6 +314,79 @@ describe("HarnessApprovalCoordinator", () => {
     expect(pending.scopeKeys).toEqual(["grant:0"]);
     coordinator.decide(pending.requestId, { decision: "deny" });
     await expect(noLongerGranted).resolves.toMatchObject({ decision: "deny", actor: "user" });
+  });
+
+  it("bounds the backlog across every interaction's stream, not only each one", async () => {
+    const coordinator = coordinatorFixture();
+    const perStream = 400;
+    let refusal: { interactionId: number; ownEvents: number } | undefined;
+    // Fill streams with resolved, unacknowledged requests, each well under its own bound.
+    for (let stream = 0; refusal === undefined; stream += 1) {
+      const interactionId = 100 + stream;
+      const channel = coordinator.beginCompletion({ interactionId, completeCallId: `complete-${stream}` });
+      for (let index = 0; index < perStream; index += 1) {
+        const waiting = channel.request(commandRequest(`provider-${stream}-${index}`, [`request:${stream}:${index}`]));
+        const pending = coordinator.snapshot(interactionId).pendingRequests.at(-1);
+        if (pending === undefined) {
+          await expect(waiting).rejects.toMatchObject({ code: "approval_event_backlog_full" });
+          refusal = { interactionId, ownEvents: coordinator.snapshot(interactionId).events.length };
+          break;
+        }
+        coordinator.decide(pending.requestId, { decision: "approve_once" });
+        await waiting;
+      }
+    }
+    expect(refusal!.ownEvents).toBeLessThan(MAX_HARNESS_APPROVAL_RETAINED_EVENTS - 2);
+    let sessionEvents = 0;
+    for (let interactionId = 100; interactionId <= refusal!.interactionId; interactionId += 1) {
+      sessionEvents += coordinator.snapshot(interactionId).events.length;
+    }
+    expect(sessionEvents).toBeGreaterThan(MAX_HARNESS_APPROVAL_SESSION_RETAINED_EVENTS - 2);
+    // Acknowledging one idle stream frees room again.
+    coordinator.endCompletion("complete-0");
+    expect(coordinator.snapshot(100, perStream * 2).events).toEqual([]);
+    const channel = coordinator.beginCompletion({ interactionId: 999, completeCallId: "complete-fresh" });
+    const admitted = channel.request(commandRequest("provider-fresh", ["request:fresh"]));
+    expect(coordinator.snapshot(999).pendingRequests).toHaveLength(1);
+    coordinator.endCompletion("complete-fresh");
+    await expect(admitted).rejects.toMatchObject({ resolution: { outcome: "aborted" } });
+  });
+
+  it("drops abandoned streams before refusing live work at the session bound", async () => {
+    let clock = Date.parse("2026-10-13T12:00:00.000Z");
+    let request = 0;
+    const coordinator = new HarnessApprovalCoordinator({
+      threadId: 7,
+      harnessSessionId: "session-1",
+      requestId: () => `request-${++request}`,
+      now: () => new Date(clock).toISOString(),
+    });
+    const fill = async (interactionId: number, completeCallId: string, count: number) => {
+      const channel = coordinator.beginCompletion({ interactionId, completeCallId });
+      for (let index = 0; index < count; index += 1) {
+        const waiting = channel.request(commandRequest(`provider-${interactionId}-${index}`, [`request:${interactionId}:${index}`]));
+        coordinator.decide(coordinator.snapshot(interactionId).pendingRequests.at(-1)!.requestId, { decision: "approve_once" });
+        await waiting;
+      }
+      coordinator.endCompletion(completeCallId);
+    };
+    // Ten ended streams whose observers never acknowledged them.
+    for (let stream = 0; stream < 10; stream += 1) await fill(100 + stream, `ended-${stream}`, 200);
+    // A run that just ended keeps its unread final events: its observer reads them in moments.
+    await fill(200, "just-ended", 48);
+    const live = coordinator.beginCompletion({ interactionId: 999, completeCallId: "live" });
+    await expect(live.request(commandRequest("provider-early", ["request:early"])))
+      .rejects.toMatchObject({ code: "approval_event_backlog_full" });
+    expect(coordinator.snapshot(200).latestSequence).toBe(96);
+
+    // Once they have sat idle past the grace period, the oldest are dropped to make room.
+    clock += 61_000;
+    const waiting = live.request(commandRequest("provider-live", ["request:live"]));
+    expect(coordinator.snapshot(999).pendingRequests).toHaveLength(1);
+    expect(coordinator.snapshot(100).latestSequence).toBe(0);
+    expect(coordinator.snapshot(109).latestSequence).toBe(400);
+    coordinator.endCompletion("live");
+    await expect(waiting).rejects.toMatchObject({ resolution: { outcome: "aborted" } });
   });
 
   it("fails closed instead of dropping an unacknowledged event backlog", async () => {

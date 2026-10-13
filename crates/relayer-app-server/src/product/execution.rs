@@ -216,10 +216,12 @@ impl InteractionExecutionService {
         let durable_input = match execution.product.interaction_input(interaction.id).await {
             Ok(value) => value,
             Err(error) => {
-                record_background_failure(
-                    &execution.product,
+                fail_prepared_before_launch(
+                    execution,
+                    runtime,
                     &thread,
                     &interaction,
+                    prepared,
                     error.to_string(),
                 )
                 .await;
@@ -231,10 +233,12 @@ impl InteractionExecutionService {
         let invoked_run = match execution.product.is_invoked_run(interaction.id).await {
             Ok(value) => value,
             Err(error) => {
-                record_background_failure(
-                    &execution.product,
+                fail_prepared_before_launch(
+                    execution,
+                    runtime,
                     &thread,
                     &interaction,
+                    prepared,
                     error.to_string(),
                 )
                 .await;
@@ -249,10 +253,12 @@ impl InteractionExecutionService {
             {
                 Ok(history) => Some(history),
                 Err(error) => {
-                    record_background_failure(
-                        &execution.product,
+                    fail_prepared_before_launch(
+                        execution,
+                        runtime,
                         &thread,
                         &interaction,
+                        prepared,
                         error.to_string(),
                     )
                     .await;
@@ -1264,6 +1270,30 @@ async fn record_pre_execution_model_failure_to_unsent(
         )
         .await;
     }
+}
+
+/// A failure after graph preparation but before launch: release the prepared graph completion
+/// and its capability, then record the failure. If even that cleanup fails, the row is left
+/// pending reconciliation rather than failed over an unresolved graph completion.
+async fn fail_prepared_before_launch(
+    execution: &InteractionExecutionService,
+    runtime: &crate::runtime::RuntimeClient,
+    thread: &Thread,
+    interaction: &Interaction,
+    prepared: PreparedInteraction,
+    message: String,
+) {
+    if let Err(cleanup) = discard_model_preparation(runtime, prepared).await {
+        record_reconciliation_pending(
+            execution,
+            thread,
+            interaction,
+            &format!("{message}; {cleanup}"),
+        )
+        .await;
+        return;
+    }
+    record_background_failure(&execution.product, thread, interaction, message).await;
 }
 
 async fn discard_model_preparation(

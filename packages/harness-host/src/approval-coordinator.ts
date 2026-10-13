@@ -19,6 +19,9 @@ export type HarnessApprovalResolutionActor = "user" | "session_grant" | "harness
 export type HarnessApprovalRequestTerminationOutcome = "expired" | "aborted";
 
 export const MAX_HARNESS_APPROVAL_RETAINED_EVENTS = 1_024;
+/** The bound across every interaction's stream in one live session. */
+export const MAX_HARNESS_APPROVAL_SESSION_RETAINED_EVENTS = 4_096;
+const ABANDONED_STREAM_GRACE_MS = 60_000;
 export const MAX_HARNESS_APPROVAL_TERMINAL_TOMBSTONES = 256;
 export const MAX_HARNESS_APPROVAL_SESSION_GRANTS = 128;
 
@@ -94,6 +97,12 @@ export interface HarnessApprovalCoordinatorOptions {
   readonly harnessSessionId?: string;
   readonly now?: () => string;
   readonly requestId?: () => string;
+  /**
+   * How long an idle, unacknowledged stream is kept before the session bound may drop it. Its
+   * observer reads the final events within moments of its run ending, so a stream idle this
+   * long has no observer left.
+   */
+  readonly abandonedStreamGraceMs?: number;
 }
 
 export class HarnessApprovalCoordinatorError extends Error {
@@ -116,6 +125,8 @@ export class HarnessApprovalRequestTerminatedError extends Error {
 interface ApprovalEventStream {
   readonly events: HarnessApprovalEvent[];
   nextSequence: number;
+  /** When its latest event was appended, by the coordinator's clock. */
+  lastEventAt: number;
 }
 
 interface PendingApproval {
@@ -314,7 +325,8 @@ export class HarnessApprovalCoordinator {
     // Every pending request has one requested event and reserves one terminal
     // event. Refuse new work rather than drop an unacknowledged event.
     const retained = this.streams.get(authority.interactionId)?.events.length ?? 0;
-    if (retained + this.pendingCount(authority.interactionId) + 2 > MAX_HARNESS_APPROVAL_RETAINED_EVENTS) {
+    if (retained + this.pendingCount(authority.interactionId) + 2 > MAX_HARNESS_APPROVAL_RETAINED_EVENTS
+      || !this.reserveSessionBacklog(authority.interactionId)) {
       return Promise.reject(new HarnessApprovalCoordinatorError(
         "approval_event_backlog_full",
         "Harness approval event backlog is full; wait for product acknowledgement before requesting another approval",
@@ -434,13 +446,35 @@ export class HarnessApprovalCoordinator {
       : event.resolution.correlation.interactionId;
     let stream = this.streams.get(interactionId);
     if (stream === undefined) {
-      stream = { events: [], nextSequence: 1 };
+      stream = { events: [], nextSequence: 1, lastEventAt: 0 };
       this.streams.set(interactionId, stream);
     }
+    stream.lastEventAt = Date.parse(this.now());
     const sequence = stream.nextSequence++;
     stream.events.push(event.type === "requested"
       ? { sequence, type: event.type, request: event.request }
       : { sequence, type: event.type, resolution: event.resolution });
+  }
+
+  /**
+   * Keeps the session's retained events, across every stream, within its bound. A stream whose
+   * completion ended with nothing pending, and that no observer acknowledged within the grace
+   * period, is abandoned, so the oldest such streams are dropped first; live work is refused
+   * only when the remaining streams fill it.
+   */
+  private reserveSessionBacklog(interactionId: number): boolean {
+    const now = Date.parse(this.now());
+    let retained = 0;
+    for (const stream of this.streams.values()) retained += stream.events.length;
+    for (const [candidate, stream] of this.streams) {
+      if (retained + this.pending.size + 2 <= MAX_HARNESS_APPROVAL_SESSION_RETAINED_EVENTS) break;
+      if (candidate === interactionId || this.interactionActive(candidate) || this.interactionPending(candidate)) continue;
+      if (now - stream.lastEventAt < (this.options.abandonedStreamGraceMs ?? ABANDONED_STREAM_GRACE_MS)) continue;
+      this.streams.delete(candidate);
+      this.forgetTerminal(candidate);
+      retained -= stream.events.length;
+    }
+    return retained + this.pending.size + 2 <= MAX_HARNESS_APPROVAL_SESSION_RETAINED_EVENTS;
   }
 
   private interactionActive(interactionId: number): boolean {
