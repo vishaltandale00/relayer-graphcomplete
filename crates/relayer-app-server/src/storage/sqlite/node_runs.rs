@@ -286,4 +286,52 @@ mod tests {
             "an archived thread queued a run"
         );
     }
+
+    /// A Stop racing the admission that queues a run (Codex review on #732). The Stop reads
+    /// that the run is not queued and records its request in one write transaction, so an
+    /// admission cannot queue the run in between: it waits, then sees the request and leaves
+    /// the run alone. The Stop is never refused while the run ends up queued.
+    #[tokio::test]
+    async fn a_stop_racing_admission_is_never_lost() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = SqliteProductStore::open(&directory.path().join("product.sqlite3"))
+            .await
+            .unwrap();
+        let (thread, _) = store.seed_node_runs_for_test(&[]).await;
+        // An id no other test uses, since the pause is process-wide.
+        let run = InteractionId::from_database(918_718);
+        sqlx::query("INSERT INTO interactions(id,thread_id,sequence,text,created_at,completion_status,permission_profile_id) VALUES (?1,?2,1,'Run','1','submitted','auto')")
+            .bind(run.value())
+            .bind(thread.value())
+            .execute(&store.pool)
+            .await
+            .unwrap();
+        store.record_node_run(run, 7).await.unwrap();
+        let (reached, resume) = (
+            std::sync::Arc::new(tokio::sync::Notify::new()),
+            std::sync::Arc::new(tokio::sync::Notify::new()),
+        );
+        *super::super::stops::STOP_PAUSE.lock().unwrap() =
+            Some((run, reached.clone(), resume.clone()));
+        let stopping = {
+            let store = store.clone();
+            tokio::spawn(async move { store.request_interaction_stop(thread, run).await })
+        };
+        reached.notified().await;
+        // Admission tries to queue the run while the Stop is between its read and its request.
+        let queueing = {
+            let store = store.clone();
+            tokio::spawn(async move { store.queue_node_run(run).await })
+        };
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+        resume.notify_one();
+        let stopped = stopping.await.unwrap();
+        let queued = queueing.await.unwrap().unwrap();
+        *super::super::stops::STOP_PAUSE.lock().unwrap() = None;
+        let current = store.get_interaction(run).await.unwrap().unwrap();
+        assert!(stopped.is_ok(), "the Stop was refused: {stopped:?}");
+        assert!(!queued, "the run was queued past its Stop");
+        assert_eq!(current.completion_status, "submitted");
+        assert!(current.stop_requested);
+    }
 }

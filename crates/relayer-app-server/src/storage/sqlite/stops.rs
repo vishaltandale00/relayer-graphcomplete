@@ -4,6 +4,31 @@ use crate::{
     storage::StorageError,
 };
 
+/// A test pauses one Stop between reading whether its run is queued and recording its
+/// request, to show nothing can queue the run in between.
+#[cfg(test)]
+pub(crate) static STOP_PAUSE: std::sync::Mutex<
+    Option<(
+        InteractionId,
+        std::sync::Arc<tokio::sync::Notify>,
+        std::sync::Arc<tokio::sync::Notify>,
+    )>,
+> = std::sync::Mutex::new(None);
+
+#[cfg(test)]
+async fn pause_for_test(interaction: InteractionId) {
+    let pause = STOP_PAUSE
+        .lock()
+        .unwrap()
+        .as_ref()
+        .filter(|(paused, _, _)| *paused == interaction)
+        .map(|(_, reached, resume)| (reached.clone(), resume.clone()));
+    if let Some((reached, resume)) = pause {
+        reached.notify_one();
+        resume.notified().await;
+    }
+}
+
 /// How a Stop request met a run waiting in its node's queue (#718).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum QueuedStop {
@@ -73,8 +98,13 @@ impl SqliteProductStore {
                 transaction.commit().await?;
                 return Ok(QueuedStop::SettleBeforeStart);
             }
-            None => transaction.commit().await?,
+            // Not queued: the ordinary request is recorded in this same write transaction. An
+            // admission that queues the run is ordered either before it (then the read above
+            // sees `queued`) or after it (then it sees the request and never queues the run).
+            None => {}
         }
+        #[cfg(test)]
+        pause_for_test(interaction).await;
         let changed = sqlx::query(
             "INSERT INTO interaction_stop_requests(interaction_id,error)
             SELECT id,NULL FROM interactions WHERE id=?1 AND thread_id=?2
@@ -85,12 +115,13 @@ impl SqliteProductStore {
         )
         .bind(interaction.value())
         .bind(thread.value())
-        .execute(&self.pool)
+        .execute(&mut *transaction)
         .await?
         .rows_affected();
         if changed == 0 {
             let terminal: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM interactions WHERE id=?1 AND thread_id=?2 AND completion_status IN ('accepted','stopped','failed') AND thread_id IN (SELECT id FROM threads WHERE conversation_import_id IS NULL) AND NOT EXISTS(SELECT 1 FROM completion_executions WHERE interaction_id=?1))")
-                .bind(interaction.value()).bind(thread.value()).fetch_one(&self.pool).await?;
+                .bind(interaction.value()).bind(thread.value()).fetch_one(&mut *transaction).await?;
+            transaction.commit().await?;
             if terminal {
                 return Ok(QueuedStop::NotQueued);
             }
@@ -99,6 +130,7 @@ impl SqliteProductStore {
                 "This interaction has no active product run to stop.",
             )));
         }
+        transaction.commit().await?;
         Ok(QueuedStop::NotQueued)
     }
 
