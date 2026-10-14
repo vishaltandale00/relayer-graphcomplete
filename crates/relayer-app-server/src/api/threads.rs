@@ -3128,13 +3128,34 @@ async fn settle_queued_stop_once(
             .stop_graph_completion(graph_node_id, &format!("product-stop:{interaction_id}"))
             .await
     {
-        // A current that already ended is the outcome the Stop asked for.
+        // A current that already stopped is the outcome the Stop asked for. One the graph
+        // ended otherwise ends the product row with the graph's outcome, never as stopped.
         let current = runtime
             .completion_current(graph_node_id)
             .await
             .map_err(|read| format!("graph Stop failed: {error}; current read failed: {read}"))?;
-        if current.lifecycle == relayer_graph_core::CompletionLifecycle::Active {
-            return Err(format!("graph Stop failed: {error}"));
+        match current.lifecycle {
+            relayer_graph_core::CompletionLifecycle::Stopped => {}
+            relayer_graph_core::CompletionLifecycle::Active => {
+                return Err(format!("graph Stop failed: {error}"));
+            }
+            other => {
+                let message =
+                    format!("The graph ended this run as {other:?} before its Stop landed.");
+                state
+                    .product
+                    .fail_interaction_completion(
+                        interaction_id,
+                        interaction
+                            .harness_configuration_name
+                            .as_deref()
+                            .unwrap_or("unknown"),
+                        &message,
+                    )
+                    .await
+                    .map_err(|error| error.to_string())?;
+                return Ok(());
+            }
         }
     }
     if let Err(error) = state
@@ -4286,14 +4307,29 @@ async fn claim_and_start_action_interaction(
     .await;
     let key = match admitted {
         Ok((key, NodeAdmission::Start)) => key,
-        // It waits in its node's queue, or it could not wait (it ended, or carries a Stop).
-        // It reads the thread when it starts.
-        Ok((_, NodeAdmission::Waiting | NodeAdmission::NotQueued)) => {
+        // It waits in its node's queue. It reads the thread when it starts.
+        Ok((_, NodeAdmission::Waiting)) => {
             return state
                 .product
                 .get_interaction(interaction.id)
                 .await
                 .map_err(Into::into);
+        }
+        // It could not wait: it ended, or a Stop reached it while it prepared. A Stop settles
+        // before any native work, outside the queue.
+        Ok((_, NodeAdmission::NotQueued)) => {
+            let current = state.product.get_interaction(interaction.id).await?;
+            if current.completion_status == "submitted"
+                && current.stop_requested
+                && current.stop_error.is_none()
+            {
+                let settle_state = state.clone();
+                let (thread_id, run) = (thread.id, interaction.id);
+                tokio::spawn(async move {
+                    settle_queued_stop(settle_state, thread_id, run).await;
+                });
+            }
+            return Ok(current);
         }
         Err(error) => {
             let error = ApiError::from(error);
@@ -4449,8 +4485,9 @@ async fn start_held_action_interaction(
                 .execute_prepared_interaction(execution_thread, interaction, prepared)
                 .await;
         });
-        // The execution has ended, or panicked. The node passes on once the run's settlement
-        // is durable, whatever its outcome.
+        // The execution has ended, or panicked. The node passes on once the run's outcome is
+        // saved, whatever it is. A run whose outcome is never saved keeps its node until a
+        // restart, which interrupts it, so no later run starts beside it.
         let _ = execution.await;
         release_node_run(release_state, key, run, true);
     });

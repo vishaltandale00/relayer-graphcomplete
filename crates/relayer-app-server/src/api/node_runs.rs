@@ -37,6 +37,10 @@ struct NodeState {
 struct Holder {
     run: InteractionId,
     admissions: usize,
+    /// One admission belongs to the request that arrived waiting and was promoted while it
+    /// prepared. Otherwise the holder's first admission belongs to whoever took the node: the
+    /// request that arrived to a free node, or the queue's dispatch of a ready run.
+    promoted: bool,
 }
 
 struct Waiter {
@@ -107,7 +111,11 @@ impl NodeRunQueue {
                 Arrival::Waiting
             }
             None => {
-                node.holder = Some(Holder { run, admissions: 1 });
+                node.holder = Some(Holder {
+                    run,
+                    admissions: 1,
+                    promoted: false,
+                });
                 Arrival::Held
             }
         }
@@ -129,15 +137,22 @@ impl NodeRunQueue {
         let node = nodes.entry(key).or_default();
         match &mut node.holder {
             Some(holder) if holder.run == run => {
-                // A request that arrived already owns an admission; any other one joins.
-                if !matches!(arrival, Some(Arrival::Held | Arrival::Waiting)) {
-                    holder.admissions += 1;
+                // A request that took the node, or was promoted to it, already owns an
+                // admission; any other one joins with its own.
+                match arrival {
+                    Some(Arrival::Held) => {}
+                    Some(Arrival::Waiting) if holder.promoted => holder.promoted = false,
+                    _ => holder.admissions += 1,
                 }
                 return Ok(NodeAdmission::Start);
             }
             None => {
                 node.remove_waiter(run);
-                node.holder = Some(Holder { run, admissions: 1 });
+                node.holder = Some(Holder {
+                    run,
+                    admissions: 1,
+                    promoted: false,
+                });
                 return Ok(NodeAdmission::Start);
             }
             Some(_) => {}
@@ -148,7 +163,10 @@ impl NodeRunQueue {
                 Waiter { run, ready: false },
             );
         }
-        if product.queue_node_run(run).await? {
+        // A duplicate request of this run may have queued it already.
+        let queued = product.queue_node_run(run).await?
+            || product.get_interaction(run).await?.completion_status == "queued";
+        if queued {
             for waiter in node.waiting.values_mut() {
                 if waiter.run == run {
                     waiter.ready = true;
@@ -156,9 +174,9 @@ impl NodeRunQueue {
             }
             Ok(NodeAdmission::Waiting)
         } else {
-            if arrival != Some(Arrival::Joined) {
-                node.remove_waiter(run);
-            }
+            // It ended or carries a Stop. A ready waiter is never dropped: its row waits.
+            node.waiting
+                .retain(|_, waiter| waiter.run != run || waiter.ready);
             Ok(NodeAdmission::NotQueued)
         }
     }
@@ -175,17 +193,22 @@ impl NodeRunQueue {
     ) -> Result<Option<InteractionId>, ProductError> {
         {
             let mut nodes = self.nodes.lock().await;
-            let node = nodes.entry(key).or_default();
-            let holds = node.holder.as_ref().is_some_and(|holder| holder.run == run);
-            match arrival {
-                Arrival::Joined => return Ok(None),
-                Arrival::Waiting if !holds => {
+            let Some(node) = nodes.get_mut(&key) else {
+                return Ok(None);
+            };
+            let holder = node.holder.as_mut().filter(|holder| holder.run == run);
+            match (arrival, holder) {
+                (Arrival::Joined, _) => return Ok(None),
+                (Arrival::Waiting, None) => {
                     node.waiting
                         .retain(|_, waiter| waiter.run != run || waiter.ready);
                     return Ok(None);
                 }
                 // A waiter promoted while it prepared holds the node for this request.
-                Arrival::Waiting | Arrival::Held => {}
+                (Arrival::Waiting, Some(holder)) if holder.promoted => holder.promoted = false,
+                // The queue's dispatch owns this hold, not this request.
+                (Arrival::Waiting, Some(_)) => return Ok(None),
+                (Arrival::Held, _) => {}
             }
         }
         self.release(product, key, run).await
@@ -214,9 +237,7 @@ impl NodeRunQueue {
             _ => return Ok(None),
         }
         // On a storage failure the settled run keeps the node, so later runs still wait in
-        // order, and the caller retries this release until it hands the node on. A row that
-        // cannot be claimed is skipped, and stays in line for the next release.
-        let mut failure = None;
+        // order, and the caller retries this release until it hands the node on.
         let positions: Vec<(i64, i64)> = node.waiting.keys().copied().collect();
         for position in positions {
             let waiter = &node.waiting[&position];
@@ -226,6 +247,7 @@ impl NodeRunQueue {
                 node.holder = Some(Holder {
                     run: next,
                     admissions: 1,
+                    promoted: true,
                 });
                 return Ok(None);
             }
@@ -235,20 +257,17 @@ impl NodeRunQueue {
                     node.holder = Some(Holder {
                         run: next,
                         admissions: 1,
+                        promoted: false,
                     });
                     return Ok(Some(next));
                 }
                 Ok(false) => {
                     node.waiting.remove(&position);
                 }
-                Err(error) => {
-                    eprintln!("queued run {next} could not be claimed to start: {error}");
-                    failure = Some(error);
-                }
+                // The settled run keeps the node and the caller retries, so no later run
+                // overtakes this one.
+                Err(error) => return Err(error),
             }
-        }
-        if let Some(error) = failure {
-            return Err(error);
         }
         nodes.remove(&key);
         Ok(None)
@@ -588,5 +607,76 @@ mod tests {
             .set_completion_status_for_test(runs[0], "failed")
             .await;
         assert_eq!(releasing.await.unwrap().unwrap(), Some(runs[1]));
+    }
+
+    /// Two requests for one waiting run (#718 review): the duplicate queues it first, then the
+    /// run ahead settles and the queue starts it. The original request's late admission joins
+    /// that start with its own admission, so the node passes on only when both have released:
+    /// the run never shares its node. A waiter that is already queued is never dropped.
+    #[tokio::test]
+    async fn a_duplicate_request_never_frees_or_drops_a_waiting_run() {
+        let (_directory, store, product, runs) = fixture(&[7, 7, 7]).await;
+        let queue = NodeRunQueue::default();
+        let node = product.node_run_key(runs[0]).await.unwrap().unwrap();
+        let (ahead, run, later) = (runs[0], runs[1], runs[2]);
+        assert_eq!(
+            queue.arrive(node, ahead, sequence(ahead)).await,
+            Arrival::Held
+        );
+        assert_eq!(
+            queue.arrive(node, run, sequence(run)).await,
+            Arrival::Waiting
+        );
+        assert_eq!(
+            queue.arrive(node, run, sequence(run)).await,
+            Arrival::Joined
+        );
+        // The duplicate admits first and queues the run.
+        assert_eq!(
+            queue
+                .admit(&product, node, run, sequence(run), Some(Arrival::Joined))
+                .await
+                .unwrap(),
+            NodeAdmission::Waiting
+        );
+        // The original sees it already queued: it stays in line.
+        assert_eq!(
+            queue
+                .admit(&product, node, run, sequence(run), Some(Arrival::Waiting))
+                .await
+                .unwrap(),
+            NodeAdmission::Waiting
+        );
+        assert_eq!(
+            queue.release(&product, node, ahead).await.unwrap(),
+            Some(run)
+        );
+        assert_eq!(
+            queue.arrive(node, later, sequence(later)).await,
+            Arrival::Waiting
+        );
+        // A late admission of the original joins the dispatched start with its own admission.
+        assert_eq!(
+            queue
+                .admit(&product, node, run, sequence(run), Some(Arrival::Waiting))
+                .await
+                .unwrap(),
+            NodeAdmission::Start
+        );
+        assert_eq!(queue.release(&product, node, run).await.unwrap(), None);
+        assert_eq!(queue.holder(node).await, Some(run));
+        // A departing original owns nothing of the dispatched hold.
+        assert_eq!(
+            queue
+                .depart(&product, node, run, Arrival::Waiting)
+                .await
+                .unwrap(),
+            None
+        );
+        assert_eq!(queue.holder(node).await, Some(run));
+        assert_eq!(store.completion_status_for_test(run).await, "submitted");
+        // Only the dispatched start's own release hands the node on.
+        assert_eq!(queue.release(&product, node, run).await.unwrap(), None);
+        assert_eq!(queue.holder(node).await, Some(later));
     }
 }

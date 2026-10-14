@@ -1432,6 +1432,9 @@ mod tests {
                 "CREATE TABLE node_runs (result_interaction_id INTEGER PRIMARY KEY, thread_id INTEGER NOT NULL, node_id INTEGER NOT NULL)",
             ),
             Some(
+                "CREATE TABLE node_runs (result_interaction_id INTEGER PRIMARY KEY REFERENCES interactions(id) ON DELETE CASCADE, thread_id INTEGER NOT NULL, node_id INTEGER NOT NULL)",
+            ),
+            Some(
                 "CREATE TABLE node_runs (result_interaction_id INTEGER PRIMARY KEY REFERENCES interactions(id) ON DELETE CASCADE, thread_id INTEGER NOT NULL REFERENCES threads(id) ON DELETE CASCADE, node_id INTEGER NOT NULL CHECK(node_id > 0))",
             ),
         ] {
@@ -1445,6 +1448,13 @@ mod tests {
                 .unwrap();
             if let Some(table) = replacement {
                 sqlx::query(table).execute(&mut *connection).await.unwrap();
+                // Each malformed table keeps its index, so only its own defect refuses it.
+                if !table.contains("CHECK(node_id > 0)") {
+                    sqlx::query("CREATE INDEX node_runs_by_node ON node_runs(thread_id, node_id)")
+                        .execute(&mut *connection)
+                        .await
+                        .unwrap();
+                }
             }
             drop(connection);
             store.pool.close().await;
