@@ -157,15 +157,32 @@ impl NodeRunQueue {
             }
             Some(_) => {}
         }
-        if !node.waits(run) {
+        let inserted = !node.waits(run);
+        if inserted {
             node.waiting.insert(
                 NodeState::position(run, sequence),
                 Waiter { run, ready: false },
             );
         }
         // A duplicate request of this run may have queued it already.
-        let queued = product.queue_node_run(run).await?
-            || product.get_interaction(run).await?.completion_status == "queued";
+        let queued = async {
+            Ok::<_, ProductError>(
+                product.queue_node_run(run).await?
+                    || product.get_interaction(run).await?.completion_status == "queued",
+            )
+        }
+        .await;
+        let queued = match queued {
+            Ok(queued) => queued,
+            Err(error) => {
+                // A waiter this admission added is taken out again, so no release ever
+                // promotes a run whose request has already given up.
+                if inserted {
+                    node.remove_waiter(run);
+                }
+                return Err(error);
+            }
+        };
         if queued {
             for waiter in node.waiting.values_mut() {
                 if waiter.run == run {
@@ -191,6 +208,7 @@ impl NodeRunQueue {
         run: InteractionId,
         arrival: Arrival,
     ) -> Result<Option<InteractionId>, ProductError> {
+        let mut used_promotion = false;
         {
             let mut nodes = self.nodes.lock().await;
             let Some(node) = nodes.get_mut(&key) else {
@@ -205,13 +223,29 @@ impl NodeRunQueue {
                     return Ok(None);
                 }
                 // A waiter promoted while it prepared holds the node for this request.
-                (Arrival::Waiting, Some(holder)) if holder.promoted => holder.promoted = false,
+                (Arrival::Waiting, Some(holder)) if holder.promoted => {
+                    holder.promoted = false;
+                    used_promotion = true;
+                }
                 // The queue's dispatch owns this hold, not this request.
                 (Arrival::Waiting, Some(_)) => return Ok(None),
                 (Arrival::Held, _) => {}
             }
         }
-        self.release(product, key, run).await
+        let released = self.release(product, key, run).await;
+        if released.is_err() && used_promotion {
+            // The run still holds its node for this request, so a retried departure releases
+            // it again.
+            let mut nodes = self.nodes.lock().await;
+            if let Some(holder) = nodes
+                .get_mut(&key)
+                .and_then(|node| node.holder.as_mut())
+                .filter(|holder| holder.run == run)
+            {
+                holder.promoted = true;
+            }
+        }
+        released
     }
 
     /// Ends one admission of the run holding a node. When it was the last, the node passes to
@@ -678,5 +712,81 @@ mod tests {
         // Only the dispatched start's own release hands the node on.
         assert_eq!(queue.release(&product, node, run).await.unwrap(), None);
         assert_eq!(queue.holder(node).await, Some(later));
+    }
+
+    /// A storage failure while a node passes on (#718 review) leaves it with its run, and the
+    /// failed step is undone: a retried departure of a promoted run releases it again, and a
+    /// run whose admission failed never stays in line to be promoted later.
+    #[tokio::test]
+    async fn a_failed_hand_off_or_admission_never_strands_a_node() {
+        let (_directory, store, product, runs) = fixture(&[7, 7, 7, 7]).await;
+        let queue = NodeRunQueue::default();
+        let node = product.node_run_key(runs[0]).await.unwrap().unwrap();
+        let (ahead, promoted, ready, stray) = (runs[0], runs[1], runs[2], runs[3]);
+        assert_eq!(
+            queue.arrive(node, ahead, sequence(ahead)).await,
+            Arrival::Held
+        );
+        assert_eq!(
+            queue.arrive(node, promoted, sequence(promoted)).await,
+            Arrival::Waiting
+        );
+        assert_eq!(
+            queue.arrive(node, ready, sequence(ready)).await,
+            Arrival::Waiting
+        );
+        assert_eq!(
+            queue
+                .admit(
+                    &product,
+                    node,
+                    ready,
+                    sequence(ready),
+                    Some(Arrival::Waiting)
+                )
+                .await
+                .unwrap(),
+            NodeAdmission::Waiting
+        );
+        // The admission of a run that arrived on no queue place fails: it does not stay in line.
+        store
+            .fault_status_change_for_test(stray, "queued", true)
+            .await;
+        assert!(
+            queue
+                .admit(&product, node, stray, sequence(stray), None)
+                .await
+                .is_err()
+        );
+        store
+            .fault_status_change_for_test(stray, "queued", false)
+            .await;
+        // The run ahead settles; the still-preparing run is promoted to hold the node.
+        assert_eq!(queue.release(&product, node, ahead).await.unwrap(), None);
+        assert_eq!(queue.holder(node).await, Some(promoted));
+        // Its request fails, and handing the node on fails once: the departure is retried.
+        store
+            .fault_status_change_for_test(ready, "submitted", true)
+            .await;
+        assert!(
+            queue
+                .depart(&product, node, promoted, Arrival::Waiting)
+                .await
+                .is_err()
+        );
+        assert_eq!(queue.holder(node).await, Some(promoted));
+        store
+            .fault_status_change_for_test(ready, "submitted", false)
+            .await;
+        assert_eq!(
+            queue
+                .depart(&product, node, promoted, Arrival::Waiting)
+                .await
+                .unwrap(),
+            Some(ready)
+        );
+        // The stray run was never promoted: once the ready run ends, the node is free.
+        assert_eq!(queue.release(&product, node, ready).await.unwrap(), None);
+        assert_eq!(queue.holder(node).await, None);
     }
 }

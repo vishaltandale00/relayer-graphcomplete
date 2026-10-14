@@ -1426,7 +1426,7 @@ mod tests {
         for replacement in [
             None,
             Some(
-                "CREATE TABLE node_runs (result_interaction_id INTEGER PRIMARY KEY, thread_id INTEGER, node_id INTEGER NOT NULL)",
+                "CREATE TABLE node_runs (result_interaction_id INTEGER PRIMARY KEY REFERENCES interactions(id) ON DELETE CASCADE, thread_id INTEGER REFERENCES threads(id) ON DELETE CASCADE, node_id INTEGER NOT NULL)",
             ),
             Some(
                 "CREATE TABLE node_runs (result_interaction_id INTEGER PRIMARY KEY, thread_id INTEGER NOT NULL, node_id INTEGER NOT NULL)",

@@ -116,6 +116,25 @@ impl SqliteProductStore {
         (ThreadId::from_database(thread), runs)
     }
 
+    /// Makes moving `run` to `status` fail (a storage fault), or stops doing so.
+    pub(crate) async fn fault_status_change_for_test(
+        &self,
+        run: InteractionId,
+        status: &str,
+        on: bool,
+    ) {
+        let name = format!("fault_{}_{status}", run.value());
+        let sql = if on {
+            format!(
+                "CREATE TRIGGER {name} BEFORE UPDATE OF completion_status ON interactions WHEN NEW.id={} AND NEW.completion_status='{status}' BEGIN SELECT RAISE(ABORT, 'fault'); END",
+                run.value()
+            )
+        } else {
+            format!("DROP TRIGGER {name}")
+        };
+        sqlx::query(&sql).execute(&self.pool).await.unwrap();
+    }
+
     pub(crate) async fn set_completion_status_for_test(&self, run: InteractionId, status: &str) {
         sqlx::query("UPDATE interactions SET completion_status=?2 WHERE id=?1")
             .bind(run.value())
