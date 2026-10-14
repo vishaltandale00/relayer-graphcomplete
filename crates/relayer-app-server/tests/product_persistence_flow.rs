@@ -5218,20 +5218,18 @@ async fn node_runs_run_beside_other_nodes_and_queue_in_order_on_their_own_node()
                 .to_owned()
         }
     };
-    let settled = |run: i64, expected: &'static str| {
-        async move {
-            let deadline = std::time::Instant::now() + Duration::from_secs(5);
-            loop {
-                let status = status_of(run).await;
-                if status == expected {
-                    return;
-                }
-                assert!(
-                    std::time::Instant::now() < deadline,
-                    "run {run} is {status}, not {expected}"
-                );
-                tokio::time::sleep(Duration::from_millis(10)).await;
+    let settled = |run: i64, expected: &'static str| async move {
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        loop {
+            let status = status_of(run).await;
+            if status == expected {
+                return;
             }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "run {run} is {status}, not {expected}"
+            );
+            tokio::time::sleep(Duration::from_millis(10)).await;
         }
     };
 
