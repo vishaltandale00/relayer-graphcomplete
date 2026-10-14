@@ -37,6 +37,21 @@ export function agentChildIds(state) {
 }
 
 /**
+ * Whether an agent's child in the thread may still ask for approval. Its graph can settle before
+ * its provider turn ends, and its attempt ends only after the provider does, so an unfinished
+ * attempt keeps the thread refreshing to show a late request.
+ */
+export function agentChildMayRequestApproval(state, threadId) {
+  const children = agentChildIds(state);
+  return (state.interactions || []).some(interaction => (
+    String(interaction.threadId) === String(threadId)
+    && children.has(String(interaction.id))
+    && interaction.latestAttempt != null
+    && !interaction.latestAttempt.finishedAt
+  ));
+}
+
+/**
  * The thread's human turns in order: its messages and the user's invoke actions. A child an
  * agent launched runs beside them, so it never decides the composer's state, the next
  * turn's inherited model, or what Stop targets.

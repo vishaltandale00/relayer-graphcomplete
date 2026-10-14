@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { interactionActivity, nodeActiveRuns, nodeRunState, threadActivity } from "../desktop/renderer/src/product-workspace/run-state.js";
+import { agentChildMayRequestApproval } from "../desktop/renderer/src/product-workspace/model.js";
 
 describe("explicit run-state symbols", () => {
   it("derives a thread's symbol from its latest interaction like the app server does", () => {
@@ -74,5 +75,17 @@ describe("explicit run-state symbols", () => {
     expect(nodeActiveRuns(node, actions, [invocation(11, 6, "not_started")], [run(6, "not_started")])).toEqual([]);
     expect(nodeActiveRuns(node, actions, [{ ...invocation(11, 6, "submitted"), preparationRecoverable: true }], [run(6, "submitted")])).toEqual([]);
     expect(nodeRunState(node, actions, [{ ...invocation(11, 6, "not_started"), preparationRecoverable: true }], [run(6, "not_started")])).toBeNull();
+  });
+
+  it("keeps a thread refreshing while an agent's settled child may still ask for approval", () => {
+    const state = (latestAttempt, agentInvoked = true) => ({
+      interactions: [{ id: 7, threadId: 1, completionStatus: "accepted", latestAttempt }],
+      actionInvocations: [{ resultInteractionId: 7, agentInvoked }],
+    });
+    expect(agentChildMayRequestApproval(state({ id: 3 }), 1)).toBe(true);
+    expect(agentChildMayRequestApproval(state({ id: 3, finishedAt: "9" }), 1)).toBe(false);
+    expect(agentChildMayRequestApproval(state(null), 1)).toBe(false);
+    expect(agentChildMayRequestApproval(state({ id: 3 }, false), 1)).toBe(false);
+    expect(agentChildMayRequestApproval(state({ id: 3 }), 2)).toBe(false);
   });
 });

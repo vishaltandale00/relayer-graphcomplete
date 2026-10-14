@@ -34,6 +34,7 @@ import {
   createLayerNavigationCoordinator,
   layerPathForVisibleLayer,
   reconcileCurrentProjection,
+  agentChildMayRequestApproval,
   humanTurns,
   messageTurns,
   workspaceTurns,
@@ -505,6 +506,7 @@ function schedulePendingRefresh(threadId, { force = false } = {}) {
     )
   ))
     || hasStaleProjection
+    || (thread.imported !== true && agentChildMayRequestApproval(appState, threadId))
     || layerContainsPendingInvokedAction(
       appState.visibleLayer,
       appState.actionInvocations,

@@ -236,6 +236,34 @@ impl SqliteProductStore {
             .await
     }
 
+    /// An agent child's requests left unresolved after its provider ended can never be answered.
+    /// Each is recorded as aborted. The row's state belongs to its graph: only a row still
+    /// waiting returns to running, as when any of a child's approvals ends.
+    pub(crate) async fn abort_unanswerable_child_approvals(
+        &self,
+        interaction_id: InteractionId,
+        rationale: &str,
+        resolved_at: &str,
+    ) -> Result<u64, StorageError> {
+        let mut transaction = self.pool.begin_with("BEGIN IMMEDIATE").await?;
+        let result = sqlx::query(
+            "INSERT INTO approval_resolutions(request_id,outcome,actor,decision,rationale,source_request_id,resolved_at) SELECT request.request_id,'aborted','host',NULL,?1,NULL,?2 FROM approval_requests request LEFT JOIN approval_resolutions resolution ON resolution.request_id=request.request_id WHERE resolution.request_id IS NULL AND request.interaction_id=?3 AND EXISTS(SELECT 1 FROM action_invocations WHERE result_interaction_id=?3 AND agent_invoked=1)",
+        )
+        .bind(rationale)
+        .bind(resolved_at)
+        .bind(interaction_id.value())
+        .execute(&mut *transaction)
+        .await?;
+        sqlx::query(
+            "UPDATE interactions SET completion_status='running' WHERE id=?1 AND completion_status='waiting_for_approval' AND EXISTS(SELECT 1 FROM action_invocations WHERE result_interaction_id=?1 AND agent_invoked=1)",
+        )
+        .bind(interaction_id.value())
+        .execute(&mut *transaction)
+        .await?;
+        transaction.commit().await?;
+        Ok(result.rows_affected())
+    }
+
     async fn abort_pending_approvals_with_restart_recovery(
         &self,
         interaction_id: Option<InteractionId>,

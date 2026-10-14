@@ -3140,6 +3140,19 @@ impl ProductService {
             .map_err(Into::into)
     }
 
+    /// Records an agent child's unresolved approval requests as aborted once its provider ended,
+    /// leaving the row's settled state to its graph.
+    pub(crate) async fn abort_unanswerable_child_approvals(
+        &self,
+        interaction_id: InteractionId,
+        rationale: &str,
+    ) -> Result<u64, ProductError> {
+        self.storage
+            .abort_unanswerable_child_approvals(interaction_id, rationale, &now())
+            .await
+            .map_err(Into::into)
+    }
+
     pub(crate) async fn abort_pending_approvals(
         &self,
         interaction_id: Option<InteractionId>,

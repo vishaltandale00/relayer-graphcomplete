@@ -114,6 +114,8 @@ struct HarnessControl {
     approval_dropped: AtomicBool,
     /// While set, every approval-events read answers 503.
     approval_reads_fail: AtomicBool,
+    /// While set, approval-events reads answer 404, as for a live session that is gone.
+    approval_session_gone: AtomicBool,
 }
 
 /// The one approval request the fake harness serves, and its resolution, for `owner`.
@@ -629,6 +631,7 @@ impl World {
             approval_aborted: AtomicBool::new(false),
             approval_dropped: AtomicBool::new(false),
             approval_reads_fail: AtomicBool::new(false),
+            approval_session_gone: AtomicBool::new(false),
         });
         let events_control = harness_control.clone();
         let decision_control = harness_control.clone();
@@ -650,6 +653,9 @@ impl World {
                             use axum::response::IntoResponse;
                             if control.approval_reads_fail.load(Ordering::SeqCst) {
                                 return (StatusCode::SERVICE_UNAVAILABLE, "busy").into_response();
+                            }
+                            if control.approval_session_gone.load(Ordering::SeqCst) {
+                                return (StatusCode::NOT_FOUND, "no session").into_response();
                             }
                             let polled = query.get("interactionId").and_then(|id| id.parse::<i64>().ok());
                             let after = query.get("after").and_then(|after| after.parse::<u64>().ok()).unwrap_or(0);
@@ -2964,12 +2970,7 @@ async fn a_childs_approval_after_its_graph_settled_stays_answerable() {
     *world.harness.approval.lock().unwrap() =
         Some((world.thread.id.value(), world.child.id.value()));
     let deadline = Instant::now() + Duration::from_secs(5);
-    while world
-        .product
-        .get_approval("request-child")
-        .await
-        .is_err()
-    {
+    while world.product.get_approval("request-child").await.is_err() {
         assert!(
             Instant::now() < deadline,
             "the late approval was never recorded"
@@ -3010,7 +3011,96 @@ async fn a_childs_approval_after_its_graph_settled_stays_answerable() {
     .unwrap_or_else(|error| panic!("decision: {}", error.message()));
     assert!(decided.approval.resolution.is_some());
     assert_eq!(world.child_row().await.completion_status, "accepted");
+    assert_ne!(
+        world
+            .product
+            .get_thread(world.thread.id)
+            .await
+            .unwrap()
+            .thread
+            .activity
+            .as_deref(),
+        Some("needs_approval")
+    );
     assert_eq!(*world.harness.prov.lock().unwrap(), "running");
+    world.finish().await;
+}
+
+/// A settled child's request the observer can no longer read the end of, here because the
+/// host session is gone, is recorded as aborted once the provider ended. The thread never
+/// keeps asking for an answer nobody can give, and the row keeps its accepted state.
+#[tokio::test]
+async fn a_settled_childs_unanswered_approval_closes_when_its_provider_ends() {
+    let mut world = World::new("child-approval-unanswered", false).await;
+    let (broker, _lease) = world.broker();
+    *world.harness.start.lock().unwrap() = "ok";
+    let (status, _) = world
+        .launch(&broker)
+        .await
+        .unwrap_or_else(|error| panic!("launch: {}", error.message()));
+    assert_eq!(status, StatusCode::CREATED);
+    world
+        .apply(&[serde_json::json!("ChildReturn")], false)
+        .await;
+    let state = world.await_state(|state| state["phase"] == "settled").await;
+    assert_eq!(state["status"], "accepted", "{state}");
+    *world.harness.approval.lock().unwrap() =
+        Some((world.thread.id.value(), world.child.id.value()));
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while world.product.get_approval("request-child").await.is_err() {
+        assert!(
+            Instant::now() < deadline,
+            "the late approval was never recorded"
+        );
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+
+    world
+        .harness
+        .approval_session_gone
+        .store(true, Ordering::SeqCst);
+    world
+        .apply(
+            &[
+                serde_json::json!("ProviderExit"),
+                serde_json::json!("exited_ok"),
+            ],
+            false,
+        )
+        .await;
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let resolution = loop {
+        if let Some(resolution) = world
+            .product
+            .get_approval("request-child")
+            .await
+            .unwrap()
+            .resolution
+        {
+            break resolution;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "the unanswerable approval was never closed"
+        );
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    };
+    assert_eq!(
+        resolution.outcome,
+        crate::approval::ApprovalOutcome::Aborted
+    );
+    assert_eq!(world.child_row().await.completion_status, "accepted");
+    assert_ne!(
+        world
+            .product
+            .get_thread(world.thread.id)
+            .await
+            .unwrap()
+            .thread
+            .activity
+            .as_deref(),
+        Some("needs_approval")
+    );
     world.finish().await;
 }
 
@@ -3034,8 +3124,7 @@ async fn a_child_whose_approvals_cannot_be_read_is_failed_and_its_provider_cance
     let deadline = Instant::now() + Duration::from_secs(5);
     let state = loop {
         let state = world.observe().await;
-        if (state["life"] == "failed" && state["prov"] == "cancelled")
-            || Instant::now() >= deadline
+        if (state["life"] == "failed" && state["prov"] == "cancelled") || Instant::now() >= deadline
         {
             break state;
         }

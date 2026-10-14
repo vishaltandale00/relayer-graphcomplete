@@ -3240,9 +3240,14 @@ impl Drop for ProviderEndSignal {
 /// drained: empty, or dropped once every event was acknowledged. A stream that never drains
 /// stops being read a bounded time after the provider ended.
 ///
-/// A request nobody can see must not hold the child. After repeated failures to read or record
-/// its approvals, the observer fails the child's graph, as a stop does, and cancels its provider
-/// on every pass until the host confirms the provider ended.
+/// A request nobody can see must not hold the child. Failures to read or record its approvals
+/// back off as the graph observer's do; after twenty in a row, the observer fails the child's
+/// graph if it is still active, as a stop does, and cancels its provider once a second until the
+/// host confirms the provider ended.
+///
+/// Once the provider ended, any request still unresolved on the row can never be answered: the
+/// host ended it, but the observer could not read that. It is recorded as aborted, leaving the
+/// row's settled state to its graph, so the thread never shows a request nobody can answer.
 fn spawn_recursive_approval_observer(
     state: ApiState,
     thread: Thread,
@@ -3252,6 +3257,8 @@ fn spawn_recursive_approval_observer(
 ) {
     const DRAIN_AFTER_PROVIDER_END: std::time::Duration = std::time::Duration::from_secs(30);
     const OBSERVATION_FAILURE_LIMIT: u8 = 20;
+    const POLL: std::time::Duration = std::time::Duration::from_millis(100);
+    const FAIL_CLOSED_PASS: std::time::Duration = std::time::Duration::from_secs(1);
     tokio::spawn(async move {
         let Some(runtime) = state.runtime.as_ref() else {
             return;
@@ -3334,12 +3341,38 @@ fn spawn_recursive_approval_observer(
             if ended
                 && (drained || ended_at.is_some_and(|at| at.elapsed() >= DRAIN_AFTER_PROVIDER_END))
             {
-                return;
+                break;
             }
-            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+            tokio::time::sleep(if failing && !ended {
+                FAIL_CLOSED_PASS
+            } else if failures > 0 {
+                APPROVAL_OBSERVATION_RETRY_STEP * u32::from(failures.min(10))
+            } else {
+                POLL
+            })
+            .await;
+        }
+        if let Err(error) = state
+            .product
+            .abort_unanswerable_child_approvals(
+                interaction.id,
+                "The child's provider ended before this approval was resolved.",
+            )
+            .await
+        {
+            eprintln!(
+                "recursive completion {completion_id} unanswerable approvals could not be closed: {error}"
+            );
         }
     });
 }
+
+/// The first pause after a failed approval read or record. Each further failure waits one step
+/// longer, up to ten steps, so twenty failures in a row take about fourteen seconds.
+#[cfg(not(test))]
+const APPROVAL_OBSERVATION_RETRY_STEP: std::time::Duration = std::time::Duration::from_millis(100);
+#[cfg(test)]
+const APPROVAL_OBSERVATION_RETRY_STEP: std::time::Duration = std::time::Duration::from_millis(10);
 
 /// One pass of the approval observer's fail-closed policy: fail the child's graph while it is
 /// still active, then cancel its provider. Either call can fail transiently, so the observer
