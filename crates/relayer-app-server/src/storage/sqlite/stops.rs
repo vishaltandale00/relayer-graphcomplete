@@ -7,13 +7,14 @@ use crate::{
 /// A test pauses one Stop between reading whether its run is queued and recording its
 /// request, to show nothing can queue the run in between.
 #[cfg(test)]
-pub(crate) static STOP_PAUSE: std::sync::Mutex<
-    Option<(
-        InteractionId,
-        std::sync::Arc<tokio::sync::Notify>,
-        std::sync::Arc<tokio::sync::Notify>,
-    )>,
-> = std::sync::Mutex::new(None);
+type StopPause = (
+    InteractionId,
+    std::sync::Arc<tokio::sync::Notify>,
+    std::sync::Arc<tokio::sync::Notify>,
+);
+
+#[cfg(test)]
+pub(crate) static STOP_PAUSE: std::sync::Mutex<Option<StopPause>> = std::sync::Mutex::new(None);
 
 #[cfg(test)]
 async fn pause_for_test(interaction: InteractionId) {
