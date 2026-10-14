@@ -2,6 +2,7 @@ use super::{
     ApiState,
     auth::{authorize_read, authorize_write},
     error::ApiError,
+    node_runs::{Arrival, NodeAdmission},
     types::{
         ActionInvocationResponse, InteractionResponse, ThreadDetailResponse, ThreadResponse,
         ThreadViewResponse,
@@ -12,7 +13,7 @@ use crate::{
     completion_broker::{CompletionBrokerGrant, CompletionBrokerLease},
     product::{
         AcceptedInteractionCompletion, CreateThreadCommand, Interaction, InteractionContextIntent,
-        InteractionId, InteractionModelSelection, InvokeActionOutcome, ModelFamilyId,
+        InteractionId, InteractionModelSelection, InvokeActionOutcome, ModelFamilyId, NodeRunKey,
         PreExecutionModelFailure, PreparedInteractionBinding, ProjectId, ProviderId,
         RECONCILIATION_PENDING_PREFIX, RetryInteractionCommand, Thread, ThreadId, ThreadView,
         record_background_failure, validate_decision_resolution,
@@ -3095,13 +3096,126 @@ pub(super) async fn stop_interaction(
     ) {
         return Ok(Json(interaction.into()));
     }
-    state
+    let queued = state
         .product
         .request_interaction_stop(thread_id, interaction_id)
         .await?;
+    if queued == crate::storage::QueuedStop::SettleBeforeStart {
+        // The graph already prepared this queued run's call. It settles as a Stop before native
+        // execution, outside its node's queue: no provider work starts, and its graph current
+        // stops with it.
+        let settle_state = state.clone();
+        tokio::spawn(async move {
+            settle_queued_stop(settle_state, thread_id, interaction_id).await;
+        });
+    }
     Ok(Json(
         state.product.get_interaction(interaction_id).await?.into(),
     ))
+}
+
+/// Settles the Stop of a queued run whose call the graph already prepared. Nothing ran, so it
+/// stops the run's graph current directly, then ends the product row stopped; it never
+/// activates the call or starts provider work. The graph Stop comes first and is retried until
+/// it lands, so the product never reports a Stop the graph does not hold. Until then the run
+/// shows Stopping…, and a restart reconciles it as an interrupted Stop.
+async fn settle_queued_stop(state: ApiState, thread_id: ThreadId, interaction_id: InteractionId) {
+    let mut backoff = std::time::Duration::from_millis(100);
+    loop {
+        match settle_queued_stop_once(&state, thread_id, interaction_id).await {
+            Ok(()) => return,
+            Err(error) => {
+                eprintln!(
+                    "could not settle the Stop of queued run {interaction_id}; retrying in {backoff:?}: {error}"
+                );
+                tokio::time::sleep(backoff).await;
+                backoff = (backoff * 2).min(std::time::Duration::from_secs(30));
+            }
+        }
+    }
+}
+
+async fn settle_queued_stop_once(
+    state: &ApiState,
+    thread_id: ThreadId,
+    interaction_id: InteractionId,
+) -> Result<(), String> {
+    let interaction = state
+        .product
+        .get_interaction(interaction_id)
+        .await
+        .map_err(|error| error.to_string())?;
+    // Only a run that still waits on its own valid Stop is settled here. One that ended, or
+    // whose earlier Stop failed, is left alone.
+    if interaction.thread_id != thread_id
+        || interaction.completion_status != "submitted"
+        || !interaction.stop_requested
+        || interaction.stop_error.is_some()
+    {
+        return Ok(());
+    }
+    let runtime = state
+        .runtime
+        .as_ref()
+        .ok_or_else(|| "GraphComplete runtime is unavailable".to_owned())?;
+    if let Some(graph_node_id) = state
+        .product
+        .prepared_invocation_node(interaction_id)
+        .await
+        .map_err(|error| error.to_string())?
+        && let Err(error) = runtime
+            .stop_graph_completion(graph_node_id, &format!("product-stop:{interaction_id}"))
+            .await
+    {
+        // A current that already stopped is the outcome the Stop asked for. One the graph
+        // ended otherwise ends the product row with the graph's outcome, never as stopped.
+        let current = runtime
+            .completion_current(graph_node_id)
+            .await
+            .map_err(|read| format!("graph Stop failed: {error}; current read failed: {read}"))?;
+        match current.lifecycle {
+            relayer_graph_core::CompletionLifecycle::Stopped => {}
+            relayer_graph_core::CompletionLifecycle::Active => {
+                return Err(format!("graph Stop failed: {error}"));
+            }
+            other => {
+                let message =
+                    format!("The graph ended this run as {other:?} before its Stop landed.");
+                state
+                    .product
+                    .fail_interaction_completion(
+                        interaction_id,
+                        interaction
+                            .harness_configuration_name
+                            .as_deref()
+                            .unwrap_or("unknown"),
+                        &message,
+                    )
+                    .await
+                    .map_err(|error| error.to_string())?;
+                return Ok(());
+            }
+        }
+    }
+    if let Err(error) = state
+        .product
+        .finish_interaction_stopped(interaction_id)
+        .await
+    {
+        // Another settlement of the same Stop may have ended it first.
+        let current = state
+            .product
+            .get_interaction(interaction_id)
+            .await
+            .map_err(|read| format!("{error}; reread failed: {read}"))?;
+        if matches!(
+            current.completion_status.as_str(),
+            "submitted" | "running" | "waiting_for_approval"
+        ) {
+            return Err(error.to_string());
+        }
+    }
+    Ok(())
 }
 
 pub(super) async fn stop_completion(
@@ -4150,6 +4264,10 @@ async fn invoke_action_with_authority(
                 &submitted_attachments,
             )
             .await?;
+        // The run joins its node's queue as soon as it exists, before its graph call is
+        // prepared, so the queue keeps creation order (#718).
+        let arrival =
+            NodeArrival::join(state, &reservation.interaction, action.source_node_id).await?;
         let node = match runtime
             .prepare_user_invocation(
                 graph_node_id,
@@ -4251,7 +4369,14 @@ async fn invoke_action_with_authority(
             .await?;
         outcome.created = reservation.created;
         // Native binding and captured-epoch consumption committed together above.
-        let (status, mut response) = spawn_action_handoff(state.clone(), thread, outcome).await?;
+        let (status, mut response) = spawn_action_handoff(
+            state.clone(),
+            thread,
+            outcome,
+            action.source_node_id,
+            Some(arrival),
+        )
+        .await?;
         // The detached handoff already owns execution. A draft read/presentation
         // outage must not tell the caller that this activation failed.
         let deadline = super::interaction_graph::projection_deadline();
@@ -4284,28 +4409,35 @@ async fn invoke_action_with_authority(
         .get_action_invocation(source_interaction_id, action_id)
         .await?
     {
-        return spawn_action_handoff(state.clone(), thread, outcome).await;
+        return spawn_action_handoff(state.clone(), thread, outcome, action.source_node_id, None)
+            .await;
     }
     // One-shot invocation is a temporary UX simplification. The durable product record is
     // intentionally shaped so future retryable or repeatable action semantics can replace it.
     let owned_state = state.clone();
+    let source_node_id = action.source_node_id;
     let handoff = tokio::spawn(async move {
         let outcome = owned_state
             .product
             .invoke_action(source_interaction_id, action_id, &interaction_text)
             .await?;
-        finish_action_handoff(&owned_state, &thread, outcome).await
+        finish_action_handoff(&owned_state, &thread, outcome, source_node_id, None).await
     });
     await_action_handoff(handoff).await
 }
 
+/// `source_node_id` is the node of the action the user invoked: runs on one node start in
+/// order (#718).
 async fn spawn_action_handoff(
     state: ApiState,
     thread: Thread,
     outcome: InvokeActionOutcome,
+    source_node_id: i64,
+    arrival: Option<NodeArrival>,
 ) -> Result<(StatusCode, Json<InvokeActionResponse>), ApiError> {
-    let handoff =
-        tokio::spawn(async move { finish_action_handoff(&state, &thread, outcome).await });
+    let handoff = tokio::spawn(async move {
+        finish_action_handoff(&state, &thread, outcome, source_node_id, arrival).await
+    });
     await_action_handoff(handoff).await
 }
 
@@ -4323,6 +4455,8 @@ async fn finish_action_handoff(
     state: &ApiState,
     thread: &Thread,
     outcome: InvokeActionOutcome,
+    source_node_id: i64,
+    arrival: Option<NodeArrival>,
 ) -> Result<(StatusCode, Json<InvokeActionResponse>), ApiError> {
     let status = if outcome.created {
         StatusCode::CREATED
@@ -4348,7 +4482,14 @@ async fn finish_action_handoff(
     let interaction = if agent_child {
         outcome.interaction
     } else if outcome.interaction.completion_status == "not_started" || recoverable_invoke {
-        claim_and_start_action_interaction(state, &owning_thread, outcome.interaction).await?
+        claim_and_start_action_interaction(
+            state,
+            &owning_thread,
+            outcome.interaction,
+            source_node_id,
+            arrival,
+        )
+        .await?
     } else {
         outcome.interaction
     };
@@ -4385,18 +4526,206 @@ async fn finish_action_handoff(
     ))
 }
 
+/// Starts a user's invoked run, or queues it behind the run that holds its node (#718). The
+/// node is recorded first, so a retried request finds the same queue. `arrival` is the queue
+/// place the run took when it was created, if its request joined the queue then.
 async fn claim_and_start_action_interaction(
     state: &ApiState,
     thread: &Thread,
     interaction: Interaction,
+    source_node_id: i64,
+    arrival: Option<NodeArrival>,
 ) -> Result<Interaction, ApiError> {
+    let arrival = arrival.map(NodeArrival::consume);
     if state.runtime.is_none() {
         let message = "GraphComplete runtime is unavailable";
         record_background_failure(&state.product, thread, &interaction, message.into()).await;
+        if let Some((key, joined)) = arrival {
+            depart_node_run(state.clone(), key, interaction.id, joined);
+        }
         return Err(ApiError::invalid(message));
     }
+    // A run that carries a Stop, for example one restored after a restart or one whose queued
+    // Stop is settling, never starts: it settles before any native work, outside the queue.
+    if interaction.completion_status == "submitted"
+        && interaction.stop_requested
+        && interaction.stop_error.is_none()
+    {
+        if let Some((key, joined)) = arrival {
+            depart_node_run(state.clone(), key, interaction.id, joined);
+        }
+        let settle_state = state.clone();
+        let (thread_id, run) = (thread.id, interaction.id);
+        tokio::spawn(async move {
+            settle_queued_stop(settle_state, thread_id, run).await;
+        });
+        return Ok(interaction);
+    }
+    let admitted = async {
+        state
+            .product
+            .record_node_run(interaction.id, source_node_id)
+            .await?;
+        let key = match arrival {
+            Some((key, _)) => key,
+            None => state
+                .product
+                .node_run_key(interaction.id)
+                .await?
+                .expect("a recorded node run has a key"),
+        };
+        state
+            .node_runs
+            .admit(
+                &state.product,
+                key,
+                interaction.id,
+                interaction.sequence,
+                arrival.map(|(_, joined)| joined),
+            )
+            .await
+            .map(|admission| (key, admission))
+    }
+    .await;
+    let key = match admitted {
+        Ok((key, NodeAdmission::Start)) => key,
+        // It waits in its node's queue. It reads the thread when it starts.
+        Ok((_, NodeAdmission::Waiting)) => {
+            return state
+                .product
+                .get_interaction(interaction.id)
+                .await
+                .map_err(Into::into);
+        }
+        // It could not wait: it ended, or a Stop reached it while it prepared. A Stop settles
+        // before any native work, outside the queue.
+        Ok((_, NodeAdmission::NotQueued)) => {
+            let current = state.product.get_interaction(interaction.id).await?;
+            if current.completion_status == "submitted"
+                && current.stop_requested
+                && current.stop_error.is_none()
+            {
+                let settle_state = state.clone();
+                let (thread_id, run) = (thread.id, interaction.id);
+                tokio::spawn(async move {
+                    settle_queued_stop(settle_state, thread_id, run).await;
+                });
+            }
+            return Ok(current);
+        }
+        Err(error) => {
+            let error = ApiError::from(error);
+            record_background_failure(
+                &state.product,
+                thread,
+                &interaction,
+                error.message().to_owned(),
+            )
+            .await;
+            if let Some((key, joined)) = arrival {
+                depart_node_run(state.clone(), key, interaction.id, joined);
+            }
+            return Err(error);
+        }
+    };
+    start_held_action_interaction(state, thread, interaction, key, false).await
+}
+
+/// A run's place in its node's queue from the moment it is created (#718). It is taken before
+/// the run's graph call is prepared, so a slower preparation never lets a later run overtake
+/// it. If the request ends before the run is admitted, dropping it gives the place up.
+pub(super) struct NodeArrival {
+    state: ApiState,
+    key: NodeRunKey,
+    run: InteractionId,
+    arrival: Arrival,
+    consumed: bool,
+}
+
+impl NodeArrival {
+    /// Records the run's node and joins its queue.
+    async fn join(
+        state: &ApiState,
+        run: &Interaction,
+        source_node_id: i64,
+    ) -> Result<Self, ApiError> {
+        state
+            .product
+            .record_node_run(run.id, source_node_id)
+            .await?;
+        let key = state
+            .product
+            .node_run_key(run.id)
+            .await?
+            .expect("a recorded node run has a key");
+        let arrival = state.node_runs.arrive(key, run.id, run.sequence).await;
+        Ok(Self {
+            state: state.clone(),
+            key,
+            run: run.id,
+            arrival,
+            consumed: false,
+        })
+    }
+
+    fn consume(mut self) -> (NodeRunKey, Arrival) {
+        self.consumed = true;
+        (self.key, self.arrival)
+    }
+}
+
+impl Drop for NodeArrival {
+    fn drop(&mut self) {
+        if !self.consumed {
+            depart_node_run(self.state.clone(), self.key, self.run, self.arrival);
+        }
+    }
+}
+
+/// Gives up the queue place of a run whose request ended before its run was admitted; the next
+/// run on the node starts if the place held it.
+fn depart_node_run(state: ApiState, key: NodeRunKey, run: InteractionId, arrival: Arrival) {
+    let depart: std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>> = Box::pin(
+        async move {
+            let mut backoff = std::time::Duration::from_millis(100);
+            loop {
+                match state
+                    .node_runs
+                    .depart(&state.product, key, run, arrival)
+                    .await
+                {
+                    Ok(Some(next)) => {
+                        start_dispatched_node_run(state, key, next).await;
+                        return;
+                    }
+                    Ok(None) => return,
+                    Err(error) => {
+                        eprintln!(
+                            "node run queue could not release run {run}; retrying in {backoff:?}: {error}"
+                        );
+                        tokio::time::sleep(backoff).await;
+                        backoff = (backoff * 2).min(std::time::Duration::from_secs(30));
+                    }
+                }
+            }
+        },
+    );
+    tokio::spawn(depart);
+}
+
+/// Starts a run that holds its node. The node is released once the run settles, whatever the
+/// outcome, and the next queued run on it then starts.
+async fn start_held_action_interaction(
+    state: &ApiState,
+    thread: &Thread,
+    interaction: Interaction,
+    key: NodeRunKey,
+    already_claimed: bool,
+) -> Result<Interaction, ApiError> {
     let prepared =
-        match prepare_and_claim_interaction(state, thread, &interaction, false, false).await {
+        match prepare_and_claim_interaction(state, thread, &interaction, already_claimed, false)
+            .await
+        {
             Ok(prepared) => prepared,
             Err(error) => {
                 record_background_failure(
@@ -4406,10 +4735,12 @@ async fn claim_and_start_action_interaction(
                     error.message().to_owned(),
                 )
                 .await;
+                release_node_run(state.clone(), key, interaction.id, false);
                 return Err(error);
             }
         };
     let Some(prepared) = prepared else {
+        release_node_run(state.clone(), key, interaction.id, false);
         return state
             .product
             .get_interaction(interaction.id)
@@ -4424,14 +4755,23 @@ async fn claim_and_start_action_interaction(
     running.graph_node_id = Some(prepared.graph_node_id);
     // No await after claim/activation and before detached execution ownership.
     let execution_state = state.clone();
+    let release_state = state.clone();
     let execution_thread = thread.clone();
+    let run = interaction.id;
     tokio::spawn(async move {
-        execution_state
-            .interaction_execution
-            .as_ref()
-            .expect("runtime-backed interaction execution service")
-            .execute_prepared_interaction(execution_thread, interaction, prepared)
-            .await;
+        let execution = tokio::spawn(async move {
+            execution_state
+                .interaction_execution
+                .as_ref()
+                .expect("runtime-backed interaction execution service")
+                .execute_prepared_interaction(execution_thread, interaction, prepared)
+                .await;
+        });
+        // The execution has ended, or panicked. The node passes on once the run's outcome is
+        // saved, whatever it is. A run whose outcome is never saved keeps its node until a
+        // restart, which interrupts it, so no later run starts beside it.
+        let _ = execution.await;
+        release_node_run(release_state, key, run, true);
     });
     match tokio::time::timeout_at(
         super::interaction_graph::projection_deadline(),
@@ -4453,6 +4793,72 @@ async fn claim_and_start_action_interaction(
         }
     }
     Ok(running)
+}
+
+/// A settled run releases its node, and the oldest run queued on it starts. It starts whether
+/// the run ahead was accepted, failed or stopped (#716 decision 4). After an execution, the
+/// release waits until the run's settlement is durable (`settled`).
+fn release_node_run(state: ApiState, key: NodeRunKey, run: InteractionId, settled: bool) {
+    let release: std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>> = Box::pin(
+        async move {
+            // A storage failure keeps the settled run on its node, so the release is retried
+            // with capped backoff until the next queued run starts or none is left.
+            let mut backoff = std::time::Duration::from_millis(100);
+            let next = loop {
+                let released = if settled {
+                    state
+                        .node_runs
+                        .release_settled(&state.product, key, run, backoff)
+                        .await
+                } else {
+                    state.node_runs.release(&state.product, key, run).await
+                };
+                match released {
+                    Ok(Some(next)) => break next,
+                    Ok(None) => return,
+                    Err(error) => {
+                        eprintln!(
+                            "node run queue could not hand node {} of thread {} on; retrying in {backoff:?}: {error}",
+                            key.node_id, key.thread_id
+                        );
+                        tokio::time::sleep(backoff).await;
+                        backoff = (backoff * 2).min(std::time::Duration::from_secs(30));
+                    }
+                }
+            };
+            start_dispatched_node_run(state, key, next).await;
+        },
+    );
+    tokio::spawn(release);
+}
+
+/// Starts a queued run the queue just claimed for its node. The run holds the node, so a failed
+/// read is retried while it keeps holding it: no later run overtakes it.
+async fn start_dispatched_node_run(state: ApiState, key: NodeRunKey, next: InteractionId) {
+    let mut backoff = std::time::Duration::from_millis(100);
+    let (thread, interaction) = loop {
+        let loaded = async {
+            let interaction = state.product.get_interaction(next).await?;
+            let thread = state
+                .product
+                .get_thread(interaction.thread_id)
+                .await?
+                .thread;
+            Ok::<_, crate::product::ProductError>((thread, interaction))
+        }
+        .await;
+        match loaded {
+            Ok(loaded) => break loaded,
+            Err(error) => {
+                eprintln!(
+                    "queued run {next} could not be loaded to start; retrying in {backoff:?}: {error}"
+                );
+                tokio::time::sleep(backoff).await;
+                backoff = (backoff * 2).min(std::time::Duration::from_secs(30));
+            }
+        }
+    };
+    let _ = start_held_action_interaction(&state, &thread, interaction, key, true).await;
 }
 
 fn log_action_invocation_request_failure(
@@ -5509,6 +5915,7 @@ mod tests {
             completion_brokers,
             completion_observations: CompletionObservations::default(),
             running_child_providers: Default::default(),
+            node_runs: Default::default(),
         };
         BrokerFixture {
             state,
@@ -5852,6 +6259,90 @@ mod tests {
             tokio::time::sleep(std::time::Duration::from_millis(10)).await;
         }
         assert_eq!(fixture.starts.load(Ordering::SeqCst), 1);
+        fixture.finish();
+    }
+
+    /// The Stop of a queued run whose call the graph prepared (#718 review). The graph
+    /// current stops first; while the graph refuses, the product row keeps waiting (Stopping…)
+    /// and is never reported stopped on its own. Once the graph Stop lands, the row ends
+    /// stopped, and no provider work ever started.
+    #[tokio::test]
+    async fn a_queued_stop_ends_the_product_row_only_after_the_graph_current_stops() {
+        let fixture = broker_fixture("queued-stop", "active").await;
+        let pool = sqlx::SqlitePool::connect(&format!(
+            "sqlite://{}",
+            fixture._root.path().join("product.sqlite3").display()
+        ))
+        .await
+        .unwrap();
+        let run = sqlx::query("INSERT INTO interactions(thread_id,sequence,text,created_at,completion_status,permission_profile_id) VALUES (?1,(SELECT MAX(sequence)+1 FROM interactions WHERE thread_id=?1),'Child work','2','queued','auto')")
+            .bind(fixture.thread.id.value())
+            .execute(&pool)
+            .await
+            .unwrap()
+            .last_insert_rowid();
+        sqlx::query("INSERT INTO action_invocations(source_interaction_id,action_id,result_interaction_id,created_at,graph_lease_required,authoritative,agent_invoked,invocation_key,prepared_graph_node_id) VALUES (?1,41,?2,'2',1,1,0,'queued-key',202)")
+            .bind(fixture.thread.root_interaction_id.value())
+            .bind(run)
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query(
+            "INSERT INTO node_runs(result_interaction_id,thread_id,node_id) VALUES (?1,?2,102)",
+        )
+        .bind(run)
+        .bind(fixture.thread.id.value())
+        .execute(&pool)
+        .await
+        .unwrap();
+        pool.close().await;
+        let run = InteractionId::from_database(run);
+        assert_eq!(
+            fixture
+                .product
+                .request_interaction_stop(fixture.thread.id, run)
+                .await
+                .unwrap(),
+            crate::storage::QueuedStop::SettleBeforeStart
+        );
+
+        fixture.transition_refusals.store(2, Ordering::SeqCst);
+        for _ in 0..2 {
+            assert!(
+                settle_queued_stop_once(&fixture.state, fixture.thread.id, run)
+                    .await
+                    .is_err()
+            );
+            let waiting = fixture.product.get_interaction(run).await.unwrap();
+            assert_eq!(waiting.completion_status, "submitted");
+            assert!(waiting.stop_requested);
+            assert_eq!(fixture.current.lock().unwrap()["lifecycle"], "active");
+        }
+        settle_queued_stop_once(&fixture.state, fixture.thread.id, run)
+            .await
+            .unwrap();
+        assert_eq!(
+            fixture
+                .product
+                .get_interaction(run)
+                .await
+                .unwrap()
+                .completion_status,
+            "stopped"
+        );
+        let transitions = fixture.transitions.lock().unwrap().clone();
+        assert_eq!(transitions.len(), 1);
+        assert_eq!(transitions[0]["transition"]["kind"], "stop");
+        assert_eq!(fixture.current.lock().unwrap()["lifecycle"], "stopped");
+        assert_eq!(
+            fixture.starts.load(Ordering::SeqCst),
+            0,
+            "no provider work started"
+        );
+        // A second settlement of the same Stop finds it ended and leaves it alone.
+        settle_queued_stop_once(&fixture.state, fixture.thread.id, run)
+            .await
+            .unwrap();
         fixture.finish();
     }
 

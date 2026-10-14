@@ -338,6 +338,6 @@ export function shouldPollThreadInteractions(thread, interactions) {
   if (!thread || thread.imported === true) return false;
   return (interactions || []).some((interaction) => (
     String(interaction.threadId) === String(thread.id)
-    && ["not_started", "running", "submitted", "waiting_for_approval"].includes(interaction.completionStatus)
+    && ["not_started", "queued", "running", "submitted", "waiting_for_approval"].includes(interaction.completionStatus)
   ));
 }

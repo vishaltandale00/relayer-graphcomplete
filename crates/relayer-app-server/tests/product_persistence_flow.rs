@@ -4890,6 +4890,424 @@ async fn action_invocation_api_is_idempotent_and_survives_restart() {
     harness_task.abort();
 }
 
+/// One harness Complete call a test holds open until it decides the call's outcome.
+type HeldCompletes = Arc<Mutex<Vec<(i64, Value, Option<tokio::sync::oneshot::Sender<bool>>)>>>;
+
+/// PAR-009 (#718): runs a user starts on different nodes run at once. On one node they queue
+/// in order, and each starts when the run ahead of it settles, whether it was accepted or
+/// failed. A queued run reads the thread when it starts, so it is pointed at the accepted
+/// result of the run ahead. A queued run that is stopped never starts.
+#[tokio::test]
+async fn node_runs_run_beside_other_nodes_and_queue_in_order_on_their_own_node() {
+    let temporary = tempfile::Builder::new()
+        .prefix("relayer-node-runs-")
+        .tempdir()
+        .unwrap();
+    let root = temporary.path().to_path_buf();
+    let database = root.join("product.sqlite3");
+
+    let app = open_app(&database, &root).await;
+    let pool = sqlite_pool(&database).await;
+    sqlx::query("UPDATE product_harnesses SET family_policy_id='codex-default-family',family_policy_version=1 WHERE configuration_name='codex-basic'")
+        .execute(&pool)
+        .await
+        .unwrap();
+    pool.close().await;
+    let published = app
+        .clone()
+        .oneshot(provider_publish_request(test_provider_snapshot()))
+        .await
+        .unwrap();
+    assert_eq!(published.status(), StatusCode::NO_CONTENT);
+    let pool = sqlite_pool(&database).await;
+    sqlx::query(
+        "UPDATE product_harnesses SET available=1,unavailable_reason_code=NULL,unavailable_reason_message=NULL WHERE configuration_name='codex-basic'",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    pool.close().await;
+    let settings = response_json(
+        app.clone()
+            .oneshot(api_request("GET", "/api/model-settings", None, true))
+            .await
+            .unwrap(),
+    )
+    .await;
+    let family_id = settings["families"][0]["id"].as_i64().unwrap();
+    let thread = response_json(
+        app.oneshot(api_request(
+            "POST",
+            "/api/threads",
+            Some(json!({
+                "title": "Node runs",
+                "initialMessage": "Start here",
+                "harnessId": "codex-basic",
+                "modelSelection": {
+                    "familyId": family_id,
+                    "providerId": "codex",
+                    "modelId": "test-model"
+                }
+            })),
+            true,
+        ))
+        .await
+        .unwrap(),
+    )
+    .await;
+    let thread_id = thread["id"].as_i64().unwrap();
+    let source_interaction_id = thread["rootInteractionId"].as_i64().unwrap();
+    // Node 7 offers four invoke actions and node 8 one.
+    let node_of_action = |action_id: i64| if action_id == 44 { 8 } else { 7 };
+    let actions = [41, 43, 44, 45, 46].map(|action_id| {
+        json!({
+            "id": action_id, "sourceNodeId": node_of_action(action_id), "kind": "invoke",
+            "interactionText": format!("Action {action_id}"), "state": "accepted", "targetLayerId": null
+        })
+    });
+    let source_output = json!({
+        "nodeId": 101,
+        "rootLayer": {"layer": {"id": 1}, "nodes": [
+            {"id": 7, "kind": "concept", "title": "Tiers table", "state": "accepted"},
+            {"id": 8, "kind": "concept", "title": "FAQ", "state": "accepted"}
+        ], "edges": [], "actions": actions}
+    });
+    let pool = sqlite_pool(&database).await;
+    let project_id = sqlx::query(
+        "INSERT INTO projects(name,path,created_at,updated_at) VALUES ('Node runs',?1,'1','1')",
+    )
+    .bind(root.to_string_lossy().as_ref())
+    .execute(&pool)
+    .await
+    .unwrap()
+    .last_insert_rowid();
+    sqlx::query("UPDATE threads SET project_id=?1 WHERE id=?2")
+        .bind(project_id)
+        .bind(thread_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query(
+        "UPDATE interactions SET graph_node_id=101,completion_status='accepted',completion_output_json=?1 WHERE id=?2",
+    )
+    .bind(source_output.to_string())
+    .bind(source_interaction_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+    pool.close().await;
+
+    let graph_nodes = Arc::new(AtomicI64::new(202));
+    let graph_metadata = Arc::new(Mutex::new(HashMap::<i64, Value>::new()));
+    let created_metadata = graph_metadata.clone();
+    let graph = axum::Router::new()
+        // Stop needs the temporal schema, as in the desktop.
+        .route(
+            "/api/control/temporal-features",
+            axum::routing::get(|| async {
+                axum::Json(json!({"configVersion": 1, "schemaRead": true, "rootCurrentWrite": true, "projectionUi": false, "invokeResolution": false, "providerRecursion": false}))
+            }),
+        )
+        .route(
+            "/api/control/capabilities",
+            axum::routing::post(|axum::Json(body): axum::Json<Value>| async move {
+                axum::Json(json!({ "graphToken": body["graphToken"] }))
+            })
+            .delete(|| async { axum::Json(json!({ "revoked": true })) }),
+        )
+        .route(
+            "/api/control/interactions/{id}/actions/{action_id}",
+            axum::routing::get(
+                move |axum::extract::Path((id, action_id)): axum::extract::Path<(i64, i64)>| async move {
+                    if id != 101 || ![41, 43, 44, 45, 46].contains(&action_id) {
+                        return (StatusCode::NOT_FOUND, axum::Json(json!({"error": {"code": "action_not_visible"}})));
+                    }
+                    (StatusCode::OK, axum::Json(json!({"action": {
+                        "id": action_id, "sourceNodeId": node_of_action(action_id), "kind": "invoke",
+                        "interactionText": format!("Action {action_id}"), "state": "accepted"
+                    }})))
+                },
+            ),
+        )
+        .route(
+            "/api/control/interactions",
+            axum::routing::post(move |axum::Json(body): axum::Json<Value>| {
+                let graph_nodes = graph_nodes.clone();
+                let created_metadata = created_metadata.clone();
+                async move {
+                    let node_id = graph_nodes.fetch_add(1, Ordering::SeqCst);
+                    created_metadata
+                        .lock()
+                        .unwrap()
+                        .insert(node_id, body["invocation"].clone());
+                    axum::Json(json!({ "node": { "id": node_id }, "graphToken": "" }))
+                }
+            }),
+        )
+        .route(
+            "/api/control/interactions/{id}",
+            axum::routing::get(move |axum::extract::Path(id): axum::extract::Path<i64>| {
+                let graph_metadata = graph_metadata.clone();
+                async move {
+                    axum::Json(json!({
+                        "nodeId": id,
+                        "invocation": graph_metadata.lock().unwrap().get(&id).cloned()
+                    }))
+                }
+            }),
+        )
+        .route(
+            "/api/control/interactions/101/output",
+            axum::routing::get(move || {
+                let source_output = source_output.clone();
+                async move { axum::Json(source_output) }
+            }),
+        );
+    let held: HeldCompletes = Arc::new(Mutex::new(Vec::new()));
+    let harness_held = held.clone();
+    let leases = Arc::new(AtomicUsize::new(1));
+    let harness = axum::Router::new()
+        .route(
+            "/sessions",
+            axum::routing::post(|| async { (StatusCode::CREATED, axum::Json(json!({}))) }),
+        )
+        .route(
+            "/sessions/{id}/execution-leases",
+            axum::routing::post(move |axum::Json(body): axum::Json<Value>| {
+                let leases = leases.clone();
+                async move {
+                    let lease = leases.fetch_add(1, Ordering::SeqCst);
+                    (
+                        StatusCode::CREATED,
+                        axum::Json(test_execution_admission(
+                            &body,
+                            &format!("00000000-0000-0000-0000-{lease:012}"),
+                            "7",
+                        )),
+                    )
+                }
+            }),
+        )
+        .route(
+            "/sessions/{id}/execution-leases/{lease}",
+            axum::routing::delete(|| async { axum::Json(json!({ "released": false })) }),
+        )
+        .route(
+            "/sessions/{id}/complete",
+            axum::routing::post(move |axum::Json(body): axum::Json<Value>| {
+                let held = harness_held.clone();
+                async move {
+                    let run = body["traceContext"]["productInteractionId"].as_i64().unwrap();
+                    let node_id = body["graph"]["nodeId"].as_i64().unwrap();
+                    let (decide, decision) = tokio::sync::oneshot::channel();
+                    held.lock().unwrap().push((run, body, Some(decide)));
+                    if decision.await.unwrap_or(false) {
+                        (StatusCode::OK, axum::Json(json!({"output": {
+                            "nodeId": node_id,
+                            "rootLayer": {"layer": {"id": 900 + node_id}, "nodes": [], "edges": [], "actions": []}
+                        }})))
+                    } else {
+                        (
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            axum::Json(json!({"error": {"code": "provider_failed", "message": "The provider failed."}})),
+                        )
+                    }
+                }
+            }),
+        );
+    let (graph_url, graph_task) = serve_test_app(graph).await;
+    let (harness_url, harness_task) = serve_test_app(harness).await;
+    let catalog = root.join("catalog.json");
+    fs::write(
+        &catalog,
+        json!({
+            "schemaVersion": 1,
+            "configurations": [{
+                "configuration": {
+                    "schemaVersion": 1,
+                    "name": "codex-basic",
+                    "implementation": "test",
+                    "implementationVersion": 1,
+                    "permissionBindings": { "ask": {}, "auto": {}, "full": {} },
+                    "modelCompatibility": [{ "providerId": "codex" }],
+                    "executionAccessContracts": ["managed-runtime@1"],
+                    "settings": {}
+                },
+                "digest": "sha256:test"
+            }]
+        })
+        .to_string(),
+    )
+    .unwrap();
+    let app =
+        open_app_with_runtime_observed(&database, &root, &catalog, &graph_url, &harness_url).await;
+
+    let invoke = |action_id: i64| {
+        let app = app.clone();
+        async move {
+            let response = app
+                .oneshot(api_request(
+                    "POST",
+                    &format!("/api/threads/{thread_id}/interactions/{source_interaction_id}/actions/{action_id}/invoke"),
+                    None,
+                    true,
+                ))
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::CREATED, "invoke {action_id}");
+            let body = response_json(response).await;
+            (
+                body["interaction"]["id"].as_i64().unwrap(),
+                body["interaction"]["completionStatus"]
+                    .as_str()
+                    .unwrap()
+                    .to_owned(),
+            )
+        }
+    };
+    let started = |run: i64| {
+        let held = held.clone();
+        async move {
+            let deadline = std::time::Instant::now() + Duration::from_secs(5);
+            loop {
+                if let Some((_, body, _)) =
+                    held.lock().unwrap().iter().find(|(id, _, _)| *id == run)
+                {
+                    return body.clone();
+                }
+                assert!(
+                    std::time::Instant::now() < deadline,
+                    "run {run} never started"
+                );
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        }
+    };
+    let settle = |run: i64, accept: bool| {
+        let decide = held
+            .lock()
+            .unwrap()
+            .iter_mut()
+            .find(|(id, _, _)| *id == run)
+            .and_then(|(_, _, decide)| decide.take())
+            .expect("a held run");
+        decide.send(accept).unwrap();
+    };
+    let status_of = |run: i64| {
+        let app = app.clone();
+        async move {
+            let state = response_json(
+                app.oneshot(api_request(
+                    "GET",
+                    &format!("/api/state?threadId={thread_id}"),
+                    None,
+                    true,
+                ))
+                .await
+                .unwrap(),
+            )
+            .await;
+            state["interactions"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|interaction| interaction["id"] == run)
+                .unwrap()["completionStatus"]
+                .as_str()
+                .unwrap()
+                .to_owned()
+        }
+    };
+    let settled = |run: i64, expected: &'static str| async move {
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        loop {
+            let status = status_of(run).await;
+            if status == expected {
+                return;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "run {run} is {status}, not {expected}"
+            );
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    };
+
+    // A run on node 7 and a run on node 8 run at once.
+    let (first, _) = invoke(41).await;
+    let first_body = started(first).await;
+    let (other_node, _) = invoke(44).await;
+    started(other_node).await;
+    assert_eq!(status_of(first).await, "running");
+    assert_eq!(status_of(other_node).await, "running");
+
+    // Two sends race to node 7 while its run is active: both wait, in order.
+    let ((second, second_status), (third, third_status)) = tokio::join!(invoke(43), invoke(45));
+    assert_eq!(
+        [second_status.as_str(), third_status.as_str()],
+        ["queued", "queued"]
+    );
+    let (second, third) = (second.min(third), second.max(third));
+    // A queued run stops without starting.
+    let (removed, removed_status) = invoke(46).await;
+    assert_eq!(removed_status, "queued");
+    let stopped = response_json(
+        app.clone()
+            .oneshot(api_request(
+                "POST",
+                &format!("/api/threads/{thread_id}/interactions/{removed}/stop"),
+                None,
+                true,
+            ))
+            .await
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(stopped["completionStatus"], "stopped");
+
+    // The run on node 8 settling starts nothing on node 7.
+    settle(other_node, true);
+    settled(other_node, "accepted").await;
+    assert_eq!(status_of(second).await, "queued");
+    assert_eq!(held.lock().unwrap().len(), 2);
+
+    // The first run is accepted, so the next one on node 7 starts and is pointed at its result.
+    settle(first, true);
+    let second_body = started(second).await;
+    settled(first, "accepted").await;
+    assert_eq!(second_body["traceContext"]["nativeSession"], "fresh");
+    let first_node = first_body["graph"]["nodeId"].as_i64().unwrap();
+    assert!(
+        second_body["traceContext"]["threadHistory"]
+            .as_array()
+            .unwrap()
+            .contains(
+                &json!({"interactionNodeId": first_node, "responseLayerId": 900 + first_node})
+            ),
+        "the queued run was not pointed at the accepted result ahead of it: {}",
+        second_body["traceContext"]["threadHistory"]
+    );
+    assert_eq!(status_of(third).await, "queued");
+
+    // The run ahead fails; the last queued run starts anyway.
+    settle(second, false);
+    started(third).await;
+    settle(third, true);
+    settled(third, "accepted").await;
+    assert_ne!(status_of(second).await, "running");
+    assert_eq!(status_of(removed).await, "stopped");
+    assert!(
+        held.lock()
+            .unwrap()
+            .iter()
+            .all(|(run, _, _)| *run != removed),
+        "a stopped queued run started"
+    );
+    assert_eq!(held.lock().unwrap().len(), 4);
+    graph_task.abort();
+    harness_task.abort();
+}
+
 #[tokio::test]
 async fn product_model_selection_is_validated_inherited_transported_and_auditable() {
     let temporary = tempfile::Builder::new()
@@ -5638,18 +6056,51 @@ async fn interrupted_action_invocation_remains_submitted_for_source_pair_recover
     .execute(&pool)
     .await
     .unwrap();
+    // A run queued behind it on the same node (#718) is interrupted the same way: nothing
+    // starts it on its own, and it never stays queued behind a run that no longer exists.
+    let queued_interaction_id = sqlx::query(
+        "INSERT INTO interactions(thread_id,sequence,text,created_at,completion_status) VALUES (?1,3,'Then this',?2,'queued')",
+    )
+    .bind(thread_id)
+    .bind(&created_at)
+    .execute(&pool)
+    .await
+    .unwrap()
+    .last_insert_rowid();
+    sqlx::query(
+        "INSERT INTO action_invocations(source_interaction_id,action_id,result_interaction_id,created_at,graph_lease_required) VALUES (?1,43,?2,?3,1)",
+    )
+    .bind(source_interaction_id)
+    .bind(queued_interaction_id)
+    .bind(&created_at)
+    .execute(&pool)
+    .await
+    .unwrap();
+    for interaction in [result_interaction_id, queued_interaction_id] {
+        sqlx::query(
+            "INSERT INTO node_runs(result_interaction_id,thread_id,node_id) VALUES (?1,?2,7)",
+        )
+        .bind(interaction)
+        .bind(thread_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    }
     pool.close().await;
 
     let reopened = open_app(&database, &root).await;
     let pool = sqlite_pool(&database).await;
-    let (startup_status, startup_error): (String, String) =
-        sqlx::query_as("SELECT completion_status,completion_error FROM interactions WHERE id=?1")
-            .bind(result_interaction_id)
-            .fetch_one(&pool)
-            .await
-            .unwrap();
-    assert_eq!(startup_status, "submitted");
-    assert!(startup_error.contains("Invoke the action again"));
+    for interaction in [result_interaction_id, queued_interaction_id] {
+        let (startup_status, startup_error): (String, String) = sqlx::query_as(
+            "SELECT completion_status,completion_error FROM interactions WHERE id=?1",
+        )
+        .bind(interaction)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(startup_status, "submitted");
+        assert!(startup_error.contains("Invoke the action again"));
+    }
     pool.close().await;
     let state = response_json(
         reopened
@@ -7156,6 +7607,17 @@ async fn persists_project_thread_and_interaction_across_restart() {
         .execute(&partial_index_pool)
         .await
         .unwrap();
+    // A later migration redefines the start guard so a queued run counts as active.
+    let queue_migration = include_str!("../src/storage/sqlite/migrations/0048_node_run_queue.sql");
+    let start_guard = &queue_migration[queue_migration
+        .find("CREATE TRIGGER archived_thread_interaction_start")
+        .unwrap()..];
+    sqlx::raw_sql(&format!(
+        "DROP TRIGGER archived_thread_interaction_start; {start_guard}"
+    ))
+    .execute(&partial_index_pool)
+    .await
+    .unwrap();
     sqlx::query("PRAGMA foreign_keys=ON")
         .execute(&partial_index_pool)
         .await

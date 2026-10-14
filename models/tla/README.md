@@ -351,6 +351,45 @@ code, with every fix on; each `-reverted` check turns one fix off.
 | `launch-product-child-reverted` | Decision; the reverted check shows the old trace | The product's Stop of a child answered 500 or recorded a Stop nothing acted on, and a user's invoke of the delegate action ran the child on the product path, where neither the user nor the parent could stop it. Now the product refuses both (`ProductLeavesChildren`, the guard on `UserStopsChild` and `UserReinvokes`). Regression tests: `only_message_turns_hold_the_thread` (Stop with and without an execution row) and `a_users_invoke_does_not_run_an_agents_child`. |
 | `launch-graph-orphan` | Known open | A crash after the parent's `prepareComplete` but before the broker's first product write leaves a graph-only child. No product row names it, so startup cannot fail it, and its current stays active. |
 
+### `NodeRunQueue.tla`
+
+This model covers the per-node run queue (#718, PRD 12.2 PAR-007 to PAR-010).
+Runs a user starts on different nodes run at once; on one node they start
+in order. It has three runs on one node, one on another, and at most one
+restart. Each run is sent once, by an invoke action on its node:
+
+- admission (`Send`, `Resume`): the run takes its node, or waits as `queued`;
+- settlement (`Settle`), which hands the node to the oldest queued run;
+- the product's Stop of a queued run (`StopQueued`);
+- a crash, which loses which run holds a node, and startup, which interrupts
+  executing and queued runs alike.
+
+A run's context is the set of runs accepted when it starts (`seen`).
+`Send` is the run's creation: in the code a run takes its place in its
+node's queue when it is created, before its graph call is prepared, which
+keeps creation order. Settlement and handing the node on are one step. In
+the code the hand-off follows the end of the run's execution task and waits
+until its outcome is saved; admission sees the node held until then. A
+storage failure during the hand-off keeps the settled run on its node, and
+the hand-off is retried; that is not modeled. `StopQueued` also stands for
+the Stop of a queued run whose graph call was already prepared: its graph
+current is stopped first, then the product row, and it never holds the node.
+Duplicate deliveries, which join the holder's admission, are not modeled.
+Graph preparation, approvals and the provider are not modeled.
+`node-queue-today` mirrors the code; each `-reverted` check turns one fix or
+decision off.
+
+| Check | Verdict | Finding |
+| --- | --- | --- |
+| `node-queue-safety` | passes | Two runs on one node never run at once (`OneRunPerNode`). A queued run never starts while another run on its node is active (`QueuedNeverStartsWhileActive`). Queued runs start in the order they were created (`QueuedStartInOrder`). A queued run reads the thread when it starts, so its context includes the accepted result of the run ahead (`QueuedRunSeesRunAhead`). After a restart, no run waits on a node nothing holds (`QueuedHasRunAhead`). |
+| `node-queue-concurrency` | Reachability; expected violation | Runs on different nodes run at once: the trace starts a run on each node. |
+| `node-queue-liveness` | passes | Without a restart, every queued run the user does not stop starts, whether the run ahead was accepted, failed or stopped. |
+| `node-queue-restart-liveness` | passes | Across a restart, every queued run leaves the queue: it starts, is stopped, or is interrupted at startup. |
+| `node-queue-race-reverted` | Fixed; the reverted check shows the race | Two sends racing to one node both saw it free and both started. Admission checks and takes the node in one step under the queue's lock (`AtomicAdmission`). Regression tests: `runs_racing_to_one_node_start_one_at_a_time` and `node_runs_run_beside_other_nodes_and_queue_in_order_on_their_own_node`. |
+| `node-queue-release-reverted` | Decision 4 (#716); the reverted check shows the old trace | A run that failed or was stopped kept its node, so the runs queued behind it never started. Every settlement hands the node on (`ReleaseOnSettle`). Regression tests: `a_settled_run_hands_its_node_to_the_oldest_queued_run` and the end-to-end test above, whose run ahead fails. |
+| `node-queue-context-reverted` | Decision 3 (#716); the reverted check shows the old trace | A queued run's context read when it was sent misses the accepted result of the run ahead. Context is read at start (`ContextAtStart`). Regression tests: `accepted_thread_history_lists_accepted_human_turns_in_order` and the end-to-end test above, which checks the queued run's `threadHistory`. |
+| `node-queue-restart-reverted` | Fixed; the reverted check shows the old trace | A run queued at a restart stayed queued behind a run that no longer existed. Startup now interrupts it like an executing run, and invoking its action again resumes it (`StartupInterruptsQueued`). #722 replaces this with paused runs. Regression test: `interrupted_action_invocation_remains_submitted_for_source_pair_recovery`. |
+
 ### `ExecutionLeases.tla`
 
 This model covers provider execution leases from admission to release:

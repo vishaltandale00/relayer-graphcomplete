@@ -229,7 +229,9 @@ impl SqliteProductStore {
         // as submitted so invoking the same action can remint authority for that exact graph node
         // and resume it rather than terminalizing the only interaction allowed to consume it.
         // An agent's child left here is not resumed by a user's invoke; startup's background
-        // retry ends it, and its message says so.
+        // retry ends it, and its message says so. A run that waited in its node's queue
+        // (#718) is interrupted like one that had started: nothing starts it on its own, and
+        // invoking its action again resumes it.
         let result = sqlx::query(
             "UPDATE interactions
              SET completion_status=CASE
@@ -247,7 +249,7 @@ impl SqliteProductStore {
                    ELSE 'Legacy action invocation was interrupted before graph acceptance. Its action remains unresolved.'
                  END
              WHERE id IN (SELECT result_interaction_id FROM action_invocations WHERE authoritative=1)
-               AND completion_status IN ('not_started','running','submitted')",
+               AND completion_status IN ('not_started','queued','running','submitted')",
         )
         .bind(error)
         .execute(&self.pool)

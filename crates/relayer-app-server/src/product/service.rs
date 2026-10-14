@@ -2707,7 +2707,7 @@ impl ProductService {
         &self,
         thread: ThreadId,
         interaction: super::InteractionId,
-    ) -> Result<(), ProductError> {
+    ) -> Result<crate::storage::QueuedStop, ProductError> {
         self.ensure_interaction_mutable(interaction).await?;
         self.storage
             .request_interaction_stop(thread, interaction)
@@ -2860,6 +2860,38 @@ impl ProductService {
     ) -> Result<bool, ProductError> {
         self.storage
             .bind_prepared_interaction(binding)
+            .await
+            .map_err(Into::into)
+    }
+
+    pub(crate) async fn record_node_run(
+        &self,
+        run: InteractionId,
+        node_id: i64,
+    ) -> Result<(), ProductError> {
+        self.storage
+            .record_node_run(run, node_id)
+            .await
+            .map_err(Into::into)
+    }
+
+    pub(crate) async fn node_run_key(
+        &self,
+        run: InteractionId,
+    ) -> Result<Option<super::NodeRunKey>, ProductError> {
+        self.storage.node_run_key(run).await.map_err(Into::into)
+    }
+
+    pub(crate) async fn queue_node_run(&self, run: InteractionId) -> Result<bool, ProductError> {
+        self.storage.queue_node_run(run).await.map_err(Into::into)
+    }
+
+    pub(crate) async fn claim_queued_node_run(
+        &self,
+        run: InteractionId,
+    ) -> Result<bool, ProductError> {
+        self.storage
+            .claim_queued_node_run(run)
             .await
             .map_err(Into::into)
     }

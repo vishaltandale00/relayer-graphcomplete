@@ -55,7 +55,7 @@ import { exportTraceEvidence } from "./recursive-live-run-trace.mjs";
 const OPT_IN = "RELAYER_RECURSIVE_LIVE_RUN";
 const repositoryRoot = resolve(import.meta.dirname, "..");
 const IN_PROGRESS_COMPLETION_STATUSES = new Set([
-  "not_started", "running", "submitted", "preparing", "draft", "waiting_for_approval",
+  "not_started", "queued", "running", "submitted", "preparing", "draft", "waiting_for_approval",
 ]);
 
 function singleArgument(name, fallback) {
