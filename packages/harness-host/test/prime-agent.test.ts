@@ -933,12 +933,15 @@ describe("PrimeAgentHarness", () => {
     await harness.complete({
       ...familyRunContext(41, "fresh-token", 0),
       nativeSession: "fresh",
-      threadHistory: [{ interactionNodeId: 1, message: "Compare the two options", responseLayerId: 9 }],
+      threadHistory: [{ interactionNodeId: 1, responseLayerId: 9 }],
     });
     expect(root.promptAndWait).not.toHaveBeenCalled();
     expect(fresh.promptAndWait).toHaveBeenCalledOnce();
     const prompt = String(vi.mocked(fresh.promptAndWait).mock.calls[0]?.[0]);
-    expect(prompt).toContain('"message": "Compare the two options"');
+    expect(prompt).toContain('"interactionNodeId": 1');
+    expect(prompt).toContain("await graph.get_node(interaction_node_id)");
+    // Pointers only: the turn's message stays in the graph.
+    expect(prompt).toContain(JSON.stringify([{ interactionNodeId: 1, responseLayerId: 9 }], null, 2));
     expect(prompt).toContain("await graph.get_layer(response_layer_id)");
     expect(fresh.disposeAsync).toHaveBeenCalledOnce();
     expect(harness.state()).toEqual({

@@ -4922,8 +4922,8 @@ mod tests {
                             assert_eq!(
                                 body["traceContext"]["threadHistory"],
                                 json!([
-                                    { "interactionNodeId": 5, "message": "First", "responseLayerId": 6 },
-                                    { "interactionNodeId": 8, "message": "Second" }
+                                    { "interactionNodeId": 5, "responseLayerId": 6 },
+                                    { "interactionNodeId": 8 }
                                 ])
                             );
                         }
@@ -4999,12 +4999,10 @@ mod tests {
         let history = [
             crate::product::ThreadHistoryEntry {
                 interaction_node_id: 5,
-                message: "First".into(),
                 response_layer_id: Some(6),
             },
             crate::product::ThreadHistoryEntry {
                 interaction_node_id: 8,
-                message: "Second".into(),
                 response_layer_id: None,
             },
         ];

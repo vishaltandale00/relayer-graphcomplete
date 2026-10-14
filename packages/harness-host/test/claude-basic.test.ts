@@ -660,10 +660,13 @@ describe("ClaudeBasicHarness", () => {
     await harness.complete({
       ...runContext(access),
       nativeSession: "fresh",
-      threadHistory: [{ interactionNodeId: 1, message: "Compare the two options", responseLayerId: 9 }],
+      threadHistory: [{ interactionNodeId: 1, responseLayerId: 9 }],
     });
     expect(calls[0]?.options.resume).toBeUndefined();
-    expect(String(calls[0]?.prompt)).toContain('"message": "Compare the two options"');
+    expect(String(calls[0]?.prompt)).toContain('"interactionNodeId": 1');
+    expect(String(calls[0]?.prompt)).toContain("await graph.getNode(interactionNodeId)");
+    // Pointers only: the turn's message stays in the graph.
+    expect(String(calls[0]?.prompt)).toContain(JSON.stringify([{ interactionNodeId: 1, responseLayerId: 9 }], null, 2));
     expect(harness.state()).toEqual({
       claudeSessionId: "root-session",
       claudeSessionProviderDefinitionId: "claude-work",

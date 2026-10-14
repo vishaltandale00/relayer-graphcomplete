@@ -1,3 +1,16 @@
+/// Whether `$result` names a user's invocation result whose preparation failed before anything
+/// ran and waits for its action's Retry. Such a reservation is not running. One predicate serves
+/// the Retry path and the thread's live state, so they never disagree.
+macro_rules! recoverable_user_preparation {
+    ($result:literal) => {
+        concat!(
+            "EXISTS(SELECT 1 FROM action_invocations ai JOIN interactions result ON result.id=ai.result_interaction_id JOIN invocation_input_submission_receipts receipt ON receipt.result_interaction_id=result.id WHERE result.id=",
+            $result,
+            " AND ai.authoritative=1 AND ai.agent_invoked=0 AND ai.invocation_key!='legacy' AND result.graph_node_id IS NULL AND NOT EXISTS(SELECT 1 FROM interaction_stop_requests stop WHERE stop.interaction_id=result.id) AND NOT EXISTS(SELECT 1 FROM completion_executions e WHERE e.interaction_id=result.id) AND NOT EXISTS(SELECT 1 FROM interaction_attempts a WHERE a.interaction_id=result.id AND (a.outcome!='model_failed' OR a.effect_boundary!='none')) AND (result.completion_status IN ('not_started','submitted') OR result.completion_status='failed' AND ai.prepared_graph_node_id IS NOT NULL AND EXISTS(SELECT 1 FROM interaction_attempts a WHERE a.interaction_id=result.id AND a.outcome='model_failed' AND a.effect_boundary='none')))"
+        )
+    };
+}
+
 mod action_invocations;
 mod annotations;
 mod approvals;

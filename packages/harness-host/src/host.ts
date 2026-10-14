@@ -3411,10 +3411,10 @@ function readThreadHistory(value: unknown): readonly HarnessThreadHistoryEntry[]
   if (!Array.isArray(value)) throw new Error("Thread history must be an array");
   return Object.freeze(value.map((entry: unknown) => {
     if (!isRecord(entry)) throw new Error("Invalid thread history entry");
-    const { interactionNodeId, message, responseLayerId } = entry;
-    const unknown = Object.keys(entry).filter((key) => !["interactionNodeId", "message", "responseLayerId"].includes(key));
+    const { interactionNodeId, responseLayerId } = entry;
+    const unknown = Object.keys(entry).filter((key) => !["interactionNodeId", "responseLayerId"].includes(key));
     if (unknown.length > 0) throw new Error(`Thread history entry contains unsupported fields: ${unknown.join(", ")}`);
-    if (!Number.isSafeInteger(interactionNodeId) || (interactionNodeId as number) < 1 || typeof message !== "string") {
+    if (!Number.isSafeInteger(interactionNodeId) || (interactionNodeId as number) < 1) {
       throw new Error("Invalid thread history entry");
     }
     if (responseLayerId !== undefined && (!Number.isSafeInteger(responseLayerId) || (responseLayerId as number) < 1)) {
@@ -3422,7 +3422,6 @@ function readThreadHistory(value: unknown): readonly HarnessThreadHistoryEntry[]
     }
     return Object.freeze({
       interactionNodeId: interactionNodeId as number,
-      message,
       ...(responseLayerId === undefined ? {} : { responseLayerId: responseLayerId as number }),
     });
   }));

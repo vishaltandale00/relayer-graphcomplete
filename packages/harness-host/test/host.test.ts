@@ -2858,7 +2858,7 @@ describe("HarnessHost", () => {
         host.createSession(registration).then(() => "registered"),
         new Promise((resolve) => setTimeout(() => resolve("waited"), 1_000)),
       ])).resolves.toBe("registered");
-      const history = [{ interactionNodeId: 1, message: "First question", responseLayerId: 5 }];
+      const history = [{ interactionNodeId: 1, responseLayerId: 5 }];
       const fresh = host.complete(1, 2, graph(2, "fresh-token"), undefined, undefined, {
         productInteractionId: 2,
         nativeSession: "fresh",
@@ -2955,7 +2955,7 @@ describe("HarnessHost", () => {
     [{ nativeSession: "fresh", requireNativeContinuity: true }, "A fresh native session cannot require native continuity"],
     [{ threadHistory: [] }, "Thread history is sent only with a fresh native session"],
     [{ nativeSession: "resume" }, "Invalid native session mode"],
-    [{ nativeSession: "fresh", threadHistory: [{ interactionNodeId: 1, message: "Hi", extra: true }] }, "unsupported fields: extra"],
+    [{ nativeSession: "fresh", threadHistory: [{ interactionNodeId: 1, message: "Hi" }] }, "unsupported fields: message"],
   ])("rejects an inconsistent fresh-run trace context %#", async (fields, message) => {
     const directory = await mkdtemp(join(tmpdir(), "relayer-harness-fresh-validation-"));
     const complete = vi.fn(async () => undefined);

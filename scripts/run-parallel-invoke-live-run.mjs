@@ -7,7 +7,7 @@
  * It boots the same GraphComplete runtime and app server the desktop uses, asks for an answer
  * with invoke actions, then clicks two of them and sends a follow-up message at once. It records
  * whether all three were admitted, how long they ran side by side, whether each settled, and
- * whether only the invoked runs started fresh native sessions with the thread's history.
+ * whether only the invoked runs started fresh native sessions pointed at the thread's history.
  */
 import { randomUUID } from "node:crypto";
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from "node:fs";
@@ -146,7 +146,7 @@ async function main() {
       interaction.id === thread.rootInteractionId && !ACTIVE.has(interaction.completionStatus)
     )), timeoutMs, samples);
     const root = rootSettled.interactions.find(({ id }) => id === thread.rootInteractionId);
-    artifact.root = { interactionId: root.id, completionStatus: root.completionStatus };
+    artifact.root = { interactionId: root.id, graphNodeId: root.graphNodeId, completionStatus: root.completionStatus };
     if (root.completionStatus !== "accepted") throw new Error(`The first turn ended ${root.completionStatus}.`);
     const invokeActions = (root.completionOutput?.rootLayer?.actions ?? [])
       .filter((action) => action.kind === "invoke" && action.targetLayerId == null);
@@ -197,7 +197,8 @@ async function main() {
     for (const run of runs) {
       const text = exportedText(join(traceDirectory, String(run.interactionId)));
       run.freshNativeSession = text.includes(FRESH_MARKER);
-      run.promptCarriesFirstTurn = text.includes("Compare three ways to learn a new programming language");
+      // History is graph pointers: the first turn appears as its interaction node, not its text.
+      run.promptCarriesFirstTurn = root.graphNodeId != null && text.includes(`"interactionNodeId": ${root.graphNodeId}`);
     }
     artifact.traces = traces.map(({ productInteractionId, status, coverageComplete, truncated }) => ({
       productInteractionId, status, coverageComplete, truncated: truncated === true,

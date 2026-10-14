@@ -158,13 +158,13 @@ pub(crate) struct InteractionContextIntent {
     pub(crate) annotations: Vec<String>,
 }
 
-/// One accepted human turn of a thread. A run that starts a fresh native session has no memory of
-/// its thread, so it receives these in order and reads anything else through the graph.
+/// One accepted human turn of a thread, as graph pointers. A run that starts a fresh native
+/// session has no memory of its thread; the turn's message and answer are in the thread's graph,
+/// so it receives only where to read them and reads them there.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct ThreadHistoryEntry {
     pub(crate) interaction_node_id: i64,
-    pub(crate) message: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) response_layer_id: Option<i64>,
 }

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { interactionActivity, nodeActiveRuns, nodeRunState, threadActivity } from "../desktop/renderer/src/product-workspace/run-state.js";
+import { interactionActivity, nodeActiveRuns, nodeRunState, threadActivity, withoutPreparationsAwaitingRetry } from "../desktop/renderer/src/product-workspace/run-state.js";
 import { agentChildMayRequestApproval } from "../desktop/renderer/src/product-workspace/model.js";
 
 describe("explicit run-state symbols", () => {
@@ -87,5 +87,13 @@ describe("explicit run-state symbols", () => {
     expect(agentChildMayRequestApproval(state(null), 1)).toBe(false);
     expect(agentChildMayRequestApproval(state({ id: 3 }, false), 1)).toBe(false);
     expect(agentChildMayRequestApproval(state({ id: 3 }), 2)).toBe(false);
+  });
+
+  it("never shows an invoke waiting for its preparation's Retry as running", () => {
+    const turns = [{ id: 1, completionStatus: "accepted" }, { id: 2, completionStatus: "not_started" }];
+    const invocations = [{ resultInteractionId: 2, preparationRecoverable: true }];
+    expect(threadActivity(turns)).toBe("running");
+    expect(threadActivity(withoutPreparationsAwaitingRetry(turns, invocations))).toBeNull();
+    expect(threadActivity(withoutPreparationsAwaitingRetry(turns, [{ resultInteractionId: 2 }]))).toBe("running");
   });
 });
