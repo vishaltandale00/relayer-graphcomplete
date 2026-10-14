@@ -113,7 +113,8 @@ impl RunCapacity {
         }
         // The oldest waiting run always gets the slot first. On a storage failure it keeps its
         // place and the settled run keeps the slot, so order and the limit both hold, and the
-        // caller retries.
+        // caller retries. A failure that never cleared would stall every later start; the
+        // claim is one conditional update, so only a global storage outage fails it.
         while let Some((next, granted)) = slots.waiting.front() {
             let next = *next;
             // Nothing waits to start this run any more (its task ended with the process), so it
@@ -125,11 +126,14 @@ impl RunCapacity {
             }
             if product.claim_capacity_run(next).await? {
                 let (_, granted) = slots.waiting.pop_front().expect("a waiting run");
+                if granted.send(()).is_err() {
+                    // Its task ended while it was claimed, so nothing will run or release it.
+                    // The slot moves on; startup recovers the run.
+                    eprintln!("run {next} left the wait for capacity as it was given a slot");
+                    continue;
+                }
                 slots.executing.remove(&run);
                 slots.executing.insert(next, 1);
-                if granted.send(()).is_err() {
-                    eprintln!("run {next} left the wait for capacity as it was given a slot");
-                }
                 return Ok(Some(next));
             }
             // Stopped, or it already left the wait: dropping its waiter ends the wait.
