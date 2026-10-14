@@ -78,15 +78,20 @@ describe("explicit run-state symbols", () => {
   });
 
   it("keeps a thread refreshing while an agent's settled child may still ask for approval", () => {
-    const state = (latestAttempt, agentInvoked = true) => ({
-      interactions: [{ id: 7, threadId: 1, completionStatus: "accepted", latestAttempt }],
-      actionInvocations: [{ resultInteractionId: 7, agentInvoked }],
+    const state = ({ providerRunning, agentInvoked = true, approvals = [] } = {}) => ({
+      interactions: [{ id: 7, threadId: 1, completionStatus: "accepted" }],
+      actionInvocations: [{ resultInteractionId: 7, agentInvoked, ...(providerRunning ? { providerRunning } : {}) }],
+      approvals,
     });
-    expect(agentChildMayRequestApproval(state({ id: 3 }), 1)).toBe(true);
-    expect(agentChildMayRequestApproval(state({ id: 3, finishedAt: "9" }), 1)).toBe(false);
-    expect(agentChildMayRequestApproval(state(null), 1)).toBe(false);
-    expect(agentChildMayRequestApproval(state({ id: 3 }, false), 1)).toBe(false);
-    expect(agentChildMayRequestApproval(state({ id: 3 }), 2)).toBe(false);
+    const pending = { request: { correlation: { interactionId: 7 } }, resolution: null };
+    // Whether or not the child has an attempt record, its running provider keeps the thread live.
+    expect(agentChildMayRequestApproval(state({ providerRunning: true }), 1)).toBe(true);
+    expect(agentChildMayRequestApproval(state(), 1)).toBe(false);
+    // Once the provider ended, a request whose closure has not landed still keeps it refreshing.
+    expect(agentChildMayRequestApproval(state({ approvals: [pending] }), 1)).toBe(true);
+    expect(agentChildMayRequestApproval(state({ approvals: [{ ...pending, resolution: { outcome: "aborted" } }] }), 1)).toBe(false);
+    expect(agentChildMayRequestApproval(state({ providerRunning: true, agentInvoked: false }), 1)).toBe(false);
+    expect(agentChildMayRequestApproval(state({ providerRunning: true }), 2)).toBe(false);
   });
 
   it("never shows an invoke waiting for its preparation's Retry as running", () => {

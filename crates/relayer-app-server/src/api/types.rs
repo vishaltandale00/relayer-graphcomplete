@@ -445,6 +445,9 @@ pub(crate) struct ActionInvocationResponse {
     pub(super) created_at: String,
     /// An agent's child: it never holds the thread's one active human turn.
     pub(super) agent_invoked: bool,
+    /// An agent's child whose provider run has not ended, so it may still ask for approval.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub(super) provider_running: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(super) execution: Option<CompletionExecutionEvidenceResponse>,
 }
@@ -467,6 +470,7 @@ impl From<ActionInvocation> for ActionInvocationResponse {
             result_completion_status: invocation.result_completion_status,
             created_at: invocation.created_at,
             agent_invoked: invocation.agent_invoked,
+            provider_running: false,
             execution: None,
         }
     }

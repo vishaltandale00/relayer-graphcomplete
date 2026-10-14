@@ -37,17 +37,23 @@ export function agentChildIds(state) {
 }
 
 /**
- * Whether an agent's child in the thread may still ask for approval. Its graph can settle before
- * its provider turn ends, and its attempt ends only after the provider does, so an unfinished
- * attempt keeps the thread refreshing to show a late request.
+ * Whether an agent's child in the thread may still ask for approval, or has a request whose end
+ * has not reached the thread yet. Its graph can settle before its provider turn ends, so the
+ * thread keeps refreshing while the app server reports the child's provider running, and until
+ * every child request it shows is resolved.
  */
 export function agentChildMayRequestApproval(state, threadId) {
-  const children = agentChildIds(state);
-  return (state.interactions || []).some(interaction => (
-    String(interaction.threadId) === String(threadId)
-    && children.has(String(interaction.id))
-    && interaction.latestAttempt != null
-    && !interaction.latestAttempt.finishedAt
+  const interactions = state.interactions || [];
+  const inThread = new Set(interactions
+    .filter(interaction => String(interaction.threadId) === String(threadId))
+    .map(interaction => String(interaction.id)));
+  const children = (state.actionInvocations || []).filter(invocation => (
+    invocation.agentInvoked === true && inThread.has(String(invocation.resultInteractionId))
+  ));
+  if (children.some(invocation => invocation.providerRunning === true)) return true;
+  const childIds = new Set(children.map(invocation => String(invocation.resultInteractionId)));
+  return (state.approvals || []).some(receipt => (
+    receipt?.resolution == null && childIds.has(String(receipt?.request?.correlation?.interactionId))
   ));
 }
 

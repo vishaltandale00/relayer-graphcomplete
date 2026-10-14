@@ -982,6 +982,7 @@ impl World {
             environment_inspector: crate::environment::EnvironmentInspector::new(),
             completion_brokers: CompletionBrokerRegistry::new(Some("http://broker".into())),
             completion_observations: CompletionObservations::default(),
+            running_child_providers: Default::default(),
         };
         let seeded = if bound {
             // Prepared and bound exactly as complete_prepared_child prepares it.
@@ -3055,6 +3056,13 @@ async fn a_settled_childs_unanswered_approval_closes_when_its_provider_ends() {
         tokio::time::sleep(Duration::from_millis(20)).await;
     }
 
+    // The child's provider still runs after its graph settled, so the thread keeps refreshing.
+    assert!(
+        world
+            .state
+            .running_child_providers
+            .contains(world.child.id.value())
+    );
     world
         .harness
         .approval_session_gone
@@ -3090,6 +3098,12 @@ async fn a_settled_childs_unanswered_approval_closes_when_its_provider_ends() {
         crate::approval::ApprovalOutcome::Aborted
     );
     assert_eq!(world.child_row().await.completion_status, "accepted");
+    assert!(
+        !world
+            .state
+            .running_child_providers
+            .contains(world.child.id.value())
+    );
     assert_ne!(
         world
             .product

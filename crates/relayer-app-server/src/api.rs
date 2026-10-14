@@ -64,6 +64,7 @@ pub(crate) struct ApiState {
     pub(crate) environment_inspector: crate::environment::EnvironmentInspector,
     pub(crate) completion_brokers: CompletionBrokerRegistry,
     pub(crate) completion_observations: CompletionObservations,
+    pub(crate) running_child_providers: crate::completion_broker::RunningChildProviders,
 }
 
 pub(crate) struct ApiRuntime {
@@ -127,6 +128,7 @@ pub(crate) fn router(
         environment_inspector: crate::environment::EnvironmentInspector::new(),
         completion_brokers,
         completion_observations: CompletionObservations::default(),
+        running_child_providers: Default::default(),
     };
     if state.runtime.is_some() {
         let recovery_state = state.clone();

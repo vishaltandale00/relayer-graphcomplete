@@ -864,6 +864,10 @@ pub(super) async fn project_action_invocations(
             .product
             .user_invocation_preparation_recoverable(invocation.result_interaction_id)
             .await?;
+        response.provider_running = invocation.agent_invoked
+            && state
+                .running_child_providers
+                .contains(invocation.result_interaction_id.value());
         response.preparation_rejected = state
             .product
             .user_invocation_preparation_rejected(invocation.result_interaction_id)
@@ -1006,6 +1010,7 @@ pub(super) async fn project_local_invocations(
                 .get("activator")
                 .and_then(Value::as_str)
                 == Some("agent"),
+            provider_running: false,
             graph_only: true,
             occupancy_only: false,
             native_invocation: Some(native),
@@ -1054,6 +1059,7 @@ pub(super) async fn project_local_invocations(
                 result_completion_status: "unavailable".into(),
                 created_at: String::new(),
                 agent_invoked: false,
+                provider_running: false,
                 graph_only: true,
                 occupancy_only: true,
                 native_invocation: None,
@@ -3221,12 +3227,35 @@ impl ProviderEnded {
     }
 }
 
-/// Held by the provider-end wait; dropping it, however that task ends, reports the end.
-struct ProviderEndSignal(ProviderEnded);
+/// Held by the provider-end wait; dropping it, however that task ends, reports the end, and
+/// takes the child off the running list the renderer refreshes for.
+struct ProviderEndSignal {
+    ended: ProviderEnded,
+    running: crate::completion_broker::RunningChildProviders,
+    interaction_id: i64,
+}
+
+impl ProviderEndSignal {
+    fn new(
+        ended: ProviderEnded,
+        running: crate::completion_broker::RunningChildProviders,
+        interaction_id: i64,
+    ) -> Self {
+        running.insert(interaction_id);
+        Self {
+            ended,
+            running,
+            interaction_id,
+        }
+    }
+}
 
 impl Drop for ProviderEndSignal {
     fn drop(&mut self) {
-        (self.0).0.store(true, std::sync::atomic::Ordering::Release);
+        self.ended
+            .0
+            .store(true, std::sync::atomic::Ordering::Release);
+        self.running.remove(self.interaction_id);
     }
 }
 
@@ -3352,7 +3381,10 @@ fn spawn_recursive_approval_observer(
             })
             .await;
         }
-        if let Err(error) = state
+        // A request left open would ask the user for an answer nobody can give, so a storage
+        // error is retried until the requests are closed.
+        let mut attempts = 0_u32;
+        while let Err(error) = state
             .product
             .abort_unanswerable_child_approvals(
                 interaction.id,
@@ -3360,9 +3392,13 @@ fn spawn_recursive_approval_observer(
             )
             .await
         {
-            eprintln!(
-                "recursive completion {completion_id} unanswerable approvals could not be closed: {error}"
-            );
+            attempts += 1;
+            if attempts == 1 || attempts.is_multiple_of(20) {
+                eprintln!(
+                    "recursive completion {completion_id} unanswerable approvals could not be closed: {error}"
+                );
+            }
+            tokio::time::sleep(APPROVAL_OBSERVATION_RETRY_STEP * attempts.min(10)).await;
         }
     });
 }
@@ -3422,7 +3458,11 @@ fn spawn_recursive_completion_observers(
     let semantic_prepared = prepared.clone();
     let completion_id = prepared.graph_node_id;
     let provider_ended = ProviderEnded::default();
-    let provider_end_signal = ProviderEndSignal(provider_ended.clone());
+    let provider_end_signal = ProviderEndSignal::new(
+        provider_ended.clone(),
+        state.running_child_providers.clone(),
+        interaction.id.value(),
+    );
     spawn_recursive_approval_observer(
         state.clone(),
         thread.clone(),
@@ -5417,6 +5457,7 @@ mod tests {
             environment_inspector: crate::environment::EnvironmentInspector::new(),
             completion_brokers,
             completion_observations: CompletionObservations::default(),
+            running_child_providers: Default::default(),
         };
         BrokerFixture {
             state,
