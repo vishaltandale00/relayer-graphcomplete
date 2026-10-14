@@ -83,6 +83,11 @@ impl RunCapacity {
             return Ok(CapacityAdmission::AlreadyWaiting);
         }
         if slots.executing.len() < self.limit && slots.waiting.is_empty() {
+            // A run that carries a Stop settles without provider work, so it takes no slot,
+            // as it could not wait for one either.
+            if product.get_interaction(run).await?.stop_requested {
+                return Ok(CapacityAdmission::Uncounted);
+            }
             slots.executing.insert(run, 1);
             return Ok(CapacityAdmission::Start);
         }
@@ -309,5 +314,12 @@ mod tests {
             CapacityAdmission::Uncounted
         ));
         assert_eq!(capacity.executing_for_test().await, [runs[0]]);
+        // With a slot free, it still takes none.
+        assert_eq!(capacity.release(&product, runs[0]).await.unwrap(), None);
+        assert!(matches!(
+            capacity.admit(&product, runs[1]).await.unwrap(),
+            CapacityAdmission::Uncounted
+        ));
+        assert!(capacity.executing_for_test().await.is_empty());
     }
 }

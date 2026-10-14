@@ -60,16 +60,25 @@ impl SqliteProductStore {
     /// At startup no run holds a slot, so no run may stay queued for one. A run that waited is
     /// interrupted like a run queued behind its node (#718): nothing starts it on its own. An
     /// invoked run stays `queued` for startup's action recovery, which resumes it when its
-    /// action is invoked again. A message turn fails, restoring any committed inputs it took.
+    /// action is invoked again. A message turn fails, restoring any committed inputs it took,
+    /// unless it already has a graph interaction.
     pub(crate) async fn interrupt_capacity_waits(&self, error: &str) -> Result<u64, StorageError> {
         let mut transaction = self.pool.begin_with("BEGIN IMMEDIATE").await?;
         let waited = sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM run_capacity_waits")
             .fetch_one(&mut *transaction)
             .await?;
         sqlx::query(
-            "UPDATE interactions SET completion_status='failed',completion_error=?1 WHERE completion_status='queued' AND id IN (SELECT interaction_id FROM run_capacity_waits) AND id NOT IN (SELECT result_interaction_id FROM action_invocations WHERE authoritative=1)",
+            "UPDATE interactions SET completion_status='failed',completion_error=?1 WHERE completion_status='queued' AND graph_node_id IS NULL AND id IN (SELECT interaction_id FROM run_capacity_waits) AND id NOT IN (SELECT result_interaction_id FROM action_invocations WHERE authoritative=1)",
         )
         .bind(error)
+        .execute(&mut *transaction)
+        .await?;
+        // One that already has a graph interaction, such as an identified send an earlier
+        // startup resumed, is left `submitted` for startup's reconciliation, which ends its
+        // graph current with it.
+        sqlx::query(
+            "UPDATE interactions SET completion_status='submitted' WHERE completion_status='queued' AND graph_node_id IS NOT NULL AND id IN (SELECT interaction_id FROM run_capacity_waits) AND id NOT IN (SELECT result_interaction_id FROM action_invocations WHERE authoritative=1)",
+        )
         .execute(&mut *transaction)
         .await?;
         sqlx::query("DELETE FROM run_capacity_waits")
@@ -154,10 +163,25 @@ mod tests {
         );
         assert!(!store.claim_capacity_run(prepared[0]).await.unwrap());
 
+        // A waiting message turn that already has a graph interaction is left for startup's
+        // reconciliation, which also ends its graph current.
+        let (_, bound) = store.seed_node_runs_for_test(&[7]).await;
+        assert!(store.claim_interaction_preparing(bound[0]).await.unwrap());
+        assert!(store.queue_run_for_capacity(bound[0]).await.unwrap());
+        sqlx::query("UPDATE interactions SET graph_node_id=903 WHERE id=?1")
+            .bind(bound[0].value())
+            .execute(&store.pool)
+            .await
+            .unwrap();
+
         // At startup a message turn still waiting fails as interrupted; it never stays queued.
         assert_eq!(
             store.interrupt_capacity_waits("Interrupted").await.unwrap(),
-            1
+            2
+        );
+        assert_eq!(
+            store.completion_status_for_test(bound[0]).await,
+            "submitted"
         );
         let interrupted = store.get_interaction(runs[2]).await.unwrap().unwrap();
         assert_eq!(interrupted.completion_status, "failed");

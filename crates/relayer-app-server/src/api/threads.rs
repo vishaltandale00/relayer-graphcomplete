@@ -1312,12 +1312,15 @@ pub(super) async fn retry_interaction(
             let slot = match wait_for_capacity(&state, run).await {
                 Ok(Some(slot)) => slot,
                 Ok(None) => return,
+                // The retry's own preparation-failure handling applies, so confirmations it
+                // consumed return to its unsent attempt.
                 Err(error) => {
-                    record_background_failure(
-                        &state.product,
+                    record_retry_failure(
+                        &state,
                         &thread,
                         &execution,
-                        error.to_string(),
+                        ApiError::from(error),
+                        consumes_context_confirmations,
                     )
                     .await;
                     return;
@@ -1359,41 +1362,60 @@ async fn retry_admitted_interaction(
         }
         Ok(None) => {}
         Err(error) => {
-            if consumes_context_confirmations {
-                let selection = execution
-                    .model_selection
-                    .as_ref()
-                    .expect("a retry always has a validated model selection");
-                match state
-                    .product
-                    .record_pre_execution_model_failure(PreExecutionModelFailure {
-                        interaction_id: execution.id,
-                        harness_name: &thread.harness_configuration_name,
-                        selection,
-                        route: None,
-                        policy: None,
-                        adapter_version: None,
-                        failure_category: "configuration",
-                        error: error.message(),
-                    })
-                    .await
-                {
-                    Ok(_) => return,
-                    Err(persistence_error) => eprintln!(
-                        "could not preserve retry preparation failure {} as an unsent attempt: {persistence_error}; falling back to a terminal failure",
-                        execution.id,
-                    ),
-                }
-            }
-            record_background_failure(
-                &state.product,
+            record_retry_failure(
+                &state,
                 &thread,
                 &execution,
-                error.internal_diagnostic(),
+                error,
+                consumes_context_confirmations,
             )
             .await;
         }
     }
+}
+
+/// Records why a retry could not start. A retry that consumed context confirmations returns
+/// to an unsent attempt, so they come back to the composer; otherwise it fails.
+async fn record_retry_failure(
+    state: &ApiState,
+    thread: &Thread,
+    execution: &Interaction,
+    error: ApiError,
+    consumes_context_confirmations: bool,
+) {
+    if consumes_context_confirmations {
+        let selection = execution
+            .model_selection
+            .as_ref()
+            .expect("a retry always has a validated model selection");
+        match state
+            .product
+            .record_pre_execution_model_failure(PreExecutionModelFailure {
+                interaction_id: execution.id,
+                harness_name: &thread.harness_configuration_name,
+                selection,
+                route: None,
+                policy: None,
+                adapter_version: None,
+                failure_category: "configuration",
+                error: error.message(),
+            })
+            .await
+        {
+            Ok(_) => return,
+            Err(persistence_error) => eprintln!(
+                "could not preserve retry preparation failure {} as an unsent attempt: {persistence_error}; falling back to a terminal failure",
+                execution.id,
+            ),
+        }
+    }
+    record_background_failure(
+        &state.product,
+        thread,
+        execution,
+        error.internal_diagnostic(),
+    )
+    .await;
 }
 
 async fn canonical_context_snapshots(
@@ -4357,8 +4379,12 @@ async fn start_held_action_interaction(
                         )
                         .await;
                     }
-                    // A Stop removed it from the wait, so it frees its node.
-                    Err(_) => release_node_run(waiting_state, key, waiting.id),
+                    // A Stop removed it from the wait. It keeps its node until that Stop has
+                    // settled, so the next run on the node starts only after it.
+                    Err(_) => {
+                        wait_until_settled(&waiting_state, waiting.id).await;
+                        release_node_run(waiting_state, key, waiting.id);
+                    }
                 }
             });
             return state
@@ -4391,6 +4417,29 @@ async fn start_held_action_interaction(
         }
     };
     run_held_action_interaction(state, thread, interaction, key, claimed, slot).await
+}
+
+/// Waits until a run removed from the wait for capacity has settled. A run whose call the
+/// graph prepared settles its Stop before native work, and that settlement always ends it
+/// (`settle_queued_stop`); any other removed run is already stopped.
+async fn wait_until_settled(state: &ApiState, run: InteractionId) {
+    let mut backoff = std::time::Duration::from_millis(50);
+    loop {
+        match state.product.get_interaction(run).await {
+            Ok(interaction)
+                if !matches!(
+                    interaction.completion_status.as_str(),
+                    "queued" | "submitted" | "running"
+                ) =>
+            {
+                return;
+            }
+            Ok(_) => {}
+            Err(error) => eprintln!("could not read removed run {run}: {error}"),
+        }
+        tokio::time::sleep(backoff).await;
+        backoff = (backoff * 2).min(std::time::Duration::from_secs(2));
+    }
 }
 
 /// Prepares and executes a run that holds its node and its capacity slot.
@@ -5871,17 +5920,17 @@ mod tests {
 
     /// PAR-011 (#720), on the held path: a duplicate delivery of a run that holds its node
     /// while it waits for capacity joins the wait and ends its own hold on the node. When a
-    /// Stop removes the run, its node frees at once.
+    /// Stop removes the run, its node frees once the Stop has settled.
     #[tokio::test]
     async fn a_duplicate_delivery_of_a_run_waiting_for_capacity_joins_the_wait() {
         let mut fixture = broker_fixture("duplicate-capacity-wait", "active").await;
         fixture.state.run_capacity = crate::api::RunCapacity::new(1);
-        // Another run holds the only slot.
+        // The root, a human-started run, holds the only slot.
         assert!(matches!(
             fixture
                 .state
                 .run_capacity
-                .admit(&fixture.product, InteractionId::from_database(999_999))
+                .admit(&fixture.product, fixture.thread.root_interaction_id)
                 .await
                 .unwrap(),
             CapacityAdmission::Start
@@ -5918,12 +5967,40 @@ mod tests {
             assert_eq!(waiting.completion_status, "queued");
             assert!(waiting.waiting_for_capacity);
         }
-        fixture
-            .product
-            .request_interaction_stop(fixture.thread.id, run.id)
+        // The graph already prepared its call, so its Stop settles before native work. It keeps
+        // its node until that settlement ends it.
+        let pool = sqlx::SqlitePool::connect(&format!(
+            "sqlite://{}",
+            fixture._root.path().join("product.sqlite3").display()
+        ))
+        .await
+        .unwrap();
+        sqlx::query("UPDATE interactions SET graph_node_id=904 WHERE id=?1")
+            .bind(run.id.value())
+            .execute(&pool)
             .await
             .unwrap();
+        assert_eq!(
+            fixture
+                .product
+                .request_interaction_stop(fixture.thread.id, run.id)
+                .await
+                .unwrap(),
+            crate::storage::QueuedStop::SettleBeforeStart
+        );
         fixture.state.run_capacity.forget(run.id).await;
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+        assert_eq!(
+            fixture.state.node_runs.holder(key).await,
+            Some(run.id),
+            "a removed run passed its node on before its Stop settled"
+        );
+        sqlx::query("UPDATE interactions SET completion_status='stopped' WHERE id=?1")
+            .bind(run.id.value())
+            .execute(&pool)
+            .await
+            .unwrap();
+        pool.close().await;
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
         while fixture.state.node_runs.holder(key).await.is_some() {
             assert!(

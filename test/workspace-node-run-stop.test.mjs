@@ -106,6 +106,12 @@ it("gives every run invoked from a node its own Stop, kept in place across refre
     const send = window.document.querySelector("#sendInteraction");
     expect(send.classList.contains("stop-button")).toBe(true);
     expect(send.getAttribute("aria-label")).toBe("Remove queued message");
+
+    // Read from an older turn, the pending notice says it waits for capacity, not for a node.
+    state.pendingTurn = { threadId: 10, interactionId: 8, status: "queued" };
+    workspace.render();
+    await window.happyDOM.waitUntilComplete();
+    expect(window.document.querySelector("#pendingTurnText").textContent).toContain("Waiting for capacity");
   } finally {
     workspace.dispose();
     await window.happyDOM.close();

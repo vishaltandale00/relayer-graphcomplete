@@ -4848,7 +4848,9 @@ export function createProductWorkspace({
     $("#pendingTurnNotice").classList.toggle("hidden", !showPending);
     if (showPending) {
       const pendingInteraction = state.interactions.find((item) => String(item.id) === String(pendingTurn.interactionId));
-      const label = pendingTurn.readyLayer ? "Result ready" : turnStatusPresentation(pendingTurn.status).label;
+      // A pending run that waits for capacity (#720) says so, apart from a node wait.
+      const pendingStatus = runViewStatus({ completionStatus: pendingTurn.status, queueReason: pendingInteraction?.queueReason });
+      const label = pendingTurn.readyLayer ? "Result ready" : turnStatusPresentation(pendingStatus).label;
       $("#pendingTurnText").textContent = `Turn ${pendingInteraction?.sequence ?? ""} · ${label}`;
       $("#openReadyResult").classList.toggle("hidden", !pendingTurn.readyLayer);
     }
