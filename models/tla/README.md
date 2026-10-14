@@ -340,7 +340,7 @@ code, with every fix on; each `-reverted` check turns one fix off.
 
 | Check | Verdict | Finding |
 | --- | --- | --- |
-| `launch-safety` | passes | A settled execution row has a terminal current and product row. Startup leaves no interrupted child active. Whenever no message turn runs, the user's next message is admitted (`SendNeverWaitsOnChild`, which reads `ENABLED UserSends`, so the child's and the invoked run's states are checked against the gate itself). Two message turns never run at once (`OneHumanTurn`). A run the user invokes never waits (`InvokeNeverWaits`). The product neither stops nor runs an agent's child (`ProductLeavesChildAlone`). |
+| `launch-safety` | passes | A settled execution row has a terminal current and product row. Startup leaves no interrupted child active. Whenever no message turn runs, the user's next message is admitted (`SendNeverWaitsOnChild`, which reads `ENABLED UserSends`, so the child's and the invoked run's states are checked against the gate itself). Two message turns never run at once (`OneHumanTurn`). A run the user invokes never waits, even beside another invoked run: the model tracks up to two at once (`InvokeNeverWaits`). The product neither stops nor runs an agent's child (`ProductLeavesChildAlone`). |
 | `launch-liveness` | passes | Without a restart, every child the parent launched ends in the graph, and its product row ends once its parent is done. |
 | `launch-restart-liveness` | passes | Across two restarts, every child the product recorded ends in both stores. |
 | `launch-activation-reverted`, `launch-activation-liveness-reverted` | Fixed; the reverted checks show the old traces | A failed or lost activation restored the child to `submitted` and settled only the execution row. An exact retry got 200 and launched nothing, product Stop answered 500, and the next human turn got 422. Now the activation failure fails both stores (`ActivationFailsGraph`). Regression test: `a_failed_activation_fails_the_child_in_both_stores_and_an_exact_retry_reports_it`. |
@@ -365,16 +365,19 @@ restart. Each run is sent once, by an invoke action on its node:
   executing and queued runs alike.
 
 A run's context is the set of runs accepted when it starts (`seen`).
-Settlement and handing the node on are one step. In the code the hand-off
-follows the end of the run's execution task, and admission sees the node
-held until then. A storage failure during the hand-off keeps the settled
-run on its node, and the hand-off is retried; that is not modeled.
-`StopQueued` also stands for the Stop of a queued run whose graph call was
-already prepared: it settles before native execution, so its graph current
-stops, and it never holds the node. Duplicate deliveries, which join the
-holder's admission, are not modeled. Graph preparation, approvals and the
-provider are not modeled. `node-queue-today` mirrors the code; each `-reverted` check turns
-one fix or decision off.
+`Send` is the run's creation: in the code a run takes its place in its
+node's queue when it is created, before its graph call is prepared, which
+keeps creation order. Settlement and handing the node on are one step. In
+the code the hand-off follows the end of the run's execution task and waits
+until its outcome is saved; admission sees the node held until then. A
+storage failure during the hand-off keeps the settled run on its node, and
+the hand-off is retried; that is not modeled. `StopQueued` also stands for
+the Stop of a queued run whose graph call was already prepared: its graph
+current is stopped first, then the product row, and it never holds the node.
+Duplicate deliveries, which join the holder's admission, are not modeled.
+Graph preparation, approvals and the provider are not modeled.
+`node-queue-today` mirrors the code; each `-reverted` check turns one fix or
+decision off.
 
 | Check | Verdict | Finding |
 | --- | --- | --- |

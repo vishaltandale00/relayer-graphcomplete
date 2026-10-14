@@ -84,9 +84,18 @@ it("queues durable invokes on one node, starts each after the run ahead, and sto
     const stopped = await request(`/api/threads/${thread.id}/interactions/${third.interaction.id}/stop`, { method: "POST" });
     expect(["submitted", "stopped"]).toContain(stopped.completionStatus);
     const afterStop = await until((detail) => statusOf(detail, third.interaction.id) === "stopped");
+    // Nothing was bound or activated for it: only its prepared call's current exists, and it stopped.
     const stoppedRun = afterStop.interactions.find((interaction) => interaction.id === third.interaction.id);
-    expect(stoppedRun.graphNodeId).not.toBeNull();
-    expect((await graphCurrent(stoppedRun.graphNodeId)).lifecycle).toBe("stopped");
+    expect(stoppedRun.graphNodeId).toBeNull();
+    const inventory = await fetch(new URL("/api/control/accepted-closures", runtimeSession.graphUrl), {
+      method: "POST", headers: { Authorization: `Bearer ${runtimeSession.graphControlToken}`, "content-type": "application/json" },
+      body: JSON.stringify({ interactionNodeIds: [parent.graphNodeId] }),
+    });
+    expect(inventory.status).toBe(200);
+    const stoppedNode = (await inventory.json()).invocations
+      .find((call) => call.invocation.invocationKey === "porto")?.invocation.childInteractionNodeId;
+    expect(stoppedNode).toEqual(expect.any(Number));
+    expect((await graphCurrent(stoppedNode)).lifecycle).toBe("stopped");
     expect(statusOf(afterStop, second.interaction.id)).toBe("queued");
 
     // The first run is accepted, and only then does the second start. Its child read the graph
@@ -97,7 +106,7 @@ it("queues durable invokes on one node, starts each after the run ahead, and sto
     const firstRun = done.interactions.find((interaction) => interaction.id === first.interaction.id);
     const contractNodes = observed.contracts.map((contract) => contract.interactionNodeId);
     expect(contractNodes.indexOf(secondRun.graphNodeId)).toBeGreaterThan(contractNodes.indexOf(firstRun.graphNodeId));
-    expect(contractNodes).not.toContain(stoppedRun.graphNodeId);
+    expect(contractNodes).not.toContain(stoppedNode);
     expect(secondRun.completionOutput.rootLayer.nodes[0].detail).toContain("Vacation comparison — Kyoto");
     expect(observed.errors).toEqual([]);
   } finally {

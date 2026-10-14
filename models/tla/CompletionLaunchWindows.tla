@@ -43,6 +43,9 @@ CONSTANTS
                         \* thread's one active message turn nor waits for it
 
 Interrupted == {"not_started", "submitted", "running"}   \* HUMAN_TURN_IN_PROGRESS
+
+\* Two overlapping invoked runs are enough to show one never waits for another.
+MaxUserInvokes == 2
 Terminal == {"succeeded", "failed", "stopped"}
 
 VARIABLES
@@ -64,7 +67,7 @@ VARIABLES
   called,     \* the parent has called the broker for this child
   cleanup,    \* a refused launch's background failure of the child is pending
   hturn,      \* the user's next message turn: none | running | ended
-  uinvoke     \* a run the user started from another invoke action: none | running | ended
+  uinvoke     \* how many runs the user started from invoke actions are running
 
 vars == <<parent, pdead, life, status, bound, phase, run, hrun, obs, stopReq, lpc,
           appUp, restarts, startupLeftActive, called, cleanup, hturn, uinvoke>>
@@ -75,7 +78,7 @@ Init ==
   /\ run = "none" /\ hrun = "none" /\ obs = FALSE /\ stopReq = FALSE
   /\ lpc = [l \in Launchers |-> "idle"]
   /\ appUp = TRUE /\ restarts = 0 /\ startupLeftActive = FALSE /\ called = FALSE /\ cleanup = FALSE
-  /\ hturn = "none" /\ uinvoke = "none"
+  /\ hturn = "none" /\ uinvoke = 0
 
 ParentAlive == parent = "running" /\ ~pdead /\ appUp
 
@@ -259,7 +262,7 @@ HumanTurnInProgress ==
   \/ parent = "running"
   \/ hturn = "running"
   \/ (~ChildrenOutsideRootGate /\ status \in Interrupted)
-  \/ (~InvokesOutsideRootGate /\ uinvoke = "running")
+  \/ (~InvokesOutsideRootGate /\ uinvoke > 0)
 
 UserSends ==
   /\ appUp /\ hturn = "none" /\ ~HumanTurnInProgress
@@ -272,15 +275,15 @@ UserSends ==
 \* nativeSession: fresh) and runs beside the message turns. Before the decision
 \* the gate refused it while a human turn ran.
 UserInvokes ==
-  /\ appUp /\ uinvoke = "none"
+  /\ appUp /\ uinvoke < MaxUserInvokes
   /\ (InvokesOutsideRootGate \/ ~HumanTurnInProgress)
-  /\ uinvoke' = "running"
+  /\ uinvoke' = uinvoke + 1
   /\ UNCHANGED <<parent, pdead, life, status, bound, phase, run, hrun, obs, stopReq, lpc,
                  appUp, restarts, startupLeftActive, called, cleanup, hturn>>
 
 UserInvokeEnds ==
-  /\ appUp /\ uinvoke = "running"
-  /\ uinvoke' = "ended"
+  /\ appUp /\ uinvoke > 0
+  /\ uinvoke' = uinvoke - 1
   /\ UNCHANGED <<parent, pdead, life, status, bound, phase, run, hrun, obs, stopReq, lpc,
                  appUp, restarts, startupLeftActive, called, cleanup, hturn>>
 
@@ -301,7 +304,7 @@ Crash ==
   /\ lpc' = [l \in Launchers |-> IF lpc[l] \in {"idle", "done"} THEN lpc[l] ELSE "dead"]
   /\ cleanup' = FALSE
   /\ hturn' = IF hturn = "running" THEN "ended" ELSE hturn   \* the turn fails with the app
-  /\ uinvoke' = IF uinvoke = "running" THEN "ended" ELSE uinvoke
+  /\ uinvoke' = 0   \* invoked runs fail with the app
   /\ UNCHANGED <<parent, life, status, bound, phase, stopReq, restarts, startupLeftActive, called>>
 
 \* APP reconcile_interrupted_work, in order.
@@ -389,6 +392,7 @@ TypeOK ==
   /\ status \in {"absent", "pending", "accepted", "failed"} \cup Interrupted
   /\ phase \in {"none", "reserved", "launching", "attached", "settled"}
   /\ run \in {"none", "running", "ended"} /\ hrun \in {"none", "running", "ended"}
+  /\ uinvoke \in 0..MaxUserInvokes
 
 \* CODE (CompletionCurrent SettledExecutionAgreesWithGraph): a settled execution
 \* row has a terminal graph current and a terminal product status.
@@ -411,8 +415,9 @@ SendNeverWaitsOnChild ==
 OneHumanTurn == ~(parent = "running" /\ hturn = "running")
 
 \* PRD 12.2 (decision, #717): a run the user starts from an invoke action never
-\* waits for a message turn, the child, or another run.
-InvokeNeverWaits == (appUp /\ uinvoke = "none") => ENABLED UserInvokes
+\* waits for a message turn, the child, or another invoked run: with one already
+\* running, a second still starts.
+InvokeNeverWaits == (appUp /\ uinvoke < MaxUserInvokes) => ENABLED UserInvokes
 
 \* PRD 12.2 (decision): only the parent agent stops or runs its child. The product
 \* neither records a Stop for it nor runs it on the product path.

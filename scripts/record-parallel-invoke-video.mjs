@@ -14,7 +14,7 @@
 import { app, BrowserWindow } from "electron";
 import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, statSync } from "node:fs";
 import { writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -118,12 +118,15 @@ async function main() {
   };
   let runtime;
   let productServer;
+  let executables;
   let window;
   let recorder;
   const samples = [];
   try {
     let resolver;
-    ({ runtime, productServer, resolver } = await startLiveProduct({ profile, configurationPath, dataDirectory }));
+    ({ runtime, productServer, resolver, executables } = await startLiveProduct({ profile, configurationPath, dataDirectory }));
+    // The servers that ran, rebuilt from this source and named by hash.
+    record.executables = executables;
     record.temporalFeatures = runtime.temporalFeatures;
     const session = await productServer.start();
     const family = await prepareRoute({ session, productServer, runtime, resolver, profile });
@@ -291,8 +294,16 @@ async function main() {
     if (window && !window.isDestroyed()) await writeFile(join(output, "failure.png"), (await window.webContents.capturePage()).toPNG()).catch(() => {});
   } finally {
     if (recorder) {
-      await recorder.stop(join(output, "parallel-invokes.mp4")).catch((error) => { record.videoError = String(error); });
+      const video = join(output, "parallel-invokes.mp4");
+      await recorder.stop(video).catch((error) => { record.videoError = String(error); });
+      // The video is the evidence: a run whose recording or encoding failed does not pass.
+      if (record.videoError === undefined && !(existsSync(video) && statSync(video).size > 0)) {
+        record.videoError = "The encoder produced no video.";
+      }
+    } else {
+      record.videoError ??= "The recorder never started.";
     }
+    if (record.videoError !== undefined) record.passed = false;
     rmSync(framesDirectory, { recursive: true, force: true });
     record.finishedAt = new Date().toISOString();
     writeJsonAtomic(join(output, "video-run.json"), record);
