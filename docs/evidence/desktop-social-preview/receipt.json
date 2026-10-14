@@ -9,11 +9,11 @@
     "contracts/share-service-v1/contract.json": "d289317c75a44675b9bb6f4b8856f4e8f30cff7948ca27f8cfee72b7ba4b7d8d",
     "scripts/capture-share-preview-evidence.mjs": "4510e3a54f6b658c2df86b1a06afc8ca2428a36693a93648786bd4e075327562",
     "test/fixtures/social-preview.jsonl": "ff4a4545de49ccc20562f2f763b6a120d87fa37f7703a994abeb71b219a405aa",
-    "desktop/shared/telemetry-module-inventory.mjs": "bac39f5b3427a958cf2cc036dfc5c93549d9d89cb2bb84ada77c8efd68007142"
+    "desktop/shared/telemetry-module-inventory.mjs": "8065b07a5ab59161e4f4013462765066d8e9a9d11c5740050509089711271fe6"
   },
   "rendererArtifact": {
     "directory": "desktop/renderer",
-    "digest": "900afe2fd278cfe6f9382119cc2479e2c3f424ad15d40207f079c2fe4c85de1c",
+    "digest": "0757e49d6f84d3cf315feca6964ce21d2703e954b911ba18a9a79c60f0edd481",
     "files": {
       "assets/relayer-logo.svg": {
         "bytes": 509,
@@ -288,8 +288,8 @@
         "sha256": "8e5d307f95b1863fb995606ca32a832de088916716c39476f9d31f2174de002d"
       },
       "src/product-workspace/workspace.js": {
-        "bytes": 311992,
-        "sha256": "d41f49ff183b26388384b1d94d3a38e7cbccde76b5fc069f95c429a8fe008d82"
+        "bytes": 313473,
+        "sha256": "82f0565c8b99489046bc207b1dfff910724c5aa358c94d4c1bd7ca617a29a9c9"
       },
       "src/project-composer-navigation.js": {
         "bytes": 282,
