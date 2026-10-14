@@ -37,14 +37,15 @@ export function threadActivity(turns = []) {
 }
 
 /**
- * The turns that can still be running: an invoke whose preparation failed before anything ran
- * waits for its action's Retry, as the app server's thread state also treats it.
+ * An invoke whose preparation failed before anything ran waits for its action's Retry, so it is
+ * not running, as the app server's thread state also treats it. Its failure, if it failed, still
+ * shows.
  */
 export function withoutPreparationsAwaitingRetry(turns = [], invocations = []) {
   const awaitingRetry = new Set(invocations
     .filter((invocation) => invocation.preparationRecoverable === true)
     .map((invocation) => String(invocation.resultInteractionId)));
-  return turns.filter((turn) => !awaitingRetry.has(String(turn.id)));
+  return turns.filter((turn) => !awaitingRetry.has(String(turn.id)) || !ACTIVE_STATUSES.has(turn.completionStatus));
 }
 
 // Node marks (visual redesign b-structure-spec §4): a hollow dashed draft, or the state of the

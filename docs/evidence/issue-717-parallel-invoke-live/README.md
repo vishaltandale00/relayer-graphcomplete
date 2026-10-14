@@ -14,9 +14,9 @@ Both ran on commit `7eb6d8d08566af5b5c152c92ab0572b6248f60b1` with a clean works
 | Ran side by side | All three were `running` in the same samples for 19.3 s. Queued or still-starting runs do not count. |
 | Traces complete | Every run's candidate trace is complete, not truncated, with full prompt coverage. |
 | All accepted | All three runs were accepted. |
-| Invoked runs fresh | Both invoke prompts carry the fresh-session history block. |
+| Invoked runs fresh | Both invoke prompts carry the fresh-session history block. This reads the prompt only; whether each provider opened a new native session is covered by the PAR-003 provider tests. The script now names this check `invokedRunsGotFreshPrompt`. |
 | History reached them | Both invoke prompts contain the first turn's message. This record predates ids-only history; the script now checks for the first turn's interaction node id. |
-| Message resumed | The message's complete prompt has no history block: it resumed the thread's native session. |
+| Message resumed | The message's complete prompt has no history block, so it was sent as a resumed turn. The script now names this check `messageGotResumePrompt`. |
 
 Other coverage features, such as reasoning summaries and tool calls, are not all `full` for this provider (`coverageComplete: false`). The checks above read only the prompt.
 
@@ -44,7 +44,7 @@ RELAYER_PARALLEL_INVOKE_LIVE_RUN=1 npm run live:parallel-invoke -- --profile pri
 RELAYER_PARALLEL_INVOKE_LIVE_RUN=1 RELAYER_LIVE_PROFILE=prime-openrouter ./node_modules/.bin/electron scripts/record-parallel-invoke-video.mjs
 ```
 
-The first writes `.relayer/live/parallel-invoke/<run id>/run.json`. The second writes `.relayer/evidence/parallel-invoke-video/`. Each exits non-zero unless every check passes.
+Both rebuild the app and graph servers from the current source and record each binary's SHA-256 in `executables`. The first writes `.relayer/live/parallel-invoke/<run id>/run.json`. The second writes `.relayer/evidence/parallel-invoke-video/`. Each exits non-zero unless every check passes; the video run also fails if recording or encoding fails.
 
 ## Limits
 

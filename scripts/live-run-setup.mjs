@@ -3,6 +3,7 @@
  * inference and is excluded from `npm run check`; this module only prepares what they run on.
  */
 import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 
@@ -265,11 +266,33 @@ export async function prepareRoute({ session, productServer, runtime, resolver, 
  * Boots the GraphComplete runtime and app server the desktop uses, with the profile's provider
  * and, by default, the temporal features the desktop ships (current pointers, Stop, recursion).
  */
+const LIVE_BINARIES = Object.freeze({
+  graphServer: join(repositoryRoot, "target", "debug", "relayer-graph-server"),
+  appServer: join(repositoryRoot, "target", "debug", "relayer-app-server"),
+});
+
+/**
+ * Builds the servers a live run executes from the current source, then names each executable
+ * by its SHA-256. Cargo rebuilds anything stale, so a record's source provenance describes the
+ * binaries that actually ran.
+ */
+export function buildLiveBinaries() {
+  execFileSync("cargo", [
+    "build", "-p", "relayer-graph-server", "-p", "relayer-app-server",
+    "--target-dir", join(repositoryRoot, "target"),
+  ], { cwd: repositoryRoot, stdio: ["ignore", "ignore", "inherit"] });
+  return Object.fromEntries(Object.entries(LIVE_BINARIES).map(([name, path]) => [
+    name,
+    { path: path.slice(repositoryRoot.length + 1), sha256: createHash("sha256").update(readFileSync(path)).digest("hex") },
+  ]));
+}
+
 export async function startLiveProduct({ profile, configurationPath, dataDirectory, temporalFeatures = productTemporalFeatures() }) {
+  const executables = buildLiveBinaries();
   const resolver = managedRuntimeResolver();
   const runtime = new GraphCompleteRuntimeService({
     userDataDirectory: dataDirectory,
-    graphServerBinary: join(repositoryRoot, "target", "debug", "relayer-graph-server"),
+    graphServerBinary: LIVE_BINARIES.graphServer,
     configurationPaths: [configurationPath],
     ...(profile.codexExecutable === undefined ? {} : { codexPathOverride: profile.codexExecutable }),
     ...(profile.implementation === "prime.agent" ? {
@@ -294,14 +317,14 @@ export async function startLiveProduct({ profile, configurationPath, dataDirecto
   try {
     const productServer = new RelayerAppServerService({
       userDataDirectory: dataDirectory,
-      binaryPath: join(repositoryRoot, "target", "debug", "relayer-app-server"),
+      binaryPath: LIVE_BINARIES.appServer,
       webDirectory: join(repositoryRoot, "desktop", "renderer"),
       permissionCatalogPath: join(repositoryRoot, "permissions", "desktop.json"),
       runtimeSession,
       defaultHarnessConfiguration: profile.harness,
       allowHarnessOverride: true,
     });
-    return { runtime, productServer, resolver };
+    return { runtime, productServer, resolver, executables };
   } catch (error) {
     await runtime.close().catch(() => {});
     throw error;
