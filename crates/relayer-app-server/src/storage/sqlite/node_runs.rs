@@ -70,7 +70,9 @@ impl SqliteProductStore {
         Ok(result.rows_affected() == 1)
     }
 
-    /// The runs waiting on a node, in the order they were created.
+    /// The runs waiting on a node, in the order they were created. The live queue keeps this
+    /// order itself; this read is for tests.
+    #[cfg(test)]
     pub(crate) async fn queued_node_runs(
         &self,
         key: NodeRunKey,
@@ -112,6 +114,15 @@ impl SqliteProductStore {
             runs.push(run);
         }
         (ThreadId::from_database(thread), runs)
+    }
+
+    pub(crate) async fn set_completion_status_for_test(&self, run: InteractionId, status: &str) {
+        sqlx::query("UPDATE interactions SET completion_status=?2 WHERE id=?1")
+            .bind(run.value())
+            .bind(status)
+            .execute(&self.pool)
+            .await
+            .unwrap();
     }
 
     pub(crate) async fn completion_status_for_test(&self, run: InteractionId) -> String {

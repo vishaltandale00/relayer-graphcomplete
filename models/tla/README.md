@@ -365,13 +365,15 @@ restart. Each run is sent once, by an invoke action on its node:
   executing and queued runs alike.
 
 A run's context is the set of runs accepted when it starts (`seen`).
-Settlement and handing the node on are one step. In the code the hand-off
-follows the end of the run's execution task, and admission sees the node
-held until then. A storage failure during the hand-off keeps the settled
+`Send` is the run's creation: in the code a run takes its place in its
+node's queue when it is created, before its graph call is prepared, which
+keeps creation order. Settlement and handing the node on are one step. In
+the code the hand-off follows the end of the run's execution task and waits
+until its outcome is saved; admission sees the node held until then. A storage failure during the hand-off keeps the settled
 run on its node, and the hand-off is retried; that is not modeled.
 `StopQueued` also stands for the Stop of a queued run whose graph call was
-already prepared: it settles before native execution, so its graph current
-stops, and it never holds the node. Duplicate deliveries, which join the
+already prepared: its graph current is stopped first, then the product row,
+and it never holds the node. Duplicate deliveries, which join the
 holder's admission, are not modeled. Graph preparation, approvals and the
 provider are not modeled. `node-queue-today` mirrors the code; each `-reverted` check turns
 one fix or decision off.

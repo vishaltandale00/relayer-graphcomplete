@@ -466,6 +466,28 @@ pub(super) async fn validate(pool: &SqlitePool) -> Result<(), StorageError> {
     )
     .await?;
     validate_columns(pool, "threads", THREAD_COLUMNS).await?;
+    // The node of each run a user starts from an invoke (#718).
+    validate_columns(
+        pool,
+        "node_runs",
+        &[
+            ("result_interaction_id", "INTEGER", false, 1),
+            ("thread_id", "INTEGER", true, 0),
+            ("node_id", "INTEGER", true, 0),
+        ],
+    )
+    .await?;
+    validate_foreign_key(
+        pool,
+        "node_runs",
+        "result_interaction_id",
+        "interactions",
+        "id",
+        "CASCADE",
+    )
+    .await?;
+    validate_foreign_key(pool, "node_runs", "thread_id", "threads", "id", "CASCADE").await?;
+    validate_index(pool, "node_runs", &["thread_id", "node_id"], false).await?;
     validate_columns(pool, "interactions", INTERACTION_COLUMNS).await?;
     validate_columns(
         pool,
@@ -1396,6 +1418,45 @@ fn incompatible(message: &str) -> StorageError {
 #[cfg(test)]
 mod tests {
     use super::super::SqliteProductStore;
+
+    /// The node-run queue table (#718) is part of the reopen check: missing or malformed, the
+    /// store refuses to open rather than failing at the first invoke.
+    #[tokio::test]
+    async fn node_runs_table_is_validated_on_reopen() {
+        for replacement in [
+            None,
+            Some(
+                "CREATE TABLE node_runs (result_interaction_id INTEGER PRIMARY KEY, thread_id INTEGER, node_id INTEGER NOT NULL)",
+            ),
+            Some(
+                "CREATE TABLE node_runs (result_interaction_id INTEGER PRIMARY KEY, thread_id INTEGER NOT NULL, node_id INTEGER NOT NULL)",
+            ),
+            Some(
+                "CREATE TABLE node_runs (result_interaction_id INTEGER PRIMARY KEY REFERENCES interactions(id) ON DELETE CASCADE, thread_id INTEGER NOT NULL REFERENCES threads(id) ON DELETE CASCADE, node_id INTEGER NOT NULL CHECK(node_id > 0))",
+            ),
+        ] {
+            let directory = tempfile::tempdir().unwrap();
+            let database = directory.path().join("schema.sqlite3");
+            let store = SqliteProductStore::open(&database).await.unwrap();
+            let mut connection = store.pool.acquire().await.unwrap();
+            sqlx::query("DROP TABLE node_runs")
+                .execute(&mut *connection)
+                .await
+                .unwrap();
+            if let Some(table) = replacement {
+                sqlx::query(table).execute(&mut *connection).await.unwrap();
+            }
+            drop(connection);
+            store.pool.close().await;
+            assert!(
+                matches!(
+                    SqliteProductStore::open(&database).await,
+                    Err(crate::storage::StorageError::IncompatibleSchema(_))
+                ),
+                "reopened with node_runs as {replacement:?}"
+            );
+        }
+    }
 
     #[tokio::test]
     async fn archive_authority_rejects_missing_or_weakened_objects_on_reopen() {

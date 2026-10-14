@@ -2896,13 +2896,6 @@ impl ProductService {
             .map_err(Into::into)
     }
 
-    pub(crate) async fn queued_node_runs(
-        &self,
-        key: super::NodeRunKey,
-    ) -> Result<Vec<InteractionId>, ProductError> {
-        self.storage.queued_node_runs(key).await.map_err(Into::into)
-    }
-
     pub(crate) async fn is_invoked_run(
         &self,
         interaction_id: InteractionId,

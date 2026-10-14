@@ -1,26 +1,59 @@
 //! The per-node run queue (#718, PRD 12.2). Runs a user starts on different nodes run at once.
-//! On one node they run in order: while a run holds its node, the next one waits as `queued`.
-//! A queued run starts when the run ahead of it settles, whatever its outcome.
+//! On one node they run in the order they were created: while a run holds its node, later ones
+//! wait, and the next one starts when the run ahead of it settles, whatever its outcome.
+//!
+//! A run joins its node's queue as soon as it is created, before its graph call is prepared,
+//! so a slower preparation never lets a later run overtake it. A run waiting behind another
+//! shows as `queued` once it is ready to start.
 //!
 //! This orders user intent; it is not an integrity rule, and it is not a recursion scheduler.
 //! Which run holds a node is live state: only a run this process executes can hold one, so a
-//! restart never leaves a node held. The queue itself is durable (`node_runs`).
+//! restart never leaves a node held. The node of each run is durable (`node_runs`).
 
 use crate::product::{InteractionId, NodeRunKey, ProductError, ProductService};
-use std::{collections::HashMap, sync::Arc};
+use std::{
+    collections::{BTreeMap, HashMap},
+    sync::Arc,
+    time::Duration,
+};
 use tokio::sync::Mutex;
 
 #[derive(Clone, Default)]
 pub(crate) struct NodeRunQueue {
-    holders: Arc<Mutex<HashMap<NodeRunKey, Holder>>>,
+    nodes: Arc<Mutex<HashMap<NodeRunKey, NodeState>>>,
 }
 
-/// The run holding a node, and how many admissions of it are still starting or running. A
+#[derive(Default)]
+struct NodeState {
+    holder: Option<Holder>,
+    /// The runs behind the holder, in creation order (sequence, then id). A run is ready once
+    /// its graph call is prepared and it waits durably as `queued`.
+    waiting: BTreeMap<(i64, i64), Waiter>,
+}
+
+/// The run holding a node, and how many request paths of it are still starting or running. A
 /// duplicate delivery of the same run joins it, and the node passes on only when the last of
 /// them releases it, so a duplicate that loses the start never frees a node its run still holds.
 struct Holder {
     run: InteractionId,
     admissions: usize,
+}
+
+struct Waiter {
+    run: InteractionId,
+    ready: bool,
+}
+
+/// What joining its node's queue did for a run's request, so the request can undo exactly that
+/// if it ends before its run is admitted.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Arrival {
+    /// The run holds the node; this request owns one of its admissions.
+    Held,
+    /// The run waits behind the holder. It may be promoted to holder while it prepares.
+    Waiting,
+    /// Another request of the same run already holds or waits for it.
+    Joined,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -34,47 +67,145 @@ pub(crate) enum NodeAdmission {
     NotQueued,
 }
 
+impl NodeState {
+    fn position(run: InteractionId, sequence: i64) -> (i64, i64) {
+        (sequence, run.value())
+    }
+
+    fn waits(&self, run: InteractionId) -> bool {
+        self.waiting.values().any(|waiter| waiter.run == run)
+    }
+
+    fn remove_waiter(&mut self, run: InteractionId) {
+        self.waiting.retain(|_, waiter| waiter.run != run);
+    }
+}
+
 impl NodeRunQueue {
-    /// Admits a run to its node. Admission and queueing are one step under the queue's lock,
-    /// so two runs racing to one node never both start.
+    /// Joins a newly created run to its node's queue, before its graph call is prepared. It
+    /// takes the node only when nothing holds it.
+    pub(crate) async fn arrive(
+        &self,
+        key: NodeRunKey,
+        run: InteractionId,
+        sequence: i64,
+    ) -> Arrival {
+        let mut nodes = self.nodes.lock().await;
+        let node = nodes.entry(key).or_default();
+        let waits = node.waits(run);
+        match &mut node.holder {
+            Some(holder) if holder.run == run => {
+                holder.admissions += 1;
+                Arrival::Held
+            }
+            Some(_) if waits => Arrival::Joined,
+            Some(_) => {
+                node.waiting.insert(
+                    NodeState::position(run, sequence),
+                    Waiter { run, ready: false },
+                );
+                Arrival::Waiting
+            }
+            None => {
+                node.holder = Some(Holder { run, admissions: 1 });
+                Arrival::Held
+            }
+        }
+    }
+
+    /// Admits a run that is ready to start. A run that already holds its node starts. Otherwise
+    /// it waits in creation order, durably as `queued`. Admission and queueing are one step
+    /// under the queue's lock, so two runs racing to one node never both start. `arrival` is
+    /// what this request's `arrive` did, if it arrived first.
     pub(crate) async fn admit(
         &self,
         product: &ProductService,
         key: NodeRunKey,
         run: InteractionId,
+        sequence: i64,
+        arrival: Option<Arrival>,
     ) -> Result<NodeAdmission, ProductError> {
-        let mut holders = self.holders.lock().await;
-        match holders.get_mut(&key) {
-            None => {
-                holders.insert(key, Holder { run, admissions: 1 });
-                Ok(NodeAdmission::Start)
-            }
-            // A duplicate delivery of the run that holds the node joins it.
+        let mut nodes = self.nodes.lock().await;
+        let node = nodes.entry(key).or_default();
+        match &mut node.holder {
             Some(holder) if holder.run == run => {
-                holder.admissions += 1;
-                Ok(NodeAdmission::Start)
+                // A request that arrived already owns an admission; any other one joins.
+                if !matches!(arrival, Some(Arrival::Held | Arrival::Waiting)) {
+                    holder.admissions += 1;
+                }
+                return Ok(NodeAdmission::Start);
             }
-            Some(_) => {
-                if product.queue_node_run(run).await? {
-                    Ok(NodeAdmission::Waiting)
-                } else {
-                    Ok(NodeAdmission::NotQueued)
+            None => {
+                node.remove_waiter(run);
+                node.holder = Some(Holder { run, admissions: 1 });
+                return Ok(NodeAdmission::Start);
+            }
+            Some(_) => {}
+        }
+        if !node.waits(run) {
+            node.waiting.insert(
+                NodeState::position(run, sequence),
+                Waiter { run, ready: false },
+            );
+        }
+        if product.queue_node_run(run).await? {
+            for waiter in node.waiting.values_mut() {
+                if waiter.run == run {
+                    waiter.ready = true;
                 }
             }
+            Ok(NodeAdmission::Waiting)
+        } else {
+            if arrival != Some(Arrival::Joined) {
+                node.remove_waiter(run);
+            }
+            Ok(NodeAdmission::NotQueued)
         }
     }
 
+    /// Undoes the arrival of a run whose request ended before its run was admitted, for
+    /// example because its graph preparation failed. Returns a queued run to start if the node
+    /// passed on.
+    pub(crate) async fn depart(
+        &self,
+        product: &ProductService,
+        key: NodeRunKey,
+        run: InteractionId,
+        arrival: Arrival,
+    ) -> Result<Option<InteractionId>, ProductError> {
+        {
+            let mut nodes = self.nodes.lock().await;
+            let node = nodes.entry(key).or_default();
+            let holds = node.holder.as_ref().is_some_and(|holder| holder.run == run);
+            match arrival {
+                Arrival::Joined => return Ok(None),
+                Arrival::Waiting if !holds => {
+                    node.waiting
+                        .retain(|_, waiter| waiter.run != run || waiter.ready);
+                    return Ok(None);
+                }
+                // A waiter promoted while it prepared holds the node for this request.
+                Arrival::Waiting | Arrival::Held => {}
+            }
+        }
+        self.release(product, key, run).await
+    }
+
     /// Ends one admission of the run holding a node. When it was the last, the node passes to
-    /// the oldest queued run, which the caller then starts. A queued run that a Stop claimed
-    /// first is skipped.
+    /// the oldest run behind it. A ready run is claimed and returned for the caller to start; a
+    /// run still preparing becomes the holder and starts when its request admits it. A queued
+    /// run that a Stop claimed first is skipped.
     pub(crate) async fn release(
         &self,
         product: &ProductService,
         key: NodeRunKey,
         run: InteractionId,
     ) -> Result<Option<InteractionId>, ProductError> {
-        let mut holders = self.holders.lock().await;
-        match holders.get_mut(&key) {
+        let mut nodes = self.nodes.lock().await;
+        let Some(node) = nodes.get_mut(&key) else {
+            return Ok(None);
+        };
+        match &mut node.holder {
             Some(holder) if holder.run == run && holder.admissions > 1 => {
                 holder.admissions -= 1;
                 return Ok(None);
@@ -82,25 +213,34 @@ impl NodeRunQueue {
             Some(holder) if holder.run == run => {}
             _ => return Ok(None),
         }
-        // On a storage failure the settled run keeps the node, so a new run still queues in
-        // order, and the caller retries this release until it hands the node on.
-        let queued = product.queued_node_runs(key).await?;
-        // A row that cannot be claimed is skipped, so one bad row never holds the node; the
-        // error is returned only when no queued run could be claimed.
+        // On a storage failure the settled run keeps the node, so later runs still wait in
+        // order, and the caller retries this release until it hands the node on. A row that
+        // cannot be claimed is skipped, and stays in line for the next release.
         let mut failure = None;
-        for next in queued {
+        let positions: Vec<(i64, i64)> = node.waiting.keys().copied().collect();
+        for position in positions {
+            let waiter = &node.waiting[&position];
+            let next = waiter.run;
+            if !waiter.ready {
+                node.waiting.remove(&position);
+                node.holder = Some(Holder {
+                    run: next,
+                    admissions: 1,
+                });
+                return Ok(None);
+            }
             match product.claim_queued_node_run(next).await {
                 Ok(true) => {
-                    holders.insert(
-                        key,
-                        Holder {
-                            run: next,
-                            admissions: 1,
-                        },
-                    );
+                    node.waiting.remove(&position);
+                    node.holder = Some(Holder {
+                        run: next,
+                        admissions: 1,
+                    });
                     return Ok(Some(next));
                 }
-                Ok(false) => {}
+                Ok(false) => {
+                    node.waiting.remove(&position);
+                }
                 Err(error) => {
                     eprintln!("queued run {next} could not be claimed to start: {error}");
                     failure = Some(error);
@@ -110,13 +250,50 @@ impl NodeRunQueue {
         if let Some(error) = failure {
             return Err(error);
         }
-        holders.remove(&key);
+        nodes.remove(&key);
         Ok(None)
+    }
+
+    /// Releases the node of a run whose execution ended, once its settlement is durable. Until
+    /// its row leaves the active statuses, for example while its outcome is still being
+    /// persisted, the node stays held, so the next run never starts beside it or reads the
+    /// thread before its result.
+    pub(crate) async fn release_settled(
+        &self,
+        product: &ProductService,
+        key: NodeRunKey,
+        run: InteractionId,
+        mut poll: Duration,
+    ) -> Result<Option<InteractionId>, ProductError> {
+        loop {
+            match product.get_interaction(run).await {
+                Ok(current)
+                    if !matches!(
+                        current.completion_status.as_str(),
+                        "submitted" | "running" | "waiting_for_approval" | "queued"
+                    ) =>
+                {
+                    return self.release(product, key, run).await;
+                }
+                Ok(current) => eprintln!(
+                    "run {run} ended its execution while still {}; its node stays held",
+                    current.completion_status
+                ),
+                Err(error) => eprintln!("could not read whether run {run} settled: {error}"),
+            }
+            tokio::time::sleep(poll).await;
+            poll = (poll * 2).min(Duration::from_secs(30));
+        }
     }
 
     #[cfg(test)]
     async fn holder(&self, key: NodeRunKey) -> Option<InteractionId> {
-        self.holders.lock().await.get(&key).map(|holder| holder.run)
+        self.nodes
+            .lock()
+            .await
+            .get(&key)
+            .and_then(|node| node.holder.as_ref())
+            .map(|holder| holder.run)
     }
 }
 
@@ -124,6 +301,11 @@ impl NodeRunQueue {
 mod tests {
     use super::*;
     use crate::storage::SqliteProductStore;
+
+    /// The seeded runs are created in id order, so a run's id stands for its creation order.
+    fn sequence(run: InteractionId) -> i64 {
+        run.value()
+    }
 
     async fn fixture(
         nodes: &[i64],
@@ -154,7 +336,9 @@ mod tests {
             // Each send admits on its own worker, so the two really race.
             let racing = |run: InteractionId| {
                 let (queue, product) = (queue.clone(), product.clone());
-                tokio::spawn(async move { queue.admit(&product, node, run).await })
+                tokio::spawn(
+                    async move { queue.admit(&product, node, run, run.value(), None).await },
+                )
             };
             let (first, second) = (racing(runs[0]), racing(runs[1]));
             let admissions = [
@@ -177,13 +361,19 @@ mod tests {
             assert_eq!(queue.holder(node).await, Some(started));
             assert_eq!(store.completion_status_for_test(waiting).await, "queued");
             assert_eq!(
-                queue.admit(&product, other_node, runs[2]).await.unwrap(),
+                queue
+                    .admit(&product, other_node, runs[2], sequence(runs[2]), None)
+                    .await
+                    .unwrap(),
                 NodeAdmission::Start
             );
             // A duplicate delivery of the holder joins it rather than queueing it. When the
             // duplicate loses the start and releases, the run it joined still holds the node.
             assert_eq!(
-                queue.admit(&product, node, started).await.unwrap(),
+                queue
+                    .admit(&product, node, started, sequence(started), None)
+                    .await
+                    .unwrap(),
                 NodeAdmission::Start
             );
             assert_eq!(queue.release(&product, node, started).await.unwrap(), None);
@@ -204,7 +394,10 @@ mod tests {
         let queue = NodeRunQueue::default();
         let node = product.node_run_key(runs[0]).await.unwrap().unwrap();
         assert_eq!(
-            queue.admit(&product, node, runs[0]).await.unwrap(),
+            queue
+                .admit(&product, node, runs[0], sequence(runs[0]), None)
+                .await
+                .unwrap(),
             NodeAdmission::Start
         );
         // A run that already carries a Stop is not queued behind the holder; it only settles.
@@ -216,7 +409,10 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(
-            queue.admit(&product, node, stopping).await.unwrap(),
+            queue
+                .admit(&product, node, stopping, sequence(stopping), None)
+                .await
+                .unwrap(),
             NodeAdmission::NotQueued
         );
         assert_eq!(
@@ -225,7 +421,10 @@ mod tests {
         );
         for run in &runs[1..] {
             assert_eq!(
-                queue.admit(&product, node, *run).await.unwrap(),
+                queue
+                    .admit(&product, node, *run, sequence(*run), None)
+                    .await
+                    .unwrap(),
                 NodeAdmission::Waiting
             );
         }
@@ -258,5 +457,136 @@ mod tests {
         assert_eq!(store.completion_status_for_test(runs[2]).await, "stopped");
         assert_eq!(queue.release(&product, node, runs[3]).await.unwrap(), None);
         assert_eq!(queue.holder(node).await, None);
+    }
+
+    /// PAR-007 (#718 review): runs start in the order they were created. A run created first
+    /// takes its place when it is created, so a later run whose preparation is faster waits
+    /// behind it instead of overtaking it. If the first run's request then fails, the later
+    /// run starts.
+    #[tokio::test]
+    async fn a_run_created_first_starts_first_even_when_it_prepares_slower() {
+        let (_directory, store, product, runs) = fixture(&[7, 7, 7, 7]).await;
+        let queue = NodeRunQueue::default();
+        let node = product.node_run_key(runs[0]).await.unwrap().unwrap();
+        let (first, second) = (runs[0], runs[1]);
+        assert_eq!(
+            queue.arrive(node, first, sequence(first)).await,
+            Arrival::Held
+        );
+        assert_eq!(
+            queue.arrive(node, second, sequence(second)).await,
+            Arrival::Waiting
+        );
+        // The second run's faster preparation reaches admission first: it waits.
+        assert_eq!(
+            queue
+                .admit(
+                    &product,
+                    node,
+                    second,
+                    sequence(second),
+                    Some(Arrival::Waiting)
+                )
+                .await
+                .unwrap(),
+            NodeAdmission::Waiting
+        );
+        assert_eq!(store.completion_status_for_test(second).await, "queued");
+        assert_eq!(
+            queue
+                .admit(&product, node, first, sequence(first), Some(Arrival::Held))
+                .await
+                .unwrap(),
+            NodeAdmission::Start
+        );
+        assert_eq!(queue.holder(node).await, Some(first));
+        assert_eq!(
+            queue.release(&product, node, first).await.unwrap(),
+            Some(second)
+        );
+
+        // A run still preparing when the run ahead settles takes the node and starts when it
+        // is admitted; a later ready run keeps waiting behind it.
+        let (third, fourth) = (runs[2], runs[3]);
+        assert_eq!(
+            queue.arrive(node, third, sequence(third)).await,
+            Arrival::Waiting
+        );
+        assert_eq!(
+            queue.arrive(node, fourth, sequence(fourth)).await,
+            Arrival::Waiting
+        );
+        assert_eq!(
+            queue
+                .admit(
+                    &product,
+                    node,
+                    fourth,
+                    sequence(fourth),
+                    Some(Arrival::Waiting)
+                )
+                .await
+                .unwrap(),
+            NodeAdmission::Waiting
+        );
+        assert_eq!(queue.release(&product, node, second).await.unwrap(), None);
+        assert_eq!(queue.holder(node).await, Some(third));
+        assert_eq!(store.completion_status_for_test(fourth).await, "queued");
+        // The third run's request fails before admission; the node passes to the fourth.
+        assert_eq!(
+            queue
+                .depart(&product, node, third, Arrival::Waiting)
+                .await
+                .unwrap(),
+            Some(fourth)
+        );
+        assert_eq!(store.completion_status_for_test(fourth).await, "submitted");
+    }
+
+    /// The node of a run whose execution ended passes on only once the run's settlement is
+    /// durable (#718 review). While its row still reads running, the queued run behind it does
+    /// not start.
+    #[tokio::test]
+    async fn a_node_passes_on_only_after_the_run_ahead_durably_settles() {
+        let (_directory, store, product, runs) = fixture(&[7, 7]).await;
+        let queue = NodeRunQueue::default();
+        let node = product.node_run_key(runs[0]).await.unwrap().unwrap();
+        assert_eq!(
+            queue
+                .admit(&product, node, runs[0], sequence(runs[0]), None)
+                .await
+                .unwrap(),
+            NodeAdmission::Start
+        );
+        assert_eq!(
+            queue
+                .admit(&product, node, runs[1], sequence(runs[1]), None)
+                .await
+                .unwrap(),
+            NodeAdmission::Waiting
+        );
+        store
+            .set_completion_status_for_test(runs[0], "running")
+            .await;
+        let ahead = runs[0];
+        let releasing = {
+            let (queue, product) = (queue.clone(), product.clone());
+            tokio::spawn(async move {
+                queue
+                    .release_settled(&product, node, ahead, Duration::from_millis(10))
+                    .await
+            })
+        };
+        tokio::time::sleep(Duration::from_millis(150)).await;
+        assert!(
+            !releasing.is_finished(),
+            "the node passed on while its run still ran"
+        );
+        assert_eq!(queue.holder(node).await, Some(runs[0]));
+        assert_eq!(store.completion_status_for_test(runs[1]).await, "queued");
+        store
+            .set_completion_status_for_test(runs[0], "failed")
+            .await;
+        assert_eq!(releasing.await.unwrap().unwrap(), Some(runs[1]));
     }
 }
