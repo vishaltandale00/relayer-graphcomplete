@@ -3097,15 +3097,25 @@ pub(super) async fn stop_interaction(
     ) {
         return Ok(Json(interaction.into()));
     }
-    let queued = state
-        .product
-        .request_interaction_stop(thread_id, interaction_id)
-        .await?;
-    if queued != crate::storage::QueuedStop::NotQueued {
-        // A run waiting for capacity (#720) leaves the wait at once, keeping its text. A run
-        // that held its node while it waited frees it, and the next run on the node starts.
-        state.run_capacity.forget(interaction_id).await;
-    }
+    // The Stop and its hand-off to the capacity wait finish even if the request goes away.
+    let stop_state = state.clone();
+    let queued = tokio::spawn(async move {
+        let queued = stop_state
+            .product
+            .request_interaction_stop(thread_id, interaction_id)
+            .await?;
+        if queued != crate::storage::QueuedStop::NotQueued {
+            // A run waiting for capacity (#720) leaves the wait at once, keeping its text. A
+            // run that held its node while it waited frees it, and the next run on it starts.
+            stop_state.run_capacity.forget(interaction_id).await;
+        }
+        Ok::<_, crate::product::ProductError>(queued)
+    })
+    .await
+    .map_err(|error| {
+        eprintln!("stop request did not finish: {error}");
+        ApiError::internal("Stop could not be confirmed. Try again.")
+    })??;
     if queued == crate::storage::QueuedStop::SettleBeforeStart {
         // The graph already prepared this queued run's call. It settles as a Stop before native
         // execution, outside its node's queue: no provider work starts, and its graph current
@@ -4614,6 +4624,31 @@ async fn start_interaction(
     if state.runtime.is_none() {
         return Ok(interaction);
     }
+    // Admission runs to its end even if the request goes away, so a run queued for capacity
+    // always keeps the waiter that starts it.
+    let (owned_state, owned_thread) = (state.clone(), thread.clone());
+    tokio::spawn(async move {
+        admit_and_start_interaction(
+            &owned_state,
+            &owned_thread,
+            interaction,
+            record_deterministic_failure,
+        )
+        .await
+    })
+    .await
+    .map_err(|error| {
+        eprintln!("interaction admission did not finish: {error}");
+        ApiError::internal("Relayer could not start this run.")
+    })?
+}
+
+async fn admit_and_start_interaction(
+    state: &ApiState,
+    thread: &Thread,
+    interaction: Interaction,
+    record_deterministic_failure: bool,
+) -> Result<Interaction, ApiError> {
     let admitted = async {
         let claimed = state
             .product
@@ -4633,15 +4668,28 @@ async fn start_interaction(
             let (waiting_state, waiting_thread) = (state.clone(), thread.clone());
             let waiting = interaction.clone();
             tokio::spawn(async move {
-                // Its request has returned, so a failure from here on is recorded on the run.
-                if grant.await.is_ok() {
-                    let _ = start_admitted_interaction(
+                if grant.await.is_err() {
+                    return;
+                }
+                let run = waiting.id;
+                if let Err(error) = start_admitted_interaction(
+                    &waiting_state,
+                    &waiting_thread,
+                    waiting,
+                    claimed,
+                    CapacitySlot::Held,
+                    record_deterministic_failure,
+                )
+                .await
+                {
+                    // Its request returned when it began to wait, so the send's own cleanup
+                    // of an identified input that cannot start runs here instead: its draft is
+                    // preserved and its context confirmations are released.
+                    discard_identified_input_that_cannot_start(
                         &waiting_state,
-                        &waiting_thread,
-                        waiting,
-                        claimed,
-                        CapacitySlot::Held,
-                        true,
+                        run,
+                        &error,
+                        record_deterministic_failure,
                     )
                     .await;
                 }
@@ -4683,6 +4731,40 @@ async fn start_interaction(
         record_deterministic_failure,
     )
     .await
+}
+
+/// The cleanup a send applies when its identified input fails before graph binding, for a
+/// run whose request already returned because it waited for capacity (#720). As for a send
+/// that fails at once, a deterministic failure or one that consumed context confirmations
+/// discards the unbound interaction, which preserves its draft and releases its
+/// confirmations. Other failures stay recorded on the run.
+async fn discard_identified_input_that_cannot_start(
+    state: &ApiState,
+    run: InteractionId,
+    error: &ApiError,
+    record_deterministic_failure: bool,
+) {
+    if record_deterministic_failure {
+        return;
+    }
+    let consumes_context_confirmations = match state
+        .product
+        .interaction_consumes_context_confirmations(run)
+        .await
+    {
+        Ok(consumes) => consumes,
+        Err(failure) => {
+            eprintln!(
+                "could not inspect waiting interaction {run} confirmation ownership: {failure}"
+            );
+            false
+        }
+    };
+    if (error.is_deterministic_input_failure() || consumes_context_confirmations)
+        && let Err(cleanup) = state.product.discard_unbound_interaction_input(run).await
+    {
+        eprintln!("could not discard waiting interaction {run} that could not start: {cleanup}");
+    }
 }
 
 /// Prepares and executes a message turn admitted under the capacity limit. Its slot is
@@ -5784,6 +5866,81 @@ mod tests {
             tokio::time::sleep(std::time::Duration::from_millis(10)).await;
         }
         assert_eq!(fixture.transition_refusals.load(Ordering::SeqCst), 0);
+        fixture.finish();
+    }
+
+    /// PAR-011 (#720), on the held path: a duplicate delivery of a run that holds its node
+    /// while it waits for capacity joins the wait and ends its own hold on the node. When a
+    /// Stop removes the run, its node frees at once.
+    #[tokio::test]
+    async fn a_duplicate_delivery_of_a_run_waiting_for_capacity_joins_the_wait() {
+        let mut fixture = broker_fixture("duplicate-capacity-wait", "active").await;
+        fixture.state.run_capacity = crate::api::RunCapacity::new(1);
+        // Another run holds the only slot.
+        assert!(matches!(
+            fixture
+                .state
+                .run_capacity
+                .admit(&fixture.product, InteractionId::from_database(999_999))
+                .await
+                .unwrap(),
+            CapacityAdmission::Start
+        ));
+        let run = fixture
+            .product
+            .create_interaction(fixture.thread.id, "Invoked again", None, true)
+            .await
+            .unwrap();
+        fixture.product.record_node_run(run.id, 7).await.unwrap();
+        let key = fixture.product.node_run_key(run.id).await.unwrap().unwrap();
+        // Two deliveries of the run both hold its node.
+        for _ in 0..2 {
+            assert_eq!(
+                fixture
+                    .state
+                    .node_runs
+                    .admit(&fixture.product, key, run.id)
+                    .await
+                    .unwrap(),
+                NodeAdmission::Start
+            );
+        }
+        for _ in 0..2 {
+            let waiting = start_held_action_interaction(
+                &fixture.state,
+                &fixture.thread,
+                run.clone(),
+                key,
+                false,
+            )
+            .await
+            .unwrap_or_else(|error| panic!("admission failed: {}", error.message()));
+            assert_eq!(waiting.completion_status, "queued");
+            assert!(waiting.waiting_for_capacity);
+        }
+        fixture
+            .product
+            .request_interaction_stop(fixture.thread.id, run.id)
+            .await
+            .unwrap();
+        fixture.state.run_capacity.forget(run.id).await;
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+        while fixture.state.node_runs.holder(key).await.is_some() {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "a removed run kept its node"
+            );
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+        assert_eq!(
+            fixture
+                .product
+                .get_interaction(run.id)
+                .await
+                .unwrap()
+                .completion_status,
+            "stopped"
+        );
         fixture.finish();
     }
 

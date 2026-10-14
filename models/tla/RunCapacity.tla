@@ -30,6 +30,10 @@ CONSTANTS
                       \* queueing, are one step under the lock (RC admit)
   ReleaseHandsSlot,   \* fix: a released slot passes to a waiting run (RC release)
   Fifo,               \* decision (#720): the slot passes to the oldest waiting run
+  AtomicHandOff,      \* the code: release frees a slot and passes it on in one step
+                      \* under the lock (RC release)
+  WaitBehindWaiting,  \* decision (#720): a new run never takes a slot while a run
+                      \* waits (RC admit checks that no run waits)
   ChildrenUncounted,  \* decision 5 (#716): a child never asks for a slot
   StartupInterruptsWaits \* fix: startup ends every wait for capacity (SRC
                       \* interrupt_capacity_waits)
@@ -54,17 +58,20 @@ VARIABLES
   holder,     \* node -> the run holding it, or 0. Live state.
   slots,      \* the runs holding a capacity slot. Live state.
   waitq,      \* the runs waiting for a slot, in the order they began. Live state.
+  before,     \* ghost: pairs <<o, r>> where o began waiting for a slot before r
+              \* and both still wait. It records arrival, independent of waitq.
   waitedNode, \* runs that ever waited behind their node
   appUp,
   restarts
 
-vars == <<status, holder, slots, waitq, waitedNode, appUp, restarts>>
+vars == <<status, holder, slots, waitq, before, waitedNode, appUp, restarts>>
 
 TypeOK ==
   /\ status \in [Runs -> Statuses]
   /\ holder \in [Nodes -> Humans \cup {0}]
   /\ slots \subseteq Runs
   /\ waitq \in Seq(Runs)
+  /\ before \subseteq Runs \X Runs
   /\ waitedNode \subseteq Humans
   /\ appUp \in BOOLEAN
   /\ restarts \in 0..MaxRestarts
@@ -74,22 +81,28 @@ Init ==
   /\ holder = [n \in Nodes |-> 0]
   /\ slots = {}
   /\ waitq = <<>>
+  /\ before = {}
   /\ waitedNode = {}
   /\ appUp = TRUE
   /\ restarts = 0
 
 InQueue(r) == \E i \in 1..Len(waitq) : waitq[i] = r
 Without(q, r) == SelectSeq(q, LAMBDA x : x /= r)
-SlotFree == Cardinality(slots) < Limit /\ waitq = <<>>
+SlotFree == Cardinality(slots) < Limit /\ (WaitBehindWaiting => waitq = <<>>)
+Waiting(st) == {o \in Runs : st[o] = "capQueued"}
+\* The ghost order after r begins to wait, and after runs leave the wait.
+Arrive(r) == before \cup {<<o, r>> : o \in Waiting(status)}
+Leave(b, st) == {pair \in b : st[pair[1]] = "capQueued" /\ st[pair[2]] = "capQueued"}
 
 \* RC admit: a run takes a free slot, or waits for one, holding its node.
 AskForSlot(r) ==
   IF SlotFree
   THEN /\ status' = [status EXCEPT ![r] = "running"]
        /\ slots' = slots \cup {r}
-       /\ UNCHANGED waitq
+       /\ UNCHANGED <<waitq, before>>
   ELSE /\ status' = [status EXCEPT ![r] = "capQueued"]   \* SRC queue_run_for_capacity
        /\ waitq' = Append(waitq, r)
+       /\ before' = Arrive(r)
        /\ UNCHANGED slots
 
 -----------------------------------------------------------------------------
@@ -106,7 +119,7 @@ Send(r) ==
      ELSE /\ status' = [status EXCEPT ![r] = "nodeQueued"]
           /\ waitedNode' = waitedNode \cup {r}
           /\ UNCHANGED holder
-  /\ UNCHANGED <<slots, waitq, appUp, restarts>>
+  /\ UNCHANGED <<slots, waitq, before, appUp, restarts>>
 
 \* With the lock, checking and taking a slot, or queueing, are one step.
 \* Without it a run can pass the check before another takes the last slot.
@@ -118,6 +131,7 @@ Admit(r) ==
              THEN status' = [status EXCEPT ![r] = "checked"]
              ELSE status' = [status EXCEPT ![r] = "capQueued"]
           /\ waitq' = IF SlotFree THEN waitq ELSE Append(waitq, r)
+          /\ before' = IF SlotFree THEN before ELSE Arrive(r)
           /\ UNCHANGED slots
   /\ UNCHANGED <<holder, waitedNode, appUp, restarts>>
 
@@ -125,7 +139,7 @@ Take(r) ==
   /\ appUp /\ status[r] = "checked"
   /\ status' = [status EXCEPT ![r] = "running"]
   /\ slots' = slots \cup {r}
-  /\ UNCHANGED <<holder, waitq, waitedNode, appUp, restarts>>
+  /\ UNCHANGED <<holder, waitq, before, waitedNode, appUp, restarts>>
 
 \* An agent invokes a child (THR complete_prepared_child). It never asks for a
 \* slot; reverted, it would wait like a human-started run.
@@ -133,7 +147,7 @@ LaunchChild(c) ==
   /\ appUp /\ c \in Kids /\ status[c] = "unsent"
   /\ IF ChildrenUncounted
      THEN /\ status' = [status EXCEPT ![c] = "running"]
-          /\ UNCHANGED <<slots, waitq>>
+          /\ UNCHANGED <<slots, waitq, before>>
      ELSE AskForSlot(c)
   /\ UNCHANGED <<holder, waitedNode, appUp, restarts>>
 
@@ -145,7 +159,7 @@ LaunchChild(c) ==
 Settle(r, outcome) ==
   /\ appUp /\ status[r] = "running"
   /\ status' = [status EXCEPT ![r] = outcome]
-  /\ UNCHANGED <<holder, slots, waitq, waitedNode, appUp, restarts>>
+  /\ UNCHANGED <<holder, slots, waitq, before, waitedNode, appUp, restarts>>
 
 Oldest(q) == q[1]
 
@@ -153,14 +167,15 @@ Oldest(q) == q[1]
 \* Stop removed has already left the queue (RC forget).
 ReleaseSlot(r) ==
   /\ appUp /\ r \in slots /\ status[r] \in Settled
-  /\ IF ReleaseHandsSlot /\ waitq /= <<>>
+  /\ IF AtomicHandOff /\ ReleaseHandsSlot /\ waitq /= <<>>
      THEN \E next \in {waitq[i] : i \in 1..Len(waitq)} :
             /\ (Fifo => next = Oldest(waitq))
             /\ status' = [status EXCEPT ![next] = "running"]   \* SRC claim_capacity_run
             /\ slots' = (slots \ {r}) \cup {next}
             /\ waitq' = Without(waitq, next)
+            /\ before' = Leave(before, status')
      ELSE /\ slots' = slots \ {r}
-          /\ UNCHANGED <<status, waitq>>
+          /\ UNCHANGED <<status, waitq, before>>
   /\ UNCHANGED <<holder, waitedNode, appUp, restarts>>
 
 \* NQ release: the node passes to the oldest run behind it, which then asks
@@ -174,7 +189,7 @@ ReleaseNode(r) ==
   /\ LET next == OldestOnNode(NodeOf(r), status)
      IN /\ holder' = [holder EXCEPT ![NodeOf(r)] = next]
         /\ status' = IF next = 0 THEN status ELSE [status EXCEPT ![next] = "holding"]
-  /\ UNCHANGED <<slots, waitq, waitedNode, appUp, restarts>>
+  /\ UNCHANGED <<slots, waitq, before, waitedNode, appUp, restarts>>
 
 \* STP request_interaction_stop and RC forget: Remove takes a run out of its
 \* queue. It never starts, and its text is kept.
@@ -182,7 +197,20 @@ Remove(r) ==
   /\ appUp /\ status[r] \in {"nodeQueued", "capQueued"}
   /\ status' = [status EXCEPT ![r] = "stopped"]
   /\ waitq' = Without(waitq, r)
+  /\ before' = Leave(before, status')
   /\ UNCHANGED <<holder, slots, waitedNode, appUp, restarts>>
+
+\* Without the atomic hand-off, a freed slot reaches the oldest waiting run in a
+\* later step, and a new run can arrive in between.
+Grant ==
+  /\ appUp /\ ~AtomicHandOff /\ ReleaseHandsSlot
+  /\ waitq /= <<>> /\ Cardinality(slots) < Limit
+  /\ LET next == Oldest(waitq)
+     IN /\ status' = [status EXCEPT ![next] = "running"]
+        /\ slots' = slots \cup {next}
+        /\ waitq' = Without(waitq, next)
+        /\ before' = Leave(before, status')
+  /\ UNCHANGED <<holder, waitedNode, appUp, restarts>>
 
 -----------------------------------------------------------------------------
 (* Crash and startup. A crash loses every live slot, hold and wait. Startup *)
@@ -194,7 +222,7 @@ Crash ==
   /\ holder' = [n \in Nodes |-> 0]
   /\ slots' = {}
   /\ waitq' = <<>>
-  /\ UNCHANGED <<status, waitedNode, restarts>>
+  /\ UNCHANGED <<status, before, waitedNode, restarts>>
 
 Startup ==
   /\ ~appUp
@@ -203,6 +231,7 @@ Startup ==
           \/ (StartupInterruptsWaits /\ status[r] = "capQueued")
        THEN "interrupted" ELSE status[r]]
   /\ appUp' = TRUE /\ restarts' = restarts + 1
+  /\ before' = Leave(before, status')
   /\ UNCHANGED <<holder, slots, waitq, waitedNode>>
 
 -----------------------------------------------------------------------------
@@ -210,7 +239,7 @@ Next ==
   \/ \E r \in Runs : Send(r) \/ Admit(r) \/ Take(r) \/ LaunchChild(r) \/ Remove(r)
                      \/ ReleaseSlot(r) \/ ReleaseNode(r)
   \/ \E r \in Runs, outcome \in Settled : Settle(r, outcome)
-  \/ Crash \/ Startup
+  \/ Grant \/ Crash \/ Startup
 
 Spec == Init /\ [][Next]_vars
 
@@ -220,7 +249,7 @@ FairSpec ==
   /\ \A r \in Runs : WF_vars(Admit(r)) /\ WF_vars(Take(r))
   /\ \A r \in Runs : WF_vars(ReleaseSlot(r)) /\ WF_vars(ReleaseNode(r))
   /\ \A r \in Runs : WF_vars(\E outcome \in Settled : Settle(r, outcome))
-  /\ WF_vars(Startup)
+  /\ WF_vars(Grant) /\ WF_vars(Startup)
 
 -----------------------------------------------------------------------------
 (* Promises.                                                               *)
@@ -230,13 +259,22 @@ RunningHumans == {r \in Humans : status[r] = "running"}
 \* PRD 12.2 (#720): executing human-started runs never exceed the limit.
 WithinLimit == Cardinality(RunningHumans) <= Limit
 
-\* Waiting runs start first in, first out. Runs join the wait only at its end
-\* (AskForSlot), so a run that starts from the wait is the one that has waited
-\* longest: none still waiting began before it.
+\* Waiting runs start first in, first out: a run that starts from the wait
+\* began to wait before every run still waiting. This reads the ghost order,
+\* not the queue that release serves.
 StartsInOrder ==
   [][\A r \in Runs :
        (status[r] = "capQueued" /\ status'[r] = "running")
-         => waitq /= <<>> /\ waitq[1] = r]_vars
+         => ~\E o \in Runs : <<o, r>> \in before /\ status'[o] = "capQueued"]_vars
+
+\* A new run never starts while another run waits for capacity. With the atomic
+\* hand-off a freed slot is never idle while a run waits, so the check in
+\* SlotFree is a second line of defense; the reverted checks show each matters
+\* once the other is gone.
+NoStartAheadOfWaiting ==
+  [][\A r \in Runs :
+       (status[r] \in {"holding", "checked", "unsent"} /\ status'[r] = "running" /\ r \in Humans)
+         => Waiting(status) = {}]_vars
 
 \* No run waits while a slot is idle, so a waiting run is never stuck,
 \* including after a restart.

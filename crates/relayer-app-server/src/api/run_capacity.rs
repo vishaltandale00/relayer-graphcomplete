@@ -96,8 +96,7 @@ impl RunCapacity {
 
     /// Ends one admission of a run holding a slot. When it was the last, the slot passes to
     /// the oldest waiting run that can still start, and that run's waiter starts it. A run a
-    /// Stop removed is skipped. On a storage failure the settled run keeps its slot, so the
-    /// limit holds, and the caller retries.
+    /// Stop removed is skipped.
     pub(crate) async fn release(
         &self,
         product: &ProductService,
@@ -112,36 +111,29 @@ impl RunCapacity {
             Some(_) => {}
             None => return Ok(None),
         }
-        // A row that cannot be claimed now keeps its place; one bad row never holds the slot.
-        let mut failure = None;
-        let mut index = 0;
-        while index < slots.waiting.len() {
-            let next = slots.waiting[index].0;
-            match product.claim_capacity_run(next).await {
-                Ok(true) => {
-                    let (_, granted) = slots.waiting.remove(index).expect("a waiting run");
-                    if granted.send(()).is_err() {
-                        // Nothing waits to start it any more; the slot moves on.
-                        eprintln!("run {next} left the wait for capacity before it could start");
-                        continue;
-                    }
-                    slots.executing.remove(&run);
-                    slots.executing.insert(next, 1);
-                    return Ok(Some(next));
-                }
-                // Stopped, or it already left the wait: dropping its waiter ends the wait.
-                Ok(false) => {
-                    slots.waiting.remove(index);
-                }
-                Err(error) => {
-                    eprintln!("run {next} could not be claimed to start: {error}");
-                    failure = Some(error);
-                    index += 1;
-                }
+        // The oldest waiting run always gets the slot first. On a storage failure it keeps its
+        // place and the settled run keeps the slot, so order and the limit both hold, and the
+        // caller retries.
+        while let Some((next, granted)) = slots.waiting.front() {
+            let next = *next;
+            // Nothing waits to start this run any more (its task ended with the process), so it
+            // is not claimed; startup recovers it.
+            if granted.is_closed() {
+                eprintln!("run {next} left the wait for capacity before it could start");
+                slots.waiting.pop_front();
+                continue;
             }
-        }
-        if let Some(error) = failure {
-            return Err(error);
+            if product.claim_capacity_run(next).await? {
+                let (_, granted) = slots.waiting.pop_front().expect("a waiting run");
+                slots.executing.remove(&run);
+                slots.executing.insert(next, 1);
+                if granted.send(()).is_err() {
+                    eprintln!("run {next} left the wait for capacity as it was given a slot");
+                }
+                return Ok(Some(next));
+            }
+            // Stopped, or it already left the wait: dropping its waiter ends the wait.
+            slots.waiting.pop_front();
         }
         slots.executing.remove(&run);
         Ok(None)

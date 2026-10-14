@@ -98,6 +98,14 @@ it("gives every run invoked from a node its own Stop, kept in place across refre
     expect(rows().map((row) => row.querySelector(".node-run-status").textContent))
       .toEqual(["List pitfalls · Running", "Find a mentor · Queued"]);
     expect(stopSecond.textContent).toBe("Stop");
+
+    // A message turn waiting for capacity (#720) is the composer's turn: its control removes it.
+    state.interactions.push({ ...run(8, "queued", "capacity"), text: "Also check the FAQ" });
+    workspace.render();
+    await window.happyDOM.waitUntilComplete();
+    const send = window.document.querySelector("#sendInteraction");
+    expect(send.classList.contains("stop-button")).toBe(true);
+    expect(send.getAttribute("aria-label")).toBe("Remove queued message");
   } finally {
     workspace.dispose();
     await window.happyDOM.close();

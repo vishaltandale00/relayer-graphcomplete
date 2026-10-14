@@ -4898,6 +4898,7 @@ type HeldCompletes = Arc<Mutex<Vec<(i64, Value, Option<tokio::sync::oneshot::Sen
 /// HTTP API, so admission, the node queue and the capacity limit run as in the product.
 struct HeldRunsFixture {
     _temporary: tempfile::TempDir,
+    database: std::path::PathBuf,
     app: Router,
     thread_id: i64,
     source_interaction_id: i64,
@@ -5057,12 +5058,24 @@ impl HeldRunsFixture {
                     let graph_nodes = graph_nodes.clone();
                     let created_metadata = created_metadata.clone();
                     async move {
+                        // The graph refuses this input, as it refuses a stale context target.
+                        if body["text"] == "Rejected by the graph" {
+                            return (
+                                StatusCode::UNPROCESSABLE_ENTITY,
+                                axum::Json(json!({"error": {"code": "context_target_missing", "message": "The context target is gone."}})),
+                            );
+                        }
                         let node_id = graph_nodes.fetch_add(1, Ordering::SeqCst);
                         created_metadata
                             .lock()
                             .unwrap()
                             .insert(node_id, body["invocation"].clone());
-                        axum::Json(json!({ "node": { "id": node_id }, "graphToken": "" }))
+                        // An identified input, such as a retry's, is echoed back as the
+                        // graph records it.
+                        (StatusCode::OK, axum::Json(json!({
+                            "node": { "id": node_id }, "graphToken": "",
+                            "inputIdentity": body["inputIdentity"], "inputDigest": body["inputDigest"]
+                        })))
                     }
                 }),
             )
@@ -5179,6 +5192,7 @@ impl HeldRunsFixture {
         .await;
         Self {
             _temporary: temporary,
+            database,
             app,
             thread_id,
             source_interaction_id,
@@ -5460,7 +5474,11 @@ async fn human_started_runs_wait_for_capacity_and_start_in_order_as_slots_free()
         json!({"text": "And the pricing page"}),
     )
     .await;
-    assert_ne!(second_message.0, StatusCode::CREATED);
+    assert_eq!(
+        second_message.1["code"], "interaction_in_progress",
+        "{}",
+        second_message.1
+    );
 
     // A slot frees: the oldest run waiting for capacity starts, not the one behind node 7.
     // Node 7 is free now, so that run holds it and waits for capacity, behind the message.
@@ -5506,6 +5524,146 @@ async fn human_started_runs_wait_for_capacity_and_start_in_order_as_slots_free()
     }
     assert_eq!(fixture.started_runs(), [a, b, c, m, f, g]);
     assert_eq!(fixture.status_of(d).await, "stopped");
+    fixture.finish();
+}
+
+/// PAR-012 (#720): an identified send that waited for capacity and then cannot start gets the
+/// same cleanup as one that fails at once: the unbound interaction is discarded, so its draft
+/// is preserved, and it never reaches the harness.
+#[tokio::test]
+async fn a_send_that_waited_for_capacity_and_cannot_start_is_discarded_like_an_immediate_one() {
+    const ACTIONS: &[(i64, i64)] = &[(41, 7)];
+    let fixture = HeldRunsFixture::open(ACTIONS, Some(1)).await;
+    let thread_id = fixture.thread_id;
+    let uri = format!("/api/threads/{thread_id}/interactions");
+    // With a free slot, the graph's refusal comes back on the send, and nothing is kept.
+    let immediate = app_post(
+        &fixture.app,
+        &uri,
+        json!({"text": "Rejected by the graph", "inputId": "rejected-at-once"}),
+    )
+    .await;
+    assert_eq!(
+        immediate.0,
+        StatusCode::UNPROCESSABLE_ENTITY,
+        "{}",
+        immediate.1
+    );
+
+    let (a, _) = fixture.invoke(41).await;
+    fixture.started(a).await;
+    let waited = app_post(
+        &fixture.app,
+        &uri,
+        json!({"text": "Rejected by the graph", "inputId": "rejected-after-waiting"}),
+    )
+    .await;
+    assert_eq!(waited.0, StatusCode::CREATED, "{}", waited.1);
+    assert_eq!(waited.1["queueReason"], "capacity");
+    let waited = waited.1["id"].as_i64().unwrap();
+    fixture.settle(a, true);
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    loop {
+        let state = response_json(
+            fixture
+                .app
+                .clone()
+                .oneshot(api_request(
+                    "GET",
+                    &format!("/api/state?threadId={thread_id}"),
+                    None,
+                    true,
+                ))
+                .await
+                .unwrap(),
+        )
+        .await;
+        let interactions = state["interactions"].as_array().unwrap();
+        if interactions
+            .iter()
+            .all(|interaction| interaction["id"] != waited)
+        {
+            assert!(
+                interactions
+                    .iter()
+                    .all(|interaction| interaction["text"] != "Rejected by the graph"),
+                "a refused send was kept"
+            );
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the refused send that waited was kept: {state}"
+        );
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    assert_eq!(fixture.started_runs(), [a]);
+    fixture.finish();
+}
+
+/// PAR-012 (#720): a retry is a human-started run, so with every slot taken it waits for
+/// capacity, and it starts when a slot frees.
+#[tokio::test]
+async fn a_retry_waits_for_capacity_like_any_human_started_run() {
+    const ACTIONS: &[(i64, i64)] = &[(41, 7)];
+    let fixture = HeldRunsFixture::open(ACTIONS, Some(1)).await;
+    let thread_id = fixture.thread_id;
+    let (a, _) = fixture.invoke(41).await;
+    fixture.started(a).await;
+
+    // A message turn a model failure returned to unsent, so its Retry runs it in place.
+    let pool = sqlite_pool(&fixture.database).await;
+    let (family_id, family_revision): (i64, i64) =
+        sqlx::query_as("SELECT id,revision FROM model_families ORDER BY id LIMIT 1")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    let retried = sqlx::query(
+        "INSERT INTO interactions(thread_id,sequence,text,created_at,completion_status,completion_error,permission_profile_id,model_provider_id,provider_model_id,model_family_id) VALUES (?1,9,'Try again','9','not_started','retryable fixture','auto','codex','test-model',?2)",
+    )
+    .bind(thread_id)
+    .bind(family_id)
+    .execute(&pool)
+    .await
+    .unwrap()
+    .last_insert_rowid();
+    let attempt_id = sqlx::query(
+        "INSERT INTO interaction_attempts(
+            interaction_id,attempt_number,started_at,finished_at,family_id,family_revision,
+            harness_configuration_name,harness_configuration_revision,harness_configuration_digest,
+            provider_id,adapter_id,adapter_implementation_version,model_id,access_contract,
+            outcome,failure_category,effect_boundary
+         ) VALUES (?1,1,'1','2',?2,?3,'codex-basic',1,'sha256:test',
+            'codex','test-adapter',1,'test-model','managed-runtime@1',
+            'model_failed','provider_timeout','none')",
+    )
+    .bind(retried)
+    .bind(family_id)
+    .bind(family_revision)
+    .execute(&pool)
+    .await
+    .unwrap()
+    .last_insert_rowid();
+    pool.close().await;
+    let retry = app_post(
+        &fixture.app,
+        &format!("/api/threads/{thread_id}/interactions/{retried}/retry"),
+        json!({
+            "attemptId": attempt_id,
+            "text": "Try again",
+            "inputId": "capacity-retry",
+            "modelSelection": {"familyId": family_id, "providerId": "codex", "modelId": "test-model"}
+        }),
+    )
+    .await;
+    assert_eq!(retry.0, StatusCode::OK, "{}", retry.1);
+    fixture.waits_for(retried, "capacity").await;
+    assert_eq!(fixture.started_runs(), [a]);
+
+    fixture.settle(a, true);
+    fixture.started(retried).await;
+    fixture.settle(retried, true);
+    fixture.settled(retried, "accepted").await;
     fixture.finish();
 }
 

@@ -239,7 +239,9 @@
       "ReleaseHandsSlot": "TRUE",
       "Fifo": "TRUE",
       "ChildrenUncounted": "TRUE",
-      "StartupInterruptsWaits": "TRUE"
+      "StartupInterruptsWaits": "TRUE",
+      "AtomicHandOff": "TRUE",
+      "WaitBehindWaiting": "TRUE"
     }
   },
   "checks": [
@@ -3162,10 +3164,11 @@
         "ChildrenNeverWait"
       ],
       "properties": [
-        "StartsInOrder"
+        "StartsInOrder",
+        "NoStartAheadOfWaiting"
       ],
       "expect": "pass",
-      "finding": "Executing human-started runs never exceed the limit, and runs waiting for capacity start first in, first out. No run waits while a slot is idle, every waiting run is in the live wait, runs on one node still run one at a time, and a child never waits for capacity. Across a restart, no run stays queued for a slot."
+      "finding": "Executing human-started runs never exceed the limit. Runs waiting for capacity start first in, first out by when they began to wait, and no new run starts while another waits. No run waits while a slot is idle, every waiting run is in the live wait, runs on one node still run one at a time, and a child never waits for capacity. Across a restart, no run stays queued for a slot."
     },
     {
       "id": "capacity-children-beside-full",
@@ -3248,6 +3251,38 @@
         "violated": "StartsInOrder"
       },
       "finding": "A released slot that may pass to any waiting run starts a later run before an earlier one."
+    },
+    {
+      "id": "capacity-jump-reverted",
+      "module": "RunCapacity",
+      "preset": "capacity-today",
+      "constants": {
+        "MaxRestarts": "0",
+        "AtomicHandOff": "FALSE",
+        "WaitBehindWaiting": "FALSE"
+      },
+      "properties": [
+        "NoStartAheadOfWaiting"
+      ],
+      "expect": {
+        "violated": "NoStartAheadOfWaiting"
+      },
+      "finding": "With the slot hand-off split from its release and no check that a run waits, a new run arriving as a slot frees takes it ahead of a run that already waits."
+    },
+    {
+      "id": "capacity-jump-guarded",
+      "module": "RunCapacity",
+      "preset": "capacity-today",
+      "constants": {
+        "MaxRestarts": "0",
+        "AtomicHandOff": "FALSE"
+      },
+      "properties": [
+        "NoStartAheadOfWaiting",
+        "StartsInOrder"
+      ],
+      "expect": "pass",
+      "finding": "Even with the hand-off split from its release, admission's check that no run waits keeps a new run behind the waiting ones, and order holds."
     },
     {
       "id": "capacity-release-reverted",

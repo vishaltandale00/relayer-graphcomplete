@@ -115,7 +115,7 @@ impl NodeRunQueue {
     }
 
     #[cfg(test)]
-    async fn holder(&self, key: NodeRunKey) -> Option<InteractionId> {
+    pub(crate) async fn holder(&self, key: NodeRunKey) -> Option<InteractionId> {
         self.holders.lock().await.get(&key).map(|holder| holder.run)
     }
 }

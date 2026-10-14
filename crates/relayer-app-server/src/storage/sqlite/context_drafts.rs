@@ -348,7 +348,7 @@ impl SqliteProductStore {
             ));
         }
         let target_already_confirmed: bool = sqlx::query_scalar(
-            "SELECT EXISTS(SELECT 1 FROM node_context_draft_resolutions r LEFT JOIN interactions i ON i.id=r.consumed_interaction_id WHERE r.thread_id=?1 AND r.target_node_id=?2 AND r.outcome='confirmed' AND r.dismissed_at IS NULL AND r.draft_id<>?3 AND (r.source_interaction_node_id<>?4 OR r.source_layer_id<>?5) AND (r.consumed_interaction_id IS NULL OR i.completion_status IN ('not_started','submitted','running','waiting_for_approval') OR (i.completion_status='failed' AND i.graph_node_id IS NULL)))",
+            "SELECT EXISTS(SELECT 1 FROM node_context_draft_resolutions r LEFT JOIN interactions i ON i.id=r.consumed_interaction_id WHERE r.thread_id=?1 AND r.target_node_id=?2 AND r.outcome='confirmed' AND r.dismissed_at IS NULL AND r.draft_id<>?3 AND (r.source_interaction_node_id<>?4 OR r.source_layer_id<>?5) AND (r.consumed_interaction_id IS NULL OR i.completion_status IN ('not_started','queued','submitted','running','waiting_for_approval') OR (i.completion_status='failed' AND i.graph_node_id IS NULL)))",
         )
         .bind(thread_id.value())
         .bind(draft.target.node_id)

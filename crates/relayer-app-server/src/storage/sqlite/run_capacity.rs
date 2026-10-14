@@ -124,6 +124,36 @@ mod tests {
         assert!(!removed.waiting_for_capacity);
         assert!(!store.claim_capacity_run(runs[1]).await.unwrap());
 
+        // A waiting run that already has a graph interaction, such as an identified send
+        // startup resumed, settles its Stop before native work so its graph current stops too.
+        let (_, prepared) = store.seed_node_runs_for_test(&[7]).await;
+        assert!(
+            store
+                .claim_interaction_preparing(prepared[0])
+                .await
+                .unwrap()
+        );
+        assert!(store.queue_run_for_capacity(prepared[0]).await.unwrap());
+        sqlx::query("UPDATE interactions SET graph_node_id=902 WHERE id=?1")
+            .bind(prepared[0].value())
+            .execute(&store.pool)
+            .await
+            .unwrap();
+        let prepared_thread = store
+            .get_interaction(prepared[0])
+            .await
+            .unwrap()
+            .unwrap()
+            .thread_id;
+        assert_eq!(
+            store
+                .request_interaction_stop(prepared_thread, prepared[0])
+                .await
+                .unwrap(),
+            QueuedStop::SettleBeforeStart
+        );
+        assert!(!store.claim_capacity_run(prepared[0]).await.unwrap());
+
         // At startup a message turn still waiting fails as interrupted; it never stays queued.
         assert_eq!(
             store.interrupt_capacity_waits("Interrupted").await.unwrap(),
