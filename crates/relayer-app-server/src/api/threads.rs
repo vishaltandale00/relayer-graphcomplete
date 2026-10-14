@@ -3075,40 +3075,65 @@ pub(super) async fn stop_interaction(
     ))
 }
 
+/// Settles the Stop of a queued run whose call the graph already prepared, before any native
+/// work. A transient outcome is retried with backoff, so the run never stays "Stopping…" with
+/// nothing settling it. If preparation keeps failing, the run still ends stopped.
 async fn settle_queued_stop(state: ApiState, thread_id: ThreadId, interaction_id: InteractionId) {
-    let loaded = async {
-        let thread = state.product.get_thread(thread_id).await?.thread;
-        let interaction = state.product.get_interaction(interaction_id).await?;
-        Ok::<_, crate::product::ProductError>((thread, interaction))
-    }
-    .await;
-    let (thread, interaction) = match loaded {
-        Ok(loaded) => loaded,
-        Err(error) => {
-            eprintln!("could not settle the Stop of queued run {interaction_id}: {error}");
+    const ATTEMPTS: u32 = 8;
+    let mut backoff = std::time::Duration::from_millis(100);
+    for attempt in 1..=ATTEMPTS {
+        let loaded = async {
+            let thread = state.product.get_thread(thread_id).await?.thread;
+            let interaction = state.product.get_interaction(interaction_id).await?;
+            Ok::<_, crate::product::ProductError>((thread, interaction))
+        }
+        .await;
+        let failure = match loaded {
+            // Only a run that still waits on its own valid Stop is settled here: one whose
+            // Stop failed earlier must not start provider work outside its node's queue.
+            Ok((_, interaction))
+                if interaction.completion_status != "submitted"
+                    || !interaction.stop_requested
+                    || interaction.stop_error.is_some() =>
+            {
+                return;
+            }
+            Ok((thread, interaction)) => {
+                match prepare_and_claim_interaction(&state, &thread, &interaction, true, false)
+                    .await
+                {
+                    Ok(Some(prepared)) => {
+                        // The run carries its Stop, so execution settles it before native work.
+                        state
+                            .interaction_execution
+                            .as_ref()
+                            .expect("runtime-backed interaction execution service")
+                            .execute_prepared_interaction(thread, interaction, prepared)
+                            .await;
+                        return;
+                    }
+                    // Another settle claimed it, or preparation ended ambiguously: re-read.
+                    Ok(None) => "preparation did not claim the run".to_owned(),
+                    Err(error) => error.internal_diagnostic(),
+                }
+            }
+            Err(error) => error.to_string(),
+        };
+        if attempt == ATTEMPTS {
+            eprintln!(
+                "could not settle the Stop of queued run {interaction_id} in the graph: {failure}; ending it stopped"
+            );
+            if let Err(error) = state
+                .product
+                .finish_interaction_stopped(interaction_id)
+                .await
+            {
+                eprintln!("could not end queued run {interaction_id} stopped: {error}");
+            }
             return;
         }
-    };
-    match prepare_and_claim_interaction(&state, &thread, &interaction, true, false).await {
-        Ok(Some(prepared)) => {
-            // The run carries its Stop, so execution settles it before any native work.
-            state
-                .interaction_execution
-                .as_ref()
-                .expect("runtime-backed interaction execution service")
-                .execute_prepared_interaction(thread, interaction, prepared)
-                .await;
-        }
-        Ok(None) => {}
-        Err(error) => {
-            record_background_failure(
-                &state.product,
-                &thread,
-                &interaction,
-                error.message().to_owned(),
-            )
-            .await;
-        }
+        tokio::time::sleep(backoff).await;
+        backoff = (backoff * 2).min(std::time::Duration::from_secs(5));
     }
 }
 
@@ -4207,7 +4232,10 @@ async fn claim_and_start_action_interaction(
         // any native work and outside its node's queue; anything else reports its state.
         Ok((_, NodeAdmission::NotQueued)) => {
             let current = state.product.get_interaction(interaction.id).await?;
-            if current.completion_status == "submitted" && current.stop_requested {
+            if current.completion_status == "submitted"
+                && current.stop_requested
+                && current.stop_error.is_none()
+            {
                 let settle_state = state.clone();
                 let (thread_id, run) = (thread.id, interaction.id);
                 tokio::spawn(async move {

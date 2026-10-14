@@ -10,7 +10,8 @@ import { completionContractFixtureFactory } from "../scripts/fixtures/completion
 // with a deterministic fixture harness and no paid inference. One reusable action on one node is
 // invoked three times. The second waits as queued and starts once the first is accepted, and its
 // child reads that result when it starts. The third is stopped while queued: its graph current
-// stops, and it never reaches the harness.
+// stops, and it never reaches the harness. The fixture children wait a second before returning,
+// which keeps the later runs queued while the test acts on them.
 it("queues durable invokes on one node, starts each after the run ahead, and stops a queued one before it starts", async () => {
   const repository = resolve(import.meta.dirname, "..");
   const directory = await mkdtemp(join(tmpdir(), "relayer-node-queue-"));

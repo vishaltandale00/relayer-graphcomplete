@@ -85,6 +85,9 @@ impl NodeRunQueue {
         // On a storage failure the settled run keeps the node, so a new run still queues in
         // order, and the caller retries this release until it hands the node on.
         let queued = product.queued_node_runs(key).await?;
+        // A row that cannot be claimed is skipped, so one bad row never holds the node; the
+        // error is returned only when no queued run could be claimed.
+        let mut failure = None;
         for next in queued {
             match product.claim_queued_node_run(next).await {
                 Ok(true) => {
@@ -98,8 +101,14 @@ impl NodeRunQueue {
                     return Ok(Some(next));
                 }
                 Ok(false) => {}
-                Err(error) => return Err(error),
+                Err(error) => {
+                    eprintln!("queued run {next} could not be claimed to start: {error}");
+                    failure = Some(error);
+                }
             }
+        }
+        if let Some(error) = failure {
+            return Err(error);
         }
         holders.remove(&key);
         Ok(None)
