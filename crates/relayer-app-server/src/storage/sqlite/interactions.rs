@@ -246,16 +246,18 @@ impl SqliteProductStore {
             .transpose()
     }
 
-    /// Thread ?1's latest accepted human turns created before interaction ?2, oldest first, at
-    /// most [`FRESH_RUN_HISTORY_LIMIT`]. Older turns stay in the thread's graph, where the run can
-    /// search for them. An agent's child belongs to its parent's work, not to the conversation.
+    /// Thread ?1's latest accepted human turns other than interaction ?2, oldest first, at most
+    /// [`FRESH_RUN_HISTORY_LIMIT`]. It is read when the run starts, so a run that waited in its
+    /// node's queue sees what was accepted while it waited, including the run ahead of it.
+    /// Older turns stay in the thread's graph, where the run can search for them. An agent's
+    /// child belongs to its parent's work, not to the conversation.
     pub(crate) async fn accepted_thread_history(
         &self,
         thread_id: ThreadId,
         excluding: InteractionId,
     ) -> Result<Vec<ThreadHistoryEntry>, StorageError> {
         let mut rows: Vec<(i64, Option<String>)> = sqlx::query_as(
-            "SELECT turn.graph_node_id,turn.completion_output_json FROM interactions turn WHERE turn.thread_id=?1 AND turn.sequence<(SELECT sequence FROM interactions WHERE id=?2) AND turn.completion_status='accepted' AND turn.graph_node_id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM action_invocations child WHERE child.result_interaction_id=turn.id AND child.agent_invoked=1) ORDER BY turn.sequence DESC LIMIT ?3",
+            "SELECT turn.graph_node_id,turn.completion_output_json FROM interactions turn WHERE turn.thread_id=?1 AND turn.id!=?2 AND turn.completion_status='accepted' AND turn.graph_node_id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM action_invocations child WHERE child.result_interaction_id=turn.id AND child.agent_invoked=1) ORDER BY turn.sequence DESC LIMIT ?3",
         )
         .bind(thread_id.value())
         .bind(excluding.value())
@@ -1706,8 +1708,9 @@ mod tests {
     }
 
     /// A fresh run is pointed at its thread's accepted human turns, in order, with each turn's
-    /// returned layer, and reads them through the graph. Unfinished turns, the run itself, and an agent's children are not part of
-    /// the thread's conversation.
+    /// returned layer, and reads them through the graph. Unfinished turns, the run itself, and
+    /// an agent's children are not part of the thread's conversation. The history is read when
+    /// the run starts, so a turn accepted while the run was queued is in it.
     #[tokio::test]
     async fn accepted_thread_history_lists_accepted_human_turns_in_order() {
         let temporary = tempfile::Builder::new()
@@ -1797,6 +1800,26 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(without_invoked.len(), 1);
+        // A run queued behind another on its node starts after that run is accepted, and the
+        // run ahead may have been created after it. It is pointed at that run's result too.
+        sqlx::query(
+            "INSERT INTO interactions(thread_id,sequence,text,created_at,completion_status,permission_profile_id,graph_node_id) VALUES (?1,50,'Accepted while queued','9','accepted','auto',731)",
+        )
+        .bind(thread.id.value())
+        .execute(&store.pool)
+        .await
+        .unwrap();
+        let started_after_queueing = store
+            .accepted_thread_history(thread.id, invoked.id)
+            .await
+            .unwrap();
+        assert_eq!(
+            started_after_queueing
+                .iter()
+                .map(|entry| entry.interaction_node_id)
+                .collect::<Vec<_>>(),
+            [701, 731]
+        );
 
         // However long the thread, a fresh run is pointed at only its latest turns, oldest first.
         for index in 0..=FRESH_RUN_HISTORY_LIMIT {

@@ -214,7 +214,7 @@ const deterministicJudgeId = "deterministic-graph-contract";
 const simulatedUserJudgeId = "simulated-user";
 const simulatedUserJudgeIds = new Set([simulatedUserJudgeId, "simulated-user-sol-high"]);
 const IN_PROGRESS_COMPLETION_STATUSES = new Set([
-  "not_started", "running", "submitted", "preparing", "draft", "waiting_for_approval",
+  "not_started", "queued", "running", "submitted", "preparing", "draft", "waiting_for_approval",
 ]);
 const MAX_CONVERSATION_IMPORT_BYTES = 256 * 1024 * 1024;
 const ANNOTATION_EXPORT_EXECUTION_STATUSES = new Set(["passed", "failed", "imported"]);

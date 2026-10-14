@@ -158,6 +158,14 @@ pub(crate) struct InteractionContextIntent {
     pub(crate) annotations: Vec<String>,
 }
 
+/// The queue a user's run waits in: the node it was started on, in its thread (#718). Runs on
+/// one node start in order; runs on different nodes run at once.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) struct NodeRunKey {
+    pub(crate) thread_id: ThreadId,
+    pub(crate) node_id: i64,
+}
+
 /// One accepted human turn of a thread, as graph pointers. A run that starts a fresh native
 /// session has no memory of its thread; the turn's message and answer are in the thread's graph,
 /// so it receives only where to read them and reads them there.

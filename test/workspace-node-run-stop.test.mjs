@@ -16,7 +16,7 @@ it("gives every run invoked from a node its own Stop, kept in place across refre
   const action = (id, label) => ({
     id, kind: "invoke", sourceNodeId: 21, label, interactionText: `${label} in detail`, state: "accepted", targetLayerId: null,
   });
-  const actions = [action(31, "Plan a week"), action(32, "List pitfalls")];
+  const actions = [action(31, "Plan a week"), action(32, "List pitfalls"), action(33, "Find a mentor")];
   const layer = { layer: { id: 201, nodes: [21], state: "accepted" }, nodes: [node], edges: [], actions };
   const thread = { id: 10, title: "Learning plan", harnessId: "fixture" };
   const run = (id, completionStatus) => ({ id, threadId: 10, sequence: id, text: "Invoked", completionStatus });
@@ -27,10 +27,12 @@ it("gives every run invoked from a node its own Stop, kept in place across refre
       { id: 1, graphNodeId: 901, threadId: 10, sequence: 1, text: "Compare approaches", completionStatus: "accepted", completionOutput: { rootLayer: layer } },
       run(5, "running"),
       run(6, "running"),
+      run(7, "queued"),
     ],
     actionInvocations: [
       { sourceInteractionId: 1, actionId: 31, resultInteractionId: 5, resultCompletionStatus: "running", agentInvoked: false },
       { sourceInteractionId: 1, actionId: 32, resultInteractionId: 6, resultCompletionStatus: "running", agentInvoked: false },
+      { sourceInteractionId: 1, actionId: 33, resultInteractionId: 7, resultCompletionStatus: "queued", agentInvoked: false },
     ],
     visibleLayer: layer, nodes: [node], actions, projects: [], permissionProfiles: [],
     modelSettings: { defaults: { harnessId: "fixture" }, harnesses: [{ id: "fixture", available: true }], providers: [], families: [] },
@@ -48,9 +50,11 @@ it("gives every run invoked from a node its own Stop, kept in place across refre
     const bar = window.document.querySelector("#nodeRunBar");
     const rows = () => [...bar.querySelectorAll(".node-run-row")];
     expect(bar.classList.contains("hidden")).toBe(false);
-    expect(rows().map((row) => row.dataset.interactionId)).toEqual(["5", "6"]);
+    expect(rows().map((row) => row.dataset.interactionId)).toEqual(["5", "6", "7"]);
+    // A run waiting behind the others on this node shows queued, with its own Stop (#718).
     expect(rows().map((row) => row.querySelector(".node-run-status").textContent))
-      .toEqual(["Plan a week · Running", "List pitfalls · Running"]);
+      .toEqual(["Plan a week · Running", "List pitfalls · Running", "Find a mentor · Queued"]);
+    expect(rows()[2].querySelector(".node-run-stop").disabled).toBe(false);
     // The composer follows message turns: invoked runs leave it a Send.
     expect(window.document.querySelector("#sendInteraction").classList.contains("stop-button")).toBe(false);
 
@@ -65,14 +69,19 @@ it("gives every run invoked from a node its own Stop, kept in place across refre
     stopSecond.click();
     await vi.waitFor(() => expect(onStopInteraction).toHaveBeenCalledWith(10, 6));
     expect(onStopInteraction).toHaveBeenCalledTimes(1);
+    rows()[2].querySelector(".node-run-stop").click();
+    await vi.waitFor(() => expect(onStopInteraction).toHaveBeenCalledWith(10, 7));
 
-    // A settled run leaves the bar; the other run keeps its row.
+    // A settled run leaves the bar, and the queued run behind it starts; the rows stay in place.
     state.interactions[1] = run(5, "accepted");
     state.actionInvocations[0] = { ...state.actionInvocations[0], resultCompletionStatus: "accepted" };
+    state.interactions[3] = run(7, "running");
+    state.actionInvocations[2] = { ...state.actionInvocations[2], resultCompletionStatus: "running" };
     workspace.render();
     await window.happyDOM.waitUntilComplete();
-    expect(rows().map((row) => row.dataset.interactionId)).toEqual(["6"]);
+    expect(rows().map((row) => row.dataset.interactionId)).toEqual(["6", "7"]);
     expect(rows()[0].querySelector(".node-run-stop")).toBe(stopSecond);
+    expect(rows()[1].querySelector(".node-run-status").textContent).toBe("Find a mentor · Running");
   } finally {
     workspace.dispose();
     await window.happyDOM.close();

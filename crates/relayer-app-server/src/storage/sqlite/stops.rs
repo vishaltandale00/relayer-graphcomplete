@@ -28,6 +28,21 @@ impl SqliteProductStore {
                 "Only the agent that launched this child can stop it.",
             )));
         }
+        // A queued run has not started, so it stops at once and never starts. Starting it
+        // claims the same row, so exactly one of the two wins.
+        let unstarted = sqlx::query(
+            "UPDATE interactions SET completion_status='stopped',completion_error='Stopped before it started.'
+            WHERE id=?1 AND thread_id=?2 AND completion_status='queued'
+            AND thread_id IN (SELECT id FROM threads WHERE conversation_import_id IS NULL)",
+        )
+        .bind(interaction.value())
+        .bind(thread.value())
+        .execute(&self.pool)
+        .await?
+        .rows_affected();
+        if unstarted == 1 {
+            return Ok(());
+        }
         let changed = sqlx::query(
             "INSERT INTO interaction_stop_requests(interaction_id,error)
             SELECT id,NULL FROM interactions WHERE id=?1 AND thread_id=?2

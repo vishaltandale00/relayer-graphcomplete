@@ -400,7 +400,11 @@ pub(super) async fn validate_existing_or_empty(pool: &SqlitePool) -> Result<(), 
 async fn validate_archive_authority(pool: &SqlitePool) -> Result<(), StorageError> {
     // Compare authority objects to their versioned definitions. A missing or weakened
     // guard must fail at reopen, before a caller can admit execution on archived work.
-    let migration = include_str!("migrations/0042_thread_archive.sql");
+    // Newest first: an object a later migration redefines is checked against that definition.
+    let migrations = [
+        include_str!("migrations/0048_node_run_queue.sql"),
+        include_str!("migrations/0042_thread_archive.sql"),
+    ];
     for (kind, name) in [
         ("view", "thread_archive_activity"),
         ("trigger", "thread_archive_busy"),
@@ -413,10 +417,10 @@ async fn validate_archive_authority(pool: &SqlitePool) -> Result<(), StorageErro
         ("trigger", "archived_thread_input_start"),
     ] {
         let prefix = format!("CREATE {} {name}", kind.to_uppercase());
-        let start = migration
-            .find(&prefix)
+        let definition = migrations
+            .iter()
+            .find_map(|migration| migration.find(&prefix).map(|start| &migration[start..]))
             .expect("versioned archive schema object");
-        let definition = &migration[start..];
         let end = if kind == "view" {
             definition.find(';').unwrap()
         } else {

@@ -2864,6 +2864,45 @@ impl ProductService {
             .map_err(Into::into)
     }
 
+    pub(crate) async fn record_node_run(
+        &self,
+        run: InteractionId,
+        node_id: i64,
+    ) -> Result<(), ProductError> {
+        self.storage
+            .record_node_run(run, node_id)
+            .await
+            .map_err(Into::into)
+    }
+
+    pub(crate) async fn node_run_key(
+        &self,
+        run: InteractionId,
+    ) -> Result<Option<super::NodeRunKey>, ProductError> {
+        self.storage.node_run_key(run).await.map_err(Into::into)
+    }
+
+    pub(crate) async fn queue_node_run(&self, run: InteractionId) -> Result<bool, ProductError> {
+        self.storage.queue_node_run(run).await.map_err(Into::into)
+    }
+
+    pub(crate) async fn claim_queued_node_run(
+        &self,
+        run: InteractionId,
+    ) -> Result<bool, ProductError> {
+        self.storage
+            .claim_queued_node_run(run)
+            .await
+            .map_err(Into::into)
+    }
+
+    pub(crate) async fn queued_node_runs(
+        &self,
+        key: super::NodeRunKey,
+    ) -> Result<Vec<InteractionId>, ProductError> {
+        self.storage.queued_node_runs(key).await.map_err(Into::into)
+    }
+
     pub(crate) async fn is_invoked_run(
         &self,
         interaction_id: InteractionId,

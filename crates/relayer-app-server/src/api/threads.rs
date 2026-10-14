@@ -2,6 +2,7 @@ use super::{
     ApiState,
     auth::{authorize_read, authorize_write},
     error::ApiError,
+    node_runs::NodeAdmission,
     types::{
         ActionInvocationResponse, InteractionResponse, ThreadDetailResponse, ThreadResponse,
         ThreadViewResponse,
@@ -12,7 +13,7 @@ use crate::{
     completion_broker::{CompletionBrokerGrant, CompletionBrokerLease},
     product::{
         AcceptedInteractionCompletion, CreateThreadCommand, Interaction, InteractionContextIntent,
-        InteractionId, InteractionModelSelection, InvokeActionOutcome, ModelFamilyId,
+        InteractionId, InteractionModelSelection, InvokeActionOutcome, ModelFamilyId, NodeRunKey,
         PreExecutionModelFailure, PreparedInteractionBinding, ProjectId, ProviderId,
         RECONCILIATION_PENDING_PREFIX, RetryInteractionCommand, Thread, ThreadId, ThreadView,
         record_background_failure, validate_decision_resolution,
@@ -3969,7 +3970,8 @@ async fn invoke_action_with_authority(
             .await?;
         outcome.created = reservation.created;
         // Native binding and captured-epoch consumption committed together above.
-        let (status, mut response) = spawn_action_handoff(state.clone(), thread, outcome).await?;
+        let (status, mut response) =
+            spawn_action_handoff(state.clone(), thread, outcome, action.source_node_id).await?;
         // The detached handoff already owns execution. A draft read/presentation
         // outage must not tell the caller that this activation failed.
         let deadline = super::interaction_graph::projection_deadline();
@@ -4002,28 +4004,33 @@ async fn invoke_action_with_authority(
         .get_action_invocation(source_interaction_id, action_id)
         .await?
     {
-        return spawn_action_handoff(state.clone(), thread, outcome).await;
+        return spawn_action_handoff(state.clone(), thread, outcome, action.source_node_id).await;
     }
     // One-shot invocation is a temporary UX simplification. The durable product record is
     // intentionally shaped so future retryable or repeatable action semantics can replace it.
     let owned_state = state.clone();
+    let source_node_id = action.source_node_id;
     let handoff = tokio::spawn(async move {
         let outcome = owned_state
             .product
             .invoke_action(source_interaction_id, action_id, &interaction_text)
             .await?;
-        finish_action_handoff(&owned_state, &thread, outcome).await
+        finish_action_handoff(&owned_state, &thread, outcome, source_node_id).await
     });
     await_action_handoff(handoff).await
 }
 
+/// `source_node_id` is the node of the action the user invoked: runs on one node start in
+/// order (#718).
 async fn spawn_action_handoff(
     state: ApiState,
     thread: Thread,
     outcome: InvokeActionOutcome,
+    source_node_id: i64,
 ) -> Result<(StatusCode, Json<InvokeActionResponse>), ApiError> {
-    let handoff =
-        tokio::spawn(async move { finish_action_handoff(&state, &thread, outcome).await });
+    let handoff = tokio::spawn(async move {
+        finish_action_handoff(&state, &thread, outcome, source_node_id).await
+    });
     await_action_handoff(handoff).await
 }
 
@@ -4041,6 +4048,7 @@ async fn finish_action_handoff(
     state: &ApiState,
     thread: &Thread,
     outcome: InvokeActionOutcome,
+    source_node_id: i64,
 ) -> Result<(StatusCode, Json<InvokeActionResponse>), ApiError> {
     let status = if outcome.created {
         StatusCode::CREATED
@@ -4066,7 +4074,13 @@ async fn finish_action_handoff(
     let interaction = if agent_child {
         outcome.interaction
     } else if outcome.interaction.completion_status == "not_started" || recoverable_invoke {
-        claim_and_start_action_interaction(state, &owning_thread, outcome.interaction).await?
+        claim_and_start_action_interaction(
+            state,
+            &owning_thread,
+            outcome.interaction,
+            source_node_id,
+        )
+        .await?
     } else {
         outcome.interaction
     };
@@ -4103,18 +4117,74 @@ async fn finish_action_handoff(
     ))
 }
 
+/// Starts a user's invoked run, or queues it behind the run that holds its node (#718). The
+/// node is recorded first, so a retried request finds the same queue.
 async fn claim_and_start_action_interaction(
     state: &ApiState,
     thread: &Thread,
     interaction: Interaction,
+    source_node_id: i64,
 ) -> Result<Interaction, ApiError> {
     if state.runtime.is_none() {
         let message = "GraphComplete runtime is unavailable";
         record_background_failure(&state.product, thread, &interaction, message.into()).await;
         return Err(ApiError::invalid(message));
     }
+    let admitted = async {
+        state
+            .product
+            .record_node_run(interaction.id, source_node_id)
+            .await?;
+        let key = state
+            .product
+            .node_run_key(interaction.id)
+            .await?
+            .expect("a recorded node run has a key");
+        state
+            .node_runs
+            .admit(&state.product, key, interaction.id)
+            .await
+            .map(|admission| (key, admission))
+    }
+    .await;
+    let key = match admitted {
+        Ok((key, NodeAdmission::Start)) => key,
+        // It waits in its node's queue. It reads the thread when it starts.
+        Ok((_, NodeAdmission::Waiting)) => {
+            return state
+                .product
+                .get_interaction(interaction.id)
+                .await
+                .map_err(Into::into);
+        }
+        Err(error) => {
+            let error = ApiError::from(error);
+            record_background_failure(
+                &state.product,
+                thread,
+                &interaction,
+                error.message().to_owned(),
+            )
+            .await;
+            return Err(error);
+        }
+    };
+    start_held_action_interaction(state, thread, interaction, key, false).await
+}
+
+/// Starts a run that holds its node. The node is released once the run settles, whatever the
+/// outcome, and the next queued run on it then starts.
+async fn start_held_action_interaction(
+    state: &ApiState,
+    thread: &Thread,
+    interaction: Interaction,
+    key: NodeRunKey,
+    already_claimed: bool,
+) -> Result<Interaction, ApiError> {
     let prepared =
-        match prepare_and_claim_interaction(state, thread, &interaction, false, false).await {
+        match prepare_and_claim_interaction(state, thread, &interaction, already_claimed, false)
+            .await
+        {
             Ok(prepared) => prepared,
             Err(error) => {
                 record_background_failure(
@@ -4124,10 +4194,12 @@ async fn claim_and_start_action_interaction(
                     error.message().to_owned(),
                 )
                 .await;
+                release_node_run(state.clone(), key, interaction.id);
                 return Err(error);
             }
         };
     let Some(prepared) = prepared else {
+        release_node_run(state.clone(), key, interaction.id);
         return state
             .product
             .get_interaction(interaction.id)
@@ -4142,14 +4214,21 @@ async fn claim_and_start_action_interaction(
     running.graph_node_id = Some(prepared.graph_node_id);
     // No await after claim/activation and before detached execution ownership.
     let execution_state = state.clone();
+    let release_state = state.clone();
     let execution_thread = thread.clone();
+    let run = interaction.id;
     tokio::spawn(async move {
-        execution_state
-            .interaction_execution
-            .as_ref()
-            .expect("runtime-backed interaction execution service")
-            .execute_prepared_interaction(execution_thread, interaction, prepared)
-            .await;
+        let execution = tokio::spawn(async move {
+            execution_state
+                .interaction_execution
+                .as_ref()
+                .expect("runtime-backed interaction execution service")
+                .execute_prepared_interaction(execution_thread, interaction, prepared)
+                .await;
+        });
+        // The execution has settled the run, or panicked. Either way the node is free.
+        let _ = execution.await;
+        release_node_run(release_state, key, run);
     });
     match tokio::time::timeout_at(
         super::interaction_graph::projection_deadline(),
@@ -4171,6 +4250,48 @@ async fn claim_and_start_action_interaction(
         }
     }
     Ok(running)
+}
+
+/// A settled run releases its node, and the oldest run queued on it starts. It starts whether
+/// the run ahead was accepted, failed or stopped (#716 decision 4).
+fn release_node_run(state: ApiState, key: NodeRunKey, run: InteractionId) {
+    let release: std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>> =
+        Box::pin(async move {
+            let next = match state.node_runs.release(&state.product, key, run).await {
+                Ok(Some(next)) => next,
+                Ok(None) => return,
+                Err(error) => {
+                    eprintln!(
+                        "node run queue could not start the next run: thread={} node={}: {error}",
+                        key.thread_id, key.node_id
+                    );
+                    return;
+                }
+            };
+            let loaded = async {
+                let interaction = state.product.get_interaction(next).await?;
+                let thread = state
+                    .product
+                    .get_thread(interaction.thread_id)
+                    .await?
+                    .thread;
+                Ok::<_, crate::product::ProductError>((thread, interaction))
+            }
+            .await;
+            match loaded {
+                Ok((thread, interaction)) => {
+                    let _ = start_held_action_interaction(&state, &thread, interaction, key, true)
+                        .await;
+                }
+                Err(error) => {
+                    eprintln!(
+                        "queued run {next} could not be loaded to start: {error}; its node moves on"
+                    );
+                    release_node_run(state, key, next);
+                }
+            }
+        });
+    tokio::spawn(release);
 }
 
 fn log_action_invocation_request_failure(
@@ -5206,6 +5327,7 @@ mod tests {
             environment_inspector: crate::environment::EnvironmentInspector::new(),
             completion_brokers,
             completion_observations: CompletionObservations::default(),
+            node_runs: Default::default(),
         };
         BrokerFixture {
             state,
