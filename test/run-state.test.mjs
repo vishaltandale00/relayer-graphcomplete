@@ -100,5 +100,8 @@ describe("explicit run-state symbols", () => {
     expect(threadActivity(turns)).toBe("running");
     expect(threadActivity(withoutPreparationsAwaitingRetry(turns, invocations))).toBeNull();
     expect(threadActivity(withoutPreparationsAwaitingRetry(turns, [{ resultInteractionId: 2 }]))).toBe("running");
+    // A failed preparation awaiting Retry still shows the thread's failure, as the sidebar does.
+    const failed = [{ id: 1, completionStatus: "accepted" }, { id: 2, completionStatus: "failed" }];
+    expect(threadActivity(withoutPreparationsAwaitingRetry(failed, invocations))).toBe("failed");
   });
 });

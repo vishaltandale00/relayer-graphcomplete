@@ -7,7 +7,7 @@
  * It boots the same GraphComplete runtime and app server the desktop uses, asks for an answer
  * with invoke actions, then clicks two of them and sends a follow-up message at once. It records
  * whether all three were admitted, how long they ran side by side, whether each settled, and
- * whether only the invoked runs started fresh native sessions pointed at the thread's history.
+ * whether only the invoked runs' prompts carried the fresh-session block pointing at the thread's history.
  */
 import { randomUUID } from "node:crypto";
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from "node:fs";
@@ -110,6 +110,7 @@ async function main() {
   const dataDirectory = mkdtempSync(join(tmpdir(), "relayer-parallel-invoke-live-"));
   let runtime;
   let productServer;
+  let executables;
   const samples = [];
   const artifact = {
     schemaVersion: 1,
@@ -127,7 +128,9 @@ async function main() {
   };
   try {
     let resolver;
-    ({ runtime, productServer, resolver } = await startLiveProduct({ profile, configurationPath, dataDirectory }));
+    ({ runtime, productServer, resolver, executables } = await startLiveProduct({ profile, configurationPath, dataDirectory }));
+    // The servers that ran, rebuilt from this source and named by hash.
+    artifact.executables = executables;
     artifact.temporalFeatures = runtime.temporalFeatures;
     const session = await productServer.start();
     const family = await prepareRoute({ session, productServer, runtime, resolver, profile });
@@ -196,7 +199,7 @@ async function main() {
     });
     for (const run of runs) {
       const text = exportedText(join(traceDirectory, String(run.interactionId)));
-      run.freshNativeSession = text.includes(FRESH_MARKER);
+      run.freshSessionPrompt = text.includes(FRESH_MARKER);
       // History is graph pointers: the first turn appears as its interaction node, not its text.
       run.promptCarriesFirstTurn = root.graphNodeId != null && text.includes(`"interactionNodeId": ${root.graphNodeId}`);
     }
@@ -214,10 +217,12 @@ async function main() {
       ranSideBySide: artifact.concurrency.maxActiveAtOnce >= 3 && artifact.concurrency.allActiveTogetherMs > 0,
       tracesComplete,
       allAccepted: runs.every(({ completionStatus }) => completionStatus === "accepted"),
-      invokedRunsFresh: runs.filter(({ kind }) => kind === "invoke").every(({ freshNativeSession }) => freshNativeSession),
+      // These read the prompt only: the run was told it starts fresh. Whether each provider
+      // really opened a new native session is the deterministic provider tests' claim (PAR-003).
+      invokedRunsGotFreshPrompt: runs.filter(({ kind }) => kind === "invoke").every(({ freshSessionPrompt }) => freshSessionPrompt),
       invokedRunsSawHistory: runs.filter(({ kind }) => kind === "invoke").every(({ promptCarriesFirstTurn }) => promptCarriesFirstTurn),
-      messageResumedRootSession: tracesComplete
-        && runs.filter(({ kind }) => kind === "message").every(({ freshNativeSession }) => !freshNativeSession),
+      messageGotResumePrompt: tracesComplete
+        && runs.filter(({ kind }) => kind === "message").every(({ freshSessionPrompt }) => !freshSessionPrompt),
     };
     artifact.checks = checks;
     artifact.passed = Object.values(checks).every(Boolean);
