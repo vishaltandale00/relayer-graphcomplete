@@ -13,7 +13,7 @@
   },
   "rendererArtifact": {
     "directory": "desktop/renderer",
-    "digest": "0757e49d6f84d3cf315feca6964ce21d2703e954b911ba18a9a79c60f0edd481",
+    "digest": "fe71fed7d118adf29bd82158f01a40a5daf73ad10512b9c8236c778b05757d66",
     "files": {
       "assets/relayer-logo.svg": {
         "bytes": 509,
@@ -288,8 +288,8 @@
         "sha256": "8e5d307f95b1863fb995606ca32a832de088916716c39476f9d31f2174de002d"
       },
       "src/product-workspace/workspace.js": {
-        "bytes": 313473,
-        "sha256": "82f0565c8b99489046bc207b1dfff910724c5aa358c94d4c1bd7ca617a29a9c9"
+        "bytes": 313686,
+        "sha256": "08daab80a142bfcdd80d88dd9048c6a2e5f5456451d00ca6e965c659873bf8d0"
       },
       "src/project-composer-navigation.js": {
         "bytes": 282,
