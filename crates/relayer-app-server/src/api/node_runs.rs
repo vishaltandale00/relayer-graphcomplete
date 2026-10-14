@@ -29,6 +29,9 @@ pub(crate) enum NodeAdmission {
     Start,
     /// Another run holds the node, so this one waits in the node's queue.
     Waiting,
+    /// Another run holds the node, and this one could not be queued: it already ended, or it
+    /// carries a Stop. It starts no native work; the caller reports or settles it.
+    NotQueued,
 }
 
 impl NodeRunQueue {
@@ -52,10 +55,11 @@ impl NodeRunQueue {
                 Ok(NodeAdmission::Start)
             }
             Some(_) => {
-                // A run that changed meanwhile, for example one stopped before admission, is
-                // not queued; the caller reports its current state.
-                product.queue_node_run(run).await?;
-                Ok(NodeAdmission::Waiting)
+                if product.queue_node_run(run).await? {
+                    Ok(NodeAdmission::Waiting)
+                } else {
+                    Ok(NodeAdmission::NotQueued)
+                }
             }
         }
     }
@@ -78,15 +82,9 @@ impl NodeRunQueue {
             Some(holder) if holder.run == run => {}
             _ => return Ok(None),
         }
-        // On a storage failure the node is freed, so the next run on it starts and its
-        // settlement retries the queue; a node is never left held by a settled run.
-        let queued = match product.queued_node_runs(key).await {
-            Ok(queued) => queued,
-            Err(error) => {
-                holders.remove(&key);
-                return Err(error);
-            }
-        };
+        // On a storage failure the settled run keeps the node, so a new run still queues in
+        // order, and the caller retries this release until it hands the node on.
+        let queued = product.queued_node_runs(key).await?;
         for next in queued {
             match product.claim_queued_node_run(next).await {
                 Ok(true) => {
@@ -100,10 +98,7 @@ impl NodeRunQueue {
                     return Ok(Some(next));
                 }
                 Ok(false) => {}
-                Err(error) => {
-                    holders.remove(&key);
-                    return Err(error);
-                }
+                Err(error) => return Err(error),
             }
         }
         holders.remove(&key);
@@ -140,18 +135,23 @@ mod tests {
 
     /// PAR-007: two sends racing to one node. However the race resolves, exactly one run
     /// holds the node and the other waits as queued; a run on another node starts at once.
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     async fn runs_racing_to_one_node_start_one_at_a_time() {
         for _ in 0..20 {
             let (_directory, store, product, runs) = fixture(&[7, 7, 8]).await;
             let queue = NodeRunQueue::default();
             let node = product.node_run_key(runs[0]).await.unwrap().unwrap();
             let other_node = product.node_run_key(runs[2]).await.unwrap().unwrap();
-            let (first, second) = tokio::join!(
-                queue.admit(&product, node, runs[0]),
-                queue.admit(&product, node, runs[1]),
-            );
-            let admissions = [first.unwrap(), second.unwrap()];
+            // Each send admits on its own worker, so the two really race.
+            let racing = |run: InteractionId| {
+                let (queue, product) = (queue.clone(), product.clone());
+                tokio::spawn(async move { queue.admit(&product, node, run).await })
+            };
+            let (first, second) = (racing(runs[0]), racing(runs[1]));
+            let admissions = [
+                first.await.unwrap().unwrap(),
+                second.await.unwrap().unwrap(),
+            ];
             assert_eq!(
                 admissions
                     .iter()
@@ -191,12 +191,28 @@ mod tests {
     /// A queued run that was stopped never starts, and only the holder can release a node.
     #[tokio::test]
     async fn a_settled_run_hands_its_node_to_the_oldest_queued_run() {
-        let (_directory, store, product, runs) = fixture(&[7, 7, 7, 7]).await;
+        let (_directory, store, product, mut runs) = fixture(&[7, 7, 7, 7, 7]).await;
         let queue = NodeRunQueue::default();
         let node = product.node_run_key(runs[0]).await.unwrap().unwrap();
         assert_eq!(
             queue.admit(&product, node, runs[0]).await.unwrap(),
             NodeAdmission::Start
+        );
+        // A run that already carries a Stop is not queued behind the holder; it only settles.
+        let stopping = runs.pop().unwrap();
+        let thread = product.get_interaction(stopping).await.unwrap().thread_id;
+        assert!(store.claim_interaction_preparing(stopping).await.unwrap());
+        product
+            .request_interaction_stop(thread, stopping)
+            .await
+            .unwrap();
+        assert_eq!(
+            queue.admit(&product, node, stopping).await.unwrap(),
+            NodeAdmission::NotQueued
+        );
+        assert_eq!(
+            store.completion_status_for_test(stopping).await,
+            "submitted"
         );
         for run in &runs[1..] {
             assert_eq!(
@@ -204,7 +220,6 @@ mod tests {
                 NodeAdmission::Waiting
             );
         }
-        let thread = product.get_interaction(runs[0]).await.unwrap().thread_id;
         product
             .request_interaction_stop(thread, runs[2])
             .await

@@ -2707,7 +2707,7 @@ impl ProductService {
         &self,
         thread: ThreadId,
         interaction: super::InteractionId,
-    ) -> Result<(), ProductError> {
+    ) -> Result<crate::storage::QueuedStop, ProductError> {
         self.ensure_interaction_mutable(interaction).await?;
         self.storage
             .request_interaction_stop(thread, interaction)

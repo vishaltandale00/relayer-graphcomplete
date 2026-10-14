@@ -4,6 +4,18 @@ use crate::{
     storage::StorageError,
 };
 
+/// How a Stop request met a run waiting in its node's queue (#718).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum QueuedStop {
+    /// The run was not queued; the Stop is an ordinary request on an active run, or a no-op.
+    NotQueued,
+    /// The queued run stopped at once. Nothing had been prepared for it.
+    Stopped,
+    /// The graph had already prepared the queued run's call. The run now carries the Stop and
+    /// the caller settles it before native execution, so its graph current stops too.
+    SettleBeforeStart,
+}
+
 impl SqliteProductStore {
     /// Only a product-owned, live execution can acquire this durable request. A child an
     /// agent launched is refused: its parent agent keeps the only authority to stop it,
@@ -12,7 +24,7 @@ impl SqliteProductStore {
         &self,
         thread: ThreadId,
         interaction: InteractionId,
-    ) -> Result<(), StorageError> {
+    ) -> Result<QueuedStop, StorageError> {
         let agent_child: bool = sqlx::query_scalar(
             "SELECT EXISTS(SELECT 1 FROM interactions WHERE id=?1 AND thread_id=?2 AND (
                 EXISTS(SELECT 1 FROM completion_executions WHERE interaction_id=?1)
@@ -28,20 +40,40 @@ impl SqliteProductStore {
                 "Only the agent that launched this child can stop it.",
             )));
         }
-        // A queued run has not started, so it stops at once and never starts. Starting it
-        // claims the same row, so exactly one of the two wins.
-        let unstarted = sqlx::query(
-            "UPDATE interactions SET completion_status='stopped',completion_error='Stopped before it started.'
-            WHERE id=?1 AND thread_id=?2 AND completion_status='queued'
-            AND thread_id IN (SELECT id FROM threads WHERE conversation_import_id IS NULL)",
+        // A queued run has not started, and it never will. Starting it claims the same row, so
+        // exactly one of the two wins. One the graph has not prepared stops at once. One whose
+        // call the graph already prepared settles as a Stop before native execution, which also
+        // stops its graph current (`QueuedStop::SettleBeforeStart`).
+        let mut transaction = self.pool.begin_with("BEGIN IMMEDIATE").await?;
+        let queued: Option<bool> = sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM action_invocations WHERE result_interaction_id=i.id AND prepared_graph_node_id IS NOT NULL) FROM interactions i WHERE i.id=?1 AND i.thread_id=?2 AND i.completion_status='queued' AND i.thread_id IN (SELECT id FROM threads WHERE conversation_import_id IS NULL)",
         )
         .bind(interaction.value())
         .bind(thread.value())
-        .execute(&self.pool)
-        .await?
-        .rows_affected();
-        if unstarted == 1 {
-            return Ok(());
+        .fetch_optional(&mut *transaction)
+        .await?;
+        match queued {
+            Some(false) => {
+                sqlx::query("UPDATE interactions SET completion_status='stopped',completion_error='Stopped before it started.' WHERE id=?1 AND completion_status='queued'")
+                    .bind(interaction.value())
+                    .execute(&mut *transaction)
+                    .await?;
+                transaction.commit().await?;
+                return Ok(QueuedStop::Stopped);
+            }
+            Some(true) => {
+                sqlx::query("UPDATE interactions SET completion_status='submitted',completion_error=NULL WHERE id=?1 AND completion_status='queued'")
+                    .bind(interaction.value())
+                    .execute(&mut *transaction)
+                    .await?;
+                sqlx::query("INSERT INTO interaction_stop_requests(interaction_id,error) VALUES (?1,NULL) ON CONFLICT(interaction_id) DO UPDATE SET error=NULL")
+                    .bind(interaction.value())
+                    .execute(&mut *transaction)
+                    .await?;
+                transaction.commit().await?;
+                return Ok(QueuedStop::SettleBeforeStart);
+            }
+            None => transaction.commit().await?,
         }
         let changed = sqlx::query(
             "INSERT INTO interaction_stop_requests(interaction_id,error)
@@ -60,14 +92,14 @@ impl SqliteProductStore {
             let terminal: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM interactions WHERE id=?1 AND thread_id=?2 AND completion_status IN ('accepted','stopped','failed') AND thread_id IN (SELECT id FROM threads WHERE conversation_import_id IS NULL) AND NOT EXISTS(SELECT 1 FROM completion_executions WHERE interaction_id=?1))")
                 .bind(interaction.value()).bind(thread.value()).fetch_one(&self.pool).await?;
             if terminal {
-                return Ok(());
+                return Ok(QueuedStop::NotQueued);
             }
             return Err(StorageError::Catalog(CatalogError::invalid(
                 "no_active_run",
                 "This interaction has no active product run to stop.",
             )));
         }
-        Ok(())
+        Ok(QueuedStop::NotQueued)
     }
 
     pub(crate) async fn record_stop_error(

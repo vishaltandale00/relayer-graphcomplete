@@ -3057,13 +3057,59 @@ pub(super) async fn stop_interaction(
     ) {
         return Ok(Json(interaction.into()));
     }
-    state
+    let queued = state
         .product
         .request_interaction_stop(thread_id, interaction_id)
         .await?;
+    if queued == crate::storage::QueuedStop::SettleBeforeStart {
+        // The graph already prepared this queued run's call. It settles as a Stop before native
+        // execution, outside its node's queue: no provider work starts, and its graph current
+        // stops with it.
+        let settle_state = state.clone();
+        tokio::spawn(async move {
+            settle_queued_stop(settle_state, thread_id, interaction_id).await;
+        });
+    }
     Ok(Json(
         state.product.get_interaction(interaction_id).await?.into(),
     ))
+}
+
+async fn settle_queued_stop(state: ApiState, thread_id: ThreadId, interaction_id: InteractionId) {
+    let loaded = async {
+        let thread = state.product.get_thread(thread_id).await?.thread;
+        let interaction = state.product.get_interaction(interaction_id).await?;
+        Ok::<_, crate::product::ProductError>((thread, interaction))
+    }
+    .await;
+    let (thread, interaction) = match loaded {
+        Ok(loaded) => loaded,
+        Err(error) => {
+            eprintln!("could not settle the Stop of queued run {interaction_id}: {error}");
+            return;
+        }
+    };
+    match prepare_and_claim_interaction(&state, &thread, &interaction, true, false).await {
+        Ok(Some(prepared)) => {
+            // The run carries its Stop, so execution settles it before any native work.
+            state
+                .interaction_execution
+                .as_ref()
+                .expect("runtime-backed interaction execution service")
+                .execute_prepared_interaction(thread, interaction, prepared)
+                .await;
+        }
+        Ok(None) => {}
+        Err(error) => {
+            record_background_failure(
+                &state.product,
+                &thread,
+                &interaction,
+                error.message().to_owned(),
+            )
+            .await;
+        }
+    }
 }
 
 pub(super) async fn stop_completion(
@@ -4157,6 +4203,19 @@ async fn claim_and_start_action_interaction(
                 .await
                 .map_err(Into::into);
         }
+        // A run that carries a Stop, for example one restored after a restart, settles before
+        // any native work and outside its node's queue; anything else reports its state.
+        Ok((_, NodeAdmission::NotQueued)) => {
+            let current = state.product.get_interaction(interaction.id).await?;
+            if current.completion_status == "submitted" && current.stop_requested {
+                let settle_state = state.clone();
+                let (thread_id, run) = (thread.id, interaction.id);
+                tokio::spawn(async move {
+                    settle_queued_stop(settle_state, thread_id, run).await;
+                });
+            }
+            return Ok(current);
+        }
         Err(error) => {
             let error = ApiError::from(error);
             record_background_failure(
@@ -4255,17 +4314,23 @@ async fn start_held_action_interaction(
 /// A settled run releases its node, and the oldest run queued on it starts. It starts whether
 /// the run ahead was accepted, failed or stopped (#716 decision 4).
 fn release_node_run(state: ApiState, key: NodeRunKey, run: InteractionId) {
-    let release: std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>> =
-        Box::pin(async move {
-            let next = match state.node_runs.release(&state.product, key, run).await {
-                Ok(Some(next)) => next,
-                Ok(None) => return,
-                Err(error) => {
-                    eprintln!(
-                        "node run queue could not start the next run: thread={} node={}: {error}",
-                        key.thread_id, key.node_id
-                    );
-                    return;
+    let release: std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>> = Box::pin(
+        async move {
+            // A storage failure keeps the settled run on its node, so the release is retried
+            // with capped backoff until the next queued run starts or none is left.
+            let mut backoff = std::time::Duration::from_millis(100);
+            let next = loop {
+                match state.node_runs.release(&state.product, key, run).await {
+                    Ok(Some(next)) => break next,
+                    Ok(None) => return,
+                    Err(error) => {
+                        eprintln!(
+                            "node run queue could not hand node {} of thread {} on; retrying in {backoff:?}: {error}",
+                            key.node_id, key.thread_id
+                        );
+                        tokio::time::sleep(backoff).await;
+                        backoff = (backoff * 2).min(std::time::Duration::from_secs(30));
+                    }
                 }
             };
             let loaded = async {
@@ -4290,7 +4355,8 @@ fn release_node_run(state: ApiState, key: NodeRunKey, run: InteractionId) {
                     release_node_run(state, key, next);
                 }
             }
-        });
+        },
+    );
     tokio::spawn(release);
 }
 

@@ -5,7 +5,7 @@ import { createProductWorkspace } from "../desktop/renderer/src/product-workspac
 afterEach(() => vi.unstubAllGlobals());
 
 // Invoked runs run beside the message turns (#717): each run's Stop lives on the node it came
-// from, and the composer stays a Send for the next message.
+// from, and the composer stays a Send for the next message. Runs on one node run in order (#718).
 it("gives every run invoked from a node its own Stop, kept in place across refreshes", async () => {
   const window = new Window({ url: "http://127.0.0.1:3000" });
   vi.stubGlobal("document", window.document);
@@ -26,12 +26,12 @@ it("gives every run invoked from a node its own Stop, kept in place across refre
     interactions: [
       { id: 1, graphNodeId: 901, threadId: 10, sequence: 1, text: "Compare approaches", completionStatus: "accepted", completionOutput: { rootLayer: layer } },
       run(5, "running"),
-      run(6, "running"),
+      run(6, "queued"),
       run(7, "queued"),
     ],
     actionInvocations: [
       { sourceInteractionId: 1, actionId: 31, resultInteractionId: 5, resultCompletionStatus: "running", agentInvoked: false },
-      { sourceInteractionId: 1, actionId: 32, resultInteractionId: 6, resultCompletionStatus: "running", agentInvoked: false },
+      { sourceInteractionId: 1, actionId: 32, resultInteractionId: 6, resultCompletionStatus: "queued", agentInvoked: false },
       { sourceInteractionId: 1, actionId: 33, resultInteractionId: 7, resultCompletionStatus: "queued", agentInvoked: false },
     ],
     visibleLayer: layer, nodes: [node], actions, projects: [], permissionProfiles: [],
@@ -51,9 +51,9 @@ it("gives every run invoked from a node its own Stop, kept in place across refre
     const rows = () => [...bar.querySelectorAll(".node-run-row")];
     expect(bar.classList.contains("hidden")).toBe(false);
     expect(rows().map((row) => row.dataset.interactionId)).toEqual(["5", "6", "7"]);
-    // A run waiting behind the others on this node shows queued, with its own Stop (#718).
+    // Runs on one node run in order (#718): the later ones show queued, each with its own Stop.
     expect(rows().map((row) => row.querySelector(".node-run-status").textContent))
-      .toEqual(["Plan a week · Running", "List pitfalls · Running", "Find a mentor · Queued"]);
+      .toEqual(["Plan a week · Running", "List pitfalls · Queued", "Find a mentor · Queued"]);
     expect(rows()[2].querySelector(".node-run-stop").disabled).toBe(false);
     // The composer follows message turns: invoked runs leave it a Send.
     expect(window.document.querySelector("#sendInteraction").classList.contains("stop-button")).toBe(false);
@@ -75,13 +75,14 @@ it("gives every run invoked from a node its own Stop, kept in place across refre
     // A settled run leaves the bar, and the queued run behind it starts; the rows stay in place.
     state.interactions[1] = run(5, "accepted");
     state.actionInvocations[0] = { ...state.actionInvocations[0], resultCompletionStatus: "accepted" };
-    state.interactions[3] = run(7, "running");
-    state.actionInvocations[2] = { ...state.actionInvocations[2], resultCompletionStatus: "running" };
+    state.interactions[2] = run(6, "running");
+    state.actionInvocations[1] = { ...state.actionInvocations[1], resultCompletionStatus: "running" };
     workspace.render();
     await window.happyDOM.waitUntilComplete();
     expect(rows().map((row) => row.dataset.interactionId)).toEqual(["6", "7"]);
     expect(rows()[0].querySelector(".node-run-stop")).toBe(stopSecond);
-    expect(rows()[1].querySelector(".node-run-status").textContent).toBe("Find a mentor · Running");
+    expect(rows().map((row) => row.querySelector(".node-run-status").textContent))
+      .toEqual(["List pitfalls · Running", "Find a mentor · Queued"]);
   } finally {
     workspace.dispose();
     await window.happyDOM.close();

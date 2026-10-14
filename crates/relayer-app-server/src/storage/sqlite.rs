@@ -31,6 +31,7 @@ mod product_state;
 mod projects;
 mod schema;
 mod stops;
+pub(crate) use stops::QueuedStop;
 mod threads;
 
 use super::StorageError;

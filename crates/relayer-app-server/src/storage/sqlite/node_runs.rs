@@ -126,6 +126,7 @@ impl SqliteProductStore {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::storage::QueuedStop;
 
     /// Stopping a queued run ends it at once, and it never starts: the Stop and the claim
     /// that would start it change the same row, so exactly one of them wins.
@@ -152,10 +153,13 @@ mod tests {
         }
         assert_eq!(store.queued_node_runs(key).await.unwrap(), runs[1..]);
 
-        store
-            .request_interaction_stop(thread, runs[1])
-            .await
-            .unwrap();
+        assert_eq!(
+            store
+                .request_interaction_stop(thread, runs[1])
+                .await
+                .unwrap(),
+            QueuedStop::Stopped
+        );
         assert_eq!(store.completion_status_for_test(runs[1]).await, "stopped");
         assert!(!store.claim_queued_node_run(runs[1]).await.unwrap());
         assert_eq!(store.queued_node_runs(key).await.unwrap(), [runs[2]]);
@@ -176,6 +180,28 @@ mod tests {
         );
         // A run with a pending Stop is about to end, so it is never queued.
         assert!(!store.queue_node_run(runs[2]).await.unwrap());
+
+        // A queued run whose call the graph already prepared takes its Stop to settle before
+        // native execution, so its graph current stops too. It never runs.
+        let (thread, prepared) = store.seed_node_runs_for_test(&[7, 7]).await;
+        sqlx::query("INSERT INTO action_invocations(source_interaction_id,action_id,result_interaction_id,created_at,graph_lease_required,authoritative,agent_invoked,invocation_key,prepared_graph_node_id) VALUES (?1,41,?2,'1',1,1,0,'key',901)")
+            .bind(prepared[0].value())
+            .bind(prepared[1].value())
+            .execute(&store.pool)
+            .await
+            .unwrap();
+        assert!(store.queue_node_run(prepared[1]).await.unwrap());
+        assert_eq!(
+            store
+                .request_interaction_stop(thread, prepared[1])
+                .await
+                .unwrap(),
+            QueuedStop::SettleBeforeStart
+        );
+        let settling = store.get_interaction(prepared[1]).await.unwrap().unwrap();
+        assert_eq!(settling.completion_status, "submitted");
+        assert!(settling.stop_requested);
+        assert!(!store.claim_queued_node_run(prepared[1]).await.unwrap());
     }
 
     /// A queued run is active work: its thread shows as running and stays out of the archive,

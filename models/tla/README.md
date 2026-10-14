@@ -367,8 +367,13 @@ restart. Each run is sent once, by an invoke action on its node:
 A run's context is the set of runs accepted when it starts (`seen`).
 Settlement and handing the node on are one step. In the code the hand-off
 follows the end of the run's execution task, and admission sees the node
-held until then. Graph preparation, approvals and the provider are not
-modeled. `node-queue-today` mirrors the code; each `-reverted` check turns
+held until then. A storage failure during the hand-off keeps the settled
+run on its node, and the hand-off is retried; that is not modeled.
+`StopQueued` also stands for the Stop of a queued run whose graph call was
+already prepared: it settles before native execution, so its graph current
+stops, and it never holds the node. Duplicate deliveries, which join the
+holder's admission, are not modeled. Graph preparation, approvals and the
+provider are not modeled. `node-queue-today` mirrors the code; each `-reverted` check turns
 one fix or decision off.
 
 | Check | Verdict | Finding |
