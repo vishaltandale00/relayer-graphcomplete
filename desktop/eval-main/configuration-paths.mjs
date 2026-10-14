@@ -38,9 +38,7 @@ export function evalHarnessConfigurationPaths({
     join(harnessDirectory, "codex-eval-visual-node-details-control.yaml"),
     join(harnessDirectory, "codex-eval-visual-node-details-treatment.yaml"),
     ...(graphSearchQualified ? [
-      join(harnessDirectory, "codex-eval-lantern-search-disabled-recursion-disabled.yaml"),
       join(harnessDirectory, "codex-eval-lantern-search-query-v1-recursion-disabled.yaml"),
-      join(harnessDirectory, "codex-eval-lantern-search-disabled-recursion-enabled.yaml"),
       join(harnessDirectory, "codex-eval-lantern-search-query-v1-recursion-enabled.yaml"),
     ] : []),
     join(harnessDirectory, "codex-layered-navigation-luna.yaml"),

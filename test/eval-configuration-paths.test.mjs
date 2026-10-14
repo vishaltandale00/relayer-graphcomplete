@@ -65,9 +65,7 @@ describe("Eval harness configuration availability", () => {
       "codex-basic-high.yaml",
       "codex-eval-visual-node-details-control.yaml",
       "codex-eval-visual-node-details-treatment.yaml",
-      "codex-eval-lantern-search-disabled-recursion-disabled.yaml",
       "codex-eval-lantern-search-query-v1-recursion-disabled.yaml",
-      "codex-eval-lantern-search-disabled-recursion-enabled.yaml",
       "codex-eval-lantern-search-query-v1-recursion-enabled.yaml",
       "codex-layered-navigation-luna.yaml",
       "codex-multi-agent-layered-navigation.yaml",
@@ -97,9 +95,7 @@ describe("Eval harness configuration availability", () => {
       "codex-basic-high.yaml",
       "codex-eval-visual-node-details-control.yaml",
       "codex-eval-visual-node-details-treatment.yaml",
-      "codex-eval-lantern-search-disabled-recursion-disabled.yaml",
       "codex-eval-lantern-search-query-v1-recursion-disabled.yaml",
-      "codex-eval-lantern-search-disabled-recursion-enabled.yaml",
       "codex-eval-lantern-search-query-v1-recursion-enabled.yaml",
       "codex-layered-navigation-luna.yaml",
       "codex-multi-agent-layered-navigation.yaml",
@@ -128,9 +124,7 @@ describe("Eval harness configuration availability", () => {
       ]));
       expect(available).not.toEqual(expect.arrayContaining([
         "fixture-graph-memory.yaml",
-              "codex-eval-lantern-search-disabled-recursion-disabled.yaml",
         "codex-eval-lantern-search-query-v1-recursion-disabled.yaml",
-        "codex-eval-lantern-search-disabled-recursion-enabled.yaml",
         "codex-eval-lantern-search-query-v1-recursion-enabled.yaml",
       ]));
     }
@@ -155,7 +149,7 @@ describe("Eval harness configuration availability", () => {
     });
   });
 
-  it("loads the Apple-Silicon-only Codex quartet without exposing non-runnable combined provider cells", async () => {
+  it("loads the Apple-Silicon-only Codex recursion pair without exposing non-runnable combined provider cells", async () => {
     const catalog = await loadHarnessConfigurations(evalHarnessConfigurationPaths({
       harnessDirectory: resolve(repositoryRoot, "harnesses"),
       packageAvailable: () => false,

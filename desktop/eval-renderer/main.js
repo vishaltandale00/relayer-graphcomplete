@@ -57,7 +57,7 @@ async function configure() {
     name: item.name,
     available: item.available,
     description: item.unavailableReason,
-    detail: `${item.implementation} · graph search ${item.graphCapabilityProfile?.search === "query-v1" ? "query-v1" : "off"} · recursion ${item.complete?.agentAuthored === true ? "on" : "off"}`,
+    detail: `${item.implementation} · graph search ${item.graphCapabilityProfile?.search === "disabled" ? "off" : "query-v1"} · recursion ${item.complete?.agentAuthored === true ? "on" : "off"}`,
   }, "harnesses", item.name === "fixture-task-system")).join("");
   const setups = await api.setupRevisions();
   const judgeSelect = $("#judgeSetupRevision");

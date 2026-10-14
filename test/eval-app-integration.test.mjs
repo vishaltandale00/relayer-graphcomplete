@@ -488,7 +488,7 @@ describe("Relayer Eval application service", () => {
     expect(evalService.listRuns()).toEqual([]);
   });
 
-  it("admits the recursive graph-memory case only with its normalized quartet and explicit live authorization", async () => {
+  it("admits the recursive graph-memory case only with its normalized pair and explicit live authorization", async () => {
     const dataDirectory = await mkdtemp(join(tmpdir(), "relayer-eval-recursive-memory-authorization-test-"));
     directories.push(dataDirectory);
     const evalService = await new EvalService({
@@ -498,9 +498,7 @@ describe("Relayer Eval application service", () => {
         cookie: { name: "unused", value: "unused" },
       },
       configurationPaths: [
-        "codex-eval-lantern-search-disabled-recursion-disabled",
         "codex-eval-lantern-search-query-v1-recursion-disabled",
-        "codex-eval-lantern-search-disabled-recursion-enabled",
         "codex-eval-lantern-search-query-v1-recursion-enabled",
       ].map((name) => join(repositoryRoot, "harnesses", `${name}.yaml`)),
       targetKey: "macos-arm64",
@@ -508,9 +506,7 @@ describe("Relayer Eval application service", () => {
     const selection = {
       testCaseIds: ["empty-project.recursive-graph-memory.launch-readiness"],
       harnessConfigurationNames: [
-        "codex-eval-lantern-search-disabled-recursion-disabled",
         "codex-eval-lantern-search-query-v1-recursion-disabled",
-        "codex-eval-lantern-search-disabled-recursion-enabled",
         "codex-eval-lantern-search-query-v1-recursion-enabled",
       ],
       judgeConfigurationName: "deterministic-graph-contract",
@@ -522,32 +518,73 @@ describe("Relayer Eval application service", () => {
       liveAuthorization: {
         confirmed: true,
         credentialReference: "connected-product-provider",
-        rootProviderExecutions: 12,
+        rootProviderExecutions: 6,
         agentAuthoredChildren: true,
       },
-    })).rejects.toThrow("exact ordered Codex quartet");
+    })).rejects.toThrow("exact ordered Codex pair");
     await expect(evalService.createRun(selection)).rejects.toThrow(
-      "requires explicit authorization for 12 live roots and additional model-controlled agent-authored child execution",
+      "requires explicit authorization for 6 live roots and additional model-controlled agent-authored child execution",
     );
     await expect(evalService.createRun({
       ...selection,
       liveAuthorization: {
         confirmed: true,
         credentialReference: "connected-product-provider",
-        rootProviderExecutions: 11,
+        rootProviderExecutions: 5,
         agentAuthoredChildren: true,
       },
-    })).rejects.toThrow("requires explicit authorization for 12 live roots and additional model-controlled agent-authored child execution");
+    })).rejects.toThrow("requires explicit authorization for 6 live roots and additional model-controlled agent-authored child execution");
     expect(evalService.listRuns()).toEqual([]);
   });
 
-  it("executes the exact Lantern quartet through one production product/Eval seam", async () => {
-    const dataDirectory = await mkdtemp(join(tmpdir(), "relayer-eval-lantern-quartet-test-"));
+  it("qualifies search-dependent cases, not search-capable harnesses, by target", async () => {
+    const dataDirectory = await mkdtemp(join(tmpdir(), "relayer-eval-graph-search-target-test-"));
+    directories.push(dataDirectory);
+    const evalService = await new EvalService({
+      stateFile: join(dataDirectory, "test-runs.json"),
+      productSession: {
+        origin: "http://127.0.0.1:1",
+        cookie: { name: "unused", value: "unused" },
+      },
+      configurationPaths: [
+        "fixture-task-system",
+        "fixture-graph-memory",
+        "codex-eval-lantern-search-query-v1-recursion-disabled",
+        "codex-eval-lantern-search-query-v1-recursion-enabled",
+      ].map((name) => join(repositoryRoot, "harnesses", `${name}.yaml`)),
+      targetKey: "windows-x64",
+    }).open();
+
+    // An omitted profile resolves to query-v1 search in the catalog Eval shows.
+    expect(evalService.catalog().harnessConfigurations.find(({ name }) => name === "fixture-task-system")
+      ?.graphCapabilityProfile).toEqual({ search: "query-v1" });
+    await expect(evalService.createRun({
+      testCaseIds: [graphMemoryEvalCaseId],
+      harnessConfigurationNames: ["fixture-graph-memory"],
+      judgeConfigurationName: "deterministic-graph-contract",
+    })).rejects.toThrow("Graph-search Eval cases are qualified only for macOS Apple Silicon.");
+    await expect(evalService.createRun({
+      testCaseIds: ["empty-project.recursive-graph-memory.launch-readiness"],
+      harnessConfigurationNames: [
+        "codex-eval-lantern-search-query-v1-recursion-disabled",
+        "codex-eval-lantern-search-query-v1-recursion-enabled",
+      ],
+      judgeConfigurationName: "deterministic-graph-contract",
+      liveAuthorization: {
+        confirmed: true,
+        credentialReference: "connected-product-provider",
+        rootProviderExecutions: 6,
+        agentAuthoredChildren: true,
+      },
+    })).rejects.toThrow("Graph-search Eval cases are qualified only for macOS Apple Silicon.");
+    expect(evalService.listRuns()).toEqual([]);
+  });
+
+  it("executes the exact Lantern recursion pair through one production product/Eval seam", async () => {
+    const dataDirectory = await mkdtemp(join(tmpdir(), "relayer-eval-lantern-pair-test-"));
     directories.push(dataDirectory);
     const names = [
-      "codex-eval-lantern-search-disabled-recursion-disabled",
       "codex-eval-lantern-search-query-v1-recursion-disabled",
-      "codex-eval-lantern-search-disabled-recursion-enabled",
       "codex-eval-lantern-search-query-v1-recursion-enabled",
     ];
     const configurationPaths = names.map((name) => join(repositoryRoot, "harnesses", `${name}.yaml`));
@@ -649,7 +686,7 @@ describe("Relayer Eval application service", () => {
       liveAuthorization: {
         confirmed: true,
         credentialReference: "connected-product-provider",
-        rootProviderExecutions: 12,
+        rootProviderExecutions: 6,
         agentAuthoredChildren: true,
       },
     });
@@ -662,12 +699,12 @@ describe("Relayer Eval application service", () => {
       checks: execution.checks.filter((check) => !check.passed),
     })), null, 2)).toBe("passed");
     expect(completed.comparison).toMatchObject({
-      kind: "graph-search-recursion-2x2",
+      kind: "graph-memory-recursion-pair",
       passed: true,
-      check: { name: "graph-search-recursion:controlled-2x2", passed: true },
+      check: { name: "graph-memory-recursion:controlled-pair", passed: true },
     });
     expect(completed.executions.map(({ harnessConfigurationName }) => harnessConfigurationName)).toEqual(names);
-    expect(new Set(completed.executions.flatMap(({ threadIds }) => threadIds).map(String)).size).toBe(4);
+    expect(new Set(completed.executions.flatMap(({ threadIds }) => threadIds).map(String)).size).toBe(2);
     expect(completed.executions.every(({ turns }) => turns.length === 3)).toBe(true);
     expect(completed.executions.slice(1).every(({ modelResolution }) => (
       JSON.stringify(modelResolution) === JSON.stringify(completed.executions[0].modelResolution)
@@ -676,8 +713,8 @@ describe("Relayer Eval application service", () => {
     expect(completed.executions.slice(1).every(({ pinnedModelResolution }) => (
       JSON.stringify(pinnedModelResolution) === JSON.stringify(completed.executions[0].modelResolution)
     ))).toBe(true);
-    expect(completed.executions.map(({ semanticChildren }) => semanticChildren.length)).toEqual([0, 0, 1, 1]);
-    expect(observed.childCompletionIds).toHaveLength(2);
+    expect(completed.executions.map(({ semanticChildren }) => semanticChildren.length)).toEqual([0, 1]);
+    expect(observed.childCompletionIds).toHaveLength(1);
     expect(completed.executions.every(({ outcomeGrade }) => (
       outcomeGrade.reviewRequired === true && outcomeGrade.qualified === null
     ))).toBe(true);
@@ -685,7 +722,7 @@ describe("Relayer Eval application service", () => {
     expect(completed.executions.every((execution) => (
       evalService.reviewContext(execution.id).cases[0].threadIds.length === 1
     ))).toBe(true);
-    expect(observed.revokedChildCapabilityProbes).toHaveLength(2);
+    expect(observed.revokedChildCapabilityProbes).toHaveLength(1);
     for (const probe of observed.revokedChildCapabilityProbes) {
       await expect(probe()).rejects.toMatchObject({
         status: 401,
