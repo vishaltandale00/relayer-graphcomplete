@@ -3121,15 +3121,25 @@ pub(super) async fn stop_interaction(
     }
     // The Stop and its hand-off to the capacity wait finish even if the request goes away.
     let stop_state = state.clone();
-    let queued = tokio::spawn(async move {
+    tokio::spawn(async move {
         let queued = stop_state
             .product
             .request_interaction_stop(thread_id, interaction_id)
             .await?;
         if queued != crate::storage::QueuedStop::NotQueued {
             // A run waiting for capacity (#720) leaves the wait at once, keeping its text. A
-            // run that held its node while it waited frees it, and the next run on it starts.
+            // run that held its node while it waited frees it once its Stop has settled.
             stop_state.run_capacity.forget(interaction_id).await;
+        }
+        if queued == crate::storage::QueuedStop::SettleBeforeStart {
+            // The graph already prepared this queued run's call. It settles as a Stop before
+            // native execution, outside its node's queue: no provider work starts, and its graph
+            // current stops with it. It is launched here, with the Stop, so a dropped request
+            // never leaves the Stop without a settlement.
+            let settle_state = stop_state.clone();
+            tokio::spawn(async move {
+                settle_queued_stop(settle_state, thread_id, interaction_id).await;
+            });
         }
         Ok::<_, crate::product::ProductError>(queued)
     })
@@ -3138,15 +3148,6 @@ pub(super) async fn stop_interaction(
         eprintln!("stop request did not finish: {error}");
         ApiError::internal("Stop could not be confirmed. Try again.")
     })??;
-    if queued == crate::storage::QueuedStop::SettleBeforeStart {
-        // The graph already prepared this queued run's call. It settles as a Stop before native
-        // execution, outside its node's queue: no provider work starts, and its graph current
-        // stops with it.
-        let settle_state = state.clone();
-        tokio::spawn(async move {
-            settle_queued_stop(settle_state, thread_id, interaction_id).await;
-        });
-    }
     Ok(Json(
         state.product.get_interaction(interaction_id).await?.into(),
     ))
@@ -4528,13 +4529,26 @@ async fn start_held_action_interaction(
                 .product
                 .claim_interaction_preparing(interaction.id)
                 .await?;
-        let admission = state
-            .run_capacity
-            .admit(&state.product, interaction.id)
-            .await?;
-        Ok::<_, crate::product::ProductError>((claimed, admission))
+        Ok::<_, crate::product::ProductError>(claimed)
     }
     .await;
+    let admitted = match admitted {
+        Ok(claimed) => match admit_with_retry(state, interaction.id).await {
+            Some(admission) => Ok((claimed, admission)),
+            // The storage outage outlasted the retries. The run stays a claimed start, which
+            // invoking its action again or a restart recovers, and its graph call is never
+            // failed under it. Its node passes on.
+            None => {
+                release_node_run(state.clone(), key, interaction.id, false);
+                return state
+                    .product
+                    .get_interaction(interaction.id)
+                    .await
+                    .map_err(Into::into);
+            }
+        },
+        Err(error) => Err(error),
+    };
     let (claimed, slot) = match admitted {
         Ok((claimed, CapacityAdmission::Start)) => (claimed, CapacitySlot::Held),
         Ok((claimed, CapacityAdmission::Uncounted)) => (claimed, CapacitySlot::Uncounted),
@@ -4589,6 +4603,29 @@ async fn start_held_action_interaction(
         }
     };
     run_held_action_interaction(state, thread, interaction, key, claimed, slot).await
+}
+
+/// Admits a run to the capacity limit, retrying a storage failure with backoff. `None` when the
+/// failure outlasts the retries.
+async fn admit_with_retry(state: &ApiState, run: InteractionId) -> Option<CapacityAdmission> {
+    const ATTEMPTS: u32 = 6;
+    let mut backoff = std::time::Duration::from_millis(100);
+    for attempt in 1..=ATTEMPTS {
+        match state.run_capacity.admit(&state.product, run).await {
+            Ok(admission) => return Some(admission),
+            Err(error) if attempt == ATTEMPTS => {
+                eprintln!("run {run} could not be admitted to the run capacity: {error}");
+            }
+            Err(error) => {
+                eprintln!(
+                    "run {run} could not be admitted to the run capacity; retrying in {backoff:?}: {error}"
+                );
+                tokio::time::sleep(backoff).await;
+                backoff = (backoff * 2).min(std::time::Duration::from_secs(5));
+            }
+        }
+    }
+    None
 }
 
 /// Prepares and executes a run that holds its node and its capacity slot.

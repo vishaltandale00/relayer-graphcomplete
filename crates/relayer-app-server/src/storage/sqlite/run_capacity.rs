@@ -67,6 +67,35 @@ impl SqliteProductStore {
         let waited = sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM run_capacity_waits")
             .fetch_one(&mut *transaction)
             .await?;
+        // A message turn about to fail returns the context confirmations it consumed to the
+        // composer, as a send that cannot start does, unless that would attach one node from two
+        // occurrences.
+        let failing: Vec<i64> = sqlx::query_scalar(
+            "SELECT i.id FROM interactions i JOIN run_capacity_waits wait ON wait.interaction_id=i.id WHERE i.completion_status='queued' AND i.graph_node_id IS NULL AND i.id NOT IN (SELECT result_interaction_id FROM action_invocations WHERE authoritative=1)",
+        )
+        .fetch_all(&mut *transaction)
+        .await?;
+        for interaction in failing {
+            match super::context_drafts::ensure_context_confirmation_restore_safe(
+                &mut transaction,
+                interaction,
+            )
+            .await
+            {
+                Ok(()) => {
+                    sqlx::query("UPDATE node_context_draft_resolutions SET consumed_interaction_id=NULL WHERE consumed_interaction_id=?1")
+                        .bind(interaction)
+                        .execute(&mut *transaction)
+                        .await?;
+                }
+                Err(StorageError::IncompatibleSchema(reason)) => {
+                    eprintln!(
+                        "kept the context confirmations of interrupted run {interaction}: {reason}"
+                    );
+                }
+                Err(error) => return Err(error),
+            }
+        }
         sqlx::query(
             "UPDATE interactions SET completion_status='failed',completion_error=?1 WHERE completion_status='queued' AND graph_node_id IS NULL AND id IN (SELECT interaction_id FROM run_capacity_waits) AND id NOT IN (SELECT result_interaction_id FROM action_invocations WHERE authoritative=1)",
         )
@@ -163,6 +192,15 @@ mod tests {
         );
         assert!(!store.claim_capacity_run(prepared[0]).await.unwrap());
 
+        // The waiting message turn consumed a confirmed node context; startup returns it to the
+        // composer when the turn fails.
+        sqlx::query("INSERT INTO node_context_draft_resolutions(draft_id,thread_id,outcome,draft_revision,target_node_id,source_interaction_node_id,source_layer_id,target_node_json,text,resolved_at,composer_text,consumed_interaction_id) VALUES ('waited',?1,'confirmed',1,7,3,5,'{}','Keep it','2','Keep it',?2)")
+            .bind(thread.value())
+            .bind(runs[2].value())
+            .execute(&store.pool)
+            .await
+            .unwrap();
+
         // A waiting message turn that already has a graph interaction is left for startup's
         // reconciliation, which also ends its graph current.
         let (_, bound) = store.seed_node_runs_for_test(&[7]).await;
@@ -182,6 +220,16 @@ mod tests {
         assert_eq!(
             store.completion_status_for_test(bound[0]).await,
             "submitted"
+        );
+        let consumed: Option<i64> = sqlx::query_scalar(
+            "SELECT consumed_interaction_id FROM node_context_draft_resolutions WHERE draft_id='waited'",
+        )
+        .fetch_one(&store.pool)
+        .await
+        .unwrap();
+        assert_eq!(
+            consumed, None,
+            "a failed waiter kept its context confirmation"
         );
         let interrupted = store.get_interaction(runs[2]).await.unwrap().unwrap();
         assert_eq!(interrupted.completion_status, "failed");
