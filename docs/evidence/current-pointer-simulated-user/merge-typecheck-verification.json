@@ -1,0 +1,440 @@
+{
+  "schemaVersion": 1,
+  "sourceDigest": "383056b9891f8082836b66222e8041c0d46bf81848d18e5ae7646f456958e617",
+  "sourceOverlay": "merge-typecheck-source.json",
+  "baseCommit": "83c636cf7b3ef63b4c80aa5c61bd5ac4dbe7f123",
+  "plan": "merge-typecheck-20261014.md#required-checkpoints",
+  "gates": [
+    {
+      "gate": "workspace-types-green",
+      "command": [
+        "npm",
+        "run",
+        "check",
+        "--workspaces",
+        "--if-present"
+      ],
+      "exitCode": 0,
+      "durationSeconds": 57.037,
+      "log": {
+        "path": ".relayer/merge-typecheck-workspace-types-green.txt",
+        "sha256": "aca4eadf1583f782c6d819d83d937343560fbac4b7531c890809370bdfe9c1f0",
+        "bytes": 501
+      },
+      "result": {
+        "path": ".relayer/merge-typecheck-workspace-types-green-result.json",
+        "sha256": "fbd74d71d25ea907cda00a142e08acaaef3bc047391013f7522d961bdbf9e492",
+        "bytes": 241
+      },
+      "innerOutcome": "All workspace checks passed, including visual-assets built-package smoke."
+    },
+    {
+      "gate": "fallback-warm",
+      "command": [
+        "node",
+        "node_modules/vitest/vitest.mjs",
+        "run",
+        "packages/harness-host/test/codex-basic.test.ts",
+        "-t",
+        "delivered fallback prompt"
+      ],
+      "exitCode": 0,
+      "durationSeconds": 40.069,
+      "log": {
+        "path": ".relayer/merge-typecheck-fallback-warm.txt",
+        "sha256": "85221c5519945a18e2772b49a2142dd1bb679b370e1c1ec072be40fe3869d5c5",
+        "bytes": 268
+      },
+      "result": {
+        "path": ".relayer/merge-typecheck-fallback-warm-result.json",
+        "sha256": "820540a8fcf3af6b635ed3042dd49d6f6bfd4613c9bc0177c144773062a45a1c",
+        "bytes": 308
+      },
+      "innerOutcome": {
+        "testsPassed": 1,
+        "filtered": 67
+      }
+    },
+    {
+      "gate": "full-check",
+      "command": [
+        "npm",
+        "run",
+        "check"
+      ],
+      "exitCode": 101,
+      "durationSeconds": 249.3,
+      "log": {
+        "path": ".relayer/merge-typecheck-full-check.txt",
+        "sha256": "cfa90888241785b87f2b796e2f72b1d68c10fa3caf63082ce81d35a198a8dfce",
+        "bytes": 49313
+      },
+      "result": {
+        "path": ".relayer/merge-typecheck-full-check-result.json",
+        "sha256": "d1e97c7e2f78caf2909fa3b02d273f82f869b99b9599fb0e5b26e1b178b4861b",
+        "bytes": 180
+      },
+      "innerOutcome": {
+        "clippy": "passed",
+        "appServerLibPassed": 385,
+        "appServerLibFailed": 8,
+        "downstream": "not reached"
+      },
+      "qualification": "FAILED. This attempt overlapped the workspace-check visual-assets rebuild. Startup proof is confounded; no cause is established for each failure. All eight cases then passed serial isolation with unchanged assertions/bounds after builds settled. Only the fallback fixture had changed from83 at this attempt; the later annotation script/planner changes do not occur in the reached native/Clippy closure."
+    },
+    {
+      "gate": "native-isolation",
+      "command": [
+        "cargo",
+        "test",
+        "-p",
+        "relayer-app-server",
+        "--lib",
+        "--",
+        "--exact",
+        "api::conversation_imports::tests::mixed_v2_asset_failures_reject_staging_and_clean_up_with_recoverable_inputs",
+        "api::conversation_imports::tests::mixed_v2_assets_and_recoverable_inputs_survive_http_publish_and_strict_reexport",
+        "api::environment::tests::thread_environment_inspects_saved_checkout_and_rejects_foreign_project",
+        "api::threads::tests::a_launch_whose_caller_disconnects_still_attaches_and_observes_the_child",
+        "environment::tests::global_ignore_submodules_all_preserves_diff_semantics_without_helpers",
+        "environment::tests::repository_identity_allows_selected_subdirectories_and_linked_worktrees",
+        "environment::tests::shadow_worktree_diff_supports_sha256_split_indexes",
+        "environment::tests::timed_out_inspection_retains_execution_capacity_until_blocking_work_exits",
+        "--test-threads=1"
+      ],
+      "exitCode": 0,
+      "durationSeconds": 26.723,
+      "log": {
+        "path": ".relayer/merge-typecheck-native-isolation.txt",
+        "sha256": "b5061827167745803d6c3e35079ce8ce2921aab8a3fd13ea3886632f8613e4d4",
+        "bytes": 2060
+      },
+      "qualification": "Exact eight cases with unchanged bounds, serial test execution after all workspace builds settled. Earlier whole attempt overlapped visual-assets build; cause of each failure not established.",
+      "result": {
+        "path": ".relayer/merge-typecheck-native-isolation-result.json",
+        "sha256": "15d4091c7d2f6585adf7c19d698097bcad6dba09f0c1701ef4f9fd70f23d0cf7",
+        "bytes": 1309
+      },
+      "innerOutcome": {
+        "testsPassed": 8,
+        "filtered": 385
+      }
+    },
+    {
+      "gate": "build",
+      "command": [
+        "npm",
+        "run",
+        "build"
+      ],
+      "exitCode": 0,
+      "durationSeconds": 27.269,
+      "log": {
+        "path": ".relayer/merge-typecheck-build.txt",
+        "sha256": "221c66121fda50a1db3f7670847727f950c68161a1bf7007cd7ec70687dba942",
+        "bytes": 2040
+      },
+      "result": {
+        "path": ".relayer/merge-typecheck-build-result.json",
+        "sha256": "9a3187015e127c8831681097b714f7020f4e684d8d7ae23f7b74b33bd21132f0",
+        "bytes": 169
+      }
+    },
+    {
+      "gate": "visual-red",
+      "command": [
+        "node",
+        "node_modules/vitest/vitest.mjs",
+        "run",
+        "test/followup-annotation-evidence.test.mjs",
+        "test/desktop-social-preview-evidence.test.mjs"
+      ],
+      "exitCode": 1,
+      "durationSeconds": 6.764,
+      "log": {
+        "path": ".relayer/merge-typecheck-visual-red.txt",
+        "sha256": "a5d0b0f757c09a1c2620d9c9349f206557f1578d178004be94d0d78df00b7dd1",
+        "bytes": 2765
+      },
+      "result": {
+        "path": ".relayer/merge-typecheck-visual-red-result.json",
+        "sha256": "a2c0d8d3e499dd682bae5155f64a7c24fb490074adae2b20b0688e63e810f768",
+        "bytes": 307
+      },
+      "innerOutcome": {
+        "testsFailed": 2,
+        "reason": "Actual renderer bytes differ from old annotation and social receipts."
+      }
+    },
+    {
+      "gate": "annotation-capture",
+      "command": [
+        "node_modules/.bin/electron",
+        "scripts/capture-followup-node-annotations.mjs"
+      ],
+      "exitCode": 0,
+      "durationSeconds": 14.208,
+      "log": {
+        "path": ".relayer/merge-typecheck-annotation-capture.txt",
+        "sha256": "0b7286804e44a64f3444b14ffb4e1998da91bfdfa066b1b2bbd466f2c657f212",
+        "bytes": 330
+      },
+      "outputDirectory": "docs/evidence/followup-node-annotations",
+      "result": {
+        "path": ".relayer/merge-typecheck-annotation-capture-result.json",
+        "sha256": "6429003aef150ee53ec20247c2604092a9ada835d851eb3aeb42baea59ca2e1d",
+        "bytes": 311
+      },
+      "innerOutcome": {
+        "receiptPassed": false,
+        "checkpoints": 0,
+        "outerExitCode": 0,
+        "failure": "Graph startup exceeded10s; autoquit before explicit failure exit/fixture removal."
+      },
+      "qualification": "FAILED despite outer0. Raw failed receipt retained; old automatic exit is not a proof pass."
+    },
+    {
+      "gate": "annotation-capture-green",
+      "command": [
+        "node_modules/.bin/electron",
+        "scripts/capture-followup-node-annotations.mjs"
+      ],
+      "exitCode": 0,
+      "durationSeconds": 18.442,
+      "log": {
+        "path": ".relayer/merge-typecheck-annotation-capture-green.txt",
+        "sha256": "27e969ed85331fec7c9840cfe1142eab5d3044533d71b7a9f10af7c1d64b16e2",
+        "bytes": 1017
+      },
+      "outputDirectory": "docs/evidence/followup-node-annotations",
+      "receiptPassed": true,
+      "remainingNewFixtureDirectories": [
+        "/Volumes/2T-SSD/tmp/relayer-interaction-context-lifecycle-K06l3h"
+      ],
+      "passed": false,
+      "qualification": "FAILED cleanup qualification despite successful five visual checkpoints and exit0: Chromium recreated its in-process profile directory. Preserved before parent-owned profile repair.",
+      "result": {
+        "path": ".relayer/merge-typecheck-annotation-capture-green-result.json",
+        "sha256": "c90079fa7acf78fac31bdb27f0ec3659b356b5eec73164970a70daa83381eba2",
+        "bytes": 650
+      }
+    },
+    {
+      "gate": "annotation-parent",
+      "command": [
+        "node",
+        "--input-type=module",
+        "-e",
+        "import { runElectronProof } from \"./scripts/electron-proof-process.mjs\";\nawait runElectronProof({executable:\"./node_modules/.bin/electron\",script:\"scripts/capture-followup-node-annotations.mjs\",label:\"Follow-up annotation evidence\",resultVariable:\"RELAYER_ANNOTATION_EVIDENCE_RESULT\",profileVariable:\"RELAYER_ANNOTATION_EVIDENCE_PROFILE\"});"
+      ],
+      "exitCode": 0,
+      "durationSeconds": 16.657,
+      "log": {
+        "path": ".relayer/merge-typecheck-annotation-parent.txt",
+        "sha256": "27e969ed85331fec7c9840cfe1142eab5d3044533d71b7a9f10af7c1d64b16e2",
+        "bytes": 1017
+      },
+      "outputDirectory": "docs/evidence/followup-node-annotations",
+      "receiptPassed": true,
+      "remainingNewFixtureOrParentDirectories": [],
+      "passed": true,
+      "qualification": "Capture-only60s startup allowance; no standard startup performance claim. Existing parent verifies final cleanup result and process exit, then removes its Chromium profile.",
+      "result": {
+        "path": ".relayer/merge-typecheck-annotation-parent-result.json",
+        "sha256": "20b5fe177d05fd40a9f6d6e29017f1f59ba19dd77a8da1d32b128855de204ade",
+        "bytes": 918
+      }
+    },
+    {
+      "gate": "social-capture",
+      "command": [
+        "npm",
+        "run",
+        "evidence:share-preview"
+      ],
+      "exitCode": 0,
+      "durationSeconds": 9.141,
+      "log": {
+        "path": ".relayer/merge-typecheck-social-capture.txt",
+        "sha256": "5d57e6a2ee1c4192fb80b3cee76d83eb88fd172927d12874ea4330f7f9babd29",
+        "bytes": 14188
+      },
+      "outputDirectory": ".relayer/evidence/desktop-social-preview",
+      "result": {
+        "path": ".relayer/merge-typecheck-social-capture-result.json",
+        "sha256": "523644eccd7ebdc757fa92a7b6cc09b4390d77411e1c5a99dc4bd01ad552fb5b",
+        "bytes": 268
+      },
+      "innerOutcome": {
+        "themes": [
+          "light",
+          "dark"
+        ],
+        "dimensions": [
+          1200,
+          630
+        ],
+        "captureCancellation": "passed",
+        "windowAndServerCleanup": "passed",
+        "rendererUnchangedDuringCapture": true
+      }
+    },
+    {
+      "gate": "visual-plan-parent-green",
+      "command": [
+        "node",
+        "node_modules/vitest/vitest.mjs",
+        "run",
+        "--maxWorkers=1",
+        "test/followup-annotation-evidence.test.mjs",
+        "test/desktop-social-preview-evidence.test.mjs",
+        "test/ci-affected-plan.test.mjs",
+        "test/electron-proof-process.test.mjs"
+      ],
+      "exitCode": 0,
+      "durationSeconds": 38.632,
+      "log": {
+        "path": ".relayer/merge-typecheck-visual-plan-parent-green.txt",
+        "sha256": "067d9146c3e18aa3d1cb9b42ef9ceb7e3ff2ee7e7ab48cbdb15a7df6266f9fe2",
+        "bytes": 1283
+      },
+      "result": {
+        "path": ".relayer/merge-typecheck-visual-plan-parent-green-result.json",
+        "sha256": "570c8e1ad1755d6207ff48b04560fead56099712b3e4c15a84b4b9f4b9ffe32b",
+        "bytes": 440
+      },
+      "innerOutcome": {
+        "filesPassed": 4,
+        "testsPassed": 98
+      }
+    },
+    {
+      "gate": "final-build",
+      "command": [
+        "npm",
+        "run",
+        "build"
+      ],
+      "exitCode": 0,
+      "durationSeconds": 36.561,
+      "log": {
+        "path": ".relayer/merge-typecheck-final-build.txt",
+        "sha256": "8788516d3aabfd323fc8f1216e2860dc502d078012fa934220ea9555d666763d",
+        "bytes": 2040
+      },
+      "result": {
+        "path": ".relayer/merge-typecheck-final-build-result.json",
+        "sha256": "64a22968e877ed35111ada830bb4dcde178f4032717cde486971bb8a87694812",
+        "bytes": 181
+      }
+    }
+  ],
+  "artifacts": [
+    {
+      "path": ".relayer/merge-review-workspace-types-red.txt",
+      "sha256": "bb66ece2cca25d141c93eec63b610d74f1f95975b6f64cd92bd10c8df6b3bd8c",
+      "bytes": 1007
+    },
+    {
+      "path": ".relayer/merge-review-workspace-types-red-result.json",
+      "sha256": "e0b16a0512e149ecbff08c6ff4d8bc3c379f434ab99646628c617dcd12e62dc8",
+      "bytes": 234
+    },
+    {
+      "path": ".relayer/merge-review-hosted-typescript-job-log.txt",
+      "sha256": "72c3f1f26a36189499179d9c7c57e367a4390f0b758e413228d623f48f25dc17",
+      "bytes": 39104
+    },
+    {
+      "path": ".relayer/merge-review-hosted-vitest-job-log.txt",
+      "sha256": "29658f417d267bedfaff92b4ab0a0db7044d647562ebc5dc83fe4065fe40b843",
+      "bytes": 305679
+    },
+    {
+      "path": ".relayer/merge-typecheck-old-ci-result.json",
+      "sha256": "8586aca93c96a45e3d1ccc86f726d9b909aa45121e532a0d81479dff7683d423",
+      "bytes": 3429
+    },
+    {
+      "path": ".relayer/merge-typecheck-annotation-capture-failed-receipt.json",
+      "sha256": "ebe001d07e4673336fb5eb767a0d437504e5dcf2f73112b1b9a6627c6f7b2eb1",
+      "bytes": 1156
+    },
+    {
+      "path": ".relayer/merge-typecheck-annotation-before-parent-receipt.json",
+      "sha256": "48a56aeee62b71281f5a460639f6d995b4da41b9c732b159056e9854aa7797fe",
+      "bytes": 3381
+    },
+    {
+      "path": ".relayer/merge-typecheck-capture-plan.json",
+      "sha256": "730b801bfe122d305dd3631b0e41fbda0f6b3c27a2b6c0d4a6a484771357ecf2",
+      "bytes": 656
+    },
+    {
+      "path": ".relayer/merge-typecheck-post-exit-processes.json",
+      "sha256": "708a829d302e4a3771f2ba060b668b5c381828dd21e0309ddf62f6233db702bb",
+      "bytes": 221
+    }
+  ],
+  "recapturedPublicEvidence": [
+    {
+      "path": "docs/evidence/followup-node-annotations/A-before-missing-plus.png",
+      "sha256": "b7a17aaf11f7c557ddcd01815bdc3e274c7ab24501f9eede5a8b87d27b86655c",
+      "bytes": 154021
+    },
+    {
+      "path": "docs/evidence/followup-node-annotations/B-after-plus-visible.png",
+      "sha256": "36b989af2f4f83458b4ff90cd194f4189d8d6ace8b97b54e5516fc49c8891472",
+      "bytes": 154396
+    },
+    {
+      "path": "docs/evidence/followup-node-annotations/C-after-editor.png",
+      "sha256": "fb46f5fbcf6daf1debf73fcf965c335ba700a6ef1763861af8bf972436d3ca2a",
+      "bytes": 169681
+    },
+    {
+      "path": "docs/evidence/followup-node-annotations/D-after-confirmed.png",
+      "sha256": "02d3cf2384b0908f624ff20dcc3513212f16a37b20c895676d94c06831584aa3",
+      "bytes": 161872
+    },
+    {
+      "path": "docs/evidence/followup-node-annotations/README.md",
+      "sha256": "6942bd0a3b10ee7ac2ac06efe660987e8a52a5cb760c3b58a02fcf01401f560b",
+      "bytes": 3976
+    },
+    {
+      "path": "docs/evidence/followup-node-annotations/receipt.json",
+      "sha256": "7ff5ff0385f6423cff30e8f0d3adea25977c2f8cca4329614637fe1700689391",
+      "bytes": 3381
+    },
+    {
+      "path": "docs/evidence/desktop-social-preview/receipt.json",
+      "sha256": "172560df0845c45476fad0bdb8f7ceafdc31cb8598276c9be31ca79a04853d5f",
+      "bytes": 17657
+    },
+    {
+      "path": "docs/evidence/desktop-social-preview/light.png",
+      "sha256": "0d64e23622f8e4d9dbe46907c8a02a46e8e53bd4dce236d38acce53bbaaf1979",
+      "bytes": 68977
+    },
+    {
+      "path": "docs/evidence/desktop-social-preview/dark.png",
+      "sha256": "ef5bd275a7732cdcd8186e9d85bf76d3f872c9416d1dce7d661d52ee87dcf2c9",
+      "bytes": 62710
+    }
+  ],
+  "hostedPriorOutcome": {
+    "head": "83c636cf7b3ef63b4c80aa5c61bd5ac4dbe7f123",
+    "run": "https://github.com/vishaltandale00/relayer-graphcomplete/actions/runs/38651659707",
+    "conclusion": "failure",
+    "typeScript": "invalid undefined JSON setting",
+    "vitest": {
+      "passed": 4244,
+      "failed": 2,
+      "skipped": 34
+    },
+    "otherSelectedChapters": "passed"
+  },
+  "reviews": "merge-typecheck-review.json (separate source/evidence assertion)",
+  "qualification": "Fresh exact-head hosted check and merge-freshness-status remain required. Historical83 manifests/reports are unchanged. Local full check remains failed; no blanket clean-local-suite, standard startup, quality or release claim."
+}

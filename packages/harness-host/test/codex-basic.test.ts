@@ -138,9 +138,10 @@ describe("CodexBasicHarness", () => {
 
   it("allows published-Current Return in the delivered fallback prompt", async () => {
     let prompt = "";
+    const settings = { ...codexBasicConfiguration.settings };
+    delete settings.promptProfile;
     const harness = new CodexBasicHarness({
-      ...context("auto"), configuration: { ...codexBasicConfiguration,
-        settings: { ...codexBasicConfiguration.settings, promptProfile: undefined } },
+      ...context("auto"), configuration: { ...codexBasicConfiguration, settings },
     }, { codexPathOverride: "/managed/codex", runAppServerTurn: async (options) => {
       prompt = options.prompt;
       return { threadId: "fallback-thread", turnId: "turn-1", status: "completed" };

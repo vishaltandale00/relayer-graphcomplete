@@ -242,6 +242,7 @@
     { "exact": "scripts/capture-provider-ux-video.mjs", "chapters": ["vitest"], "vitestFiles": ["test/provider-electron-evidence.test.mjs"] },
     { "exact": "scripts/evidence-browser-target.mjs", "chapters": ["vitest"], "vitestFiles": ["test/evidence-browser-target.test.mjs", "test/provider-electron-evidence.test.mjs"] },
     { "exact": "scripts/electron-proof-process.mjs", "chapters": ["vitest"], "vitestFiles": ["test/electron-proof-process.test.mjs", "test/node-input-actions-proof-result.test.mjs"] },
+    { "exact": "scripts/capture-followup-node-annotations.mjs", "chapters": ["vitest"], "vitestFiles": ["test/followup-annotation-evidence.test.mjs"] },
     { "exact": "scripts/capture-share-action-details-evidence.mjs", "chapters": ["vitest"], "vitestFiles": ["test/public-share-viewer.test.mjs", "test/conversation-export-eval-e2e.test.mjs"] },
     { "exact": "scripts/capture-public-share-viewer-evidence.mjs", "chapters": ["vitest"], "vitestFiles": ["test/public-share-viewer-evidence.test.mjs"] },
     { "exact": "scripts/test-share-publish-restart.mjs", "chapters": ["vitest"], "vitestFiles": ["test/share-publish-restart-evidence.test.mjs"] },
