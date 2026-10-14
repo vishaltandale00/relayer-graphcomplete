@@ -4839,7 +4839,8 @@ export function createProductWorkspace({
     const agentChildren = agentChildIds(state);
     renderThreadStatusSymbol(threadActivity(
       humanTurns(state, thread),
-      workspaceTurns(state, thread).filter((turn) => agentChildren.has(String(turn.id))),
+      pendingApprovalsForThread(state, thread)
+        .some((receipt) => agentChildren.has(String(receipt.request.correlation.interactionId))),
     ));
     if (inputDraftController && latestInteraction) {
       const statusKey = `${latestInteraction.id}:${latestInteraction.completionStatus || ""}`;

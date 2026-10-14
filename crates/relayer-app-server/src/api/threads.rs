@@ -155,7 +155,11 @@ pub(super) async fn decide_approval(
             "approval request already has a terminal resolution",
         ));
     }
-    if interaction.completion_status != "waiting_for_approval" {
+    // An agent's child's request stays answerable after its graph settles, until its
+    // provider ends and the host resolves it.
+    if interaction.completion_status != "waiting_for_approval"
+        && !state.product.is_agent_invoked_child(interaction_id).await?
+    {
         return Err(ApiError::conflict(
             "approval_not_actionable",
             "interaction is not waiting for approval",
@@ -3206,22 +3210,48 @@ fn completion_timestamp() -> String {
         .to_string()
 }
 
+/// Set once the host confirms a child's provider run has ended, or when the task waiting for
+/// that answer goes away. Only then can no further approval request arrive for the child.
+#[derive(Clone, Default)]
+struct ProviderEnded(std::sync::Arc<std::sync::atomic::AtomicBool>);
+
+impl ProviderEnded {
+    fn get(&self) -> bool {
+        self.0.load(std::sync::atomic::Ordering::Acquire)
+    }
+}
+
+/// Held by the provider-end wait; dropping it, however that task ends, reports the end.
+struct ProviderEndSignal(ProviderEnded);
+
+impl Drop for ProviderEndSignal {
+    fn drop(&mut self) {
+        (self.0).0.store(true, std::sync::atomic::Ordering::Release);
+    }
+}
+
 /// An agent's child has no execution observer of its own, so its approvals reach a person
 /// through its own product row: the host keys the child's approval stream by that row, and this
 /// records it there, where the product's approval decision already resolves it. The row's
 /// terminal state is never this observer's to write; its graph settlement owns that.
 ///
-/// It reads until the row is terminal and the stream is drained: empty, or dropped by the host
-/// once its run ended and every event was acknowledged. A run whose stream never drains stops
-/// being read a bounded time after its row ended.
+/// A child's graph can settle before its provider turn ends, and the provider can still ask for
+/// approval then. So this reads until the host confirms the provider ended and the stream is
+/// drained: empty, or dropped once every event was acknowledged. A stream that never drains
+/// stops being read a bounded time after the provider ended.
+///
+/// A request nobody can see must not hold the child. After repeated failures to read or record
+/// its approvals, the observer fails the child's graph, as a stop does, and cancels its provider
+/// on every pass until the host confirms the provider ended.
 fn spawn_recursive_approval_observer(
     state: ApiState,
     thread: Thread,
     interaction: Interaction,
     completion_id: i64,
+    provider_ended: ProviderEnded,
 ) {
-    const DRAIN_AFTER_SETTLEMENT: std::time::Duration = std::time::Duration::from_secs(30);
-    const PERSISTENCE_FAILURE_LIMIT: u8 = 20;
+    const DRAIN_AFTER_PROVIDER_END: std::time::Duration = std::time::Duration::from_secs(30);
+    const OBSERVATION_FAILURE_LIMIT: u8 = 20;
     tokio::spawn(async move {
         let Some(runtime) = state.runtime.as_ref() else {
             return;
@@ -3229,15 +3259,13 @@ fn spawn_recursive_approval_observer(
         let mut cursor = 0;
         let mut harness_session_id = None;
         let mut complete_call_id = None;
-        let mut persistence_failures = 0_u8;
-        let mut settled_at = None;
+        let mut failures = 0_u8;
+        let mut failing = false;
+        let mut ended_at = None;
         loop {
-            let settled = matches!(
-                state.product.get_interaction(interaction.id).await,
-                Ok(row) if matches!(row.completion_status.as_str(), "accepted" | "failed" | "stopped")
-            );
-            if settled && settled_at.is_none() {
-                settled_at = Some(tokio::time::Instant::now());
+            let ended = provider_ended.get();
+            if ended && ended_at.is_none() {
+                ended_at = Some(tokio::time::Instant::now());
             }
             let drained = match runtime
                 .approval_events(thread.id.value(), interaction.id.value(), cursor)
@@ -3272,28 +3300,15 @@ fn spawn_recursive_approval_observer(
                     .await
                     {
                         Ok(()) => {
-                            persistence_failures = 0;
+                            failures = 0;
                             cursor == 0 && empty
                         }
                         Err(error) => {
-                            persistence_failures += 1;
-                            if persistence_failures >= PERSISTENCE_FAILURE_LIMIT {
+                            failures = failures.saturating_add(1);
+                            if failures == OBSERVATION_FAILURE_LIMIT {
                                 eprintln!(
                                     "recursive completion {completion_id} approvals could not be recorded: {error}"
                                 );
-                                // A request nobody can see must not hold the child. Fail the
-                                // graph first, as a stop does, then end the run.
-                                let _ = runtime
-                                    .fail_graph_completion(
-                                        completion_id,
-                                        &format!("recursive-approval-failed:{}", interaction.id),
-                                        "approval_observation_failed",
-                                    )
-                                    .await;
-                                let _ = runtime
-                                    .cancel_invoked_completion(thread.id.value(), completion_id)
-                                    .await;
-                                return;
                             }
                             false
                         }
@@ -3302,20 +3317,61 @@ fn spawn_recursive_approval_observer(
                 // The live session is gone, so nothing more can be requested.
                 Err(RuntimeError::Remote { status: 404, .. }) => true,
                 Err(error) => {
-                    eprintln!(
-                        "recursive completion {completion_id} approvals could not be read: {error}"
-                    );
+                    failures = failures.saturating_add(1);
+                    if failures == OBSERVATION_FAILURE_LIMIT {
+                        eprintln!(
+                            "recursive completion {completion_id} approvals could not be read: {error}"
+                        );
+                    }
                     false
                 }
             };
-            if settled
-                && (drained || settled_at.is_some_and(|at| at.elapsed() >= DRAIN_AFTER_SETTLEMENT))
+            failing |= failures >= OBSERVATION_FAILURE_LIMIT;
+            if failing && !ended {
+                fail_closed_recursive_approvals(runtime, &thread, &interaction, completion_id)
+                    .await;
+            }
+            if ended
+                && (drained || ended_at.is_some_and(|at| at.elapsed() >= DRAIN_AFTER_PROVIDER_END))
             {
                 return;
             }
             tokio::time::sleep(std::time::Duration::from_millis(100)).await;
         }
     });
+}
+
+/// One pass of the approval observer's fail-closed policy: fail the child's graph while it is
+/// still active, then cancel its provider. Either call can fail transiently, so the observer
+/// repeats this pass until the host confirms the provider ended.
+async fn fail_closed_recursive_approvals(
+    runtime: &crate::runtime::RuntimeClient,
+    thread: &Thread,
+    interaction: &Interaction,
+    completion_id: i64,
+) {
+    let active = runtime
+        .completion_current(completion_id)
+        .await
+        .map_or(true, |current| {
+            current.lifecycle == relayer_graph_core::CompletionLifecycle::Active
+        });
+    if active
+        && let Err(error) = runtime
+            .fail_graph_completion(
+                completion_id,
+                &format!("recursive-approval-failed:{}", interaction.id),
+                "approval_observation_failed",
+            )
+            .await
+    {
+        eprintln!(
+            "recursive completion {completion_id} approval failure could not terminalize graph state: {error}"
+        );
+    }
+    let _ = runtime
+        .cancel_invoked_completion(thread.id.value(), completion_id)
+        .await;
 }
 
 fn spawn_recursive_completion_observers(
@@ -3332,11 +3388,14 @@ fn spawn_recursive_completion_observers(
     let semantic_interaction = interaction.clone();
     let semantic_prepared = prepared.clone();
     let completion_id = prepared.graph_node_id;
+    let provider_ended = ProviderEnded::default();
+    let provider_end_signal = ProviderEndSignal(provider_ended.clone());
     spawn_recursive_approval_observer(
         state.clone(),
         thread.clone(),
         interaction.clone(),
         completion_id,
+        provider_ended,
     );
     let semantic_origin_digest = permission_origin_digest.clone();
     let supervision = semantic_state
@@ -3446,6 +3505,7 @@ fn spawn_recursive_completion_observers(
             PROVIDER_END_RETRY_STEP,
         )
         .await;
+        drop(provider_end_signal);
         // Nothing else will end a current whose provider is gone, so this retries until
         // the current is terminal.
         loop {

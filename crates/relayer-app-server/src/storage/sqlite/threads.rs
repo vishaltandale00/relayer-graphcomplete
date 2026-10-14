@@ -14,9 +14,11 @@ const THREAD_COLUMNS: &str = r#"
                 -- The thread's turns. Runs from invoke actions run beside the message turns,
                 -- so the most urgent active turn wins over the latest one. A turn a model
                 -- failure returned to unsent is not running. An agent's child never makes the
-                -- thread running, but its approval request is the user's to answer.
+                -- thread running, but its approval request is the user's to answer, even
+                -- after its graph settled.
                 SELECT i.sequence,i.completion_status,
                        EXISTS(SELECT 1 FROM action_invocations child WHERE child.result_interaction_id=i.id AND child.agent_invoked=1) AS agent_child,
+                       EXISTS(SELECT 1 FROM approval_requests request LEFT JOIN approval_resolutions resolution ON resolution.request_id=request.request_id WHERE request.interaction_id=i.id AND resolution.request_id IS NULL) AS approval_pending,
                        i.completion_status IN ('not_started','running','submitted','waiting_for_approval')
                          AND NOT (i.completion_status='not_started' AND (SELECT a.outcome FROM interaction_attempts a WHERE a.interaction_id=i.id ORDER BY a.attempt_number DESC LIMIT 1) IS 'model_failed') AS active,
                        EXISTS(SELECT 1 FROM interaction_stop_requests stop WHERE stop.interaction_id=i.id AND stop.error IS NULL) AS stopping
@@ -24,7 +26,8 @@ const THREAD_COLUMNS: &str = r#"
                 WHERE i.thread_id=t.id
             )
             SELECT CASE
-                WHEN EXISTS(SELECT 1 FROM turn WHERE active AND NOT stopping AND completion_status='waiting_for_approval') THEN 'needs_approval'
+                WHEN EXISTS(SELECT 1 FROM turn WHERE active AND NOT stopping AND completion_status='waiting_for_approval')
+                  OR EXISTS(SELECT 1 FROM turn WHERE agent_child AND approval_pending) THEN 'needs_approval'
                 WHEN EXISTS(SELECT 1 FROM turn WHERE active AND stopping AND NOT agent_child) THEN 'stopping'
                 WHEN EXISTS(SELECT 1 FROM turn WHERE active AND NOT agent_child) THEN 'running'
                 WHEN (SELECT completion_status FROM turn WHERE NOT agent_child ORDER BY sequence DESC LIMIT 1)='failed' THEN 'failed'

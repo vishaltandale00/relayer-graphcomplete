@@ -3999,6 +3999,7 @@ async fn app_server_failure_reasons_are_canonical() {
         "provider_start_failed",
         "provider_attachment_persist_failed",
         "graph_observation_failed",
+        "approval_observation_failed",
         "capability_activation_failed",
         "preparation_failed",
     ] {

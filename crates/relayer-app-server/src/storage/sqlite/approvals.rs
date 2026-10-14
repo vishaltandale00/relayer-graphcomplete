@@ -65,6 +65,16 @@ impl SqliteProductStore {
                 .bind(request.correlation.interaction_id)
                 .fetch_one(&mut *transaction)
                 .await?;
+        // An agent's child can settle on its graph before its provider turn ends, and the
+        // provider can still ask for approval then. The request stays answerable on the
+        // child's row, whose settled state belongs to its graph and is left unchanged.
+        let settled_agent_child = matches!(status.as_str(), "accepted" | "failed" | "stopped")
+            && sqlx::query_scalar::<_, bool>(
+                "SELECT EXISTS(SELECT 1 FROM action_invocations WHERE result_interaction_id=?1 AND agent_invoked=1)",
+            )
+            .bind(request.correlation.interaction_id)
+            .fetch_one(&mut *transaction)
+            .await?;
         if status == "running" {
             sqlx::query(
                 "UPDATE interactions SET completion_status='waiting_for_approval' WHERE id=?1 AND completion_status='running'",
@@ -72,7 +82,7 @@ impl SqliteProductStore {
             .bind(request.correlation.interaction_id)
             .execute(&mut *transaction)
             .await?;
-        } else if status != "waiting_for_approval" {
+        } else if status != "waiting_for_approval" && !settled_agent_child {
             return Err(StorageError::ApprovalConflict(format!(
                 "interaction {} cannot request approval while {status}",
                 request.correlation.interaction_id
