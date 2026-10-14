@@ -805,13 +805,13 @@ mod tests {
             .unwrap();
         assert_eq!(activity(&store, &thread).await, None);
         // Nor is an invoke whose preparation failed before anything ran and waits for Retry.
-        let recoverable = sqlx::query("INSERT INTO interactions(thread_id,sequence,text,created_at,completion_status,permission_profile_id) VALUES (?1,3,'Invoked','3','not_started','ask')")
+        let recoverable = sqlx::query("INSERT INTO interactions(thread_id,sequence,text,created_at,completion_status,permission_profile_id) VALUES (?1,4,'Invoked','4','not_started','ask')")
             .bind(thread.id.value())
             .execute(&store.pool)
             .await
             .unwrap()
             .last_insert_rowid();
-        sqlx::query("INSERT INTO action_invocations(source_interaction_id,action_id,result_interaction_id,created_at,graph_lease_required,authoritative,agent_invoked,invocation_key) VALUES (?1,42,?2,'3',1,1,0,'call-1')")
+        sqlx::query("INSERT INTO action_invocations(source_interaction_id,action_id,result_interaction_id,created_at,graph_lease_required,authoritative,agent_invoked,invocation_key) VALUES (?1,43,?2,'4',1,1,0,'call-1')")
             .bind(thread.root_interaction_id.value())
             .bind(recoverable)
             .execute(&store.pool)
