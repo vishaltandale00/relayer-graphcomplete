@@ -4,7 +4,8 @@ use crate::{
     storage::StorageError,
 };
 
-/// How a Stop request met a run waiting in its node's queue (#718).
+/// How a Stop request met a queued run: one waiting in its node's queue (#718) or for capacity
+/// (#720).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum QueuedStop {
     /// The run was not queued; the Stop is an ordinary request on an active run, or a no-op.
@@ -43,10 +44,11 @@ impl SqliteProductStore {
         // A queued run has not started, and it never will. Starting it claims the same row, so
         // exactly one of the two wins. One the graph has not prepared stops at once. One whose
         // call the graph already prepared settles as a Stop before native execution, which also
-        // stops its graph current (`QueuedStop::SettleBeforeStart`).
+        // stops its graph current (`QueuedStop::SettleBeforeStart`). Either way it leaves the
+        // wait for capacity (#720) as well as its node's queue, and keeps its text.
         let mut transaction = self.pool.begin_with("BEGIN IMMEDIATE").await?;
         let queued: Option<bool> = sqlx::query_scalar(
-            "SELECT EXISTS(SELECT 1 FROM action_invocations WHERE result_interaction_id=i.id AND prepared_graph_node_id IS NOT NULL) FROM interactions i WHERE i.id=?1 AND i.thread_id=?2 AND i.completion_status='queued' AND i.thread_id IN (SELECT id FROM threads WHERE conversation_import_id IS NULL)",
+            "SELECT i.graph_node_id IS NOT NULL OR EXISTS(SELECT 1 FROM action_invocations WHERE result_interaction_id=i.id AND prepared_graph_node_id IS NOT NULL) FROM interactions i WHERE i.id=?1 AND i.thread_id=?2 AND i.completion_status='queued' AND i.thread_id IN (SELECT id FROM threads WHERE conversation_import_id IS NULL)",
         )
         .bind(interaction.value())
         .bind(thread.value())
@@ -58,11 +60,19 @@ impl SqliteProductStore {
                     .bind(interaction.value())
                     .execute(&mut *transaction)
                     .await?;
+                sqlx::query("DELETE FROM run_capacity_waits WHERE interaction_id=?1")
+                    .bind(interaction.value())
+                    .execute(&mut *transaction)
+                    .await?;
                 transaction.commit().await?;
                 return Ok(QueuedStop::Stopped);
             }
             Some(true) => {
                 sqlx::query("UPDATE interactions SET completion_status='submitted',completion_error=NULL WHERE id=?1 AND completion_status='queued'")
+                    .bind(interaction.value())
+                    .execute(&mut *transaction)
+                    .await?;
+                sqlx::query("DELETE FROM run_capacity_waits WHERE interaction_id=?1")
                     .bind(interaction.value())
                     .execute(&mut *transaction)
                     .await?;

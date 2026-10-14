@@ -451,6 +451,12 @@ describe("desktop environment rail", () => {
       .toBe("8:accepted");
     expect(interactionStatusRenderKey({ id: 9, completionStatus: "running" }, "running"))
       .toBe("9:running");
+    // A queued run that leaves its node's queue to wait for capacity (#720) re-renders its pill.
+    const behindNode = { id: 10, completionStatus: "queued", queueReason: "node" };
+    const forCapacity = { ...behindNode, queueReason: "capacity" };
+    expect(viewedInteractionStatus(behindNode)).toBe("queued");
+    expect(viewedInteractionStatus(forCapacity)).toBe("waiting_for_capacity");
+    expect(interactionStatusRenderKey(forCapacity)).not.toBe(interactionStatusRenderKey(behindNode));
   });
 
   it("re-renders the status when the graph lifecycle ends before the product status changes", () => {
@@ -468,6 +474,9 @@ describe("desktop environment rail", () => {
     const state = { interactions: [root, child], actionInvocations: [{ resultInteractionId: "9", agentInvoked: true }] };
     expect(productStopTarget(state, { id: 10 })).toBe(root);
     expect(productStopTarget({ ...state, interactions: [{ ...root, completionStatus: "accepted" }, child] }, { id: 10 })).toBeNull();
+    // A message turn waiting for capacity (#720) is the composer's to remove.
+    const waiting = { ...root, completionStatus: "queued", queueReason: "capacity" };
+    expect(productStopTarget({ ...state, interactions: [waiting, child] }, { id: 10 })).toBe(waiting);
     // A user's own invoke runs beside message turns with its own Stop on its node, so the
     // composer's Stop never targets it.
     const userAction = { ...state, actionInvocations: [{ resultInteractionId: "9", agentInvoked: false }] };
