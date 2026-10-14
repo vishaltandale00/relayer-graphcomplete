@@ -198,6 +198,13 @@ describe("ClaudeBasicHarness", () => {
     expect(prompt).toContain("Your current layer is how you explain the work to the user while doing it.");
     expect(prompt).toContain("read each changed current.currentLayerId with graph.getLayer");
     expect(prompt).toContain("an ordinary Input on your current root layer exposes an explicit Answer control");
+    expect(prompt).toContain("Even byte-identical objects recreated in a fresh client");
+    expect(prompt).toContain("A prose list of unknowns or invented preferences does not obtain that decision");
+    expect(prompt).toContain("finish-published-current");
+    expect(prompt).toContain("skip every phase already accepted by Advance");
+    expect(prompt).not.toContain("Input alone feeds chat");
+    expect(prompt).not.toContain("Standalone Input feeds chat");
+    expect(prompt).toContain("No answer means unresolved");
     expect(prompt).toContain("graph.getLiveAnswers(cursor)");
     expect(prompt).toContain("graph.waitForLiveAnswers(cursor)");
     expect(prompt).toContain("The sealed initial contract remains unchanged");

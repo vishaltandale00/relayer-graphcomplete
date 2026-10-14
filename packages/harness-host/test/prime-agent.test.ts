@@ -38,6 +38,13 @@ describe("PrimeAgentHarness", () => {
         expect(prompt).toContain("read each changed current.current_layer_id with graph.get_layer");
         expect(prompt).toContain("skip Exception values before reading current.current_layer_id");
         expect(prompt).toContain("an ordinary Input on your current root layer exposes an explicit Answer control");
+    expect(prompt).toContain("Even byte-identical objects recreated in a fresh client");
+    expect(prompt).toContain("A prose list of unknowns or invented preferences does not obtain that decision");
+    expect(prompt).toContain("finish-published-current");
+    expect(prompt).toContain("skip every phase already accepted by Advance");
+    expect(prompt).not.toContain("Input alone feeds chat");
+    expect(prompt).not.toContain("Standalone Input feeds chat");
+    expect(prompt).toContain("No answer means unresolved");
         expect(prompt).toContain("graph.get_live_answers(cursor)");
         expect(prompt).toContain("graph.wait_for_live_answers(cursor)");
         expect(prompt).toContain("The sealed initial contract remains unchanged");
@@ -791,11 +798,11 @@ describe("PrimeAgentHarness", () => {
     expectGraphPresentationGuidance(prompts[0]!.text);
     expectGraphAuthoringRules(prompts[0]!.text);
     // The submit call directly follows the sentence that introduces it.
-    expect(prompts[0]!.text).toContain("Finish the root execution only by calling:\n\nawait graph.submit(11)");
+    expect(prompts[0]!.text).toContain("Finish the root execution with a terminal submission (or the published-Current Return alternative above):\n\nawait graph.submit(11)");
     expect(prompts[0]!.text).toContain("exactly one new root navigate action");
     expect(prompts[0]!.text).toContain("add_navigate_action(node, \"View evidence\"");
     expect(prompts[0]!.text).toContain("Keep snapshot and local keys stable");
-    expect(prompts[0]!.text).toContain("rerun the same authoring code with the same client_key values");
+    expect(prompts[0]!.text).toContain("skip every phase already accepted by Advance. Edit and rerun the same authoring code with the same client_key values");
     expect(prompts[0]!.text).toContain("Do not add fake navigation");
     expect(prompts[0]!.text).toContain("await graph.discard_layer(layer)");
     await expect(hostHandlers[0]?.({}, invocation(first))).resolves.toEqual({
@@ -1929,7 +1936,7 @@ describe("PrimeAgentHarness", () => {
     expectGraphAuthoringRules(prompt);
     expect(prompt).toContain("A flat answer is valid");
     expect(prompt).toContain("writer persists drafts");
-    expect(prompt).toContain("final acceptance requires await graph.submit(11)");
+    expect(prompt).toContain("final acceptance requires successful terminal submission: await graph.submit(11)");
     expect(prompt).toContain("await graph.get_node(11)");
     expect(prompt).toContain("await graph.get_neighbors(11)");
     expect(prompt).toContain("ordinary graph.submit(11) automatically fulfills any lease");

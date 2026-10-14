@@ -1,4 +1,4 @@
-import { AUTHORING_REPAIR_GUIDANCE_JS } from "../packages/harness-host/src/implementations/graph-presentation-guidance.ts";
+import { AUTHORING_REPAIR_GUIDANCE_JS, AUTHORING_REPAIR_GUIDANCE_PYTHON, finishPublishedCurrentRecipeJs, FINISH_PUBLISHED_CURRENT_RECIPE_PYTHON, READ_CURRENT_ANSWERS_JS, READ_CURRENT_ANSWERS_PYTHON } from "../packages/harness-host/src/implementations/graph-presentation-guidance.ts";
 import { currentCommunicationAuthoringRecipePython, scopedAuthoringRecipeJs, scopedAuthoringRecipePython } from "../packages/harness-host/dist/implementations/graph-presentation-guidance.js";
 import { pathToFileURL } from "node:url";
 import { spawn } from "node:child_process";
@@ -39,6 +39,91 @@ afterEach(async () => {
 });
 
 describe("replay-safe graph authoring", () => {
+  it.each(["javascript", "python"])("publishes the delivered %s Input, reads empty and delivered replies, and finalizes unchanged Current from a fresh client", async language => {
+    const directory = await mkdtemp(join(tmpdir(), "relayer-current-decision-"));
+    directories.push(directory);
+    const token = "current-decision-control";
+    const server = await startGraphServer(join(directory, "graph.sqlite3"), token, ["--temporal-schema-read", "--temporal-root-current-write"]);
+    processes.push(server.process);
+    const interaction = await controlRequest(server.url, token, "/api/control/interactions", { projectId: 41, threadId: 78, text: "Choose the constraint before planning" });
+    const capability = { url: server.url, token: interaction.graphToken, nodeId: interaction.node.id };
+    const graph = new RelayerGraphClient(capability);
+    const contract = await graph.getContract();
+    const bridge = new PrimeVisualAuthoring();
+    const host = createServer(async (request, response) => {
+      try {
+        const chunks = [];
+        for await (const chunk of request) chunks.push(chunk);
+        const { method, payload } = JSON.parse(Buffer.concat(chunks));
+        const value = method === "relayer.graph.current" ? capability : method === "relayer.graph.visual-authoring" ? await bridge.execute(payload, capability, () => {}, new AbortController().signal) : await submitPrimeLayer(payload, capability, () => {}, new AbortController().signal);
+        response.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify(value));
+      } catch (error) { response.writeHead(500).end(JSON.stringify({ error: error.message })); }
+    });
+    await new Promise(resolve => host.listen(0, "127.0.0.1", resolve));
+    const moduleUrl = pathToFileURL(join(repositoryRoot, "packages/graph-client/dist/index.js")).href;
+    const block = text => text.match(new RegExp("```" + language + "\\n([\\s\\S]*?)\\n```"))[1];
+    const environment = { RELAYER_GRAPH_URL: server.url, RELAYER_GRAPH_TOKEN: interaction.graphToken, RELAYER_NODE_ID: String(interaction.node.id),
+      PYTHONPATH: join(repositoryRoot, "python/relayer-graph/src"), SCOPED_HOST: `http://127.0.0.1:${host.address().port}`, SCOPED_CAPABILITY: JSON.stringify(capability) };
+    const pythonPrelude = SCOPED_PYTHON.split("async def main():")[0].replace("host_request(method, payload)", "host_request(method, payload=None)");
+    const run = code => language === "javascript"
+      ? runRecipeProcess(process.execPath, ["--input-type=module"], code, environment)
+      : runRecipeProcess("python3", ["-c", pythonPrelude + "async def main():\n" + code.split("\n").map(line => "    " + line).join("\n") + "\nasyncio.run(main())"], undefined, environment);
+    try {
+      // Use the exact delivered question fragment in a minimal real draft; root attachment and Advance remain explicit.
+      const publish = language === "javascript" ? `
+import { RelayerGraphClient, html, detailCapability } from ${JSON.stringify(moduleUrl)};
+const graph = RelayerGraphClient.fromEnv();
+const author = graph.authoring("decision-v1");
+const layer = author.layer("question");
+const finding = layer.node("finding", { icon: "info", title: "Choose the constraint", detail: "Your decision changes the plan" });
+const sourceUrl = "https://example.com/evidence";
+${block(AUTHORING_REPAIR_GUIDANCE_JS)}
+layer.layout([[finding, .5, .5]], { edgeShape: "default", defaultNode: finding });
+const written = await author.write(layer);
+await graph.addAction(${interaction.node.id}, { kind: "navigate", relation: "expand", label: "Plan constraints", icon: "info", target: written.rootLayer, clientKey: "root-response" });
+await graph.advanceCurrent(written.rootLayer, 0, "publish-question");
+` : `
+from relayer_graph import GraphSession, html, action_capability
+graph = await GraphSession.current()
+author = graph.authoring("decision-v1")
+layer = author.layer("question")
+finding = layer.node("finding", icon="info", title="Choose the constraint", detail="Your decision changes the plan")
+source_url = "https://example.com/evidence"
+${block(AUTHORING_REPAIR_GUIDANCE_PYTHON)}
+layer.layout([(finding, .5, .5)], edge_shape="default", default_node=finding)
+written = await author.write(layer)
+await graph.add_navigate_action(${interaction.node.id}, "Plan constraints", written.root_layer, relation="expand", client_key="root-response", icon="info")
+await graph.advance_current(written.root_layer, expected_revision=0, operation_key="publish-question")
+`;
+      await run(publish);
+      const current = await graph.getCurrent();
+      const accepted = await graph.getLayer(current.currentLayerId);
+      const question = accepted.actions.find(action => action.kind === "input");
+      expect(question).toMatchObject({ state: "accepted", prompt: "Which constraint should guide the next step?", control: "text" });
+      expect(accepted.nodes[0].authoredDetail.mounts.some(mount => mount.capability.kind === "input" && mount.capability.action.clientKey === question.clientKey)).toBe(true);
+      const read = language === "javascript" ? `import { RelayerGraphClient } from ${JSON.stringify(moduleUrl)};
+const graph = RelayerGraphClient.fromEnv();
+${block(READ_CURRENT_ANSWERS_JS)}
+console.log(JSON.stringify({ decisions: userDecisions, cursor: answerCursor, next: await graph.getLiveAnswers(answerCursor) }));` : `from relayer_graph import GraphSession
+graph = await GraphSession.current()
+${block(READ_CURRENT_ANSWERS_PYTHON)}
+print(json.dumps({"decisions": user_decisions, "cursor": answer_cursor, "next": await graph.get_live_answers(answer_cursor)}))`;
+      const empty = JSON.parse(await run(read));
+      expect(empty).toMatchObject({ decisions: [], cursor: 0, next: { answers: [] } });
+      const page = await graph.getLiveAnswers();
+      const receipt = await controlRequest(server.url, token, `/api/control/interactions/${interaction.node.id}/live-answers`, {
+        threadId: 78, answer: { attemptId: 1, authorityEpoch: page.authorityEpoch, expectedRevision: current.headRevision, operationKey: "answer-constraint",
+          occurrence: { presentingInteractionNodeId: interaction.node.id, presentingLayerId: current.currentLayerId, actionId: question.id }, value: { text: "Twelve nights; step-free transport" } },
+      });
+      const delivered = JSON.parse(await run(read));
+      expect(delivered).toMatchObject({ decisions: [{ question: receipt.question, value: receipt.value }], cursor: receipt.sequence, next: { answers: [] } });
+      expect(await graph.getContract()).toEqual(contract);
+      await run(block(language === "javascript" ? finishPublishedCurrentRecipeJs(moduleUrl) : FINISH_PUBLISHED_CURRENT_RECIPE_PYTHON));
+      const final = await controlRead(server.url, token, `/api/control/interactions/${interaction.node.id}/current`);
+      expect(final).toMatchObject({ lifecycle: "succeeded", currentLayerId: current.currentLayerId, headRevision: current.headRevision + 1 });
+      expect(await controlRead(server.url, token, `/api/control/interactions/${interaction.node.id}/layers/${current.currentLayerId}`)).toEqual(accepted);
+    } finally { await new Promise(resolve => host.close(resolve)); }
+  }, 15_000);
   it("replays stable keys, rejects a duplicate root, discards the retargeted orphan, and submits", async () => {
     const directory = await mkdtemp(join(tmpdir(), "relayer-graph-replay-"));
     directories.push(directory);

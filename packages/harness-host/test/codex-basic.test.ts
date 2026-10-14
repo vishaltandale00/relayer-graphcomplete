@@ -155,6 +155,13 @@ describe("CodexBasicHarness", () => {
       expect(prompt).toContain("Your current layer is how you explain the work to the user while doing it.");
       expect(prompt).toContain("read each changed current.currentLayerId with graph.getLayer");
       expect(prompt).toContain("an ordinary Input on your current root layer exposes an explicit Answer control");
+    expect(prompt).toContain("Even byte-identical objects recreated in a fresh client");
+    expect(prompt).toContain("A prose list of unknowns or invented preferences does not obtain that decision");
+    expect(prompt).toContain("finish-published-current");
+    expect(prompt).toContain("skip every phase already accepted by Advance");
+    expect(prompt).not.toContain("Input alone feeds chat");
+    expect(prompt).not.toContain("Standalone Input feeds chat");
+    expect(prompt).toContain("No answer means unresolved");
       expect(prompt).toContain("graph.getLiveAnswers(cursor)");
       expect(prompt).toContain("graph.waitForLiveAnswers(cursor)");
       expect(prompt).toContain("The sealed initial contract remains unchanged");
@@ -665,8 +672,8 @@ describe("CodexBasicHarness", () => {
         expect(submittedPrompt).toContain("ordinary Codex workspace tools under the configured permission policy");
         expect(submittedPrompt).toContain("LayerLayoutObject takes the placements array, the edge shape and an optional array of edge routes");
         expect(submittedPrompt).toContain("never assign layout.version");
-        // The pinned launcher strips the environment and reads no files, so it keeps whole reruns.
-        expect(submittedPrompt).toContain("edit the same program and rerun it with the same clientKey values");
+        // The pinned launcher repairs remaining drafts from source without replaying accepted phases.
+        expect(submittedPrompt).toContain("skip every phase already accepted by Advance. Edit the remaining program and rerun it with the same clientKey values");
         expect(submittedPrompt).not.toContain("rerunGraphProgram");
         expect(submittedEnvironment.RELAYER_GRAPH_AUTHORING_NODE).toBeUndefined();
       }
@@ -811,7 +818,7 @@ describe("CodexBasicHarness", () => {
     expect(submittedPrompt).toContain("verify that requested workspace effects have actually occurred");
     expect(submittedPrompt).toContain("A flat answer is valid");
     expect(submittedPrompt).toContain("Author in whatever order fits the task");
-    expect(submittedPrompt).toContain("final graph call must be await graph.submit(1)");
+    expect(submittedPrompt).toContain("Finish with await graph.submit(1), or the published-Current Return alternative");
     expect(submittedPrompt).toContain("graph.getNode(1)");
     expect(submittedPrompt).toContain("graph.getNeighbors(1)");
     expect(submittedPrompt).toContain("ordinary graph.submit(1) automatically fulfills any lease");
