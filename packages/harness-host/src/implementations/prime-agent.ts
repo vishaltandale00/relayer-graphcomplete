@@ -7,6 +7,7 @@ import { lstat, mkdir, realpath, stat } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { type GraphCapability } from "@relayer/graph-client";
 import { nativeExecutionHandle, type NativeExecutionHandle } from "../completion-execution.js";
+import { grantsGraphSearch } from "../configuration.js";
 import {
   parseNativeSessionResetReason,
   reportNativeSessionReset,
@@ -1149,7 +1150,7 @@ graph = await GraphSession.current()
 ${PYTHON_GRAPH_API_REFERENCE}
 
 ${currentWorkspaceMechanicsPython()}
-${semanticChildGuidancePython(context)}${graphSearchGuidancePython(this.context.configuration.graphCapabilityProfile?.search === "query-v1")}${draftPreviewGuidancePython(context)}
+${semanticChildGuidancePython(context)}${graphSearchGuidancePython(grantsGraphSearch(this.context.configuration))}${draftPreviewGuidancePython(context)}
 
 The graph scope is supplied by the host for this complete() execution and is inherited by your RLM children. Do not read graph credentials from environment variables or files. Use the scoped recipe above for new drafts; final acceptance requires await graph.submit(${interaction.id}).
 
@@ -1199,7 +1200,7 @@ graph = await GraphSession.current()
 ${PYTHON_GRAPH_API_REFERENCE}
 
 ${currentWorkspaceMechanicsPython()}
-${semanticChildGuidancePython(context)}${graphSearchGuidancePython(this.context.configuration.graphCapabilityProfile?.search === "query-v1")}${draftPreviewGuidancePython(context)}
+${semanticChildGuidancePython(context)}${graphSearchGuidancePython(grantsGraphSearch(this.context.configuration))}${draftPreviewGuidancePython(context)}
 
 The graph scope is supplied by the host for this complete() execution and is inherited by your RLM children. Do not read graph credentials from environment variables or files. Use the scoped recipe above for new drafts; final acceptance requires await graph.submit(${interaction.id}).
 
