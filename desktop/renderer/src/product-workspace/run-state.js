@@ -35,6 +35,17 @@ export function threadActivity(turns = []) {
   return turns.at(-1)?.completionStatus === "failed" ? "failed" : null;
 }
 
+/**
+ * The turns that can still be running: an invoke whose preparation failed before anything ran
+ * waits for its action's Retry, as the app server's thread state also treats it.
+ */
+export function withoutPreparationsAwaitingRetry(turns = [], invocations = []) {
+  const awaitingRetry = new Set(invocations
+    .filter((invocation) => invocation.preparationRecoverable === true)
+    .map((invocation) => String(invocation.resultInteractionId)));
+  return turns.filter((turn) => !awaitingRetry.has(String(turn.id)));
+}
+
 // Node marks (visual redesign b-structure-spec §4): a hollow dashed draft, or the state of the
 // latest child run the node's actions started. Accepted and never-invoked nodes carry no mark.
 export const NODE_RUN_STATE = Object.freeze({

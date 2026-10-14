@@ -1186,11 +1186,14 @@ describe("CodexBasicHarness", () => {
     await harness.complete({
       ...runContext(2, "fresh-token"),
       nativeSession: "fresh",
-      threadHistory: [{ interactionNodeId: 1, message: "Compare the two options", responseLayerId: 9 }],
+      threadHistory: [{ interactionNodeId: 1, responseLayerId: 9 }],
     });
     expect(submissions[0]?.savedThreadId).toBeUndefined();
     expect(submissions[0]?.prompt).toContain("This run starts a fresh session");
-    expect(submissions[0]?.prompt).toContain('"message": "Compare the two options"');
+    expect(submissions[0]?.prompt).toContain('"interactionNodeId": 1');
+    expect(submissions[0]?.prompt).toContain("await graph.getNode(interactionNodeId)");
+    // Pointers only: the turn's message stays in the graph.
+    expect(submissions[0]?.prompt).toContain(JSON.stringify([{ interactionNodeId: 1, responseLayerId: 9 }], null, 2));
     expect(submissions[0]?.prompt).toContain("await graph.getLayer(responseLayerId)");
     expect(harness.state()).toEqual({
       codexThreadId: "root-thread",

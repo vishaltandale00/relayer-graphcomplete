@@ -182,10 +182,12 @@ export interface HarnessTraceSink {
   attach(input: HarnessTraceAttachmentInput): Promise<TraceAttachmentRef>;
 }
 
-/** One accepted earlier interaction of the thread. A fresh native session reads its thread through these. */
+/**
+ * One accepted earlier interaction of the thread, as graph pointers. A fresh native session reads
+ * the turn's message from its interaction node and its answer from its layer.
+ */
 export interface HarnessThreadHistoryEntry {
   readonly interactionNodeId: number;
-  readonly message: string;
   /** The returned layer, read through the graph capability. Absent when the turn returned none. */
   readonly responseLayerId?: number;
 }

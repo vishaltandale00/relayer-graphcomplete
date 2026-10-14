@@ -24,7 +24,9 @@ import {
 } from "./model.js";
 import { createLucideIcon, createRelayerIcon as createSymbolIcon, relayerIconFamily, renderThreadTitle } from "./icons.js";
 import { createImageIcon, imageIconReference } from "./image-icons.js";
-import { NODE_RUN_STATE, nodeActiveRuns, nodeRunState, THREAD_ACTIVITY, threadActivity } from "./run-state.js";
+import { NODE_RUN_STATE, nodeActiveRuns, nodeRunState, THREAD_ACTIVITY, threadActivity,
+  withoutPreparationsAwaitingRetry,
+} from "./run-state.js";
 import { graphLayoutSignature, nodesInReadingOrder, projectLayerNodePositions } from "./graph-layout.js";
 import { graphEdgePath, graphFollowWaypoints, graphLayerCircle, graphRoutedEdgePath, resolveEdgeShape } from "./edge-shapes.js";
 import { renderMarkdown } from "./markdown.js";
@@ -4835,7 +4837,9 @@ export function createProductWorkspace({
     // An invoked run runs beside the message turns: the composer's scopes follow message turns.
     const turns = messageTurns(state, thread);
     const latestInteraction = turns.at(-1);
-    renderThreadStatusSymbol(threadActivity(humanTurns(state, thread)));
+    renderThreadStatusSymbol(threadActivity(
+      withoutPreparationsAwaitingRetry(humanTurns(state, thread), state.actionInvocations || []),
+    ));
     if (inputDraftController && latestInteraction) {
       const statusKey = `${latestInteraction.id}:${latestInteraction.completionStatus || ""}`;
       const priorStatusKey = renderedInputDraftStatusKeys.get(threadId);

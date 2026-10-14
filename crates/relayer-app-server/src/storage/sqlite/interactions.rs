@@ -10,6 +10,10 @@ use crate::storage::{NewInteractionInput, StorageError};
 use sqlx::{Row, SqliteConnection, sqlite::SqliteRow};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+/// The most earlier turns a fresh run is pointed at. Each is a pair of graph ids, so the prompt
+/// stays small however long the thread grows; older turns are found by searching the thread.
+pub(crate) const FRESH_RUN_HISTORY_LIMIT: i64 = 50;
+
 impl SqliteProductStore {
     pub(crate) async fn get_interaction_by_input_identity(
         &self,
@@ -242,31 +246,31 @@ impl SqliteProductStore {
             .transpose()
     }
 
-    /// Thread ?1's accepted human turns created before interaction ?2, in order. An agent's child
-    /// belongs to its parent's work, not to the thread's conversation.
+    /// Thread ?1's latest accepted human turns created before interaction ?2, oldest first, at
+    /// most [`FRESH_RUN_HISTORY_LIMIT`]. Older turns stay in the thread's graph, where the run can
+    /// search for them. An agent's child belongs to its parent's work, not to the conversation.
     pub(crate) async fn accepted_thread_history(
         &self,
         thread_id: ThreadId,
         excluding: InteractionId,
     ) -> Result<Vec<ThreadHistoryEntry>, StorageError> {
-        let rows: Vec<(i64, String, Option<String>)> = sqlx::query_as(
-            "SELECT turn.graph_node_id,turn.text,turn.completion_output_json FROM interactions turn WHERE turn.thread_id=?1 AND turn.sequence<(SELECT sequence FROM interactions WHERE id=?2) AND turn.completion_status='accepted' AND turn.graph_node_id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM action_invocations child WHERE child.result_interaction_id=turn.id AND child.agent_invoked=1) ORDER BY turn.sequence",
+        let mut rows: Vec<(i64, Option<String>)> = sqlx::query_as(
+            "SELECT turn.graph_node_id,turn.completion_output_json FROM interactions turn WHERE turn.thread_id=?1 AND turn.sequence<(SELECT sequence FROM interactions WHERE id=?2) AND turn.completion_status='accepted' AND turn.graph_node_id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM action_invocations child WHERE child.result_interaction_id=turn.id AND child.agent_invoked=1) ORDER BY turn.sequence DESC LIMIT ?3",
         )
         .bind(thread_id.value())
         .bind(excluding.value())
+        .bind(FRESH_RUN_HISTORY_LIMIT)
         .fetch_all(&self.pool)
         .await?;
+        rows.reverse();
         Ok(rows
             .into_iter()
-            .map(
-                |(interaction_node_id, message, output)| ThreadHistoryEntry {
-                    interaction_node_id,
-                    message,
-                    response_layer_id: output
-                        .and_then(|json| serde_json::from_str::<serde_json::Value>(&json).ok())
-                        .and_then(|output| output["rootLayer"]["layer"]["id"].as_i64()),
-                },
-            )
+            .map(|(interaction_node_id, output)| ThreadHistoryEntry {
+                interaction_node_id,
+                response_layer_id: output
+                    .and_then(|json| serde_json::from_str::<serde_json::Value>(&json).ok())
+                    .and_then(|output| output["rootLayer"]["layer"]["id"].as_i64()),
+            })
             .collect())
     }
 
@@ -1701,8 +1705,8 @@ mod tests {
         store.pool.close().await;
     }
 
-    /// A fresh run reads its thread through the accepted human turns, in order, with each turn's
-    /// returned layer. Unfinished turns, the run itself, and an agent's children are not part of
+    /// A fresh run is pointed at its thread's accepted human turns, in order, with each turn's
+    /// returned layer, and reads them through the graph. Unfinished turns, the run itself, and an agent's children are not part of
     /// the thread's conversation.
     #[tokio::test]
     async fn accepted_thread_history_lists_accepted_human_turns_in_order() {
@@ -1780,12 +1784,10 @@ mod tests {
             [
                 ThreadHistoryEntry {
                     interaction_node_id: 701,
-                    message: "Compare the options".into(),
                     response_layer_id: Some(702),
                 },
                 ThreadHistoryEntry {
                     interaction_node_id: 721,
-                    message: "Use the second option".into(),
                     response_layer_id: None,
                 },
             ]
@@ -1795,6 +1797,37 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(without_invoked.len(), 1);
+
+        // However long the thread, a fresh run is pointed at only its latest turns, oldest first.
+        for index in 0..=FRESH_RUN_HISTORY_LIMIT {
+            sqlx::query(
+                "INSERT INTO interactions(thread_id,sequence,text,created_at,completion_status,permission_profile_id,graph_node_id) VALUES (?1,?2,'Later','9','accepted','auto',?3)",
+            )
+            .bind(thread.id.value())
+            .bind(100 + index)
+            .bind(1_000 + index)
+            .execute(&store.pool)
+            .await
+            .unwrap();
+        }
+        let newest = sqlx::query(
+            "INSERT INTO interactions(thread_id,sequence,text,created_at,completion_status,permission_profile_id) VALUES (?1,999,'Newest','9','running','auto')",
+        )
+        .bind(thread.id.value())
+        .execute(&store.pool)
+        .await
+        .unwrap()
+        .last_insert_rowid();
+        let bounded = store
+            .accepted_thread_history(thread.id, InteractionId::from_database(newest))
+            .await
+            .unwrap();
+        assert_eq!(bounded.len(), FRESH_RUN_HISTORY_LIMIT as usize);
+        assert_eq!(bounded[0].interaction_node_id, 1_001);
+        assert_eq!(
+            bounded.last().unwrap().interaction_node_id,
+            1_000 + FRESH_RUN_HISTORY_LIMIT
+        );
         store.pool.close().await;
     }
 

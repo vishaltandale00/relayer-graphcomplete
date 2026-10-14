@@ -15,7 +15,7 @@ Both ran on commit `7eb6d8d08566af5b5c152c92ab0572b6248f60b1` with a clean works
 | Traces complete | Every run's candidate trace is complete, not truncated, with full prompt coverage. |
 | All accepted | All three runs were accepted. |
 | Invoked runs fresh | Both invoke prompts carry the fresh-session history block. |
-| History reached them | Both invoke prompts contain the first turn's message. |
+| History reached them | Both invoke prompts contain the first turn's message. This record predates ids-only history; the script now checks for the first turn's interaction node id. |
 | Message resumed | The message's complete prompt has no history block: it resumed the thread's native session. |
 
 Other coverage features, such as reasoning summaries and tool calls, are not all `full` for this provider (`coverageComplete: false`). The checks above read only the prompt.

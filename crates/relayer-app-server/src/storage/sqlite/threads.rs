@@ -3,7 +3,8 @@ use crate::product::{InteractionId, ProjectId, Thread, ThreadId, ValidateModelSe
 use crate::storage::{NewThreadRecord, StorageError};
 use sqlx::{Row, SqliteConnection, sqlite::SqliteRow};
 
-const THREAD_COLUMNS: &str = r#"
+const THREAD_COLUMNS: &str = concat!(
+    r#"
     SELECT t.id,t.title,t.project_id,t.created_at,t.updated_at,
            t.harness_configuration_name,
            t.permission_profile_id,
@@ -13,10 +14,14 @@ const THREAD_COLUMNS: &str = r#"
            (WITH turn AS (
                 -- The thread's human turns. Runs from invoke actions run beside the message
                 -- turns, so the most urgent active turn wins over the latest one. A turn a
-                -- model failure returned to unsent is not running.
+                -- model failure returned to unsent is not running, nor is a preparation that
+                -- waits for its action's Retry.
                 SELECT i.sequence,i.completion_status,
                        i.completion_status IN ('not_started','running','submitted','waiting_for_approval')
-                         AND NOT (i.completion_status='not_started' AND (SELECT a.outcome FROM interaction_attempts a WHERE a.interaction_id=i.id ORDER BY a.attempt_number DESC LIMIT 1) IS 'model_failed') AS active,
+                         AND NOT (i.completion_status='not_started' AND (SELECT a.outcome FROM interaction_attempts a WHERE a.interaction_id=i.id ORDER BY a.attempt_number DESC LIMIT 1) IS 'model_failed')
+                         AND NOT "#,
+    recoverable_user_preparation!("i.id"),
+    r#" AS active,
                        EXISTS(SELECT 1 FROM interaction_stop_requests stop WHERE stop.interaction_id=i.id AND stop.error IS NULL) AS stopping
                 FROM interactions i
                 WHERE i.thread_id=t.id
@@ -30,7 +35,8 @@ const THREAD_COLUMNS: &str = r#"
             END)
  ,t.archived_at, (SELECT busy FROM thread_archive_activity WHERE id=t.id)
     FROM threads t
-"#;
+"#
+);
 
 const VISIBLE_THREAD: &str = "t.surface='conversation' AND (t.conversation_import_id IS NULL OR EXISTS(SELECT 1 FROM conversation_imports ci WHERE ci.id=t.conversation_import_id AND ci.state='published'))";
 
@@ -761,5 +767,37 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(activity(&store, &thread).await, None);
+        // Nor is an invoke whose preparation failed before anything ran and waits for Retry.
+        let recoverable = sqlx::query("INSERT INTO interactions(thread_id,sequence,text,created_at,completion_status,permission_profile_id) VALUES (?1,3,'Invoked','3','not_started','ask')")
+            .bind(thread.id.value())
+            .execute(&store.pool)
+            .await
+            .unwrap()
+            .last_insert_rowid();
+        sqlx::query("INSERT INTO action_invocations(source_interaction_id,action_id,result_interaction_id,created_at,graph_lease_required,authoritative,agent_invoked,invocation_key) VALUES (?1,42,?2,'3',1,1,0,'call-1')")
+            .bind(thread.root_interaction_id.value())
+            .bind(recoverable)
+            .execute(&store.pool)
+            .await
+            .unwrap();
+        sqlx::query("INSERT INTO invocation_input_submission_receipts(result_interaction_id,input_draft_revision,attachments_json) VALUES (?1,0,'[]')")
+            .bind(recoverable)
+            .execute(&store.pool)
+            .await
+            .unwrap();
+        assert!(
+            store
+                .user_invocation_preparation_recoverable(InteractionId::from_database(recoverable))
+                .await
+                .unwrap()
+        );
+        assert_eq!(activity(&store, &thread).await, None);
+        // Once the preparation is bound to a graph node it is running, not waiting for Retry.
+        sqlx::query("UPDATE interactions SET graph_node_id=900 WHERE id=?1")
+            .bind(recoverable)
+            .execute(&store.pool)
+            .await
+            .unwrap();
+        assert_eq!(activity(&store, &thread).await.as_deref(), Some("running"));
     }
 }

@@ -35,10 +35,11 @@ export const INVOCATION_PUBLICATION_GUIDANCE = `Before executing or waiting for 
  */
 export function renderThreadHistory(context: HarnessRunContext | undefined, language: "javascript" | "python"): string {
   if (context?.nativeSession !== "fresh") return "";
+  const readNode = language === "javascript" ? "await graph.getNode(interactionNodeId)" : "await graph.get_node(interaction_node_id)";
   const readLayer = language === "javascript" ? "await graph.getLayer(responseLayerId)" : "await graph.get_layer(response_layer_id)";
   return `
-This run starts a fresh session. It has no memory of earlier turns in this thread; the thread's accepted interactions, oldest first, are:
+This run starts a fresh session. It has no memory of earlier turns in this thread; they are in the thread's graph. The thread's latest accepted interactions, oldest first, are:
 ${JSON.stringify(context.threadHistory ?? [], null, 2)}
-Read an earlier answer with ${readLayer}, or search the thread. Other runs in this thread can be working at the same time. Their work becomes readable once they advance or return it.
+Read a turn's message with ${readNode} and its answer with ${readLayer}. Search the thread for older turns. Other runs in this thread can be working at the same time. Their work becomes readable once they advance or return it.
 `;
 }

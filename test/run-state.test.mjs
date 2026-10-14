@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { interactionActivity, nodeActiveRuns, nodeRunState, threadActivity } from "../desktop/renderer/src/product-workspace/run-state.js";
+import { interactionActivity, nodeActiveRuns, nodeRunState, threadActivity, withoutPreparationsAwaitingRetry } from "../desktop/renderer/src/product-workspace/run-state.js";
 
 describe("explicit run-state symbols", () => {
   it("derives a thread's symbol from its latest interaction like the app server does", () => {
@@ -71,5 +71,13 @@ describe("explicit run-state symbols", () => {
     expect(nodeActiveRuns(node, actions, [invocation(11, 6, "not_started")], [run(6, "not_started")])).toEqual([]);
     expect(nodeActiveRuns(node, actions, [{ ...invocation(11, 6, "submitted"), preparationRecoverable: true }], [run(6, "submitted")])).toEqual([]);
     expect(nodeRunState(node, actions, [{ ...invocation(11, 6, "not_started"), preparationRecoverable: true }], [run(6, "not_started")])).toBeNull();
+  });
+
+  it("never shows an invoke waiting for its preparation's Retry as running", () => {
+    const turns = [{ id: 1, completionStatus: "accepted" }, { id: 2, completionStatus: "not_started" }];
+    const invocations = [{ resultInteractionId: 2, preparationRecoverable: true }];
+    expect(threadActivity(turns)).toBe("running");
+    expect(threadActivity(withoutPreparationsAwaitingRetry(turns, invocations))).toBeNull();
+    expect(threadActivity(withoutPreparationsAwaitingRetry(turns, [{ resultInteractionId: 2 }]))).toBe("running");
   });
 });
