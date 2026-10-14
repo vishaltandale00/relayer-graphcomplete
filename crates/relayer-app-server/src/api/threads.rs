@@ -3,6 +3,7 @@ use super::{
     auth::{authorize_read, authorize_write},
     error::ApiError,
     node_runs::{Arrival, NodeAdmission},
+    run_capacity::CapacityAdmission,
     types::{
         ActionInvocationResponse, InteractionResponse, ThreadDetailResponse, ThreadResponse,
         ThreadViewResponse,
@@ -1344,55 +1345,116 @@ pub(super) async fn retry_interaction(
         let thread = thread.clone();
         let execution = interaction.clone();
         tokio::spawn(async move {
-            match prepare_and_claim_interaction(&state, &thread, &execution, true, false).await {
-                Ok(Some(prepared)) => {
-                    state
-                        .interaction_execution
-                        .as_ref()
-                        .expect("runtime-backed interaction execution service")
-                        .execute_prepared_interaction(thread, execution, prepared)
-                        .await;
-                }
-                Ok(None) => {}
+            // A retry is a human-started run, so it waits for a slot under the app's limit
+            // (#720). Its start is already claimed.
+            let run = execution.id;
+            let slot = match wait_for_capacity(&state, run).await {
+                Ok(Some(slot)) => slot,
+                Ok(None) => return,
+                // The retry's own preparation-failure handling applies, so confirmations it
+                // consumed return to its unsent attempt.
                 Err(error) => {
-                    if consumes_context_confirmations {
-                        let selection = execution
-                            .model_selection
-                            .as_ref()
-                            .expect("a retry always has a validated model selection");
-                        match state
-                            .product
-                            .record_pre_execution_model_failure(PreExecutionModelFailure {
-                                interaction_id: execution.id,
-                                harness_name: &thread.harness_configuration_name,
-                                selection,
-                                route: None,
-                                policy: None,
-                                adapter_version: None,
-                                failure_category: "configuration",
-                                error: error.message(),
-                            })
-                            .await
-                        {
-                            Ok(_) => return,
-                            Err(persistence_error) => eprintln!(
-                                "could not preserve retry preparation failure {} as an unsent attempt: {persistence_error}; falling back to a terminal failure",
-                                execution.id,
-                            ),
-                        }
-                    }
-                    record_background_failure(
-                        &state.product,
+                    record_retry_failure(
+                        &state,
                         &thread,
                         &execution,
-                        error.internal_diagnostic(),
+                        ApiError::from(error),
+                        consumes_context_confirmations,
                     )
                     .await;
+                    return;
                 }
-            }
+            };
+            let release_state = state.clone();
+            let retried = tokio::spawn(async move {
+                retry_admitted_interaction(
+                    state,
+                    thread,
+                    execution,
+                    consumes_context_confirmations,
+                )
+                .await;
+            });
+            // The retry has settled, or panicked. Either way its slot is free.
+            let _ = retried.await;
+            release_run_capacity(release_state, slot, run);
         });
     }
     Ok(Json(interaction.into()))
+}
+
+/// Prepares and executes a retried run that holds its capacity slot.
+async fn retry_admitted_interaction(
+    state: ApiState,
+    thread: Thread,
+    execution: Interaction,
+    consumes_context_confirmations: bool,
+) {
+    match prepare_and_claim_interaction(&state, &thread, &execution, true, false).await {
+        Ok(Some(prepared)) => {
+            state
+                .interaction_execution
+                .as_ref()
+                .expect("runtime-backed interaction execution service")
+                .execute_prepared_interaction(thread, execution, prepared)
+                .await;
+        }
+        Ok(None) => {}
+        Err(error) => {
+            record_retry_failure(
+                &state,
+                &thread,
+                &execution,
+                error,
+                consumes_context_confirmations,
+            )
+            .await;
+        }
+    }
+}
+
+/// Records why a retry could not start. A retry that consumed context confirmations returns
+/// to an unsent attempt, so they come back to the composer; otherwise it fails.
+async fn record_retry_failure(
+    state: &ApiState,
+    thread: &Thread,
+    execution: &Interaction,
+    error: ApiError,
+    consumes_context_confirmations: bool,
+) {
+    if consumes_context_confirmations {
+        let selection = execution
+            .model_selection
+            .as_ref()
+            .expect("a retry always has a validated model selection");
+        match state
+            .product
+            .record_pre_execution_model_failure(PreExecutionModelFailure {
+                interaction_id: execution.id,
+                harness_name: &thread.harness_configuration_name,
+                selection,
+                route: None,
+                policy: None,
+                adapter_version: None,
+                failure_category: "configuration",
+                error: error.message(),
+            })
+            .await
+        {
+            Ok(_) => return,
+            Err(persistence_error) => eprintln!(
+                "could not preserve retry preparation failure {} as an unsent attempt: {persistence_error}; falling back to a terminal failure",
+                execution.id,
+            ),
+        }
+    }
+    record_background_failure(
+        &state.product,
+        thread,
+        execution,
+        error.internal_diagnostic(),
+    )
+    .await;
 }
 
 async fn canonical_context_snapshots(
@@ -3096,19 +3158,35 @@ pub(super) async fn stop_interaction(
     ) {
         return Ok(Json(interaction.into()));
     }
-    let queued = state
-        .product
-        .request_interaction_stop(thread_id, interaction_id)
-        .await?;
-    if queued == crate::storage::QueuedStop::SettleBeforeStart {
-        // The graph already prepared this queued run's call. It settles as a Stop before native
-        // execution, outside its node's queue: no provider work starts, and its graph current
-        // stops with it.
-        let settle_state = state.clone();
-        tokio::spawn(async move {
-            settle_queued_stop(settle_state, thread_id, interaction_id).await;
-        });
-    }
+    // The Stop and its hand-off to the capacity wait finish even if the request goes away.
+    let stop_state = state.clone();
+    tokio::spawn(async move {
+        let queued = stop_state
+            .product
+            .request_interaction_stop(thread_id, interaction_id)
+            .await?;
+        if queued != crate::storage::QueuedStop::NotQueued {
+            // A run waiting for capacity (#720) leaves the wait at once, keeping its text. A
+            // run that held its node while it waited frees it once its Stop has settled.
+            stop_state.run_capacity.forget(interaction_id).await;
+        }
+        if queued == crate::storage::QueuedStop::SettleBeforeStart {
+            // The graph already prepared this queued run's call. It settles as a Stop before
+            // native execution, outside its node's queue: no provider work starts, and its graph
+            // current stops with it. It is launched here, with the Stop, so a dropped request
+            // never leaves the Stop without a settlement.
+            let settle_state = stop_state.clone();
+            tokio::spawn(async move {
+                settle_queued_stop(settle_state, thread_id, interaction_id).await;
+            });
+        }
+        Ok::<_, crate::product::ProductError>(queued)
+    })
+    .await
+    .map_err(|error| {
+        eprintln!("stop request did not finish: {error}");
+        ApiError::internal("Stop could not be confirmed. Try again.")
+    })??;
     Ok(Json(
         state.product.get_interaction(interaction_id).await?.into(),
     ))
@@ -3158,11 +3236,14 @@ async fn settle_queued_stop_once(
         .runtime
         .as_ref()
         .ok_or_else(|| "GraphComplete runtime is unavailable".to_owned())?;
+    // A message turn that waited for capacity (#720) may already have its graph interaction,
+    // for example an identified send that startup resumed.
     if let Some(graph_node_id) = state
         .product
         .prepared_invocation_node(interaction_id)
         .await
         .map_err(|error| error.to_string())?
+        .or(interaction.graph_node_id)
         && let Err(error) = runtime
             .stop_graph_completion(graph_node_id, &format!("product-stop:{interaction_id}"))
             .await
@@ -4713,8 +4794,10 @@ fn depart_node_run(state: ApiState, key: NodeRunKey, run: InteractionId, arrival
     tokio::spawn(depart);
 }
 
-/// Starts a run that holds its node. The node is released once the run settles, whatever the
-/// outcome, and the next queued run on it then starts.
+/// Starts a run that holds its node, once it holds a slot under the app's capacity limit
+/// (#720). It holds its node while it waits for a slot, so later runs on the node stay behind
+/// it. The node and the slot are released once the run settles, whatever the outcome, and the
+/// next queued run on the node, and the oldest run waiting for a slot, then start.
 async fn start_held_action_interaction(
     state: &ApiState,
     thread: &Thread,
@@ -4722,10 +4805,122 @@ async fn start_held_action_interaction(
     key: NodeRunKey,
     already_claimed: bool,
 ) -> Result<Interaction, ApiError> {
+    let admitted = async {
+        let claimed = already_claimed
+            || state
+                .product
+                .claim_interaction_preparing(interaction.id)
+                .await?;
+        Ok::<_, crate::product::ProductError>(claimed)
+    }
+    .await;
+    let admitted = match admitted {
+        Ok(claimed) => match admit_with_retry(state, interaction.id).await {
+            Some(admission) => Ok((claimed, admission)),
+            // The storage outage outlasted the retries. The run stays a claimed start, which
+            // invoking its action again or a restart recovers, and its graph call is never
+            // failed under it. Its node passes on.
+            None => {
+                release_node_run(state.clone(), key, interaction.id, false);
+                return state
+                    .product
+                    .get_interaction(interaction.id)
+                    .await
+                    .map_err(Into::into);
+            }
+        },
+        Err(error) => Err(error),
+    };
+    let (claimed, slot) = match admitted {
+        Ok((claimed, CapacityAdmission::Start)) => (claimed, CapacitySlot::Held),
+        Ok((claimed, CapacityAdmission::Uncounted)) => (claimed, CapacitySlot::Uncounted),
+        Ok((claimed, CapacityAdmission::Waiting(grant))) => {
+            let (waiting_state, waiting_thread) = (state.clone(), thread.clone());
+            let waiting = interaction.clone();
+            tokio::spawn(async move {
+                match grant.await {
+                    Ok(()) => {
+                        let _ = run_held_action_interaction(
+                            &waiting_state,
+                            &waiting_thread,
+                            waiting,
+                            key,
+                            claimed,
+                            CapacitySlot::Held,
+                        )
+                        .await;
+                    }
+                    // A Stop removed it from the wait. It keeps its node until that Stop has
+                    // settled, so the next run on the node starts only after it.
+                    Err(_) => release_node_run(waiting_state, key, waiting.id, true),
+                }
+            });
+            return state
+                .product
+                .get_interaction(interaction.id)
+                .await
+                .map_err(Into::into);
+        }
+        // A duplicate delivery of a run that waits for capacity: the first one starts it, and
+        // this delivery's hold on the node ends.
+        Ok((_, CapacityAdmission::AlreadyWaiting)) => {
+            release_node_run(state.clone(), key, interaction.id, false);
+            return state
+                .product
+                .get_interaction(interaction.id)
+                .await
+                .map_err(Into::into);
+        }
+        Err(error) => {
+            let error = ApiError::from(error);
+            record_background_failure(
+                &state.product,
+                thread,
+                &interaction,
+                error.message().to_owned(),
+            )
+            .await;
+            release_node_run(state.clone(), key, interaction.id, false);
+            return Err(error);
+        }
+    };
+    run_held_action_interaction(state, thread, interaction, key, claimed, slot).await
+}
+
+/// Admits a run to the capacity limit, retrying a storage failure with backoff. `None` when the
+/// failure outlasts the retries.
+async fn admit_with_retry(state: &ApiState, run: InteractionId) -> Option<CapacityAdmission> {
+    const ATTEMPTS: u32 = 6;
+    let mut backoff = std::time::Duration::from_millis(100);
+    for attempt in 1..=ATTEMPTS {
+        match state.run_capacity.admit(&state.product, run).await {
+            Ok(admission) => return Some(admission),
+            Err(error) if attempt == ATTEMPTS => {
+                eprintln!("run {run} could not be admitted to the run capacity: {error}");
+            }
+            Err(error) => {
+                eprintln!(
+                    "run {run} could not be admitted to the run capacity; retrying in {backoff:?}: {error}"
+                );
+                tokio::time::sleep(backoff).await;
+                backoff = (backoff * 2).min(std::time::Duration::from_secs(5));
+            }
+        }
+    }
+    None
+}
+
+/// Prepares and executes a run that holds its node and its capacity slot.
+async fn run_held_action_interaction(
+    state: &ApiState,
+    thread: &Thread,
+    interaction: Interaction,
+    key: NodeRunKey,
+    claimed: bool,
+    slot: CapacitySlot,
+) -> Result<Interaction, ApiError> {
     let prepared =
-        match prepare_and_claim_interaction(state, thread, &interaction, already_claimed, false)
-            .await
-        {
+        match prepare_and_claim_interaction(state, thread, &interaction, claimed, false).await {
             Ok(prepared) => prepared,
             Err(error) => {
                 record_background_failure(
@@ -4735,11 +4930,13 @@ async fn start_held_action_interaction(
                     error.message().to_owned(),
                 )
                 .await;
+                release_run_capacity(state.clone(), slot, interaction.id);
                 release_node_run(state.clone(), key, interaction.id, false);
                 return Err(error);
             }
         };
     let Some(prepared) = prepared else {
+        release_run_capacity(state.clone(), slot, interaction.id);
         release_node_run(state.clone(), key, interaction.id, false);
         return state
             .product
@@ -4767,10 +4964,11 @@ async fn start_held_action_interaction(
                 .execute_prepared_interaction(execution_thread, interaction, prepared)
                 .await;
         });
-        // The execution has ended, or panicked. The node passes on once the run's outcome is
-        // saved, whatever it is. A run whose outcome is never saved keeps its node until a
-        // restart, which interrupts it, so no later run starts beside it.
+        // The execution has ended, or panicked. Its slot is free. The node passes on once the
+        // run's outcome is saved, whatever it is. A run whose outcome is never saved keeps its
+        // node until a restart, which interrupts it, so no later run starts beside it.
         let _ = execution.await;
+        release_run_capacity(release_state.clone(), slot, run);
         release_node_run(release_state, key, run, true);
     });
     match tokio::time::timeout_at(
@@ -4949,6 +5147,9 @@ fn selected_permission_profile(
     Ok(resolved_id.to_owned())
 }
 
+/// Starts a human-started message turn, or queues it for capacity when every slot of the app's
+/// limit is taken (#720). Its start is claimed first, so a run that waits for capacity waits as
+/// a claimed start and is prepared, when a slot frees, as it would have been at once.
 async fn start_interaction(
     state: &ApiState,
     thread: &Thread,
@@ -4958,8 +5159,161 @@ async fn start_interaction(
     if state.runtime.is_none() {
         return Ok(interaction);
     }
+    // Admission runs to its end even if the request goes away, so a run queued for capacity
+    // always keeps the waiter that starts it.
+    let (owned_state, owned_thread) = (state.clone(), thread.clone());
+    tokio::spawn(async move {
+        admit_and_start_interaction(
+            &owned_state,
+            &owned_thread,
+            interaction,
+            record_deterministic_failure,
+        )
+        .await
+    })
+    .await
+    .map_err(|error| {
+        eprintln!("interaction admission did not finish: {error}");
+        ApiError::internal("Relayer could not start this run.")
+    })?
+}
+
+async fn admit_and_start_interaction(
+    state: &ApiState,
+    thread: &Thread,
+    interaction: Interaction,
+    record_deterministic_failure: bool,
+) -> Result<Interaction, ApiError> {
+    let admitted = async {
+        let claimed = state
+            .product
+            .claim_interaction_preparing(interaction.id)
+            .await?;
+        let admission = state
+            .run_capacity
+            .admit(&state.product, interaction.id)
+            .await?;
+        Ok::<_, crate::product::ProductError>((claimed, admission))
+    }
+    .await;
+    let (claimed, slot) = match admitted {
+        Ok((claimed, CapacityAdmission::Start)) => (claimed, CapacitySlot::Held),
+        Ok((claimed, CapacityAdmission::Uncounted)) => (claimed, CapacitySlot::Uncounted),
+        Ok((claimed, CapacityAdmission::Waiting(grant))) => {
+            let (waiting_state, waiting_thread) = (state.clone(), thread.clone());
+            let waiting = interaction.clone();
+            tokio::spawn(async move {
+                if grant.await.is_err() {
+                    return;
+                }
+                let run = waiting.id;
+                if let Err(error) = start_admitted_interaction(
+                    &waiting_state,
+                    &waiting_thread,
+                    waiting,
+                    claimed,
+                    CapacitySlot::Held,
+                    record_deterministic_failure,
+                )
+                .await
+                {
+                    // Its request returned when it began to wait, so the send's own cleanup
+                    // of an identified input that cannot start runs here instead: its draft is
+                    // preserved and its context confirmations are released.
+                    discard_identified_input_that_cannot_start(
+                        &waiting_state,
+                        run,
+                        &error,
+                        record_deterministic_failure,
+                    )
+                    .await;
+                }
+            });
+            return state
+                .product
+                .get_interaction(interaction.id)
+                .await
+                .map_err(Into::into);
+        }
+        // A duplicate delivery of a run that waits for capacity: the first one starts it.
+        Ok((_, CapacityAdmission::AlreadyWaiting)) => {
+            return state
+                .product
+                .get_interaction(interaction.id)
+                .await
+                .map_err(Into::into);
+        }
+        Err(error) => {
+            let error = ApiError::from(error);
+            if record_deterministic_failure || !error.is_deterministic_input_failure() {
+                record_background_failure(
+                    &state.product,
+                    thread,
+                    &interaction,
+                    error.internal_diagnostic(),
+                )
+                .await;
+            }
+            return Err(error);
+        }
+    };
+    start_admitted_interaction(
+        state,
+        thread,
+        interaction,
+        claimed,
+        slot,
+        record_deterministic_failure,
+    )
+    .await
+}
+
+/// The cleanup a send applies when its identified input fails before graph binding, for a
+/// run whose request already returned because it waited for capacity (#720). As for a send
+/// that fails at once, a deterministic failure or one that consumed context confirmations
+/// discards the unbound interaction, which preserves its draft and releases its
+/// confirmations. Other failures stay recorded on the run.
+async fn discard_identified_input_that_cannot_start(
+    state: &ApiState,
+    run: InteractionId,
+    error: &ApiError,
+    record_deterministic_failure: bool,
+) {
+    if record_deterministic_failure {
+        return;
+    }
+    let consumes_context_confirmations = match state
+        .product
+        .interaction_consumes_context_confirmations(run)
+        .await
+    {
+        Ok(consumes) => consumes,
+        Err(failure) => {
+            eprintln!(
+                "could not inspect waiting interaction {run} confirmation ownership: {failure}"
+            );
+            false
+        }
+    };
+    if (error.is_deterministic_input_failure() || consumes_context_confirmations)
+        && let Err(cleanup) = state.product.discard_unbound_interaction_input(run).await
+    {
+        eprintln!("could not discard waiting interaction {run} that could not start: {cleanup}");
+    }
+}
+
+/// Prepares and executes a message turn admitted under the capacity limit. Its slot is
+/// released once the run settles, whatever the outcome, or when it cannot start.
+async fn start_admitted_interaction(
+    state: &ApiState,
+    thread: &Thread,
+    interaction: Interaction,
+    claimed: bool,
+    slot: CapacitySlot,
+    record_deterministic_failure: bool,
+) -> Result<Interaction, ApiError> {
     let prepared =
-        match prepare_and_claim_interaction(state, thread, &interaction, false, false).await {
+        match prepare_and_claim_interaction(state, thread, &interaction, claimed, false).await {
             Ok(prepared) => prepared,
             Err(error) => {
                 if record_deterministic_failure || !error.is_deterministic_input_failure() {
@@ -4971,28 +5325,86 @@ async fn start_interaction(
                     )
                     .await;
                 }
+                release_run_capacity(state.clone(), slot, interaction.id);
                 return Err(error);
             }
         };
     let Some(prepared) = prepared else {
+        release_run_capacity(state.clone(), slot, interaction.id);
         return state
             .product
             .get_interaction(interaction.id)
             .await
             .map_err(Into::into);
     };
-    let running = state.product.get_interaction(interaction.id).await?;
-    let state = state.clone();
+    let running = match state.product.get_interaction(interaction.id).await {
+        Ok(running) => running,
+        Err(error) => {
+            release_run_capacity(state.clone(), slot, interaction.id);
+            return Err(error.into());
+        }
+    };
+    let execution_state = state.clone();
+    let release_state = state.clone();
     let thread = thread.clone();
+    let run = interaction.id;
     tokio::spawn(async move {
-        state
-            .interaction_execution
-            .as_ref()
-            .expect("runtime-backed interaction execution service")
-            .execute_prepared_interaction(thread, interaction, prepared)
-            .await;
+        let execution = tokio::spawn(async move {
+            execution_state
+                .interaction_execution
+                .as_ref()
+                .expect("runtime-backed interaction execution service")
+                .execute_prepared_interaction(thread, interaction, prepared)
+                .await;
+        });
+        // The execution has settled the run, or panicked. Either way its slot is free.
+        let _ = execution.await;
+        release_run_capacity(release_state, slot, run);
     });
     Ok(running)
+}
+
+/// A human-started run's place under the app's capacity limit (#720).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CapacitySlot {
+    /// The run holds a slot, which it releases once it settles.
+    Held,
+    /// The run carries a Stop, so it settles without provider work and holds no slot.
+    Uncounted,
+}
+
+/// Admits a human-started run that starts in the background, waiting here for a slot when every
+/// slot is taken. `None` when it left the wait, for example because a Stop removed it, or when
+/// a duplicate delivery of it already waits.
+async fn wait_for_capacity(
+    state: &ApiState,
+    run: InteractionId,
+) -> Result<Option<CapacitySlot>, crate::product::ProductError> {
+    Ok(match state.run_capacity.admit(&state.product, run).await? {
+        CapacityAdmission::Start => Some(CapacitySlot::Held),
+        CapacityAdmission::Uncounted => Some(CapacitySlot::Uncounted),
+        CapacityAdmission::Waiting(grant) => grant.await.ok().map(|()| CapacitySlot::Held),
+        CapacityAdmission::AlreadyWaiting => None,
+    })
+}
+
+/// A settled run frees its capacity slot, and the oldest run waiting for one starts (#720). A
+/// storage failure keeps the settled run's slot, so the limit holds, and the release is retried
+/// with capped backoff until the slot passes on or frees.
+fn release_run_capacity(state: ApiState, slot: CapacitySlot, run: InteractionId) {
+    if slot == CapacitySlot::Uncounted {
+        return;
+    }
+    tokio::spawn(async move {
+        let mut backoff = std::time::Duration::from_millis(100);
+        while let Err(error) = state.run_capacity.release(&state.product, run).await {
+            eprintln!(
+                "run capacity could not pass run {run}'s slot on; retrying in {backoff:?}: {error}"
+            );
+            tokio::time::sleep(backoff).await;
+            backoff = (backoff * 2).min(std::time::Duration::from_secs(30));
+        }
+    });
 }
 
 /// Existing folder scopes must remain available; only no-folder workspaces are created.
@@ -5916,6 +6328,7 @@ mod tests {
             completion_observations: CompletionObservations::default(),
             running_child_providers: Default::default(),
             node_runs: Default::default(),
+            run_capacity: Default::default(),
         };
         BrokerFixture {
             state,
@@ -6009,6 +6422,144 @@ mod tests {
             tokio::time::sleep(std::time::Duration::from_millis(10)).await;
         }
         assert_eq!(fixture.transition_refusals.load(Ordering::SeqCst), 0);
+        fixture.finish();
+    }
+
+    /// PAR-011 (#720), on the held path: a duplicate delivery of a run that holds its node
+    /// while it waits for capacity joins the wait and ends its own hold on the node. When a
+    /// Stop removes the run, its node frees once the Stop has settled.
+    #[tokio::test]
+    async fn a_duplicate_delivery_of_a_run_waiting_for_capacity_joins_the_wait() {
+        let mut fixture = broker_fixture("duplicate-capacity-wait", "active").await;
+        fixture.state.run_capacity = crate::api::RunCapacity::new(1);
+        // The root, a human-started run, holds the only slot.
+        assert!(matches!(
+            fixture
+                .state
+                .run_capacity
+                .admit(&fixture.product, fixture.thread.root_interaction_id)
+                .await
+                .unwrap(),
+            CapacityAdmission::Start
+        ));
+        let run = fixture
+            .product
+            .create_interaction(fixture.thread.id, "Invoked again", None, true)
+            .await
+            .unwrap();
+        fixture.product.record_node_run(run.id, 7).await.unwrap();
+        let key = fixture.product.node_run_key(run.id).await.unwrap().unwrap();
+        // Two deliveries of the run both hold its node.
+        for _ in 0..2 {
+            assert_eq!(
+                fixture
+                    .state
+                    .node_runs
+                    .admit(&fixture.product, key, run.id, run.sequence, None)
+                    .await
+                    .unwrap(),
+                NodeAdmission::Start
+            );
+        }
+        for _ in 0..2 {
+            let waiting = start_held_action_interaction(
+                &fixture.state,
+                &fixture.thread,
+                run.clone(),
+                key,
+                false,
+            )
+            .await
+            .unwrap_or_else(|error| panic!("admission failed: {}", error.message()));
+            assert_eq!(waiting.completion_status, "queued");
+            assert!(waiting.waiting_for_capacity);
+        }
+        // The graph already prepared its call, so its Stop settles before native work. It keeps
+        // its node until that settlement ends it.
+        let pool = sqlx::SqlitePool::connect(&format!(
+            "sqlite://{}",
+            fixture._root.path().join("product.sqlite3").display()
+        ))
+        .await
+        .unwrap();
+        sqlx::query("UPDATE interactions SET graph_node_id=904 WHERE id=?1")
+            .bind(run.id.value())
+            .execute(&pool)
+            .await
+            .unwrap();
+        assert_eq!(
+            fixture
+                .product
+                .request_interaction_stop(fixture.thread.id, run.id)
+                .await
+                .unwrap(),
+            crate::storage::QueuedStop::SettleBeforeStart
+        );
+        fixture.state.run_capacity.forget(run.id).await;
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+        assert_eq!(
+            fixture.state.node_runs.holder(key).await,
+            Some(run.id),
+            "a removed run passed its node on before its Stop settled"
+        );
+        sqlx::query("UPDATE interactions SET completion_status='stopped' WHERE id=?1")
+            .bind(run.id.value())
+            .execute(&pool)
+            .await
+            .unwrap();
+        pool.close().await;
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+        while fixture.state.node_runs.holder(key).await.is_some() {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "a removed run kept its node"
+            );
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+        assert_eq!(
+            fixture
+                .product
+                .get_interaction(run.id)
+                .await
+                .unwrap()
+                .completion_status,
+            "stopped"
+        );
+        fixture.finish();
+    }
+
+    /// PAR-013 (#720): a child an agent invokes never asks for a slot under the app's limit on
+    /// human-started runs. With every slot taken, the child still starts, and it holds none.
+    #[tokio::test]
+    async fn an_agent_child_starts_while_human_started_runs_fill_the_capacity() {
+        let mut fixture = broker_fixture("child-beside-full-capacity", "active").await;
+        fixture.state.run_capacity = crate::api::RunCapacity::new(1);
+        // The parent, a human-started run, holds the only slot.
+        let parent = fixture.thread.root_interaction_id;
+        assert!(matches!(
+            fixture
+                .state
+                .run_capacity
+                .admit(&fixture.product, parent)
+                .await
+                .unwrap(),
+            CapacityAdmission::Start
+        ));
+        let (status, _) = complete_prepared_child(
+            State(fixture.state.clone()),
+            fixture.headers.clone(),
+            Json(CompletePreparedChildRequest {
+                interaction_node: 202,
+            }),
+        )
+        .await
+        .unwrap_or_else(|error| panic!("the child waited for capacity: {}", error.message()));
+        assert!(status.is_success());
+        assert_eq!(fixture.starts.load(Ordering::SeqCst), 1);
+        assert_eq!(
+            fixture.state.run_capacity.executing_for_test().await,
+            [parent]
+        );
         fixture.finish();
     }
 

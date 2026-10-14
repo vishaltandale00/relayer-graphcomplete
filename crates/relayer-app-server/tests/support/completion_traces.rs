@@ -984,6 +984,7 @@ impl World {
             completion_observations: CompletionObservations::default(),
             running_child_providers: Default::default(),
             node_runs: Default::default(),
+            run_capacity: Default::default(),
         };
         let seeded = if bound {
             // Prepared and bound exactly as complete_prepared_child prepares it.

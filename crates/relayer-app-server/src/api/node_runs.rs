@@ -340,7 +340,7 @@ impl NodeRunQueue {
     }
 
     #[cfg(test)]
-    async fn holder(&self, key: NodeRunKey) -> Option<InteractionId> {
+    pub(crate) async fn holder(&self, key: NodeRunKey) -> Option<InteractionId> {
         self.nodes
             .lock()
             .await

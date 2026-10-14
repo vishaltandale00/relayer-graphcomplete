@@ -3236,12 +3236,15 @@ async fn retire_absent_product_harness(
     .await?;
     // Identified sends and authoritative invoke results have durable replay identities. An
     // interrupted preparation may therefore be rebound to the same graph interaction under the
-    // replacement product harness. A bound run waiting in its node's queue (#718) is unfinished
-    // too, and is rebound the same way. Clear only that unfinished mutable binding; accepted rows and
-    // immutable attempt receipts continue to describe the harness that actually executed.
+    // replacement product harness. A bound run waiting in a queue, for its node (#718) or for
+    // capacity (#720), is unfinished too: its binding is cleared the same way and it keeps
+    // waiting, then is prepared on the new binding when it starts. Clear only that unfinished
+    // mutable binding; accepted rows and immutable attempt receipts continue to describe the
+    // harness that actually executed.
     sqlx::query(
         "UPDATE interactions
-         SET graph_node_id=NULL,completion_status='submitted',
+         SET graph_node_id=NULL,
+             completion_status=CASE WHEN completion_status='queued' THEN 'queued' ELSE 'submitted' END,
              harness_configuration_name=?1,harness_configuration_digest=NULL,
              effective_execution_digest=NULL,effective_permission_receipt_json=NULL,
              completion_output_json=NULL,completion_error=NULL

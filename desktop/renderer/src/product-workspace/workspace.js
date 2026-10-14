@@ -447,7 +447,19 @@ export { humanTurns, messageTurns, workspaceTurns } from "./model.js";
 
 /** The composer's Stop: the active message turn. Each invoked run has its own Stop on its node. */
 export function productStopTarget(state, thread) {
-  return messageTurns(state, thread).findLast((turn) => ["submitted", "running", "waiting_for_approval"].includes(turn.completionStatus)) || null;
+  // A message turn waiting for capacity (#720) is the thread's turn too; its Stop removes it.
+  return messageTurns(state, thread).findLast((turn) => ["queued", "submitted", "running", "waiting_for_approval"].includes(turn.completionStatus)) || null;
+}
+
+/**
+ * The status a run shows. A queued run waits behind a run on its node (#718), shown as
+ * `queued`, or for a free slot under the app's limit on human-started runs (#720), shown as
+ * `waiting_for_capacity`. A run on a busy node waits for its node first, then for capacity.
+ */
+export function runViewStatus(run) {
+  return run?.completionStatus === "queued" && run.queueReason === "capacity"
+    ? "waiting_for_capacity"
+    : run?.completionStatus;
 }
 
 export function turnStatusPresentation(status) {
@@ -457,6 +469,8 @@ export function turnStatusPresentation(status) {
   }
   // A run queued behind another on its node (#718) starts once that run settles.
   if (status === "queued") return { kind: "running", label: "Queued" };
+  // A run waiting for capacity (#720) starts once a slot frees, first in, first out.
+  if (status === "waiting_for_capacity") return { kind: "running", label: "Waiting for capacity" };
   if (["not_started", "running", "submitted"].includes(status)) {
     return { kind: "running", label: status === "not_started" ? "Waiting" : "Running" };
   }
@@ -557,12 +571,12 @@ export function viewedInteractionStatus(interaction, fallbackStatus = "idle", te
   }
   return TERMINAL_TEMPORAL_LIFECYCLES.includes(temporalLifecycle)
     ? temporalLifecycle
-    : interaction?.completionStatus || fallbackStatus;
+    : runViewStatus(interaction) || fallbackStatus;
 }
 
 /** Changes whenever the shown status would, including a graph lifecycle ahead of the product status. */
 export function interactionStatusRenderKey(interaction, fallbackStatus = "idle", temporalLifecycle = null) {
-  const key = `${interaction?.id ?? "none"}:${interaction?.completionStatus || fallbackStatus}`;
+  const key = `${interaction?.id ?? "none"}:${runViewStatus(interaction) || fallbackStatus}`;
   if (interaction?.stopRequested) return `${key}:${viewedInteractionStatus(interaction, fallbackStatus, temporalLifecycle)}`;
   return TERMINAL_TEMPORAL_LIFECYCLES.includes(temporalLifecycle) ? `${key}:${temporalLifecycle}` : key;
 }
@@ -3765,7 +3779,6 @@ export function createProductWorkspace({
         const stop = document.createElement("button");
         stop.type = "button";
         stop.className = "node-run-stop";
-        stop.textContent = "Stop";
         stop.onclick = () => { void stopNodeRun(run.id); };
         row.append(status, stop);
       }
@@ -3773,16 +3786,23 @@ export function createProductWorkspace({
       const label = action ? actionPresentation(action).label : null;
       const stopping = pendingStops.has(run.id) || (run.stopRequested && !run.stopError);
       const error = stopErrors.get(run.id) || run.stopError;
+      const viewStatus = runViewStatus(run);
       const phase = error
-        || (stopping ? "Stopping…" : run.completionStatus === "waiting_for_approval" ? "Needs approval"
-          : run.completionStatus === "queued" ? "Queued" : "Running");
+        || (stopping ? "Stopping…" : viewStatus === "waiting_for_approval" ? "Needs approval"
+          : viewStatus === "queued" ? "Queued"
+            : viewStatus === "waiting_for_capacity" ? "Waiting for capacity" : "Running");
       const text = label ? `${label} · ${phase}` : phase;
       const [status, stop] = row.children;
       if (status.textContent !== text) status.textContent = text;
       row.classList.toggle("has-error", Boolean(error));
+      // A run that has not started is taken out of its queue, keeping its text (#721); a
+      // started run is stopped. The status text says which wait it is in.
+      const verb = run.completionStatus === "queued" ? "Remove" : "Stop";
+      if (stop.textContent !== verb) stop.textContent = verb;
+      stop.title = verb === "Remove" ? "Take this run out of the queue. Its text is kept." : "Stop this run";
       stop.disabled = Boolean(stopping);
       stop.setAttribute("aria-busy", String(Boolean(stopping)));
-      stop.setAttribute("aria-label", label ? `Stop ${label}` : "Stop run");
+      stop.setAttribute("aria-label", label ? `${verb} ${label}` : `${verb} run`);
       return row;
     });
     for (const row of existing.values()) if (!rows.includes(row)) row.remove();
@@ -3807,10 +3827,13 @@ export function createProductWorkspace({
     send.classList.toggle("is-stopping", Boolean(stopping));
     send.textContent = run ? "" : "↑";
     send.setAttribute("aria-busy", String(Boolean(stopping)));
-    send.setAttribute("aria-label", run ? (stopping ? "Stopping" : "Stop run") : "Send");
+    // A message turn waiting for capacity (#720) has not started: its Stop removes it.
+    const removes = run?.completionStatus === "queued";
+    send.setAttribute("aria-label", run ? (stopping ? "Stopping" : removes ? "Remove queued message" : "Stop run") : "Send");
     if (run) {
       send.disabled = Boolean(stopping);
-      send.title = stopping ? "Waiting for the run to stop" : "Stop this run";
+      send.title = stopping ? "Waiting for the run to stop"
+        : removes ? "Take this message out of the queue. Its text is kept." : "Stop this run";
       const message = $("#composerRetryMessage");
       const error = stopErrors.get(run.id) || run.stopError;
       if (error) { message.textContent = error; message.classList.remove("hidden"); }
@@ -4532,7 +4555,7 @@ export function createProductWorkspace({
 
     const rows = turns.map((turn, index) => {
       const current = index === turnIndex;
-      const status = turnStatusPresentation(turn.stopRequested && !turn.stopError && PENDING_COMPLETION_STATUSES.has(turn.completionStatus) ? "stopping" : turn.completionStatus);
+      const status = turnStatusPresentation(turn.stopRequested && !turn.stopError && PENDING_COMPLETION_STATUSES.has(turn.completionStatus) ? "stopping" : runViewStatus(turn));
       const row = graphDocument.createElement("button");
       row.type = "button";
       row.className = `turn-option${status && !status.hidden ? ` turn-status-${status.kind}` : ""}`;
@@ -4826,7 +4849,9 @@ export function createProductWorkspace({
     $("#pendingTurnNotice").classList.toggle("hidden", !showPending);
     if (showPending) {
       const pendingInteraction = state.interactions.find((item) => String(item.id) === String(pendingTurn.interactionId));
-      const label = pendingTurn.readyLayer ? "Result ready" : turnStatusPresentation(pendingTurn.status).label;
+      // A pending run that waits for capacity (#720) says so, apart from a node wait.
+      const pendingStatus = runViewStatus({ completionStatus: pendingTurn.status, queueReason: pendingInteraction?.queueReason });
+      const label = pendingTurn.readyLayer ? "Result ready" : turnStatusPresentation(pendingStatus).label;
       $("#pendingTurnText").textContent = `Turn ${pendingInteraction?.sequence ?? ""} · ${label}`;
       $("#openReadyResult").classList.toggle("hidden", !pendingTurn.readyLayer);
     }

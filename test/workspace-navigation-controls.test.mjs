@@ -161,6 +161,7 @@ describe("product workspace navigation controls", () => {
     expect([
       "not_started",
       "queued",
+      "waiting_for_capacity",
       "running",
       "submitted",
       "accepted",
@@ -171,6 +172,7 @@ describe("product workspace navigation controls", () => {
     ].map((status) => turnStatusPresentation(status).label)).toEqual([
       "Waiting",
       "Queued",
+      "Waiting for capacity",
       "Running",
       "Running",
       "",

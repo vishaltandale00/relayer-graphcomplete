@@ -6,6 +6,7 @@ afterEach(() => vi.unstubAllGlobals());
 
 // Invoked runs run beside the message turns (#717): each run's Stop lives on the node it came
 // from, and the composer stays a Send for the next message. Runs on one node run in order (#718).
+// A queued run waits behind its node or for capacity (#720), and its Remove keeps its text (#721).
 it("gives every run invoked from a node its own Stop, kept in place across refreshes", async () => {
   const window = new Window({ url: "http://127.0.0.1:3000" });
   vi.stubGlobal("document", window.document);
@@ -19,15 +20,15 @@ it("gives every run invoked from a node its own Stop, kept in place across refre
   const actions = [action(31, "Plan a week"), action(32, "List pitfalls"), action(33, "Find a mentor")];
   const layer = { layer: { id: 201, nodes: [21], state: "accepted" }, nodes: [node], edges: [], actions };
   const thread = { id: 10, title: "Learning plan", harnessId: "fixture" };
-  const run = (id, completionStatus) => ({ id, threadId: 10, sequence: id, text: "Invoked", completionStatus });
+  const run = (id, completionStatus, queueReason) => ({ id, threadId: 10, sequence: id, text: "Invoked", completionStatus, queueReason });
   const state = {
     status: "accepted", currentInteractionId: 1, capabilities: { stopRuns: true },
     conversationCompatibility: { threadId: 10, status: "unrestricted", harnessId: "fixture" },
     interactions: [
       { id: 1, graphNodeId: 901, threadId: 10, sequence: 1, text: "Compare approaches", completionStatus: "accepted", completionOutput: { rootLayer: layer } },
       run(5, "running"),
-      run(6, "queued"),
-      run(7, "queued"),
+      run(6, "queued", "node"),
+      run(7, "queued", "node"),
     ],
     actionInvocations: [
       { sourceInteractionId: 1, actionId: 31, resultInteractionId: 5, resultCompletionStatus: "running", agentInvoked: false },
@@ -51,9 +52,11 @@ it("gives every run invoked from a node its own Stop, kept in place across refre
     const rows = () => [...bar.querySelectorAll(".node-run-row")];
     expect(bar.classList.contains("hidden")).toBe(false);
     expect(rows().map((row) => row.dataset.interactionId)).toEqual(["5", "6", "7"]);
-    // Runs on one node run in order (#718): the later ones show queued, each with its own Stop.
+    // Runs on one node run in order (#718): the later ones show queued, each with its own Remove.
     expect(rows().map((row) => row.querySelector(".node-run-status").textContent))
       .toEqual(["Plan a week · Running", "List pitfalls · Queued", "Find a mentor · Queued"]);
+    expect(rows().map((row) => row.querySelector(".node-run-stop").textContent)).toEqual(["Stop", "Remove", "Remove"]);
+    expect(rows()[2].querySelector(".node-run-stop").getAttribute("aria-label")).toBe("Remove Find a mentor");
     expect(rows()[2].querySelector(".node-run-stop").disabled).toBe(false);
     // The composer follows message turns: invoked runs leave it a Send.
     expect(window.document.querySelector("#sendInteraction").classList.contains("stop-button")).toBe(false);
@@ -72,9 +75,20 @@ it("gives every run invoked from a node its own Stop, kept in place across refre
     rows()[2].querySelector(".node-run-stop").click();
     await vi.waitFor(() => expect(onStopInteraction).toHaveBeenCalledWith(10, 7));
 
-    // A settled run leaves the bar, and the queued run behind it starts; the rows stay in place.
+    // A settled run leaves the bar, and the run behind it takes the node. Every slot under the
+    // app's limit is taken, so it now waits for capacity, while the last still waits for the node.
     state.interactions[1] = run(5, "accepted");
     state.actionInvocations[0] = { ...state.actionInvocations[0], resultCompletionStatus: "accepted" };
+    state.interactions[2] = run(6, "queued", "capacity");
+    workspace.render();
+    await window.happyDOM.waitUntilComplete();
+    expect(rows().map((row) => row.dataset.interactionId)).toEqual(["6", "7"]);
+    expect(rows()[0].querySelector(".node-run-stop")).toBe(stopSecond);
+    expect(rows().map((row) => row.querySelector(".node-run-status").textContent))
+      .toEqual(["List pitfalls · Waiting for capacity", "Find a mentor · Queued"]);
+    expect(stopSecond.textContent).toBe("Remove");
+
+    // A slot frees, and the run starts; the rows stay in place.
     state.interactions[2] = run(6, "running");
     state.actionInvocations[1] = { ...state.actionInvocations[1], resultCompletionStatus: "running" };
     workspace.render();
@@ -83,6 +97,21 @@ it("gives every run invoked from a node its own Stop, kept in place across refre
     expect(rows()[0].querySelector(".node-run-stop")).toBe(stopSecond);
     expect(rows().map((row) => row.querySelector(".node-run-status").textContent))
       .toEqual(["List pitfalls · Running", "Find a mentor · Queued"]);
+    expect(stopSecond.textContent).toBe("Stop");
+
+    // A message turn waiting for capacity (#720) is the composer's turn: its control removes it.
+    state.interactions.push({ ...run(8, "queued", "capacity"), text: "Also check the FAQ" });
+    workspace.render();
+    await window.happyDOM.waitUntilComplete();
+    const send = window.document.querySelector("#sendInteraction");
+    expect(send.classList.contains("stop-button")).toBe(true);
+    expect(send.getAttribute("aria-label")).toBe("Remove queued message");
+
+    // Read from an older turn, the pending notice says it waits for capacity, not for a node.
+    state.pendingTurn = { threadId: 10, interactionId: 8, status: "queued" };
+    workspace.render();
+    await window.happyDOM.waitUntilComplete();
+    expect(window.document.querySelector("#pendingTurnText").textContent).toContain("Waiting for capacity");
   } finally {
     workspace.dispose();
     await window.happyDOM.close();

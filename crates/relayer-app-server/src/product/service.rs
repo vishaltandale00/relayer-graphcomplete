@@ -2896,6 +2896,26 @@ impl ProductService {
             .map_err(Into::into)
     }
 
+    pub(crate) async fn queue_run_for_capacity(
+        &self,
+        run: InteractionId,
+    ) -> Result<bool, ProductError> {
+        self.storage
+            .queue_run_for_capacity(run)
+            .await
+            .map_err(Into::into)
+    }
+
+    pub(crate) async fn claim_capacity_run(
+        &self,
+        run: InteractionId,
+    ) -> Result<bool, ProductError> {
+        self.storage
+            .claim_capacity_run(run)
+            .await
+            .map_err(Into::into)
+    }
+
     pub(crate) async fn is_invoked_run(
         &self,
         interaction_id: InteractionId,
