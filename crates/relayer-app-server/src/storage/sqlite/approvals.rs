@@ -68,9 +68,11 @@ impl SqliteProductStore {
         // An agent's child can settle on its graph before its provider turn ends, and the
         // provider can still ask for approval then. The request stays answerable on the
         // child's row, whose settled state belongs to its graph and is left unchanged.
+        // An archived thread takes no new work, so such a request is refused there and the
+        // observer ends the provider.
         let settled_agent_child = matches!(status.as_str(), "accepted" | "failed" | "stopped")
             && sqlx::query_scalar::<_, bool>(
-                "SELECT EXISTS(SELECT 1 FROM action_invocations WHERE result_interaction_id=?1 AND agent_invoked=1)",
+                "SELECT EXISTS(SELECT 1 FROM action_invocations WHERE result_interaction_id=?1 AND agent_invoked=1) AND NOT EXISTS(SELECT 1 FROM interactions i JOIN threads t ON t.id=i.thread_id WHERE i.id=?1 AND t.archived_at IS NOT NULL)",
             )
             .bind(request.correlation.interaction_id)
             .fetch_one(&mut *transaction)

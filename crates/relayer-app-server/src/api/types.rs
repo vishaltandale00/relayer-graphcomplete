@@ -171,7 +171,7 @@ pub(crate) struct ThreadResponse {
     updated_at: String,
     imported: bool,
     archived_at: Option<String>,
-    archive_blocked: bool,
+    pub(super) archive_blocked: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     activity: Option<String>,
 }

@@ -36,7 +36,11 @@ const THREAD_COLUMNS: &str = concat!(
                 WHEN EXISTS(SELECT 1 FROM turn WHERE active AND NOT agent_child) THEN 'running'
                 WHEN (SELECT completion_status FROM turn WHERE NOT agent_child ORDER BY sequence DESC LIMIT 1)='failed' THEN 'failed'
             END)
- ,t.archived_at, (SELECT busy FROM thread_archive_activity WHERE id=t.id)
+ ,t.archived_at,
+  -- An unresolved approval is work the archive would hide, including one an agent child's
+  -- provider made after the child's graph settled.
+  ((SELECT busy FROM thread_archive_activity WHERE id=t.id)
+   OR EXISTS(SELECT 1 FROM approval_requests request JOIN interactions i ON i.id=request.interaction_id LEFT JOIN approval_resolutions resolution ON resolution.request_id=request.request_id WHERE i.thread_id=t.id AND resolution.request_id IS NULL))
     FROM threads t
 "#
 );

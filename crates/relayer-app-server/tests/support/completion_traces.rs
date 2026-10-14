@@ -3063,6 +3063,34 @@ async fn a_settled_childs_unanswered_approval_closes_when_its_provider_ends() {
             .running_child_providers
             .contains(world.child.id.value())
     );
+    // Archiving would hide work the user still has to answer: storage sees the open request,
+    // and the API also refuses while the child's provider runs.
+    assert!(
+        world
+            .product
+            .get_thread(world.thread.id)
+            .await
+            .unwrap()
+            .thread
+            .archive_blocked
+    );
+    let mut control = HeaderMap::new();
+    control.insert(
+        header::COOKIE,
+        format!("{}=control", crate::api::CONTROL_COOKIE)
+            .parse()
+            .unwrap(),
+    );
+    let refused = set_archived(
+        State(world.state.clone()),
+        control,
+        Path(world.thread.id.value()),
+        Json(ArchiveRequest { archived: true }),
+    )
+    .await
+    .err()
+    .expect("archive is refused while the child's provider runs");
+    assert_eq!(refused.message(), "Available when work finishes.");
     world
         .harness
         .approval_session_gone
@@ -3147,6 +3175,47 @@ async fn a_child_whose_approvals_cannot_be_read_is_failed_and_its_provider_cance
     assert_eq!(state["life"], "failed", "{state}");
     assert_eq!(state["why"], "approval_observation_failed", "{state}");
     assert_eq!(state["prov"], "cancelled", "{state}");
+    world.finish().await;
+}
+
+/// A child's graph can return while one of its approval requests is still pending. Its
+/// settlement is the graph's to decide, so the row settles as accepted and the request stays
+/// open on it until it is answered or its provider ends.
+#[tokio::test]
+async fn a_child_settles_while_its_approval_request_is_pending() {
+    let mut world = World::new("child-approval-pending-settle", false).await;
+    let (broker, _lease) = world.broker();
+    *world.harness.start.lock().unwrap() = "ok";
+    *world.harness.approval.lock().unwrap() =
+        Some((world.thread.id.value(), world.child.id.value()));
+    let (status, _) = world
+        .launch(&broker)
+        .await
+        .unwrap_or_else(|error| panic!("launch: {}", error.message()));
+    assert_eq!(status, StatusCode::CREATED);
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while world.child_row().await.completion_status != "waiting_for_approval" {
+        assert!(
+            Instant::now() < deadline,
+            "the child's approval was never recorded"
+        );
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    world
+        .apply(&[serde_json::json!("ChildReturn")], false)
+        .await;
+    let state = world.await_state(|state| state["phase"] == "settled").await;
+    assert_eq!(state["status"], "accepted", "{state}");
+    assert_eq!(world.child_row().await.completion_status, "accepted");
+    assert!(
+        world
+            .product
+            .get_approval("request-child")
+            .await
+            .unwrap()
+            .resolution
+            .is_none()
+    );
     world.finish().await;
 }
 

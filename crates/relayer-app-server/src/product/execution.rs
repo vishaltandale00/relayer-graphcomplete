@@ -1406,6 +1406,15 @@ pub(crate) async fn persist_approval_snapshot(
                     .record_approval_resolution(&resolution, true)
                     .await
                     .map_err(|error| error.to_string())?;
+                // The resolution is durable now, so a decision kept after its own write failed
+                // is no longer needed as its authority.
+                if resolution.actor == ApprovalActor::User {
+                    recorder
+                        .decisions
+                        .lock()
+                        .expect("approval decision lock poisoned")
+                        .remove(&resolution.request_id);
+                }
             }
         }
         *cursor += 1;

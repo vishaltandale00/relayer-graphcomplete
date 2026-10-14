@@ -115,10 +115,16 @@ struct ApprovalDecisionReservation {
     decisions:
         std::sync::Arc<std::sync::Mutex<std::collections::HashMap<String, ApprovalDecision>>>,
     request_id: String,
+    /// The harness accepted the decision but recording it failed. The decision stays as the
+    /// authority for the resolution event an observer records later, which then removes it.
+    keep: bool,
 }
 
 impl Drop for ApprovalDecisionReservation {
     fn drop(&mut self) {
+        if self.keep {
+            return;
+        }
         self.decisions
             .lock()
             .expect("approval decision lock poisoned")
@@ -169,7 +175,7 @@ pub(super) async fn decide_approval(
         .runtime
         .as_ref()
         .ok_or_else(|| ApiError::invalid("GraphComplete runtime is unavailable"))?;
-    let _reservation = {
+    let mut reservation = {
         let mut decisions = state
             .approval_decisions
             .lock()
@@ -184,6 +190,7 @@ pub(super) async fn decide_approval(
         ApprovalDecisionReservation {
             decisions: state.approval_decisions.clone(),
             request_id: request_id.clone(),
+            keep: false,
         }
     };
     async {
@@ -192,10 +199,17 @@ pub(super) async fn decide_approval(
             .await?;
         validate_decision_resolution(&stored.request, submission.decision, &resolution)
             .map_err(|error| ApiError::internal(&error))?;
-        let approval = state
+        let approval = match state
             .product
             .record_approval_resolution(&resolution, true)
-            .await?;
+            .await
+        {
+            Ok(approval) => approval,
+            Err(error) => {
+                reservation.keep = true;
+                return Err(error.into());
+            }
+        };
         Ok(Json(ApprovalDecisionResponse { approval }))
     }
     .await
@@ -240,13 +254,28 @@ pub(super) async fn set_archived(
     Json(request): Json<ArchiveRequest>,
 ) -> Result<Json<ThreadResponse>, ApiError> {
     authorize_write(&state, &headers)?;
-    Ok(Json(
-        state
-            .product
-            .set_thread_archived(ThreadId::try_from(id)?, request.archived)
-            .await?
-            .into(),
-    ))
+    // An agent child's provider can still ask for approval after its graph settled; that is
+    // work the archive would hide. Stored state cannot see it, so it is checked here too.
+    if request.archived && state.running_child_providers.in_thread(id) {
+        return Err(ApiError::conflict(
+            "thread_archive_busy",
+            "Available when work finishes.",
+        ));
+    }
+    let thread = state
+        .product
+        .set_thread_archived(ThreadId::try_from(id)?, request.archived)
+        .await?;
+    Ok(Json(thread_response(&state, thread)))
+}
+
+/// A thread as the renderer sees it. A child provider still running keeps the thread from being
+/// archived, and so also keeps the sidebar's activity refresh going for it.
+fn thread_response(state: &ApiState, thread: crate::product::Thread) -> ThreadResponse {
+    let child_provider_running = state.running_child_providers.in_thread(thread.id.value());
+    let mut response = ThreadResponse::from(thread);
+    response.archive_blocked |= child_provider_running;
+    response
 }
 
 pub(super) async fn list(
@@ -259,7 +288,7 @@ pub(super) async fn list(
         .list_threads()
         .await?
         .into_iter()
-        .map(Into::into)
+        .map(|thread| thread_response(&state, thread))
         .collect();
     Ok(Json(ThreadsResponse { threads }))
 }
@@ -3240,8 +3269,9 @@ impl ProviderEndSignal {
         ended: ProviderEnded,
         running: crate::completion_broker::RunningChildProviders,
         interaction_id: i64,
+        thread_id: i64,
     ) -> Self {
-        running.insert(interaction_id);
+        running.insert(interaction_id, thread_id);
         Self {
             ended,
             running,
@@ -3462,6 +3492,7 @@ fn spawn_recursive_completion_observers(
         provider_ended.clone(),
         state.running_child_providers.clone(),
         interaction.id.value(),
+        thread.id.value(),
     );
     spawn_recursive_approval_observer(
         state.clone(),
@@ -4949,6 +4980,26 @@ mod completion_traces;
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A decision the harness accepted but whose write failed stays as the authority for the
+    /// resolution event an observer records later; otherwise it is released with its request.
+    #[test]
+    fn a_kept_approval_decision_outlives_its_request() {
+        let decisions =
+            std::sync::Arc::new(std::sync::Mutex::new(std::collections::HashMap::new()));
+        for (keep, remains) in [(false, false), (true, true)] {
+            decisions
+                .lock()
+                .unwrap()
+                .insert("request-1".to_owned(), ApprovalDecision::ApproveOnce);
+            drop(ApprovalDecisionReservation {
+                decisions: decisions.clone(),
+                request_id: "request-1".into(),
+                keep,
+            });
+            assert_eq!(decisions.lock().unwrap().contains_key("request-1"), remains);
+        }
+    }
     use crate::{
         api::auth::DesktopSessionAuthenticator,
         approval::{
