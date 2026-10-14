@@ -136,10 +136,9 @@ pub(super) async fn project_layer_input_availability(
             if !thread.imported && interaction.latest_attempt.is_some() =>
         {
             match tokio::time::timeout_at(deadline, async {
-                tokio::try_join!(
-                    runtime.live_answers(presenting_interaction),
-                    runtime.live_answer_receipts(presenting_interaction, layer_id)
-                )
+                runtime
+                    .live_answer_presentation(presenting_interaction, layer_id)
+                    .await
             })
             .await
             {
@@ -166,7 +165,9 @@ pub(super) async fn project_layer_input_availability(
             action["inputCanAcceptAnswer"] = serde_json::json!(false);
             continue;
         }
-        if let (Some((page, receipts)), Some(interaction)) = (&live, &interaction) {
+        if let (Some(presentation), Some(interaction)) = (&live, &interaction) {
+            let page = &presentation.page;
+            let receipts = &presentation.receipts;
             let receipt = receipts
                 .iter()
                 .find(|answer| Some(answer.occurrence.action_id.value()) == action["id"].as_i64());

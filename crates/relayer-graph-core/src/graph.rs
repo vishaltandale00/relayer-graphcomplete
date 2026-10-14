@@ -26,7 +26,7 @@ pub use import::{
     ImportedTurn, ImportedTurnReceipt, ImportedVisualAssetContent, SkippedSubmittedInput,
 };
 pub use invocation::GraphInvocation;
-pub use live_answers::{LiveAnswer, LiveAnswerPage, LiveAnswerRequest};
+pub use live_answers::{LiveAnswer, LiveAnswerPage, LiveAnswerPresentation, LiveAnswerRequest};
 pub use model::{
     AcceptedDetailAsset, AcceptedDetailAssetMetadata, ActionDraft, ActionId, ActionKind,
     ActionVariant, AuthoredDetailUpdate, CompletionContract, CompletionContractAnswer,

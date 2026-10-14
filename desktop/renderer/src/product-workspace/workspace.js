@@ -5647,6 +5647,7 @@ export function createProductWorkspace({
   }
 
   function displayedInputAttachment(draft, input, occurrence) {
+    if (input.liveInput) return null;
     const bound = implicitInputAcceptance && (getState().actions ?? []).some(action => action.kind === "invoke"
       && action.inputActionIds?.some(id => String(id) === String(input.id)));
     return bound ? boundInputAttachment(draft, input, occurrence) : committedInputAttachment(draft, occurrence);
@@ -5980,15 +5981,8 @@ export function createProductWorkspace({
     const interaction = currentInteraction(state, thread);
     const layerId = currentLayerId(state, thread);
     const immutableReviewInput = mode === "review";
-    if ((!inputDraftController || !loadedInputDraftThreads.has(String(thread?.id))) && !immutableReviewInput) {
-      const status = graphDocument.createElement("p");
-      status.className = "node-input-status";
-      status.textContent = inputDraftController
-        ? "Loading committed inputs…"
-        : "Input editing is unavailable in this view.";
-      host.replaceChildren(status);
-      return;
-    }
+    const draftReady = immutableReviewInput || (inputDraftController
+      && loadedInputDraftThreads.has(String(thread?.id)));
     if (interaction?.graphNodeId == null || layerId == null) {
       const status = graphDocument.createElement("p");
       status.className = "node-input-status";
@@ -6008,7 +6002,7 @@ export function createProductWorkspace({
     for (const rail of host.querySelectorAll("[data-input-rail-key]")) {
       inputRailScroll.set(rail.dataset.inputRailKey, rail.scrollLeft);
     }
-    const draft = immutableReviewInput
+    const draft = immutableReviewInput || !draftReady
       ? { revision: 0, attachments: [] }
       : inputDraftController.current(thread.id);
     const sections = actions.map((action) => {
@@ -6017,6 +6011,20 @@ export function createProductWorkspace({
       const semantic = action.input || action;
       const occurrence = createInputOccurrence(interaction.graphNodeId, layerId, action.id);
       const stageKey = threadInputOccurrenceKey(thread.id, occurrence);
+      if (!action.liveInput && !draftReady) {
+        const fieldset = graphDocument.createElement("fieldset");
+        fieldset.className = "node-input-editor";
+        fieldset.dataset.inputOccurrenceKey = stageKey;
+        fieldset.disabled = true;
+        const legend = graphDocument.createElement("legend");
+        legend.textContent = semantic.prompt;
+        const status = graphDocument.createElement("p");
+        status.className = "node-input-status";
+        status.textContent = inputDraftController
+          ? "Loading committed inputs…" : "Input editing is unavailable in this view.";
+        fieldset.append(legend, status);
+        return fieldset;
+      }
       const attachment = displayedInputAttachment(draft, action, occurrence);
       const liveReceipt = action.liveInput?.receipt ?? liveAnswerController?.receipt(thread.id, occurrence);
       const committedValue = liveReceipt ? (semantic.control === "text" ? liveReceipt.value.text : liveReceipt.value.selected.map(option => String(option.key))) : initialInputStageValue(semantic, attachment);
@@ -6495,6 +6503,12 @@ export function createProductWorkspace({
         const attachment = occurrence && inputDraftController
           ? displayedInputAttachment(inputDraftController.current(getThread()?.id), action, occurrence)
           : null;
+        const liveReceipt = action.liveInput && occurrence
+          ? action.liveInput.receipt ?? liveAnswerController?.receipt(getThread()?.id, occurrence)
+          : null;
+        const initialValue = liveReceipt
+          ? (action.control === "text" ? liveReceipt.value.text : liveReceipt.value.selected.map(option => String(option.key)))
+          : initialInputStageValue(action, attachment);
         const failure = occurrence
           ? authoredInputErrors.get(`${getThread()?.id}\u0000${authoredInputKey(occurrence)}`)
           : null;
@@ -6506,16 +6520,18 @@ export function createProductWorkspace({
           value: occurrence && implicitInputEntries.has(threadInputOccurrenceKey(getThread()?.id, occurrence))
             && inputStages.has(threadInputOccurrenceKey(getThread()?.id, occurrence))
             ? inputStages.get(threadInputOccurrenceKey(getThread()?.id, occurrence))
-            : initialInputStageValue(action, attachment),
+            : initialValue,
           ...(failure ? { error: failure } : {}),
           // Locked while a Send is in flight, so no commit races its
           // reservation. A commit during a run goes to the next draft (ADR 0008).
-          disabled: inputConsumersExhausted(state, action) || mode === "review"
-            || !inputDraftController
-            || !loadedInputDraftThreads.has(String(getThread()?.id))
-            || occurrence === null
-            || sendAttemptBlocksThread(sendAttempt?.threadId, getThread()?.id)
-            || threadHasInFlightSend(inFlightSendThreads, getThread()?.id),
+          disabled: inputConsumersExhausted(state, action) || occurrence === null
+            || (action.liveInput
+              ? mode !== "interactive" || !capabilities.canCompose || !liveAnswerController
+                || action.liveInput.eligible !== true || Boolean(liveReceipt)
+              : mode === "review" || !inputDraftController
+                || !loadedInputDraftThreads.has(String(getThread()?.id))
+                || sendAttemptBlocksThread(sendAttempt?.threadId, getThread()?.id)
+                || threadHasInFlightSend(inFlightSendThreads, getThread()?.id)),
         };
       }
     }

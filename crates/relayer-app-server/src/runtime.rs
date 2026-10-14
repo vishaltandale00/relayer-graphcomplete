@@ -2380,14 +2380,14 @@ impl RuntimeClient {
         )?)
     }
 
-    pub(crate) async fn live_answer_receipts(
+    pub(crate) async fn live_answer_presentation(
         &self,
         node_id: i64,
         layer_id: i64,
-    ) -> Result<Vec<relayer_graph_core::LiveAnswer>, RuntimeError> {
+    ) -> Result<relayer_graph_core::LiveAnswerPresentation, RuntimeError> {
         Ok(serde_json::from_value(
             self.control_get(&format!(
-                "api/control/interactions/{node_id}/live-answers/layers/{layer_id}"
+                "api/control/interactions/{node_id}/live-answer-presentation/{layer_id}"
             ))
             .await?,
         )?)

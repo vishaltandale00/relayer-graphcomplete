@@ -136,6 +136,21 @@ describe("CodexBasicHarness", () => {
     expect(brokerAuthorized).toContain("If child.result rejects with any other error, as it may for a child reported with an error, you cannot read that child's work; present that part as not done, without quoting the error or inventing findings.");
   });
 
+  it("allows published-Current Return in the delivered fallback prompt", async () => {
+    let prompt = "";
+    const harness = new CodexBasicHarness({
+      ...context("auto"), configuration: { ...codexBasicConfiguration,
+        settings: { ...codexBasicConfiguration.settings, promptProfile: undefined } },
+    }, { codexPathOverride: "/managed/codex", runAppServerTurn: async (options) => {
+      prompt = options.prompt;
+      return { threadId: "fallback-thread", turnId: "turn-1", status: "completed" };
+    } });
+    await harness.complete(runContext(1, "token"));
+    expect(prompt).toContain("The graph is complete only after a successful terminal graph.submit or returnCurrent.");
+    expect(prompt).not.toContain("The graph is complete only after graph.submit succeeds.");
+    expect(prompt).toContain("finish-published-current");
+  });
+
   it.each([undefined, "layered-navigation-v1", "layered-navigation-multi-agent-v1"])("uses the communication contract by default in actual %s turns", async (promptProfile) => {
     for (const brokerAvailable of [false, true]) {
       let prompt = "";
@@ -153,6 +168,8 @@ describe("CodexBasicHarness", () => {
         url: "http://127.0.0.1:43125/api/completions", token: "fixture-broker-token-1234567890123456",
       } } : {}) });
       expect(prompt).toContain("Your current layer is how you explain the work to the user while doing it.");
+      expect(prompt).toContain("returnCurrent");
+      expect(prompt).not.toContain("The graph is complete only after graph.submit succeeds.");
       expect(prompt).toContain("read each changed current.currentLayerId with graph.getLayer");
       expect(prompt).toContain("an ordinary Input on your current root layer exposes an explicit Answer control");
     expect(prompt).toContain("Even byte-identical objects recreated in a fresh client");

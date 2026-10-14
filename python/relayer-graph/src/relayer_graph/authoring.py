@@ -7,6 +7,7 @@ import asyncio
 import json
 import os
 import socket
+import time
 import uuid
 from dataclasses import dataclass, field, replace
 from types import MappingProxyType
@@ -492,28 +493,31 @@ class RelayerGraphClient:
 
     async def get_live_answers(self, after_sequence: int = 0) -> Mapping[str, Any]:
         """Read accepted supplemental answers without changing the sealed contract."""
+        return await self._get_live_answers(after_sequence)
+
+    async def _get_live_answers(self, after_sequence: int, *, deadline: float | None = None) -> Mapping[str, Any]:
         if isinstance(after_sequence, bool) or not isinstance(after_sequence, int) or after_sequence < 0:
             raise ValueError("Invalid live-answer cursor")
-        return await self._request("GET", f"/api/graph/live-answers?afterSequence={after_sequence}")
+        return await self._request("GET", f"/api/graph/live-answers?afterSequence={after_sequence}",
+                                   **({"deadline": deadline} if deadline is not None else {}))
 
     async def wait_for_live_answers(self, after_sequence: int = 0, timeout_seconds: float = 30) -> Mapping[str, Any]:
-        """Bounded provider-authored waiting; cancellation follows the caller's task."""
+        """Bounded waiting; an in-flight worker retains the remaining socket budget on cancellation."""
         if not 0 <= timeout_seconds <= 300:
             raise ValueError("Invalid live-answer timeout")
-        loop = asyncio.get_running_loop()
-        deadline = loop.time() + timeout_seconds
+        deadline = time.monotonic() + max(0.001, timeout_seconds)
         last_page = None
         while True:
             try:
-                page = await asyncio.wait_for(self.get_live_answers(after_sequence), timeout=max(0.001, deadline - loop.time()))
+                page = await asyncio.wait_for(self._get_live_answers(after_sequence, deadline=deadline), timeout=max(0.001, deadline - time.monotonic()))
             except TimeoutError:
                 if last_page is not None:
                     return last_page
                 raise
             last_page = page
-            if page["answers"] or page["current"]["lifecycle"] != "active" or loop.time() >= deadline:
+            if timeout_seconds == 0 or page["answers"] or page["current"]["lifecycle"] != "active" or time.monotonic() >= deadline:
                 return page
-            await asyncio.sleep(min(0.25, max(0, deadline - loop.time())))
+            await asyncio.sleep(min(0.25, max(0, deadline - time.monotonic())))
 
     async def get_invocations(self, action: int | Mapping[str, Any]) -> tuple[GraphInvocation, ...]:
         """Inspect reusable action calls under this capability's ordinary graph visibility."""
@@ -837,15 +841,22 @@ class RelayerGraphClient:
         return result
 
     async def _request(self, method: str, path: str, body: Any = None, *,
-                       graph_query: bool = False) -> Any:
+                       graph_query: bool = False, deadline: float | None = None) -> Any:
         encoded = None if body is None else json.dumps(body, separators=(",", ":")).encode()
         headers = {"accept": "application/json", "authorization": f"Bearer {self.token}"}
         if encoded is not None:
             headers["content-type"] = "application/json"
 
         def send() -> Any:
+            # Compute this when the executor actually starts, not while its work
+            # may still be queued. Never change the shared client's timeout.
+            remaining = None if deadline is None else deadline - time.monotonic()
+            if remaining is not None and remaining <= 0:
+                raise TimeoutError("Live-answer request deadline expired")
+            deadline_limited = remaining is not None and remaining <= self.timeout
+            timeout = min(self.timeout, remaining) if remaining is not None else self.timeout
             try:
-                with urlopen(Request(self.url + path, data=encoded, method=method, headers=headers), timeout=self.timeout) as response:
+                with urlopen(Request(self.url + path, data=encoded, method=method, headers=headers), timeout=timeout) as response:
                     return json.loads(response.read() or b"{}")
             except HTTPError as error:
                 try:
@@ -854,6 +865,9 @@ class RelayerGraphClient:
                     error.close()
                 raise _graph_error(error.code, json.loads(raw or b"{}"), graph_query=graph_query) from error
             except (URLError, socket.timeout, TimeoutError, OSError) as error:
+                cause = error.reason if isinstance(error, URLError) else error
+                if deadline_limited and isinstance(cause, (socket.timeout, TimeoutError)):
+                    raise TimeoutError("Live-answer request deadline expired") from error
                 raise TransportError(f"could not reach Relayer Graph at {self.url}: {error}") from error
 
         return await asyncio.to_thread(send)

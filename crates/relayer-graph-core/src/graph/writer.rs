@@ -985,6 +985,14 @@ impl GraphWriter {
         super::live_answers::receipts(&self.database, &self.scope, layer).await
     }
 
+    /// Trusted Product projection; eligibility and receipts share one read snapshot.
+    pub async fn live_answer_presentation(
+        &self,
+        layer: LayerId,
+    ) -> Result<crate::LiveAnswerPresentation, GraphError> {
+        super::live_answers::presentation(&self.database, &self.scope, 0, Some(layer)).await
+    }
+
     pub async fn live_answers(
         &self,
         after_sequence: i64,

@@ -737,6 +737,14 @@ it("working controls permit exact live questions and navigation but refuse Send,
   for (const selector of ["#send", "#stop", "#composer", "[data-review-kind=invoke-action]", "[data-input-control-role=commit]"]) expect(taskActorWorkingControlAllowed(document.querySelector(selector), "click")).toBe(false);
   for (const selector of [".graph-node", "[data-review-kind=navigate-action]", "[data-input-control-role=answer]"]) expect(taskActorWorkingControlAllowed(document.querySelector(selector), "click")).toBe(true);
   expect(taskActorWorkingControlAllowed(document.querySelector("fieldset textarea"), "fill")).toBe(true);
+  const live = document.querySelector("fieldset");
+  live.insertAdjacentHTML("beforeend", '<select><option>Boston</option></select><input type="text"><input type="checkbox"><textarea readonly></textarea><button data-input-control-role="option"></button>');
+  expect(taskActorWorkingControlAllowed(live.querySelector("select"), "select")).toBe(true);
+  expect(taskActorWorkingControlAllowed(live.querySelector("input[type=text]"), "fill")).toBe(true);
+  expect(taskActorWorkingControlAllowed(live.querySelector("[data-input-control-role=option]"), "click")).toBe(true);
+  for (const [selector, kind] of [["[data-input-control-role=answer]", "fill"], ["[data-input-control-role=answer]", "select"], ["textarea", "select"], ["select", "fill"], ["input[type=checkbox]", "fill"], ["textarea[readonly]", "fill"]]) {
+    expect(taskActorWorkingControlAllowed(live.querySelector(selector), kind)).toBe(false);
+  }
 });
 
 it("action exhaustion leaves a stage undelivered and records the limit without another admission", async () => {

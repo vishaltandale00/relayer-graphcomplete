@@ -33,7 +33,15 @@ export function taskActorCurrentIdentity({ expected, presentation = globalThis.w
 export function taskActorWorkingControlAllowed(element, kind) {
   if (kind === "scroll") return true;
   const live = element?.closest?.("[data-live-answer-scope]");
-  if (live && (element.matches("textarea,input,select") || ["answer", "option"].includes(element.dataset.inputControlRole))) return true;
+  if (live) {
+    const text = element.matches("textarea") || (element.matches("input")
+      && ["text", "search", "url", "tel", "email", "password", "number"].includes(element.type));
+    if (kind === "fill") return text && !element.readOnly;
+    if (kind === "select") return element.matches("select");
+    if (kind === "click") return text || element.matches("select")
+      || element.matches('button[data-input-control-role="answer"],button[data-input-control-role="option"]');
+    return false;
+  }
   return kind === "click" && Boolean(element?.matches?.("#nodeLayer .graph-node[data-node],#detailActions button[data-review-kind=navigate-action],#workspaceBreadcrumb button[data-review-kind=layer-navigation],#inspectorClose"));
 }
 

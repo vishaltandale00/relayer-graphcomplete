@@ -247,6 +247,8 @@
     { "exact": "scripts/test-share-publish-restart.mjs", "chapters": ["vitest"], "vitestFiles": ["test/share-publish-restart-evidence.test.mjs"] },
     { "exact": "scripts/capture-conversation-eval-evidence.mjs", "chapters": [] },
     { "exact": "scripts/test-eval-web.mjs", "chapters": [] },
+    { "exact": "scripts/eval-current-actor-proof.mjs", "chapters": [] },
+    { "exact": "scripts/build-public-share-viewer-artifact.mjs", "chapters": ["vitest"], "vitestFiles": ["test/public-share-viewer-artifact.test.mjs"] },
     { "exact": "scripts/eval-compiled.vitest.config.mjs", "chapters": [] },
     { "prefix": "scripts/design/", "chapters": ["vitest"], "vitestFiles": ["test/design-config.test.mjs", "test/sticker-structure.test.mjs", "test/public-share-viewer-artifact.test.mjs"] },
     { "prefix": "scripts/lib/", "chapters": ["vitest"], "vitestFiles": ["test/desktop-capture-evidence.test.mjs", "test/tutorial-lifecycle.test.mjs"] },

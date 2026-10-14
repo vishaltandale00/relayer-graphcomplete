@@ -1126,7 +1126,10 @@ async function proveTaskActor({ browser, service, productSession, data }) {
     assert.equal(setupRegistry.catalog().promotions.length, promotionsBeforeRelease);
     console.log("PASS independent completion selector: actual form, exact revision/export pin, release locking and unchanged defaults");
     console.log("PASS evaluator release: file-only completion publication, explicit three-revision release, real form submission with frozen run/export pins and exact stopping evidence; unchanged defaults (fixture inference)");
+    const oldCalibrationSource = await page.locator('#calibrationMember [name="source"]').elementHandle();
     await page.locator("#calibrationRefresh").click();
+    await until(() => oldCalibrationSource.evaluate(element => !element.isConnected), "refreshed calibration form rendered");
+    await oldCalibrationSource.dispose();
     await until(async () => (await page.locator('#calibrationMember [name="source"]').textContent()).includes(task.id), "calibration sources refreshed");
     const originalSource = await page.locator('#calibrationMember [name="source"] option').evaluateAll((options, taskId) => options.find(option => option.textContent.includes(taskId))?.value, task.id);
     assert.ok(originalSource, "original task remains selectable after release run");
@@ -1141,23 +1144,39 @@ async function proveTaskActor({ browser, service, productSession, data }) {
     const set = await until(() => calibration.catalog().sets[0], "frozen set saved from dashboard");
     assert.equal(set.members[0].membership, "tuning");
     assert.equal(set.members[0].labels[0].scale, "human-actor-realism-1-4");
+    // Storage publication precedes the asynchronous form refresh. Select the
+    // new rendered set before editing the candidate in that same form.
+    await page.locator('#calibrationCompare [name="calibrationSetId"]').selectOption(set.id);
     await page.locator('#calibrationCompare [name="candidateRevisionId"]').selectOption(revision.id);
     await page.locator("#calibrationCompare button").click();
     const comparison = await until(() => calibration.catalog().comparisons[0], "comparison created on exact frozen set");
+    assert.equal(comparison.calibrationSetId, set.id);
+    assert.equal(comparison.candidate.id, revision.id);
+    await until(async () => (await page.locator("#calibrationReport").textContent()).includes(set.digest), "comparison report rendered on exact frozen set");
     await page.locator('#calibrationObservation [name="revisionId"]').selectOption(baseline.id);
     await page.locator('#calibrationObservation [name="taskId"]').fill(task.id);
     await page.locator('#calibrationObservation [name="value"]').fill("2");
     await page.locator('#calibrationObservation [name="comment"]').fill("Baseline realism reviewed separately from satisfaction");
     await page.locator("#calibrationObservation button:not([type])").click();
     await until(() => calibration.report(comparison.id).rows[0].baseline?.score === 2, "baseline human realism recorded");
+    await until(async () => JSON.parse(await page.locator("#calibrationReport pre").textContent())[0].baseline?.score === 2, "baseline human realism rendered before choosing the candidate");
     decision = 0;
     await page.locator('#calibrationObservation [name="revisionId"]').selectOption(revision.id);
+    const tasksBeforeCalibration = new Set(tasks.list().map(item => item.id));
     page.once("dialog", (dialog) => dialog.accept());
     await page.locator("#calibrationRunArm").click();
-    const revised = await until(() => { const latest = tasks.list()[0]; return latest.id !== task.id && latest.id !== releaseTask.id && latest.status === "completed" ? tasks.get(latest.id) : null; }, "selected actor revision completed in real workspace");
+    // This is the same eight-decision/preflight workload as the first actor
+    // journey. Bind to the task this click creates, not list update order.
+    const revised = await until(() => {
+      const created = tasks.list().find(item => !tasksBeforeCalibration.has(item.id));
+      return created && ["completed", "interrupted", "failed"].includes(created.status) ? tasks.get(created.id) : null;
+    }, "selected actor revision completed in real workspace", 120_000);
+    assert.equal(revised.status, "completed", JSON.stringify(revised.events.filter(event => event.kind === "actor_error")));
     assert.equal(revised.actorSetup.id, revision.id);
     assert.ok(revised.events.find((event) => event.kind === "actor_started").prompt.includes("Keep replies brief."));
-    await page.locator("#calibrationComparison").selectOption(comparison.id);
+    // Re-selecting the same comparison starts another asynchronous redraw and
+    // can overwrite the independent result being entered below.
+    assert.equal(await page.locator("#calibrationComparison").inputValue(), comparison.id);
     await page.locator('#calibrationObservation [name="revisionId"]').selectOption(revision.id);
     await page.locator('#calibrationObservation [name="taskId"]').fill(revised.id);
     await page.locator('#calibrationObservation [name="value"]').fill("3");
@@ -1381,20 +1400,28 @@ async function proveTaskActorInputs({ browser, service, productSession, data }) 
   const actors = new TaskActorService({ tasks, resolveRuntime: async () => ({}),
     resolveCompletionJudgeRuntime: async () => ({}),
     createCompletionJudge: async () => ({ close: async () => {}, evaluate: async () => ({ verdict: "complete", evidenceExplanation: "Fixture input was incorporated.", continuationHint: "", usage: null }) }),
-    openBrowser: (sessionId, signal) => openTaskActorBrowser({ tasks, sessionId, productSession, browser, signal }),
+    openBrowser: async (sessionId, signal) => {
+      const controller = await openTaskActorBrowser({ tasks, sessionId, productSession, browser, signal });
+      return { ...controller, async act(action, correlation) {
+        await controller.act(action, correlation);
+        // A certified refusal obtains a fresh observation of the same stage.
+        // Successful fallback scrolling must not skip the pending input either.
+        if ((stage < 2 && action.kind === "fill") || (stage === 2 && action.kind === "click")) stage++;
+      } };
+    },
     createActor: async () => ({ close: async () => {},
       observe: async () => ({ comment: "I can see the work progressing.", action: null, usage: null }),
       decide: async ({ controls }) => {
       const action = { kind: "scroll", ref: "", value: "down", reason: "", satisfaction: null, comment: "", endpointStatus: "incomplete", remainingWork: "Further choices remain." };
       const note = controls.find((control) => control.name === "Review note" && control.role === "input");
-      if (stage === 0 && note) { Object.assign(action, { kind: "fill", ref: note.ref, value: "A note entered through the graph" }); stage++; }
+      if (stage === 0 && note) { Object.assign(action, { kind: "fill", ref: note.ref, value: "A note entered through the graph" }); }
       else if (stage === 1) {
         const composer = controls.find((control) => control.role === "textarea");
         assert.ok(composer, "Visible composer after node input");
-        Object.assign(action, { kind: "fill", ref: composer.ref, value: "Use my review note to refine this." }); stage++;
+        Object.assign(action, { kind: "fill", ref: composer.ref, value: "Use my review note to refine this." });
       } else if (stage === 2) {
         const send = controls.find((control) => ["Send", "↑"].includes(control.name)); assert.ok(send, "Send enabled after input commitment");
-        Object.assign(action, { kind: "click", ref: send.ref }); stage++;
+        Object.assign(action, { kind: "click", ref: send.ref });
       } else if (stage === 3) { Object.assign(action, { kind: "finish", reason: "satisfied", satisfaction: 3 }); stage++; }
       return { action, usage: null };
     } }),
@@ -1406,7 +1433,9 @@ async function proveTaskActorInputs({ browser, service, productSession, data }) 
   assert.equal(finished.status, "completed", JSON.stringify(finished.events.filter((event) => event.kind === "actor_error")));
   assert.equal(stage, 4, "Actor reached and committed the authored input");
   assert.equal(finished.completions, 2, "Drafting does not spend a completion");
-  assert.ok(finished.events.some((event) => event.kind === "product_action" && event.path.endsWith("/input-draft/attachments") && event.outcome === "accepted"));
+  assert.ok(finished.events.some((event) => event.kind === "product_action" && event.path.endsWith("/input-draft/attachments") && event.outcome === "accepted"),
+    JSON.stringify(finished.events.filter(event => ["product_action", "actor_action_failed"].includes(event.kind))
+      .map(({ kind, path, method, outcome, status, category, actionDispatched }) => ({ kind, path, method, outcome, status, category, actionDispatched }))));
   assert.ok(finished.conversations.some((conversation) => conversation.jsonl.includes("A note entered through the graph")));
   console.log("PASS actor input: visible authored input, draft commit and composer Send through real product routes with preserved answer evidence");
 }

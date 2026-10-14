@@ -129,6 +129,80 @@ mod tests {
     use std::borrow::Cow;
 
     #[tokio::test]
+    async fn pre_temporal_accepted_root_is_explicitly_non_live_after_migration() {
+        let file = tempfile::NamedTempFile::new().unwrap();
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect(&format!("sqlite://{}", file.path().display()))
+            .await
+            .unwrap();
+        let legacy = Migrator {
+            migrations: Cow::Owned(
+                MIGRATOR
+                    .iter()
+                    .filter(|migration| migration.version <= 10)
+                    .cloned()
+                    .collect(),
+            ),
+            ..Migrator::DEFAULT
+        };
+        legacy.run(&pool).await.unwrap();
+        sqlx::raw_sql("INSERT INTO nodes(id,thread_id,kind,icon,title,detail,state,owner_interaction_id,client_key) VALUES
+            (1,1,'user-interaction','user','Legacy request','Keep historical work','accepted',NULL,NULL),
+            (2,1,'concept','box','Historical answer','Preserved answer','accepted',1,'answer');
+            INSERT INTO layers(id,thread_id,state,owner_interaction_id,client_key) VALUES (1,1,'accepted',1,'root');
+            INSERT INTO layer_nodes(layer_id,node_id,position) VALUES (1,2,0);
+            INSERT INTO actions(id,thread_id,source_node_id,kind,relation,label,variant,target_layer_id,response,state,owner_interaction_id,client_key) VALUES (1,1,1,'navigate','expand','Response','pill',1,1,'accepted',1,'response');
+            INSERT INTO completions(interaction_node_id,root_action_id) VALUES (1,1);")
+            .execute(&pool).await.unwrap();
+        pool.close().await;
+        let database = GraphDatabase::open(file.path()).await.unwrap();
+        let mut connection = database.storage.acquire().await.unwrap();
+        let authority: (i64, i64) = sqlx::query_as("SELECT author_eligible,authority_epoch FROM completion_authorities WHERE interaction_node_id=1")
+            .fetch_one(&mut *connection).await.unwrap();
+        assert_eq!(authority, (0, 0));
+        drop(connection);
+        let writer = database
+            .writer_for_subgraph(NodeId::new(1).unwrap())
+            .await
+            .unwrap();
+        for error in [
+            writer.live_answers(0).await.unwrap_err(),
+            writer
+                .live_answer_presentation(LayerId::new(1).unwrap())
+                .await
+                .unwrap_err(),
+            writer
+                .live_answer_receipts(LayerId::new(1).unwrap())
+                .await
+                .unwrap_err(),
+        ] {
+            assert!(
+                matches!(
+                    error,
+                    GraphError::Validation {
+                        code: "live_answer_root_only",
+                        ..
+                    }
+                ),
+                "{error}"
+            );
+        }
+        assert_eq!(
+            writer
+                .get_node(NodeId::new(2).unwrap())
+                .await
+                .unwrap()
+                .detail,
+            "Preserved answer"
+        );
+        assert_eq!(
+            writer.current_completion().await.unwrap().lifecycle,
+            crate::CompletionLifecycle::Succeeded
+        );
+    }
+
+    #[tokio::test]
     async fn schema_21_default_selection_survives_permission_migration_without_backfill() {
         let temporary = tempfile::tempdir().unwrap();
         let file = tempfile::NamedTempFile::new_in(temporary.path()).unwrap();

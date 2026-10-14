@@ -44,7 +44,7 @@ function mountedCss(shadowRoot, index) {
 afterEach(() => vi.unstubAllGlobals());
 
 describe("compiled Node Detail product runtime", () => {
-  it("delivers an authored live answer when leaving the field to press Answer", async () => {
+  it.each([false, true])("delivers live answers while ordinary draft restoration is unavailable (authored=%s)", async (authored) => {
     const window = new Window({ url: "http://127.0.0.1:3000" });
     vi.stubGlobal("document", window.document);
     vi.stubGlobal("window", window);
@@ -54,21 +54,40 @@ describe("compiled Node Detail product runtime", () => {
       version: 1, components: [{ id: "form", order: 0, html: '<textarea aria-label="Your answer" data-gc-mount="input"></textarea>', css: "" }],
       mounts: [{ id: "input", componentId: "form", kind: "capability", host: "textarea", capability: { kind: "input", action: { clientKey: "answer", sourceNode: { clientKey: "question" }, sourceLayer: { clientKey: "working" } } } }], assets: [],
     }) };
+    if (authored) {
+      const { integritySha256: _hash, ...detail } = node.authoredDetail;
+      detail.components[0].html += '<textarea aria-label="Ordinary notes" data-gc-mount="ordinary"></textarea>';
+      detail.mounts.push({ id: "ordinary", componentId: "form", kind: "capability", host: "textarea", capability: { kind: "input", action: { clientKey: "ordinary", sourceNode: { clientKey: "question" }, sourceLayer: { clientKey: "working" } } } });
+      node.authoredDetail = compiledPackage(detail);
+    } else delete node.authoredDetail;
+    const pendingDraft = deferred();
+    const getDraft = vi.fn(() => pendingDraft.promise);
+    if (authored) getDraft.mockRejectedValueOnce(new Error("Draft load unavailable"));
     const action = { id: 13, clientKey: "answer", sourceNodeId: 7, sourceLayerId: 101, sourceLayerClientKey: "working", kind: "input", control: "text", prompt: "Your answer", liveInput: { eligible: true, attemptId: 10, authorityEpoch: 2, currentRevision: 1 } };
-    const layer = { layer: { id: 101, clientKey: "working" }, nodes: [node], edges: [], actions: [action] };
+    const ordinary = { id: 14, clientKey: "ordinary", sourceNodeId: 7, sourceLayerId: 101, sourceLayerClientKey: "working", kind: "input", control: "text", prompt: "Ordinary notes", inputCanAcceptAnswer: true };
+    const layer = { layer: { id: 101, clientKey: "working" }, nodes: [node], edges: [], actions: [action, ordinary] };
     const thread = { id: 3, rootInteractionId: 5, harnessId: "fixture" };
     const state = { conversationCompatibility: { threadId: 3, status: "unrestricted", harnessId: "fixture" }, status: "accepted", currentInteractionId: 5,
       interactions: [{ id: 5, threadId: 3, graphNodeId: 50, text: "Investigate", completionStatus: "running", completionOutput: { rootLayer: layer } }],
-      visibleLayer: layer, nodes: [node], actions: [action], projects: [], permissionProfiles: [], modelSettings: { defaults: { harnessId: "fixture" }, harnesses: [{ id: "fixture", available: true }], providers: [], families: [] }, modelCatalog: [], actionInvocations: [], pendingActionInvocations: [] };
+      visibleLayer: layer, nodes: [node], actions: layer.actions, projects: [], permissionProfiles: [], modelSettings: { defaults: { harnessId: "fixture" }, harnesses: [{ id: "fixture", available: true }], providers: [], families: [] }, modelCatalog: [], actionInvocations: [], pendingActionInvocations: [] };
     const commit = vi.fn();
     const answer = vi.fn(async (_threadId, _interactionId, request) => ({ ...request, currentRevision: request.expectedRevision, sequence: 1, completionId: 50 }));
     const workspace = createProductWorkspace({ root: window.document, getState: () => state, getThread: () => thread,
       selection: { currentThreadId: 3, currentInteractionId: 5, selectedNodeId: 7, layerPath: [] }, showThread() {}, showEmpty() {},
-      implicitInputAcceptance: true, inputDraftApi: { get: async () => ({ threadId: 3, revision: 0, attachments: [], updatedAt: "2026-10-09T00:00:00Z" }), commit, answer } });
+      implicitInputAcceptance: true, inputDraftApi: { get: getDraft, commit, answer } });
     try {
       workspace.render();
-      await vi.waitFor(() => expect(window.document.querySelector("[data-node-detail-runtime]")?.shadowRoot?.querySelector("textarea")?.disabled).toBe(false));
-      const field = window.document.querySelector("[data-node-detail-runtime]").shadowRoot.querySelector("textarea");
+      const liveField = () => authored
+        ? window.document.querySelector("[data-node-detail-runtime]")?.shadowRoot?.querySelector('textarea[aria-label="Your answer"]')
+        : window.document.querySelector("[data-live-answer-scope] textarea");
+      await vi.waitFor(() => expect(liveField()?.disabled).toBe(false));
+      await vi.waitFor(() => expect(getDraft.mock.calls.length).toBeGreaterThanOrEqual(authored ? 2 : 1));
+      const ordinaryField = () => authored
+        ? window.document.querySelector("[data-node-detail-runtime]")?.shadowRoot?.querySelector('textarea[aria-label="Ordinary notes"]')
+        : window.document.querySelector('textarea[aria-label="Ordinary notes"]');
+      if (authored) expect(ordinaryField()?.disabled).toBe(true);
+      else expect(window.document.querySelector(".node-input-status")?.textContent).toBe("Loading committed inputs…");
+      const field = liveField();
       field.focus();
       field.value = "Worker";
       field.dispatchEvent(new window.Event("input", { bubbles: true }));
@@ -82,6 +101,16 @@ describe("compiled Node Detail product runtime", () => {
       await vi.waitFor(() => expect(window.document.querySelector('[data-input-control-role="answer"]')?.textContent).toBe("Delivered"));
       expect(answer).toHaveBeenCalledTimes(1);
       expect(answer.mock.calls[0]).toEqual([3, 5, expect.objectContaining({ value: { text: "Worker" }, occurrence: { presentingInteractionNodeId: 50, presentingLayerId: 101, actionId: 13 } })]);
+      expect(commit).not.toHaveBeenCalled();
+      pendingDraft.resolve({ threadId: 3, revision: 2, attachments: [
+        { occurrence: { presentingInteractionNodeId: 50, presentingLayerId: 101, actionId: 14 }, sourceNodeId: 7,
+          action: ordinary, value: { text: "Restored ordinary note" }, draftRevision: 2, committedAt: "2026-10-14T00:00:00Z" },
+        { occurrence: { presentingInteractionNodeId: 50, presentingLayerId: 101, actionId: 13 }, sourceNodeId: 7,
+          action, value: { text: "Must not become the live value" }, draftRevision: 1, committedAt: "2026-10-14T00:00:00Z" },
+      ], updatedAt: "2026-10-14T00:00:00Z" });
+      await vi.waitFor(() => expect(ordinaryField()?.value).toBe("Restored ordinary note"));
+      expect(liveField().value).toBe("Worker");
+      expect(window.document.querySelector('[data-input-control-role="answer"]')?.textContent).toBe("Delivered");
       expect(commit).not.toHaveBeenCalled();
     } finally { workspace.dispose(); await window.happyDOM.close(); }
   });

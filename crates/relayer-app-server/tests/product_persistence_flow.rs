@@ -8967,6 +8967,129 @@ async fn response_json(response: Response<Body>) -> Value {
     serde_json::from_slice(&to_bytes(response.into_body(), usize::MAX).await.unwrap()).unwrap()
 }
 
+#[tokio::test]
+async fn live_input_projection_reads_one_snapshot_and_preserves_known_legacy_inputs() {
+    let temporary = tempfile::tempdir().unwrap();
+    let root = temporary.path();
+    let database = root.join("product.sqlite3");
+    let seeded = open_app(&database, root).await;
+    let thread = response_json(
+        seeded
+            .oneshot(api_request(
+                "POST",
+                "/api/threads",
+                Some(json!({"initialMessage":"Which city?"})),
+                true,
+            ))
+            .await
+            .unwrap(),
+    )
+    .await;
+    let thread_id = thread["id"].as_i64().unwrap();
+    seed_explicit_test_model_default(&database, thread_id).await;
+    let pool = sqlite_pool(&database).await;
+    let interaction_id: i64 = sqlx::query_scalar(
+        "SELECT id FROM interactions WHERE thread_id=?1 ORDER BY sequence LIMIT 1",
+    )
+    .bind(thread_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "UPDATE interactions SET graph_node_id=501,completion_status='accepted' WHERE id=?1",
+    )
+    .bind(interaction_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query("INSERT INTO interaction_attempts(interaction_id,attempt_number,started_at,finished_at,family_id,family_revision,harness_configuration_name,harness_configuration_revision,harness_configuration_digest,provider_id,adapter_id,adapter_implementation_version,model_id,access_contract,outcome,effect_boundary)
+        SELECT id,1,'1','2',model_family_id,1,'codex-basic',1,'sha256:test','codex','test',1,'test-model','managed-runtime@1','accepted','graph_write' FROM interactions WHERE id=?1")
+        .bind(interaction_id).execute(&pool).await.unwrap();
+    pool.close().await;
+
+    let mode = Arc::new(AtomicUsize::new(0));
+    let reads = Arc::new(AtomicUsize::new(0));
+    let split_reads = Arc::new(AtomicUsize::new(0));
+    let canonical_reads = Arc::new(AtomicUsize::new(0));
+    let question = json!({"id":801,"sourceNodeId":601,"sourceLayerId":701,"kind":"input","control":"text","prompt":"Which city?"});
+    let graph = Router::new()
+        .route("/api/control/interactions/501/layers/701", axum::routing::get(move || {
+            let question = question.clone();
+            async move { axum::Json(json!({"layer":{"id":701},"nodes":[],"edges":[],"actions":[question]})) }
+        }))
+        .route("/api/control/interactions/501/live-answer-presentation/701", axum::routing::get({
+            let mode=mode.clone(); let reads=reads.clone();
+            move || { let mode=mode.clone(); let reads=reads.clone(); async move {
+                reads.fetch_add(1, Ordering::SeqCst);
+                let mode=mode.load(Ordering::SeqCst);
+                if mode >= 3 {
+                    return (StatusCode::UNPROCESSABLE_ENTITY, axum::Json(json!({"error":{"code":if mode == 3 {"live_answer_root_only"} else {"internal"},"message":"Fixture authority classification"}}))).into_response();
+                }
+                let delivered = mode != 0;
+                let receipt=json!({"sequence":1,"completionId":501,"attemptId":1,"authorityEpoch":1,"currentRevision":1,"operationKey":"answer-city",
+                    "occurrence":{"presentingInteractionNodeId":501,"presentingLayerId":701,"actionId":801},"question":{"control":"text","prompt":"Which city?"},"value":{"text":"Boston"}});
+                axum::Json(json!({"page":{
+                    "current":{"completionId":501,"lifecycle":"active","headRevision":if mode==2 {2} else {1},"currentLayerId":if mode==2 {702} else {701},"finalLayerId":null,"safeReason":null,
+                    "temporalFeatures":{"configVersion":1,"schemaRead":true,"rootCurrentWrite":true,"projectionUi":true,"invokeResolution":true,"providerRecursion":true}},
+                    "authorityEpoch":1,"answers":[],"currentAnswers":[],"nextSequence":0,"eligibleActionIds":if delivered {vec![]} else {vec![801]}},
+                    "receipts":if delivered {vec![receipt]} else {vec![]}})).into_response()
+            }}
+        }))
+        .route("/api/control/interactions/501/live-answers", axum::routing::get({
+            let split=split_reads.clone(); move || { let split=split.clone(); async move {split.fetch_add(1,Ordering::SeqCst);StatusCode::INTERNAL_SERVER_ERROR} }
+        }))
+        .route("/api/control/interactions/501/live-answers/layers/701", axum::routing::get({
+            let split=split_reads.clone(); move || { let split=split.clone(); async move {split.fetch_add(1,Ordering::SeqCst);StatusCode::INTERNAL_SERVER_ERROR} }
+        }))
+        .route("/api/control/input-action-occurrences/canonical", axum::routing::post({
+            let reads=canonical_reads.clone(); move || {let reads=reads.clone();async move {reads.fetch_add(1,Ordering::SeqCst);axum::Json(json!({"editable":true,"composerEligible":true}))}}
+        }));
+    let (graph_url, graph_task) = serve_test_app(graph).await;
+    let (harness_url, harness_task) = serve_test_app(Router::new()).await;
+    let catalog = root.join("catalog.json");
+    fs::write(&catalog,json!({"schemaVersion":1,"configurations":[{"configuration":{"schemaVersion":1,"name":"codex-basic","implementation":"test","implementationVersion":1,"permissionBindings":{"ask":{},"auto":{},"full":{}},"settings":{}},"digest":"sha256:test"}]}).to_string()).unwrap();
+    let app = open_app_with_runtime(&database, root, &catalog, &graph_url, &harness_url).await;
+    for phase in 0..5 {
+        mode.store(phase, Ordering::SeqCst);
+        let layer = response_json(
+            app.clone()
+                .oneshot(api_request(
+                    "GET",
+                    &format!("/api/threads/{thread_id}/interactions/{interaction_id}/layers/701"),
+                    None,
+                    true,
+                ))
+                .await
+                .unwrap(),
+        )
+        .await;
+        let action = &layer["actions"][0];
+        match phase {
+            0 => {
+                assert_eq!(action["liveInput"]["eligible"], true);
+                assert_eq!(action["inputCanAcceptAnswer"], true);
+            }
+            1 | 2 => {
+                assert_eq!(action["liveInput"]["receipt"]["value"]["text"], "Boston");
+                assert_eq!(action["inputCanAcceptAnswer"], false);
+            }
+            3 => {
+                assert!(action["liveInput"].is_null());
+                assert_eq!(action["inputCanAcceptAnswer"], true);
+            }
+            _ => {
+                assert_eq!(action["liveInput"]["unavailable"], true);
+                assert_eq!(action["inputCanAcceptAnswer"], false);
+            }
+        }
+        assert_eq!(reads.load(Ordering::SeqCst), phase + 1);
+    }
+    assert_eq!(split_reads.load(Ordering::SeqCst), 0);
+    assert_eq!(canonical_reads.load(Ordering::SeqCst), 1);
+    graph_task.abort();
+    harness_task.abort();
+}
+
 async fn open_app(database: &Path, web_directory: &Path) -> Router {
     RelayerAppServer::open(RelayerAppServerConfig {
         database_path: database.to_owned(),

@@ -50,6 +50,14 @@ pub struct LiveAnswerPage {
     pub eligible_action_ids: Vec<ActionId>,
 }
 
+/// One graph snapshot for Product's live-question and historical Delivered state.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LiveAnswerPresentation {
+    pub page: LiveAnswerPage,
+    pub receipts: Vec<LiveAnswer>,
+}
+
 fn refused(code: &'static str, message: &str) -> GraphError {
     GraphError::validation(code, "liveAnswer", message)
 }
@@ -67,7 +75,7 @@ fn decode<T: serde::de::DeserializeOwned>(value: &str) -> Result<T, GraphError> 
 async fn require_human_root(
     connection: &mut GraphConnection,
     scope: &InteractionScope,
-) -> Result<(), GraphError> {
+) -> Result<u64, GraphError> {
     let child: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM durable_invocations WHERE child_interaction_node_id=?1) OR EXISTS(SELECT 1 FROM nodes WHERE id=?1 AND leased_action_id IS NOT NULL)")
         .bind(scope.root_node_id.value()).fetch_one(&mut *connection).await?;
     if scope.read_only || child {
@@ -76,12 +84,23 @@ async fn require_human_root(
             "Live answers require an original human completion.",
         ));
     }
-    Ok(())
+    epoch(connection, scope.root_node_id).await
 }
 
 async fn epoch(connection: &mut GraphConnection, root: NodeId) -> Result<u64, GraphError> {
-    let value: i64 = sqlx::query_scalar("SELECT authority_epoch FROM completion_authorities WHERE interaction_node_id=?1 AND author_eligible=1")
+    let (value, author_eligible): (i64, i64) = sqlx::query_as("SELECT authority_epoch,author_eligible FROM completion_authorities WHERE interaction_node_id=?1")
         .bind(root.value()).fetch_one(&mut *connection).await?;
+    if author_eligible == 0 {
+        return Err(refused(
+            "live_answer_root_only",
+            "Legacy completions do not accept live answers.",
+        ));
+    }
+    if author_eligible != 1 {
+        return Err(GraphError::Internal(
+            "invalid completion authority eligibility".into(),
+        ));
+    }
     u64::try_from(value).map_err(|_| GraphError::Internal("invalid authority epoch".into()))
 }
 
@@ -119,6 +138,15 @@ pub(crate) async fn page(
     scope: &InteractionScope,
     after: i64,
 ) -> Result<LiveAnswerPage, GraphError> {
+    Ok(presentation(database, scope, after, None).await?.page)
+}
+
+pub(crate) async fn presentation(
+    database: &GraphDatabase,
+    scope: &InteractionScope,
+    after: i64,
+    layer: Option<LayerId>,
+) -> Result<LiveAnswerPresentation, GraphError> {
     if after < 0 {
         return Err(refused(
             "invalid_live_answer_cursor",
@@ -126,34 +154,58 @@ pub(crate) async fn page(
         ));
     }
     let mut transaction = database.storage.begin_read().await?;
-    scope.require_generation_authority(&mut transaction).await?;
-    require_human_root(&mut transaction, scope).await?;
-    let current = CurrentTable::new(&mut transaction)
+    let result = read_presentation(&mut transaction, scope, after, layer).await?;
+    transaction.commit().await?;
+    Ok(result)
+}
+
+async fn read_presentation(
+    connection: &mut GraphConnection,
+    scope: &InteractionScope,
+    after: i64,
+    layer: Option<LayerId>,
+) -> Result<LiveAnswerPresentation, GraphError> {
+    scope.require_generation_authority(&mut *connection).await?;
+    let authority_epoch = require_human_root(&mut *connection, scope).await?;
+    let current = CurrentTable::new(&mut *connection)
         .state(scope.root_node_id)
         .await?;
-    let authority_epoch = epoch(&mut transaction, scope.root_node_id).await?;
     let records: Vec<String> = sqlx::query_scalar("SELECT receipt_json FROM live_answers WHERE completion_id=?1 AND sequence>?2 ORDER BY sequence LIMIT 100")
-        .bind(scope.root_node_id.value()).bind(after).fetch_all(&mut *transaction).await?;
+        .bind(scope.root_node_id.value()).bind(after).fetch_all(&mut *connection).await?;
     let answers: Vec<LiveAnswer> = records
         .into_iter()
         .map(|record| decode(&record))
         .collect::<Result<_, GraphError>>()?;
     let next_sequence = answers.last().map_or(after, |answer| answer.sequence);
     let current_records: Vec<String> = sqlx::query_scalar("SELECT receipt_json FROM live_answers WHERE completion_id=?1 AND presenting_layer_id=?2 ORDER BY sequence")
-        .bind(scope.root_node_id.value()).bind(current.current_layer_id.map(|id| id.value())).fetch_all(&mut *transaction).await?;
-    let current_answers = current_records
+        .bind(scope.root_node_id.value()).bind(current.current_layer_id.map(|id| id.value())).fetch_all(&mut *connection).await?;
+    let current_answers: Vec<LiveAnswer> = current_records
         .into_iter()
         .map(|record| decode(&record))
         .collect::<Result<_, GraphError>>()?;
-    let eligible_action_ids = eligible(&mut transaction, scope, &current).await?;
-    transaction.commit().await?;
-    Ok(LiveAnswerPage {
-        current,
-        authority_epoch,
-        answers,
-        current_answers,
-        next_sequence,
-        eligible_action_ids,
+    let eligible_action_ids = eligible(&mut *connection, scope, &current).await?;
+    let receipts = match layer {
+        Some(layer) if Some(layer) == current.current_layer_id => current_answers.clone(),
+        Some(layer) => {
+            let records: Vec<String> = sqlx::query_scalar("SELECT receipt_json FROM live_answers WHERE completion_id=?1 AND presenting_layer_id=?2 ORDER BY sequence")
+                .bind(scope.root_node_id.value()).bind(layer.value()).fetch_all(&mut *connection).await?;
+            records
+                .into_iter()
+                .map(|record| decode(&record))
+                .collect::<Result<_, GraphError>>()?
+        }
+        None => Vec::new(),
+    };
+    Ok(LiveAnswerPresentation {
+        page: LiveAnswerPage {
+            current,
+            authority_epoch,
+            answers,
+            current_answers,
+            next_sequence,
+            eligible_action_ids,
+        },
+        receipts,
     })
 }
 
@@ -208,7 +260,7 @@ impl GraphDatabase {
                 "Answer the exact completion in this thread.",
             ));
         }
-        require_human_root(&mut transaction, &scope).await?;
+        let authority_epoch = require_human_root(&mut transaction, &scope).await?;
         let request_json = encode(request)?;
         let prior: Option<(String, String)> = sqlx::query_as("SELECT request_json,receipt_json FROM live_answers WHERE completion_id=?1 AND operation_key=?2")
             .bind(completion.value()).bind(&request.operation_key).fetch_optional(&mut *transaction).await?;
@@ -234,7 +286,7 @@ impl GraphDatabase {
         }
         if current.head_revision != request.expected_revision
             || current.current_layer_id != Some(request.occurrence.presenting_layer_id)
-            || epoch(&mut transaction, completion).await? != request.authority_epoch
+            || authority_epoch != request.authority_epoch
         {
             return Err(refused(
                 "stale_live_question",
@@ -289,5 +341,119 @@ impl GraphDatabase {
             .bind(&request.operation_key).bind(request_json).bind(encode(&answer)?).execute(&mut *transaction).await?;
         transaction.commit().await?;
         Ok(answer)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::*;
+
+    include!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/support/live_answer_question.rs"
+    ));
+
+    #[tokio::test]
+    async fn presentation_keeps_one_snapshot_across_a_concurrent_answer() {
+        let directory = tempfile::tempdir().unwrap();
+        let database = GraphDatabase::open(directory.path().join("graph.sqlite"))
+            .await
+            .unwrap();
+        let (writer, request) = question(&database).await;
+        let mut reader = database.storage.begin_read().await.unwrap();
+        let scope = NodeTable::new(&mut reader)
+            .interaction_scope(writer.node_id())
+            .await
+            .unwrap();
+        // This is the reader's production authority check. Its snapshot is
+        // established before another connection commits the real Answer.
+        require_human_root(&mut reader, &scope).await.unwrap();
+        let receipt = database
+            .accept_live_answer(writer.node_id(), ThreadId::new(1).unwrap(), &request)
+            .await
+            .unwrap();
+        let before = read_presentation(
+            &mut reader,
+            &scope,
+            0,
+            Some(request.occurrence.presenting_layer_id),
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            before.page.eligible_action_ids,
+            vec![request.occurrence.action_id]
+        );
+        assert!(before.receipts.is_empty());
+        reader.commit().await.unwrap();
+        let after = writer
+            .live_answer_presentation(request.occurrence.presenting_layer_id)
+            .await
+            .unwrap();
+        assert!(after.page.eligible_action_ids.is_empty());
+        assert_eq!(after.receipts.len(), 1);
+        assert_eq!(after.receipts[0].sequence, receipt.sequence);
+        assert_eq!(after.receipts[0].value, request.value);
+    }
+
+    #[tokio::test]
+    async fn missing_or_corrupt_live_authority_never_becomes_ordinary_input() {
+        for corrupt in [false, true] {
+            let database = GraphDatabase::in_memory().await.unwrap();
+            let (writer, request) = question(&database).await;
+            let mut connection = database.storage.acquire().await.unwrap();
+            if corrupt {
+                sqlx::query("PRAGMA ignore_check_constraints=ON")
+                    .execute(&mut *connection)
+                    .await
+                    .unwrap();
+                sqlx::query("UPDATE completion_authorities SET authority_epoch=-1 WHERE interaction_node_id=?1")
+                    .bind(writer.node_id().value()).execute(&mut *connection).await.unwrap();
+                sqlx::query("PRAGMA ignore_check_constraints=OFF")
+                    .execute(&mut *connection)
+                    .await
+                    .unwrap();
+            } else {
+                sqlx::query("DELETE FROM completion_authorities WHERE interaction_node_id=?1")
+                    .bind(writer.node_id().value())
+                    .execute(&mut *connection)
+                    .await
+                    .unwrap();
+            }
+            drop(connection);
+            let observer = database
+                .writer_for_subgraph(writer.node_id())
+                .await
+                .unwrap();
+            let results = [
+                observer.live_answers(0).await.map(|_| ()),
+                observer
+                    .live_answer_presentation(request.occurrence.presenting_layer_id)
+                    .await
+                    .map(|_| ()),
+                observer
+                    .live_answer_receipts(request.occurrence.presenting_layer_id)
+                    .await
+                    .map(|_| ()),
+                database
+                    .accept_live_answer(writer.node_id(), ThreadId::new(1).unwrap(), &request)
+                    .await
+                    .map(|_| ()),
+            ];
+            for result in results {
+                let error = result.unwrap_err();
+                assert!(
+                    !matches!(
+                        error,
+                        GraphError::Validation {
+                            code: "live_answer_root_only",
+                            ..
+                        }
+                    ),
+                    "{error}"
+                );
+            }
+        }
     }
 }

@@ -99,6 +99,14 @@ await graph.advance_current(written.root_layer, expected_revision=0, operation_k
       const current = await graph.getCurrent();
       const accepted = await graph.getLayer(current.currentLayerId);
       const question = accepted.actions.find(action => action.kind === "input");
+      const presentationPath = `/api/control/interactions/${interaction.node.id}/live-answer-presentation/${current.currentLayerId}`;
+      const beforeProjection = await controlRead(server.url, token, presentationPath);
+      expect(beforeProjection).toMatchObject({ page: { eligibleActionIds: [question.id], current: { currentLayerId: current.currentLayerId } }, receipts: [] });
+      for (const bearer of [null, interaction.graphToken]) {
+        const response = await fetch(new URL(presentationPath, server.url), { headers: bearer ? { Authorization: `Bearer ${bearer}` } : {} });
+        expect(response.status).toBe(401);
+        await response.arrayBuffer();
+      }
       expect(question).toMatchObject({ state: "accepted", prompt: "Which constraint should guide the next step?", control: "text" });
       expect(accepted.nodes[0].authoredDetail.mounts.some(mount => mount.capability.kind === "input" && mount.capability.action.clientKey === question.clientKey)).toBe(true);
       const read = language === "javascript" ? `import { RelayerGraphClient } from ${JSON.stringify(moduleUrl)};
@@ -138,10 +146,17 @@ print(json.dumps({"decisions": user_decisions, "cursor": answer_cursor, "next": 
       const delivered = parseLastLine(await reading);
       expect(delivered).toMatchObject({ decisions: [{ question: receipt.question, value: receipt.value }], cursor: receipt.sequence, next: { answers: [] } });
       expect(windowMs).toBe(30_000);
+      const deliveredProjection = await controlRead(server.url, token, presentationPath);
+      expect(deliveredProjection.page.eligibleActionIds).toEqual([]);
+      expect(deliveredProjection.receipts).toHaveLength(1);
+      expect(deliveredProjection.receipts[0]).toMatchObject({ sequence: receipt.sequence, value: receipt.value });
       expect(await graph.getContract()).toEqual(contract);
       await run(block(language === "javascript" ? finishPublishedCurrentRecipeJs(moduleUrl) : FINISH_PUBLISHED_CURRENT_RECIPE_PYTHON));
       const final = await controlRead(server.url, token, `/api/control/interactions/${interaction.node.id}/current`);
       expect(final).toMatchObject({ lifecycle: "succeeded", currentLayerId: current.currentLayerId, headRevision: current.headRevision + 1 });
+      const settledProjection = await controlRead(server.url, token, presentationPath);
+      expect(settledProjection.page.current.lifecycle).toBe("succeeded");
+      expect(settledProjection.receipts).toEqual(deliveredProjection.receipts);
       expect(await controlRead(server.url, token, `/api/control/interactions/${interaction.node.id}/layers/${current.currentLayerId}`)).toEqual(accepted);
     } finally { await new Promise(resolve => host.close(resolve)); }
   }, 15_000);

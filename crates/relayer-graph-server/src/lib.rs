@@ -209,6 +209,10 @@ pub fn router(state: ServerState) -> Router {
             get(control_live_answer_receipts),
         )
         .route(
+            "/api/control/interactions/{id}/live-answer-presentation/{layer}",
+            get(control_live_answer_presentation),
+        )
+        .route(
             "/api/control/interactions/{id}/input-children",
             get(control_input_children),
         )
@@ -2984,6 +2988,22 @@ async fn control_live_answers(
             .writer_for_subgraph(id)
             .await?
             .live_answers(cursor.after_sequence)
+            .await?,
+    ))
+}
+
+async fn control_live_answer_presentation(
+    State(state): State<ServerState>,
+    headers: HeaderMap,
+    Path((id, layer)): Path<(NodeId, LayerId)>,
+) -> Result<Json<relayer_graph_core::LiveAnswerPresentation>, ApiError> {
+    require_bearer(&headers, &state.control_token)?;
+    Ok(Json(
+        state
+            .graph
+            .writer_for_subgraph(id)
+            .await?
+            .live_answer_presentation(layer)
             .await?,
     ))
 }
