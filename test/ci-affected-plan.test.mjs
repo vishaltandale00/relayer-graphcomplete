@@ -650,6 +650,16 @@ describe("affected-module plan v1", { timeout: 30_000 }, () => {
     }
   });
 
+  test.each([
+    ["scripts/evidence-browser-target.mjs", ["test/evidence-browser-target.test.mjs", "test/provider-electron-evidence.test.mjs"]],
+    ["scripts/electron-proof-process.mjs", ["test/electron-proof-process.test.mjs", "test/node-input-actions-proof-result.test.mjs"]],
+  ])("maps the proof boundary %s to its production-seam checkpoints", (changedFile, expected) => {
+    const result = plan(changedFile);
+    expect(result.mode).toBe("affected");
+    expect(result.chapters.vitest).toBe(true);
+    expect(result.vitestFiles).toEqual(expected);
+  });
+
   test("crash selection never fires without the Rust chapter", () => {
     // The lbug-prebuilt job runs when rust, rust_runtime, or rust_crash is
     // set; the crash lane depends on it. If rust_crash could ever be true

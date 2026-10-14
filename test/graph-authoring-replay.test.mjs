@@ -65,9 +65,9 @@ describe("replay-safe graph authoring", () => {
     const environment = { RELAYER_GRAPH_URL: server.url, RELAYER_GRAPH_TOKEN: interaction.graphToken, RELAYER_NODE_ID: String(interaction.node.id),
       PYTHONPATH: join(repositoryRoot, "python/relayer-graph/src"), SCOPED_HOST: `http://127.0.0.1:${host.address().port}`, SCOPED_CAPABILITY: JSON.stringify(capability) };
     const pythonPrelude = SCOPED_PYTHON.split("async def main():")[0].replace("host_request(method, payload)", "host_request(method, payload=None)");
-    const run = code => language === "javascript"
-      ? runRecipeProcess(process.execPath, ["--input-type=module"], code, environment)
-      : runRecipeProcess("python3", ["-c", pythonPrelude + "async def main():\n" + code.split("\n").map(line => "    " + line).join("\n") + "\nasyncio.run(main())"], undefined, environment);
+    const run = (code, onOutput) => language === "javascript"
+      ? runRecipeProcess(process.execPath, ["--input-type=module"], code, environment, onOutput)
+      : runRecipeProcess("python3", ["-c", pythonPrelude + "async def main():\n" + code.split("\n").map(line => "    " + line).join("\n") + "\nasyncio.run(main())"], undefined, environment, onOutput);
     try {
       // Use the exact delivered question fragment in a minimal real draft; root attachment and Advance remain explicit.
       const publish = language === "javascript" ? `
@@ -103,20 +103,41 @@ await graph.advance_current(written.root_layer, expected_revision=0, operation_k
       expect(accepted.nodes[0].authoredDetail.mounts.some(mount => mount.capability.kind === "input" && mount.capability.action.clientKey === question.clientKey)).toBe(true);
       const read = language === "javascript" ? `import { RelayerGraphClient } from ${JSON.stringify(moduleUrl)};
 const graph = RelayerGraphClient.fromEnv();
+const actualWait = graph.waitForLiveAnswers.bind(graph);
+graph.waitForLiveAnswers = (cursor, timeout) => { console.log("WAIT:" + timeout); return actualWait(cursor, timeout); };
 ${block(READ_CURRENT_ANSWERS_JS)}
 console.log(JSON.stringify({ decisions: userDecisions, cursor: answerCursor, next: await graph.getLiveAnswers(answerCursor) }));` : `from relayer_graph import GraphSession
 graph = await GraphSession.current()
+actual_wait = graph.wait_for_live_answers
+async def observed_wait(cursor, timeout_seconds):
+    print("WAIT:" + str(timeout_seconds * 1000), flush=True)
+    return await actual_wait(cursor, timeout_seconds=timeout_seconds)
+graph.wait_for_live_answers = observed_wait
 ${block(READ_CURRENT_ANSWERS_PYTHON)}
 print(json.dumps({"decisions": user_decisions, "cursor": answer_cursor, "next": await graph.get_live_answers(answer_cursor)}))`;
-      const empty = JSON.parse(await run(read));
+      // A short fixture-only deadline exercises expiry without spending the guide's participant window.
+      const shortRead = read.replace(/waitForLiveAnswers\(answerCursor, [\d_]+\)/, "waitForLiveAnswers(answerCursor, 20)").replace(/timeout_seconds=[\d_]+/, "timeout_seconds=0.02");
+      const parseLastLine = output => JSON.parse(output.trim().split("\n").at(-1));
+      const empty = parseLastLine(await run(shortRead));
       expect(empty).toMatchObject({ decisions: [], cursor: 0, next: { answers: [] } });
       const page = await graph.getLiveAnswers();
+      let notifyWaiting;
+      const waiting = new Promise(resolve => { notifyWaiting = resolve; });
+      const reading = run(read, output => {
+        const match = output.match(/WAIT:([\d.]+)\r?\n/);
+        if (match) notifyWaiting(Number(match[1]));
+      });
+      const windowMs = await Promise.race([waiting, reading.then(() => { throw new Error("Reader returned without entering its wait"); })]);
+      // Answer after the former one-second window, while the exact delivered program is still active.
+      await new Promise(resolve => setTimeout(resolve, 1500));
+      expect((await graph.getCurrent()).lifecycle).toBe("active");
       const receipt = await controlRequest(server.url, token, `/api/control/interactions/${interaction.node.id}/live-answers`, {
         threadId: 78, answer: { attemptId: 1, authorityEpoch: page.authorityEpoch, expectedRevision: current.headRevision, operationKey: "answer-constraint",
           occurrence: { presentingInteractionNodeId: interaction.node.id, presentingLayerId: current.currentLayerId, actionId: question.id }, value: { text: "Twelve nights; step-free transport" } },
       });
-      const delivered = JSON.parse(await run(read));
+      const delivered = parseLastLine(await reading);
       expect(delivered).toMatchObject({ decisions: [{ question: receipt.question, value: receipt.value }], cursor: receipt.sequence, next: { answers: [] } });
+      expect(windowMs).toBe(30_000);
       expect(await graph.getContract()).toEqual(contract);
       await run(block(language === "javascript" ? finishPublishedCurrentRecipeJs(moduleUrl) : FINISH_PUBLISHED_CURRENT_RECIPE_PYTHON));
       const final = await controlRead(server.url, token, `/api/control/interactions/${interaction.node.id}/current`);
@@ -1057,11 +1078,11 @@ async def main():
 asyncio.run(main())
 `;
 
-async function runRecipeProcess(command, args, stdin, environment) {
+async function runRecipeProcess(command, args, stdin, environment, onOutput) {
   const child = spawn(command, args, { env: { ...process.env, ...environment }, stdio: ["pipe", "pipe", "pipe"] });
   processes.push(child);
   let stdout = "", stderr = "";
-  child.stdout.on("data", bytes => { stdout += bytes; });
+  child.stdout.on("data", bytes => { stdout += bytes; onOutput?.(stdout); });
   child.stderr.on("data", bytes => { stderr += bytes; });
   child.stdin.end(stdin);
   const code = await new Promise((resolve, reject) => { child.once("error", reject); child.once("exit", resolve); });

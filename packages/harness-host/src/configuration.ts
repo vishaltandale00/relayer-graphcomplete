@@ -318,10 +318,10 @@ export function canResumeHarnessExecutionConfiguration(
   );
 }
 
-// Codex and Prime presentation settings select the Product pin at thread creation;
+// Native harness presentation settings select the Product pin at thread creation;
 // each run receives its immutable attachment independently of provider resume state.
 function sessionExecutionSettings(configuration: HarnessConfiguration): HarnessConfiguration["settings"] {
-  if (configuration.implementation !== "codex.basic" && configuration.implementation !== "prime.agent") return configuration.settings;
+  if (!["codex.basic", "claude.basic", "prime.agent"].includes(configuration.implementation)) return configuration.settings;
   const { personalPresentationVersion: _selection, ...execution } = configuration.settings;
   return execution;
 }

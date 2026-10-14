@@ -1644,7 +1644,7 @@ function parsePrimeAgentConfiguration(context: HarnessFactoryContext): PrimeAgen
   const allowed = new Set(["thinkingLevel", "rlmMaxDepth", "prewarmIpythonKernel", "promptProfile", "personalPresentationVersion"]);
   const unknown = Object.keys(settings).filter((key) => !allowed.has(key));
   if (unknown.length > 0) throw new Error(`Unknown prime.agent configuration field: ${unknown.join(", ")}`);
-  optionalEnum(settings.personalPresentationVersion, ["personal-presentation-v0", "personal-presentation-v1", "personal-presentation-v2", "personal-presentation-v3", "personal-presentation-v4"] as const, "personalPresentationVersion");
+  optionalEnum(settings.personalPresentationVersion, ["personal-presentation-v0", "personal-presentation-v1", "personal-presentation-v2", "personal-presentation-v3", "personal-presentation-v4", "personal-presentation-v6"] as const, "personalPresentationVersion");
   const thinkingLevel = optionalEnum(settings.thinkingLevel, ["minimal", "low", "medium", "high", "xhigh", "max"] as const, "thinkingLevel");
   const rlmMaxDepth = optionalPositiveInteger(settings.rlmMaxDepth, "rlmMaxDepth");
   const prewarmIpythonKernel = optionalBoolean(settings.prewarmIpythonKernel, "prewarmIpythonKernel");

@@ -456,6 +456,11 @@ async function proveProductionSettings({ browser, product, productSession, runti
   await until(async () => (await page.locator("#providerSettingsStatus").textContent()) === "Provider models refreshed.", "provider refresh UI settled before editing families");
   await page.locator('[data-settings-tab="models"]').click();
   await page.locator("#newModelFamily").click();
+  await until(() => page.evaluate(() => {
+    const editor = document.querySelector("#familyNameInput")?.closest("[data-family-slide]");
+    const carousel = document.querySelector("#familyCarousel");
+    return editor && carousel?.clientWidth > 0 && Math.abs(carousel.scrollLeft - Number(editor.dataset.familySlide) * carousel.clientWidth) <= 1;
+  }), "new family carousel settled before editing");
   await page.locator("#familyNameInput").fill("My eval models");
   assert.equal(await page.locator('[data-member-model="0"]').inputValue(), "fixture-model");
   await page.locator("#saveFamilyEdit").click();
@@ -914,7 +919,9 @@ async function proveTaskActor({ browser, service, productSession, data }) {
     await page.locator("#humanEndpoint").fill("An understandable task system");
     await page.locator("#humanCreate button").click();
     await until(() => tasks.list().length > 0, "actor session created through dashboard");
-    const task = await until(() => { const task = tasks.get(tasks.list()[0].id); return ["completed", "interrupted", "failed"].includes(task.status) ? task : null; }, "actor session terminal").catch(async error => {
+    // This journey includes adversarial browser preflight and eight actor
+    // decisions; it is an aggregate proof budget, not an actor/action deadline.
+    const task = await until(() => { const task = tasks.get(tasks.list()[0].id); return ["completed", "interrupted", "failed"].includes(task.status) ? task : null; }, "actor session terminal", 120_000).catch(async error => {
       const active = tasks.get(tasks.list()[0].id);
       const diagnostic = { status: active.status, decision, events: active.events.slice(-12).map(({ kind, phase, at, category }) => ({ kind, phase, at, category })) };
       console.error("ACTOR_TERMINAL_DIAGNOSTIC", JSON.stringify(diagnostic));

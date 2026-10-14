@@ -101,7 +101,9 @@ describe("provider browser evidence", () => {
         output,
       ], {
         cwd: new URL("..", import.meta.url),
-        timeout: 120_000,
+        // Aggregate budget for all main scenes, variants, motion and encoding.
+        // Each scene retains its separate 12-second readiness bound.
+        timeout: 180_000,
         maxBuffer: 1024 * 1024 * 8,
       });
       const result = JSON.parse(stdout.trim());
@@ -204,7 +206,7 @@ describe("provider browser evidence", () => {
       stopProgress();
       await rm(output, { recursive: true, force: true });
     }
-  }, 120_000);
+  }, 190_000); // Leave cleanup/diagnostics time beyond the child-process budget.
 
   it.skipIf(!mediaToolsAvailable)("captures focused main scenes and excludes omitted files from reused sidebar-only output", async () => {
     const output = await mkdtemp(join(tmpdir(), "relayer-focused-evidence-"));

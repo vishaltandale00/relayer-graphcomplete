@@ -1,4 +1,5 @@
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { spawn } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
@@ -19,15 +20,24 @@ afterEach(async () => {
 });
 
 describe("first-message composer integration", () => {
-  it.each(["personal-presentation-v1", "personal-presentation-v3"])("promotes new Codex threads while preserving reopened %s follow-up and invoke pins", async (previousVersion) => {
-    const dataDirectory = await mkdtemp(join(tmpdir(), "relayer-codex-presentation-"));
+  it.each(["codex-basic", "claude-basic"].flatMap((harnessId) =>
+    ["personal-presentation-v1", "personal-presentation-v3", "personal-presentation-v4"].map((previousVersion) => [harnessId, previousVersion]),
+  ))("promotes new %s threads while preserving reopened %s follow-up and invoke pins", async (harnessId, previousVersion) => {
+    const providerId = harnessId === "claude-basic" ? "claude" : "codex";
+    const adapterId = `${providerId}-subscription`;
+    const implementation = `${providerId}.basic`;
+    const modelId = providerId === "claude" ? "opus" : "fixture-model";
+    const dataDirectory = await mkdtemp(join(tmpdir(), `relayer-${providerId}-presentation-`));
     directories.push(dataDirectory);
-    const configurationPath = join(dataDirectory, "codex-basic.yaml");
-    const shipped = await readFile(join(repositoryRoot, "harnesses/codex-basic.yaml"), "utf8");
-    // Exercise both the original implicit default and the immediately preceding visual default.
-    await writeFile(configurationPath, shipped.replace(/^  personalPresentationVersion:.*\n/m, previousVersion === "personal-presentation-v1" ? "" : `  personalPresentationVersion: ${previousVersion}\n`));
+    const configurationPath = join(dataDirectory, `${harnessId}.yaml`);
+    const shipped = await readFile(join(repositoryRoot, `harnesses/${harnessId}.yaml`), "utf8");
+    // Preserve implicit, visual, and explanatory historical pins across promotion.
+    await writeFile(configurationPath, shipped
+      .replace(/^  personalPresentationVersion:.*\n/m, previousVersion === "personal-presentation-v1" ? "" : `  personalPresentationVersion: ${previousVersion}\n`)
+      .replace(/settings:\s*$/, "settings: {}\n"));
     const observed = [];
     const start = async () => {
+      const errors = [];
       const runtime = new GraphCompleteRuntimeService({
         userDataDirectory: dataDirectory,
         graphServerBinary: join(repositoryRoot, "target/debug/relayer-graph-server"),
@@ -39,7 +49,7 @@ describe("first-message composer integration", () => {
         // Only replace paid provider execution; keep configuration selection, graph
         // attachment, acceptance, and durable Product storage on production paths.
         additionalImplementations: {
-          "codex.basic": (context) => {
+          [implementation]: (context) => {
             const fixture = taskSystemFixtureFactory(context);
             const complete = fixture.complete.bind(fixture);
             fixture.complete = async (run) => {
@@ -50,32 +60,47 @@ describe("first-message composer integration", () => {
           },
         },
         acquireProviderExecution: async (providerId) => ({
-          definition: { id: providerId, adapterId: "codex-subscription", accessContract: "managed-runtime@1" },
-          descriptor: { adapterId: "codex-subscription", accessContract: "managed-runtime@1", implementationVersion: "1" },
+          definition: { id: providerId, adapterId, accessContract: "managed-runtime@1" },
+          descriptor: { adapterId, accessContract: "managed-runtime@1", implementationVersion: "1" },
           runtime: { async executionAccess() { return { kind: "managed-runtime", environment: {} }; } },
           async release() {},
         }),
       });
       services.push(runtime);
       const product = new RelayerAppServerService({
+        spawnProcess: (...args) => {
+          const child = spawn(...args);
+          child.stderr.on("data", (chunk) => errors.push(String(chunk)));
+          return child;
+        },
         userDataDirectory: dataDirectory,
         binaryPath: join(repositoryRoot, "target/debug/relayer-app-server"),
         webDirectory: join(repositoryRoot, "desktop/renderer"),
         permissionCatalogPath: join(repositoryRoot, "permissions/desktop.json"),
         runtimeSession: await runtime.start(),
-        defaultHarnessConfiguration: "codex-basic",
+        defaultHarnessConfiguration: harnessId,
       });
       services.push(product);
       const session = await product.start();
-      await product.seedProviderCatalog(fixtureCatalogSnapshot());
-      return { product, runtime, session };
+      if (providerId === "claude") {
+        const store = product.providerDefinitionStore();
+        const definitions = await store.load();
+        if (!definitions.some(({ id }) => id === providerId)) {
+          await store.save([...definitions, {
+            id: providerId, adapterId, label: "Claude", accessContract: "managed-runtime@1",
+            credentialReference: "fixture", lifecycleState: "active", removedAt: null,
+          }]);
+        }
+      }
+      await product.seedProviderCatalog(fixtureCatalogSnapshot(providerId, modelId));
+      return { product, runtime, session, errors };
     };
     const before = await start();
     const family = await productRequest(before.session, "/api/model-families", {
       method: "POST",
-      body: JSON.stringify({ name: "Fixture models", enabled: true, members: [{ providerId: "codex", modelId: "fixture-model" }] }),
+      body: JSON.stringify({ name: "Fixture models", enabled: true, members: [{ providerId, modelId }] }),
     });
-    const modelSelection = { familyId: family.id, providerId: "codex", modelId: "fixture-model" };
+    const modelSelection = { familyId: family.id, providerId, modelId };
     const createThread = (session) => productRequest(session, "/api/threads", {
       method: "POST",
       body: JSON.stringify({ title: "Presentation selection", initialMessage: "Show the task system.", modelSelection }),
@@ -95,7 +120,7 @@ describe("first-message composer integration", () => {
       const target = join(dataDirectory, `failed-trace-${interaction.id}`);
       const trace = await after.runtime.exportCandidateTrace(interaction.id, target).catch((error) => ({ exportError: String(error) }));
       const receipts = await readFile(join(target, "graph-operations.jsonl"), "utf8").catch(() => "");
-      return { trace, graphOperations: receipts };
+      return { trace, graphOperations: receipts, runtimeErrors: after.errors.join("") };
     };
     const reopened = await productRequest(after.session, `/api/threads/${oldThread.id}`);
     expect(reopened.interactions[0]).toEqual(oldAccepted.interactions[0]);
@@ -140,11 +165,11 @@ describe("first-message composer integration", () => {
     const newPresentation = observed.find(({ graphNodeId }) => graphNodeId === newAccepted.interactions[0].graphNodeId).presentation;
     expect(newPresentation.attachment.versionInteractionNodeId).not.toBe(oldPresentation.attachment.versionInteractionNodeId);
     const titles = (presentation) => presentation.graph.layers.flatMap(({ nodes }) => nodes.map(({ title }) => title));
-    expect(titles(oldPresentation)).not.toContain("Explanatory presentation");
+    expect(titles(oldPresentation)).not.toContain("Meaningful graph relationships");
     expect(titles(newPresentation)).toContain("Authored visual Node Details");
-    expect(titles(newPresentation)).toContain("Explanatory presentation");
+    expect(titles(newPresentation)).toContain("Meaningful graph relationships");
     const newTrace = await after.runtime.exportCandidateTrace(newAccepted.interactions[0].id, join(dataDirectory, "new-trace"));
-    expect(newTrace.personalPresentationVersionKey).toBe("personal-presentation-v4");
+    expect(newTrace.personalPresentationVersionKey).toBe("personal-presentation-v6");
   }, 20_000);
 
   it("submits on Enter and accepts a graph through the zero-inference fixture harness", async () => {
@@ -324,13 +349,14 @@ describe("first-message composer integration", () => {
   }, 15_000);
 });
 
-function fixtureCatalogSnapshot() {
+function fixtureCatalogSnapshot(providerId = "codex", modelId = "fixture-model") {
+  const label = providerId === "claude" ? "Claude" : "Codex";
   return {
-    providerId: "codex",
-    label: "Codex",
+    providerId,
+    label,
     connected: true,
     models: [{
-      id: "fixture-model",
+      id: modelId,
       label: "Fixture model",
       order: 0,
       visible: true,
@@ -338,7 +364,7 @@ function fixtureCatalogSnapshot() {
       providerDefault: true,
       metadata: {},
     }],
-    systemFamily: { key: "codex", name: "Codex", modelIds: ["fixture-model"] },
+    systemFamily: { key: providerId, name: label, modelIds: [modelId] },
   };
 }
 

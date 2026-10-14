@@ -312,28 +312,28 @@ await graph.return_current(published["currentLayerId"], expected_revision=publis
 # Terminal: no further graph reads or writes.
 \`\`\``;
 
-export const READ_CURRENT_ANSWERS_JS = `After publishing a consequential human-root Input with Advance, read replies while the completion is active. This bounded example starts at cursor zero; retain nextSequence for subsequent reads. Read each answer's question and value before using it. No answer means unresolved, not permission to invent a preference.
+export const READ_CURRENT_ANSWERS_JS = `After publishing a consequential human-root Input with Advance, read replies while the completion is active. This example allows up to 30 seconds for a participant response; choose a bounded window appropriate to the task and remaining time. A short empty poll is not a completed opportunity to answer. Do independent work while waiting when possible, then reread before settling dependent work. The window starts at cursor zero; retain nextSequence for subsequent reads. Read each answer's question and value before using it. No answer means unresolved, not permission to invent a preference.
 
 \`\`\`javascript
 let answerCursor = 0;
 let replies = await graph.getLiveAnswers(answerCursor);
 answerCursor = replies.nextSequence;
 if (replies.answers.length === 0) {
-  replies = await graph.waitForLiveAnswers(answerCursor, 1000);
+  replies = await graph.waitForLiveAnswers(answerCursor, 30_000);
   answerCursor = replies.nextSequence;
 }
 const userDecisions = replies.answers.map(answer => ({ question: answer.question, value: answer.value }));
 // Use userDecisions in dependent work; publish changed findings with a new snapshot.
 \`\`\``;
 
-export const READ_CURRENT_ANSWERS_PYTHON = `After publishing a consequential human-root Input with Advance, read replies while the completion is active. This bounded example starts at cursor zero; retain nextSequence for subsequent reads. Read each answer's question and value before using it. No answer means unresolved, not permission to invent a preference.
+export const READ_CURRENT_ANSWERS_PYTHON = `After publishing a consequential human-root Input with Advance, read replies while the completion is active. This example allows up to 30 seconds for a participant response; choose a bounded window appropriate to the task and remaining time. A short empty poll is not a completed opportunity to answer. Do independent work while waiting when possible, then reread before settling dependent work. The window starts at cursor zero; retain nextSequence for subsequent reads. Read each answer's question and value before using it. No answer means unresolved, not permission to invent a preference.
 
 \`\`\`python
 answer_cursor = 0
 replies = await graph.get_live_answers(answer_cursor)
 answer_cursor = replies["nextSequence"]
 if not replies["answers"]:
-    replies = await graph.wait_for_live_answers(answer_cursor, timeout_seconds=1)
+    replies = await graph.wait_for_live_answers(answer_cursor, timeout_seconds=30)
     answer_cursor = replies["nextSequence"]
 user_decisions = [{"question": answer["question"], "value": answer["value"]} for answer in replies["answers"]]
 # Use user_decisions in dependent work; publish changed findings with a new snapshot.

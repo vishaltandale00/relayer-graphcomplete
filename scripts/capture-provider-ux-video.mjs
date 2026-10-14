@@ -5,6 +5,7 @@ import { copyFile, mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from
 import { tmpdir } from "node:os";
 import { dirname, extname, join, resolve } from "node:path";
 import { promisify } from "node:util";
+import { openEvidenceBrowserPage } from "./evidence-browser-target.mjs";
 import {
   providerSidebarSnapshotFunctionSource,
   providerSidebarAuditFunctionSource,
@@ -176,26 +177,8 @@ async function captureBrowserScene(url, frame, profile, width = 1280, { forcedCo
   ], { stdio: ["ignore", "ignore", "pipe"] });
   try {
     const browserEndpoint = new URL(await devtoolsEndpoint(child));
-    const target = await fetch(
-      `${browserEndpoint.protocol === "wss:" ? "https:" : "http:"}//${browserEndpoint.host}/json/new?${encodeURIComponent(url)}`,
-      { method: "PUT" },
-    ).then((response) => response.json());
-    const cdp = await cdpClient(target.webSocketDebuggerUrl);
+    const cdp = await openEvidenceBrowserPage(browserEndpoint, url, { connect: cdpClient, width, forcedColors });
     try {
-      await cdp.call("Runtime.enable");
-      await cdp.call("Page.enable");
-      await cdp.call("Emulation.setDeviceMetricsOverride", {
-        width,
-        height: 800,
-        deviceScaleFactor: 1,
-        mobile: false,
-      });
-      if (forcedColors) {
-        await cdp.call("Emulation.setEmulatedMedia", {
-          features: [{ name: "forced-colors", value: "active" }],
-        });
-      }
-      await cdp.call("Page.reload", { ignoreCache: true });
       const deadline = Date.now() + 12_000;
       let readiness = "pending";
       while (readiness === "pending" && Date.now() < deadline) {
@@ -598,11 +581,7 @@ async function recordBrowserFlow(url, directory, profile) {
   let frameIndex = 0;
   try {
     const browserEndpoint = new URL(await devtoolsEndpoint(child));
-    const target = await fetch(
-      `${browserEndpoint.protocol === "wss:" ? "https:" : "http:"}//${browserEndpoint.host}/json/new?${encodeURIComponent(url)}`,
-      { method: "PUT" },
-    ).then((response) => response.json());
-    const cdp = await cdpClient(target.webSocketDebuggerUrl);
+    const cdp = await openEvidenceBrowserPage(browserEndpoint, url, { connect: cdpClient });
     const evaluate = async (expression) => {
       const result = await cdp.call("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true });
       if (result.exceptionDetails) throw new Error(result.exceptionDetails.exception?.description ?? "Flow evaluation failed.");
@@ -646,10 +625,6 @@ async function recordBrowserFlow(url, directory, profile) {
     };
 
     try {
-      await cdp.call("Runtime.enable");
-      await cdp.call("Page.enable");
-      await cdp.call("Emulation.setDeviceMetricsOverride", { width: 1280, height: 800, deviceScaleFactor: 1, mobile: false });
-      await cdp.call("Page.reload", { ignoreCache: true });
       await waitFor("document.body?.dataset.evidenceReady === 'true'", "initial onboarding");
       await caption("1 · Connect an API provider");
       await click('[data-provider-adapter="openai-api"]');

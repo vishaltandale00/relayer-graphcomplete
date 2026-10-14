@@ -40,7 +40,7 @@ let releaseFourthCompletion;
 const fourthCompletionGate = new Promise((resolveGate) => { releaseFourthCompletion = resolveGate; });
 
 app.setName("Relayer Node Input Actions Test");
-app.setPath("userData", join(dataDirectory, "electron-profile"));
+app.setPath("userData", process.env.RELAYER_NODE_INPUT_ELECTRON_PROFILE || join(dataDirectory, "electron-profile"));
 app.commandLine.appendSwitch("disable-gpu");
 
 const catalogSnapshot = {
