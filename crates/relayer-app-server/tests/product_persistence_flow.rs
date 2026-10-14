@@ -5219,7 +5219,6 @@ async fn node_runs_run_beside_other_nodes_and_queue_in_order_on_their_own_node()
         }
     };
     let settled = |run: i64, expected: &'static str| {
-        let status_of = status_of.clone();
         async move {
             let deadline = std::time::Instant::now() + Duration::from_secs(5);
             loop {
