@@ -238,6 +238,19 @@ impl SqliteProductStore {
             .await
     }
 
+    /// The agent children with an unresolved approval request, as (thread, graph completion).
+    /// Startup closes those requests, but a harness that outlived the server still has the
+    /// provider waiting on them, so their invoked completions are cancelled there too.
+    pub(crate) async fn agent_children_with_open_approvals(
+        &self,
+    ) -> Result<Vec<(i64, i64)>, StorageError> {
+        Ok(sqlx::query_as(
+            "SELECT DISTINCT i.thread_id,e.graph_completion_id FROM approval_requests request JOIN interactions i ON i.id=request.interaction_id JOIN completion_executions e ON e.interaction_id=i.id LEFT JOIN approval_resolutions resolution ON resolution.request_id=request.request_id WHERE resolution.request_id IS NULL AND EXISTS(SELECT 1 FROM action_invocations ai WHERE ai.result_interaction_id=i.id AND ai.agent_invoked=1) ORDER BY e.graph_completion_id",
+        )
+        .fetch_all(&self.pool)
+        .await?)
+    }
+
     /// An agent child's requests left unresolved after its provider ended can never be answered.
     /// Each is recorded as aborted. The row's state belongs to its graph: only a row still
     /// waiting returns to running, as when any of a child's approvals ends.

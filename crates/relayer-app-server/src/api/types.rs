@@ -171,9 +171,20 @@ pub(crate) struct ThreadResponse {
     updated_at: String,
     imported: bool,
     archived_at: Option<String>,
-    pub(super) archive_blocked: bool,
+    archive_blocked: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     activity: Option<String>,
+}
+
+impl ThreadResponse {
+    /// A child provider still running keeps the thread from being archived, and so also keeps
+    /// the sidebar's activity refresh going for it. Stored state cannot see that provider.
+    pub(super) fn mark_running_child_providers(
+        &mut self,
+        running: &crate::completion_broker::RunningChildProviders,
+    ) {
+        self.archive_blocked |= running.in_thread(self.id);
+    }
 }
 
 impl From<Thread> for ThreadResponse {
@@ -666,6 +677,18 @@ impl ProductStateResponse {
     }
 }
 
+impl ProductStateResponse {
+    pub(super) fn with_running_child_providers(
+        mut self,
+        running: &crate::completion_broker::RunningChildProviders,
+    ) -> Self {
+        for view in &mut self.threads {
+            view.thread.mark_running_child_providers(running);
+        }
+        self
+    }
+}
+
 impl From<ProductState> for ProductStateResponse {
     fn from(state: ProductState) -> Self {
         Self {
@@ -698,6 +721,16 @@ pub(crate) struct ThreadDetailResponse {
     imported_invocation_history: Vec<ImportedInvocationHistoryResponse>,
     approvals: Vec<ApprovalReceipt>,
     invocation_inventory_available: bool,
+}
+
+impl ThreadDetailResponse {
+    pub(super) fn with_running_child_providers(
+        mut self,
+        running: &crate::completion_broker::RunningChildProviders,
+    ) -> Self {
+        self.thread.mark_running_child_providers(running);
+        self
+    }
 }
 
 impl From<ThreadDetail> for ThreadDetailResponse {
