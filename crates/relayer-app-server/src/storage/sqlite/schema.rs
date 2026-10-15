@@ -488,6 +488,19 @@ pub(super) async fn validate(pool: &SqlitePool) -> Result<(), StorageError> {
     .await?;
     validate_foreign_key(pool, "node_runs", "thread_id", "threads", "id", "CASCADE").await?;
     validate_index(pool, "node_runs", &["thread_id", "node_id"], false).await?;
+    let node_runs: String =
+        sqlx::query_scalar("SELECT sql FROM sqlite_schema WHERE type='table' AND name='node_runs'")
+            .fetch_one(pool)
+            .await?;
+    if !node_runs
+        .split_whitespace()
+        .collect::<String>()
+        .contains("CHECK(node_id>0)")
+    {
+        return Err(incompatible(
+            "table node_runs is missing its positive node id check",
+        ));
+    }
     validate_columns(pool, "interactions", INTERACTION_COLUMNS).await?;
     validate_columns(
         pool,
@@ -1436,6 +1449,9 @@ mod tests {
             ),
             Some(
                 "CREATE TABLE node_runs (result_interaction_id INTEGER PRIMARY KEY REFERENCES interactions(id) ON DELETE CASCADE, thread_id INTEGER NOT NULL REFERENCES threads(id) ON DELETE CASCADE, node_id INTEGER NOT NULL CHECK(node_id > 0))",
+            ),
+            Some(
+                "CREATE TABLE node_runs (result_interaction_id INTEGER PRIMARY KEY REFERENCES interactions(id) ON DELETE CASCADE, thread_id INTEGER NOT NULL REFERENCES threads(id) ON DELETE CASCADE, node_id INTEGER NOT NULL)",
             ),
         ] {
             let directory = tempfile::tempdir().unwrap();
