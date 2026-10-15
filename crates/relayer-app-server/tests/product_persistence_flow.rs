@@ -4958,8 +4958,13 @@ async fn node_runs_run_beside_other_nodes_and_queue_in_order_on_their_own_node()
     let thread_id = thread["id"].as_i64().unwrap();
     let source_interaction_id = thread["rootInteractionId"].as_i64().unwrap();
     // Node 7 offers four invoke actions and node 8 one.
-    let node_of_action = |action_id: i64| if action_id == 44 { 8 } else { 7 };
-    let actions = [41, 43, 44, 45, 46].map(|action_id| {
+    // Node 9 offers two more; the first one's graph preparation ends ambiguously.
+    let node_of_action = |action_id: i64| match action_id {
+        44 => 8,
+        47 | 48 => 9,
+        _ => 7,
+    };
+    let actions = [41, 43, 44, 45, 46, 47, 48].map(|action_id| {
         json!({
             "id": action_id, "sourceNodeId": node_of_action(action_id), "kind": "invoke",
             "interactionText": format!("Action {action_id}"), "state": "accepted", "targetLayerId": null
@@ -4969,7 +4974,8 @@ async fn node_runs_run_beside_other_nodes_and_queue_in_order_on_their_own_node()
         "nodeId": 101,
         "rootLayer": {"layer": {"id": 1}, "nodes": [
             {"id": 7, "kind": "concept", "title": "Tiers table", "state": "accepted"},
-            {"id": 8, "kind": "concept", "title": "FAQ", "state": "accepted"}
+            {"id": 8, "kind": "concept", "title": "FAQ", "state": "accepted"},
+            {"id": 9, "kind": "concept", "title": "Pricing", "state": "accepted"}
         ], "edges": [], "actions": actions}
     });
     let pool = sqlite_pool(&database).await;
@@ -5019,7 +5025,7 @@ async fn node_runs_run_beside_other_nodes_and_queue_in_order_on_their_own_node()
             "/api/control/interactions/{id}/actions/{action_id}",
             axum::routing::get(
                 move |axum::extract::Path((id, action_id)): axum::extract::Path<(i64, i64)>| async move {
-                    if id != 101 || ![41, 43, 44, 45, 46].contains(&action_id) {
+                    if id != 101 || ![41, 43, 44, 45, 46, 47, 48].contains(&action_id) {
                         return (StatusCode::NOT_FOUND, axum::Json(json!({"error": {"code": "action_not_visible"}})));
                     }
                     (StatusCode::OK, axum::Json(json!({"action": {
@@ -5035,12 +5041,17 @@ async fn node_runs_run_beside_other_nodes_and_queue_in_order_on_their_own_node()
                 let graph_nodes = graph_nodes.clone();
                 let created_metadata = created_metadata.clone();
                 async move {
+                    // An answer the server cannot decode leaves the preparation ambiguous.
+                    if body["invocation"]["sourceActionId"] == 47 {
+                        return (StatusCode::OK, "unreadable").into_response();
+                    }
                     let node_id = graph_nodes.fetch_add(1, Ordering::SeqCst);
                     created_metadata
                         .lock()
                         .unwrap()
                         .insert(node_id, body["invocation"].clone());
                     axum::Json(json!({ "node": { "id": node_id }, "graphToken": "" }))
+                        .into_response()
                 }
             }),
         )
@@ -5304,6 +5315,21 @@ async fn node_runs_run_beside_other_nodes_and_queue_in_order_on_their_own_node()
         "a stopped queued run started"
     );
     assert_eq!(held.lock().unwrap().len(), 4);
+
+    // A run whose graph preparation ends ambiguously stays submitted with no outcome, so it
+    // keeps its node: the next run on that node waits instead of starting before it.
+    let (ambiguous, ambiguous_status) = invoke(47).await;
+    assert_eq!(ambiguous_status, "submitted");
+    let (behind, behind_status) = invoke(48).await;
+    assert_eq!(behind_status, "queued");
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert_eq!(status_of(ambiguous).await, "submitted");
+    assert_eq!(status_of(behind).await, "queued");
+    assert_eq!(
+        held.lock().unwrap().len(),
+        4,
+        "a run started before the run ahead had an outcome"
+    );
     graph_task.abort();
     harness_task.abort();
 }

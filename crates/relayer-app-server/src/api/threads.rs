@@ -4139,7 +4139,17 @@ async fn invoke_action_with_authority(
             .product
             .invoke_action(source_interaction_id, action_id, &interaction_text)
             .await?;
-        finish_action_handoff(&owned_state, &thread, outcome, source_node_id, None).await
+        // The run takes its place in its node's queue as soon as it exists, so the queue keeps
+        // creation order on this path too (#718).
+        let arrival = NodeArrival::join(&owned_state, &outcome.interaction, source_node_id).await?;
+        finish_action_handoff(
+            &owned_state,
+            &thread,
+            outcome,
+            source_node_id,
+            Some(arrival),
+        )
+        .await
     });
     await_action_handoff(handoff).await
 }
@@ -4431,8 +4441,10 @@ fn depart_node_run(state: ApiState, key: NodeRunKey, run: InteractionId, arrival
     tokio::spawn(depart);
 }
 
-/// Starts a run that holds its node. The node is released once the run settles, whatever the
-/// outcome, and the next queued run on it then starts.
+/// Starts a run that holds its node. The node is released once the run's outcome is saved,
+/// whatever it is, and the next queued run on it then starts. A run whose preparation ended
+/// ambiguously stays `submitted` until it is retried or a restart interrupts it, and keeps its
+/// node until then, so no later run starts before it has an outcome.
 async fn start_held_action_interaction(
     state: &ApiState,
     thread: &Thread,
@@ -4453,12 +4465,12 @@ async fn start_held_action_interaction(
                     error.message().to_owned(),
                 )
                 .await;
-                release_node_run(state.clone(), key, interaction.id, false);
+                release_node_run(state.clone(), key, interaction.id, true);
                 return Err(error);
             }
         };
     let Some(prepared) = prepared else {
-        release_node_run(state.clone(), key, interaction.id, false);
+        release_node_run(state.clone(), key, interaction.id, true);
         return state
             .product
             .get_interaction(interaction.id)
