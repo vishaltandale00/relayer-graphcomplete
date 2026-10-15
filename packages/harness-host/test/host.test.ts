@@ -2935,7 +2935,8 @@ describe("HarnessHost", () => {
       // not reached its preview grant. It neither waits for the run nor widens it.
       await host.createSession({
         ...registration,
-        configuration: { ...configuration, revision: 2, graphCapabilityProfile: { search: "disabled", preview: "enabled" } },
+        // An omitted profile grants search (#731), so only the preview capability changes here.
+        configuration: { ...configuration, revision: 2, graphCapabilityProfile: { search: "query-v1", preview: "enabled" } },
       });
       releaseReads();
       await running;
