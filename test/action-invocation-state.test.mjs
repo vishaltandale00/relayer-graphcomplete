@@ -217,6 +217,9 @@ describe("the run an invoke returns (#720)", () => {
     // A refresh already saw it start, so the older waiting acknowledgement is not merged.
     const running = [{ id: 2, threadId: 10, completionStatus: "running" }];
     expect(mergeInvokedInteraction(running, waiting)).toBe(running);
+    // A later capacity wait is kept over an earlier node wait.
+    const capacity = [waiting];
+    expect(mergeInvokedInteraction(capacity, { ...waiting, queueReason: "node" })).toBe(capacity);
     // A run that no longer waits loses its old reason.
     const merged = mergeInvokedInteraction([waiting], { id: 2, threadId: 10, completionStatus: "submitted" });
     expect(merged).toEqual([{ id: 2, threadId: 10, completionStatus: "submitted" }]);

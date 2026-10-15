@@ -5028,7 +5028,22 @@ async fn admit_and_start_interaction(
     .await;
     let (claimed, slot) = match admitted {
         Ok((claimed, CapacityAdmission::Start)) => (claimed, CapacitySlot::Held),
-        Ok((claimed, CapacityAdmission::Uncounted)) => (claimed, CapacitySlot::Uncounted),
+        Ok((claimed, CapacityAdmission::Uncounted)) => {
+            // A valid Stop reached it before it started. Nothing was prepared, so it ends
+            // stopped here, marked as never started, rather than through preparation that
+            // could fail first. One already bound to the graph settles through execution.
+            if matches!(
+                state.product.stop_unstarted_run(interaction.id).await,
+                Ok(true)
+            ) {
+                return state
+                    .product
+                    .get_interaction(interaction.id)
+                    .await
+                    .map_err(Into::into);
+            }
+            (claimed, CapacitySlot::Uncounted)
+        }
         Ok((_, CapacityAdmission::Waiting(grant))) => {
             let (waiting_state, waiting_thread) = (state.clone(), thread.clone());
             let waiting = interaction.clone();
@@ -5169,13 +5184,12 @@ async fn start_admitted_interaction(
             .await
             .map_err(Into::into);
     };
-    let running = match state.product.get_interaction(interaction.id).await {
-        Ok(running) => running,
-        Err(error) => {
-            release_run_capacity(state.clone(), slot, interaction.id);
-            return Err(error.into());
-        }
-    };
+    // The run is claimed and activated, so its execution is detached before anything else
+    // can fail; the reread below is only its acknowledgement.
+    let mut running = interaction.clone();
+    running.completion_status = "running".into();
+    running.graph_node_id = Some(prepared.graph_node_id);
+    running.waiting_for_capacity = false;
     let execution_state = state.clone();
     let release_state = state.clone();
     let thread = thread.clone();
@@ -5193,7 +5207,13 @@ async fn start_admitted_interaction(
         let _ = execution.await;
         release_run_capacity(release_state, slot, run);
     });
-    Ok(running)
+    match state.product.get_interaction(running.id).await {
+        Ok(current) => Ok(current),
+        Err(error) => {
+            eprintln!("started run {} could not be reread: {error}", running.id);
+            Ok(running)
+        }
+    }
 }
 
 /// The run as it now stands, after it began or joined a wait for capacity. Its waiter is
@@ -5232,7 +5252,25 @@ async fn wait_for_capacity(
     state: &ApiState,
     run: InteractionId,
 ) -> Result<Option<CapacitySlot>, crate::product::ProductError> {
-    Ok(match state.run_capacity.admit(&state.product, run).await? {
+    // A storage failure is retried briefly, so a wait that landed despite a reported failure
+    // is adopted rather than stranded.
+    let mut backoff = std::time::Duration::from_millis(50);
+    let mut attempt = 1;
+    let admission = loop {
+        match state.run_capacity.admit(&state.product, run).await {
+            Ok(admission) => break admission,
+            Err(error) if attempt == 4 => return Err(error),
+            Err(error) => {
+                eprintln!(
+                    "run {run} could not be admitted to the run capacity; retrying in {backoff:?}: {error}"
+                );
+                tokio::time::sleep(backoff).await;
+                backoff *= 2;
+                attempt += 1;
+            }
+        }
+    };
+    Ok(match admission {
         CapacityAdmission::Start => Some(CapacitySlot::Held),
         CapacityAdmission::Uncounted => Some(CapacitySlot::Uncounted),
         CapacityAdmission::Waiting(grant) => grant.await.ok().map(|()| CapacitySlot::Held),

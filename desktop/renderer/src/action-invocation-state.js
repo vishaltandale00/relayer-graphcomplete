@@ -140,6 +140,10 @@ export function actionReviewKind(action) {
 export function mergeInvokedInteraction(interactions = [], interaction) {
   const existing = interactions.find((item) => String(item.id) === String(interaction.id));
   if (existing && !["not_started", "submitted", "queued"].includes(existing.completionStatus)) return interactions;
+  // A run waits behind its node first and for capacity after, so a node wait never replaces a
+  // capacity wait a refresh already saw.
+  if (existing?.completionStatus === "queued" && existing.queueReason === "capacity"
+    && interaction.completionStatus === "queued" && interaction.queueReason !== "capacity") return interactions;
   const merged = { ...existing, ...interaction };
   if (!("queueReason" in interaction)) delete merged.queueReason;
   return existing

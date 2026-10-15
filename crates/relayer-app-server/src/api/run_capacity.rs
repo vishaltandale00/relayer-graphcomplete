@@ -92,11 +92,22 @@ impl RunCapacity {
             }
             // A wait an earlier, ambiguous admission already made durable is claimed back, so
             // the run starts from its claimed state.
-            if current.completion_status == "queued"
-                && current.waiting_for_capacity
-                && !product.claim_capacity_run(run).await?
-            {
-                return Ok(CapacityAdmission::Uncounted);
+            if current.completion_status == "queued" && current.waiting_for_capacity {
+                let claimed = match product.claim_capacity_run(run).await {
+                    Ok(claimed) => claimed,
+                    // The claim may have landed though it reported failure. The run then holds
+                    // the slot, so the limit holds either way.
+                    Err(error) => {
+                        let reread = product.get_interaction(run).await?;
+                        if reread.completion_status != "submitted" {
+                            return Err(error);
+                        }
+                        true
+                    }
+                };
+                if !claimed {
+                    return Ok(CapacityAdmission::Uncounted);
+                }
             }
             slots.executing.insert(run, 1);
             return Ok(CapacityAdmission::Start);
