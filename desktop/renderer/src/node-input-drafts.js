@@ -3,6 +3,8 @@ import { request } from "./api.js";
 export function createNodeInputDraftApi() {
   const base = (threadId) => `/api/threads/${encodeURIComponent(threadId)}/input-draft`;
   return Object.freeze({
+    liveAnswers: (threadId, interactionId) => request(`/api/threads/${encodeURIComponent(threadId)}/interactions/${encodeURIComponent(interactionId)}/live-answers`),
+    answer: (threadId, interactionId, answer) => request(`/api/threads/${encodeURIComponent(threadId)}/interactions/${encodeURIComponent(interactionId)}/live-answers`, { method: "POST", body: JSON.stringify(answer) }),
     get: (threadId) => request(base(threadId)),
     commit: (threadId, occurrence, value, expectedRevision) => request(
       `${base(threadId)}/attachments`,

@@ -1,0 +1,58 @@
+{
+  "algorithm": "sha256 of compact JSON sorted path/sha256 entries",
+  "digest": "2dd0f7bd8a9170b4195c41cc8ea4c23d77eaf231598d148f123bd606d381ca86",
+  "files": [
+    {
+      "path": "desktop/main/services/prime-agent-runtime.mjs",
+      "sha256": "114cc4ee34941ade21a2ecc79115fc3a8429b5134d7a0287a3db68f37409849f"
+    },
+    {
+      "path": "harnesses/claude-basic.yaml",
+      "sha256": "54288947fc74e97a6184c5bf3b53289302cafb922424e2171dee22389e42e9fd"
+    },
+    {
+      "path": "harnesses/codex-basic.yaml",
+      "sha256": "ece6934f3b146e878a6e1c468ee532bc0795d47633159e1b44d9cdcbd917a461"
+    },
+    {
+      "path": "harnesses/prime-agent-basic.yaml",
+      "sha256": "1bf6a19246916ffde2ffbaae5a1c09fc6f9d3086ced9f4ac67b3880d10b6abb0"
+    },
+    {
+      "path": "packages/harness-host/src/implementations/codex-basic.ts",
+      "sha256": "acc19079d166d3c0cddcd4e591678cd0db8910945854b9bf81a4bfe3e4bd5d06"
+    },
+    {
+      "path": "packages/harness-host/src/implementations/graph-presentation-guidance.ts",
+      "sha256": "2d0cf8b82bf1bcb86e9a4e28c26ebf5c095d9ad7e1253993050acf7f4f0ff3a3"
+    },
+    {
+      "path": "packages/harness-host/src/implementations/prime-agent.ts",
+      "sha256": "c564752de4a07e3ddce96d9d23507e391238c405b41480b6dff7294bc80edd5f"
+    },
+    {
+      "path": "packages/harness-host/test/claude-basic.test.ts",
+      "sha256": "42059e352f8ebe4d471222c5bb1675e04f3daad93e0281dbe4c71d4969f3baac"
+    },
+    {
+      "path": "packages/harness-host/test/codex-basic.test.ts",
+      "sha256": "b7941543f0a5473e965100a8058e46af1ddb807743ed0bffd765decc05fb18b0"
+    },
+    {
+      "path": "packages/harness-host/test/configuration.test.ts",
+      "sha256": "02e5d592a186f7bf9a4653517d8ba2d2c57208f0f17dd5924348266c88119863"
+    },
+    {
+      "path": "packages/harness-host/test/prime-agent.test.ts",
+      "sha256": "45fafba1e77f579ac5db5058b8fe7187239208b313a0251180bb501f021cbd66"
+    },
+    {
+      "path": "test/graph-authoring-replay.test.mjs",
+      "sha256": "888c1b67563de9268d9a20458c981ef5f064a4f83f8fb11cbb2367a7c81ee320"
+    },
+    {
+      "path": "vendor/prime-agent/manifest.json",
+      "sha256": "65f7cd79acbf6fb94fa666d05a236493772113779f830fe3c4b9aa93c89ecd6c"
+    }
+  ]
+}
