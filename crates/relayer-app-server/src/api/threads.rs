@@ -4599,7 +4599,9 @@ async fn start_held_action_interaction(
                     error.message().to_owned(),
                 )
                 .await;
-                release_node_run(state.clone(), key, interaction.id, false);
+                // The node passes on only once the run has a durable outcome, which the
+                // failure record above may not have written during the same outage.
+                release_node_run(state.clone(), key, interaction.id, true);
                 return Err(error);
             }
         }
@@ -4663,13 +4665,14 @@ async fn continue_held_admission(
             let waiting = interaction.clone();
             tokio::spawn(async move {
                 match grant.await {
+                    // The grant claimed the run back from its wait for this waiter alone.
                     Ok(()) => {
                         let _ = run_held_action_interaction(
                             &waiting_state,
                             &waiting_thread,
                             waiting,
                             key,
-                            claimed,
+                            true,
                             CapacitySlot::Held,
                         )
                         .await;
@@ -4682,11 +4685,7 @@ async fn continue_held_admission(
                     }
                 }
             });
-            return state
-                .product
-                .get_interaction(interaction.id)
-                .await
-                .map_err(Into::into);
+            return Ok(waiting_acknowledgement(state, interaction).await);
         }
         // A duplicate delivery of a run that waits for capacity: the first one starts it, and
         // this delivery's hold on the node and its own preparing mark end. The first delivery
@@ -4694,11 +4693,7 @@ async fn continue_held_admission(
         CapacityAdmission::AlreadyWaiting => {
             state.node_runs.end_preparing(interaction.id);
             release_node_run(state.clone(), key, interaction.id, false);
-            return state
-                .product
-                .get_interaction(interaction.id)
-                .await
-                .map_err(Into::into);
+            return Ok(waiting_acknowledgement(state, interaction).await);
         }
     };
     run_held_action_interaction(state, thread, interaction, key, claimed, slot).await
@@ -5019,7 +5014,7 @@ async fn admit_and_start_interaction(
     let (claimed, slot) = match admitted {
         Ok((claimed, CapacityAdmission::Start)) => (claimed, CapacitySlot::Held),
         Ok((claimed, CapacityAdmission::Uncounted)) => (claimed, CapacitySlot::Uncounted),
-        Ok((claimed, CapacityAdmission::Waiting(grant))) => {
+        Ok((_, CapacityAdmission::Waiting(grant))) => {
             let (waiting_state, waiting_thread) = (state.clone(), thread.clone());
             let waiting = interaction.clone();
             tokio::spawn(async move {
@@ -5027,11 +5022,13 @@ async fn admit_and_start_interaction(
                     return;
                 }
                 let run = waiting.id;
+                // The grant claimed the run back from its wait, and only this waiter holds it,
+                // so it owns the start whichever delivery first claimed it.
                 if let Err(error) = start_admitted_interaction(
                     &waiting_state,
                     &waiting_thread,
                     waiting,
-                    claimed,
+                    true,
                     CapacitySlot::Held,
                     record_deterministic_failure,
                 )
@@ -5049,22 +5046,27 @@ async fn admit_and_start_interaction(
                     .await;
                 }
             });
-            return state
-                .product
-                .get_interaction(interaction.id)
-                .await
-                .map_err(Into::into);
+            return Ok(waiting_acknowledgement(state, interaction).await);
         }
         // A duplicate delivery of a run that waits for capacity: the first one starts it.
         Ok((_, CapacityAdmission::AlreadyWaiting)) => {
-            return state
-                .product
-                .get_interaction(interaction.id)
-                .await
-                .map_err(Into::into);
+            return Ok(waiting_acknowledgement(state, interaction).await);
         }
         Err(error) => {
             let error = ApiError::from(error);
+            // A Stop that committed meanwhile wins: the run ends stopped, never failed.
+            if let Ok(current) = state.product.get_interaction(interaction.id).await
+                && current.completion_status == "submitted"
+                && current.stop_requested
+                && current.stop_error.is_none()
+                && state
+                    .product
+                    .finish_interaction_stopped(interaction.id)
+                    .await
+                    .is_ok()
+            {
+                return Err(error);
+            }
             if record_deterministic_failure || !error.is_deterministic_input_failure() {
                 record_background_failure(
                     &state.product,
@@ -5182,6 +5184,26 @@ async fn start_admitted_interaction(
         release_run_capacity(release_state, slot, run);
     });
     Ok(running)
+}
+
+/// The run as it now stands, after it began or joined a wait for capacity. Its waiter is
+/// installed, so a failed reread still acknowledges it as waiting rather than reporting an
+/// error for a run that will start.
+async fn waiting_acknowledgement(state: &ApiState, interaction: Interaction) -> Interaction {
+    match state.product.get_interaction(interaction.id).await {
+        Ok(current) => current,
+        Err(error) => {
+            eprintln!(
+                "run {} waits for capacity, but could not be reread: {error}",
+                interaction.id
+            );
+            Interaction {
+                completion_status: "queued".into(),
+                waiting_for_capacity: true,
+                ..interaction
+            }
+        }
+    }
 }
 
 /// A human-started run's place under the app's capacity limit (#720).

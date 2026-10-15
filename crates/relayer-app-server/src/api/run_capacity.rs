@@ -90,11 +90,24 @@ impl RunCapacity {
             if current.stop_requested && current.stop_error.is_none() {
                 return Ok(CapacityAdmission::Uncounted);
             }
+            // A wait an earlier, ambiguous admission already made durable is claimed back, so
+            // the run starts from its claimed state.
+            if current.completion_status == "queued"
+                && current.waiting_for_capacity
+                && !product.claim_capacity_run(run).await?
+            {
+                return Ok(CapacityAdmission::Uncounted);
+            }
             slots.executing.insert(run, 1);
             return Ok(CapacityAdmission::Start);
         }
         if !product.queue_run_for_capacity(run).await? {
-            return Ok(CapacityAdmission::Uncounted);
+            // An earlier admission whose commit was reported failed may have made the wait
+            // durable after all. That wait is adopted, so the run keeps its place.
+            let current = product.get_interaction(run).await?;
+            if !(current.completion_status == "queued" && current.waiting_for_capacity) {
+                return Ok(CapacityAdmission::Uncounted);
+            }
         }
         let (granted, grant) = oneshot::channel();
         slots.waiting.push_back((run, granted));
@@ -136,6 +149,19 @@ impl RunCapacity {
                 if granted.send(()).is_err() {
                     // Its task ended while it was claimed, so nothing will run or release it.
                     // The slot moves on; startup recovers the run.
+                    eprintln!("run {next} left the wait for capacity as it was given a slot");
+                    continue;
+                }
+                slots.executing.remove(&run);
+                slots.executing.insert(next, 1);
+                return Ok(Some(next));
+            }
+            // A grant an earlier release committed, though its commit was reported failed,
+            // left the run `submitted` without a Stop: it is this waiter's slot after all.
+            let current = product.get_interaction(next).await?;
+            if current.completion_status == "submitted" && !current.stop_requested {
+                let (_, granted) = slots.waiting.pop_front().expect("a waiting run");
+                if granted.send(()).is_err() {
                     eprintln!("run {next} left the wait for capacity as it was given a slot");
                     continue;
                 }
@@ -337,6 +363,42 @@ mod tests {
         grants.remove(0).await.unwrap();
         assert_eq!(capacity.executing_for_test().await, [runs[1]]);
         assert_eq!(capacity.waiting().await, [runs[2], late[0]]);
+    }
+
+    /// An admission or a grant whose commit was reported failed may still have landed. A
+    /// retried admission adopts a durable wait, and a retried release recognizes a durable
+    /// grant, so the run neither loses its place nor is left without an owner.
+    #[tokio::test]
+    async fn ambiguous_commits_are_adopted_on_retry() {
+        let (_directory, store, product, runs) = fixture(3).await;
+        let capacity = RunCapacity::new(1);
+        assert!(matches!(
+            capacity.admit(&product, runs[0]).await.unwrap(),
+            CapacityAdmission::Start
+        ));
+        // The wait landed, though its admission failed: the retry adopts it.
+        assert!(store.queue_run_for_capacity(runs[1]).await.unwrap());
+        let mut grant = match capacity.admit(&product, runs[1]).await.unwrap() {
+            CapacityAdmission::Waiting(grant) => grant,
+            other => panic!("the durable wait was not adopted: {other:?}"),
+        };
+        assert_eq!(capacity.waiting().await, [runs[1]]);
+        // The grant landed, though its release failed: the retry hands the slot over.
+        assert!(store.claim_capacity_run(runs[1]).await.unwrap());
+        assert_eq!(
+            capacity.release(&product, runs[0]).await.unwrap(),
+            Some(runs[1])
+        );
+        (&mut grant).await.unwrap();
+        assert_eq!(capacity.executing_for_test().await, [runs[1]]);
+        // A durable wait found with a slot free is claimed back and starts.
+        assert_eq!(capacity.release(&product, runs[1]).await.unwrap(), None);
+        assert!(store.queue_run_for_capacity(runs[2]).await.unwrap());
+        assert!(matches!(
+            capacity.admit(&product, runs[2]).await.unwrap(),
+            CapacityAdmission::Start
+        ));
+        assert_eq!(store.completion_status_for_test(runs[2]).await, "submitted");
     }
 
     /// A run that carries a valid Stop never waits for capacity; it settles without a slot.
