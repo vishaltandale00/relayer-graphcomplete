@@ -4849,8 +4849,12 @@ export function createProductWorkspace({
     if (showPending) {
       const pendingInteraction = state.interactions.find((item) => String(item.id) === String(pendingTurn.interactionId));
       // A pending run that waits for capacity (#720) says so, apart from a node wait.
-      // The run's own row is newer than the status the pending entry was seeded with.
-      const pendingStatus = runViewStatus(pendingInteraction ?? { completionStatus: pendingTurn.status });
+      // A pending entry is seeded as running; until it ends, the run's own row says whether it
+      // still waits, for capacity or behind its node. An ended pending status wins.
+      const pendingStatus = pendingInteraction?.completionStatus === "queued"
+        && PENDING_COMPLETION_STATUSES.has(pendingTurn.status)
+        ? runViewStatus(pendingInteraction)
+        : pendingTurn.status;
       const label = pendingTurn.readyLayer ? "Result ready" : turnStatusPresentation(pendingStatus).label;
       $("#pendingTurnText").textContent = `Turn ${pendingInteraction?.sequence ?? ""} · ${label}`;
       $("#openReadyResult").classList.toggle("hidden", !pendingTurn.readyLayer);
