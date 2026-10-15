@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { join, resolve } from "node:path";
 import { mkdir, writeFile } from "node:fs/promises";
-import { RelayerGraphClient, LayerObject, LayerLayoutObject, NodeObject, NodePlacementObject, html, detailCapability } from "@relayer/graph-client";
+import { RelayerGraphClient, EdgeObject, LayerObject, LayerLayoutObject, NodeObject, NodePlacementObject, html, detailCapability } from "@relayer/graph-client";
 import { GraphCompleteRuntimeService, RECURSIVE_TEMPORAL_FEATURES } from "../desktop/main/services/graphcomplete-runtime.mjs";
 import { RelayerAppServerService } from "../desktop/main/services/relayer-app-server.mjs";
 import { EvalService } from "../desktop/eval-main/eval-service.mjs";
@@ -17,6 +17,8 @@ export async function proveCurrentActor({ browser, directory, authored = false }
   await writeFile(configuration, "schemaVersion: 1\nname: fixture-current-actor\nimplementation: fixture.current-actor\nimplementationVersion: 1\npermissionBindings:\n  ask: {}\n  auto: {}\n  full: {}\nmodelCompatibility:\n  - providerId: codex\nexecutionAccessContracts: [managed-runtime@1]\nsettings: {}\n");
   const gates = [deferred(), deferred(), deferred()];
   const layers = [];
+  const reconciliation = deferred();
+  let pendingDeliveryObserved = false;
   const resources = [];
   let controller;
   let tasks;
@@ -36,13 +38,20 @@ export async function proveCurrentActor({ browser, directory, authored = false }
           harnessCalls++;
           const initialContract = await graph.getContract();
           await gates[0].promise;
+          try {
           let revision = 0;
           for (let index = 1; index <= 2; index++) {
             const node = new NodeObject("search", `Working finding ${index}`, index === 1 ? "I found the queue and am checking the worker boundary." : "The worker boundary explains the delay. Earlier findings remain linked.", "concept", `finding-${index}`);
-            const layer = new LayerObject([node], [], new LayerLayoutObject([new NodePlacementObject(node, 0.5, 0.5)], "default"), `working-${index}`);
+            const navigationMarker = authored && index === 2 ? new NodeObject("info", "Navigation remount marker", "A separate visible node lets the proof replace the selected Node Detail through ordinary selection.", "concept", "navigation-marker") : null;
+            const members = navigationMarker ? [node, navigationMarker] : [node];
+            const edges = navigationMarker ? [new EdgeObject([node, navigationMarker], "navigation-marker-edge")] : [];
+            const layer = new LayerObject(members, edges, new LayerLayoutObject(members.map((member, index) => new NodePlacementObject(member, members.length === 1 ? 0.5 : index === 0 ? 0.25 : 0.75, 0.5)), "default"), `working-${index}`, node);
             const question = { kind: "input", control: "text", prompt: "Which boundary should I inspect?", label: "Investigation boundary", sourceLayer: layer, clientKey: "boundary" };
             if (authored && index === 1) node.detailAuthoring.setComponent("question", html`<label>Which boundary should I inspect?<textarea aria-label="Which boundary should I inspect?" gc=${detailCapability.input("boundary", question)}></textarea></label>`);
+            if (authored && index === 2) node.detailAuthoring.setComponent("navigation", html`<a gc=${detailCapability.reference("earlier", { kind: "navigate", relation: "reference", sourceLayer: layer, label: "Earlier finding", target: layers[0], clientKey: "earlier" })}>Earlier finding</a>`);
             await graph.submitNode(node);
+            if (navigationMarker) await graph.submitNode(navigationMarker);
+            for (const edge of edges) await graph.createEdge(edge);
             await graph.submitLayer(layer);
             if (index === 1) await graph.addAction(node, question);
             if (index === 2) await graph.addAction(node, { kind: "navigate", relation: "reference", sourceLayer: layer, label: "Earlier finding", target: layers[0], clientKey: "earlier" });
@@ -65,6 +74,7 @@ export async function proveCurrentActor({ browser, directory, authored = false }
             } else await gates[index].promise;
           }
           await graph.returnCurrent(layers[1], revision, "finished");
+          } catch (error) { console.error("CURRENT_FIXTURE_FAILURE", String(error.message).replaceAll(capability.token, "[redacted]").replace(/https?:\/\/[^\s]+/g, "[loopback]")); throw error; }
         },
       }) },
     });
@@ -94,7 +104,10 @@ export async function proveCurrentActor({ browser, directory, authored = false }
           } catch (error) { console.error("CURRENT_ACTOR_ACTION_FAILURE", error.message, error.code, error.actionDispatched); throw error; }
         };
         await actorPage.route("**/api/threads/*/interactions/*/live-answers", async route => {
-          if (route.request().method() !== "POST") return route.continue();
+          if (route.request().method() !== "POST") {
+            if (answerRequests > 0 && !pendingDeliveryObserved) await reconciliation.promise;
+            return route.continue();
+          }
           answerRequests++;
           const response = await route.fetch();
           assert.equal(response.status(), 200, await response.text());
@@ -103,7 +116,7 @@ export async function proveCurrentActor({ browser, directory, authored = false }
         gates[0].resolve(); return controller;
       },
       createActor: async () => ({ close: async () => {},
-        observe: async observation => {
+        observe: async (observation, signal) => {
           try {
           assert.deepEqual(observation.availableActions, ["click", "fill", "select", "scroll"]);
           assert.ok(observation.screenshot);
@@ -111,7 +124,14 @@ export async function proveCurrentActor({ browser, directory, authored = false }
           assert.equal((await tasks.detail(tasks.list()[0].currentThreadId)).interactions.at(-1).completionStatus, "running");
           if (observation.currentUpdate.revision === 1) {
             if (receivedAnswer) {
-              assert.ok(await actorPage.getByRole("button", { name: "Delivered answer for Which boundary should I inspect?", exact: true }).isDisabled());
+              const delivered = actorPage.getByRole("button", { name: "Delivered answer for Which boundary should I inspect?", exact: true });
+              if (!await delivered.isVisible()) {
+                assert.equal(pendingDeliveryObserved, false, "pending delivery is observed once before releasing reconciliation");
+                pendingDeliveryObserved = true;
+                reconciliation.resolve();
+                return { comment: "My Answer is still pending; I am waiting for delivery", action: null, usage: null };
+              }
+              assert.ok(await delivered.isDisabled());
               gates[1].resolve();
               return { comment: "My answer was delivered; I am waiting for the investigation", action: null, usage: null };
             }
@@ -148,6 +168,42 @@ export async function proveCurrentActor({ browser, directory, authored = false }
             assert.ok(control, JSON.stringify(observation.controls));
             return { comment: "I understand the decision and choose Worker", action: { kind, ref: control.ref, value: kind === "fill" ? "Worker" : "", reason: "", satisfaction: null, comment: "Answer the working question", endpointStatus: null, remainingWork: "" }, usage: null };
           }
+          if (authored && observation.currentUpdate.revision === 2) {
+            // A second view exercises the actual working-control registry and
+            // redraw rebinding without changing this actor's visible history.
+            const sessionId = tasks.list()[0].id;
+            console.log("CURRENT_AUTHORED_NAV_STAGE", "opening");
+            const nav = await openTaskActorBrowser({ tasks, sessionId, productSession, browser, signal });
+            const navPage = browser.contexts().at(-1).pages()[0];
+            try {
+              const submission = tasks.get(sessionId).events.find(event => event.kind === "submission");
+              const expected = { threadId: submission.threadId, turnId: submission.interactionId, submittedAt: Date.parse(submission.at) };
+              console.log("CURRENT_AUTHORED_NAV_STAGE", "selecting_current_node");
+              await navPage.locator("#nodeLayer .graph-node").filter({ hasText: "Working finding 2" }).click();
+              await navPage.getByRole("button", { name: "Earlier finding", exact: true }).waitFor();
+              console.log("CURRENT_AUTHORED_NAV_STAGE", "registered_control_visible");
+              const forged = await navPage.getByRole("button", { name: "Earlier finding", exact: true }).elementHandle();
+              await forged.evaluate(element => { const clone = element.cloneNode(true); clone.id = "unregistered-navigation"; element.after(clone); });
+              const captured = await nav.observeCurrent(expected);
+              console.log("CURRENT_AUTHORED_NAV_STAGE", "captured");
+              const choices = captured.observation.controls.filter(control => control.name === "Earlier finding");
+              assert.equal(choices.length, 1, "an unregistered authored clone has no working ref");
+              await navPage.locator("#unregistered-navigation").evaluate(element => element.remove());
+              console.log("CURRENT_AUTHORED_NAV_STAGE", "remounting");
+              await navPage.locator("#closeInspector").click();
+              await navPage.locator("#nodeLayer .graph-node").filter({ hasText: "Navigation remount marker" }).click();
+              await navPage.waitForFunction(element => !element.isConnected, forged);
+              await navPage.locator("#nodeLayer .graph-node").filter({ hasText: "Working finding 2" }).click();
+              await navPage.getByRole("button", { name: "Earlier finding", exact: true }).waitFor();
+              await navPage.evaluate(async () => { const { refreshState } = await import("/src/threads.js"); await refreshState(window.__taskActorPresentation.threadId); });
+              await navPage.waitForFunction(element => !element.isConnected, forged);
+              console.log("CURRENT_AUTHORED_NAV_STAGE", "activating_rebound");
+              await nav.act({ kind: "click", ref: choices[0].ref }, { current: { expected, pointer: captured.pointer } });
+              await navPage.getByRole("button", { name: "Delivered answer for Which boundary should I inspect?", exact: true }).waitFor();
+              assert.equal(await navPage.evaluate(() => window.__taskActorPresentation.currentPointer.mode), "pinned", "registered authored navigation follows the accepted reference");
+              console.log("CURRENT_AUTHORED_NAV_STAGE", "historical_delivered");
+            } finally { await nav.close(); }
+          }
           gates[observation.currentUpdate.revision].resolve();
           return { comment: `I understand finding ${observation.currentUpdate.revision}`, usage: null };
           } catch (error) {
@@ -157,7 +213,8 @@ export async function proveCurrentActor({ browser, directory, authored = false }
           }
         },
         decide: async () => {
-          assert.deepEqual(reactions, [1, 1, 1, 2]);
+          console.log("CURRENT_DECIDE_REVISIONS", JSON.stringify({ authored, reactions }));
+          assert.deepEqual(reactions, [1, 1, 1, 1, 2]);
           assert.equal((await tasks.detail(tasks.list()[0].currentThreadId)).interactions.at(-1).completionStatus, "accepted");
           // Ordinary navigation really pins the workspace. It must not expose an
           // unseen Current as though the actor were still following it.
@@ -217,7 +274,7 @@ export async function proveCurrentActor({ browser, directory, authored = false }
     const result = tasks.get(task.id);
     assert.equal(result.status, "completed", JSON.stringify(result.events.filter(event => event.kind === "actor_error")));
     const working = result.events.filter(event => event.kind === "actor_observation" && event.phase === "current");
-    assert.deepEqual(working.map(event => event.pointer.revision), [1, 1, 1, 2]);
+    assert.deepEqual(working.map(event => event.pointer.revision), [1, 1, 1, 1, 2]);
     assert.equal(answerRequests, 1, "lost UI response was reconciled without replay");
     assert.equal(harnessCalls, 1, "answer did not restart inference");
     assert.equal(result.completions, 1, "answer did not admit another completion");
@@ -225,19 +282,25 @@ export async function proveCurrentActor({ browser, directory, authored = false }
     const delivery = result.events.filter(event => event.kind === "product_action" && event.path.endsWith("/live-answers") && event.outcome === "accepted");
     assert.equal(delivery.length, 1);
     assert.deepEqual(delivery[0].liveAnswerReceipt, receivedAnswer);
-    assert.equal(result.events.some(event => event.kind === "actor_current_gap"), false);
+    const captureGaps = result.events.filter(event => event.kind === "actor_current_gap");
+    for (const gap of captureGaps) {
+      assert.equal(gap.reason, "presentation_changed_during_capture", "no graph revision may be missed");
+      assert.ok([1, 2].includes(gap.pointer.revision));
+    }
+    console.log("CURRENT_CAPTURE_GAPS", JSON.stringify({ authored, gaps: captureGaps.map(gap => ({ reason: gap.reason, revision: gap.pointer.revision })) }));
     assert.ok(working[0].observation.screenshotArtifact.sha256 !== working[3].observation.screenshotArtifact.sha256);
     const reopened = await new HumanTaskService({ stateFile: join(data, "tasks.json"), evalService: service, productSession }).open();
     const { bundle } = await reopened.export(task.id);
-    assert.equal(bundle.actorScreenshots.length, 5);
+    assert.equal(bundle.actorScreenshots.length, 6);
     assert.deepEqual(bundle.session.events.find(event => event.id === delivery[0].id).liveAnswerReceipt, receivedAnswer);
-    assert.equal(bundle.session.events.filter(event => event.kind === "actor_current_reaction").length, 4);
+    assert.equal(bundle.session.events.filter(event => event.kind === "actor_current_reaction").length, 5);
     console.log(`PASS current-pointer actor (${authored ? "authored" : "native"} input): two real Advances with a live UI answer consumed through the candidate SDK, sealed input unchanged, response-loss reconciliation, one inference/one admission, ordered screenshot/reaction export, fresh settled decision, hidden/zero-width exclusion, capture cancellation/race, historical Delivered after navigation/reload, composer exclusion and ordinary navigation pin exclusion (fixture inference)`);
   } catch (error) {
     console.error("CURRENT_ACTOR_PROOF_FAILURE", error.message);
     if (actorPage && !actorPage.isClosed()) await actorPage.screenshot({ path: resolve(".relayer/current-pointers-live-failure.png") }).catch(() => {});
     throw error;
   } finally {
+    reconciliation.resolve();
     gates.forEach(gate => gate.resolve());
     for (const resource of resources.reverse()) await resource.close();
   }

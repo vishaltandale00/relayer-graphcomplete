@@ -382,9 +382,12 @@ export async function createHumanTaskSurface({ tasks, sessionId, productSession,
         throw fail(403, "Read is outside this task session.");
       }
       const draftRead = /^\/api\/threads\/[1-9][0-9]*\/(?:context-drafts|input-draft)$/.test(url.pathname);
-      const upstream = annotationToken && !draftRead
-        ? await annotationUpstream(`${url.pathname}${url.search}`)
-        : await tasks.upstream(`${url.pathname}${url.search}`, {}, draftRead);
+      const liveAnswerRead = /^\/api\/threads\/[1-9][0-9]*\/interactions\/[1-9][0-9]*\/live-answers$/.test(url.pathname);
+      const upstream = liveAnswerRead
+        ? await tasks.readLiveAnswers(sessionId, `${url.pathname}${url.search}`)
+        : annotationToken && !draftRead
+          ? await annotationUpstream(`${url.pathname}${url.search}`)
+          : await tasks.upstream(`${url.pathname}${url.search}`, {}, draftRead);
       let bytes = Buffer.from(await upstream.arrayBuffer());
       if (actor && upstream.ok && url.pathname === "/api/capabilities") {
         bytes = Buffer.from(JSON.stringify({ ...JSON.parse(bytes.toString()), annotations: false }));

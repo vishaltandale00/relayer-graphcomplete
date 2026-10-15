@@ -339,6 +339,58 @@ export class HumanTaskService {
       }
     });
   }
+  readLiveAnswers(id, path, { signal } = {}) {
+    return this.serial(async () => {
+      signal?.throwIfAborted();
+      const session = this.find(id);
+      const pathname = new URL(path, "http://task.invalid").pathname;
+      const route = /^\/api\/threads\/([1-9][0-9]*)\/interactions\/[1-9][0-9]*\/live-answers$/.exec(pathname);
+      if (!route || !session.threadIds.some(thread => String(thread) === route[1])) throw failure("Read is outside this task session.", 403);
+      const response = await this.upstream(path, { signal });
+      if (!response.ok) return response;
+      const pending = session.events.filter(event => event.kind === "product_action" && event.method === "POST" && event.outcome === "unknown"
+        && new URL(event.path, "http://task.invalid").pathname === pathname
+        && !session.events.some(resolution => resolution.kind === "live_answer_reconciled" && resolution.productActionEventId === event.id));
+      if (!pending.length) return response;
+      const page = await response.clone().json().catch(() => null);
+      const canonicalValue = value => {
+        if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+        if (typeof value.text === "string" && !("selected" in value)) return { text: value.text };
+        if ("text" in value || !Array.isArray(value.selected) || value.selected.some(option => !option
+          || typeof option.key !== "string" || typeof option.label !== "string")
+          || new Set(value.selected.map(option => option.key)).size !== value.selected.length) return null;
+        return { selected: value.selected.map(({ key, label }) => ({ key, label })).sort((a, b) => a.key < b.key ? -1 : a.key > b.key ? 1 : 0) };
+      };
+      const before = session.events.length;
+      for (const event of pending) {
+        const request = event.request;
+        const value = canonicalValue(request?.value);
+        if (!value || !request?.occurrence || typeof request.operationKey !== "string" || !request.operationKey
+          || !Number.isSafeInteger(request.attemptId) || request.attemptId < 1
+          || !Number.isSafeInteger(request.authorityEpoch) || request.authorityEpoch < 1
+          || !Number.isSafeInteger(request.expectedRevision) || request.expectedRevision < 1) continue;
+        const keyed = [...(Array.isArray(page?.answers) ? page.answers : []), ...(Array.isArray(page?.currentAnswers) ? page.currentAnswers : [])]
+          .filter(answer => answer?.operationKey === request.operationKey);
+        if (!keyed.length || keyed.some(answer => !isDeepStrictEqual(answer, keyed[0]))) continue;
+        const matches = keyed.filter(answer =>
+          Number.isSafeInteger(answer.completionId) && answer.completionId === page?.current?.completionId && answer.completionId === request.occurrence.presentingInteractionNodeId
+          && answer.attemptId === request.attemptId && answer.authorityEpoch === request.authorityEpoch
+          && answer.currentRevision === request.expectedRevision && answer.operationKey === request.operationKey
+          && Number.isSafeInteger(answer.sequence) && answer.sequence > 0
+          && isDeepStrictEqual(answer.occurrence, request.occurrence)
+          && isDeepStrictEqual(canonicalValue(answer.value), value));
+        if (!matches.length || matches.some(answer => !isDeepStrictEqual(answer, matches[0]))) continue;
+        this.event(session, "live_answer_reconciled", { productActionEventId: event.id, threadId: event.threadId,
+          outcome: "accepted", source: "graph_receipt_read", liveAnswerReceipt: clone(matches[0]) });
+      }
+      if (session.events.length !== before) {
+        try { await this.persist(); }
+        catch { session.events.length = before; throw failure("Answer receipt evidence could not be saved. Reopen the question to check again.", 503); }
+      }
+      // The original unknown event, interruption and admission count stay intact.
+      return response;
+    });
+  }
   observe(id, observation, { signal } = {}) {
     return this.serial(async () => {
       const session = this.find(id);
@@ -432,7 +484,7 @@ export class HumanTaskService {
       }
       const currentNative = session.actorSetup?.behaviorContract?.observationContract?.id === "task-actor-observation-v3";
       const candidates = session.events.filter(event => ["submission", "actor_action"].includes(event.kind)
-        || (currentNative && event.kind === "product_action" && event.path?.endsWith("/live-answers")));
+        || (currentNative && (event.kind === "live_answer_reconciled" || (event.kind === "product_action" && event.path?.endsWith("/live-answers")))));
       const projected = candidates.slice(-80).map(event => {
         const item = { id: event.id, kind: event.kind, at: event.at };
         if (event.kind === "submission") {
@@ -447,11 +499,12 @@ export class HumanTaskService {
             ...(turn ? { committedAt: text(turn.createdAt, 100), submittedInputs: inputs,
               ...(turn.submittedInputs?.length > inputs.length ? { inputsOmitted: turn.submittedInputs.length - inputs.length } : {}) } : { committedInputsUnavailable: true }) };
         }
-        if (event.kind === "product_action") {
+        if (["product_action", "live_answer_reconciled"].includes(event.kind)) {
           const answer = event.outcome === "accepted" ? event.liveAnswerReceipt : null;
           if (!answer) return { ...item, kind: "live_answer", delivery: "unavailable", outcome: text(event.outcome, 100) };
           const serialized = JSON.stringify(answer.value);
           return { ...item, kind: "live_answer", delivery: "accepted", incorporation: "not_established",
+            ...(event.kind === "live_answer_reconciled" ? { productActionEventId: event.productActionEventId, recovered: true } : {}),
             completionId: answer.completionId, attemptId: answer.attemptId, authorityEpoch: answer.authorityEpoch,
             currentRevision: answer.currentRevision, sequence: answer.sequence, occurrence: clone(answer.occurrence),
             prompt: text(answer.question?.prompt), ...(Buffer.byteLength(serialized) <= 2000

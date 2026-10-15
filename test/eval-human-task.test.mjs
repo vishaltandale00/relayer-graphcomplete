@@ -578,6 +578,12 @@ it("current-native stopping evidence separates live delivery receipts from inten
   expect(trajectory.find(item => item.kind === "live_answer" && item.delivery === "accepted")).toMatchObject({ incorporation: "not_established", attemptId: 8, value: { text: "Boston" }, prompt: "Which city?" });
   expect(trajectory.find(item => item.kind === "live_answer" && item.delivery === "unavailable")).toMatchObject({ outcome: "unknown" });
   expect(JSON.stringify(trajectory)).not.toContain("UNCONFIRMED_VALUE");
+  const unknown = session.events.findLast(event => event.kind === "product_action" && event.outcome === "unknown");
+  const accepted = session.events.find(event => event.liveAnswerReceipt)?.liveAnswerReceipt;
+  await f.tasks.actorEvent(id, "live_answer_reconciled", { productActionEventId: unknown.id, outcome: "accepted", liveAnswerReceipt: { ...accepted, sequence: 2 } });
+  const resolved = (await f.tasks.completionJudgeEvidence(id)).trajectory;
+  expect(resolved.find(item => item.recovered)).toMatchObject({ kind: "live_answer", delivery: "accepted", incorporation: "not_established", productActionEventId: unknown.id });
+  expect(resolved.findIndex(item => item.recovered)).toBeGreaterThan(resolved.findIndex(item => item.id === unknown.id));
   session.actorSetup.behaviorContract.observationContract = { id: "task-actor-observation-v2" };
   expect((await f.tasks.completionJudgeEvidence(id)).trajectory.some(item => item.kind === "live_answer")).toBe(false);
 });
@@ -595,4 +601,97 @@ it("live-answer gateway transport uncertainty is retry-ambiguous HTTP 503 rather
   expect(await response.json()).toMatchObject({ error: expect.stringContaining("unconfirmed") });
   expect(f.tasks.get(f.session.id)).toMatchObject({ completions: 1, status: "interrupted", termination: { reason: "product_write_unknown" } });
   expect(f.tasks.get(f.session.id).events.find(event => event.kind === "product_action")).toMatchObject({ outcome: "unknown", request: { operationKey: "answer-1" } });
+});
+
+async function ambiguousAnswerFixture({ mismatch = null, value = { text: "Boston" }, receiptValue = value, conflict = false, annotations = false } = {}) {
+  const f = await fixture();
+  const request = { operationKey: "lost-answer", attemptId: 8, authorityEpoch: 2, expectedRevision: 3,
+    occurrence: { presentingInteractionNodeId: 7, presentingLayerId: 9, actionId: 11 }, value: structuredClone(value) };
+  const receipt = { sequence: 1, completionId: 7, attemptId: 8, authorityEpoch: 2, currentRevision: 3,
+    operationKey: request.operationKey, occurrence: structuredClone(request.occurrence), question: { prompt: "Which city?" }, value: structuredClone(receiptValue) };
+  if (receipt.value.selected) receipt.value.selected.sort((a, b) => a.key < b.key ? -1 : a.key > b.key ? 1 : 0);
+  if (mismatch) mismatch(receipt);
+  let posts = 0;
+  const upstream = f.tasks.fetchImpl;
+  f.tasks.fetchImpl = async (url, init) => {
+    if (url.pathname.endsWith("/live-answers")) {
+      if (init.method === "POST") { posts++; throw new Error("Response lost after commit"); }
+      return Response.json({ current: { completionId: 7 }, answers: [receipt], currentAnswers: [conflict ? { ...receipt, question: { prompt: "Different question" } } : receipt] });
+    }
+    return upstream(url, init);
+  };
+  const path = "/api/threads/1/interactions/10/live-answers";
+  await expect(f.tasks.write(f.session.id, path, "POST", request)).rejects.toMatchObject({ status: 503 });
+  const surface = await createHumanTaskSurface({ tasks: f.tasks, sessionId: f.session.id, productSession: f.options.productSession, ...(annotations ? { registerAnnotations: async () => {} } : {}) });
+  cleanups.push(() => surface.close());
+  const read = () => fetch(new URL(path, surface.url), { headers: { Authorization: `Bearer ${new URL(surface.url).hash.slice(1)}` } });
+  return { ...f, read, receipt, posts: () => posts };
+}
+
+it.each([{ text: "Boston" }, { selected: [{ key: "z", label: "Later" }, { key: "a", label: "Earlier" }] }, { selected: [{ key: "é", label: "Composed" }, { key: "e\u0301", label: "Decomposed" }] }])("persists a graph receipt recovered by the ordinary gateway GET without rewriting ambiguity or prior exports (%j)", async value => {
+  const f = await ambiguousAnswerFixture({ value });
+  const id = f.session.id;
+  const before = await f.tasks.export(id);
+  const savedBefore = await readFile(before.path, "utf8");
+  expect((await f.read()).status).toBe(200);
+  await f.read();
+  const reopened = await new HumanTaskService(f.options).open();
+  const result = reopened.get(id);
+  expect(result).toMatchObject({ completions: 1, status: "interrupted", termination: { reason: "product_write_unknown" } });
+  const original = result.events.find(event => event.kind === "product_action");
+  expect(original.outcome).toBe("unknown");
+  const resolutions = result.events.filter(event => event.kind === "live_answer_reconciled");
+  expect(resolutions).toHaveLength(1);
+  expect(resolutions[0]).toMatchObject({ productActionEventId: original.id, outcome: "accepted", liveAnswerReceipt: f.receipt });
+  expect(resolutions[0].sequence).toBeGreaterThan(original.sequence);
+  const after = await reopened.export(id);
+  expect(after.bundle.session.events.find(event => event.kind === "live_answer_reconciled").liveAnswerReceipt).toEqual(f.receipt);
+  expect(await readFile(before.path, "utf8")).toBe(savedBefore);
+  expect(f.posts()).toBe(1);
+});
+
+it.each([
+  ["attempt", receipt => { receipt.attemptId++; }], ["epoch", receipt => { receipt.authorityEpoch++; }],
+  ["revision", receipt => { receipt.currentRevision++; }], ["completion", receipt => { receipt.completionId++; }],
+  ["occurrence", receipt => { receipt.occurrence.actionId++; }], ["key", receipt => { receipt.operationKey = "foreign"; }],
+  ["value", receipt => { receipt.value.text = "Paris"; }], ["sequence", receipt => { receipt.sequence = 0; }],
+])("does not reconcile an ambiguous Answer against a mismatched %s", async (_name, mismatch) => {
+  const f = await ambiguousAnswerFixture({ mismatch });
+  expect((await f.read()).status).toBe(200);
+  expect(f.tasks.get(f.session.id).events.some(event => event.kind === "live_answer_reconciled")).toBe(false);
+  expect(f.posts()).toBe(1);
+});
+
+it("refuses recovered receipt delivery when its evidence persistence fails, then safely retries the read", async () => {
+  const f = await ambiguousAnswerFixture();
+  const persist = f.tasks.persist.bind(f.tasks);
+  f.tasks.persist = async () => { throw new Error("Evidence disk unavailable"); };
+  expect((await f.read()).status).toBeGreaterThanOrEqual(500);
+  expect(f.tasks.get(f.session.id).events.some(event => event.kind === "live_answer_reconciled")).toBe(false);
+  f.tasks.persist = persist;
+  expect((await f.read()).status).toBe(200);
+  expect(f.tasks.get(f.session.id).events.filter(event => event.kind === "live_answer_reconciled")).toHaveLength(1);
+  expect(f.posts()).toBe(1);
+});
+
+
+it.each([{ selected: [null] }, { selected: [{ key: 4, label: "Bad" }] }, { selected: [{ key: "a", label: "One" }, { key: "a", label: "Duplicate" }] }, { text: null }])("keeps malformed saved Answer values unknown without poisoning receipt reads (%j)", async value => {
+  const f = await ambiguousAnswerFixture({ value, receiptValue: { text: "Boston" } });
+  expect((await f.read()).status).toBe(200);
+  expect(f.tasks.get(f.session.id).events.some(event => event.kind === "live_answer_reconciled")).toBe(false);
+});
+
+it("refuses conflicting same-key receipt copies", async () => {
+  const f = await ambiguousAnswerFixture({ conflict: true });
+  expect((await f.read()).status).toBe(200);
+  expect(f.tasks.get(f.session.id).events.some(event => event.kind === "live_answer_reconciled")).toBe(false);
+});
+
+
+it("reconciles through an annotated operator workspace with the same graph read authority", async () => {
+  const f = await ambiguousAnswerFixture({ annotations: true });
+  expect((await f.read()).status).toBe(200);
+  expect(f.tasks.get(f.session.id).events.filter(event => event.kind === "live_answer_reconciled")).toHaveLength(1);
+  expect(f.tasks.get(f.session.id).status).toBe("interrupted");
+  expect(f.posts()).toBe(1);
 });

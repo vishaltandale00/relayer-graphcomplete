@@ -14,7 +14,7 @@ export function taskActorPresentationReady({ expected, presentation = globalThis
 }
 
 // Correlation only: never read hidden layers or a child's graph inventory.
-export function taskActorCurrentIdentity({ expected, presentation = globalThis.window?.__taskActorPresentation }) {
+export function taskActorCurrentIdentity({ expected, presentation = globalThis.window?.__taskActorPresentation, document = globalThis.document }) {
   const p = presentation;
   const pointer = p?.currentPointer;
   if (String(p?.threadId) !== String(expected.threadId) || String(p?.turnId) !== String(expected.turnId)
@@ -24,9 +24,29 @@ export function taskActorCurrentIdentity({ expected, presentation = globalThis.w
     || (expected.attemptId != null && String(p.attemptId) !== String(expected.attemptId))
     || pointer?.mode !== "following" || !Number.isSafeInteger(pointer.revision) || pointer.revision < 1
     || pointer.layerId == null || String(pointer.layerId) !== String(p.layerId)) return null;
+  // Delivery can settle without a graph Advance. Only rendered status enters
+  // this dedup identity; never field values, hidden content or graph inventory.
+  const answers = [];
+  function collect(root) {
+    for (const element of root?.querySelectorAll("*") ?? []) {
+      if (element.matches('[data-input-control-role="answer"]')) {
+        const rect = element.getBoundingClientRect();
+        const x = Math.max(0, rect.left) + Math.min(rect.width, document.defaultView.innerWidth - Math.max(0, rect.left)) / 2;
+        const y = Math.max(0, rect.top) + Math.min(rect.height, document.defaultView.innerHeight - Math.max(0, rect.top)) / 2;
+        const hit = element.getRootNode().elementFromPoint?.(x, y);
+        if (rect.width > 0 && rect.height > 0 && (hit === element || element.contains(hit))) {
+          answers.push([element.closest("[data-live-answer-scope]")?.dataset.liveAnswerScope ?? null,
+            element.disabled, element.textContent === "Delivered"]);
+        }
+      }
+      if (element.shadowRoot) collect(element.shadowRoot);
+    }
+  }
+  collect(document?.querySelector(".workspace-layout"));
   return { threadId: p.threadId, turnId: p.turnId, attemptId: p.attemptId ?? null,
     revision: pointer.revision, layerId: p.layerId, observedAt: p.observedAt,
-    completionStatus: p.completionStatus, selectedNodeId: p.selectedNodeId, navigationPath: p.navigationPath };
+    completionStatus: p.completionStatus, selectedNodeId: p.selectedNodeId, navigationPath: p.navigationPath,
+    answerPresentation: JSON.stringify(answers) };
 }
 
 // These functions are serialized by Playwright; keep their dependencies local.
@@ -42,7 +62,7 @@ export function taskActorWorkingControlAllowed(element, kind) {
       || element.matches('button[data-input-control-role="answer"],button[data-input-control-role="option"]');
     return false;
   }
-  return kind === "click" && Boolean(element?.matches?.("#nodeLayer .graph-node[data-node],#detailActions button[data-review-kind=navigate-action],#workspaceBreadcrumb button[data-review-kind=layer-navigation],#inspectorClose"));
+  return kind === "click" && Boolean(element?.matches?.("#nodeLayer .graph-node[data-node],#detailActions button[data-review-kind=navigate-action],#workspaceBreadcrumb button[data-review-kind=layer-navigation],#closeInspector"));
 }
 
 export function taskActorControlIdentity(element) {
@@ -92,6 +112,25 @@ export function taskActorRebindControl(identity, document = globalThis.document)
   const matches = [...document.querySelectorAll(selector)].filter(element => element.textContent === identity.text
     && Object.entries(identity.attributes).every(([key, value]) => element.getAttribute(key) === value));
   return matches.length === 1 ? matches[0] : null;
+}
+
+// Used both to identify a registered authored control and to resolve that exact
+// identity after redraw. DOM attributes alone never confer navigation authority.
+export async function taskActorAuthoredNavigation(target) {
+  const { compiledNodeDetailReviewControls } = await import("/src/product-workspace/node-detail-runtime.js");
+  const element = target?.nodeType ? target : null;
+  const document = element?.ownerDocument ?? globalThis.document;
+  const p = document.defaultView.__taskActorPresentation;
+  if (!p?.threadId || !p?.turnId || !p?.layerId || p.selectedNodeId == null) return null;
+  const scope = JSON.stringify([p.threadId, p.turnId, p.layerId, p.attemptId, p.selectedNodeId, p.navigationPath]);
+  const descriptors = compiledNodeDetailReviewControls(document).filter(control => control.kind === "navigate-action").map(control => ({
+    element: control.element,
+    identity: { kind: "authored-navigation", scope, actionId: control.actionId, mount: control.element.getAttribute("data-gc-mount"),
+      tag: control.element.tagName, text: control.element.textContent, label: control.element.getAttribute("aria-label") },
+  }));
+  if (element) return descriptors.find(control => control.element === element)?.identity ?? null;
+  const matches = descriptors.filter(control => JSON.stringify(control.identity) === JSON.stringify(target));
+  return matches.length === 1 ? matches[0].element : null;
 }
 
 // Native popup pixels are absent from headless screenshots. This is an explicit
@@ -189,6 +228,8 @@ export async function openTaskActorBrowser({ tasks, sessionId, productSession, b
       menuAuthorities = new Map();
       const snapshot = await page.evaluateHandle(async working => {
         const { isVisibleElement, accessibleControlName } = await import("/src/review-tools.js");
+        const { compiledNodeDetailReviewControls } = await import("/src/product-workspace/node-detail-runtime.js");
+        const authoredNavigation = new Set(compiledNodeDetailReviewControls(document).filter(control => control.kind === "navigate-action").map(control => control.element));
         const root = document.querySelector(".workspace-layout");
         const elements = [];
         function collect(node) {
@@ -219,11 +260,11 @@ export async function openTaskActorBrowser({ tasks, sessionId, productSession, b
           return (element.getAttribute("aria-label") || labels || element.getAttribute("title") || element.getAttribute("placeholder") || "").replace(/\s+/g, " ").trim();
         }
         const visible = elements.filter(visibleRect);
-        let controls = visible.filter((element) => element.matches("button,input:not([type=hidden]):not([type=file]),textarea,select,[role=button],[role=tab],summary") && !element.disabled && element.getAttribute("aria-disabled") !== "true");
+        let controls = visible.filter((element) => (element.matches("button,input:not([type=hidden]):not([type=file]),textarea,select,[role=button],[role=tab],summary") || authoredNavigation.has(element)) && !element.disabled && element.getAttribute("aria-disabled") !== "true");
         if (working) controls = controls.filter(element => {
           const live = element.closest?.("[data-live-answer-scope]");
-          return (live && (element.matches("textarea,input,select") || ["answer", "option"].includes(element.dataset.inputControlRole)))
-            || element.matches("#nodeLayer .graph-node[data-node],#detailActions button[data-review-kind=navigate-action],#workspaceBreadcrumb button[data-review-kind=layer-navigation],#inspectorClose");
+          return authoredNavigation.has(element) || (live && (element.matches("textarea,input,select") || ["answer", "option"].includes(element.dataset.inputControlRole)))
+            || element.matches("#nodeLayer .graph-node[data-node],#detailActions button[data-review-kind=navigate-action],#workspaceBreadcrumb button[data-review-kind=layer-navigation],#closeInspector");
         });
         // Pixels are the content observation. Accessible names identify controls;
         // never flatten full DOM paragraphs hidden under scroll/clipping.
@@ -238,7 +279,7 @@ export async function openTaskActorBrowser({ tasks, sessionId, productSession, b
           const ref = randomUUID();
           const handle = await elements.getProperty(String(index));
           handles.set(ref, handle);
-          const identity = await handle.evaluate(taskActorControlIdentity);
+          const identity = await handle.evaluate(taskActorAuthoredNavigation) ?? await handle.evaluate(taskActorControlIdentity);
           if (identity) controlIdentities.set(ref, identity);
           controls[index].ref = ref;
           if (nativeMenuObservation && openedSelect && await handle.evaluate((element, opened) => element === opened, openedSelect)) {
@@ -263,7 +304,8 @@ export async function openTaskActorBrowser({ tasks, sessionId, productSession, b
           const pointer = await page.evaluate(taskActorCurrentIdentity, { expected });
           if (!pointer || (expected.workingOnly && ["accepted", "failed", "stopped", "not_started"].includes(pointer.completionStatus)) || (previous && pointer.revision === previous.revision
             && String(pointer.threadId) === String(previous.threadId)
-            && String(pointer.attemptId) === String(previous.attemptId) && String(pointer.turnId) === String(previous.turnId))) return null;
+            && String(pointer.attemptId) === String(previous.attemptId) && String(pointer.turnId) === String(previous.turnId)
+            && pointer.answerPresentation === previous.answerPresentation)) return null;
           const observation = await observe(undefined, true);
           await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
           const after = await page.evaluate(taskActorCurrentIdentity, { expected });
@@ -305,12 +347,13 @@ export async function openTaskActorBrowser({ tasks, sessionId, productSession, b
           // Rebind only exact control identity in the same presentation, never by name.
           const identity = controlIdentities.get(action.ref);
           if (handle && identity && !await handle.evaluate(element => element.isConnected)) {
-            const replacement = await page.evaluateHandle(taskActorRebindControl, identity);
+            const replacement = await page.evaluateHandle(identity.kind === "authored-navigation" ? taskActorAuthoredNavigation : taskActorRebindControl, identity);
             const rebound = replacement.asElement();
             if (rebound) { await handle.dispose(); handles.set(action.ref, replacement); handle = rebound; }
             else await replacement.dispose();
           }
-          if (correlation.current && (!handle || !await handle.evaluate(taskActorWorkingControlAllowed, action.kind))) {
+          const authoredNavigation = handle && action.kind === "click" && await handle.evaluate(taskActorAuthoredNavigation);
+          if (correlation.current && (!handle || (!authoredNavigation && !await handle.evaluate(taskActorWorkingControlAllowed, action.kind)))) {
             throw Object.assign(new Error("This control is unavailable during working observation."), { code: "actor_control_unavailable", actionDispatched: false });
           }
           diagnosticTarget = handle;

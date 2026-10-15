@@ -112,6 +112,7 @@ export class TaskActorService {
       let limitRecorded = false;
       let actionsUsed = 0;
       let repeatCurrent = false;
+      let workingControlRepairPending = false;
       const observeCurrent = currentNative ? async current => {
         if (currentCaptures >= currentCaptureLimit) {
           if (!limitRecorded) {
@@ -166,9 +167,13 @@ export class TaskActorService {
           try {
             await abortable(signal, () => browser.act(reaction.action, { actionEventId: intent.id, observationEventId: observed.id, current: { expected, pointer } }));
             await this.tasks.actorEvent(id, "actor_action_completed", { actionEventId: intent.id });
+            workingControlRepairPending = false;
           } catch (error) {
             if (error.actionDispatched !== false || !["actor_control_stale", "actor_control_unavailable"].includes(error.code)) throw error;
-            await this.tasks.actorEvent(id, "actor_action_failed", { actionEventId: intent.id, actionDispatched: false, category: actorFailure(error).category, retryAllowed: actionsUsed < task.actor.maxActions, message: "Working control changed before dispatch. Obtain a fresh observation." });
+            const retryAllowed = !workingControlRepairPending && actionsUsed < task.actor.maxActions;
+            await this.tasks.actorEvent(id, "actor_action_failed", { actionEventId: intent.id, actionDispatched: false, category: actorFailure(error).category, retryAllowed, message: "Working control changed before dispatch. Obtain a fresh observation." });
+            if (!retryAllowed) throw error;
+            workingControlRepairPending = true;
           }
           repeatCurrent = true;
         }

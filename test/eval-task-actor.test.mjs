@@ -51,7 +51,7 @@ async function fixture({ decide, observe, observeCurrent, promptVersion, maxActi
   const browser = {
     observeCurrent: vi.fn(async (...args) => observeCurrent ? observeCurrent(...args, turns) : null),
     observe: vi.fn(async () => ({ text: turns.length > 1 ? "A trip plan based on your reply" : "Where do you want to go?", controls: [{ ref: "visible", name: "Send" }] })),
-    act: vi.fn(async (chosen, correlation) => { if (correlation?.current) { if (chosen.kind === "click") await tasks.write(id, "/api/threads/1/interactions/1/live-answers", "POST", { attemptId: 10, operationKey: "answer-1" }, { signal: browserSignal }); return; } const controlError = controlErrors.shift(); if (controlError) throw controlError; if (navigateOnly) return; await tasks.write(id, retry ? "/api/threads/1/interactions/1/retry" : "/api/threads/1/interactions", "POST", { text: "Somewhere warm", ...(retry ? { attemptId: 91 } : {}) }, { signal: browserSignal }); }),
+    act: vi.fn(async (chosen, correlation) => { const controlError = controlErrors.shift(); if (controlError) throw controlError; if (correlation?.current) { if (chosen.kind === "click") await tasks.write(id, "/api/threads/1/interactions/1/live-answers", "POST", { attemptId: 10, operationKey: "answer-1" }, { signal: browserSignal }); return; } if (navigateOnly) return; await tasks.write(id, retry ? "/api/threads/1/interactions/1/retry" : "/api/threads/1/interactions", "POST", { text: "Somewhere warm", ...(retry ? { attemptId: 91 } : {}) }, { signal: browserSignal }); }),
     nextStep: vi.fn(),
     close: vi.fn(),
   };
@@ -733,9 +733,9 @@ it("cancels a pending browser capture even if the injected capture ignores its s
 
 it("working controls permit exact live questions and navigation but refuse Send, Invoke, Stop and unrelated edits", () => {
   const document = new Window().document;
-  document.body.innerHTML = `<div class="workspace-layout"><div id="nodeLayer"><button class="graph-node" data-node="4"></button></div><div id="detailActions"><button data-review-kind="invoke-action"></button><button data-review-kind="navigate-action"></button></div><fieldset data-live-answer-scope="question"><textarea></textarea><button data-input-control-role="answer"></button><button data-input-control-role="commit"></button></fieldset><button id="send">Send</button><button id="stop">Stop</button><textarea id="composer"></textarea></div>`;
+  document.body.innerHTML = `<div class="workspace-layout"><div id="nodeLayer"><button class="graph-node" data-node="4"></button></div><div id="detailActions"><button data-review-kind="invoke-action"></button><button data-review-kind="navigate-action"></button></div><fieldset data-live-answer-scope="question"><textarea></textarea><button data-input-control-role="answer"></button><button data-input-control-role="commit"></button></fieldset><button id="closeInspector">Close</button><button id="send">Send</button><button id="stop">Stop</button><textarea id="composer"></textarea></div>`;
   for (const selector of ["#send", "#stop", "#composer", "[data-review-kind=invoke-action]", "[data-input-control-role=commit]"]) expect(taskActorWorkingControlAllowed(document.querySelector(selector), "click")).toBe(false);
-  for (const selector of [".graph-node", "[data-review-kind=navigate-action]", "[data-input-control-role=answer]"]) expect(taskActorWorkingControlAllowed(document.querySelector(selector), "click")).toBe(true);
+  for (const selector of [".graph-node", "[data-review-kind=navigate-action]", "[data-input-control-role=answer]", "#closeInspector"]) expect(taskActorWorkingControlAllowed(document.querySelector(selector), "click")).toBe(true);
   expect(taskActorWorkingControlAllowed(document.querySelector("fieldset textarea"), "fill")).toBe(true);
   const live = document.querySelector("fieldset");
   live.insertAdjacentHTML("beforeend", '<select><option>Boston</option></select><input type="text"><input type="checkbox"><textarea readonly></textarea><button data-input-control-role="option"></button>');
@@ -761,4 +761,72 @@ it("action exhaustion leaves a stage undelivered and records the limit without a
   expect(f.tasks.get(f.id).completions).toBe(1);
   expect(f.tasks.get(f.id).events.some(event => event.kind === "actor_limit")).toBe(true);
   expect(f.tasks.get(f.id).events.some(event => event.liveAnswerReceipt)).toBe(false);
+});
+
+
+it.each(["repeated", "last-slot", "ambiguous"])("stops working control recovery at its boundary: %s", async scenario => {
+  const unavailable = () => Object.assign(new Error("changed control"), { code: "actor_control_unavailable", actionDispatched: false });
+  const f = await fixture({ busy: true, maxActions: scenario === "last-slot" ? 1 : 8,
+    controlErrors: scenario === "ambiguous" ? [new Error("unknown dispatch")] : [unavailable(), unavailable()],
+    observeCurrent: async () => ({ ...currentCapture(1), observation: { ...currentCapture(1).observation, availableActions: ["click"] } }),
+    observe: async () => ({ comment: "I will answer", action: action("click") }),
+  });
+  await f.done;
+  expect(f.browser.act).toHaveBeenCalledTimes(scenario === "repeated" ? 2 : 1);
+  expect(f.browser.observeCurrent).toHaveBeenCalledTimes(scenario === "repeated" ? 2 : 1);
+  expect(f.tasks.get(f.id)).toMatchObject({ completions: 1, status: "interrupted", termination: { reason: "actor_failed" } });
+  const failures = f.tasks.get(f.id).events.filter(event => event.kind === "actor_action_failed");
+  expect(failures.map(event => event.retryAllowed)).toEqual(scenario === "ambiguous" ? [] : scenario === "last-slot" ? [false] : [true, false]);
+  expect(f.dispatches).toEqual([]);
+});
+
+it("recovers one unavailable working control from a fresh observation without replaying its intent", async () => {
+  const unavailable = Object.assign(new Error("changed control"), { code: "actor_control_stale", actionDispatched: false });
+  const f = await fixture({ busy: true, controlErrors: [unavailable],
+    decide: () => action("finish", { reason: "satisfied", satisfaction: 3 }),
+    observeCurrent: async (_expected, previous) => { expect(previous).toBeNull(); return { ...currentCapture(1), observation: { ...currentCapture(1).observation, availableActions: ["click"] } }; },
+    observe: async () => ({ comment: "I am using the fresh control", action: action("click") }),
+  });
+  await f.done;
+  const events = f.tasks.get(f.id).events;
+  expect(events.filter(event => event.kind === "actor_action_failed")).toHaveLength(1);
+  expect(events.find(event => event.kind === "actor_action_failed").retryAllowed).toBe(true);
+  expect(events.filter(event => event.kind === "actor_action_completed")).toHaveLength(2);
+  expect(f.dispatches).toEqual(["/api/threads/1/interactions/1/live-answers"]);
+});
+
+
+it("a successful working action resets the one-recovery allowance", async () => {
+  const unavailable = () => Object.assign(new Error("changed control"), { code: "actor_control_unavailable", actionDispatched: false });
+  let decisions = 0;
+  const f = await fixture({ busy: true, controlErrors: [unavailable(), null, unavailable()],
+    decide: () => action("finish", { reason: "satisfied", satisfaction: 3 }),
+    observeCurrent: async () => ({ ...currentCapture(1), observation: { ...currentCapture(1).observation, availableActions: ["fill", "click"] } }),
+    observe: async () => ({ comment: "I am using the fresh control", action: action(++decisions === 4 ? "click" : "fill", { value: "Boston" }) }),
+  });
+  await f.done;
+  expect(f.tasks.get(f.id).events.filter(event => event.kind === "actor_action_failed").map(event => event.retryAllowed)).toEqual([true, true]);
+  expect(f.browser.act).toHaveBeenCalledTimes(4);
+  expect(f.dispatches).toEqual(["/api/threads/1/interactions/1/live-answers"]);
+});
+
+
+it("same-revision identity distinguishes pending from Delivered without tracking field values", () => {
+  const document = new Window().document;
+  document.body.innerHTML = '<div class="workspace-layout"><fieldset data-live-answer-scope="question"><input value="Private stage"><button data-input-control-role="answer">Answer</button></fieldset></div>';
+  const button = document.querySelector("button");
+  vi.spyOn(button, "getBoundingClientRect").mockReturnValue({ left: 0, top: 0, width: 100, height: 30 });
+  vi.spyOn(document, "elementFromPoint").mockReturnValue(button);
+  const expected = { threadId: 1, turnId: 2, submittedAt: 100 };
+  const presentation = { ...expected, graphVisible: true, layerId: 5, observedAt: 120, currentPointer: { mode: "following", revision: 2, layerId: 5 } };
+  const identity = () => taskActorCurrentIdentity({ expected, presentation, document }).answerPresentation;
+  const ready = identity();
+  document.querySelector("input").value = "Changed private stage";
+  expect(identity()).toBe(ready);
+  button.disabled = true;
+  const pending = identity();
+  expect(pending).not.toBe(ready);
+  button.textContent = "Delivered";
+  expect(identity()).not.toBe(pending);
+  expect(identity()).not.toContain("private stage");
 });
