@@ -5009,7 +5009,49 @@ async fn node_runs_run_beside_other_nodes_and_queue_in_order_on_their_own_node()
     let graph_metadata = Arc::new(Mutex::new(HashMap::<i64, Value>::new()));
     let created_metadata = graph_metadata.clone();
     let activated_metadata = graph_metadata.clone();
+    let graph_metadata_for_test = graph_metadata.clone();
+    // Each graph current this test stops, by node.
+    let stopped_currents = Arc::new(Mutex::new(Vec::<i64>::new()));
+    let read_stopped = stopped_currents.clone();
+    let recorded_stops = stopped_currents.clone();
     let graph = axum::Router::new()
+        .route(
+            "/api/control/interactions/{id}/current",
+            axum::routing::get(move |axum::extract::Path(id): axum::extract::Path<i64>| {
+                let stopped = read_stopped.lock().unwrap().contains(&id);
+                async move {
+                    axum::Json(json!({
+                        "completionId": id, "lifecycle": if stopped { "stopped" } else { "active" },
+                        "headRevision": if stopped { 2 } else { 1 }, "currentLayerId": null,
+                        "finalLayerId": null, "safeReason": null,
+                        "temporalFeatures": {"configVersion": 1, "schemaRead": true, "rootCurrentWrite": true,
+                            "projectionUi": false, "invokeResolution": false, "providerRecursion": false}
+                    }))
+                }
+            }),
+        )
+        .route(
+            "/api/control/interactions/{id}/current/receipts",
+            axum::routing::post(|| async {
+                (StatusCode::NOT_FOUND, axum::Json(json!({"error": {"code": "receipt_not_found", "message": "none"}})))
+            }),
+        )
+        .route(
+            "/api/control/interactions/{id}/current/transitions",
+            axum::routing::post(
+                move |axum::extract::Path(id): axum::extract::Path<i64>, axum::Json(body): axum::Json<Value>| {
+                    recorded_stops.lock().unwrap().push(id);
+                    async move {
+                        axum::Json(json!({
+                            "completionId": id, "revision": 2, "lifecycle": "stopped",
+                            "currentLayerId": null, "finalLayerId": null,
+                            "operationKey": body["operationKey"], "requestDigest": "sha256:test",
+                            "snapshotDigest": "sha256:test", "projectionSequence": 2
+                        }))
+                    }
+                },
+            ),
+        )
         // Stop needs the temporal schema, as in the desktop.
         .route(
             "/api/control/temporal-features",
@@ -5379,6 +5421,15 @@ async fn node_runs_run_beside_other_nodes_and_queue_in_order_on_their_own_node()
         .await
         .unwrap();
     settled(unactivated, "stopped").await;
+    // Its bound graph current was stopped first, so the Stop the product reports holds.
+    let unactivated_node = graph_metadata_for_test
+        .lock()
+        .unwrap()
+        .iter()
+        .find(|(_, invocation)| invocation["sourceActionId"] == 49)
+        .map(|(node, _)| *node)
+        .unwrap();
+    assert!(stopped_currents.lock().unwrap().contains(&unactivated_node));
     started(waiting).await;
     settle(waiting, true);
     settled(waiting, "accepted").await;

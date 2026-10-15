@@ -3072,7 +3072,9 @@ pub(super) async fn stop_interaction(
         tokio::spawn(async move {
             settle_queued_stop(settle_state, thread_id, interaction_id).await;
         });
-    } else {
+    } else if !state.node_runs.is_preparing(interaction_id) {
+        // A run still preparing is left to its own request, which settles the Stop once the
+        // preparation returns, so a graph call it creates meanwhile is never orphaned.
         settle_unstarted_stop(&state, thread_id, interaction_id).await;
     }
     Ok(Json(
@@ -3157,11 +3159,13 @@ async fn settle_queued_stop_once(
         .runtime
         .as_ref()
         .ok_or_else(|| "GraphComplete runtime is unavailable".to_owned())?;
+    // The prepared call's node, or, on the pre-contract path, the node the run is bound to.
     if let Some(graph_node_id) = state
         .product
         .prepared_invocation_node(interaction_id)
         .await
         .map_err(|error| error.to_string())?
+        .or(interaction.graph_node_id)
         && let Err(error) = runtime
             .stop_graph_completion(graph_node_id, &format!("product-stop:{interaction_id}"))
             .await
@@ -4490,26 +4494,27 @@ async fn start_held_action_interaction(
     key: NodeRunKey,
     already_claimed: bool,
 ) -> Result<Interaction, ApiError> {
+    state.node_runs.begin_preparing(interaction.id);
     let prepared =
-        match prepare_and_claim_interaction(state, thread, &interaction, already_claimed, false)
-            .await
-        {
-            Ok(prepared) => prepared,
-            Err(error) => {
-                // A run the user stopped while it prepared ends stopped, not failed.
-                if !settle_unstarted_stop(state, thread.id, interaction.id).await {
-                    record_background_failure(
-                        &state.product,
-                        thread,
-                        &interaction,
-                        error.message().to_owned(),
-                    )
-                    .await;
-                }
-                release_node_run(state.clone(), key, interaction.id, true);
-                return Err(error);
+        prepare_and_claim_interaction(state, thread, &interaction, already_claimed, false).await;
+    state.node_runs.end_preparing(interaction.id);
+    let prepared = match prepared {
+        Ok(prepared) => prepared,
+        Err(error) => {
+            // A run the user stopped while it prepared ends stopped, not failed.
+            if !settle_unstarted_stop(state, thread.id, interaction.id).await {
+                record_background_failure(
+                    &state.product,
+                    thread,
+                    &interaction,
+                    error.message().to_owned(),
+                )
+                .await;
             }
-        };
+            release_node_run(state.clone(), key, interaction.id, true);
+            return Err(error);
+        }
+    };
     let Some(prepared) = prepared else {
         // Nothing started the run. A Stop that arrived while it prepared settles here; without
         // one it waits, holding its node, until it is retried or stopped.
