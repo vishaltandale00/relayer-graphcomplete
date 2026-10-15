@@ -718,16 +718,11 @@ pub(crate) async fn reconcile_interrupted_recursive_completion_executions(
     Ok(reconciled)
 }
 
-/// Settles, in order, the work the previous process left interrupted: launched recursive
-/// children, then every interrupted interaction, stale approvals, leased action results, and
-/// ordinary running interactions. Nothing is replayed through a provider.
-pub(crate) async fn reconcile_interrupted_work(
-    storage: &SqliteProductStore,
-    runtime: Option<&RuntimeClient>,
-    permission_catalog: &PermissionCatalog,
-) -> anyhow::Result<()> {
-    // No run holds a capacity slot after a restart (#720), so no run stays queued for one.
-    // An invoked run that waited is recovered below with the runs queued behind their nodes.
+/// No run holds a capacity slot after a restart (#720), so no run stays queued for one. A
+/// message turn that waited fails, unless it already has a graph interaction, which is
+/// reconciled with it. An invoked run that waited is recovered with the runs queued behind
+/// their nodes.
+pub(crate) async fn interrupt_capacity_waits(storage: &SqliteProductStore) -> anyhow::Result<()> {
     let waited = storage
         .interrupt_capacity_waits(
             "Relayer stopped before this message had capacity to start. Send it again to run it.",
@@ -736,6 +731,20 @@ pub(crate) async fn reconcile_interrupted_work(
     if waited > 0 {
         eprintln!("interrupted {waited} run(s) that waited for capacity");
     }
+    Ok(())
+}
+
+/// Settles, in order, the work the previous process left interrupted: launched recursive
+/// children, then every interrupted interaction, stale approvals, leased action results, and
+/// ordinary running interactions. Nothing is replayed through a provider.
+pub(crate) async fn reconcile_interrupted_work(
+    storage: &SqliteProductStore,
+    runtime: Option<&RuntimeClient>,
+    permission_catalog: &PermissionCatalog,
+) -> anyhow::Result<()> {
+    // No run stays queued for capacity (#720). Startup interrupts those waits before harness
+    // retirement; this repeats it for callers that reconcile without opening the server.
+    interrupt_capacity_waits(storage).await?;
     // Agent children an older build left unmarked are marked first, so they are failed
     // below rather than held for a user's invoke.
     let marked = storage.mark_unrecorded_agent_children().await?;
@@ -1288,6 +1297,10 @@ impl RelayerAppServer {
             .as_ref()
             .map(RuntimeClient::product_harnesses)
             .unwrap_or_default();
+        // No run holds a capacity slot after a restart (#720). Runs that waited for one are
+        // interrupted before harness retirement may rebind them, so a waiting turn that already
+        // has a graph interaction is still recognized as bound and reconciled with it.
+        interrupt_capacity_waits(&storage).await?;
         storage
             .initialize_model_catalog(&default_harness_configuration, &runtime_harnesses)
             .await?;

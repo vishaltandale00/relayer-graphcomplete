@@ -70,6 +70,15 @@ pub(super) async fn compatibility_on(
             }
             continue;
         }
+        // A run that ended before it ever started, such as one removed or interrupted while
+        // it waited in a queue (#718, #720), never executed: it has no attempt and no graph
+        // interaction, so it neither owns nor obscures the conversation's route.
+        if !has_attempts
+            && matches!(status.as_str(), "failed" | "stopped")
+            && row.try_get::<Option<i64>, _>("graph_node_id")?.is_none()
+        {
+            continue;
+        }
         if !matches!(status.as_str(), "not_started" | "submitted" | "running") {
             saw_execution = true;
         }

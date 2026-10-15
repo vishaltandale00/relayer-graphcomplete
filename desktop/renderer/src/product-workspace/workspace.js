@@ -566,7 +566,7 @@ export function viewedInteractionStatus(interaction, fallbackStatus = "idle", te
   if (interaction?.stopRequested) {
     return PENDING_COMPLETION_STATUSES.has(interaction.completionStatus) && !interaction.stopError
       ? "stopping"
-      : interaction.completionStatus || fallbackStatus;
+      : runViewStatus(interaction) || fallbackStatus;
   }
   return TERMINAL_TEMPORAL_LIFECYCLES.includes(temporalLifecycle)
     ? temporalLifecycle

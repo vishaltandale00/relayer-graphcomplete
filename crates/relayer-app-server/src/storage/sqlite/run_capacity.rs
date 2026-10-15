@@ -120,6 +120,22 @@ impl SqliteProductStore {
 }
 
 #[cfg(test)]
+impl SqliteProductStore {
+    /// Makes the capacity wait unreachable, or reachable again, to fault its storage in tests.
+    pub(crate) async fn set_capacity_waits_offline_for_test(&self, offline: bool) {
+        let (from, to) = if offline {
+            ("run_capacity_waits", "run_capacity_waits_offline")
+        } else {
+            ("run_capacity_waits_offline", "run_capacity_waits")
+        };
+        sqlx::query(&format!("ALTER TABLE {from} RENAME TO {to}"))
+            .execute(&self.pool)
+            .await
+            .unwrap();
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use crate::storage::QueuedStop;

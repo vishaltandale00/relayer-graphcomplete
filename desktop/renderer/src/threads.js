@@ -1859,6 +1859,13 @@ export async function invokeAction(action, { inputDraftRevision } = {}) {
     }
     return null;
   }
+  // The returned run carries why it waits (#720), so its node row is right before a refresh.
+  if (response.interaction?.id != null && response.interaction.threadId != null) {
+    const existing = appState.interactions.find((item) => String(item.id) === String(response.interaction.id));
+    appState.interactions = existing
+      ? appState.interactions.map((item) => (item === existing ? { ...existing, ...response.interaction } : item))
+      : [...appState.interactions, response.interaction];
+  }
   if (response.invocation) {
     appState.actionInvocations = mergeActionInvocation(appState.actionInvocations, response.invocation);
     appState.pendingActionInvocations = withoutPendingActionInvocation(

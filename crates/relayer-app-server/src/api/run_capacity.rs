@@ -297,6 +297,48 @@ mod tests {
         }
     }
 
+    /// A storage failure while passing a slot on keeps the settled run's slot and the oldest
+    /// waiter's place: the limit holds and no later run overtakes it. Once storage recovers,
+    /// the retried release starts exactly that waiter.
+    #[tokio::test]
+    async fn a_release_that_fails_keeps_the_slot_and_the_oldest_waiter() {
+        let (_directory, store, product, runs) = fixture(3).await;
+        let capacity = RunCapacity::new(1);
+        assert!(matches!(
+            capacity.admit(&product, runs[0]).await.unwrap(),
+            CapacityAdmission::Start
+        ));
+        let mut grants = Vec::new();
+        for run in &runs[1..] {
+            match capacity.admit(&product, *run).await.unwrap() {
+                CapacityAdmission::Waiting(grant) => grants.push(grant),
+                other => panic!("run {run} was admitted as {other:?}"),
+            }
+        }
+        // The wait's table is unreachable, so claiming the oldest waiter fails.
+        store.set_capacity_waits_offline_for_test(true).await;
+        assert!(capacity.release(&product, runs[0]).await.is_err());
+        assert_eq!(capacity.executing_for_test().await, [runs[0]]);
+        assert_eq!(capacity.waiting().await, runs[1..]);
+        assert_eq!(store.completion_status_for_test(runs[1]).await, "queued");
+        // A new run still waits behind them.
+        let (_, late) = store.seed_node_runs_for_test(&[9]).await;
+        assert!(store.claim_interaction_preparing(late[0]).await.unwrap());
+        store.set_capacity_waits_offline_for_test(false).await;
+        assert!(matches!(
+            capacity.admit(&product, late[0]).await.unwrap(),
+            CapacityAdmission::Waiting(_)
+        ));
+        // Storage is back: the retried release starts the oldest waiter, and only it.
+        assert_eq!(
+            capacity.release(&product, runs[0]).await.unwrap(),
+            Some(runs[1])
+        );
+        grants.remove(0).await.unwrap();
+        assert_eq!(capacity.executing_for_test().await, [runs[1]]);
+        assert_eq!(capacity.waiting().await, [runs[2], late[0]]);
+    }
+
     /// A run that carries a valid Stop never waits for capacity; it settles without a slot.
     #[tokio::test]
     async fn a_run_with_a_stop_settles_without_a_slot() {

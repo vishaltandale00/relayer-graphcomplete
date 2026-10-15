@@ -1164,7 +1164,7 @@ describe("workspace navigation integration", () => {
     root.actions = [action];
     const source = interaction(1, 10, root);
     const state = productState([{ id: 10, title: "Acknowledged activation" }], [source]);
-    const acknowledgment = { created: true, interaction: { id: 2, threadId: 10, completionStatus: "running" },
+    const acknowledgment = { created: true, interaction: { id: 2, threadId: 10, completionStatus: "queued", queueReason: "capacity" },
       invocation: { durable: true, reusable: false, invocationKey, sourceInteractionId: 1, actionId: 6, sourceNodeId: 22,
         presentingLayerId: 7, resultInteractionId: 2, resultCompletionStatus: "running" },
       inputDraft: { threadId: 10, revision: 5, attachments: [{ occurrence: { actionId: 14 }, value: { text: "Unrelated notes" } }] } };
@@ -1197,6 +1197,9 @@ describe("workspace navigation integration", () => {
     expect(response).toBe(acknowledgment);
     expect(response.inputDraft).toBe(acknowledgment.inputDraft);
     expect(controller.appState.actionInvocations).toEqual([acknowledgment.invocation]);
+    // The returned run is in state at once, with why it waits if it does (#720).
+    expect(controller.appState.interactions.find((interaction) => interaction.id === 2))
+      .toMatchObject(acknowledgment.interaction);
     expect(controller.appState.pendingActionInvocations).toEqual([]);
     expect(controller.appState.pendingTurn).toMatchObject({ interactionId: 2, invocationSource: { origin: {
       invocationKey, sourceNodeId: 22, presentingLayerId: 7, sourceEntry: { turnId: "1", selectedNodeId: 22 },

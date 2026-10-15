@@ -648,6 +648,38 @@ mod tests {
         )
     }
 
+    /// A first message removed or interrupted while it waited for capacity (#720) never ran: it
+    /// has a selected model but no attempt and no graph interaction. The thread stays open to
+    /// a new send, so "send it again" works.
+    #[tokio::test]
+    async fn a_first_message_that_never_started_leaves_the_conversation_open() {
+        let (_directory, store, root, _route) = seeded_store().await;
+        let thread: i64 = sqlx::query_scalar("SELECT thread_id FROM interactions WHERE id=?1")
+            .bind(root.value())
+            .fetch_one(&store.pool)
+            .await
+            .unwrap();
+        for status in ["stopped", "failed"] {
+            sqlx::query(
+                "UPDATE interactions SET completion_status=?1,graph_node_id=NULL WHERE id=?2",
+            )
+            .bind(status)
+            .bind(root.value())
+            .execute(&store.pool)
+            .await
+            .unwrap();
+            assert_ne!(
+                store
+                    .conversation_compatibility(ThreadId::from_database(thread))
+                    .await
+                    .unwrap()
+                    .status,
+                "blocked",
+                "a {status} first message that never started blocked its thread"
+            );
+        }
+    }
+
     #[tokio::test]
     async fn legacy_conversation_blocks_unknown_and_conflicting_successful_provenance() {
         let (_directory, store, root, route) = seeded_store().await;

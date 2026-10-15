@@ -8491,9 +8491,12 @@ async fn product_harness_retirement_precedes_retryable_startup_reconciliation() 
     })
     .to_string();
     let mut interaction_ids = Vec::new();
+    // A graph-bound message that waited for capacity (#720) is reconciled with its graph
+    // interaction like the running one, even though retirement rebinds it at startup.
     for (sequence, status, graph_node_id) in [
         (2, "running", Some(902_i64)),
         (3, "waiting_for_approval", None),
+        (4, "queued", Some(903_i64)),
     ] {
         let result = sqlx::query(
             "INSERT INTO interactions(
@@ -8516,6 +8519,13 @@ async fn product_harness_retirement_precedes_retryable_startup_reconciliation() 
         .await
         .unwrap();
         interaction_ids.push(result.last_insert_rowid());
+        if status == "queued" {
+            sqlx::query("INSERT INTO run_capacity_waits(interaction_id) VALUES (?1)")
+                .bind(result.last_insert_rowid())
+                .execute(&pool)
+                .await
+                .unwrap();
+        }
     }
     pool.close().await;
 
@@ -8564,7 +8574,7 @@ async fn product_harness_retirement_precedes_retryable_startup_reconciliation() 
     for _ in 0..100 {
         let both_resumed = {
             let resumed_inputs = resumed_inputs.lock().unwrap();
-            ["send-restart-2", "send-restart-3"]
+            ["send-restart-2", "send-restart-3", "send-restart-4"]
                 .iter()
                 .all(|expected| resumed_inputs.iter().any(|actual| actual == expected))
         };
@@ -8576,7 +8586,7 @@ async fn product_harness_retirement_precedes_retryable_startup_reconciliation() 
 
     {
         let resumed_inputs = resumed_inputs.lock().unwrap();
-        for expected in ["send-restart-2", "send-restart-3"] {
+        for expected in ["send-restart-2", "send-restart-3", "send-restart-4"] {
             assert!(resumed_inputs.iter().any(|actual| actual == expected));
         }
     }

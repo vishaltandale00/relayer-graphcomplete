@@ -457,6 +457,9 @@ describe("desktop environment rail", () => {
     expect(viewedInteractionStatus(behindNode)).toBe("queued");
     expect(viewedInteractionStatus(forCapacity)).toBe("waiting_for_capacity");
     expect(interactionStatusRenderKey(forCapacity)).not.toBe(interactionStatusRenderKey(behindNode));
+    // A failed Remove leaves the run waiting for capacity, and its pill still says so.
+    expect(viewedInteractionStatus({ ...forCapacity, stopRequested: true, stopError: "Stop failed." }))
+      .toBe("waiting_for_capacity");
   });
 
   it("re-renders the status when the graph lifecycle ends before the product status changes", () => {

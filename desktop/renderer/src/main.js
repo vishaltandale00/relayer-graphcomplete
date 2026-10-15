@@ -39,6 +39,7 @@ import {
 } from "./threads.js";
 import { bindComposerKeydown } from "./product-workspace/workspace.js";
 import { loadDesignFonts } from "./product-workspace/workspace.js";
+import { presentationInteractionRevision } from "./product-workspace/model.js";
 import { prepareCurrentWorkspaceTransition } from "./graph.js";
 import {
   initializeModelFamilySettings,
@@ -517,11 +518,7 @@ async function boot() {
       getPresentationState: () => {
         const threadId = viewState.currentThreadId;
         const thread = appState.threads.find((candidate) => String(candidate.id) === String(threadId));
-        const interactionRevision = appState.interactions
-          .filter((interaction) => String(interaction.threadId) === String(threadId))
-          .sort((left, right) => left.sequence - right.sequence)
-          .map((interaction) => `${interaction.id}:${interaction.sequence}:${interaction.completionStatus}`)
-          .join(",");
+        const interactionRevision = presentationInteractionRevision(appState.interactions, threadId);
         return {
           threadId,
           threadRevision: `thread:${threadId}:updated:${thread?.updatedAt ?? "unknown"}`
