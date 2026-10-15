@@ -1862,9 +1862,16 @@ export async function invokeAction(action, { inputDraftRevision } = {}) {
   // The returned run carries why it waits (#720), so its node row is right before a refresh.
   if (response.interaction?.id != null && response.interaction.threadId != null) {
     const existing = appState.interactions.find((item) => String(item.id) === String(response.interaction.id));
-    appState.interactions = existing
-      ? appState.interactions.map((item) => (item === existing ? { ...existing, ...response.interaction } : item))
-      : [...appState.interactions, response.interaction];
+    // A row a refresh already moved on to a terminal state is newer than this response.
+    const newer = existing && ["accepted", "failed", "stopped"].includes(existing.completionStatus);
+    if (!newer) {
+      const merged = { ...existing, ...response.interaction };
+      // The server omits a reason when the run does not wait, so an old one never lingers.
+      if (!("queueReason" in response.interaction)) delete merged.queueReason;
+      appState.interactions = existing
+        ? appState.interactions.map((item) => (item === existing ? merged : item))
+        : [...appState.interactions, merged];
+    }
   }
   if (response.invocation) {
     appState.actionInvocations = mergeActionInvocation(appState.actionInvocations, response.invocation);

@@ -659,12 +659,16 @@ mod tests {
             .fetch_one(&store.pool)
             .await
             .unwrap();
-        for status in ["stopped", "failed"] {
+        for (status, error) in [
+            ("stopped", super::super::QUEUED_RUN_STOPPED),
+            ("failed", super::super::CAPACITY_WAIT_INTERRUPTED),
+        ] {
             sqlx::query(
-                "UPDATE interactions SET completion_status=?1,graph_node_id=NULL WHERE id=?2",
+                "UPDATE interactions SET completion_status=?1,completion_error=?3,graph_node_id=NULL WHERE id=?2",
             )
             .bind(status)
             .bind(root.value())
+            .bind(error)
             .execute(&store.pool)
             .await
             .unwrap();
@@ -678,6 +682,23 @@ mod tests {
                 "a {status} first message that never started blocked its thread"
             );
         }
+        // A failure with no such marker may have run before attempts were recorded, so it
+        // still keeps the route unverified.
+        sqlx::query(
+            "UPDATE interactions SET completion_status='failed',completion_error='Provider failed' WHERE id=?1",
+        )
+        .bind(root.value())
+        .execute(&store.pool)
+        .await
+        .unwrap();
+        assert_eq!(
+            store
+                .conversation_compatibility(ThreadId::from_database(thread))
+                .await
+                .unwrap()
+                .status,
+            "blocked"
+        );
     }
 
     #[tokio::test]

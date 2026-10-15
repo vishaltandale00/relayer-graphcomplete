@@ -724,9 +724,7 @@ pub(crate) async fn reconcile_interrupted_recursive_completion_executions(
 /// their nodes.
 pub(crate) async fn interrupt_capacity_waits(storage: &SqliteProductStore) -> anyhow::Result<()> {
     let waited = storage
-        .interrupt_capacity_waits(
-            "Relayer stopped before this message had capacity to start. Send it again to run it.",
-        )
+        .interrupt_capacity_waits(crate::storage::CAPACITY_WAIT_INTERRUPTED)
         .await?;
     if waited > 0 {
         eprintln!("interrupted {waited} run(s) that waited for capacity");

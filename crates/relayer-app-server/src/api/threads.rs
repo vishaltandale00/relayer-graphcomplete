@@ -4656,14 +4656,14 @@ async fn continue_held_admission(
         CapacityAdmission::Start => CapacitySlot::Held,
         CapacityAdmission::Uncounted => CapacitySlot::Uncounted,
         CapacityAdmission::Waiting(grant) => {
-            // It waits as `queued`, where a Stop removes it directly.
-            state.node_runs.end_preparing(interaction.id);
+            // It stays this request's while it waits, so a Stop that lands between its grant
+            // and its preparation is settled here, never beside it. While it is `queued` a Stop
+            // removes it directly.
             let (waiting_state, waiting_thread) = (state.clone(), thread.clone());
             let waiting = interaction.clone();
             tokio::spawn(async move {
                 match grant.await {
                     Ok(()) => {
-                        waiting_state.node_runs.begin_preparing(waiting.id);
                         let _ = run_held_action_interaction(
                             &waiting_state,
                             &waiting_thread,
@@ -4676,7 +4676,10 @@ async fn continue_held_admission(
                     }
                     // A Stop removed it from the wait. It keeps its node until that Stop has
                     // settled, so the next run on the node starts only after it.
-                    Err(_) => release_node_run(waiting_state, key, waiting.id, true),
+                    Err(_) => {
+                        waiting_state.node_runs.end_preparing(waiting.id);
+                        release_node_run(waiting_state, key, waiting.id, true);
+                    }
                 }
             });
             return state
@@ -4686,9 +4689,8 @@ async fn continue_held_admission(
                 .map_err(Into::into);
         }
         // A duplicate delivery of a run that waits for capacity: the first one starts it, and
-        // this delivery's hold on the node ends.
+        // this delivery's hold on the node ends. The run stays the first delivery's to prepare.
         CapacityAdmission::AlreadyWaiting => {
-            state.node_runs.end_preparing(interaction.id);
             release_node_run(state.clone(), key, interaction.id, false);
             return state
                 .product
@@ -6268,6 +6270,9 @@ mod tests {
             .unwrap_or_else(|error| panic!("admission failed: {}", error.message()));
             assert_eq!(waiting.completion_status, "queued");
             assert!(waiting.waiting_for_capacity);
+            // The run stays the first request's while it waits, so a Stop between its grant
+            // and its preparation is settled by that request, never beside it.
+            assert!(fixture.state.node_runs.is_preparing(run.id));
         }
         // The graph already prepared its call, so its Stop settles before native work. It keeps
         // its node until that settlement ends it.
@@ -6320,6 +6325,7 @@ mod tests {
                 .completion_status,
             "stopped"
         );
+        assert!(!fixture.state.node_runs.is_preparing(run.id));
         fixture.finish();
     }
 

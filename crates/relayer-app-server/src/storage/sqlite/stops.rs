@@ -82,8 +82,9 @@ impl SqliteProductStore {
         .await?;
         match queued {
             Some(false) => {
-                sqlx::query("UPDATE interactions SET completion_status='stopped',completion_error='Stopped before it started.' WHERE id=?1 AND completion_status='queued'")
+                sqlx::query("UPDATE interactions SET completion_status='stopped',completion_error=?2 WHERE id=?1 AND completion_status='queued'")
                     .bind(interaction.value())
+                    .bind(super::QUEUED_RUN_STOPPED)
                     .execute(&mut *transaction)
                     .await?;
                 sqlx::query("DELETE FROM run_capacity_waits WHERE interaction_id=?1")
