@@ -857,6 +857,9 @@ pub(crate) async fn reconcile_interrupted_work(
     // Reconcile canonical graph acceptance before aborting approvals left open by the dead
     // harness session. A completion may have been accepted after the last product write; in
     // that case graph authority wins while the stale approval is still durably closed below.
+    // A harness that outlived the server still has an agent child's provider waiting on a
+    // request no observer can bring back to the user, so that child is cancelled there.
+    let blocked_children = storage.agent_children_with_open_approvals().await?;
     let interrupted_approvals = storage
         .abort_pending_approvals_on_restart(
             "Approval request was aborted because its harness session ended when Relayer stopped.",
@@ -867,6 +870,34 @@ pub(crate) async fn reconcile_interrupted_work(
         eprintln!(
             "marked {interrupted_approvals} interrupted approval request(s) aborted during backend startup"
         );
+    }
+    if let Some(runtime) = runtime {
+        for (thread_id, completion_id) in blocked_children {
+            let runtime = runtime.clone();
+            tokio::spawn(async move {
+                // Retried until the host answers; a host that restarted too has no such run.
+                for attempt in 1..=20_u32 {
+                    match runtime
+                        .cancel_invoked_completion(thread_id, completion_id)
+                        .await
+                    {
+                        Ok(_) => return,
+                        Err(error) if error.is_host_answer() => return,
+                        Err(error) => {
+                            if attempt == 1 {
+                                eprintln!(
+                                    "recursive completion {completion_id} blocked on an approval could not be cancelled after restart; retrying: {error}"
+                                );
+                            }
+                            tokio::time::sleep(
+                                std::time::Duration::from_millis(250) * attempt.min(10),
+                            )
+                            .await;
+                        }
+                    }
+                }
+            });
+        }
     }
     let interrupted = storage
         .recover_interrupted_action_invocations(

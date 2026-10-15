@@ -3219,6 +3219,56 @@ async fn a_child_settles_while_its_approval_request_is_pending() {
     world.finish().await;
 }
 
+/// A server restart closes a child's open approval request, but a harness that outlived it
+/// still has the provider waiting on that request, and no observer can bring it back. Startup
+/// therefore cancels that child's run on the harness, which ends the provider.
+#[tokio::test]
+async fn a_restart_cancels_a_child_blocked_on_an_open_approval() {
+    let mut world = World::new("child-approval-restart", false).await;
+    let (broker, _lease) = world.broker();
+    *world.harness.start.lock().unwrap() = "ok";
+    let (status, _) = world
+        .launch(&broker)
+        .await
+        .unwrap_or_else(|error| panic!("launch: {}", error.message()));
+    assert_eq!(status, StatusCode::CREATED);
+    world
+        .apply(&[serde_json::json!("ChildReturn")], false)
+        .await;
+    let state = world.await_state(|state| state["phase"] == "settled").await;
+    assert_eq!(state["status"], "accepted", "{state}");
+    *world.harness.approval.lock().unwrap() =
+        Some((world.thread.id.value(), world.child.id.value()));
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while world.product.get_approval("request-child").await.is_err() {
+        assert!(
+            Instant::now() < deadline,
+            "the late approval was never recorded"
+        );
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+
+    world.restart().await;
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while *world.harness.prov.lock().unwrap() != "cancelled" {
+        assert!(
+            Instant::now() < deadline,
+            "the blocked child's provider was never cancelled"
+        );
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    let closed = world
+        .product
+        .get_approval("request-child")
+        .await
+        .unwrap()
+        .resolution
+        .expect("startup closes the open request");
+    assert_eq!(closed.outcome, crate::approval::ApprovalOutcome::Aborted);
+    assert_eq!(world.child_row().await.completion_status, "accepted");
+    world.finish().await;
+}
+
 /// An older build left a stuck child without the agent marker. A child whose parent is not
 /// accepted cannot be a user's invoke, so startup marks it and fails it in both stores.
 #[tokio::test]

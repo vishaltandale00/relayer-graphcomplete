@@ -208,6 +208,7 @@ pub(super) async fn product_state(
         );
     }
     let response = ProductStateResponse::from(product_state)
+        .with_running_child_providers(&state.running_child_providers)
         .with_invocation_inventory_available(inventory_available)
         .with_action_invocations(invocations)
         .with_imported_invocation_history(imported_history)

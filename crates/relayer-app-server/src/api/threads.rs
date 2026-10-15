@@ -272,9 +272,8 @@ pub(super) async fn set_archived(
 /// A thread as the renderer sees it. A child provider still running keeps the thread from being
 /// archived, and so also keeps the sidebar's activity refresh going for it.
 fn thread_response(state: &ApiState, thread: crate::product::Thread) -> ThreadResponse {
-    let child_provider_running = state.running_child_providers.in_thread(thread.id.value());
     let mut response = ThreadResponse::from(thread);
-    response.archive_blocked |= child_provider_running;
+    response.mark_running_child_providers(&state.running_child_providers);
     response
 }
 
@@ -439,6 +438,7 @@ pub(super) async fn get(
         .conversation_compatibility(detail.thread.id)
         .await?;
     let response = ThreadDetailResponse::from(detail)
+        .with_running_child_providers(&state.running_child_providers)
         .with_invocation_inventory_available(inventory_available)
         .with_action_invocations(invocations)
         .with_imported_invocation_history(imported_history)
