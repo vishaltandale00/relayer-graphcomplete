@@ -5330,6 +5330,20 @@ async fn node_runs_run_beside_other_nodes_and_queue_in_order_on_their_own_node()
         4,
         "a run started before the run ahead had an outcome"
     );
+    // Stopping the ambiguous run ends it, and the run behind it starts.
+    app.clone()
+        .oneshot(api_request(
+            "POST",
+            &format!("/api/threads/{thread_id}/interactions/{ambiguous}/stop"),
+            None,
+            true,
+        ))
+        .await
+        .unwrap();
+    settled(ambiguous, "stopped").await;
+    started(behind).await;
+    settle(behind, true);
+    settled(behind, "accepted").await;
     graph_task.abort();
     harness_task.abort();
 }

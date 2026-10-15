@@ -3061,10 +3061,19 @@ pub(super) async fn stop_interaction(
         .product
         .request_interaction_stop(thread_id, interaction_id)
         .await?;
-    if queued == crate::storage::QueuedStop::SettleBeforeStart {
-        // The graph already prepared this queued run's call. It settles as a Stop before native
-        // execution, outside its node's queue: no provider work starts, and its graph current
-        // stops with it.
+    let current = state.product.get_interaction(interaction_id).await?;
+    // The graph already prepared this queued run's call. It settles as a Stop before native
+    // execution, outside its node's queue: no provider work starts, and its graph current stops
+    // with it. So does a node run still preparing, or left `submitted` by a preparation that
+    // ended ambiguously: nothing else would end it, and it holds its node until it ends. A run
+    // that wins its start meanwhile settles the Stop itself before native work.
+    let unstarted_node_run = queued == crate::storage::QueuedStop::NotQueued
+        && current.completion_status == "submitted"
+        && current.graph_node_id.is_none()
+        && current.stop_requested
+        && current.stop_error.is_none()
+        && state.product.node_run_key(interaction_id).await?.is_some();
+    if queued == crate::storage::QueuedStop::SettleBeforeStart || unstarted_node_run {
         let settle_state = state.clone();
         tokio::spawn(async move {
             settle_queued_stop(settle_state, thread_id, interaction_id).await;
@@ -4470,6 +4479,19 @@ async fn start_held_action_interaction(
             }
         };
     let Some(prepared) = prepared else {
+        // A Stop that arrived while it prepared settles here if nothing started the run.
+        if let Ok(current) = state.product.get_interaction(interaction.id).await
+            && current.completion_status == "submitted"
+            && current.graph_node_id.is_none()
+            && current.stop_requested
+            && current.stop_error.is_none()
+        {
+            let settle_state = state.clone();
+            let (thread_id, run) = (thread.id, interaction.id);
+            tokio::spawn(async move {
+                settle_queued_stop(settle_state, thread_id, run).await;
+            });
+        }
         release_node_run(state.clone(), key, interaction.id, true);
         return state
             .product
