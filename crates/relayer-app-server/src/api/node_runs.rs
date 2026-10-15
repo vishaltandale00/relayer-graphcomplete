@@ -23,7 +23,8 @@ pub(crate) struct NodeRunQueue {
     nodes: Arc<Mutex<HashMap<NodeRunKey, NodeState>>>,
     /// Runs whose graph preparation is in flight in this process. Their own request settles a
     /// Stop once the preparation returns, so the Stop handler leaves them to it.
-    preparing: Arc<std::sync::Mutex<std::collections::HashSet<InteractionId>>>,
+    /// Counted per run, since duplicate deliveries of one run can prepare at once.
+    preparing: Arc<std::sync::Mutex<HashMap<InteractionId, usize>>>,
 }
 
 #[derive(Default)]
@@ -90,15 +91,21 @@ impl NodeState {
 
 impl NodeRunQueue {
     pub(crate) fn begin_preparing(&self, run: InteractionId) {
-        self.preparing.lock().unwrap().insert(run);
+        *self.preparing.lock().unwrap().entry(run).or_default() += 1;
     }
 
     pub(crate) fn end_preparing(&self, run: InteractionId) {
-        self.preparing.lock().unwrap().remove(&run);
+        let mut preparing = self.preparing.lock().unwrap();
+        if let Some(count) = preparing.get_mut(&run) {
+            *count -= 1;
+            if *count == 0 {
+                preparing.remove(&run);
+            }
+        }
     }
 
     pub(crate) fn is_preparing(&self, run: InteractionId) -> bool {
-        self.preparing.lock().unwrap().contains(&run)
+        self.preparing.lock().unwrap().contains_key(&run)
     }
 
     /// Joins a newly created run to its node's queue, before its graph call is prepared. It
@@ -803,5 +810,19 @@ mod tests {
         // The stray run was never promoted: once the ready run ends, the node is free.
         assert_eq!(queue.release(&product, node, ready).await.unwrap(), None);
         assert_eq!(queue.holder(node).await, None);
+    }
+
+    /// Two deliveries of one run can prepare at once: the run stays marked as preparing until
+    /// the last of them returns (Codex review on #732).
+    #[test]
+    fn preparation_marks_count_concurrent_deliveries() {
+        let queue = NodeRunQueue::default();
+        let run = InteractionId::from_database(7);
+        queue.begin_preparing(run);
+        queue.begin_preparing(run);
+        queue.end_preparing(run);
+        assert!(queue.is_preparing(run));
+        queue.end_preparing(run);
+        assert!(!queue.is_preparing(run));
     }
 }

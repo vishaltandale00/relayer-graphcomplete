@@ -4689,8 +4689,10 @@ async fn continue_held_admission(
                 .map_err(Into::into);
         }
         // A duplicate delivery of a run that waits for capacity: the first one starts it, and
-        // this delivery's hold on the node ends. The run stays the first delivery's to prepare.
+        // this delivery's hold on the node and its own preparing mark end. The first delivery
+        // keeps its mark, so the run stays its to prepare.
         CapacityAdmission::AlreadyWaiting => {
+            state.node_runs.end_preparing(interaction.id);
             release_node_run(state.clone(), key, interaction.id, false);
             return state
                 .product
