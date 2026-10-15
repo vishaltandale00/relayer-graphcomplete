@@ -8,14 +8,15 @@ use crate::{product::InteractionId, storage::StorageError};
 
 impl SqliteProductStore {
     /// Puts a run whose start was claimed into the wait for capacity. A run with a pending Stop
-    /// is never queued; it is about to end, and it settles without a slot.
+    /// is never queued; it is about to end, and it settles without a slot. A Stop that failed
+    /// is not pending, so its run waits like any other.
     pub(crate) async fn queue_run_for_capacity(
         &self,
         run: InteractionId,
     ) -> Result<bool, StorageError> {
         let mut transaction = self.pool.begin_with("BEGIN IMMEDIATE").await?;
         let queued = sqlx::query(
-            "UPDATE interactions SET completion_status='queued' WHERE id=?1 AND completion_status='submitted' AND NOT EXISTS(SELECT 1 FROM interaction_stop_requests WHERE interaction_id=?1) AND thread_id IN (SELECT id FROM threads WHERE conversation_import_id IS NULL)",
+            "UPDATE interactions SET completion_status='queued' WHERE id=?1 AND completion_status='submitted' AND NOT EXISTS(SELECT 1 FROM interaction_stop_requests WHERE interaction_id=?1 AND error IS NULL) AND thread_id IN (SELECT id FROM threads WHERE conversation_import_id IS NULL)",
         )
         .bind(run.value())
         .execute(&mut *transaction)

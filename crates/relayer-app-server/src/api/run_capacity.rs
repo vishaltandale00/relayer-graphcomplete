@@ -83,9 +83,11 @@ impl RunCapacity {
             return Ok(CapacityAdmission::AlreadyWaiting);
         }
         if slots.executing.len() < self.limit && slots.waiting.is_empty() {
-            // A run that carries a Stop settles without provider work, so it takes no slot,
-            // as it could not wait for one either.
-            if product.get_interaction(run).await?.stop_requested {
+            // A run that carries a valid Stop settles without provider work, so it takes no
+            // slot, as it could not wait for one either.
+            // A Stop that failed earlier is not honoured, so its run executes and counts.
+            let current = product.get_interaction(run).await?;
+            if current.stop_requested && current.stop_error.is_none() {
                 return Ok(CapacityAdmission::Uncounted);
             }
             slots.executing.insert(run, 1);
@@ -295,10 +297,10 @@ mod tests {
         }
     }
 
-    /// A run that carries a Stop never waits for capacity; it settles without a slot.
+    /// A run that carries a valid Stop never waits for capacity; it settles without a slot.
     #[tokio::test]
     async fn a_run_with_a_stop_settles_without_a_slot() {
-        let (_directory, _store, product, runs) = fixture(2).await;
+        let (_directory, store, product, runs) = fixture(2).await;
         let capacity = RunCapacity::new(1);
         assert!(matches!(
             capacity.admit(&product, runs[0]).await.unwrap(),
@@ -321,5 +323,31 @@ mod tests {
             CapacityAdmission::Uncounted
         ));
         assert!(capacity.executing_for_test().await.is_empty());
+
+        // A Stop that failed is not honoured, so its run executes and takes a slot, and with
+        // every slot taken it waits like any other run.
+        store
+            .record_stop_error(runs[1], "The provider refused the Stop.")
+            .await
+            .unwrap();
+        assert!(matches!(
+            capacity.admit(&product, runs[1]).await.unwrap(),
+            CapacityAdmission::Start
+        ));
+        let (_, more) = store.seed_node_runs_for_test(&[9]).await;
+        assert!(store.claim_interaction_preparing(more[0]).await.unwrap());
+        let thread = product.get_interaction(more[0]).await.unwrap().thread_id;
+        product
+            .request_interaction_stop(thread, more[0])
+            .await
+            .unwrap();
+        store
+            .record_stop_error(more[0], "The provider refused the Stop.")
+            .await
+            .unwrap();
+        assert!(matches!(
+            capacity.admit(&product, more[0]).await.unwrap(),
+            CapacityAdmission::Waiting(_)
+        ));
     }
 }

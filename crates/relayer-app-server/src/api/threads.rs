@@ -4523,36 +4523,81 @@ async fn start_held_action_interaction(
     key: NodeRunKey,
     already_claimed: bool,
 ) -> Result<Interaction, ApiError> {
-    let admitted = async {
-        let claimed = already_claimed
-            || state
-                .product
-                .claim_interaction_preparing(interaction.id)
-                .await?;
-        Ok::<_, crate::product::ProductError>(claimed)
-    }
-    .await;
-    let admitted = match admitted {
-        Ok(claimed) => match admit_with_retry(state, interaction.id).await {
-            Some(admission) => Ok((claimed, admission)),
-            // The storage outage outlasted the retries. The run stays a claimed start, which
-            // invoking its action again or a restart recovers, and its graph call is never
-            // failed under it. Its node passes on.
-            None => {
+    let claimed = if already_claimed {
+        true
+    } else {
+        match state
+            .product
+            .claim_interaction_preparing(interaction.id)
+            .await
+        {
+            Ok(claimed) => claimed,
+            Err(error) => {
+                let error = ApiError::from(error);
+                record_background_failure(
+                    &state.product,
+                    thread,
+                    &interaction,
+                    error.message().to_owned(),
+                )
+                .await;
                 release_node_run(state.clone(), key, interaction.id, false);
-                return state
-                    .product
-                    .get_interaction(interaction.id)
-                    .await
-                    .map_err(Into::into);
+                return Err(error);
             }
-        },
-        Err(error) => Err(error),
+        }
     };
-    let (claimed, slot) = match admitted {
-        Ok((claimed, CapacityAdmission::Start)) => (claimed, CapacitySlot::Held),
-        Ok((claimed, CapacityAdmission::Uncounted)) => (claimed, CapacitySlot::Uncounted),
-        Ok((claimed, CapacityAdmission::Waiting(grant))) => {
+    match state
+        .run_capacity
+        .admit(&state.product, interaction.id)
+        .await
+    {
+        Ok(admission) => {
+            continue_held_admission(state, thread, interaction, key, claimed, admission).await
+        }
+        // A storage failure is retried in the background until admission succeeds. The run
+        // keeps its node meanwhile, so its order holds, and its graph call is never failed
+        // under it. A Stop it receives meanwhile settles once it is admitted.
+        Err(error) => {
+            eprintln!(
+                "run {} could not be admitted to the run capacity; retrying in the background: {error}",
+                interaction.id
+            );
+            let (retry_state, retry_thread) = (state.clone(), thread.clone());
+            let retried = interaction.clone();
+            tokio::spawn(async move {
+                let admission = admit_until_admitted(&retry_state, retried.id).await;
+                let _ = continue_held_admission(
+                    &retry_state,
+                    &retry_thread,
+                    retried,
+                    key,
+                    claimed,
+                    admission,
+                )
+                .await;
+            });
+            state
+                .product
+                .get_interaction(interaction.id)
+                .await
+                .map_err(Into::into)
+        }
+    }
+}
+
+/// Starts, or leaves waiting, a held run that the capacity limit admitted.
+async fn continue_held_admission(
+    state: &ApiState,
+    thread: &Thread,
+    interaction: Interaction,
+    key: NodeRunKey,
+    claimed: bool,
+    admission: CapacityAdmission,
+) -> Result<Interaction, ApiError> {
+    let slot = match admission {
+        CapacityAdmission::Start => CapacitySlot::Held,
+        CapacityAdmission::Uncounted => CapacitySlot::Uncounted,
+        CapacityAdmission::Waiting(grant) => {
             let (waiting_state, waiting_thread) = (state.clone(), thread.clone());
             let waiting = interaction.clone();
             tokio::spawn(async move {
@@ -4581,7 +4626,7 @@ async fn start_held_action_interaction(
         }
         // A duplicate delivery of a run that waits for capacity: the first one starts it, and
         // this delivery's hold on the node ends.
-        Ok((_, CapacityAdmission::AlreadyWaiting)) => {
+        CapacityAdmission::AlreadyWaiting => {
             release_node_run(state.clone(), key, interaction.id, false);
             return state
                 .product
@@ -4589,43 +4634,26 @@ async fn start_held_action_interaction(
                 .await
                 .map_err(Into::into);
         }
-        Err(error) => {
-            let error = ApiError::from(error);
-            record_background_failure(
-                &state.product,
-                thread,
-                &interaction,
-                error.message().to_owned(),
-            )
-            .await;
-            release_node_run(state.clone(), key, interaction.id, false);
-            return Err(error);
-        }
     };
     run_held_action_interaction(state, thread, interaction, key, claimed, slot).await
 }
 
-/// Admits a run to the capacity limit, retrying a storage failure with backoff. `None` when the
-/// failure outlasts the retries.
-async fn admit_with_retry(state: &ApiState, run: InteractionId) -> Option<CapacityAdmission> {
-    const ATTEMPTS: u32 = 6;
+/// Admits a run to the capacity limit, retrying a storage failure with capped backoff until it
+/// succeeds.
+async fn admit_until_admitted(state: &ApiState, run: InteractionId) -> CapacityAdmission {
     let mut backoff = std::time::Duration::from_millis(100);
-    for attempt in 1..=ATTEMPTS {
+    loop {
         match state.run_capacity.admit(&state.product, run).await {
-            Ok(admission) => return Some(admission),
-            Err(error) if attempt == ATTEMPTS => {
-                eprintln!("run {run} could not be admitted to the run capacity: {error}");
-            }
+            Ok(admission) => return admission,
             Err(error) => {
                 eprintln!(
                     "run {run} could not be admitted to the run capacity; retrying in {backoff:?}: {error}"
                 );
                 tokio::time::sleep(backoff).await;
-                backoff = (backoff * 2).min(std::time::Duration::from_secs(5));
+                backoff = (backoff * 2).min(std::time::Duration::from_secs(30));
             }
         }
     }
-    None
 }
 
 /// Prepares and executes a run that holds its node and its capacity slot.
