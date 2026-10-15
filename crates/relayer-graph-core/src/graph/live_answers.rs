@@ -165,7 +165,7 @@ async fn read_presentation(
     after: i64,
     layer: Option<LayerId>,
 ) -> Result<LiveAnswerPresentation, GraphError> {
-    scope.require_generation_authority(&mut *connection).await?;
+    scope.require_active_authority(&mut *connection).await?;
     let authority_epoch = require_human_root(&mut *connection, scope).await?;
     let current = CurrentTable::new(&mut *connection)
         .state(scope.root_node_id)
@@ -215,7 +215,7 @@ pub(crate) async fn receipts(
     layer: LayerId,
 ) -> Result<Vec<LiveAnswer>, GraphError> {
     let mut transaction = database.storage.begin_read().await?;
-    scope.require_generation_authority(&mut transaction).await?;
+    scope.require_active_authority(&mut transaction).await?;
     require_human_root(&mut transaction, scope).await?;
     let records: Vec<String> = sqlx::query_scalar("SELECT receipt_json FROM live_answers WHERE completion_id=?1 AND presenting_layer_id=?2 ORDER BY sequence")
         .bind(scope.root_node_id.value()).bind(layer.value()).fetch_all(&mut *transaction).await?;
@@ -319,10 +319,12 @@ impl GraphDatabase {
             )
         })?;
         let value = validate_value(0, &question, &request.value)?;
-        let sequence: i64 =
-            sqlx::query_scalar("SELECT COALESCE(MAX(sequence),0)+1 FROM live_answers")
-                .fetch_one(&mut *transaction)
-                .await?;
+        let sequence: i64 = sqlx::query_scalar(
+            "SELECT COALESCE(MAX(sequence),0)+1 FROM live_answers WHERE completion_id=?1",
+        )
+        .bind(completion.value())
+        .fetch_one(&mut *transaction)
+        .await?;
         let answer = LiveAnswer {
             sequence,
             completion_id: completion,

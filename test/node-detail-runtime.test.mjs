@@ -138,11 +138,15 @@ describe("compiled Node Detail product runtime", () => {
     try {
       workspace.render();
       await window.happyDOM.waitUntilComplete();
-      const shadow = window.document.querySelector("[data-node-detail-runtime]")?.shadowRoot;
-      const controls = [...window.document.querySelectorAll(".action-control"), ...(shadow?.querySelectorAll("button") ?? [])];
-      expect(controls.filter((control) => control.textContent.includes("Kyoto") || control.dataset.invocationResultInteractionId === "6")).toHaveLength(1);
-      const result = controls.find((control) => control.dataset.invocationResultInteractionId === "6");
-      expect(result).toBeDefined();
+      let result;
+      await vi.waitFor(() => {
+        // WebCrypto compilation is not a task tracked by Happy DOM's queue.
+        const shadow = window.document.querySelector("[data-node-detail-runtime]")?.shadowRoot;
+        const controls = [...window.document.querySelectorAll(".action-control"), ...(shadow?.querySelectorAll("button") ?? [])];
+        expect(controls.filter((control) => control.textContent.includes("Kyoto") || control.dataset.invocationResultInteractionId === "6")).toHaveLength(1);
+        result = controls.find((control) => control.dataset.invocationResultInteractionId === "6");
+        expect(result).toBeDefined();
+      });
       result.click();
       await window.happyDOM.waitUntilComplete();
       expect(onNavigateLayer).toHaveBeenCalledWith(201, expect.objectContaining({ action: navigation, sourceNode: node }));
@@ -1508,4 +1512,137 @@ it("requires exact converted navigation shape for inert imported invoke bindings
     { convertedFromInvoke: false }]) {
     expect(isResolvedInvokeAction({ ...action, ...invalid })).toBe(false);
   }
+});
+
+async function liveInputWorkspace({ authored = false, control = "text" } = {}) {
+  const window = new Window({ url: "http://127.0.0.1:3000" });
+  vi.stubGlobal("document", window.document); vi.stubGlobal("window", window);
+  vi.stubGlobal("lucide", new Proxy({ createElement: () => window.document.createElement("svg") }, { get: (target, key) => target[key] ?? {} }));
+  window.document.body.innerHTML = '<section id="threadView"></section><div id="toast" class="hidden"></div>';
+  const node = { id: 7, clientKey: "question", kind: "concept", icon: "box", title: "Question", detail: "Choose a boundary" };
+  if (authored) node.authoredDetail = compiledPackage({ version: 1,
+    components: [{ id: "form", order: 0, html: `<${control === "text" ? "textarea" : "select"} aria-label="Your answer" data-gc-mount="answer"></${control === "text" ? "textarea" : "select"}>`, css: "" }],
+    mounts: [{ id: "answer", componentId: "form", kind: "capability", host: control === "text" ? "textarea" : "select", capability: { kind: "input", action: { clientKey: "answer", sourceNode: { clientKey: "question" }, sourceLayer: { clientKey: "working" } } } }], assets: [] });
+  if (authored) {
+    const { integritySha256: _hash, ...detail } = node.authoredDetail;
+    detail.components[0].html += '<textarea aria-label="Ordinary note" data-gc-mount="ordinary"></textarea>';
+    detail.mounts.push({ id: "ordinary", componentId: "form", kind: "capability", host: "textarea", capability: { kind: "input", action: { clientKey: "ordinary", sourceNode: { clientKey: "question" }, sourceLayer: { clientKey: "working" } } } });
+    node.authoredDetail = compiledPackage(detail);
+  }
+  const ordinary = { id: 14, clientKey: "ordinary", sourceNodeId: 7, sourceLayerId: 101, sourceLayerClientKey: "working", kind: "input", control: "text", prompt: "Ordinary note", inputCanAcceptAnswer: true };
+  const action = { id: 13, clientKey: "answer", sourceNodeId: 7, sourceLayerId: 101, sourceLayerClientKey: "working", kind: "input", control, prompt: "Your answer",
+    ...(control === "text" ? {} : { options: [{ key: "a", label: "Alpha" }, { key: "b", label: "Beta" }] }),
+    liveInput: { eligible: true, attemptId: 10, authorityEpoch: 2, currentRevision: 1 } };
+  const layer = { layer: { id: 101, clientKey: "working" }, nodes: [node], edges: [], actions: [action, ordinary] };
+  const thread = { id: 3, rootInteractionId: 5, harnessId: "fixture" };
+  const state = { conversationCompatibility: { threadId: 3, status: "unrestricted", harnessId: "fixture" }, status: "accepted", currentInteractionId: 5,
+    interactions: [{ id: 5, threadId: 3, graphNodeId: 50, text: "Investigate", completionStatus: "running", completionOutput: { rootLayer: layer } }],
+    visibleLayer: layer, nodes: [node], actions: layer.actions, projects: [], permissionProfiles: [], modelSettings: { defaults: { harnessId: "fixture" }, harnesses: [{ id: "fixture", available: true }], providers: [], families: [] }, modelCatalog: [], actionInvocations: [], pendingActionInvocations: [] };
+  let draft = { threadId: 3, revision: 0, attachments: [], updatedAt: "2026-10-14T00:00:00Z" };
+  const commit = vi.fn(async (_thread, occurrence, value) => {
+    draft = { ...draft, revision: draft.revision + 1, attachments: [{ occurrence, sourceNodeId: 7,
+      action: occurrence.actionId === 14 ? ordinary : action, value, composerEligible: occurrence.actionId === 14,
+      draftRevision: draft.revision + 1, committedAt: "2026-10-14T00:00:01Z" }] };
+    return draft;
+  });
+  const answer = vi.fn(), submit = vi.fn(async () => ({}));
+  const workspace = createProductWorkspace({ root: window.document, getState: () => state, getThread: () => thread,
+    selection: { currentThreadId: 3, currentInteractionId: 5, selectedNodeId: 7, layerPath: [] }, showThread() {}, showEmpty() {},
+    implicitInputAcceptance: true, inputDraftApi: { get: async () => draft, commit, answer }, onSubmitInteraction: submit });
+  const surface = () => authored ? window.document.querySelector("[data-node-detail-runtime]")?.shadowRoot : window.document;
+  const field = () => surface()?.querySelector('[aria-label="Your answer"]');
+  workspace.render(); await vi.waitFor(() => expect(field()?.disabled).toBe(false));
+  const edit = value => {
+    if (control === "text") { field().value = value; field().dispatchEvent(new window.Event("input", { bubbles: true })); }
+    else if (authored) { field().value = value; field().dispatchEvent(new window.Event("change", { bubbles: true })); }
+    else field().querySelector(`[data-option-key="${value}"]`).click();
+  };
+  const value = () => control === "text" || authored ? field().value : field().querySelector('[aria-checked="true"]')?.dataset.optionKey;
+  const ordinaryField = () => surface()?.querySelector('[aria-label="Ordinary note"]');
+  const replace = next => { state.actions = layer.actions = [next, ordinary]; workspace.render(); };
+  return { window, workspace, state, action, commit, answer, submit, field, edit, value, replace, ordinaryField,
+    close: async () => { workspace.dispose(); await window.happyDOM.close(); } };
+}
+
+it.each([false, true])("does not send an abandoned live edit after same-occurrence settlement (authored=%s)", async authored => {
+  const f = await liveInputWorkspace({ authored });
+  try {
+    // Ordinary draft edits are staged before execution; live Answer remains a separate channel.
+    f.state.interactions[0].completionStatus = "accepted";
+    f.replace(f.action);
+    await vi.waitFor(() => expect(f.ordinaryField()?.disabled).toBe(false));
+    f.ordinaryField().value = "Intended ordinary note";
+    f.ordinaryField().dispatchEvent(new f.window.Event("input", { bubbles: true }));
+    f.state.interactions[0].completionStatus = "running";
+    f.replace(f.action);
+    f.edit("Unanswered private stage");
+    const original = f.field();
+    const { liveInput: _live, ...ordinary } = f.action;
+    f.state.interactions[0].completionStatus = "accepted";
+    f.replace(ordinary);
+    await vi.waitFor(() => expect(f.field()?.value, f.window.document.querySelector("#nodeInputActions")?.outerHTML).toBe(""));
+    if (authored) expect(f.field()).toBe(original);
+    f.field().dispatchEvent(new f.window.Event("blur", { bubbles: true }));
+    const text = f.window.document.querySelector('#threadPrompt');
+    expect(text).toBeTruthy(); text.value = "Continue"; text.dispatchEvent(new f.window.Event("input", { bubbles: true }));
+    await vi.waitFor(() => expect(f.window.document.querySelector('#sendInteraction').disabled, text.outerHTML + ' / ' + f.window.document.querySelector('#sendInteraction').outerHTML).toBe(false));
+    f.window.document.querySelector('#sendInteraction').click();
+    await vi.waitFor(() => expect(f.submit).toHaveBeenCalledTimes(1));
+    expect(f.commit.mock.calls.map(call => [call[1].actionId, call[2]])).toEqual([[14, { text: "Intended ordinary note" }]]);
+    expect(f.submit.mock.calls[0][4]).toBe(1);
+    expect(f.answer).not.toHaveBeenCalled();
+  } finally { await f.close(); }
+});
+
+it.each([[false, "text"], [true, "text"], [false, "single_select"], [true, "single_select"]])("projects accepted delivery over a conflicting local edit and locks it (authored=%s, control=%s)", async (authored, control) => {
+  const f = await liveInputWorkspace({ authored, control });
+  try {
+    f.edit(control === "text" ? "Unsent local value" : "b");
+    await vi.waitFor(() => expect(f.value()).toBe(control === "text" ? "Unsent local value" : "b"));
+    const receipt = { operationKey: "accepted-elsewhere", value: control === "text" ? { text: "Accepted value" } : { selected: [{ key: "a", label: "Alpha" }] } };
+    f.replace({ ...f.action, liveInput: { ...f.action.liveInput, eligible: false, receipt } });
+    await vi.waitFor(() => expect(f.value()).toBe(control === "text" ? "Accepted value" : "a"));
+    if (authored || control === "text") expect(f.field().disabled).toBe(true);
+    else expect([...f.field().querySelectorAll('button')].every(button => button.disabled)).toBe(true);
+    expect(f.window.document.querySelector('[data-input-control-role="answer"]')?.textContent).toBe("Delivered");
+    expect(f.commit).not.toHaveBeenCalled(); expect(f.answer).not.toHaveBeenCalled();
+  } finally { await f.close(); }
+});
+
+it.each(["text", "single_select"])("locks a native live field when eligibility is lost without delivery (%s)", async control => {
+  const f = await liveInputWorkspace({ control });
+  try {
+    f.replace({ ...f.action, liveInput: { ...f.action.liveInput, eligible: false } });
+    await vi.waitFor(() => expect(control === "text" ? f.field().disabled : [...f.field().querySelectorAll('button')].every(button => button.disabled)).toBe(true));
+    expect(f.answer).not.toHaveBeenCalled();
+  } finally { await f.close(); }
+});
+
+it.each([false, true])("does not carry an unsent live edit into another execution authority (authored=%s)", async authored => {
+  const f = await liveInputWorkspace({ authored });
+  try {
+    f.edit("Private to the earlier attempt");
+    f.replace({ ...f.action, liveInput: { ...f.action.liveInput, attemptId: 11, authorityEpoch: 3 } });
+    await vi.waitFor(() => expect(f.field()?.value).toBe(""));
+    expect(f.commit).not.toHaveBeenCalled(); expect(f.answer).not.toHaveBeenCalled();
+  } finally { await f.close(); }
+});
+
+it.each([[false, "ordinary"], [true, "ordinary"], [false, "live"], [true, "live"]])("quarantines an unavailable lookup without discarding private edits (authored=%s, channel=%s)", async (authored, channel) => {
+  const f = await liveInputWorkspace({ authored });
+  try {
+    const { liveInput: _live, ...ordinary } = f.action;
+    const confirmed = channel === "live" ? f.action : ordinary;
+    if (channel === "ordinary") f.state.interactions[0].completionStatus = "accepted";
+    f.replace(confirmed);
+    await vi.waitFor(() => expect(f.field()?.disabled).toBe(false));
+    f.edit("Private retained value");
+    f.replace({ ...confirmed, liveInput: { eligible: false, receipt: null, unavailable: true } });
+    await vi.waitFor(() => expect(f.field()?.disabled).toBe(true));
+    expect(f.field().value).toBe("Private retained value");
+    f.replace(confirmed);
+    await vi.waitFor(() => expect(f.field()?.disabled).toBe(false));
+    expect(f.field().value).toBe("Private retained value");
+    expect(f.commit).not.toHaveBeenCalled(); expect(f.answer).not.toHaveBeenCalled();
+  } finally { await f.close(); }
 });

@@ -169,6 +169,21 @@ async fn answer_and_terminal_races_preserve_exact_receipts_and_never_change_seal
             .unwrap();
         assert_ne!(page.current.lifecycle, CompletionLifecycle::Active);
         assert!(page.eligible_action_ids.is_empty());
+        // Provider-bound reads lose authority at both Return and Stop. The
+        // trusted Product read above and exact recovery below remain available.
+        assert!(writer.live_answers(0).await.is_err());
+        assert!(
+            writer
+                .live_answer_presentation(request.occurrence.presenting_layer_id)
+                .await
+                .is_err()
+        );
+        assert!(
+            writer
+                .live_answer_receipts(request.occurrence.presenting_layer_id)
+                .await
+                .is_err()
+        );
         match answer {
             Ok(answer) => {
                 assert_eq!(page.answers.len(), 1);
@@ -336,4 +351,101 @@ async fn human_invoke_roots_do_not_acquire_live_answer_authority() {
             ..
         })
     ));
+}
+
+#[tokio::test]
+async fn live_answer_cursors_do_not_reveal_other_completions() {
+    let database = GraphDatabase::in_memory().await.unwrap();
+    let (first, first_request, _, first_extra) =
+        question_with_extra_inputs(&database, None, 1).await;
+    let (second, second_request, _, second_extra) =
+        question_with_extra_inputs(&database, None, 1).await;
+    let thread = ThreadId::new(1).unwrap();
+    let first_answer = database
+        .accept_live_answer(first.node_id(), thread, &first_request)
+        .await
+        .unwrap();
+    let second_answer = database
+        .accept_live_answer(second.node_id(), thread, &second_request)
+        .await
+        .unwrap();
+    assert_eq!((first_answer.sequence, second_answer.sequence), (1, 1));
+    let (third, third_request) = question(&database).await;
+    let third_answer = database
+        .accept_live_answer(third.node_id(), thread, &third_request)
+        .await
+        .unwrap();
+    assert_eq!(third_answer.sequence, 1);
+    let mut next_first = first_request.clone();
+    next_first.operation_key = "next-first".into();
+    next_first.occurrence.action_id = first_extra[0];
+    let mut next_second = second_request.clone();
+    next_second.operation_key = "next-second".into();
+    next_second.occurrence.action_id = second_extra[0];
+    let (next_first, next_second) = tokio::join!(
+        database.accept_live_answer(first.node_id(), thread, &next_first),
+        database.accept_live_answer(second.node_id(), thread, &next_second),
+    );
+    assert_eq!(
+        (next_first.unwrap().sequence, next_second.unwrap().sequence),
+        (2, 2)
+    );
+    for writer in [&first, &second] {
+        let page = writer.live_answers(0).await.unwrap();
+        assert_eq!(page.next_sequence, 2);
+        assert_eq!(page.answers.len(), 2);
+        assert!(
+            page.answers
+                .iter()
+                .all(|answer| answer.completion_id == writer.node_id())
+        );
+        let later = writer.live_answers(1).await.unwrap();
+        assert_eq!(later.answers.len(), 1);
+        assert_eq!(later.answers[0].sequence, 2);
+    }
+    assert!(third.live_answers(1).await.unwrap().answers.is_empty());
+}
+
+#[tokio::test]
+async fn delivered_occurrences_are_excluded_from_ordinary_drafts_but_unanswered_history_remains_editable()
+ {
+    for answered in [false, true] {
+        let database = GraphDatabase::in_memory().await.unwrap();
+        let (writer, request) = question(&database).await;
+        let thread = ThreadId::new(1).unwrap();
+        if answered {
+            database
+                .accept_live_answer(writer.node_id(), thread, &request)
+                .await
+                .unwrap();
+        }
+        writer
+            .transition_current(
+                1,
+                "return",
+                CurrentTransition::Return {
+                    layer_id: request.occurrence.presenting_layer_id,
+                },
+            )
+            .await
+            .unwrap();
+        let (_, ordinary, editable) = database
+            .canonical_input_action_consumer_state(None, thread, &request.occurrence)
+            .await
+            .unwrap();
+        assert_eq!((ordinary, editable), (!answered, !answered));
+        assert_eq!(
+            database
+                .canonical_editable_input_action_occurrence(None, thread, &request.occurrence)
+                .await
+                .is_ok(),
+            !answered
+        );
+        assert!(
+            database
+                .canonical_input_action_occurrence(None, thread, &request.occurrence)
+                .await
+                .is_ok()
+        );
+    }
 }

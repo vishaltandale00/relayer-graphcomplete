@@ -18,6 +18,7 @@ export async function proveCurrentActor({ browser, directory, authored = false }
   const gates = [deferred(), deferred(), deferred()];
   const layers = [];
   const reconciliation = deferred();
+  const terminalReadCheck = deferred();
   let pendingDeliveryObserved = false;
   const resources = [];
   let controller;
@@ -74,7 +75,9 @@ export async function proveCurrentActor({ browser, directory, authored = false }
             } else await gates[index].promise;
           }
           await graph.returnCurrent(layers[1], revision, "finished");
-          } catch (error) { console.error("CURRENT_FIXTURE_FAILURE", String(error.message).replaceAll(capability.token, "[redacted]").replace(/https?:\/\/[^\s]+/g, "[loopback]")); throw error; }
+          await assert.rejects(graph.getLiveAnswers(), error => error.code === "authority_generation_expired", "terminal provider capability cannot read supplemental answers");
+          terminalReadCheck.resolve(true);
+          } catch (error) { terminalReadCheck.resolve(false); console.error("CURRENT_FIXTURE_FAILURE", String(error.message).replaceAll(capability.token, "[redacted]").replace(/https?:\/\/[^\s]+/g, "[loopback]")); throw error; }
         },
       }) },
     });
@@ -264,6 +267,14 @@ export async function proveCurrentActor({ browser, directory, authored = false }
           const threadId = tasks.list()[0].currentThreadId;
           const draft = await (await fetch(new URL(`/api/threads/${threadId}/input-draft`, productSession.origin), { headers: { Cookie: `${productSession.cookie.name}=${productSession.cookie.value}` } })).json();
           assert.deepEqual(draft.attachments, [], "historical Delivered answer stays out of ordinary composer");
+          const refused = await fetch(new URL(`/api/threads/${threadId}/input-draft/attachments`, productSession.origin), {
+            method: "PUT", headers: { Cookie: `${productSession.cookie.name}=${productSession.cookie.value}`, "Content-Type": "application/json" },
+            body: JSON.stringify({ occurrence: receivedAnswer.occurrence, value: { text: "Attempted ordinary reuse" }, expectedRevision: draft.revision }),
+          });
+          assert.equal(refused.status, 422, "Product rejects ordinary edits to a delivered occurrence");
+          assert.equal((await refused.json()).error.code, "input_consumers_exhausted");
+          const unchanged = await (await fetch(new URL(`/api/threads/${threadId}/input-draft`, productSession.origin), { headers: { Cookie: `${productSession.cookie.name}=${productSession.cookie.value}` } })).json();
+          assert.deepEqual(unchanged, draft, "refused edit neither stages an answer nor spends a draft revision");
           return { action: { kind: "finish", ref: "", value: "", reason: "satisfied", satisfaction: 3, comment: "I followed the investigation", endpointStatus: "incomplete", remainingWork: "This is a fixture" }, usage: null };
         },
       }),
@@ -271,6 +282,14 @@ export async function proveCurrentActor({ browser, directory, authored = false }
     resources.push(actors);
     const task = await actors.create({ testCaseId: "empty-project.task-system.two-turn", harnessConfigurationName: "fixture-current-actor", maxCompletions: 1, endpoint: "Understand the work", actor: { maxActions: 8 } });
     await actors.running.get(task.id).done;
+    let terminalReadTimeout;
+    try {
+      assert.equal(await Promise.race([
+        terminalReadCheck.promise,
+        new Promise(resolve => { terminalReadTimeout = setTimeout(() => resolve(false), 5000); }),
+      ]), true, "provider terminal read check must succeed before the outer proof passes");
+    } finally { clearTimeout(terminalReadTimeout); }
+    console.log("CURRENT_TERMINAL_READ_REFUSED", JSON.stringify({ authored, code: "authority_generation_expired" }));
     const result = tasks.get(task.id);
     assert.equal(result.status, "completed", JSON.stringify(result.events.filter(event => event.kind === "actor_error")));
     const working = result.events.filter(event => event.kind === "actor_observation" && event.phase === "current");

@@ -156,6 +156,7 @@ export class TaskActorService {
         await this.tasks.actorEvent(id, "actor_current_reaction", { observationEventId: observed.id, comment: reaction.comment, usage: reaction.usage ?? null });
         previousPointer = pointer;
         repeatCurrent = false;
+        if (reaction.action == null) workingControlRepairPending = false;
         if (reaction.action != null) {
           validateActorAction(reaction.action);
           if (!captured.observation.availableActions.includes(reaction.action.kind)

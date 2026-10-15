@@ -448,6 +448,7 @@ function configureInput(host, action, resolveCurrentAction, onInput, onInputEdit
   // Change fires before blur, so an edit still reported here went back to
   // the value it had on focus, and nothing commits.
   host.addEventListener("blur", () => { if (edited) reportEdit(null); });
+  return () => reportEdit(null);
 }
 
 function assetFallback(host) {
@@ -583,6 +584,7 @@ img{max-inline-size:100%}
     const capabilityHosts = new Map();
     const capabilityStates = new Map();
     const inputDrafts = new Set();
+    const resetInputEdits = new Map();
     const capabilityRecords = new Map();
     const configuredCapabilities = new Set();
     const adapters = { resolveAction, onNavigate, onInvoke, onInput, onInputEdit };
@@ -590,7 +592,7 @@ img{max-inline-size:100%}
       if (configuredCapabilities.has(id)) return;
       const context = Object.freeze({ mountId: id, capability, actionReference: capability.action });
       if (capability.kind === "input") {
-        configureInput(
+        const resetEdit = configureInput(
           element,
           action,
           resolveCurrentAction,
@@ -600,6 +602,7 @@ img{max-inline-size:100%}
           inputDrafts,
           capabilityStates,
         );
+        resetInputEdits.set(id, resetEdit);
       } else {
         activateGraphHost(element, async () => {
           const prior = capabilityStates.get(id) ?? {};
@@ -692,6 +695,10 @@ img{max-inline-size:100%}
         const capabilityHost = capabilityHosts.get(mountId);
         if (!capabilityHost) return false;
         const nextState = { ...state };
+        const prior = capabilityStates.get(mountId) ?? {};
+        const boundaryChanged = Object.hasOwn(prior, "inputBoundary")
+          && Object.hasOwn(nextState, "inputBoundary") && prior.inputBoundary !== nextState.inputBoundary;
+        if (boundaryChanged) inputDrafts.delete(mountId);
         const hasValue = Object.prototype.hasOwnProperty.call(nextState, "value");
         const commitAcknowledged = hasValue
           && nextState.busy === false
@@ -702,6 +709,7 @@ img{max-inline-size:100%}
         if (commitAcknowledged) inputDrafts.delete(mountId);
         capabilityStates.set(mountId, { ...(capabilityStates.get(mountId) ?? {}), ...nextState });
         applyCapabilityState(capabilityHost, capabilityStates.get(mountId));
+        if (boundaryChanged) resetInputEdits.get(mountId)?.();
         return true;
       },
       async updateAdapters(next) {

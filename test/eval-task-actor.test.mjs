@@ -830,3 +830,18 @@ it("same-revision identity distinguishes pending from Delivered without tracking
   expect(identity()).not.toBe(pending);
   expect(identity()).not.toContain("private stage");
 });
+
+it("a fresh no-action reaction ends recovery before a later question races", async () => {
+  const unavailable = () => Object.assign(new Error("changed control"), { code: "actor_control_unavailable", actionDispatched: false });
+  let decisions = 0;
+  const f = await fixture({ busy: true, controlErrors: [unavailable(), unavailable()],
+    decide: () => action("finish", { reason: "satisfied", satisfaction: 3 }),
+    observeCurrent: async () => ({ ...currentCapture(decisions < 2 ? 1 : 2), observation: { ...currentCapture(1).observation, availableActions: ["click"] } }),
+    observe: async () => ({ comment: "A fresh view informs my next step", action: ++decisions === 2 ? null : action("click") }),
+  });
+  await f.done;
+  expect(f.tasks.get(f.id).events.filter(event => event.kind === "actor_action_failed").map(event => event.retryAllowed)).toEqual([true, true]);
+  expect(f.browser.act).toHaveBeenCalledTimes(3);
+  expect(f.dispatches).toEqual(["/api/threads/1/interactions/1/live-answers"]);
+  expect(f.tasks.get(f.id).completions).toBe(1);
+});

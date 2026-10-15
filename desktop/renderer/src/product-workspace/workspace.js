@@ -5653,13 +5653,40 @@ export function createProductWorkspace({
     return bound ? boundInputAttachment(draft, input, occurrence) : committedInputAttachment(draft, occurrence);
   }
 
+  function liveInputIdentity(input) {
+    return input?.unavailable ? undefined : input ? JSON.stringify([input.attemptId, input.authorityEpoch, input.currentRevision]) : null;
+  }
+
+  function registerInputStage(key, entry, committedValue, receipt) {
+    const observedIdentity = liveInputIdentity(entry.action.liveInput);
+    const prior = implicitInputEntries.get(key);
+    const previousIdentity = prior && (Object.hasOwn(prior, "liveIdentity") ? prior.liveIdentity : liveInputIdentity(prior.action?.liveInput));
+    // Failed lookup grants no channel/authority knowledge and cannot discard a
+    // private edit. Keep its last confirmed identity while delivery is locked.
+    const liveIdentity = observedIdentity === undefined ? previousIdentity : observedIdentity;
+    if (prior && observedIdentity !== undefined && previousIdentity !== undefined && previousIdentity !== liveIdentity) {
+      inputStages.delete(key);
+      inputTouched.delete(key);
+      inputErrors.delete(key);
+      noteInputEdit(key);
+    }
+    // A graph-owned receipt wins over a conflicting private edit, including on
+    // reload when this workspace's local Answer controller has no history.
+    if (receipt) {
+      inputStages.set(key, committedValue);
+      inputTouched.delete(key);
+      inputErrors.delete(key);
+    } else if (!inputStages.has(key) || !inputTouched.has(key)) inputStages.set(key, committedValue);
+    implicitInputEntries.set(key, { ...entry, liveIdentity });
+  }
+
   function captureImplicitInputs(threadId, { composerOnly = false, action = null } = {}) {
     if (!implicitInputAcceptance) return [];
     const state = getState();
     const interaction = currentInteraction(state, getThread());
     const layerId = currentLayerId(state, getThread());
     const draft = inputDraftController?.current(threadId);
-    return [...implicitInputEntries].filter(([key, entry]) => inputKeyBelongsToThread(key, threadId)
+    return [...implicitInputEntries].filter(([key, entry]) => !entry.action?.liveInput && inputKeyBelongsToThread(key, threadId)
       && (!composerOnly || isComposerInputOccurrence(entry.occurrence))
       && (!action || (String(entry.occurrence.presentingInteractionNodeId) === String(interaction?.graphNodeId)
         && String(entry.occurrence.presentingLayerId) === String(layerId)
@@ -6028,10 +6055,9 @@ export function createProductWorkspace({
       const attachment = displayedInputAttachment(draft, action, occurrence);
       const liveReceipt = action.liveInput?.receipt ?? liveAnswerController?.receipt(thread.id, occurrence);
       const committedValue = liveReceipt ? (semantic.control === "text" ? liveReceipt.value.text : liveReceipt.value.selected.map(option => String(option.key))) : initialInputStageValue(semantic, attachment);
-      implicitInputEntries.set(stageKey, { occurrence, semantic, action,
+      registerInputStage(stageKey, { occurrence, semantic, action,
         composerEligible: !action.liveInput && !(state.actions ?? []).some(candidate => candidate.kind === "invoke"
-          && candidate.inputActionIds?.some(id => String(id) === String(action.id))) });
-      if (!inputStages.has(stageKey) || !inputTouched.has(stageKey)) inputStages.set(stageKey, committedValue);
+          && candidate.inputActionIds?.some(id => String(id) === String(action.id))) }, committedValue, liveReceipt);
       const fieldset = graphDocument.createElement("fieldset");
       fieldset.className = "node-input-editor";
       fieldset.dataset.inputOccurrenceKey = stageKey;
@@ -6142,7 +6168,7 @@ export function createProductWorkspace({
         const persistedError = inputErrors.get(stageKey);
         error.textContent = persistedError || (inputTouched.has(stageKey) ? issue?.message : "") || "";
         const pending = inputPending.has(stageKey);
-        const locked = (action.liveInput ? mode !== "interactive" || !capabilities.canCompose : contextStagingDisabled()) || pending || inputConsumersExhausted(state, action);
+        const locked = (action.liveInput ? mode !== "interactive" || !capabilities.canCompose || action.liveInput.eligible !== true || Boolean(liveReceipt) : contextStagingDisabled()) || pending || inputConsumersExhausted(state, action);
         control.disabled = locked;
         for (const option of control.querySelectorAll?.("button") || []) option.disabled = locked;
         undo.disabled = locked || inputStageValuesEqual(semantic, staged, committedValue);
@@ -6462,13 +6488,13 @@ export function createProductWorkspace({
       for (const action of inputActions) {
         const occurrence = createInputOccurrence(interaction.graphNodeId, visibleLayer.layer.id, action.id);
         const key = threadInputOccurrenceKey(getThread()?.id, occurrence);
-        implicitInputEntries.set(key, { occurrence, action, semantic: action.input ?? action,
-          composerEligible: !action.liveInput && !(state.actions ?? []).some(candidate => candidate.kind === "invoke"
-            && candidate.inputActionIds?.some(id => String(id) === String(action.id))) });
         const liveReceipt = action.liveInput?.receipt ?? liveAnswerController?.receipt(getThread()?.id, occurrence);
-        if (!inputStages.has(key) || !inputTouched.has(key)) inputStages.set(key, liveReceipt
+        const value = liveReceipt
           ? (action.control === "text" ? liveReceipt.value.text : liveReceipt.value.selected.map(option => String(option.key)))
-          : initialInputStageValue(action.input ?? action, displayedInputAttachment(inputDraftController.current(getThread()?.id), action, occurrence)));
+          : initialInputStageValue(action.input ?? action, displayedInputAttachment(inputDraftController.current(getThread()?.id), action, occurrence));
+        registerInputStage(key, { occurrence, action, semantic: action.input ?? action,
+          composerEligible: !action.liveInput && !(state.actions ?? []).some(candidate => candidate.kind === "invoke"
+            && candidate.inputActionIds?.some(id => String(id) === String(action.id))) }, value, liveReceipt);
       }
     }
     const authoredCapabilityState = {};
@@ -6512,8 +6538,14 @@ export function createProductWorkspace({
         const failure = occurrence
           ? authoredInputErrors.get(`${getThread()?.id}\u0000${authoredInputKey(occurrence)}`)
           : null;
+        const registered = occurrence && implicitInputEntries.get(threadInputOccurrenceKey(getThread()?.id, occurrence));
+        const boundaryIdentity = registered && Object.hasOwn(registered, "liveIdentity")
+          ? registered.liveIdentity : liveInputIdentity(action.liveInput);
         authoredCapabilityState[mount.id] = {
-          ...(action.liveInput && occurrence ? { liveAnswerScope: JSON.stringify(occurrence) } : {}),
+          liveAnswerScope: action.liveInput && occurrence ? JSON.stringify(occurrence) : null,
+          ...(boundaryIdentity !== undefined || liveReceipt ? {
+            inputBoundary: JSON.stringify([boundaryIdentity, liveReceipt?.operationKey ?? null]),
+          } : {}),
           // A presentation replacement transfers an existing pending standard
           // value. The same occurrence registry continues to own its epoch;
           // authored edit callbacks below keep it current until submission.

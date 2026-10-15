@@ -7,6 +7,15 @@ async fn question_with_invoke(
     database: &GraphDatabase,
     binding: Option<bool>,
 ) -> (GraphWriter, LiveAnswerRequest, Option<ActionId>) {
+    let (writer, request, invoke, _) = question_with_extra_inputs(database, binding, 0).await;
+    (writer, request, invoke)
+}
+
+async fn question_with_extra_inputs(
+    database: &GraphDatabase,
+    binding: Option<bool>,
+    extra: usize,
+) -> (GraphWriter, LiveAnswerRequest, Option<ActionId>, Vec<ActionId>) {
     let root = database
         .create_interaction(None, ThreadId::new(1).unwrap(), "Plan a trip")
         .await
@@ -47,8 +56,7 @@ async fn question_with_invoke(
         })
         .await
         .unwrap();
-    let action = writer
-        .add_action(&ActionDraft {
+    let input_draft = ActionDraft {
             client_key: "city".into(),
             source_node_id: node.id,
             source_layer_id: Some(layer.id),
@@ -69,9 +77,16 @@ async fn question_with_invoke(
                 minimum_selections: None,
                 unsupported_fields: Default::default(),
             }),
-        })
-        .await
-        .unwrap();
+        };
+    let action = writer.add_action(&input_draft).await.unwrap();
+    let mut extra_actions = Vec::new();
+    for index in 0..extra {
+        let extra_action = writer.add_action(&ActionDraft {
+            client_key: format!("city-extra-{index}"),
+            ..input_draft.clone()
+        }).await.unwrap();
+        extra_actions.push(extra_action.id);
+    }
     writer
         .add_action(&ActionDraft {
             client_key: "response".into(),
@@ -142,6 +157,7 @@ async fn question_with_invoke(
             },
         },
         invoke,
+        extra_actions,
     )
 }
 
