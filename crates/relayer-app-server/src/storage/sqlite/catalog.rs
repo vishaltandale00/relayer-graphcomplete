@@ -4669,10 +4669,9 @@ mod provider_definition_tests {
         .fetch_one(&store.pool)
         .await
         .unwrap();
-        assert_eq!(
-            queued,
-            ("submitted".into(), None, "prime-agent-basic".into())
-        );
+        // Rebound to the replacement harness, it stays queued (#720): startup recovery then
+        // handles it as a waiting run, so nothing starts it on its own.
+        assert_eq!(queued, ("queued".into(), None, "prime-agent-basic".into()));
 
         let thread_harness: String =
             sqlx::query_scalar("SELECT harness_configuration_name FROM threads WHERE id=1")
