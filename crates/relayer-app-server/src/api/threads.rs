@@ -3061,27 +3061,56 @@ pub(super) async fn stop_interaction(
         .product
         .request_interaction_stop(thread_id, interaction_id)
         .await?;
-    let current = state.product.get_interaction(interaction_id).await?;
     // The graph already prepared this queued run's call. It settles as a Stop before native
     // execution, outside its node's queue: no provider work starts, and its graph current stops
-    // with it. So does a node run still preparing, or left `submitted` by a preparation that
-    // ended ambiguously: nothing else would end it, and it holds its node until it ends. A run
-    // that wins its start meanwhile settles the Stop itself before native work.
-    let unstarted_node_run = queued == crate::storage::QueuedStop::NotQueued
-        && current.completion_status == "submitted"
-        && current.graph_node_id.is_none()
-        && current.stop_requested
-        && current.stop_error.is_none()
-        && state.product.node_run_key(interaction_id).await?.is_some();
-    if queued == crate::storage::QueuedStop::SettleBeforeStart || unstarted_node_run {
+    // with it. So does a node run that has not started executing: one still preparing, or one a
+    // preparation or activation left `submitted`. Nothing else would end it, and it holds its
+    // node until it ends. A run that wins its start meanwhile settles the Stop itself before
+    // native work.
+    if queued == crate::storage::QueuedStop::SettleBeforeStart {
         let settle_state = state.clone();
         tokio::spawn(async move {
             settle_queued_stop(settle_state, thread_id, interaction_id).await;
         });
+    } else {
+        settle_unstarted_stop(&state, thread_id, interaction_id).await;
     }
     Ok(Json(
         state.product.get_interaction(interaction_id).await?.into(),
     ))
+}
+
+/// Spawns the settlement of a Stop on a user's node run that has not started executing: it is
+/// `submitted`, carries a Stop without an error, and has no running attempt. Returns whether
+/// it did. Message turns are left to their own Stop path.
+async fn settle_unstarted_stop(
+    state: &ApiState,
+    thread_id: ThreadId,
+    interaction_id: InteractionId,
+) -> bool {
+    let Ok(current) = state.product.get_interaction(interaction_id).await else {
+        return false;
+    };
+    let unstarted = current.completion_status == "submitted"
+        && current.stop_requested
+        && current.stop_error.is_none()
+        && current
+            .latest_attempt
+            .as_ref()
+            .is_none_or(|attempt| attempt.outcome != "running");
+    if !unstarted
+        || !matches!(
+            state.product.node_run_key(interaction_id).await,
+            Ok(Some(_))
+        )
+    {
+        return false;
+    }
+    let settle_state = state.clone();
+    tokio::spawn(async move {
+        settle_queued_stop(settle_state, thread_id, interaction_id).await;
+    });
+    true
 }
 
 /// Settles the Stop of a queued run whose call the graph already prepared. Nothing ran, so it
@@ -4467,31 +4496,24 @@ async fn start_held_action_interaction(
         {
             Ok(prepared) => prepared,
             Err(error) => {
-                record_background_failure(
-                    &state.product,
-                    thread,
-                    &interaction,
-                    error.message().to_owned(),
-                )
-                .await;
+                // A run the user stopped while it prepared ends stopped, not failed.
+                if !settle_unstarted_stop(state, thread.id, interaction.id).await {
+                    record_background_failure(
+                        &state.product,
+                        thread,
+                        &interaction,
+                        error.message().to_owned(),
+                    )
+                    .await;
+                }
                 release_node_run(state.clone(), key, interaction.id, true);
                 return Err(error);
             }
         };
     let Some(prepared) = prepared else {
-        // A Stop that arrived while it prepared settles here if nothing started the run.
-        if let Ok(current) = state.product.get_interaction(interaction.id).await
-            && current.completion_status == "submitted"
-            && current.graph_node_id.is_none()
-            && current.stop_requested
-            && current.stop_error.is_none()
-        {
-            let settle_state = state.clone();
-            let (thread_id, run) = (thread.id, interaction.id);
-            tokio::spawn(async move {
-                settle_queued_stop(settle_state, thread_id, run).await;
-            });
-        }
+        // Nothing started the run. A Stop that arrived while it prepared settles here; without
+        // one it waits, holding its node, until it is retried or stopped.
+        settle_unstarted_stop(state, thread.id, interaction.id).await;
         release_node_run(state.clone(), key, interaction.id, true);
         return state
             .product

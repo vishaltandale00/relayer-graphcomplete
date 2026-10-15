@@ -4962,9 +4962,10 @@ async fn node_runs_run_beside_other_nodes_and_queue_in_order_on_their_own_node()
     let node_of_action = |action_id: i64| match action_id {
         44 => 8,
         47 | 48 => 9,
+        49 | 50 => 10,
         _ => 7,
     };
-    let actions = [41, 43, 44, 45, 46, 47, 48].map(|action_id| {
+    let actions = [41, 43, 44, 45, 46, 47, 48, 49, 50].map(|action_id| {
         json!({
             "id": action_id, "sourceNodeId": node_of_action(action_id), "kind": "invoke",
             "interactionText": format!("Action {action_id}"), "state": "accepted", "targetLayerId": null
@@ -4975,7 +4976,8 @@ async fn node_runs_run_beside_other_nodes_and_queue_in_order_on_their_own_node()
         "rootLayer": {"layer": {"id": 1}, "nodes": [
             {"id": 7, "kind": "concept", "title": "Tiers table", "state": "accepted"},
             {"id": 8, "kind": "concept", "title": "FAQ", "state": "accepted"},
-            {"id": 9, "kind": "concept", "title": "Pricing", "state": "accepted"}
+            {"id": 9, "kind": "concept", "title": "Pricing", "state": "accepted"},
+            {"id": 10, "kind": "concept", "title": "Billing", "state": "accepted"}
         ], "edges": [], "actions": actions}
     });
     let pool = sqlite_pool(&database).await;
@@ -5006,6 +5008,7 @@ async fn node_runs_run_beside_other_nodes_and_queue_in_order_on_their_own_node()
     let graph_nodes = Arc::new(AtomicI64::new(202));
     let graph_metadata = Arc::new(Mutex::new(HashMap::<i64, Value>::new()));
     let created_metadata = graph_metadata.clone();
+    let activated_metadata = graph_metadata.clone();
     let graph = axum::Router::new()
         // Stop needs the temporal schema, as in the desktop.
         .route(
@@ -5016,8 +5019,23 @@ async fn node_runs_run_beside_other_nodes_and_queue_in_order_on_their_own_node()
         )
         .route(
             "/api/control/capabilities",
-            axum::routing::post(|axum::Json(body): axum::Json<Value>| async move {
-                axum::Json(json!({ "graphToken": body["graphToken"] }))
+            axum::routing::post(move |axum::Json(body): axum::Json<Value>| {
+                let activated_metadata = activated_metadata.clone();
+                async move {
+                    // Activating action 49's call keeps failing transiently.
+                    let action = activated_metadata
+                        .lock()
+                        .unwrap()
+                        .get(&body["nodeId"].as_i64().unwrap_or_default())
+                        .map(|invocation| invocation["sourceActionId"].clone());
+                    if action == Some(json!(49)) {
+                        return (
+                            StatusCode::SERVICE_UNAVAILABLE,
+                            axum::Json(json!({"error": {"code": "unavailable"}})),
+                        );
+                    }
+                    (StatusCode::OK, axum::Json(json!({ "graphToken": body["graphToken"] })))
+                }
             })
             .delete(|| async { axum::Json(json!({ "revoked": true })) }),
         )
@@ -5025,7 +5043,7 @@ async fn node_runs_run_beside_other_nodes_and_queue_in_order_on_their_own_node()
             "/api/control/interactions/{id}/actions/{action_id}",
             axum::routing::get(
                 move |axum::extract::Path((id, action_id)): axum::extract::Path<(i64, i64)>| async move {
-                    if id != 101 || ![41, 43, 44, 45, 46, 47, 48].contains(&action_id) {
+                    if id != 101 || ![41, 43, 44, 45, 46, 47, 48, 49, 50].contains(&action_id) {
                         return (StatusCode::NOT_FOUND, axum::Json(json!({"error": {"code": "action_not_visible"}})));
                     }
                     (StatusCode::OK, axum::Json(json!({"action": {
@@ -5344,6 +5362,26 @@ async fn node_runs_run_beside_other_nodes_and_queue_in_order_on_their_own_node()
     started(behind).await;
     settle(behind, true);
     settled(behind, "accepted").await;
+
+    // A run bound to its graph call whose activation fails transiently is restored to
+    // submitted. It keeps its node until it is stopped; then the run behind it starts.
+    let (unactivated, _) = invoke(49).await;
+    settled(unactivated, "submitted").await;
+    let (waiting, waiting_status) = invoke(50).await;
+    assert_eq!(waiting_status, "queued");
+    app.clone()
+        .oneshot(api_request(
+            "POST",
+            &format!("/api/threads/{thread_id}/interactions/{unactivated}/stop"),
+            None,
+            true,
+        ))
+        .await
+        .unwrap();
+    settled(unactivated, "stopped").await;
+    started(waiting).await;
+    settle(waiting, true);
+    settled(waiting, "accepted").await;
     graph_task.abort();
     harness_task.abort();
 }
