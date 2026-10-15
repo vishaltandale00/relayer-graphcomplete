@@ -159,7 +159,9 @@ impl RunCapacity {
             // A grant an earlier release committed, though its commit was reported failed,
             // left the run `submitted` without a Stop: it is this waiter's slot after all.
             let current = product.get_interaction(next).await?;
-            if current.completion_status == "submitted" && !current.stop_requested {
+            if current.completion_status == "submitted"
+                && !(current.stop_requested && current.stop_error.is_none())
+            {
                 let (_, granted) = slots.waiting.pop_front().expect("a waiting run");
                 if granted.send(()).is_err() {
                     eprintln!("run {next} left the wait for capacity as it was given a slot");
@@ -399,6 +401,29 @@ mod tests {
             CapacityAdmission::Start
         ));
         assert_eq!(store.completion_status_for_test(runs[2]).await, "submitted");
+
+        // A lost grant is recognized even when the run carries a Stop that failed earlier.
+        let (_, more) = store.seed_node_runs_for_test(&[5]).await;
+        assert!(store.claim_interaction_preparing(more[0]).await.unwrap());
+        let thread = product.get_interaction(more[0]).await.unwrap().thread_id;
+        product
+            .request_interaction_stop(thread, more[0])
+            .await
+            .unwrap();
+        store
+            .record_stop_error(more[0], "The provider refused the Stop.")
+            .await
+            .unwrap();
+        let mut lost = match capacity.admit(&product, more[0]).await.unwrap() {
+            CapacityAdmission::Waiting(grant) => grant,
+            other => panic!("a run with a failed Stop did not wait: {other:?}"),
+        };
+        assert!(store.claim_capacity_run(more[0]).await.unwrap());
+        assert_eq!(
+            capacity.release(&product, runs[2]).await.unwrap(),
+            Some(more[0])
+        );
+        (&mut lost).await.unwrap();
     }
 
     /// A run that carries a valid Stop never waits for capacity; it settles without a slot.

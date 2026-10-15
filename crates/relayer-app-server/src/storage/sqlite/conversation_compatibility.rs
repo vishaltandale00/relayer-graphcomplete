@@ -76,9 +76,15 @@ pub(super) async fn compatibility_on(
         let error: Option<String> = row.try_get("completion_error")?;
         if !has_attempts
             && row.try_get::<Option<i64>, _>("graph_node_id")?.is_none()
-            && ((status == "stopped" && error.as_deref() == Some(super::QUEUED_RUN_STOPPED))
+            // Input restoration may append to the marker, so it is matched as a prefix.
+            && ((status == "stopped"
+                && error
+                    .as_deref()
+                    .is_some_and(|error| error.starts_with(super::QUEUED_RUN_STOPPED)))
                 || (status == "failed"
-                    && error.as_deref() == Some(super::CAPACITY_WAIT_INTERRUPTED)))
+                    && error
+                        .as_deref()
+                        .is_some_and(|error| error.starts_with(super::CAPACITY_WAIT_INTERRUPTED))))
         {
             continue;
         }

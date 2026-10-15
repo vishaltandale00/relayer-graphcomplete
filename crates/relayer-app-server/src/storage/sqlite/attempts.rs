@@ -659,8 +659,14 @@ mod tests {
             .fetch_one(&store.pool)
             .await
             .unwrap();
+        // Input restoration may append to the marker.
+        let restored = format!(
+            "{} A newer committed value was preserved instead of restoring this attempt's earlier value.",
+            super::super::QUEUED_RUN_STOPPED
+        );
         for (status, error) in [
             ("stopped", super::super::QUEUED_RUN_STOPPED),
+            ("stopped", restored.as_str()),
             ("failed", super::super::CAPACITY_WAIT_INTERRUPTED),
         ] {
             sqlx::query(

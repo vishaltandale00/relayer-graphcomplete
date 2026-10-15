@@ -5004,10 +5004,25 @@ async fn admit_and_start_interaction(
             .product
             .claim_interaction_preparing(interaction.id)
             .await?;
-        let admission = state
-            .run_capacity
-            .admit(&state.product, interaction.id)
-            .await?;
+        // A storage failure is retried briefly. A wait an earlier attempt made durable,
+        // though its commit was reported failed, is adopted by the retry.
+        let mut backoff = std::time::Duration::from_millis(50);
+        let mut attempt = 1;
+        let admission = loop {
+            match state.run_capacity.admit(&state.product, interaction.id).await {
+                Ok(admission) => break admission,
+                Err(error) if attempt == 4 => return Err(error),
+                Err(error) => {
+                    eprintln!(
+                        "run {} could not be admitted to the run capacity; retrying in {backoff:?}: {error}",
+                        interaction.id
+                    );
+                    tokio::time::sleep(backoff).await;
+                    backoff *= 2;
+                    attempt += 1;
+                }
+            }
+        };
         Ok::<_, crate::product::ProductError>((claimed, admission))
     }
     .await;
@@ -5054,17 +5069,12 @@ async fn admit_and_start_interaction(
         }
         Err(error) => {
             let error = ApiError::from(error);
-            // A Stop that committed meanwhile wins: the run ends stopped, never failed.
-            if let Ok(current) = state.product.get_interaction(interaction.id).await
-                && current.completion_status == "submitted"
-                && current.stop_requested
-                && current.stop_error.is_none()
-                && state
-                    .product
-                    .finish_interaction_stopped(interaction.id)
-                    .await
-                    .is_ok()
-            {
+            // A Stop that committed meanwhile wins: the run ends stopped, never failed, and is
+            // marked as never started.
+            if matches!(
+                state.product.stop_unstarted_run(interaction.id).await,
+                Ok(true)
+            ) {
                 return Err(error);
             }
             if record_deterministic_failure || !error.is_deterministic_input_failure() {

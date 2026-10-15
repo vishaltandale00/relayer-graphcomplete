@@ -2906,6 +2906,16 @@ impl ProductService {
             .map_err(Into::into)
     }
 
+    pub(crate) async fn stop_unstarted_run(
+        &self,
+        run: InteractionId,
+    ) -> Result<bool, ProductError> {
+        self.storage
+            .stop_unstarted_run(run)
+            .await
+            .map_err(Into::into)
+    }
+
     pub(crate) async fn claim_capacity_run(
         &self,
         run: InteractionId,

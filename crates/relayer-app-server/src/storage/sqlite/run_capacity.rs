@@ -58,6 +58,22 @@ impl SqliteProductStore {
         Ok(claimed)
     }
 
+    /// Ends stopped a claimed run that never started and carries a valid Stop, marked as never
+    /// started so it neither owns nor obscures its conversation's route.
+    pub(crate) async fn stop_unstarted_run(
+        &self,
+        run: InteractionId,
+    ) -> Result<bool, StorageError> {
+        let result = sqlx::query(
+            "UPDATE interactions SET completion_status='stopped',completion_error=?2 WHERE id=?1 AND completion_status='submitted' AND graph_node_id IS NULL AND EXISTS(SELECT 1 FROM interaction_stop_requests WHERE interaction_id=?1 AND error IS NULL)",
+        )
+        .bind(run.value())
+        .bind(super::QUEUED_RUN_STOPPED)
+        .execute(&self.pool)
+        .await?;
+        Ok(result.rows_affected() == 1)
+    }
+
     /// At startup no run holds a slot, so no run may stay queued for one. A run that waited is
     /// interrupted like a run queued behind its node (#718): nothing starts it on its own. An
     /// invoked run stays `queued` for startup's action recovery, which resumes it when its
@@ -252,5 +268,33 @@ mod tests {
         assert_eq!(interrupted.completion_status, "failed");
         assert_eq!(interrupted.completion_error.as_deref(), Some("Interrupted"));
         assert!(!store.claim_capacity_run(runs[2]).await.unwrap());
+    }
+
+    /// A claimed run that never started and carries a valid Stop ends stopped, marked as never
+    /// started; a run whose Stop failed, or one already bound to the graph, is left alone.
+    #[tokio::test]
+    async fn an_unstarted_run_with_a_stop_ends_marked_as_never_started() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = SqliteProductStore::open(&directory.path().join("product.sqlite3"))
+            .await
+            .unwrap();
+        let (thread, runs) = store.seed_node_runs_for_test(&[1, 2]).await;
+        for run in &runs {
+            assert!(store.claim_interaction_preparing(*run).await.unwrap());
+            store.request_interaction_stop(thread, *run).await.unwrap();
+        }
+        store
+            .record_stop_error(runs[1], "The provider refused the Stop.")
+            .await
+            .unwrap();
+        assert!(store.stop_unstarted_run(runs[0]).await.unwrap());
+        let stopped = store.get_interaction(runs[0]).await.unwrap().unwrap();
+        assert_eq!(stopped.completion_status, "stopped");
+        assert_eq!(
+            stopped.completion_error.as_deref(),
+            Some(super::super::QUEUED_RUN_STOPPED)
+        );
+        assert!(!store.stop_unstarted_run(runs[1]).await.unwrap());
+        assert_eq!(store.completion_status_for_test(runs[1]).await, "submitted");
     }
 }
