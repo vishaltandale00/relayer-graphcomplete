@@ -3119,7 +3119,8 @@ pub(super) async fn stop_interaction(
     ) {
         return Ok(Json(interaction.into()));
     }
-    // The Stop and its hand-off to the capacity wait finish even if the request goes away.
+    // The Stop, its hand-off to the capacity wait, and its settlement are launched together,
+    // so they all happen even if the request goes away.
     let stop_state = state.clone();
     tokio::spawn(async move {
         let queued = stop_state
@@ -3131,15 +3132,22 @@ pub(super) async fn stop_interaction(
             // run that held its node while it waited frees it once its Stop has settled.
             stop_state.run_capacity.forget(interaction_id).await;
         }
+        // The graph already prepared this queued run's call. It settles as a Stop before
+        // native execution, outside its node's queue: no provider work starts, and its graph
+        // current stops with it. So does a node run that has not started executing: one a
+        // preparation or activation left `submitted`. Nothing else would end it, and it holds
+        // its node until it ends. A run that wins its start meanwhile settles the Stop itself
+        // before native work.
         if queued == crate::storage::QueuedStop::SettleBeforeStart {
-            // The graph already prepared this queued run's call. It settles as a Stop before
-            // native execution, outside its node's queue: no provider work starts, and its graph
-            // current stops with it. It is launched here, with the Stop, so a dropped request
-            // never leaves the Stop without a settlement.
             let settle_state = stop_state.clone();
             tokio::spawn(async move {
                 settle_queued_stop(settle_state, thread_id, interaction_id).await;
             });
+        } else if !stop_state.node_runs.is_preparing(interaction_id) {
+            // A run still preparing, or still being admitted to the run capacity, is left to
+            // its own request, which settles the Stop once that returns, so a graph call it
+            // creates meanwhile is never orphaned.
+            settle_unstarted_stop(&stop_state, thread_id, interaction_id).await;
         }
         Ok::<_, crate::product::ProductError>(queued)
     })
@@ -3151,6 +3159,39 @@ pub(super) async fn stop_interaction(
     Ok(Json(
         state.product.get_interaction(interaction_id).await?.into(),
     ))
+}
+
+/// Spawns the settlement of a Stop on a user's node run that has not started executing: it is
+/// `submitted`, carries a Stop without an error, and has no running attempt. Returns whether
+/// it did. Message turns are left to their own Stop path.
+async fn settle_unstarted_stop(
+    state: &ApiState,
+    thread_id: ThreadId,
+    interaction_id: InteractionId,
+) -> bool {
+    let Ok(current) = state.product.get_interaction(interaction_id).await else {
+        return false;
+    };
+    let unstarted = current.completion_status == "submitted"
+        && current.stop_requested
+        && current.stop_error.is_none()
+        && current
+            .latest_attempt
+            .as_ref()
+            .is_none_or(|attempt| attempt.outcome != "running");
+    if !unstarted
+        || !matches!(
+            state.product.node_run_key(interaction_id).await,
+            Ok(Some(_))
+        )
+    {
+        return false;
+    }
+    let settle_state = state.clone();
+    tokio::spawn(async move {
+        settle_queued_stop(settle_state, thread_id, interaction_id).await;
+    });
+    true
 }
 
 /// Settles the Stop of a queued run whose call the graph already prepared. Nothing ran, so it
@@ -3197,8 +3238,9 @@ async fn settle_queued_stop_once(
         .runtime
         .as_ref()
         .ok_or_else(|| "GraphComplete runtime is unavailable".to_owned())?;
-    // A message turn that waited for capacity (#720) may already have its graph interaction,
-    // for example an identified send that startup resumed.
+    // The prepared call's node, or, on the pre-contract path, the node the run is bound to.
+    // A message turn that waited for capacity (#720) may also already have its graph
+    // interaction, for example an identified send that startup resumed.
     if let Some(graph_node_id) = state
         .product
         .prepared_invocation_node(interaction_id)
@@ -4220,7 +4262,17 @@ async fn invoke_action_with_authority(
             .product
             .invoke_action(source_interaction_id, action_id, &interaction_text)
             .await?;
-        finish_action_handoff(&owned_state, &thread, outcome, source_node_id, None).await
+        // The run takes its place in its node's queue as soon as it exists, so the queue keeps
+        // creation order on this path too (#718).
+        let arrival = NodeArrival::join(&owned_state, &outcome.interaction, source_node_id).await?;
+        finish_action_handoff(
+            &owned_state,
+            &thread,
+            outcome,
+            source_node_id,
+            Some(arrival),
+        )
+        .await
     });
     await_action_handoff(handoff).await
 }
@@ -4514,8 +4566,10 @@ fn depart_node_run(state: ApiState, key: NodeRunKey, run: InteractionId, arrival
 
 /// Starts a run that holds its node, once it holds a slot under the app's capacity limit
 /// (#720). It holds its node while it waits for a slot, so later runs on the node stay behind
-/// it. The node and the slot are released once the run settles, whatever the outcome, and the
-/// next queued run on the node, and the oldest run waiting for a slot, then start.
+/// it. The node is released once the run's outcome is saved, whatever it is, and its slot once
+/// its execution ends; the next queued run on the node, and the oldest run waiting for a slot,
+/// then start. A run whose preparation ended ambiguously stays `submitted` until it is retried
+/// or a restart interrupts it, and keeps its node until then.
 async fn start_held_action_interaction(
     state: &ApiState,
     thread: &Thread,
@@ -4523,6 +4577,9 @@ async fn start_held_action_interaction(
     key: NodeRunKey,
     already_claimed: bool,
 ) -> Result<Interaction, ApiError> {
+    // From its claim until it waits for capacity or its preparation returns, the run is this
+    // request's: a Stop meanwhile is settled here, never beside it.
+    state.node_runs.begin_preparing(interaction.id);
     let claimed = if already_claimed {
         true
     } else {
@@ -4533,6 +4590,7 @@ async fn start_held_action_interaction(
         {
             Ok(claimed) => claimed,
             Err(error) => {
+                state.node_runs.end_preparing(interaction.id);
                 let error = ApiError::from(error);
                 record_background_failure(
                     &state.product,
@@ -4598,11 +4656,14 @@ async fn continue_held_admission(
         CapacityAdmission::Start => CapacitySlot::Held,
         CapacityAdmission::Uncounted => CapacitySlot::Uncounted,
         CapacityAdmission::Waiting(grant) => {
+            // It waits as `queued`, where a Stop removes it directly.
+            state.node_runs.end_preparing(interaction.id);
             let (waiting_state, waiting_thread) = (state.clone(), thread.clone());
             let waiting = interaction.clone();
             tokio::spawn(async move {
                 match grant.await {
                     Ok(()) => {
+                        waiting_state.node_runs.begin_preparing(waiting.id);
                         let _ = run_held_action_interaction(
                             &waiting_state,
                             &waiting_thread,
@@ -4627,6 +4688,7 @@ async fn continue_held_admission(
         // A duplicate delivery of a run that waits for capacity: the first one starts it, and
         // this delivery's hold on the node ends.
         CapacityAdmission::AlreadyWaiting => {
+            state.node_runs.end_preparing(interaction.id);
             release_node_run(state.clone(), key, interaction.id, false);
             return state
                 .product
@@ -4656,7 +4718,8 @@ async fn admit_until_admitted(state: &ApiState, run: InteractionId) -> CapacityA
     }
 }
 
-/// Prepares and executes a run that holds its node and its capacity slot.
+/// Prepares and executes a run that holds its node and its capacity slot. The caller marked it
+/// preparing.
 async fn run_held_action_interaction(
     state: &ApiState,
     thread: &Thread,
@@ -4665,10 +4728,13 @@ async fn run_held_action_interaction(
     claimed: bool,
     slot: CapacitySlot,
 ) -> Result<Interaction, ApiError> {
-    let prepared =
-        match prepare_and_claim_interaction(state, thread, &interaction, claimed, false).await {
-            Ok(prepared) => prepared,
-            Err(error) => {
+    let prepared = prepare_and_claim_interaction(state, thread, &interaction, claimed, false).await;
+    state.node_runs.end_preparing(interaction.id);
+    let prepared = match prepared {
+        Ok(prepared) => prepared,
+        Err(error) => {
+            // A run the user stopped while it prepared ends stopped, not failed.
+            if !settle_unstarted_stop(state, thread.id, interaction.id).await {
                 record_background_failure(
                     &state.product,
                     thread,
@@ -4676,14 +4742,18 @@ async fn run_held_action_interaction(
                     error.message().to_owned(),
                 )
                 .await;
-                release_run_capacity(state.clone(), slot, interaction.id);
-                release_node_run(state.clone(), key, interaction.id, false);
-                return Err(error);
             }
-        };
+            release_run_capacity(state.clone(), slot, interaction.id);
+            release_node_run(state.clone(), key, interaction.id, true);
+            return Err(error);
+        }
+    };
     let Some(prepared) = prepared else {
+        // Nothing started the run. A Stop that arrived while it prepared settles here; without
+        // one it waits, holding its node, until it is retried or stopped.
+        settle_unstarted_stop(state, thread.id, interaction.id).await;
         release_run_capacity(state.clone(), slot, interaction.id);
-        release_node_run(state.clone(), key, interaction.id, false);
+        release_node_run(state.clone(), key, interaction.id, true);
         return state
             .product
             .get_interaction(interaction.id)

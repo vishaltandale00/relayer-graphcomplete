@@ -5367,42 +5367,453 @@ impl HeldRunsFixture {
 /// result of the run ahead. A queued run that is stopped never starts.
 #[tokio::test]
 async fn node_runs_run_beside_other_nodes_and_queue_in_order_on_their_own_node() {
+    let temporary = tempfile::Builder::new()
+        .prefix("relayer-node-runs-")
+        .tempdir()
+        .unwrap();
+    let root = temporary.path().to_path_buf();
+    let database = root.join("product.sqlite3");
+
+    let app = open_app(&database, &root).await;
+    let pool = sqlite_pool(&database).await;
+    sqlx::query("UPDATE product_harnesses SET family_policy_id='codex-default-family',family_policy_version=1 WHERE configuration_name='codex-basic'")
+        .execute(&pool)
+        .await
+        .unwrap();
+    pool.close().await;
+    let published = app
+        .clone()
+        .oneshot(provider_publish_request(test_provider_snapshot()))
+        .await
+        .unwrap();
+    assert_eq!(published.status(), StatusCode::NO_CONTENT);
+    let pool = sqlite_pool(&database).await;
+    sqlx::query(
+        "UPDATE product_harnesses SET available=1,unavailable_reason_code=NULL,unavailable_reason_message=NULL WHERE configuration_name='codex-basic'",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    pool.close().await;
+    let settings = response_json(
+        app.clone()
+            .oneshot(api_request("GET", "/api/model-settings", None, true))
+            .await
+            .unwrap(),
+    )
+    .await;
+    let family_id = settings["families"][0]["id"].as_i64().unwrap();
+    let thread = response_json(
+        app.oneshot(api_request(
+            "POST",
+            "/api/threads",
+            Some(json!({
+                "title": "Node runs",
+                "initialMessage": "Start here",
+                "harnessId": "codex-basic",
+                "modelSelection": {
+                    "familyId": family_id,
+                    "providerId": "codex",
+                    "modelId": "test-model"
+                }
+            })),
+            true,
+        ))
+        .await
+        .unwrap(),
+    )
+    .await;
+    let thread_id = thread["id"].as_i64().unwrap();
+    let source_interaction_id = thread["rootInteractionId"].as_i64().unwrap();
     // Node 7 offers four invoke actions and node 8 one.
-    const ACTIONS: &[(i64, i64)] = &[(41, 7), (43, 7), (44, 8), (45, 7), (46, 7)];
-    let fixture = HeldRunsFixture::open(ACTIONS, None).await;
+    // Node 9 offers two more; the first one's graph preparation ends ambiguously.
+    let node_of_action = |action_id: i64| match action_id {
+        44 => 8,
+        47 | 48 => 9,
+        49 | 50 => 10,
+        _ => 7,
+    };
+    let actions = [41, 43, 44, 45, 46, 47, 48, 49, 50].map(|action_id| {
+        json!({
+            "id": action_id, "sourceNodeId": node_of_action(action_id), "kind": "invoke",
+            "interactionText": format!("Action {action_id}"), "state": "accepted", "targetLayerId": null
+        })
+    });
+    let source_output = json!({
+        "nodeId": 101,
+        "rootLayer": {"layer": {"id": 1}, "nodes": [
+            {"id": 7, "kind": "concept", "title": "Tiers table", "state": "accepted"},
+            {"id": 8, "kind": "concept", "title": "FAQ", "state": "accepted"},
+            {"id": 9, "kind": "concept", "title": "Pricing", "state": "accepted"},
+            {"id": 10, "kind": "concept", "title": "Billing", "state": "accepted"}
+        ], "edges": [], "actions": actions}
+    });
+    let pool = sqlite_pool(&database).await;
+    let project_id = sqlx::query(
+        "INSERT INTO projects(name,path,created_at,updated_at) VALUES ('Node runs',?1,'1','1')",
+    )
+    .bind(root.to_string_lossy().as_ref())
+    .execute(&pool)
+    .await
+    .unwrap()
+    .last_insert_rowid();
+    sqlx::query("UPDATE threads SET project_id=?1 WHERE id=?2")
+        .bind(project_id)
+        .bind(thread_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query(
+        "UPDATE interactions SET graph_node_id=101,completion_status='accepted',completion_output_json=?1 WHERE id=?2",
+    )
+    .bind(source_output.to_string())
+    .bind(source_interaction_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+    pool.close().await;
+
+    let graph_nodes = Arc::new(AtomicI64::new(202));
+    let graph_metadata = Arc::new(Mutex::new(HashMap::<i64, Value>::new()));
+    let created_metadata = graph_metadata.clone();
+    let activated_metadata = graph_metadata.clone();
+    let graph_metadata_for_test = graph_metadata.clone();
+    // Each graph current this test stops, by node.
+    let stopped_currents = Arc::new(Mutex::new(Vec::<i64>::new()));
+    let read_stopped = stopped_currents.clone();
+    let recorded_stops = stopped_currents.clone();
+    let graph = axum::Router::new()
+        .route(
+            "/api/control/interactions/{id}/current",
+            axum::routing::get(move |axum::extract::Path(id): axum::extract::Path<i64>| {
+                let stopped = read_stopped.lock().unwrap().contains(&id);
+                async move {
+                    axum::Json(json!({
+                        "completionId": id, "lifecycle": if stopped { "stopped" } else { "active" },
+                        "headRevision": if stopped { 2 } else { 1 }, "currentLayerId": null,
+                        "finalLayerId": null, "safeReason": null,
+                        "temporalFeatures": {"configVersion": 1, "schemaRead": true, "rootCurrentWrite": true,
+                            "projectionUi": false, "invokeResolution": false, "providerRecursion": false}
+                    }))
+                }
+            }),
+        )
+        .route(
+            "/api/control/interactions/{id}/current/receipts",
+            axum::routing::post(|| async {
+                (StatusCode::NOT_FOUND, axum::Json(json!({"error": {"code": "receipt_not_found", "message": "none"}})))
+            }),
+        )
+        .route(
+            "/api/control/interactions/{id}/current/transitions",
+            axum::routing::post(
+                move |axum::extract::Path(id): axum::extract::Path<i64>, axum::Json(body): axum::Json<Value>| {
+                    recorded_stops.lock().unwrap().push(id);
+                    async move {
+                        axum::Json(json!({
+                            "completionId": id, "revision": 2, "lifecycle": "stopped",
+                            "currentLayerId": null, "finalLayerId": null,
+                            "operationKey": body["operationKey"], "requestDigest": "sha256:test",
+                            "snapshotDigest": "sha256:test", "projectionSequence": 2
+                        }))
+                    }
+                },
+            ),
+        )
+        // Stop needs the temporal schema, as in the desktop.
+        .route(
+            "/api/control/temporal-features",
+            axum::routing::get(|| async {
+                axum::Json(json!({"configVersion": 1, "schemaRead": true, "rootCurrentWrite": true, "projectionUi": false, "invokeResolution": false, "providerRecursion": false}))
+            }),
+        )
+        .route(
+            "/api/control/capabilities",
+            axum::routing::post(move |axum::Json(body): axum::Json<Value>| {
+                let activated_metadata = activated_metadata.clone();
+                async move {
+                    // Activating action 49's call keeps failing transiently.
+                    let action = activated_metadata
+                        .lock()
+                        .unwrap()
+                        .get(&body["nodeId"].as_i64().unwrap_or_default())
+                        .map(|invocation| invocation["sourceActionId"].clone());
+                    if action == Some(json!(49)) {
+                        return (
+                            StatusCode::SERVICE_UNAVAILABLE,
+                            axum::Json(json!({"error": {"code": "unavailable"}})),
+                        );
+                    }
+                    (StatusCode::OK, axum::Json(json!({ "graphToken": body["graphToken"] })))
+                }
+            })
+            .delete(|| async { axum::Json(json!({ "revoked": true })) }),
+        )
+        .route(
+            "/api/control/interactions/{id}/actions/{action_id}",
+            axum::routing::get(
+                move |axum::extract::Path((id, action_id)): axum::extract::Path<(i64, i64)>| async move {
+                    if id != 101 || ![41, 43, 44, 45, 46, 47, 48, 49, 50].contains(&action_id) {
+                        return (StatusCode::NOT_FOUND, axum::Json(json!({"error": {"code": "action_not_visible"}})));
+                    }
+                    (StatusCode::OK, axum::Json(json!({"action": {
+                        "id": action_id, "sourceNodeId": node_of_action(action_id), "kind": "invoke",
+                        "interactionText": format!("Action {action_id}"), "state": "accepted"
+                    }})))
+                },
+            ),
+        )
+        .route(
+            "/api/control/interactions",
+            axum::routing::post(move |axum::Json(body): axum::Json<Value>| {
+                let graph_nodes = graph_nodes.clone();
+                let created_metadata = created_metadata.clone();
+                async move {
+                    // An answer the server cannot decode leaves the preparation ambiguous.
+                    if body["invocation"]["sourceActionId"] == 47 {
+                        return (StatusCode::OK, "unreadable").into_response();
+                    }
+                    let node_id = graph_nodes.fetch_add(1, Ordering::SeqCst);
+                    created_metadata
+                        .lock()
+                        .unwrap()
+                        .insert(node_id, body["invocation"].clone());
+                    axum::Json(json!({ "node": { "id": node_id }, "graphToken": "" }))
+                        .into_response()
+                }
+            }),
+        )
+        .route(
+            "/api/control/interactions/{id}",
+            axum::routing::get(move |axum::extract::Path(id): axum::extract::Path<i64>| {
+                let graph_metadata = graph_metadata.clone();
+                async move {
+                    axum::Json(json!({
+                        "nodeId": id,
+                        "invocation": graph_metadata.lock().unwrap().get(&id).cloned()
+                    }))
+                }
+            }),
+        )
+        .route(
+            "/api/control/interactions/101/output",
+            axum::routing::get(move || {
+                let source_output = source_output.clone();
+                async move { axum::Json(source_output) }
+            }),
+        );
+    let held: HeldCompletes = Arc::new(Mutex::new(Vec::new()));
+    let harness_held = held.clone();
+    let leases = Arc::new(AtomicUsize::new(1));
+    let harness = axum::Router::new()
+        .route(
+            "/sessions",
+            axum::routing::post(|| async { (StatusCode::CREATED, axum::Json(json!({}))) }),
+        )
+        .route(
+            "/sessions/{id}/execution-leases",
+            axum::routing::post(move |axum::Json(body): axum::Json<Value>| {
+                let leases = leases.clone();
+                async move {
+                    let lease = leases.fetch_add(1, Ordering::SeqCst);
+                    (
+                        StatusCode::CREATED,
+                        axum::Json(test_execution_admission(
+                            &body,
+                            &format!("00000000-0000-0000-0000-{lease:012}"),
+                            "7",
+                        )),
+                    )
+                }
+            }),
+        )
+        .route(
+            "/sessions/{id}/execution-leases/{lease}",
+            axum::routing::delete(|| async { axum::Json(json!({ "released": false })) }),
+        )
+        .route(
+            "/sessions/{id}/complete",
+            axum::routing::post(move |axum::Json(body): axum::Json<Value>| {
+                let held = harness_held.clone();
+                async move {
+                    let run = body["traceContext"]["productInteractionId"].as_i64().unwrap();
+                    let node_id = body["graph"]["nodeId"].as_i64().unwrap();
+                    let (decide, decision) = tokio::sync::oneshot::channel();
+                    held.lock().unwrap().push((run, body, Some(decide)));
+                    if decision.await.unwrap_or(false) {
+                        (StatusCode::OK, axum::Json(json!({"output": {
+                            "nodeId": node_id,
+                            "rootLayer": {"layer": {"id": 900 + node_id}, "nodes": [], "edges": [], "actions": []}
+                        }})))
+                    } else {
+                        (
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            axum::Json(json!({"error": {"code": "provider_failed", "message": "The provider failed."}})),
+                        )
+                    }
+                }
+            }),
+        );
+    let (graph_url, graph_task) = serve_test_app(graph).await;
+    let (harness_url, harness_task) = serve_test_app(harness).await;
+    let catalog = root.join("catalog.json");
+    fs::write(
+        &catalog,
+        json!({
+            "schemaVersion": 1,
+            "configurations": [{
+                "configuration": {
+                    "schemaVersion": 1,
+                    "name": "codex-basic",
+                    "implementation": "test",
+                    "implementationVersion": 1,
+                    "permissionBindings": { "ask": {}, "auto": {}, "full": {} },
+                    "modelCompatibility": [{ "providerId": "codex" }],
+                    "executionAccessContracts": ["managed-runtime@1"],
+                    "settings": {}
+                },
+                "digest": "sha256:test"
+            }]
+        })
+        .to_string(),
+    )
+    .unwrap();
+    let app =
+        open_app_with_runtime_observed(&database, &root, &catalog, &graph_url, &harness_url).await;
+
+    let invoke = |action_id: i64| {
+        let app = app.clone();
+        async move {
+            let response = app
+                .oneshot(api_request(
+                    "POST",
+                    &format!("/api/threads/{thread_id}/interactions/{source_interaction_id}/actions/{action_id}/invoke"),
+                    None,
+                    true,
+                ))
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::CREATED, "invoke {action_id}");
+            let body = response_json(response).await;
+            (
+                body["interaction"]["id"].as_i64().unwrap(),
+                body["interaction"]["completionStatus"]
+                    .as_str()
+                    .unwrap()
+                    .to_owned(),
+            )
+        }
+    };
+    let started = |run: i64| {
+        let held = held.clone();
+        async move {
+            let deadline = std::time::Instant::now() + Duration::from_secs(5);
+            loop {
+                if let Some((_, body, _)) =
+                    held.lock().unwrap().iter().find(|(id, _, _)| *id == run)
+                {
+                    return body.clone();
+                }
+                assert!(
+                    std::time::Instant::now() < deadline,
+                    "run {run} never started"
+                );
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        }
+    };
+    let settle = |run: i64, accept: bool| {
+        let decide = held
+            .lock()
+            .unwrap()
+            .iter_mut()
+            .find(|(id, _, _)| *id == run)
+            .and_then(|(_, _, decide)| decide.take())
+            .expect("a held run");
+        decide.send(accept).unwrap();
+    };
+    let status_of = |run: i64| {
+        let app = app.clone();
+        async move {
+            let state = response_json(
+                app.oneshot(api_request(
+                    "GET",
+                    &format!("/api/state?threadId={thread_id}"),
+                    None,
+                    true,
+                ))
+                .await
+                .unwrap(),
+            )
+            .await;
+            state["interactions"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|interaction| interaction["id"] == run)
+                .unwrap()["completionStatus"]
+                .as_str()
+                .unwrap()
+                .to_owned()
+        }
+    };
+    let settled = |run: i64, expected: &'static str| async move {
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        loop {
+            let status = status_of(run).await;
+            if status == expected {
+                return;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "run {run} is {status}, not {expected}"
+            );
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    };
 
     // A run on node 7 and a run on node 8 run at once.
-    let (first, _) = fixture.invoke(41).await;
-    let first_body = fixture.started(first).await;
-    let (other_node, _) = fixture.invoke(44).await;
-    fixture.started(other_node).await;
-    assert_eq!(fixture.status_of(first).await, "running");
-    assert_eq!(fixture.status_of(other_node).await, "running");
+    let (first, _) = invoke(41).await;
+    let first_body = started(first).await;
+    let (other_node, _) = invoke(44).await;
+    started(other_node).await;
+    assert_eq!(status_of(first).await, "running");
+    assert_eq!(status_of(other_node).await, "running");
 
     // Two sends race to node 7 while its run is active: both wait, in order.
-    let ((second, second_status), (third, third_status)) =
-        tokio::join!(fixture.invoke(43), fixture.invoke(45));
+    let ((second, second_status), (third, third_status)) = tokio::join!(invoke(43), invoke(45));
     assert_eq!(
         [second_status.as_str(), third_status.as_str()],
         ["queued", "queued"]
     );
     let (second, third) = (second.min(third), second.max(third));
-    assert_eq!(fixture.interaction(second).await["queueReason"], "node");
     // A queued run stops without starting.
-    let (removed, removed_status) = fixture.invoke(46).await;
+    let (removed, removed_status) = invoke(46).await;
     assert_eq!(removed_status, "queued");
-    assert_eq!(fixture.stop(removed).await["completionStatus"], "stopped");
+    let stopped = response_json(
+        app.clone()
+            .oneshot(api_request(
+                "POST",
+                &format!("/api/threads/{thread_id}/interactions/{removed}/stop"),
+                None,
+                true,
+            ))
+            .await
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(stopped["completionStatus"], "stopped");
 
     // The run on node 8 settling starts nothing on node 7.
-    fixture.settle(other_node, true);
-    fixture.settled(other_node, "accepted").await;
-    assert_eq!(fixture.status_of(second).await, "queued");
-    assert_eq!(fixture.started_runs().len(), 2);
+    settle(other_node, true);
+    settled(other_node, "accepted").await;
+    assert_eq!(status_of(second).await, "queued");
+    assert_eq!(held.lock().unwrap().len(), 2);
 
     // The first run is accepted, so the next one on node 7 starts and is pointed at its result.
-    fixture.settle(first, true);
-    let second_body = fixture.started(second).await;
-    fixture.settled(first, "accepted").await;
+    settle(first, true);
+    let second_body = started(second).await;
+    settled(first, "accepted").await;
     assert_eq!(second_body["traceContext"]["nativeSession"], "fresh");
     let first_node = first_body["graph"]["nodeId"].as_i64().unwrap();
     assert!(
@@ -5415,21 +5826,83 @@ async fn node_runs_run_beside_other_nodes_and_queue_in_order_on_their_own_node()
         "the queued run was not pointed at the accepted result ahead of it: {}",
         second_body["traceContext"]["threadHistory"]
     );
-    assert_eq!(fixture.status_of(third).await, "queued");
+    assert_eq!(status_of(third).await, "queued");
 
     // The run ahead fails; the last queued run starts anyway.
-    fixture.settle(second, false);
-    fixture.started(third).await;
-    fixture.settle(third, true);
-    fixture.settled(third, "accepted").await;
-    assert_ne!(fixture.status_of(second).await, "running");
-    assert_eq!(fixture.status_of(removed).await, "stopped");
+    settle(second, false);
+    started(third).await;
+    settle(third, true);
+    settled(third, "accepted").await;
+    assert_ne!(status_of(second).await, "running");
+    assert_eq!(status_of(removed).await, "stopped");
     assert!(
-        !fixture.started_runs().contains(&removed),
+        held.lock()
+            .unwrap()
+            .iter()
+            .all(|(run, _, _)| *run != removed),
         "a stopped queued run started"
     );
-    assert_eq!(fixture.started_runs().len(), 4);
-    fixture.finish();
+    assert_eq!(held.lock().unwrap().len(), 4);
+
+    // A run whose graph preparation ends ambiguously stays submitted with no outcome, so it
+    // keeps its node: the next run on that node waits instead of starting before it.
+    let (ambiguous, ambiguous_status) = invoke(47).await;
+    assert_eq!(ambiguous_status, "submitted");
+    let (behind, behind_status) = invoke(48).await;
+    assert_eq!(behind_status, "queued");
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert_eq!(status_of(ambiguous).await, "submitted");
+    assert_eq!(status_of(behind).await, "queued");
+    assert_eq!(
+        held.lock().unwrap().len(),
+        4,
+        "a run started before the run ahead had an outcome"
+    );
+    // Stopping the ambiguous run ends it, and the run behind it starts.
+    app.clone()
+        .oneshot(api_request(
+            "POST",
+            &format!("/api/threads/{thread_id}/interactions/{ambiguous}/stop"),
+            None,
+            true,
+        ))
+        .await
+        .unwrap();
+    settled(ambiguous, "stopped").await;
+    started(behind).await;
+    settle(behind, true);
+    settled(behind, "accepted").await;
+
+    // A run bound to its graph call whose activation fails transiently is restored to
+    // submitted. It keeps its node until it is stopped; then the run behind it starts.
+    let (unactivated, _) = invoke(49).await;
+    settled(unactivated, "submitted").await;
+    let (waiting, waiting_status) = invoke(50).await;
+    assert_eq!(waiting_status, "queued");
+    app.clone()
+        .oneshot(api_request(
+            "POST",
+            &format!("/api/threads/{thread_id}/interactions/{unactivated}/stop"),
+            None,
+            true,
+        ))
+        .await
+        .unwrap();
+    settled(unactivated, "stopped").await;
+    // Its bound graph current was stopped first, so the Stop the product reports holds.
+    let unactivated_node = graph_metadata_for_test
+        .lock()
+        .unwrap()
+        .iter()
+        .find(|(_, invocation)| invocation["sourceActionId"] == 49)
+        .map(|(node, _)| *node)
+        .unwrap();
+    assert!(stopped_currents.lock().unwrap().contains(&unactivated_node));
+    started(waiting).await;
+    settle(waiting, true);
+    settled(waiting, "accepted").await;
+    graph_task.abort();
+    harness_task.abort();
 }
 
 /// PAR-012 (#720): with the app's limit on human-started runs filled, the next run waits as

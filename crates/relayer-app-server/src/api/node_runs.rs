@@ -21,6 +21,9 @@ use tokio::sync::Mutex;
 #[derive(Clone, Default)]
 pub(crate) struct NodeRunQueue {
     nodes: Arc<Mutex<HashMap<NodeRunKey, NodeState>>>,
+    /// Runs whose graph preparation is in flight in this process. Their own request settles a
+    /// Stop once the preparation returns, so the Stop handler leaves them to it.
+    preparing: Arc<std::sync::Mutex<std::collections::HashSet<InteractionId>>>,
 }
 
 #[derive(Default)]
@@ -86,6 +89,18 @@ impl NodeState {
 }
 
 impl NodeRunQueue {
+    pub(crate) fn begin_preparing(&self, run: InteractionId) {
+        self.preparing.lock().unwrap().insert(run);
+    }
+
+    pub(crate) fn end_preparing(&self, run: InteractionId) {
+        self.preparing.lock().unwrap().remove(&run);
+    }
+
+    pub(crate) fn is_preparing(&self, run: InteractionId) -> bool {
+        self.preparing.lock().unwrap().contains(&run)
+    }
+
     /// Joins a newly created run to its node's queue, before its graph call is prepared. It
     /// takes the node only when nothing holds it.
     pub(crate) async fn arrive(
