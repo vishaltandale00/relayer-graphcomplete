@@ -346,13 +346,43 @@ export class HumanTaskService {
       const pathname = new URL(path, "http://task.invalid").pathname;
       const route = /^\/api\/threads\/([1-9][0-9]*)\/interactions\/[1-9][0-9]*\/live-answers$/.exec(pathname);
       if (!route || !session.threadIds.some(thread => String(thread) === route[1])) throw failure("Read is outside this task session.", 403);
-      const response = await this.upstream(path, { signal });
+      let response = await this.upstream(path, { signal });
       if (!response.ok) return response;
+      let page = await response.clone().json().catch(() => null);
+      const answers = [];
+      const reconciliationAnswers = [];
+      const query = new URL(path, "http://task.invalid");
+      let cursor = Number(query.searchParams.get("afterSequence") ?? 0);
+      let paginated = false;
+      const completionId = page?.current?.completionId;
+      while (Array.isArray(page?.answers)) {
+        signal?.throwIfAborted();
+        const next = page.nextSequence;
+        if (next !== undefined && (!Number.isSafeInteger(next) || next < cursor
+          || (page.answers.length ? next <= cursor || next !== page.answers.at(-1)?.sequence : next !== cursor))) {
+          throw failure("Answer receipt pagination is unavailable. Reopen the question to check again.", 503);
+        }
+        if (page.current?.completionId !== completionId) throw failure("Answer receipt completion changed during pagination.", 503);
+        answers.push(...page.answers);
+        reconciliationAnswers.push(...page.answers, ...(Array.isArray(page.currentAnswers) ? page.currentAnswers : []));
+        if (page.answers.length < 100) break;
+        if (!Number.isSafeInteger(next) || next <= cursor) throw failure("Answer receipt pagination did not advance.", 503);
+        cursor = next;
+        query.searchParams.set("afterSequence", String(cursor));
+        response = await this.upstream(`${query.pathname}${query.search}`, { signal });
+        if (!response.ok) return response;
+        page = await response.clone().json().catch(() => null);
+        if (!Array.isArray(page?.answers)) throw failure("Answer receipt page is unavailable. Reopen the question to check again.", 503);
+        paginated = true;
+      }
+      if (paginated) {
+        page = { ...page, answers };
+        response = Response.json(page);
+      }
       const pending = session.events.filter(event => event.kind === "product_action" && event.method === "POST" && event.outcome === "unknown"
         && new URL(event.path, "http://task.invalid").pathname === pathname
         && !session.events.some(resolution => resolution.kind === "live_answer_reconciled" && resolution.productActionEventId === event.id));
       if (!pending.length) return response;
-      const page = await response.clone().json().catch(() => null);
       const canonicalValue = value => {
         if (!value || typeof value !== "object" || Array.isArray(value)) return null;
         if (typeof value.text === "string" && !("selected" in value)) return { text: value.text };
@@ -369,7 +399,7 @@ export class HumanTaskService {
           || !Number.isSafeInteger(request.attemptId) || request.attemptId < 1
           || !Number.isSafeInteger(request.authorityEpoch) || request.authorityEpoch < 1
           || !Number.isSafeInteger(request.expectedRevision) || request.expectedRevision < 1) continue;
-        const keyed = [...(Array.isArray(page?.answers) ? page.answers : []), ...(Array.isArray(page?.currentAnswers) ? page.currentAnswers : [])]
+        const keyed = reconciliationAnswers
           .filter(answer => answer?.operationKey === request.operationKey);
         if (!keyed.length || keyed.some(answer => !isDeepStrictEqual(answer, keyed[0]))) continue;
         const matches = keyed.filter(answer =>

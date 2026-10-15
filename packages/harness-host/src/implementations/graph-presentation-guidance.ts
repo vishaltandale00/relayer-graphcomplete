@@ -312,29 +312,53 @@ await graph.return_current(published["currentLayerId"], expected_revision=publis
 # Terminal: no further graph reads or writes.
 \`\`\``;
 
-export const READ_CURRENT_ANSWERS_JS = `After publishing a consequential human-root Input with Advance, read replies while the completion is active. This example allows up to 30 seconds for a participant response; choose a bounded window appropriate to the task and remaining time. A short empty poll is not a completed opportunity to answer. Do independent work while waiting when possible, then reread before settling dependent work. The window starts at cursor zero; retain nextSequence for subsequent reads. Read each answer's question and value before using it. No answer means unresolved, not permission to invent a preference.
+export const READ_CURRENT_ANSWERS_JS = `After publishing a consequential human-root Input with Advance, read replies while the completion is active. Here question and finding are the exact Input declaration and owning node from the example above. Resolve the accepted action by its owner and stable clientKey, never its label or position; clientKey alone is only source-node scoped. A fresh client must recover those exact accepted identities. Each later question needs its own published occurrence. This example allows up to 30 seconds for a participant response; choose a bounded window appropriate to the task and remaining time. A short empty poll is not a completed opportunity to answer. Do independent work while waiting when possible, then reread before settling dependent work. Retain nextSequence across reads; a fresh process may recover from zero, but only a receipt for this exact question occurrence satisfies this wait. Earlier questions' receipts do not. Read each matching answer's question and value before using it. No answer means unresolved, not permission to invent a preference.
 
 \`\`\`javascript
 let answerCursor = 0;
+const answeringCurrent = await graph.getCurrent();
+const answeringLayer = await graph.getLayer(answeringCurrent.currentLayerId);
+const answeringAction = answeringLayer.actions.find(action => action.kind === "input" && action.clientKey === question.clientKey && action.sourceNodeId === finding.ref.id);
+if (!answeringAction) throw new Error("The intended question is not published in Current");
+const answersThisQuestion = answer => answer.occurrence.presentingInteractionNodeId === answeringCurrent.completionId
+  && answer.occurrence.presentingLayerId === answeringCurrent.currentLayerId
+  && answer.occurrence.actionId === answeringAction.id;
+const answerDeadline = Date.now() + 30_000;
 let replies = await graph.getLiveAnswers(answerCursor);
 answerCursor = replies.nextSequence;
-if (replies.answers.length === 0) {
-  replies = await graph.waitForLiveAnswers(answerCursor, 30_000);
+let questionAnswers = replies.answers.filter(answersThisQuestion);
+while (questionAnswers.length === 0 && replies.current.lifecycle === "active" && Date.now() < answerDeadline) {
+  replies = await graph.waitForLiveAnswers(answerCursor, Math.max(0, answerDeadline - Date.now()));
   answerCursor = replies.nextSequence;
+  questionAnswers = replies.answers.filter(answersThisQuestion);
 }
-const userDecisions = replies.answers.map(answer => ({ question: answer.question, value: answer.value }));
+const userDecisions = questionAnswers.map(answer => ({ question: answer.question, value: answer.value }));
 // Use userDecisions in dependent work; publish changed findings with a new snapshot.
 \`\`\``;
 
-export const READ_CURRENT_ANSWERS_PYTHON = `After publishing a consequential human-root Input with Advance, read replies while the completion is active. This example allows up to 30 seconds for a participant response; choose a bounded window appropriate to the task and remaining time. A short empty poll is not a completed opportunity to answer. Do independent work while waiting when possible, then reread before settling dependent work. The window starts at cursor zero; retain nextSequence for subsequent reads. Read each answer's question and value before using it. No answer means unresolved, not permission to invent a preference.
+export const READ_CURRENT_ANSWERS_PYTHON = `After publishing a consequential human-root Input with Advance, read replies while the completion is active. Here question and finding are the exact Input declaration and owning node from the example above. Resolve the accepted action by its owner and stable client_key, never its label or position; client_key alone is only source-node scoped. A fresh client must recover those exact accepted identities. Each later question needs its own published occurrence. This example allows up to 30 seconds for a participant response; choose a bounded window appropriate to the task and remaining time. A short empty poll is not a completed opportunity to answer. Do independent work while waiting when possible, then reread before settling dependent work. Retain nextSequence across reads; a fresh process may recover from zero, but only a receipt for this exact question occurrence satisfies this wait. Earlier questions' receipts do not. Read each matching answer's question and value before using it. No answer means unresolved, not permission to invent a preference.
 
 \`\`\`python
+import time
 answer_cursor = 0
+answering_current = await graph.get_current()
+answering_layer = await graph.get_layer(answering_current["currentLayerId"])
+answering_action = next((action for action in answering_layer["actions"] if action["kind"] == "input" and action["clientKey"] == question.client_key and action["sourceNodeId"] == finding.ref.id), None)
+if answering_action is None:
+    raise RuntimeError("The intended question is not published in Current")
+def answers_this_question(answer):
+    occurrence = answer["occurrence"]
+    return (occurrence["presentingInteractionNodeId"] == answering_current["completionId"]
+            and occurrence["presentingLayerId"] == answering_current["currentLayerId"]
+            and occurrence["actionId"] == answering_action["id"])
+answer_deadline = time.monotonic() + 30
 replies = await graph.get_live_answers(answer_cursor)
 answer_cursor = replies["nextSequence"]
-if not replies["answers"]:
-    replies = await graph.wait_for_live_answers(answer_cursor, timeout_seconds=30)
+question_answers = [answer for answer in replies["answers"] if answers_this_question(answer)]
+while not question_answers and replies["current"]["lifecycle"] == "active" and time.monotonic() < answer_deadline:
+    replies = await graph.wait_for_live_answers(answer_cursor, timeout_seconds=max(0, answer_deadline - time.monotonic()))
     answer_cursor = replies["nextSequence"]
-user_decisions = [{"question": answer["question"], "value": answer["value"]} for answer in replies["answers"]]
+    question_answers = [answer for answer in replies["answers"] if answers_this_question(answer)]
+user_decisions = [{"question": answer["question"], "value": answer["value"]} for answer in question_answers]
 # Use user_decisions in dependent work; publish changed findings with a new snapshot.
 \`\`\``;

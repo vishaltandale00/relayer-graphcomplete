@@ -19,6 +19,7 @@ export async function proveCurrentActor({ browser, directory, authored = false }
   const layers = [];
   const reconciliation = deferred();
   const terminalReadCheck = deferred();
+  const approvalResumed = deferred();
   let pendingDeliveryObserved = false;
   const resources = [];
   let controller;
@@ -28,6 +29,7 @@ export async function proveCurrentActor({ browser, directory, authored = false }
   let harnessCalls = 0;
   let answerRequests = 0;
   let deniedAdmissionChecked = false;
+  let approvalObserved = false;
   try {
     const binaries = resolve(process.env.CARGO_TARGET_DIR || "target", "debug");
     const runtime = new GraphCompleteRuntimeService({ userDataDirectory: data, graphServerBinary: join(binaries, "relayer-graph-server"), configurationPaths: [configuration], temporalFeatures: RECURSIVE_TEMPORAL_FEATURES,
@@ -72,6 +74,14 @@ export async function proveCurrentActor({ browser, directory, authored = false }
               assert.equal(receivedAnswer.question.prompt, "Which boundary should I inspect?");
               assert.deepEqual(await graph.getContract(), initialContract, "live answer preserves sealed input");
               await gates[1].promise;
+              const approval = await context.approvals.request({
+                providerItemId: "current-status-proof", title: "Inspect the worker boundary",
+                reason: "The status proof requires a visible approval without another graph Advance.",
+                action: { kind: "other", action: "Inspect fixture boundary" },
+                scopeKeys: ["fixture:current-status"], scopeDescription: "Fixture status transition only",
+              }, { signal });
+              assert.equal(approval.decision, "approve_once");
+              await approvalResumed.promise;
             } else await gates[index].promise;
           }
           await graph.returnCurrent(layers[1], revision, "finished");
@@ -95,6 +105,7 @@ export async function proveCurrentActor({ browser, directory, authored = false }
     const service = await new EvalService({ stateFile: join(data, "eval-data/test-runs.json"), productSession, configurationPaths: [configuration] }).open();
     tasks = await new HumanTaskService({ stateFile: join(data, "tasks.json"), evalService: service, productSession }).open();
     const reactions = [];
+    const workingStatuses = [];
     const actors = new TaskActorService({ tasks, pollMs: 10, deadlineMs: 30000, resolveRuntime: async () => ({}),
       openBrowser: async (sessionId, signal, observationContract) => {
         controller = await openTaskActorBrowser({ tasks, sessionId, productSession, browser, signal, observationContract });
@@ -124,7 +135,9 @@ export async function proveCurrentActor({ browser, directory, authored = false }
           assert.deepEqual(observation.availableActions, ["click", "fill", "select", "scroll"]);
           assert.ok(observation.screenshot);
           reactions.push(observation.currentUpdate.revision);
-          assert.equal((await tasks.detail(tasks.list()[0].currentThreadId)).interactions.at(-1).completionStatus, "running");
+          const status = observation.currentUpdate.completionStatus;
+          workingStatuses.push(status);
+          assert.equal((await tasks.detail(tasks.list()[0].currentThreadId)).interactions.at(-1).completionStatus, status);
           if (observation.currentUpdate.revision === 1) {
             if (receivedAnswer) {
               const delivered = actorPage.getByRole("button", { name: "Delivered answer for Which boundary should I inspect?", exact: true });
@@ -135,7 +148,25 @@ export async function proveCurrentActor({ browser, directory, authored = false }
                 return { comment: "My Answer is still pending; I am waiting for delivery", action: null, usage: null };
               }
               assert.ok(await delivered.isDisabled());
-              gates[1].resolve();
+              if (status === "waiting_for_approval") {
+                assert.equal(approvalObserved, false, "the approval state is observed exactly once");
+                assert.equal(await actorPage.locator("#approvalEyebrow").textContent(), "Needs approval");
+                assert.equal(await actorPage.locator("#approvalDock").isVisible(), true);
+                const requestId = await actorPage.locator("#approvalDock").getAttribute("data-request-id");
+                assert.ok(requestId);
+                const threadId = tasks.list()[0].currentThreadId;
+                const turnId = (await tasks.detail(threadId)).interactions.at(-1).id;
+                const response = await fetch(new URL(`/api/threads/${threadId}/interactions/${turnId}/approvals/${encodeURIComponent(requestId)}/decision`, productSession.origin), {
+                  method: "POST", headers: { Cookie: `${productSession.cookie.name}=${productSession.cookie.value}`, "Content-Type": "application/json" },
+                  body: JSON.stringify({ decision: "approve_once" }),
+                });
+                assert.equal(response.status, 200, await response.text());
+                approvalObserved = true;
+                return { comment: "I can see the work needs approval; the fixture user approves it", action: null, usage: null };
+              }
+              assert.equal(status, "running");
+              if (approvalObserved) approvalResumed.resolve();
+              else gates[1].resolve();
               return { comment: "My answer was delivered; I am waiting for the investigation", action: null, usage: null };
             }
             if (!deniedAdmissionChecked) {
@@ -217,7 +248,8 @@ export async function proveCurrentActor({ browser, directory, authored = false }
         },
         decide: async () => {
           console.log("CURRENT_DECIDE_REVISIONS", JSON.stringify({ authored, reactions }));
-          assert.deepEqual(reactions, [1, 1, 1, 1, 2]);
+          assert.deepEqual(reactions, [1, 1, 1, 1, 1, 1, 2]);
+          assert.deepEqual(workingStatuses, ["running", "running", "running", "running", "waiting_for_approval", "running", "running"]);
           assert.equal((await tasks.detail(tasks.list()[0].currentThreadId)).interactions.at(-1).completionStatus, "accepted");
           // Ordinary navigation really pins the workspace. It must not expose an
           // unseen Current as though the actor were still following it.
@@ -293,7 +325,10 @@ export async function proveCurrentActor({ browser, directory, authored = false }
     const result = tasks.get(task.id);
     assert.equal(result.status, "completed", JSON.stringify(result.events.filter(event => event.kind === "actor_error")));
     const working = result.events.filter(event => event.kind === "actor_observation" && event.phase === "current");
-    assert.deepEqual(working.map(event => event.pointer.revision), [1, 1, 1, 1, 2]);
+    assert.deepEqual(working.map(event => event.pointer.revision), [1, 1, 1, 1, 1, 1, 2]);
+    assert.deepEqual(working.map(event => event.pointer.completionStatus), ["running", "running", "running", "running", "waiting_for_approval", "running", "running"]);
+    assert.ok(working[3].observation.screenshotArtifact.sha256 !== working[4].observation.screenshotArtifact.sha256, "same-revision approval changes the actual screenshot");
+    console.log("CURRENT_APPROVAL_STATUS_CYCLE", JSON.stringify({ authored, revisions: working.map(event => event.pointer.revision), statuses: workingStatuses }));
     assert.equal(answerRequests, 1, "lost UI response was reconciled without replay");
     assert.equal(harnessCalls, 1, "answer did not restart inference");
     assert.equal(result.completions, 1, "answer did not admit another completion");
@@ -310,16 +345,17 @@ export async function proveCurrentActor({ browser, directory, authored = false }
     assert.ok(working[0].observation.screenshotArtifact.sha256 !== working[3].observation.screenshotArtifact.sha256);
     const reopened = await new HumanTaskService({ stateFile: join(data, "tasks.json"), evalService: service, productSession }).open();
     const { bundle } = await reopened.export(task.id);
-    assert.equal(bundle.actorScreenshots.length, 6);
+    assert.equal(bundle.actorScreenshots.length, 8);
     assert.deepEqual(bundle.session.events.find(event => event.id === delivery[0].id).liveAnswerReceipt, receivedAnswer);
-    assert.equal(bundle.session.events.filter(event => event.kind === "actor_current_reaction").length, 5);
-    console.log(`PASS current-pointer actor (${authored ? "authored" : "native"} input): two real Advances with a live UI answer consumed through the candidate SDK, sealed input unchanged, response-loss reconciliation, one inference/one admission, ordered screenshot/reaction export, fresh settled decision, hidden/zero-width exclusion, capture cancellation/race, historical Delivered after navigation/reload, composer exclusion and ordinary navigation pin exclusion (fixture inference)`);
+    assert.equal(bundle.session.events.filter(event => event.kind === "actor_current_reaction").length, 7);
+    console.log(`PASS current-pointer actor (${authored ? "authored" : "native"} input): two real Advances with a live UI answer consumed through the candidate SDK, sealed input unchanged, response-loss reconciliation, one inference/one admission, ordered screenshot/reaction export, fresh settled decision, hidden/zero-width exclusion, capture cancellation/race, same-revision approval/resume screenshots, historical Delivered after navigation/reload, composer exclusion and ordinary navigation pin exclusion (fixture inference)`);
   } catch (error) {
     console.error("CURRENT_ACTOR_PROOF_FAILURE", error.message);
     if (actorPage && !actorPage.isClosed()) await actorPage.screenshot({ path: resolve(".relayer/current-pointers-live-failure.png") }).catch(() => {});
     throw error;
   } finally {
     reconciliation.resolve();
+    approvalResumed.resolve();
     gates.forEach(gate => gate.resolve());
     for (const resource of resources.reverse()) await resource.close();
   }

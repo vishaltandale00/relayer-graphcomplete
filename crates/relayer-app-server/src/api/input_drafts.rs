@@ -171,14 +171,18 @@ pub(super) async fn project_layer_input_availability(
             let receipt = receipts
                 .iter()
                 .find(|answer| Some(answer.occurrence.action_id.value()) == action["id"].as_i64());
-            let eligible = page.current.current_layer_id.map(|id| id.value()) == layer_id
+            let bound_attempt =
+                super::live_answers::active_attempt(state, interaction, page.authority_epoch)
+                    .await?;
+            let graph_eligible = page.current.current_layer_id.map(|id| id.value()) == layer_id
                 && page
                     .eligible_action_ids
                     .iter()
                     .any(|id| Some(id.value()) == action["id"].as_i64());
-            if eligible || receipt.is_some() {
-                action["liveInput"] = serde_json::json!({"attemptId":interaction.latest_attempt.as_ref().map(|attempt| attempt.id),
-                    "authorityEpoch":page.authority_epoch,"currentRevision":page.current.head_revision,"eligible":eligible,"receipt":receipt});
+            let eligible = graph_eligible && bound_attempt.is_some();
+            if graph_eligible || receipt.is_some() {
+                action["liveInput"] = serde_json::json!({"attemptId":receipt.map(|receipt| receipt.attempt_id).or(bound_attempt),
+                    "authorityEpoch":page.authority_epoch,"currentRevision":page.current.head_revision,"eligible":eligible,"receipt":receipt,"unavailable":graph_eligible && bound_attempt.is_none()});
                 action["inputCanAcceptAnswer"] = serde_json::json!(eligible);
                 continue;
             }

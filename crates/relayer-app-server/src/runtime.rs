@@ -241,6 +241,7 @@ pub(crate) struct PreparedInvocation {
 pub(crate) struct PreparedInteraction {
     pub(crate) graph_node_id: i64,
     graph_token: String,
+    authority_epoch: std::sync::Arc<std::sync::atomic::AtomicU64>,
     pub(crate) harness_configuration_name: String,
     pub(crate) harness_configuration_digest: String,
     pub(crate) permission_profile_id: String,
@@ -257,6 +258,16 @@ pub(crate) struct PreparedInteraction {
 }
 
 impl PreparedInteraction {
+    pub(crate) fn live_answer_authority_epoch(&self) -> Option<u64> {
+        match self
+            .authority_epoch
+            .load(std::sync::atomic::Ordering::Acquire)
+        {
+            0 => None,
+            epoch => Some(epoch),
+        }
+    }
+
     /// The policy this execution was prepared under, which its admission must match.
     pub(crate) fn harness_policy(&self) -> Option<&ExecutionHarnessPolicy> {
         self.harness_policy.as_ref()
@@ -944,6 +955,7 @@ impl RuntimeClient {
         Ok(PreparedInteraction {
             graph_node_id: interaction.node.id,
             graph_token: Uuid::new_v4().to_string(),
+            authority_epoch: Default::default(),
             harness_policy: command.harness_policy.cloned(),
             harness_configuration_name: selected.configuration.name.clone(),
             harness_configuration_digest: harness_configuration_digest.to_owned(),
@@ -1034,7 +1046,13 @@ impl RuntimeClient {
             .await
             .unwrap_or(Err(RuntimeError::Timeout("graph capability activation")))
             {
-                Ok(response) if response.graph_token == prepared.graph_token => return Ok(()),
+                Ok(response) if response.graph_token == prepared.graph_token => {
+                    prepared.authority_epoch.store(
+                        response.authority_epoch.unwrap_or(0),
+                        std::sync::atomic::Ordering::Release,
+                    );
+                    return Ok(());
+                }
                 Ok(_) if attempt < CONTROL_RETRY_ATTEMPTS => {}
                 Ok(_) => {
                     return Err(RuntimeError::Protocol(
@@ -2370,13 +2388,16 @@ impl RuntimeClient {
         Ok(serde_json::from_value(value)?)
     }
 
-    pub(crate) async fn live_answers(
+    pub(crate) async fn live_answers_after(
         &self,
         node_id: i64,
+        after_sequence: i64,
     ) -> Result<relayer_graph_core::LiveAnswerPage, RuntimeError> {
         Ok(serde_json::from_value(
-            self.control_get(&format!("api/control/interactions/{node_id}/live-answers"))
-                .await?,
+            self.control_get(&format!(
+                "api/control/interactions/{node_id}/live-answers?afterSequence={after_sequence}"
+            ))
+            .await?,
         )?)
     }
 
@@ -2771,6 +2792,8 @@ struct ExecutionAdmissionResponse {
 #[serde(rename_all = "camelCase")]
 struct RemintCapabilityResponse {
     graph_token: String,
+    #[serde(default)]
+    authority_epoch: Option<u64>,
 }
 
 #[derive(Deserialize)]
@@ -3543,6 +3566,7 @@ mod tests {
         let prepared = PreparedInteraction {
             graph_node_id: 41,
             graph_token: "child-token".into(),
+            authority_epoch: Default::default(),
             harness_policy: None,
             harness_configuration_name: "test".into(),
             harness_configuration_digest: "sha256:test".into(),

@@ -5969,7 +5969,13 @@ export function createProductWorkspace({
           expectedRevision: action.liveInput.currentRevision,
         }, value);
         inputTouched.delete(stageKey);
-      } catch (error) { inputErrors.set(stageKey, error.message); }
+      } catch (error) {
+        const graphMessage = error?.details?.error?.message;
+        const message = typeof graphMessage === "string" && graphMessage.trim() ? graphMessage
+          : typeof error?.message === "string" && error.message !== "[object Object]" && error.message.trim()
+            ? error.message : "Answer could not be delivered. Reopen the question to check its receipt.";
+        inputErrors.set(stageKey, message);
+      }
       finally {
         inputPending.end(stageKey);
         if (String(getThread()?.id) === String(thread.id) && String(selection.selectedNodeId) === String(node.id)) {

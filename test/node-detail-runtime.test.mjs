@@ -1628,6 +1628,30 @@ it.each([false, true])("does not carry an unsent live edit into another executio
   } finally { await f.close(); }
 });
 
+it.each([false, true])("shows the graph recovery message after a refused Answer (authored=%s)", async authored => {
+  const f = await liveInputWorkspace({ authored });
+  try {
+    const message = 'Reopen the current question before answering. <b>Do not replay</b>';
+    f.edit("Private answer");
+    const answerButton = () => f.window.document.querySelector('[data-input-control-role="answer"]');
+    const failures = [
+      [Object.assign(new Error("[object Object]"), { status: 422, details: { error: { code: "stale_live_question", message } } }), message],
+      [Object.assign(new Error("Reopen this completion before answering."), { status: 422, details: { error: { message: {} } } }), "Reopen this completion before answering."],
+      [Object.assign(new Error("[object Object]"), { status: 422 }), "Answer could not be delivered. Reopen the question to check its receipt."],
+    ];
+    for (const [error, expected] of failures) {
+      f.answer.mockRejectedValueOnce(error);
+      await vi.waitFor(() => expect(answerButton()?.disabled).toBe(false));
+      answerButton().click();
+      await vi.waitFor(() => expect(f.window.document.querySelector('.node-input-error')?.textContent).toBe(expected));
+      expect(f.window.document.querySelector('.node-input-error b')).toBeNull();
+    }
+    expect(f.answer).toHaveBeenCalledTimes(failures.length);
+    expect(f.commit).not.toHaveBeenCalled();
+    expect(f.submit).not.toHaveBeenCalled();
+  } finally { await f.close(); }
+});
+
 it.each([[false, "ordinary"], [true, "ordinary"], [false, "live"], [true, "live"]])("quarantines an unavailable lookup without discarding private edits (authored=%s, channel=%s)", async (authored, channel) => {
   const f = await liveInputWorkspace({ authored });
   try {

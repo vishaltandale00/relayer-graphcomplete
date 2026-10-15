@@ -8,7 +8,7 @@ import { createHumanTaskSurface } from "../desktop/eval-main/web-host.mjs";
 
 const cleanups = [];
 afterEach(async () => { for (const cleanup of cleanups.splice(0).reverse()) await cleanup(); });
-async function fixture({ steps = 1 } = {}) {
+async function fixture({ steps = 1, mode } = {}) {
   const dir = await mkdtemp(join(tmpdir(), "human-eval-")); cleanups.push(() => rm(dir, { recursive: true, force: true }));
   const threads = new Map();
   const calls = [];
@@ -51,7 +51,7 @@ async function fixture({ steps = 1 } = {}) {
     annotationSnapshotLoader: async (threadIds) => ({ threadIds, annotations: [] }),
   };
   const tasks = await new HumanTaskService(options).open();
-  const session = await tasks.create({ testCaseId: "case", harnessConfigurationName: "fixture", maxCompletions: 2, endpoint: "A working artifact" });
+  const session = await tasks.create({ testCaseId: "case", harnessConfigurationName: "fixture", maxCompletions: 2, endpoint: "A working artifact", mode });
   return { tasks, session, threads, calls, options, reject: () => { reject = true; }, failTransport: () => { transportFailure = true; }, failServer: () => { serverFailure = true; }, replayInvoke: () => { replayInvoke = true; }, failExport: () => { exportFailure = true; } };
 }
 
@@ -603,7 +603,47 @@ it("live-answer gateway transport uncertainty is retry-ambiguous HTTP 503 rather
   expect(f.tasks.get(f.session.id).events.find(event => event.kind === "product_action")).toMatchObject({ outcome: "unknown", request: { operationKey: "answer-1" } });
 });
 
-async function ambiguousAnswerFixture({ mismatch = null, value = { text: "Boston" }, receiptValue = value, conflict = false, annotations = false } = {}) {
+it("cancels a gateway reconciliation read with the actor signal and releases queued evidence admission", async () => {
+  const f = await fixture({ mode: "simulated" });
+  const reason = "Actor stopped";
+  const controller = new AbortController();
+  let reached;
+  const started = new Promise(resolve => { reached = resolve; });
+  let release;
+  let upstreamAborted = false;
+  const upstream = f.tasks.fetchImpl;
+  f.tasks.fetchImpl = (url, options) => {
+    if (!url.pathname.endsWith("/live-answers")) return upstream(url, options);
+    return new Promise((resolve, reject) => {
+      release = () => resolve(Response.json({ answers: [] }));
+      options.signal?.addEventListener("abort", () => { upstreamAborted = true; reject(options.signal.reason); }, { once: true });
+      reached();
+    });
+  };
+  const surface = await createHumanTaskSurface({ tasks: f.tasks, sessionId: f.session.id, productSession: f.options.productSession, actor: true, signal: controller.signal });
+  const response = fetch(new URL("/api/threads/1/interactions/10/live-answers", surface.url), {
+    headers: { Authorization: `Bearer ${new URL(surface.url).hash.slice(1)}` },
+  });
+  let timeout;
+  try {
+    await started;
+    const queued = f.tasks.actorEvent(f.session.id, "actor_error", { message: reason });
+    controller.abort(new Error(reason));
+    await Promise.race([
+      Promise.all([response.then(async result => { expect(result.ok).toBe(false); expect(await result.json()).toEqual({ error: reason }); }), queued]),
+      new Promise((_, reject) => { timeout = setTimeout(() => reject(new Error("Reconciliation blocked cancellation and evidence admission")), 500); }),
+    ]);
+    expect(upstreamAborted).toBe(true);
+    expect(f.tasks.get(f.session.id).events.at(-1)).toMatchObject({ kind: "actor_error", message: reason });
+  } finally {
+    clearTimeout(timeout);
+    release?.();
+    await response;
+    await surface.close();
+  }
+});
+
+async function ambiguousAnswerFixture({ mismatch = null, value = { text: "Boston" }, receiptValue = value, conflict = false, annotations = false, signal } = {}) {
   const f = await fixture();
   const request = { operationKey: "lost-answer", attemptId: 8, authorityEpoch: 2, expectedRevision: 3,
     occurrence: { presentingInteractionNodeId: 7, presentingLayerId: 9, actionId: 11 }, value: structuredClone(value) };
@@ -622,11 +662,83 @@ async function ambiguousAnswerFixture({ mismatch = null, value = { text: "Boston
   };
   const path = "/api/threads/1/interactions/10/live-answers";
   await expect(f.tasks.write(f.session.id, path, "POST", request)).rejects.toMatchObject({ status: 503 });
-  const surface = await createHumanTaskSurface({ tasks: f.tasks, sessionId: f.session.id, productSession: f.options.productSession, ...(annotations ? { registerAnnotations: async () => {} } : {}) });
+  const surface = await createHumanTaskSurface({ tasks: f.tasks, sessionId: f.session.id, productSession: f.options.productSession, signal, ...(annotations ? { registerAnnotations: async () => {} } : {}) });
   cleanups.push(() => surface.close());
   const read = () => fetch(new URL(path, surface.url), { headers: { Authorization: `Bearer ${new URL(surface.url).hash.slice(1)}` } });
   return { ...f, read, receipt, posts: () => posts };
 }
+
+async function pagedAnswerFixture({ signal, nextPage, receiptSequence = 101 } = {}) {
+  const f = await ambiguousAnswerFixture({ signal });
+  f.receipt.sequence = receiptSequence;
+  const reads = [];
+  const upstream = f.tasks.fetchImpl;
+  f.tasks.fetchImpl = (url, options) => {
+    if (!url.pathname.endsWith("/live-answers") || options.method !== "GET") return upstream(url, options);
+    const after = Number(url.searchParams.get("afterSequence") ?? 0);
+    reads.push(after);
+    const current = { completionId: 7, revision: 4, layerId: 12 };
+    if (after === 0) return Response.json({ current, currentAnswers: [], nextSequence: 100,
+      answers: Array.from({ length: 100 }, (_, index) => index + 1 === receiptSequence ? f.receipt : ({ ...f.receipt, sequence: index + 1, operationKey: `other-${index}` })) });
+    if (nextPage) return nextPage({ url, options, receipt: f.receipt, current });
+    return Response.json({ current, currentAnswers: [], nextSequence: 101, answers: [f.receipt] });
+  };
+  return { ...f, reads };
+}
+
+it("reconciles receipt 101 through the gateway after Current advances, without replaying its unknown Answer", async () => {
+  const f = await pagedAnswerFixture();
+  const response = await f.read();
+  expect(response.status).toBe(200);
+  const page = await response.json();
+  expect(f.reads).toEqual([0, 100]);
+  expect(page).toMatchObject({ current: { revision: 4, layerId: 12 }, currentAnswers: [], nextSequence: 101 });
+  expect(page.answers).toHaveLength(101);
+  expect(page.answers.at(-1)).toEqual(f.receipt);
+  const events = f.tasks.get(f.session.id).events;
+  expect(events.find(event => event.kind === "product_action").outcome).toBe("unknown");
+  expect(events.filter(event => event.kind === "live_answer_reconciled")).toMatchObject([{ liveAnswerReceipt: f.receipt }]);
+  const reopened = await new HumanTaskService(f.options).open();
+  expect(reopened.get(f.session.id).events.find(event => event.kind === "live_answer_reconciled").liveAnswerReceipt).toEqual(f.receipt);
+  expect(f.posts()).toBe(1);
+});
+
+it.each(["http", "cursor"])("does not publish partial reconciliation when a later receipt page fails (%s)", async kind => {
+  const f = await pagedAnswerFixture({ receiptSequence: 50, nextPage: ({ receipt, current }) => kind === "http"
+    ? Response.json({ error: "Receipt page unavailable" }, { status: 503 })
+    : Response.json({ current, currentAnswers: [], nextSequence: 100, answers: [receipt] }) });
+  const response = await f.read();
+  expect(response.status).toBe(503);
+  expect(f.reads).toEqual([0, 100]);
+  expect(f.tasks.get(f.session.id).events.some(event => event.kind === "live_answer_reconciled")).toBe(false);
+  expect(f.posts()).toBe(1);
+});
+
+it("aborts a stalled later receipt page and releases queued task admission", async () => {
+  const controller = new AbortController();
+  let reached;
+  const started = new Promise(resolve => { reached = resolve; });
+  let release;
+  let aborted = false;
+  const f = await pagedAnswerFixture({ signal: controller.signal, receiptSequence: 50, nextPage: ({ options }) => new Promise((resolve, reject) => {
+    release = () => resolve(Response.json({ answers: [], currentAnswers: [], nextSequence: 100 }));
+    options.signal?.addEventListener("abort", () => { aborted = true; reject(options.signal.reason); }, { once: true });
+    reached();
+  }) });
+  const response = f.read();
+  let timeout;
+  try {
+    await Promise.race([started, response.then(() => { throw new Error("Gateway returned before reading the later receipt page"); })]);
+    const queued = f.tasks.serial(() => "queue released");
+    controller.abort(new Error("Actor stopped during pagination"));
+    await Promise.race([
+      Promise.all([response.then(result => { expect(result.ok).toBe(false); }), queued.then(value => { expect(value).toBe("queue released"); })]),
+      new Promise((_, reject) => { timeout = setTimeout(() => reject(new Error("Later receipt page blocked cancellation")), 500); }),
+    ]);
+    expect(aborted).toBe(true);
+    expect(f.tasks.get(f.session.id).events.some(event => event.kind === "live_answer_reconciled")).toBe(false);
+  } finally { clearTimeout(timeout); release?.(); await response; }
+});
 
 it.each([{ text: "Boston" }, { selected: [{ key: "z", label: "Later" }, { key: "a", label: "Earlier" }] }, { selected: [{ key: "é", label: "Composed" }, { key: "e\u0301", label: "Decomposed" }] }])("persists a graph receipt recovered by the ordinary gateway GET without rewriting ambiguity or prior exports (%j)", async value => {
   const f = await ambiguousAnswerFixture({ value });

@@ -384,7 +384,7 @@ export async function createHumanTaskSurface({ tasks, sessionId, productSession,
       const draftRead = /^\/api\/threads\/[1-9][0-9]*\/(?:context-drafts|input-draft)$/.test(url.pathname);
       const liveAnswerRead = /^\/api\/threads\/[1-9][0-9]*\/interactions\/[1-9][0-9]*\/live-answers$/.test(url.pathname);
       const upstream = liveAnswerRead
-        ? await tasks.readLiveAnswers(sessionId, `${url.pathname}${url.search}`)
+        ? await tasks.readLiveAnswers(sessionId, `${url.pathname}${url.search}`, { signal })
         : annotationToken && !draftRead
           ? await annotationUpstream(`${url.pathname}${url.search}`)
           : await tasks.upstream(`${url.pathname}${url.search}`, {}, draftRead);

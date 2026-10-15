@@ -1,6 +1,6 @@
 import { Window } from "happy-dom";
 import { taskActorControlIdentity, taskActorRebindControl, taskActorWorkingControlAllowed } from "../desktop/eval-main/task-actor-browser.mjs";
-import { taskActorPresentationReady, taskActorCurrentIdentity } from "../desktop/eval-main/task-actor-browser.mjs";
+import { taskActorPresentationReady, taskActorCurrentIdentity, taskActorCurrentUnchanged } from "../desktop/eval-main/task-actor-browser.mjs";
 import { mkdtemp, rm, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -691,6 +691,23 @@ it("current capture excludes stale attempts, pinned navigation and layers differ
   for (const changed of [{ graphVisible: false }, { attemptId: 9 }, { observedAt: 90 }, { observedAt: undefined }, { currentPointer: { ...presentation.currentPointer, mode: "pinned" } }, { layerId: 6 }]) {
     expect(taskActorCurrentIdentity({ expected, presentation: { ...presentation, ...changed } })).toBeNull();
   }
+});
+
+it("observes approval and resumed work at the same Current revision while deduplicating ordinary repaints", () => {
+  const expected = { threadId: 1, turnId: 2, submittedAt: 100, attemptId: 10 };
+  const presentation = { ...expected, graphVisible: true, layerId: 5, observedAt: 120, completionStatus: "running", currentPointer: { mode: "following", revision: 2, layerId: 5 } };
+  const capture = () => taskActorCurrentIdentity({ expected, presentation });
+  const running = capture();
+  presentation.observedAt++;
+  expect(taskActorCurrentUnchanged(capture(), running)).toBe(true);
+  presentation.completionStatus = "waiting_for_approval";
+  const approval = capture();
+  expect(taskActorCurrentUnchanged(approval, running)).toBe(false);
+  expect(approval).toMatchObject({ revision: running.revision, completionStatus: "waiting_for_approval" });
+  presentation.observedAt++;
+  expect(taskActorCurrentUnchanged(capture(), approval)).toBe(true);
+  presentation.completionStatus = "running";
+  expect(taskActorCurrentUnchanged(capture(), approval)).toBe(false);
 });
 
 it("native perception and actions share one restricted session but separate output schemas", async () => {

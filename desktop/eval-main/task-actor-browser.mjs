@@ -49,6 +49,14 @@ export function taskActorCurrentIdentity({ expected, presentation = globalThis.w
     answerPresentation: JSON.stringify(answers) };
 }
 
+export function taskActorCurrentUnchanged(pointer, previous) {
+  return Boolean(previous && pointer.revision === previous.revision
+    && String(pointer.threadId) === String(previous.threadId)
+    && String(pointer.attemptId) === String(previous.attemptId) && String(pointer.turnId) === String(previous.turnId)
+    && pointer.completionStatus === previous.completionStatus
+    && pointer.answerPresentation === previous.answerPresentation);
+}
+
 // These functions are serialized by Playwright; keep their dependencies local.
 export function taskActorWorkingControlAllowed(element, kind) {
   if (kind === "scroll") return true;
@@ -302,10 +310,7 @@ export async function openTaskActorBrowser({ tasks, sessionId, productSession, b
           signal?.throwIfAborted();
           await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
           const pointer = await page.evaluate(taskActorCurrentIdentity, { expected });
-          if (!pointer || (expected.workingOnly && ["accepted", "failed", "stopped", "not_started"].includes(pointer.completionStatus)) || (previous && pointer.revision === previous.revision
-            && String(pointer.threadId) === String(previous.threadId)
-            && String(pointer.attemptId) === String(previous.attemptId) && String(pointer.turnId) === String(previous.turnId)
-            && pointer.answerPresentation === previous.answerPresentation)) return null;
+          if (!pointer || (expected.workingOnly && ["accepted", "failed", "stopped", "not_started"].includes(pointer.completionStatus)) || taskActorCurrentUnchanged(pointer, previous)) return null;
           const observation = await observe(undefined, true);
           await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
           const after = await page.evaluate(taskActorCurrentIdentity, { expected });

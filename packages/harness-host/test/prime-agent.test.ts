@@ -2427,7 +2427,13 @@ describe("PrimeAgentHarness", () => {
     };
     const harness = await createHarness(session);
 
-    await harness.complete(attachedRunContext(11, "token"));
+    const run = attachedRunContext(11, "token");
+    // Adversarial extra fields exercise the serializer's whitelist. These are
+    // not canonical InteractionContext fields or sealed-contract provenance.
+    const extraFields = { sourceNodeId: 9_876_540_321, sourceLayerId: 9_876_540_322 };
+    await harness.complete({ ...run, interactionInput: { ...run.interactionInput,
+      contexts: run.interactionInput.contexts.map(context => ({ ...context, ...extraFields })),
+    } });
 
     expect(prompt).toContain('"message": "Question"');
     expect(prompt.indexOf('"title": "First target"')).toBeLessThan(prompt.indexOf('"title": "Second target"'));
@@ -2435,8 +2441,19 @@ describe("PrimeAgentHarness", () => {
     expect(prompt).toContain("product assigns no semantic precedence");
     expect(prompt).toContain("including in native child agents");
     expect(prompt).toContain("await graph.get_interaction_input()");
-    expect(prompt).not.toContain("sourceNodeId");
-    expect(prompt).not.toContain("sourceLayerId");
+    const sections = [...prompt.matchAll(/Normalized interaction input:\n([\s\S]*?)\n\n/g)];
+    expect(sections).toHaveLength(1);
+    const normalized = sections[0]![1]!;
+    expect(JSON.parse(normalized)).toEqual({
+      message: "Question",
+      contexts: [
+        { targetNode: { id: 20, kind: "concept", icon: "box", title: "First target", detail: "First detail", state: "accepted" }, annotations: ["first annotation", "second annotation"] },
+        { targetNode: { id: 21, kind: "concept", icon: "box", title: "Second target", detail: "Second detail", state: "accepted" }, annotations: ["third annotation"] },
+      ],
+    });
+    expect(normalized).not.toContain("sourceNodeId");
+    expect(normalized).not.toContain("sourceLayerId");
+    for (const canary of Object.values(extraFields)) expect(prompt).not.toContain(String(canary));
   });
 
   it("does not start a prompt when the run was already cancelled", async () => {

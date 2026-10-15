@@ -109,22 +109,30 @@ await graph.advance_current(written.root_layer, expected_revision=0, operation_k
       }
       expect(question).toMatchObject({ state: "accepted", prompt: "Which constraint should guide the next step?", control: "text" });
       expect(accepted.nodes[0].authoredDetail.mounts.some(mount => mount.capability.kind === "input" && mount.capability.action.clientKey === question.clientKey)).toBe(true);
-      const read = language === "javascript" ? `import { RelayerGraphClient } from ${JSON.stringify(moduleUrl)};
+      const readQuestion = target => language === "javascript" ? `import { RelayerGraphClient } from ${JSON.stringify(moduleUrl)};
 const graph = RelayerGraphClient.fromEnv();
+const question = { clientKey: ${JSON.stringify(target.clientKey)}, id: ${target.id} };
+const finding = { ref: { id: ${target.sourceNodeId} } };
 const actualWait = graph.waitForLiveAnswers.bind(graph);
-graph.waitForLiveAnswers = (cursor, timeout) => { console.log("WAIT:" + timeout); return actualWait(cursor, timeout); };
+graph.waitForLiveAnswers = (cursor, timeout) => { if (answeringAction.id !== question.id) throw new Error("Selected another source's question"); console.log("WAIT:" + timeout); return actualWait(cursor, timeout); };
 ${block(READ_CURRENT_ANSWERS_JS)}
 console.log(JSON.stringify({ decisions: userDecisions, cursor: answerCursor, next: await graph.getLiveAnswers(answerCursor) }));` : `from relayer_graph import GraphSession
+from types import SimpleNamespace
 graph = await GraphSession.current()
+question = SimpleNamespace(client_key=${JSON.stringify(target.clientKey)}, id=${target.id})
+finding = SimpleNamespace(ref=SimpleNamespace(id=${target.sourceNodeId}))
 actual_wait = graph.wait_for_live_answers
 async def observed_wait(cursor, timeout_seconds):
+    if answering_action["id"] != question.id:
+        raise RuntimeError("Selected another source's question")
     print("WAIT:" + str(timeout_seconds * 1000), flush=True)
     return await actual_wait(cursor, timeout_seconds=timeout_seconds)
 graph.wait_for_live_answers = observed_wait
 ${block(READ_CURRENT_ANSWERS_PYTHON)}
 print(json.dumps({"decisions": user_decisions, "cursor": answer_cursor, "next": await graph.get_live_answers(answer_cursor)}))`;
+      const read = readQuestion(question);
       // A short fixture-only deadline exercises expiry without spending the guide's participant window.
-      const shortRead = read.replace(/waitForLiveAnswers\(answerCursor, [\d_]+\)/, "waitForLiveAnswers(answerCursor, 20)").replace(/timeout_seconds=[\d_]+/, "timeout_seconds=0.02");
+      const shortRead = read.replace("Date.now() + 30_000", "Date.now() + 20").replace("time.monotonic() + 30", "time.monotonic() + 0.02");
       const parseLastLine = output => JSON.parse(output.trim().split("\n").at(-1));
       const empty = parseLastLine(await run(shortRead));
       expect(empty).toMatchObject({ decisions: [], cursor: 0, next: { answers: [] } });
@@ -145,15 +153,44 @@ print(json.dumps({"decisions": user_decisions, "cursor": answer_cursor, "next": 
       });
       const delivered = parseLastLine(await reading);
       expect(delivered).toMatchObject({ decisions: [{ question: receipt.question, value: receipt.value }], cursor: receipt.sequence, next: { answers: [] } });
-      expect(windowMs).toBe(30_000);
+      expect(windowMs).toBeGreaterThan(29_000);
+      expect(windowMs).toBeLessThanOrEqual(30_000);
       const deliveredProjection = await controlRead(server.url, token, presentationPath);
       expect(deliveredProjection.page.eligibleActionIds).toEqual([]);
       expect(deliveredProjection.receipts).toHaveLength(1);
       expect(deliveredProjection.receipts[0]).toMatchObject({ sequence: receipt.sequence, value: receipt.value });
       expect(await graph.getContract()).toEqual(contract);
+      // A fresh process reading question two sees question one's receipt at
+      // cursor zero. It must ignore that receipt and wait for this occurrence.
+      const secondNode = new NodeObject("info", "Second decision", "A separate constraint changes the plan", "concept", "second-decision");
+      const decoyNode = new NodeObject("info", "Other question", "This question has the same source-scoped action key", "concept", "other-question");
+      await graph.submitNode(secondNode);
+      await graph.submitNode(decoyNode);
+      const connection = new EdgeObject([decoyNode, secondNode], "question-connection");
+      await graph.createEdge(connection);
+      const secondLayer = new LayerObject([decoyNode, secondNode], [connection], new LayerLayoutObject([new NodePlacementObject(decoyNode, .25, .5), new NodePlacementObject(secondNode, .75, .5)], "default"), "second-question");
+      await graph.submitLayer(secondLayer);
+      await graph.addAction(decoyNode, { kind: "input", label: "Other decision", prompt: "An unrelated question", control: "text", sourceLayer: secondLayer, clientKey: "budget" });
+      const secondQuestion = await graph.addAction(secondNode, { kind: "input", label: "Second decision", prompt: "What budget should guide the plan?", control: "text", sourceLayer: secondLayer, clientKey: "budget" });
+      await graph.addAction(secondNode, { kind: "navigate", relation: "reference", label: "Earlier decision", sourceLayer: secondLayer, target: current.currentLayerId, clientKey: "prior" });
+      await graph.addAction(interaction.node.id, { kind: "navigate", relation: "expand", label: "Plan constraints", icon: "info", target: secondLayer, clientKey: "root-response" });
+      await graph.advanceCurrent(secondLayer, current.headRevision, "second-question");
+      const secondCurrent = await graph.getCurrent();
+      let nextWaiting;
+      const secondWaiting = new Promise(resolve => { nextWaiting = resolve; });
+      const secondReading = run(readQuestion(secondQuestion), output => {
+        if (/WAIT:([\d.]+)\r?\n/.test(output)) nextWaiting();
+      });
+      await Promise.race([secondWaiting, secondReading.then(() => { throw new Error("Old receipt incorrectly satisfied the second question"); })]);
+      const secondReceipt = await controlRequest(server.url, token, `/api/control/interactions/${interaction.node.id}/live-answers`, {
+        threadId: 78, answer: { attemptId: 1, authorityEpoch: page.authorityEpoch, expectedRevision: secondCurrent.headRevision, operationKey: "answer-budget",
+          occurrence: { presentingInteractionNodeId: interaction.node.id, presentingLayerId: secondCurrent.currentLayerId, actionId: secondQuestion.id }, value: { text: "Under $4000" } },
+      });
+      expect(parseLastLine(await secondReading)).toMatchObject({ decisions: [{ question: secondReceipt.question, value: secondReceipt.value }], cursor: secondReceipt.sequence, next: { answers: [] } });
+      expect(await graph.getContract()).toEqual(contract);
       await run(block(language === "javascript" ? finishPublishedCurrentRecipeJs(moduleUrl) : FINISH_PUBLISHED_CURRENT_RECIPE_PYTHON));
       const final = await controlRead(server.url, token, `/api/control/interactions/${interaction.node.id}/current`);
-      expect(final).toMatchObject({ lifecycle: "succeeded", currentLayerId: current.currentLayerId, headRevision: current.headRevision + 1 });
+      expect(final).toMatchObject({ lifecycle: "succeeded", currentLayerId: secondCurrent.currentLayerId, headRevision: secondCurrent.headRevision + 1 });
       const settledProjection = await controlRead(server.url, token, presentationPath);
       expect(settledProjection.page.current.lifecycle).toBe("succeeded");
       expect(settledProjection.receipts).toEqual(deliveredProjection.receipts);
