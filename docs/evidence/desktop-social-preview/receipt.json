@@ -13,7 +13,7 @@
   },
   "rendererArtifact": {
     "directory": "desktop/renderer",
-    "digest": "e8a952fac6c60bc47035651cb9b1525dc60846038b381162ff8f58a7469cecda",
+    "digest": "6f73b6a8d893b3565352e980e8a10b395193b280035fb602aec9ab522f4d6395",
     "files": {
       "assets/relayer-logo.svg": {
         "bytes": 509,
@@ -72,8 +72,8 @@
         "sha256": "4024542092755f7167e11f0c7803a25f49c7d9b27172ce5c9dde74f16905a58e"
       },
       "src/approval-model.js": {
-        "bytes": 6668,
-        "sha256": "f1b0d76178c7de024d14a191930f2e419e1a7e9c9396626d56ad45b58a9a4ecf"
+        "bytes": 7111,
+        "sha256": "1ffdf08269641173c42a47b7fe63d405a74f2f1c45ffe28b4fa37e6ec5539193"
       },
       "src/artifact-viewer.js": {
         "bytes": 23799,
@@ -268,16 +268,16 @@
         "sha256": "338cdd8855f3b40c4138d0245262c209554b26b94c1a4655598ce976fca5b90c"
       },
       "src/product-workspace/model.js": {
-        "bytes": 14394,
-        "sha256": "ede58db0e475a17d79a6c8f82665f49d370e53d551c136e1e1a242e31b13adef"
+        "bytes": 15531,
+        "sha256": "2eb057d7ddff6298f7aa7c7e69ad49f1b127e978bbaca052c2a5982e0be641eb"
       },
       "src/product-workspace/node-detail-runtime.js": {
         "bytes": 30996,
         "sha256": "c1c6e8a2627e20298a7f88c7516febc4c0f7317b00ec00713372bd24202cdcfd"
       },
       "src/product-workspace/run-state.js": {
-        "bytes": 6029,
-        "sha256": "f7f600a85dc641321ff8800088c7d04b19620a7de300048ccd04788e9abb18c0"
+        "bytes": 6285,
+        "sha256": "158850b5c9e52a16a82755e7532a245ff7126a91d6f966bdbb7b31d34432ed50"
       },
       "src/product-workspace/view.js": {
         "bytes": 15531,
@@ -288,8 +288,8 @@
         "sha256": "8e5d307f95b1863fb995606ca32a832de088916716c39476f9d31f2174de002d"
       },
       "src/product-workspace/workspace.js": {
-        "bytes": 313686,
-        "sha256": "08daab80a142bfcdd80d88dd9048c6a2e5f5456451d00ca6e965c659873bf8d0"
+        "bytes": 313896,
+        "sha256": "4a45bc2072ef2fc541380aa5465eb89e0e926f87945438679138a9a39bbec8ba"
       },
       "src/project-composer-navigation.js": {
         "bytes": 282,
@@ -372,8 +372,8 @@
         "sha256": "6ecc188e2f85f1d507775cd5dc7cb077d1f85698cd5940c1b501e62bf71d45c1"
       },
       "src/threads.js": {
-        "bytes": 94480,
-        "sha256": "c552f0d215aa14f5ecb227a0e9688bfa370d736c013d75217547106bef19d395"
+        "bytes": 94598,
+        "sha256": "f1ddf79c5872ae82a9a0a9cdbf090bd8d45f8c2f8b80d8006ade67759f40aa52"
       },
       "src/ui.js": {
         "bytes": 2147,
