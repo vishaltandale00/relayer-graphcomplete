@@ -1,0 +1,164 @@
+{
+  "schemaVersion": 1,
+  "issues": [
+    722
+  ],
+  "runId": "a6e6e15f-0937-400d-9ae4-43e6bc131152",
+  "profile": "prime-openrouter",
+  "harness": "prime-agent-basic",
+  "modelId": "openai/gpt-6-luna",
+  "source": {
+    "commit": "5f949e99b7d93ac64c6a1d3b51f4444d243e1a3b",
+    "clean": false,
+    "workspaceDigest": "sha256:186bc3ca6f45aa3c0c3e3fe30e724d7f5049076d95c83814fd98c3d17ed3783e"
+  },
+  "startedAt": "2026-10-16T18:49:22.854Z",
+  "executables": {
+    "graphServer": {
+      "path": "target/debug/relayer-graph-server",
+      "sha256": "6dc72a7c30351b18f6498657b7d2175d302ae6afeb6da0f240810e91f5779abe"
+    },
+    "appServer": {
+      "path": "target/debug/relayer-app-server",
+      "sha256": "1ce010e72b5eda635c583a6e13bfefb04f272261cdf909c80c734593eaf70c40"
+    }
+  },
+  "temporalFeatures": {
+    "schemaRead": true,
+    "rootCurrentWrite": true,
+    "projectionUi": true,
+    "invokeResolution": true,
+    "providerRecursion": true
+  },
+  "actions": [
+    {
+      "id": 9,
+      "label": "Plan a first week",
+      "sourceNodeId": 29
+    },
+    {
+      "id": 10,
+      "label": "List three starter resources",
+      "sourceNodeId": 29
+    },
+    {
+      "id": 11,
+      "label": "Suggest a practice project",
+      "sourceNodeId": 29
+    }
+  ],
+  "clicked": [
+    true,
+    true,
+    true
+  ],
+  "runIds": [
+    2,
+    3,
+    4
+  ],
+  "beforeRestart": [
+    "running",
+    "queued",
+    "queued"
+  ],
+  "textsBefore": [
+    "Plan a first week for learning a new programming language by building a small project.",
+    "List three starter resources for learning a new programming language by building a small project.",
+    "Suggest a practice project for learning a new programming language by building a small project."
+  ],
+  "reconnectNote": "Provider creation failed (422): {\"code\":\"provider_definition_exists\",\"error\":\"Provider definition already exists.\",\"familyId\":null,\"harnessId\":null,\"modelId\":null,\"providerId\":null}",
+  "afterRestart": [
+    "interrupted",
+    "paused",
+    "paused"
+  ],
+  "heldSamples": [
+    [
+      "interrupted",
+      "paused",
+      "paused"
+    ],
+    [
+      "interrupted",
+      "paused",
+      "paused"
+    ],
+    [
+      "interrupted",
+      "paused",
+      "paused"
+    ],
+    [
+      "interrupted",
+      "paused",
+      "paused"
+    ],
+    [
+      "interrupted",
+      "paused",
+      "paused"
+    ],
+    [
+      "interrupted",
+      "paused",
+      "paused"
+    ],
+    [
+      "interrupted",
+      "paused",
+      "paused"
+    ],
+    [
+      "interrupted",
+      "paused",
+      "paused"
+    ],
+    [
+      "interrupted",
+      "paused",
+      "paused"
+    ],
+    [
+      "interrupted",
+      "paused",
+      "paused"
+    ],
+    [
+      "interrupted",
+      "paused",
+      "paused"
+    ],
+    [
+      "interrupted",
+      "paused",
+      "paused"
+    ]
+  ],
+  "pausedBadge": "3 paused",
+  "restartNotice": "Relayer restarted. 3 runs stopped where they were. Nothing resumes until you do.Resume all (3)",
+  "resumedSamples": 827,
+  "final": [
+    "accepted",
+    "accepted",
+    "stopped"
+  ],
+  "textsAfter": [
+    "Plan a first week for learning a new programming language by building a small project.",
+    "List three starter resources for learning a new programming language by building a small project.",
+    "Suggest a practice project for learning a new programming language by building a small project."
+  ],
+  "checks": {
+    "allClickedInTheUi": true,
+    "oneRanAndTwoQueuedBeforeRestart": true,
+    "restartInterruptedTheRunAndPausedTheQueue": true,
+    "nothingStartedOnItsOwn": true,
+    "pausedBadgeShown": true,
+    "restartNoticeShown": true,
+    "discardStoppedTheRunAndKeptItsText": true,
+    "resumeRanTheChainInOrder": true,
+    "resumedRunsAccepted": true
+  },
+  "passed": true,
+  "finishedAt": "2026-10-16T18:58:33.081Z"
+}
