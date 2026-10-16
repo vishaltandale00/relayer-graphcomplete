@@ -192,3 +192,62 @@ the same nine missing/replacement candidate cells can start. All inference
 routes remain subscription-only; the original candidate native binaries,
 prompts, models and family/guidance assignments remain pinned. The evaluator
 and viewer operational amendments prevent an identical-code replay claim.
+
+## Follow-up: compiled input capture regions
+
+V4 reached six complete original grades. Guidance-on collaboration ended partial
+because its compiled Node Detail input had no occurrence-bound capture target.
+The visible textarea existed, but the judge correctly refused generic detail
+screenshots as proof of that exact input. The final proof review remained
+unstarted. No new candidates were admitted. A separate read-only review of that
+same accepted graph reproduced `Unknown review target: input-action-33-10-11`
+without inference; after repair its exact capture succeeded.
+
+Authority: PRD §§13.4.1–13.4.3 and authored Node Detail review registration.
+Read-only inputs remain disabled; evidence predicates, canonical action
+identity, scoring, evaluator revisions and operator commission are unchanged.
+
+| Checkpoint | Changed executable seam | Deterministic evidence |
+| --- | --- | --- |
+| Compiled inputs have the same exact occurrence evidence as standard inputs | Workspace supplies trusted interaction/layer/node context; Node Detail runtime registers resolved input captures privately; `main.js` supplies the current presentation owner | Extended accepted Product fixture authors a compiled input, discovers its exact ref, captures the actual prompt/control, and satisfies strict input evidence validation |
+| Capture shows authored content, without injecting semantic prompt text | Runtime aliases the existing detail surface and uses a neutral label | Same Product fixture; in-process distinct unrendered-prompt sentinel is absent from review metadata |
+| No author-supplied capture authority, stale owner, covered target or disposed capability | `review-tools.js` resolves only current trusted registry entries, with current thread interaction/layer/selected-node ownership and existing modal root | Registry fixture rejects unrelated shadow root/forged attributes, wrong interaction, adapter-boundary change and disposal; Product artifact modal excludes the input capture |
+| Failed requalification revokes every prior input capture | Runtime clears all registrations before its first asynchronous action lookup | Two-input fixture: first lookup throwing leaves neither prior capture; unresolved action also revokes capture |
+| Role-aware families are used by deterministic visual-evidence fixtures | Follow-up annotation capture script assigns its sole fixture member the required orchestrator role | Real capture first failed `model_family_orchestrator_required`, then the ordinary native setup and A→B proof succeeded; no admission bypass |
+
+Final warm suite: 213 tests across six files passed. Full Eval browser journey
+passed all chapters on the final executable source, including Current and
+settled actors, input, artifact review, judge capture and native reopen. Build
+passed. Full check passed native/type/package stages and 4,361 JavaScript tests
+(three skipped), then failed only two stale visual-evidence receipts. Both were
+regenerated through their actual Electron runners, visually inspected and
+subsequently tested. Existing evidence and the failed fixture receipt are
+preserved privately; no receipt hash was substituted for a capture. The outer
+aggregate failure remains recorded, separately from the repaired checkpoints.
+
+Adversarial reviewer `/root/repair_authority_review`: six-file input scope digest
+`ecfffcd8a5dc6f9703cf073f7db8cbf27f3fe0f0fb92c4a5cde3ad7b144a2fde`
+(same algorithm), no remaining scoped blockers; targeted lifecycle fixture
+independently passed. Two findings were repaired: unrendered prompt leakage in
+capture names, and incomplete revocation when the first of several lookups
+throws. This assertion covers its exact source scope; other new evidence and
+fixture review is recorded separately in the PR.
+
+V5 retains six complete grades with their original source/evidence provenance.
+Their inventories contain zero input actions, so this repair does not
+invalidate them. Only the partial collaboration and still-unstarted proof
+receive new judge attempts. Eight complete original grades still gate the
+same nine missing/replacement subscription-only sessions. Historical partials,
+unknown actor cause, stopped attempts and immutable once journals remain.
+
+Final evidence/fixture delta review by the same reviewer: seven-file digest
+`74bb84b4e07da581a23fe0fa925eb65db996375e5f0a5100a5b035a39023d6d2`,
+no blockers. Normal family admission retained, captures/source hashes checked,
+A/B visually inspected, receipt tests independently 2/2 passed. V5 ten-file
+controller digest `6ce0e9ae2c6b37816ec7a178c9d90fd2d37e38bef639400dd3dd5da2d5f4bae4`;
+no unapproved frozen source/native/fixture changes, all candidate inputs remain
+pinned. These assertions do not certify pending live outcomes. Separate
+remaining check chapters passed: secret boundary 2, Python 99, Ladybug receipts
+and PRD readability. An initial secret-suite import attempt overlapped package
+rebuilding and ran no tests; its failure is retained separately from the
+subsequent post-build 2/2 pass.

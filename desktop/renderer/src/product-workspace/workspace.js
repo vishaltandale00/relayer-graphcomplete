@@ -119,6 +119,7 @@ export async function renderProductNodeDetail({
   onInput,
   onInputEdit,
   capabilityState,
+  inputReviewContext,
 }) {
   if (!node?.authoredDetail) {
     existing?.dispose?.();
@@ -137,7 +138,7 @@ export async function renderProductNodeDetail({
     appendCompatibilityNodeDetail(container, node);
     return Object.freeze({ authored: false, status: "fallback", error: compatibilityIssue });
   }
-  const adapters = { resolveAction, onNavigate, onInvoke, onInput, onInputEdit };
+  const adapters = { resolveAction, onNavigate, onInvoke, onInput, onInputEdit, inputReviewContext };
   if (existing?.authored === true
     && existing.status === "mounted"
     && existing.mountKey === mountKey
@@ -165,6 +166,7 @@ export async function renderProductNodeDetail({
     onInput,
     onInputEdit,
     capabilityState,
+    inputReviewContext,
   });
   if (runtime.status !== "mounted") {
     appendCompatibilityNodeDetail(container, node);
@@ -6811,6 +6813,11 @@ export function createProductWorkspace({
       resolveAsset: (asset) => resolveNodeDetailAsset(asset, { node, state, thread: assetThread, interaction: assetInteraction, layerId: assetLayerId }),
       resolveAction: resolveAuthoredAction,
       capabilityState: authoredCapabilityState,
+      inputReviewContext: {
+        presentingInteractionNodeId: assetInteraction?.graphNodeId,
+        presentingLayerId: assetLayerId,
+        nodeId: node.id,
+      },
       onNavigate: async (action) => {
         if (!await prepareNodeContextSelectionChange()) return;
         if (usesResolvedInvokeDestination(action, getThread()?.imported)) {

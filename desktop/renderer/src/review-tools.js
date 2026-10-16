@@ -1,4 +1,4 @@
-import { compiledNodeDetailReviewControls } from "./product-workspace/node-detail-runtime.js";
+import { compiledNodeDetailReviewControls, compiledNodeDetailReviewCaptureRegions } from "./product-workspace/node-detail-runtime.js";
 import { controlActivationCompletionFor } from "./control-activation.js";
 
 const CONTROL_SELECTOR = [
@@ -194,6 +194,22 @@ export function createReviewPresentationAdapter({
       });
   }
 
+  function compiledInputCaptures() {
+    const presentation = getPresentationState();
+    return compiledNodeDetailReviewCaptureRegions(getReviewRoot()).filter(region => {
+      const control = region.controlElement;
+      const style = windowObject.getComputedStyle(control);
+      const rect = control.getBoundingClientRect();
+      return String(region.occurrence.presentingInteractionNodeId) === String(presentation.presentingInteractionNodeId)
+        && String(region.occurrence.presentingLayerId) === String(presentation.layerId)
+        && region.sourceNodeId === String(presentation.selectedNodeId)
+        && isVisibleElement(region.element, windowObject)
+        && !control.hidden && style.display !== "none" && style.visibility !== "hidden" && Number(style.opacity) !== 0
+        && (!control.checkVisibility || control.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true }))
+        && rect.width > 0 && rect.height > 0;
+    });
+  }
+
   function snapshot() {
     const presentation = getPresentationState();
     if (Array.isArray(presentation.navigationPath)) {
@@ -218,7 +234,8 @@ export function createReviewPresentationAdapter({
         height: windowObject.innerHeight,
         deviceScaleFactor: windowObject.devicePixelRatio,
       },
-      controls: [...controls(), ...visibleCaptureRegions(getReviewRoot(), windowObject)],
+      controls: [...controls(), ...visibleCaptureRegions(getReviewRoot(), windowObject),
+        ...compiledInputCaptures().map(({ element: _element, controlElement: _control, occurrence: _occurrence, sourceNodeId: _source, ...region }) => region)],
     };
   }
 
@@ -231,10 +248,11 @@ export function createReviewPresentationAdapter({
     const control = referencedElements.get(target.elementRef);
     const shownRoot = getReviewRoot();
     const captureTarget = [...(shownRoot.matches?.("[data-review-capture]") ? [shownRoot] : []), ...shownRoot.querySelectorAll("[data-review-capture]")]
-      .find((element) => element.dataset.reviewCapture === target.elementRef);
+      .find((element) => element.dataset.reviewCapture === target.elementRef)
+      ?? compiledInputCaptures().find(region => region.elementRef === target.elementRef)?.element;
     const element = control || captureTarget;
     if (!element) throw new Error(`Unknown review target: ${target.elementRef}`);
-    const revealableInput = captureTarget?.dataset.reviewCapture?.startsWith("input-action-");
+    const revealableInput = captureTarget && target.elementRef.startsWith("input-action-");
     if (!isVisibleElement(element, windowObject) && revealableInput && captureTarget.scrollIntoView) {
       captureTarget.scrollIntoView({ block: "nearest", inline: "nearest" });
       await nextFrame(windowObject);

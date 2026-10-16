@@ -527,6 +527,10 @@ async function boot() {
           threadRevision: `thread:${threadId}:updated:${thread?.updatedAt ?? "unknown"}`
             + `:input-draft:${appState.inputDraftRevision ?? "none"}:interactions:${interactionRevision}`,
           turnId: viewState.currentInteractionId,
+          presentingInteractionNodeId: appState.interactions.find(interaction => (
+            String(interaction.id) === String(viewState.currentInteractionId)
+            && String(interaction.threadId) === String(threadId)
+          ))?.graphNodeId ?? null,
           layerId: artifact?.layerId ?? appState.visibleLayer?.layer?.id ?? null,
           selectedNodeId: artifact?.selectedNodeId ?? viewState.selectedNodeId,
           navigationPath: artifact?.navigationPath ?? viewState.layerPath.map((entry) => ({
