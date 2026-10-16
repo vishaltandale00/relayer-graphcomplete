@@ -72,8 +72,15 @@ pub(super) async fn compatibility_on(
         // attempt, no graph interaction, and its row says so. It neither owns nor obscures the
         // conversation's route.
         let error: Option<String> = row.try_get("completion_error")?;
+        let bound = row.try_get::<Option<i64>, _>("graph_node_id")?.is_some();
+        let stale_returned = status == "failed"
+            && error
+                .as_deref()
+                .is_some_and(|error| error.starts_with(super::STALE_RETURNED_MESSAGE));
         if !has_attempts
-            && row.try_get::<Option<i64>, _>("graph_node_id")?.is_none()
+            // A stale returned message may already have a bound graph interaction; with no
+            // attempt it still never executed.
+            && (!bound || stale_returned)
             // Input restoration may append to the marker, so it is matched as a prefix.
             && ((status == "stopped"
                 && error

@@ -60,8 +60,9 @@ pub(crate) const STALE_RETURNED_MESSAGE: &str = "This message could not run, and
 /// Thread messages run in parallel (#719), so a message a model failure returned to unsent can
 /// be followed by later messages. Its draft is then stale: only the latest message can be
 /// retried in place (`interaction_retry_stale`). A message returned before any attempt began
-/// records no attempt; it is recognized by the harness its preparation recorded, which a message
-/// that was never prepared does not have. It is settled as failed, with its error, so it
+/// records no attempt, whether or not its graph interaction was already bound; it is recognized
+/// by the harness its preparation recorded, which a message that was never prepared does not
+/// have. It is settled as failed, with its error, so it
 /// never stays `not_started` and holds its thread out of the archive. Its restored inputs and
 /// context confirmations stay restored. Call this inside the transaction that creates a message
 /// or returns one to unsent.
@@ -70,7 +71,7 @@ pub(super) async fn fail_stale_returned_messages(
     thread_id: i64,
 ) -> Result<(), StorageError> {
     sqlx::query(
-        "UPDATE interactions SET completion_status='failed',completion_error=?2 WHERE thread_id=?1 AND completion_status='not_started' AND ((SELECT a.outcome FROM interaction_attempts a WHERE a.interaction_id=interactions.id ORDER BY a.attempt_number DESC LIMIT 1) IS 'model_failed' OR (harness_configuration_name IS NOT NULL AND graph_node_id IS NULL AND NOT EXISTS(SELECT 1 FROM interaction_attempts a WHERE a.interaction_id=interactions.id))) AND NOT EXISTS(SELECT 1 FROM action_invocations run WHERE run.result_interaction_id=interactions.id) AND EXISTS(SELECT 1 FROM interactions later WHERE later.thread_id=interactions.thread_id AND later.sequence>interactions.sequence AND NOT EXISTS(SELECT 1 FROM action_invocations run WHERE run.result_interaction_id=later.id))",
+        "UPDATE interactions SET completion_status='failed',completion_error=?2 WHERE thread_id=?1 AND completion_status='not_started' AND ((SELECT a.outcome FROM interaction_attempts a WHERE a.interaction_id=interactions.id ORDER BY a.attempt_number DESC LIMIT 1) IS 'model_failed' OR (harness_configuration_name IS NOT NULL AND NOT EXISTS(SELECT 1 FROM interaction_attempts a WHERE a.interaction_id=interactions.id))) AND NOT EXISTS(SELECT 1 FROM action_invocations run WHERE run.result_interaction_id=interactions.id) AND EXISTS(SELECT 1 FROM interactions later WHERE later.thread_id=interactions.thread_id AND later.sequence>interactions.sequence AND NOT EXISTS(SELECT 1 FROM action_invocations run WHERE run.result_interaction_id=later.id))",
     )
     .bind(thread_id)
     .bind(STALE_RETURNED_MESSAGE)
