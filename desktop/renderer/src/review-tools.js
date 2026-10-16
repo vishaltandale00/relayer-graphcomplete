@@ -79,7 +79,7 @@ export function isAccessibleControl(element, windowObject = window) {
 }
 
 export function visibleCaptureRegions(root = document, windowObject = window) {
-  return [...root.querySelectorAll("[data-review-capture]")]
+  return [...(root.matches?.("[data-review-capture]") ? [root] : []), ...root.querySelectorAll("[data-review-capture]")]
     .filter((element) => isVisibleElement(element, windowObject))
     .map((element) => ({
       elementRef: element.dataset.reviewCapture,
@@ -144,6 +144,7 @@ export function createReviewPresentationAdapter({
   navigateHistory,
   setInputOperatorCommitted = null,
   root = document,
+  getReviewRoot = () => root,
   windowObject = window,
 }) {
   if (!executionId) throw new Error("A review presentation adapter requires an execution ID.");
@@ -171,11 +172,12 @@ export function createReviewPresentationAdapter({
 
   function controls() {
     referencedElements.clear();
-    const authored = compiledNodeDetailReviewControls(root);
+    const shownRoot = getReviewRoot();
+    const authored = compiledNodeDetailReviewControls(shownRoot);
     for (const { element, kind, actionId } of authored) {
       authoredControlMetadata.set(element, { kind, actionId });
     }
-    return [...root.querySelectorAll(CONTROL_SELECTOR), ...authored.map(({ element }) => element)]
+    return [...shownRoot.querySelectorAll(CONTROL_SELECTOR), ...authored.map(({ element }) => element)]
       .filter((element) => isAccessibleControl(element, windowObject))
       .map((element) => {
         const elementRef = referenceFor(element);
@@ -216,7 +218,7 @@ export function createReviewPresentationAdapter({
         height: windowObject.innerHeight,
         deviceScaleFactor: windowObject.devicePixelRatio,
       },
-      controls: [...controls(), ...visibleCaptureRegions(root, windowObject)],
+      controls: [...controls(), ...visibleCaptureRegions(getReviewRoot(), windowObject)],
     };
   }
 
@@ -227,7 +229,8 @@ export function createReviewPresentationAdapter({
     }
     controls();
     const control = referencedElements.get(target.elementRef);
-    const captureTarget = [...root.querySelectorAll("[data-review-capture]")]
+    const shownRoot = getReviewRoot();
+    const captureTarget = [...(shownRoot.matches?.("[data-review-capture]") ? [shownRoot] : []), ...shownRoot.querySelectorAll("[data-review-capture]")]
       .find((element) => element.dataset.reviewCapture === target.elementRef);
     const element = control || captureTarget;
     if (!element) throw new Error(`Unknown review target: ${target.elementRef}`);

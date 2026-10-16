@@ -1,4 +1,5 @@
 import { proveActorScroll } from "./eval-actor-scroll-proof.mjs";
+import { proveArtifactReview } from "./eval-artifact-review-proof.mjs";
 import { CalibrationService } from "../desktop/eval-main/calibration-service.mjs";
 import { SetupRegistry, setupDigest } from "../desktop/eval-main/setup-registry.mjs";
 import assert from "node:assert/strict";
@@ -97,6 +98,7 @@ try {
   } finally { clearTimeout(timeout); if (pending.exitCode === null) pending.kill("SIGKILL"); }
   console.log("PASS interrupted startup: pending native child terminated and profile lock released");
   const browser = await chromium.launch(); resources.push(browser);
+  await proveArtifactReview({ browser, directory });
   const host = await launchHost();
   const duplicate = spawn(process.execPath, ["desktop/eval-main/index.mjs"], {
     env: { ...Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith("RELAYER_EVAL_AUTORUN"))), RELAYER_EVAL_USER_DATA_DIR: join(directory, "host"), RELAYER_EVAL_PRIME_PROFILE_FILE: "" }, stdio: "ignore",

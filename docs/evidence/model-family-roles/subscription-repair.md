@@ -139,3 +139,56 @@ and budgets match the prior protocol. Prior partial reviews and journals remain
 separate; reopened task/accepted-turn identities must equal the pre-regrade
 baseline. All ten controller syntax checks passed. Actual freeze and live
 outcomes remain separately required.
+
+## Follow-up: visible artifact attribution
+
+V3 completed both original Claude artifact-case reviews with full coverage.
+Their accepted topologies each contain one ordinary graph layer and no artifact
+layer; their complete evidence is retained without another inference call.
+The Codex artifact-case review remained partial. Production navigation opened
+the artifact viewer while preserving its source graph, but the judge bridge
+continued reporting the source layer/node. This caused a false navigation
+failure and correctly rejected destination evidence. The observed browser
+viewer displayed an availability card, not a running local web app.
+
+Product authority: PRD §§6.6.1, 6.6.2, 6.6.10, 13.4.3–4; ADR 0014.
+No product decision, scoring rule or evidence predicate changed.
+
+| Checkpoint | Changed production seam | Smallest deterministic evidence |
+| --- | --- | --- |
+| Accepted artifact identity and traversed path describe visible pixels, retaining source graph | `threads.js` accepted navigation; `artifact-viewer.js` cloned modal presentation; `main.js` judge getter | `eval-artifact-review-proof.mjs`: actual native acceptance, read-only production review, successful navigation, target IDs/path, availability-card pixels, exact Graph/Esc restoration |
+| Covered graph controls cannot activate or stand in for artifact detail | `review-tools.js` current trusted review root, enumeration and target lookup | Same Product journey rejects stale covered controls and source capture; exposes viewer region; rejects closed viewer and wrong-turn identity |
+| Source/wrong-turn screenshots still fail artifact evidence | Existing recursive evidence validator, unchanged | Same journey validates actual viewer capture and rejects source/wrong-turn metadata |
+| A close/navigation during platform capture cannot mislabel pixels | `review-session.mjs` before/after checks for every tile | Two in-process `review-session.test.mjs` cases: viewport and element races reject, persist no bytes/metadata or success trace, restore element capture |
+| Heavy fixture executes with ordinary Eval proof | `test-eval-web.mjs` new chapter | Existing `npm run test:eval-web` entry point; no paid default-suite inference |
+
+The accepted Product fixture first reproduced the exact false navigation error.
+The capture-race fixtures first failed twice by accepting mislabeled pixels;
+after the guard they passed. Focused final verification: 140 tests across five
+selected files passed. `npm run build` passed. The full check failed in the
+unchanged native `command_runner_enforces_start_timeout_and_output_bounds`
+test (434 passed, one failed); it did not reach the later aggregate chapters.
+The aggregate remains failed, not certified by focused passes. The complete
+Eval browser entry was also attempted twice: the new accepted-artifact chapter
+passed both times, but later chapters failed (Current actor Product startup
+timeout, then settled actor fixture startup interruption). Their causes are not
+established by the discarded exception details; no complete-browser pass is
+claimed for this snapshot. Earlier successful browser proof does not certify
+these new source bytes. The relevant accepted-artifact and capture-race pilots
+are green; the wider failures remain explicit limits on readiness.
+
+Adversarial reviewer `/root/repair_authority_review`: eight source/test files,
+scope digest `a28c51e66b2292f7135b2422b0a404f4c20240fcc25388ddee1433134f67612a`
+(same digest algorithm). No remaining authority/presentation blockers. Reviewer
+independently observed the capture-race red and reran its two regressions green.
+Source graph preservation, strict evidence, trusted modal scoping and wrong-turn
+rejection reviewed. No implementation or inference delegated. This assertion
+does not certify aggregate gates or live review outcomes.
+
+V4 retains V2/V3 partial attempts and permanent admission journals. Two complete
+V3 grades carry their exact source/evidence provenance and verified absence of
+artifact layers. Six original accepted graphs remain to review before any of
+the same nine missing/replacement candidate cells can start. All inference
+routes remain subscription-only; the original candidate native binaries,
+prompts, models and family/guidance assignments remain pinned. The evaluator
+and viewer operational amendments prevent an identical-code replay claim.

@@ -1237,6 +1237,14 @@ function artifactViewer() {
   return sharedArtifactViewer;
 }
 
+export function artifactReviewPresentation() {
+  const presentation = sharedArtifactViewer?.reviewPresentation({ threadId: viewState.currentThreadId, turnId: viewState.currentInteractionId }) ?? null;
+  if (sharedArtifactViewer?.isOpen() && presentation === null) {
+    throw new Error("The visible artifact does not belong to the selected review thread and turn.");
+  }
+  return presentation;
+}
+
 const inertInvocationPresentations = new Map();
 const inertPresentationKey = (threadId, turnId) => `${threadId}\u0000${turnId}`;
 
@@ -1417,6 +1425,15 @@ export async function navigateLayer(layerId, navigation = {}) {
       artifactViewer().open({
         threadId: pendingNavigation.threadId,
         node: artifactNode,
+        presentation: {
+          turnId: pendingNavigation.interactionId,
+          layerId: layer.layer.id,
+          selectedNodeId: artifactNode.id,
+          navigationPath: (navigation.restore
+            ? pendingNavigation.layerPath.slice(0, navigation.pathIndex + 1)
+            : appendLayerPath(pendingNavigation.layerPath, navigation.action, navigation.sourceNode, layerId))
+            .map((entry) => ({ layerId: entry.layerId, viaActionId: entry.actionId ?? entry.viaActionId ?? null })),
+        },
         target: interaction?.graphNodeId == null ? null : { nodeId: artifactNode.id, sourceInteractionNodeId: interaction.graphNodeId, sourceLayerId: layer.layer.id },
       });
       return;
