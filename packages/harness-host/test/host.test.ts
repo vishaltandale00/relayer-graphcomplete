@@ -3407,10 +3407,11 @@ describe("HarnessHost", () => {
       revision: current.revision! - 1,
       permissionBindings: { ...current.permissionBindings, auto: { approvalMode: "acceptEdits" } },
     };
-    const session = (configuration: HarnessConfiguration) => ({
-      threadId: 1, configuration, permissionProfileId: "auto", workingDirectory: directory,
+    const session = (threadId: number, configuration: HarnessConfiguration, permissionProfileId = "auto") => ({
+      threadId, configuration, permissionProfileId, workingDirectory: directory,
       state: { claudeSessionId: "existing-session" },
     });
+    const renamed = (configuration: HarnessConfiguration) => ({ ...configuration, name: "claude-custom" });
     let restoredState: HarnessSessionState | undefined;
     const warning = vi.spyOn(console, "warn").mockImplementation(() => undefined);
     const host = new HarnessHost({
@@ -3422,7 +3423,13 @@ describe("HarnessHost", () => {
       } },
     });
     try {
-      await writeFile(stateFile, JSON.stringify({ schemaVersion: 6, sessions: [session(saved), { ...session(saved), threadId: 2 }] }), { mode: 0o600 });
+      await writeFile(stateFile, JSON.stringify({ schemaVersion: 6, sessions: [
+        session(1, saved),
+        session(2, saved),
+        session(3, saved, "ask"),
+        session(4, { ...saved, permissionBindings: { ...saved.permissionBindings, full: { approvalMode: "default" } } }),
+        session(5, renamed(saved)),
+      ] }), { mode: 0o600 });
       await host.initialize();
 
       await host.createSession({ threadId: 1, permissionProfileId: "auto", configuration: current, workingDirectory: directory });
@@ -3437,6 +3444,13 @@ describe("HarnessHost", () => {
         configuration: { ...current, settings: { ...current.settings, unexpected: true } },
         workingDirectory: directory,
       })).rejects.toThrow("Thread 2 is already pinned");
+      // The upgrade covers the whole file, so an Ask-pinned thread resumes too.
+      await host.createSession({ threadId: 3, permissionProfileId: "ask", configuration: current, workingDirectory: directory });
+      // Only the Auto binding may move, and only for the product configurations.
+      await expect(host.createSession({ threadId: 4, permissionProfileId: "auto", configuration: current, workingDirectory: directory }))
+        .rejects.toThrow("Thread 4 is already pinned");
+      await expect(host.createSession({ threadId: 5, permissionProfileId: "auto", configuration: renamed(current), workingDirectory: directory }))
+        .rejects.toThrow("Thread 5 is already pinned");
     } finally {
       warning.mockRestore();
       await host.close();
