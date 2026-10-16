@@ -968,7 +968,7 @@ async function run() {
   if (disclosure.tag !== "DETAILS" || disclosure.open || disclosure.summaryTag !== "SUMMARY"
     || [...disclosure.value].length !== 80 || !disclosure.value.endsWith("…") || !disclosure.valueOneLine || !disclosure.listScrolls) throw new Error(`Submitted long input history row is wrong: ${JSON.stringify(disclosure)}`);
   await evaluate(`${historyRow}.querySelector('summary').click()`);
-  await waitFor("submitted input full text opens", () => evaluate(`(() => { const row = ${historyRow}; const value = row.querySelector('summary>span:last-child'); return row.open && value.textContent === ${JSON.stringify(submittedTextValue)} && getComputedStyle(value).whiteSpace === 'pre-wrap'; })()`));
+  await waitFor("submitted input full text opens", () => evaluate(`(() => { const row = ${historyRow}; const full = row.querySelector(':scope>.interaction-input-history-full'); return row.open && full?.textContent === ${JSON.stringify(submittedTextValue)} && getComputedStyle(full).whiteSpace === 'pre-wrap' && [...row.querySelector('summary>span:last-child').textContent].length === 80; })()`));
 
   const authoredTurnId = acceptedThread.interactions[0].id;
   await window.loadURL(`${productSession.origin}/?threadId=${encodeURIComponent(thread.id)}&interactionId=${encodeURIComponent(authoredTurnId)}&review=1`);

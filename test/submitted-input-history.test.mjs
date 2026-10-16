@@ -7,7 +7,7 @@ const actualFixture = JSON.parse(readFileSync(new URL("./fixtures/inert-returned
 afterEach(() => vi.unstubAllGlobals());
 
 describe("submitted input history in the turn banner", () => {
-  it("keeps collapsed rows bounded, opens the exact value, and survives refreshes", async () => {
+  it("keeps the toggle label bounded, mounts the exact value only while open, and survives refreshes", async () => {
     const { detail, sourceLayer } = structuredClone(actualFixture);
     const window = new Window({ url: "http://127.0.0.1:3000" });
     vi.stubGlobal("document", window.document); vi.stubGlobal("window", window);
@@ -33,8 +33,12 @@ describe("submitted input history in the turn banner", () => {
       expect([...value.textContent]).toHaveLength(80);
       expect(value.textContent.endsWith("…")).toBe(true);
 
+      expect(row.querySelector(".interaction-input-history-full")).toBeNull();
+
       row.open = true;
-      await vi.waitFor(() => expect(value.textContent).toBe(exact));
+      await vi.waitFor(() => expect(row.querySelector(".interaction-input-history-full")?.textContent).toBe(exact));
+      expect(row.querySelector(".interaction-input-history-full").parentElement).toBe(row);
+      expect([...row.querySelector("summary").textContent]).toHaveLength("Deployment rationale".length + 80);
       const list = host.querySelector(".interaction-input-history-list");
       list.scrollTop = 40;
       workspace.render();
@@ -43,7 +47,8 @@ describe("submitted input history in the turn banner", () => {
       expect(list.scrollTop).toBe(40);
 
       row.open = false;
-      await vi.waitFor(() => expect([...value.textContent]).toHaveLength(80));
+      await vi.waitFor(() => expect(row.querySelector(".interaction-input-history-full")).toBeNull());
+      expect([...value.textContent]).toHaveLength(80);
 
       source.submittedInputs = source.submittedInputs.slice(1);
       workspace.render();

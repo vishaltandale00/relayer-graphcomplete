@@ -4795,9 +4795,17 @@ export function createProductWorkspace({
       prompt.textContent = input.action?.prompt || "Input";
       const value = graphDocument.createElement("span");
       const { compactValue, fullValue } = submittedInputHistoryPresentation(input);
-      // A closed row holds only the bounded prefix; the exact value is laid out only while open.
+      // The summary (the toggle's accessible name) holds only the bounded prefix; the exact
+      // value is mounted as the row's body only while it is open.
       value.textContent = compactValue;
-      item.addEventListener("toggle", () => { value.textContent = item.open ? fullValue : compactValue; });
+      // Not a <p>: the banner clamps its paragraphs to two lines.
+      const full = graphDocument.createElement("div");
+      full.className = "interaction-input-history-full";
+      item.addEventListener("toggle", () => {
+        full.textContent = item.open ? fullValue : "";
+        if (item.open) item.append(full);
+        else full.remove();
+      });
       summary.append(prompt, value);
       item.append(summary);
       list.append(item);

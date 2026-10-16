@@ -342,7 +342,8 @@ describe("product workspace keyboard behavior", () => {
     const styles = await readFile(new URL("../desktop/renderer/styles.css", import.meta.url), "utf8");
     expect(styles).toContain(".interaction-input-history-list{max-height:8em;overflow-y:auto");
     expect(styles).toContain(".interaction-input-history-item>summary>span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap");
-    expect(styles).toContain(".interaction-input-history-item[open]>summary>span{white-space:pre-wrap");
+    expect(styles).toContain(".interaction-input-history-item[open]>summary>span:last-child{display:none}");
+    expect(styles).toContain(".interaction-input-history-full{margin:0;padding:.45em 2px;line-height:1.35;color:var(--text);white-space:pre-wrap");
     expect(styles).toContain('.interaction-input-history-item>summary>span:first-child::before{content:"▸"/""');
     expect(styles).toContain('.interaction-input-history-item[open]>summary>span:first-child::before{content:"▾"/""}');
   });
