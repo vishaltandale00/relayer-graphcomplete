@@ -34,6 +34,13 @@ export function selectEvalPermissionProfile(configuration: HarnessConfiguration)
 }
 
 export interface EvalCheck { readonly name: string; readonly passed: boolean; readonly detail: string }
+
+export interface EvalCapabilityCoverage {
+  readonly capability: string;
+  readonly status: "passed" | "failed" | "not_exercised" | "unknown";
+  readonly attempts: number | null;
+  readonly checks: readonly EvalCheck[];
+}
 export interface GraphMemoryAuditEvent {
   readonly sequence: number;
   readonly method: string;
@@ -199,6 +206,57 @@ export function readGraphMemoryEvidence(
   };
 }
 
+/** Memory correctness is independent of the mechanism used to retrieve the original. */
+export function checkGraphMemoryRetrieval(
+  output: CompletionOutput,
+  firstOutput: CompletionOutput,
+  evidence: GraphMemoryEvidence,
+  expectedInteractionNodeId = output.nodeId,
+): EvalCheck[] {
+  const priorLayerId = firstOutput.rootLayer.layer.id;
+  const firstReturn = evidence.auditEvents.find(event => isReturnAcknowledgement(event, firstOutput)
+    && event.sequence <= evidence.secondTurnStartSequence);
+  const finalReturn = evidence.auditEvents.find(event => isReturnAcknowledgement(event, output)
+    && event.sequence > evidence.secondTurnStartSequence);
+  const reference = evidence.auditEvents.find(event => event.method === "POST"
+    && event.path === "/api/graph/actions" && event.status >= 200 && event.status < 300
+    && event.sequence > evidence.secondTurnStartSequence
+    && output.rootLayer.actions.some(action => action.id === event.recordId
+      && action.state === "accepted" && action.kind === "navigate" && action.relation === "reference"
+      && action.sourceLayerId === output.rootLayer.layer.id && action.targetLayerId === priorLayerId
+      && output.rootLayer.nodes.some(node => node.id === action.sourceNodeId)
+      && event.actionKind === action.kind && event.actionRelation === action.relation
+      && event.actionSourceNodeId === action.sourceNodeId && event.actionSourceLayerId === action.sourceLayerId
+      && event.actionTargetLayerId === action.targetLayerId));
+  const sectionNodes = graphMemorySections(firstOutput, graphMemorySearchTitle).count === 1
+    ? firstOutput.rootLayer.nodes.filter(node => graphMemorySections({
+      ...firstOutput, rootLayer: { ...firstOutput.rootLayer, nodes: [node] },
+    }, graphMemorySearchTitle).count === 1) : [];
+  const readPaths = new Set([
+    `/api/graph/layers/${priorLayerId}`,
+    `/api/graph/nodes/${firstOutput.nodeId}/output`,
+    ...sectionNodes.map(node => `/api/graph/nodes/${node.id}`),
+  ]);
+  const retrieval = evidence.auditEvents.find(event => event.status >= 200 && event.status < 300
+    && event.sequence > evidence.secondTurnStartSequence
+    && firstReturn !== undefined && event.sequence > firstReturn.sequence
+    && reference !== undefined && event.sequence < reference.sequence
+    && ((event.method === "GET" && readPaths.has(event.path))
+      || (event.method === "POST" && event.path === "/api/graph/search"
+        && event.searchLayerIds?.includes(priorLayerId))));
+  return [
+    ...checkBasicOutput(output, expectedInteractionNodeId),
+    { name: "prior-context-retrieved", passed: retrieval !== undefined,
+      detail: "A scoped read or typed search result recovered the original accepted explanation during the follow-up." },
+    { name: "typed-reference-target", passed: reference !== undefined,
+      detail: "The new accepted root contains the audited typed reference to this execution's exact original root." },
+    { name: "ack-retrieval-return-order", passed: retrieval !== undefined && reference !== undefined
+        && finalReturn !== undefined && reference.sequence < finalReturn.sequence,
+      detail: "Exact first Return, follow-up retrieval, matching reference and exact final Return are ordered in the server audit." },
+  ];
+}
+
+/** Strict search conformance, retained independently of memory correctness. */
 export function checkGraphMemorySecondTurn(
   output: CompletionOutput,
   firstOutput: CompletionOutput,

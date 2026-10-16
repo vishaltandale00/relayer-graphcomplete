@@ -1041,9 +1041,10 @@ describe("Relayer Eval application service", () => {
 
     expect(definition).toMatchObject({
       name: "Graph memory · prior accepted reference",
-      description: expect.stringContaining("prior accepted layer"),
+      description: expect.stringContaining("original accepted explanation"),
       defaultSelected: false,
     });
+    expect(definition.description).toContain("graph-search coverage separately");
     expect(firstRun).toEqual(graphMemoryEvalPrompts("run-alpha"));
     expect(firstRun).toHaveLength(2);
     expect(firstRun.join("\n")).not.toContain("GRAPH_MEMORY_ANCHOR:");
@@ -1119,11 +1120,19 @@ describe("Relayer Eval application service", () => {
     expect(execution.turns).toHaveLength(2);
     expect(execution.turns.every((turn) => !turn.prompt.includes("GRAPH_MEMORY_ANCHOR:"))).toBe(true);
     expect(execution.turns[1].deterministicChecks).toEqual(expect.arrayContaining([
-      expect.objectContaining({ name: expect.stringContaining("search-returned-prior-root"), passed: true }),
-      expect.objectContaining({ name: expect.stringContaining("draft-decoy-hidden"), passed: true }),
+      expect.objectContaining({ name: expect.stringContaining("prior-context-retrieved"), passed: true }),
       expect.objectContaining({ name: expect.stringContaining("typed-reference-target"), passed: true }),
-      expect.objectContaining({ name: expect.stringContaining("ack-search-submit-order"), passed: true }),
+      expect.objectContaining({ name: expect.stringContaining("ack-retrieval-return-order"), passed: true }),
     ]));
+    expect(execution.caseGradingVersion).toBe("graph-memory-retrieval-v2");
+    expect(execution.turns[1].capabilityCoverage).toMatchObject([{
+      capability: "graph-search", status: "passed", attempts: 1,
+      checks: expect.arrayContaining([
+        expect.objectContaining({ name: "search-returned-prior-root", passed: true }),
+        expect.objectContaining({ name: "draft-decoy-hidden", passed: true }),
+        expect.objectContaining({ name: "ack-search-submit-order", passed: true }),
+      ]),
+    }]);
     expect(execution.turns[1].caseEvidence).toMatchObject({
       searchedLayerIds: [execution.turns[0].rootLayerId],
       referenceActionId: expect.any(Number),
@@ -1135,6 +1144,7 @@ describe("Relayer Eval application service", () => {
     ]);
     const persisted = JSON.parse(await readFile(join(dataDirectory, "eval-data", "test-runs.json"), "utf8"));
     expect(JSON.stringify(persisted)).toContain('"authoringErrors"');
+    expect(persisted.runs[0].executions[0].turns[1].capabilityCoverage).toEqual(execution.turns[1].capabilityCoverage);
 
     const secondTrace = await evalService.candidateTraceContext(
       execution.id,
@@ -1441,8 +1451,10 @@ describe("Relayer Eval application service", () => {
       judgeConfigurationName: "deterministic-graph-contract",
     });
     const launderedCompleted = await waitForCompletedRun(launderedEvalService, launderedRun.id, 20_000);
-    expect(launderedCompleted.status).toBe("failed");
-    expect(launderedCompleted.executions[0].turns[1].deterministicChecks).toEqual(expect.arrayContaining([
+    expect(launderedCompleted.status).toBe("passed");
+    expect(launderedCompleted.executions[0].outcomeGrade.qualified).toBe(true);
+    expect(launderedCompleted.executions[0].turns[1].capabilityCoverage[0].status).toBe("failed");
+    expect(launderedCompleted.executions[0].turns[1].capabilityCoverage[0].checks).toEqual(expect.arrayContaining([
       expect.objectContaining({
         name: expect.stringContaining("search-request-contract"),
         passed: false,

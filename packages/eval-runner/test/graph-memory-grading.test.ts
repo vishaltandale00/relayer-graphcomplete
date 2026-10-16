@@ -48,13 +48,23 @@ function scenario(temporalFirst = true, temporalSecond = true) {
     execution: { harnessConfiguration: { implementation: "codex.basic" }, turns: [{ graphOperations: firstEvents }, { graphOperations: secondEvents }] },
     interactions: [{ graphNodeId: 1, completionOutput: first }, { graphNodeId: 2, completionOutput: second }],
   });
-  return { first, firstEvents, secondEvents, grade };
+  return { first, second, firstEvents, secondEvents, grade };
 }
 
 describe("graph-memory grading through the exported production seam", () => {
+  it("passes pointer retrieval separately from unexercised search coverage", async () => {
+    const s = scenario();
+    s.secondEvents.splice(0, 1, { method: "GET", path: "/api/graph/layers/101", status: 200, sequence: 20 });
+    const result = await s.grade();
+    expect(result.turns.flatMap(turn => turn.checks).filter(check => !check.passed)).toEqual([]);
+    expect(result.turns[1]!.capabilityCoverage).toMatchObject([{
+      capability: "graph-search", status: "not_exercised", attempts: 0,
+    }]);
+  });
   it.each([[true, true], [false, false], [true, false], [false, true]])("accepts exact HTML target and successful search with temporal acknowledgements %s/%s", async (first, second) => {
     const result = await scenario(first, second).grade();
     expect(result.turns.flatMap(turn => turn.checks).filter(check => !check.passed)).toEqual([]);
+    expect(result.turns[1]!.capabilityCoverage?.[0]?.status).toBe("passed");
   });
 
   it.each([
@@ -71,7 +81,8 @@ describe("graph-memory grading through the exported production seam", () => {
       const event = position === "first" ? s.firstEvents[0]! : s.secondEvents[2]!;
       Object.assign(event, patch);
       const result = await s.grade();
-      expect(result.turns[1]!.checks.find(check => check.name === "ack-search-submit-order")?.passed).toBe(false);
+      expect(result.turns[1]!.checks.find(check => check.name === "ack-retrieval-return-order")?.passed).toBe(false);
+      expect(result.turns[1]!.capabilityCoverage?.[0]?.checks.find(check => check.name === "ack-search-submit-order")?.passed).toBe(false);
     }
   });
 
@@ -95,7 +106,70 @@ describe("graph-memory grading through the exported production seam", () => {
     const checkpoint = boundary === "empty" || boundary === "truncated" ? "search-returned-prior-root"
       : boundary === "wrong-title" || boundary === "unrelated-title" ? "search-request-contract"
       : boundary === "wrong-reference" ? "typed-reference-target" : "ack-search-submit-order";
-    expect(result.turns[1]!.checks.find(check => check.name === checkpoint)?.passed).toBe(false);
+    const checks = boundary === "wrong-reference" ? result.turns[1]!.checks : result.turns[1]!.capabilityCoverage![0]!.checks;
+    expect(checks.find(check => check.name === checkpoint)?.passed).toBe(false);
+  });
+
+  it.each([
+    { path: "/api/graph/layers/101", status: 200, accepted: true },
+    { path: "/api/graph/nodes/1/output", status: 200, accepted: true },
+    { path: "/api/graph/nodes/1001", status: 200, accepted: true },
+    { path: "/api/graph/nodes/1/input", status: 200, accepted: false },
+    { path: "/api/graph/history", status: 200, accepted: false },
+    { path: "/api/graph/nodes/2/output", status: 200, accepted: false },
+    { path: "/api/graph/layers/999", status: 200, accepted: false },
+    { path: "/api/graph/layers/101", status: 403, accepted: false },
+  ])("grades scoped retrieval $path/$status independently of search", async ({ path, status, accepted }) => {
+    const s = scenario();
+    s.secondEvents.splice(0, 1, { method: "GET", path, status, sequence: 20 });
+    const result = await s.grade();
+    expect(result.turns.flatMap(turn => turn.checks).every(check => check.passed)).toBe(accepted);
+    expect(result.turns[1]!.capabilityCoverage?.[0]?.status).toBe("not_exercised");
+  });
+
+  it.each(["failed search", "failed then successful search", "truncated search", "extra search"])("keeps %s visible after successful pointer recovery", async boundary => {
+    const s = scenario();
+    if (boundary === "failed search") Object.assign(s.secondEvents[0]!, { status: 503, searchLayerIds: [] });
+    if (boundary === "truncated search") Object.assign(s.secondEvents[0]!, { resultTruncated: true });
+    if (boundary === "extra search") s.secondEvents.push({ ...s.secondEvents[0]!, sequence: 21 });
+    if (boundary === "failed then successful search") s.secondEvents.push({ ...s.secondEvents[0]!, status: 503, searchLayerIds: [], sequence: 19 });
+    s.secondEvents.push({ method: "GET", path: "/api/graph/layers/101", status: 200, sequence: 22 });
+    const result = await s.grade();
+    expect(result.turns.flatMap(turn => turn.checks).every(check => check.passed)).toBe(true);
+    expect(result.turns[1]!.capabilityCoverage?.[0]?.status).toBe("failed");
+  });
+
+  it.each(["before first Return", "after reference", "wrong audited source", "missing audit"])("rejects %s as memory proof", async boundary => {
+    const s = scenario();
+    s.secondEvents.splice(0, 1, { method: "GET", path: "/api/graph/layers/101", status: 200,
+      sequence: boundary === "before first Return" ? 5 : boundary === "after reference" ? 35 : 20 });
+    if (boundary === "wrong audited source") Object.assign(s.secondEvents[1]!, { actionSourceNodeId: 999 });
+    if (boundary === "missing audit") s.secondEvents.splice(0);
+    const result = await s.grade();
+    expect(result.turns.flatMap(turn => turn.checks).every(check => check.passed)).toBe(false);
+    if (boundary === "missing audit") expect(result.turns[1]!.capabilityCoverage?.[0]?.status).toBe("unknown");
+  });
+
+  it("rejects reading an unrelated Node in the correct original layer", async () => {
+    const s = scenario();
+    Reflect.set(s.first.rootLayer, "nodes", [...s.first.rootLayer.nodes,
+      { id: 1003, kind: "concept", icon: "info", title: "Other", detail: "Not the requested explanation", state: "accepted" }]);
+    Reflect.set(s.first.rootLayer.layer, "nodes", [1001, 1003]);
+    Reflect.set(s.first.rootLayer.layer.layout!, "placements", [{ nodeId: 1001, x: 0.25, y: 0.5 }, { nodeId: 1003, x: 0.75, y: 0.5 }]);
+    Reflect.set(s.first.rootLayer, "edges", [{ id: 400, endpoints: [1001, 1003], state: "accepted" }]);
+    Reflect.set(s.first.rootLayer.layer, "edges", [400]);
+    s.secondEvents.splice(0, 1, { method: "GET", path: "/api/graph/nodes/1003", status: 200, sequence: 20 });
+    const result = await s.grade();
+    expect(result.turns[0]!.checks.every(check => check.passed)).toBe(true);
+    expect(result.turns[1]!.checks.find(check => check.name === "prior-context-retrieved")?.passed).toBe(false);
+  });
+
+  it("rejects an accepted reference to a copy even when the real original was retrieved", async () => {
+    const s = scenario();
+    Reflect.set(s.second.rootLayer.actions[0]!, "targetLayerId", 999);
+    Object.assign(s.secondEvents[1]!, { actionTargetLayerId: 999 });
+    const result = await s.grade();
+    expect(result.turns[1]!.checks.find(check => check.name === "typed-reference-target")?.passed).toBe(false);
   });
 });
 

@@ -87,7 +87,7 @@ export const evalCases = Object.freeze([
   Object.freeze({
     id: graphMemoryEvalCaseId,
     name: "Graph memory · prior accepted reference",
-    description: "Searches a prior accepted layer in a second turn and retains the typed reference in one real product thread.",
+    description: "Retrieves and references the original accepted explanation; reports graph-search coverage separately.",
     defaultSelected: false,
     promptsForRun: graphMemoryEvalPrompts,
     gradeExecution: gradeGraphMemoryExecution,
@@ -2278,6 +2278,7 @@ export class EvalService {
             interactions,
             loadGraphOperations: (turn) => this.#loadGraphOperations(execution, turn),
           });
+          if (caseGrade?.version !== undefined) execution.caseGradingVersion = caseGrade.version;
         } catch (error) {
           execution.promotable = false;
           caseGrade = {
@@ -2314,6 +2315,8 @@ export class EvalService {
           })));
           const caseEvidence = caseGrade?.turns?.[turnIndex]?.evidence;
           if (caseEvidence !== undefined) turn.caseEvidence = copy(caseEvidence);
+          const capabilityCoverage = caseGrade?.turns?.[turnIndex]?.capabilityCoverage;
+          if (capabilityCoverage !== undefined) turn.capabilityCoverage = copy(capabilityCoverage);
           if (definition.requiredChecks?.includes("node-navigation")) {
             turnChecks.push(...checkNodeNavigation(interaction.completionOutput).map((check) => ({
               ...check,

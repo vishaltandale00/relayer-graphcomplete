@@ -11,6 +11,21 @@ import {
 } from "../desktop/eval-renderer/run-model.js";
 
 describe("Eval dashboard run presentation", () => {
+  it.each(["not_exercised", "failed", "passed", "unknown"])("keeps %s capability coverage separate from memory qualification", status => {
+    const execution = {
+      id: "memory", status: "passed", testCaseId: "graph-memory.prior-accepted-reference",
+      checks: [{ name: "typed-reference-target", passed: true, detail: "Exact original." }],
+      turns: [{}, { capabilityCoverage: [{ capability: "graph-search", status, attempts: status === "not_exercised" ? 0 : 1,
+        checks: [{ name: "search-request-contract", passed: status === "passed", detail: "Bounded title query." }],
+      }] }],
+    };
+    const dossier = projectExecutionDossier({ kind: "local-eval" }, execution);
+    expect(dossier.substance.qualified).toBe(true);
+    expect(dossier.substance.gates).toHaveLength(1);
+    expect(dossier.capabilityCoverage).toMatchObject([{ status, label: "Turn 2 · Graph search" }]);
+    expect(projectExecutionDossier({ kind: "local-eval" }, { ...execution, turns: [{}] }).capabilityCoverage)
+      .toMatchObject([{ status: "unknown", checks: [] }]);
+  });
   it("filters judge choices against selected case requirements", () => {
     const cases = [{
       id: "input-roundtrip",

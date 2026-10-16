@@ -9,7 +9,7 @@
     "contracts/share-service-v1/contract.json": "d289317c75a44675b9bb6f4b8856f4e8f30cff7948ca27f8cfee72b7ba4b7d8d",
     "scripts/capture-share-preview-evidence.mjs": "4510e3a54f6b658c2df86b1a06afc8ca2428a36693a93648786bd4e075327562",
     "test/fixtures/social-preview.jsonl": "ff4a4545de49ccc20562f2f763b6a120d87fa37f7703a994abeb71b219a405aa",
-    "desktop/shared/telemetry-module-inventory.mjs": "f9fa4da180dce3464dc3e763d2e638a8f127008c7528aa635576a7903907e014"
+    "desktop/shared/telemetry-module-inventory.mjs": "a80a446e56aaa72cd684e75b5effb7766b35e33c81c2d5cacd387c341b07d628"
   },
   "rendererArtifact": {
     "directory": "desktop/renderer",
