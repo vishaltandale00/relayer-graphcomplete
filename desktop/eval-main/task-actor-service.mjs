@@ -4,7 +4,7 @@ import { createCompletionJudge as createNativeCompletionJudge, validateCompletio
 import { randomUUID } from "node:crypto";
 import { abortable } from "./abortable.mjs";
 import { setTimeout as delay } from "node:timers/promises";
-import { ACTOR_ACTION_SCHEMA, ACTOR_OBSERVATION_CONTRACT, ACTOR_SETTLED_OBSERVATION_CONTRACT, ACTOR_PROMPT_VERSION, actorConfiguration, actorPrompt, createCodexTaskActor, validateActorAction } from "./task-actor.mjs";
+import { ACTOR_NATIVE_CALL_TIMEOUT_MS, ACTOR_ACTION_SCHEMA, ACTOR_OBSERVATION_CONTRACT, ACTOR_SETTLED_OBSERVATION_CONTRACT, ACTOR_PROMPT_VERSION, actorConfiguration, actorPrompt, createCodexTaskActor, validateActorAction } from "./task-actor.mjs";
 
 // Classification may inspect native errors, but evidence and UI use only these
 // closed categories and fixed messages; never copy provider text or error.name.
@@ -35,7 +35,10 @@ function actorFailure(error, { cancelled = false, timedOut = false } = {}) {
     invalid_action: "The actor response did not satisfy the action contract. No action was executed.",
     runtime_failure: "Actor runtime failed without claiming task success. No action is replayed automatically.",
   };
-  return { category, message: messages[category] };
+  return { category, message: messages[category],
+    ...(["prepare", "execute", "validate"].includes(error?.actorFailureStage) ? { nativeStage: error.actorFailureStage } : {}),
+    ...(["none", "unknown", "completed"].includes(error?.actorNativeDispatch) ? { nativeDispatch: error.actorNativeDispatch } : {}),
+  };
 }
 
 export class TaskActorService {
@@ -99,7 +102,7 @@ export class TaskActorService {
     let browser;
     let phase = "startup";
     try {
-      await this.tasks.actorEvent(id, "actor_started", { configuration: task.actor, prompt });
+      await this.tasks.actorEvent(id, "actor_started", { configuration: task.actor, prompt, nativeCallTimeoutMs: ACTOR_NATIVE_CALL_TIMEOUT_MS });
       actor = await this.createActor({ runtime, config: task.actor, prompt, outputSchema: task.actorSetup?.behaviorContract?.actionSchema });
       signal.throwIfAborted();
       const observationContract = task.actorSetup ? task.actorSetup.behaviorContract?.observationContract ?? null
