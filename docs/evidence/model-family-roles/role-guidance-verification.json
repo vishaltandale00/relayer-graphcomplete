@@ -53,6 +53,13 @@
       "testsPassed": 8,
       "testsFailed": 4,
       "boundary": "graph/app native readiness timeouts; no behavior pass claimed"
+    },
+    "serializedFocus": {
+      "status": "passed",
+      "files": 4,
+      "tests": 200,
+      "durationSeconds": 28.9,
+      "scope": "provider setup, input delivery, actor and host production seams"
     }
   },
   "logs": [
@@ -95,6 +102,10 @@
     {
       "path": "/Users/vishal/.relayer/role-guidance-ablation-20261016/compiled-runtime-final.log",
       "sha256": "ecc2a892fdb664a35d71da0aa0cab825d625b8248f917a38e5c1751090046992"
+    },
+    {
+      "path": "/Users/vishal/.relayer/role-guidance-ablation-20261016/limited-focus-final.log",
+      "sha256": "57efb3dadc2f5a881cc46902649e4d6ad9193d76fbc03cb18a695801e8ec1cef"
     }
   ],
   "limits": [
