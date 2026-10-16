@@ -250,7 +250,7 @@ async function run() {
   const project = await productRequest("/api/projects", { method: "POST", body: JSON.stringify({ path: repositoryRoot }) });
   const family = await productRequest("/api/model-families", {
     method: "POST",
-    body: JSON.stringify({ name: "Fixture", enabled: true, members: [{ providerId: "codex", modelId: "fixture-model" }] }),
+    body: JSON.stringify({ name: "Fixture", enabled: true, members: [{ providerId: "codex", modelId: "fixture-model", roles: [{ name: "orchestrator" }] }] }),
   });
   const thread = await productRequest("/api/threads", {
     method: "POST",
@@ -929,7 +929,7 @@ async function run() {
   if (lostThread.interactions.at(-1).submittedInputs.length !== 3
     || originalAttempt.contexts?.[0]?.annotations?.[0] !== "Preserve this click-time context through reconciliation."
     || originalAttempt.contextConfirmationIds?.length !== 1
-    || originalAttempt.modelSelection?.providerId !== "codex" || originalAttempt.modelSelection?.modelId !== "fixture-model") throw new Error("Lost response did not retain exact input/context/model submission.");
+    || originalAttempt.modelSelection?.providerId !== "codex" || originalAttempt.modelSelection?.modelId !== "fixture-model") throw new Error(`Lost response did not retain exact input/context/model submission: ${JSON.stringify({ submittedInputs: lostThread.interactions.at(-1).submittedInputs.length, originalAttempt })}`);
   await clickNode("Input grammar");
   await waitFor("reconciliation exposes externally retained text", () => evaluate("Boolean(document.querySelector('[aria-label=\"Detach Name the governing constraint\"]'))"));
   await click("[aria-label='Detach Name the governing constraint']");
