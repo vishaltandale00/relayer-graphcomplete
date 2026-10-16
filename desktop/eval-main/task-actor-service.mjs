@@ -214,6 +214,9 @@ export class TaskActorService {
           actionSchema.properties.kind.enum = actionSchema.properties.kind.enum.filter(kind => kind !== "next_step");
         }
         if (judgeInteractionRequired) actionSchema.properties.kind.enum = actionSchema.properties.kind.enum.filter(kind => kind !== "finish");
+        if (Array.isArray(observation.availableActions)) {
+          actionSchema.properties.kind.enum = actionSchema.properties.kind.enum.filter(kind => observation.availableActions.includes(kind));
+        }
         observation.availableActions = [...actionSchema.properties.kind.enum];
         if (completionJudgeFeedback) observation.completionJudgeFeedback = completionJudgeFeedback;
         if (finishRepairPending) observation.previousActionError = "Your previous finish decision was rejected before execution. Reconsider using the visible evidence. endpoint_reached requires endpointStatus reached and empty remainingWork. If work remains, report incomplete or uncertain with satisfied or abandoned. Do not erase unfinished work merely to satisfy the format.";
@@ -288,9 +291,9 @@ export class TaskActorService {
         else {
           try { await browser.act(action, { actionEventId: intent.id, observationEventId: observed.id }); }
           catch (error) {
-            // Only the browser's own checks before click/fill/select certify no
+            // Only the browser's own checks before click/fill/select/scroll certify no
             // dispatch. Playwright failures and product-write errors are ambiguous.
-            if (!["click", "fill", "select"].includes(action.kind) || error.actionDispatched !== false
+            if (!["click", "fill", "select", "scroll"].includes(action.kind) || error.actionDispatched !== false
               || !["actor_control_stale", "actor_control_unavailable"].includes(error.code)) throw error;
             const retryAllowed = !controlRepairPending && actionsUsed < task.actor.maxActions;
             await this.tasks.actorEvent(id, "actor_action_failed", { actionEventId: intent.id, actionDispatched: false,

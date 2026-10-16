@@ -1,3 +1,4 @@
+import { proveActorScroll } from "./eval-actor-scroll-proof.mjs";
 import { CalibrationService } from "../desktop/eval-main/calibration-service.mjs";
 import { SetupRegistry, setupDigest } from "../desktop/eval-main/setup-registry.mjs";
 import assert from "node:assert/strict";
@@ -560,6 +561,8 @@ async function proveTaskActor({ browser, service, productSession, data }) {
       controlPage = actorPage;
       actorCapability = new URL(actorPage.url()).hash.slice(1);
       await actorPage.locator(".graph-node").first().waitFor({ state: "visible" });
+      try { await proveActorScroll({ controller, page: actorPage }); }
+      catch (error) { console.error("Actor scroll browser proof failed:", error); throw error; }
       try {
       // Same-view polling must preserve the target even during native dispatch.
       {
@@ -1008,7 +1011,7 @@ async function proveTaskActor({ browser, service, productSession, data }) {
       "READ-001 preserves the source; opening the discoverable invoked result remains a user choice");
     for (const snapshot of snapshots) {
       assert.deepEqual(Object.keys(snapshot).sort(), [...["availableActions", "controls", "screenshot", "text"], ...(snapshot.completionJudgeFeedback ? ["completionJudgeFeedback"] : [])].sort());
-      assert.deepEqual(snapshot.availableActions, ["click", "fill", "select", "scroll", ...(snapshot === snapshots[6] ? [] : ["finish"])]);
+      assert.deepEqual(snapshot.availableActions, ["click", "fill", "select", ...(snapshot.controls.some(control => control.name === "Close node details") ? ["scroll"] : []), ...(snapshot === snapshots[6] ? [] : ["finish"])]);
       for (const control of snapshot.controls) assert.deepEqual(Object.keys(control).sort(), ["name", "ref", "role"]);
     }
     assert.ok(task.events.filter(event => event.kind === "actor_observation").every(event => !event.observation.screenshot && event.observation.screenshotArtifact));
@@ -1148,7 +1151,7 @@ async function proveTaskActor({ browser, service, productSession, data }) {
       const created = tasks.list().find(item => !beforeIndividual.has(item.id));
       return created && ["completed", "interrupted", "failed"].includes(created.status) ? tasks.get(created.id) : null;
     }, "independent completion selection completed through actual form");
-    assert.equal(individual.status, "completed");
+    assert.equal(individual.status, "completed", JSON.stringify(individual.events.filter(event => event.kind === "actor_error")));
     assert.equal(individual.evaluatorRelease, undefined);
     assert.deepEqual(individual.completionJudgeSetup, completionRevision);
     const individualExport = await tasks.export(individual.id);

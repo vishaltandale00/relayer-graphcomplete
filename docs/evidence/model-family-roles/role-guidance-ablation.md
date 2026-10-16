@@ -96,3 +96,54 @@ Review assertions bind their named narrower scopes within that exact workspace:
 The PR records these assertions. They do not certify the failed aggregate/browser
 chapters, physical UX, statistical quality or product-default promotion. A changed
 reviewed file invalidates its assertion.
+
+## Preserved partial cohort and clean scroll-repair cohort
+
+The initial frozen802e8765 cohort admitted only four artifact cells before new
+admissions stopped. Fresh reconciliation found three actor-completed sessions and
+one actor timeout; all four underlying Product runs were accepted. The remaining
+twelve cells were never admitted. The timeout was a scroll hover against the
+closed detail panel, not native graph failure. Actor completion does not imply
+endpoint attainment. Original task/export, witness and protocol-note files remain
+in the original private directory; none is replaced or pooled into the new cohort.
+
+The follow-up directory is
+`/Users/vishal/.relayer/role-guidance-ablation-20261016-scroll-fixed`.
+It has fresh Product databases and actor histories. Only qualified native runtime
+caches and subscription credential files are copied. The same four tasks and
+16-cell design apply. Pair order alternates across cases and is reversed across
+providers for each case. The actual shared actor deadline is60 minutes; no separate
+candidate-turn30-minute deadline is claimed. Actor, completion judge and graph
+judge revisions remain identical across arms. Whole-block ON/OFF remains the
+only candidate intervention. Source, native binaries, loaded hooks and exact
+admitted families are pinned before dispatch.
+
+The scroll repair maps to PRD13.2.3 in the simulated-user evidence README. Actual
+settled and both working browser journeys observe hidden-panel omission, a trusted
+wheel delivered within visible details, and refusal after closing the panel with
+no input. The fixture does not claim overflow displacement. Unit71 scenarios
+include schema/observation intersection, a fresh decision after certified scroll
+non-dispatch and terminal treatment of unknown scroll outcomes. No tests deleted.
+
+The private controller now halts admissions immediately after an actor error,
+attempts independent owned cancellations even if another fails, and reconciles
+Product candidates separately from actor status through ordinary Stop authority.
+A transport-ambiguous create is permanently unresolved unless separately audited;
+an empty task list never certifies no delayed admission. There is no create retry.
+
+Independent reviewer `/root/pilot_fix_authority_review` found no static blocker
+on seven-file source/mapping digest
+`bb3ec0349b3e7689957e7c9a067da9c429a8e86a96d1443d6c805450ff9249ba`
+and private five-file experiment digest
+`6a24db32a688322832dddf61081d315d43eecdab0f54bbe0f1f6df1184ed2d34`.
+The reviewer inspected the native/authored working browser pass logs; root owns
+execution evidence. These assertions are non-certifying and conditional on actual
+freeze/startup checks; changed reviewed bytes invalidate them. Required gate
+results are recorded separately, including the failed full check and isolated
+command-boundary pass. No aggregate pass or live outcome is supplied by this prose.
+
+Final scroll proof and exact seven-file identities are recorded in
+`actor-scroll-verification.json`. Full check and browser aggregates remain failed;
+focused final-source actor journeys pass. The experiment uses explicit task RPC
+selections rather than the failing later calibration-rerun UI. This is exploratory
+execution admission, not product acceptance or merge certification.

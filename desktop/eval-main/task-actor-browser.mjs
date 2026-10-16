@@ -295,7 +295,8 @@ export async function openTaskActorBrowser({ tasks, sessionId, productSession, b
         // Pixels are the content observation. Accessible names identify controls;
         // never flatten full DOM paragraphs hidden under scroll/clipping.
         const text = "Use the attached screenshot and these currently visible controls.";
-        return { text, elements: controls, controls: controls.map((element) => ({ name: actorControlName(element), role: element.getAttribute("role") || element.tagName.toLowerCase() })) };
+        const inspector = document.getElementById("inspectorContent");
+        return { text, canScroll: Boolean(inspector && visibleRect(inspector)), elements: controls, controls: controls.map((element) => ({ name: actorControlName(element), role: element.getAttribute("role") || element.tagName.toLowerCase() })) };
       }, working);
       try {
         const text = await (await snapshot.getProperty("text")).jsonValue();
@@ -322,7 +323,8 @@ export async function openTaskActorBrowser({ tasks, sessionId, productSession, b
         if (capture && scope(await page.evaluate(() => window.__taskActorPresentation)) !== scope(capture.presentation)) {
           throw Object.assign(new Error("Actor presentation changed during capture."), { code: "actor_control_unavailable", actionDispatched: false });
         }
-        return { text, controls, screenshot };
+        const canScroll = await (await snapshot.getProperty("canScroll")).jsonValue();
+        return { text, controls, screenshot, availableActions: ["click", "fill", "select", ...(canScroll ? ["scroll"] : []), "next_step", "finish"] };
       } finally { await snapshot.dispose(); }
     }
     return {
@@ -341,7 +343,7 @@ export async function openTaskActorBrowser({ tasks, sessionId, productSession, b
           return { kind: "observation", pointer, observation: { ...observation,
             text: "Current working update. You may answer visible questions using the explicit Answer control. Send starts a later interaction after settlement.",
             currentUpdate: { revision: pointer.revision, observedAt: pointer.observedAt, completionStatus: pointer.completionStatus },
-            availableActions: ["click", "fill", "select", "scroll"] } };
+            availableActions: observation.availableActions.filter(kind => ["click", "fill", "select", "scroll"].includes(kind)) } };
         });
       },
       async observe(expected) { try { return await observe(expected); } catch (error) { await diagnostics?.operationError("observe", error); throw error; } },
@@ -364,7 +366,13 @@ export async function openTaskActorBrowser({ tasks, sessionId, productSession, b
         if (action.kind === "scroll") {
           if (!["up", "down"].includes(action.value)) throw new Error("Scroll must be up or down.");
           stage = "dispatch_scroll";
-          await page.locator("#inspectorContent").hover();
+          const inspector = page.locator("#inspectorContent");
+          if (!await inspector.isVisible()) throw Object.assign(new Error("No visible node detail is available to scroll."), {
+            code: "actor_control_unavailable", actionDispatched: false,
+          });
+          // Visibility can change after observation. Only the check above proves
+          // no input; a failed hover or wheel remains an ambiguous browser failure.
+          await inspector.hover({ timeout: 5000 });
           await page.mouse.wheel(0, action.value === "up" ? -600 : 600);
         } else {
           let handle = handles.get(action.ref)?.asElement();
