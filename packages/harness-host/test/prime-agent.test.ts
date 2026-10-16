@@ -2128,7 +2128,7 @@ describe("PrimeAgentHarness", () => {
     } finally { await harness.dispose(); }
   });
 
-  it("includes Python graph-search guidance only for a query-v1 capability profile", async () => {
+  it("includes Python graph-search guidance unless the capability profile disables search", async () => {
     let disabledPrompt = "";
     const disabled = await createHarness(primeSession("/tmp/search-disabled.jsonl", {
       agent: { state: { thinkingLevel: "off" } },
@@ -2161,8 +2161,9 @@ describe("PrimeAgentHarness", () => {
 
     expect(disabledPrompt).not.toContain("Graph search is available");
     expect(disabledPrompt).not.toContain("GraphSearchRequest");
-    expect(omittedPrompt).not.toContain("Graph search is available");
-    expect(omittedPrompt).not.toContain("GraphSearchRequest");
+    // Omission is the query-v1 default; only an explicit disabled profile withholds guidance.
+    expect(omittedPrompt).toContain("Graph search is available");
+    expect(omittedPrompt).toContain("GraphSearchRequest");
     expect(enabledPrompt).toContain("Graph search is available");
     expect(enabledPrompt).toContain("await graph.search(GraphSearchRequest(...))");
     expect(enabledPrompt).toContain("query_contract_version=1");

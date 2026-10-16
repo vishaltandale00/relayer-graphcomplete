@@ -10,6 +10,7 @@ import {
   loadHarnessConfiguration,
   loadHarnessConfigurations,
   parseHarnessConfiguration,
+  grantsGraphSearch,
   resolveGraphCapabilityProfile,
   sameHarnessExecutionConfiguration,
 } from "../src/configuration.js";
@@ -71,7 +72,7 @@ describe("harness configuration", () => {
     }
   });
 
-  it("defaults graph search authority off and admits only the versioned query-v1 profile", () => {
+  it("defaults graph search authority to query-v1 and admits only the versioned profiles", () => {
     const base = {
       schemaVersion: 1,
       name: "capability-profile",
@@ -90,12 +91,17 @@ describe("harness configuration", () => {
       graphCapabilityProfile: { search: "query-v1" },
     });
 
-    expect(resolveGraphCapabilityProfile(omitted)).toEqual({ search: "disabled" });
+    // Omission grants query-v1 search; an explicit disabled profile remains the opt-out.
+    expect(resolveGraphCapabilityProfile(omitted)).toEqual({ search: "query-v1" });
     expect(resolveGraphCapabilityProfile(disabled)).toEqual({ search: "disabled" });
     expect(resolveGraphCapabilityProfile(enabled)).toEqual({ search: "query-v1" });
-    expect(digestHarnessConfiguration(omitted)).toBe(digestHarnessConfiguration(disabled));
-    expect(digestHarnessConfiguration(enabled)).not.toBe(digestHarnessConfiguration(disabled));
-    expect(sameHarnessExecutionConfiguration(omitted, disabled)).toBe(true);
+    expect(grantsGraphSearch(omitted)).toBe(true);
+    expect(grantsGraphSearch(disabled)).toBe(false);
+    expect(grantsGraphSearch(enabled)).toBe(true);
+    expect(digestHarnessConfiguration(omitted)).toBe(digestHarnessConfiguration(enabled));
+    expect(digestHarnessConfiguration(omitted)).not.toBe(digestHarnessConfiguration(disabled));
+    expect(sameHarnessExecutionConfiguration(omitted, enabled)).toBe(true);
+    expect(sameHarnessExecutionConfiguration(omitted, disabled)).toBe(false);
     expect(sameHarnessExecutionConfiguration(disabled, enabled)).toBe(false);
     expect(sameHarnessExecutionConfiguration(enabled, disabled)).toBe(false);
     expect(() => parseHarnessConfiguration({
