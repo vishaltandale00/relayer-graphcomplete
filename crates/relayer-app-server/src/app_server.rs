@@ -68,6 +68,12 @@ async fn reconcile_interrupted_interaction(
     {
         return Ok(());
     }
+    // A run an earlier startup interrupted (#722) waits for the user's Resume, which prepares
+    // and binds it. Startup only checks a bound one against its graph interaction again, so a
+    // result the graph accepted after all is still recovered.
+    if interaction.completion_status == "interrupted" && interaction.graph_node_id.is_none() {
+        return Ok(());
+    }
     // An agent's child is recovered from its own invoke occurrence whatever its parent's
     // status: its parent may already have failed, and it still has to end.
     let agent_child = storage
@@ -357,10 +363,15 @@ async fn reconcile_interrupted_interaction(
                 .map_err(StartupReconciliationError::retryable)?;
         } else if let Some(durable_input) = durable_input.as_ref() {
             if durable_input.submitted_inputs.is_empty() {
-                storage.recover_identified_interaction_submitted(
-                    interaction.id,
-                    "Identified interaction input was recovered after restart and is ready to resume.",
-                ).await.map_err(StartupReconciliationError::retryable)?;
+                // Its input identity lets it run again on this graph interaction, but nothing
+                // runs it on its own: it waits, interrupted, for the user's Resume (#722).
+                storage
+                    .interrupt_identified_interaction(
+                        interaction.id,
+                        crate::storage::RESTART_INTERRUPTED,
+                    )
+                    .await
+                    .map_err(StartupReconciliationError::retryable)?;
             } else {
                 let harness = interaction
                     .harness_configuration_name
@@ -716,16 +727,15 @@ pub(crate) async fn reconcile_interrupted_recursive_completion_executions(
     Ok(reconciled)
 }
 
-/// No run holds a capacity slot after a restart (#720), so no run stays queued for one. A
-/// message turn that waited fails, unless it already has a graph interaction, which is
-/// reconciled with it. An invoked run that waited is recovered with the runs queued behind
-/// their nodes.
-pub(crate) async fn interrupt_capacity_waits(storage: &SqliteProductStore) -> anyhow::Result<()> {
-    let waited = storage
-        .interrupt_capacity_waits(crate::storage::CAPACITY_WAIT_INTERRUPTED)
+/// No run holds a node or a capacity slot after a restart, so no run stays queued (#718,
+/// #720). Every queued run is paused instead (#722): it keeps its node, its text and the
+/// inputs it snapshotted, and nothing starts it until the user resumes it.
+pub(crate) async fn pause_queued_runs(storage: &SqliteProductStore) -> anyhow::Result<()> {
+    let paused = storage
+        .pause_queued_runs(crate::storage::RESTART_PAUSED)
         .await?;
-    if waited > 0 {
-        eprintln!("interrupted {waited} run(s) that waited for capacity");
+    if paused > 0 {
+        eprintln!("paused {paused} queued run(s) until the user resumes them");
     }
     Ok(())
 }
@@ -738,9 +748,9 @@ pub(crate) async fn reconcile_interrupted_work(
     runtime: Option<&RuntimeClient>,
     permission_catalog: &PermissionCatalog,
 ) -> anyhow::Result<()> {
-    // No run stays queued for capacity (#720). Startup interrupts those waits before harness
-    // retirement; this repeats it for callers that reconcile without opening the server.
-    interrupt_capacity_waits(storage).await?;
+    // No run stays queued (#722). Startup pauses queued runs before harness retirement; this
+    // repeats it for callers that reconcile without opening the server.
+    pause_queued_runs(storage).await?;
     // Agent children an older build left unmarked are marked first, so they are failed
     // below rather than held for a user's invoke.
     let marked = storage.mark_unrecorded_agent_children().await?;
@@ -765,6 +775,15 @@ pub(crate) async fn reconcile_interrupted_work(
             )
             .await
             {
+                // A run an earlier startup interrupted keeps waiting for the user's Resume;
+                // its next start reconciles it with the graph (#722).
+                if interaction.completion_status == "interrupted" {
+                    eprintln!(
+                        "keeping interrupted run {} for the user's Resume after startup reconciliation failed: {error}",
+                        interaction.id
+                    );
+                    continue;
+                }
                 let graph_lease_recoverable = storage
                     .invocation_requires_graph_lease(interaction.id)
                     .await?;
@@ -781,10 +800,12 @@ pub(crate) async fn reconcile_interrupted_work(
                     && (graph_lease_recoverable || context_only_identified)
                 {
                     if context_only_identified {
+                        // It waits, interrupted, for the user's Resume (#722); its next start
+                        // reconciles it with its graph interaction.
                         storage
-                            .recover_identified_interaction_submitted(
+                            .interrupt_identified_interaction(
                                 interaction.id,
-                                "Identified interaction startup reconciliation was interrupted transiently and is ready to resume.",
+                                crate::storage::RESTART_INTERRUPTED,
                             )
                             .await?;
                     }
@@ -1293,10 +1314,9 @@ impl RelayerAppServer {
             .as_ref()
             .map(RuntimeClient::product_harnesses)
             .unwrap_or_default();
-        // No run holds a capacity slot after a restart (#720). Runs that waited for one are
-        // interrupted before harness retirement may rebind them, so a waiting turn that already
-        // has a graph interaction is still recognized as bound and reconciled with it.
-        interrupt_capacity_waits(&storage).await?;
+        // No run holds a node or a capacity slot after a restart. Queued runs are paused
+        // before harness retirement rebinds them, so a paused run keeps its status (#722).
+        pause_queued_runs(&storage).await?;
         storage
             .initialize_model_catalog(&default_harness_configuration, &runtime_harnesses)
             .await?;

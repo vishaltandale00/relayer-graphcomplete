@@ -546,6 +546,13 @@ pub(super) async fn project_interaction(
     if projection_stale {
         response.mark_projection_stale();
     }
+    response.set_run_node_id(
+        state
+            .product
+            .node_run_key(InteractionId::try_from(id)?)
+            .await?
+            .map(|key| key.node_id),
+    );
     let durable_input = state
         .product
         .interaction_input(InteractionId::try_from(id)?)
@@ -1459,77 +1466,6 @@ fn context_snapshot_api_error(error: ApiError) -> ApiError {
         error.internal_diagnostic()
     );
     ApiError::internal("Relayer could not send this message. Your draft was preserved.")
-}
-
-pub(crate) async fn resume_recovered_identified_interactions(state: ApiState) {
-    let interactions = match state.product.interrupted_interactions().await {
-        Ok(interactions) => interactions,
-        Err(error) => {
-            eprintln!("could not list recovered identified interactions: {error}");
-            return;
-        }
-    };
-    for interaction in interactions {
-        if interaction.completion_status != "submitted" {
-            continue;
-        }
-        let identified = match state.product.interaction_input(interaction.id).await {
-            Ok(Some(_)) => true,
-            Ok(None) => false,
-            Err(error) => {
-                eprintln!(
-                    "could not read recovered interaction {} input identity: {error}",
-                    interaction.id
-                );
-                false
-            }
-        };
-        if !identified {
-            continue;
-        }
-        let thread = match state.product.get_thread(interaction.thread_id).await {
-            Ok(detail) => detail.thread,
-            Err(error) => {
-                eprintln!(
-                    "could not read recovered interaction {} thread: {error}",
-                    interaction.id
-                );
-                continue;
-            }
-        };
-        let consumes_context_confirmations = match state
-            .product
-            .interaction_consumes_context_confirmations(interaction.id)
-            .await
-        {
-            Ok(consumes) => consumes,
-            Err(error) => {
-                eprintln!(
-                    "could not inspect recovered interaction {} confirmation ownership: {error}",
-                    interaction.id
-                );
-                false
-            }
-        };
-        if let Err(error) = start_interaction(&state, &thread, interaction.clone(), false).await {
-            eprintln!(
-                "could not resume recovered identified interaction {}: {}",
-                interaction.id,
-                error.message()
-            );
-            if (error.is_deterministic_input_failure() || consumes_context_confirmations)
-                && let Err(cleanup) = state
-                    .product
-                    .discard_unbound_interaction_input(interaction.id)
-                    .await
-            {
-                eprintln!(
-                    "could not discard recovered invalid interaction {}: {cleanup}",
-                    interaction.id
-                );
-            }
-        }
-    }
 }
 
 pub(super) async fn get_layer(
@@ -3264,6 +3200,24 @@ async fn settle_queued_stop_once(
             relayer_graph_core::CompletionLifecycle::Active => {
                 return Err(format!("graph Stop failed: {error}"));
             }
+            // The graph accepted the run before the Stop landed, for example a run a restart
+            // interrupted after its result was saved (#722). Its accepted result stands.
+            relayer_graph_core::CompletionLifecycle::Succeeded => {
+                let output = runtime
+                    .completion_output(graph_node_id)
+                    .await
+                    .map_err(|read| format!("accepted output read failed: {read}"))?
+                    .ok_or_else(|| "accepted output not yet readable".to_owned())?;
+                if !state
+                    .product
+                    .recover_interaction_accepted(interaction_id, &output)
+                    .await
+                    .map_err(|error| error.to_string())?
+                {
+                    return Err("run changed while its accepted result was recovered".into());
+                }
+                return Ok(());
+            }
             other => {
                 let message =
                     format!("The graph ended this run as {other:?} before its Stop landed.");
@@ -3302,6 +3256,343 @@ async fn settle_queued_stop_once(
         }
     }
     Ok(())
+}
+
+/// The runs a Resume or Resume all started, as they now stand (#722).
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(super) struct ResumedRunsResponse {
+    interactions: Vec<InteractionResponse>,
+}
+
+/// Resumes a run a restart paused or interrupted (#722, PRD 8.2). A run on a node resumes only
+/// as the head of its node's paused chain, and the runs behind it resume with it, in order: the
+/// head starts, and the rest wait behind it as `queued`. A run that already resumed is
+/// reported as it stands, so a repeated click starts nothing twice.
+pub(super) async fn resume_interaction(
+    State(state): State<ApiState>,
+    headers: HeaderMap,
+    Path((thread_id, interaction_id)): Path<(i64, i64)>,
+) -> Result<Json<ResumedRunsResponse>, ApiError> {
+    authorize_write(&state, &headers)?;
+    let thread = resumable_thread(&state, thread_id).await?;
+    let interaction_id = InteractionId::try_from(interaction_id)?;
+    let interaction = state.product.get_interaction(interaction_id).await?;
+    if interaction.thread_id != thread.id {
+        return Err(ApiError::invalid(
+            "Interaction does not belong to this thread",
+        ));
+    }
+    if !matches!(
+        interaction.completion_status.as_str(),
+        "paused" | "interrupted"
+    ) {
+        if matches!(
+            interaction.completion_status.as_str(),
+            "submitted" | "queued" | "running" | "waiting_for_approval"
+        ) {
+            return Ok(Json(ResumedRunsResponse {
+                interactions: vec![interaction.into()],
+            }));
+        }
+        return Err(ApiError::conflict(
+            "run_not_resumable",
+            "Only a run that a restart paused or interrupted can resume.",
+        ));
+    }
+    if state.product.is_agent_invoked_child(interaction_id).await? {
+        return Err(ApiError::conflict(
+            "run_not_resumable",
+            "Only the agent that launched this child can run it.",
+        ));
+    }
+    let runs = match state.product.restart_chain(interaction_id).await? {
+        Some(chain) if chain.first() == Some(&interaction_id) => chain,
+        Some(_) => {
+            return Err(ApiError::conflict(
+                "resume_not_queue_head",
+                "Only the first paused run on a node resumes. Discard the runs ahead of it to skip them.",
+            ));
+        }
+        None => vec![interaction_id],
+    };
+    let resumed = spawn_resume(&state, thread, vec![runs]).await?;
+    Ok(Json(ResumedRunsResponse {
+        interactions: resumed.into_iter().map(Into::into).collect(),
+    }))
+}
+
+/// Resume all, from the restart notice (#722): every run that is not on a node, and the head of
+/// each node's paused chain with the runs behind it, in creation order.
+pub(super) async fn resume_all(
+    State(state): State<ApiState>,
+    headers: HeaderMap,
+    Path(thread_id): Path<i64>,
+) -> Result<Json<ResumedRunsResponse>, ApiError> {
+    authorize_write(&state, &headers)?;
+    let thread = resumable_thread(&state, thread_id).await?;
+    let mut groups = Vec::new();
+    for head in state.product.restart_heads(thread.id).await? {
+        groups.push(
+            state
+                .product
+                .restart_chain(head)
+                .await?
+                .unwrap_or_else(|| vec![head]),
+        );
+    }
+    let resumed = spawn_resume(&state, thread, groups).await?;
+    Ok(Json(ResumedRunsResponse {
+        interactions: resumed.into_iter().map(Into::into).collect(),
+    }))
+}
+
+/// Discards a run a restart paused or interrupted (#722): it ends stopped, never starts, and
+/// keeps its text. Nothing behind it starts; the next paused run on its node becomes the head.
+pub(super) async fn discard_interaction(
+    State(state): State<ApiState>,
+    headers: HeaderMap,
+    Path((thread_id, interaction_id)): Path<(i64, i64)>,
+) -> Result<Json<InteractionResponse>, ApiError> {
+    authorize_write(&state, &headers)?;
+    let thread_id = resumable_thread(&state, thread_id).await?.id;
+    let interaction_id = InteractionId::try_from(interaction_id)?;
+    let interaction = state.product.get_interaction(interaction_id).await?;
+    if interaction.thread_id != thread_id {
+        return Err(ApiError::invalid(
+            "Interaction does not belong to this thread",
+        ));
+    }
+    match state
+        .product
+        .discard_restart_run(thread_id, interaction_id)
+        .await?
+    {
+        crate::storage::RestartDiscard::Stopped => {}
+        // The graph holds its call: its current stops first, then the product row, as for a
+        // queued run's Stop. It shows Stopping… meanwhile, and ends marked as discarded.
+        crate::storage::RestartDiscard::SettleBeforeStart => {
+            let settle_state = state.clone();
+            tokio::spawn(async move {
+                settle_queued_stop(settle_state.clone(), thread_id, interaction_id).await;
+                if let Err(error) = settle_state
+                    .product
+                    .mark_restart_discarded(interaction_id)
+                    .await
+                {
+                    eprintln!("could not mark discarded run {interaction_id}: {error}");
+                }
+            });
+        }
+        crate::storage::RestartDiscard::NotResumable => {
+            if !matches!(
+                interaction.completion_status.as_str(),
+                "stopped" | "failed" | "accepted"
+            ) {
+                return Err(ApiError::conflict(
+                    "run_not_resumable",
+                    "Only a run that a restart paused or interrupted can be discarded.",
+                ));
+            }
+        }
+    }
+    Ok(Json(
+        state.product.get_interaction(interaction_id).await?.into(),
+    ))
+}
+
+async fn resumable_thread(state: &ApiState, thread_id: i64) -> Result<Thread, ApiError> {
+    if state.runtime.is_none() {
+        return Err(ApiError::invalid("GraphComplete runtime is unavailable"));
+    }
+    let thread = state
+        .product
+        .get_thread(ThreadId::try_from(thread_id)?)
+        .await?
+        .thread;
+    if thread.imported {
+        return Err(ApiError::invalid("imported conversations are immutable"));
+    }
+    if thread.archived_at.is_some() {
+        return Err(ApiError::conflict(
+            "thread_archived",
+            "Open this archived chat again before resuming or discarding its runs.",
+        ));
+    }
+    Ok(thread)
+}
+
+/// Starts each group of resumed runs. The resume runs to its end even if the request goes away,
+/// so a chain never stops part way. One group that cannot start never holds back the others;
+/// its runs that did not start are paused again.
+async fn spawn_resume(
+    state: &ApiState,
+    thread: Thread,
+    groups: Vec<Vec<InteractionId>>,
+) -> Result<Vec<Interaction>, ApiError> {
+    let state = state.clone();
+    tokio::spawn(async move {
+        let mut resumed = Vec::new();
+        let mut first_error = None;
+        for runs in groups {
+            match resume_runs(&state, &thread, &runs).await {
+                Ok(started) => resumed.extend(started),
+                Err(error) => {
+                    eprintln!("could not resume runs {runs:?}: {}", error.message());
+                    first_error.get_or_insert(error);
+                }
+            }
+        }
+        match first_error {
+            Some(error) if resumed.is_empty() => Err(error),
+            _ => Ok(resumed),
+        }
+    })
+    .await
+    .map_err(|error| {
+        eprintln!("resume did not finish: {error}");
+        ApiError::internal("Relayer could not resume these runs.")
+    })?
+}
+
+/// Claims one node's chain, or one run that is not on a node, and starts it. A node's runs take
+/// their places in its queue in creation order before the head starts, so a run created later
+/// on the node never overtakes them; the head starts and the rest wait behind it. When a run
+/// cannot start, the claimed runs that have not been admitted return to where the restart left
+/// them, so none is stranded as claimed with nothing to start it.
+async fn resume_runs(
+    state: &ApiState,
+    thread: &Thread,
+    runs: &[InteractionId],
+) -> Result<Vec<Interaction>, ApiError> {
+    let mut before = std::collections::HashMap::new();
+    for run in runs {
+        before.insert(*run, state.product.get_interaction(*run).await?);
+    }
+    let claimed = state.product.claim_restart_runs(thread.id, runs).await?;
+    let restore = |pending: Vec<InteractionId>| {
+        let restored: Vec<(InteractionId, String, Option<String>)> = pending
+            .into_iter()
+            .filter_map(|run| {
+                before.get(&run).map(|interaction| {
+                    (
+                        run,
+                        interaction.completion_status.clone(),
+                        interaction.completion_error.clone(),
+                    )
+                })
+            })
+            .collect();
+        async move {
+            for (run, status, note) in restored {
+                if let Err(error) = state
+                    .product
+                    .restore_restart_run(run, &status, note.as_deref())
+                    .await
+                {
+                    eprintln!(
+                        "could not return run {run} to {status} after its resume failed: {error}"
+                    );
+                }
+            }
+        }
+    };
+    let mut started = Vec::with_capacity(claimed.len());
+    let Some(first) = claimed.first() else {
+        return Ok(started);
+    };
+    let key = match state.product.node_run_key(*first).await {
+        Ok(key) => key,
+        Err(error) => {
+            restore(claimed.clone()).await;
+            return Err(error.into());
+        }
+    };
+    let Some(key) = key else {
+        for (index, run) in claimed.iter().enumerate() {
+            let started_run = async {
+                let interaction = state.product.get_interaction(*run).await?;
+                start_resumed_interaction(state, thread, interaction).await
+            }
+            .await;
+            match started_run {
+                Ok(interaction) => started.push(interaction),
+                Err(error) => {
+                    restore(claimed[index..].to_vec()).await;
+                    return partial_resume(started, error);
+                }
+            }
+        }
+        return Ok(started);
+    };
+    let mut arrivals = Vec::with_capacity(claimed.len());
+    for run in &claimed {
+        let joined = async {
+            let interaction = state.product.get_interaction(*run).await?;
+            let arrival = NodeArrival::join(state, &interaction, key.node_id).await?;
+            Ok::<_, ApiError>((interaction, arrival))
+        }
+        .await;
+        match joined {
+            Ok(joined) => arrivals.push(joined),
+            Err(error) => {
+                drop(arrivals);
+                restore(claimed.clone()).await;
+                return Err(error);
+            }
+        }
+    }
+    let mut arrivals = arrivals.into_iter().enumerate();
+    while let Some((index, (interaction, arrival))) = arrivals.next() {
+        match claim_and_start_action_interaction(
+            state,
+            thread,
+            interaction,
+            key.node_id,
+            Some(arrival),
+        )
+        .await
+        {
+            Ok(interaction) => started.push(interaction),
+            Err(error) => {
+                // The runs behind it give up their queue places and are paused again; the run
+                // that failed has recorded its failure.
+                drop(arrivals);
+                restore(claimed[index..].to_vec()).await;
+                return partial_resume(started, error);
+            }
+        }
+    }
+    Ok(started)
+}
+
+/// A resume whose earlier runs started reports them, though a later one could not start; that
+/// run recorded its failure, and the runs behind it are paused again.
+fn partial_resume(
+    started: Vec<Interaction>,
+    error: ApiError,
+) -> Result<Vec<Interaction>, ApiError> {
+    if started.is_empty() {
+        return Err(error);
+    }
+    eprintln!(
+        "resumed {} run(s); a later run could not start: {}",
+        started.len(),
+        error.message()
+    );
+    Ok(started)
+}
+
+/// Starts a resumed message turn, whose start the resume already claimed. It asks for a slot
+/// like any human-started run (#720) and runs fresh on its own interaction (#719).
+async fn start_resumed_interaction(
+    state: &ApiState,
+    thread: &Thread,
+    interaction: Interaction,
+) -> Result<Interaction, ApiError> {
+    // A resumed run's text left the composer long ago, so a failure is recorded on the run
+    // rather than discarding it.
+    admit_and_start_interaction(state, thread, interaction, true, true).await
 }
 
 pub(super) async fn stop_completion(
@@ -5108,6 +5399,7 @@ async fn start_interaction(
             &owned_thread,
             interaction,
             record_deterministic_failure,
+            false,
         )
         .await
     })
@@ -5123,12 +5415,14 @@ async fn admit_and_start_interaction(
     thread: &Thread,
     interaction: Interaction,
     record_deterministic_failure: bool,
+    already_claimed: bool,
 ) -> Result<Interaction, ApiError> {
     let admitted = async {
-        let claimed = state
-            .product
-            .claim_interaction_preparing(interaction.id)
-            .await?;
+        let claimed = already_claimed
+            || state
+                .product
+                .claim_interaction_preparing(interaction.id)
+                .await?;
         // A storage failure is retried briefly. A wait an earlier attempt made durable,
         // though its commit was reported failed, is adopted by the retry.
         let mut backoff = std::time::Duration::from_millis(50);

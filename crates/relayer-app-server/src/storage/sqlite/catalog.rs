@@ -3239,17 +3239,19 @@ async fn retire_absent_product_harness(
     // replacement product harness. A bound run that waits, in its node's queue (#718) or for
     // capacity (#720), is unfinished too and is rebound the same way. It keeps waiting as
     // `queued`, so nothing starts it on its own; it is prepared on the new binding when it
-    // starts. Clear only that unfinished mutable binding; accepted rows and immutable attempt
-    // receipts continue to describe the harness that actually executed.
+    // starts. A paused or interrupted run (#722) keeps its status the same way, until the user
+    // resumes it. Clear only that unfinished mutable binding; accepted rows and immutable
+    // attempt receipts continue to describe the harness that actually executed.
     sqlx::query(
         "UPDATE interactions
          SET graph_node_id=NULL,
-             completion_status=CASE WHEN completion_status='queued' THEN 'queued' ELSE 'submitted' END,
+             completion_status=CASE WHEN completion_status IN ('queued','paused','interrupted') THEN completion_status ELSE 'submitted' END,
              harness_configuration_name=?1,harness_configuration_digest=NULL,
              effective_execution_digest=NULL,effective_permission_receipt_json=NULL,
-             completion_output_json=NULL,completion_error=NULL
+             completion_output_json=NULL,
+             completion_error=CASE WHEN completion_status IN ('paused','interrupted') THEN completion_error END
          WHERE harness_configuration_name=?2
-           AND completion_status IN ('not_started','queued','running','submitted','waiting_for_approval')
+           AND completion_status IN ('not_started','queued','paused','interrupted','running','submitted','waiting_for_approval')
            AND graph_node_id IS NOT NULL
            AND (input_identity IS NOT NULL OR EXISTS (
                SELECT 1 FROM action_invocations
@@ -4653,9 +4655,16 @@ mod provider_definition_tests {
             .execute(&store.pool).await.unwrap();
         sqlx::query("INSERT INTO interactions(id,thread_id,sequence,text,created_at,completion_status,harness_configuration_name) VALUES (1,1,1,'Historical','1','accepted','prime-agent-deep')")
             .execute(&store.pool).await.unwrap();
-        // A bound invoke result that waits in its node's queue (#718) under the retired harness.
+        // A bound invoke result that waited in its node's queue (#718) under the retired
+        // harness.
         sqlx::query("INSERT INTO interactions(id,thread_id,sequence,text,created_at,completion_status,graph_node_id,harness_configuration_name,harness_configuration_digest,effective_execution_digest,effective_permission_receipt_json) VALUES (2,1,2,'Queued','2','queued',77,'prime-agent-deep','sha256:old','sha256:old','{}')")
             .execute(&store.pool).await.unwrap();
+        for (id, status, node) in [(3, "paused", 78), (4, "interrupted", 79)] {
+            sqlx::query("INSERT INTO interactions(id,thread_id,sequence,text,created_at,completion_status,graph_node_id,harness_configuration_name,harness_configuration_digest,effective_execution_digest,effective_permission_receipt_json) VALUES (?1,1,?1,'After restart','2',?2,?3,'prime-agent-deep','sha256:old','sha256:old','{}')")
+                .bind(id).bind(status).bind(node).execute(&store.pool).await.unwrap();
+            sqlx::query("INSERT INTO action_invocations(source_interaction_id,action_id,result_interaction_id,created_at,graph_lease_required,authoritative) VALUES (1,?1,?2,'2',1,1)")
+                .bind(40 + id).bind(id).execute(&store.pool).await.unwrap();
+        }
         sqlx::query("INSERT INTO action_invocations(source_interaction_id,action_id,result_interaction_id,created_at,graph_lease_required,authoritative) VALUES (1,41,2,'2',1,1)")
             .execute(&store.pool).await.unwrap();
 
@@ -4669,10 +4678,11 @@ mod provider_definition_tests {
         .fetch_one(&store.pool)
         .await
         .unwrap();
-        // It keeps waiting as queued (#720), so nothing starts it on its own after the rebind.
+        // It keeps its status (#720), so nothing starts it on its own after the rebind.
         assert_eq!(queued, ("queued".into(), None, "prime-agent-basic".into()));
-        // At startup the rebound queued invoke is interrupted like any queued invoke, though it
-        // no longer has a graph interaction, so it never stays queued.
+        // Startup pauses it, rebound and without a graph interaction (#722); the recovery of
+        // interrupted invokes then leaves it paused for the user's Resume.
+        store.pause_queued_runs("Paused at restart.").await.unwrap();
         store
             .recover_interrupted_action_invocations("Interrupted at restart.")
             .await
@@ -4683,8 +4693,20 @@ mod provider_definition_tests {
         .fetch_one(&store.pool)
         .await
         .unwrap();
-        assert_eq!(status, "submitted");
-        assert_eq!(error.as_deref(), Some("Interrupted at restart."));
+        assert_eq!(status, "paused");
+        assert_eq!(error.as_deref(), Some("Paused at restart."));
+        // A run a restart paused or interrupted (#722) is rebound the same way and keeps its
+        // status until the user resumes it.
+        for (id, status) in [(3, "paused"), (4, "interrupted")] {
+            let rebound: (String, Option<i64>, String) = sqlx::query_as(
+                "SELECT completion_status,graph_node_id,harness_configuration_name FROM interactions WHERE id=?1",
+            )
+            .bind(id)
+            .fetch_one(&store.pool)
+            .await
+            .unwrap();
+            assert_eq!(rebound, (status.into(), None, "prime-agent-basic".into()));
+        }
 
         let thread_harness: String =
             sqlx::query_scalar("SELECT harness_configuration_name FROM threads WHERE id=1")

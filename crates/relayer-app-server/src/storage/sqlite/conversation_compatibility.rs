@@ -67,7 +67,7 @@ pub(super) async fn compatibility_on(
             }
             continue;
         }
-        // A run removed or interrupted while it waited in a queue (#718, #720), or a message
+        // A run removed, discarded or interrupted while it waited in a queue (#718, #720, #722), or a message
         // returned before any attempt and then made stale (#719), never executed: it has no
         // attempt, no graph interaction, and its row says so. It neither owns nor obscures the
         // conversation's route.
@@ -89,9 +89,11 @@ pub(super) async fn compatibility_on(
             && (!bound || stale_returned)
             // Input restoration may append to the marker, so it is matched as a prefix.
             && ((status == "stopped"
-                && error
-                    .as_deref()
-                    .is_some_and(|error| error.starts_with(super::QUEUED_RUN_STOPPED)))
+                && error.as_deref().is_some_and(|error| {
+                    error.starts_with(super::QUEUED_RUN_STOPPED)
+                        // A paused run discarded after a restart (#722) never ran either.
+                        || error.starts_with(super::RESTART_DISCARDED)
+                }))
                 || (status == "failed"
                     && error.as_deref().is_some_and(|error| {
                         error.starts_with(super::CAPACITY_WAIT_INTERRUPTED)
@@ -102,7 +104,11 @@ pub(super) async fn compatibility_on(
         {
             continue;
         }
-        if !matches!(status.as_str(), "not_started" | "submitted" | "running") {
+        // A run a restart paused or interrupted (#722) is still pending, like a running one.
+        if !matches!(
+            status.as_str(),
+            "not_started" | "submitted" | "running" | "paused" | "interrupted"
+        ) {
             saw_execution = true;
         }
         let provider = if attempted_provider.is_some() {

@@ -249,6 +249,7 @@ export const APPROVED_TELEMETRY_MODULES = Object.freeze({
     "crates/relayer-app-server/src/storage/sqlite/interactions.rs",
     "crates/relayer-app-server/src/storage/sqlite/migrations.rs",
     "crates/relayer-app-server/src/storage/sqlite/node_runs.rs",
+    "crates/relayer-app-server/src/storage/sqlite/paused_runs.rs",
     "crates/relayer-app-server/src/storage/sqlite/personal_presentation.rs",
     "crates/relayer-app-server/src/storage/sqlite/product_state.rs",
     "crates/relayer-app-server/src/storage/sqlite/projects.rs",

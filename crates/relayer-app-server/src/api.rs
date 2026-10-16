@@ -139,12 +139,6 @@ pub(crate) fn router(
         node_runs: node_runs::NodeRunQueue::default(),
         run_capacity: runtime.run_capacity,
     };
-    if state.runtime.is_some() {
-        let recovery_state = state.clone();
-        tokio::spawn(async move {
-            threads::resume_recovered_identified_interactions(recovery_state).await;
-        });
-    }
     Router::new()
         .route("/health", get(state::health))
         .route("/api/capabilities", get(state::capabilities))
@@ -323,6 +317,18 @@ pub(crate) fn router(
         .route(
             "/api/threads/{thread_id}/interactions/{interaction_id}/retry",
             axum::routing::post(threads::retry_interaction),
+        )
+        .route(
+            "/api/threads/{thread_id}/interactions/{interaction_id}/resume",
+            axum::routing::post(threads::resume_interaction),
+        )
+        .route(
+            "/api/threads/{thread_id}/interactions/{interaction_id}/discard",
+            axum::routing::post(threads::discard_interaction),
+        )
+        .route(
+            "/api/threads/{id}/resume",
+            axum::routing::post(threads::resume_all),
         )
         .route(
             "/api/threads/{thread_id}/interactions/{interaction_id}/layers/{layer_id}",

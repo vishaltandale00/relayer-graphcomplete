@@ -368,7 +368,9 @@ restart. Each run is sent once, by an invoke action on its node:
 - settlement (`Settle`), which hands the node to the oldest queued run;
 - the product's Stop of a queued run (`StopQueued`);
 - a crash, which loses which run holds a node, and startup, which interrupts
-  executing and queued runs alike.
+  executing runs and pauses queued ones (#722);
+- the user's Resume of a run a restart stopped (`Resume`), which resumes the
+  head of its node's chain and re-queues the rest in order, and `Discard`.
 
 A run's context is the set of runs accepted when it starts (`seen`).
 `Send` is the run's creation: in the code a run takes its place in its
@@ -381,20 +383,27 @@ the hand-off is retried; that is not modeled. `StopQueued` also stands for
 the Stop of a queued run whose graph call was already prepared: its graph
 current is stopped first, then the product row, and it never holds the node.
 Duplicate deliveries, which join the holder's admission, are not modeled.
-Graph preparation, approvals and the provider are not modeled.
+Graph preparation, approvals and the provider are not modeled. Two ghost sets
+record which runs a startup stopped and which the user resumed or discarded,
+so the resume properties read the user's intent, not the queue.
 `node-queue-today` mirrors the code; each `-reverted` check turns one fix or
 decision off.
 
 | Check | Verdict | Finding |
 | --- | --- | --- |
-| `node-queue-safety` | passes | Two runs on one node never run at once (`OneRunPerNode`). A queued run never starts while another run on its node is active (`QueuedNeverStartsWhileActive`). Queued runs start in the order they were created (`QueuedStartInOrder`). A queued run reads the thread when it starts, so its context includes the accepted result of the run ahead (`QueuedRunSeesRunAhead`). After a restart, no run waits on a node nothing holds (`QueuedHasRunAhead`). |
+| `node-queue-safety` | passes | Two runs on one node never run at once (`OneRunPerNode`). A queued run never starts while another run on its node is active (`QueuedNeverStartsWhileActive`). Queued runs start in the order they were created (`QueuedStartInOrder`). A queued run reads the thread when it starts, so its context includes the accepted result of the run ahead (`QueuedRunSeesRunAhead`). After a restart, no run waits on a node nothing holds (`QueuedHasRunAhead`). No paused or interrupted run starts until the user resumes it (`NoStartWithoutResume`); startup may still record a result the graph accepted (`RecoverAccepted`), and a resumed chain keeps same-node order (`ResumeKeepsOrder`). |
+| `node-queue-second-restart` | passes | With two restarts, paused and interrupted runs stay as they are across the second, and the resume properties still hold. It runs two runs on node 1 to keep the search short. |
+| `node-queue-resume-reachable` | Reachability; expected violation | A resumed run runs, so the resume properties are not vacuous. |
+| `node-queue-resume-liveness` | passes | A resumed run waiting in its node's queue starts or ends, unless another restart pauses it again. |
+| `node-queue-resume-head-reverted` | Decision (#721); the reverted check shows the trace | A run inside a paused chain that resumed alone started while an earlier run on its node still waited for the user. Only the head resumes, and it resumes the chain (`ResumeHeadOnly`). Regression tests: `a_restart_pauses_queued_runs_and_resume_starts_them_in_order` and `chains_resume_in_order_and_discard_keeps_the_text`. |
+| `node-queue-auto-resume-reverted` | Fixed (#722); the reverted check shows the old trace | Startup ran an interrupted identified send again on its own (`AutoResume`). Nothing starts now until the user resumes it. Regression tests: `identified_context_replays_after_response_loss_and_resumes_bound_input_after_restart` and `product_harness_retirement_precedes_retryable_startup_reconciliation`. |
 | `node-queue-concurrency` | Reachability; expected violation | Runs on different nodes run at once: the trace starts a run on each node. |
 | `node-queue-liveness` | passes | Without a restart, every queued run the user does not stop starts, whether the run ahead was accepted, failed or stopped. |
-| `node-queue-restart-liveness` | passes | Across a restart, every queued run leaves the queue: it starts, is stopped, or is interrupted at startup. |
+| `node-queue-restart-liveness` | passes | Across a restart, every queued run leaves the queue: it starts, is stopped, or is paused at startup. |
 | `node-queue-race-reverted` | Fixed; the reverted check shows the race | Two sends racing to one node both saw it free and both started. Admission checks and takes the node in one step under the queue's lock (`AtomicAdmission`). Regression tests: `runs_racing_to_one_node_start_one_at_a_time` and `node_runs_run_beside_other_nodes_and_queue_in_order_on_their_own_node`. |
 | `node-queue-release-reverted` | Decision 4 (#716); the reverted check shows the old trace | A run that failed or was stopped kept its node, so the runs queued behind it never started. Every settlement hands the node on (`ReleaseOnSettle`). Regression tests: `a_settled_run_hands_its_node_to_the_oldest_queued_run` and the end-to-end test above, whose run ahead fails. |
 | `node-queue-context-reverted` | Decision 3 (#716); the reverted check shows the old trace | A queued run's context read when it was sent misses the accepted result of the run ahead. Context is read at start (`ContextAtStart`). Regression tests: `accepted_thread_history_lists_accepted_human_turns_in_order` and the end-to-end test above, which checks the queued run's `threadHistory`. |
-| `node-queue-restart-reverted` | Fixed; the reverted check shows the old trace | A run queued at a restart stayed queued behind a run that no longer existed. Startup now interrupts it like an executing run, and invoking its action again resumes it (`StartupInterruptsQueued`). #722 replaces this with paused runs. Regression test: `interrupted_action_invocation_remains_submitted_for_source_pair_recovery`. |
+| `node-queue-restart-reverted` | Fixed; the reverted check shows the old trace | A run queued at a restart stayed queued behind a run that no longer existed. Startup now pauses it until the user resumes it (`StartupPausesQueued`, #722). Regression tests: `a_restart_interrupts_running_invokes_and_pauses_queued_runs` and `startup_pauses_every_queued_run_and_keeps_its_context`. |
 
 ### `RunCapacity.tla`
 
@@ -410,7 +419,8 @@ of two, and at most one restart:
   passes it to the oldest waiting run, and of the node (`ReleaseNode`);
 - Remove of a queued run (`Remove`), which takes it out of either wait;
 - a crash, which loses every slot, hold and wait, and startup, which
-  interrupts the runs that waited.
+  interrupts executing runs and pauses the runs that waited (#722). A paused
+  or interrupted run asks for its node again when the user resumes it.
 
 The slot and the node are released in separate steps, as separate tasks
 release them in the code. Releasing a slot passes it to the oldest waiting run
@@ -425,7 +435,7 @@ mirrors the code; each `-reverted` check turns one fix or decision off.
 
 | Check | Verdict | Finding |
 | --- | --- | --- |
-| `capacity-safety` | passes | Executing human-started runs never exceed the limit (`WithinLimit`). Runs waiting for capacity start first in, first out by when they began to wait (`StartsInOrder`), and no new run starts while another waits (`NoStartAheadOfWaiting`). No run waits while a slot is idle (`NoIdleSlotWhileWaiting`), and every waiting run is in the live wait, also after a restart (`WaitIsLive`). Runs on one node still run one at a time (`OneRunPerNode`), and a child never waits for capacity (`ChildrenNeverWait`). |
+| `capacity-safety` | passes | Executing human-started runs never exceed the limit (`WithinLimit`). Runs waiting for capacity start first in, first out by when they began to wait (`StartsInOrder`), and no new run starts while another waits (`NoStartAheadOfWaiting`). No run waits while a slot is idle (`NoIdleSlotWhileWaiting`), and every waiting run is in the live wait, also after a restart (`WaitIsLive`). Runs on one node still run one at a time (`OneRunPerNode`), and a child never waits for capacity (`ChildrenNeverWait`). A paused run holds no slot, node or place in the wait (`PausedHoldsNothing`). |
 | `capacity-children-beside-full` | Reachability; expected violation | An agent's child runs while human-started runs fill every slot. |
 | `capacity-both-waits` | Reachability; expected violation | One run waits behind a run on its node, then takes the node and waits for capacity. |
 | `capacity-liveness` | passes | Without a restart, every run waiting for capacity that the user does not remove starts. |
@@ -436,7 +446,7 @@ mirrors the code; each `-reverted` check turns one fix or decision off.
 | `capacity-jump-guarded` | passes | With the hand-off split but admission's check kept (`WaitBehindWaiting`), no new run jumps a waiting one and order holds. Each defense is enough on its own. |
 | `capacity-release-reverted` | Fixed; the reverted check shows the trace | A settled run that only freed its slot left the waiting runs beside an idle slot. Release passes the slot on (`ReleaseHandsSlot`). Regression test: the end-to-end test above. |
 | `capacity-children-reverted` | Decision 5 (#716); the reverted check shows the trace | Counting children would make a child wait behind human-started runs, a recursion scheduler. Children never ask for a slot (`ChildrenUncounted`). Regression test: `an_agent_child_starts_while_human_started_runs_fill_the_capacity`. |
-| `capacity-restart-reverted` | Fixed; the reverted check shows the trace | A run that waited for capacity at a restart stayed queued for a slot nothing would pass it. Startup interrupts it (`StartupInterruptsWaits`). Regression tests: `a_run_waits_for_capacity_from_its_claimed_start_and_a_stop_removes_it` and `interrupted_action_invocation_remains_submitted_for_source_pair_recovery`. |
+| `capacity-restart-reverted` | Fixed; the reverted check shows the trace | A run that waited for capacity at a restart stayed queued for a slot nothing would pass it. Startup pauses it (`StartupPausesWaits`, #722). Regression tests: `startup_pauses_every_queued_run_and_keeps_its_context` and `a_restart_interrupts_running_invokes_and_pauses_queued_runs`. |
 
 ### `ExecutionLeases.tla`
 

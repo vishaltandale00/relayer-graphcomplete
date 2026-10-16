@@ -72,6 +72,9 @@ pub(crate) struct Thread {
     /// The latest interaction's live state for thread lists: running, stopping,
     /// needs_approval or failed. None when idle, accepted, stopped or cancelled.
     pub(crate) activity: Option<String>,
+    /// How many human-started runs a restart paused or interrupted (#722). They are not
+    /// active, and each waits for the user's Resume or Discard.
+    pub(crate) resumable_runs: i64,
 }
 
 /// A recursive child that settled while its provider still ran, found after a restart.

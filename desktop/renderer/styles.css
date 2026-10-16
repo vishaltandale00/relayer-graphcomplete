@@ -327,6 +327,46 @@ body.sidebar-collapsed .new-thread-button{gap:0;padding-inline:0}
 .interaction-graph-node[aria-current="true"]{border-color:var(--selection-ring);box-shadow:inset 3px 0 var(--selection-ring)}
 .interaction-graph-node-label{font-size:12px;font-weight:550;line-height:1.35;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
 .interaction-graph-node small{font-size:10px;color:var(--muted)}
+/* Runs in the interaction graph (#721, #722): decks, corner controls, restart notice, chips. */
+.interaction-graph-trigger b.needs-attention{background:var(--warning-soft-bg);border-color:var(--warning-solid);color:var(--warning-text)}
+.interaction-graph-heading{display:flex;flex-wrap:wrap;align-items:center;gap:6px}
+.interaction-graph-status-chips{display:inline-flex;flex-wrap:wrap;gap:4px;margin-left:auto}
+.interaction-graph-status-chip{font-size:10px;font-weight:500;padding:2px 7px;border-radius:9px;border:1px solid var(--line-strong);color:var(--muted)}
+.interaction-graph-status-chip.running{color:var(--running-text)}
+.interaction-graph-status-chip.paused,.interaction-graph-status-chip.interrupted{color:var(--warning-text);border-color:var(--warning-solid)}
+.interaction-graph-restart-notice{flex:none;display:flex;align-items:center;gap:8px;margin:8px 10px 0;padding:8px 10px;border-radius:8px;border:1px solid var(--warning-solid);background:var(--warning-soft-bg);color:var(--text);font-size:12px}
+.interaction-graph-restart-notice span{flex:1}
+.interaction-graph-resume-all{flex:none;height:24px;padding:0 9px;border-radius:6px;border:1px solid var(--warning-solid);background:var(--panel);color:var(--warning-text);font-size:11px}
+.interaction-graph-resume-all.hidden{display:none}
+.interaction-graph-card{position:absolute;width:192px}
+.interaction-graph-card>.interaction-graph-node{position:relative;width:100%}
+.interaction-graph-card.deck{border:1px solid var(--line-strong);border-radius:10px;background:var(--raised);padding-bottom:6px;box-shadow:4px 4px 0 -1px var(--raised),4px 4px 0 0 var(--line-strong)}
+.interaction-graph-card.deck>.interaction-graph-node{border-color:transparent;background:transparent}
+.interaction-graph-card.deck .interaction-graph-deck-toggle,.interaction-graph-card.deck .interaction-graph-deck{margin-left:8px;margin-right:8px;width:auto}
+.interaction-graph-card:has(.interaction-graph-controls) .interaction-graph-node-label{padding-right:46px}
+.interaction-graph-card.agent-run>.interaction-graph-node{border-style:dashed}
+.interaction-graph-card.attention-flash>.interaction-graph-node{animation:interaction-graph-attention 1.4s ease-out 1}
+@keyframes interaction-graph-attention{30%{box-shadow:0 0 0 3px var(--warning-solid)}}
+.interaction-graph-status.needs-resume{color:var(--warning-text)}
+.interaction-graph-status.running{color:var(--running-text)}
+.interaction-graph-controls{position:absolute;right:7px;top:6px;display:flex;gap:3px;opacity:0;pointer-events:none;transition:opacity .12s}
+.interaction-graph-card:hover .interaction-graph-controls,.interaction-graph-card:focus-within .interaction-graph-controls{opacity:1;pointer-events:auto}
+.interaction-graph-control{min-width:20px;height:20px;padding:0 5px;border-radius:6px;border:1px solid var(--line-strong);background:var(--panel);color:var(--muted);font-size:10px;line-height:1}
+.interaction-graph-control:hover,.interaction-graph-control:focus-visible{color:var(--text);background:var(--hover)}
+.interaction-graph-control.stop,.interaction-graph-control.remove{color:var(--danger-text)}
+.interaction-graph-control.resume{color:var(--warning-text);border-color:var(--warning-solid)}
+.interaction-graph-control:disabled{opacity:.5}
+.interaction-graph-deck-toggle{display:block;width:100%;margin-top:2px;padding:0 4px;border:0;background:none;color:var(--muted);font-size:10.5px;text-align:left;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.interaction-graph-deck{margin:4px 0 0;padding:6px 0 0 20px;border-top:1px solid var(--line);display:flex;flex-direction:column;gap:4px;font-size:11px;color:var(--muted)}
+.interaction-graph-deck li{display:flex;align-items:center;gap:4px}
+.interaction-graph-deck-text{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.interaction-graph-chip{position:absolute;height:26px;max-width:220px;padding:0 10px;border:1px dashed var(--line-strong);border-radius:13px;background:var(--raised);color:var(--muted);font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.interaction-graph-chip.previous-attempt{color:var(--text-faint)}
+.interaction-graph-surface .agent-connection{stroke-dasharray:2 3}
+.interaction-status-paused:before,.turn-status-paused .turn-option-status:before{background:var(--warning-solid)}
+.interaction-status-paused{color:var(--warning-text)}
+.thread-paused-badge{flex:none;margin-left:auto;padding:0 6px;border:1px solid var(--warning-solid);border-radius:9px;background:var(--warning-soft-bg);color:var(--warning-text);font-size:10px;line-height:15px;white-space:nowrap}
+.sidebar-collapsed .thread-paused-badge{display:none}
 /* Reading layout: Environment overlays; the saved ratio is independent of sidebar state. */
 .workspace-layout{position:relative}
 .workspace-layout .environment-panel{position:fixed;grid-area:auto;z-index:60;right:12px;top:64px;width:min(360px,calc(100vw - 24px));margin:0;box-shadow:0 16px 48px rgba(0,0,0,.35)}

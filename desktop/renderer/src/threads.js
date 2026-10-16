@@ -425,9 +425,12 @@ function layerContainsUnresolvedInvokedAction(layer, invocations = appState.acti
   )) ?? false;
 }
 
+// A run a restart paused or interrupted (#722) can still resume, so its action is unresolved.
 const NONTERMINAL_INVOCATION_STATUSES = new Set([
   "not_started",
   "queued",
+  "paused",
+  "interrupted",
   "running",
   "submitted",
   "waiting_for_approval",
@@ -2034,6 +2037,52 @@ function clearSuccessfulNewThreadInput(input) {
 
 export function connectEvents() {
   // Live harness events are intentionally outside this product-persistence slice.
+}
+
+// Runs a restart stopped where they were wait for the user (#722). Resume starts a run, or a
+// node's chain from its head in order; Resume all starts every head and standalone run; Discard
+// ends a run stopped, keeping its text. Each answers with the runs as they now stand.
+// Only the run's state is taken from the answer; the thread refresh that follows brings its
+// projected context and graph.
+const RUN_STATE_FIELDS = ["completionStatus", "completionError", "queueReason", "stopRequested", "stopError", "graphNodeId", "latestAttempt"];
+function mergeRunResults(threadId, interactions = []) {
+  for (const interaction of interactions) {
+    const existing = appState.interactions?.find((turn) => String(turn.id) === String(interaction.id) && String(turn.threadId) === String(threadId));
+    if (!existing) continue;
+    for (const field of RUN_STATE_FIELDS) {
+      if (field in interaction) existing[field] = interaction[field];
+      else if (field === "queueReason") delete existing.queueReason;
+    }
+  }
+}
+
+async function afterRestartRunChange(threadId) {
+  cancelPendingRefresh();
+  renderThread();
+  // The thread list's "N paused" count and the thread's activity change with the run.
+  await refreshState(threadId).catch(() => {});
+  schedulePendingRefresh(viewState.currentThreadId);
+}
+
+export async function resumeInteraction(threadId, interactionId) {
+  const resumed = await request(`/api/threads/${threadId}/interactions/${interactionId}/resume`, { method: "POST", body: JSON.stringify({}) });
+  mergeRunResults(threadId, resumed?.interactions);
+  await afterRestartRunChange(threadId);
+  return resumed;
+}
+
+export async function resumeAllRuns(threadId) {
+  const resumed = await request(`/api/threads/${threadId}/resume`, { method: "POST", body: JSON.stringify({}) });
+  mergeRunResults(threadId, resumed?.interactions);
+  await afterRestartRunChange(threadId);
+  return resumed;
+}
+
+export async function discardInteraction(threadId, interactionId) {
+  const discarded = await request(`/api/threads/${threadId}/interactions/${interactionId}/discard`, { method: "POST", body: JSON.stringify({}) });
+  mergeRunResults(threadId, [discarded]);
+  await afterRestartRunChange(threadId);
+  return discarded;
 }
 
 export async function stopInteraction(threadId, interactionId) {

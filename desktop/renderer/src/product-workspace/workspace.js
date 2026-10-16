@@ -1,5 +1,5 @@
 import { environmentProjectForThread } from "../environment-context.js";
-import { interactionGraph, renderInteractionGraph } from "./interaction-graph.js";
+import { interactionGraph, interactionGraphStatusChips, renderInteractionGraph } from "./interaction-graph.js";
 import { createWorkspaceLayout } from "./workspace-layout.js";
 import { preferredLayerNode, rememberedLayerSelection, rememberLayerSelection } from "./layer-selection.js";
 import { escapeHtml, toast } from "../ui.js";
@@ -473,6 +473,9 @@ export function turnStatusPresentation(status) {
   }
   if (status === "failed") return { kind: "failed", label: "Failed" };
   if (status === "cancelled") return { kind: "cancelled", label: "Cancelled" };
+  // Runs a restart stopped wait for the user's Resume or Discard (#722); amber like a wait.
+  if (status === "paused") return { kind: "paused", label: "Paused" };
+  if (status === "interrupted") return { kind: "paused", label: "Interrupted by restart" };
   if (status === "stopped") return { kind: "stopped", label: "Stopped" };
   return { kind: "unknown", label: status ? String(status).replaceAll("_", " ") : "Unknown" };
 }
@@ -1651,6 +1654,9 @@ export function createProductWorkspace({
   shareApi = null,
   onSubmitInteraction = async () => {},
   onStopInteraction = async () => {},
+  onResumeInteraction = null,
+  onResumeAllRuns = null,
+  onDiscardInteraction = null,
   onOpenSettings = () => {},
   onRefreshModels = null,
   onNavigateLayer = async () => {},
@@ -2856,6 +2862,90 @@ export function createProductWorkspace({
       }
     }
   };
+  // The decks and agent chips the user opened in the graph popover, and the runs whose
+  // control request is in flight (#721, #722).
+  const expandedGraphGroups = new Set();
+  const pendingRunActions = new Set();
+  let attentionFlash = null;
+  const graphControlSelector = (element) => {
+    const data = element?.dataset;
+    if (!data) return null;
+    if (data.deckFor) return { selector: `[data-deck-for="${data.deckFor}"]`, runId: data.deckFor };
+    if (data.chipId) return { selector: `[data-chip-id="${data.chipId}"]`, runId: null };
+    if (data.runAction && data.runId) return { selector: `[data-run-action="${data.runAction}"][data-run-id="${data.runId}"]`, runId: data.runId };
+    if (element.classList?.contains("interaction-graph-resume-all")) return { selector: ".interaction-graph-resume-all", runId: null };
+    return null;
+  };
+  const toggleGraphGroup = (id) => {
+    if (expandedGraphGroups.has(id)) expandedGraphGroups.delete(id);
+    else expandedGraphGroups.add(id);
+    render();
+  };
+  // A card's corner controls: Stop a running run, Remove a queued one, or Resume or Discard a
+  // run a restart stopped. Each request runs once at a time per run.
+  const runGraphControl = async (action, run) => {
+    const thread = getThread();
+    const key = `${action}:${run.id}`;
+    if (!thread || pendingRunActions.has(key)) return;
+    pendingRunActions.add(key);
+    try {
+      if (action === "stop" || action === "remove") await onStopInteraction(thread.id, Number(run.id));
+      else if (action === "resume") await onResumeInteraction?.(thread.id, Number(run.id));
+      else if (action === "discard") await onDiscardInteraction?.(thread.id, Number(run.id));
+    } catch (error) {
+      toast(error?.message || "This run could not be changed. Try again.");
+    } finally {
+      pendingRunActions.delete(key);
+      if (!disposed) render();
+    }
+  };
+  const resumeAllRuns = async () => {
+    const thread = getThread();
+    if (!thread || pendingRunActions.has("resume-all")) return;
+    pendingRunActions.add("resume-all");
+    try { await onResumeAllRuns?.(thread.id); }
+    catch (error) { toast(error?.message || "The runs could not be resumed. Try again."); }
+    finally {
+      pendingRunActions.delete("resume-all");
+      if (!disposed) render();
+    }
+  };
+  const appendGraphStatusChips = (title, graph) => {
+    const chips = interactionGraphStatusChips(graph);
+    if (!chips.length) return;
+    const row = graphDocument.createElement("span");
+    row.className = "interaction-graph-status-chips";
+    for (const chip of chips) {
+      const element = graphDocument.createElement("span");
+      element.className = `interaction-graph-status-chip ${chip.kind}`;
+      element.textContent = chip.text;
+      row.append(element);
+    }
+    title.append(row);
+  };
+  // The restart notice is the only place Resume all appears (#721).
+  const syncRestartNotice = (popover, viewport, graph) => {
+    let notice = popover.querySelector(".interaction-graph-restart-notice");
+    // A read-only view shows each run's status, not a call to resume it.
+    if (!graph.resumable || !stopsAvailable() || !onResumeAllRuns) { notice?.remove(); return; }
+    if (!notice) {
+      notice = graphDocument.createElement("div");
+      notice.className = "interaction-graph-restart-notice";
+      notice.setAttribute("role", "status");
+      const text = graphDocument.createElement("span");
+      const resume = graphDocument.createElement("button");
+      resume.type = "button";
+      resume.className = "interaction-graph-resume-all";
+      notice.append(text, resume);
+    }
+    const count = graph.resumable;
+    const [text, resume] = notice.children;
+    text.textContent = `Relayer restarted. ${count} run${count === 1 ? "" : "s"} stopped where ${count === 1 ? "it was" : "they were"}. Nothing resumes until you do.`;
+    resume.textContent = `Resume all (${count})`;
+    resume.disabled = pendingRunActions.has("resume-all");
+    resume.onclick = () => { void resumeAllRuns(); };
+    if (notice.nextSibling !== viewport) popover.insertBefore(notice, viewport);
+  };
   const closeTurnPopover = () => {
     turnPopoverOpen = false;
     $("#turnPopover").classList.add("hidden");
@@ -2882,6 +2972,18 @@ export function createProductWorkspace({
     $("#turnPopover").classList.remove("hidden");
     $("#turnPickerButton").setAttribute("aria-expanded", "true");
     fitInteractionGraphPopover();
+    // After a restart, opening the graph brings the first run that needs the user into view,
+    // in reading order, and briefly highlights it (#721). The canvas keeps its selection.
+    const attention = [...$("#turnPopover").querySelectorAll('.interaction-graph-card[data-needs-attention="true"]')]
+      .sort((left, right) => (parseFloat(left.style.left) - parseFloat(right.style.left))
+        || (parseFloat(left.style.top) - parseFloat(right.style.top)))[0];
+    if (attention) {
+      attentionFlash = { id: attention.dataset.cardId, until: Date.now() + 1600 };
+      attention.classList.add("attention-flash");
+      attention.scrollIntoView?.({ block: "nearest", inline: "nearest" });
+      attention.querySelector(".interaction-graph-node")?.focus?.({ preventScroll: true });
+      return;
+    }
     const current = $("#turnPopover [aria-current='true']");
     current?.scrollIntoView?.({ block: "nearest" });
     current?.focus?.({ preventScroll: true });
@@ -4626,12 +4728,18 @@ export function createProductWorkspace({
       turnPopoverOpen,
       graphDocument.activeElement,
     );
+    const focusedGraphControl = turnPopoverOpen ? graphControlSelector(graphDocument.activeElement) : null;
     const turns = workspaceTurns(state, thread);
     const turnIndex = turns.findIndex((item) => String(item.id) === String(interaction?.id));
     $("#previousTurn").disabled = turnIndex <= 0;
     $("#nextTurn").disabled = turnIndex < 0 || turnIndex >= turns.length - 1;
     const pickerButton = $("#turnPickerButton");
-    const graph = interactionGraph(turns, interaction?.id);
+    const graph = interactionGraph(turns, interaction?.id, {
+      invocations: state.actionInvocations || [],
+      expanded: expandedGraphGroups,
+      nodeLabels: new Map((state.nodes || []).map((node) => [String(node.id), node.title || node.label || "this node"])),
+      controllable: stopsAvailable(),
+    });
     $("#turnPicker .turn-stepper").classList.toggle("interaction-graph-stepper", graph !== null);
     $("#previousTurn").classList.toggle("hidden", graph !== null);
     $("#nextTurn").classList.toggle("hidden", graph !== null);
@@ -4640,19 +4748,35 @@ export function createProductWorkspace({
     if (graph) {
       $("#turnPicker .turn-stepper").setAttribute("aria-label", "Interaction navigation");
       pickerButton.disabled = !turns.length;
-      pickerButton.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6h12M6 6v12m0-6h12"/><circle cx="6" cy="6" r="2.5"/><circle cx="6" cy="18" r="2.5"/><circle cx="18" cy="12" r="2.5"/></svg><b>${graph.contextCount}</b>`;
-      pickerButton.setAttribute("aria-label", `Open interaction graph. ${graph.contextCount} attached context nodes`);
+      // Runs a restart paused or interrupted show as an amber count on the trigger (#722).
+      const triggerCount = graph.attention > 0
+        ? `<b class="needs-attention">${graph.attention}</b>`
+        : `<b>${graph.contextCount}</b>`;
+      pickerButton.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6h12M6 6v12m0-6h12"/><circle cx="6" cy="6" r="2.5"/><circle cx="6" cy="18" r="2.5"/><circle cx="18" cy="12" r="2.5"/></svg>${triggerCount}`;
+      pickerButton.setAttribute("aria-label", `Open interaction graph. ${graph.contextCount} attached context nodes${graph.attention > 0 ? `. ${graph.attention} paused run${graph.attention === 1 ? "" : "s"} waiting for you` : ""}`);
       const popover = $("#turnPopover");
       const title = popover.querySelector(".interaction-graph-heading") ?? graphDocument.createElement("div"); title.className = "interaction-graph-heading";
       title.textContent = graph.incomplete ? "Interaction graph · Some connections unavailable" : "Interaction graph";
+      appendGraphStatusChips(title, graph);
       // Keep the scroll host mounted while status/context updates rebuild the cards.
       const viewport = popover.querySelector(".interaction-graph-viewport") ?? graphDocument.createElement("div"); viewport.className = "interaction-graph-viewport";
       viewport.replaceChildren(renderInteractionGraph(graphDocument, graph, interaction?.id, async (node) => {
         if (!await prepareNodeContextSelectionChange()) return;
         closeTurnPopover(); collapseContextPreviews();
         if (onSelectTurnById) await onSelectTurnById(node.id, { responseRoot: node.completionStatus === "accepted", threadId: node.threadId });
-      }));
+      }, { onRun: runGraphControl, onToggle: toggleGraphGroup }));
       if (viewport.parentElement !== popover) popover.replaceChildren(title, viewport);
+      syncRestartNotice($("#turnPopover"), viewport, graph);
+      if (attentionFlash && Date.now() < attentionFlash.until) {
+        viewport.querySelector(`.interaction-graph-card[data-card-id="${attentionFlash.id}"]`)?.classList.add("attention-flash");
+      }
+      if (focusedGraphControl) {
+        // A control that went away with its run's change hands focus to the run's card.
+        const target = $("#turnPopover").querySelector(focusedGraphControl.selector)
+          ?? (focusedGraphControl.runId ? $("#turnPopover").querySelector(`[data-turn-id="${focusedGraphControl.runId}"]`) : null)
+          ?? $("#turnPopover").querySelector(".interaction-graph-node[aria-current='true']");
+        target?.focus({ preventScroll: true });
+      }
       if (focusedTurnId !== null) [...$("#turnPopover").querySelectorAll("[data-turn-id]")].find((row) => row.dataset.turnId === focusedTurnId)?.focus({ preventScroll: true });
       $("#turnPopover").classList.toggle("hidden", !turnPopoverOpen);
       pickerButton.setAttribute("aria-expanded", String(turnPopoverOpen));

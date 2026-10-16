@@ -444,19 +444,6 @@ impl SqliteProductStore {
         Ok(result.rows_affected() == 1)
     }
 
-    pub(crate) async fn recover_identified_interaction_submitted(
-        &self,
-        interaction_id: InteractionId,
-        error: &str,
-    ) -> Result<bool, StorageError> {
-        let result = sqlx::query(
-            "UPDATE interactions SET completion_status='submitted',completion_error=?1
-             WHERE id=?2 AND input_identity IS NOT NULL AND input_digest IS NOT NULL
-               AND completion_status IN ('not_started','running','submitted','waiting_for_approval')",
-        ).bind(error).bind(interaction_id.value()).execute(&self.pool).await?;
-        Ok(result.rows_affected() == 1)
-    }
-
     pub(crate) async fn claim_interaction_preparing(
         &self,
         interaction_id: InteractionId,

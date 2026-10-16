@@ -403,6 +403,7 @@ async fn validate_archive_authority(pool: &SqlitePool) -> Result<(), StorageErro
     // guard must fail at reopen, before a caller can admit execution on archived work.
     // Newest first: an object a later migration redefines is checked against that definition.
     let migrations = [
+        include_str!("migrations/0051_paused_runs_archive.sql"),
         include_str!("migrations/0049_node_run_queue.sql"),
         include_str!("migrations/0042_thread_archive.sql"),
     ];
