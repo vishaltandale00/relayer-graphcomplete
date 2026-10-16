@@ -37,6 +37,8 @@ export interface HarnessCompleteConfiguration {
 }
 
 export interface GraphCapabilityProfile {
+  /** New preparations use planning with search unless explicitly disabled. */
+  readonly planning?: "disabled" | "interaction-v1";
   readonly search: "disabled" | "query-v1";
   /** Draft previews (PRD §11.10). Omission means disabled. */
   readonly preview?: "enabled";

@@ -472,6 +472,14 @@ class RelayerGraphClient:
         except (KeyError, ValueError) as error:
             raise ConfigurationError("RELAYER_GRAPH_URL, RELAYER_GRAPH_TOKEN, and RELAYER_NODE_ID are required") from error
 
+    async def publish_plan(self, *, client_key: str, title: str, detail: str) -> Mapping[str, Any]:
+        """Publish an immutable, internal contribution owned by this interaction."""
+        return await self._request("POST", "/api/graph/plans", {"clientKey": client_key, "title": title, "detail": detail})
+
+    async def get_plan(self, node: NodeReference) -> Mapping[str, Any]:
+        """Read an exact plan pointer and record its observation in graph provenance."""
+        return await self._request("GET", f"/api/graph/plans/{_node_id(node)}")
+
     async def get_node(self, node: NodeReference) -> GraphNode:
         value = await self._request("GET", f"/api/graph/nodes/{_node_id(node)}")
         return GraphNode.from_dict(value["node"])

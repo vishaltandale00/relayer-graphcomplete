@@ -2006,6 +2006,18 @@ fn register_imported_node(
     definitions: &mut HashMap<String, ImportedNode>,
     mut node: ImportedNode,
 ) -> Result<(), GraphError> {
+    if node.kind == "interaction-plan"
+        || node
+            .client_key
+            .as_deref()
+            .is_some_and(|key| key.starts_with("__plan:"))
+    {
+        return Err(GraphError::validation(
+            "reserved_plan_record",
+            "node.kind",
+            "Portable output cannot mint internal plan records.",
+        ));
+    }
     if let Some(existing) = definitions.get_mut(&node.id) {
         let incoming_client_key = node.client_key.take();
         let existing_client_key = existing.client_key.take();

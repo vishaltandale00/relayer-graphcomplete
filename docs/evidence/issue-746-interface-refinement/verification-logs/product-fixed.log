@@ -1,0 +1,9 @@
+
+ RUN  v4.1.10 /Volumes/2T-SSD/worktrees/0f84/relayer-graphcomplete
+
+
+ Test Files  2 passed (2)
+      Tests  11 passed (11)
+   Start at  03:45:35
+   Duration  52.08s (transform 762ms, setup 0ms, import 1.58s, tests 50.36s, environment 0ms)
+

@@ -2,7 +2,7 @@ import { readFile } from "node:fs/promises";
 import { basename, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it, vi } from "vitest";
-import { loadHarnessConfigurations } from "../packages/harness-host/src/configuration.ts";
+import { loadHarnessConfigurations, parseHarnessConfiguration } from "../packages/harness-host/src/configuration.ts";
 import {
   evalHarnessConfigurationPaths,
   evalRuntimeTarget,
@@ -229,6 +229,16 @@ describe("Eval harness configuration availability", () => {
     }
     if (treatment) treatment.name = "comparison";
     expect(treatment).toEqual(control);
+  });
+
+  it("keeps shipped planning-enabled configurations valid through off-target adaptation", async () => {
+    const catalog = await loadHarnessConfigurations(["codex-basic", "claude-basic", "prime-agent-basic"].map(name => resolve(repositoryRoot, `harnesses/${name}.yaml`)));
+    for (const configuration of catalog.values()) {
+      for (const target of ["windows-x64", "macos-x64"]) {
+        const adapted = parseHarnessConfiguration(evalTargetHarnessConfiguration(target)(configuration));
+        expect(adapted.graphCapabilityProfile).toMatchObject({ search: "disabled", planning: "disabled" });
+      }
+    }
   });
 
   it("disables search for every configuration only off the qualified target", () => {

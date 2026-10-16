@@ -29,6 +29,10 @@ describe("harness configuration", () => {
       settings: {},
       graphCapabilityProfile: { search: "disabled" },
     } as const;
+    for (const profile of [
+      { search: "query-v1", planning: "unknown" },
+      { search: "disabled", planning: "interaction-v1" },
+    ]) expect(() => parseHarnessConfiguration({ ...base, graphCapabilityProfile: profile })).toThrow();
     const omitted = parseHarnessConfiguration(base);
     const disabled = parseHarnessConfiguration({ ...base, graphCapabilityProfile: { search: "disabled", preview: "disabled" } });
     const enabled = parseHarnessConfiguration({ ...base, graphCapabilityProfile: { search: "disabled", preview: "enabled" } });
@@ -131,7 +135,7 @@ describe("harness configuration", () => {
   ])("ships %s with query-v1 graph search and agent-authored Complete", async (name) => {
     const configuration = await loadHarnessConfiguration(join(repositoryRoot, `harnesses/${name}.yaml`));
     // Each of these harnesses can show draft previews to its model (PRD §11.10).
-    const profile = { search: "query-v1", preview: "enabled" };
+    const profile = { search: "query-v1", preview: "enabled", planning: "interaction-v1" };
     expect(configuration.graphCapabilityProfile).toEqual(profile);
     expect(resolveGraphCapabilityProfile(configuration)).toEqual(profile);
     expect(configuration.complete).toEqual({ agentAuthored: true });
@@ -146,7 +150,7 @@ describe("harness configuration", () => {
   });
 
   it.each([
-    ["codex-basic", "medium", 18, "layered-navigation-multi-agent-v1"],
+    ["codex-basic", "medium", 20, "layered-navigation-multi-agent-v1"],
     ["codex-basic-high", "high", 4, undefined],
   ])("loads the checked-in %s configuration", async (name, modelReasoningEffort, revision, promptProfile) => {
     await expect(loadHarnessConfiguration(join(repositoryRoot, `harnesses/${name}.yaml`))).resolves.toEqual({
@@ -172,10 +176,10 @@ describe("harness configuration", () => {
       },
       executionAccessContracts: ["managed-runtime@1", "secret@1"],
       modelDefaults: { familyPolicy: { id: "codex-default-family", version: name === "codex-basic" ? 4 : 2 } },
-      ...(name === "codex-basic" ? { complete: { agentAuthored: true }, graphCapabilityProfile: { search: "query-v1", preview: "enabled" } } : {}),
+      ...(name === "codex-basic" ? { complete: { agentAuthored: true }, graphCapabilityProfile: { search: "query-v1", preview: "enabled", planning: "interaction-v1" } } : {}),
       settings: {
         modelReasoningEffort,
-        ...(name === "codex-basic" ? { personalPresentationVersion: "personal-presentation-v6" } : {}),
+        ...(name === "codex-basic" ? { personalPresentationVersion: "personal-presentation-v8" } : {}),
         ...(promptProfile === undefined ? {} : { promptProfile }),
         skipGitRepoCheck: true,
       },
@@ -183,9 +187,9 @@ describe("harness configuration", () => {
   });
 
   it.each([
-    ["codex-basic", "personal-presentation-v6"],
-    ["claude-basic", "personal-presentation-v6"],
-    ["prime-agent-basic", "personal-presentation-v6"],
+    ["codex-basic", "personal-presentation-v8"],
+    ["claude-basic", "personal-presentation-v8"],
+    ["prime-agent-basic", "personal-presentation-v8"],
     ["prime-agent-deep", "personal-presentation-v4"],
   ])(
     "pins the shipped %s configuration to %s",

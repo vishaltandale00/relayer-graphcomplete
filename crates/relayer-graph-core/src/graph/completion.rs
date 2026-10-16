@@ -430,7 +430,8 @@ pub(crate) async fn index_and_record(
         .max(stored)
         .map_or(SearchIndexRevision::FIRST, SearchIndexRevision::next);
 
-    let committed = index_publications(database, target, revision, publications, expiry).await?;
+    let committed =
+        index_publications(database, target, revision, publications, Vec::new(), expiry).await?;
     SearchIndexTable::new(&mut *transaction)
         .record_revision(target, committed)
         .await?;
@@ -441,6 +442,36 @@ pub(crate) async fn index_and_record(
 
 /// Remove imported publications from Ladybug and record the derived revision
 /// in the caller's still-open canonical SQLite rollback transaction.
+pub(super) async fn index_internal_and_record(
+    database: &GraphDatabase,
+    transaction: &mut GraphConnection,
+    target: SearchTarget,
+    node: GraphNode,
+    published_to: Vec<SearchTarget>,
+    expiry: tokio::time::Instant,
+) -> Result<(), GraphError> {
+    let recorded = SearchIndexTable::new(&mut *transaction)
+        .revision(target)
+        .await?;
+    let stored = deadline(expiry, database.search_index.revision(target)).await?;
+    let revision = recorded
+        .max(stored)
+        .map_or(SearchIndexRevision::FIRST, SearchIndexRevision::next);
+    let committed = index_publications(
+        database,
+        target,
+        revision,
+        Vec::new(),
+        vec![(node, published_to)],
+        expiry,
+    )
+    .await?;
+    SearchIndexTable::new(transaction)
+        .record_revision(target, committed)
+        .await?;
+    Ok(())
+}
+
 pub(crate) async fn remove_from_index_and_record(
     database: &GraphDatabase,
     transaction: &mut GraphConnection,
@@ -495,13 +526,16 @@ async fn index_publications(
     target: SearchTarget,
     revision: SearchIndexRevision,
     publications: Vec<(AcceptedGraphPublication, Vec<SearchTarget>)>,
+    internal_content: Vec<(GraphNode, Vec<SearchTarget>)>,
     expiry: tokio::time::Instant,
 ) -> Result<SearchIndexRevision, GraphError> {
     let publication_identity = format!(
         "sha256:{:x}",
-        Sha256::digest(serde_json::to_vec(&publications).map_err(|error| {
-            GraphError::Internal(format!("search publication identity failed: {error}"))
-        })?)
+        Sha256::digest(
+            serde_json::to_vec(&(&publications, &internal_content)).map_err(|error| {
+                GraphError::Internal(format!("search publication identity failed: {error}"))
+            })?
+        )
     );
     let mut write = deadline(
         expiry,
@@ -512,6 +546,12 @@ async fn index_publications(
     .await?;
     for (publication, published_to) in publications {
         if let Err(error) = deadline(expiry, write.apply(publication, published_to)).await {
+            let _ = deadline(expiry, write.rollback()).await;
+            return Err(error);
+        }
+    }
+    for (node, targets) in internal_content {
+        if let Err(error) = deadline(expiry, write.apply_internal_content(node, targets)).await {
             let _ = deadline(expiry, write.rollback()).await;
             return Err(error);
         }
@@ -558,7 +598,7 @@ pub(super) async fn canonical_publication_matches(
     Ok(true)
 }
 
-async fn deadline<T>(
+pub(super) async fn deadline<T>(
     expiry: tokio::time::Instant,
     work: impl std::future::Future<Output = Result<T, GraphError>>,
 ) -> Result<T, GraphError> {

@@ -1,0 +1,211 @@
+{
+  "schemaVersion": 1,
+  "sourceManifestSha256": "0052fc95dc1636974bfc8a7913fd85f5e9e1886c4584e059d309f5b8e53fccf9",
+  "qualification": "partial",
+  "requiredEntryPoints": [
+    "npm run test:living-plans",
+    "npm run check",
+    "npm run build",
+    "npm run test:desktop:first-message",
+    "npm run test:eval-compiled-runtime",
+    "npm run test:eval-web"
+  ],
+  "executions": [
+    {
+      "name": "living-plans",
+      "command": [
+        "npm",
+        "run",
+        "test:living-plans"
+      ],
+      "exitCode": 0,
+      "seconds": 97.91,
+      "observedInnerResult": "3 real graph-server scenarios plus adoption/import boundary scenarios; 250 JavaScript tests across 10 files passed",
+      "log": "verification-logs/final-living-plans.log"
+    },
+    {
+      "name": "desktop",
+      "command": [
+        "npm",
+        "run",
+        "test:desktop:first-message"
+      ],
+      "exitCode": 1,
+      "seconds": 38.19,
+      "observedInnerResult": "Build succeeded; Electron keyboard-focus wait timed out before smoke completion",
+      "log": "verification-logs/final-desktop.log"
+    },
+    {
+      "name": "compiled",
+      "command": [
+        "npm",
+        "run",
+        "test:eval-compiled-runtime"
+      ],
+      "exitCode": 0,
+      "seconds": 103.02,
+      "observedInnerResult": "12 recursive-completion scenarios passed using compiled entry",
+      "log": "verification-logs/final-compiled.log"
+    },
+    {
+      "name": "web",
+      "command": [
+        "npm",
+        "run",
+        "test:eval-web"
+      ],
+      "exitCode": 1,
+      "seconds": 88.72,
+      "observedInnerResult": "Nine named chapters passed; proveTaskActor timed out in observe, expected completed but got interrupted",
+      "log": "verification-logs/final-web.log"
+    },
+    {
+      "name": "sealed-node",
+      "command": [
+        "npx",
+        "vitest",
+        "run",
+        "--maxWorkers=1",
+        "test/evidence-capture-integrity.test.mjs",
+        "-t",
+        "executes a sealed private Homebrew Node closure without external Homebrew reads"
+      ],
+      "exitCode": 0,
+      "seconds": 16.03,
+      "observedInnerResult": "1 selected test passed, 129 deselected",
+      "log": "verification-logs/final-sealed-node.log"
+    },
+    {
+      "name": "secret",
+      "command": [
+        "npm",
+        "run",
+        "test:codex-secret-boundary"
+      ],
+      "exitCode": 0,
+      "seconds": 4.15,
+      "observedInnerResult": "2 process-boundary tests passed",
+      "log": "verification-logs/final-secret.log"
+    },
+    {
+      "name": "python",
+      "command": [
+        "python3",
+        "-m",
+        "unittest",
+        "discover",
+        "-s",
+        "python/relayer-graph/tests"
+      ],
+      "exitCode": 0,
+      "seconds": 3.74,
+      "observedInnerResult": "99 tests passed",
+      "log": "verification-logs/final-python.log"
+    },
+    {
+      "name": "receipt-lint",
+      "command": [
+        "npm",
+        "run",
+        "lint:ladybug-receipt"
+      ],
+      "exitCode": 0,
+      "seconds": 1.3,
+      "observedInnerResult": "All receipt lint stages passed",
+      "log": "verification-logs/final-receipt-lint.log"
+    },
+    {
+      "name": "readability",
+      "command": [
+        "npm",
+        "run",
+        "prd:check-readability"
+      ],
+      "exitCode": 0,
+      "seconds": 0.3,
+      "observedInnerResult": "Passed; no checked sentence exceeds 25 words",
+      "log": "verification-logs/final-readability.log"
+    }
+  ],
+  "fullCheck": {
+    "exitCode": 1,
+    "rustAndTypes": "Formatting, Clippy, workspace tests, crash reconciliation, package builds and TypeScript checks passed; app library 401 passed",
+    "vitest": {
+      "filesPassed": 325,
+      "filesFailed": 4,
+      "filesSkipped": 1,
+      "testsPassed": 4354,
+      "testsFailed": 5,
+      "testsSkipped": 3
+    },
+    "failures": [
+      "sealed private Homebrew Node closure timed out",
+      "compiler-wrapper failure fixture timed out",
+      "recursive JS temporal communication without prior timed out on graph startup",
+      "recursive JS temporal communication with prior timed out on app startup",
+      "historical desktop social-preview receipt expects earlier telemetry inventory hash"
+    ],
+    "log": "verification-logs/check-fixed.log"
+  },
+  "additionalPasses": [
+    {
+      "name": "build",
+      "command": "npm run build",
+      "exitCode": 0,
+      "log": "verification-logs/build-fixed.log"
+    },
+    {
+      "name": "real composer and Prime product",
+      "testsPassed": 11,
+      "exitCode": 0,
+      "log": "verification-logs/product-fixed.log"
+    },
+    {
+      "name": "source recursive scenarios after build",
+      "testsPassed": 12,
+      "exitCode": 0,
+      "log": "verification-logs/recursive-after-build.log"
+    },
+    {
+      "name": "compiler-wrapper file isolated",
+      "testsPassed": 20,
+      "exitCode": 0,
+      "log": "verification-logs/timeout-reruns.log",
+      "limit": "The paired recursive file did not load because package cleaning overlapped this attempted run; its later separate rerun passes. This initial combined command failed and is not relabelled as passing."
+    }
+  ],
+  "unresolved": [
+    "Full npm run check remains failed; targeted reruns do not turn its original result green",
+    "Historical social-preview evidence remains bound to its original source snapshot",
+    "Desktop first-message smoke timed out waiting for keyboard focus",
+    "Eval web actor-observation chapter timed out; later chapters were not reached"
+  ],
+  "review": {
+    "sourceReviewer": "/root/plan_prd_review",
+    "semanticAndVisualReviewer": "/root/eval_build_readiness",
+    "manifestSha256": "0052fc95dc1636974bfc8a7913fd85f5e9e1886c4584e059d309f5b8e53fccf9",
+    "verdict": "No unresolved source finding; no semantic or captured-preview blocker in this one observed iteration",
+    "certifying": false
+  },
+  "logDigests": {
+    "app-tests.log": "4c79360fc0e290b2415669f78a50c4ebd9c77ae3f47588eb491a931f81b67efe",
+    "build-fixed.log": "e8ccc20bf6f22f24416651eb64c03206a10b8977afc5cf365e8f02cedbaf8573",
+    "check-fixed.log": "09a5e1e7d9ed3a762c8b7787d6a44fdb42d391500227813037508cb1262dc7e5",
+    "final-compiled.log": "14a03374719dc530016bcb12618272bfc47bb8e75a323b8d0cb5d82925c3304a",
+    "final-desktop.log": "8f6c122ce5c544782bc51258daeb8e333e1ace6ce2ea6e63f5a2137357a3a82a",
+    "final-living-plans.log": "2d040ad41eefb695216d46316b247ca7fa68c838fb1178c29c5f450d1115e00c",
+    "final-python.log": "40f6505275e596be1a38e2a6310a5e0a3e7e2db06ba6acca4e07c68421521d43",
+    "final-readability.log": "bf54c46d3bfe97d64358d7b626bc48534c55954c760d95098fcf6762b10ab321",
+    "final-receipt-lint.log": "1b529311a19916ae37ad0c7261c097146039939448083be45c049ce58fca625c",
+    "final-sealed-node.log": "c5313c7dcd0ed05bc68f1025fcdca58e0f3346734b2438a1cf9c921851c7b68f",
+    "final-secret.log": "5859f37120e5b7f5a815f0b5c67fe92a18464a3bff6b4b16826a1e8fc7ff7fd6",
+    "final-web.log": "138b7c2ae5bd884c9738d2e5a8fa475d0e843b6589e933cd3bee83db2d438bbc",
+    "guidance-tests.log": "82c6139a953b32eeb53ae7b6190c04d305ad58506963199b7a0b56a04e2cf941",
+    "materialization-fixed.log": "ddda9c6d87a378f3e3f041758073c94a724c3475d147f1fd083916dbf5b1ac1f",
+    "product-fixed.log": "c410a1cd2177c325387c2683b5ebecc60be66b716dae9c9ec6ad7c4ce8c2d3a8",
+    "product-tests.log": "aba93c9fa54e5c4b66083c23d7c74a9c03fed9fcb10077068e39f0ede9772075",
+    "recursive-after-build.log": "7ae7866d7dbf623590db989dd7ebe7c223ff70c573d65fe09c5c84df8ef68e58",
+    "registration-tests.log": "757a895c2bd7ef7b341e6539be923933c2d4bef7498743d2b31cc06ac204b5b6",
+    "timeout-reruns.log": "f2ec26d7a8800712983fb6d02f33ef4760e357c82d2d66d39054edae33d94c28"
+  }
+}

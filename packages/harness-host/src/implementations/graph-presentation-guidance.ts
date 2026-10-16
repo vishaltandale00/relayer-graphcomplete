@@ -107,6 +107,7 @@ catch (error) {
 const contract = await graph.getContract();
 async function stageResponseLinks(responseLayer) {
   for (const requirement of contract?.returnRequirements ?? []) {
+    if (requirement.kind === "plan.contribution") continue; // Publish the internal contribution separately.
     if (requirement.kind !== "navigate.response") throw new Error("Unsupported Return requirement");
     const snapshot = await graph.getNodePresentation(requirement.nodeId);
     const addition = { kind: "navigate", relation: "reference", label: "Task findings", target: responseLayer, clientKey: "response-${interactionNodeId}-" + requirement.nodeId };
@@ -217,6 +218,8 @@ except APIError as error:
 contract = await graph.get_contract()
 async def stage_response_links(response_layer):
     for requirement in contract.return_requirements if contract is not None else ():
+        if requirement["kind"] == "plan.contribution":
+            continue  # Publish the internal contribution separately.
         if requirement["kind"] != "navigate.response":
             raise RuntimeError("Unsupported Return requirement")
         node_id = requirement["nodeId"]

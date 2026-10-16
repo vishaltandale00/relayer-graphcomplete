@@ -37,6 +37,21 @@ const codexBasicConfiguration: HarnessConfiguration = {
 };
 
 describe("CodexBasicHarness", () => {
+  it.each(["Codex", "Claude"])("delivers living planning from the sealed contract in the %s production builder", (label) => {
+    const base=runContext(1,"token");
+    const planned: HarnessRunContext={...base,interactionInput:{...base.interactionInput,completionContract:{schemaVersion:1,interactionNodeId:1,input:{text:"Question",context:[],answers:[],invocationReferences:[]},authorities:[],returnRequirements:[{kind:"plan.contribution"}],digest:"fixture-sealed"}}};
+    const prompt=buildLayeredNavigationPrompt(planned,"@relayer/graph-client",undefined,true,label,true,true);
+    expect(prompt).toContain("Internal living plan is ENABLED");
+    expect(prompt).toContain("what the user should understand immediately");
+    expect(prompt).toContain("before substantive research, delegation, or response authoring");
+    expect(prompt).toContain("await graph.search(");
+    expect(prompt).toContain("await graph.getPlan(nodeId)");
+    expect(prompt).toContain("await graph.publishPlan(");
+    expect(prompt).toContain("Children search the graph themselves");
+    expect(prompt).toContain("Do not prescribe future response contents");
+    expect(buildLayeredNavigationPrompt(base,"@relayer/graph-client")).not.toContain("Internal living plan is ENABLED");
+  });
+
   it("renders V1 after generic guidance and leaves neutral V0 at baseline", () => {
     const baseline = buildLayeredNavigationPrompt(runContext(1, "token"), "@relayer/graph-client");
     const brokerAuthorized = buildLayeredNavigationPrompt({

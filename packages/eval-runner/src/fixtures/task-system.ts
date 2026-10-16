@@ -35,6 +35,9 @@ class TaskSystemFixtureHarness implements Harness {
     if (renderInteractionInput(rereadInput) !== renderInteractionInput(context.interactionInput)) {
       throw new Error("Harness run context does not match the interaction input re-read from its graph capability");
     }
+    if (rereadInput.completionContract?.returnRequirements.some(({ kind }) => kind === "plan.contribution")) {
+      await graph.publishPlan({ clientKey: "task-system-fixture", title: "Task system fixture", detail: "The deterministic task-system view supports reviewing the queue, workers and results. This fake replaces provider inference and makes no model-planning claim." });
+    }
     context.trace.emit({ type: "prompt", data: { text: renderInteractionInput(context.interactionInput), kind: "fixture-input" } });
     context.trace.emit({ type: "tool.call.started", data: { tool: "fixture.graph-authoring" } });
     await waitForInvokeEvidenceRelease(context.inputGraph.leasedActionId

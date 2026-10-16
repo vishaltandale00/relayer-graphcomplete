@@ -268,8 +268,11 @@ impl CompletionPlan {
                 contract
                     .return_requirements
                     .into_iter()
-                    .map(|requirement| match requirement {
-                        crate::CompletionReturnRequirement::NavigateResponse { node_id } => node_id,
+                    .filter_map(|requirement| match requirement {
+                        crate::CompletionReturnRequirement::NavigateResponse { node_id } => {
+                            Some(node_id)
+                        }
+                        crate::CompletionReturnRequirement::PlanContribution => None,
                     })
                     .collect()
             }

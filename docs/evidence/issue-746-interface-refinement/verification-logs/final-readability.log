@@ -1,0 +1,5 @@
+
+> relayer-graphcomplete@0.0.0 prd:check-readability
+> node docs/prd/check-readability.mjs
+
+PRD readability check passed. No checked sentence has more than 25 words.

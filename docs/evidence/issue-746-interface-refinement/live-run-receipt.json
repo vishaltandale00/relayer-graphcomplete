@@ -1,0 +1,1331 @@
+{
+  "schemaVersion": 1,
+  "runId": "run-2026-10-16T07-50-40-176Z-735814f3",
+  "executionId": "747b2550-216b-4357-b1f4-ae54ae634f90",
+  "caseId": "living-plan.interaction-continuity",
+  "status": "passed",
+  "completedAt": "2026-10-16T07:59:19.858Z",
+  "sourceManifestSha256": "0052fc95dc1636974bfc8a7913fd85f5e9e1886c4584e059d309f5b8e53fccf9",
+  "loadedNativeBinaries": {
+    "relayer-app-server": "a5938b8d958ccc6b744ae88ff9f31a6e7948c0d08c5178e7218dfad436cdc07c",
+    "relayer-graph-server": "420354191c03a2c67540647b5c810462c63236bacb652c16e3f0098cf6a57743"
+  },
+  "harness": {
+    "name": "codex-basic",
+    "revision": 20,
+    "digest": "sha256:b55f6ea77461b17883148dbd7c467cdbc135cdc55d987a4fc61390afe6506ce8",
+    "graphCapabilityProfile": {
+      "search": "query-v1",
+      "preview": "enabled",
+      "planning": "interaction-v1"
+    },
+    "personalPresentationVersion": "personal-presentation-v8",
+    "reasoningEffort": "medium"
+  },
+  "model": {
+    "familyId": 1,
+    "providerId": "codex",
+    "modelId": "gpt-6.1-sol"
+  },
+  "summary": {
+    "passed": 1,
+    "total": 1,
+    "byHarness": [
+      {
+        "name": "codex-basic",
+        "passed": 1,
+        "total": 1,
+        "finished": 1,
+        "completed": 1,
+        "outcomeQualified": 1,
+        "outcomeJudged": 1,
+        "presentationJudged": 0
+      }
+    ]
+  },
+  "checks": [
+    {
+      "name": "turn-1:living-plan-own-contribution",
+      "passed": true,
+      "detail": "The current interaction published its own internal planning contribution."
+    },
+    {
+      "name": "turn-1:living-plan-search-discovery",
+      "passed": true,
+      "detail": "The candidate executed the public graph-search route."
+    },
+    {
+      "name": "turn-1:living-plan-before-return",
+      "passed": true,
+      "detail": "A successful plan publication preceded terminal graph Return."
+    },
+    {
+      "name": "turn-1:living-plan-prior-pointer-incorporation",
+      "passed": true,
+      "detail": "The candidate read the successful child's plan (first turn) or the preceding root's published plan (follow-up), then retained that exact pointer in its own contribution."
+    },
+    {
+      "name": "turn-1:living-plan-successful-semantic-child",
+      "passed": true,
+      "detail": "A successful semantic child's own planning contribution was read by the enclosing candidate."
+    },
+    {
+      "name": "turn-3:living-plan-own-contribution",
+      "passed": true,
+      "detail": "The current interaction published its own internal planning contribution."
+    },
+    {
+      "name": "turn-3:living-plan-search-discovery",
+      "passed": true,
+      "detail": "The candidate executed the public graph-search route."
+    },
+    {
+      "name": "turn-3:living-plan-before-return",
+      "passed": true,
+      "detail": "A successful plan publication preceded terminal graph Return."
+    },
+    {
+      "name": "turn-3:living-plan-prior-pointer-incorporation",
+      "passed": true,
+      "detail": "The candidate read the successful child's plan (first turn) or the preceding root's published plan (follow-up), then retained that exact pointer in its own contribution."
+    },
+    {
+      "name": "agent-authored-complete:broker-authority",
+      "passed": true,
+      "detail": "Configuration requested agent-authored Complete enabled; root trace recorded broker authority true."
+    },
+    {
+      "name": "agent-authored-complete:semantic-child-count",
+      "passed": true,
+      "detail": "Agent-authored Complete was available; child creation remains observed behavior and 1 semantic child execution was recorded."
+    },
+    {
+      "name": "agent-authored-complete:child-provenance",
+      "passed": true,
+      "detail": "Every semantic child must retain the exact source interaction, action, product interaction, and graph completion identities."
+    },
+    {
+      "name": "agent-authored-complete:child-terminal",
+      "passed": true,
+      "detail": "Every semantic child must publish a current layer and settle as an accepted succeeded result with an ordered durable projection sequence."
+    },
+    {
+      "name": "agent-authored-complete:child-execution",
+      "passed": true,
+      "detail": "Every semantic child must retain an exact attached and successfully settled provider execution binding."
+    },
+    {
+      "name": "agent-authored-complete:child-trace",
+      "passed": true,
+      "detail": "Every semantic child must have a complete portable candidate trace that records nested completion-broker authority."
+    },
+    {
+      "name": "agent-authored-complete:child-8:visual-node-detail:authored-output",
+      "passed": true,
+      "detail": "The authored presentation must accept a compiled visual Node Detail for every accepted node; observed 7 valid packages across 7 nodes."
+    }
+  ],
+  "turns": [
+    {
+      "threadId": 3,
+      "interactionId": 7,
+      "graphNodeId": 83,
+      "rootLayerId": 26,
+      "status": "accepted",
+      "prompt": "Help me plan a small community repair caf\u00e9. We have one Saturday afternoon, a library meeting room, and six volunteers. Work out the repair stations, intake and safety approach, and a practical volunteer allocation. Use one semantic subcompletion for a focused review of intake and safety risks, read its findings, and integrate them into the overall proposal. Keep the work concise. Leave the supply budget as a clearly unresolved decision for now; do not assume it. Give me a useful overview with deeper supporting material only where it helps.",
+      "deterministicChecks": [
+        {
+          "name": "turn-1:living-plan-own-contribution",
+          "passed": true,
+          "detail": "The current interaction published its own internal planning contribution."
+        },
+        {
+          "name": "turn-1:living-plan-search-discovery",
+          "passed": true,
+          "detail": "The candidate executed the public graph-search route."
+        },
+        {
+          "name": "turn-1:living-plan-before-return",
+          "passed": true,
+          "detail": "A successful plan publication preceded terminal graph Return."
+        },
+        {
+          "name": "turn-1:living-plan-prior-pointer-incorporation",
+          "passed": true,
+          "detail": "The candidate read the successful child's plan (first turn) or the preceding root's published plan (follow-up), then retained that exact pointer in its own contribution."
+        },
+        {
+          "name": "turn-1:living-plan-successful-semantic-child",
+          "passed": true,
+          "detail": "A successful semantic child's own planning contribution was read by the enclosing candidate."
+        }
+      ],
+      "caseEvidence": {
+        "interactionNodeId": 83,
+        "publishedPlanNodeIds": [
+          84,
+          89,
+          89,
+          98,
+          98,
+          102
+        ],
+        "readPlanNodeIds": [
+          87,
+          84,
+          97,
+          91,
+          89,
+          87,
+          84
+        ],
+        "semanticChildOwners": [
+          86
+        ],
+        "semanticQuality": "Requires separate review of the actual plans and rendered work; these checks prove graph use only."
+      },
+      "candidateTrace": {
+        "status": "complete",
+        "format": "relayer-harness-trace-v1",
+        "traceId": "73b60d59-eacc-422d-9984-a557c6271510",
+        "sha256": "sha256:f32d7bb70afa5a17f42332b746d9ebffc92fb52d10601e869dfac3f54d2e394d",
+        "byteLength": 692448,
+        "eventCount": 560,
+        "coverage": {
+          "prompt": "full",
+          "messages": "full",
+          "reasoningSummaries": "full",
+          "modelCalls": "full",
+          "toolCalls": "full",
+          "usage": "full",
+          "childStreams": "none",
+          "nativeArtifacts": "none"
+        },
+        "redactionCount": 59,
+        "personalPresentationVersionId": 76,
+        "personalPresentationVersionKey": "personal-presentation-v8",
+        "graphOperations": {
+          "status": "complete",
+          "promotable": true,
+          "format": "relayer-graph-operations-v1",
+          "ref": "graph-operations.jsonl",
+          "sha256": "sha256:e270fd9699d6ab7bd5b7876ee2f249d68326d9194eb17c48f26e0b1bcf0c87a6",
+          "byteLength": 14450,
+          "eventCount": 63,
+          "truncated": false
+        },
+        "completionBrokerAvailable": true,
+        "ref": "executions/747b2550-216b-4357-b1f4-ae54ae634f90/turns/7/candidate-trace/manifest.json",
+        "promotable": true
+      },
+      "authoringErrors": {
+        "schemaVersion": 1,
+        "coverage": "partial",
+        "total": null,
+        "observed": 3,
+        "byCause": {
+          "compiler": 2,
+          "client": 1
+        },
+        "reasons": [
+          "client_capture_not_exhaustive"
+        ]
+      }
+    },
+    {
+      "threadId": 3,
+      "interactionId": 9,
+      "graphNodeId": 103,
+      "rootLayerId": 28,
+      "status": "accepted",
+      "prompt": "Our supply budget is now $120, and one volunteer can only help for the first hour. Continue from the work already done: adapt the station choices and allocation, explain the tradeoffs, and make clear what we still need to decide. Do not start another specialist run unless the new information actually requires it.",
+      "deterministicChecks": [
+        {
+          "name": "turn-3:living-plan-own-contribution",
+          "passed": true,
+          "detail": "The current interaction published its own internal planning contribution."
+        },
+        {
+          "name": "turn-3:living-plan-search-discovery",
+          "passed": true,
+          "detail": "The candidate executed the public graph-search route."
+        },
+        {
+          "name": "turn-3:living-plan-before-return",
+          "passed": true,
+          "detail": "A successful plan publication preceded terminal graph Return."
+        },
+        {
+          "name": "turn-3:living-plan-prior-pointer-incorporation",
+          "passed": true,
+          "detail": "The candidate read the successful child's plan (first turn) or the preceding root's published plan (follow-up), then retained that exact pointer in its own contribution."
+        }
+      ],
+      "caseEvidence": {
+        "interactionNodeId": 103,
+        "publishedPlanNodeIds": [
+          104,
+          106,
+          110
+        ],
+        "readPlanNodeIds": [
+          98,
+          97,
+          91,
+          89,
+          87,
+          84,
+          102
+        ],
+        "semanticChildOwners": [
+          86
+        ],
+        "semanticQuality": "Requires separate review of the actual plans and rendered work; these checks prove graph use only."
+      },
+      "candidateTrace": {
+        "status": "complete",
+        "format": "relayer-harness-trace-v1",
+        "traceId": "32723da1-9355-4210-9303-fadae39b331c",
+        "sha256": "sha256:55a45bd1e053e7ae99dd1a3011618eb4d95a1a0b8bd19fbdc7c5ac641aecd0f9",
+        "byteLength": 537347,
+        "eventCount": 322,
+        "coverage": {
+          "prompt": "full",
+          "messages": "full",
+          "reasoningSummaries": "full",
+          "modelCalls": "full",
+          "toolCalls": "full",
+          "usage": "full",
+          "childStreams": "none",
+          "nativeArtifacts": "none"
+        },
+        "redactionCount": 29,
+        "personalPresentationVersionId": 76,
+        "personalPresentationVersionKey": "personal-presentation-v8",
+        "graphOperations": {
+          "status": "complete",
+          "promotable": true,
+          "format": "relayer-graph-operations-v1",
+          "ref": "graph-operations.jsonl",
+          "sha256": "sha256:20b91fd3033ab411aee76835d2944838ab972e32434ba2286de0a517ff760605",
+          "byteLength": 29537,
+          "eventCount": 167,
+          "truncated": false
+        },
+        "completionBrokerAvailable": true,
+        "ref": "executions/747b2550-216b-4357-b1f4-ae54ae634f90/turns/9/candidate-trace/manifest.json",
+        "promotable": true
+      },
+      "authoringErrors": {
+        "schemaVersion": 1,
+        "coverage": "partial",
+        "total": null,
+        "observed": 0,
+        "byCause": {},
+        "reasons": [
+          "client_capture_not_exhaustive"
+        ]
+      }
+    }
+  ],
+  "finalPlanAssociations": {
+    "83": 102,
+    "86": 97,
+    "103": 110
+  },
+  "notes": [
+    "User explicitly authorized repeating this live case.",
+    "Same case and model route as baseline; both planning and presentation changed. This is not a controlled causal A/B.",
+    "16/16 deterministic graph-contract checks do not certify general quality. Graph presentation remains Unjudged in Eval.",
+    "Explicit authored plans and accepted output were reviewed separately. No native reasoning was used as product evidence.",
+    "Authoring failures and partial client-capture coverage are retained in turn metadata."
+  ],
+  "semanticChildren": [
+    {
+      "threadId": 3,
+      "sourceInteractionId": 7,
+      "sourceActionId": 34,
+      "durable": true,
+      "reusable": false,
+      "invocationKey": "intake-safety-once",
+      "sourceCompletionId": 83,
+      "interactionId": 8,
+      "graphNodeId": 86,
+      "status": "accepted",
+      "rootLayerId": 24,
+      "acceptedRootNodes": [
+        {
+          "id": 92,
+          "title": "Keep six roles; opening is conditional",
+          "detail": "Retain 2 textile repairers, 1 simple-household repairer, intake, queue/checkout and a protected safety lead. Reduce stations for breaks; verify skills, library approval and supplies before opening. Budget unresolved.",
+          "authoredDetail": {
+            "assets": [],
+            "components": [
+              {
+                "css": "section{padding:1rem;line-height:1.5}p{margin:0.6rem 0}button,a{padding:0.5rem}nav{display:flex;flex-wrap:wrap;gap:0.5rem}[data-relayer-theme=\"light\"] section{color:#182c34;background-color:#fafbf9}[data-relayer-theme=\"dark\"] section{color:#edf2f3;background-color:#121619}button:focus-visible,a:focus-visible{outline:2px solid #7d9fbc;outline-offset:3px}",
+                "html": "<section><h2>Keep the allocation, with safeguards</h2><p>For this Saturday library pilot: <strong>2 textile repairers + 1 simple-household repairer + intake + queue/checkout + safety lead.</strong> Verify competence before assigning stations; shrink the offer if a skill is absent.</p><p>Keep the safety lead free of routine repairs, with authority to stop work. Stagger breaks by closing a station; do not leave intake or checkout uncovered. Pause new starts without safety coverage. Anyone may call a stop.</p><p><strong>Before opening:</strong> obtain library approval for the exact activities/tools, confirm applicable insurance arrangements, emergency/access checks and available supplies. No supplies or funding are assumed; <strong>budget unresolved.</strong></p><p>This is a conditional proposal, not an inspected venue or safety certification.</p><nav><button data-gc-mount=\"m_2027d70cd119c4aa\">Evidence and limits</button><button data-gc-mount=\"m_168e16e9deb9391a\">Earlier staffing finding</button></nav></section>",
+                "id": "main",
+                "order": 0
+              }
+            ],
+            "integritySha256": "1a974c630042c7728f9a2e52f09424700b1e19804bb098f55604e8075a78029a",
+            "mounts": [
+              {
+                "capability": {
+                  "action": {
+                    "clientKey": "ga1:WyJzYWZldHktZmluYWwtODYiLCJyZXZpZXciLCJhIiwic291cmNlcyJd",
+                    "sourceLayer": {
+                      "clientKey": "ga1:WyJzYWZldHktZmluYWwtODYiLCJyZXZpZXciLCJsIiwiIl0"
+                    },
+                    "sourceNode": {
+                      "clientKey": "ga1:WyJzYWZldHktZmluYWwtODYiLCJyZXZpZXciLCJuIiwiYWxsb2NhdGlvbiJd"
+                    }
+                  },
+                  "kind": "reference"
+                },
+                "componentId": "main",
+                "host": "button",
+                "id": "m_2027d70cd119c4aa",
+                "kind": "capability"
+              },
+              {
+                "capability": {
+                  "action": {
+                    "clientKey": "ga1:WyJzYWZldHktZmluYWwtODYiLCJyZXZpZXciLCJhIiwicHJpb3IiXQ",
+                    "sourceLayer": {
+                      "clientKey": "ga1:WyJzYWZldHktZmluYWwtODYiLCJyZXZpZXciLCJsIiwiIl0"
+                    },
+                    "sourceNode": {
+                      "clientKey": "ga1:WyJzYWZldHktZmluYWwtODYiLCJyZXZpZXciLCJuIiwiYWxsb2NhdGlvbiJd"
+                    }
+                  },
+                  "kind": "reference"
+                },
+                "componentId": "main",
+                "host": "button",
+                "id": "m_168e16e9deb9391a",
+                "kind": "capability"
+              }
+            ],
+            "version": 1
+          }
+        },
+        {
+          "id": 93,
+          "title": "Screen twice; keep the scope narrow",
+          "detail": "Intake rejects excluded items; repairers independently confirm competence, safe method and tools. Hand sewing needs an explicit needle/scissor exception. Any doubt or scope expansion means stop.",
+          "authoredDetail": {
+            "assets": [],
+            "components": [
+              {
+                "css": "section{padding:1rem;line-height:1.5}p{margin:0.6rem 0}button,a{padding:0.5rem}nav{display:flex;flex-wrap:wrap;gap:0.5rem}[data-relayer-theme=\"light\"] section{color:#182c34;background-color:#fafbf9}[data-relayer-theme=\"dark\"] section{color:#edf2f3;background-color:#121619}button:focus-visible,a:focus-visible{outline:2px solid #7d9fbc;outline-offset:3px}",
+                "html": "<section><h2>Intake screens; repairer confirms</h2><p>Advertise and enforce exclusions: mains electrical items/work, battery-powered items for this pilot, damaged batteries, gas, blades/power tools, heat/solvents and safety-critical equipment (for example helmets, brakes, medical or child-restraint equipment). Exclude contaminated, unstable or unmanageably heavy items.</p><p>Offer hand sewing and small non-powered fixes only. Resolve the textile tool ambiguity with the library: permit supervised needles and small sewing scissors explicitly, or offer only work possible without them. No irons, powered sewing machines or hidden glue/chemical exceptions.</p><p>Ask about fault, intended use, prior repair and concealed hazards before handling. Repairer then confirms skill, tools, materials and safe checks independently.</p><p><strong>Stop:</strong> unknown hazard, out-of-scope work, missing competence/materials, unstable item, consent withdrawn or insufficient time to leave it secure. Refer or decline; consent cannot make unsafe work acceptable.</p></section>",
+                "id": "main",
+                "order": 0
+              }
+            ],
+            "integritySha256": "cbff905d737d44e64bf4f3e5b370bc31633dec13d76daa83edad841fe5aec930",
+            "mounts": [],
+            "version": 1
+          }
+        },
+        {
+          "id": 94,
+          "title": "One item record through checkout",
+          "detail": "Record consent, matching item ID and parts, proposed work, repairer checks, outcome and remaining faults. Owner stays; checkout verifies identity and explains limits, including do-not-use warnings.",
+          "authoredDetail": {
+            "assets": [],
+            "components": [
+              {
+                "css": "section{padding:1rem;line-height:1.5}p{margin:0.6rem 0}button,a{padding:0.5rem}nav{display:flex;flex-wrap:wrap;gap:0.5rem}[data-relayer-theme=\"light\"] section{color:#182c34;background-color:#fafbf9}[data-relayer-theme=\"dark\"] section{color:#edf2f3;background-color:#121619}button:focus-visible,a:focus-visible{outline:2px solid #7d9fbc;outline-offset:3px}",
+                "html": "<section><h2>Screen \u2192 agree \u2192 repair \u2192 return</h2><p><strong>Intake:</strong> one item per person initially. Assign matching numbered tags to item, owner claim and record; describe condition, fault and detachable parts. Keep loose parts in a matching container. Collect only necessary personal data and set a retention period.</p><p><strong>Consent:</strong> explain proposed work, risk of further damage, no guaranteed fix and the right to decline/stop. Owner stays; seek renewed agreement for changed work. Separate optional photo permission. Consent does not replace safeguards.</p><p><strong>Queue:</strong> match skills, avoid unattended drop-offs and pause acceptance when the remaining time cannot cover repair, checks and checkout.</p><p><strong>Checkout:</strong> repairer records work, checks, remaining faults and repaired/partial/unrepaired status. Host matches owner/item/parts and explains written restrictions or referrals. An attempted fix is not safety certification; label unsafe items \u201cdo not use\u201d and arrange safe return, never a use demonstration.</p></section>",
+                "id": "main",
+                "order": 0
+              }
+            ],
+            "integritySha256": "6e95ba0dac77345dae3e08d034f6edfe0fb4b0332a3a3b9bd71f96b5874613eb",
+            "mounts": [],
+            "version": 1
+          }
+        },
+        {
+          "id": 95,
+          "title": "Verify emergency and accessible operation",
+          "detail": "Confirm venue emergency procedures, named roles, first-aid arrangements, accessible routes and seating, and controlled tools before opening. Pause the event if coverage or safe access fails.",
+          "authoredDetail": {
+            "assets": [],
+            "components": [
+              {
+                "css": "section{padding:1rem;line-height:1.5}p{margin:0.6rem 0}button,a{padding:0.5rem}nav{display:flex;flex-wrap:wrap;gap:0.5rem}[data-relayer-theme=\"light\"] section{color:#182c34;background-color:#fafbf9}[data-relayer-theme=\"dark\"] section{color:#edf2f3;background-color:#121619}button:focus-visible,a:focus-visible{outline:2px solid #7d9fbc;outline-offset:3px}",
+                "html": "<section><h2>Brief and walk through before doors open</h2><p>With library staff, confirm occupancy, clear exits, alarm, assembly point, emergency number, exact address and responder access. Name who alerts staff/calls for help, guides evacuation and meets responders. Identify first-aid provision, kit and AED location; do not assume the safety lead is trained.</p><p>Verify step-free entrance, usable toilets, clear mobility-aid routes, seated waiting and workable table heights. Offer spoken and written queue calls and help with forms; keep consent understandable. Agree evacuation assistance without requiring disclosure of diagnoses.</p><p>Keep needles/scissors controlled and counted, tools away from children, and carers responsible for supervision. Stop all repairs during an emergency, follow venue procedures and record incidents/near misses. Smoke or a suspect battery triggers staff/emergency procedures, not volunteer handling or charging.</p></section>",
+                "id": "main",
+                "order": 0
+              }
+            ],
+            "integritySha256": "ed9339bf627679cf619320e3eacbdfe57568676ef14796d145c3dda852daa34e",
+            "mounts": [],
+            "version": 1
+          }
+        }
+      ],
+      "acceptedNodes": [
+        {
+          "id": "92",
+          "title": "Keep six roles; opening is conditional",
+          "detail": "Retain 2 textile repairers, 1 simple-household repairer, intake, queue/checkout and a protected safety lead. Reduce stations for breaks; verify skills, library approval and supplies before opening. Budget unresolved.",
+          "authoredDetail": {
+            "assets": [],
+            "components": [
+              {
+                "css": "section{padding:1rem;line-height:1.5}p{margin:0.6rem 0}button,a{padding:0.5rem}nav{display:flex;flex-wrap:wrap;gap:0.5rem}[data-relayer-theme=\"light\"] section{color:#182c34;background-color:#fafbf9}[data-relayer-theme=\"dark\"] section{color:#edf2f3;background-color:#121619}button:focus-visible,a:focus-visible{outline:2px solid #7d9fbc;outline-offset:3px}",
+                "html": "<section><h2>Keep the allocation, with safeguards</h2><p>For this Saturday library pilot: <strong>2 textile repairers + 1 simple-household repairer + intake + queue/checkout + safety lead.</strong> Verify competence before assigning stations; shrink the offer if a skill is absent.</p><p>Keep the safety lead free of routine repairs, with authority to stop work. Stagger breaks by closing a station; do not leave intake or checkout uncovered. Pause new starts without safety coverage. Anyone may call a stop.</p><p><strong>Before opening:</strong> obtain library approval for the exact activities/tools, confirm applicable insurance arrangements, emergency/access checks and available supplies. No supplies or funding are assumed; <strong>budget unresolved.</strong></p><p>This is a conditional proposal, not an inspected venue or safety certification.</p><nav><button data-gc-mount=\"m_2027d70cd119c4aa\">Evidence and limits</button><button data-gc-mount=\"m_168e16e9deb9391a\">Earlier staffing finding</button></nav></section>",
+                "id": "main",
+                "order": 0
+              }
+            ],
+            "integritySha256": "1a974c630042c7728f9a2e52f09424700b1e19804bb098f55604e8075a78029a",
+            "mounts": [
+              {
+                "capability": {
+                  "action": {
+                    "clientKey": "ga1:WyJzYWZldHktZmluYWwtODYiLCJyZXZpZXciLCJhIiwic291cmNlcyJd",
+                    "sourceLayer": {
+                      "clientKey": "ga1:WyJzYWZldHktZmluYWwtODYiLCJyZXZpZXciLCJsIiwiIl0"
+                    },
+                    "sourceNode": {
+                      "clientKey": "ga1:WyJzYWZldHktZmluYWwtODYiLCJyZXZpZXciLCJuIiwiYWxsb2NhdGlvbiJd"
+                    }
+                  },
+                  "kind": "reference"
+                },
+                "componentId": "main",
+                "host": "button",
+                "id": "m_2027d70cd119c4aa",
+                "kind": "capability"
+              },
+              {
+                "capability": {
+                  "action": {
+                    "clientKey": "ga1:WyJzYWZldHktZmluYWwtODYiLCJyZXZpZXciLCJhIiwicHJpb3IiXQ",
+                    "sourceLayer": {
+                      "clientKey": "ga1:WyJzYWZldHktZmluYWwtODYiLCJyZXZpZXciLCJsIiwiIl0"
+                    },
+                    "sourceNode": {
+                      "clientKey": "ga1:WyJzYWZldHktZmluYWwtODYiLCJyZXZpZXciLCJuIiwiYWxsb2NhdGlvbiJd"
+                    }
+                  },
+                  "kind": "reference"
+                },
+                "componentId": "main",
+                "host": "button",
+                "id": "m_168e16e9deb9391a",
+                "kind": "capability"
+              }
+            ],
+            "version": 1
+          }
+        },
+        {
+          "id": "93",
+          "title": "Screen twice; keep the scope narrow",
+          "detail": "Intake rejects excluded items; repairers independently confirm competence, safe method and tools. Hand sewing needs an explicit needle/scissor exception. Any doubt or scope expansion means stop.",
+          "authoredDetail": {
+            "assets": [],
+            "components": [
+              {
+                "css": "section{padding:1rem;line-height:1.5}p{margin:0.6rem 0}button,a{padding:0.5rem}nav{display:flex;flex-wrap:wrap;gap:0.5rem}[data-relayer-theme=\"light\"] section{color:#182c34;background-color:#fafbf9}[data-relayer-theme=\"dark\"] section{color:#edf2f3;background-color:#121619}button:focus-visible,a:focus-visible{outline:2px solid #7d9fbc;outline-offset:3px}",
+                "html": "<section><h2>Intake screens; repairer confirms</h2><p>Advertise and enforce exclusions: mains electrical items/work, battery-powered items for this pilot, damaged batteries, gas, blades/power tools, heat/solvents and safety-critical equipment (for example helmets, brakes, medical or child-restraint equipment). Exclude contaminated, unstable or unmanageably heavy items.</p><p>Offer hand sewing and small non-powered fixes only. Resolve the textile tool ambiguity with the library: permit supervised needles and small sewing scissors explicitly, or offer only work possible without them. No irons, powered sewing machines or hidden glue/chemical exceptions.</p><p>Ask about fault, intended use, prior repair and concealed hazards before handling. Repairer then confirms skill, tools, materials and safe checks independently.</p><p><strong>Stop:</strong> unknown hazard, out-of-scope work, missing competence/materials, unstable item, consent withdrawn or insufficient time to leave it secure. Refer or decline; consent cannot make unsafe work acceptable.</p></section>",
+                "id": "main",
+                "order": 0
+              }
+            ],
+            "integritySha256": "cbff905d737d44e64bf4f3e5b370bc31633dec13d76daa83edad841fe5aec930",
+            "mounts": [],
+            "version": 1
+          }
+        },
+        {
+          "id": "94",
+          "title": "One item record through checkout",
+          "detail": "Record consent, matching item ID and parts, proposed work, repairer checks, outcome and remaining faults. Owner stays; checkout verifies identity and explains limits, including do-not-use warnings.",
+          "authoredDetail": {
+            "assets": [],
+            "components": [
+              {
+                "css": "section{padding:1rem;line-height:1.5}p{margin:0.6rem 0}button,a{padding:0.5rem}nav{display:flex;flex-wrap:wrap;gap:0.5rem}[data-relayer-theme=\"light\"] section{color:#182c34;background-color:#fafbf9}[data-relayer-theme=\"dark\"] section{color:#edf2f3;background-color:#121619}button:focus-visible,a:focus-visible{outline:2px solid #7d9fbc;outline-offset:3px}",
+                "html": "<section><h2>Screen \u2192 agree \u2192 repair \u2192 return</h2><p><strong>Intake:</strong> one item per person initially. Assign matching numbered tags to item, owner claim and record; describe condition, fault and detachable parts. Keep loose parts in a matching container. Collect only necessary personal data and set a retention period.</p><p><strong>Consent:</strong> explain proposed work, risk of further damage, no guaranteed fix and the right to decline/stop. Owner stays; seek renewed agreement for changed work. Separate optional photo permission. Consent does not replace safeguards.</p><p><strong>Queue:</strong> match skills, avoid unattended drop-offs and pause acceptance when the remaining time cannot cover repair, checks and checkout.</p><p><strong>Checkout:</strong> repairer records work, checks, remaining faults and repaired/partial/unrepaired status. Host matches owner/item/parts and explains written restrictions or referrals. An attempted fix is not safety certification; label unsafe items \u201cdo not use\u201d and arrange safe return, never a use demonstration.</p></section>",
+                "id": "main",
+                "order": 0
+              }
+            ],
+            "integritySha256": "6e95ba0dac77345dae3e08d034f6edfe0fb4b0332a3a3b9bd71f96b5874613eb",
+            "mounts": [],
+            "version": 1
+          }
+        },
+        {
+          "id": "95",
+          "title": "Verify emergency and accessible operation",
+          "detail": "Confirm venue emergency procedures, named roles, first-aid arrangements, accessible routes and seating, and controlled tools before opening. Pause the event if coverage or safe access fails.",
+          "authoredDetail": {
+            "assets": [],
+            "components": [
+              {
+                "css": "section{padding:1rem;line-height:1.5}p{margin:0.6rem 0}button,a{padding:0.5rem}nav{display:flex;flex-wrap:wrap;gap:0.5rem}[data-relayer-theme=\"light\"] section{color:#182c34;background-color:#fafbf9}[data-relayer-theme=\"dark\"] section{color:#edf2f3;background-color:#121619}button:focus-visible,a:focus-visible{outline:2px solid #7d9fbc;outline-offset:3px}",
+                "html": "<section><h2>Brief and walk through before doors open</h2><p>With library staff, confirm occupancy, clear exits, alarm, assembly point, emergency number, exact address and responder access. Name who alerts staff/calls for help, guides evacuation and meets responders. Identify first-aid provision, kit and AED location; do not assume the safety lead is trained.</p><p>Verify step-free entrance, usable toilets, clear mobility-aid routes, seated waiting and workable table heights. Offer spoken and written queue calls and help with forms; keep consent understandable. Agree evacuation assistance without requiring disclosure of diagnoses.</p><p>Keep needles/scissors controlled and counted, tools away from children, and carers responsible for supervision. Stop all repairs during an emergency, follow venue procedures and record incidents/near misses. Smoke or a suspect battery triggers staff/emergency procedures, not volunteer handling or charging.</p></section>",
+                "id": "main",
+                "order": 0
+              }
+            ],
+            "integritySha256": "ed9339bf627679cf619320e3eacbdfe57568676ef14796d145c3dda852daa34e",
+            "mounts": [],
+            "version": 1
+          }
+        },
+        {
+          "id": "96",
+          "title": "Evidence and limits",
+          "detail": "Primary repair-event guidance supports refusal, one-item queues, consent, item records, venue checks and emergency planning. Specific exclusions and staffing safeguards are recommendations for this proposal; no inspection or competence verification occurred.",
+          "authoredDetail": {
+            "assets": [],
+            "components": [
+              {
+                "css": "section{padding:1rem;line-height:1.5}p{margin:0.6rem 0}button,a{padding:0.5rem}nav{display:flex;flex-wrap:wrap;gap:0.5rem}[data-relayer-theme=\"light\"] section{color:#182c34;background-color:#fafbf9}[data-relayer-theme=\"dark\"] section{color:#edf2f3;background-color:#121619}button:focus-visible,a:focus-visible{outline:2px solid #7d9fbc;outline-offset:3px}",
+                "html": "<section><h2>What supports this review</h2><p><a data-gc-mount=\"m_34e5c32f458f2bd6\">Repair Caf\u00e9 house rules</a> support refusing unsuitable repairs, no guaranteed outcome and one-item queues.</p><p><a data-gc-mount=\"m_2d3fba39a6c217ff\">CCF repair agreement</a> addresses damage risk, owner presence and return. Its <a data-gc-mount=\"m_40eb74c96f4fa47d\">safety briefing</a> uses item IDs, outcome records and emergency briefings; its <a data-gc-mount=\"m_320691f8570ddbf1\">venue checklist</a> includes access, toilets and emergency facilities.</p><p><a data-gc-mount=\"m_65d6bfb478659743\">HSE emergency guidance</a> supports proportionate plans, clear roles, unobstructed exits and assisted evacuation.</p><p>These are general and UK-based sources, not local legal clearance. Protected staffing, stricter exclusions and handoffs are this review\u2019s recommendations. No venue inspection, skill assessment, local policy check or supply inventory occurred; budget remains unresolved.</p></section>",
+                "id": "main",
+                "order": 0
+              }
+            ],
+            "integritySha256": "038f871dd2e15a051fd2feb3b8208ea841ec08af4dd69947e7252b45d279f0e4",
+            "mounts": [
+              {
+                "capability": {
+                  "href": "https://www.repaircafe.org/en/house-rules/",
+                  "kind": "link"
+                },
+                "componentId": "main",
+                "host": "a",
+                "id": "m_34e5c32f458f2bd6",
+                "kind": "capability"
+              },
+              {
+                "capability": {
+                  "href": "https://cambridgecarbonfootprint.org/wp-content/uploads/2023/12/21.-Repair-agreement-feedback-form-Dec-2023.pdf",
+                  "kind": "link"
+                },
+                "componentId": "main",
+                "host": "a",
+                "id": "m_2d3fba39a6c217ff",
+                "kind": "capability"
+              },
+              {
+                "capability": {
+                  "href": "https://cambridgecarbonfootprint.org/wp-content/uploads/2024/10/22.-Safety-briefing-Oct-2024.docx.pdf",
+                  "kind": "link"
+                },
+                "componentId": "main",
+                "host": "a",
+                "id": "m_40eb74c96f4fa47d",
+                "kind": "capability"
+              },
+              {
+                "capability": {
+                  "href": "https://cambridgecarbonfootprint.org/wp-content/uploads/2025/02/Venue-checklist.pdf",
+                  "kind": "link"
+                },
+                "componentId": "main",
+                "host": "a",
+                "id": "m_320691f8570ddbf1",
+                "kind": "capability"
+              },
+              {
+                "capability": {
+                  "href": "https://www.hse.gov.uk/event-safety/incidents-and-emergencies.htm",
+                  "kind": "link"
+                },
+                "componentId": "main",
+                "host": "a",
+                "id": "m_65d6bfb478659743",
+                "kind": "capability"
+              }
+            ],
+            "version": 1
+          }
+        },
+        {
+          "id": "88",
+          "title": "Protect safety coverage before throughput",
+          "detail": "Keep the proposed 3 repairers + intake + queue/checkout + safety lead, conditional on verified skills and library approval. The safety lead should not routinely repair; pause new starts when safety coverage is absent. Budget remains unresolved.",
+          "authoredDetail": {
+            "assets": [],
+            "components": [
+              {
+                "css": "section{padding:1rem;line-height:1.5}[data-relayer-theme=\"light\"] section{color:#182c34;background-color:#fafbf9}[data-relayer-theme=\"dark\"] section{color:#edf2f3;background-color:#121619}button{padding:0.6rem}",
+                "html": "<section><h2>Keep six roles; protect the safety lead</h2><p>The proposed three repairers, intake host, queue/checkout host and safety lead are a workable starting allocation only after skills and library permission are checked.</p><p>Make the safety lead a stop-work authority, not a routine fourth repairer. Pause new starts if that coverage is lost; reduce stations for breaks rather than leaving intake or checkout uncovered.</p><p>This is a staffing recommendation, not venue clearance. Supply budget remains unresolved. Screening, consent and emergency checks are being reviewed.</p><button data-gc-mount=\"m_c73b6867fd49d4d1\">Original proposal</button></section>",
+                "id": "main",
+                "order": 0
+              }
+            ],
+            "integritySha256": "6809e3304e8382fc7e41b861d548182f51212e5256227f86af04f301cacd74b3",
+            "mounts": [
+              {
+                "capability": {
+                  "action": {
+                    "clientKey": "ga1:WyJzYWZldHktZmlyc3QtODYiLCJjb3ZlcmFnZSIsImEiLCJwcm9wb3NhbCJd",
+                    "sourceLayer": {
+                      "clientKey": "ga1:WyJzYWZldHktZmlyc3QtODYiLCJjb3ZlcmFnZSIsImwiLCIiXQ"
+                    },
+                    "sourceNode": {
+                      "clientKey": "ga1:WyJzYWZldHktZmlyc3QtODYiLCJjb3ZlcmFnZSIsIm4iLCJmaW5kaW5nIl0"
+                    }
+                  },
+                  "kind": "reference"
+                },
+                "componentId": "main",
+                "host": "button",
+                "id": "m_c73b6867fd49d4d1",
+                "kind": "capability"
+              }
+            ],
+            "version": 1
+          }
+        },
+        {
+          "id": "85",
+          "title": "A small, bounded repair caf\u00e9",
+          "detail": "Proposed: textiles and simple household repairs, with three repairers, one intake host, one queue/checkout host and one safety floater. Intake and safety review is pending. Supply budget remains unresolved.",
+          "authoredDetail": {
+            "assets": [],
+            "components": [
+              {
+                "css": "section{padding:1rem;line-height:1.5}[data-relayer-theme=\"light\"] section{color:#182c34;background-color:#fafbf9}[data-relayer-theme=\"dark\"] section{color:#edf2f3;background-color:#121619}button{padding:0.6rem}",
+                "html": "<section><h2>Start with low-risk repairs</h2><p>Proposed stations: textiles and simple non-powered household items. Three repairers leave three volunteers for intake, queue/checkout and safety support.</p><p>Skills and library rules still need checking. A focused intake and safety review will test this setup before the proposal is finalized.</p><p><strong>Supply budget: unresolved.</strong></p><button data-gc-mount=\"m_c639d691c16c1b0c\">Review intake and safety</button></section>",
+                "id": "main",
+                "order": 0
+              },
+              {
+                "css": "",
+                "html": "<button data-gc-mount=\"m_91710b8d802e822a\">Safety findings</button>",
+                "id": "safety-result-86",
+                "order": 1
+              }
+            ],
+            "integritySha256": "0e663134781e19e08df26eed57f8768e2dea65ff89aeb3aa4b93be3acd6f833f",
+            "mounts": [
+              {
+                "capability": {
+                  "action": {
+                    "clientKey": "ga1:WyJyZXBhaXItaW5pdGlhbC04MyIsImNhbmRpZGF0ZSIsImEiLCJzYWZldHktcmV2aWV3Il0",
+                    "sourceLayer": {
+                      "clientKey": "ga1:WyJyZXBhaXItaW5pdGlhbC04MyIsImNhbmRpZGF0ZSIsImwiLCIiXQ"
+                    },
+                    "sourceNode": {
+                      "clientKey": "ga1:WyJyZXBhaXItaW5pdGlhbC04MyIsImNhbmRpZGF0ZSIsIm4iLCJzY29wZSJd"
+                    }
+                  },
+                  "kind": "invoke"
+                },
+                "componentId": "main",
+                "host": "button",
+                "id": "m_c639d691c16c1b0c",
+                "kind": "capability"
+              },
+              {
+                "capability": {
+                  "action": {
+                    "clientKey": "response-86-85",
+                    "sourceNode": {
+                      "clientKey": "ga1:WyJyZXBhaXItaW5pdGlhbC04MyIsImNhbmRpZGF0ZSIsIm4iLCJzY29wZSJd"
+                    }
+                  },
+                  "kind": "reference"
+                },
+                "componentId": "safety-result-86",
+                "host": "button",
+                "id": "m_91710b8d802e822a",
+                "kind": "capability"
+              }
+            ],
+            "version": 1
+          }
+        }
+      ],
+      "resultCompletionStatus": "accepted",
+      "execution": {
+        "interactionId": 8,
+        "graphCompletionId": 86,
+        "harnessConfigurationName": "codex-basic",
+        "harnessConfigurationDigest": "sha256:b55f6ea77461b17883148dbd7c467cdbc135cdc55d987a4fc61390afe6506ce8",
+        "modelExecutionDigest": "sha256:7bcecb3b24780527eab7a69e0136fda34dcaf17851e81e73dd8efbc3f7960079",
+        "phase": "settled",
+        "attached": true,
+        "attachmentSchemaVersion": 1,
+        "attachmentProvider": "codex",
+        "settled": true,
+        "settlementNodeId": 86,
+        "settlementRootLayerId": 24,
+        "safeReason": null
+      },
+      "authoringErrors": {
+        "schemaVersion": 1,
+        "coverage": "partial",
+        "total": null,
+        "observed": 5,
+        "byCause": {
+          "compiler": 4,
+          "client": 1
+        },
+        "reasons": [
+          "client_capture_not_exhaustive"
+        ]
+      },
+      "candidateTrace": {
+        "status": "complete",
+        "format": "relayer-harness-trace-v1",
+        "traceId": "09bf4bd3-876c-4d37-bf24-45f316a19f03",
+        "sha256": "sha256:08605f0c61ce0bc0351b8408f79d3c23e43c20e4735ccd7c39b5a75ae7576532",
+        "byteLength": 670423,
+        "eventCount": 407,
+        "coverage": {
+          "prompt": "full",
+          "messages": "full",
+          "reasoningSummaries": "full",
+          "modelCalls": "full",
+          "toolCalls": "full",
+          "usage": "full",
+          "childStreams": "none",
+          "nativeArtifacts": "none"
+        },
+        "redactionCount": 68,
+        "personalPresentationVersionId": 76,
+        "personalPresentationVersionKey": "personal-presentation-v8",
+        "graphOperations": {
+          "status": "complete",
+          "promotable": true,
+          "format": "relayer-graph-operations-v1",
+          "ref": "graph-operations.jsonl",
+          "sha256": "sha256:02b27c5b9f0d1f6fb0fdcba3dc11c79a232d849a12bf42436ce548276de1548b",
+          "byteLength": 19789,
+          "eventCount": 88,
+          "truncated": false
+        },
+        "completionBrokerAvailable": true,
+        "ref": "executions/747b2550-216b-4357-b1f4-ae54ae634f90/turns/8/candidate-trace/manifest.json",
+        "promotable": true
+      },
+      "projectionObservations": [
+        {
+          "observedAt": "2026-10-16T07:51:16.529Z",
+          "completionId": 86,
+          "sequence": 39,
+          "revision": 0,
+          "previousRevision": null,
+          "lifecycle": "active",
+          "currentLayerId": null,
+          "productStatus": "running",
+          "observedPreTerminal": true
+        },
+        {
+          "observedAt": "2026-10-16T07:52:59.453Z",
+          "completionId": 86,
+          "sequence": 40,
+          "revision": 1,
+          "previousRevision": 0,
+          "lifecycle": "active",
+          "currentLayerId": 22,
+          "productStatus": "running",
+          "observedPreTerminal": true
+        },
+        {
+          "observedAt": "2026-10-16T07:54:25.156Z",
+          "completionId": 86,
+          "sequence": 42,
+          "revision": 2,
+          "previousRevision": 1,
+          "lifecycle": "succeeded",
+          "currentLayerId": 24,
+          "productStatus": "running",
+          "observedPreTerminal": true
+        }
+      ]
+    }
+  ],
+  "currentProjectionEvidence": {
+    "cursor": 47,
+    "observations": [
+      {
+        "observedAt": "2026-10-16T07:50:40.750Z",
+        "completionId": 83,
+        "sequence": 37,
+        "revision": 0,
+        "previousRevision": null,
+        "lifecycle": "active",
+        "currentLayerId": null,
+        "productStatus": "running",
+        "observedPreTerminal": true
+      },
+      {
+        "observedAt": "2026-10-16T07:51:16.529Z",
+        "completionId": 83,
+        "sequence": 38,
+        "revision": 1,
+        "previousRevision": 0,
+        "lifecycle": "active",
+        "currentLayerId": 21,
+        "productStatus": "running",
+        "observedPreTerminal": true
+      },
+      {
+        "observedAt": "2026-10-16T07:51:16.529Z",
+        "completionId": 86,
+        "sequence": 39,
+        "revision": 0,
+        "previousRevision": null,
+        "lifecycle": "active",
+        "currentLayerId": null,
+        "productStatus": "running",
+        "observedPreTerminal": true
+      },
+      {
+        "observedAt": "2026-10-16T07:52:59.453Z",
+        "completionId": 86,
+        "sequence": 40,
+        "revision": 1,
+        "previousRevision": 0,
+        "lifecycle": "active",
+        "currentLayerId": 22,
+        "productStatus": "running",
+        "observedPreTerminal": true
+      },
+      {
+        "observedAt": "2026-10-16T07:53:34.297Z",
+        "completionId": 83,
+        "sequence": 41,
+        "revision": 2,
+        "previousRevision": 1,
+        "lifecycle": "active",
+        "currentLayerId": 23,
+        "productStatus": "running",
+        "observedPreTerminal": true
+      },
+      {
+        "observedAt": "2026-10-16T07:54:25.156Z",
+        "completionId": 86,
+        "sequence": 42,
+        "revision": 2,
+        "previousRevision": 1,
+        "lifecycle": "succeeded",
+        "currentLayerId": 24,
+        "productStatus": "running",
+        "observedPreTerminal": true
+      },
+      {
+        "observedAt": "2026-10-16T07:55:27.667Z",
+        "completionId": 83,
+        "sequence": 43,
+        "revision": 3,
+        "previousRevision": 2,
+        "lifecycle": "active",
+        "currentLayerId": 26,
+        "productStatus": "running",
+        "observedPreTerminal": true
+      },
+      {
+        "observedAt": "2026-10-16T07:55:47.032Z",
+        "completionId": 83,
+        "sequence": 44,
+        "revision": 4,
+        "previousRevision": 3,
+        "lifecycle": "succeeded",
+        "currentLayerId": 26,
+        "productStatus": "running",
+        "observedPreTerminal": true
+      },
+      {
+        "observedAt": "2026-10-16T07:55:58.052Z",
+        "completionId": 83,
+        "sequence": 37,
+        "revision": 0,
+        "previousRevision": null,
+        "lifecycle": "active",
+        "currentLayerId": null,
+        "productStatus": "accepted",
+        "observedPreTerminal": false,
+        "recoveredAfterDiscovery": true
+      },
+      {
+        "observedAt": "2026-10-16T07:55:58.052Z",
+        "completionId": 83,
+        "sequence": 38,
+        "revision": 1,
+        "previousRevision": 0,
+        "lifecycle": "active",
+        "currentLayerId": 21,
+        "productStatus": "accepted",
+        "observedPreTerminal": false,
+        "recoveredAfterDiscovery": true
+      },
+      {
+        "observedAt": "2026-10-16T07:55:58.052Z",
+        "completionId": 83,
+        "sequence": 41,
+        "revision": 2,
+        "previousRevision": 1,
+        "lifecycle": "active",
+        "currentLayerId": 23,
+        "productStatus": "accepted",
+        "observedPreTerminal": false,
+        "recoveredAfterDiscovery": true
+      },
+      {
+        "observedAt": "2026-10-16T07:55:58.052Z",
+        "completionId": 83,
+        "sequence": 43,
+        "revision": 3,
+        "previousRevision": 2,
+        "lifecycle": "active",
+        "currentLayerId": 26,
+        "productStatus": "accepted",
+        "observedPreTerminal": false,
+        "recoveredAfterDiscovery": true
+      },
+      {
+        "observedAt": "2026-10-16T07:55:58.052Z",
+        "completionId": 83,
+        "sequence": 44,
+        "revision": 4,
+        "previousRevision": 3,
+        "lifecycle": "succeeded",
+        "currentLayerId": 26,
+        "productStatus": "accepted",
+        "observedPreTerminal": false,
+        "recoveredAfterDiscovery": true
+      },
+      {
+        "observedAt": "2026-10-16T07:55:58.623Z",
+        "completionId": 103,
+        "sequence": 45,
+        "revision": 0,
+        "previousRevision": null,
+        "lifecycle": "active",
+        "currentLayerId": null,
+        "productStatus": "running",
+        "observedPreTerminal": true
+      },
+      {
+        "observedAt": "2026-10-16T07:56:55.812Z",
+        "completionId": 103,
+        "sequence": 46,
+        "revision": 1,
+        "previousRevision": 0,
+        "lifecycle": "active",
+        "currentLayerId": 27,
+        "productStatus": "running",
+        "observedPreTerminal": true
+      },
+      {
+        "observedAt": "2026-10-16T07:59:10.368Z",
+        "completionId": 103,
+        "sequence": 47,
+        "revision": 2,
+        "previousRevision": 1,
+        "lifecycle": "succeeded",
+        "currentLayerId": 28,
+        "productStatus": "running",
+        "observedPreTerminal": true
+      },
+      {
+        "observedAt": "2026-10-16T07:59:19.808Z",
+        "completionId": 83,
+        "sequence": 37,
+        "revision": 0,
+        "previousRevision": null,
+        "lifecycle": "active",
+        "currentLayerId": null,
+        "productStatus": "accepted",
+        "observedPreTerminal": false,
+        "recoveredAfterDiscovery": true
+      },
+      {
+        "observedAt": "2026-10-16T07:59:19.808Z",
+        "completionId": 83,
+        "sequence": 38,
+        "revision": 1,
+        "previousRevision": 0,
+        "lifecycle": "active",
+        "currentLayerId": 21,
+        "productStatus": "accepted",
+        "observedPreTerminal": false,
+        "recoveredAfterDiscovery": true
+      },
+      {
+        "observedAt": "2026-10-16T07:59:19.808Z",
+        "completionId": 83,
+        "sequence": 41,
+        "revision": 2,
+        "previousRevision": 1,
+        "lifecycle": "active",
+        "currentLayerId": 23,
+        "productStatus": "accepted",
+        "observedPreTerminal": false,
+        "recoveredAfterDiscovery": true
+      },
+      {
+        "observedAt": "2026-10-16T07:59:19.808Z",
+        "completionId": 83,
+        "sequence": 43,
+        "revision": 3,
+        "previousRevision": 2,
+        "lifecycle": "active",
+        "currentLayerId": 26,
+        "productStatus": "accepted",
+        "observedPreTerminal": false,
+        "recoveredAfterDiscovery": true
+      },
+      {
+        "observedAt": "2026-10-16T07:59:19.808Z",
+        "completionId": 83,
+        "sequence": 44,
+        "revision": 4,
+        "previousRevision": 3,
+        "lifecycle": "succeeded",
+        "currentLayerId": 26,
+        "productStatus": "accepted",
+        "observedPreTerminal": false,
+        "recoveredAfterDiscovery": true
+      },
+      {
+        "observedAt": "2026-10-16T07:59:19.808Z",
+        "completionId": 103,
+        "sequence": 45,
+        "revision": 0,
+        "previousRevision": null,
+        "lifecycle": "active",
+        "currentLayerId": null,
+        "productStatus": "accepted",
+        "observedPreTerminal": false,
+        "recoveredAfterDiscovery": true
+      },
+      {
+        "observedAt": "2026-10-16T07:59:19.808Z",
+        "completionId": 103,
+        "sequence": 46,
+        "revision": 1,
+        "previousRevision": 0,
+        "lifecycle": "active",
+        "currentLayerId": 27,
+        "productStatus": "accepted",
+        "observedPreTerminal": false,
+        "recoveredAfterDiscovery": true
+      },
+      {
+        "observedAt": "2026-10-16T07:59:19.808Z",
+        "completionId": 103,
+        "sequence": 47,
+        "revision": 2,
+        "previousRevision": 1,
+        "lifecycle": "succeeded",
+        "currentLayerId": 28,
+        "productStatus": "accepted",
+        "observedPreTerminal": false,
+        "recoveredAfterDiscovery": true
+      }
+    ]
+  },
+  "outcomeGrade": {
+    "schemaVersion": 1,
+    "kind": "task_outcome_grade",
+    "status": "completed",
+    "qualified": true,
+    "score": null,
+    "mandatoryGates": [
+      {
+        "schemaVersion": 1,
+        "gateId": "turn-1:living-plan-own-contribution",
+        "name": "turn-1:living-plan-own-contribution",
+        "mandatory": true,
+        "status": "completed",
+        "passed": true,
+        "detail": "The current interaction published its own internal planning contribution.",
+        "evidenceRefs": []
+      },
+      {
+        "schemaVersion": 1,
+        "gateId": "turn-1:living-plan-search-discovery",
+        "name": "turn-1:living-plan-search-discovery",
+        "mandatory": true,
+        "status": "completed",
+        "passed": true,
+        "detail": "The candidate executed the public graph-search route.",
+        "evidenceRefs": []
+      },
+      {
+        "schemaVersion": 1,
+        "gateId": "turn-1:living-plan-before-return",
+        "name": "turn-1:living-plan-before-return",
+        "mandatory": true,
+        "status": "completed",
+        "passed": true,
+        "detail": "A successful plan publication preceded terminal graph Return.",
+        "evidenceRefs": []
+      },
+      {
+        "schemaVersion": 1,
+        "gateId": "turn-1:living-plan-prior-pointer-incorporation",
+        "name": "turn-1:living-plan-prior-pointer-incorporation",
+        "mandatory": true,
+        "status": "completed",
+        "passed": true,
+        "detail": "The candidate read the successful child's plan (first turn) or the preceding root's published plan (follow-up), then retained that exact pointer in its own contribution.",
+        "evidenceRefs": []
+      },
+      {
+        "schemaVersion": 1,
+        "gateId": "turn-1:living-plan-successful-semantic-child",
+        "name": "turn-1:living-plan-successful-semantic-child",
+        "mandatory": true,
+        "status": "completed",
+        "passed": true,
+        "detail": "A successful semantic child's own planning contribution was read by the enclosing candidate.",
+        "evidenceRefs": []
+      },
+      {
+        "schemaVersion": 1,
+        "gateId": "turn-3:living-plan-own-contribution",
+        "name": "turn-3:living-plan-own-contribution",
+        "mandatory": true,
+        "status": "completed",
+        "passed": true,
+        "detail": "The current interaction published its own internal planning contribution.",
+        "evidenceRefs": []
+      },
+      {
+        "schemaVersion": 1,
+        "gateId": "turn-3:living-plan-search-discovery",
+        "name": "turn-3:living-plan-search-discovery",
+        "mandatory": true,
+        "status": "completed",
+        "passed": true,
+        "detail": "The candidate executed the public graph-search route.",
+        "evidenceRefs": []
+      },
+      {
+        "schemaVersion": 1,
+        "gateId": "turn-3:living-plan-before-return",
+        "name": "turn-3:living-plan-before-return",
+        "mandatory": true,
+        "status": "completed",
+        "passed": true,
+        "detail": "A successful plan publication preceded terminal graph Return.",
+        "evidenceRefs": []
+      },
+      {
+        "schemaVersion": 1,
+        "gateId": "turn-3:living-plan-prior-pointer-incorporation",
+        "name": "turn-3:living-plan-prior-pointer-incorporation",
+        "mandatory": true,
+        "status": "completed",
+        "passed": true,
+        "detail": "The candidate read the successful child's plan (first turn) or the preceding root's published plan (follow-up), then retained that exact pointer in its own contribution.",
+        "evidenceRefs": []
+      },
+      {
+        "schemaVersion": 1,
+        "gateId": "agent-authored-complete:broker-authority",
+        "name": "agent-authored-complete:broker-authority",
+        "mandatory": true,
+        "status": "completed",
+        "passed": true,
+        "detail": "Configuration requested agent-authored Complete enabled; root trace recorded broker authority true.",
+        "evidenceRefs": []
+      },
+      {
+        "schemaVersion": 1,
+        "gateId": "agent-authored-complete:semantic-child-count",
+        "name": "agent-authored-complete:semantic-child-count",
+        "mandatory": true,
+        "status": "completed",
+        "passed": true,
+        "detail": "Agent-authored Complete was available; child creation remains observed behavior and 1 semantic child execution was recorded.",
+        "evidenceRefs": []
+      },
+      {
+        "schemaVersion": 1,
+        "gateId": "agent-authored-complete:child-provenance",
+        "name": "agent-authored-complete:child-provenance",
+        "mandatory": true,
+        "status": "completed",
+        "passed": true,
+        "detail": "Every semantic child must retain the exact source interaction, action, product interaction, and graph completion identities.",
+        "evidenceRefs": []
+      },
+      {
+        "schemaVersion": 1,
+        "gateId": "agent-authored-complete:child-terminal",
+        "name": "agent-authored-complete:child-terminal",
+        "mandatory": true,
+        "status": "completed",
+        "passed": true,
+        "detail": "Every semantic child must publish a current layer and settle as an accepted succeeded result with an ordered durable projection sequence.",
+        "evidenceRefs": []
+      },
+      {
+        "schemaVersion": 1,
+        "gateId": "agent-authored-complete:child-execution",
+        "name": "agent-authored-complete:child-execution",
+        "mandatory": true,
+        "status": "completed",
+        "passed": true,
+        "detail": "Every semantic child must retain an exact attached and successfully settled provider execution binding.",
+        "evidenceRefs": []
+      },
+      {
+        "schemaVersion": 1,
+        "gateId": "agent-authored-complete:child-trace",
+        "name": "agent-authored-complete:child-trace",
+        "mandatory": true,
+        "status": "completed",
+        "passed": true,
+        "detail": "Every semantic child must have a complete portable candidate trace that records nested completion-broker authority.",
+        "evidenceRefs": []
+      },
+      {
+        "schemaVersion": 1,
+        "gateId": "agent-authored-complete:child-8:visual-node-detail:authored-output",
+        "name": "agent-authored-complete:child-8:visual-node-detail:authored-output",
+        "mandatory": true,
+        "status": "completed",
+        "passed": true,
+        "detail": "The authored presentation must accept a compiled visual Node Detail for every accepted node; observed 7 valid packages across 7 nodes.",
+        "evidenceRefs": []
+      }
+    ],
+    "criteria": []
+  },
+  "presentationGrade": {
+    "schemaVersion": 1,
+    "kind": "graph_presentation_grade",
+    "status": "unjudged",
+    "score": null,
+    "comprehensionScore": null,
+    "renderedScore": null,
+    "rawScore": null,
+    "scoreCeiling": null,
+    "scoreScaleMaximum": 4,
+    "depthDecay": 0.5,
+    "layers": [],
+    "aggregation": [],
+    "worstLayer": null,
+    "hasMateriallyMisleadingLayer": false,
+    "aggregationMethod": "legacy_depth_weighted"
+  },
+  "modelResolution": {
+    "selectedModel": {
+      "harnessId": "codex-basic",
+      "familyId": 1,
+      "providerId": "codex",
+      "modelId": "gpt-6.1-sol"
+    },
+    "productModelSelection": true
+  }
+}

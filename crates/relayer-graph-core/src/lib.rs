@@ -32,14 +32,16 @@ pub use graph::{
     PresentingInputOccurrence, ProjectId, PublishedPersonalPresentationVersion,
     RELAYER_ICON_ALIASES, RELAYER_ICON_CATALOG_JSON, RELAYER_ICON_NAMES, RecordState,
     ResolvedLayer, ResolvedPersonalPresentation, SearchIndex, SearchIndexComponent,
-    SearchIndexFuture, SearchIndexRebuildClosure, SearchIndexRebuildSnapshot, SearchIndexRevision,
-    SearchIndexWrite, SearchTarget, SkippedSubmittedInput, SubmittedInput, SubmittedInputDraft,
-    SubmittedInputValue, TemporalFeatureConfig, ThreadId, current_transition_request_digest,
+    SearchIndexFuture, SearchIndexRebuildClosure, SearchIndexRebuildContent,
+    SearchIndexRebuildSnapshot, SearchIndexRevision, SearchIndexWrite, SearchTarget,
+    SkippedSubmittedInput, SubmittedInput, SubmittedInputDraft, SubmittedInputValue,
+    TemporalFeatureConfig, ThreadId, current_transition_request_digest,
     interaction_input_authority_digest, interaction_input_digest,
     interaction_input_semantic_digest, is_supported_icon, map_authored_detail_actions,
     normalize_icon_name, publication_targets, resolve_icon_name,
 };
 pub use graph::{LiveAnswer, LiveAnswerPage, LiveAnswerPresentation, LiveAnswerRequest};
+pub use graph::{PlanDraft, PlanPublication};
 
 pub use graph::artifact;
 pub use graph::{ImageIcon, image_icon};

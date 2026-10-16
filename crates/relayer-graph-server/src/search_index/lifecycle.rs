@@ -147,6 +147,12 @@ async fn damaged_targets(
         .closures
         .iter()
         .flat_map(|item| item.published_to.iter().copied())
+        .chain(
+            snapshot
+                .internal_content
+                .iter()
+                .flat_map(|item| item.published_to.iter().copied()),
+        )
         .chain(snapshot.targets.iter().map(|(target, _)| *target))
         .collect::<HashSet<_>>();
     for name in index.revision_targets().await? {
@@ -302,6 +308,15 @@ async fn build_generation(
         {
             write
                 .apply(item.closure.clone(), item.published_to.clone())
+                .await?;
+        }
+        for item in snapshot
+            .internal_content
+            .iter()
+            .filter(|item| item.target == *target)
+        {
+            write
+                .apply_internal_content(item.node.clone(), item.published_to.clone())
                 .await?;
         }
         let committed = write.commit().await?;

@@ -78,11 +78,15 @@ impl GraphWriter {
                 }),
             )
             .await?;
+        let planning =
+            crate::storage::sqlite::plans::enabled(&mut transaction, self.scope.root_node_id)
+                .await?;
         initialize_completion(
             &mut transaction,
             &child,
             self.scope.project_id,
             self.scope.thread_id,
+            planning,
         )
         .await?;
         transaction.commit().await?;
@@ -441,6 +445,8 @@ impl GraphWriter {
         let mut transaction = self.database.storage.begin_write().await?;
         self.ensure_writable(&mut transaction).await?;
         for (index, node_id) in endpoints.iter().enumerate() {
+            crate::storage::sqlite::plans::require_public_content(&mut transaction, *node_id)
+                .await?;
             NodeTable::new(&mut transaction)
                 .visible(&self.scope, *node_id)
                 .await
@@ -499,6 +505,7 @@ impl GraphWriter {
         self.ensure_writable(&mut transaction).await?;
         let mut nodes = Vec::with_capacity(draft.nodes.len());
         for id in &draft.nodes {
+            crate::storage::sqlite::plans::require_public_content(&mut transaction, *id).await?;
             nodes.push(
                 NodeTable::new(&mut transaction)
                     .visible(&self.scope, *id)
@@ -622,6 +629,11 @@ impl GraphWriter {
         let draft = &normalized_draft;
         let mut transaction = self.database.storage.begin_write().await?;
         self.ensure_writable(&mut transaction).await?;
+        crate::storage::sqlite::plans::require_public_content(
+            &mut transaction,
+            draft.source_node_id,
+        )
+        .await?;
         ActionTable::new(&mut transaction)
             .validate_invoke_inputs(&self.scope, draft.source_node_id, &draft.input_action_ids)
             .await?;
@@ -879,13 +891,14 @@ impl GraphWriter {
     }
 
     pub async fn get_node(&self, id: NodeId) -> Result<GraphNode, GraphError> {
-        let mut transaction = self.database.storage.begin_read().await?;
+        let mut transaction = self.database.storage.begin_write().await?;
         self.scope
             .require_active_authority(&mut transaction)
             .await?;
         let node = NodeTable::new(&mut transaction)
             .visible(&self.scope, id)
             .await?;
+        crate::storage::sqlite::plans::observe(&mut transaction, &self.scope, id).await?;
         transaction.commit().await?;
         Ok(node)
     }
@@ -1031,7 +1044,10 @@ impl GraphWriter {
         completion::complete(&self.database, &self.scope).await
     }
 
-    async fn ensure_writable(&self, connection: &mut GraphConnection) -> Result<(), GraphError> {
+    pub(super) async fn ensure_writable(
+        &self,
+        connection: &mut GraphConnection,
+    ) -> Result<(), GraphError> {
         if self.scope.read_only {
             return Err(GraphError::Forbidden(
                 "imported conversation graphs are immutable".into(),

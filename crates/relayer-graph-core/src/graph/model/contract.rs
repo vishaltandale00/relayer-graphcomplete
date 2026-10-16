@@ -54,6 +54,8 @@ pub struct CompletionContractAnswer {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", deny_unknown_fields)]
 pub enum CompletionReturnRequirement {
+    #[serde(rename = "plan.contribution")]
+    PlanContribution,
     #[serde(rename = "navigate.response")]
     NavigateResponse {
         #[serde(rename = "nodeId")]
@@ -85,7 +87,9 @@ impl CompletionContract {
             ));
         }
         for requirement in &self.return_requirements {
-            let CompletionReturnRequirement::NavigateResponse { node_id } = requirement;
+            let CompletionReturnRequirement::NavigateResponse { node_id } = requirement else {
+                continue;
+            };
             if !self
                 .authorities
                 .contains(&InteractionPermission::NavigateAdd { node_id: *node_id })

@@ -53,6 +53,14 @@ pub fn create(connection: &Connection<'_>) -> Result<()> {
     Ok(())
 }
 
+pub fn apply_internal_content(
+    connection: &Connection<'_>,
+    published_to: &[SearchTarget],
+    node: &GraphNode,
+) -> Result<()> {
+    write_node(connection, &published_targets(published_to), node)
+}
+
 pub fn content_id(node: &GraphNode) -> String {
     format!("content:{}", node.id)
 }
@@ -259,6 +267,20 @@ type InventoryMap = BTreeMap<Vec<String>, (Properties, BTreeSet<String>, usize)>
 
 pub fn canonical_inventory(snapshot: &SearchIndexRebuildSnapshot) -> SearchInventory {
     let mut inventory = InventoryMap::new();
+    for item in &snapshot.internal_content {
+        let targets = item
+            .published_to
+            .iter()
+            .map(ToString::to_string)
+            .collect::<BTreeSet<_>>();
+        add_inventory(
+            &mut inventory,
+            vec!["node".into(), "Content".into(), content_id(&item.node)],
+            content_properties(&item.node),
+            &targets,
+            1,
+        );
+    }
     for item in &snapshot.closures {
         let targets = item
             .published_to

@@ -87,6 +87,15 @@ mod tests {
 
     #[tokio::test]
     async fn schema_46_adds_v6_without_changing_published_preferences_or_pins() {
+        published_preferences_survive_upgrade(47, "personal-presentation-v4").await;
+    }
+
+    #[tokio::test]
+    async fn schema_48_adds_v8_without_changing_v6_or_its_pins() {
+        published_preferences_survive_upgrade(49, "personal-presentation-v6").await;
+    }
+
+    async fn published_preferences_survive_upgrade(before_version: i64, pinned_version: &str) {
         let temporary = tempfile::tempdir().unwrap();
         let file = tempfile::NamedTempFile::new_in(temporary.path()).unwrap();
         let pool = SqlitePoolOptions::new()
@@ -98,7 +107,7 @@ mod tests {
             migrations: Cow::Owned(
                 MIGRATOR
                     .iter()
-                    .filter(|migration| migration.version < 47)
+                    .filter(|migration| migration.version < before_version)
                     .cloned()
                     .collect(),
             ),
@@ -112,7 +121,7 @@ mod tests {
             harness_readiness_generations: Default::default(),
         };
         old.publish_personal_presentation_version(
-            "personal-presentation-v4",
+            pinned_version,
             501,
             601,
             &serde_json::json!({"nodeId":501,"rootLayer":{"layer":{"id":601}}}),
@@ -132,7 +141,7 @@ mod tests {
                     model_selection: None,
                     timestamp: "2",
                 },
-                Some("personal-presentation-v4"),
+                Some(pinned_version),
             )
             .await
             .unwrap();
@@ -145,10 +154,12 @@ mod tests {
         let current = SqliteProductStore::open(file.path()).await.unwrap();
         let after = current.personal_presentation_profile().await.unwrap();
         assert_eq!(after.active_version_key, before.active_version_key);
-        assert_eq!(&after.versions[..5], &before.versions);
-        assert_eq!(after.versions.len(), 6);
+        assert_eq!(&after.versions[..before.versions.len()], &before.versions);
+        assert_eq!(after.versions.len(), 7);
         assert_eq!(after.versions[5].version_key, "personal-presentation-v6");
         assert_eq!(after.versions[5].profile_interaction_id, -7);
+        assert_eq!(after.versions[6].version_key, "personal-presentation-v8");
+        assert_eq!(after.versions[6].profile_interaction_id, -9);
         assert_eq!(
             current
                 .prepare_personal_presentation_pin(thread.root_interaction_id, None, "4")
@@ -204,7 +215,7 @@ mod tests {
         .fetch_all(&store.pool)
         .await
         .unwrap();
-        assert_eq!(versions, [40, 41, 42, 43, 44, 45, 46, 47, 48]);
+        assert_eq!(versions, [40, 41, 42, 43, 44, 45, 46, 47, 48, 49]);
         assert!(
             store
                 .recover_interaction_accepted(

@@ -49,6 +49,7 @@ pub const DEFAULT_IMPORT_INDEX_BUDGET: Duration = Duration::from_secs(60);
 #[derive(Clone)]
 pub struct GraphDatabase {
     pub(crate) storage: SqliteGraphStore,
+    pub(crate) prepare_living_plans: bool,
     pub(crate) search_index: Arc<dyn SearchIndex>,
     pub(crate) search_index_budget: Duration,
     pub(crate) import_index_budget: Duration,
@@ -78,6 +79,7 @@ impl GraphDatabase {
     ) -> Result<Self, GraphError> {
         Ok(Self {
             storage: SqliteGraphStore::open(path).await?,
+            prepare_living_plans: false,
             search_index,
             search_index_budget: DEFAULT_SEARCH_INDEX_BUDGET,
             import_index_budget: DEFAULT_IMPORT_INDEX_BUDGET,
@@ -97,6 +99,7 @@ impl GraphDatabase {
     ) -> Result<Self, GraphError> {
         Ok(Self {
             storage: SqliteGraphStore::in_memory().await?,
+            prepare_living_plans: false,
             search_index,
             search_index_budget: DEFAULT_SEARCH_INDEX_BUDGET,
             import_index_budget: DEFAULT_IMPORT_INDEX_BUDGET,
@@ -230,6 +233,15 @@ impl GraphDatabase {
                 closure,
             });
         }
+        let internal_content = crate::storage::sqlite::plans::published(&mut transaction)
+            .await?
+            .into_iter()
+            .map(|(project, thread, node)| crate::SearchIndexRebuildContent {
+                target: SearchTarget::new(project, thread),
+                published_to: crate::publication_targets(project, thread),
+                node,
+            })
+            .collect::<Vec<_>>();
         let mut targets = SearchIndexTable::new(&mut transaction).revisions().await?;
         let mut known = targets
             .iter()
@@ -246,7 +258,11 @@ impl GraphDatabase {
         }
         targets.sort_by_key(|(target, _)| (target.kind(), target.id()));
         transaction.commit().await?;
-        Ok(SearchIndexRebuildSnapshot { targets, closures })
+        Ok(SearchIndexRebuildSnapshot {
+            targets,
+            closures,
+            internal_content,
+        })
     }
 
     /// Bound how long a search-index write may take before the save fails.
@@ -458,7 +474,14 @@ impl GraphDatabase {
                 .insert_all(&scope, contexts)
                 .await?;
         }
-        initialize_completion(&mut transaction, &node, project_id, thread_id).await?;
+        initialize_completion(
+            &mut transaction,
+            &node,
+            project_id,
+            thread_id,
+            self.prepare_living_plans,
+        )
+        .await?;
         transaction.commit().await?;
         Ok(node)
     }
@@ -497,7 +520,14 @@ impl GraphDatabase {
         let actions = ContextTable::new(&mut transaction)
             .insert_all(&scope, contexts)
             .await?;
-        initialize_completion(&mut transaction, &node, project_id, thread_id).await?;
+        initialize_completion(
+            &mut transaction,
+            &node,
+            project_id,
+            thread_id,
+            self.prepare_living_plans,
+        )
+        .await?;
         transaction.commit().await?;
         Ok((node, actions))
     }
@@ -636,7 +666,14 @@ impl GraphDatabase {
         let actions = ContextTable::new(&mut transaction)
             .insert_all(&scope, contexts)
             .await?;
-        initialize_completion(&mut transaction, &node, project_id, thread_id).await?;
+        initialize_completion(
+            &mut transaction,
+            &node,
+            project_id,
+            thread_id,
+            self.prepare_living_plans,
+        )
+        .await?;
         transaction.commit().await?;
         Ok((node, actions))
     }
@@ -762,7 +799,14 @@ impl GraphDatabase {
         let children = InputChildTable::new(&mut transaction)
             .validate_and_insert_all(&scope, text, input_identity, authority_digest, attachments)
             .await?;
-        initialize_completion(&mut transaction, &node, project_id, thread_id).await?;
+        initialize_completion(
+            &mut transaction,
+            &node,
+            project_id,
+            thread_id,
+            self.prepare_living_plans,
+        )
+        .await?;
         transaction.commit().await?;
         Ok((node, children))
     }
@@ -1195,6 +1239,7 @@ pub(crate) async fn initialize_completion(
     node: &GraphNode,
     project_id: Option<ProjectId>,
     thread_id: ThreadId,
+    planning: bool,
 ) -> Result<(), GraphError> {
     let scope = InteractionScope {
         project_id,
@@ -1203,6 +1248,7 @@ pub(crate) async fn initialize_completion(
         read_only: false,
         authority_epoch: None,
     };
+    crate::storage::sqlite::plans::prepare(connection, node.id, planning).await?;
     crate::storage::sqlite::permissions::prepare(connection, node.id).await?;
     crate::storage::sqlite::contracts::prepare(connection, &scope).await?;
     initialize_completion_scope(connection, &scope).await?;

@@ -1,0 +1,162 @@
+{
+  "schemaVersion": 1,
+  "sourceManifestSha256": "aff5e6108d0d007faa99083c6a9910dd87256c61d320d623975d8338cd5b5aa2",
+  "qualification": "partial",
+  "requiredEntryPoints": [
+    "npm run test:living-plans",
+    "npm run check",
+    "npm run build",
+    "npm run test:desktop:first-message",
+    "npm run test:eval-compiled-runtime",
+    "npm run test:eval-web"
+  ],
+  "controlledFinalExecutions": [
+    {
+      "name": "desktop-private-final",
+      "command": [
+        "npm",
+        "run",
+        "test:desktop:first-message"
+      ],
+      "exitCode": 0,
+      "durationSeconds": 32.48
+    },
+    {
+      "name": "eval-compiled-private-final",
+      "command": [
+        "npm",
+        "run",
+        "test:eval-compiled-runtime"
+      ],
+      "exitCode": 0,
+      "durationSeconds": 25.58
+    },
+    {
+      "name": "eval-web-private-final",
+      "command": [
+        "npm",
+        "run",
+        "test:eval-web"
+      ],
+      "exitCode": 1,
+      "durationSeconds": 32.67
+    },
+    {
+      "name": "timing-and-fixture-final",
+      "command": [
+        "npx",
+        "vitest",
+        "run",
+        "--maxWorkers=1",
+        "test/first-message-composer-integration.test.mjs",
+        "test/public-share-viewer.test.mjs",
+        "packages/harness-host/test/prime-agent.test.ts",
+        "test/invoke-input-product-integration.test.mjs"
+      ],
+      "exitCode": 0,
+      "durationSeconds": 69.81
+    },
+    {
+      "name": "living-plan-final-source",
+      "command": [
+        "npm",
+        "run",
+        "test:living-plans"
+      ],
+      "exitCode": 0,
+      "durationSeconds": 64.84
+    },
+    {
+      "name": "stop-fixture-final",
+      "command": [
+        "npx",
+        "vitest",
+        "run",
+        "--maxWorkers=1",
+        "test/stop-run-integration.test.mjs"
+      ],
+      "exitCode": 0,
+      "durationSeconds": 31.8
+    }
+  ],
+  "additionalPassingResults": [
+    {
+      "command": "npm run build (nested in test:desktop:first-message)",
+      "result": "native servers, root TypeScript and workspace packages built; smoke began and passed"
+    },
+    {
+      "command": "exact telemetry module inventory",
+      "files": 1,
+      "testsPassed": 1
+    },
+    {
+      "command": "sealed private Homebrew Node closure isolated scenario",
+      "testsPassed": 1,
+      "testsDeselected": 129
+    },
+    {
+      "command": "npm run test:codex-secret-boundary",
+      "testsPassed": 2
+    },
+    {
+      "command": "Python unittest discovery",
+      "testsPassed": 99
+    },
+    {
+      "command": "npm run lint:ladybug-receipt",
+      "result": "qualification/native/contract probe lints passed"
+    },
+    {
+      "command": "npm run prd:check-readability",
+      "result": "passed"
+    },
+    {
+      "command": "git diff --check",
+      "result": "passed"
+    }
+  ],
+  "fullCheck": {
+    "exitCode": 1,
+    "vitest": {
+      "filesPassed": 320,
+      "filesFailed": 9,
+      "filesSkipped": 1,
+      "testsPassed": 4334,
+      "testsFailed": 21,
+      "testsSkipped": 3
+    },
+    "earlierStages": "format, Clippy, Rust workspace, crash reconciliation, package build and type checking passed",
+    "sourceQualification": "Began before fixture/inventory repairs; no exact-source overall pass is claimed. Entire check was not rerun. The failed files/scenarios subsequently passed in the separately recorded focused contexts."
+  },
+  "evalWeb": {
+    "exitCode": 1,
+    "completedCheckpoints": [
+      "interrupted startup",
+      "host persistence/restart",
+      "settings",
+      "human lifecycle",
+      "dispatch race",
+      "native select"
+    ],
+    "failure": "actor startup produced interrupted instead of completed",
+    "diagnostic": "A corrected private-target logging-only diagnostic progressed through startup, redraw and three completions, then timed out during observe. This is a failed diagnostic, not a passing web gate. An earlier shared-target diagnostic was excluded. No further unchanged retry was run."
+  },
+  "liveReceipt": "live-run-receipt.json",
+  "limits": [
+    "Consistent interface-purpose planning before substantive work remains unqualified.",
+    "No comparative prompting or general model-quality claim.",
+    "Full check and assembled Eval web gate are not green.",
+    "Source review is non-certifying without a PR."
+  ],
+  "localLogDigests": {
+    "check-isolated.log": "a178e2af04e2b5649486d7bbd46dd7fa788f45fc323e3f1228dfc323b00f85e5",
+    "desktop-private-final.log": "85caf9de3dd528bebfd1b3acb066d8a43386d9d756bd88c74e43a67c27a6299f",
+    "eval-compiled-private-final.log": "55e3e60d117a33502beda32421457929d660b5191ee8e5c95e634985fc448d52",
+    "eval-web-private-final.log": "37dd4670f3ef3dccb0823d5b63bb8a083a078c89367b742f2439bb7cc901c23f",
+    "timing-and-fixture-final.log": "d62b999d9f7a262f24d83fd7ae79ecdc1e6cd83f0bc84e9c2cc37ca64bc228d9",
+    "living-plan-final-source.log": "16e50b7cf2b027806f1bb328ad092bc8c2582fc7c3d835cb4fd9633339b95d8c",
+    "stop-fixture-final.log": "8ec4c4088b50d3e6a35843815d4c305ed0d906fad702d93f97cd6d0fb15cc9a8",
+    "sealed-node-timeout-rerun.log": "1e0316ccd232e6620822f8faa883b5d2a75d14a045c85835ec2057dc9cf66ef3",
+    "eval-web-startup-diagnostic.log": "fdbbe684642dd255b5c55cafab4a44179acc7c3c7e1aeb81af451c3e3cc0b83e"
+  }
+}

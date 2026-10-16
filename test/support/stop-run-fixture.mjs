@@ -52,6 +52,9 @@ export async function stopRunFixture() {
       let control;
       const begin = async () => {
         const graph = new RelayerGraphClient(context.graph.acquireCapability());
+        if (context.interactionInput.completionContract?.returnRequirements.some(({ kind }) => kind === "plan.contribution")) {
+          await graph.publishPlan({ clientKey: "stop-fixture", title: "Inspectable fixture work", detail: "Expose working progress for inspection and retain the last published state if stopped. This deterministic provider replacement exercises cancellation and acceptance, not model planning." });
+        }
         const text = context.interactionInput.interaction.detail;
         control = { context, submitLate: () => graph.submit(context.inputGraph.id), readCurrent: () => graph.getCurrent(), text, aborts: 0, started: Promise.withResolvers(), prompt: Promise.withResolvers(), settled: Promise.withResolvers(), aborted: Promise.withResolvers() };
         controls.set(context.inputGraph.id, control);

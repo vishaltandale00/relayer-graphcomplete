@@ -1,0 +1,25 @@
+
+ RUN  v4.1.10 /Volumes/2T-SSD/worktrees/0f84/relayer-graphcomplete
+
+ ❯ |isolated| test/recursive-complete-e2e.test.mjs (0 test)
+
+⎯⎯⎯⎯⎯⎯ Failed Suites 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  |isolated| test/recursive-complete-e2e.test.mjs [ test/recursive-complete-e2e.test.mjs ]
+Error: Failed to resolve entry for package "@relayer/graph-client". The package may have incorrect main/module/exports specified in its package.json.
+ ❯ test/recursive-complete-e2e.test.mjs:9:1
+      7| import { afterEach, describe, expect, it } from "vitest";
+      8|
+      9| import {
+       | ^
+     10|   css,
+     11|   detailCapability,
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed | 1 passed (2)
+      Tests  20 passed (20)
+   Start at  04:07:35
+   Duration  1.56s (transform 87ms, setup 0ms, import 136ms, tests 919ms, environment 7ms)
+

@@ -124,6 +124,16 @@ export class RelayerGraphClient {
     return body.nodes;
   }
 
+  /** An immutable, interaction-owned internal checkpoint, searchable before Return. */
+  async publishPlan(draft: import("./types.js").PlanDraft): Promise<import("./types.js").PlanPublication> {
+    return this.request("/api/graph/plans", { method: "POST", body: JSON.stringify(draft) });
+  }
+
+  /** Exact authorized read; the server records this observation as plan provenance. */
+  async getPlan(reference: NodeReference): Promise<import("./types.js").PlanPublication> {
+    return this.request(`/api/graph/plans/${nodeId(reference)}`);
+  }
+
   async getInteractionInput(): Promise<InteractionInput> {
     return this.request<InteractionInput>("/api/graph/input");
   }

@@ -22,6 +22,25 @@ const configuration: HarnessConfiguration = {
 const fullPermission = { permissionProfileId: "full", permissionBinding: {} } as const;
 
 describe("PrimeAgentHarness", () => {
+  it("delivers the Python living-plan API in an actual planned turn and removes it for legacy input", async () => {
+    const session=primeSession("/tmp/living-plan-session.jsonl");
+    const harness=await createHarness(session);
+    const base=runContext(71,"token");
+    const planned: HarnessRunContext={...base,interactionInput:{...base.interactionInput,completionContract:{schemaVersion:1,interactionNodeId:71,input:{text:"Question",context:[],answers:[],invocationReferences:[]},authorities:[],returnRequirements:[{kind:"plan.contribution"}],digest:"fixture-sealed"}}};
+    try {
+      await harness.complete(planned);
+      const prompt=session.promptAndWait.mock.calls.at(-1)![0];
+      expect(prompt).toContain("Internal living plan is ENABLED");
+    expect(prompt).toContain("what the user should understand immediately");
+    expect(prompt).toContain("before substantive research, delegation, or response authoring");
+      expect(prompt).toContain("await graph.search(");
+      expect(prompt).toContain("await graph.get_plan(node_id)");
+      expect(prompt).toContain("await graph.publish_plan(");
+      await harness.complete(runContext(72,"token"));
+      expect(session.promptAndWait.mock.calls.at(-1)![0]).not.toContain("Internal living plan is ENABLED");
+    } finally { await harness.dispose(); }
+  });
+
 
   it.each(["basic", "layered-navigation-v1"])("delivers the Python communication baseline in actual %s Prime turns", async (profile) => {
     const session = primeSession("/tmp/communication-session.jsonl");

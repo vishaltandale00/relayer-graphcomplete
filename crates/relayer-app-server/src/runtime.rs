@@ -82,9 +82,32 @@ enum GraphPreviewCapability {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct GraphCapabilityProfile {
     search: GraphSearchCapability,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    planning: Option<GraphPlanningCapability>,
     // Omitted when disabled so configurations pinned before previews keep their bytes.
     #[serde(default, skip_serializing_if = "GraphPreviewCapability::is_disabled")]
     preview: GraphPreviewCapability,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+enum GraphPlanningCapability {
+    Disabled,
+    InteractionV1,
+}
+
+impl GraphCapabilityProfile {
+    fn planning_enabled(&self, implementation: &str) -> bool {
+        !matches!(self.search, GraphSearchCapability::Disabled)
+            && match self.planning {
+                Some(GraphPlanningCapability::Disabled) => false,
+                Some(GraphPlanningCapability::InteractionV1) => true,
+                None => matches!(
+                    implementation,
+                    "codex.basic" | "claude.basic" | "prime.agent"
+                ),
+            }
+    }
 }
 
 impl GraphPreviewCapability {
@@ -782,6 +805,7 @@ impl RuntimeClient {
                         | "personal-presentation-v3"
                         | "personal-presentation-v4"
                         | "personal-presentation-v6"
+                        | "personal-presentation-v8"
                 ) =>
             {
                 Ok(Some(value))
@@ -876,7 +900,7 @@ impl RuntimeClient {
             })
         });
         let create_url = self.graph_url.join("api/control/interactions")?;
-        let create_body = serde_json::json!({
+        let mut create_body = serde_json::json!({
             "projectId": command.project_id,
             "threadId": command.thread_id,
             "text": frozen_instruction.as_deref().unwrap_or(command.text),
@@ -888,6 +912,13 @@ impl RuntimeClient {
             "submittedInputs": command.submitted_inputs,
             "mintCapability": false,
         });
+        if selected
+            .configuration
+            .graph_capability_profile
+            .planning_enabled(&selected.configuration.implementation)
+        {
+            create_body["livingPlan"] = serde_json::json!(true);
+        }
         let interaction: CreateInteractionResponse =
             if command.invocation.is_some() || command.input_identity.is_some() {
                 self.post_idempotent(
@@ -1770,6 +1801,7 @@ impl RuntimeClient {
                     &graph_token,
                     &serde_json::json!({
                         "clientKey": "personal-presentation-root",
+                        "sizeJustification": definition.size_justification,
                         "nodes": nodes,
                         "edges": edges,
                         "layout": {"version": 1, "placements": placements, "edgeShape": "default"},
@@ -2592,6 +2624,7 @@ struct PersonalPresentationNodeDefinition {
 }
 
 struct PersonalPresentationDefinition {
+    size_justification: Option<&'static str>,
     interaction_text: &'static str,
     nodes: &'static [PersonalPresentationNodeDefinition],
     edges: &'static [[usize; 2]],
@@ -2713,35 +2746,55 @@ const PERSONAL_PRESENTATION_V6_NODES: &[PersonalPresentationNodeDefinition] = &[
     },
 ];
 
+const PERSONAL_PRESENTATION_V8_NODES: &[PersonalPresentationNodeDefinition] = &[
+    PERSONAL_PRESENTATION_V6_NODES[0],
+    PERSONAL_PRESENTATION_V6_NODES[1],
+    PERSONAL_PRESENTATION_V6_NODES[2],
+    PERSONAL_PRESENTATION_V6_NODES[3],
+    PERSONAL_PRESENTATION_V6_NODES[4],
+    PersonalPresentationNodeDefinition {
+        client_key: "concise-node-details",
+        kind: "presentation-preference",
+        icon: "align-left",
+        title: "Concise Node Details",
+        detail: "Make the opened Node Detail an easy-to-use interface, not a miniature report. Be wordy only when necessary for the user's task. Aim for 80-150 words of visible text on an ordinary detail page, usually less; this is a ceiling to work below, not a quota. Lead with the takeaway and retain the material reasons, critical constraints, uncertainty and controls needed to understand or act on this node. Compress information through meaningful grouping, comparisons, diagrams and clear navigation. Put substantial supporting evidence, secondary alternatives and deeper explanation behind useful graph paths with descriptive labels. Keep essential context available without forcing extra clicks. Do not repeat the same explanation across nodes, substitute a wall of bullets for prose, hide prose in accordions merely to meet the budget, or shrink type to fit more words. Add a branch only when its distinct purpose earns the navigation cost. Exceed the ordinary text budget only when shorter treatment would lose necessary meaning, usable instructions or an explicitly requested substantial artifact; make that need clear in the internal plan. Review the rendered page for readability and remove text that does not help the user understand, explore or decide. Explicit user presentation requests take precedence.",
+    },
+];
+
 fn personal_presentation_definition(
     version_key: &str,
 ) -> Result<PersonalPresentationDefinition, RuntimeError> {
     match version_key {
         "personal-presentation-v0" => Ok(PersonalPresentationDefinition {
+            size_justification: None,
             interaction_text: "Personal presentation V0",
             nodes: PERSONAL_PRESENTATION_V0_NODES,
             edges: &[],
             placements: &[[0.5, 0.5]],
         }),
         "personal-presentation-v1" => Ok(PersonalPresentationDefinition {
+            size_justification: None,
             interaction_text: "Personal presentation V1",
             nodes: PERSONAL_PRESENTATION_V1_NODES,
             edges: &[[0, 1]],
             placements: &[[0.25, 0.5], [0.75, 0.5]],
         }),
         "personal-presentation-v2" => Ok(PersonalPresentationDefinition {
+            size_justification: None,
             interaction_text: "Personal presentation V2",
             nodes: PERSONAL_PRESENTATION_V2_NODES,
             edges: &[[0, 1], [0, 2]],
             placements: &[[0.5, 0.2], [0.25, 0.75], [0.75, 0.75]],
         }),
         "personal-presentation-v3" => Ok(PersonalPresentationDefinition {
+            size_justification: None,
             interaction_text: "Personal presentation V3",
             nodes: PERSONAL_PRESENTATION_V3_NODES,
             edges: &[[0, 1], [0, 2], [0, 3]],
             placements: &[[0.5, 0.2], [0.25, 0.75], [0.75, 0.75], [0.9, 0.35]],
         }),
         "personal-presentation-v4" => Ok(PersonalPresentationDefinition {
+            size_justification: None,
             interaction_text: "Personal presentation V4",
             nodes: PERSONAL_PRESENTATION_V4_NODES,
             edges: &[[0, 1], [0, 2], [0, 3], [0, 4]],
@@ -2754,6 +2807,7 @@ fn personal_presentation_definition(
             ],
         }),
         "personal-presentation-v6" => Ok(PersonalPresentationDefinition {
+            size_justification: None,
             interaction_text: "Personal presentation V6",
             nodes: PERSONAL_PRESENTATION_V6_NODES,
             edges: &[[0, 1], [0, 2], [0, 3], [0, 4]],
@@ -2763,6 +2817,22 @@ fn personal_presentation_definition(
                 [0.8, 0.5],
                 [0.3, 0.85],
                 [0.7, 0.85],
+            ],
+        }),
+        "personal-presentation-v8" => Ok(PersonalPresentationDefinition {
+            size_justification: Some(
+                "Keep the six complementary presentation preferences in one self-contained profile so every author receives their combined meaning without hidden navigation dependencies.",
+            ),
+            interaction_text: "Personal presentation V8",
+            nodes: PERSONAL_PRESENTATION_V8_NODES,
+            edges: &[[0, 1], [0, 2], [0, 3], [0, 4], [0, 5]],
+            placements: &[
+                [0.5, 0.1],
+                [0.15, 0.4],
+                [0.5, 0.4],
+                [0.85, 0.4],
+                [0.3, 0.8],
+                [0.7, 0.8],
             ],
         }),
         _ => Err(RuntimeError::Configuration(format!(
@@ -3322,6 +3392,29 @@ impl RuntimeError {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn planning_adoption_preserves_supported_defaults_and_explicit_opt_outs() {
+        for implementation in ["codex.basic", "claude.basic", "prime.agent"] {
+            let inherited: super::GraphCapabilityProfile =
+                serde_json::from_str(r#"{"search":"query-v1"}"#).unwrap();
+            assert!(inherited.planning_enabled(implementation));
+            for profile in [
+                r#"{"search":"query-v1","planning":"disabled"}"#,
+                r#"{"search":"disabled"}"#,
+            ] {
+                let opted_out: super::GraphCapabilityProfile =
+                    serde_json::from_str(profile).unwrap();
+                assert!(!opted_out.planning_enabled(implementation));
+            }
+        }
+        let inherited: super::GraphCapabilityProfile =
+            serde_json::from_str(r#"{"search":"query-v1"}"#).unwrap();
+        assert!(!inherited.planning_enabled("fixture.custom"));
+        let enabled: super::GraphCapabilityProfile =
+            serde_json::from_str(r#"{"search":"query-v1","planning":"interaction-v1"}"#).unwrap();
+        assert!(enabled.planning_enabled("fixture.custom"));
+    }
+
     use super::{
         CONTROL_REQUEST_TIMEOUT, CompleteInteraction, GraphCapabilityProfile,
         HarnessCompleteConfiguration, HarnessConfiguration, PreparedInteraction,
@@ -4595,6 +4688,45 @@ mod tests {
         assert_eq!(replay_v6.interaction_node_id, v6.interaction_node_id);
         assert_eq!(
             serde_json::to_value(&replay_v6.closure).unwrap(),
+            serde_json::to_value(&v6.closure).unwrap()
+        );
+        let v8 = runtime
+            .ensure_personal_presentation_version("personal-presentation-v8")
+            .await
+            .unwrap();
+        assert_ne!(v8.interaction_node_id, v6.interaction_node_id);
+        assert_eq!(v8.closure.layers[0].nodes.len(), 6);
+        assert_eq!(v8.closure.layers[0].edges.len(), 5);
+        for (old, new) in v6.closure.layers[0]
+            .nodes
+            .iter()
+            .zip(&v8.closure.layers[0].nodes)
+        {
+            assert_eq!(
+                (&old.kind, &old.icon, &old.title, &old.detail),
+                (&new.kind, &new.icon, &new.title, &new.detail)
+            );
+        }
+        assert_eq!(v8.closure.layers[0].nodes[5].title, "Concise Node Details");
+        assert!(
+            v8.closure.layers[0].nodes[5]
+                .detail
+                .contains("80-150 words")
+        );
+        let replay_v8 = runtime
+            .ensure_personal_presentation_version("personal-presentation-v8")
+            .await
+            .unwrap();
+        assert_eq!(
+            serde_json::to_value(&replay_v8.closure).unwrap(),
+            serde_json::to_value(&v8.closure).unwrap()
+        );
+        let retained_v6 = runtime
+            .ensure_personal_presentation_version("personal-presentation-v6")
+            .await
+            .unwrap();
+        assert_eq!(
+            serde_json::to_value(&retained_v6.closure).unwrap(),
             serde_json::to_value(&v6.closure).unwrap()
         );
         assert_ne!(v3.interaction_node_id, v4.interaction_node_id);

@@ -25,6 +25,18 @@ export interface LiveAnswerPage {
   readonly eligibleActionIds: readonly GraphId[];
 }
 
+export interface PlanDraft {
+  readonly clientKey: string;
+  readonly title: string;
+  readonly detail: string;
+}
+export interface PlanPublication {
+  readonly node: GraphNode;
+  readonly interactionNodeId: GraphId;
+  readonly revision: number;
+  readonly readPlanNodeIds: readonly GraphId[];
+}
+
 export interface CompletionInputGraph {
   readonly interactionNode: GraphId;
 }
@@ -302,7 +314,7 @@ export interface CompletionContract {
     }[];
   };
   readonly authorities: InteractionPermissions["permissions"];
-  readonly returnRequirements: readonly { readonly kind: "navigate.response"; readonly nodeId: GraphId }[];
+  readonly returnRequirements: readonly ({ readonly kind: "navigate.response"; readonly nodeId: GraphId } | { readonly kind: "plan.contribution" })[];
   readonly digest: string;
 }
 

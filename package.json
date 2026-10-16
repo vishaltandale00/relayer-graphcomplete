@@ -105,7 +105,8 @@
     "desktop:dev:windows": "node scripts/run-windows-dev-loop.mjs",
     "desktop:status:windows": "node scripts/windows-dev-status.mjs",
     "desktop:sync:windows": "node scripts/windows-dev-sync.mjs",
-    "desktop:qualify:windows-install": "node desktop/release/windows-first-install.mjs"
+    "desktop:qualify:windows-install": "node desktop/release/windows-first-install.mjs",
+    "test:living-plans": "cargo test -p relayer-app-server --lib planning_adoption_preserves_supported_defaults_and_explicit_opt_outs && cargo test -p relayer-graph-core --test graph_database imports_cannot_mint_reserved_internal_plan_types_or_keys && cargo test -p relayer-graph-server --test living_plans && vitest run test/living-plan-product-e2e.test.mjs test/eval-living-plan.test.mjs test/graph-operation-recorder.test.mjs test/eval-configuration-paths.test.mjs test/prime-managed-runtime.test.mjs test/prime-agent-packaging.test.mjs test/prime-visual-integration.test.mjs packages/harness-host/test/codex-basic.test.ts packages/harness-host/test/prime-agent.test.ts packages/harness-host/test/configuration.test.ts"
   },
   "devDependencies": {
     "@actions/cache": "6.2.0",

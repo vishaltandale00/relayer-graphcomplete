@@ -13,7 +13,7 @@ it.each(["prime-agent-basic", "prime-agent-deep"])("%s accepts Python authored a
   const directory = await mkdtemp(join(tmpdir(), 'prime-visual-proof-'));
   const configurationPath = join(directory, 'prime.yaml');
   const shipped = await readFile(join(root, 'harnesses', `${harnessId}.yaml`), 'utf8');
-  const promotedVersion = harnessId === 'prime-agent-basic' ? 'personal-presentation-v6' : 'personal-presentation-v4';
+  const promotedVersion = harnessId === 'prime-agent-basic' ? 'personal-presentation-v8' : 'personal-presentation-v4';
   expect(shipped).toContain(`personalPresentationVersion: ${promotedVersion}`);
   const configuration = shipped.replace(`  personalPresentationVersion: ${promotedVersion}\n`, '');
   await writeFile(configurationPath, configuration);

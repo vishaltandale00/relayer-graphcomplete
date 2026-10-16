@@ -333,11 +333,15 @@ impl GraphWriter {
                 submitted_inputs,
             )
             .await?;
+        let planning =
+            crate::storage::sqlite::plans::enabled(&mut transaction, self.scope.root_node_id)
+                .await?;
         crate::graph::database::initialize_completion(
             &mut transaction,
             &child,
             self.scope.project_id,
             self.scope.thread_id,
+            planning,
         )
         .await?;
         let invocation = crate::storage::sqlite::invocations::for_key(

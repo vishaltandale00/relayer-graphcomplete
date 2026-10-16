@@ -103,7 +103,7 @@ function parseGraphCapabilityProfile(value: unknown): GraphCapabilityProfile | u
   if (value === undefined) return undefined;
   if (!isRecord(value)) throw new Error("Harness graphCapabilityProfile must be an object");
   for (const key of Object.keys(value)) {
-    if (key !== "search" && key !== "preview") throw new Error(`Unknown graphCapabilityProfile field: ${key}`);
+    if (key !== "search" && key !== "preview" && key !== "planning") throw new Error(`Unknown graphCapabilityProfile field: ${key}`);
   }
   if (value.search !== "disabled" && value.search !== "query-v1") {
     throw new Error("Harness graphCapabilityProfile.search must be disabled or query-v1");
@@ -111,8 +111,12 @@ function parseGraphCapabilityProfile(value: unknown): GraphCapabilityProfile | u
   if (value.preview !== undefined && value.preview !== "disabled" && value.preview !== "enabled") {
     throw new Error("Harness graphCapabilityProfile.preview must be disabled or enabled");
   }
+  if (value.planning !== undefined && value.planning !== "disabled" && value.planning !== "interaction-v1") {
+    throw new Error("Harness graphCapabilityProfile.planning must be disabled or interaction-v1");
+  }
+  if (value.planning === "interaction-v1" && value.search !== "query-v1") throw new Error("Planning requires query-v1 graph search");
   // Disabled is stored as omission, so configurations pinned before previews keep their digest.
-  return { search: value.search, ...(value.preview === "enabled" ? { preview: "enabled" as const } : {}) };
+  return { search: value.search, ...(value.preview === "enabled" ? { preview: "enabled" as const } : {}), ...(value.planning !== undefined ? { planning: value.planning } : {}) };
 }
 
 /** Omission grants bounded `query-v1` search; a configuration opts out with an explicit `disabled`. */

@@ -30,6 +30,15 @@ pub(crate) async fn read(
                     GraphError::Forbidden("Unsupported CompletionContract description.".into())
                 })?;
             contract.validate()?;
+            if contract
+                .return_requirements
+                .contains(&CompletionReturnRequirement::PlanContribution)
+                != super::plans::enabled(connection, interaction).await?
+            {
+                return Err(GraphError::Forbidden(
+                    "CompletionContract planning policy mismatch.".into(),
+                ));
+            }
             if contract.interaction_node_id != interaction || contract.digest != marker {
                 return Err(GraphError::Forbidden(
                     "CompletionContract identity mismatch.".into(),
@@ -140,7 +149,7 @@ pub(crate) async fn prepare(
             authorities.push(integration);
         }
     }
-    let return_requirements = authorities
+    let mut return_requirements: Vec<CompletionReturnRequirement> = authorities
         .iter()
         .filter_map(|p| match p {
             InteractionPermission::NavigateAdd { node_id } => {
@@ -149,6 +158,9 @@ pub(crate) async fn prepare(
             _ => None,
         })
         .collect();
+    if super::plans::enabled(connection, scope.root_node_id).await? {
+        return_requirements.push(CompletionReturnRequirement::PlanContribution);
+    }
     let contract = CompletionContract {
         schema_version: 1,
         interaction_node_id: scope.root_node_id,

@@ -234,7 +234,7 @@ describe("Relayer Eval application service", () => {
     expect(visualNodeDetailCheck(partialVisualOutput, "personal-presentation-v3").passed).toBe(false);
     expect(visualNodeDetailCheck(malformedOutput, "personal-presentation-v3").passed).toBe(false);
     expect(visualNodeDetailCheck(visualOutput, "personal-presentation-v3").passed).toBe(true);
-    for (const version of ["personal-presentation-v4", "personal-presentation-v6"]) {
+    for (const version of ["personal-presentation-v4", "personal-presentation-v6", "personal-presentation-v8"]) {
       expect(visualNodeDetailCheck(visualOutput, version).passed).toBe(true);
       expect(visualNodeDetailCheck(plainOutput, version).passed).toBe(false);
       expect(visualNodeDetailCheck(partialVisualOutput, version).passed).toBe(false);
@@ -283,7 +283,7 @@ describe("Relayer Eval application service", () => {
     ).passed).toBe(false);
   });
 
-  it.each(["personal-presentation-v3", "personal-presentation-v6"])("fails a plain semantic child under %s", (personalPresentationVersion) => {
+  it.each(["personal-presentation-v3", "personal-presentation-v6", "personal-presentation-v8"])("fails a plain semantic child under %s", (personalPresentationVersion) => {
     const checks = recursiveCompleteChecks({
       harnessConfiguration: {
         implementation: "fixture.task-system",
@@ -560,6 +560,11 @@ describe("Relayer Eval application service", () => {
     // An omitted profile resolves to query-v1 search in the catalog Eval shows.
     expect(evalService.catalog().harnessConfigurations.find(({ name }) => name === "fixture-task-system")
       ?.graphCapabilityProfile).toEqual({ search: "query-v1" });
+    await expect(evalService.createRun({
+      testCaseIds: ["living-plan.interaction-continuity"],
+      harnessConfigurationNames: ["fixture-task-system"],
+      judgeConfigurationName: "deterministic-graph-contract",
+    })).rejects.toThrow("Graph-search Eval cases are qualified only for macOS Apple Silicon.");
     await expect(evalService.createRun({
       testCaseIds: [graphMemoryEvalCaseId],
       harnessConfigurationNames: ["fixture-graph-memory"],

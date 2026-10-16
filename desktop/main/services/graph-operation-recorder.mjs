@@ -170,6 +170,14 @@ function withSearch(receipt, response) {
   };
 }
 
+function withPlan(receipt, response) {
+  if (!isObject(response?.node) || !positiveInteger(response.node.id)
+    || !positiveInteger(response.interactionNodeId) || !positiveInteger(response.revision)
+    || !Array.isArray(response.readPlanNodeIds) || !response.readPlanNodeIds.every(positiveInteger)) return receipt;
+  return { ...receipt, planNodeId: response.node.id, planOwnerInteractionNodeId: response.interactionNodeId,
+    planRevision: response.revision, readPlanNodeIds: [...response.readPlanNodeIds] };
+}
+
 function withCompletion(receipt, response) {
   const rootLayer = isObject(response?.rootLayer) && isObject(response.rootLayer.layer)
     ? response.rootLayer.layer
@@ -193,6 +201,8 @@ function sanitizeReceipt(method, path, status, request, response, knownSecrets) 
         ? { visualAssetOperationKind: kind } : {}),
     };
   }
+  if (status >= 200 && status < 300 && ((method === "POST" && path === "/api/graph/plans")
+    || (method === "GET" && /^\/api\/graph\/plans\/[1-9]\d*$/.test(path)))) return withPlan(receipt, response);
   if (method === "POST" && path === "/api/graph/nodes") return withRecord(receipt, "node", response?.node);
   if (method === "POST" && path === "/api/graph/edges") return withRecord(receipt, "edge", response?.edge);
   if (method === "POST" && path === "/api/graph/layers") return withRecord(receipt, "layer", response?.layer);

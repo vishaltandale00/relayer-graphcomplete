@@ -21,7 +21,7 @@ afterEach(async () => {
 
 describe("first-message composer integration", () => {
   it.each(["codex-basic", "claude-basic"].flatMap((harnessId) =>
-    ["personal-presentation-v1", "personal-presentation-v3", "personal-presentation-v4"].map((previousVersion) => [harnessId, previousVersion]),
+    ["personal-presentation-v1", "personal-presentation-v3", "personal-presentation-v4", "personal-presentation-v6"].map((previousVersion) => [harnessId, previousVersion]),
   ))("promotes new %s threads while preserving reopened %s follow-up and invoke pins", async (harnessId, previousVersion) => {
     const providerId = harnessId === "claude-basic" ? "claude" : "codex";
     const adapterId = `${providerId}-subscription`;
@@ -165,11 +165,13 @@ describe("first-message composer integration", () => {
     const newPresentation = observed.find(({ graphNodeId }) => graphNodeId === newAccepted.interactions[0].graphNodeId).presentation;
     expect(newPresentation.attachment.versionInteractionNodeId).not.toBe(oldPresentation.attachment.versionInteractionNodeId);
     const titles = (presentation) => presentation.graph.layers.flatMap(({ nodes }) => nodes.map(({ title }) => title));
-    expect(titles(oldPresentation)).not.toContain("Meaningful graph relationships");
+    expect(titles(oldPresentation).includes("Meaningful graph relationships")).toBe(previousVersion === "personal-presentation-v6");
+    expect(titles(oldPresentation)).not.toContain("Concise Node Details");
     expect(titles(newPresentation)).toContain("Authored visual Node Details");
     expect(titles(newPresentation)).toContain("Meaningful graph relationships");
+    expect(titles(newPresentation)).toContain("Concise Node Details");
     const newTrace = await after.runtime.exportCandidateTrace(newAccepted.interactions[0].id, join(dataDirectory, "new-trace"));
-    expect(newTrace.personalPresentationVersionKey).toBe("personal-presentation-v6");
+    expect(newTrace.personalPresentationVersionKey).toBe("personal-presentation-v8");
   }, 20_000);
 
   it("submits on Enter and accepts a graph through the zero-inference fixture harness", async () => {

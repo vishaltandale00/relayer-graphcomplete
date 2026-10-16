@@ -1,0 +1,44 @@
+
+ RUN  v4.1.10 /Volumes/2T-SSD/worktrees/0f84/relayer-graphcomplete
+
+ ❯ |isolated| packages/harness-host/test/configuration.test.ts (33 tests | 1 failed) 102ms
+     × loads the checked-in codex-basic configuration 13ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  |isolated| packages/harness-host/test/configuration.test.ts > harness configuration > loads the checked-in codex-basic configuration
+AssertionError: expected { schemaVersion: 1, …(12) } to deeply equal { schemaVersion: 1, …(12) }
+
+- Expected
++ Received
+
+@@ -62,11 +62,11 @@
+      "full": {
+        "approvalPolicy": "never",
+        "sandboxMode": "danger-full-access",
+      },
+    },
+-   "revision": 19,
++   "revision": 20,
+    "schemaVersion": 1,
+    "settings": {
+      "modelReasoningEffort": "medium",
+      "personalPresentationVersion": "personal-presentation-v8",
+      "promptProfile": "layered-navigation-multi-agent-v1",
+
+ ❯ packages/harness-host/test/configuration.test.ts:156:91
+    154|     ["codex-basic-high", "high", 4, undefined],
+    155|   ])("loads the checked-in %s configuration", async (name, modelReason…
+    156|     await expect(loadHarnessConfiguration(join(repositoryRoot, `harnes…
+       |                                                                                           ^
+    157|       schemaVersion: 1,
+    158|       name,
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed | 4 passed (5)
+      Tests  1 failed | 208 passed (209)
+   Start at  03:40:55
+   Duration  14.68s (transform 2.30s, setup 0ms, import 3.20s, tests 10.67s, environment 1ms)
+

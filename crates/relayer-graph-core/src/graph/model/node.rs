@@ -121,6 +121,13 @@ pub struct NodeDraft {
 
 impl NodeDraft {
     pub(crate) fn validate(&self) -> Result<String, GraphError> {
+        if self.kind == "interaction-plan" || self.client_key.starts_with("__plan:") {
+            return Err(GraphError::validation(
+                "reserved_plan_record",
+                "kind",
+                "Use publishPlan for internal planning records.",
+            ));
+        }
         super::require_nonempty(&self.client_key, "clientKey")?;
         super::require_nonempty(&self.kind, "kind")?;
         super::require_nonempty(&self.icon, "icon")?;

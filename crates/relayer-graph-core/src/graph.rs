@@ -5,6 +5,8 @@ mod import;
 mod interaction_scope;
 mod invocation;
 mod live_answers;
+mod plans;
+pub use plans::{PlanDraft, PlanPublication};
 pub(crate) mod model;
 mod personal_presentation;
 mod search_index;
@@ -52,8 +54,8 @@ pub use personal_presentation::{
 };
 pub use search_index::{
     NoSearchIndex, SearchIndex, SearchIndexComponent, SearchIndexFuture, SearchIndexRebuildClosure,
-    SearchIndexRebuildSnapshot, SearchIndexRevision, SearchIndexWrite, SearchTarget,
-    publication_targets,
+    SearchIndexRebuildContent, SearchIndexRebuildSnapshot, SearchIndexRevision, SearchIndexWrite,
+    SearchTarget, publication_targets,
 };
 pub use writer::GraphWriter;
 

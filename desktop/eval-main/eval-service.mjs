@@ -1,3 +1,4 @@
+import { livingPlanCase } from "./living-plan-case.mjs";
 import { completionArtifactEvidence } from "./task-completion-artifacts.mjs";
 import { abortable } from "./abortable.mjs";
 import { interactiveTripCase } from "./interactive-trip-case.mjs";
@@ -83,6 +84,7 @@ export function evalTurnTimeoutMs(environment = process.env) {
 }
 
 export const evalCases = Object.freeze([
+  livingPlanCase,
   interactiveTripCase,
   Object.freeze({
     id: graphMemoryEvalCaseId,
@@ -153,7 +155,7 @@ const evalAblations = Object.freeze([]);
 
 // Search is a default harness capability, so qualification follows the cases whose
 // evidence depends on search rather than every configuration that may search.
-const graphSearchEvalCaseIds = new Set([graphMemoryEvalCaseId, RECURSIVE_GRAPH_MEMORY_CASE_ID]);
+const graphSearchEvalCaseIds = new Set([graphMemoryEvalCaseId, RECURSIVE_GRAPH_MEMORY_CASE_ID, livingPlanCase.id]);
 
 export function resolveEvalCasePrompts(definition, testRunId) {
   if (!definition) throw new Error("Cannot resolve prompts for an unknown Eval case.");
@@ -381,7 +383,7 @@ export function visualNodeDetailCheck(output, personalPresentationVersion) {
     && Array.isArray(authoredDetail.assets)
     && /^[a-f0-9]{64}$/.test(authoredDetail.integritySha256 || "")
   ));
-  const treatment = ["personal-presentation-v3", "personal-presentation-v4", "personal-presentation-v6"].includes(personalPresentationVersion);
+  const treatment = ["personal-presentation-v3", "personal-presentation-v4", "personal-presentation-v6", "personal-presentation-v8"].includes(personalPresentationVersion);
   return {
     name: "visual-node-detail:authored-output",
     passed: treatment ? nodes.length > 0 && compiledNodes.length === nodes.length : authoredNodes.length === 0,
@@ -459,7 +461,8 @@ export function recursiveCompleteChecks(execution, { requireChildWhenEnabled = f
   if ((personalPresentationVersion === "personal-presentation-v2"
     || personalPresentationVersion === "personal-presentation-v3"
     || personalPresentationVersion === "personal-presentation-v4"
-    || personalPresentationVersion === "personal-presentation-v6") && children.length > 0) {
+    || personalPresentationVersion === "personal-presentation-v6"
+    || personalPresentationVersion === "personal-presentation-v8") && children.length > 0) {
     for (const child of children.filter((candidate) => candidate.status === "accepted")) {
       checks.push({
         ...visualNodeDetailCheck(
@@ -3165,7 +3168,16 @@ export class EvalService {
       };
       const deadline = Date.now() + 30_000;
       let descriptor;
-      for (;;) {
+      const captured = execution.candidateTraceCaptures?.[String(interaction.id)];
+      if (captured?.status === "complete" && captured.ref === ref) {
+        // Export consumes the host spool. A child discovered again after a later
+        // human turn reuses its immutable portable evidence, after integrity and
+        // exact scope are checked again. Never replace success with a second
+        // export's expected "no trace" error.
+        await validateCandidateTrace(targetDirectory, captured, interaction, correlation, { requireComplete: true });
+        descriptor = captured;
+      }
+      for (; descriptor === undefined;) {
         try {
           descriptor = await this.candidateTraceExporter(interaction.id, targetDirectory, correlation);
           break;

@@ -1,0 +1,50 @@
+
+ RUN  v4.1.10 /Volumes/2T-SSD/worktrees/0f84/relayer-graphcomplete
+
+ ❯ |isolated| test/first-message-composer-integration.test.mjs (9 tests | 9 failed) 67890ms
+     × promotes new codex-basic threads while preserving reopened personal-presentation-v1 follow-up and invoke pins 11569ms
+     × promotes new codex-basic threads while preserving reopened personal-presentation-v3 follow-up and invoke pins 7129ms
+     × promotes new codex-basic threads while preserving reopened personal-presentation-v4 follow-up and invoke pins 6100ms
+     × promotes new codex-basic threads while preserving reopened personal-presentation-v6 follow-up and invoke pins 7218ms
+     × promotes new claude-basic threads while preserving reopened personal-presentation-v1 follow-up and invoke pins 6416ms
+     × promotes new claude-basic threads while preserving reopened personal-presentation-v3 follow-up and invoke pins 7323ms
+     × promotes new claude-basic threads while preserving reopened personal-presentation-v4 follow-up and invoke pins 8661ms
+     × promotes new claude-basic threads while preserving reopened personal-presentation-v6 follow-up and invoke pins 6601ms
+     × submits on Enter and accepts a graph through the zero-inference fixture harness 6870ms
+ ❯ |isolated| test/prime-visual-integration.test.mjs (2 tests | 2 failed) 13184ms
+   × prime-agent-basic accepts Python authored assets and preserves old pins while promoting new threads 8825ms
+   × prime-agent-deep accepts Python authored assets and preserves old pins while promoting new threads 4357ms
+
+⎯⎯⎯⎯⎯⎯ Failed Tests 11 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  |isolated| test/first-message-composer-integration.test.mjs > first-message composer integration > promotes new codex-basic threads while preserving reopened personal-presentation-v1 follow-up and invoke pins
+ FAIL  |isolated| test/first-message-composer-integration.test.mjs > first-message composer integration > promotes new codex-basic threads while preserving reopened personal-presentation-v3 follow-up and invoke pins
+ FAIL  |isolated| test/first-message-composer-integration.test.mjs > first-message composer integration > promotes new codex-basic threads while preserving reopened personal-presentation-v4 follow-up and invoke pins
+ FAIL  |isolated| test/first-message-composer-integration.test.mjs > first-message composer integration > promotes new codex-basic threads while preserving reopened personal-presentation-v6 follow-up and invoke pins
+ FAIL  |isolated| test/first-message-composer-integration.test.mjs > first-message composer integration > promotes new claude-basic threads while preserving reopened personal-presentation-v1 follow-up and invoke pins
+ FAIL  |isolated| test/first-message-composer-integration.test.mjs > first-message composer integration > promotes new claude-basic threads while preserving reopened personal-presentation-v3 follow-up and invoke pins
+ FAIL  |isolated| test/first-message-composer-integration.test.mjs > first-message composer integration > promotes new claude-basic threads while preserving reopened personal-presentation-v4 follow-up and invoke pins
+ FAIL  |isolated| test/first-message-composer-integration.test.mjs > first-message composer integration > promotes new claude-basic threads while preserving reopened personal-presentation-v6 follow-up and invoke pins
+ FAIL  |isolated| test/first-message-composer-integration.test.mjs > first-message composer integration > submits on Enter and accepts a graph through the zero-inference fixture harness
+ FAIL  |isolated| test/prime-visual-integration.test.mjs > prime-agent-basic accepts Python authored assets and preserves old pins while promoting new threads
+ FAIL  |isolated| test/prime-visual-integration.test.mjs > prime-agent-deep accepts Python authored assets and preserves old pins while promoting new threads
+Error: Relayer app server stopped before readiness (1): Error: open Relayer app server
+
+Caused by:
+    runtime request failed with HTTP 422: {"error":{"code":"large_layer_justification_required","issues":[{"code":"large_layer_justification_required","message":"This layer has 6 nodes. Layers with 6 to 8 nodes need a private justification of at least 20 characters explaining why one larger layer is clearer. Resubmit with sizeJustification; do not copy it into user-visible content.","path":"sizeJustification"}],"message":"This layer has 6 nodes. Layers with 6 to 8 nodes need a private justification of at least 20 characters explaining why one larger layer is clearer. Resubmit with sizeJustification; do not copy it into user-visible content.","path":"sizeJustification"}}
+ ❯ ChildProcess.onExit desktop/main/services/relayer-app-server.mjs:570:16
+    568|         cleanup();
+    569|         const detail = stderr.join("").trim();
+    570|         reject(new Error(`Relayer app server stopped before readiness …
+       |                ^
+    571|       };
+    572|       const onError = (error) => {
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/11]⎯
+
+
+ Test Files  2 failed (2)
+      Tests  11 failed (11)
+   Start at  03:41:49
+   Duration  89.59s (transform 5.09s, setup 0ms, import 7.96s, tests 81.07s, environment 0ms)
+

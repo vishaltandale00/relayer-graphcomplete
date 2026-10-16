@@ -1,3 +1,4 @@
+import { livingPlanGuidance } from "./living-plan-guidance.js";
 import { appOwnedNodeCommand, appOwnedNodeInstructions } from "./graph-authoring-command.js";
 import { threadIconGuidance } from "./thread-icon-guidance.js";
 import { type GraphCapability, type GraphNode } from "@relayer/graph-client";
@@ -748,6 +749,7 @@ Codex native subagents are available when useful. Subagents may directly author,
 Answer the current user interaction by authoring and accepting a useful graph layer that truthfully presents the completed work or genuine blocker.
 
 ${GRAPH_PRESENTATION_GUIDANCE}
+${livingPlanGuidance(context, "javascript")}
 ${threadIconGuidance(context, "javascript")}
 ${CODEX_VISUAL_GUIDANCE}
 For Input plus Invoke, declare one InputActionObject field, then set the Invoke's inputActions: [field]. Mount these exact objects on the same Node. After submitting Node and Layer, graph.addAction(node, invoke) writes or recovers the referenced Input first and stores canonical IDs; no ID guessing or proximity inference. An ordinary human-root Current Input supports live Answer; child and Invoke-bound inputs use the next ordinary interaction. Invoke consumes only its explicit bindings. New Invokes allow one call unless reusable: true is explicitly appropriate.
@@ -905,6 +907,7 @@ Do not turn a node, relationship, path, list, record, or arbitrary string into a
 While doing the underlying work, publish useful findings through current; finally answer the current user interaction with a useful graph that truthfully presents the result, evidence, and limitations. A flat answer is valid. Add navigation only when opening it would materially improve understanding or support; apply that same test again inside every layer you author.
 
 ${GRAPH_PRESENTATION_GUIDANCE}
+${livingPlanGuidance(context, "javascript")}
 ${threadIconGuidance(context, "javascript")}
 ${CODEX_VISUAL_GUIDANCE}
 For Input plus Invoke, declare one InputActionObject field, then set the Invoke's inputActions: [field]. Mount these exact objects on the same Node. After submitting Node and Layer, graph.addAction(node, invoke) writes or recovers the referenced Input first and stores canonical IDs; no ID guessing or proximity inference. An ordinary human-root Current Input supports live Answer; child and Invoke-bound inputs use the next ordinary interaction. Invoke consumes only its explicit bindings. New Invokes allow one call unless reusable: true is explicitly appropriate.
@@ -1436,7 +1439,7 @@ function parseCodexBasicConfiguration(context: HarnessFactoryContext): ResolvedC
   const additionalDirectories = optionalStringArray(configuration.additionalDirectories, "additionalDirectories");
   const promptProfile = optionalEnum(configuration.promptProfile, ["layered-navigation-v1", "layered-navigation-multi-agent-v1"] as const, "promptProfile");
   const rootSessionMode = optionalEnum(configuration.rootSessionMode, ["resume", "fresh"] as const, "rootSessionMode");
-  optionalEnum(configuration.personalPresentationVersion, ["personal-presentation-v0", "personal-presentation-v1", "personal-presentation-v2", "personal-presentation-v3", "personal-presentation-v4", "personal-presentation-v6"] as const, "personalPresentationVersion");
+  optionalEnum(configuration.personalPresentationVersion, ["personal-presentation-v0", "personal-presentation-v1", "personal-presentation-v2", "personal-presentation-v3", "personal-presentation-v4", "personal-presentation-v6", "personal-presentation-v8"] as const, "personalPresentationVersion");
   const permission = parseCodexPermissionBinding(context.permissionProfileId, context.permissionBinding);
 
   return {

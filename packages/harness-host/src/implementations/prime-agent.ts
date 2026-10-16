@@ -1,3 +1,4 @@
+import { livingPlanGuidance } from "./living-plan-guidance.js";
 import { threadIconGuidance } from "./thread-icon-guidance.js";
 import { PrimeVisualAuthoring, submitPrimeLayer } from "./prime-visual-authoring.js";
 import { Buffer } from "node:buffer";
@@ -1125,6 +1126,7 @@ export class PrimeAgentHarness implements Harness {
     return `While doing the underlying work, publish useful findings through current; finally answer the current Relayer interaction by using Python in IPython to author a useful graph response.
 
 ${GRAPH_PRESENTATION_GUIDANCE}
+${livingPlanGuidance(context, "python")}
 ${threadIconGuidance(context, "python")}
 ${PRIME_VISUAL_GUIDANCE}
 For Input plus Invoke, declare field = ActionObject("input", ..., control="text", prompt="...") and invoke = ActionObject("invoke", ..., interaction_text="...", input_actions=(field,)). Mount these exact objects on the same Node. After submitting Node and Layer, await graph.add_action(node, invoke) writes or recovers the referenced Input first and stores canonical IDs. Never guess IDs or infer connections from proximity. An ordinary human-root Current Input supports live Answer; child and Invoke-bound inputs use the next ordinary interaction. Invoke consumes explicit bindings. One call is the default; set reusable=True only for meaningful repeat use.
@@ -1175,6 +1177,7 @@ If a graph call fails, repair only unaccepted draft phases; skip every phase alr
     return `While doing the underlying work, publish useful findings through current; finally answer the current Relayer interaction by using Python in IPython to author a useful graph response. A flat answer is valid. Add navigation only when opening it would materially improve understanding or support; apply that same test again inside every layer you author.
 
 ${GRAPH_PRESENTATION_GUIDANCE}
+${livingPlanGuidance(context, "python")}
 ${threadIconGuidance(context, "python")}
 ${PRIME_VISUAL_GUIDANCE}
 For Input plus Invoke, declare field = ActionObject("input", ..., control="text", prompt="...") and invoke = ActionObject("invoke", ..., interaction_text="...", input_actions=(field,)). Mount these exact objects on the same Node. After submitting Node and Layer, await graph.add_action(node, invoke) writes or recovers the referenced Input first and stores canonical IDs. Never guess IDs or infer connections from proximity. An ordinary human-root Current Input supports live Answer; child and Invoke-bound inputs use the next ordinary interaction. Invoke consumes explicit bindings. One call is the default; set reusable=True only for meaningful repeat use.
@@ -1649,7 +1652,7 @@ function parsePrimeAgentConfiguration(context: HarnessFactoryContext): PrimeAgen
   const allowed = new Set(["thinkingLevel", "rlmMaxDepth", "prewarmIpythonKernel", "promptProfile", "personalPresentationVersion"]);
   const unknown = Object.keys(settings).filter((key) => !allowed.has(key));
   if (unknown.length > 0) throw new Error(`Unknown prime.agent configuration field: ${unknown.join(", ")}`);
-  optionalEnum(settings.personalPresentationVersion, ["personal-presentation-v0", "personal-presentation-v1", "personal-presentation-v2", "personal-presentation-v3", "personal-presentation-v4", "personal-presentation-v6"] as const, "personalPresentationVersion");
+  optionalEnum(settings.personalPresentationVersion, ["personal-presentation-v0", "personal-presentation-v1", "personal-presentation-v2", "personal-presentation-v3", "personal-presentation-v4", "personal-presentation-v6", "personal-presentation-v8"] as const, "personalPresentationVersion");
   const thinkingLevel = optionalEnum(settings.thinkingLevel, ["minimal", "low", "medium", "high", "xhigh", "max"] as const, "thinkingLevel");
   const rlmMaxDepth = optionalPositiveInteger(settings.rlmMaxDepth, "rlmMaxDepth");
   const prewarmIpythonKernel = optionalBoolean(settings.prewarmIpythonKernel, "prewarmIpythonKernel");

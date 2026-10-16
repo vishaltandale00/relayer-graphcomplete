@@ -12,12 +12,21 @@ pub struct SearchIndexRebuildClosure {
     pub closure: AcceptedGraphPublication,
 }
 
+/// Internal accepted Content, indexed without response layers or navigation.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SearchIndexRebuildContent {
+    pub target: SearchTarget,
+    pub published_to: Vec<SearchTarget>,
+    pub node: crate::GraphNode,
+}
+
 /// A transactionally consistent SQLite view of everything the derived store
 /// must contain after startup reconciliation.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SearchIndexRebuildSnapshot {
     pub targets: Vec<(SearchTarget, SearchIndexRevision)>,
     pub closures: Vec<SearchIndexRebuildClosure>,
+    pub internal_content: Vec<SearchIndexRebuildContent>,
 }
 
 /// A boxed future. The seam is used through `dyn SearchIndex`, and an `async fn`
@@ -217,6 +226,18 @@ pub trait SearchIndex: Send + Sync + 'static {
 /// One open transaction against the search store. Committing or rolling back
 /// consumes it, so a write cannot be committed twice or silently abandoned.
 pub trait SearchIndexWrite: Send + 'static {
+    fn apply_internal_content(
+        &mut self,
+        _node: crate::GraphNode,
+        _published_to: Vec<SearchTarget>,
+    ) -> SearchIndexFuture<()> {
+        Box::pin(async {
+            Err(GraphError::Internal(
+                "internal Content indexing is unsupported".into(),
+            ))
+        })
+    }
+
     /// Write one accepted closure into the open transaction, visible to every
     /// target in `published_to`. Nothing is visible to search until the
     /// transaction commits.
@@ -274,6 +295,13 @@ struct NoSearchIndexWrite {
 }
 
 impl SearchIndexWrite for NoSearchIndexWrite {
+    fn apply_internal_content(
+        &mut self,
+        _node: crate::GraphNode,
+        _targets: Vec<SearchTarget>,
+    ) -> SearchIndexFuture<()> {
+        Box::pin(async { Ok(()) })
+    }
     fn apply(
         &mut self,
         _publication: AcceptedGraphPublication,

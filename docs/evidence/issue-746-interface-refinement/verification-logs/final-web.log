@@ -1,0 +1,33 @@
+
+> relayer-graphcomplete@0.0.0 test:eval-web
+> node scripts/test-eval-web.mjs
+
+PASS interrupted startup: pending native child terminated and profile lock released
+PASS real index human lifecycle: initial graph, finish/export RPCs, process restart, persisted task/read-only review; disconnected actor rejected before candidate creation
+PASS host: real fixture, tab independence, review authority, judge/trace pages, shutdown and restart
+PASS Eval Settings: production Providers, login/cancel/reconnect, model refresh, persisted families/defaults and Harnesses (fake provider; no inference)
+PASS human task: live composer, recorded graph, two completions, finish, read-only review, annotation and export
+PASS actor dispatch race: real renderer redraw requires fresh observation; trusted activation, scroll and document rewrite failures stay terminal
+PASS actor native select: opened-only explicit accessibility, exact enabled unique labels, normal input/change, closed/unowned/stale/presentation/oversized rejection
+PASS actor redraw action: production refresh detached the original and exact replacement activation succeeded
+PASS actor redraw breadcrumb: production refresh detached the original and exact replacement activation succeeded
+node:internal/modules/run_main:105
+    triggerUncaughtException(
+    ^
+
+AssertionError [ERR_ASSERTION]: [{"kind":"submission"},{"kind":"thread_started"},{"kind":"actor_started"},{"kind":"presentation"},{"kind":"presentation"},{"kind":"presentation"},{"kind":"presentation"},{"kind":"presentation"},{"kind":"presentation"},{"kind":"presentation"},{"kind":"presentation"},{"kind":"presentation"},{"kind":"presentation"},{"kind":"presentation"},{"kind":"presentation"},{"kind":"presentation"},{"kind":"presentation"},{"kind":"presentation"},{"kind":"presentation"},{"kind":"presentation"},{"kind":"presentation"},{"kind":"presentation"},{"kind":"presentation"},{"kind":"actor_observation"},{"kind":"actor_action"},{"kind":"presentation"},{"kind":"actor_action_completed"},{"kind":"actor_observation"},{"kind":"actor_action"},{"kind":"actor_action_completed"},{"kind":"actor_observation"},{"kind":"actor_action"},{"kind":"submission"},{"kind":"actor_action_completed"},{"kind":"presentation"},{"kind":"actor_observation"},{"kind":"actor_action"},{"kind":"presentation"},{"kind":"actor_action_completed"},{"kind":"actor_observation"},{"kind":"actor_action"},{"kind":"submission"},{"kind":"presentation"},{"kind":"presentation"},{"kind":"actor_action_completed"},{"kind":"presentation"},{"kind":"actor_error","id":"human-0c06aa3f-beb9-49cb-b618-ab763d6f194b:47","sequence":47,"at":"2026-10-16T08:11:22.656Z","category":"timeout","message":"Actor timed out. Review the saved trajectory before starting another task.","phase":"observe"},{"kind":"actor_interrupted"}]
++ actual - expected
+
++ 'interrupted'
+- 'completed'
+
+    at proveTaskActor (file:///Volumes/2T-SSD/worktrees/0f84/relayer-graphcomplete/scripts/test-eval-web.mjs:931:12)
+    at async file:///Volumes/2T-SSD/worktrees/0f84/relayer-graphcomplete/scripts/test-eval-web.mjs:307:3 {
+  generatedMessage: false,
+  code: 'ERR_ASSERTION',
+  actual: 'interrupted',
+  expected: 'completed',
+  operator: 'strictEqual'
+}
+
+Node.js v24.1.0

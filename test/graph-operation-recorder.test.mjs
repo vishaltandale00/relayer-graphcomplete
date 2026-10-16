@@ -64,6 +64,11 @@ async function startUpstream({ holdNodeResponse = false, rejectVisualAssetOperat
         currentLayerId: 9, finalLayerId: kind === "return" ? 9 : null, privateField: "private response" }));
       return;
     }
+    if (request.url === "/api/graph/plans" || request.url === "/api/graph/plans/71") {
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(JSON.stringify({node:{id:71,state:"accepted",detail:"private plan content"},interactionNodeId:17,revision:2,readPlanNodeIds:[61],extra:"not evidence"}));
+      return;
+    }
     if (request.url === "/api/graph/nodes" && request.method === "POST") {
       resolveNodeStarted();
       if (holdNodeResponse) await nodeResponseReleased;
@@ -860,4 +865,18 @@ it("bounds an attributed graph request stalled before its body finishes", async 
   await aborted;
   expect(descriptor).toMatchObject({ status: "partial", promotable: false, truncated: true, eventCount: 0, discardedEvents: 1 });
   expect(descriptor.authoringDiagnosticsDiscarded).toBeUndefined();
+});
+
+it("records exact plan publication/read attribution while omitting private plan bodies", async () => {
+  const upstream=await startUpstream();
+  const recorder=await startGraphOperationRecorder({upstreamUrl:upstream.url});resources.push(recorder);
+  const token="plan-receipt-token";await bindCapability(recorder.url,token);
+  await jsonRequest(`${recorder.url}/api/graph/plans`,{method:"POST",token,body:{clientKey:"final",title:"Task",detail:"private request"}});
+  await jsonRequest(`${recorder.url}/api/graph/plans/71`,{token});
+  const target=await createCandidateTraceDirectory();await recorder.exportInteraction(17,target);
+  const text=await readFile(join(target,"graph-operations.jsonl"),"utf8");
+  const events=text.trim().split("\n").map(line=>JSON.parse(line));
+  expect(events).toHaveLength(2);
+  for(const event of events) expect(event).toMatchObject({planNodeId:71,planOwnerInteractionNodeId:17,planRevision:2,readPlanNodeIds:[61]});
+  expect(text).not.toContain("private plan content");expect(text).not.toContain("private request");expect(text).not.toContain(token);
 });

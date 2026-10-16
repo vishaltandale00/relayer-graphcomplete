@@ -59,6 +59,13 @@ export function primeVisualFixtureFactory(context) {
               + "async def main():\n" + example.split("\n").map((line) => "    " + line).join("\n")
               + "\nasyncio.run(main())\n";
           }
+          // This fixture replaces inference and must author the new intrinsic
+          // contribution itself; visual prompt examples remain focused on UI.
+          python = python.replace("    await graph.submit(", `    contract = await graph.get_contract()
+    if contract and any(item["kind"] == "plan.contribution" for item in contract.return_requirements):
+        plan = await graph.publish_plan(client_key="visual-fixture", title="Visual proof", detail="Visual authoring completed; interface purposes are the existing visual response and its controls. No further fixture work pending.")
+        assert (await graph.get_plan(plan["node"]["id"])) == plan
+    await graph.submit(`);
           if (nativeKernel) {
             const kernel = new nativeKernel.KernelManager({
               python: globalThis.process.env.RELAYER_TEST_PRIME_PYTHON,

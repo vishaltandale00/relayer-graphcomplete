@@ -124,6 +124,9 @@ pub(crate) async fn transition(
             (Some(*layer_id), None, digest, Some(publication))
         }
         CurrentTransition::Return { layer_id } => {
+            let _final_plan =
+                crate::storage::sqlite::plans::finalize(&mut transaction, scope.root_node_id)
+                    .await?;
             let plan = CompletionPlan::build_return(
                 &mut transaction,
                 scope,

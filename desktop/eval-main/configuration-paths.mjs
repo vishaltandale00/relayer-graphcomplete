@@ -15,7 +15,11 @@ export function evalTargetHarnessConfiguration(targetKey) {
   if (targetKey === GRAPH_SEARCH_EVAL_TARGET) return (configuration) => configuration;
   return (configuration) => ({
     ...configuration,
-    graphCapabilityProfile: { ...configuration.graphCapabilityProfile, search: "disabled" },
+    graphCapabilityProfile: {
+      ...configuration.graphCapabilityProfile,
+      search: "disabled",
+      ...(configuration.graphCapabilityProfile?.planning ? { planning: "disabled" } : {}),
+    },
   });
 }
 

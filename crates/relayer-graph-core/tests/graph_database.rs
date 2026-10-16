@@ -11134,3 +11134,25 @@ async fn thread_icon_proposal_survives_reopen_but_advance_and_stop_do_not_accept
         assert!(writer.propose_thread_icon("heart").await.is_err());
     }
 }
+
+#[tokio::test]
+async fn imports_cannot_mint_reserved_internal_plan_types_or_keys() {
+    for spoof_kind in [true, false] {
+        let database = GraphDatabase::in_memory().await.unwrap();
+        let mut input = imported_conversation("interaction-1");
+        let node = &mut input.turns[0].accepted_view.as_mut().unwrap().layers[0].nodes[0];
+        if spoof_kind {
+            node.kind = "interaction-plan".into();
+        } else {
+            node.client_key = Some("__plan:forged".into());
+        }
+        assert!(matches!(
+            database.import_accepted_conversation(&input).await,
+            Err(GraphError::Validation {
+                code: "reserved_plan_record",
+                ..
+            })
+        ));
+        database.close().await;
+    }
+}

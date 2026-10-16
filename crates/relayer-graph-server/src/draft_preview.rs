@@ -447,6 +447,7 @@ mod tests {
                 GraphCapabilityProfile {
                     search: GraphSearchCapability::Disabled,
                     preview,
+                    planning: None,
                 },
             )
             .await

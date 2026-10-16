@@ -56,6 +56,9 @@ async function authorChild(context, observed) {
   observed.revokedChildCapabilityProbes.push(() => (
     new RelayerGraphClient(capability).getNode(context.inputGraph.id)
   ));
+  if (input.completionContract.returnRequirements.some(requirement => requirement.kind === "plan.contribution")) {
+    await graph.publishPlan({ clientKey: "fixture-plan", title: "Red-team review", detail: "Review completed; interface exposes the falsifiable stop condition. Fixture inference leaves broader launch decisions to its parent." });
+  }
   const current = await graph.getCurrent();
   const node = new NodeObject("box", "Red-team stop condition", STOP_CONDITION, "concept", "red-team-condition");
   await graph.submitNode(node);
@@ -77,6 +80,10 @@ async function authorChild(context, observed) {
 
 async function authorRoot(context, turn, recursionEnabled, observed) {
   const graph = new RelayerGraphClient(context.graph.acquireCapability());
+  const contract = await graph.getContract();
+  if (contract?.returnRequirements.some(requirement => requirement.kind === "plan.contribution")) {
+    await graph.publishPlan({ clientKey: "fixture-plan", title: "Lantern fixture", detail: "Current fixture brief authored; interface preserves prior briefs as supporting context. This replaces inference only and makes no model-quality claim." });
+  }
   const titles = ["Offline recovery covenant", "Constrained recovery revision", "Red-team stop condition"];
   const details = [
     "Interrupted updates roll back to the last-known-good build and stale permissions are revoked before relaunch.",

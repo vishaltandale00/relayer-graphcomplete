@@ -1,0 +1,15 @@
+
+> relayer-graphcomplete@0.0.0 lint:ladybug-receipt
+> cargo fmt --manifest-path docs/evidence/issue-261-ladybug-probe/Cargo.toml -- --check && rustfmt --edition 2021 --check docs/evidence/issue-261-ladybug-probe/source-build-probe/src/main.rs && node scripts/lint-ladybug-qualification-receipt.mjs && npm run lint:ladybug-native-receipt && npm run lint:ladybug-contract-probe
+
+Ladybug v0.19.1 qualification receipt lint passed: upstream artifacts NO-GO
+
+> relayer-graphcomplete@0.0.0 lint:ladybug-native-receipt
+> node scripts/verify-ladybug-native-receipts.mjs
+
+Ladybug native receipt verified: 27 subtrees inventoried; no release blockers declared
+
+> relayer-graphcomplete@0.0.0 lint:ladybug-contract-probe
+> node scripts/lint-ladybug-contract-probe.mjs
+
+Ladybug contract probe receipt covers 20 positive, 27 negative, 15 value, and 9 limit/budget cases; current conformance adds 3 positive and 34 negative Issue #354 cases.

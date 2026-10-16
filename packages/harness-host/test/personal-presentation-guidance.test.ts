@@ -104,6 +104,24 @@ Visible working state: For work that will not finish immediately, prefer establi
     expect(personalPresentationTraceValues({ personalPresentation: pinned } as Parameters<typeof personalPresentationTraceValues>[0])?.legacyBlocks).toEqual([]);
   });
 
+  it("delivers the graph-owned V8 detail budget verbatim and includes it in trace redaction", () => {
+    const source = readFileSync(new URL("../../../crates/relayer-app-server/src/runtime.rs", import.meta.url), "utf8");
+    const encoded = source.match(/title: "Concise Node Details",\s*detail: ("(?:[^"\\]|\\.)*")/)?.[1];
+    expect(encoded).toBeDefined();
+    const detail: string = JSON.parse(encoded!);
+    const pinned = presentation([{ id: 93, kind: "presentation-preference", icon: "align-left", title: "Concise Node Details", detail, state: "accepted" }]);
+    const before = structuredClone(pinned);
+    const rendered = renderPersonalPresentationGuidance(pinned);
+    expect(rendered).toBe(`Personal graph presentation preferences:\n\nConcise Node Details: ${detail}`);
+    expect(detail).toContain("80-150 words");
+    expect(detail).toContain("Be wordy only when necessary");
+    expect(detail).toContain("Keep essential context available without forcing extra clicks");
+    expect(pinned).toEqual(before);
+    const trace = personalPresentationTraceValues({ personalPresentation: pinned } as Parameters<typeof personalPresentationTraceValues>[0]);
+    expect(trace?.exactBlock).toBe(rendered);
+    expect(trace?.fragments).toContain(detail);
+  });
+
   it("fails closed when the attachment and resolved graph disagree", () => {
     const valid = presentation([]);
     const invalid = {

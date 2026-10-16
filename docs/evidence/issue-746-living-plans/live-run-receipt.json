@@ -1,0 +1,297 @@
+{
+  "schemaVersion": 1,
+  "runId": "run-2026-10-16T06-48-29-861Z-ef3d4c66",
+  "executionId": "848aefc5-b7ce-4246-b90a-17a847930dc4",
+  "status": "passed",
+  "completedAt": "2026-10-16T06:58:34.466Z",
+  "target": "macos-arm64",
+  "harness": {
+    "name": "codex-basic",
+    "revision": 19,
+    "digest": "sha256:a69edf34bfc2caa3168234c502a884a95e3cb1de67bf6a0bb38dda6a91502f20",
+    "graphCapabilityProfile": {
+      "search": "query-v1",
+      "preview": "enabled",
+      "planning": "interaction-v1"
+    }
+  },
+  "modelResolution": {
+    "selectedModel": {
+      "harnessId": "codex-basic",
+      "familyId": 1,
+      "providerId": "codex",
+      "modelId": "gpt-6.1-sol"
+    },
+    "productModelSelection": true
+  },
+  "sourceManifestSha256": "50fbf77024754f91bc766f4a439f0e7898c02e8d137b98341986a4363ded846a",
+  "loadedNativeBinaries": {
+    "relayer-app-server": "2e7b98edd789a3aa9942a3a87a81426c26ef5fbedd411cb4881d82f39466e8fb",
+    "relayer-graph-server": "420354191c03a2c67540647b5c810462c63236bacb652c16e3f0098cf6a57743"
+  },
+  "checks": [
+    {
+      "name": "turn-1:living-plan-own-contribution",
+      "passed": true,
+      "detail": "The current interaction published its own internal planning contribution."
+    },
+    {
+      "name": "turn-1:living-plan-search-discovery",
+      "passed": true,
+      "detail": "The candidate executed the public graph-search route."
+    },
+    {
+      "name": "turn-1:living-plan-before-return",
+      "passed": true,
+      "detail": "A successful plan publication preceded terminal graph Return."
+    },
+    {
+      "name": "turn-1:living-plan-prior-pointer-incorporation",
+      "passed": true,
+      "detail": "The candidate read the successful child's plan (first turn) or the preceding root's published plan (follow-up), then retained that exact pointer in its own contribution."
+    },
+    {
+      "name": "turn-1:living-plan-successful-semantic-child",
+      "passed": true,
+      "detail": "A successful semantic child's own planning contribution was read by the enclosing candidate."
+    },
+    {
+      "name": "turn-3:living-plan-own-contribution",
+      "passed": true,
+      "detail": "The current interaction published its own internal planning contribution."
+    },
+    {
+      "name": "turn-3:living-plan-search-discovery",
+      "passed": true,
+      "detail": "The candidate executed the public graph-search route."
+    },
+    {
+      "name": "turn-3:living-plan-before-return",
+      "passed": true,
+      "detail": "A successful plan publication preceded terminal graph Return."
+    },
+    {
+      "name": "turn-3:living-plan-prior-pointer-incorporation",
+      "passed": true,
+      "detail": "The candidate read the successful child's plan (first turn) or the preceding root's published plan (follow-up), then retained that exact pointer in its own contribution."
+    },
+    {
+      "name": "agent-authored-complete:broker-authority",
+      "passed": true,
+      "detail": "Configuration requested agent-authored Complete enabled; root trace recorded broker authority true."
+    },
+    {
+      "name": "agent-authored-complete:semantic-child-count",
+      "passed": true,
+      "detail": "Agent-authored Complete was available; child creation remains observed behavior and 1 semantic child execution was recorded."
+    },
+    {
+      "name": "agent-authored-complete:child-provenance",
+      "passed": true,
+      "detail": "Every semantic child must retain the exact source interaction, action, product interaction, and graph completion identities."
+    },
+    {
+      "name": "agent-authored-complete:child-terminal",
+      "passed": true,
+      "detail": "Every semantic child must publish a current layer and settle as an accepted succeeded result with an ordered durable projection sequence."
+    },
+    {
+      "name": "agent-authored-complete:child-execution",
+      "passed": true,
+      "detail": "Every semantic child must retain an exact attached and successfully settled provider execution binding."
+    },
+    {
+      "name": "agent-authored-complete:child-trace",
+      "passed": true,
+      "detail": "Every semantic child must have a complete portable candidate trace that records nested completion-broker authority."
+    },
+    {
+      "name": "agent-authored-complete:child-5:visual-node-detail:authored-output",
+      "passed": true,
+      "detail": "The authored presentation must accept a compiled visual Node Detail for every accepted node; observed 5 valid packages across 5 nodes."
+    }
+  ],
+  "turns": [
+    {
+      "interactionId": 4,
+      "graphNodeId": 53,
+      "status": "accepted",
+      "traceSha256": "sha256:7f987318089501fc50541be785fef345bb78f12f3c1ddea4e77b1c1ed6b54f10",
+      "graphOperations": {
+        "status": "complete",
+        "promotable": true,
+        "format": "relayer-graph-operations-v1",
+        "ref": "graph-operations.jsonl",
+        "sha256": "sha256:0c7f47340850996f8411bcf1e3ccfd8281da31e583773212bb85314e09138a24",
+        "byteLength": 16961,
+        "eventCount": 71,
+        "truncated": false
+      }
+    },
+    {
+      "interactionId": 6,
+      "graphNodeId": 69,
+      "status": "accepted",
+      "traceSha256": "sha256:7b82877615836bc508738f1ee4f90985968409a651358a5036c5c8a81e75ec27",
+      "graphOperations": {
+        "status": "complete",
+        "promotable": true,
+        "format": "relayer-graph-operations-v1",
+        "ref": "graph-operations.jsonl",
+        "sha256": "sha256:d05eceeabe7fbd70793c0f2101f0243531613b0c40a0d36146ba90b05d881627",
+        "byteLength": 28955,
+        "eventCount": 164,
+        "truncated": false
+      }
+    }
+  ],
+  "children": [
+    {
+      "interactionId": 5,
+      "graphNodeId": 56,
+      "status": "accepted",
+      "traceSha256": "sha256:49e9843fca38054d03fd7b0194dda634d21b42e3affcf79374ebb4daf42a9f98",
+      "graphOperations": {
+        "status": "complete",
+        "promotable": true,
+        "format": "relayer-graph-operations-v1",
+        "ref": "graph-operations.jsonl",
+        "sha256": "sha256:165456080d1d84b9486833debcb97ac08d48646475468197add64a999638e5d9",
+        "byteLength": 14686,
+        "eventCount": 67,
+        "truncated": false
+      }
+    }
+  ],
+  "planPublications": [
+    {
+      "nodeId": 54,
+      "interactionNodeId": 53,
+      "revision": 1,
+      "title": "Plan a manageable library repair caf\u00e9",
+      "detail": "No earlier published plans found. Develop two repair stations and six-person coverage for one afternoon. A single focused intake/safety review will test scope, triage and stop rules; integrate its observed findings. Supply budget remains undecided. Confirm skills and venue conditions before operation.",
+      "readPlanNodeIds": []
+    },
+    {
+      "nodeId": 57,
+      "interactionNodeId": 56,
+      "revision": 1,
+      "title": "Review intake and safe limits for the library caf\u00e9",
+      "detail": "Read the published caf\u00e9 plan and its proposed two-station six-volunteer scope. Review acceptance, consent, queue and stop rules, room access, release and incidents against authoritative guidance. Baseline excludes mains electrical work; no budget decision. Venue and jurisdiction remain unknown; identify checks rather than assert local compliance.",
+      "readPlanNodeIds": [
+        54
+      ]
+    },
+    {
+      "nodeId": 62,
+      "interactionNodeId": 53,
+      "revision": 2,
+      "title": "Keep two repair benches and protect host roles",
+      "detail": "Proposed allocation is four bench volunteers plus intake and coordinator. Planning target: eight initial slots within 2.5 public hours, with setup and closeout outside that window; timings remain adjustable to booking. Initial safety review supports excluding mains work and retaining intake/coordinator coverage. Await full review for integration. Supply budget remains unresolved; venue rules, insurance and volunteer competence unverified.",
+      "readPlanNodeIds": [
+        54,
+        57
+      ]
+    },
+    {
+      "nodeId": 63,
+      "interactionNodeId": 56,
+      "revision": 2,
+      "title": "Intake and safety review completed; venue checks remain",
+      "detail": "Reviewed authoritative Repair Caf\u00e9 International, HSE and US DOJ guidance. Retained the two-station six-volunteer baseline with protected intake/safety coverage; supplied accept/decline, triage/consent, queue/stop, accessibility, release and incident recommendations. Mains electrical work remains excluded. Permission, competence, insurance, venue access/emergency arrangements and jurisdiction-specific requirements remain for the organiser to verify. No supply budget selected. Contribution integrates into the original proposal and retains earlier findings.",
+      "readPlanNodeIds": [
+        54
+      ]
+    },
+    {
+      "nodeId": 64,
+      "interactionNodeId": 53,
+      "revision": 3,
+      "title": "Integrated caf\u00e9 proposal ready for review",
+      "detail": "Read the single intake/safety review's initial and final published findings. Integrated competence-based triage, powered/safety-critical exclusions, protected host coverage, stop and safe-release rules. Proposed six-person allocation and adjustable 3.5-hour booking model with eight initial slots. Final presentation is being checked; safety review supplies deeper support. Budget stays unresolved. Venue approval, insurance, skills, first aid and tools have not been verified.",
+      "readPlanNodeIds": [
+        54,
+        57,
+        62,
+        63
+      ]
+    },
+    {
+      "nodeId": 68,
+      "interactionNodeId": 53,
+      "revision": 4,
+      "title": "Repair caf\u00e9 proposal completed; budget remains open",
+      "detail": "Completed the concise proposal: textile and simple non-powered household stations, explicit six-volunteer roles, suggested afternoon timing and eight initial repair slots. Exactly one semantic intake/safety review completed; read its published findings and integrated screening, informed agreement, stop/coverage and safe-handback controls, with its detailed review retained as support. Checked rendered overview and volunteer allocation. No event execution, room inspection or skill/insurance verification occurred. Organiser still confirms venue conditions, competence, materials, first aid and local arrangements. Supply budget is deliberately unresolved; no spending assumed.",
+      "readPlanNodeIds": [
+        54,
+        57,
+        62,
+        63,
+        64
+      ]
+    },
+    {
+      "nodeId": 70,
+      "interactionNodeId": 69,
+      "revision": 1,
+      "title": "Adapt the caf\u00e9 to $120 and a shorter volunteer shift",
+      "detail": "Prior proposal and completed safety review are available; original two-station arrangement relied on six volunteers. Budget is now fixed at $120, but supply prices, inventory, volunteer identity/skills and meaning of first hour remain unconfirmed. Reuse existing intake/safety controls without another specialist run. Evaluate five-person coverage, a conservative reduced-capacity fallback and an allocation ceiling rather than assumed quotes. Resolve or explicitly preserve staffing dependencies through a bounded question; update operating scope and tradeoffs.",
+      "readPlanNodeIds": [
+        54,
+        57,
+        62,
+        63,
+        64,
+        68
+      ]
+    },
+    {
+      "nodeId": 72,
+      "interactionNodeId": 69,
+      "revision": 2,
+      "title": "Conservative five-person plan with a $120 supply ceiling",
+      "detail": "No live staffing reply received during the bounded opportunity or final reread. Recommended one paired bench plus floater after reserving intake and coordination; textiles preferred only if the staying lead is competent, otherwise choose the supported household scope. Four initial slots replace eight, with a conditional two-bench option if solo textile competence and five-person coverage are confirmed. Budget envelopes sum to $120 with $25 reserve; no quotes, purchases or inventory verification. Reused completed safety findings; no new specialist run. Departure timing, remaining skills, station choice, supply inventory/quotes and venue conditions remain unresolved.",
+      "readPlanNodeIds": [
+        54,
+        57,
+        62,
+        63,
+        64,
+        68
+      ]
+    },
+    {
+      "nodeId": 75,
+      "interactionNodeId": 69,
+      "revision": 3,
+      "title": "Budget and staffing adaptation completed; final scope remains conditional",
+      "detail": "Completed and visually inspected the revised proposal using prior plan and completed safety evidence. Recommended a five-person core: paired repair bench, intake, coordinator and floater, with short-shift volunteer on setup/arrivals; four initial slots and conditional two-bench alternative explain the resilience/capacity tradeoff. Supply envelopes verified to sum to $120, including $25 reserve; prices and availability unverified and no spending occurred. Published and checked the live staffing question; no answer received, so departure timing and staying skills remain explicitly unresolved alongside station/capacity choice, inventory/quotes and venue conditions. No new specialist run was needed or launched.",
+      "readPlanNodeIds": [
+        54,
+        57,
+        62,
+        63,
+        64,
+        68
+      ]
+    }
+  ],
+  "finalAssociations": [
+    {
+      "interactionNodeId": 53,
+      "finalPlanNodeId": 68
+    },
+    {
+      "interactionNodeId": 56,
+      "finalPlanNodeId": 63
+    },
+    {
+      "interactionNodeId": 69,
+      "finalPlanNodeId": 75
+    }
+  ],
+  "semanticReview": {
+    "observed": "Root plan leaves budget unresolved, one semantic child refines intake/safety, root contributions retain that child pointer, and the follow-up applies the $120 cap and missing continuing volunteer while retaining unresolved skill and venue dependencies. Rendered response offers a five-person core, reduced capacity, conditional alternatives and supply ceilings.",
+    "limits": "One successful model trajectory demonstrates authored continuity. Early root and child contributions emphasize work and constraints; interface-purpose planning appears mainly later. This run does not establish that every call planned interface purposes before substantive work, general model quality, or a comparative prompting improvement. No graph presentation judge was run. The captured Node Detail does not expose the budget breakdown for independent arithmetic review. Internal plans are absent from the ordinary response UI; Slice 2 is deferred."
+  }
+}

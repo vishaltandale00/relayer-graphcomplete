@@ -887,6 +887,23 @@ impl Drop for LadybugWrite {
 }
 
 impl SearchIndexWrite for LadybugWrite {
+    fn apply_internal_content(
+        &mut self,
+        node: relayer_graph_core::GraphNode,
+        published_to: Vec<SearchTarget>,
+    ) -> SearchIndexFuture<()> {
+        let store = self.store.clone();
+        let deadline = self.deadline;
+        Box::pin(async move {
+            store
+                .run_until(deadline, move |connection| {
+                    schema::apply_internal_content(connection, &published_to, &node)
+                })
+                .await
+                .map_err(internal)
+        })
+    }
+
     fn apply(
         &mut self,
         closure: AcceptedGraphPublication,

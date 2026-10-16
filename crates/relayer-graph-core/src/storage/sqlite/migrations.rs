@@ -152,6 +152,13 @@ mod tests {
             ..Migrator::DEFAULT
         };
         legacy.run(&pool).await.unwrap();
+        // The current writer used to seed this historical live-answer fixture
+        // requires plan tables. Install this unrelated additive schema only
+        // while seeding, then remove it before exercising the real upgrade.
+        sqlx::raw_sql(include_str!("migrations/0042_interaction_plans.sql"))
+            .execute(&pool)
+            .await
+            .unwrap();
         let mut database = GraphDatabase::in_memory().await.unwrap();
         database.storage.close().await;
         database.storage = crate::storage::sqlite::SqliteGraphStore { pool: pool.clone() };
@@ -187,6 +194,20 @@ mod tests {
             .fetch_all(&pool).await.unwrap();
         drop(first);
         drop(second);
+        let triggers: Vec<String> = sqlx::query_scalar(
+            "SELECT name FROM sqlite_master WHERE type='trigger' AND name LIKE 'internal_plan_%'",
+        )
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+        for trigger in triggers {
+            sqlx::query(&format!("DROP TRIGGER {trigger}"))
+                .execute(&pool)
+                .await
+                .unwrap();
+        }
+        sqlx::raw_sql("DROP TABLE interaction_plan_reads; DROP TABLE interaction_plans; DROP TABLE interaction_plan_policy;")
+            .execute(&pool).await.unwrap();
         database.storage.close().await;
         let reopened = GraphDatabase::open(file.path()).await.unwrap();
         let mut connection = reopened.storage.acquire().await.unwrap();
@@ -1657,7 +1678,10 @@ mod tests {
         .fetch_all(&pool)
         .await
         .unwrap();
-        assert_eq!(versions, [30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41]);
+        assert_eq!(
+            versions,
+            [30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42]
+        );
         sqlx::query(
             "INSERT INTO thread_icon_proposals(interaction_node_id,icon) VALUES (1,'compass')",
         )

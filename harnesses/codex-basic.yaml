@@ -2,7 +2,7 @@ schemaVersion: 1
 name: codex-basic
 implementation: codex.basic
 implementationVersion: 1
-revision: 18
+revision: 20
 complete:
   agentAuthored: true
 permissionBindings:
@@ -38,10 +38,11 @@ modelDefaults:
     id: codex-default-family
     version: 4
 graphCapabilityProfile:
+  planning: interaction-v1
   search: query-v1
   preview: enabled
 settings:
-  personalPresentationVersion: personal-presentation-v6
+  personalPresentationVersion: personal-presentation-v8
   modelReasoningEffort: medium
   promptProfile: layered-navigation-multi-agent-v1
   skipGitRepoCheck: true

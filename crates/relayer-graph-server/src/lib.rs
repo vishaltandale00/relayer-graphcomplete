@@ -86,8 +86,17 @@ enum GraphSearchCapability {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct GraphCapabilityProfile {
     search: GraphSearchCapability,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    planning: Option<GraphPlanningCapability>,
     #[serde(default, skip_serializing_if = "GraphPreviewCapability::is_disabled")]
     preview: GraphPreviewCapability,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+enum GraphPlanningCapability {
+    Disabled,
+    InteractionV1,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -328,6 +337,8 @@ pub fn router(state: ServerState) -> Router {
             "/api/control/interaction-features",
             get(control_interaction_features),
         )
+        .route("/api/graph/plans", post(publish_plan))
+        .route("/api/graph/plans/{id}", get(get_plan))
         .route("/api/graph/nodes", post(submit_node))
         .route(
             "/api/graph/detail-assets/resolve",
@@ -1103,7 +1114,45 @@ async fn search(
             }
         })?;
     cancel_on_drop.0 = None;
-    Ok(Json(result.outcome.to_json()))
+    let result = result.outcome.to_json();
+    let mut ids = HashSet::new();
+    collect_search_node_pointers(&result, &mut ids);
+    if !ids.is_empty() {
+        state
+            .graph
+            .writer_for_completion_authority(capability.node_id, capability.epoch)
+            .await?
+            .observe_plan_pointers(&ids.into_iter().collect::<Vec<_>>())
+            .await?;
+    }
+    Ok(Json(result))
+}
+
+#[cfg(feature = "ladybug")]
+fn collect_search_node_pointers(value: &Value, ids: &mut HashSet<NodeId>) {
+    match value {
+        Value::Object(object) => {
+            if object.get("type").and_then(Value::as_str) == Some("node")
+                && let Some(id) = object
+                    .get("id")
+                    .and_then(Value::as_str)
+                    .and_then(|id| id.strip_prefix("content:"))
+                    .and_then(|id| id.parse::<i64>().ok())
+                    .and_then(NodeId::new)
+            {
+                ids.insert(id);
+            }
+            for child in object.values() {
+                collect_search_node_pointers(child, ids);
+            }
+        }
+        Value::Array(values) => {
+            for child in values {
+                collect_search_node_pointers(child, ids);
+            }
+        }
+        _ => {}
+    }
 }
 
 #[cfg(not(feature = "ladybug"))]
@@ -1480,6 +1529,8 @@ fn require_temporal_feature(enabled: bool, feature: &str) -> Result<(), ApiError
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct CreateInteractionRequest {
+    #[serde(default)]
+    living_plan: bool,
     project_id: Option<ProjectId>,
     thread_id: ThreadId,
     text: String,
@@ -1533,11 +1584,11 @@ async fn create_interaction(
             "invocation and submitted interaction input cannot be prepared together",
         ));
     }
+    let graph = state.graph.clone().with_plan_preparation(input.living_plan);
     let (interaction, context_actions, input_children) = if let Some(node_id) =
         input.prepared_interaction_node
     {
-        let durable = state
-            .graph
+        let durable = graph
             .durable_invocation(node_id)
             .await?
             .ok_or_else(|| ApiError::invalid("prepared interaction is not a durable invocation"))?;
@@ -1556,8 +1607,7 @@ async fn create_interaction(
                 "prepared invocation provenance or input mismatch",
             ));
         }
-        let writer = state
-            .graph
+        let writer = graph
             .writer_for_subgraph(durable.source_completion_id)
             .await?;
         if writer.authority_scope() != (input.project_id, input.thread_id) {
@@ -1590,8 +1640,7 @@ async fn create_interaction(
             ));
         };
         (
-            state
-                .graph
+            graph
                 .create_personal_presentation_interaction(&input.text, identity, digest)
                 .await?,
             Vec::new(),
@@ -1607,8 +1656,7 @@ async fn create_interaction(
             ));
         }
         if input.submitted_inputs.is_empty() {
-            let (node, actions) = state
-                .graph
+            let (node, actions) = graph
                 .create_identified_interaction_with_context(
                     input.project_id,
                     input.thread_id,
@@ -1620,8 +1668,7 @@ async fn create_interaction(
                 .await?;
             (node, actions, Vec::new())
         } else {
-            let (node, children) = state
-                .graph
+            let (node, children) = graph
                 .create_identified_interaction_with_inputs(
                     input.project_id,
                     input.thread_id,
@@ -1634,7 +1681,7 @@ async fn create_interaction(
                     },
                 )
                 .await?;
-            let actions = state.graph.interaction_context_actions(node.id).await?;
+            let actions = graph.interaction_context_actions(node.id).await?;
             (node, actions, children)
         }
     } else if input.input_identity.is_some() || input.input_digest.is_some() {
@@ -1646,8 +1693,7 @@ async fn create_interaction(
             "submittedInputs require inputIdentity and inputDigest",
         ));
     } else if input.contexts.is_empty() || input.invocation.is_some() {
-        let node = state
-            .graph
+        let node = graph
             .create_interaction_with_invocation_and_context(
                 input.project_id,
                 input.thread_id,
@@ -1656,11 +1702,10 @@ async fn create_interaction(
                 &input.contexts,
             )
             .await?;
-        let actions = state.graph.interaction_context_actions(node.id).await?;
+        let actions = graph.interaction_context_actions(node.id).await?;
         (node, actions, Vec::new())
     } else {
-        let (node, actions) = state
-            .graph
+        let (node, actions) = graph
             .create_interaction_with_context(
                 input.project_id,
                 input.thread_id,
@@ -2915,6 +2960,32 @@ async fn stage_node_presentation(
         .stage_node_presentation(id, input.expected_revision, &input.authored_detail, &assets)
         .await?;
     Ok(Json(json!({"staged":true})))
+}
+
+async fn publish_plan(
+    State(state): State<ServerState>,
+    headers: HeaderMap,
+    Json(input): Json<relayer_graph_core::PlanDraft>,
+) -> Result<Json<relayer_graph_core::PlanPublication>, ApiError> {
+    let authority = session(&state, &headers)?;
+    let writer = state
+        .graph
+        .writer_for_completion_authority(authority.node_id, authority.epoch)
+        .await?;
+    Ok(Json(writer.publish_plan(&input).await?))
+}
+
+async fn get_plan(
+    State(state): State<ServerState>,
+    headers: HeaderMap,
+    Path(id): Path<NodeId>,
+) -> Result<Json<relayer_graph_core::PlanPublication>, ApiError> {
+    let authority = session(&state, &headers)?;
+    let writer = state
+        .graph
+        .writer_for_completion_authority(authority.node_id, authority.epoch)
+        .await?;
+    Ok(Json(writer.get_plan(id).await?))
 }
 
 async fn get_node(
@@ -7727,6 +7798,7 @@ mod no_ladybug_search_tests {
             None,
             GraphCapabilityProfile {
                 search: GraphSearchCapability::QueryV1,
+                ..Default::default()
             },
         )
         .await
