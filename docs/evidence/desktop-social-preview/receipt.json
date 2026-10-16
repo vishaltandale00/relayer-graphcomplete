@@ -13,7 +13,7 @@
   },
   "rendererArtifact": {
     "directory": "desktop/renderer",
-    "digest": "0ed8bf4902f0deb5cc50153ae6724ee7b2e021b7d44c4b88ab56211c705a9288",
+    "digest": "2b1ad05a4563ec85909b6d856cf11315e84df4a82a58902fb8bcde15860da3a7",
     "files": {
       "assets/relayer-logo.svg": {
         "bytes": 509,
@@ -292,8 +292,8 @@
         "sha256": "8e5d307f95b1863fb995606ca32a832de088916716c39476f9d31f2174de002d"
       },
       "src/product-workspace/workspace.js": {
-        "bytes": 318110,
-        "sha256": "81c57e1f19a6ae9cffc1a8884e6ef070220de7c0205ae6d3da920b632054680f"
+        "bytes": 318387,
+        "sha256": "c96af9592c420fac9124517dff9771a5eb5c51e5f561f6153c5090c04b11d3fd"
       },
       "src/project-composer-navigation.js": {
         "bytes": 282,
@@ -424,13 +424,13 @@
   "captures": [
     {
       "theme": "light",
-      "sha256": "0d64e23622f8e4d9dbe46907c8a02a46e8e53bd4dce236d38acce53bbaaf1979",
-      "bytes": 68977
+      "sha256": "a8077468198b281a0dad0799786177b2d771f6cc2a5b27a32e1f520d3e0e2dd2",
+      "bytes": 68432
     },
     {
       "theme": "dark",
-      "sha256": "ef5bd275a7732cdcd8186e9d85bf76d3f872c9416d1dce7d661d52ee87dcf2c9",
-      "bytes": 62710
+      "sha256": "13b4e25984fbd66f4c257eb7b0dc5dd85f366287d19aaff58b8c46482e2774bd",
+      "bytes": 65629
     }
   ],
   "platform": "macOS ARM64",

@@ -4446,15 +4446,17 @@ export function createProductWorkspace({
       pickerButton.disabled = !turns.length;
       pickerButton.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6h12M6 6v12m0-6h12"/><circle cx="6" cy="6" r="2.5"/><circle cx="6" cy="18" r="2.5"/><circle cx="18" cy="12" r="2.5"/></svg><b>${graph.contextCount}</b>`;
       pickerButton.setAttribute("aria-label", `Open interaction graph. ${graph.contextCount} attached context nodes`);
-      const title = graphDocument.createElement("div"); title.className = "interaction-graph-heading";
+      const popover = $("#turnPopover");
+      const title = popover.querySelector(".interaction-graph-heading") ?? graphDocument.createElement("div"); title.className = "interaction-graph-heading";
       title.textContent = graph.incomplete ? "Interaction graph · Some connections unavailable" : "Interaction graph";
-      const viewport = graphDocument.createElement("div"); viewport.className = "interaction-graph-viewport";
-      viewport.append(renderInteractionGraph(graphDocument, graph, interaction?.id, async (node) => {
+      // Keep the scroll host mounted while status/context updates rebuild the cards.
+      const viewport = popover.querySelector(".interaction-graph-viewport") ?? graphDocument.createElement("div"); viewport.className = "interaction-graph-viewport";
+      viewport.replaceChildren(renderInteractionGraph(graphDocument, graph, interaction?.id, async (node) => {
         if (!await prepareNodeContextSelectionChange()) return;
         closeTurnPopover(); collapseContextPreviews();
         if (onSelectTurnById) await onSelectTurnById(node.id, { responseRoot: node.completionStatus === "accepted", threadId: node.threadId });
       }));
-      $("#turnPopover").replaceChildren(title, viewport);
+      if (viewport.parentElement !== popover) popover.replaceChildren(title, viewport);
       if (focusedTurnId !== null) [...$("#turnPopover").querySelectorAll("[data-turn-id]")].find((row) => row.dataset.turnId === focusedTurnId)?.focus({ preventScroll: true });
       $("#turnPopover").classList.toggle("hidden", !turnPopoverOpen);
       pickerButton.setAttribute("aria-expanded", String(turnPopoverOpen));

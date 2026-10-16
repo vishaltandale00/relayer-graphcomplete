@@ -22,6 +22,11 @@ it.each(["failed", "stopped", "running", "pending"])("keeps %s local turns selec
   expect(trigger.getAttribute("aria-label")).toContain("interaction graph");
   expect(window.document.querySelector("#previousTurn").classList.contains("hidden")).toBe(true);
   trigger.click();expect(popover.classList.contains("hidden")).toBe(false);
+  const viewport = popover.querySelector('.interaction-graph-viewport');
+  viewport.scrollTop = 80; viewport.scrollLeft = 40;
+  workspace.render();await window.happyDOM.waitUntilComplete();
+  expect(popover.querySelector('.interaction-graph-viewport').scrollTop).toBe(80);
+  expect(popover.querySelector('.interaction-graph-viewport').scrollLeft).toBe(40);
   const active = window.document.querySelector('.interaction-graph-node[data-turn-id="4"]');
   expect(active.disabled).toBe(true);active.click();expect(select).not.toHaveBeenCalled();
   window.document.dispatchEvent(new window.KeyboardEvent("keydown",{key:"Escape",bubbles:true}));
