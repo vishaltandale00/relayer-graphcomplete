@@ -77,6 +77,12 @@ pub(super) async fn compatibility_on(
             && error
                 .as_deref()
                 .is_some_and(|error| error.starts_with(super::STALE_RETURNED_MESSAGE));
+        // A message a model failure returned to unsent, then made stale by a later message
+        // (#719), failed like a draft: it never accepted, so it neither owns nor obscures the
+        // route, whatever attempts it recorded.
+        if stale_returned && attempted_provider.is_none() {
+            continue;
+        }
         if !has_attempts
             // A stale returned message may already have a bound graph interaction; with no
             // attempt it still never executed.

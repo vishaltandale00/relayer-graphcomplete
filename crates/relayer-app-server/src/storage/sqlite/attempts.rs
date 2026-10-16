@@ -2259,6 +2259,13 @@ mod tests {
                 ),
                 "later_first={later_first}"
             );
+            // The stale failure never blocks the conversation's route, so the later message can
+            // still be retried or followed up.
+            let route = store
+                .conversation_compatibility(ThreadId::from_database(thread_id))
+                .await
+                .unwrap();
+            assert_ne!(route.status, "blocked", "later_first={later_first}");
             // Once the later message ends, nothing holds the thread out of the archive.
             mark_later_accepted(&store, later.id).await;
             let busy: bool =
