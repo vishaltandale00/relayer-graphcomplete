@@ -1,0 +1,90 @@
+{
+  "baseCommit": "802e8765f2d2e7de93e055c28e37f8fff99021e0",
+  "mainCommit": "37589c77378b755578f3b67e0006007a3cb0f7da",
+  "reviewScopeDigest": "bb3ec0349b3e7689957e7c9a067da9c429a8e86a96d1443d6c805450ff9249ba",
+  "digestAlgorithm": "SHA256 of concatenated sorted UTF8(relative path)+NUL+exact bytes+NUL",
+  "reviewer": "/root/pilot_fix_authority_review",
+  "verdict": "No static authority blocker; reviewer inspected final browser logs; non-certifying",
+  "files": {
+    "desktop/eval-main/task-actor-browser.mjs": "7546ae393a3f8fc0a117d92678a0632643272555e45040ef1bdbf027c19fd280",
+    "desktop/eval-main/task-actor-service.mjs": "355c6c9a6a8678aadf9a3d9f2429488c892ced70ff1b33e7cd2ede1876dbadaf",
+    "docs/evidence/issue-544-simulated-user/README.md": "ac5ad0264f23cc672705549e195c8911e40c51de8a98b79eb54494aee99a82d9",
+    "scripts/eval-actor-scroll-proof.mjs": "b528bc5c32f26f19fc9fee1919a0758fd131e8f50a88a133d2b4943e5e1adfc0",
+    "scripts/eval-current-actor-proof.mjs": "4c05c00d9e364bf7a72785050d9e81d26e4fa42b93426d9893ecfaffa73586f0",
+    "scripts/test-eval-web.mjs": "9a189bb3ff585f314753c842d4b092eef458adcba9f2946c1f95a9bf5dfeb95d",
+    "test/eval-task-actor.test.mjs": "216b0c8ff1355b1822c80f042e2d1b3e29b6f4119c8d8b935d3c40470e77effa"
+  },
+  "privateReviewScope": "6a24db32a688322832dddf61081d315d43eecdab0f54bbe0f1f6df1184ed2d34",
+  "verification": [
+    {
+      "entry": "npm run check (first)",
+      "log": "/Users/vishal/.relayer/role-guidance-ablation-20261016/scroll-check.log",
+      "status": "failed",
+      "evidence": "434 app-server tests pass; unchanged one-second bounded-output scenario fails before later chapters."
+    },
+    {
+      "entry": "bounded-output isolated",
+      "log": "/Users/vishal/.relayer/role-guidance-ablation-20261016/scroll-bounded-command-isolated.log",
+      "status": "passed",
+      "evidence": "1 passed in0.23s; aggregate failure cause not proved."
+    },
+    {
+      "entry": "npm run check (final attempt)",
+      "log": "/Users/vishal/.relayer/role-guidance-ablation-20261016/scroll-check-final.log",
+      "status": "failed",
+      "evidence": "Native/workspace/crash/type/package gates pass; JavaScript4343 pass,3skip; one Electron suite fails to load (0 tests). Runtime and unit bytes unchanged since that attempt; later fixture edits settle the Close action and add diagnostic context. No aggregate pass."
+    },
+    {
+      "entry": "Electron setup repair + blocked suite",
+      "log": "/Users/vishal/.relayer/role-guidance-ablation-20261016/scroll-electron-focused.log",
+      "status": "passed",
+      "evidence": "Official pinned-checksum installer repaired runtime;3 tests pass. Does not rewrite failed aggregate."
+    },
+    {
+      "entry": "remaining default-check tail",
+      "log": "/Users/vishal/.relayer/role-guidance-ablation-20261016/scroll-tail-gates.log",
+      "status": "passed",
+      "evidence": "Secret-boundary2,Python99,Ladybug receipts,PRD readability pass; separate receipt binds inner exits."
+    },
+    {
+      "entry": "actor service",
+      "log": "/Users/vishal/.relayer/role-guidance-ablation-20261016/scroll-service-final.log",
+      "status": "passed",
+      "evidence": "71 cases on unchanged final production/unit bytes, also included in4343 broad passes."
+    },
+    {
+      "entry": "settled actor journey (final helper)",
+      "log": "/Users/vishal/.relayer/role-guidance-ablation-20261016/scroll-actor-browser-final.log",
+      "status": "passed",
+      "evidence": "Real closed/visible/close-race scroll;8 decisions,3 completions; Send/Invoke idle-source barrier. Fixture inference only."
+    },
+    {
+      "entry": "native and authored Current (final helper)",
+      "log": "/Users/vishal/.relayer/role-guidance-ablation-20261016/scroll-current-browser-source-final.log",
+      "status": "passed",
+      "evidence": "Both full working journeys pass, including scroll availability, live Answer, response-loss reconciliation, approval cycle, export and authority."
+    },
+    {
+      "entry": "npm run test:eval-web",
+      "log": "/Users/vishal/.relayer/role-guidance-ablation-20261016/scroll-web-settled-fixture.log",
+      "status": "failed",
+      "evidence": "Four scroll passes plus actor/race/select/redraw, independent completion selector and evaluator release pass. Later calibration rerun startup interrupts; cause undiagnosed, downstream chapters unreached. Direct working chapters above ran separately."
+    },
+    {
+      "entry": "npm run build (final)",
+      "log": "/Users/vishal/.relayer/role-guidance-ablation-20261016/scroll-build-final.log",
+      "status": "passed",
+      "evidence": "Exit0 on final executable source; both server builds, root and workspace TypeScript compile."
+    }
+  ],
+  "earlierFailuresRetained": [
+    "/Users/vishal/.relayer/role-guidance-ablation-20261016/scroll-red.log",
+    "/Users/vishal/.relayer/role-guidance-ablation-20261016/scroll-red-exact.log",
+    "/Users/vishal/.relayer/role-guidance-ablation-20261016/scroll-service-red-exact.log",
+    "/Users/vishal/.relayer/role-guidance-ablation-20261016/scroll-current-browser.log",
+    "/Users/vishal/.relayer/role-guidance-ablation-20261016/scroll-current-browser-fixed-fixture.log",
+    "/Users/vishal/.relayer/role-guidance-ablation-20261016/scroll-web-final.log",
+    "/Users/vishal/.relayer/role-guidance-ablation-20261016/scroll-web-diagnostic.log"
+  ],
+  "claims": "Narrow seven-file review only. Original104-file802 evidence is historical. No full-check/browser pass, merge-ready, statistical or live-outcome claim."
+}

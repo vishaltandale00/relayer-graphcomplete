@@ -4,7 +4,7 @@ import { createCompletionJudge as createNativeCompletionJudge, validateCompletio
 import { randomUUID } from "node:crypto";
 import { abortable } from "./abortable.mjs";
 import { setTimeout as delay } from "node:timers/promises";
-import { ACTOR_ACTION_SCHEMA, ACTOR_OBSERVATION_CONTRACT, ACTOR_SETTLED_OBSERVATION_CONTRACT, ACTOR_PROMPT_VERSION, actorConfiguration, actorPrompt, createCodexTaskActor, validateActorAction } from "./task-actor.mjs";
+import { ACTOR_NATIVE_CALL_TIMEOUT_MS, ACTOR_ACTION_SCHEMA, ACTOR_OBSERVATION_CONTRACT, ACTOR_SETTLED_OBSERVATION_CONTRACT, ACTOR_PROMPT_VERSION, actorConfiguration, actorPrompt, createCodexTaskActor, validateActorAction } from "./task-actor.mjs";
 
 // Classification may inspect native errors, but evidence and UI use only these
 // closed categories and fixed messages; never copy provider text or error.name.
@@ -35,7 +35,10 @@ function actorFailure(error, { cancelled = false, timedOut = false } = {}) {
     invalid_action: "The actor response did not satisfy the action contract. No action was executed.",
     runtime_failure: "Actor runtime failed without claiming task success. No action is replayed automatically.",
   };
-  return { category, message: messages[category] };
+  return { category, message: messages[category],
+    ...(["prepare", "execute", "validate"].includes(error?.actorFailureStage) ? { nativeStage: error.actorFailureStage } : {}),
+    ...(["none", "unknown", "completed"].includes(error?.actorNativeDispatch) ? { nativeDispatch: error.actorNativeDispatch } : {}),
+  };
 }
 
 export class TaskActorService {
@@ -99,7 +102,7 @@ export class TaskActorService {
     let browser;
     let phase = "startup";
     try {
-      await this.tasks.actorEvent(id, "actor_started", { configuration: task.actor, prompt });
+      await this.tasks.actorEvent(id, "actor_started", { configuration: task.actor, prompt, nativeCallTimeoutMs: ACTOR_NATIVE_CALL_TIMEOUT_MS });
       actor = await this.createActor({ runtime, config: task.actor, prompt, outputSchema: task.actorSetup?.behaviorContract?.actionSchema });
       signal.throwIfAborted();
       const observationContract = task.actorSetup ? task.actorSetup.behaviorContract?.observationContract ?? null
@@ -196,6 +199,16 @@ export class TaskActorService {
           const attemptId = turn.latestAttempt?.id;
           if (submission.path?.endsWith("/retry") && attemptId == null) throw new Error("Retried interaction has no settled attempt identity.");
           expected = { threadId: submission.threadId, turnId: submission.interactionId, submittedAt: Date.parse(submission.at), ...(attemptId == null ? {} : { attemptId }) };
+          // READ-001 keeps invoked results discoverable from their source. The
+          // actor must not wait for navigation the user has not chosen.
+          const invoke = /^\/api\/threads\/([1-9]\d*)\/interactions\/([1-9]\d*)\/actions\/[1-9]\d*\/invoke$/.exec(submission.path ?? "");
+          if (invoke) {
+            const source = detail.interactions.find(item => String(item.id) === invoke[2]);
+            if (invoke[1] !== String(submission.threadId) || !source) throw new Error("Invoked source interaction is unavailable.");
+            expected.invokeSource = { turnId: source.id,
+              ...(source.latestAttempt?.id == null ? {} : { attemptId: source.latestAttempt.id }),
+              observedAfter: Date.now() };
+          }
         }
         phase = "observe";
         const observation = await browser.observe(expected);
@@ -204,6 +217,9 @@ export class TaskActorService {
           actionSchema.properties.kind.enum = actionSchema.properties.kind.enum.filter(kind => kind !== "next_step");
         }
         if (judgeInteractionRequired) actionSchema.properties.kind.enum = actionSchema.properties.kind.enum.filter(kind => kind !== "finish");
+        if (Array.isArray(observation.availableActions)) {
+          actionSchema.properties.kind.enum = actionSchema.properties.kind.enum.filter(kind => observation.availableActions.includes(kind));
+        }
         observation.availableActions = [...actionSchema.properties.kind.enum];
         if (completionJudgeFeedback) observation.completionJudgeFeedback = completionJudgeFeedback;
         if (finishRepairPending) observation.previousActionError = "Your previous finish decision was rejected before execution. Reconsider using the visible evidence. endpoint_reached requires endpointStatus reached and empty remainingWork. If work remains, report incomplete or uncertain with satisfied or abandoned. Do not erase unfinished work merely to satisfy the format.";
@@ -278,9 +294,9 @@ export class TaskActorService {
         else {
           try { await browser.act(action, { actionEventId: intent.id, observationEventId: observed.id }); }
           catch (error) {
-            // Only the browser's own checks before click/fill/select certify no
+            // Only the browser's own checks before click/fill/select/scroll certify no
             // dispatch. Playwright failures and product-write errors are ambiguous.
-            if (!["click", "fill", "select"].includes(action.kind) || error.actionDispatched !== false
+            if (!["click", "fill", "select", "scroll"].includes(action.kind) || error.actionDispatched !== false
               || !["actor_control_stale", "actor_control_unavailable"].includes(error.code)) throw error;
             const retryAllowed = !controlRepairPending && actionsUsed < task.actor.maxActions;
             await this.tasks.actorEvent(id, "actor_action_failed", { actionEventId: intent.id, actionDispatched: false,

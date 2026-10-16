@@ -20,7 +20,7 @@ calibration remain separate work.
 | --- | --- | --- |
 | Separate versioned actor configuration and restricted native inference | `task-actor.mjs`, eval-runner `simulated-user/task-actor.ts` | `eval-task-actor.test.mjs`: native configuration, prompt and environment projection |
 | Adapt to current rendered state while preserving admission and budgets | `task-actor-service.mjs` → `HumanTaskService.write` | Actor test: adaptive trajectory, unknown write, action limit; browser: Send and invoke |
-| Wait for the submitted response to render, including same-turn retry attempts | Service submission identity, renderer presentation, browser readiness predicate | Actor tests: stale failed-attempt presentation and actual settled retry identity; browser: latest accepted turn after invoke |
+| Wait for the submitted response to render, including same-turn retry attempts | Service submission identity, renderer presentation, browser readiness predicate | Actor tests: stale failed-attempt and exact retry identity; settled invokes bind the exact source attempt and fresh after-paint capture. Browser: idle source with deduplicated timestamp, visible enabled result link, preserved source, eight actor decisions and three settled completions |
 | No action during product execution; cancellation reaches reads, writes and inference | Service settlement, browser context, gateway abort signal | Actor tests: settlement, queued intent, persisted satisfaction, pending read/write, native deadline and service close |
 | No replay after uncertain submission | Existing durable admission reservation | Actor unknown-write/reopen test and existing human-task tests |
 | Actor satisfaction stays independent of human grades and objective checks | Actor events, human grade, finish, immutable export | Actor test: reopen/export with disagreement and failed objective check; browser: active human grade and completed export |
@@ -579,3 +579,30 @@ diagnostic sink, actor service, diagnostics test and browser proof. The reviewer
 independently verified the real trace viewer and inspected the final browser log;
 full repository gates were root-run. Capture/privacy limits above remain explicit.
 No paid run was launched and no historical outcome was changed.
+
+## Hidden-detail scroll availability (October 16, 2026)
+
+PRD §13.2.3 requires ordinary visible actions and a fresh decision after certified
+non-dispatch. A live actor attempted to hover the closed `#inspectorContent`
+before scrolling; Playwright waited30 seconds. The original cohort remains
+partial (four admitted, twelve never admitted), with its failure preserved.
+A separate clean cohort is required after this repair.
+
+Changed seams and checkpoints:
+
+| Seam / promise | Smallest deterministic evidence |
+|---|---|
+| Settled and working observations offer scrolling only for visible, hit-testable details | Production browser capture plus `observeCurrent`; actual closed/open detail browser journeys, including working Current |
+| Native decision schema agrees with offered actions | Actor service schema-intersection scenario; browser availability intersects existing completion and finish limits |
+| Closed-panel race refuses before hover/wheel | Actual close-after-observation journey checks exact `actionDispatched:false` and unchanged trusted-input counter |
+| Visible-panel scrolling uses ordinary input | Production controller journey observes exactly one trusted wheel with the details panel in its composed path |
+| Certified non-dispatch permits one fresh decision, without replay | Existing bounded-repair table extended to scroll; repeated/final-slot cases remain fatal |
+| Unknown scroll outcome remains terminal | Service ambiguous-scroll scenario alongside existing click ambiguity checks |
+
+No graph-wheel fallback, forced panel opening, model timeout increase or native
+inference policy change is introduced. No tests were deleted. The current-pointer
+fixture now explicitly designates its sole model as orchestrator, as required by
+#715; it does not bypass Product family validation. Required gates remain
+`npm run check`, `npm run build` and `npm run test:eval-web`. Focused fixture
+execution and known failures are recorded separately in the role-guidance ledger.
+Trusted Ladybug reuse was independently verified before the required build.

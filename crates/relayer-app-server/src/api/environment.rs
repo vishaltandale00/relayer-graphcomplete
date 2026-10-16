@@ -127,6 +127,7 @@ mod tests {
         let thread = product
             .create_thread_in_directory(
                 CreateThreadCommand {
+                    required_provider_adapter_id: None,
                     icon_selection_eligible: true,
                     title: None,
                     project_id: Some(project.id),

@@ -1,0 +1,95 @@
+{
+  "main": "d9a26d50b9de1d9cbc61d6620fa49e71e4c7ec2a",
+  "sourceManifest": "latest-main-source-snapshot.json",
+  "sourceDigest": "aacf011fc370244f3b00aa5a498a0b6538014a012badb357d964ef5e8fdb91a2",
+  "logRetention": "Operator-private orchestrator-default-comparison-20261016 directory; hashes bind exact logs, no secret-bearing raw logs published",
+  "entries": [
+    {
+      "command": "all-target Rust type check",
+      "log": "candidate-d9-types.log",
+      "logSha256": "b2dfc87d6d63ab99871ec8f7f43d13cd85680f7b607ec3733164555d292940bc",
+      "exitCode": 0,
+      "result": "app-server all targets and features"
+    },
+    {
+      "command": "npm run build",
+      "log": "candidate-d9-build.log",
+      "logSha256": "525cb2c949e5033feb1daed6727d6e585d3dd8655631b9abbddbc32bfd6651a0",
+      "exitCode": 0,
+      "result": "native servers, distribution and workspace packages"
+    },
+    {
+      "command": "npm run check",
+      "log": "candidate-d9-check.log",
+      "logSha256": "672aa53668f827a4796429f05841c0f31521ccc05a724e3a397d081a768b9d69",
+      "exitCode": 1,
+      "result": "Rust/workspace/crash/build/typecheck passed; Vitest 4383 passed, 1 timed out, 3 skipped; later gates unreached"
+    },
+    {
+      "command": "selected public-viewer depth diagnostic",
+      "log": "public-depth-diagnostic.log",
+      "logSha256": "e15cd639ed69d96a3bc9f829980c2849870a066094e72badfbc5b35a8fbd7106",
+      "exitCode": 0,
+      "result": "1 passed, 137 skipped, 10.99 seconds test time; aggregate remains failed"
+    },
+    {
+      "command": "npm run evidence:share-preview",
+      "log": "candidate-d9-share-preview.log",
+      "logSha256": "62942517c7ea14d888f427b23db5f7ae200d3bef11369c9856781b8dac6ff0a9",
+      "exitCode": 0,
+      "result": "actual Electron capture, cancellation and cleanup"
+    },
+    {
+      "command": "npm run evidence:telemetry",
+      "log": "candidate-d9-telemetry.log",
+      "logSha256": "c39310b82f1af8b461899682d45ea26b73c2b13e4ebafe4e432c3154b1428ccd",
+      "exitCode": 0,
+      "result": "5 Rust tests and 184 portfolio tests passed; local-gateway-privacy-pass-release-indeterminate"
+    },
+    {
+      "command": "npm run test:codex-secret-boundary",
+      "log": "candidate-d9-secret.log",
+      "logSha256": "ac72687b82deeab3d5ead9a930dc47d1aa4814eb159fe5c14a1a094cc394d12a",
+      "exitCode": 0,
+      "result": "2 passed, separately executed short-circuited gate"
+    },
+    {
+      "command": "Python unittest discover",
+      "log": "candidate-d9-python.log",
+      "logSha256": "5be5d4a7593e690977ebd869844228efb673e379dab76fbcc2e7bcc91213184b",
+      "exitCode": 0,
+      "result": "99 passed, separately executed short-circuited gate"
+    },
+    {
+      "command": "npm run lint:ladybug-receipt",
+      "log": "candidate-d9-ladybug.log",
+      "logSha256": "1b529311a19916ae37ad0c7261c097146039939448083be45c049ce58fca625c",
+      "exitCode": 0,
+      "result": "qualification, native and contract receipt lints passed"
+    },
+    {
+      "command": "npm run prd:check-readability",
+      "log": "candidate-d9-prd.log",
+      "logSha256": "bf54c46d3bfe97d64358d7b626bc48534c55954c760d95098fcf6762b10ab321",
+      "exitCode": 0,
+      "result": "passed"
+    },
+    {
+      "command": "npm run test:eval-web",
+      "log": "candidate-d9-eval-web.log",
+      "logSha256": "dacb3881145d578e4a4d4dbe7f553534762824baaa757f4e3d5e27c2cca4792c",
+      "exitCode": 1,
+      "result": "Startup/lifecycle/reopen/read-only, host, production Settings, Human Task, actor dispatch race, native select and redraw action/breadcrumb chapters reported PASS. proveTaskActor observed interrupted instead of completed at line 943; actor_error timeout in observe phase. Later actor-input/current/calibration/judge chapters unreached."
+    }
+  ],
+  "pending": [],
+  "wholePortfolioPass": false,
+  "liveComparisonStarted": false,
+  "unresolved": [
+    "Aggregate public-viewer depth timeout (selected unchanged scenario later passed)",
+    "Browser actor observation timeout; later chapters unproved",
+    "Physical Mac swipe cadence and historical live-model quality findings"
+  ],
+  "comparisonStatus": "not launched: browser actor result unresolved",
+  "telemetryArtifactSha256": "c7b827dfaad2dbb65b7ddc3a86505cbc19a554e0ac7e812fa1413edcc9e206ea"
+}

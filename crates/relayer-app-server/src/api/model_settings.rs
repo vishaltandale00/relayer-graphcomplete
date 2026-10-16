@@ -48,6 +48,8 @@ pub(super) struct UpdateFamilyRequest {
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(super) struct MemberRequest {
+    #[serde(default)]
+    roles: Vec<crate::product::ModelFamilyRole>,
     provider_id: String,
     model_id: String,
 }
@@ -63,7 +65,9 @@ pub(super) struct ReorderFamiliesRequest {
 pub(super) struct ValidateSelectionRequest {
     harness_id: String,
     family_id: i64,
+    #[serde(default = "super::threads::family_selection_placeholder")]
     provider_id: String,
+    #[serde(default)]
     model_id: String,
 }
 
@@ -497,6 +501,7 @@ fn members(requests: Vec<MemberRequest>) -> Result<Vec<ModelFamilyMember>, ApiEr
         .enumerate()
         .map(|(position, member)| {
             Ok(ModelFamilyMember {
+                roles: member.roles,
                 provider_id: ProviderId::parse(member.provider_id)?,
                 model_id: member.model_id,
                 position,

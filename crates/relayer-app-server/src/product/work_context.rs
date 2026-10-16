@@ -325,6 +325,7 @@ mod tests {
     }
     fn command(project_id: ProjectId) -> CreateThreadCommand {
         CreateThreadCommand {
+            required_provider_adapter_id: None,
             icon_selection_eligible: true,
             title: None,
             project_id: Some(project_id),

@@ -27,6 +27,7 @@ import {
   resetNewThreadModelPicker,
 } from "./composer-model-picker.js";
 import {
+  artifactReviewPresentation,
   cancelNavigationHistory,
   connectEvents,
   createFirstThread,
@@ -515,18 +516,24 @@ async function boot() {
   if (evalReview) {
     evalReview.registerPresentationAdapter(createReviewPresentationAdapter({
       executionId: viewState.evalContext.selectedExecutionId,
+      getReviewRoot: () => artifactReviewPresentation()?.root ?? document,
       getPresentationState: () => {
         const threadId = viewState.currentThreadId;
         const thread = appState.threads.find((candidate) => String(candidate.id) === String(threadId));
         const interactionRevision = presentationInteractionRevision(appState.interactions, threadId);
+        const artifact = artifactReviewPresentation();
         return {
           threadId,
           threadRevision: `thread:${threadId}:updated:${thread?.updatedAt ?? "unknown"}`
             + `:input-draft:${appState.inputDraftRevision ?? "none"}:interactions:${interactionRevision}`,
           turnId: viewState.currentInteractionId,
-          layerId: appState.visibleLayer?.layer?.id ?? null,
-          selectedNodeId: viewState.selectedNodeId,
-          navigationPath: viewState.layerPath.map((entry) => ({
+          presentingInteractionNodeId: appState.interactions.find(interaction => (
+            String(interaction.id) === String(viewState.currentInteractionId)
+            && String(interaction.threadId) === String(threadId)
+          ))?.graphNodeId ?? null,
+          layerId: artifact?.layerId ?? appState.visibleLayer?.layer?.id ?? null,
+          selectedNodeId: artifact?.selectedNodeId ?? viewState.selectedNodeId,
+          navigationPath: artifact?.navigationPath ?? viewState.layerPath.map((entry) => ({
             layerId: entry.layerId,
             viaActionId: entry.actionId ?? entry.viaActionId ?? null,
           })),

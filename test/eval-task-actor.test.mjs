@@ -15,10 +15,10 @@ import { createHumanTaskSurface } from "../desktop/eval-main/web-host.mjs";
 const cleanups = [];
 afterEach(async () => { for (const cleanup of cleanups.splice(0).reverse()) await cleanup(); });
 const action = (kind, extra = {}) => ({ kind, ref: "visible", value: "", reason: "", satisfaction: null, comment: "", endpointStatus: "incomplete", remainingWork: "Route undecided", ...extra });
-async function fixture({ decide, observe, observeCurrent, promptVersion, maxActions = 8, busy = false, failWrite = false, navigateOnly = false, retry = false, timeoutMs = 900000, planCount = 1, maxCompletions = 2, controlErrors = [], completionJudge = null, judgeEvaluate = null, voluntaryStop = false } = {}) {
+async function fixture({ decide, observe, observeCurrent, promptVersion, maxActions = 8, availableActions = null, busy = false, failWrite = false, navigateOnly = false, retry = false, invoke = false, timeoutMs = 900000, planCount = 1, maxCompletions = 2, controlErrors = [], completionJudge = null, judgeEvaluate = null, voluntaryStop = false } = {}) {
   const directory = await mkdtemp(join(tmpdir(), "task-actor-test-"));
   cleanups.push(() => rm(directory, { recursive: true, force: true }));
-  const turns = [{ id: 1, completionStatus: busy ? "running" : retry ? "not_started" : "accepted", ...(retry ? { latestAttempt: { id: 91, outcome: "model_failed" } } : {}) }];
+  const turns = [{ id: 1, completionStatus: busy ? "running" : retry ? "not_started" : "accepted", ...(retry ? { latestAttempt: { id: 91, outcome: "model_failed" } } : invoke ? { latestAttempt: { id: 41, outcome: "accepted" } } : {}) }];
   const dispatches = [];
   const behavior = { ...defaultActorSetup().behaviorContract, completionJudge };
   if (!voluntaryStop) { behavior.id = "task-actor-v4"; delete behavior.participantMayStopIncomplete; }
@@ -34,8 +34,9 @@ async function fixture({ decide, observe, observeCurrent, promptVersion, maxActi
         dispatches.push(url.pathname);
         if (url.pathname.endsWith("/live-answers")) { turns[0].completionStatus = "accepted"; return Response.json({ sequence: 1, attemptId: 10, operationKey: "answer-1" }); }
         if (failWrite) throw new Error("Ambiguous response");
+        if (invoke) await new Promise(resolve => setTimeout(resolve, 5));
         if (retry) turns[0] = { id: 1, completionStatus: "accepted", latestAttempt: { id: 92, outcome: "accepted" } };
-        else turns.push({ id: turns.length + 1, completionStatus: "accepted" });
+        else turns.push({ id: turns.length + 1, completionStatus: "accepted", ...(invoke ? { latestAttempt: { id: 42, outcome: "accepted" } } : {}) });
         return Response.json(turns.at(-1));
       }
       if (url.pathname.endsWith("/export")) return new Response("frozen conversation");
@@ -50,8 +51,8 @@ async function fixture({ decide, observe, observeCurrent, promptVersion, maxActi
   let browserSignal;
   const browser = {
     observeCurrent: vi.fn(async (...args) => observeCurrent ? observeCurrent(...args, turns) : null),
-    observe: vi.fn(async () => ({ text: turns.length > 1 ? "A trip plan based on your reply" : "Where do you want to go?", controls: [{ ref: "visible", name: "Send" }] })),
-    act: vi.fn(async (chosen, correlation) => { const controlError = controlErrors.shift(); if (controlError) throw controlError; if (correlation?.current) { if (chosen.kind === "click") await tasks.write(id, "/api/threads/1/interactions/1/live-answers", "POST", { attemptId: 10, operationKey: "answer-1" }, { signal: browserSignal }); return; } if (navigateOnly) return; await tasks.write(id, retry ? "/api/threads/1/interactions/1/retry" : "/api/threads/1/interactions", "POST", { text: "Somewhere warm", ...(retry ? { attemptId: 91 } : {}) }, { signal: browserSignal }); }),
+    observe: vi.fn(async () => ({ text: turns.length > 1 ? "A trip plan based on your reply" : "Where do you want to go?", controls: [{ ref: "visible", name: "Send" }], ...(availableActions ? { availableActions: [...availableActions] } : {}) })),
+    act: vi.fn(async (chosen, correlation) => { const controlError = controlErrors.shift(); if (controlError) throw controlError; if (correlation?.current) { if (chosen.kind === "click") await tasks.write(id, "/api/threads/1/interactions/1/live-answers", "POST", { attemptId: 10, operationKey: "answer-1" }, { signal: browserSignal }); return; } if (navigateOnly) return; await tasks.write(id, retry ? "/api/threads/1/interactions/1/retry" : invoke ? "/api/threads/1/interactions/1/actions/11/invoke" : "/api/threads/1/interactions", "POST", { text: "Somewhere warm", ...(retry ? { attemptId: 91 } : {}) }, { signal: browserSignal }); }),
     nextStep: vi.fn(),
     close: vi.fn(),
   };
@@ -228,6 +229,29 @@ it("supplies the actual settled retry attempt to the browser readiness gate", as
   const stale = { threadId: 1, turnId: 1, attemptId: 91, attemptOutcome: "model_failed", completionStatus: "not_started", observedAt: expected.submittedAt + 100 };
   expect(taskActorPresentationReady({ expected, presentation: stale })).toBe(false);
   expect(taskActorPresentationReady({ expected, presentation: { ...stale, attemptId: 92, attemptOutcome: "accepted", completionStatus: "accepted" } })).toBe(true);
+});
+
+it("observes a settled invoke from its exact source without forcing result navigation", async () => {
+  const f = await fixture({ invoke: true });
+  await f.done;
+  expect(f.tasks.get(f.id)).toMatchObject({ status: "completed", completions: 2 });
+  expect(f.dispatches).toEqual(["/api/threads/1/interactions/1/actions/11/invoke"]);
+  const [expected] = f.browser.observe.mock.calls[1];
+  expect(expected).toMatchObject({ turnId: 2, attemptId: 42, invokeSource: { turnId: 1, attemptId: 41 } });
+  const submission = f.tasks.get(f.id).events.findLast(event => event.kind === "submission");
+  expect(expected.invokeSource.observedAfter).toBeGreaterThan(Date.parse(submission.at) + 1);
+  const source = { threadId: 1, turnId: 1, attemptId: 41, completionStatus: "accepted", observedAt: expected.invokeSource.observedAfter + 1 };
+  const capturedAt = expected.invokeSource.observedAfter + 1;
+  expect(taskActorPresentationReady({ expected, presentation: source, capturedAt })).toBe(true);
+  // Renderer deduplication can retain old timestamps on an unchanged source.
+  expect(taskActorPresentationReady({ expected, presentation: { ...source, observedAt: 0 }, capturedAt })).toBe(true);
+  expect(taskActorPresentationReady({ expected, presentation: source })).toBe(false);
+  expect(taskActorPresentationReady({ expected, presentation: source, capturedAt: expected.invokeSource.observedAfter - 1 })).toBe(false);
+  expect(taskActorPresentationReady({ expected, presentation: { ...source, turnId: 2, attemptId: 42 } })).toBe(true);
+  for (const changed of [{ threadId: 2 }, { turnId: 3 }, { attemptId: 40 }]) {
+    expect(taskActorPresentationReady({ expected, presentation: { ...source, ...changed }, capturedAt })).toBe(false);
+  }
+  expect(JSON.stringify(f.seen.map(item => item.observation))).not.toContain("invokeSource");
 });
 
 it("service close aborts a pending native decision and closes its browser without dispatch", async () => {
@@ -412,11 +436,27 @@ it("preserves a contradictory finish at the last action slot without extending i
 });
 
 
-it.each(["actor_control_unavailable", "actor_control_stale"])("recaptures the workspace after confirmed pre-dispatch %s without replaying the intent", async code => {
+it("intersects the native decision schema with browser-observed action availability", async () => {
+  const offered = ["click", "fill", "select", "finish"];
+  const f = await fixture({ availableActions: offered, decide: (observation, _signal, options) => {
+    expect(observation.availableActions).toEqual(offered);
+    expect(options.outputSchema.properties.kind.enum).toEqual(offered);
+    return action("finish", { reason: "abandoned", satisfaction: 2, comment: "No details are open." });
+  } });
+  await f.done;
+  expect(f.tasks.get(f.id).status).toBe("completed");
+  expect(f.dispatches).toEqual([]);
+});
+
+it.each([
+  { code: "actor_control_unavailable", kind: "click" },
+  { code: "actor_control_stale", kind: "click" },
+  { code: "actor_control_unavailable", kind: "scroll" },
+])("recaptures after confirmed pre-dispatch $kind $code without replaying the intent", async ({ code, kind }) => {
   let decisions = 0;
   const f = await fixture({ controlErrors: [Object.assign(new Error("private browser details"), { code, actionDispatched: false })], decide: observation => {
     decisions++;
-    if (decisions === 1) return action("click", { ref: "expired-runbook" });
+    if (decisions === 1) return action(kind, { ref: "expired-runbook", value: kind === "scroll" ? "down" : "" });
     expect(observation.previousActionError).toContain("not executed");
     expect(observation.previousActionError).not.toContain("private browser details");
     return action("finish", { reason: "abandoned", satisfaction: 2 });
@@ -432,9 +472,14 @@ it.each(["actor_control_unavailable", "actor_control_stale"])("recaptures the wo
   expect(f.dispatches).toEqual([]);
 });
 
-it.each(["repeated", "last-slot", "unconfirmed"])("fails closed on %s control failure without extra decisions or product dispatch", async scenario => {
+it.each([
+  { scenario: "repeated", kind: "click" },
+  { scenario: "last-slot", kind: "click" },
+  { scenario: "unconfirmed", kind: "click" },
+  { scenario: "unconfirmed", kind: "scroll" },
+])("fails closed on $scenario $kind failure without extra decisions or dispatch", async ({ scenario, kind }) => {
   const error = () => Object.assign(new Error("private browser details"), { code: "actor_control_unavailable", ...(scenario === "unconfirmed" ? {} : { actionDispatched: false }) });
-  const f = await fixture({ maxActions: scenario === "last-slot" ? 1 : 8, controlErrors: [error(), error()], decide: () => action("click") });
+  const f = await fixture({ maxActions: scenario === "last-slot" ? 1 : 8, controlErrors: [error(), error()], decide: () => action(kind, { value: kind === "scroll" ? "down" : "" }) });
   await f.done;
   const task = f.tasks.get(f.id);
   expect(task.status).toBe("interrupted");

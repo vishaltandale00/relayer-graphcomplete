@@ -4,6 +4,7 @@ import { join, resolve } from "node:path";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { bindAutonomousCaseSnapshot, createAutonomousCaseSnapshot } from "../packages/eval-runner/src/index.ts";
+import { HumanTaskService } from "../desktop/eval-main/human-task-service.mjs";
 import { EvalService } from "../desktop/eval-main/eval-service.mjs";
 import { createSyntheticExternalCatalog } from "../packages/eval-runner/test/fixtures/external-catalog.ts";
 
@@ -45,7 +46,7 @@ describe("EvalService live external authorization", () => {
   });
 
   it("pins an external human subscription route, dispatches ordinary input, and grades with the external callback", async () => {
-    const route = { selectedModel: { harnessId: "codex-basic", providerId: "codex", modelId: "gpt-5.6-sol" }, productModelSelection: true, providerAdapterId: "codex-subscription" };
+    const route = { selectedModel: { harnessId: "codex-basic", familyId: 7, providerId: "codex", modelId: "gpt-5.6-sol" }, productModelSelection: true, providerAdapterId: "codex-subscription" };
     const { service, product } = await openService({ interactive: true, validateLiveCredential: vi.fn(async () => route) });
     const selection = { testCaseId: externalCaseIds[0], harnessConfigurationName: "codex-basic", sessionId: "human-external", maxCompletions: 3, endpoint: "A verified change", mode: "human" };
     const prepared = await service.prepareHumanTask({ ...selection, liveAuthorization: { ...selection, confirmed: true, billingMode: "subscription-only" } });
@@ -55,6 +56,7 @@ describe("EvalService live external authorization", () => {
     expect(prepared.execution.catalogIdentity.commit).toBe("a".repeat(40));
     expect(prepared.execution.pinnedModelResolution).toEqual(route);
     await service.createHumanTaskThread(prepared, 0);
+    expect(JSON.parse(product.mock.calls.find(([url, options]) => new URL(url).pathname === "/api/threads" && options?.method === "POST")[1].body).requiredProviderAdapterId).toBe("codex-subscription");
     expect(product.mock.calls.some(([url]) => new URL(url).pathname === "/api/threads")).toBe(true);
     expect(JSON.stringify(product.mock.calls)).not.toMatch(/PRIVATE_PARTICIPANT|PRIVATE_REVIEW_CRITERION/);
     const grade = await service.gradeHumanTaskStep(prepared, 0);
@@ -64,8 +66,61 @@ describe("EvalService live external authorization", () => {
     await expect(service.gradeHumanTaskStep(prepared, 0)).rejects.toThrow("catalog drift");
   });
 
+  it.each(["root", "next-step"].flatMap(phase => ["refused", "server", "transport"].map(outcome => [phase, outcome])))("handles atomic consent %s %s through the real Eval service without refunding unknown dispatch", async (phase, outcome) => {
+    const route = { selectedModel: { harnessId: "codex-basic", familyId: 7, providerId: "codex", modelId: "first" }, productModelSelection: true, providerAdapterId: "codex-subscription" };
+    const { service, product, stateFile } = await openService({ interactive: true, validateLiveCredential: vi.fn(async () => route) });
+    const prepare = service.prepareHumanTask.bind(service);
+    service.prepareHumanTask = async selection => {
+      const prepared = await prepare(selection);
+      prepared.plan.push(structuredClone(prepared.plan[0]));
+      return prepared;
+    };
+    let fail = phase === "root";
+    globalThis.fetch = async (url, options = {}) => {
+      if (fail && new URL(url).pathname === "/api/threads" && options.method === "POST") {
+        if (outcome === "transport") throw new Error("Connection lost");
+        return jsonResponse({ code: "execution_provider_not_authorized", error: "API spending is not authorized" }, outcome === "refused" ? 422 : 500);
+      }
+      return product(url, options);
+    };
+    const tasks = await new HumanTaskService({ stateFile: join(stateFile, "..", "human-sessions.json"), productSession: { ...service.productSession, readOnlyCookie: service.productSession.cookie }, evalService: service }).open();
+    const selection = { testCaseId: externalCaseIds[0], harnessConfigurationName: "codex-basic", maxCompletions: 3, endpoint: "A verified change", mode: "human" };
+    selection.liveAuthorization = { ...selection, confirmed: true, billingMode: "subscription-only" };
+    if (phase === "root") await expect(tasks.create(selection)).rejects.toThrow(outcome === "transport" ? "Connection lost" : "API spending is not authorized");
+    else {
+      const started = await tasks.create(selection);
+      fail = true;
+      await expect(tasks.nextStep(started.id)).rejects.toThrow(outcome === "transport" ? "Connection lost" : "API spending is not authorized");
+    }
+    const session = tasks.sessions[0];
+    const initial = phase === "root" ? 0 : 1;
+    expect(session.completions).toBe(initial + (outcome === "refused" ? 0 : 1));
+    if (outcome === "refused") {
+      expect(session.events.at(-1).outcome ?? session.events.findLast(event => event.kind === "submission").outcome).toBe("refused_before_dispatch");
+      expect(session.step).toBe(0);
+      if (phase === "next-step") expect(session.status).toBe("active");
+    } else expect(session.termination.reason).toBe("product_write_unknown");
+  });
+
+  it("revalidates a retained family's subscription consent before each dispatch", async () => {
+    const route = { selectedModel: { harnessId: "codex-basic", familyId: 7, providerId: "codex", modelId: "first" }, productModelSelection: true, providerAdapterId: "codex-subscription" };
+    const validator = vi.fn(async () => structuredClone(route));
+    const { service, product } = await openService({ interactive: true, validateLiveCredential: validator });
+    const selection = { testCaseId: externalCaseIds[0], harnessConfigurationName: "codex-basic", sessionId: "consent", maxCompletions: 3, endpoint: "A verified change", mode: "human" };
+    const prepared = await service.prepareHumanTask({ ...selection, liveAuthorization: { ...selection, confirmed: true, billingMode: "subscription-only" } });
+    route.selectedModel.modelId = "second";
+    await service.createHumanTaskThread(prepared, 0);
+    expect(validator.mock.calls.at(-1)[2]).toEqual({ familyId: 7 });
+    route.providerAdapterId = "openai-api";
+    route.selectedModel.providerId = "api";
+    const calls = product.mock.calls.length;
+    await expect(service.assertHumanTaskExecution(prepared)).rejects.toThrow("API spending is not authorized");
+    await expect(service.createHumanTaskThread(prepared, 0)).rejects.toThrow("API spending is not authorized");
+    expect(product.mock.calls).toHaveLength(calls);
+  });
+
   it.each(["catalog", "credential", "materialize", "thread", "grade"])("cancels external %s work without late product dispatch", async (phase) => {
-    const route = { selectedModel: { providerId: "codex", modelId: "gpt-5.6-sol" }, productModelSelection: true, providerAdapterId: "codex-subscription" };
+    const route = { selectedModel: { familyId: 7, providerId: "codex", modelId: "gpt-5.6-sol" }, productModelSelection: true, providerAdapterId: "codex-subscription" };
     const { service, product } = await openService({ interactive: true, validateLiveCredential: vi.fn(async () => route) });
     const selection = { testCaseId: externalCaseIds[0], harnessConfigurationName: "codex-basic", sessionId: "cancel-external", maxCompletions: 3, endpoint: "A verified change", mode: "human" };
     selection.liveAuthorization = { ...selection, confirmed: true, billingMode: "subscription-only" };
@@ -218,8 +273,6 @@ describe("EvalService live external authorization", () => {
       harnessConfigurationName: "codex-basic",
       modelSelection: {
         familyId: 7,
-        providerId: "codex",
-        modelId: "gpt-6-sol",
       },
     });
   });
@@ -442,7 +495,7 @@ function fakeExternalProduct() {
         { id: "codex-layered-navigation-luna", available: true, modelCompatibility: [], compatibleProviderIds: [] },
       ],
       providers: [{ id: "openai", adapterId: "openai-api", connected: true, models: [{ id: "test-model", visible: true, available: true }] }],
-      families: [{ id: 1, enabled: true, position: 0, members: [{ position: 0, providerId: "openai", modelId: "test-model" }] }],
+      families: [{ id: 1, enabled: true, position: 0, members: [{ position: 0, providerId: "openai", modelId: "test-model", roles: [{ name: "orchestrator" }] }] }],
     });
     if (path === "/api/projects" && options.method === "POST") return jsonResponse({ id: `project-${++projectId}`, path: JSON.parse(options.body).path });
     if (path === "/api/threads" && options.method === "POST") return jsonResponse({ id: "thread-1", rootInteractionId: interaction.id });

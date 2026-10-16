@@ -3,6 +3,7 @@ import {
   defaultFamilyRecoveryError,
   firstAvailableSelection,
   harnessUsesConfigurationModel,
+  normalizePickerSelection,
   requireDefaultModelSelection,
 } from "../renderer/src/model-picker-model.js";
 
@@ -27,11 +28,18 @@ export function createLiveModelRouteResolver({
     throw new TypeError("Live Eval model route resolution requires product model settings.");
   }
 
-  return async function resolveLiveModelRoute(configuration) {
+  return async function resolveLiveModelRoute(configuration, { familyId } = {}) {
     const implementation = configuration?.implementation;
     const harnessName = configuration?.name;
     if (typeof harnessName !== "string" || harnessName.trim() === "") {
       throw new Error("The live Eval harness configuration is invalid.");
+    }
+
+    if (familyId != null) {
+      const settings = await readModelSettings();
+      const selectedModel = normalizePickerSelection(settings, { harnessId: harnessName, familyId });
+      return routeForSelection({ settings, selectedModel, productModelSelection: true,
+        expectedHarnessId: harnessName });
     }
 
     if (implementation === "codex.basic") {
@@ -119,7 +127,7 @@ export function createLiveCredentialValidator({
   createCredentials = (environment) => new CodexCredentialAdapter({ environment }),
   resolveModelRoute,
 } = {}) {
-  return async function validateLiveCredential(configuration, credentialReference) {
+  return async function validateLiveCredential(configuration, credentialReference, selection = {}) {
     if (credentialReference !== CONNECTED_PRODUCT_PROVIDER) {
       throw new Error("The live Eval credential reference is unavailable.");
     }
@@ -134,7 +142,7 @@ export function createLiveCredentialValidator({
       if (typeof resolveModelRoute !== "function") {
         throw new Error("No model-selection route is configured.");
       }
-      route = await resolveModelRoute(configuration);
+      route = await resolveModelRoute(configuration, selection);
     } catch {
       throw new Error("The selected live Eval model route is unavailable.");
     }

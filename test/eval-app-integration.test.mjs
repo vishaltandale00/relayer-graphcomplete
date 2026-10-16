@@ -726,7 +726,7 @@ describe("Relayer Eval application service", () => {
       body: JSON.stringify({
         name: "Fixture models",
         enabled: true,
-        members: [{ providerId: "codex", modelId: "fixture-model" }],
+        members: [{ providerId: "codex", modelId: "fixture-model", roles: [{ name: "orchestrator" }] }],
       }),
     });
     // Lantern's fixture awaits child.result before returning its final root.
@@ -919,7 +919,7 @@ describe("Relayer Eval application service", () => {
       body: JSON.stringify({
         name: "Fixture models",
         enabled: true,
-        members: [{ providerId: "codex", modelId: "fixture-model" }],
+        members: [{ providerId: "codex", modelId: "fixture-model", roles: [{ name: "orchestrator" }] }],
       }),
     });
     const evalService = await new EvalService({

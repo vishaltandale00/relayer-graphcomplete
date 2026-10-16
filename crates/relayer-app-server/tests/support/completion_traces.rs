@@ -59,6 +59,7 @@ fn sign_admission(body: &Value) -> Value {
         serde_json::from_value(body["modelPlan"].clone()).unwrap();
     let admit =
         |route: &crate::product::ExecutionModelRoute| crate::product::AdmittedExecutionModelRoute {
+            roles: route.roles.clone(),
             provider_id: route.provider_id.clone(),
             adapter_id: route.adapter_id.clone(),
             access_contract: route.access_contract.clone(),
@@ -66,6 +67,7 @@ fn sign_admission(body: &Value) -> Value {
             adapter_implementation_version: "1".into(),
         };
     let mut admitted = crate::product::AdmittedExecutionModelPlan {
+        schema_version: plan.schema_version,
         family_id: plan.family_id,
         family_revision: plan.family_revision,
         orchestrator: admit(&plan.orchestrator),
@@ -333,6 +335,7 @@ impl World {
         let product = ProductService::new(SqliteProductStore::open(&database).await.unwrap(), true);
         let thread = product
             .create_thread(CreateThreadCommand {
+                required_provider_adapter_id: None,
                 icon_selection_eligible: true,
                 title: None,
                 project_id: None,
@@ -607,7 +610,7 @@ impl World {
                 "INSERT INTO provider_models(provider_id,model_id,label,provider_order,visible,available,provider_default,metadata_json) VALUES ('codex','test-model','Test model',0,1,1,1,'{}')",
                 "UPDATE product_harnesses SET available=1,unavailable_reason_code=NULL,unavailable_reason_message=NULL WHERE configuration_name='codex-basic'",
                 "INSERT INTO model_families(id,name,kind,system_key,enabled,position) VALUES (1,'Codex','system','codex',1,0)",
-                "INSERT INTO model_family_members(family_id,position,provider_id,model_id) VALUES (1,0,'codex','test-model')",
+                "INSERT INTO model_family_members(family_id,position,provider_id,model_id,roles_json) VALUES (1,0,'codex','test-model',json_array(json_object('name','orchestrator')))",
             ] {
                 sqlx::query(statement).execute(&pool).await.unwrap();
             }
@@ -2838,79 +2841,131 @@ async fn a_running_child_does_not_hold_the_next_human_turn_and_product_stop_refu
 /// own product row: the request is recorded there, and the product's decision resumes it.
 #[tokio::test]
 async fn a_childs_approval_is_recorded_on_its_own_row_and_its_decision_resumes_it() {
-    let world = World::new("child-approval", false).await;
-    let (broker, _lease) = world.broker();
-    *world.harness.start.lock().unwrap() = "ok";
-    *world.harness.approval.lock().unwrap() =
-        Some((world.thread.id.value(), world.child.id.value()));
-    let (status, _) = world
-        .launch(&broker)
-        .await
-        .unwrap_or_else(|error| panic!("launch: {}", error.message()));
-    assert_eq!(status, StatusCode::CREATED);
+    for selected in [false, true] {
+        let world = World::new("child-approval", selected).await;
+        let (broker, _lease) = world.broker();
+        *world.harness.start.lock().unwrap() = "ok";
+        *world.harness.approval.lock().unwrap() =
+            Some((world.thread.id.value(), world.child.id.value()));
+        let (status, _) = world
+            .launch(&broker)
+            .await
+            .unwrap_or_else(|error| panic!("launch: {}", error.message()));
+        assert_eq!(status, StatusCode::CREATED);
 
-    let deadline = Instant::now() + Duration::from_secs(5);
-    while world.child_row().await.completion_status != "waiting_for_approval" {
-        assert!(
-            Instant::now() < deadline,
-            "the child's approval was never recorded"
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while world.child_row().await.completion_status != "waiting_for_approval" {
+            assert!(
+                Instant::now() < deadline,
+                "the child's approval was never recorded"
+            );
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        let stored = world.product.get_approval("request-child").await.unwrap();
+        assert_eq!(
+            stored.request.correlation.interaction_id,
+            world.child.id.value()
         );
-        tokio::time::sleep(Duration::from_millis(20)).await;
-    }
-    let stored = world.product.get_approval("request-child").await.unwrap();
-    assert_eq!(
-        stored.request.correlation.interaction_id,
-        world.child.id.value()
-    );
-    assert!(stored.resolution.is_none());
-    let thread_activity = world
-        .product
-        .get_thread(world.thread.id)
+        assert!(stored.resolution.is_none());
+        let thread_activity = world
+            .product
+            .get_thread(world.thread.id)
+            .await
+            .unwrap()
+            .thread
+            .activity;
+        assert_eq!(thread_activity.as_deref(), Some("needs_approval"));
+
+        let mut control = HeaderMap::new();
+        control.insert(
+            header::COOKIE,
+            format!("{}=control", crate::api::CONTROL_COOKIE)
+                .parse()
+                .unwrap(),
+        );
+        let Json(decided) = decide_approval(
+            State(world.state.clone()),
+            control,
+            Path((
+                world.thread.id.value(),
+                world.child.id.value(),
+                "request-child".to_owned(),
+            )),
+            Json(crate::approval::ApprovalDecisionSubmission {
+                decision: crate::approval::ApprovalDecision::ApproveOnce,
+                rationale: None,
+            }),
+        )
+        .await
+        .unwrap_or_else(|error| panic!("decision: {}", error.message()));
+        assert!(decided.approval.resolution.is_some());
+        assert_eq!(world.child_row().await.completion_status, "running");
+
+        let admitted_before: Option<String> = sqlx::query_scalar(
+            "SELECT admitted_plan_json FROM interaction_attempts WHERE interaction_id=?1 ORDER BY id DESC LIMIT 1",
+        )
+        .bind(world.child.id.value())
+        .fetch_optional(&world.pool)
         .await
         .unwrap()
-        .thread
-        .activity;
-    assert_eq!(thread_activity.as_deref(), Some("needs_approval"));
+        .flatten();
+        if selected {
+            let plan: crate::product::AdmittedExecutionModelPlan = serde_json::from_str(
+                admitted_before
+                    .as_deref()
+                    .expect("selected child admission"),
+            )
+            .unwrap();
+            assert_eq!(plan.schema_version, 2);
+            assert_eq!(plan.orchestrator.adapter_id, "codex-subscription");
+            assert!(
+                plan.orchestrator
+                    .roles
+                    .as_ref()
+                    .unwrap()
+                    .iter()
+                    .any(|role| role.name == "orchestrator")
+            );
+            assert_eq!(world.observe().await["lease"], "held");
+        } else {
+            assert!(admitted_before.is_none());
+        }
 
-    let mut control = HeaderMap::new();
-    control.insert(
-        header::COOKIE,
-        format!("{}=control", crate::api::CONTROL_COOKIE)
-            .parse()
-            .unwrap(),
-    );
-    let Json(decided) = decide_approval(
-        State(world.state.clone()),
-        control,
-        Path((
-            world.thread.id.value(),
-            world.child.id.value(),
-            "request-child".to_owned(),
-        )),
-        Json(crate::approval::ApprovalDecisionSubmission {
-            decision: crate::approval::ApprovalDecision::ApproveOnce,
-            rationale: None,
-        }),
-    )
-    .await
-    .unwrap_or_else(|error| panic!("decision: {}", error.message()));
-    assert!(decided.approval.resolution.is_some());
-    assert_eq!(world.child_row().await.completion_status, "running");
-
-    // The same child goes on and settles on its own current.
-    let mut world = world;
-    world
-        .apply(&[serde_json::json!("ChildReturn")], false)
-        .await;
-    let state = world.await_state(|state| state["phase"] == "settled").await;
-    assert_eq!(state["status"], "accepted", "{state}");
-    assert!(world.harness.approval_decided.load(Ordering::SeqCst));
-    assert_ne!(
-        *world.harness.prov.lock().unwrap(),
-        "cancelled",
-        "the approval observer never ends the child"
-    );
-    world.finish().await;
+        // The same child goes on and settles on its own current.
+        let mut world = world;
+        world
+            .apply(&[serde_json::json!("ChildReturn")], false)
+            .await;
+        let state = world.await_state(|state| state["phase"] == "settled").await;
+        assert_eq!(state["status"], "accepted", "{state}");
+        assert!(world.harness.approval_decided.load(Ordering::SeqCst));
+        assert_ne!(
+            *world.harness.prov.lock().unwrap(),
+            "cancelled",
+            "the approval observer never ends the child"
+        );
+        if selected {
+            let after = world.observe().await;
+            assert_eq!(after["attempt"], "running");
+            assert_eq!(
+                after["lease"], "held",
+                "graph Return cannot release a live provider lease"
+            );
+            let admitted_after: String = sqlx::query_scalar(
+                "SELECT admitted_plan_json FROM interaction_attempts WHERE interaction_id=?1 ORDER BY id DESC LIMIT 1",
+            )
+            .bind(world.child.id.value())
+            .fetch_one(&world.pool)
+            .await
+            .unwrap();
+            assert_eq!(
+                Some(admitted_after),
+                admitted_before,
+                "approval never changes the admitted family"
+            );
+        }
+        world.finish().await;
+    }
 }
 
 /// A decision whose harness answer is lost may still have resolved the request. It stays the
@@ -3806,6 +3861,7 @@ async fn v4_import_reexport_preserves_standalone_bound_input_image_without_layer
     let thread = world
         .product
         .create_thread(CreateThreadCommand {
+            required_provider_adapter_id: None,
             icon_selection_eligible: true,
             title: None,
             project_id: None,
@@ -4376,6 +4432,7 @@ async fn portable_builder_isolates_shared_node_calls_and_preserves_selected_laye
         let thread = world
             .product
             .create_thread(CreateThreadCommand {
+                required_provider_adapter_id: None,
                 icon_selection_eligible: true,
                 title: None,
                 project_id: Some(project.id),
@@ -7995,6 +8052,7 @@ async fn local_call_occupancy_is_private_and_isolated_across_unrelated_roots() {
             world
                 .product
                 .create_thread(CreateThreadCommand {
+                    required_provider_adapter_id: None,
                     icon_selection_eligible: true,
                     title: None,
                     project_id: Some(project.id),
@@ -8237,6 +8295,7 @@ async fn native_invocation_argument_bound_preserves_exportable_calls_and_uncalle
     let thread = world
         .product
         .create_thread(CreateThreadCommand {
+            required_provider_adapter_id: None,
             icon_selection_eligible: true,
             title: None,
             project_id: None,
@@ -9317,4 +9376,81 @@ async fn delivered_input_cannot_be_committed_or_selected_by_ordinary_send() {
         }
         world.finish().await;
     }
+}
+
+#[tokio::test]
+async fn changed_orchestrator_refuses_stale_preparation_before_admission() {
+    use crate::product::{
+        InteractionExecutionService, ModelFamilyMember, ModelFamilyRole, UpdateModelFamilyCommand,
+    };
+    let world = World::new("changed-prepared-route", true).await;
+    // Fixture a user-editable family around the real, already bound preparation.
+    // Membership, selection and prepared identity remain exactly as prepared.
+    sqlx::query("UPDATE model_families SET kind='custom',system_key=NULL WHERE id=1")
+        .execute(&world.pool)
+        .await
+        .unwrap();
+    sqlx::query("INSERT INTO provider_models(provider_id,model_id,label,provider_order,visible,available,provider_default,metadata_json) VALUES ('codex','replacement-model','Replacement',1,1,1,0,'{}')").execute(&world.pool).await.unwrap();
+    let selection = world.child.model_selection.as_ref().unwrap();
+    world
+        .product
+        .update_model_family(UpdateModelFamilyCommand {
+            id: selection.family_id,
+            name: None,
+            enabled: true,
+            members: Some(vec![ModelFamilyMember {
+                provider_id: selection.provider_id.clone(),
+                model_id: "replacement-model".into(),
+                roles: vec![ModelFamilyRole::orchestrator()],
+                position: 0,
+            }]),
+        })
+        .await
+        .unwrap();
+    let service = InteractionExecutionService::new(
+        world.product.clone(),
+        world.runtime.clone(),
+        world.state.permission_catalog.clone(),
+        world.state.standalone_workspaces_directory.clone(),
+        world.state.approval_decisions.clone(),
+        None,
+        world.state.completion_brokers.clone(),
+    );
+    service
+        .execute_prepared_interaction(
+            world.thread.clone(),
+            world.child.clone(),
+            world.seeded.clone(),
+        )
+        .await;
+    assert_eq!(
+        *world.harness.admitted_policy_revision.lock().unwrap(),
+        None
+    );
+    assert!(world.harness.granted.lock().unwrap().is_empty());
+    assert!(!world.harness.session_requested.load(Ordering::SeqCst));
+    assert_eq!(*world.harness.prov.lock().unwrap(), "none");
+    let unsent = world.product.get_interaction(world.child.id).await.unwrap();
+    assert_eq!(unsent.completion_status, "not_started");
+    assert!(unsent.graph_node_id.is_none());
+    let attempt = unsent.latest_attempt.as_ref().unwrap();
+    assert_eq!(attempt.outcome, "model_failed");
+    assert_eq!(attempt.effect_boundary, "none");
+    assert_eq!(attempt.provider_id.as_str(), "codex");
+    assert_eq!(attempt.model_id, "replacement-model");
+    assert_eq!(attempt.adapter_id, "codex-subscription");
+    assert_eq!(attempt.access_contract, "managed-runtime@1");
+    assert!(attempt.admitted_plan.is_none());
+    let (_, current_route) = world
+        .product
+        .resolve_execution_model_plan(HARNESS, unsent.model_selection.as_ref().unwrap())
+        .await
+        .unwrap();
+    let next = prepare_and_claim_interaction(&world.state, &world.thread, &unsent, false, true)
+        .await
+        .unwrap_or_else(|error| panic!("prepare: {}", error.internal_diagnostic()))
+        .unwrap();
+    assert!(next.matches_model_selection(Some(&current_route)));
+    world.runtime.discard_prepared(next).await.unwrap();
+    world.finish().await;
 }
