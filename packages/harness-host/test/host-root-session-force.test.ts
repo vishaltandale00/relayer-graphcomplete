@@ -7,9 +7,8 @@ import type { CodexAppServerTurnOptions } from "../src/implementations/codex-app
 import { CodexBasicHarness } from "../src/implementations/codex-basic.js";
 import type { HarnessConfiguration, HarnessSessionState } from "../src/types.js";
 
-// PRD, Provider execution access: "A root turn force-stopped while its native conversation
-// ran is not resumed. The next root turn starts a fresh one." These cases cover the two ways
-// the host ends such a turn: quitting the app (force close), and the per-turn force-stop.
+// Every root run starts a fresh native session and never resumes one (#719), so a root turn the
+// host force-closes leaves nothing behind for the next root run to continue.
 
 const codexConfiguration: HarnessConfiguration = {
   schemaVersion: 1,
@@ -22,7 +21,7 @@ const codexConfiguration: HarnessConfiguration = {
 const node = (id: number) => ({ id, kind: "user-interaction", icon: "user", title: "Q", detail: "Q", state: "accepted" });
 const graph = (nodeId: number) => ({ url: "http://127.0.0.1:43123", token: `token-${nodeId}`, nodeId });
 
-describe("root session state when the host force-stops a root turn", () => {
+describe("root runs when the host force-closes", () => {
   let directory: string | undefined;
   afterEach(async () => {
     vi.useRealTimers();
@@ -31,10 +30,10 @@ describe("root session state when the host force-stops a root turn", () => {
     directory = undefined;
   });
 
-  it("does not resume, after a restart, the Codex root thread a force close killed", async () => {
+  it("kills an in-flight Codex root turn on force close, and the restarted host's next root run starts fresh", async () => {
     directory = await mkdtemp(join(tmpdir(), "relayer-force-close-root-"));
     const accepted = stubGraph();
-    const submissions: { nodeId: string; savedThreadId: string | undefined }[] = [];
+    const submissions: CodexAppServerTurnOptions[] = [];
     const makeHost = () => new HarnessHost({
       stateFile: join(directory!, "sessions.json"),
       controlToken: "control",
@@ -42,13 +41,10 @@ describe("root session state when the host force-stops a root turn", () => {
         codexPathOverride: "/managed/codex",
         runAppServerTurn: async (options: CodexAppServerTurnOptions) => {
           const nodeId = options.environment.RELAYER_NODE_ID!;
-          submissions.push({ nodeId, savedThreadId: options.savedThreadId });
-          const threadId = options.savedThreadId ?? `thread-${nodeId}`;
-          await options.onThreadId(threadId);
-          options.onTurnStarting?.(threadId);
+          submissions.push(options);
+          const threadId = `thread-${nodeId}`;
           await options.onTurnId?.(threadId, `turn-${nodeId}`);
-          // Quitting kills this turn's app-server mid-write. Its settlement never reaches the
-          // host before the process exits, so only the force close itself can record anything.
+          // Quitting kills this turn's app-server. Its settlement never reaches the host.
           if (nodeId === "2") return new Promise<never>(() => {});
           accepted.add(Number(nodeId));
           return { threadId, turnId: `turn-${nodeId}`, status: "completed" };
@@ -61,11 +57,12 @@ describe("root session state when the host force-stops a root turn", () => {
     await first.initialize();
     await first.createSession(descriptor);
     await first.complete(1, 1, graph(1));
-    expect(await persistedState()).toMatchObject({ codexThreadId: "thread-1" });
+    expect(await persistedState()).toEqual({});
     void first.complete(1, 2, graph(2)).catch(() => undefined);
     await vi.waitFor(() => expect(submissions).toHaveLength(2));
     await first.forceClose();
-    expect(await persistedState()).toEqual({ codexRootResetReason: "force_stopped" });
+    expect(submissions[1]?.forceSignal?.aborted).toBe(true);
+    expect(await persistedState()).toEqual({});
 
     const second = makeHost();
     await second.initialize();
@@ -73,49 +70,8 @@ describe("root session state when the host force-stops a root turn", () => {
     await second.complete(1, 3, graph(3));
     await second.close();
 
-    expect(submissions.map(({ savedThreadId }) => savedThreadId)).toEqual([undefined, "thread-1", undefined]);
-  });
-
-  it("records a force-stopped root turn's forgotten session before its host run ends", async () => {
-    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
-    directory = await mkdtemp(join(tmpdir(), "relayer-force-stop-root-"));
-    stubGraph();
-    let rootSession: string | undefined = "root-session";
-    let running = false;
-    const host = new HarnessHost({
-      stateFile: join(directory, "sessions.json"),
-      controlToken: "control",
-      implementations: { test: () => ({
-        supportsForceStop: true,
-        complete(context) {
-          running = true;
-          // The forced root conversation is forgotten at once, as Codex and Prime do. The
-          // native turn itself never settles: the host gives up on it after ten seconds.
-          context.forceSignal?.addEventListener("abort", () => { rootSession = undefined; }, { once: true });
-          return new Promise<void>(() => {});
-        },
-        state: (): HarnessSessionState => (rootSession === undefined ? {} : { rootSession }),
-      }) },
-    });
-    await host.initialize();
-    await host.createSession({
-      threadId: 1, permissionProfileId: "auto", workingDirectory: directory,
-      configuration: { schemaVersion: 1, name: "test", implementation: "test", implementationVersion: 1, permissionBindings: { auto: {} }, settings: {} },
-    });
-    const cancel = new AbortController();
-    const turn = host.complete(1, 1, graph(1), cancel.signal).then(() => undefined, () => undefined);
-    await until(() => running);
-    expect(await persistedState()).toEqual({ rootSession: "root-session" });
-
-    cancel.abort(new Error("Stopped by user"));
-    await vi.advanceTimersByTimeAsync(CANCELLED_TURN_FORCE_STOP_MS);
-    // A crash from here on, before the host run ends, must not restore the forced session.
-    await until(async () => JSON.stringify(await persistedState()) === "{}");
+    expect(submissions.map((options) => "savedThreadId" in options)).toEqual([false, false, false]);
     expect(await persistedState()).toEqual({});
-
-    await vi.advanceTimersByTimeAsync(10_000);
-    await turn;
-    await host.close();
   });
 
   it("still force-closes, and records the other threads, when one harness cannot report its state", async () => {

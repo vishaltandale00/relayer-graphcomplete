@@ -24,8 +24,8 @@ import {
 } from "./model.js";
 import { createLucideIcon, createRelayerIcon as createSymbolIcon, relayerIconFamily, renderThreadTitle } from "./icons.js";
 import { createImageIcon, imageIconReference } from "./image-icons.js";
-import { NODE_RUN_STATE, nodeActiveRuns, nodeRunState, THREAD_ACTIVITY, threadActivity,
-  withoutPreparationsAwaitingRetry,
+import { interactionRunControl, NODE_RUN_STATE, nodeActiveRuns, nodeRunState, THREAD_ACTIVITY, threadActiveRuns,
+  threadActivity, withoutPreparationsAwaitingRetry,
 } from "./run-state.js";
 import { graphLayoutSignature, nodesInReadingOrder, projectLayerNodePositions } from "./graph-layout.js";
 import { graphEdgePath, graphFollowWaypoints, graphLayerCircle, graphRoutedEdgePath, resolveEdgeShape } from "./edge-shapes.js";
@@ -444,12 +444,6 @@ export function graphTurnNavigationDelta(event, graphFocused) {
 
 export { humanTurns, messageTurns, workspaceTurns } from "./model.js";
 
-/** The composer's Stop: the active message turn. Each invoked run has its own Stop on its node. */
-export function productStopTarget(state, thread) {
-  // A message turn waiting for capacity (#720) is the thread's turn too; its Stop removes it.
-  return messageTurns(state, thread).findLast((turn) => ["queued", "submitted", "running", "waiting_for_approval"].includes(turn.completionStatus)) || null;
-}
-
 /**
  * The status a run shows. A queued run waits behind a run on its node (#718), shown as
  * `queued`, or for a free slot under the app's limit on human-started runs (#720), shown as
@@ -722,16 +716,6 @@ export async function continueDraftOverrideAfterPersistence({
 
 export function sendAttemptBlocksThread(pendingThreadId, currentThreadId) {
   return pendingThreadId != null && String(pendingThreadId) === String(currentThreadId);
-}
-
-export function threadHasInFlightSend(inFlightThreadIds, threadId) {
-  return inFlightThreadIds.has(String(threadId));
-}
-
-export function releaseInFlightSend(inFlightSends, attempt) {
-  if (!attempt || inFlightSends.get(String(attempt.threadId)) !== attempt) return false;
-  inFlightSends.delete(String(attempt.threadId));
-  return true;
 }
 
 export function confirmationSendReplayIntent({
@@ -1363,17 +1347,16 @@ export function clearSubmittedComposerDraft(
   return { activeScopeKey: state.activeScopeKey, drafts };
 }
 
-export function contextStagingDisabledFor(
-  status,
-  canCompose = true,
-  requestDisabled = false,
-  restoredDraft = false,
-) {
-  return requestDisabled || composerDisabledForState(status, canCompose, restoredDraft);
+export function contextStagingDisabledFor(canCompose = true, requestDisabled = false) {
+  return requestDisabled || composerDisabledForState(canCompose);
 }
 
-export function composerDisabledForState(status, canCompose = true, restoredDraft = false) {
-  return !canCompose || (PENDING_COMPLETION_STATUSES.has(status) && !restoredDraft);
+/**
+ * The message box never locks while runs are active (#719): thread messages run in parallel, so
+ * only a workspace that cannot compose at all disables it.
+ */
+export function composerDisabledForState(canCompose = true) {
+  return !canCompose;
 }
 
 export function applyComposerCapabilities({ composer, prompt, send, readOnlyMessage }, canCompose) {
@@ -1381,10 +1364,6 @@ export function applyComposerCapabilities({ composer, prompt, send, readOnlyMess
   prompt.classList.toggle("hidden", !canCompose);
   send.classList.toggle("hidden", !canCompose);
   readOnlyMessage.classList.toggle("hidden", canCompose);
-}
-
-export function composerStatusForThread(state, thread) {
-  return messageTurns(state, thread).at(-1)?.completionStatus || state.status || "idle";
 }
 
 /** The latest message turn, which the composer follows up, retries, and inherits a model from. */
@@ -2200,7 +2179,77 @@ export function createProductWorkspace({
   const settingsMenu = $("#conversationSettingsMenu");
   const exportButton = $("#exportConversation");
   const archiveButton = $("#archiveConversation");
+  const stopAllButton = $("#stopAllRuns");
+  const stopAllAndArchiveButton = $("#stopAllAndArchive");
   const archiveAvailable = mode === "interactive" && typeof onArchiveThread === "function";
+  // Thread messages, node runs and invokes run in parallel (#719), so the thread menu can stop
+  // them all at once (#721): it stops every running run and removes every queued one.
+  const stopAllAvailable = () => mode === "interactive" && getThread()?.imported !== true
+    && getState().capabilities?.stopRuns === true && typeof onStopInteraction === "function";
+  const runsToStop = (thread = getThread()) => thread
+    ? threadActiveRuns(humanTurns(getState(), thread), getState().actionInvocations || [])
+    : [];
+  const archivingAfterStop = new Set();
+  const stopAllRuns = async (thread) => {
+    const runs = runsToStop(thread).filter((run) => !pendingStops.has(run.id) && !(run.stopRequested && !run.stopError));
+    for (const run of runs) { pendingStops.add(run.id); stopErrors.delete(run.id); }
+    syncComposer();
+    const outcomes = await Promise.allSettled(runs.map((run) => onStopInteraction(thread.id, run.id)));
+    if (disposed) return false;
+    let failed = 0;
+    outcomes.forEach((outcome, index) => {
+      const run = runs[index];
+      pendingStops.delete(run.id);
+      if (outcome.status === "rejected") {
+        failed += 1;
+        stopErrors.set(run.id, outcome.reason?.message || "Stop could not be confirmed. Try again.");
+      }
+    });
+    syncComposer();
+    if (failed) toast(`${failed} of ${runs.length} runs could not be stopped. Try again.`);
+    return failed === 0;
+  };
+  // Archive refuses a thread with active work (ARC-002). "Stop all and archive" stops every run,
+  // then archives as soon as the app server reports none active.
+  const ARCHIVE_AFTER_STOP_DEADLINE_MS = 150_000;
+  const stopAllAndArchive = async (thread) => {
+    if (archivingAfterStop.has(String(thread.id))) return;
+    archivingAfterStop.add(String(thread.id));
+    renderExportControl();
+    try {
+      if (!await stopAllRuns(thread)) return;
+      const deadline = Date.now() + ARCHIVE_AFTER_STOP_DEADLINE_MS;
+      for (;;) {
+        try {
+          await onArchiveThread(thread.id, true);
+          return;
+        } catch (error) {
+          if (error?.code !== "thread_archive_busy" || Date.now() >= deadline || disposed) {
+            toast(error?.code === "thread_archive_busy"
+              ? "Runs are still stopping. Archive the chat once they finish."
+              : error.message);
+            return;
+          }
+        }
+        await new Promise((resolveWait) => setTimeout(resolveWait, 500));
+      }
+    } finally {
+      archivingAfterStop.delete(String(thread.id));
+      renderExportControl();
+    }
+  };
+  stopAllButton.onclick = () => {
+    const thread = getThread();
+    if (!thread || stopAllButton.disabled) return;
+    closeSettingsMenu();
+    void stopAllRuns(thread);
+  };
+  stopAllAndArchiveButton.onclick = () => {
+    const thread = getThread();
+    if (!thread || stopAllAndArchiveButton.disabled) return;
+    closeSettingsMenu();
+    void stopAllAndArchive(thread);
+  };
   archiveButton.onclick = async () => {
     const thread = getThread();
     if (!thread || archiveButton.disabled) return;
@@ -2237,17 +2286,26 @@ export function createProductWorkspace({
     archiveButton.textContent = thread?.archivedAt ? "Unarchive" : "Archive";
     archiveButton.disabled = !thread || (!thread.archivedAt && (thread.archiveBlocked || ["running", "stopping", "needs_approval"].includes(thread.activity)));
     archiveButton.title = archiveButton.disabled ? "Available when work finishes." : "";
+    const stoppable = stopAllAvailable() && !thread?.archivedAt ? runsToStop(thread).length : 0;
+    const archiving = thread != null && archivingAfterStop.has(String(thread.id));
+    stopAllButton.classList.toggle("hidden", stoppable === 0);
+    stopAllButton.textContent = `Stop all runs (${stoppable})`;
+    stopAllButton.disabled = archiving;
+    // The archive block offers to stop everything first (ARC-002).
+    stopAllAndArchiveButton.classList.toggle("hidden", !archiveAvailable || (stoppable === 0 && !archiving));
+    stopAllAndArchiveButton.textContent = archiving ? "Archiving once runs stop…" : "Stop all and archive";
+    stopAllAndArchiveButton.disabled = archiving;
     $("#threadArchivedLabel").classList.toggle("hidden", !thread?.archivedAt);
     const available = capabilities.canExportConversation
       && typeof onExportConversation === "function";
-    settingsControl.classList.toggle("hidden", !available && !shareAvailable && !archiveAvailable);
+    settingsControl.classList.toggle("hidden", !available && !shareAvailable && !archiveAvailable && stoppable === 0);
     exportButton.classList.toggle("hidden", !available);
     exportButton.disabled = !available || exportPending || thread?.id == null;
-    settingsButton.disabled = (!available && !shareAvailable && !archiveAvailable) || exportPending;
+    settingsButton.disabled = (!available && !shareAvailable && !archiveAvailable && stoppable === 0) || exportPending;
     settingsButton.setAttribute("aria-busy", String(exportPending));
     exportButton.setAttribute("aria-busy", String(exportPending));
     exportButton.textContent = exportPending ? "Exporting…" : "Export conversation…";
-    if (!available && !shareAvailable && !archiveAvailable) closeSettingsMenu();
+    if (!available && !shareAvailable && !archiveAvailable && stoppable === 0) closeSettingsMenu();
   };
   settingsButton.onclick = () => {
     if (settingsMenuOpen) closeSettingsMenu();
@@ -2977,16 +3035,19 @@ export function createProductWorkspace({
   const send = $("#sendInteraction");
   const pendingStops = new Set();
   const stopErrors = new Map();
-  const activeRun = () => {
-    const thread = getThread();
-    if (mode !== "interactive" || thread?.imported === true || getState().capabilities?.stopRuns !== true) return null;
-    return productStopTarget(getState(), thread);
-  };
+  // Runs are stopped on their own interaction nodes, never from the composer (#719).
+  const stopsAvailable = () => mode === "interactive" && getThread()?.imported !== true
+    && getState().capabilities?.stopRuns === true;
   const contextDraftSendWarning = $("#contextDraftSendWarning");
   const cancelContextDraftSend = $("#cancelContextDraftSend");
   const confirmContextDraftSend = $("#confirmContextDraftSend");
   let sendAttempt = null;
-  const inFlightSendThreads = new Map();
+  // thread -> the sends whose POST is in flight. The message box never locks while runs are
+  // active (#719); a Send clicked meanwhile waits for these to settle, then reads the composer,
+  // so it never sends the same text or context confirmations twice. Node inputs a send carries
+  // stay locked while it posts, so no commit races its reservation.
+  const postingSends = new Map();
+  const postingSendsFor = (threadId) => postingSends.get(String(threadId)) ?? new Set();
   // thread -> the scope and prompt revision of its submission in flight,
   // from the click on Send.
   const inFlightSubmissions = new Map();
@@ -3055,22 +3116,14 @@ export function createProductWorkspace({
   const contextForTarget = (target) => composerContextState.value.find((context) => (
     interactionContextTargetKey(context.target) === interactionContextTargetKey(target)
   ));
-  const contextStagingDisabled = () => {
-    const status = composerStatusForThread(getState(), getThread());
-    return sendAttemptBlocksThread(sendAttempt?.threadId, getThread()?.id)
-      || threadHasInFlightSend(inFlightSendThreads, getThread()?.id)
-      || contextStagingDisabledFor(
-        status,
-        capabilities.canCompose,
-        prompt.disabled,
-        restoredDraftActive,
-      );
-  };
+  const contextStagingDisabled = () => sendAttemptBlocksThread(sendAttempt?.threadId, getThread()?.id)
+    || postingSendsFor(getThread()?.id).size > 0
+    || contextStagingDisabledFor(capabilities.canCompose, prompt.disabled);
   // An accepted node can be annotated while its completion continues. Only
   // the Send request itself freezes annotations into an immutable input.
   const annotationStagingDisabled = () => !capabilities.canCompose
     || sendAttemptBlocksThread(sendAttempt?.threadId, getThread()?.id)
-    || threadHasInFlightSend(inFlightSendThreads, getThread()?.id);
+    || postingSendsFor(getThread()?.id).size > 0;
   const closeDurableEditor = (ownerThreadId, draftId) => {
     if (contextEditor?.durable
       && contextEditor.ownerThreadId === String(ownerThreadId)
@@ -3809,8 +3862,46 @@ export function createProductWorkspace({
       if (bar.children[index] !== row) bar.insertBefore(row, bar.children[index] ?? null);
     });
   };
+  // Each run, including one sent from the message box, shows its status and Stop on its own
+  // interaction node (#719): the prompt card offers Stop, or Remove before it starts, for the
+  // run the viewed interaction started.
+  const stopInteractionRun = async (runId) => {
+    const thread = getThread();
+    if (!thread || pendingStops.has(runId)) return;
+    pendingStops.add(runId);
+    stopErrors.delete(runId);
+    syncComposer();
+    try { await onStopInteraction(thread.id, runId); }
+    catch (failure) { stopErrors.set(runId, failure.message || "Stop could not be confirmed. Try again."); }
+    finally { pendingStops.delete(runId); if (!disposed) syncComposer(); }
+  };
+  const syncInteractionRunControl = () => {
+    const button = $("#interactionRunStop");
+    const state = getState();
+    const thread = getThread();
+    const control = thread && stopsAvailable()
+      ? interactionRunControl(interactionForThread(state, thread), state.actionInvocations || [])
+      : null;
+    button.classList.toggle("hidden", !control);
+    if (!control) {
+      delete button.dataset.interactionId;
+      return;
+    }
+    const { run, verb } = control;
+    const stopping = pendingStops.has(run.id) || (run.stopRequested && !run.stopError);
+    const error = stopErrors.get(run.id) || run.stopError;
+    button.dataset.interactionId = String(run.id);
+    if (button.textContent !== verb) button.textContent = verb;
+    button.disabled = Boolean(stopping);
+    button.classList.toggle("has-error", Boolean(error));
+    button.setAttribute("aria-busy", String(Boolean(stopping)));
+    button.setAttribute("aria-label", stopping ? "Stopping this run" : verb === "Remove" ? "Remove this queued run" : "Stop this run");
+    button.title = error || (stopping ? "Waiting for the run to stop"
+      : verb === "Remove" ? "Take this run out of the queue. Its text is kept." : "Stop this run");
+  };
   const syncComposer = () => {
     syncNodeRunBar();
+    syncInteractionRunControl();
     resizeComposerTextarea(prompt);
     const thread = getThread();
     if (!thread) {
@@ -3820,24 +3911,9 @@ export function createProductWorkspace({
       tray.classList.add("hidden");
       return;
     }
-    const run = activeRun();
-    const stopping = run && (pendingStops.has(run.id) || (run.stopRequested && !run.stopError));
-    send.classList.toggle("stop-button", Boolean(run));
-    send.classList.toggle("is-stopping", Boolean(stopping));
-    send.textContent = run ? "" : "↑";
-    send.setAttribute("aria-busy", String(Boolean(stopping)));
-    // A message turn waiting for capacity (#720) has not started: its Stop removes it.
-    const removes = run?.completionStatus === "queued";
-    send.setAttribute("aria-label", run ? (stopping ? "Stopping" : removes ? "Remove queued message" : "Stop run") : "Send");
-    if (run) {
-      send.disabled = Boolean(stopping);
-      send.title = stopping ? "Waiting for the run to stop"
-        : removes ? "Take this message out of the queue. Its text is kept." : "Stop this run";
-      const message = $("#composerRetryMessage");
-      const error = stopErrors.get(run.id) || run.stopError;
-      if (error) { message.textContent = error; message.classList.remove("hidden"); }
-      return;
-    }
+    // Send stays Send while runs are active (#719).
+    send.textContent = "↑";
+    send.setAttribute("aria-label", "Send");
     const contextDraftsReady = !contextDraftController
       || loadedContextDraftThreads.has(String(thread.id));
     const inputThreadId = String(thread.id);
@@ -3870,7 +3946,7 @@ export function createProductWorkspace({
       && !prompt.disabled
       && (modelPicker?.isReady() ?? false)
       && !contextEditor;
-    send.disabled = Boolean(thread.archivedAt) || threadHasInFlightSend(inFlightSendThreads, thread.id)
+    send.disabled = Boolean(thread.archivedAt)
       || threadHasPendingInputMutation(pendingInputDetaches, thread.id)
       || !contextDraftsReady || !inputDraftsReady || (!replayReady && !composerSubmissionReady(
       prompt.value,
@@ -3897,7 +3973,6 @@ export function createProductWorkspace({
     }
   };
   const cancelSendAttempt = () => {
-    releaseInFlightSend(inFlightSendThreads, sendAttempt);
     releaseSendAttempt();
   };
   const closeContextDraftSendWarning = ({ focusSend = true, cancelAttempt = true } = {}) => {
@@ -3995,7 +4070,7 @@ export function createProductWorkspace({
     persistThreadFollowupDraft(activeScopeKey, stranded);
   };
 
-  const submitInteraction = async (intent) => {
+  const submitInteraction = async (intent, attempt = null) => {
     const submittedThreadId = intent.threadId;
     const submittedContexts = intent.contexts;
     const submittedConfirmationIds = intent.contextConfirmationIds;
@@ -4038,9 +4113,19 @@ export function createProductWorkspace({
       return Boolean(sentRecord) && record?.originScopeKey === sentRecord.originScopeKey
         && record.textDigest === sentRecord.textDigest;
     };
-    // The prompt stays editable while the send is pending (SCP-019); Send
-    // stays disabled, so one follow-up is in flight per thread.
-    send.disabled = true;
+    // The prompt stays editable while the send is pending (SCP-019), and Send stays Send
+    // (#719). Once it posts, the Send's preparation is done: a later Send waits only for this
+    // post to settle, so it never resends this text or these confirmations.
+    let settlePosting;
+    const posting = new Promise((resolvePosting) => { settlePosting = resolvePosting; });
+    const postingKey = String(submittedThreadId);
+    if (!postingSends.has(postingKey)) postingSends.set(postingKey, new Set());
+    postingSends.get(postingKey).add(posting);
+    if (attempt && sendAttempt === attempt) {
+      sendAttempt = null;
+      send.removeAttribute("aria-busy");
+      confirmContextDraftSend.disabled = false;
+    }
     for (const control of $("#nodeInputActions").querySelectorAll("button, textarea")) {
       control.disabled = true;
     }
@@ -4184,11 +4269,10 @@ export function createProductWorkspace({
       if (inFlightSubmissions.get(String(submittedThreadId)) === inFlightSubmission) {
         inFlightSubmissions.delete(String(submittedThreadId));
       }
-      prompt.disabled = composerDisabledForState(
-        getState().status,
-        capabilities.canCompose,
-        restoredDraftActive,
-      );
+      postingSends.get(postingKey)?.delete(posting);
+      if (postingSends.get(postingKey)?.size === 0) postingSends.delete(postingKey);
+      settlePosting();
+      prompt.disabled = composerDisabledForState(capabilities.canCompose);
       renderComposerContexts();
       if (selection.selectedNodeId != null) {
         void selectNode(getState(), selection.selectedNodeId, { notify: false });
@@ -4205,8 +4289,17 @@ export function createProductWorkspace({
     )) return;
     const threadId = getThread()?.id;
     if (implicitInvokeBoundaries.has(String(threadId))) return;
-    if (threadHasInFlightSend(inFlightSendThreads, threadId)
-      || sendAttemptBlocksThread(sendAttempt?.threadId, threadId)) return;
+    if (sendAttemptBlocksThread(sendAttempt?.threadId, threadId)) return;
+    // A Send clicked while an earlier one of this thread is still posting waits for it, then
+    // reads the composer afresh: the earlier send may have cleared its own text and context
+    // confirmations. Runs never lock the composer (#719); only this short post is awaited.
+    if (!draftOverride && postingSendsFor(threadId).size > 0) {
+      await Promise.allSettled([...postingSendsFor(threadId)]);
+      if (!sendIntentIsCurrentThread(getThread()?.id, threadId)) return;
+      syncComposer();
+      if (send.disabled || contextDraftSendWarning.open
+        || sendAttemptBlocksThread(sendAttempt?.threadId, threadId)) return;
+    }
     const implicitSnapshot = captureImplicitInputs(threadId, { composerOnly: true });
     implicitSendSnapshots.set(String(threadId), implicitSnapshot);
     const sendRequest = draftOverride ? null : {
@@ -4231,7 +4324,6 @@ export function createProductWorkspace({
     let intent = draftOverride ? sendWarningIntent : null;
     let unconfirmedContextDrafts = [];
     const attempt = { threadId: String(threadId) };
-    inFlightSendThreads.set(attempt.threadId, attempt);
     sendAttempt = attempt;
     // The text is held from the click, so a newer turn that loads while Send
     // reconciles inputs does not carry it into its scope before it is sent.
@@ -4314,7 +4406,7 @@ export function createProductWorkspace({
           readCurrentAttempt: () => sendAttempt,
           continueSend: async () => {
             closeContextDraftSendWarning({ focusSend: false, cancelAttempt: false });
-            await submitInteraction(intent);
+            await submitInteraction(intent, attempt);
           },
         });
         return;
@@ -4322,7 +4414,7 @@ export function createProductWorkspace({
       if (draftOverride) {
         closeContextDraftSendWarning({ focusSend: false, cancelAttempt: false });
       }
-      await submitInteraction(intent);
+      await submitInteraction(intent, attempt);
     } catch (error) {
       toast(error.message);
     } finally {
@@ -4334,7 +4426,6 @@ export function createProductWorkspace({
           restoreStrandedSubmission({ threadId: attempt.threadId, scopeKey: clickSubmission.scopeKey });
         }
       }
-      releaseInFlightSend(inFlightSendThreads, attempt);
       if (sendAttempt === attempt) releaseSendAttempt();
       else syncComposer();
     }
@@ -4404,17 +4495,13 @@ export function createProductWorkspace({
     if (!modelPicker?.isReady()) modelPicker?.open("model");
     else send.click();
   });
-  send.onclick = async () => {
-    const run = activeRun();
-    if (!run) { void requestInteractionSend(); return; }
-    if (send.disabled || pendingStops.has(run.id)) return;
-    const threadId = getThread().id;
-    pendingStops.add(run.id);
-    stopErrors.delete(run.id);
-    syncComposer();
-    try { await onStopInteraction(threadId, run.id); }
-    catch (error) { stopErrors.set(run.id, error.message || "Stop could not be confirmed. Try again."); }
-    finally { pendingStops.delete(run.id); syncComposer(); }
+  // Send stays Send while runs are active (#719); each run's Stop is on its interaction node.
+  send.onclick = () => { void requestInteractionSend(); };
+  $("#interactionRunStop").onclick = () => {
+    const runId = $("#interactionRunStop").dataset.interactionId;
+    if (runId == null || $("#interactionRunStop").disabled) return;
+    const run = (getState().interactions || []).find((interaction) => String(interaction.id) === runId);
+    if (run) void stopInteractionRun(run.id);
   };
   $("#attachNodeContext").onclick = () => {
     const node = resolveInteractionContextNode(
@@ -5035,7 +5122,7 @@ export function createProductWorkspace({
       });
       pickerInheritanceKey = inheritanceKey;
     }
-    renderInteractionState(state, interaction, Boolean(restoredDraft));
+    renderInteractionState(state, interaction);
     renderApprovalDock(state, thread);
     renderGraph(state, thread);
     if (selection.selectedNodeId != null) {
@@ -5139,7 +5226,7 @@ export function createProductWorkspace({
     breadcrumb.scrollLeft = breadcrumb.scrollWidth;
   }
 
-  function renderInteractionState(state, interaction, restoredDraft = false) {
+  function renderInteractionState(state, interaction) {
     const viewedStatus = viewedInteractionStatus(interaction, state.status || "idle", state.temporalLifecycle);
     const presentation = turnStatusPresentation(viewedStatus);
     const statusElement = $("#interactionStatus");
@@ -5154,11 +5241,7 @@ export function createProductWorkspace({
         : `${presentation.label}: ${safeReason}`;
       renderedInteractionStatusKey = statusKey;
     }
-    prompt.disabled = composerDisabledForState(
-      composerStatusForThread(state, getThread()),
-      capabilities.canCompose,
-      restoredDraft,
-    );
+    prompt.disabled = composerDisabledForState(capabilities.canCompose);
     modelPicker?.setDisabled(prompt.disabled);
     renderComposerContexts();
     updateAttachContextControl();
@@ -6521,7 +6604,7 @@ export function createProductWorkspace({
             || !loadedInputDraftThreads.has(String(getThread()?.id))
             || occurrence === null
             || sendAttemptBlocksThread(sendAttempt?.threadId, getThread()?.id)
-            || threadHasInFlightSend(inFlightSendThreads, getThread()?.id),
+            || postingSendsFor(getThread()?.id).size > 0,
         };
       }
     }

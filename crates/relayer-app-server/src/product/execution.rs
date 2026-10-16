@@ -228,10 +228,15 @@ impl InteractionExecutionService {
                 return;
             }
         };
-        // A run started from an invoke action starts a fresh native session beside the thread's
-        // other turns. It has no native memory of the thread, so it receives the accepted turns.
-        let invoked_run = match execution.product.is_invoked_run(interaction.id).await {
-            Ok(value) => value,
+        // Every root run starts a fresh native session beside the thread's other runs, so it has no
+        // native memory of the thread (#719). It receives graph pointers to the accepted turns,
+        // read now, when it starts, so a run that waited sees what was accepted meanwhile.
+        let thread_history = match execution
+            .product
+            .accepted_thread_history(thread.id, interaction.id)
+            .await
+        {
+            Ok(history) => history,
             Err(error) => {
                 fail_prepared_before_launch(
                     execution,
@@ -245,34 +250,9 @@ impl InteractionExecutionService {
                 return;
             }
         };
-        let fresh_history = if invoked_run {
-            match execution
-                .product
-                .accepted_thread_history(thread.id, interaction.id)
-                .await
-            {
-                Ok(history) => Some(history),
-                Err(error) => {
-                    fail_prepared_before_launch(
-                        execution,
-                        runtime,
-                        &thread,
-                        &interaction,
-                        prepared,
-                        error.to_string(),
-                    )
-                    .await;
-                    return;
-                }
-            }
-        } else {
-            None
-        };
         let command = CompleteInteraction {
             thread_icon_selection_eligible: thread.icon_selection_eligible && thread.icon.is_none(),
-            require_native_continuity: false,
-            native_history_anchor: None,
-            fresh_native_session: fresh_history.as_deref(),
+            thread_history: Some(&thread_history),
             project_id: thread.project_id.map(ProjectId::value),
             product_interaction_id: interaction.id.value(),
             thread_id: thread.id.value(),
@@ -463,22 +443,7 @@ impl InteractionExecutionService {
             stop_before_native_execution(execution, &thread, &interaction, prepared, attempt).await;
             return;
         }
-        let continuity = execution
-            .product
-            .conversation_compatibility(thread.id)
-            .await
-            .ok();
-        let require_native_continuity = execution_model_selection.is_some()
-            && invocation.is_none()
-            && command.fresh_native_session.is_none()
-            && continuity
-                .as_ref()
-                .is_none_or(|value| value.status != "unrestricted");
         let command = CompleteInteraction {
-            require_native_continuity,
-            native_history_anchor: continuity
-                .as_ref()
-                .and_then(|value| value.native_history_anchor.as_ref()),
             execution_lease_id: admission
                 .as_ref()
                 .map(|admission| admission.execution_lease_id.as_str()),

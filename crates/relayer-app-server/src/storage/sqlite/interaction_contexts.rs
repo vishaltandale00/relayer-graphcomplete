@@ -92,7 +92,6 @@ impl SqliteProductStore {
         input: NewInteractionInput<'_>,
         model_selection: Option<&InteractionModelSelection>,
         require_model_selection: bool,
-        enforce_single_active_interaction: bool,
     ) -> Result<InteractionInputInsertOutcome, StorageError> {
         let mut tx = self.pool.begin_with("BEGIN IMMEDIATE").await?;
         let thread: Option<(String, String, String)> = sqlx::query_as(
@@ -163,20 +162,6 @@ impl SqliteProductStore {
             return Ok(InteractionInputInsertOutcome::Existing(existing));
         }
 
-        if enforce_single_active_interaction {
-            let active: bool = sqlx::query_scalar(super::MESSAGE_TURN_IN_PROGRESS)
-                .bind(thread_id.value())
-                .fetch_one(&mut *tx)
-                .await?;
-            if active {
-                return Err(StorageError::Catalog(
-                    crate::product::CatalogError::invalid(
-                        "interaction_in_progress",
-                        "Wait for the active interaction to finish.",
-                    ),
-                ));
-            }
-        }
         let submitted_input = if let Some(expected_revision) = input.submitted_input_draft_revision
         {
             let current_revision: Option<i64> =
@@ -596,7 +581,6 @@ mod tests {
                 },
                 None,
                 false,
-                false,
             )
             .await
             .unwrap();
@@ -629,7 +613,6 @@ mod tests {
                     submitted_input_draft_revision: Some(0),
                 },
                 None,
-                false,
                 false,
             )
             .await
@@ -686,7 +669,6 @@ mod tests {
                     submitted_input_draft_revision: None,
                 },
                 None,
-                false,
                 false,
             )
             .await
@@ -829,7 +811,6 @@ mod tests {
                 input(),
                 None,
                 false,
-                false,
             )
             .await
             .unwrap();
@@ -865,7 +846,6 @@ mod tests {
                 },
                 None,
                 false,
-                false,
             )
             .await
             .unwrap_err();
@@ -878,7 +858,6 @@ mod tests {
                 ThreadId::from_database(thread_id),
                 input(),
                 None,
-                false,
                 false,
             )
             .await
@@ -942,7 +921,6 @@ mod tests {
                     submitted_input_draft_revision: None,
                 },
                 None,
-                false,
                 false,
             )
             .await
@@ -1013,7 +991,6 @@ mod tests {
                 input,
                 None,
                 false,
-                false,
             )
             .await
             .unwrap();
@@ -1041,7 +1018,6 @@ mod tests {
                 },
                 None,
                 false,
-                false,
             )
             .await
             .unwrap();
@@ -1061,7 +1037,6 @@ mod tests {
                     submitted_input_draft_revision: None,
                 },
                 None,
-                false,
                 false,
             )
             .await

@@ -764,10 +764,6 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(owner.provider_id.as_deref(), Some("codex"));
-        assert_eq!(
-            owner.native_history_anchor.as_ref().unwrap()["interactionNodeId"],
-            17
-        );
         sqlx::query("INSERT INTO node_context_draft_resolutions(draft_id,thread_id,outcome,draft_revision,target_node_id,source_interaction_node_id,source_layer_id,target_node_json,text,resolved_at,composer_text) VALUES ('legacy-context',?1,'confirmed',1,7,17,5,'{}','Keep this attachment','13','Keep this attachment')").bind(thread_id).execute(&store.pool).await.unwrap();
         let contexts = [crate::product::InteractionContextIntent {
             target: crate::product::InteractionContextTarget {
@@ -797,7 +793,6 @@ mod tests {
                 ThreadId::from_database(thread_id),
                 input,
                 Some(&foreign),
-                true,
                 true,
             )
             .await
@@ -864,7 +859,6 @@ mod tests {
                 "Do not lose this draft",
                 Some(&foreign),
                 true,
-                true,
             )
             .await
             .unwrap_err();
@@ -885,7 +879,6 @@ mod tests {
                 ThreadId::from_database(thread_id),
                 "Compatible follow-up",
                 Some(&compatible),
-                true,
                 true,
             )
             .await

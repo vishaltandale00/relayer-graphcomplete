@@ -183,12 +183,10 @@ pub(crate) struct InvokedCompletionAdmission<'a> {
 
 pub(crate) struct CompleteInteraction<'a> {
     pub(crate) thread_icon_selection_eligible: bool,
-    pub(crate) require_native_continuity: bool,
-    pub(crate) native_history_anchor: Option<&'a Value>,
-    /// The thread's accepted turns, sent with a run that starts a fresh native session. A run
-    /// started from an invoke action never resumes the thread's root session, so it runs beside
-    /// the thread's other turns. `None` resumes the root session as before.
-    pub(crate) fresh_native_session: Option<&'a [crate::product::ThreadHistoryEntry]>,
+    /// The thread's latest accepted turns, as graph pointers. Every root run starts a fresh native
+    /// session and runs beside the thread's other runs (#719), so the product sends them with
+    /// every root run it starts. Graph preparation ignores them.
+    pub(crate) thread_history: Option<&'a [crate::product::ThreadHistoryEntry]>,
     pub(crate) project_id: Option<i64>,
     pub(crate) product_interaction_id: i64,
     pub(crate) thread_id: i64,
@@ -1111,13 +1109,12 @@ impl RuntimeClient {
             let mut complete_body = serde_json::json!({
                 "interactionId": command.interaction_id,
                 "graph": graph,
-                "traceContext": { "productInteractionId": command.product_interaction_id, "requireNativeContinuity": command.require_native_continuity, "nativeHistoryAnchor": command.native_history_anchor },
+                "traceContext": { "productInteractionId": command.product_interaction_id },
             });
             if command.thread_icon_selection_eligible {
                 complete_body["traceContext"]["threadIconSelection"] = serde_json::json!({"eligible": true});
             }
-            if let Some(history) = command.fresh_native_session {
-                complete_body["traceContext"]["nativeSession"] = Value::from("fresh");
+            if let Some(history) = command.thread_history {
                 complete_body["traceContext"]["threadHistory"] = serde_json::to_value(history)
                     .map_err(|error| RuntimeError::Protocol(format!("thread history: {error}")))?;
             }
@@ -4062,9 +4059,7 @@ mod tests {
         };
         let command = CompleteInteraction {
             thread_icon_selection_eligible: false,
-            require_native_continuity: false,
-            native_history_anchor: None,
-            fresh_native_session: None,
+            thread_history: None,
             project_id: None,
             product_interaction_id: 1,
             thread_id: 1,
@@ -4112,9 +4107,7 @@ mod tests {
         }];
         let identified = CompleteInteraction {
             thread_icon_selection_eligible: false,
-            require_native_continuity: false,
-            native_history_anchor: None,
-            fresh_native_session: None,
+            thread_history: None,
             project_id: None,
             product_interaction_id: 99,
             thread_id: 1,
@@ -4257,9 +4250,7 @@ mod tests {
         };
         let command = CompleteInteraction {
             thread_icon_selection_eligible: false,
-            require_native_continuity: false,
-            native_history_anchor: None,
-            fresh_native_session: None,
+            thread_history: None,
             project_id: None,
             product_interaction_id: 77,
             thread_id: 1,
@@ -4665,9 +4656,7 @@ mod tests {
         };
         let command = CompleteInteraction {
             thread_icon_selection_eligible: false,
-            require_native_continuity: false,
-            native_history_anchor: None,
-            fresh_native_session: None,
+            thread_history: None,
             project_id: None,
             product_interaction_id: 1,
             thread_id: 1,
@@ -4810,9 +4799,7 @@ mod tests {
         let result = runtime
             .complete(CompleteInteraction {
                 thread_icon_selection_eligible: false,
-                require_native_continuity: false,
-                native_history_anchor: None,
-                fresh_native_session: None,
+                thread_history: None,
                 project_id: None,
                 product_interaction_id: 1,
                 thread_id: 1,
@@ -4909,16 +4896,18 @@ mod tests {
                     async move {
                         assert_eq!(headers["authorization"], "Bearer harness-control");
                         assert_eq!(body["interactionId"], 7);
+                        // No root run resumes a native session (#719): nothing asks for one.
+                        for retired in ["nativeSession", "requireNativeContinuity", "nativeHistoryAnchor"] {
+                            assert!(body["traceContext"].get(retired).is_none(), "{body}");
+                        }
                         if observed_calls.fetch_add(1, Ordering::SeqCst) == 0 {
                             assert_eq!(
                                 body["traceContext"]["threadIconSelection"],
                                 json!({"eligible": true})
                             );
-                            assert!(body["traceContext"].get("nativeSession").is_none());
                             assert!(body["traceContext"].get("threadHistory").is_none());
                         } else {
                             assert!(body["traceContext"].get("threadIconSelection").is_none());
-                            assert_eq!(body["traceContext"]["nativeSession"], "fresh");
                             assert_eq!(
                                 body["traceContext"]["threadHistory"],
                                 json!([
@@ -5010,9 +4999,7 @@ mod tests {
             let completed = runtime
                 .complete(CompleteInteraction {
                     thread_icon_selection_eligible: eligible,
-                    require_native_continuity: false,
-                    native_history_anchor: None,
-                    fresh_native_session: (!eligible).then_some(history.as_slice()),
+                    thread_history: (!eligible).then_some(history.as_slice()),
                     project_id: None,
                     product_interaction_id: 1,
                     thread_id: 1,

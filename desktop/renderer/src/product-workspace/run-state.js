@@ -23,9 +23,10 @@ export function interactionActivity(interaction) {
 }
 
 /**
- * A thread's symbol from its human turns, as the app server computes it for thread lists. Runs
- * from invoke actions run beside the message turns, so the most urgent active turn wins over
- * the latest one; otherwise the latest turn's failure shows.
+ * A thread's symbol from its human turns, as the app server computes it for thread lists. Every
+ * human-started run, message or invoke, runs beside the others (#719), so the symbol means "any
+ * run active": the most urgent active run wins over the latest turn, even a finished one.
+ * Otherwise the latest turn's failure shows.
  */
 export function threadActivity(turns = []) {
   const active = turns.filter(runIsActive);
@@ -106,4 +107,39 @@ export function nodeRunState(node, actions = [], invocations = [], interactions 
   if (latest?.completionStatus === "stopped") return "stopped";
   if (latest?.completionStatus === "failed" || interactionReturnsToUnsent(latest)) return "failed";
   return null;
+}
+
+// The run a person can stop or remove, from an interaction row. An agent's child is never one,
+// because only its parent agent may stop it; neither is a preparation waiting for its action's
+// Retry, nor a run a model failure returned to unsent.
+function stoppableHumanRun(run, invocationsByResult) {
+  const invocation = invocationsByResult.get(String(run?.id));
+  if (invocation?.agentInvoked === true || invocation?.preparationRecoverable === true) return false;
+  return runIsActive(run) && STOPPABLE_STATUSES.has(run.completionStatus);
+}
+
+function invocationsByResult(invocations = []) {
+  return new Map(invocations.map((invocation) => [String(invocation.resultInteractionId), invocation]));
+}
+
+/**
+ * Every run in the thread a person can stop now, oldest first: its message turns and the runs its
+ * invoke actions started. Thread messages run in parallel (#719), so this is what the thread
+ * menu's "Stop all runs (N)" stops or removes.
+ */
+export function threadActiveRuns(turns = [], invocations = []) {
+  const byResult = invocationsByResult(invocations);
+  return turns
+    .filter((turn) => stoppableHumanRun(turn, byResult))
+    .sort((left, right) => Number(left.id) - Number(right.id));
+}
+
+/**
+ * The status and Stop of the run an interaction node started (#719). Each run, including one
+ * sent from the message box, shows them on its own interaction node. A run that has not started
+ * is removed from its queue instead, keeping its text (#721).
+ */
+export function interactionRunControl(interaction, invocations = []) {
+  if (!interaction || !stoppableHumanRun(interaction, invocationsByResult(invocations))) return null;
+  return { run: interaction, verb: interaction.completionStatus === "queued" ? "Remove" : "Stop" };
 }

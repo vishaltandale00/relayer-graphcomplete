@@ -454,7 +454,7 @@ pub(crate) struct ActionInvocationResponse {
     pub(super) native_invocation: Option<relayer_graph_core::InvocationGraphSnapshot>,
     pub(super) result_completion_status: String,
     pub(super) created_at: String,
-    /// An agent's child: it never holds the thread's one active human turn.
+    /// An agent's child: only its parent agent may stop it, and it holds no capacity slot.
     pub(super) agent_invoked: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(super) execution: Option<CompletionExecutionEvidenceResponse>,

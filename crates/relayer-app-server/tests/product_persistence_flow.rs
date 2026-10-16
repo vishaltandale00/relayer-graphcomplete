@@ -5297,6 +5297,38 @@ impl HeldRunsFixture {
             .clone()
     }
 
+    /// Sends a thread message, as the composer does.
+    async fn send(&self, text: &str) -> Value {
+        let thread_id = self.thread_id;
+        let (status, body) = app_post(
+            &self.app,
+            &format!("/api/threads/{thread_id}/interactions"),
+            json!({ "text": text }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CREATED, "{body}");
+        body
+    }
+
+    /// The thread's activity symbol, as the thread list reports it.
+    async fn thread_activity(&self) -> Value {
+        let threads = response_json(
+            self.app
+                .clone()
+                .oneshot(api_request("GET", "/api/threads", None, true))
+                .await
+                .unwrap(),
+        )
+        .await;
+        threads["threads"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|thread| thread["id"] == self.thread_id)
+            .unwrap()["activity"]
+            .clone()
+    }
+
     async fn status_of(&self, run: i64) -> String {
         self.interaction(run).await["completionStatus"]
             .as_str()
@@ -5814,7 +5846,6 @@ async fn node_runs_run_beside_other_nodes_and_queue_in_order_on_their_own_node()
     settle(first, true);
     let second_body = started(second).await;
     settled(first, "accepted").await;
-    assert_eq!(second_body["traceContext"]["nativeSession"], "fresh");
     let first_node = first_body["graph"]["nodeId"].as_i64().unwrap();
     assert!(
         second_body["traceContext"]["threadHistory"]
@@ -5905,6 +5936,65 @@ async fn node_runs_run_beside_other_nodes_and_queue_in_order_on_their_own_node()
     harness_task.abort();
 }
 
+/// PAR-015 (#719): thread messages run in parallel with each other and with node runs. Two
+/// messages sent back to back and two invokes on different nodes all run at once. No root run
+/// resumes a native session: each gets graph pointers to the thread's accepted turns, read when
+/// it starts, so a follow-up such as "now change that" is grounded in the accepted interaction
+/// graph alone. The thread stays active while any run is active, even once the latest finished.
+#[tokio::test]
+async fn thread_messages_run_beside_each_other_and_node_runs_from_the_accepted_graph() {
+    const ACTIONS: &[(i64, i64)] = &[(41, 7), (42, 8)];
+    let fixture = HeldRunsFixture::open(ACTIONS, None).await;
+    let root = json!({"interactionNodeId": 101, "responseLayerId": 1});
+
+    let first = fixture.send("Summarize the README").await["id"]
+        .as_i64()
+        .unwrap();
+    let second = fixture.send("And list the open issues").await["id"]
+        .as_i64()
+        .unwrap();
+    let (x, _) = fixture.invoke(41).await;
+    let (y, _) = fixture.invoke(42).await;
+    let first_body = fixture.started(first).await;
+    let second_body = fixture.started(second).await;
+    fixture.started(x).await;
+    fixture.started(y).await;
+    for run in [first, second, x, y] {
+        assert_eq!(fixture.status_of(run).await, "running", "run {run}");
+    }
+    for body in [&first_body, &second_body] {
+        let context = &body["traceContext"];
+        for retired in ["nativeSession", "requireNativeContinuity", "nativeHistoryAnchor"] {
+            assert!(context.get(retired).is_none(), "{context}");
+        }
+        assert_eq!(context["threadHistory"], json!([root.clone()]), "{context}");
+    }
+
+    // The first message is accepted while the second still runs: the thread is still running.
+    fixture.settle(first, true);
+    fixture.settled(first, "accepted").await;
+    assert_eq!(fixture.thread_activity().await, "running");
+    // A follow-up sent now points at the first message's accepted result, with no native
+    // session behind it.
+    let follow_up = fixture.send("Now change that").await["id"]
+        .as_i64()
+        .unwrap();
+    let follow_up_body = fixture.started(follow_up).await;
+    let first_node = first_body["graph"]["nodeId"].as_i64().unwrap();
+    assert_eq!(
+        follow_up_body["traceContext"]["threadHistory"],
+        json!([root, {"interactionNodeId": first_node, "responseLayerId": 900 + first_node}]),
+    );
+    assert!(follow_up_body["traceContext"].get("nativeSession").is_none());
+
+    for run in [second, x, y, follow_up] {
+        fixture.settle(run, true);
+        fixture.settled(run, "accepted").await;
+    }
+    assert_eq!(fixture.thread_activity().await, Value::Null);
+    fixture.finish();
+}
+
 /// PAR-012 (#720): with the app's limit on human-started runs filled, the next run waits as
 /// queued for capacity, and waiting runs start first in, first out as slots free. A run behind
 /// another on its node first waits for its node, then for capacity, and each wait shows its own
@@ -5929,29 +6019,15 @@ async fn human_started_runs_wait_for_capacity_and_start_in_order_as_slots_free()
     fixture.waits_for(c, "capacity").await;
     let (d, _) = fixture.invoke(44).await;
     fixture.waits_for(d, "node").await;
-    // A thread message is human-started, so it waits for capacity as well, and it still holds
-    // its thread's one message turn while it waits.
-    let message = app_post(
-        &fixture.app,
-        &format!("/api/threads/{thread_id}/interactions"),
-        json!({"text": "Also check the FAQ"}),
-    )
-    .await;
-    assert_eq!(message.0, StatusCode::CREATED, "{}", message.1);
-    let m = message.1["id"].as_i64().unwrap();
-    assert_eq!(message.1["completionStatus"], "queued");
-    assert_eq!(message.1["queueReason"], "capacity");
-    let second_message = app_post(
-        &fixture.app,
-        &format!("/api/threads/{thread_id}/interactions"),
-        json!({"text": "And the pricing page"}),
-    )
-    .await;
-    assert_eq!(
-        second_message.1["code"], "interaction_in_progress",
-        "{}",
-        second_message.1
-    );
+    // A thread message is human-started, so it waits for capacity as well. Messages hold no
+    // turn of the thread (#719): a second message waits for capacity behind the first.
+    let message = fixture.send("Also check the FAQ").await;
+    let m = message["id"].as_i64().unwrap();
+    assert_eq!(message["completionStatus"], "queued");
+    assert_eq!(message["queueReason"], "capacity");
+    let second_message = fixture.send("And the pricing page").await;
+    let m2 = second_message["id"].as_i64().unwrap();
+    assert_eq!(second_message["queueReason"], "capacity");
 
     // A slot frees: the oldest run waiting for capacity starts, not the one behind node 7.
     // Node 7 is free now, so that run holds it and waits for capacity, behind the message.
@@ -5972,13 +6048,18 @@ async fn human_started_runs_wait_for_capacity_and_start_in_order_as_slots_free()
     fixture.waits_for(g, "capacity").await;
     assert_eq!(fixture.started_runs(), [a, b, c]);
 
-    // Whatever the outcome, each settled run passes its slot to the oldest waiting run.
+    // Whatever the outcome, each settled run passes its slot to the oldest waiting run. The
+    // two messages then run at once.
     fixture.settle(b, false);
     fixture.started(m).await;
     fixture.settle(c, true);
+    fixture.started(m2).await;
+    assert_eq!(fixture.status_of(m).await, "running");
+    fixture.waits_for(f, "capacity").await;
+    fixture.settle(m, true);
     fixture.started(f).await;
     fixture.waits_for(g, "capacity").await;
-    fixture.settle(m, true);
+    fixture.settle(m2, true);
     let g_body = fixture.started(g).await;
     // The run on node 7 reads the thread when it starts, so it sees the first run's result.
     let a_node = a_body["graph"]["nodeId"].as_i64().unwrap();
@@ -5992,10 +6073,10 @@ async fn human_started_runs_wait_for_capacity_and_start_in_order_as_slots_free()
     );
     fixture.settle(f, true);
     fixture.settle(g, true);
-    for run in [c, f, g, m] {
+    for run in [c, f, g, m, m2] {
         fixture.settled(run, "accepted").await;
     }
-    assert_eq!(fixture.started_runs(), [a, b, c, m, f, g]);
+    assert_eq!(fixture.started_runs(), [a, b, c, m, m2, f, g]);
     assert_eq!(fixture.status_of(d).await, "stopped");
     fixture.finish();
 }

@@ -276,22 +276,6 @@ impl SqliteProductStore {
             .collect())
     }
 
-    /// Whether interaction ?1 is a run an invoke action started. This is the admission gate's own
-    /// test (`MESSAGE_TURN_IN_PROGRESS`), so a run the gate admits beside a message turn always
-    /// starts a fresh native session.
-    pub(crate) async fn is_invoked_run(
-        &self,
-        interaction_id: InteractionId,
-    ) -> Result<bool, StorageError> {
-        sqlx::query_scalar(
-            "SELECT EXISTS(SELECT 1 FROM action_invocations WHERE result_interaction_id=?1)",
-        )
-        .bind(interaction_id.value())
-        .fetch_one(&self.pool)
-        .await
-        .map_err(Into::into)
-    }
-
     #[cfg(test)]
     pub(crate) async fn list_interactions(
         &self,
@@ -307,7 +291,6 @@ impl SqliteProductStore {
         text: &str,
         model_selection: Option<&InteractionModelSelection>,
         require_model_selection: bool,
-        enforce_single_active_interaction: bool,
     ) -> Result<Interaction, StorageError> {
         let mut transaction = self.pool.begin_with("BEGIN IMMEDIATE").await?;
         let (previous_timestamp, permission_profile_id, harness_id): (String, String, String) =
@@ -315,20 +298,6 @@ impl SqliteProductStore {
                 .bind(thread_id.value())
                 .fetch_one(&mut *transaction)
                 .await?;
-        if enforce_single_active_interaction {
-            let interaction_in_progress: bool = sqlx::query_scalar(super::MESSAGE_TURN_IN_PROGRESS)
-                .bind(thread_id.value())
-                .fetch_one(&mut *transaction)
-                .await?;
-            if interaction_in_progress {
-                return Err(StorageError::Catalog(
-                    crate::product::CatalogError::invalid(
-                        "interaction_in_progress",
-                        "Wait for the active interaction to finish.",
-                    ),
-                ));
-            }
-        }
         let model_selection = match model_selection {
             Some(selection) => Some(selection.clone()),
             None => sqlx::query(super::LATEST_HUMAN_TURN_MODEL)
@@ -1172,29 +1141,25 @@ mod tests {
             .await
             .unwrap();
 
-        let queued = store
-            .insert_interaction(thread.id, "Queued", Some(&second_model), true, true)
+        // Messages run in parallel (#719): one sent while the first still runs is admitted, and
+        // one sent with no selection inherits the latest human turn's model even while it runs.
+        let beside = store
+            .insert_interaction(thread.id, "Beside", None, true)
             .await
-            .err()
-            .unwrap();
-        match queued {
-            StorageError::Catalog(error) => assert_eq!(error.code(), "interaction_in_progress"),
-            other => panic!("unexpected error: {other}"),
-        }
-        mark_interaction_accepted(&store, thread.root_interaction_id).await;
-
+            .unwrap_or_else(|error| panic!("a running message held the thread: {error}"));
+        assert_eq!(beside.model_selection, Some(first_model));
         let explicit = store
-            .insert_interaction(thread.id, "Explicit", Some(&second_model), true, true)
+            .insert_interaction(thread.id, "Explicit", Some(&second_model), true)
             .await
             .unwrap();
-        mark_interaction_accepted(&store, explicit.id).await;
         let inherited = store
-            .insert_interaction(thread.id, "Inherited", None, true, true)
+            .insert_interaction(thread.id, "Inherited", None, true)
             .await
             .unwrap();
 
-        assert_eq!(explicit.sequence, 2);
-        assert_eq!(inherited.sequence, 3);
+        assert_eq!(beside.sequence, 2);
+        assert_eq!(explicit.sequence, 3);
+        assert_eq!(inherited.sequence, 4);
         assert_eq!(inherited.model_selection, Some(second_model));
         store.pool.close().await;
     }
@@ -1229,7 +1194,7 @@ mod tests {
             .unwrap();
         mark_interaction_accepted(&store, thread.root_interaction_id).await;
         store
-            .insert_interaction(thread.id, "Last-known follow-up", None, true, true)
+            .insert_interaction(thread.id, "Last-known follow-up", None, true)
             .await
             .unwrap();
         assert_eq!(store.list_interactions(thread.id).await.unwrap().len(), 2);
@@ -1589,11 +1554,10 @@ mod tests {
         store.pool.close().await;
     }
 
-    /// Only message turns hold the thread, because they resume its native root session. A run
-    /// started by an invoke action starts fresh: a user's invoke and an agent's child both run
-    /// beside message turns.
+    /// No run holds the thread (#719): every root run starts a fresh native session, so a
+    /// message is admitted beside an agent's child, a user's invoke and another message.
     #[tokio::test]
-    async fn only_message_turns_hold_the_thread() {
+    async fn no_run_holds_the_thread() {
         let temporary = tempfile::Builder::new()
             .prefix("relayer-human-turn-gate-")
             .tempdir()
@@ -1647,7 +1611,7 @@ mod tests {
             other => panic!("the product stopped an agent's child: {other:?}"),
         }
         let next = store
-            .insert_interaction(thread.id, "Next question", None, true, true)
+            .insert_interaction(thread.id, "Next question", None, true)
             .await
             .unwrap_or_else(|error| panic!("a running child held the thread: {error}"));
         assert_eq!(
@@ -1657,16 +1621,17 @@ mod tests {
             Some("first-model"),
             "a new human turn inherits the latest human turn's model, not the child's"
         );
-        let held = store
-            .insert_interaction(thread.id, "Queued", None, true, true)
+        sqlx::query("UPDATE interactions SET completion_status='running' WHERE id=?1")
+            .bind(next.id.value())
+            .execute(&store.pool)
             .await
-            .err()
             .unwrap();
-        match held {
-            StorageError::Catalog(error) => assert_eq!(error.code(), "interaction_in_progress"),
-            other => panic!("unexpected error: {other}"),
-        }
+        let beside = store
+            .insert_interaction(thread.id, "Beside the running message", None, true)
+            .await
+            .unwrap_or_else(|error| panic!("a running message held the thread: {error}"));
         mark_interaction_accepted(&store, next.id).await;
+        mark_interaction_accepted(&store, beside.id).await;
 
         let invoked = match store
             .insert_action_invocation(thread.root_interaction_id, 42, "User action")
@@ -1684,7 +1649,7 @@ mod tests {
             .await
             .unwrap();
         let after_action = store
-            .insert_interaction(thread.id, "After the action", None, true, true)
+            .insert_interaction(thread.id, "After the action", None, true)
             .await
             .unwrap_or_else(|error| panic!("a user's running invoke held the thread: {error}"));
         sqlx::query("UPDATE interactions SET completion_status='running' WHERE id=?1")
@@ -1692,15 +1657,10 @@ mod tests {
             .execute(&store.pool)
             .await
             .unwrap();
-        let held = store
-            .insert_interaction(thread.id, "Second message", None, true, true)
+        store
+            .insert_interaction(thread.id, "Second message", None, true)
             .await
-            .err()
-            .unwrap();
-        match held {
-            StorageError::Catalog(error) => assert_eq!(error.code(), "interaction_in_progress"),
-            other => panic!("unexpected error: {other}"),
-        }
+            .unwrap_or_else(|error| panic!("running message and invoke held the thread: {error}"));
         // The user's own action result stays stoppable by the product.
         store
             .request_interaction_stop(thread.id, invoked.id)
@@ -1766,7 +1726,7 @@ mod tests {
             _ => panic!("the invoke's result is new"),
         };
         let running = store
-            .insert_interaction(thread.id, "Still running", None, true, false)
+            .insert_interaction(thread.id, "Still running", None, true)
             .await
             .unwrap();
         for (interaction, node) in [(child.id, 711), (invoked.id, 721)] {

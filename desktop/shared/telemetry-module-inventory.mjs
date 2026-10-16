@@ -187,7 +187,6 @@ export const APPROVED_TELEMETRY_MODULES = Object.freeze({
     "packages/harness-host/dist/implementations/thread-icon-guidance.js",
     "packages/harness-host/dist/index.js",
     "packages/harness-host/dist/interaction-input.js",
-    "packages/harness-host/dist/native-session-reset.js",
     "packages/harness-host/dist/registry.js",
     "packages/harness-host/dist/trace.js",
     "packages/harness-host/dist/types.js",

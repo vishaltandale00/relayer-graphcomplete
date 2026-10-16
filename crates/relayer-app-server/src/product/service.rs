@@ -1485,7 +1485,6 @@ impl ProductService {
                 text,
                 model_selection,
                 self.runtime_available && !allow_unselected_model,
-                self.runtime_available,
             )
             .await
             .map_err(Into::into)
@@ -1555,7 +1554,6 @@ impl ProductService {
                     },
                     command.model_selection,
                     self.runtime_available && !command.allow_unselected_model,
-                    self.runtime_available,
                 )
                 .await
                 .map_err(Into::into);
@@ -1598,7 +1596,6 @@ impl ProductService {
                 },
                 command.model_selection,
                 self.runtime_available && !command.allow_unselected_model,
-                self.runtime_available,
             )
             .await
             .map_err(Into::into)
@@ -2922,16 +2919,6 @@ impl ProductService {
     ) -> Result<bool, ProductError> {
         self.storage
             .claim_capacity_run(run)
-            .await
-            .map_err(Into::into)
-    }
-
-    pub(crate) async fn is_invoked_run(
-        &self,
-        interaction_id: InteractionId,
-    ) -> Result<bool, ProductError> {
-        self.storage
-            .is_invoked_run(interaction_id)
             .await
             .map_err(Into::into)
     }

@@ -58,8 +58,8 @@ it("gives every run invoked from a node its own Stop, kept in place across refre
     expect(rows().map((row) => row.querySelector(".node-run-stop").textContent)).toEqual(["Stop", "Remove", "Remove"]);
     expect(rows()[2].querySelector(".node-run-stop").getAttribute("aria-label")).toBe("Remove Find a mentor");
     expect(rows()[2].querySelector(".node-run-stop").disabled).toBe(false);
-    // The composer follows message turns: invoked runs leave it a Send.
-    expect(window.document.querySelector("#sendInteraction").classList.contains("stop-button")).toBe(false);
+    // The composer stays a Send while runs are active (#719).
+    expect(window.document.querySelector("#sendInteraction").getAttribute("aria-label")).toBe("Send");
 
     // A refresh updates the rows in place, so a focused Stop keeps its focus.
     const stopSecond = rows()[1].querySelector(".node-run-stop");
@@ -99,20 +99,44 @@ it("gives every run invoked from a node its own Stop, kept in place across refre
       .toEqual(["List pitfalls · Running", "Find a mentor · Queued"]);
     expect(stopSecond.textContent).toBe("Stop");
 
-    // A message turn waiting for capacity (#720) is the composer's turn: its control removes it.
-    state.interactions.push({ ...run(8, "queued", "capacity"), text: "Also check the FAQ" });
-    workspace.render();
-    await window.happyDOM.waitUntilComplete();
-    const send = window.document.querySelector("#sendInteraction");
-    expect(send.classList.contains("stop-button")).toBe(true);
-    expect(send.getAttribute("aria-label")).toBe("Remove queued message");
-
-    // Read from an older turn, the pending notice says it waits for capacity, not for a node.
+    // Messages run in parallel (#719): a message turn waiting for capacity (#720) leaves the
+    // composer a Send. Read from an older turn, the pending notice says it waits for capacity.
     // Its pending entry was seeded as running; the run's own row says it waits for capacity.
+    state.interactions.push({ ...run(8, "queued", "capacity"), text: "Also check the FAQ" });
     state.pendingTurn = { threadId: 10, interactionId: 8, status: "running" };
     workspace.render();
     await window.happyDOM.waitUntilComplete();
+    const send = window.document.querySelector("#sendInteraction");
+    expect(send.getAttribute("aria-label")).toBe("Send");
     expect(window.document.querySelector("#pendingTurnText").textContent).toContain("Waiting for capacity");
+    const runStop = window.document.querySelector("#interactionRunStop");
+    expect(runStop.classList.contains("hidden")).toBe(true);
+
+    // Each message's status and Stop live on its own interaction node: viewed, the waiting
+    // message offers Remove, and a running one offers Stop.
+    state.currentInteractionId = 8;
+    workspace.render();
+    await window.happyDOM.waitUntilComplete();
+    expect(runStop.classList.contains("hidden")).toBe(false);
+    expect(runStop.textContent).toBe("Remove");
+    runStop.click();
+    await vi.waitFor(() => expect(onStopInteraction).toHaveBeenCalledWith(10, 8));
+    state.interactions.push({ ...run(9, "running"), text: "And the pricing page" });
+    state.currentInteractionId = 9;
+    workspace.render();
+    await window.happyDOM.waitUntilComplete();
+    expect(runStop.textContent).toBe("Stop");
+    expect(runStop.getAttribute("aria-label")).toBe("Stop this run");
+    expect(send.getAttribute("aria-label")).toBe("Send");
+
+    // The thread menu stops every running run and removes every queued one (#721).
+    onStopInteraction.mockClear();
+    const stopAll = window.document.querySelector("#stopAllRuns");
+    expect(stopAll.classList.contains("hidden")).toBe(false);
+    expect(stopAll.textContent).toBe("Stop all runs (4)");
+    stopAll.click();
+    await vi.waitFor(() => expect(onStopInteraction).toHaveBeenCalledTimes(4));
+    expect(onStopInteraction.mock.calls.map(([, id]) => id).sort()).toEqual([6, 7, 8, 9]);
   } finally {
     workspace.dispose();
     await window.happyDOM.close();

@@ -2640,9 +2640,7 @@ async fn admit_recursive_child(
     let attempt_admission_id = uuid::Uuid::new_v4().to_string();
     let command = CompleteInteraction {
         thread_icon_selection_eligible: false,
-        require_native_continuity: false,
-        native_history_anchor: None,
-        fresh_native_session: None,
+        thread_history: None,
         project_id: thread.project_id.map(ProjectId::value),
         product_interaction_id: interaction.id.value(),
         thread_id: thread.id.value(),
@@ -5450,9 +5448,7 @@ async fn prepare_interaction(
     };
     let command = CompleteInteraction {
         thread_icon_selection_eligible: false,
-        require_native_continuity: false,
-        native_history_anchor: None,
-        fresh_native_session: None,
+        thread_history: None,
         project_id: thread.project_id.map(ProjectId::value),
         product_interaction_id: interaction.id.value(),
         thread_id: thread.id.value(),
@@ -6095,9 +6091,7 @@ mod tests {
         let seeded = runtime
             .prepare(&CompleteInteraction {
                 thread_icon_selection_eligible: false,
-                require_native_continuity: false,
-                native_history_anchor: None,
-                fresh_native_session: None,
+                thread_history: None,
                 project_id: None,
                 product_interaction_id: child.id.value(),
                 thread_id: thread.id.value(),

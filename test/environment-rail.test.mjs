@@ -17,6 +17,7 @@ import {
   resolveEnvironmentSnapshot,
 } from "../desktop/renderer/src/environment-context.js";
 import { productWorkspaceMarkup } from "../desktop/renderer/src/product-workspace/view.js";
+import { interactionRunControl, threadActiveRuns } from "../desktop/renderer/src/product-workspace/run-state.js";
 import {
   appendLayerPath,
   rootLayerPath,
@@ -27,7 +28,6 @@ import {
   inspectorEscapeShouldClose,
   interactionStatusRenderKey,
   viewedInteractionStatus,
-  productStopTarget,
   trackedChangesLabel,
   untrackedFilesLabel,
   workspaceBreadcrumbShouldRender,
@@ -472,19 +472,21 @@ describe("desktop environment rail", () => {
     }
     expect(interactionStatusRenderKey(running, "running", "active")).toBe("8:running");
     expect(viewedInteractionStatus(running, "running", "active")).toBe("running");
+    // Each run's Stop lives on its own interaction node (#719): never on an agent's child, and
+    // a run that has not started is removed instead.
     const root = { ...running, threadId: 10, sequence: 1 };
     const child = { id: 9, threadId: 10, sequence: 2, completionStatus: "running" };
-    const state = { interactions: [root, child], actionInvocations: [{ resultInteractionId: "9", agentInvoked: true }] };
-    expect(productStopTarget(state, { id: 10 })).toBe(root);
-    expect(productStopTarget({ ...state, interactions: [{ ...root, completionStatus: "accepted" }, child] }, { id: 10 })).toBeNull();
-    // A message turn waiting for capacity (#720) is the composer's to remove.
+    const childInvocations = [{ resultInteractionId: "9", agentInvoked: true }];
+    expect(interactionRunControl(root, childInvocations)).toEqual({ run: root, verb: "Stop" });
+    expect(interactionRunControl(child, childInvocations)).toBeNull();
+    expect(interactionRunControl({ ...root, completionStatus: "accepted" }, childInvocations)).toBeNull();
     const waiting = { ...root, completionStatus: "queued", queueReason: "capacity" };
-    expect(productStopTarget({ ...state, interactions: [waiting, child] }, { id: 10 })).toBe(waiting);
-    // A user's own invoke runs beside message turns with its own Stop on its node, so the
-    // composer's Stop never targets it.
-    const userAction = { ...state, actionInvocations: [{ resultInteractionId: "9", agentInvoked: false }] };
-    expect(productStopTarget({ ...userAction, interactions: [{ ...root, completionStatus: "accepted" }, child] }, { id: 10 })).toBeNull();
-    expect(productStopTarget(userAction, { id: 10 })).toBe(root);
+    expect(interactionRunControl(waiting, childInvocations)).toEqual({ run: waiting, verb: "Remove" });
+    // A user's own invoke is a run a person stops; it is part of Stop all.
+    const userInvocations = [{ resultInteractionId: "9", agentInvoked: false }];
+    expect(interactionRunControl(child, userInvocations)).toEqual({ run: child, verb: "Stop" });
+    expect(threadActiveRuns([root, child], userInvocations)).toEqual([child, root].sort((a, b) => a.id - b.id));
+    expect(threadActiveRuns([root, child], childInvocations)).toEqual([root]);
     const stopping = { ...running, stopRequested: true };
     expect(viewedInteractionStatus(stopping, "running", "stopped")).toBe("stopping");
     expect(interactionStatusRenderKey(stopping, "running", "stopped"))

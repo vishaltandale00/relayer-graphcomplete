@@ -870,7 +870,6 @@ mod tests {
                 },
                 None,
                 false,
-                false,
             )
             .await
             .unwrap();
@@ -987,7 +986,6 @@ mod tests {
                 },
                 None,
                 false,
-                false,
             )
             .await
             .unwrap();
@@ -1070,6 +1068,182 @@ mod tests {
         );
     }
 
+    /// #719: every Send runs in parallel, so overlapping sends are admitted beside a running
+    /// message turn, and each snapshots exactly its own answers and annotations. An answer or an
+    /// annotation is consumed once: a second send that names it is refused.
+    #[tokio::test]
+    async fn overlapping_sends_each_snapshot_only_their_own_answers_and_annotations() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("product.sqlite3");
+        let store = SqliteProductStore::open(&path).await.unwrap();
+        let thread = store
+            .insert_thread_with_initial_interaction(NewThreadRecord {
+                icon_selection_eligible: true,
+                title: "Parallel sends",
+                project_id: None,
+                initial_message: "Initial",
+                harness_configuration_name: "fixture-task-system",
+                permission_profile_id: "ask",
+                model_selection: None,
+                timestamp: "2026-10-07T00:00:00Z",
+            })
+            .await
+            .unwrap();
+        // The first message still runs.
+        sqlx::query("UPDATE interactions SET completion_status='running',graph_node_id=100 WHERE id=?1")
+            .bind(thread.root_interaction_id.value())
+            .execute(&store.pool)
+            .await
+            .unwrap();
+        let action = InputAction {
+            control: InputControl::Text,
+            prompt: "Notes".into(),
+            options: vec![],
+            minimum_selections: None,
+            unsupported_fields: Default::default(),
+        };
+        let answer = |id: i64, text: &str| relayer_graph_core::SubmittedInputDraft {
+            occurrence: occurrence(id),
+            action: action.clone(),
+            value: relayer_graph_core::SubmittedInputValue::Text { text: text.into() },
+        };
+        let send = |identity: &'static str,
+                    occurrences: Option<Vec<PresentingInputOccurrence>>,
+                    digest: String,
+                    contexts: Vec<crate::product::InteractionContextIntent>,
+                    confirmations: Vec<String>,
+                    revision: Option<i64>| {
+            let store = store.clone();
+            let thread_id = thread.id;
+            async move {
+                store
+                    .insert_interaction_input(
+                        thread_id,
+                        NewInteractionInput {
+                            composer_input_occurrences: occurrences.as_deref(),
+                            text: identity,
+                            input_identity: identity,
+                            input_digest: &digest,
+                            contexts: &contexts,
+                            context_confirmation_ids: &confirmations,
+                            submitted_input_draft_revision: revision,
+                        },
+                        None,
+                        false,
+                    )
+                    .await
+            }
+        };
+        let created = |outcome: Result<InteractionInputInsertOutcome, StorageError>| match outcome {
+            Ok(InteractionInputInsertOutcome::Created(interaction)) => interaction,
+            other => panic!("a send beside a running message was not admitted: {other:?}"),
+        };
+
+        // A plain message runs beside the first.
+        let plain_digest = relayer_graph_core::interaction_input_digest("plain", &[]).unwrap();
+        created(send("plain", None, plain_digest, vec![], vec![], None).await);
+
+        // A message carrying an answer snapshots it and consumes it.
+        let revision = store
+            .commit_action_input_attachment(
+                thread.id,
+                NewActionInputAttachment {
+                    occurrence: &occurrence(300),
+                    source_node_id: 400,
+                    action: &action,
+                    value: &ActionInputValue::Text { text: "First answer".into() },
+                },
+                0,
+            )
+            .await
+            .unwrap()
+            .revision;
+        let first_answer = answer(300, "First answer");
+        let answered_digest = relayer_graph_core::interaction_input_authority_digest(
+            "answered",
+            std::slice::from_ref(&first_answer),
+        )
+        .unwrap();
+        let answered = created(
+            send("answered", Some(vec![occurrence(300)]), answered_digest.clone(), vec![], vec![], Some(revision)).await,
+        );
+        // An overlapping send that reserved the same answer is refused: it is consumed once.
+        let replayed_digest = relayer_graph_core::interaction_input_authority_digest(
+            "replayed",
+            std::slice::from_ref(&first_answer),
+        )
+        .unwrap();
+        match send("replayed", Some(vec![occurrence(300)]), replayed_digest, vec![], vec![], Some(revision)).await {
+            Err(StorageError::ActionInputDraftConflict { code: "input_draft_revision_conflict", .. }) => {}
+            other => panic!("one answer was consumed twice: {other:?}"),
+        }
+
+        // A third message carries a new answer and an annotation, while both still run.
+        let next_revision = store
+            .commit_action_input_attachment(
+                thread.id,
+                NewActionInputAttachment {
+                    occurrence: &occurrence(301),
+                    source_node_id: 400,
+                    action: &action,
+                    value: &ActionInputValue::Text { text: "Second answer".into() },
+                },
+                store.action_input_draft(thread.id).await.unwrap().revision,
+            )
+            .await
+            .unwrap()
+            .revision;
+        sqlx::query("INSERT INTO node_context_draft_resolutions(draft_id,thread_id,outcome,draft_revision,target_node_id,source_interaction_node_id,source_layer_id,target_node_json,text,resolved_at,composer_text) VALUES ('annotation',?1,'confirmed',1,7,100,200,?2,'Expand this','3','Expand this')")
+            .bind(thread.id.value())
+            .bind(r#"{"id":7,"kind":"concept","icon":"list","title":"Queue","detail":"Tasks","state":"accepted"}"#)
+            .execute(&store.pool)
+            .await
+            .unwrap();
+        let contexts = vec![crate::product::InteractionContextIntent {
+            target: crate::product::InteractionContextTarget {
+                node_id: 7,
+                source_interaction_node_id: 100,
+                source_layer_id: 200,
+            },
+            annotations: vec!["Expand this".into()],
+        }];
+        let second_answer = answer(301, "Second answer");
+        let annotated_digest = relayer_graph_core::interaction_input_authority_digest(
+            "annotated",
+            std::slice::from_ref(&second_answer),
+        )
+        .unwrap();
+        let annotated = created(
+            send(
+                "annotated",
+                Some(vec![occurrence(301)]),
+                annotated_digest,
+                contexts.clone(),
+                vec!["annotation".into()],
+                Some(next_revision),
+            )
+            .await,
+        );
+        // The annotation was consumed by that send; another send cannot take it too.
+        let again_digest = relayer_graph_core::interaction_input_digest("again", &[]).unwrap();
+        match send("again", None, again_digest, contexts, vec!["annotation".into()], None).await {
+            Err(StorageError::ContextDraftConflict { code: "context_confirmation_not_pending", .. }) => {}
+            other => panic!("one annotation was consumed twice: {other:?}"),
+        }
+
+        // Each send owns exactly its own answers and annotations.
+        let answered_input = store.interaction_input(answered.id).await.unwrap().unwrap();
+        assert_eq!(answered_input.submitted_inputs, vec![first_answer]);
+        assert!(answered_input.contexts.is_empty());
+        let annotated_input = store.interaction_input(annotated.id).await.unwrap().unwrap();
+        assert_eq!(annotated_input.submitted_inputs, vec![second_answer]);
+        assert_eq!(annotated_input.contexts.len(), 1);
+        assert!(store.interaction_consumes_context_confirmations(annotated.id).await.unwrap());
+        assert!(!store.interaction_consumes_context_confirmations(answered.id).await.unwrap());
+        assert!(store.action_input_draft(thread.id).await.unwrap().attachments.is_empty());
+        store.pool.close().await;
+    }
+
     #[tokio::test]
     async fn send_reserves_an_immutable_snapshot_and_failure_restores_a_new_draft() {
         let directory = tempfile::tempdir().unwrap();
@@ -1142,7 +1316,6 @@ mod tests {
                 },
                 None,
                 false,
-                false,
             )
             .await
             .unwrap();
@@ -1176,7 +1349,6 @@ mod tests {
                     submitted_input_draft_revision: Some(committed.revision),
                 },
                 None,
-                false,
                 false,
             )
             .await
@@ -1303,7 +1475,6 @@ mod tests {
                     submitted_input_draft_revision: Some(restored.revision),
                 },
                 None,
-                false,
                 false,
             )
             .await

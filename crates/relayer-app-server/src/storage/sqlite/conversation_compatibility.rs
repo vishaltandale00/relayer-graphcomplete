@@ -9,8 +9,6 @@ use sqlx::{Row, SqliteConnection};
 #[derive(Debug, Clone, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct ConversationCompatibility {
-    #[serde(skip)]
-    pub(crate) native_history_anchor: Option<serde_json::Value>,
     pub(crate) thread_id: i64,
     pub(crate) status: &'static str,
     pub(crate) harness_id: String,
@@ -46,7 +44,6 @@ pub(super) async fn compatibility_on(
             .fetch_one(&mut *connection)
             .await?;
     let mut result = ConversationCompatibility {
-        native_history_anchor: None,
         thread_id,
         status: "unrestricted",
         harness_id,
@@ -120,11 +117,6 @@ pub(super) async fn compatibility_on(
             uncertain = true;
         }
         result.provider_id = provider;
-        if let Some(node_id) = row.try_get::<Option<i64>, _>("graph_node_id")? {
-            result.native_history_anchor = Some(
-                serde_json::json!({"interactionNodeId": node_id, "message": row.try_get::<String, _>("text")?}),
-            );
-        }
     }
     if uncertain || (saw_execution && result.provider_id.is_none()) {
         result.status = "blocked";

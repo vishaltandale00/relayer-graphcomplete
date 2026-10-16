@@ -25,10 +25,10 @@ import { RelayerAppServerService } from "../desktop/main/services/relayer-app-se
 import { interactionModelSelection } from "../desktop/renderer/src/model-picker.js";
 import {
   composerDisabledForState,
-  composerStatusForThread,
   latestMessageTurn,
-  productStopTarget,
 } from "../desktop/renderer/src/product-workspace/workspace.js";
+import { humanTurns } from "../desktop/renderer/src/product-workspace/model.js";
+import { interactionRunControl, threadActiveRuns } from "../desktop/renderer/src/product-workspace/run-state.js";
 import {
   RECURSIVE_FIXTURE_CHILD_TASK as CHILD_TASK,
   recursiveCompleteFixtureFactory as recursiveFixtureFactory,
@@ -531,15 +531,16 @@ describe("recursive complete end to end", () => {
     expect(child.graphNodeId).toBe(observed.preparedChild);
 
     // The renderer reads the real thread view: the child is marked, so the composer follows
-    // the accepted root, Stop has no target, and the next turn inherits the root's model.
+    // the accepted root, the child offers no Stop, nothing is left for Stop all, and the next
+    // turn inherits the root's model.
     const view = await productRequest(session, `/api/state?threadId=${thread.id}`);
     expect(view.actionInvocations.find((invocation) => invocation.resultInteractionId === child.id))
       .toMatchObject({ agentInvoked: true });
     const viewedThread = { id: thread.id };
-    expect(composerStatusForThread(view, viewedThread)).toBe("accepted");
-    expect(composerDisabledForState(composerStatusForThread(view, viewedThread))).toBe(false);
+    expect(composerDisabledForState()).toBe(false);
     expect(latestMessageTurn(view, viewedThread).id).toBe(detail.interactions[0].id);
-    expect(productStopTarget(view, viewedThread)).toBeNull();
+    expect(interactionRunControl(view.interactions.find((turn) => turn.id === child.id), view.actionInvocations)).toBeNull();
+    expect(threadActiveRuns(humanTurns(view, viewedThread), view.actionInvocations)).toEqual([]);
     // The next turn's model is inherited from this turn (selectionForNextInteraction's input).
     expect(interactionModelSelection(latestMessageTurn(view, viewedThread))).toEqual(selection);
 

@@ -24,7 +24,7 @@ Pre-alpha product and executable runtime. The repository now includes:
 
 - a Rust SQLx/SQLite graph core and async loopback server with interaction-scoped capability tokens;
 - object-based TypeScript and Python clients for nodes, undirected edges, layers, actions, and submission;
-- a persistent Node harness host that loads named file-backed configurations, caches one harness object per thread, persists opaque provider resume state without graph credentials, and supports cancellation and deterministic disposal;
+- a persistent Node harness host that loads named file-backed configurations, caches one harness object per thread, runs its root completes side by side in fresh native sessions, persists opaque provider state without graph credentials, and supports cancellation and deterministic disposal;
 - graph-tool `codex.basic` and `claude.basic` harnesses using Relayer's Codex app-server bridge and the Claude Agent SDK respectively;
 - a `prime.agent` harness that passes the current graph scope through Prime Agent's run-scoped IPython host context;
 - a developer-only local Relayer Eval web application that runs test-case × harness matrices through the product app server and opens their threads in the production graph/chat workspace;
@@ -39,7 +39,7 @@ The Node runtime is split into explicit workspace packages: `@relayer/graph-clie
 - GraphComplete owns graph records, active-interaction write authority, validation, accepted-history integrity, and explicit submission. Accepted records are immutable except for ADR 0005's exact one-shot leased-invoke target transition.
 - Relayer owns a hidden, versioned personal-presentation profile. Each execution atomically pins one accepted profile completion through a control-only attachment; semantic children inherit that exact pin, and the harness renders it without adding preference records to visible response topology or exports. Published V2 adds a graph-owned Visible working state preference while V1 remains active. See [ADR 0009](docs/decisions/0009-personal-presentation-graph-attachments.md).
 - Product hosts such as Relayer own workspace lifecycle, durable product storage, activation, and user experience.
-- The Node harness host owns live per-thread harness objects and provider-session resume state, not graph rules or product lifecycle.
+- The Node harness host owns live per-thread harness objects and opaque provider state, not graph rules or product lifecycle. No root run resumes a native session (#719).
 - Provider adapters own authentication, model discovery, and provider-specific execution details. Product records use stable provider, model, harness, and permission identifiers.
 
 The implemented basic loop is:

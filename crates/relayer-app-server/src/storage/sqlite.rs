@@ -54,11 +54,6 @@ pub(crate) const QUEUED_RUN_STOPPED: &str = "Stopped before it started.";
 pub(crate) const CAPACITY_WAIT_INTERRUPTED: &str =
     "Relayer stopped before this message had capacity to start. Send it again to run it.";
 
-/// Whether thread ?1 has a message turn in progress. Message turns resume the thread's native
-/// root session, so they still run one at a time. A run started by an invoke action, whether a
-/// user clicked it or an agent launched it, starts a fresh session and runs beside them. A
-/// message turn waiting for capacity (#720) is still the thread's turn in progress.
-const MESSAGE_TURN_IN_PROGRESS: &str = "SELECT EXISTS(SELECT 1 FROM interactions turn WHERE turn.thread_id=?1 AND turn.completion_status IN ('not_started','queued','running','submitted') AND NOT EXISTS(SELECT 1 FROM action_invocations run WHERE run.result_interaction_id=turn.id))";
 
 #[derive(Clone)]
 pub(crate) struct SqliteProductStore {
