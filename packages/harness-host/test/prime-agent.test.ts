@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
+import { fileURLToPath } from "node:url";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { MAX_HARNESS_APPROVAL_TEXT_LENGTH, parseHarnessApprovalRequestInput } from "../src/approval.js";
@@ -2201,18 +2202,18 @@ describe("PrimeAgentHarness", () => {
       { name: "malformed identity", result: { truncated: false, rows: [[{ type: "layer", id: "layer:42x" }]] } },
     ];
     const python = [
-      "import asyncio, json, re, sys, textwrap, types",
+      "import asyncio, json, re, sys, textwrap",
+      "from relayer_graph import GraphNode, GraphSearchRequest",
       "cases = json.load(sys.stdin)",
-      "class GraphSearchRequest:",
-      "    def __init__(self, **kwargs): pass",
       "class FakeGraph:",
-      "    def __init__(self, response): self.response = response",
-      "    async def search(self, request): return self.response",
-      "client = types.ModuleType('relayer_graph')",
-      "client.GraphSearchRequest = GraphSearchRequest",
-      "sys.modules['relayer_graph'] = client",
+      "    def __init__(self, response): self.response = response; self.calls = 0",
+      "    async def search(self, request):",
+      "        self.calls += 1",
+      "        assert self.calls == 1",
+      "        assert request.parameters == {'title': {'type': 'string', 'value': 'When graph content becomes available'}}",
+      "        return self.response",
       "async def exercise(case):",
-      "    namespace = {'graph': FakeGraph(case['result']), 'GraphSearchRequest': GraphSearchRequest, 're': re}",
+      "    namespace = {'graph': FakeGraph(case['result']), 'GraphSearchRequest': GraphSearchRequest, 're': re, 'inspected_node': GraphNode.from_dict({'id': 29, 'kind': 'concept', 'icon': 'info', 'state': 'accepted', 'title': 'When graph content becomes available', 'detail': '<h2>Freshness acknowledged</h2>'})}",
       "    source = 'async def sample():\\n' + textwrap.indent(case['example'], '    ') + '\\n    return layer_id'",
       "    exec(compile(source, '<emitted-prime-search-example>', 'exec'), namespace)",
       "    try:",
@@ -2226,6 +2227,7 @@ describe("PrimeAgentHarness", () => {
     const executed = JSON.parse(execFileSync("python3", ["-c", python], {
       input: JSON.stringify(cases.map((entry) => ({ ...entry, example }))),
       encoding: "utf8",
+      env: { ...process.env, PYTHONPATH: fileURLToPath(new URL("../../../python/relayer-graph/src", import.meta.url)) },
     })) as Array<{ name: string; target?: number; error?: string }>;
     expect(executed[0]).toEqual({ name: "valid first cell", target: 42 });
     expect(executed.slice(1).map(({ name, error }) => ({ name, rejected: typeof error === "string" })))

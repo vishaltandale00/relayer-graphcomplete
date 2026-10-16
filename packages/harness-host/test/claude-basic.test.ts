@@ -390,6 +390,8 @@ describe("ClaudeBasicHarness", () => {
 
     expect(prompt).toContain("Graph search is available");
     expect(prompt).toContain("await graph.search(request, options)");
+    expect(prompt).toContain("value: inspectedNode.title");
+    expect(prompt).toContain("not a section heading inside authored HTML");
     expect(prompt).toContain('target: { scope: "project", id: knownProjectId }');
     expect(prompt).toContain("Never invent, guess, or discover a target ID");
   });
