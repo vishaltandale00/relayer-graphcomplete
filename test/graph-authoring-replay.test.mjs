@@ -1,3 +1,4 @@
+import { AUTHORING_REPAIR_GUIDANCE_JS, AUTHORING_REPAIR_GUIDANCE_PYTHON, finishPublishedCurrentRecipeJs, FINISH_PUBLISHED_CURRENT_RECIPE_PYTHON, READ_CURRENT_ANSWERS_JS, READ_CURRENT_ANSWERS_PYTHON } from "../packages/harness-host/src/implementations/graph-presentation-guidance.ts";
 import { currentCommunicationAuthoringRecipePython, scopedAuthoringRecipeJs, scopedAuthoringRecipePython } from "../packages/harness-host/dist/implementations/graph-presentation-guidance.js";
 import { pathToFileURL } from "node:url";
 import { spawn } from "node:child_process";
@@ -38,6 +39,164 @@ afterEach(async () => {
 });
 
 describe("replay-safe graph authoring", () => {
+  it.each(["javascript", "python"])("publishes the delivered %s Input, reads empty and delivered replies, and finalizes unchanged Current from a fresh client", async language => {
+    const directory = await mkdtemp(join(tmpdir(), "relayer-current-decision-"));
+    directories.push(directory);
+    const token = "current-decision-control";
+    const server = await startGraphServer(join(directory, "graph.sqlite3"), token, ["--temporal-schema-read", "--temporal-root-current-write"]);
+    processes.push(server.process);
+    const interaction = await controlRequest(server.url, token, "/api/control/interactions", { projectId: 41, threadId: 78, text: "Choose the constraint before planning" });
+    const capability = { url: server.url, token: interaction.graphToken, nodeId: interaction.node.id };
+    const graph = new RelayerGraphClient(capability);
+    const contract = await graph.getContract();
+    const bridge = new PrimeVisualAuthoring();
+    const host = createServer(async (request, response) => {
+      try {
+        const chunks = [];
+        for await (const chunk of request) chunks.push(chunk);
+        const { method, payload } = JSON.parse(Buffer.concat(chunks));
+        const value = method === "relayer.graph.current" ? capability : method === "relayer.graph.visual-authoring" ? await bridge.execute(payload, capability, () => {}, new AbortController().signal) : await submitPrimeLayer(payload, capability, () => {}, new AbortController().signal);
+        response.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify(value));
+      } catch (error) { response.writeHead(500).end(JSON.stringify({ error: error.message })); }
+    });
+    await new Promise(resolve => host.listen(0, "127.0.0.1", resolve));
+    const moduleUrl = pathToFileURL(join(repositoryRoot, "packages/graph-client/dist/index.js")).href;
+    const block = text => text.match(new RegExp("```" + language + "\\n([\\s\\S]*?)\\n```"))[1];
+    const environment = { RELAYER_GRAPH_URL: server.url, RELAYER_GRAPH_TOKEN: interaction.graphToken, RELAYER_NODE_ID: String(interaction.node.id),
+      PYTHONPATH: join(repositoryRoot, "python/relayer-graph/src"), SCOPED_HOST: `http://127.0.0.1:${host.address().port}`, SCOPED_CAPABILITY: JSON.stringify(capability) };
+    const pythonPrelude = SCOPED_PYTHON.split("async def main():")[0].replace("host_request(method, payload)", "host_request(method, payload=None)");
+    const run = (code, onOutput) => language === "javascript"
+      ? runRecipeProcess(process.execPath, ["--input-type=module"], code, environment, onOutput)
+      : runRecipeProcess("python3", ["-c", pythonPrelude + "async def main():\n" + code.split("\n").map(line => "    " + line).join("\n") + "\nasyncio.run(main())"], undefined, environment, onOutput);
+    try {
+      // Use the exact delivered question fragment in a minimal real draft; root attachment and Advance remain explicit.
+      const publish = language === "javascript" ? `
+import { RelayerGraphClient, html, detailCapability } from ${JSON.stringify(moduleUrl)};
+const graph = RelayerGraphClient.fromEnv();
+const author = graph.authoring("decision-v1");
+const layer = author.layer("question");
+const finding = layer.node("finding", { icon: "info", title: "Choose the constraint", detail: "Your decision changes the plan" });
+const sourceUrl = "https://example.com/evidence";
+${block(AUTHORING_REPAIR_GUIDANCE_JS)}
+layer.layout([[finding, .5, .5]], { edgeShape: "default", defaultNode: finding });
+const written = await author.write(layer);
+await graph.addAction(${interaction.node.id}, { kind: "navigate", relation: "expand", label: "Plan constraints", icon: "info", target: written.rootLayer, clientKey: "root-response" });
+await graph.advanceCurrent(written.rootLayer, 0, "publish-question");
+` : `
+from relayer_graph import GraphSession, html, action_capability
+graph = await GraphSession.current()
+author = graph.authoring("decision-v1")
+layer = author.layer("question")
+finding = layer.node("finding", icon="info", title="Choose the constraint", detail="Your decision changes the plan")
+source_url = "https://example.com/evidence"
+${block(AUTHORING_REPAIR_GUIDANCE_PYTHON)}
+layer.layout([(finding, .5, .5)], edge_shape="default", default_node=finding)
+written = await author.write(layer)
+await graph.add_navigate_action(${interaction.node.id}, "Plan constraints", written.root_layer, relation="expand", client_key="root-response", icon="info")
+await graph.advance_current(written.root_layer, expected_revision=0, operation_key="publish-question")
+`;
+      await run(publish);
+      const current = await graph.getCurrent();
+      const accepted = await graph.getLayer(current.currentLayerId);
+      const question = accepted.actions.find(action => action.kind === "input");
+      const presentationPath = `/api/control/interactions/${interaction.node.id}/live-answer-presentation/${current.currentLayerId}`;
+      const beforeProjection = await controlRead(server.url, token, presentationPath);
+      expect(beforeProjection).toMatchObject({ page: { eligibleActionIds: [question.id], current: { currentLayerId: current.currentLayerId } }, receipts: [] });
+      for (const bearer of [null, interaction.graphToken]) {
+        const response = await fetch(new URL(presentationPath, server.url), { headers: bearer ? { Authorization: `Bearer ${bearer}` } : {} });
+        expect(response.status).toBe(401);
+        await response.arrayBuffer();
+      }
+      expect(question).toMatchObject({ state: "accepted", prompt: "Which constraint should guide the next step?", control: "text" });
+      expect(accepted.nodes[0].authoredDetail.mounts.some(mount => mount.capability.kind === "input" && mount.capability.action.clientKey === question.clientKey)).toBe(true);
+      const readQuestion = target => language === "javascript" ? `import { RelayerGraphClient } from ${JSON.stringify(moduleUrl)};
+const graph = RelayerGraphClient.fromEnv();
+const question = { clientKey: ${JSON.stringify(target.clientKey)}, id: ${target.id} };
+const finding = { ref: { id: ${target.sourceNodeId} } };
+const actualWait = graph.waitForLiveAnswers.bind(graph);
+graph.waitForLiveAnswers = (cursor, timeout) => { if (answeringAction.id !== question.id) throw new Error("Selected another source's question"); console.log("WAIT:" + timeout); return actualWait(cursor, timeout); };
+${block(READ_CURRENT_ANSWERS_JS)}
+console.log(JSON.stringify({ decisions: userDecisions, cursor: answerCursor, next: await graph.getLiveAnswers(answerCursor) }));` : `from relayer_graph import GraphSession
+from types import SimpleNamespace
+graph = await GraphSession.current()
+question = SimpleNamespace(client_key=${JSON.stringify(target.clientKey)}, id=${target.id})
+finding = SimpleNamespace(ref=SimpleNamespace(id=${target.sourceNodeId}))
+actual_wait = graph.wait_for_live_answers
+async def observed_wait(cursor, timeout_seconds):
+    if answering_action["id"] != question.id:
+        raise RuntimeError("Selected another source's question")
+    print("WAIT:" + str(timeout_seconds * 1000), flush=True)
+    return await actual_wait(cursor, timeout_seconds=timeout_seconds)
+graph.wait_for_live_answers = observed_wait
+${block(READ_CURRENT_ANSWERS_PYTHON)}
+print(json.dumps({"decisions": user_decisions, "cursor": answer_cursor, "next": await graph.get_live_answers(answer_cursor)}))`;
+      const read = readQuestion(question);
+      // A short fixture-only deadline exercises expiry without spending the guide's participant window.
+      const shortRead = read.replace("Date.now() + 30_000", "Date.now() + 20").replace("time.monotonic() + 30", "time.monotonic() + 0.02");
+      const parseLastLine = output => JSON.parse(output.trim().split("\n").at(-1));
+      const empty = parseLastLine(await run(shortRead));
+      expect(empty).toMatchObject({ decisions: [], cursor: 0, next: { answers: [] } });
+      const page = await graph.getLiveAnswers();
+      let notifyWaiting;
+      const waiting = new Promise(resolve => { notifyWaiting = resolve; });
+      const reading = run(read, output => {
+        const match = output.match(/WAIT:([\d.]+)\r?\n/);
+        if (match) notifyWaiting(Number(match[1]));
+      });
+      const windowMs = await Promise.race([waiting, reading.then(() => { throw new Error("Reader returned without entering its wait"); })]);
+      // Answer after the former one-second window, while the exact delivered program is still active.
+      await new Promise(resolve => setTimeout(resolve, 1500));
+      expect((await graph.getCurrent()).lifecycle).toBe("active");
+      const receipt = await controlRequest(server.url, token, `/api/control/interactions/${interaction.node.id}/live-answers`, {
+        threadId: 78, answer: { attemptId: 1, authorityEpoch: page.authorityEpoch, expectedRevision: current.headRevision, operationKey: "answer-constraint",
+          occurrence: { presentingInteractionNodeId: interaction.node.id, presentingLayerId: current.currentLayerId, actionId: question.id }, value: { text: "Twelve nights; step-free transport" } },
+      });
+      const delivered = parseLastLine(await reading);
+      expect(delivered).toMatchObject({ decisions: [{ question: receipt.question, value: receipt.value }], cursor: receipt.sequence, next: { answers: [] } });
+      expect(windowMs).toBeGreaterThan(29_000);
+      expect(windowMs).toBeLessThanOrEqual(30_000);
+      const deliveredProjection = await controlRead(server.url, token, presentationPath);
+      expect(deliveredProjection.page.eligibleActionIds).toEqual([]);
+      expect(deliveredProjection.receipts).toHaveLength(1);
+      expect(deliveredProjection.receipts[0]).toMatchObject({ sequence: receipt.sequence, value: receipt.value });
+      expect(await graph.getContract()).toEqual(contract);
+      // A fresh process reading question two sees question one's receipt at
+      // cursor zero. It must ignore that receipt and wait for this occurrence.
+      const secondNode = new NodeObject("info", "Second decision", "A separate constraint changes the plan", "concept", "second-decision");
+      const decoyNode = new NodeObject("info", "Other question", "This question has the same source-scoped action key", "concept", "other-question");
+      await graph.submitNode(secondNode);
+      await graph.submitNode(decoyNode);
+      const connection = new EdgeObject([decoyNode, secondNode], "question-connection");
+      await graph.createEdge(connection);
+      const secondLayer = new LayerObject([decoyNode, secondNode], [connection], new LayerLayoutObject([new NodePlacementObject(decoyNode, .25, .5), new NodePlacementObject(secondNode, .75, .5)], "default"), "second-question");
+      await graph.submitLayer(secondLayer);
+      await graph.addAction(decoyNode, { kind: "input", label: "Other decision", prompt: "An unrelated question", control: "text", sourceLayer: secondLayer, clientKey: "budget" });
+      const secondQuestion = await graph.addAction(secondNode, { kind: "input", label: "Second decision", prompt: "What budget should guide the plan?", control: "text", sourceLayer: secondLayer, clientKey: "budget" });
+      await graph.addAction(secondNode, { kind: "navigate", relation: "reference", label: "Earlier decision", sourceLayer: secondLayer, target: current.currentLayerId, clientKey: "prior" });
+      await graph.addAction(interaction.node.id, { kind: "navigate", relation: "expand", label: "Plan constraints", icon: "info", target: secondLayer, clientKey: "root-response" });
+      await graph.advanceCurrent(secondLayer, current.headRevision, "second-question");
+      const secondCurrent = await graph.getCurrent();
+      let nextWaiting;
+      const secondWaiting = new Promise(resolve => { nextWaiting = resolve; });
+      const secondReading = run(readQuestion(secondQuestion), output => {
+        if (/WAIT:([\d.]+)\r?\n/.test(output)) nextWaiting();
+      });
+      await Promise.race([secondWaiting, secondReading.then(() => { throw new Error("Old receipt incorrectly satisfied the second question"); })]);
+      const secondReceipt = await controlRequest(server.url, token, `/api/control/interactions/${interaction.node.id}/live-answers`, {
+        threadId: 78, answer: { attemptId: 1, authorityEpoch: page.authorityEpoch, expectedRevision: secondCurrent.headRevision, operationKey: "answer-budget",
+          occurrence: { presentingInteractionNodeId: interaction.node.id, presentingLayerId: secondCurrent.currentLayerId, actionId: secondQuestion.id }, value: { text: "Under $4000" } },
+      });
+      expect(parseLastLine(await secondReading)).toMatchObject({ decisions: [{ question: secondReceipt.question, value: secondReceipt.value }], cursor: secondReceipt.sequence, next: { answers: [] } });
+      expect(await graph.getContract()).toEqual(contract);
+      await run(block(language === "javascript" ? finishPublishedCurrentRecipeJs(moduleUrl) : FINISH_PUBLISHED_CURRENT_RECIPE_PYTHON));
+      const final = await controlRead(server.url, token, `/api/control/interactions/${interaction.node.id}/current`);
+      expect(final).toMatchObject({ lifecycle: "succeeded", currentLayerId: secondCurrent.currentLayerId, headRevision: secondCurrent.headRevision + 1 });
+      const settledProjection = await controlRead(server.url, token, presentationPath);
+      expect(settledProjection.page.current.lifecycle).toBe("succeeded");
+      expect(settledProjection.receipts).toEqual(deliveredProjection.receipts);
+      expect(await controlRead(server.url, token, `/api/control/interactions/${interaction.node.id}/layers/${current.currentLayerId}`)).toEqual(accepted);
+    } finally { await new Promise(resolve => host.close(resolve)); }
+  }, 15_000);
   it("replays stable keys, rejects a duplicate root, discards the retargeted orphan, and submits", async () => {
     const directory = await mkdtemp(join(tmpdir(), "relayer-graph-replay-"));
     directories.push(directory);
@@ -836,6 +995,25 @@ describe("scoped artifact authoring against the real graph server", () => {
       await graph.addAction(interaction.node.id, { kind: "navigate", relation: "expand", label: "Launch site", target: written.rootLayer, clientKey: "root-response" });
       await graph.submit(interaction.node.id);
       const viewerLayer = written.layers.find((layer) => layer.renderer === "artifact");
+
+      // Execute the delivered repair example, including its literal icon, against the real acceptance seam.
+      await writeFile(join(threadFolder, "itinerary.md"), "# Shareable itinerary\nA planning draft.");
+      const exampleInteraction = await controlRequest(server.url, token, "/api/control/interactions", { projectId: 41, threadId: 77, text: "Show an itinerary" });
+      const exampleGraph = new RelayerGraphClient({ url: server.url, token: exampleInteraction.graphToken, nodeId: exampleInteraction.node.id });
+      const exampleAuthor = exampleGraph.authoring("repair-example");
+      const exampleRoot = exampleAuthor.layer("overview");
+      const exampleFinding = exampleRoot.node("finding", { icon: "info", title: "Trip plan", detail: "A shareable draft" });
+      const fragment = AUTHORING_REPAIR_GUIDANCE_JS.match(/For example, (const viewer =[\s\S]*?);\. artifactNode/)[1];
+      new Function("author", "layer", "finding", fragment)(exampleAuthor, exampleRoot, exampleFinding);
+      exampleRoot.layout([[exampleFinding, .5, .5]], { edgeShape: "default", defaultNode: exampleFinding });
+      const exampleWritten = await exampleAuthor.write(exampleRoot);
+      await exampleGraph.addAction(exampleInteraction.node.id, { kind: "navigate", relation: "expand", label: "Trip plan", target: exampleWritten.rootLayer, clientKey: "root-response" });
+      const exampleAccepted = await exampleGraph.submit(exampleInteraction.node.id);
+      expect(exampleAccepted.rootLayer.layer.state).toBe("accepted");
+      const exampleViewer = exampleWritten.layers.find(layer => layer.renderer === "artifact");
+      const exampleDetail = await controlRead(server.url, token, `/api/control/interactions/${exampleInteraction.node.id}/layers/${exampleViewer.id}`);
+      expect(exampleDetail.nodes[0]).toMatchObject({ icon: "box", artifact: { kind: "markdown" } });
+
       const accepted = await controlRead(server.url, token, `/api/control/interactions/${interaction.node.id}/layers/${viewerLayer.id}`);
       expect(accepted.layer).toMatchObject({ state: "accepted", renderer: "artifact", edges: [] });
       expect(accepted.nodes).toEqual([expect.objectContaining({ title: "Landing page", artifact: expect.objectContaining({ ...site, fingerprint: expect.stringMatching(/^sha256:[0-9a-f]{64}$/) }) })]);
@@ -952,11 +1130,11 @@ async def main():
 asyncio.run(main())
 `;
 
-async function runRecipeProcess(command, args, stdin, environment) {
+async function runRecipeProcess(command, args, stdin, environment, onOutput) {
   const child = spawn(command, args, { env: { ...process.env, ...environment }, stdio: ["pipe", "pipe", "pipe"] });
   processes.push(child);
   let stdout = "", stderr = "";
-  child.stdout.on("data", bytes => { stdout += bytes; });
+  child.stdout.on("data", bytes => { stdout += bytes; onOutput?.(stdout); });
   child.stderr.on("data", bytes => { stderr += bytes; });
   child.stdin.end(stdin);
   const code = await new Promise((resolve, reject) => { child.once("error", reject); child.once("exit", resolve); });

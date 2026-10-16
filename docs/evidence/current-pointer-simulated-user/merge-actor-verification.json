@@ -1,0 +1,528 @@
+{
+  "schemaVersion": 1,
+  "sourceDigest": "89010de1df3fd0c63e5ced1bca2d8b8bf564270715a8cc88412426332fe1758d",
+  "sourceOverlay": "merge-actor-source.json",
+  "baseCommit": "26e5fc7a4d590f5064c328ab489ce6f2732b164c",
+  "plan": "merge-actor-20261014.md#required-checkpoints",
+  "gates": [
+    {
+      "gate": "full-check",
+      "command": [
+        "npm",
+        "run",
+        "check"
+      ],
+      "exitCode": 101,
+      "durationSeconds": 623.141,
+      "log": {
+        "path": ".relayer/merge-actor-boundaries-full-check.txt",
+        "sha256": "25bf63089cdc9eb0c701e576d5c4a05166c864314521a51a6c1c0378ab7d007a",
+        "bytes": 45607
+      },
+      "sourceDigest": "89010de1df3fd0c63e5ced1bca2d8b8bf564270715a8cc88412426332fe1758d",
+      "environment": {
+        "RUST_TEST_THREADS": "1",
+        "VITEST_MAX_WORKERS": "1"
+      },
+      "result": {
+        "path": ".relayer/merge-actor-boundaries-full-check-result.json",
+        "sha256": "baf261b434d5f8181e980a61a1cbe9a3939be74247b1642eb658e3630da6bcab",
+        "bytes": 359
+      },
+      "innerOutcome": {
+        "clippy": "passed",
+        "appServerLibPassed": 392,
+        "appServerLibFailed": 1,
+        "downstream": "not reached"
+      },
+      "qualification": "FAILED. The SHA-256 split-index test observed Unavailable instead of Git. No overlapping build was launched by this task. Cause remains unestablished. The unchanged exact case later passed isolated with its original bounds; that does not make this whole command pass."
+    },
+    {
+      "gate": "native-isolation",
+      "command": [
+        "cargo",
+        "test",
+        "-p",
+        "relayer-app-server",
+        "--lib",
+        "environment::tests::shadow_worktree_diff_supports_sha256_split_indexes",
+        "--",
+        "--exact",
+        "--test-threads=1"
+      ],
+      "exitCode": 0,
+      "durationSeconds": 3.889,
+      "sourceDigest": "89010de1df3fd0c63e5ced1bca2d8b8bf564270715a8cc88412426332fe1758d",
+      "environment": {
+        "RUST_TEST_THREADS": "1",
+        "VITEST_MAX_WORKERS": "1"
+      },
+      "log": {
+        "path": ".relayer/merge-actor-boundaries-native-isolation.txt",
+        "sha256": "4e226b70a0f44cae1ffc41e1fb06c0451522f0df3b9bf9e1caed08f709f3b01f",
+        "bytes": 1285
+      },
+      "result": {
+        "path": ".relayer/merge-actor-boundaries-native-isolation-result.json",
+        "sha256": "00d437b8bd33989fdbcc13dc8392c3262d0a8f195bd0ee2ee7bedaa3c2d8b429",
+        "bytes": 438
+      },
+      "innerOutcome": {
+        "testsPassed": 1,
+        "filtered": 392
+      },
+      "qualification": "Exact failed native case; original assertions and time bounds, serial execution."
+    },
+    {
+      "gate": "build",
+      "command": [
+        "npm",
+        "run",
+        "build"
+      ],
+      "exitCode": 0,
+      "durationSeconds": 51.393,
+      "sourceDigest": "89010de1df3fd0c63e5ced1bca2d8b8bf564270715a8cc88412426332fe1758d",
+      "environment": {
+        "RUST_TEST_THREADS": "1",
+        "VITEST_MAX_WORKERS": "1"
+      },
+      "log": {
+        "path": ".relayer/merge-actor-boundaries-build.txt",
+        "sha256": "43688a9305b9790743092e78fe48897aa0e9b68f331f3fb8eb58203dbf57ec8b",
+        "bytes": 2040
+      },
+      "result": {
+        "path": ".relayer/merge-actor-boundaries-build-result.json",
+        "sha256": "b2a2751b8fc0c5d91843ec4c56f740226d4ee83a889d6aaa00e3bc993aac8269",
+        "bytes": 273
+      },
+      "innerOutcome": {
+        "runtimeBuild": "passed",
+        "rootAndWorkspaceTypeScriptBuilds": "passed"
+      }
+    },
+    {
+      "gate": "eval-web",
+      "command": [
+        "npm",
+        "run",
+        "test:eval-web"
+      ],
+      "exitCode": 1,
+      "durationSeconds": 62.384,
+      "sourceDigest": "89010de1df3fd0c63e5ced1bca2d8b8bf564270715a8cc88412426332fe1758d",
+      "environment": {
+        "RUST_TEST_THREADS": "1",
+        "VITEST_MAX_WORKERS": "1"
+      },
+      "log": {
+        "path": ".relayer/merge-actor-boundaries-eval-web.txt",
+        "sha256": "e9a5df666a31542edf96296980c882ba554bfd4277f9f1b6d449cc96b8dde195",
+        "bytes": 1253
+      },
+      "result": {
+        "path": ".relayer/merge-actor-boundaries-eval-web-result.json",
+        "sha256": "a2d5db205cbd053739a29f3c4cccf2922b457c70bae07a60342e8792a15cc0e9",
+        "bytes": 281
+      },
+      "innerOutcome": {
+        "passedChapters": [
+          "interrupted startup cleanup"
+        ],
+        "failure": "graph readiness timeout before real host ready; Current chapters not reached"
+      }
+    },
+    {
+      "gate": "startup-diagnostic",
+      "command": [
+        "node",
+        ".relayer/merge-actor-startup-diagnostic.mjs"
+      ],
+      "exitCode": 0,
+      "durationSeconds": 3.49,
+      "sourceDigest": "89010de1df3fd0c63e5ced1bca2d8b8bf564270715a8cc88412426332fe1758d",
+      "environment": {
+        "RUST_TEST_THREADS": "1",
+        "VITEST_MAX_WORKERS": "1"
+      },
+      "log": {
+        "path": ".relayer/merge-actor-boundaries-startup-diagnostic.txt",
+        "sha256": "01933c28fc962014770ac0af939d4b9aadeaccab5e9f1017f0ac0c7d8ad790bc",
+        "bytes": 384
+      },
+      "result": {
+        "path": ".relayer/merge-actor-boundaries-startup-diagnostic-result.json",
+        "sha256": "cc962489a43df46d6b2a978c76ffcdd41881b2f5397944d9c77f8d40e6307121",
+        "bytes": 299
+      },
+      "innerOutcome": {
+        "passed": true,
+        "startupTimeoutMs": 10000,
+        "graphReadinessOutputMsAfterSpawn": 1970,
+        "qualification": "Partial isolated graph/runtime startup; no configured harnesses/full Eval host, no original failure cause established."
+      }
+    },
+    {
+      "gate": "eval-web-green",
+      "command": [
+        "npm",
+        "run",
+        "test:eval-web"
+      ],
+      "exitCode": 0,
+      "durationSeconds": 287.508,
+      "sourceDigest": "89010de1df3fd0c63e5ced1bca2d8b8bf564270715a8cc88412426332fe1758d",
+      "environment": {
+        "RUST_TEST_THREADS": "1",
+        "VITEST_MAX_WORKERS": "1"
+      },
+      "log": {
+        "path": ".relayer/merge-actor-boundaries-eval-web-green.txt",
+        "sha256": "c5937a8fd14a29c0dc48cbabd2bda11451b066a1c0e59d0cf1b70c2551fd5ee9",
+        "bytes": 5753
+      },
+      "result": {
+        "path": ".relayer/merge-actor-boundaries-eval-web-green-result.json",
+        "sha256": "167852f5538979c5ea765f85098c2341d43f44fae0c6028dcbbaa35a28818a01",
+        "bytes": 282
+      },
+      "innerOutcome": {
+        "passChapters": [
+          "interrupted startup: pending native child terminated and profile lock released",
+          "real index human lifecycle: initial graph, finish/export RPCs, process restart, persisted task/read-only review; disconnected actor rejected before candidate creation",
+          "host: real fixture, tab independence, review authority, judge/trace pages, shutdown and restart",
+          "Eval Settings: production Providers, login/cancel/reconnect, model refresh, persisted families/defaults and Harnesses (fake provider; no inference)",
+          "human task: live composer, recorded graph, two completions, finish, read-only review, annotation and export",
+          "actor dispatch race: real renderer redraw requires fresh observation; trusted activation, scroll and document rewrite failures stay terminal",
+          "actor native select: opened-only explicit accessibility, exact enabled unique labels, normal input/change, closed/unowned/stale/presentation/oversized rejection",
+          "actor redraw action: production refresh detached the original and exact replacement activation succeeded",
+          "actor redraw breadcrumb: production refresh detached the original and exact replacement activation succeeded",
+          "actor diagnostic capture: actual Playwright archive, errors, recovery decisions, action correlation and failure screenshots; no raw capability",
+          "setup revisions: actual dashboard publication, predecessor/human lineage, selection, explicit promotion, reopen and original run/export unchanged",
+          "judge config file: selected repository YAML, file-only configuration, exact file snapshot and motivating feedback publication",
+          "actor dispatch race: real renderer redraw requires fresh observation; trusted activation, scroll and document rewrite failures stay terminal",
+          "actor native select: opened-only explicit accessibility, exact enabled unique labels, normal input/change, closed/unowned/stale/presentation/oversized rejection",
+          "actor redraw action: production refresh detached the original and exact replacement activation succeeded",
+          "actor redraw breadcrumb: production refresh detached the original and exact replacement activation succeeded",
+          "actor dispatch race: real renderer redraw requires fresh observation; trusted activation, scroll and document rewrite failures stay terminal",
+          "actor native select: opened-only explicit accessibility, exact enabled unique labels, normal input/change, closed/unowned/stale/presentation/oversized rejection",
+          "actor redraw action: production refresh detached the original and exact replacement activation succeeded",
+          "actor redraw breadcrumb: production refresh detached the original and exact replacement activation succeeded",
+          "independent completion selector: actual form, exact revision/export pin, release locking and unchanged defaults",
+          "evaluator release: file-only completion publication, explicit three-revision release, real form submission with frozen run/export pins and exact stopping evidence; unchanged defaults (fixture inference)",
+          "actor dispatch race: real renderer redraw requires fresh observation; trusted activation, scroll and document rewrite failures stay terminal",
+          "actor native select: opened-only explicit accessibility, exact enabled unique labels, normal input/change, closed/unowned/stale/presentation/oversized rejection",
+          "actor redraw action: production refresh detached the original and exact replacement activation succeeded",
+          "actor redraw breadcrumb: production refresh detached the original and exact replacement activation succeeded",
+          "calibration: frozen native human label/evidence, tuning membership, pinned actor comparison, real second selected-revision run, independent human scores, export/reopen",
+          "task actor: dashboard configuration, production screenshots/node selection/composer/Send/invoke, three-completion admission, active read-only human grading isolated from actor, export (fixture inference)",
+          "actor input: visible authored input, draft commit and composer Send through real product routes with preserved answer evidence",
+          "current-pointer actor (native input): two real Advances with a live UI answer consumed through the candidate SDK, sealed input unchanged, response-loss reconciliation, one inference/one admission, ordered screenshot/reaction export, fresh settled decision, hidden/zero-width exclusion, capture cancellation/race, historical Delivered after navigation/reload, composer exclusion and ordinary navigation pin exclusion (fixture inference)",
+          "current-pointer actor (authored input): two real Advances with a live UI answer consumed through the candidate SDK, sealed input unchanged, response-loss reconciliation, one inference/one admission, ordered screenshot/reaction export, fresh settled decision, hidden/zero-width exclusion, capture cancellation/race, historical Delivered after navigation/reload, composer exclusion and ordinary navigation pin exclusion (fixture inference)",
+          "judge: isolated context, exact execution/turn readiness, viewport/full capture and restoration",
+          "human persistence: native product restart, task-service reopen, accepted turns and verified route preserved"
+        ],
+        "currentPointerVariants": {
+          "native": {
+            "validObservationRevisions": [
+              1,
+              1,
+              1,
+              1,
+              2
+            ],
+            "captureGaps": []
+          },
+          "authored": {
+            "validObservationRevisions": [
+              1,
+              1,
+              1,
+              1,
+              2
+            ],
+            "captureGaps": []
+          }
+        },
+        "paidInferenceCalls": 0
+      }
+    },
+    {
+      "gate": "compiled-runtime",
+      "command": [
+        "npm",
+        "run",
+        "test:eval-compiled-runtime"
+      ],
+      "exitCode": 1,
+      "durationSeconds": 136.402,
+      "sourceDigest": "89010de1df3fd0c63e5ced1bca2d8b8bf564270715a8cc88412426332fe1758d",
+      "environment": {
+        "RUST_TEST_THREADS": "1",
+        "VITEST_MAX_WORKERS": "1"
+      },
+      "log": {
+        "path": ".relayer/merge-actor-boundaries-compiled-runtime.txt",
+        "sha256": "90404142cdb5495a1001fc8a3d979a358a546988bf27ea0155b3cddc14b6b697",
+        "bytes": 1502
+      },
+      "result": {
+        "path": ".relayer/merge-actor-boundaries-compiled-runtime-result.json",
+        "sha256": "6c8332a56161ee842d62137513c5b47ae359ce52dd3f717beae9e0696f413259",
+        "bytes": 295
+      },
+      "innerOutcome": {
+        "testsPassed": 11,
+        "testsFailed": 1,
+        "failure": "rich attached temporal/replay JS communication recipe exceeded unchanged15s test bound; whole attempt failed"
+      }
+    },
+    {
+      "gate": "compiled-isolation",
+      "command": [
+        "npm",
+        "run",
+        "test:eval-compiled-runtime",
+        "--",
+        "-t",
+        "\"withPrior\":false,\"temporal\":true,\"replay\":true,\"attached\":true,\"rich\":true"
+      ],
+      "exitCode": 0,
+      "durationSeconds": 19.779,
+      "sourceDigest": "89010de1df3fd0c63e5ced1bca2d8b8bf564270715a8cc88412426332fe1758d",
+      "environment": {
+        "RUST_TEST_THREADS": "1",
+        "VITEST_MAX_WORKERS": "1"
+      },
+      "log": {
+        "path": ".relayer/merge-actor-boundaries-compiled-isolation.txt",
+        "sha256": "bd5d4e615a9f11ce89b8e8d229717e7300fb52b3d9182c1e581eb5a32b9643f4",
+        "bytes": 471
+      },
+      "result": {
+        "path": ".relayer/merge-actor-boundaries-compiled-isolation-result.json",
+        "sha256": "ab7da49e7f7ef6e3c97f66a15226540c0e21434c7785df7d4648424b71467ca9",
+        "bytes": 407
+      },
+      "innerOutcome": {
+        "testsPassed": 1,
+        "filtered": 11,
+        "scenarioDurationSeconds": 12.26,
+        "testTimeoutMs": 15000,
+        "qualification": "Exact failed scenario; unchanged source, assertions and bounds. Original timeout cause unestablished."
+      }
+    },
+    {
+      "gate": "compiled-runtime-final",
+      "command": [
+        "npm",
+        "run",
+        "test:eval-compiled-runtime"
+      ],
+      "exitCode": 0,
+      "durationSeconds": 118.235,
+      "sourceDigest": "89010de1df3fd0c63e5ced1bca2d8b8bf564270715a8cc88412426332fe1758d",
+      "environment": {
+        "RUST_TEST_THREADS": "1",
+        "VITEST_MAX_WORKERS": "1"
+      },
+      "log": {
+        "path": ".relayer/merge-actor-boundaries-compiled-runtime-final.txt",
+        "sha256": "3083aca3f4c858b327551b69228a4523607a23b5496e498238049ac6ebae9822",
+        "bytes": 382
+      },
+      "result": {
+        "path": ".relayer/merge-actor-boundaries-compiled-runtime-final-result.json",
+        "sha256": "29a906ca9274ba50f11b461fc7b89bf22d12884d487e10b3fbebbf81302bb589",
+        "bytes": 295
+      },
+      "innerOutcome": {
+        "filesPassed": 1,
+        "testsPassed": 12,
+        "testsFailed": 0,
+        "testTimeoutMs": 15000
+      }
+    }
+  ],
+  "focusedAndRetainedAttempts": [
+    {
+      "artifact": {
+        "path": ".relayer/merge-actor-boundaries-warm-final-v2.txt",
+        "sha256": "59c7dde3c20c2e6ea058742b91a55948dc70b86c0ca560645e9861dc9bc978e7",
+        "bytes": 259
+      },
+      "outcome": "PASS:119 tests in two files;9.84s. Final production source and tests; proof-helper-only changes afterward do not occur in this in-process closure."
+    },
+    {
+      "artifact": {
+        "path": ".relayer/merge-actor-boundaries-recovery-red.txt",
+        "sha256": "151f0956096c2bc1266135dc5af0293aa02e8cd2eba2bbd479170dfcb2c46019",
+        "bytes": 2062
+      },
+      "outcome": "FAILED: initial fixture count issue alongside repeated recovery defect; fixture count corrected separately."
+    },
+    {
+      "artifact": {
+        "path": ".relayer/merge-actor-boundaries-recovery-red-v2.txt",
+        "sha256": "c07efe41d3a7da0350ec2fb072e9494158275d33487c6416f6495510f84d8ef5",
+        "bytes": 1904
+      },
+      "outcome": "FAILED:2failed/2passed; repeated stale recovery and extra capture after last action slot."
+    },
+    {
+      "artifact": {
+        "path": ".relayer/merge-actor-boundaries-recovery-green.txt",
+        "sha256": "49c59af6e22570fbe751fdcb698394eed5eb4566bab6971cf3b192e5d410ff62",
+        "bytes": 269
+      },
+      "outcome": "PASS:focused recovery boundaries; later complete119-case run supersedes for final source."
+    },
+    {
+      "artifact": {
+        "path": ".relayer/merge-actor-boundaries-receipt-red.txt",
+        "sha256": "5e2da150b662b2e9f9aa0fee0394aac7d96a08766371c6c3771a72dc391ae06c",
+        "bytes": 2135
+      },
+      "outcome": "FAILED:missing durable recovered receipt evidence."
+    },
+    {
+      "artifact": {
+        "path": ".relayer/merge-actor-boundaries-receipt-green.txt",
+        "sha256": "12fdc2eb2947d34385a8fd95a5fbf2ad961b7b8b08e63662b5682753f821c98f",
+        "bytes": 1259
+      },
+      "outcome": "FAILED:8passed/1failed; persistence error surfaced400 before safe503 repair."
+    },
+    {
+      "artifact": {
+        "path": ".relayer/merge-actor-boundaries-browser-red.txt",
+        "sha256": "61d000fef66e9dde80e5ef01850d889d7d9f696b10c69813e44e13e8cddf1b47",
+        "bytes": 1298
+      },
+      "outcome": "FAILED:old same-revision dedup missed recovered Delivered and timed out."
+    },
+    {
+      "artifact": {
+        "path": ".relayer/merge-actor-boundaries-current-browser.txt",
+        "sha256": "8a954d87ede2105cdcda63cc940a03e4ac9620b4732c80b1f43ec7c87321544a",
+        "bytes": 1829
+      },
+      "outcome": "FAILED:authored chapter timed out on wrong Close ID; native chapter passed at intermediate helper source."
+    },
+    {
+      "artifact": {
+        "path": ".relayer/merge-actor-boundaries-current-browser-v2.txt",
+        "sha256": "a6009fc06fdb6899222cdf97e92eff341275a364fd919c217f9c92febbabbbb2",
+        "bytes": 759
+      },
+      "outcome": "FAILED:strict valid observations/receipt passed but blanket no-gap assertion rejected a legitimate status-transition capture race."
+    },
+    {
+      "artifact": {
+        "path": ".relayer/merge-actor-boundaries-current-browser-v3.txt",
+        "sha256": "49b9e2f0677b42c8606137def5a45b767384a00fd7f912b92ffc5a8e882efca6",
+        "bytes": 1879
+      },
+      "outcome": "FAILED:authored remount fixture assumed close/reopen detaches, while actual renderer preserves the mount; native chapter passed."
+    },
+    {
+      "artifact": {
+        "path": ".relayer/merge-actor-boundaries-browser-authored-diagnostic.txt",
+        "sha256": "f2416a73204fc418c83da5b7a78497eab3615d39ad805507a7e89bfdd7e0be8b",
+        "bytes": 1615
+      },
+      "outcome": "FAILED:stage diagnostic confirms remount wait."
+    },
+    {
+      "artifact": {
+        "path": ".relayer/merge-actor-boundaries-browser-authored-v2.txt",
+        "sha256": "0fad9d180adec5f7db1911718adeb631a051fd91ea4695a03929c3ace6b90d17",
+        "bytes": 1326
+      },
+      "outcome": "FAILED:disconnected fixture layer, runtime_failure."
+    },
+    {
+      "artifact": {
+        "path": ".relayer/merge-actor-boundaries-browser-authored-v3.txt",
+        "sha256": "0fd63afa18da94a83f224cb1616a5529d6666ca0d9363cd5393e8c66a3118850",
+        "bytes": 1510
+      },
+      "outcome": "FAILED:diagnostic proves disconnected1/2-node layer."
+    },
+    {
+      "artifact": {
+        "path": ".relayer/merge-actor-boundaries-browser-authored-v4.txt",
+        "sha256": "387f73b358f58df8db93ea40389cf97697ace9b25808a5c9eea06b38e3d7e1d8",
+        "bytes": 1450
+      },
+      "outcome": "FAILED:fixture used nonexistent graph.submitEdge API."
+    },
+    {
+      "artifact": {
+        "path": ".relayer/merge-actor-boundaries-browser-authored-v5.txt",
+        "sha256": "a0bc4a7b99204d1096b72b171519cfdaa4932c4d78fbe57f181ee771993d3e1c",
+        "bytes": 866
+      },
+      "outcome": "PASS:actual authored Current proof at final helper source; connected remount and registered navigation, valid revisions[1,1,1,1,2],gap list empty on this attempt; no paid calls."
+    },
+    {
+      "artifact": {
+        "path": ".relayer/merge-actor-boundaries-browser-green.txt",
+        "sha256": "01a5b25b2b766c80f56eda3627481636584844fe4d21f7a4a0f921c364a60d0f",
+        "bytes": 441
+      },
+      "outcome": "PASS:actual native Current proof at intermediate helper source; canonical final run required separately."
+    }
+  ],
+  "artifacts": [
+    {
+      "path": ".relayer/merge-actor-boundaries-startup-diagnostic.json",
+      "sha256": "a6a3a900447db5d2413637201db2ff03db346b3b8b713d6483e38faba89cebca",
+      "bytes": 506
+    },
+    {
+      "path": ".relayer/merge-typecheck-hosted-jobs.json",
+      "sha256": "f9f720743fbe64e08615df631a8adb59c1e811daafd9c1b2cdc30930e40e032e",
+      "bytes": 45813
+    },
+    {
+      "path": ".relayer/merge-typecheck-hosted-typescript-job-log.txt",
+      "sha256": "cdab2de72ea50729940667bbd3dd7780806f0dd5626123f30d6d5a78c9cebfbc",
+      "bytes": 39312
+    },
+    {
+      "path": ".relayer/merge-typecheck-hosted-rust-job-log.txt",
+      "sha256": "67dfc4363df828303e969608d4ba98f387748749afd57898df3c32fd6d04104a",
+      "bytes": 195524
+    },
+    {
+      "path": ".relayer/merge-typecheck-hosted-prime-job-log.txt",
+      "sha256": "5238bc328086402da5a4fbccac106d9549da4d8c9a19b6c5b7189688603840e5",
+      "bytes": 49416
+    },
+    {
+      "path": ".relayer/merge-typecheck-hosted-vitest-job-log.txt",
+      "sha256": "795ed0ec2eca5b39aecb7552b79da141b4862ce6b59bfddaa0320a37b95c806f",
+      "bytes": 305323
+    }
+  ],
+  "priorHosted": {
+    "head": "26e5fc7a4d590f5064c328ab489ce6f2732b164c",
+    "run": "https://github.com/vishaltandale00/relayer-graphcomplete/actions/runs/38653757201",
+    "conclusion": "success",
+    "native": {
+      "passed": 776,
+      "failed": 0,
+      "ignored": 0,
+      "suiteResults": 30
+    },
+    "vitest": {
+      "passed": 4247,
+      "failed": 0,
+      "skipped": 34
+    },
+    "qualification": "Historical exact26e CI; does not certify the seven current source changes. Fresh exact-head CI/freshness required after push."
+  },
+  "qualification": "Local full check remains FAILED; isolated or hosted proof is recorded separately. No paid inference, quality, standard startup/performance or release claim."
+}

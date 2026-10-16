@@ -7,10 +7,14 @@ import { stopRunFixture, waitFor } from "../test/support/stop-run-fixture.mjs";
 import assert from "node:assert/strict";
 
 const evidence = resolve(process.env.RELAYER_STOP_EVIDENCE_DIR || ".relayer/evidence/issue-506-stop");
-const profile = mkdtempSync(join(tmpdir(), "relayer-stop-electron-"));
+const profile = process.env.RELAYER_STOP_ELECTRON_PROFILE || mkdtempSync(join(tmpdir(), "relayer-stop-electron-"));
+const resultFile = process.env.RELAYER_STOP_RESULT_FILE;
 app.setPath("userData", profile);
 app.setName("Relayer Stop verification");
 app.commandLine.appendSwitch("disable-gpu");
+// The final window closes before asynchronous fixture reset. Only the explicit
+// exit below may finish this proof, after its final receipt is written.
+app.on("window-all-closed", () => {});
 let window;
 let fixture;
 let exitCode = 1;
@@ -70,12 +74,16 @@ async function main() {
   console.log(JSON.stringify({ passed: true, evidence, results }));
   exitCode = 0;
 }
-void app.whenReady().then(main).catch(async (error) => {
+void app.whenReady().then(async () => {
+  if (resultFile) await writeFile(resultFile, JSON.stringify({ passed: false, error: "Stop proof teardown has not completed." }));
+  await main();
+}).catch(async (error) => {
   console.error(error);
   if (window && !window.isDestroyed()) await capture("failure").catch(() => {});
 }).finally(async () => {
   window?.destroy();
   await fixture?.close();
-  await rm(profile, { recursive: true, force: true });
+  if (!process.env.RELAYER_STOP_ELECTRON_PROFILE) await rm(profile, { recursive: true, force: true });
+  if (resultFile) await writeFile(resultFile, JSON.stringify({ passed: exitCode === 0 }));
   app.exit(exitCode);
 });

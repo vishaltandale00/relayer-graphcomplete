@@ -1,0 +1,181 @@
+{
+  "baseline": {
+    "case": "interactive.everyday.europe-trip",
+    "candidate": "gpt-6-luna",
+    "actor": "gpt-5.6-luna",
+    "actorSetup": "setup-98dee801-7d74-4071-81b5-3b4190d3cf4c",
+    "source": "18c46db76ec9a70855836d64e5849b3802f154be",
+    "completions": 1,
+    "candidateNativeToolCalls": 33,
+    "observedFailureOrigins": {
+      "scope_validation": 1,
+      "detail_compilation": 1,
+      "program_edit_missing": 1,
+      "orphan_draft": 1,
+      "empty_program_edits": 1,
+      "index_unavailable": 1
+    },
+    "observedAuthoringOrigins": 5,
+    "nonterminalAdvances": 0,
+    "workingObservations": 0,
+    "liveAnswerReceipts": 0,
+    "scope": "visible native failure origins counted once per tool output; not an exhaustive total or normalized automatic metric"
+  },
+  "runs": [
+    {
+      "label": "first",
+      "taskId": "human-5bca6640-83b3-43fa-8439-efb6e01a17f0",
+      "sourceDigest": "ce8d344a330dbb5024b8cc38f372f85188abb64924d08a1413a36d08a0d95361",
+      "status": "completed",
+      "completions": 2,
+      "exportSha256": "sha256:95af326c4a2e0cbbebcbe34c6d1254b5a3f500ed5d5a5e4b9027c56052ff335c",
+      "canonical": [
+        {
+          "root": 21,
+          "history": [
+            {
+              "revision": 0,
+              "transition": "initial",
+              "layer": null,
+              "lifecycle": "active"
+            },
+            {
+              "revision": 1,
+              "transition": "advance",
+              "layer": 6,
+              "lifecycle": "active"
+            },
+            {
+              "revision": 2,
+              "transition": "advance",
+              "layer": 8,
+              "lifecycle": "active"
+            },
+            {
+              "revision": 3,
+              "transition": "return",
+              "layer": 8,
+              "lifecycle": "succeeded"
+            }
+          ],
+          "liveAnswerReceipts": 1
+        },
+        {
+          "root": 26,
+          "history": [
+            {
+              "revision": 0,
+              "transition": "initial",
+              "layer": null,
+              "lifecycle": "active"
+            },
+            {
+              "revision": 1,
+              "transition": "advance",
+              "layer": 9,
+              "lifecycle": "active"
+            },
+            {
+              "revision": 2,
+              "transition": "advance",
+              "layer": 10,
+              "lifecycle": "active"
+            },
+            {
+              "revision": 3,
+              "transition": "return",
+              "layer": 10,
+              "lifecycle": "succeeded"
+            }
+          ],
+          "liveAnswerReceipts": 0
+        }
+      ],
+      "native": [
+        {
+          "file": "rollout-2026-10-13T17-24-35-01a13727-26ce-7a82-854f-4a9a68430d41.jsonl",
+          "sha256": "9e22b060a82224eba47b60f8784455913ddf5c5527abfeaf3a2cbc2ef7e9080f",
+          "toolCalls": 27,
+          "observedAuthoringFailureOutputs": [
+            {
+              "at": "2026-10-13T21:25:34.573Z",
+              "tool": "exec",
+              "codes": [
+                "GraphApiError",
+                "GraphAuthoringWriteError",
+                "unsupported_icon"
+              ]
+            },
+            {
+              "at": "2026-10-13T21:25:37.782Z",
+              "tool": "exec",
+              "codes": [
+                "GraphAuthoringValidationError"
+              ]
+            },
+            {
+              "at": "2026-10-13T21:25:45.160Z",
+              "tool": "exec",
+              "codes": [
+                "GraphApiError",
+                "GraphAuthoringWriteError",
+                "unsupported_icon"
+              ]
+            }
+          ],
+          "liveAnswerReadCalls": []
+        }
+      ],
+      "actorErrors": []
+    },
+    {
+      "label": "corrected",
+      "taskId": "human-16d93d36-7ead-4d1b-949a-8dca06105045",
+      "sourceDigest": "a9420890aeafbfca0ce7047978742c98c59a81de6a26178ed65ad4a079d2d038",
+      "status": "interrupted",
+      "completions": 1,
+      "exportSha256": "sha256:2e12f1e01903f2966c4f74f2c3b323fed36c3594f182f47524d53fa5be777879",
+      "canonical": [
+        {
+          "root": 33,
+          "history": [
+            {
+              "revision": 0,
+              "transition": "initial",
+              "layer": null,
+              "lifecycle": "active"
+            },
+            {
+              "revision": 1,
+              "transition": "advance",
+              "layer": 12,
+              "lifecycle": "active"
+            },
+            {
+              "revision": 2,
+              "transition": "return",
+              "layer": 14,
+              "lifecycle": "succeeded"
+            }
+          ],
+          "liveAnswerReceipts": 0
+        }
+      ],
+      "native": [
+        {
+          "file": "rollout-2026-10-13T17-40-57-01a13736-23d2-73b1-9ce5-33855583558e.jsonl",
+          "sha256": "984a13d1fb7e5a398810d98465ed13ec6140c0b74bbac9258c5fda711a1ecf63",
+          "toolCalls": 10,
+          "observedAuthoringFailureOutputs": [],
+          "liveAnswerReadCalls": []
+        }
+      ],
+      "actorErrors": [
+        {
+          "category": "runtime_failure",
+          "phase": "act_current"
+        }
+      ]
+    }
+  ]
+}

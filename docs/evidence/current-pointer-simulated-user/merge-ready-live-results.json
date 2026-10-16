@@ -1,0 +1,147 @@
+{
+  "schemaVersion": 1,
+  "taskId": "human-ba2eb609-2ef7-4bb2-9da7-f1852928b474",
+  "caseId": "interactive.everyday.europe-trip",
+  "catalogCommit": "2ae3ff3a24ea74d7f73fab5ebd5304e7ba49ffe4",
+  "configuration": {
+    "candidate": "codex-basic",
+    "revision": 18,
+    "model": "gpt-6-luna",
+    "personalPresentationVersion": "personal-presentation-v6",
+    "actualAttachment": {
+      "interactionNodeId": 48,
+      "versionInteractionNodeId": 42,
+      "title": "Personal presentation V6",
+      "rootLayerId": 18
+    },
+    "actorSetupRevisionId": "setup-98dee801-7d74-4071-81b5-3b4190d3cf4c",
+    "actorModel": "gpt-5.6-luna",
+    "completionJudgeModel": "gpt-5.6-sol",
+    "maxCandidateCompletions": 3
+  },
+  "outcomes": {
+    "candidateCompletions": 1,
+    "status": "completed",
+    "termination": "satisfied",
+    "actorSatisfaction": 3,
+    "satisfactionScale": "1-4",
+    "actorEndpoint": "incomplete",
+    "judgeVerdict": "incomplete",
+    "candidateLifecycle": "succeeded",
+    "current": [
+      [
+        0,
+        "initial",
+        null,
+        "active"
+      ],
+      [
+        1,
+        "advance",
+        19,
+        "active"
+      ],
+      [
+        2,
+        "return",
+        20,
+        "succeeded"
+      ]
+    ],
+    "acceptedInputActions": 1,
+    "acceptedAnswerReceipts": 1,
+    "acceptedNodeRejections": 0,
+    "visibleLocalAuthoringFailureOutputs": 1,
+    "localError": "detail_template_nested (repaired before Return)",
+    "actorActions": 6,
+    "actorActionsCompleted": 6,
+    "failedActorActions": 0,
+    "fatalActorErrors": 0
+  },
+  "answer": {
+    "sequence": 2,
+    "currentRevision": 1,
+    "actionId": 22,
+    "acceptedAt": "2026-10-14T20:50:53.220Z",
+    "readCallStartedAt": "2026-10-14T20:50:44.135Z",
+    "readOutputAt": "2026-10-14T20:50:53.519Z",
+    "waitBudgetMs": 30000,
+    "readObservedAcceptedValue": true,
+    "cursor": 2,
+    "incorporationEvidence": "Final graph and itinerary explicitly use received group size, origin, duration, budget, mobility needs, interests and hotel-change limit. Exact dates and approval remain unresolved.",
+    "terminalSubmitOutputAt": "2026-10-14T20:52:00.582Z",
+    "sealedInputUnchanged": true,
+    "sealedContractDigest": "sha256:v1:2292831fed32084c93bf3aa766622cbeefe0f257058835b7b81bbf6340bdcc29"
+  },
+  "native": {
+    "file": "rollout-2026-10-14T16-50-18-01a13c2e-1e9d-7f13-ab22-8beb35435d61.jsonl",
+    "sha256": "96bcf68a75432478f34d249c7136cc74d6da184dea1bf2b77c3bf8c9123ecd36",
+    "toolCalls": 9,
+    "toolOutputs": 9,
+    "observedFailureSignals": [
+      {
+        "at": "2026-10-14T20:51:50.054Z",
+        "callId": "call_63228d21b0ff467a9239dac1e8dddf7a",
+        "signals": {
+          "detail_template_nested": 2,
+          "native_exception": 1
+        }
+      }
+    ],
+    "allOutputEnvelopesInspected": true,
+    "allGraphAuthoringAndAnswerOutputsReadInFull": true,
+    "fullOutputFailureSignalScan": true,
+    "webResearchBodiesNotExhaustivelyFactChecked": true
+  },
+  "export": {
+    "canonicalSha256": "sha256:74658229d19ddd41b0de5c04214dfd142bcada7d13d5756ac7902ae1b8f5cb42",
+    "verifiedAgainstFrozenBundle": true,
+    "screenshotCount": 7
+  },
+  "artifact": {
+    "fileName": "europe-friends-trip.md",
+    "sha256": "d7c7ed89fee6bdbe4358518d681f68b2582a62e13fa40a88b14924aa993e091b",
+    "bytes": 7678,
+    "actorCouldInspectContents": false
+  },
+  "shutdown": {
+    "ownedProfileProcessesRemaining": [],
+    "lockRemovedAfterDeadOwnerCheck": true,
+    "readMode": "mode=ro (includes WAL)",
+    "current": [
+      [
+        0,
+        "initial",
+        null,
+        "active"
+      ],
+      [
+        1,
+        "advance",
+        19,
+        "active"
+      ],
+      [
+        2,
+        "return",
+        20,
+        "succeeded"
+      ]
+    ],
+    "receipts": [
+      [
+        2,
+        1,
+        22
+      ]
+    ]
+  },
+  "limits": [
+    "One same-case confirmation; no statistical, causal, overall error-rate, task-quality or calibrated graph-quality improvement claim.",
+    "Current V6 selection differs from the previous V4 run, so this is functional confirmation rather than an isolated ablation.",
+    "Endpoint remains incomplete: exact dates, participant approval, practical access details and agreed delivery remain unresolved.",
+    "Uses the retained private 60-second startup allowance; standard startup and TTFG latency are not qualified.",
+    "Candidate exception counting is manually inspected output-level evidence, not exhaustive telemetry.",
+    "Original graph input remains sealed; Answer is supplemental evidence, not another completion admission."
+  ]
+}

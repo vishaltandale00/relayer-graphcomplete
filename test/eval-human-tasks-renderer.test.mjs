@@ -37,6 +37,21 @@ it("keeps live work visible, collapses older sessions without deleting them, and
     await vi.waitFor(() => expect(document.querySelector("#humanOpen")?.textContent).toContain("Open graph review"));
     document.querySelector("#humanOpen").click();
     expect(api.openHumanTask).toHaveBeenCalledWith("task-1", true);
+    // A delayed status refresh may finish after the user reopens New task.
+    let releaseStatus;
+    api.humanTask = vi.fn(id => new Promise(resolve => { releaseStatus = () => resolve({ ...sessions.find(item => item.id === id), status: "completed" }); }));
+    document.querySelector("#humanView").classList.remove("hidden");
+    const poll = timer.mock.calls.find(([, delay]) => delay === 2000)[0];
+    const polling = poll();
+    await vi.waitFor(() => expect(releaseStatus).toBeTypeOf("function"));
+    document.querySelector("#humanNewTask").open = true;
+    releaseStatus();
+    await vi.waitFor(() => expect(api.humanTask).toHaveBeenCalledTimes(2));
+    releaseStatus();
+    await polling;
+    await vi.waitFor(() => expect(document.querySelector("#humanTaskDetail").textContent).toContain("completed"));
+    expect(document.querySelector("#humanNewTask").open).toBe(true);
+    api.humanTask = async id => structuredClone(sessions.find(item => item.id === id));
     expect(sessions).toEqual(original);
     sessions.splice(4);
     document.querySelector("#humanGrader").click();
