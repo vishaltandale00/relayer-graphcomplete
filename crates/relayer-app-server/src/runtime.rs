@@ -1507,14 +1507,14 @@ impl RuntimeClient {
                 "invoked completion id must be positive".into(),
             ));
         }
-        self.cancel_completion_request(thread_id, Some(completion_id))
+        self.cancel_completion_request(thread_id, completion_id)
             .await
     }
 
     async fn cancel_completion_request(
         &self,
         thread_id: i64,
-        completion_id: Option<i64>,
+        completion_id: i64,
     ) -> Result<bool, RuntimeError> {
         if thread_id < 1 {
             return Err(RuntimeError::Configuration(
@@ -1524,10 +1524,9 @@ impl RuntimeClient {
         let mut url = self
             .harness_url
             .join(&format!("sessions/{thread_id}/cancel"))?;
-        if let Some(completion_id) = completion_id {
-            url.query_pairs_mut()
-                .append_pair("completionId", &completion_id.to_string());
-        }
+        // Root runs run side by side (#719), so a cancel always names its completion.
+        url.query_pairs_mut()
+            .append_pair("completionId", &completion_id.to_string());
         let response: CancelCompletionResponse = self
             .post(
                 url,

@@ -362,6 +362,8 @@ impl SqliteProductStore {
             completion_error: None,
             latest_attempt: None,
         };
+        // An earlier message a model failure returned to unsent can no longer be retried (#719).
+        super::fail_stale_returned_messages(&mut tx, thread_id.value()).await?;
         tx.commit().await?;
         Ok(InteractionInputInsertOutcome::Created(interaction))
     }

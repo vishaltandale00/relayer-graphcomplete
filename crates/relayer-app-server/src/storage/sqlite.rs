@@ -54,6 +54,42 @@ pub(crate) const QUEUED_RUN_STOPPED: &str = "Stopped before it started.";
 pub(crate) const CAPACITY_WAIT_INTERRUPTED: &str =
     "Relayer stopped before this message had capacity to start. Send it again to run it.";
 
+/// The error of a message a model failure returned to unsent after a later message was sent.
+pub(crate) const STALE_RETURNED_MESSAGE: &str =
+    "A later message was sent before this one could be retried. Send it again to run it.";
+
+/// Thread messages run in parallel (#719), so a message a model failure returned to unsent can
+/// be followed by later messages. Its draft is then stale: only the latest message can be
+/// retried in place (`interaction_retry_stale`). It is settled as failed, with its error, so it
+/// never stays `not_started` and holds its thread out of the archive. Its restored inputs and
+/// context confirmations stay restored. Call this inside the transaction that creates a message
+/// or returns one to unsent.
+pub(super) async fn fail_stale_returned_messages(
+    connection: &mut sqlx::SqliteConnection,
+    thread_id: i64,
+) -> Result<(), StorageError> {
+    sqlx::query(
+        "UPDATE interactions SET completion_status='failed',completion_error=?2 WHERE thread_id=?1 AND completion_status='not_started' AND (SELECT a.outcome FROM interaction_attempts a WHERE a.interaction_id=interactions.id ORDER BY a.attempt_number DESC LIMIT 1) IS 'model_failed' AND NOT EXISTS(SELECT 1 FROM action_invocations run WHERE run.result_interaction_id=interactions.id) AND EXISTS(SELECT 1 FROM interactions later WHERE later.thread_id=interactions.thread_id AND later.sequence>interactions.sequence AND NOT EXISTS(SELECT 1 FROM action_invocations run WHERE run.result_interaction_id=later.id))",
+    )
+    .bind(thread_id)
+    .bind(STALE_RETURNED_MESSAGE)
+    .execute(connection)
+    .await?;
+    Ok(())
+}
+
+/// [`fail_stale_returned_messages`] for the thread of interaction ?1.
+pub(super) async fn fail_stale_returned_messages_beside(
+    connection: &mut sqlx::SqliteConnection,
+    interaction_id: i64,
+) -> Result<(), StorageError> {
+    let thread_id: i64 = sqlx::query_scalar("SELECT thread_id FROM interactions WHERE id=?1")
+        .bind(interaction_id)
+        .fetch_one(&mut *connection)
+        .await?;
+    fail_stale_returned_messages(connection, thread_id).await
+}
+
 #[derive(Clone)]
 pub(crate) struct SqliteProductStore {
     pool: SqlitePool,

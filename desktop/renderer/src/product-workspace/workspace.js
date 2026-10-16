@@ -2225,8 +2225,9 @@ export function createProductWorkspace({
           return;
         } catch (error) {
           if (error?.code !== "thread_archive_busy" || Date.now() >= deadline || disposed) {
+            // Agent-launched work is never the product's to stop, and archive waits for it too.
             toast(error?.code === "thread_archive_busy"
-              ? "Runs are still stopping. Archive the chat once they finish."
+              ? `"${thread.title || "This chat"}" still has work running, such as agent work. Archive it once that finishes.`
               : error.message);
             return;
           }
@@ -3877,6 +3878,7 @@ export function createProductWorkspace({
   };
   const syncInteractionRunControl = () => {
     const button = $("#interactionRunStop");
+    const errorText = $("#interactionRunError");
     const state = getState();
     const thread = getThread();
     const control = thread && stopsAvailable()
@@ -3885,6 +3887,9 @@ export function createProductWorkspace({
     button.classList.toggle("hidden", !control);
     if (!control) {
       delete button.dataset.interactionId;
+      errorText.classList.add("hidden");
+      errorText.textContent = "";
+      button.removeAttribute("aria-describedby");
       return;
     }
     const { run, verb } = control;
@@ -3896,8 +3901,13 @@ export function createProductWorkspace({
     button.classList.toggle("has-error", Boolean(error));
     button.setAttribute("aria-busy", String(Boolean(stopping)));
     button.setAttribute("aria-label", stopping ? "Stopping this run" : verb === "Remove" ? "Remove this queued run" : "Stop this run");
-    button.title = error || (stopping ? "Waiting for the run to stop"
-      : verb === "Remove" ? "Take this run out of the queue. Its text is kept." : "Stop this run");
+    button.title = stopping ? "Waiting for the run to stop"
+      : verb === "Remove" ? "Take this run out of the queue. Its text is kept." : "Stop this run";
+    // A failed Stop is announced and stays visible beside the control.
+    if (errorText.textContent !== (error || "")) errorText.textContent = error || "";
+    errorText.classList.toggle("hidden", !error);
+    if (error) button.setAttribute("aria-describedby", "interactionRunError");
+    else button.removeAttribute("aria-describedby");
   };
   const syncComposer = () => {
     syncNodeRunBar();
@@ -4962,11 +4972,13 @@ export function createProductWorkspace({
       withoutPreparationsAwaitingRetry(humanTurns(state, thread), state.actionInvocations || []),
     ));
     if (inputDraftController && latestInteraction) {
-      const statusKey = `${latestInteraction.id}:${latestInteraction.completionStatus || ""}`;
+      // Messages run in parallel (#719): any message that settles may have returned its
+      // submitted inputs, not only the latest one, so the inputs reload when any settles.
+      const settledTurns = turns.filter((turn) => !PENDING_COMPLETION_STATUSES.has(turn.completionStatus));
+      const statusKey = settledTurns.map((turn) => `${turn.id}:${turn.completionStatus || ""}`).join(",");
       const priorStatusKey = renderedInputDraftStatusKeys.get(threadId);
       renderedInputDraftStatusKeys.set(threadId, statusKey);
-      if (priorStatusKey && priorStatusKey !== statusKey
-        && !PENDING_COMPLETION_STATUSES.has(latestInteraction.completionStatus)) {
+      if (priorStatusKey != null && priorStatusKey !== statusKey && settledTurns.length) {
         void ensureInputDraftLoaded(threadId, { reload: true }).catch((error) => {
           if (!disposed && String(getThread()?.id) === threadId) {
             toast(`Restored inputs could not be refreshed: ${error.message}`);
@@ -4985,12 +4997,19 @@ export function createProductWorkspace({
         text: restoredDraft.text,
       }
       : null;
-    const restoredConfirmationKey = confirmationRestorationKey(threadId, latestInteraction);
-    if (restoredConfirmationKey
-      && !recoveredConfirmationThreads.has(restoredConfirmationKey)
-      && contextDraftController) {
-      recoveredConfirmationThreads.add(restoredConfirmationKey);
+    // Messages run in parallel (#719), so an earlier message can fail while a later one runs.
+    // The app server returns its context confirmations, so any message that returned to unsent
+    // or failed brings them back into the composer, not only the latest one.
+    const restoredConfirmationKeys = turns.flatMap((turn) => {
+      const key = confirmationRestorationKey(threadId, turn)
+        ?? (turn.completionStatus === "failed" ? `${threadId}:${turn.id}:failed` : null);
+      return key && !recoveredConfirmationThreads.has(key) ? [key] : [];
+    });
+    if (restoredConfirmationKeys.length && contextDraftController) {
+      for (const key of restoredConfirmationKeys) recoveredConfirmationThreads.add(key);
       contextDraftController.allowConfirmationRestoration(threadId);
+      // A settled earlier load is not reused: the restored confirmations are read afresh.
+      if (loadedContextDraftThreads.has(threadId)) contextDraftLoads.delete(threadId);
       loadedContextDraftThreads.delete(threadId);
       void ensureContextDraftsLoaded(threadId).catch((error) => {
         if (!disposed && String(getThread()?.id) === threadId) {

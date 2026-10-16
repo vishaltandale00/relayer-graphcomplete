@@ -119,8 +119,11 @@ it("gives every run invoked from a node its own Stop, kept in place across refre
     await window.happyDOM.waitUntilComplete();
     expect(runStop.classList.contains("hidden")).toBe(false);
     expect(runStop.textContent).toBe("Remove");
+    // A double click stops once.
+    runStop.click();
     runStop.click();
     await vi.waitFor(() => expect(onStopInteraction).toHaveBeenCalledWith(10, 8));
+    expect(onStopInteraction.mock.calls.filter(([, id]) => id === 8)).toHaveLength(1);
     state.interactions.push({ ...run(9, "running"), text: "And the pricing page" });
     state.currentInteractionId = 9;
     workspace.render();
@@ -128,6 +131,14 @@ it("gives every run invoked from a node its own Stop, kept in place across refre
     expect(runStop.textContent).toBe("Stop");
     expect(runStop.getAttribute("aria-label")).toBe("Stop this run");
     expect(send.getAttribute("aria-label")).toBe("Send");
+    // A Stop that fails says so in text beside the control, announced to assistive technology.
+    onStopInteraction.mockRejectedValueOnce(new Error("Stop could not reach the run."));
+    runStop.click();
+    const runError = window.document.querySelector("#interactionRunError");
+    await vi.waitFor(() => expect(runError.textContent).toBe("Stop could not reach the run."));
+    expect(runError.classList.contains("hidden")).toBe(false);
+    expect(runError.getAttribute("role")).toBe("status");
+    expect(runStop.getAttribute("aria-describedby")).toBe("interactionRunError");
 
     // The thread menu stops every running run and removes every queued one (#721).
     onStopInteraction.mockClear();

@@ -378,6 +378,8 @@ impl SqliteProductStore {
             completion_error: None,
             latest_attempt: None,
         };
+        // An earlier message a model failure returned to unsent can no longer be retried (#719).
+        super::fail_stale_returned_messages(&mut transaction, thread_id.value()).await?;
         transaction.commit().await?;
         Ok(interaction)
     }
@@ -935,6 +937,11 @@ impl SqliteProductStore {
                 .bind(failure.interaction_id.value())
                 .execute(&mut *transaction)
                 .await?;
+            super::fail_stale_returned_messages_beside(
+                &mut transaction,
+                failure.interaction_id.value(),
+            )
+            .await?;
         }
         transaction.commit().await?;
         Ok(())
@@ -988,6 +995,8 @@ impl SqliteProductStore {
         sqlx::query("UPDATE node_context_draft_resolutions SET consumed_interaction_id=NULL WHERE consumed_interaction_id=?1")
             .bind(interaction_id.value())
             .execute(&mut *transaction)
+            .await?;
+        super::fail_stale_returned_messages_beside(&mut transaction, interaction_id.value())
             .await?;
         transaction.commit().await?;
         Ok(())

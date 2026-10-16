@@ -137,3 +137,48 @@ it("sends a plain message, an annotation and an answer while earlier runs are ac
     await window.happyDOM.close();
   }
 });
+
+// #719: an earlier message can fail while a later one runs. The app server returns its context
+// confirmations, so the composer shows them again, though that message is not the latest.
+it("brings back the annotations of an earlier message that failed while a later one runs", async () => {
+  const window = new Window({ url: "http://127.0.0.1:3000" });
+  vi.stubGlobal("document", window.document);
+  vi.stubGlobal("window", window);
+  vi.stubGlobal("lucide", new Proxy({ createElement: () => window.document.createElement("svg") }, { get: (t, k) => t[k] ?? {} }));
+  window.document.body.innerHTML = '<section id="threadView"></section><div id="toast" class="hidden"></div>';
+  const node = { id: 7, kind: "concept", icon: "compass", title: "Plan", detail: "Body", state: "accepted" };
+  const layer = { layer: { id: 101, nodes: [7], state: "accepted" }, nodes: [node], edges: [], actions: [] };
+  const thread = { id: 3, harnessId: "fixture", title: "Parallel" };
+  const turn = (id, completionStatus, extra = {}) => ({ id, threadId: 3, sequence: id, text: `Turn ${id}`, completionStatus, ...extra });
+  const state = {
+    conversationCompatibility: { threadId: 3, status: "unrestricted", harnessId: "fixture" },
+    status: "running", currentInteractionId: 7, capabilities: { stopRuns: true },
+    interactions: [turn(5, "accepted", { graphNodeId: 50, completionOutput: { rootLayer: layer } }), turn(6, "running"), turn(7, "running")],
+    visibleLayer: layer, nodes: layer.nodes, actions: [], projects: [], permissionProfiles: [],
+    modelSettings: { defaults: { harnessId: "fixture" }, harnesses: [{ id: "fixture", available: true }], providers: [], families: [] },
+    modelCatalog: [], actionInvocations: [], pendingActionInvocations: [],
+  };
+  const confirmation = { draftId: "annotation", target: { nodeId: 7, sourceInteractionNodeId: 50, sourceLayerId: 101 }, targetNode: node, annotation: "Expand this", confirmationRevision: 1 };
+  let confirmations = [];
+  const list = vi.fn(async () => ({ drafts: [], confirmations }));
+  const selection = { currentThreadId: 3, currentInteractionId: 7, selectedNodeId: null, layerPath: [] };
+  const workspace = createProductWorkspace({
+    root: window.document, getState: () => state, getThread: () => thread, selection, mode: "interactive",
+    contextDraftApi: { list }, onSubmitInteraction: vi.fn(async () => ({})), showThread() {}, showEmpty() {},
+  });
+  try {
+    workspace.render();
+    await window.happyDOM.waitUntilComplete();
+    expect(window.document.querySelector("#composerContextTray").classList.contains("hidden")).toBe(true);
+    // Message 6 fails, and the app server restored the annotation it had consumed.
+    state.interactions[1] = turn(6, "failed", { completionError: "A later message was sent before this one could be retried. Send it again to run it." });
+    confirmations = [confirmation];
+    const calls = list.mock.calls.length;
+    workspace.render();
+    await vi.waitFor(() => expect(list.mock.calls.length).toBeGreaterThan(calls));
+    await vi.waitFor(() => expect(window.document.querySelector("#composerContextTray").textContent).toContain("1"));
+  } finally {
+    workspace.dispose();
+    await window.happyDOM.close();
+  }
+});

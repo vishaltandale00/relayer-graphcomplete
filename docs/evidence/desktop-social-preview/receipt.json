@@ -9,11 +9,11 @@
     "contracts/share-service-v1/contract.json": "d289317c75a44675b9bb6f4b8856f4e8f30cff7948ca27f8cfee72b7ba4b7d8d",
     "scripts/capture-share-preview-evidence.mjs": "4510e3a54f6b658c2df86b1a06afc8ca2428a36693a93648786bd4e075327562",
     "test/fixtures/social-preview.jsonl": "ff4a4545de49ccc20562f2f763b6a120d87fa37f7703a994abeb71b219a405aa",
-    "desktop/shared/telemetry-module-inventory.mjs": "8065b07a5ab59161e4f4013462765066d8e9a9d11c5740050509089711271fe6"
+    "desktop/shared/telemetry-module-inventory.mjs": "77d5ebb73b8c7e477f3e13550be7e847c9ee1500a5456f9f2e37e43580e9a097"
   },
   "rendererArtifact": {
     "directory": "desktop/renderer",
-    "digest": "19a84c519477987c778c25f716376ab7e32d9d73c5bf8a19198d9976365433b5",
+    "digest": "6772955090f9eb59b2d9ad6ff39704f49b9db8fe882bf090df443593f4701bb0",
     "files": {
       "assets/relayer-logo.svg": {
         "bytes": 509,
@@ -276,20 +276,20 @@
         "sha256": "c1c6e8a2627e20298a7f88c7516febc4c0f7317b00ec00713372bd24202cdcfd"
       },
       "src/product-workspace/run-state.js": {
-        "bytes": 6029,
-        "sha256": "f7f600a85dc641321ff8800088c7d04b19620a7de300048ccd04788e9abb18c0"
+        "bytes": 7855,
+        "sha256": "507d33ea4454767adde7bc29143897ccebe90dc601d88d6b0864079dadfc30fd"
       },
       "src/product-workspace/view.js": {
-        "bytes": 15531,
-        "sha256": "4192b7b8f1f6df356a57b05e260a4e3ff4e34423ad085582b95c411bd59a1b96"
+        "bytes": 15967,
+        "sha256": "83d1f6900db8fd133f60ffbdb2c13fc4f11828cc97afc5b62071ea24facf13f6"
       },
       "src/product-workspace/workspace-layout.js": {
         "bytes": 4731,
         "sha256": "8e5d307f95b1863fb995606ca32a832de088916716c39476f9d31f2174de002d"
       },
       "src/product-workspace/workspace.js": {
-        "bytes": 313949,
-        "sha256": "550e9f55cf1b548e097756f4a3244dbe2543fbd04e194b9ab4a9305bac01cd02"
+        "bytes": 318966,
+        "sha256": "002d1dd815b9055b1e264ef2645f6ba1679809a4c4077839ab2c924092b014bd"
       },
       "src/project-composer-navigation.js": {
         "bytes": 282,
@@ -396,8 +396,8 @@
         "sha256": "8ef7bdf6d8b97ef298e083ad42c7e87670e4bd588468970a43c1f73da60c0831"
       },
       "styles.css": {
-        "bytes": 138047,
-        "sha256": "c50c339465191dd6198140b2fa1e65b3d53715dac520e2fd1b2e695742d0d938"
+        "bytes": 137285,
+        "sha256": "1657969635b6e755b133f5cb6efba3d253edd49aab364f4c1a875c20d517184c"
       },
       "vendor/artifact-office.LICENSES.txt": {
         "bytes": 62430,
