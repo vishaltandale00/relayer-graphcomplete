@@ -1,3 +1,4 @@
+import { expectStructureExample } from "./fixtures/structure-example-checks.mjs";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
@@ -334,10 +335,16 @@ describe("recursive complete end to end", () => {
     }
     const detail = await waitForStatus(stack.session, thread.id, attached ? 1 : 0, "accepted", observed);
     const resultTurn = detail.interactions[attached ? 1 : 0];
+    const loadStructureLayer = async (layerId) => {
+      const response = await fetch(new URL(`/api/control/interactions/${resultTurn.graphNodeId}/layers/${layerId}`, stack.runtimeSession.graphUrl), {
+        headers: { authorization: `Bearer ${stack.runtimeSession.graphControlToken}` },
+      });
+      expect(response.ok).toBe(true);
+      return response.json();
+    };
     if (!temporal) {
       const root = detail.interactions[0].completionOutput.rootLayer;
-      expect(root.nodes.map(node => node.title)).toEqual(["Result"]);
-      expect(root.actions).toEqual([]);
+      await expectStructureExample(root, loadStructureLayer);
       expect(root.nodes[0].authoredDetail.mounts).toEqual([]);
       expect(observed.advanced).toBeUndefined();
       return;
@@ -359,6 +366,7 @@ describe("recursive complete end to end", () => {
     expect(finalCurrent).toMatchObject({ lifecycle: "succeeded", headRevision: (withPrior ? 3 : 2) + (later ? 1 : 0) });
     expect(finalCurrent.currentLayerId).not.toBe(observed.advanced.currentLayerId);
     const finalLayer = resultTurn.completionOutput.rootLayer;
+    await expectStructureExample(finalLayer, loadStructureLayer);
     expect(finalLayer.nodes[0].authoredDetail.mounts[0].capability.kind).toBe("reference");
     const earlier = finalLayer.actions.find(action => action.label === "Earlier findings");
     expect(earlier.targetLayerId).toBe(observed.advanced.currentLayerId);

@@ -1,3 +1,4 @@
+import { expectStructureExample } from "./fixtures/structure-example-checks.mjs";
 import { AUTHORING_REPAIR_GUIDANCE_JS, AUTHORING_REPAIR_GUIDANCE_PYTHON, finishPublishedCurrentRecipeJs, FINISH_PUBLISHED_CURRENT_RECIPE_PYTHON, READ_CURRENT_ANSWERS_JS, READ_CURRENT_ANSWERS_PYTHON } from "../packages/harness-host/src/implementations/graph-presentation-guidance.ts";
 import { currentCommunicationAuthoringRecipePython, scopedAuthoringRecipeJs, scopedAuthoringRecipePython } from "../packages/harness-host/dist/implementations/graph-presentation-guidance.js";
 import { pathToFileURL } from "node:url";
@@ -705,9 +706,8 @@ print(json.dumps({"decisions": user_decisions, "cursor": answer_cursor, "next": 
           const finalId = Number(output.match(/FINAL_DRAFT:(\d+)/)[1]);
           const finalLayer = await controlRead(baselineServer.url, token, `/api/control/interactions/${capability.nodeId}/layers/${finalId}`);
           expect(finalLayer.layer.state).toBe("accepted");
-          expect(finalLayer.nodes.map(node => node.title)).toEqual(["Result"]);
+          await expectStructureExample(finalLayer, layerId => controlRead(baselineServer.url, token, `/api/control/interactions/${capability.nodeId}/layers/${layerId}`));
           expect(finalLayer.nodes[0].authoredDetail.mounts).toEqual([]);
-          expect(finalLayer.actions).toEqual([]);
           expect(output).not.toContain("ADVANCED:");
           continue;
         }
@@ -730,6 +730,7 @@ print(json.dumps({"decisions": user_decisions, "cursor": answer_cursor, "next": 
         const finalCurrent = await controlRead(baselineServer.url, token, `/api/control/interactions/${capability.nodeId}/current`);
         expect(finalCurrent).toMatchObject({ lifecycle: "succeeded", headRevision: (withPrior ? 3 : 2) + (later ? 1 : 0) });
         const finalLayer = await controlRead(baselineServer.url, token, `/api/control/interactions/${capability.nodeId}/layers/${finalCurrent.currentLayerId}`);
+        await expectStructureExample(finalLayer, layerId => controlRead(baselineServer.url, token, `/api/control/interactions/${capability.nodeId}/layers/${layerId}`));
         const finalMount = finalLayer.nodes[0].authoredDetail.mounts[0];
         const finalEarlier = finalLayer.actions.find(action => action.label === "Earlier findings");
         expect(finalMount.capability.kind).toBe("reference");

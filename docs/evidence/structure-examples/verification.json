@@ -1,0 +1,104 @@
+{
+  "schemaVersion": 1,
+  "baseCommit": "6a04aa9842de5bb1005d4dfd51b790ad0914c041",
+  "scope": "Delivered JavaScript and Python communication examples shared by Codex, Claude and Prime. Published personal-presentation-v6 text and graph pin are unchanged.",
+  "sourceScopeDigest": "e0a3da708c5e74300298d3fa6fbaa2dd1411be894661ef7692ae7638e3eb753b",
+  "digestAlgorithm": "sha256(sorted relative path UTF-8 + NUL + exact file bytes + NUL)",
+  "checkpoints": [
+    {
+      "promise": "Examples demonstrate meaningful task-sensitive result/reason/evidence relationships without a node quota",
+      "productionSeam": "graph-presentation-guidance.ts currentCommunicationAuthoringRecipeJs/Python; Codex prompt paths, Claude buildLayeredNavigationPrompt, Prime primeVisualExample",
+      "checks": [
+        "harness-host codex-basic, claude-basic, prime-agent and graph-authoring-repair-examples tests (185 passed)",
+        "actual JavaScript and Python communication recipe execution through native GraphComplete (9 scenarios passed)"
+      ]
+    },
+    {
+      "promise": "A typed inspection control navigates to accepted distinct evidence with valid layout",
+      "productionSeam": "Scoped authoring closure compilation, expand mount/action identity and canonical Rust acceptance",
+      "checks": [
+        "existing recipe scenarios follow the actual targetLayerId and check accepted layer, supporting content, compiled detail, centered placement and default node"
+      ]
+    },
+    {
+      "promise": "Current, accepted history, replay and attached-node return authority remain valid",
+      "productionSeam": "Current communication example publication/finalization; stable replay keys; source-linked return actions",
+      "checks": [
+        "existing temporal/prior/replay/later/attached plain/attached rich/all-off recipe scenarios; preservation assertions retained"
+      ]
+    }
+  ],
+  "requiredVerificationPlan": [
+    "npm run build",
+    "npm run check",
+    "npm run test:eval-compiled-runtime",
+    "Three cases across three harnesses, updated examples only, with current-main actor/completion judge/graph judge; no baseline improvement claim"
+  ],
+  "ran": [
+    {
+      "command": "npm run build (isolated target, Node22.23.2)",
+      "result": "passed"
+    },
+    {
+      "command": "four focused harness-host files",
+      "result": "185 passed"
+    },
+    {
+      "command": "actual recipe scenarios with supporting-layer inspection",
+      "result": "9 passed;8 unrelated scenarios filtered"
+    },
+    {
+      "command": "npm run check (isolated target)",
+      "result": "FAILED at cargo test:app-server library environment::tests::repository_identity_allows_selected_subdirectories_and_linked_worktrees (Unavailable versus Git;2secondinspectionbudget);395 otherapp-server librarytests passed. Latercheck chapters not reached."
+    },
+    {
+      "command": "same repository identity scenario isolated",
+      "result": "1 passed;1.46seconds. This does not certify the original full gate or prove its failure cause."
+    },
+    {
+      "command": "npm run test:eval-compiled-runtime first pass",
+      "result": "FAILED:11passed,1app-server readiness timeout"
+    },
+    {
+      "command": "npm run test:eval-compiled-runtime after broad native tests stopped",
+      "result": "12passed. No source changes or timeout changes between these two runs."
+    },
+    {
+      "command": "Latest-main7-file focused portfolio (6a04aa98)",
+      "result": "206passed; all three harness delivery, both full native recipe files and workspace scroll tests"
+    },
+    {
+      "command": "npm run build on6a04aa98",
+      "result": "passed; isolated target and Node22.23.2"
+    },
+    {
+      "command": "npm run test:eval-compiled-runtime on6a04aa98",
+      "result": "12passed"
+    }
+  ],
+  "review": {
+    "reviewer": "/root/pilot_fix_authority_review",
+    "scopeDigest": "e0a3da708c5e74300298d3fa6fbaa2dd1411be894661ef7692ae7638e3eb753b",
+    "scope": "All-three delivery; semantic/no-quota guidance; typed expand/target; history/replay/native authority; deterministic mapping",
+    "verdict": "passed",
+    "unresolvedFindings": [],
+    "certification": "non-certifying; no PR exists",
+    "baseCommit": "6a04aa9842de5bb1005d4dfd51b790ad0914c041"
+  },
+  "notClaimed": [
+    "Measured improvement over latest-main examples",
+    "Default paid-inference tests",
+    "Release proof",
+    "Full inventory provider-readiness qualification"
+  ],
+  "liveEvidence": "Nine updated-only local Mac sessions admitted: three cases across three native providers, current-main actor/completion judge and graph judge pinned. Results pending. Full135 comparison deferred; no passing pilot is rerun.",
+  "unknowns": [
+    "Full npm run check remains failed;remaining chapters not reached",
+    "Machine load is a hypothesis for the timing failures, not an established cause"
+  ],
+  "upstreamUpdate": {
+    "from": "5156d906579625f1eda41bbcf0de7cc71827458d",
+    "to": "6a04aa9842de5bb1005d4dfd51b790ad0914c041",
+    "scope": "One upstream graph-scroll fix (#735), no Rust/provider/prompt changes; example source digest unchanged. Earlier verification is historical to5156; later latest-main-focused log qualifies final combined source."
+  }
+}
