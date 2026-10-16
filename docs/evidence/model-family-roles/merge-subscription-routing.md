@@ -199,3 +199,42 @@ passed native-input Current and both scrolling modes, then failed authored
 navigation while reporting temporarily unavailable visual assets during a
 parallel generated-package rebuild. No causal claim or production fix is made
 from that failure; a post-build browser run remains required.
+
+
+## Downstream custom-family recovery
+
+The final review found a second consumer of the recovery action: the Settings
+default-family presentation still inferred its destination from optional
+`providerLabel` metadata. A disconnected custom default has no managed recovery
+row, so it incorrectly offered Model Families. The presentation now branches on
+the explicit `family-settings` action; provider recovery derives its accessible
+name from the actual provider label, then stable ID. Refresh recovery is unchanged.
+
+PROV-008 and the existing reconnect/family-edit promise apply. The changed seams
+are the default-recovery presentation, its Providers-tab activation/focus and the
+social-preview renderer inventory. The existing editor/save/reopen/refresh journey
+now disconnects its custom default and checks the visible button, accessible
+reconnect name, actual Providers-tab click/focus and retained family. The test
+failed with “Open Model Families” before the fix (447 ms), then the four related
+files passed all 81 tests. This extends a distinct failure boundary without new
+fixture duplication, test deletion or weaker assertions. Required check/build
+and regenerated preview evidence run again before committing this delta.
+
+Adversarial reviewer `/root/repair_authority_review` found no blocker in the
+[two-file delta and combined 21-file scope](merge-subscription-recovery-review.json).
+The delta digest is
+`08d13ec123777afac202f47b216c80d382c63319c7dba44469d15025bf64c2c1`;
+the combined digest is
+`af96ec174f34de1771079b596f7174a41494b30f5e722f09832cdcba1fb1e356`.
+Full gates and hosted CI were pending at review; earlier source receipts and
+passing CI remain historical at `212b1d1e`. Scoped changes invalidate the assertion.
+
+
+The downstream-recovery source subsequently passed the complete required
+`npm run check` invocation, including 447 app-server unit tests, 50 export
+contracts, 10 catalog API journeys, native/crash/Clippy, root/workspace types,
+4,366 JavaScript tests (three existing skips), secret boundary 2/2, Python 99,
+Ladybug receipts and PRD readability. `npm run build` passed sequentially after
+that check. The regenerated preview images match the already inspected PNG
+bytes and bind the changed renderer inventory. New browser/hosted CI outcomes
+remain separate; earlier failed commands retain their historical attribution.

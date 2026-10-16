@@ -134,4 +134,18 @@ it("edits multiple roles, saves and reopens them, and focuses unavailable defaul
   const harness = window.document.querySelector("#defaultHarnessSelect");
   expect(harness.disabled).toBe(false);
   expect(harness.querySelector('option[value="compatible"]')?.disabled).toBe(false);
+  // Custom default families have no managed-family recovery row/providerLabel.
+  // Their disconnected orchestrator must still reach the real Providers control.
+  settings.providers[0].connected = false;
+  await refreshModelFamilySettings();
+  const providersTab = window.document.querySelector('[data-settings-tab="providers"]');
+  const openedProviders = vi.fn();
+  providersTab.addEventListener("click", openedProviders);
+  const reconnect = window.document.querySelector("#refreshDefaultFamilyModels");
+  expect(reconnect.textContent).toBe("Open Providers");
+  expect(reconnect.getAttribute("aria-label")).toBe("Reconnect Codex under Providers");
+  await reconnect.onclick();
+  expect(openedProviders).toHaveBeenCalledTimes(1);
+  expect(window.document.activeElement).toBe(providersTab);
+  expect(window.document.querySelector("#currentFamilyName").textContent).toBe("Custom");
 });

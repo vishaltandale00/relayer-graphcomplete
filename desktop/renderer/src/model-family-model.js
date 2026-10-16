@@ -217,18 +217,22 @@ export function defaultFamilyRecoveryPresentation(settings) {
       busyName: modelSetup.busyName,
     };
   }
-  if (!modelSetup.providerLabel) return {
+  if (modelSetup.action === "family-settings") return {
     ...common,
     action: "families",
     actionLabel: "Open Model Families",
     actionName: modelSetup.actionName,
   };
+  // Recovery authority comes from the action, not optional display metadata.
+  const providerLabel = modelSetup.providerLabel
+    ?? settings.providers?.find((provider) => provider.id === modelSetup.providerId)?.label
+    ?? modelSetup.providerId;
   // A disconnected provider is reconnected from its card under Providers.
   return {
     ...common,
     action: "providers",
     actionLabel: "Open Providers",
-    actionName: `Reconnect ${modelSetup.providerLabel} under Providers`,
+    actionName: `Reconnect ${providerLabel} under Providers`,
   };
 }
 
