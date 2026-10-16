@@ -17,6 +17,7 @@ import {
   responseNodesForThread,
   workspaceBreadcrumbItems,
   workspaceModeCapabilities,
+  agentChildIds,
   humanTurns,
   messageTurns,
   workspaceTurns,
@@ -4988,8 +4989,11 @@ export function createProductWorkspace({
     // An invoked run runs beside the message turns: the composer's scopes follow message turns.
     const turns = messageTurns(state, thread);
     const latestInteraction = turns.at(-1);
+    const agentChildren = agentChildIds(state);
     renderThreadStatusSymbol(threadActivity(
       withoutPreparationsAwaitingRetry(humanTurns(state, thread), state.actionInvocations || []),
+      pendingApprovalsForThread(state, thread)
+        .some((receipt) => agentChildren.has(String(receipt.request.correlation.interactionId))),
     ));
     if (inputDraftController && latestInteraction) {
       // Messages run in parallel (#719): any message that settles may have returned its

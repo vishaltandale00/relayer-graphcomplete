@@ -65,6 +65,18 @@ impl SqliteProductStore {
                 .bind(request.correlation.interaction_id)
                 .fetch_one(&mut *transaction)
                 .await?;
+        // An agent's child can settle on its graph before its provider turn ends, and the
+        // provider can still ask for approval then. The request stays answerable on the
+        // child's row, whose settled state belongs to its graph and is left unchanged.
+        // An archived thread takes no new work, so such a request is refused there and the
+        // observer ends the provider.
+        let settled_agent_child = matches!(status.as_str(), "accepted" | "failed" | "stopped")
+            && sqlx::query_scalar::<_, bool>(
+                "SELECT EXISTS(SELECT 1 FROM action_invocations WHERE result_interaction_id=?1 AND agent_invoked=1) AND NOT EXISTS(SELECT 1 FROM interactions i JOIN threads t ON t.id=i.thread_id WHERE i.id=?1 AND t.archived_at IS NOT NULL)",
+            )
+            .bind(request.correlation.interaction_id)
+            .fetch_one(&mut *transaction)
+            .await?;
         if status == "running" {
             sqlx::query(
                 "UPDATE interactions SET completion_status='waiting_for_approval' WHERE id=?1 AND completion_status='running'",
@@ -72,7 +84,7 @@ impl SqliteProductStore {
             .bind(request.correlation.interaction_id)
             .execute(&mut *transaction)
             .await?;
-        } else if status != "waiting_for_approval" {
+        } else if status != "waiting_for_approval" && !settled_agent_child {
             return Err(StorageError::ApprovalConflict(format!(
                 "interaction {} cannot request approval while {status}",
                 request.correlation.interaction_id
@@ -131,6 +143,26 @@ impl SqliteProductStore {
         .await?;
 
         let interaction_id = receipt.request.correlation.interaction_id;
+        // An agent's child ends only through its own graph settlement, which its observers
+        // project onto its row. An approval's end, whatever its outcome, never makes the row
+        // terminal: once nothing is pending the child is running again until it settles.
+        let agent_child: bool = sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM action_invocations WHERE result_interaction_id=?1 AND agent_invoked=1)",
+        )
+        .bind(interaction_id)
+        .fetch_one(&mut *transaction)
+        .await?;
+        if agent_child {
+            sqlx::query(
+                "UPDATE interactions SET completion_status='running' WHERE id=?1 AND completion_status='waiting_for_approval' AND NOT EXISTS(SELECT 1 FROM approval_requests request LEFT JOIN approval_resolutions resolution ON resolution.request_id=request.request_id WHERE request.interaction_id=?1 AND resolution.request_id IS NULL)",
+            )
+            .bind(interaction_id)
+            .execute(&mut *transaction)
+            .await?;
+            receipt.resolution = Some(resolution.clone());
+            transaction.commit().await?;
+            return Ok(receipt);
+        }
         match resolution.outcome {
             ApprovalOutcome::Approved | ApprovalOutcome::Denied => {
                 let pending: i64 = sqlx::query_scalar(
@@ -204,6 +236,47 @@ impl SqliteProductStore {
     ) -> Result<u64, StorageError> {
         self.abort_pending_approvals_with_restart_recovery(None, rationale, resolved_at, true)
             .await
+    }
+
+    /// The agent children with an unresolved approval request, as (thread, graph completion).
+    /// Startup closes those requests, but a harness that outlived the server still has the
+    /// provider waiting on them, so their invoked completions are cancelled there too.
+    pub(crate) async fn agent_children_with_open_approvals(
+        &self,
+    ) -> Result<Vec<(i64, i64)>, StorageError> {
+        Ok(sqlx::query_as(
+            "SELECT DISTINCT i.thread_id,e.graph_completion_id FROM approval_requests request JOIN interactions i ON i.id=request.interaction_id JOIN completion_executions e ON e.interaction_id=i.id LEFT JOIN approval_resolutions resolution ON resolution.request_id=request.request_id WHERE resolution.request_id IS NULL AND EXISTS(SELECT 1 FROM action_invocations ai WHERE ai.result_interaction_id=i.id AND ai.agent_invoked=1) ORDER BY e.graph_completion_id",
+        )
+        .fetch_all(&self.pool)
+        .await?)
+    }
+
+    /// An agent child's requests left unresolved after its provider ended can never be answered.
+    /// Each is recorded as aborted. The row's state belongs to its graph: only a row still
+    /// waiting returns to running, as when any of a child's approvals ends.
+    pub(crate) async fn abort_unanswerable_child_approvals(
+        &self,
+        interaction_id: InteractionId,
+        rationale: &str,
+        resolved_at: &str,
+    ) -> Result<u64, StorageError> {
+        let mut transaction = self.pool.begin_with("BEGIN IMMEDIATE").await?;
+        let result = sqlx::query(
+            "INSERT INTO approval_resolutions(request_id,outcome,actor,decision,rationale,source_request_id,resolved_at) SELECT request.request_id,'aborted','host',NULL,?1,NULL,?2 FROM approval_requests request LEFT JOIN approval_resolutions resolution ON resolution.request_id=request.request_id WHERE resolution.request_id IS NULL AND request.interaction_id=?3 AND EXISTS(SELECT 1 FROM action_invocations WHERE result_interaction_id=?3 AND agent_invoked=1)",
+        )
+        .bind(rationale)
+        .bind(resolved_at)
+        .bind(interaction_id.value())
+        .execute(&mut *transaction)
+        .await?;
+        sqlx::query(
+            "UPDATE interactions SET completion_status='running' WHERE id=?1 AND completion_status='waiting_for_approval' AND EXISTS(SELECT 1 FROM action_invocations WHERE result_interaction_id=?1 AND agent_invoked=1)",
+        )
+        .bind(interaction_id.value())
+        .execute(&mut *transaction)
+        .await?;
+        transaction.commit().await?;
+        Ok(result.rows_affected())
     }
 
     async fn abort_pending_approvals_with_restart_recovery(
@@ -421,6 +494,76 @@ mod tests {
                 .completion_status,
             "running"
         );
+        drop(store);
+    }
+
+    /// An agent's child ends only through its own graph settlement. An approval that ends as
+    /// aborted, cancelled or expired returns the child to running instead of ending its row,
+    /// so the settlement its observers project never conflicts with it.
+    #[tokio::test]
+    async fn an_agent_childs_approval_never_ends_its_row() {
+        let (store, _directory) = store().await;
+        let thread = store
+            .insert_thread_with_initial_interaction(crate::storage::NewThreadRecord {
+                required_provider_adapter_id: None,
+                icon_selection_eligible: true,
+                title: "Thread",
+                project_id: None,
+                initial_message: "Question",
+                harness_configuration_name: "test",
+                permission_profile_id: "ask",
+                model_selection: None,
+                timestamp: "1",
+            })
+            .await
+            .unwrap();
+        let child = sqlx::query("INSERT INTO interactions(thread_id,sequence,text,created_at,completion_status,permission_profile_id) VALUES (?1,2,'Child','2','running','ask')")
+            .bind(thread.id.value())
+            .execute(&store.pool)
+            .await
+            .unwrap()
+            .last_insert_rowid();
+        sqlx::query("INSERT INTO action_invocations(source_interaction_id,action_id,result_interaction_id,created_at,graph_lease_required,authoritative,agent_invoked) VALUES (?1,41,?2,'2',1,1,1)")
+            .bind(thread.root_interaction_id.value())
+            .bind(child)
+            .execute(&store.pool)
+            .await
+            .unwrap();
+        let status = |store: &SqliteProductStore| {
+            let store = store.clone();
+            async move {
+                store
+                    .get_interaction(InteractionId::from_database(child))
+                    .await
+                    .unwrap()
+                    .unwrap()
+                    .completion_status
+            }
+        };
+        for (index, outcome) in [
+            ApprovalOutcome::Aborted,
+            ApprovalOutcome::Cancelled,
+            ApprovalOutcome::Expired,
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let mut pending = request(&thread, &format!("child-request-{index}"));
+            pending.correlation.interaction_id = child;
+            store.record_approval_request(&pending).await.unwrap();
+            assert_eq!(status(&store).await, "waiting_for_approval");
+            let ended = ApprovalResolution {
+                actor: ApprovalActor::Host,
+                decision: None,
+                rationale: Some("The run ended.".into()),
+                ..resolution(&pending, ApprovalOutcome::Approved)
+            };
+            store
+                .record_approval_resolution(&ApprovalResolution { outcome, ..ended }, false)
+                .await
+                .unwrap();
+            assert_eq!(status(&store).await, "running", "{outcome:?}");
+        }
         drop(store);
     }
 

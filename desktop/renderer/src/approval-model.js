@@ -71,6 +71,11 @@ export function pendingApprovalsForThread(state, thread) {
     counts.set(id, (counts.get(id) || 0) + 1);
   }
   const interactions = Array.isArray(state?.interactions) ? state.interactions : [];
+  // An agent's child's request stays answerable after its graph settles, until its provider
+  // ends and the host resolves it, so any state of its row will do.
+  const agentChildren = new Set((Array.isArray(state?.actionInvocations) ? state.actionInvocations : [])
+    .filter((invocation) => invocation.agentInvoked === true)
+    .map((invocation) => String(invocation.resultInteractionId)));
   return receipts
     .filter((receipt) => {
       const request = receipt.request;
@@ -78,7 +83,7 @@ export function pendingApprovalsForThread(state, thread) {
       return interactions.some((interaction) => (
         sameId(interaction.id, request.correlation.interactionId)
         && sameId(interaction.threadId, thread?.id)
-        && interaction.completionStatus === "waiting_for_approval"
+        && (interaction.completionStatus === "waiting_for_approval" || agentChildren.has(String(interaction.id)))
       ));
     })
     .sort((left, right) => (

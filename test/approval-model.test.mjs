@@ -63,6 +63,17 @@ describe("desktop approval model", () => {
     expect(pendingApprovalsForThread(state([first], "running"), { id: 10 })).toEqual([]);
   });
 
+  it("keeps an agent child's request answerable after its graph settled", () => {
+    const pending = receipt({ requestId: "child" });
+    const settled = (agentInvoked) => ({
+      ...state([pending], "accepted"),
+      actionInvocations: [{ resultInteractionId: 20, agentInvoked }],
+    });
+    expect(pendingApprovalsForThread(settled(true), { id: 10 }).map(({ request }) => request.requestId)).toEqual(["child"]);
+    // A user's invoked run, like any turn, is answerable only while it waits.
+    expect(pendingApprovalsForThread(settled(false), { id: 10 })).toEqual([]);
+  });
+
   it("fails closed for duplicate request IDs and unsupported action shapes", () => {
     const duplicate = receipt({ requestId: "duplicate" });
     expect(pendingApprovalsForThread(state([duplicate, duplicate]), { id: 10 })).toEqual([]);

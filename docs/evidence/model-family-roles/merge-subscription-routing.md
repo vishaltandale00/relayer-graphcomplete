@@ -1,0 +1,96 @@
+# Latest-main merge with native subscription routing
+
+This integration combines role-aware families and the evaluator repairs at
+`ecaa615c03fd7dc503744dce00a2b12296033f59` with main
+`c8225db3139f1c944022b50d2293c14d7f5862f0` (#725). The previous
+16-cell comparison remains evidence only for its recorded sources. It is not
+rerun or reinterpreted as proof of this merged source.
+
+## Product meaning and executable seams
+
+PRD FAM-001–006 and ADR 0006 govern frozen family admission and native routing.
+PRD sections 12 and 13 and the child-approval decisions on main govern independent
+completion, provider and approval lifetimes. Native providers continue to own
+recursion; `complete(inputGraph)` and graph acceptance retain their owners.
+
+Native family guidance is called directly by the normal Codex, Claude and Prime
+prompt constructors. The experiment's private loader is not part of the product.
+Codex and Claude native selectors retain the exact admitted provider definition
+and access contract, including managed subscriptions. Other-provider members
+remain metadata-only in those adapters. This enables the supported subscription
+routes; it does not promise arbitrary cross-provider delegation or API fallback.
+Eval's independent Codex evaluator refreshes native subscription discovery under
+its lease, without changing candidate defaults or installing a missing runtime.
+No configuration switch or new authority is introduced by this integration.
+
+| Executable seam / checkpoint | Deterministic production proof |
+| --- | --- |
+| Actual Codex/Claude/Prime root and invoked prompts carry the frozen roster; current-provider subscription selectors never substitute credentials | Complete `codex-basic`, `claude-basic`, `prime-agent` harness test files and host admission journeys |
+| Judge subscription discovery refresh, stale cached status, cancellation, missing runtime, model/effort checks and preserved candidate defaults | `test/eval-provider-setup.test.mjs` |
+| App-server recursive launch/settlement, per-child approval stream, decision reservation, late requests, fail-closed observer and prepared-resource cleanup | `relayer-app-server` completion-trace support scenarios through `cargo test --workspace`; the own-row approval journey runs both legacy and v2 selected admission |
+| Role-aware subscription admission and own-row child approval preserve the same v2 plan and held native lease across graph Return | `a_childs_approval_is_recorded_on_its_own_row_and_its_decision_resumes_it` in `crates/relayer-app-server/tests/support/completion_traces.rs`, both `selected=false` and `selected=true` |
+| Storage approval outcomes preserve graph-owned child terminal state; accepted settlement while waiting; thread/archive activity includes answerable child approvals | App-server SQLite approval, completion-execution and thread tests through `cargo test --workspace` |
+| Graph current settlement retains its canonical terminal reason | Graph-core current and database tests through `cargo test --workspace` |
+| Renderer child status/refresh keeps late approvals answerable without making every child a running message turn | `test/approval-model.test.mjs`, `test/run-state.test.mjs`, native completion-trace scenarios |
+| Compiled input occurrence capture and artifact modal identity remain scoped to visible trusted presentation | `test/node-detail-runtime.test.mjs`, `test/review-session.test.mjs`, full `npm run test:eval-web` |
+| Social preview and follow-up annotation renderer receipts match this actual merged renderer | Real Electron capture runners and both evidence receipt tests; inspect generated images |
+| Packaged telemetry module/source integrity remains current | `npm run evidence:telemetry` |
+
+No test is deleted or weakened. These checkpoints cover separate native,
+persistence, presentation and authority failure boundaries. Required local gates
+are `npm run check` and `npm run build`; Eval browser and declared evidence
+runners remain separate heavy checkpoints. There is no paid inference in these
+gates. Signed, release and unavailable-platform proof is not claimed.
+
+## Build preparation and evidence
+
+The existing isolated Cargo target is warm. Before compilation the repository's
+`lbug-artifact.mjs verify` accepted the existing macOS-ARM64 / Rust 1.98.0 Ladybug
+bundle, checking identities and hashes against this checkout. No cached test
+result is reused. Both Rust servers rebuild against the merged source.
+
+Visual evidence is regenerated rather than resolving conflicting receipts or
+PNG files by choosing either parent. Verification outcomes and exact-source
+adversarial assertions are recorded in the PR after execution. Prior failures
+and prior-source review assertions remain historical; they do not certify the
+merged source.
+
+The integration review found that main's own-row child-approval journey only
+covered the legacy unselected path. Its existing scenario now runs both paths
+with all previous correlation, resume, settlement and no-cancellation assertions.
+The selected path additionally observes the persisted v2 Codex subscription plan,
+its orchestrator role, unchanged admitted bytes and held lease before and after
+graph Return while the provider still runs. The real production journey passed
+in 0.92 seconds. Main's new storage fixture also needed the added optional
+provider constraint explicitly set to `None`; the first compile failure and the
+corrected passing run are preserved in the private integration ledger.
+
+Adversarial reviewer `/root/repair_authority_review` found no concrete blockers
+in the exact 39-file integration/authority scope recorded in
+[the source receipt](merge-subscription-routing-review.json), SHA-256
+`84c8044667582a16989401dcf2159167d03f3a3ae7e18b31074734d6efa8cef3`
+(sorted relative path + NUL + bytes + NUL). The reviewer independently passed
+86 renderer tests. Source changes invalidate this assertion. Full/heavy gate
+outcomes were pending at review and are not certified by it.
+
+## Executed local gates
+
+The final merged executable/source-test snapshot passed:
+
+- `npm run check`: complete aggregate, including 446 app-server unit tests,
+  4,365 JavaScript tests (three skipped), secret boundary 2/2, Python 99,
+  native/crash chapters, package/type checks and receipt/readability checks.
+- `npm run build`: final rerun after the integration test change passed.
+- `npm run test:eval-web`: all declared chapters passed, including accepted
+  artifact/input capture, Current/settled actors, judge screenshots and native
+  Product restart/reopen.
+- `npm run evidence:telemetry`: local gateway privacy passed; release proof
+  remains indeterminate, as recorded in its structured verdict.
+- Actual Electron social-preview and follow-up-annotation runners passed; all
+  six images were visually inspected and both receipt tests passed.
+- Focused harness/provider/renderer suite: 423/423 across nine files.
+
+The initial compile failure remains preserved separately; it is not rewritten
+as a pass. No inference run was added for this merge. Required hosted CI still
+checks the exact PR merge source before integration. These local gates do not
+constitute signed/release proof or an orchestrator quality promotion.

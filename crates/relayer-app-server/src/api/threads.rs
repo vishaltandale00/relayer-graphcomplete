@@ -124,15 +124,29 @@ pub(super) struct ApprovalDecisionResponse {
 struct ApprovalDecisionReservation {
     decisions:
         std::sync::Arc<std::sync::Mutex<std::collections::HashMap<String, ApprovalDecision>>>,
+    in_flight: std::sync::Arc<std::sync::Mutex<std::collections::HashSet<String>>>,
     request_id: String,
+    /// The decision may have resolved the request in the harness, but it is not recorded: the
+    /// harness's answer was lost, or recording it failed. The decision stays as the authority
+    /// for the resolution event an observer records later, which then removes it.
+    keep: bool,
 }
 
 impl Drop for ApprovalDecisionReservation {
     fn drop(&mut self) {
-        self.decisions
+        // Released under the in-flight lock, so a decision admitted next never sees this one's
+        // entry as retained, nor loses its own entry to this removal.
+        let mut in_flight = self
+            .in_flight
             .lock()
-            .expect("approval decision lock poisoned")
-            .remove(&self.request_id);
+            .expect("approval decision lock poisoned");
+        if !self.keep {
+            self.decisions
+                .lock()
+                .expect("approval decision lock poisoned")
+                .remove(&self.request_id);
+        }
+        in_flight.remove(&self.request_id);
     }
 }
 
@@ -165,7 +179,11 @@ pub(super) async fn decide_approval(
             "approval request already has a terminal resolution",
         ));
     }
-    if interaction.completion_status != "waiting_for_approval" {
+    // An agent's child's request stays answerable after its graph settles, until its
+    // provider ends and the host resolves it.
+    if interaction.completion_status != "waiting_for_approval"
+        && !state.product.is_agent_invoked_child(interaction_id).await?
+    {
         return Err(ApiError::conflict(
             "approval_not_actionable",
             "interaction is not waiting for approval",
@@ -175,33 +193,75 @@ pub(super) async fn decide_approval(
         .runtime
         .as_ref()
         .ok_or_else(|| ApiError::invalid("GraphComplete runtime is unavailable"))?;
-    let _reservation = {
-        let mut decisions = state
-            .approval_decisions
+    let (mut reservation, retained_earlier) = {
+        let mut in_flight = state
+            .approval_decisions_in_flight
             .lock()
             .expect("approval decision lock poisoned");
-        if decisions.contains_key(&request_id) {
+        if in_flight.contains(&request_id) {
             return Err(ApiError::conflict(
                 "approval_decision_in_flight",
                 "approval request already has a decision in flight",
             ));
         }
-        decisions.insert(request_id.clone(), submission.decision);
-        ApprovalDecisionReservation {
-            decisions: state.approval_decisions.clone(),
-            request_id: request_id.clone(),
+        let mut decisions = state
+            .approval_decisions
+            .lock()
+            .expect("approval decision lock poisoned");
+        // A decision whose harness answer was lost may already have resolved the request. It
+        // can be sent again, but no other decision may replace it.
+        let retained = decisions.get(&request_id).copied();
+        if retained.is_some_and(|retained| retained != submission.decision) {
+            return Err(ApiError::conflict(
+                "approval_decision_retained",
+                "an earlier decision on this approval request may already have resolved it",
+            ));
         }
+        in_flight.insert(request_id.clone());
+        decisions.insert(request_id.clone(), submission.decision);
+        let reservation = ApprovalDecisionReservation {
+            decisions: state.approval_decisions.clone(),
+            in_flight: state.approval_decisions_in_flight.clone(),
+            request_id: request_id.clone(),
+            // Kept until the harness refuses the decision or its resolution is recorded: a
+            // request dropped mid-call may already have resolved it.
+            keep: true,
+        };
+        (reservation, retained.is_some())
     };
     async {
-        let resolution = runtime
+        let resolution = match runtime
             .decide_approval(thread_id.value(), &request_id, &submission)
-            .await?;
-        validate_decision_resolution(&stored.request, submission.decision, &resolution)
-            .map_err(|error| ApiError::internal(&error))?;
-        let approval = state
+            .await
+        {
+            Ok(resolution) => resolution,
+            Err(error) => {
+                // Only the harness's own refusal proves this decision was not applied: its
+                // decision handler validates before it resolves. Any other failure may have
+                // lost the answer to a decision it applied. An earlier attempt's decision
+                // stays retained either way.
+                reservation.keep = retained_earlier || !error.is_host_answer();
+                return Err(error.into());
+            }
+        };
+        if let Err(error) =
+            validate_decision_resolution(&stored.request, submission.decision, &resolution)
+        {
+            reservation.keep = retained_earlier;
+            return Err(ApiError::internal(&error));
+        }
+        let approval = match state
             .product
             .record_approval_resolution(&resolution, true)
-            .await?;
+            .await
+        {
+            Ok(approval) => approval,
+            Err(error) => {
+                reservation.keep = true;
+                return Err(error.into());
+            }
+        };
+        reservation.keep = false;
         Ok(Json(ApprovalDecisionResponse { approval }))
     }
     .await
@@ -246,13 +306,27 @@ pub(super) async fn set_archived(
     Json(request): Json<ArchiveRequest>,
 ) -> Result<Json<ThreadResponse>, ApiError> {
     authorize_write(&state, &headers)?;
-    Ok(Json(
-        state
-            .product
-            .set_thread_archived(ThreadId::try_from(id)?, request.archived)
-            .await?
-            .into(),
-    ))
+    // An agent child's provider can still ask for approval after its graph settled; that is
+    // work the archive would hide. Stored state cannot see it, so it is checked here too.
+    if request.archived && state.running_child_providers.in_thread(id) {
+        return Err(ApiError::conflict(
+            "thread_archive_busy",
+            "Available when work finishes.",
+        ));
+    }
+    let thread = state
+        .product
+        .set_thread_archived(ThreadId::try_from(id)?, request.archived)
+        .await?;
+    Ok(Json(thread_response(&state, thread)))
+}
+
+/// A thread as the renderer sees it. A child provider still running keeps the thread from being
+/// archived, and so also keeps the sidebar's activity refresh going for it.
+fn thread_response(state: &ApiState, thread: crate::product::Thread) -> ThreadResponse {
+    let mut response = ThreadResponse::from(thread);
+    response.mark_running_child_providers(&state.running_child_providers);
+    response
 }
 
 pub(super) async fn list(
@@ -265,7 +339,7 @@ pub(super) async fn list(
         .list_threads()
         .await?
         .into_iter()
-        .map(Into::into)
+        .map(|thread| thread_response(&state, thread))
         .collect();
     Ok(Json(ThreadsResponse { threads }))
 }
@@ -417,6 +491,7 @@ pub(super) async fn get(
         .conversation_compatibility(detail.thread.id)
         .await?;
     let response = ThreadDetailResponse::from(detail)
+        .with_running_child_providers(&state.running_child_providers)
         .with_invocation_inventory_available(inventory_available)
         .with_action_invocations(invocations)
         .with_imported_invocation_history(imported_history)
@@ -871,6 +946,10 @@ pub(super) async fn project_action_invocations(
             .product
             .user_invocation_preparation_recoverable(invocation.result_interaction_id)
             .await?;
+        response.provider_running = invocation.agent_invoked
+            && state
+                .running_child_providers
+                .contains(invocation.result_interaction_id.value());
         response.preparation_rejected = state
             .product
             .user_invocation_preparation_rejected(invocation.result_interaction_id)
@@ -1013,6 +1092,7 @@ pub(super) async fn project_local_invocations(
                 .get("activator")
                 .and_then(Value::as_str)
                 == Some("agent"),
+            provider_running: false,
             graph_only: true,
             occupancy_only: false,
             native_invocation: Some(native),
@@ -1061,6 +1141,7 @@ pub(super) async fn project_local_invocations(
                 result_completion_status: "unavailable".into(),
                 created_at: String::new(),
                 agent_invoked: false,
+                provider_running: false,
                 graph_only: true,
                 occupancy_only: true,
                 native_invocation: None,
@@ -3454,6 +3535,234 @@ fn completion_timestamp() -> String {
         .to_string()
 }
 
+/// Set once the host confirms a child's provider run has ended, or when the task waiting for
+/// that answer goes away. Only then can no further approval request arrive for the child.
+#[derive(Clone, Default)]
+struct ProviderEnded(std::sync::Arc<std::sync::atomic::AtomicBool>);
+
+impl ProviderEnded {
+    fn get(&self) -> bool {
+        self.0.load(std::sync::atomic::Ordering::Acquire)
+    }
+}
+
+/// Held by the provider-end wait; dropping it, however that task ends, reports the end, and
+/// takes the child off the running list the renderer refreshes for.
+struct ProviderEndSignal {
+    ended: ProviderEnded,
+    running: crate::completion_broker::RunningChildProviders,
+    interaction_id: i64,
+}
+
+impl ProviderEndSignal {
+    fn new(
+        ended: ProviderEnded,
+        running: crate::completion_broker::RunningChildProviders,
+        interaction_id: i64,
+        thread_id: i64,
+    ) -> Self {
+        running.insert(interaction_id, thread_id);
+        Self {
+            ended,
+            running,
+            interaction_id,
+        }
+    }
+}
+
+impl Drop for ProviderEndSignal {
+    fn drop(&mut self) {
+        self.ended
+            .0
+            .store(true, std::sync::atomic::Ordering::Release);
+        self.running.remove(self.interaction_id);
+    }
+}
+
+/// An agent's child has no execution observer of its own, so its approvals reach a person
+/// through its own product row: the host keys the child's approval stream by that row, and this
+/// records it there, where the product's approval decision already resolves it. The row's
+/// terminal state is never this observer's to write; its graph settlement owns that.
+///
+/// A child's graph can settle before its provider turn ends, and the provider can still ask for
+/// approval then. So this reads until the host confirms the provider ended and the stream is
+/// drained: empty, or dropped once every event was acknowledged. A stream that never drains
+/// stops being read a bounded time after the provider ended.
+///
+/// A request nobody can see must not hold the child. Failures to read or record its approvals
+/// back off as the graph observer's do; after twenty in a row, the observer fails the child's
+/// graph if it is still active, as a stop does, and cancels its provider once a second until the
+/// host confirms the provider ended.
+///
+/// Once the provider ended, any request still unresolved on the row can never be answered: the
+/// host ended it, but the observer could not read that. It is recorded as aborted, leaving the
+/// row's settled state to its graph, so the thread never shows a request nobody can answer.
+fn spawn_recursive_approval_observer(
+    state: ApiState,
+    thread: Thread,
+    interaction: Interaction,
+    completion_id: i64,
+    provider_ended: ProviderEnded,
+) {
+    const DRAIN_AFTER_PROVIDER_END: std::time::Duration = std::time::Duration::from_secs(30);
+    const OBSERVATION_FAILURE_LIMIT: u8 = 20;
+    const POLL: std::time::Duration = std::time::Duration::from_millis(100);
+    const FAIL_CLOSED_PASS: std::time::Duration = std::time::Duration::from_secs(1);
+    tokio::spawn(async move {
+        let Some(runtime) = state.runtime.as_ref() else {
+            return;
+        };
+        let mut cursor = 0;
+        let mut harness_session_id = None;
+        let mut complete_call_id = None;
+        let mut failures = 0_u8;
+        let mut failing = false;
+        let mut ended_at = None;
+        loop {
+            let ended = provider_ended.get();
+            if ended && ended_at.is_none() {
+                ended_at = Some(tokio::time::Instant::now());
+            }
+            let drained = match runtime
+                .approval_events(thread.id.value(), interaction.id.value(), cursor)
+                .await
+            {
+                // The host drops a stream once its run ended and every event was
+                // acknowledged; nothing more can arrive on it.
+                Ok(snapshot)
+                    if cursor > 0
+                        && snapshot.latest_sequence == 0
+                        && snapshot.events.is_empty()
+                        && snapshot.pending_requests.is_empty() =>
+                {
+                    cursor = 0;
+                    complete_call_id = None;
+                    true
+                }
+                Ok(snapshot) => {
+                    let empty = snapshot.pending_requests.is_empty();
+                    match crate::product::persist_approval_snapshot(
+                        crate::product::ApprovalRecorder {
+                            product: &state.product,
+                            decisions: &state.approval_decisions,
+                        },
+                        thread.id,
+                        interaction.id,
+                        &mut cursor,
+                        &mut harness_session_id,
+                        &mut complete_call_id,
+                        snapshot,
+                    )
+                    .await
+                    {
+                        Ok(()) => {
+                            failures = 0;
+                            cursor == 0 && empty
+                        }
+                        Err(error) => {
+                            failures = failures.saturating_add(1);
+                            if failures == OBSERVATION_FAILURE_LIMIT {
+                                eprintln!(
+                                    "recursive completion {completion_id} approvals could not be recorded: {error}"
+                                );
+                            }
+                            false
+                        }
+                    }
+                }
+                // The live session is gone, so nothing more can be requested.
+                Err(RuntimeError::Remote { status: 404, .. }) => true,
+                Err(error) => {
+                    failures = failures.saturating_add(1);
+                    if failures == OBSERVATION_FAILURE_LIMIT {
+                        eprintln!(
+                            "recursive completion {completion_id} approvals could not be read: {error}"
+                        );
+                    }
+                    false
+                }
+            };
+            failing |= failures >= OBSERVATION_FAILURE_LIMIT;
+            if failing && !ended {
+                fail_closed_recursive_approvals(runtime, &thread, &interaction, completion_id)
+                    .await;
+            }
+            if ended
+                && (drained || ended_at.is_some_and(|at| at.elapsed() >= DRAIN_AFTER_PROVIDER_END))
+            {
+                break;
+            }
+            tokio::time::sleep(if failing && !ended {
+                FAIL_CLOSED_PASS
+            } else if failures > 0 {
+                APPROVAL_OBSERVATION_RETRY_STEP * u32::from(failures.min(10))
+            } else {
+                POLL
+            })
+            .await;
+        }
+        // A request left open would ask the user for an answer nobody can give, so a storage
+        // error is retried until the requests are closed.
+        let mut attempts = 0_u32;
+        while let Err(error) = state
+            .product
+            .abort_unanswerable_child_approvals(
+                interaction.id,
+                "The child's provider ended before this approval was resolved.",
+            )
+            .await
+        {
+            attempts += 1;
+            if attempts == 1 || attempts.is_multiple_of(20) {
+                eprintln!(
+                    "recursive completion {completion_id} unanswerable approvals could not be closed: {error}"
+                );
+            }
+            tokio::time::sleep(APPROVAL_OBSERVATION_RETRY_STEP * attempts.min(10)).await;
+        }
+    });
+}
+
+/// The first pause after a failed approval read or record. Each further failure waits one step
+/// longer, up to ten steps, so twenty failures in a row take about fourteen seconds.
+#[cfg(not(test))]
+const APPROVAL_OBSERVATION_RETRY_STEP: std::time::Duration = std::time::Duration::from_millis(100);
+#[cfg(test)]
+const APPROVAL_OBSERVATION_RETRY_STEP: std::time::Duration = std::time::Duration::from_millis(10);
+
+/// One pass of the approval observer's fail-closed policy: fail the child's graph while it is
+/// still active, then cancel its provider. Either call can fail transiently, so the observer
+/// repeats this pass until the host confirms the provider ended.
+async fn fail_closed_recursive_approvals(
+    runtime: &crate::runtime::RuntimeClient,
+    thread: &Thread,
+    interaction: &Interaction,
+    completion_id: i64,
+) {
+    let active = runtime
+        .completion_current(completion_id)
+        .await
+        .map_or(true, |current| {
+            current.lifecycle == relayer_graph_core::CompletionLifecycle::Active
+        });
+    if active
+        && let Err(error) = runtime
+            .fail_graph_completion(
+                completion_id,
+                &format!("recursive-approval-failed:{}", interaction.id),
+                "approval_observation_failed",
+            )
+            .await
+    {
+        eprintln!(
+            "recursive completion {completion_id} approval failure could not terminalize graph state: {error}"
+        );
+    }
+    let _ = runtime
+        .cancel_invoked_completion(thread.id.value(), completion_id)
+        .await;
+}
+
 fn spawn_recursive_completion_observers(
     state: ApiState,
     thread: Thread,
@@ -3468,6 +3777,20 @@ fn spawn_recursive_completion_observers(
     let semantic_interaction = interaction.clone();
     let semantic_prepared = prepared.clone();
     let completion_id = prepared.graph_node_id;
+    let provider_ended = ProviderEnded::default();
+    let provider_end_signal = ProviderEndSignal::new(
+        provider_ended.clone(),
+        state.running_child_providers.clone(),
+        interaction.id.value(),
+        thread.id.value(),
+    );
+    spawn_recursive_approval_observer(
+        state.clone(),
+        thread.clone(),
+        interaction.clone(),
+        completion_id,
+        provider_ended,
+    );
     let semantic_origin_digest = permission_origin_digest.clone();
     let supervision = semantic_state
         .completion_observations
@@ -3576,6 +3899,7 @@ fn spawn_recursive_completion_observers(
             PROVIDER_END_RETRY_STEP,
         )
         .await;
+        drop(provider_end_signal);
         // Nothing else will end a current whose provider is gone, so this retries until
         // the current is terminal.
         loop {
@@ -5824,6 +6148,27 @@ mod completion_traces;
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A decision the harness accepted but whose write failed stays as the authority for the
+    /// resolution event an observer records later; otherwise it is released with its request.
+    #[test]
+    fn a_kept_approval_decision_outlives_its_request() {
+        let decisions =
+            std::sync::Arc::new(std::sync::Mutex::new(std::collections::HashMap::new()));
+        for (keep, remains) in [(false, false), (true, true)] {
+            decisions
+                .lock()
+                .unwrap()
+                .insert("request-1".to_owned(), ApprovalDecision::ApproveOnce);
+            drop(ApprovalDecisionReservation {
+                decisions: decisions.clone(),
+                in_flight: Default::default(),
+                request_id: "request-1".into(),
+                keep,
+            });
+            assert_eq!(decisions.lock().unwrap().contains_key("request-1"), remains);
+        }
+    }
     use crate::{
         api::auth::DesktopSessionAuthenticator,
         approval::{
@@ -6331,6 +6676,8 @@ mod tests {
             environment_inspector: crate::environment::EnvironmentInspector::new(),
             completion_brokers,
             completion_observations: CompletionObservations::default(),
+            running_child_providers: Default::default(),
+            approval_decisions_in_flight: Default::default(),
             node_runs: Default::default(),
             run_capacity: Default::default(),
         };

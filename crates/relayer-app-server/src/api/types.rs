@@ -176,6 +176,17 @@ pub(crate) struct ThreadResponse {
     activity: Option<String>,
 }
 
+impl ThreadResponse {
+    /// A child provider still running keeps the thread from being archived, and so also keeps
+    /// the sidebar's activity refresh going for it. Stored state cannot see that provider.
+    pub(super) fn mark_running_child_providers(
+        &mut self,
+        running: &crate::completion_broker::RunningChildProviders,
+    ) {
+        self.archive_blocked |= running.in_thread(self.id);
+    }
+}
+
 impl From<Thread> for ThreadResponse {
     fn from(thread: Thread) -> Self {
         Self {
@@ -456,6 +467,9 @@ pub(crate) struct ActionInvocationResponse {
     pub(super) created_at: String,
     /// An agent's child: only its parent agent may stop it, and it holds no capacity slot.
     pub(super) agent_invoked: bool,
+    /// An agent's child whose provider run has not ended, so it may still ask for approval.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub(super) provider_running: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(super) execution: Option<CompletionExecutionEvidenceResponse>,
 }
@@ -478,6 +492,7 @@ impl From<ActionInvocation> for ActionInvocationResponse {
             result_completion_status: invocation.result_completion_status,
             created_at: invocation.created_at,
             agent_invoked: invocation.agent_invoked,
+            provider_running: false,
             execution: None,
         }
     }
@@ -662,6 +677,18 @@ impl ProductStateResponse {
     }
 }
 
+impl ProductStateResponse {
+    pub(super) fn with_running_child_providers(
+        mut self,
+        running: &crate::completion_broker::RunningChildProviders,
+    ) -> Self {
+        for view in &mut self.threads {
+            view.thread.mark_running_child_providers(running);
+        }
+        self
+    }
+}
+
 impl From<ProductState> for ProductStateResponse {
     fn from(state: ProductState) -> Self {
         Self {
@@ -694,6 +721,16 @@ pub(crate) struct ThreadDetailResponse {
     imported_invocation_history: Vec<ImportedInvocationHistoryResponse>,
     approvals: Vec<ApprovalReceipt>,
     invocation_inventory_available: bool,
+}
+
+impl ThreadDetailResponse {
+    pub(super) fn with_running_child_providers(
+        mut self,
+        running: &crate::completion_broker::RunningChildProviders,
+    ) -> Self {
+        self.thread.mark_running_child_providers(running);
+        self
+    }
 }
 
 impl From<ThreadDetail> for ThreadDetailResponse {
