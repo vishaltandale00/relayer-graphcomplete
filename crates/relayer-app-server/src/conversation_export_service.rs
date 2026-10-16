@@ -3005,7 +3005,8 @@ fn ensure_accepted(
 
 fn completion_status(value: &str) -> Result<ExportCompletionStatus, ConversationExportBuildError> {
     match value {
-        "not_started" => Ok(ExportCompletionStatus::NotStarted),
+        // A run queued behind another on its node (#718) has not started.
+        "not_started" | "queued" => Ok(ExportCompletionStatus::NotStarted),
         "running" => Ok(ExportCompletionStatus::Running),
         "submitted" => Ok(ExportCompletionStatus::Submitted),
         "waiting_for_approval" => Ok(ExportCompletionStatus::WaitingForApproval),
@@ -4932,6 +4933,11 @@ mod tests {
         assert_eq!(
             completion_status("stopped").unwrap(),
             ExportCompletionStatus::Stopped
+        );
+        // A queued run exports as not started, so sharing a thread with one keeps working.
+        assert_eq!(
+            completion_status("queued").unwrap(),
+            ExportCompletionStatus::NotStarted
         );
     }
 

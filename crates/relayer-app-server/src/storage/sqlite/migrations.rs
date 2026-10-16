@@ -166,7 +166,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn schema_48_roles_backfill_family_order_without_rewriting_history() {
+    async fn schema_49_roles_backfill_family_order_without_rewriting_history() {
         let file = tempfile::NamedTempFile::new().unwrap();
         let pool = SqlitePoolOptions::new()
             .max_connections(1)
@@ -177,7 +177,7 @@ mod tests {
             migrations: Cow::Owned(
                 MIGRATOR
                     .iter()
-                    .filter(|m| m.version < 49)
+                    .filter(|m| m.version < 50)
                     .cloned()
                     .collect(),
             ),
@@ -277,7 +277,7 @@ mod tests {
         .fetch_all(&store.pool)
         .await
         .unwrap();
-        assert_eq!(versions, [40, 41, 42, 43, 44, 45, 46, 47, 48, 49]);
+        assert_eq!(versions, [40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50]);
         assert!(
             store
                 .recover_interaction_accepted(
