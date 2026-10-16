@@ -102,7 +102,8 @@ export async function resolveProviderOnboardingStep({
 
 export function providerOnboardingCompletionIntent({ providerId, projection, harnessId, family }) {
   if (!providerId || !projection?.projectionRevision || !harnessId || !family) return null;
-  if (family.kind === "create" && (!family.name?.trim() || !family.members?.length)) return null;
+  if (family.kind === "create" && (!family.name?.trim() || !family.members?.length
+    || family.members.filter((member) => member.roles?.some((role) => role.name === "orchestrator")).length !== 1)) return null;
   return {
     providerId,
     harnessId,

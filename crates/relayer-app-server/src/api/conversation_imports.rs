@@ -360,6 +360,7 @@ pub(crate) mod tests {
 
     fn accepted_receipt() -> ExportCompletionReceipt {
         let route = ExportAdmittedExecutionModelRoute {
+            roles: None,
             provider_id: "codex".into(),
             adapter_id: "codex-subscription".into(),
             access_contract: "managed-runtime@1".into(),
@@ -367,6 +368,7 @@ pub(crate) mod tests {
             adapter_implementation_version: "7".into(),
         };
         let mut admitted_plan = ExportAdmittedExecutionModelPlan {
+            schema_version: 1,
             family_id: 1,
             family_revision: 4,
             orchestrator: route.clone(),

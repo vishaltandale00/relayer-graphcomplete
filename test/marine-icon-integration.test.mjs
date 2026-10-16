@@ -29,7 +29,7 @@ it("authors the sourced marine ecology fixture through production catalog discov
     const session=await product.start();
     await product.providerDefinitionStore().save([{id:"openai-work",adapterId:"openai-api",label:"Fixture",endpoint:"https://unused.invalid/v1",accessContract:"secret@1",credentialReference:"fixture",lifecycleState:"active",removedAt:null}]);
     await product.seedProviderCatalog({providerId:"openai-work",label:"Fixture",connected:true,models:[{id:"fixture-model",label:"Fixture",order:0,visible:true,available:true,providerDefault:true,metadata:{}}],systemFamily:{key:"fixture",name:"Fixture",modelIds:["fixture-model"]}});
-    const family=await request(session,"/api/model-families",{method:"POST",body:JSON.stringify({name:"Fixture",enabled:true,members:[{providerId:"openai-work",modelId:"fixture-model"}]})});
+    const family=await request(session,"/api/model-families",{method:"POST",body:JSON.stringify({name:"Fixture",enabled:true,members:[{providerId:"openai-work",modelId:"fixture-model", roles: [{ name: "orchestrator" }]}]})});
     const thread=await request(session,"/api/threads",{method:"POST",body:JSON.stringify({title:"Marine ecology",initialMessage:"Explain coral, jellyfish, octopus, sea turtles, plankton and reef monitoring.",permissionProfileId:"full",harnessId:"fixture-task-system",modelSelection:{familyId:family.id,providerId:"openai-work",modelId:"fixture-model"}})});
     let turn;
     for(let attempt=0;attempt<300;attempt++){

@@ -36,7 +36,7 @@ it("seals connected inputs, clears exact submissions, recovers their key, and pr
       return value;
     };
     await product.seedProviderCatalog({ providerId: "codex", label: "Fixture", connected: true, models: [{ id: "fixture-model", label: "Fixture", order: 0, visible: true, available: true, providerDefault: true, metadata: {} }] });
-    const family = await request("/api/model-families", { method: "POST", body: JSON.stringify({ name: "Fixture", enabled: true, members: [{ providerId: "codex", modelId: "fixture-model" }] }) });
+    const family = await request("/api/model-families", { method: "POST", body: JSON.stringify({ name: "Fixture", enabled: true, members: [{ providerId: "codex", modelId: "fixture-model", roles: [{ name: "orchestrator" }] }] }) });
     const thread = await request("/api/threads", { method: "POST", body: JSON.stringify({ title: "Vacation inputs", initialMessage: "Choose a vacation destination", modelSelection: { familyId: family.id, providerId: "codex", modelId: "fixture-model" } }) });
     const allowedRefusals = new Map();
     const accepted = async (count, expectedIds = []) => {

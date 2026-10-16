@@ -833,6 +833,7 @@ mod tests {
         let store = SqliteProductStore::open(path).await.unwrap();
         let thread = store
             .insert_thread_with_initial_interaction(NewThreadRecord {
+                required_provider_adapter_id: None,
                 icon_selection_eligible: true,
                 title: "Durable execution",
                 project_id: None,

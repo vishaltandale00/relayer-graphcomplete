@@ -1,4 +1,5 @@
 import {
+  availableFamilyMembers,
   availablePickerFamilies,
   familyModelSetup,
   harnessUsesConfigurationModel,
@@ -32,7 +33,7 @@ function harnessFor(settings, harnessId) {
 export function modelPickerModelSetup(settings, selection) {
   if (!settings || pickerSelectionIsAvailable(settings, selection)) return null;
   const compatibility = settings.conversationCompatibility;
-  const setup = familyModelSetup(settings, selection?.familyId ?? settings.defaults?.familyId);
+  const setup = familyModelSetup(settings, selection?.familyId ?? settings.defaults?.familyId, selection?.harnessId ?? settings.defaults?.harnessId);
   if (compatibility?.status === "blocked") return null;
   if (compatibility?.status === "compatible" && (
     setup?.providerId !== compatibility.providerId
@@ -70,10 +71,10 @@ export function modelPickerMemberIsSelected(familyId, selection, member) {
 export function modelPickerMarkup({ mode = "new" } = {}) {
   const safeMode = mode === "ongoing" ? "ongoing" : "new";
   return `<div class="model-control model-control-${safeMode}" data-model-picker="${safeMode}">
-    <button type="button" class="model-button" data-model-picker-trigger aria-haspopup="dialog" aria-expanded="false" title="Choose model"><span aria-hidden="true">✦</span><span data-model-picker-label>Model</span><span aria-hidden="true">⌄</span></button>
+    <button type="button" class="model-button" data-model-picker-trigger aria-haspopup="dialog" aria-expanded="false" title="Choose model family"><span aria-hidden="true">✦</span><span data-model-picker-label>Model</span><span aria-hidden="true">⌄</span></button>
     <div class="model-picker-popover hidden" data-model-picker-popover role="dialog" aria-label="Model and harness picker">
       <div class="model-picker-tabs" role="tablist" aria-label="Model picker sections">
-        <button type="button" role="tab" data-model-picker-tab="model" aria-selected="true">Model</button>
+        <button type="button" role="tab" data-model-picker-tab="model" aria-selected="true">Family</button>
         <button type="button" role="tab" data-model-picker-tab="advanced" aria-selected="false">Advanced</button>
       </div>
       <section class="model-picker-panel" data-model-picker-panel="model" role="tabpanel"></section>
@@ -136,7 +137,7 @@ export function modelSelectionLabels(settings, selection) {
     family: family?.name ?? null,
     provider: providerLabel,
     model: modelLabel,
-    compact: family ? `${family.name} · ${modelLabel}` : `${providerLabel} · ${modelLabel}`,
+    compact: family ? family.name : `${providerLabel} · ${modelLabel}`,
   };
 }
 
@@ -211,6 +212,43 @@ export function createModelPicker({
   let validatingHarness = false;
   let refreshingModels = false;
   const harnessValidationGate = createModelPickerRequestGate();
+  let swipeDelta = 0;
+  let swipeDirection = 0;
+  let lastSwipeTime = null;
+  let swipeTimer = null;
+  let familyAnimations = [];
+
+  function clearFamilyMotion() {
+    familyAnimations.forEach((animation) => animation.cancel());
+    familyAnimations = [];
+    root.querySelectorAll("[data-family-outgoing]").forEach((element) => element.remove());
+    const list = root.querySelector(".model-family-members");
+    if (list) list.style.transform = "";
+  }
+
+  function reducedFamilyMotion() {
+    return root.ownerDocument.defaultView.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+  }
+
+  function settleFamilyDrag() {
+    const list = root.querySelector(".model-family-members");
+    if (!list?.style.transform) return;
+    const from = list.style.transform;
+    list.style.transform = "";
+    if (!reducedFamilyMotion() && list.animate) {
+      familyAnimations.push(list.animate([{ transform: from }, { transform: "translateX(0)" }],
+        { duration: 180, easing: "cubic-bezier(.2,.8,.2,1)" }));
+    }
+  }
+
+  function resetSwipe() {
+    swipeDelta = 0;
+    swipeDirection = 0;
+    lastSwipeTime = null;
+    clearTimeout(swipeTimer);
+    swipeTimer = null;
+    clearFamilyMotion();
+  }
 
   function selectionReady() {
     return !validatingHarness && pickerSelectionIsAvailable(currentSettings, currentSelection);
@@ -235,20 +273,87 @@ export function createModelPicker({
     return families.map((family) => `<option value="${escapeHtmlAttribute(family.id)}" ${String(family.id) === String(selectedFamily?.id) ? "selected" : ""}>${escapeHtml(family.name)}</option>`).join("");
   }
 
+  function familyFieldMarkup(families, selectedFamily, setupName = null) {
+    return `<div class="model-family-field"><span>Family</span>
+      <select data-model-family aria-label="Model family">${setupName ? `<option value="" selected disabled>${escapeHtml(setupName)}</option>` : ""}${familyOptions(families, selectedFamily)}</select>
+    </div>`;
+  }
+
+  function familyMembersMarkup(family, families, selectedFamily) {
+    if (!family && !families.length) return "";
+    const canCycle = families.length > 1 || (families.length === 1 && !selectedFamily);
+    const arrow = (direction, label, glyph) => `<button type="button" class="model-family-cycle" data-family-cycle="${direction}" aria-label="${label}" title="${label}" ${canCycle ? "" : "disabled"}><span aria-hidden="true">${glyph}</span></button>`;
+    const available = family ? availableFamilyMembers(currentSettings, family, selectedHarnessId()) : [];
+    return `<div class="model-family-roster" data-family-roster>${arrow("previous", "Previous model family", "‹")}<div class="model-family-viewport"><ul class="model-family-members" aria-label="Family models and roles">${[...(family?.members ?? [])]
+      .sort((left, right) => left.position - right.position)
+      .map((member) => {
+        const provider = currentSettings.providers.find((item) => item.id === member.providerId);
+        const model = modelFor(currentSettings, member.providerId, member.modelId);
+        const isAvailable = available.some((candidate) => candidate.providerId === member.providerId && candidate.modelId === member.modelId);
+        const roles = (member.roles ?? []).map((role) => `<span class="model-family-role"${role.description ? ` title="${escapeHtmlAttribute(role.description)}"` : ""}>${escapeHtml(role.name)}</span>`).join("");
+        return `<li class="model-family-member${isAvailable ? "" : " model-family-member-unavailable"}"><button type="button" class="model-family-member-button" data-family-member>
+          <span class="model-family-member-heading"><strong>${escapeHtml(model?.label ?? member.modelId)}</strong>${isAvailable ? "" : '<small class="model-family-member-status">Unavailable</small>'}</span>
+          <span class="model-family-member-meta"><small class="model-family-member-provider">${escapeHtml(provider?.label ?? member.providerId)}</small><span class="model-family-member-roles">${roles || '<span class="model-family-no-role">No role assigned</span>'}</span></span>
+        </button></li>`;
+      }).join("")}</ul></div>${arrow("next", "Next model family", "›")}</div>`;
+  }
+
+  function chooseFamily(nextFamily) {
+    const member = nextFamily?.orchestrator;
+    if (!member) return;
+    onUserTakeover();
+    commit({
+      harnessId: selectedHarnessId(),
+      familyId: nextFamily.id,
+      providerId: member.providerId,
+      modelId: member.modelId,
+    });
+  }
+
+  function cycleFamily(direction, { focus = true } = {}) {
+    const { families, selectedFamily } = modelPickerFamilyPresentation(currentSettings, selectedHarnessId(), currentSelection);
+    if (!families.length || (families.length === 1 && selectedFamily)) return;
+    const currentIndex = families.findIndex((family) => String(family.id) === String(currentSelection?.familyId));
+    const nextIndex = currentIndex < 0
+      ? (direction === "next" ? 0 : families.length - 1)
+      : (currentIndex + (direction === "next" ? 1 : -1) + families.length) % families.length;
+    const outgoing = root.querySelector(".model-family-members")?.cloneNode(true);
+    clearFamilyMotion();
+    chooseFamily(families[nextIndex]);
+    const incoming = root.querySelector(".model-family-members");
+    if (outgoing && incoming?.animate && !reducedFamilyMotion()) {
+      const sign = direction === "next" ? 1 : -1;
+      outgoing.setAttribute("data-family-outgoing", "");
+      outgoing.setAttribute("aria-hidden", "true");
+      outgoing.inert = true;
+      incoming.parentElement.append(outgoing);
+      const timing = { duration: 240, easing: "cubic-bezier(.2,.8,.2,1)" };
+      const exit = outgoing.animate([
+        { transform: outgoing.style.transform || "translateX(0)", opacity: 1 },
+        { transform: `translateX(${-sign * 100}%)`, opacity: 0 },
+      ], timing);
+      exit.onfinish = () => outgoing.remove();
+      familyAnimations = [exit, incoming.animate([
+        { transform: `translateX(${sign * 100}%)`, opacity: 0.3 },
+        { transform: "translateX(0)", opacity: 1 },
+      ], timing)];
+    }
+    if (!focus) return;
+    const nextButton = root.querySelector(`[data-family-cycle="${direction}"]`);
+    (nextButton?.disabled ? root.querySelector("[data-model-family]") : nextButton)?.focus();
+  }
+
   function bindFamilyChange(panel, families) {
     panel.querySelector("[data-model-family]").onchange = (event) => {
-      onUserTakeover();
-      const nextFamily = families.find((family) => String(family.id) === event.target.value);
-      const member = nextFamily?.availableMembers[0];
-      if (!member) return;
-      commit({
-        harnessId: selectedHarnessId(),
-        familyId: nextFamily.id,
-        providerId: member.providerId,
-        modelId: member.modelId,
-      });
-      requestAnimationFrame(() => root.querySelector("[data-model-family]")?.focus());
+      chooseFamily(families.find((family) => String(family.id) === event.target.value));
+      close({ returnFocus: true });
     };
+    panel.querySelectorAll("[data-family-cycle]").forEach((button) => {
+      button.onclick = () => {
+        resetSwipe();
+        cycleFamily(button.dataset.familyCycle);
+      };
+    });
   }
 
   function renderModelSetupPanel(panel, families, modelSetup) {
@@ -256,9 +361,9 @@ export function createModelPicker({
       ? `<button type="button" class="secondary" data-model-picker-refresh aria-label="${escapeHtmlAttribute(refreshingModels ? modelSetup.busyName : modelSetup.actionName)}" aria-busy="${refreshingModels}" aria-disabled="${refreshingModels}">${refreshingModels ? "Refreshing…" : escapeHtml(modelSetup.actionLabel)}</button>`
       : `<button type="button" class="secondary" data-model-picker-settings${modelSetup.action === "settings" ? ` aria-label="${escapeHtmlAttribute(modelSetup.actionName)}"` : ""}>Open Settings</button>`;
     const otherFamilies = families.length
-      ? `<label class="model-family-field"><span>Family</span><select data-model-family aria-label="Model family"><option value="" selected disabled>${escapeHtml(modelSetup.familyName)}</option>${familyOptions(families, null)}</select></label>`
+      ? familyFieldMarkup(families, null, modelSetup.familyName)
       : "";
-    panel.innerHTML = `<div class="model-picker-empty model-picker-recovery"><strong>${escapeHtml(modelSetup.label)}</strong><span>${escapeHtml(modelSetup.message)}</span>${refresh}</div>${otherFamilies}`;
+    panel.innerHTML = `<div class="model-picker-empty model-picker-recovery"><strong>${escapeHtml(modelSetup.label)}</strong><span>${escapeHtml(modelSetup.message)}</span>${refresh}</div>${otherFamilies}${familyMembersMarkup(familyFor(currentSettings, modelSetup.familyId), families, null)}`;
     if (families.length) bindFamilyChange(panel, families);
     // A disconnected provider is reconnected on its card under Providers; otherwise the Settings
     // defaults show the recovery and the other providers.
@@ -328,28 +433,9 @@ export function createModelPicker({
       };
       return;
     }
-    panel.innerHTML = `<label class="model-family-field"><span>Family</span><select data-model-family aria-label="Model family">${familyOptions(families, selectedFamily)}</select></label>
-      <div class="model-option-list" role="radiogroup" aria-label="Models in ${escapeHtmlAttribute(selectedFamily.name)}">${selectedFamily.availableMembers.map((member) => {
-        const model = modelFor(currentSettings, member.providerId, member.modelId);
-        const provider = currentSettings.providers.find((item) => item.id === member.providerId);
-        const checked = modelPickerMemberIsSelected(selectedFamily.id, currentSelection, member);
-        return `<button type="button" role="radio" aria-checked="${checked}" data-model-option data-provider-id="${escapeHtmlAttribute(member.providerId)}" data-model-id="${escapeHtmlAttribute(member.modelId)}"><span><strong>${escapeHtml(model?.label ?? member.modelId)}</strong><small>${escapeHtml(provider?.label ?? member.providerId)}</small></span><i aria-hidden="true">${checked ? "✓" : ""}</i></button>`;
-      }).join("")}</div>`;
+    panel.innerHTML = `${familyFieldMarkup(families, selectedFamily)}
+      ${familyMembersMarkup(selectedFamily, families, selectedFamily)}`;
     bindFamilyChange(panel, families);
-    panel.querySelectorAll("[data-model-option]").forEach((button) => {
-      button.onclick = () => {
-        onUserTakeover();
-        const providerId = button.dataset.providerId;
-        const modelId = button.dataset.modelId;
-        commit({
-          harnessId: selectedHarnessId(),
-          familyId: selectedFamily.id,
-          providerId,
-          modelId,
-        });
-        close({ returnFocus: true });
-      };
-    });
   }
 
   function renderAdvancedPanel() {
@@ -438,10 +524,10 @@ export function createModelPicker({
       : false;
     const modelSetup = ready ? null : modelPickerModelSetup(currentSettings, currentSelection);
     triggerLabel.textContent = labels?.compact
-      ?? (configurationOwnedModel ? "Harness default" : modelSetup?.label ?? (hasAvailableModels ? "Choose model" : "Set up models"));
+      ?? (configurationOwnedModel ? "Harness default" : modelSetup?.label ?? (hasAvailableModels ? "Choose family" : "Set up models"));
     trigger.title = labels
       ? `Model: ${labels.compact}`
-      : (configurationOwnedModel ? "Model set by harness configuration" : modelSetup?.message ?? "Choose an available model");
+      : (configurationOwnedModel ? "Model set by harness configuration" : modelSetup?.message ?? "Choose an available family");
     trigger.disabled = disabled;
     root.querySelectorAll("[data-model-picker-tab]").forEach((tab) => {
       const selected = tab.dataset.modelPickerTab === activeTab;
@@ -453,6 +539,12 @@ export function createModelPicker({
     });
     renderModelPanel();
     renderAdvancedPanel();
+    root.querySelectorAll("[data-family-member]").forEach((button) => {
+      button.onclick = () => {
+        onUserTakeover();
+        close({ returnFocus: true });
+      };
+    });
     const status = modelSetup?.message ?? "";
     if (statusElement.textContent !== status) statusElement.textContent = status;
     const compatibilityNotice = currentSettings?.conversationCompatibility?.status === "compatible"
@@ -467,6 +559,7 @@ export function createModelPicker({
 
   function open(tab = activeTab) {
     if (disabled) return;
+    resetSwipe();
     activeTab = TABS.includes(tab) ? tab : "model";
     error = null;
     render();
@@ -476,6 +569,7 @@ export function createModelPicker({
   }
 
   function close({ returnFocus = false } = {}) {
+    resetSwipe();
     harnessValidationGate.invalidate();
     const wasValidatingHarness = validatingHarness;
     validatingHarness = false;
@@ -487,6 +581,7 @@ export function createModelPicker({
 
   function setActiveTab(tab, { focus = false } = {}) {
     if (!TABS.includes(tab)) return;
+    resetSwipe();
     activeTab = tab;
     render();
     if (focus) root.querySelector(`[data-model-picker-tab="${tab}"]`)?.focus();
@@ -527,15 +622,56 @@ export function createModelPicker({
   };
   root.ownerDocument.addEventListener("click", dismissWatcher.observe, true);
   root.ownerDocument.addEventListener("click", outsideClick);
+  const onFamilyWheel = (event) => {
+    if (disabled || popover.classList.contains("hidden") || activeTab !== "model"
+      || !event.target.closest?.("[data-family-roster]") || event.ctrlKey || event.metaKey || event.altKey) return;
+    if (lastSwipeTime === null || event.timeStamp - lastSwipeTime > 180) resetSwipe();
+    lastSwipeTime = event.timeStamp;
+    if (Math.abs(event.deltaX) <= Math.abs(event.deltaY) || event.deltaX === 0) {
+      if (!swipeDirection) {
+        swipeDelta = 0;
+        settleFamilyDrag();
+      }
+      return;
+    }
+    const { families, selectedFamily } = modelPickerFamilyPresentation(currentSettings, selectedHarnessId(), currentSelection);
+    if (!families.length || (families.length === 1 && selectedFamily)) return;
+    event.preventDefault();
+    const scale = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? popover.clientWidth || 300 : 1;
+    const delta = event.deltaX * scale;
+    // Same-direction momentum cannot run through the catalog. A meaningful
+    // reversal starts a new movement immediately, without waiting for idle.
+    if (Math.sign(delta) === swipeDirection) {
+      swipeDelta = 0;
+      return;
+    }
+    if (Math.sign(swipeDelta) !== Math.sign(delta)) swipeDelta = 0;
+    swipeDelta += delta;
+    const list = root.querySelector(".model-family-members");
+    if (list && !reducedFamilyMotion()) {
+      clearFamilyMotion();
+      list.style.transform = `translateX(${-Math.max(-60, Math.min(60, swipeDelta))}px)`;
+    }
+    clearTimeout(swipeTimer);
+    swipeTimer = setTimeout(settleFamilyDrag, 120);
+    if (Math.abs(swipeDelta) < 48) return;
+    swipeDirection = Math.sign(swipeDelta);
+    cycleFamily(swipeDelta > 0 ? "next" : "previous", { focus: false });
+    swipeDelta = 0;
+    clearTimeout(swipeTimer);
+  };
+  root.addEventListener("wheel", onFamilyWheel, { passive: false });
 
   render();
 
   return Object.freeze({
     close,
     dispose() {
+      resetSwipe();
       harnessValidationGate.invalidate();
       root.ownerDocument.removeEventListener("click", dismissWatcher.observe, true);
       root.ownerDocument.removeEventListener("click", outsideClick);
+      root.removeEventListener("wheel", onFamilyWheel);
       trigger.onclick = null;
       root.onkeydown = null;
       root.querySelectorAll("[data-model-picker-tab]").forEach((tab) => { tab.onclick = null; });
@@ -555,6 +691,7 @@ export function createModelPicker({
       selection: nextSelection,
       replaceSelection = false,
     } = {}) {
+      resetSwipe();
       harnessValidationGate.invalidate();
       validatingHarness = false;
       const recoveringFamilyId = selectionReady()

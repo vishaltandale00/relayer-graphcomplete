@@ -29,11 +29,13 @@ pub(crate) use catalog::HarnessModelCompatibility;
 pub(crate) use catalog::HarnessModelRule;
 pub(crate) use catalog::HarnessModelRules;
 pub(crate) use catalog::InteractionModelSelection;
+pub(crate) use catalog::MAX_MODELS_PER_FAMILY;
 pub(crate) use catalog::ManagedFamilyPolicy;
 pub(crate) use catalog::ModelFamily;
 pub(crate) use catalog::ModelFamilyId;
 pub(crate) use catalog::ModelFamilyKind;
 pub(crate) use catalog::ModelFamilyMember;
+pub(crate) use catalog::ModelFamilyRole;
 pub(crate) use catalog::ModelSelection;
 pub(crate) use catalog::ModelSettings;
 pub(crate) use catalog::ModelSettingsDefaults;
@@ -60,11 +62,13 @@ pub(crate) use catalog::UpdateHarnessModelRulesCommand;
 pub(crate) use catalog::UpdateModelFamilyCommand;
 pub(crate) use catalog::UpdateModelSettingsDefaultsCommand;
 pub(crate) use catalog::ValidateModelSelectionCommand;
+pub(crate) use catalog::deserialize_present_optional;
 pub(crate) use catalog::validate_family;
 pub(crate) use catalog::validate_harness_model_rules;
 pub(crate) use catalog::validate_stable_id;
 pub(crate) use catalog::{HarnessRuntimeAvailabilityUpdate, RuntimeProductHarness};
 pub(crate) use catalog::{ProviderConnectionEvent, ProviderConnectionStamp};
+pub(crate) use catalog::{is_legacy_plan_version, legacy_plan_version, validate_roles};
 pub(crate) use context_drafts::{
     NodeContextDraftConfirmationError, NodeContextDraftConfirmationService,
 };
@@ -79,7 +83,8 @@ pub(crate) use ids::InvalidProductId;
 pub(crate) use ids::ProjectId;
 pub(crate) use ids::ThreadId;
 pub(crate) use model_policy::{
-    applies_to_adapter, derive_managed_family_members, fallback_for_adapter,
+    applies_to_adapter, assign_managed_orchestrator, derive_managed_family_members,
+    fallback_for_adapter,
 };
 pub(crate) use models::ActionInvocation;
 pub(crate) use models::BeginInteractionAttempt;

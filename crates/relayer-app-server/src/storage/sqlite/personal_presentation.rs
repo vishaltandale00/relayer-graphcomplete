@@ -425,6 +425,7 @@ mod tests {
         assert!(
             store
                 .insert_thread_with_initial_interaction(crate::storage::NewThreadRecord {
+                    required_provider_adapter_id: None,
                     icon_selection_eligible: true,
                     title: "Unavailable",
                     project_id: None,
@@ -487,6 +488,7 @@ mod tests {
         let thread = store
             .insert_thread_with_initial_interaction_and_personal_presentation(
                 crate::storage::NewThreadRecord {
+                    required_provider_adapter_id: None,
                     icon_selection_eligible: true,
                     title: "Visible",
                     project_id: None,
@@ -537,6 +539,7 @@ mod tests {
             .unwrap();
         let next = store
             .insert_thread_with_initial_interaction(crate::storage::NewThreadRecord {
+                required_provider_adapter_id: None,
                 icon_selection_eligible: true,
                 title: "Next",
                 project_id: None,
@@ -609,6 +612,7 @@ mod tests {
         let thread = store
             .insert_thread_with_initial_interaction_and_personal_presentation(
                 crate::storage::NewThreadRecord {
+                    required_provider_adapter_id: None,
                     icon_selection_eligible: true,
                     title: "Historical",
                     project_id: None,
@@ -647,6 +651,7 @@ mod tests {
             reopened
                 .insert_thread_with_initial_interaction_and_personal_presentation(
                     crate::storage::NewThreadRecord {
+                        required_provider_adapter_id: None,
                         icon_selection_eligible: true,
                         title: "Rejected",
                         project_id: None,

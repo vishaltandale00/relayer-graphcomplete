@@ -12,7 +12,7 @@ function modelSettings({ providerId = "router", adapterId = "openrouter", connec
   return {
     harnesses: [{ id: "codex-basic", available: true, compatibleProviderIds: [providerId] }],
     defaults: { harnessId: "codex-basic", familyId: 1 },
-    families: [{ id: 1, enabled: true, position: 0, members: [{ providerId, modelId: "model-a", position: 0 }] }],
+    families: [{ id: 1, enabled: true, position: 0, members: [{ providerId, modelId: "model-a", position: 0, roles: [{ name: "orchestrator" }] }] }],
     providers: [{ id: providerId, adapterId, connected, models }],
   };
 }
@@ -37,6 +37,30 @@ describe("live Eval credential validation", () => {
       providerAdapterId: "openrouter",
     });
     expect(ensureCodexModelCatalog).not.toHaveBeenCalled();
+  });
+
+  it("revalidates the retained family even when defaults change, without a specialist fallback", async () => {
+    const settings = modelSettings();
+    settings.providers.push({ id: "codex", adapterId: "codex-subscription", connected: true,
+      models: [{ id: "first", available: true }, { id: "second", available: true }] });
+    settings.harnesses[0].compatibleProviderIds.push("codex");
+    settings.families.push({ id: 2, enabled: true, position: 1, members: [
+      { providerId: "codex", modelId: "first", position: 0, roles: [{ name: "orchestrator" }] },
+      { providerId: "codex", modelId: "second", position: 1, roles: [] },
+    ] });
+    const resolveModelRoute = resolver(settings);
+    const validate = createLiveCredentialValidator({ resolveModelRoute,
+      resolveCodexRuntime: async () => ({ executable: "/fixture/codex", environment: {} }),
+      createCredentials: () => ({ account: async () => ({ status: "connected", account: { type: "chatgpt" } }), close: async () => {} }) });
+    const configuration = { name: "codex-basic", implementation: "codex.basic" };
+    expect((await validate(configuration, reference, { familyId: 2 })).selectedModel).toMatchObject({ familyId: 2, providerId: "codex", modelId: "first" });
+    settings.families[1].members[0].modelId = "second";
+    settings.families[1].members[1].modelId = "first";
+    expect((await validate(configuration, reference, { familyId: 2 })).selectedModel.modelId).toBe("second");
+    settings.providers[1].models[1].available = false;
+    await expect(validate(configuration, reference, { familyId: 2 })).rejects.toThrow("route is unavailable");
+    settings.families[1].members[0] = { providerId: "router", modelId: "model-a", position: 0, roles: [{ name: "orchestrator" }] };
+    expect((await validate(configuration, reference, { familyId: 2 })).providerAdapterId).toBe("openrouter");
   });
 
   it("validates and preserves a configuration-owned Codex model instead of requiring a product family", async () => {
