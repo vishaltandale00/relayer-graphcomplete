@@ -102,6 +102,11 @@ impl RunCapacity {
                         if reread.completion_status != "submitted" {
                             return Err(error);
                         }
+                        // A Stop that settles before start may have moved it there instead; it
+                        // settles without a slot.
+                        if reread.stop_requested && reread.stop_error.is_none() {
+                            return Ok(CapacityAdmission::Uncounted);
+                        }
                         true
                     }
                 };
