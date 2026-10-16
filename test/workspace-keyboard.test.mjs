@@ -343,6 +343,8 @@ describe("product workspace keyboard behavior", () => {
     expect(styles).toContain(".interaction-input-history-list{max-height:8em;overflow-y:auto");
     expect(styles).toContain(".interaction-input-history-item>summary>span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap");
     expect(styles).toContain(".interaction-input-history-item[open]>summary>span{white-space:pre-wrap");
+    expect(styles).toContain('.interaction-input-history-item>summary>span:first-child::before{content:"▸"/""');
+    expect(styles).toContain('.interaction-input-history-item[open]>summary>span:first-child::before{content:"▾"/""}');
   });
 
   it("projects durable confirmations into grouped composer contexts with exact identities", () => {
