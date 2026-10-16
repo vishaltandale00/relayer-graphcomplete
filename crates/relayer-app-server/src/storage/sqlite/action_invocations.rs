@@ -157,7 +157,7 @@ impl SqliteProductStore {
 
     pub(crate) async fn interrupted_interactions(&self) -> Result<Vec<Interaction>, StorageError> {
         let rows = sqlx::query(
-            "SELECT i.id,i.thread_id,i.sequence,i.text,i.created_at,i.graph_node_id,i.completion_status,i.harness_configuration_name,i.harness_configuration_digest,i.completion_output_json,i.completion_error,i.permission_profile_id,i.effective_execution_digest,i.effective_permission_receipt_json,i.model_provider_id,i.provider_model_id,i.model_family_id,a.id,a.attempt_number,a.started_at,a.finished_at,a.family_id,a.family_revision,a.harness_configuration_name,a.harness_configuration_revision,a.harness_configuration_digest,a.provider_id,a.adapter_id,a.adapter_implementation_version,a.model_id,a.access_contract,a.outcome,a.failure_category,a.effect_boundary,a.attempt_admission_id,a.admitted_plan_json,a.admitted_plan_digest,EXISTS(SELECT 1 FROM interaction_stop_requests stop WHERE stop.interaction_id=i.id), (SELECT error FROM interaction_stop_requests stop WHERE stop.interaction_id=i.id) FROM interactions i LEFT JOIN interaction_attempts a ON a.id=(SELECT latest.id FROM interaction_attempts latest WHERE latest.interaction_id=i.id ORDER BY latest.attempt_number DESC LIMIT 1) WHERE i.completion_status IN ('not_started','running','submitted','waiting_for_approval') ORDER BY i.id",
+            "SELECT i.id,i.thread_id,i.sequence,i.text,i.created_at,i.graph_node_id,i.completion_status,i.harness_configuration_name,i.harness_configuration_digest,i.completion_output_json,i.completion_error,i.permission_profile_id,i.effective_execution_digest,i.effective_permission_receipt_json,i.model_provider_id,i.provider_model_id,i.model_family_id,a.id,a.attempt_number,a.started_at,a.finished_at,a.family_id,a.family_revision,a.harness_configuration_name,a.harness_configuration_revision,a.harness_configuration_digest,a.provider_id,a.adapter_id,a.adapter_implementation_version,a.model_id,a.access_contract,a.outcome,a.failure_category,a.effect_boundary,a.attempt_admission_id,a.admitted_plan_json,a.admitted_plan_digest,EXISTS(SELECT 1 FROM interaction_stop_requests stop WHERE stop.interaction_id=i.id), (SELECT error FROM interaction_stop_requests stop WHERE stop.interaction_id=i.id),EXISTS(SELECT 1 FROM run_capacity_waits wait WHERE wait.interaction_id=i.id AND i.completion_status='queued') FROM interactions i LEFT JOIN interaction_attempts a ON a.id=(SELECT latest.id FROM interaction_attempts latest WHERE latest.interaction_id=i.id ORDER BY latest.attempt_number DESC LIMIT 1) WHERE i.completion_status IN ('not_started','running','submitted','waiting_for_approval') ORDER BY i.id",
         )
         .fetch_all(&self.pool)
         .await?;
@@ -229,7 +229,9 @@ impl SqliteProductStore {
         // as submitted so invoking the same action can remint authority for that exact graph node
         // and resume it rather than terminalizing the only interaction allowed to consume it.
         // An agent's child left here is not resumed by a user's invoke; startup's background
-        // retry ends it, and its message says so.
+        // retry ends it, and its message says so. A run that waited in its node's queue
+        // (#718) is interrupted like one that had started: nothing starts it on its own, and
+        // invoking its action again resumes it.
         let result = sqlx::query(
             "UPDATE interactions
              SET completion_status=CASE
@@ -247,7 +249,7 @@ impl SqliteProductStore {
                    ELSE 'Legacy action invocation was interrupted before graph acceptance. Its action remains unresolved.'
                  END
              WHERE id IN (SELECT result_interaction_id FROM action_invocations WHERE authoritative=1)
-               AND completion_status IN ('not_started','running','submitted')",
+               AND completion_status IN ('not_started','queued','running','submitted')",
         )
         .bind(error)
         .execute(&self.pool)
@@ -652,6 +654,7 @@ impl SqliteProductStore {
         let interaction = Interaction {
             stop_requested: false,
             stop_error: None,
+            waiting_for_capacity: false,
             id: InteractionId::from_database(result.last_insert_rowid()),
             thread_id,
             sequence,
@@ -850,7 +853,7 @@ async fn invocation_with_result(
 ) -> Result<Option<(ActionInvocation, Interaction)>, StorageError> {
     let invocation = invocation_from_row(&row)?;
     let interaction = sqlx::query(
-        "SELECT i.id,i.thread_id,i.sequence,i.text,i.created_at,i.graph_node_id,i.completion_status,i.harness_configuration_name,i.harness_configuration_digest,i.completion_output_json,i.completion_error,i.permission_profile_id,i.effective_execution_digest,i.effective_permission_receipt_json,i.model_provider_id,i.provider_model_id,i.model_family_id,a.id,a.attempt_number,a.started_at,a.finished_at,a.family_id,a.family_revision,a.harness_configuration_name,a.harness_configuration_revision,a.harness_configuration_digest,a.provider_id,a.adapter_id,a.adapter_implementation_version,a.model_id,a.access_contract,a.outcome,a.failure_category,a.effect_boundary,a.attempt_admission_id,a.admitted_plan_json,a.admitted_plan_digest,EXISTS(SELECT 1 FROM interaction_stop_requests stop WHERE stop.interaction_id=i.id), (SELECT error FROM interaction_stop_requests stop WHERE stop.interaction_id=i.id) FROM interactions i LEFT JOIN interaction_attempts a ON a.id=(SELECT latest.id FROM interaction_attempts latest WHERE latest.interaction_id=i.id ORDER BY latest.attempt_number DESC LIMIT 1) WHERE i.id=?1",
+        "SELECT i.id,i.thread_id,i.sequence,i.text,i.created_at,i.graph_node_id,i.completion_status,i.harness_configuration_name,i.harness_configuration_digest,i.completion_output_json,i.completion_error,i.permission_profile_id,i.effective_execution_digest,i.effective_permission_receipt_json,i.model_provider_id,i.provider_model_id,i.model_family_id,a.id,a.attempt_number,a.started_at,a.finished_at,a.family_id,a.family_revision,a.harness_configuration_name,a.harness_configuration_revision,a.harness_configuration_digest,a.provider_id,a.adapter_id,a.adapter_implementation_version,a.model_id,a.access_contract,a.outcome,a.failure_category,a.effect_boundary,a.attempt_admission_id,a.admitted_plan_json,a.admitted_plan_digest,EXISTS(SELECT 1 FROM interaction_stop_requests stop WHERE stop.interaction_id=i.id), (SELECT error FROM interaction_stop_requests stop WHERE stop.interaction_id=i.id),EXISTS(SELECT 1 FROM run_capacity_waits wait WHERE wait.interaction_id=i.id AND i.completion_status='queued') FROM interactions i LEFT JOIN interaction_attempts a ON a.id=(SELECT latest.id FROM interaction_attempts latest WHERE latest.interaction_id=i.id ORDER BY latest.attempt_number DESC LIMIT 1) WHERE i.id=?1",
     )
     .bind(invocation.result_interaction_id.value())
     .fetch_one(&mut *connection)

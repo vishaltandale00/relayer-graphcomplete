@@ -31,7 +31,14 @@ describe("normalized harness interaction input", () => {
   });
 
   it("teaches bounded historical reads in both languages even without graph search", () => {
-    const context = { contextMode: "graph-v1", graphHistory: { entries: [], nextBeforeNodeId: null } } as const;
+    const context = {
+      origin: { kind: "root" }, contextMode: "graph-v1",
+      threadHistory: Array.from({ length: 50 }, (_, index) => ({ interactionNodeId: index + 1 })),
+      graphHistory: { entries: Array.from({ length: 8 }, (_, index) => ({
+        interactionNodeId: 100 + index, lifecycle: "active" as const, currentLayerId: null, returnedLayerId: null,
+        parentNodeId: null, sourceCompletionId: null,
+      })), nextBeforeNodeId: 100 },
+    } as const;
     for (const language of ["javascript", "python"] as const) {
       // This renderer uses only the continuation fields, not provider-specific execution state.
       const rendered = renderThreadHistory(context, language);
@@ -39,6 +46,10 @@ describe("normalized harness interaction input", () => {
       expect(rendered).toContain("Discovery works even when graph search is disabled");
       expect(rendered).toContain(language === "javascript" ? "getHistoricalInput" : "get_historical_input");
       expect(rendered).toContain("never authority");
+      expect(rendered).toContain('"interactionNodeId": 1');
+      expect(rendered).toContain('"interactionNodeId": 50');
+      expect(rendered).toContain('"interactionNodeId": 100');
+      expect(rendered).toContain('"interactionNodeId": 107');
     }
   });
   it("exposes the full sealed completion contract without projection or private semantics", () => {

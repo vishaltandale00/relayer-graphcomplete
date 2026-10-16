@@ -9,7 +9,6 @@ import { describe, expect, it, vi } from "vitest";
 import { RelayerGraphClient, type InteractionInput, type ResolvedPersonalPresentation } from "@relayer/graph-client";
 import { HarnessExecutionFailure, HarnessHost, startHarnessHost, type HarnessInvokedCompletion } from "../src/host.js";
 import { nativeExecutionHandle } from "../src/completion-execution.js";
-import { PrimeAgentHarness } from "../src/implementations/prime-agent.js";
 import type {
   Harness,
   HarnessConfiguration,
@@ -68,6 +67,7 @@ const personalPresentation = (interactionNodeId: number, versionInteractionNodeI
 const graphReadResponse = (url: string, nodeId = 1, contexts: InteractionInput["contexts"] = [], leasedActionId?: number) => new Response(
   JSON.stringify(url.endsWith("/personal-presentation")
     ? { error: { code: "personal_presentation_not_attached" } }
+    : new URL(url).pathname.endsWith("/history") ? { entries: [], nextBeforeNodeId: null }
     : url.endsWith("/input") ? interactionInput(nodeId, contexts) : { node: graphNode(nodeId, leasedActionId) }),
   { status: url.endsWith("/personal-presentation") ? 404 : 200, headers: { "content-type": "application/json" } },
 );
@@ -751,7 +751,7 @@ describe("HarnessHost", () => {
       expect(host.cancel(1, 2)).toBe(false);
       expect(host.cancel(1, 1)).toBe(true);
       await expect(completing).rejects.toThrow("cancelled for thread 1");
-      expect(host.cancel(1)).toBe(false);
+      expect(host.cancel(1, 1)).toBe(false);
       await host.exportCandidateTrace(8, join(directory, "cancelled-export"), {
         runId: "run", executionId: "execution", interactionId: "8", harnessConfigurationName: "test-default",
       });
@@ -817,7 +817,7 @@ describe("HarnessHost", () => {
       const completing = host.complete(1, 44, graph());
       await started;
 
-      expect(host.cancel(1)).toBe(true);
+      expect(host.cancel(1, 1)).toBe(true);
 
       await expect(completing).rejects.toThrow("cancelled");
       expect(host.approvalEvents(1, 44)).toMatchObject({
@@ -856,7 +856,7 @@ describe("HarnessHost", () => {
     }
   });
 
-  it("waits for a fresh root run to unwind before disposing during shutdown", async () => {
+  it("waits for a root run to unwind before disposing during shutdown", async () => {
     const directory = await mkdtemp(join(tmpdir(), "relayer-harness-close-fresh-"));
     let completionStarted!: () => void;
     const started = new Promise<void>((resolveStarted) => { completionStarted = resolveStarted; });
@@ -886,7 +886,7 @@ describe("HarnessHost", () => {
       await host.initialize();
       await host.createSession({ threadId: 1, permissionProfileId: "auto", configuration: testConfiguration, workingDirectory: directory });
 
-      const fresh = host.complete(1, 2, graph(2, "fresh-token"), undefined, undefined, { productInteractionId: 2, nativeSession: "fresh" });
+      const fresh = host.complete(1, 2, graph(2, "fresh-token"), undefined, undefined, { productInteractionId: 2 });
       await started;
       const closing = host.close();
       await new Promise((resolveTurn) => setTimeout(resolveTurn, 20));
@@ -902,7 +902,7 @@ describe("HarnessHost", () => {
     }
   });
 
-  it("rejects admitted queued completions before disposing during shutdown", async () => {
+  it("refuses a root run that arrives after shutdown begins and rejects the active one before disposing", async () => {
     const directory = await mkdtemp(join(tmpdir(), "relayer-harness-close-queue-"));
     let completionStarted!: () => void;
     const started = new Promise<void>((resolveStarted) => { completionStarted = resolveStarted; });
@@ -939,11 +939,11 @@ describe("HarnessHost", () => {
 
       const active = host.complete(1, 1, graph(1, "active-token"), undefined, undefined, { productInteractionId: 10 });
       await started;
-      const queued = host.complete(1, 2, graph(2, "queued-token"));
       const closing = host.close();
+      const late = host.complete(1, 2, graph(2, "queued-token"));
 
+      await expect(late).rejects.toThrow("closed");
       await expect(active).rejects.toThrow("closed");
-      await expect(queued).rejects.toThrow("closed");
       await closing;
       expect(calls).toEqual([1]);
       expect(dispose).toHaveBeenCalledTimes(1);
@@ -1458,6 +1458,64 @@ describe("HarnessHost", () => {
       expect(release).toHaveBeenCalledOnce();
       expect(await readFile(join(directory, "sessions.json"), "utf8")).not.toContain("never-persist-me");
     } finally {
+      vi.unstubAllGlobals();
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it.each([false, true])("releases access after root history bootstrap fails (pre-admitted: %s)", async (preAdmitted) => {
+    const directory = await mkdtemp(join(tmpdir(), "relayer-history-bootstrap-failure-"));
+    const release = vi.fn();
+    const model = { providerId: "openai-work", adapterId: "openai-api", modelId: "gpt-5.2" };
+    const acquire = vi.fn(async () => ({
+      access: {
+        kind: "secret" as const, contract: "secret@1" as const,
+        providerId: model.providerId, adapterId: model.adapterId, adapterImplementationVersion: "1",
+        endpoint: "https://api.openai.test", fields: { "api-key": "fixture-secret" },
+      },
+      release,
+    }));
+    let failHistory = true;
+    let accepted = false;
+    const complete = vi.fn(async () => { accepted = true; });
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => {
+      if (new URL(url).pathname.endsWith("/history") && failHistory) {
+        expect(acquire).toHaveBeenCalledOnce();
+        expect(release).not.toHaveBeenCalled();
+        throw new Error("history bootstrap unavailable");
+      }
+      if (url.endsWith("/output")) return accepted
+        ? new Response(JSON.stringify(completion))
+        : new Response(JSON.stringify({ error: { code: "completion_not_found" } }), { status: 404 });
+      return graphReadResponse(url);
+    }));
+    const host = new HarnessHost({
+      stateFile: join(directory, "sessions.json"), controlToken: "control", accessBroker: { acquire },
+      implementations: { test: () => ({ complete, state: emptyState }) },
+    });
+    try {
+      await host.initialize();
+      await host.createSession({
+        threadId: 1, permissionProfileId: "auto", workingDirectory: directory,
+        configuration: { ...testConfiguration, executionAccessContracts: ["secret@1"] },
+      });
+      const admission = preAdmitted ? await host.admitProviderExecution(1, model, new AbortController().signal) : undefined;
+      await expect(host.complete(1, 1, graph(), model, undefined, undefined, admission?.executionLeaseId))
+        .rejects.toMatchObject({ message: "history bootstrap unavailable", effectBoundary: "none" });
+      expect(complete).not.toHaveBeenCalled();
+      await vi.waitFor(() => expect(release).toHaveBeenCalledOnce());
+      if (admission !== undefined) {
+        expect(await host.releaseProviderExecution(admission.executionLeaseId)).toBe(true);
+        expect(release).toHaveBeenCalledOnce();
+      }
+      // The failed bootstrap must leave no active completion claim blocking a retry.
+      failHistory = false;
+      await expect(host.complete(1, 1, graph(), model)).resolves.toMatchObject({ output: completion });
+      expect(complete).toHaveBeenCalledOnce();
+      expect(acquire).toHaveBeenCalledTimes(2);
+      await vi.waitFor(() => expect(release).toHaveBeenCalledTimes(2));
+    } finally {
+      await host.close();
       vi.unstubAllGlobals();
       await rm(directory, { recursive: true, force: true });
     }
@@ -2202,7 +2260,7 @@ describe("HarnessHost", () => {
       expect(releases).toEqual(["sibling-provider", "stuck-provider"]);
 
       // A stuck root turn is force-stopped the same way, and the next root turn then runs.
-      expect(host.cancel(1)).toBe(true);
+      expect(host.cancel(1, 1)).toBe(true);
       await vi.advanceTimersByTimeAsync(119_999);
       expect(forced).toEqual([2]);
       await vi.advanceTimersByTimeAsync(1);
@@ -2278,7 +2336,7 @@ describe("HarnessHost", () => {
         .then(() => undefined, (error: unknown) => error);
       await vi.waitFor(() => expect(started).toBe(true));
 
-      expect(host.cancel(1)).toBe(true);
+      expect(host.cancel(1, 1)).toBe(true);
       await vi.advanceTimersByTimeAsync(120_000);
       if (ending === "never settles") await vi.advanceTimersByTimeAsync(10_000);
 
@@ -2447,7 +2505,7 @@ describe("HarnessHost", () => {
       await vi.waitFor(() => expect(observedContext).toBeDefined());
       expect(observedContext!.forceSignal).toBeUndefined();
 
-      expect(host.cancel(1)).toBe(true);
+      expect(host.cancel(1, 1)).toBe(true);
       await vi.advanceTimersByTimeAsync(10 * 60_000);
       expect(release).not.toHaveBeenCalled();
 
@@ -2773,8 +2831,8 @@ describe("HarnessHost", () => {
     }
   });
 
-  it("serializes complete calls while preserving each call's graph scope", async () => {
-    const directory = await mkdtemp(join(tmpdir(), "relayer-harness-serialized-rotation-"));
+  it("runs root completes side by side while preserving each call's graph scope", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "relayer-harness-parallel-roots-"));
     let completionStarted!: () => void;
     let finishCompletion!: () => void;
     const started = new Promise<void>((resolveStarted) => { completionStarted = resolveStarted; });
@@ -2805,74 +2863,21 @@ describe("HarnessHost", () => {
 
       const completing = host.complete(1, 1, graph(1, "first-token"));
       await started;
-      const queued = host.complete(1, 2, graph(2, "second-token"));
-      await new Promise((resolveTurn) => setTimeout(resolveTurn, 0));
-      expect(adopted).toEqual(["first-token"]);
+      // Every root run starts a fresh native session (#719): a second message on the thread
+      // starts while the first still runs, with its own graph scope, and finishes first.
+      const beside = host.complete(1, 2, graph(2, "second-token"));
+      await expect(beside).resolves.toMatchObject({ output: completion });
+      expect(adopted).toEqual(["first-token", "second-token"]);
 
       finishCompletion();
       await completing;
-      await queued;
-      expect(adopted).toEqual(["first-token", "second-token"]);
     } finally {
       vi.unstubAllGlobals();
       await rm(directory, { recursive: true, force: true });
     }
   });
 
-  it("serializes fresh ordinary messages, joins duplicate delivery, and keeps Invoke cancellation independent", async () => {
-    const directory = await mkdtemp(join(tmpdir(), "relayer-graph-messages-"));
-    const started = new Map<number, () => void>();
-    const gates = new Map<number, Promise<void>>();
-    const contexts: HarnessRunContext[] = [];
-    for (const id of [1, 2, 3]) gates.set(id, new Promise<void>((resolve) => started.set(id, resolve)));
-    vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
-      const id = Number(new Headers(init?.headers).get("authorization")?.replace("Bearer token-", ""));
-      if (url.endsWith("/output")) return new Response(JSON.stringify({ error: { code: "completion_not_found" } }), { status: 404 });
-      if (url.includes("/history?")) return new Response(JSON.stringify({ entries: [], nextBeforeNodeId: null }));
-      return graphReadResponse(url, id);
-    }));
-    const host = new HarnessHost({ stateFile: join(directory, "sessions.json"), controlToken: "control",
-      implementations: { test: () => ({ state: emptyState, async complete(context, signal) {
-        contexts.push(context);
-        started.get(context.inputGraph.id)!();
-        await new Promise<void>((_resolve, reject) => signal?.addEventListener("abort", () => reject(signal.reason), { once: true }));
-      } }) },
-    });
-    try {
-      await host.initialize();
-      await host.createSession({ threadId: 1, permissionProfileId: "auto", configuration: testConfiguration, workingDirectory: directory });
-      const launch = (id: number, rootRunKind: "message" | "invoke") => host.complete(1, id, graph(id, `token-${id}`), undefined, undefined, {
-        productInteractionId: id, nativeSession: "fresh", contextMode: "graph-v1", rootRunKind,
-      });
-      const first = launch(1, "message");
-      void first.catch(() => {});
-      await gates.get(1);
-      const duplicate = launch(1, "message");
-      void duplicate.catch(() => {});
-      const second = launch(2, "message");
-      void second.catch(() => {});
-      const invoke = launch(3, "invoke");
-      void invoke.catch(() => {});
-      await gates.get(3);
-      expect(contexts.map(({ inputGraph }) => inputGraph.id)).toEqual([1, 3]);
-      expect(contexts[0]?.graphHistory).toEqual({ entries: [], nextBeforeNodeId: null });
-      expect(host.cancel(1)).toBe(true);
-      await expect(first).rejects.toThrow("cancelled");
-      await expect(duplicate).rejects.toThrow("cancelled");
-      await gates.get(2);
-      expect(host.cancel(1, 3)).toBe(true);
-      await expect(invoke).rejects.toThrow("cancelled");
-      expect(host.cancel(1)).toBe(true);
-      await expect(second).rejects.toThrow("cancelled");
-      expect(contexts.map(({ inputGraph }) => inputGraph.id)).toEqual([1, 3, 2]);
-    } finally {
-      await host.close();
-      vi.unstubAllGlobals();
-      await rm(directory, { recursive: true, force: true });
-    }
-  });
-
-  it("runs a fresh root beside the thread's root turn and cancels each exactly", async () => {
+  it("runs two root turns side by side, forwards history to each, and cancels each exactly", async () => {
     const directory = await mkdtemp(join(tmpdir(), "relayer-harness-fresh-root-"));
     const started = new Map<number, () => void>();
     const running = new Map<number, Promise<void>>();
@@ -2903,10 +2908,14 @@ describe("HarnessHost", () => {
       const registration = { threadId: 1, permissionProfileId: "auto", configuration: testConfiguration, workingDirectory: directory };
       await host.createSession(registration);
 
-      const root = host.complete(1, 1, graph(1, "first-token"));
+      const firstHistory = [{ interactionNodeId: 7 }];
+      const root = host.complete(1, 1, graph(1, "first-token"), undefined, undefined, {
+        productInteractionId: 1,
+        threadHistory: firstHistory,
+      });
       await running.get(1);
-      // The product registers the session before every run; an unchanged registration must not
-      // wait for the root turn that holds the session.
+      // The product registers the session before every run; an unchanged registration never
+      // waits for a running root turn.
       await expect(Promise.race([
         host.createSession(registration).then(() => "registered"),
         new Promise((resolve) => setTimeout(() => resolve("waited"), 1_000)),
@@ -2914,17 +2923,22 @@ describe("HarnessHost", () => {
       const history = [{ interactionNodeId: 1, responseLayerId: 5 }];
       const fresh = host.complete(1, 2, graph(2, "fresh-token"), undefined, undefined, {
         productInteractionId: 2,
-        nativeSession: "fresh",
         threadHistory: history,
       });
       await running.get(2);
-      expect(contexts.get(2)).toMatchObject({ origin: { kind: "root" }, nativeSession: "fresh", threadHistory: history });
-      expect(contexts.get(1)?.nativeSession).toBeUndefined();
+      expect(contexts.get(1)).toMatchObject({ origin: { kind: "root" }, threadHistory: firstHistory });
+      expect(contexts.get(2)).toMatchObject({ origin: { kind: "root" }, threadHistory: history });
+      for (const context of contexts.values()) {
+        expect(context.contextMode).toBe("graph-v1");
+        expect(context.graphHistory).toEqual({ entries: [], nextBeforeNodeId: null });
+        expect(context).not.toHaveProperty("nativeSession");
+        expect(context).not.toHaveProperty("requireNativeContinuity");
+      }
 
-      // Without a completion ID, cancel still targets the thread's root turn, never a fresh run.
-      expect(host.cancel(1)).toBe(true);
+      // Root runs run side by side, so each cancel names its run and stops only that one.
+      expect(host.cancel(1, 1)).toBe(true);
       await expect(root).rejects.toThrow("cancelled");
-      expect(host.cancel(1)).toBe(false);
+      expect(host.cancel(1, 1)).toBe(false);
       expect(host.cancel(1, 2)).toBe(true);
       await expect(fresh).rejects.toThrow("cancelled");
     } finally {
@@ -2933,7 +2947,7 @@ describe("HarnessHost", () => {
     }
   });
 
-  it("joins a duplicate fresh delivery and keeps its admitted configuration across a registration change", async () => {
+  it("joins a duplicate root delivery and keeps its admitted configuration across a registration change", async () => {
     const directory = await mkdtemp(join(tmpdir(), "relayer-harness-fresh-duplicate-"));
     let starts = 0;
     let finish!: () => void;
@@ -2976,7 +2990,7 @@ describe("HarnessHost", () => {
       const configuration = { ...testConfiguration, name: "fresh-preview", implementation: "codex.basic" };
       const registration = { threadId: 1, permissionProfileId: "auto", configuration, workingDirectory: directory };
       await host.createSession(registration);
-      const fresh = { productInteractionId: 2, nativeSession: "fresh" as const };
+      const fresh = { productInteractionId: 2 };
 
       const first = host.complete(1, 2, graph(2, "fresh-token"), undefined, undefined, fresh);
       // A retried delivery of the same prepared run joins it instead of starting another.
@@ -3006,11 +3020,11 @@ describe("HarnessHost", () => {
   });
 
   it.each([
-    [{ nativeSession: "fresh", requireNativeContinuity: true }, "A fresh native session cannot require native continuity"],
-    [{ threadHistory: [] }, "Thread history is sent only with a fresh native session"],
-    [{ nativeSession: "resume" }, "Invalid native session mode"],
-    [{ nativeSession: "fresh", threadHistory: [{ interactionNodeId: 1, message: "Hi" }] }, "unsupported fields: message"],
-  ])("rejects an inconsistent fresh-run trace context %#", async (fields, message) => {
+    [{ nativeSession: "fresh" }, "retired native-session fields: nativeSession"],
+    [{ requireNativeContinuity: true }, "retired native-session fields: requireNativeContinuity"],
+    [{ nativeHistoryAnchor: { interactionNodeId: 1, message: "Hi" } }, "retired native-session fields: nativeHistoryAnchor"],
+    [{ threadHistory: [{ interactionNodeId: 1, message: "Hi" }] }, "unsupported fields: message"],
+  ])("refuses a root run that asks for native resume or carries message text %#", async (fields, message) => {
     const directory = await mkdtemp(join(tmpdir(), "relayer-harness-fresh-validation-"));
     const complete = vi.fn(async () => undefined);
     let running: Awaited<ReturnType<typeof startHarnessHost>> | undefined;
@@ -4273,13 +4287,21 @@ describe("HarnessHost", () => {
         controlToken: "control",
         implementations: {},
       });
-      const response = await fetch(`${running.url}/sessions/1/cancel`, {
+      const response = await fetch(`${running.url}/sessions/1/cancel?completionId=4`, {
         method: "POST",
         headers: { authorization: "Bearer control" },
       });
 
       expect(response.status).toBe(200);
       expect(await response.json()).toEqual({ cancelled: false });
+      // Root runs run side by side (#719), so a cancel without its run is refused, never
+      // guessed.
+      const unnamed = await fetch(`${running.url}/sessions/1/cancel`, {
+        method: "POST",
+        headers: { authorization: "Bearer control" },
+      });
+      expect(unnamed.status).toBe(400);
+      expect(await unnamed.json()).toEqual({ error: "invalid_completion_id" });
       const invalid = await fetch(`${running.url}/sessions/1/cancel?completionId=not-a-number`, {
         method: "POST",
         headers: { authorization: "Bearer control" },
@@ -4527,80 +4549,6 @@ describe("HarnessHost", () => {
       await expect(host.forceClose()).resolves.toBeUndefined();
     } finally {
       resolveHarness?.({ async complete() {}, state: emptyState, forceShutdown, dispose });
-      await host.forceClose().catch(() => {});
-      await rm(directory, { recursive: true, force: true });
-    }
-  });
-
-  it("lets a late Prime harness complete graceful fallback after forced native disposal throws", async () => {
-    const directory = await mkdtemp(join(tmpdir(), "relayer-harness-late-prime-force-throw-"));
-    let resolveHarness!: (harness: Harness) => void;
-    let markFactoryStarted!: () => void;
-    let markFallbackFinished!: () => void;
-    const factoryStarted = new Promise<void>((resolve) => { markFactoryStarted = resolve; });
-    const fallbackFinished = new Promise<void>((resolve) => { markFallbackFinished = resolve; });
-    const pendingHarness = new Promise<Harness>((resolve) => { resolveHarness = resolve; });
-    let nativeAttempts = 0;
-    const nativeDispose = vi.fn(() => {
-      nativeAttempts += 1;
-      if (nativeAttempts === 1) throw new Error("late Prime native cleanup failed");
-    });
-    const session = {
-      agent: { state: { thinkingLevel: "off" } },
-      sessionManager: { appendThinkingLevelChange: vi.fn() },
-      promptAndWait: vi.fn(async () => undefined),
-      waitForRlmQuiescence: vi.fn(async () => undefined),
-      abort: vi.fn(async () => undefined),
-      dispose: nativeDispose,
-      disposeAsync: vi.fn(async () => {
-        session.dispose();
-        markFallbackFinished();
-      }),
-    };
-    const harness = await PrimeAgentHarness.create({
-      threadId: 1,
-      workingDirectory: directory,
-      permissionProfileId: "full",
-      permissionBinding: {},
-      configuration: {
-        schemaVersion: 1,
-        name: "prime-agent-test",
-        implementation: "prime.agent",
-        implementationVersion: 1,
-        permissionBindings: { full: {} },
-        settings: {},
-      },
-    }, { loadModule: async () => ({
-      SessionManager: { create: vi.fn(() => "new-session"), open: vi.fn() },
-      createHostRequestHandler: (handler: unknown) => handler,
-      createAgentSessionServices: vi.fn(async () => ({ modelRegistry: { find: vi.fn() } })),
-      createAgentSessionFromServices: vi.fn(async () => ({ session })),
-    }) as never });
-    const host = new HarnessHost({
-      stateFile: join(directory, "sessions.json"),
-      controlToken: "control",
-      implementations: { test: () => { markFactoryStarted(); return pendingHarness; } },
-    });
-    try {
-      await host.initialize();
-      const registering = host.createSession({
-        threadId: 1,
-        permissionProfileId: "auto",
-        configuration: testConfiguration,
-        workingDirectory: directory,
-      });
-      await factoryStarted;
-      await host.forceClose();
-
-      resolveHarness(harness);
-
-      await expect(registering).rejects.toThrow("Harness host force-closed while the session was starting");
-      await fallbackFinished;
-      expect(session.abort).toHaveBeenCalledOnce();
-      expect(session.disposeAsync).toHaveBeenCalledOnce();
-      expect(nativeDispose).toHaveBeenCalledTimes(2);
-    } finally {
-      resolveHarness?.(harness);
       await host.forceClose().catch(() => {});
       await rm(directory, { recursive: true, force: true });
     }

@@ -1485,7 +1485,6 @@ impl ProductService {
                 text,
                 model_selection,
                 self.runtime_available && !allow_unselected_model,
-                self.runtime_available,
             )
             .await
             .map_err(Into::into)
@@ -1555,7 +1554,6 @@ impl ProductService {
                     },
                     command.model_selection,
                     self.runtime_available && !command.allow_unselected_model,
-                    self.runtime_available,
                 )
                 .await
                 .map_err(Into::into);
@@ -1598,7 +1596,6 @@ impl ProductService {
                 },
                 command.model_selection,
                 self.runtime_available && !command.allow_unselected_model,
-                self.runtime_available,
             )
             .await
             .map_err(Into::into)
@@ -2707,7 +2704,7 @@ impl ProductService {
         &self,
         thread: ThreadId,
         interaction: super::InteractionId,
-    ) -> Result<(), ProductError> {
+    ) -> Result<crate::storage::QueuedStop, ProductError> {
         self.ensure_interaction_mutable(interaction).await?;
         self.storage
             .request_interaction_stop(thread, interaction)
@@ -2864,22 +2861,64 @@ impl ProductService {
             .map_err(Into::into)
     }
 
-    pub(crate) async fn is_invoked_run(
+    pub(crate) async fn record_node_run(
         &self,
-        interaction_id: InteractionId,
-    ) -> Result<bool, ProductError> {
+        run: InteractionId,
+        node_id: i64,
+    ) -> Result<(), ProductError> {
         self.storage
-            .is_invoked_run(interaction_id)
+            .record_node_run(run, node_id)
             .await
             .map_err(Into::into)
     }
 
-    pub(crate) async fn graph_backed_continuation(
+    pub(crate) async fn node_run_key(
         &self,
-        id: ThreadId,
+        run: InteractionId,
+    ) -> Result<Option<super::NodeRunKey>, ProductError> {
+        self.storage.node_run_key(run).await.map_err(Into::into)
+    }
+
+    pub(crate) async fn queue_node_run(&self, run: InteractionId) -> Result<bool, ProductError> {
+        self.storage.queue_node_run(run).await.map_err(Into::into)
+    }
+
+    pub(crate) async fn claim_queued_node_run(
+        &self,
+        run: InteractionId,
     ) -> Result<bool, ProductError> {
         self.storage
-            .graph_backed_continuation(id)
+            .claim_queued_node_run(run)
+            .await
+            .map_err(Into::into)
+    }
+
+    pub(crate) async fn queue_run_for_capacity(
+        &self,
+        run: InteractionId,
+    ) -> Result<bool, ProductError> {
+        self.storage
+            .queue_run_for_capacity(run)
+            .await
+            .map_err(Into::into)
+    }
+
+    pub(crate) async fn stop_unstarted_run(
+        &self,
+        run: InteractionId,
+    ) -> Result<bool, ProductError> {
+        self.storage
+            .stop_unstarted_run(run)
+            .await
+            .map_err(Into::into)
+    }
+
+    pub(crate) async fn claim_capacity_run(
+        &self,
+        run: InteractionId,
+    ) -> Result<bool, ProductError> {
+        self.storage
+            .claim_capacity_run(run)
             .await
             .map_err(Into::into)
     }
@@ -3159,6 +3198,19 @@ impl ProductService {
     ) -> Result<ApprovalReceipt, ProductError> {
         self.storage
             .record_approval_resolution(resolution, harness_live)
+            .await
+            .map_err(Into::into)
+    }
+
+    /// Records an agent child's unresolved approval requests as aborted once its provider ended,
+    /// leaving the row's settled state to its graph.
+    pub(crate) async fn abort_unanswerable_child_approvals(
+        &self,
+        interaction_id: InteractionId,
+        rationale: &str,
+    ) -> Result<u64, ProductError> {
+        self.storage
+            .abort_unanswerable_child_approvals(interaction_id, rationale, &now())
             .await
             .map_err(Into::into)
     }

@@ -114,11 +114,11 @@ interface LiveSession {
   }>;
   invokedCompletionRuns: Map<GraphId, InvokedCompletionRun>;
   /**
-   * Fresh root runs by completion, which bypass `tail`. A duplicate delivery of one joins its
-   * run instead of starting another; close waits for them here.
+   * Root runs by completion. Every root run starts a fresh native session, so root runs never
+   * wait on `tail` or on each other (#719). A duplicate delivery of one joins its run instead of
+   * starting another; close waits for them here.
    */
-  freshRootRuns: Map<GraphId, { readonly binding: string; readonly run: Promise<HarnessCompleteResult> }>;
-  activeHumanRootCompletionId?: GraphId;
+  rootRuns: Map<GraphId, { readonly binding: string; readonly run: Promise<HarnessCompleteResult> }>;
   currentPolicyRevision?: number;
   currentPolicyIdentity?: string;
 }
@@ -535,8 +535,7 @@ export class HarnessHost {
     if (this.closed) throw new Error("Harness host is closed");
     const live = this.sessions.get(descriptor.threadId);
     // The product registers the session before every run. An unchanged registration only
-    // retries persistence, so it must not wait for the root turn queued on the session: a fresh
-    // root run would otherwise wait for that turn to finish.
+    // retries persistence, so it never waits on the session's registration lock.
     if (live !== undefined && sameRegistration(live.descriptor, descriptor)) {
       await this.persist();
       return;
@@ -631,7 +630,7 @@ export class HarnessHost {
       tail: Promise.resolve(),
       activeCompletions: new Map(),
       invokedCompletionRuns: new Map(),
-      freshRootRuns: new Map(),
+      rootRuns: new Map(),
     });
     this.saved.set(descriptor.threadId, persistedDescriptor(persisted));
     this.legacySaved.delete(descriptor.threadId);
@@ -713,32 +712,27 @@ export class HarnessHost {
       ...(completionBroker === undefined ? {} : { completionBroker }),
       origin: { kind: "root" },
     } as const;
-    // Provider freshness is separate from scheduling: ordinary messages keep their queue;
-    // user Invoke runs are independent. Both deduplicate the same admitted delivery.
-    if (traceContext?.nativeSession === "fresh") {
-      // A retried or duplicated delivery of the same prepared run joins it: it must not start
-      // a second paid run, nor take over the first one's cancellation.
-      const binding = freshRootBinding(capability, traceContext, model, attemptAdmissionId, executionLeaseId);
-      const existing = session.freshRootRuns.get(capability.nodeId);
-      if (existing !== undefined) {
-        if (existing.binding !== binding) throw new Error("Fresh root completion is already active under a different graph binding");
-        return existing.run;
-      }
-      const run = (traceContext.rootRunKind === "message"
-        ? this.withSessionLock(session, () => this.runCompletion(runInput))
-        : this.runCompletion(runInput)) as Promise<HarnessCompleteResult>;
-      const entry = { binding, run };
-      session.freshRootRuns.set(capability.nodeId, entry);
-      const forget = () => {
-        if (session.freshRootRuns.get(capability.nodeId) === entry) session.freshRootRuns.delete(capability.nodeId);
-      };
-      void run.then(forget, forget);
-      return run;
+    // Every root run starts a fresh native session and runs beside the thread's other runs:
+    // there is no per-thread root queue (#719). A retried or duplicated delivery of the same
+    // prepared run joins it: it must not start a second paid run, nor take over the first one's
+    // cancellation.
+    const binding = rootRunBinding(capability, traceContext, model, attemptAdmissionId, executionLeaseId);
+    const existing = session.rootRuns.get(capability.nodeId);
+    if (existing !== undefined) {
+      if (existing.binding !== binding) throw new Error("Root completion is already active under a different graph binding");
+      return existing.run;
     }
-    return this.withSessionLock(session, () => this.runCompletion(runInput));
+    const run = this.runCompletion(runInput) as Promise<HarnessCompleteResult>;
+    const entry = { binding, run };
+    session.rootRuns.set(capability.nodeId, entry);
+    const forget = () => {
+      if (session.rootRuns.get(capability.nodeId) === entry) session.rootRuns.delete(capability.nodeId);
+    };
+    void run.then(forget, forget);
+    return run;
   }
 
-  /** Agent-invoked Complete uses the same operation while bypassing only the human-root queue. */
+  /** Agent-invoked Complete uses the same operation as a root run, with trusted invoke provenance. */
   startInvokedCompletion(
     threadId: number,
     invocation: HarnessInvokedCompletion,
@@ -905,13 +899,6 @@ export class HarnessHost {
       forceTimer.unref?.();
     };
     controller.signal.addEventListener("abort", armForceStop, { once: true });
-    // A force-stopped root turn's harness forgets its native conversation in its own force
-    // listener. Record that at once: after the force (two minutes after the cancel), the host
-    // run may take ten more seconds to end, and a crash before then must not restore it.
-    const recordForcedState = () => queueMicrotask(() => {
-      void this.recordSessionState(threadId, session).catch(() => undefined);
-    });
-    forceController.signal.addEventListener("abort", recordForcedState, { once: true });
     const detachSignal = forwardAbort(input.signal, controller);
     const completeCallId = randomUUID();
     // Approvals are keyed by product interaction, the stream its product observer reads. A
@@ -922,9 +909,6 @@ export class HarnessHost {
       ? session.approvals.beginUnobservedCompletion({ interactionId, completeCallId }, UNOBSERVED_CHILD_APPROVAL_RATIONALE)
       : session.approvals.beginCompletion({ interactionId: approvalInteractionId, completeCallId });
     session.activeCompletions.set(capability.nodeId, { completeCallId, interactionId, controller });
-    if (input.origin.kind === "root" && (input.traceContext?.nativeSession !== "fresh" || input.traceContext.rootRunKind === "message")) {
-      session.activeHumanRootCompletionId = capability.nodeId;
-    }
     const abortApprovals = () => session.approvals.endCompletion(
       completeCallId,
       "aborted",
@@ -963,7 +947,6 @@ export class HarnessHost {
       if (!nativeStarted && error !== null && typeof error === "object") executionNotStartedErrors.add(error);
     }
     controller.signal.removeEventListener("abort", armForceStop);
-    forceController.signal.removeEventListener("abort", recordForcedState);
     if (forceTimer !== undefined) clearTimeout(forceTimer);
     session.approvals.endCompletion(
       completeCallId,
@@ -973,9 +956,6 @@ export class HarnessHost {
     controller.signal.removeEventListener("abort", abortApprovals);
     if (session.activeCompletions.get(capability.nodeId)?.controller === controller) {
       session.activeCompletions.delete(capability.nodeId);
-    }
-    if (session.activeHumanRootCompletionId === capability.nodeId) {
-      delete session.activeHumanRootCompletionId;
     }
     detachSignal();
     const errors: unknown[] = operationError === undefined ? [] : [operationError];
@@ -1262,7 +1242,7 @@ export class HarnessHost {
     forceSignal: AbortSignal = new AbortController().signal,
   ): Promise<HarnessCompleteResult | HarnessInvokedCompletionObservation> {
     // The configuration this run was admitted with. A registration that changes the session
-    // while it runs, which never waits for fresh roots or invoked children, cannot widen or
+    // while it runs, which never waits for root runs or invoked children, cannot widen or
     // narrow what this run may do.
     const descriptor = session.descriptor;
     const graph = new RelayerGraphClient(capability);
@@ -1415,21 +1395,16 @@ export class HarnessHost {
         }
         selectedAccess = accessLease.access;
       }
-      const graphHistory = traceContext?.contextMode === "graph-v1" ? await graph.getHistory({ limit: 8 }) : undefined;
+      const graphHistory = origin.kind === "root" ? await graph.getHistory({ limit: 8 }) : undefined;
       // A turn cancelled and force-stopped before its native work starts ends as a cancellation.
       if (forceSignal.aborted) throw signal.reason;
       harnessStarted = true;
       onNativeStarted?.();
       const native = session.harness.complete({
         origin,
-        ...(traceContext?.contextMode === undefined ? {} : { contextMode: traceContext.contextMode }),
-        ...(graphHistory === undefined ? {} : { graphHistory }),
-        ...(traceContext?.rootRunKind === undefined ? {} : { rootRunKind: traceContext.rootRunKind }),
-        requireNativeContinuity: traceContext?.requireNativeContinuity === true,
+        ...(graphHistory === undefined ? {} : { contextMode: "graph-v1" as const, graphHistory }),
         ...(traceContext?.threadIconSelection === undefined ? {} : { threadIconSelection: traceContext.threadIconSelection }),
-        ...(traceContext?.nativeHistoryAnchor === undefined ? {} : { nativeHistoryAnchor: traceContext.nativeHistoryAnchor }),
-        ...(traceContext?.nativeSession === undefined ? {} : { nativeSession: traceContext.nativeSession }),
-        ...(traceContext?.threadHistory === undefined ? {} : { threadHistory: traceContext.threadHistory }),
+        ...(origin.kind !== "root" || traceContext?.threadHistory === undefined ? {} : { threadHistory: traceContext.threadHistory }),
         inputGraph: interaction,
         interactionInput: await withArtifactNoteScreenshots(interactionInput, this.options.artifactNotesDirectory, programDirectory),
         ...(personalPresentation === undefined ? {} : { personalPresentation }),
@@ -1582,10 +1557,10 @@ export class HarnessHost {
     return this.traceStore.personalPresentationVersionId(productInteractionId);
   }
 
-  cancel(threadId: number, completionId?: GraphId): boolean {
+  /** Cancels one completion. Root runs run side by side, so a cancel always names its run. */
+  cancel(threadId: number, completionId: GraphId): boolean {
     const session = this.sessions.get(threadId);
-    const targetId = completionId ?? session?.activeHumanRootCompletionId;
-    const active = targetId === undefined ? undefined : session?.activeCompletions.get(targetId);
+    const active = session?.activeCompletions.get(completionId);
     if (session === undefined || active === undefined || active.controller.signal.aborted) return false;
     session.approvals.endCompletion(
       active.completeCallId,
@@ -1642,7 +1617,7 @@ export class HarnessHost {
       try {
         const invokedRuns = Promise.allSettled([
           ...[...session.invokedCompletionRuns.values()].map(({ run }) => run),
-          ...[...session.freshRootRuns.values()].map(({ run }) => run),
+          ...[...session.rootRuns.values()].map(({ run }) => run),
         ])
           .then(() => undefined);
         await waitForHarnessSessionClose(
@@ -2095,8 +2070,8 @@ async function route(host: HarnessHost, options: HarnessHostOptions, request: In
       const threadId = Number(decodeURIComponent(cancelMatch[1]));
       if (!Number.isSafeInteger(threadId) || threadId < 1) return reply(response, 400, { error: "invalid_thread_id" });
       const completionIdInput = url.searchParams.get("completionId");
-      const completionId = completionIdInput === null ? undefined : Number(completionIdInput);
-      if (completionId !== undefined && (!Number.isSafeInteger(completionId) || completionId < 1)) {
+      const completionId = completionIdInput === null ? Number.NaN : Number(completionIdInput);
+      if (!Number.isSafeInteger(completionId) || completionId < 1) {
         return reply(response, 400, { error: "invalid_completion_id" });
       }
       return reply(response, 200, { cancelled: host.cancel(threadId, completionId) });
@@ -3373,18 +3348,14 @@ function isNativeExecutionHandle(value: Promise<void> | NativeExecutionHandle): 
 function readTraceContext(value: unknown): HarnessCompletionTraceContext | undefined {
   if (!isRecord(value) || value.traceContext === undefined) return undefined;
   if (!isRecord(value.traceContext)) throw new Error("Harness completion contains an invalid trace context");
-  const { productInteractionId, personalPresentationVersionId, personalPresentationVersionKey, requireNativeContinuity, nativeHistoryAnchor, threadIconSelection, nativeSession, threadHistory, contextMode, rootRunKind } = value.traceContext;
-  if (contextMode !== undefined && contextMode !== "graph-v1") throw new Error("Invalid graph context mode");
-  if (contextMode === "graph-v1" && nativeSession !== "fresh") throw new Error("Graph continuation requires a fresh session");
-  if (rootRunKind !== undefined && rootRunKind !== "message" && rootRunKind !== "invoke") throw new Error("Invalid root run kind");
-  if (rootRunKind === "message" && contextMode !== "graph-v1") throw new Error("Fresh message runs require graph continuation");
-  if (nativeSession !== undefined && nativeSession !== "fresh") throw new Error("Invalid native session mode");
-  if (nativeSession === "fresh" && requireNativeContinuity === true) throw new Error("A fresh native session cannot require native continuity");
-  if (threadHistory !== undefined && nativeSession !== "fresh") throw new Error("Thread history is sent only with a fresh native session");
+  const { productInteractionId, personalPresentationVersionId, personalPresentationVersionKey, threadIconSelection, threadHistory } = value.traceContext;
+  // Native root-session resume is retired (#719): no root run resumes, continues or requires a
+  // provider's native conversation, so a request that asks for one is refused, never ignored.
+  const retired = ["nativeSession", "requireNativeContinuity", "nativeHistoryAnchor"]
+    .filter((key) => (value.traceContext as Record<string, unknown>)[key] !== undefined);
+  if (retired.length > 0) throw new Error(`Harness completion trace context contains retired native-session fields: ${retired.join(", ")}`);
   const history = threadHistory === undefined ? undefined : readThreadHistory(threadHistory);
   if (threadIconSelection !== undefined && (!isRecord(threadIconSelection) || threadIconSelection.eligible !== true || Object.keys(threadIconSelection).length !== 1)) throw new Error("Invalid thread icon selection eligibility");
-  if (nativeHistoryAnchor != null && (!isRecord(nativeHistoryAnchor) || !Number.isSafeInteger(nativeHistoryAnchor.interactionNodeId) || Number(nativeHistoryAnchor.interactionNodeId) < 1 || typeof nativeHistoryAnchor.message !== "string")) throw new Error("Invalid native history anchor");
-  if (requireNativeContinuity !== undefined && typeof requireNativeContinuity !== "boolean") throw new Error("Invalid native continuity requirement");
   if (typeof productInteractionId !== "number" || !Number.isSafeInteger(productInteractionId) || productInteractionId < 1) {
     throw new Error("Harness completion trace context requires a positive product interaction id");
   }
@@ -3402,12 +3373,7 @@ function readTraceContext(value: unknown): HarnessCompletionTraceContext | undef
   }
   return {
     productInteractionId,
-    ...(contextMode === undefined ? {} : { contextMode }),
-    ...(rootRunKind === undefined ? {} : { rootRunKind }),
-    ...(requireNativeContinuity === undefined ? {} : { requireNativeContinuity }),
     ...(threadIconSelection === undefined ? {} : { threadIconSelection: { eligible: true as const } }),
-    ...(nativeHistoryAnchor == null ? {} : { nativeHistoryAnchor: nativeHistoryAnchor as { interactionNodeId: number; message: string } }),
-    ...(nativeSession === undefined ? {} : { nativeSession }),
     ...(history === undefined ? {} : { threadHistory: history }),
     ...(personalPresentationVersionId === undefined ? {} : { personalPresentationVersionId }),
     ...(personalPresentationVersionKey === undefined ? {} : { personalPresentationVersionKey }),
@@ -3504,10 +3470,10 @@ function validateCompletionOrigin(
   }
 }
 
-/** What makes two fresh-root deliveries the same run: one completion, attempt and lease. */
-function freshRootBinding(
+/** What makes two root-run deliveries the same run: one completion, attempt and lease. */
+function rootRunBinding(
   capability: GraphCapability,
-  traceContext: HarnessCompletionTraceContext,
+  traceContext: HarnessCompletionTraceContext | undefined,
   model: InteractionModelSelection | undefined,
   attemptAdmissionId: string | undefined,
   executionLeaseId: string | undefined,
@@ -3515,9 +3481,7 @@ function freshRootBinding(
   return createHash("sha256")
     .update(JSON.stringify({
       completionId: capability.nodeId,
-      productInteractionId: traceContext.productInteractionId,
-      contextMode: traceContext.contextMode,
-      rootRunKind: traceContext.rootRunKind,
+      productInteractionId: traceContext?.productInteractionId ?? null,
       attemptAdmissionId: attemptAdmissionId ?? null,
       executionLeaseId: executionLeaseId ?? null,
       model: model === undefined ? undefined : { providerId: model.providerId, adapterId: model.adapterId, modelId: model.modelId },

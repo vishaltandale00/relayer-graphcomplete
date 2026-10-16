@@ -228,10 +228,15 @@ impl InteractionExecutionService {
                 return;
             }
         };
-        // A run started from an invoke action starts a fresh native session beside the thread's
-        // other turns. It has no native memory of the thread, so it receives the accepted turns.
-        let invoked_run = match execution.product.is_invoked_run(interaction.id).await {
-            Ok(value) => value,
+        // Every root run starts a fresh native session beside the thread's other runs, so it has no
+        // native memory of the thread (#719). It receives graph pointers to the accepted turns,
+        // read now, when it starts, so a run that waited sees what was accepted meanwhile.
+        let thread_history = match execution
+            .product
+            .accepted_thread_history(thread.id, interaction.id)
+            .await
+        {
+            Ok(history) => history,
             Err(error) => {
                 fail_prepared_before_launch(
                     execution,
@@ -244,51 +249,10 @@ impl InteractionExecutionService {
                 .await;
                 return;
             }
-        };
-        let graph_context = match execution.product.graph_backed_continuation(thread.id).await {
-            Ok(value) => value,
-            Err(error) => {
-                fail_prepared_before_launch(
-                    execution,
-                    runtime,
-                    &thread,
-                    &interaction,
-                    prepared,
-                    error.to_string(),
-                )
-                .await;
-                return;
-            }
-        };
-        let fresh_history = if invoked_run {
-            match execution
-                .product
-                .accepted_thread_history(thread.id, interaction.id)
-                .await
-            {
-                Ok(history) => Some(history),
-                Err(error) => {
-                    fail_prepared_before_launch(
-                        execution,
-                        runtime,
-                        &thread,
-                        &interaction,
-                        prepared,
-                        error.to_string(),
-                    )
-                    .await;
-                    return;
-                }
-            }
-        } else {
-            None
         };
         let command = CompleteInteraction {
             thread_icon_selection_eligible: thread.icon_selection_eligible && thread.icon.is_none(),
-            require_native_continuity: false,
-            native_history_anchor: None,
-            fresh_native_session: fresh_history.as_deref(),
-            graph_context,
+            thread_history: Some(&thread_history),
             project_id: thread.project_id.map(ProjectId::value),
             product_interaction_id: interaction.id.value(),
             thread_id: thread.id.value(),
@@ -481,23 +445,20 @@ impl InteractionExecutionService {
             stop_before_native_execution(execution, &thread, &interaction, prepared, attempt).await;
             return;
         }
-        let continuity = execution
+        // Read the history again just before native work starts: provider admission can wait,
+        // for example on a reconnect, and a parallel run accepted meanwhile belongs in it. If the
+        // read fails, the snapshot taken before admission still grounds the run.
+        let started_history = execution
             .product
-            .conversation_compatibility(thread.id)
+            .accepted_thread_history(thread.id, interaction.id)
             .await
             .ok();
-        let require_native_continuity = execution_model_selection.is_some()
-            && invocation.is_none()
-            && command.fresh_native_session.is_none()
-            && !command.graph_context
-            && continuity
-                .as_ref()
-                .is_none_or(|value| value.status != "unrestricted");
         let command = CompleteInteraction {
-            require_native_continuity,
-            native_history_anchor: continuity
-                .as_ref()
-                .and_then(|value| value.native_history_anchor.as_ref()),
+            thread_history: Some(
+                started_history
+                    .as_deref()
+                    .unwrap_or(thread_history.as_slice()),
+            ),
             execution_lease_id: admission
                 .as_ref()
                 .map(|admission| admission.execution_lease_id.as_str()),
@@ -538,7 +499,10 @@ impl InteractionExecutionService {
                     match runtime.approval_events(thread.id.value(), interaction.id.value(), cursor).await {
                         Ok(snapshot) => {
                             if let Err(error) = persist_approval_snapshot(
-                                execution,
+                                ApprovalRecorder {
+                                    product: &execution.product,
+                                    decisions: &execution.approval_decisions,
+                                },
                                 thread.id,
                                 interaction.id,
                                 &mut cursor,
@@ -560,7 +524,10 @@ impl InteractionExecutionService {
                             match final_approval_acknowledgement(cursor, &acknowledgement) {
                                 Ok(true) => {
                                     if let Err(error) = persist_approval_snapshot(
-                                        execution,
+                                        ApprovalRecorder {
+                                            product: &execution.product,
+                                            decisions: &execution.approval_decisions,
+                                        },
                                         thread.id,
                                         interaction.id,
                                         &mut cursor,
@@ -603,7 +570,10 @@ impl InteractionExecutionService {
                     match runtime.approval_events(thread.id.value(), interaction.id.value(), cursor).await {
                         Ok(snapshot) => {
                             if let Err(error) = persist_approval_snapshot(
-                                execution,
+                                ApprovalRecorder {
+                                    product: &execution.product,
+                                    decisions: &execution.approval_decisions,
+                                },
                                 thread.id,
                                 interaction.id,
                                 &mut cursor,
@@ -1349,8 +1319,15 @@ pub(crate) fn final_approval_acknowledgement(
     Err("harness did not acknowledge the exact final approval event cursor".into())
 }
 
-async fn persist_approval_snapshot(
-    execution: &InteractionExecutionService,
+/// Where an observer records a completion's approval events: the product store, and the user
+/// decisions in flight that authorize a user's resolution.
+pub(crate) struct ApprovalRecorder<'a> {
+    pub(crate) product: &'a ProductService,
+    pub(crate) decisions: &'a Mutex<HashMap<String, ApprovalDecision>>,
+}
+
+pub(crate) async fn persist_approval_snapshot(
+    recorder: ApprovalRecorder<'_>,
     thread_id: ThreadId,
     interaction_id: InteractionId,
     cursor: &mut u64,
@@ -1384,7 +1361,7 @@ async fn persist_approval_snapshot(
                     complete_call_id,
                     &request.correlation,
                 )?;
-                execution
+                recorder
                     .product
                     .record_approval_request(&request)
                     .await
@@ -1398,12 +1375,24 @@ async fn persist_approval_snapshot(
                     complete_call_id,
                     &resolution.correlation,
                 )?;
-                validate_event_resolution_authority(execution, &resolution).await?;
-                execution
+                validate_event_resolution_authority(
+                    recorder.product,
+                    recorder.decisions,
+                    &resolution,
+                )
+                .await?;
+                recorder
                     .product
                     .record_approval_resolution(&resolution, true)
                     .await
                     .map_err(|error| error.to_string())?;
+                // The resolution is durable now, so a decision kept as its possible authority
+                // is no longer needed. Any other end means that decision was never applied.
+                recorder
+                    .decisions
+                    .lock()
+                    .expect("approval decision lock poisoned")
+                    .remove(&resolution.request_id);
             }
         }
         *cursor += 1;
@@ -1422,7 +1411,7 @@ async fn persist_approval_snapshot(
             complete_call_id,
             &request.correlation,
         )?;
-        execution
+        recorder
             .product
             .record_approval_request(&request)
             .await
@@ -1482,22 +1471,21 @@ pub(crate) fn validate_decision_resolution(
 }
 
 async fn validate_event_resolution_authority(
-    execution: &InteractionExecutionService,
+    product: &ProductService,
+    approval_decisions: &Mutex<HashMap<String, ApprovalDecision>>,
     resolution: &ApprovalResolution,
 ) -> Result<(), String> {
     if resolution.actor != ApprovalActor::User {
         return Ok(());
     }
-    let stored = execution
-        .product
+    let stored = product
         .get_approval(&resolution.request_id)
         .await
         .map_err(|error| error.to_string())?;
     if stored.resolution.as_ref() == Some(resolution) {
         return Ok(());
     }
-    let decision = execution
-        .approval_decisions
+    let decision = approval_decisions
         .lock()
         .expect("approval decision lock poisoned")
         .get(&resolution.request_id)

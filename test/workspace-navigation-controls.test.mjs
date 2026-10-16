@@ -4,7 +4,8 @@ import { describe, expect, it, vi } from "vitest";
 
 import { productWorkspaceMarkup } from "../desktop/renderer/src/product-workspace/view.js";
 import { controlActivationCompletionFor } from "../desktop/renderer/src/control-activation.js";
-import { shouldPollThreadInteractions } from "../desktop/renderer/src/product-workspace/model.js";
+import { presentationInteractionRevision, shouldPollThreadInteractions } from "../desktop/renderer/src/product-workspace/model.js";
+import { interactionGraphStatus } from "../desktop/renderer/src/product-workspace/interaction-graph.js";
 import {
   activateHistoryControl,
   approvalHistoryRenderIdentity,
@@ -160,6 +161,8 @@ describe("product workspace navigation controls", () => {
     expect(turns.map((turn) => turn.id)).toEqual(["first", "second", "third"]);
     expect([
       "not_started",
+      "queued",
+      "waiting_for_capacity",
       "running",
       "submitted",
       "accepted",
@@ -169,6 +172,8 @@ describe("product workspace navigation controls", () => {
       "stopped",
     ].map((status) => turnStatusPresentation(status).label)).toEqual([
       "Waiting",
+      "Queued",
+      "Waiting for capacity",
       "Running",
       "Running",
       "",
@@ -178,6 +183,14 @@ describe("product workspace navigation controls", () => {
       "Stopped",
     ]);
     expect(turnStatusPresentation("accepted")).toMatchObject({ hidden: true, label: "" });
+    // Interaction-graph cards tell a capacity wait from a node wait (#720).
+    expect(interactionGraphStatus({ completionStatus: "queued", queueReason: "capacity" })).toBe("Waiting for capacity");
+    expect(interactionGraphStatus({ completionStatus: "queued", queueReason: "node" })).toBe("queued");
+    // A review capture taken before a run moved to the capacity wait is not current after it.
+    const queuedTurn = { id: 5, threadId: 4, sequence: 2, completionStatus: "queued", queueReason: "node" };
+    expect(presentationInteractionRevision([queuedTurn], 4))
+      .not.toBe(presentationInteractionRevision([{ ...queuedTurn, queueReason: "capacity" }], 4));
+    expect(presentationInteractionRevision([{ id: 5, threadId: 4, sequence: 2, completionStatus: "running" }], 4)).toBe("5:2:running");
     expect(turnStatusPresentation("succeeded")).toMatchObject({ hidden: true, label: "" });
   });
 

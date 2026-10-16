@@ -25,11 +25,14 @@ mod input_drafts;
 mod interaction_contexts;
 mod interactions;
 mod migrations;
+mod node_runs;
 mod personal_presentation;
 mod product_state;
 mod projects;
+mod run_capacity;
 mod schema;
 mod stops;
+pub(crate) use stops::QueuedStop;
 mod threads;
 
 use super::StorageError;
@@ -44,10 +47,50 @@ pub(crate) use personal_presentation::PersonalPresentationPin;
 /// agent launched is not a human turn, so its selection is never inherited.
 const LATEST_HUMAN_TURN_MODEL: &str = "SELECT turn.model_provider_id,turn.provider_model_id,turn.model_family_id FROM interactions turn WHERE turn.thread_id=?1 AND NOT EXISTS(SELECT 1 FROM action_invocations child WHERE child.result_interaction_id=turn.id AND child.agent_invoked=1) ORDER BY turn.sequence DESC LIMIT 1";
 
-/// Whether thread ?1 has a message turn in progress. Message turns resume the thread's native
-/// root session, so they still run one at a time. A run started by an invoke action, whether a
-/// user clicked it or an agent launched it, starts a fresh session and runs beside them.
-const MESSAGE_TURN_IN_PROGRESS: &str = "SELECT EXISTS(SELECT 1 FROM interactions turn WHERE turn.thread_id=?1 AND turn.completion_status IN ('not_started','running','submitted') AND NOT EXISTS(SELECT 1 FROM action_invocations run WHERE run.result_interaction_id=turn.id))";
+/// The error of a queued run a Stop removed before it started (#718, #720).
+pub(crate) const QUEUED_RUN_STOPPED: &str = "Stopped before it started.";
+
+/// The error of a message turn that waited for capacity when Relayer stopped (#720).
+pub(crate) const CAPACITY_WAIT_INTERRUPTED: &str =
+    "Relayer stopped before this message had capacity to start. Send it again to run it.";
+
+/// The error of a message a model failure returned to unsent after a later message was sent.
+pub(crate) const STALE_RETURNED_MESSAGE: &str = "This message could not run, and a later message was sent before it was retried. Send it again to run it.";
+
+/// Thread messages run in parallel (#719), so a message a model failure returned to unsent can
+/// be followed by later messages. Its draft is then stale: only the latest message can be
+/// retried in place (`interaction_retry_stale`). A message returned before any attempt began
+/// records no attempt, whether or not its graph interaction was already bound; it is recognized
+/// by the harness its preparation recorded, which a message that was never prepared does not
+/// have. It is settled as failed, with its error, so it
+/// never stays `not_started` and holds its thread out of the archive. Its restored inputs and
+/// context confirmations stay restored. Call this inside the transaction that creates a message
+/// or returns one to unsent.
+pub(super) async fn fail_stale_returned_messages(
+    connection: &mut sqlx::SqliteConnection,
+    thread_id: i64,
+) -> Result<(), StorageError> {
+    sqlx::query(
+        "UPDATE interactions SET completion_status='failed',completion_error=?2 WHERE thread_id=?1 AND completion_status='not_started' AND ((SELECT a.outcome FROM interaction_attempts a WHERE a.interaction_id=interactions.id ORDER BY a.attempt_number DESC LIMIT 1) IS 'model_failed' OR (harness_configuration_name IS NOT NULL AND NOT EXISTS(SELECT 1 FROM interaction_attempts a WHERE a.interaction_id=interactions.id))) AND NOT EXISTS(SELECT 1 FROM action_invocations run WHERE run.result_interaction_id=interactions.id) AND EXISTS(SELECT 1 FROM interactions later WHERE later.thread_id=interactions.thread_id AND later.sequence>interactions.sequence AND NOT EXISTS(SELECT 1 FROM action_invocations run WHERE run.result_interaction_id=later.id))",
+    )
+    .bind(thread_id)
+    .bind(STALE_RETURNED_MESSAGE)
+    .execute(connection)
+    .await?;
+    Ok(())
+}
+
+/// [`fail_stale_returned_messages`] for the thread of interaction ?1.
+pub(super) async fn fail_stale_returned_messages_beside(
+    connection: &mut sqlx::SqliteConnection,
+    interaction_id: i64,
+) -> Result<(), StorageError> {
+    let thread_id: i64 = sqlx::query_scalar("SELECT thread_id FROM interactions WHERE id=?1")
+        .bind(interaction_id)
+        .fetch_one(&mut *connection)
+        .await?;
+    fail_stale_returned_messages(connection, thread_id).await
+}
 
 #[derive(Clone)]
 pub(crate) struct SqliteProductStore {

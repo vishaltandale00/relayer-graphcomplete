@@ -134,6 +134,7 @@ export function latestInteractionForThread(interactions, threadId) {
 
 const PENDING_STATUSES = new Set([
   "not_started",
+  "queued",
   "running",
   "submitted",
   "waiting_for_approval",

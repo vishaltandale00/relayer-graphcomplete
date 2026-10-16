@@ -3236,16 +3236,20 @@ async fn retire_absent_product_harness(
     .await?;
     // Identified sends and authoritative invoke results have durable replay identities. An
     // interrupted preparation may therefore be rebound to the same graph interaction under the
-    // replacement product harness. Clear only that unfinished mutable binding; accepted rows and
-    // immutable attempt receipts continue to describe the harness that actually executed.
+    // replacement product harness. A bound run that waits, in its node's queue (#718) or for
+    // capacity (#720), is unfinished too and is rebound the same way. It keeps waiting as
+    // `queued`, so nothing starts it on its own; it is prepared on the new binding when it
+    // starts. Clear only that unfinished mutable binding; accepted rows and immutable attempt
+    // receipts continue to describe the harness that actually executed.
     sqlx::query(
         "UPDATE interactions
-         SET graph_node_id=NULL,completion_status='submitted',
+         SET graph_node_id=NULL,
+             completion_status=CASE WHEN completion_status='queued' THEN 'queued' ELSE 'submitted' END,
              harness_configuration_name=?1,harness_configuration_digest=NULL,
              effective_execution_digest=NULL,effective_permission_receipt_json=NULL,
              completion_output_json=NULL,completion_error=NULL
          WHERE harness_configuration_name=?2
-           AND completion_status IN ('not_started','running','submitted','waiting_for_approval')
+           AND completion_status IN ('not_started','queued','running','submitted','waiting_for_approval')
            AND graph_node_id IS NOT NULL
            AND (input_identity IS NOT NULL OR EXISTS (
                SELECT 1 FROM action_invocations
@@ -4649,11 +4653,38 @@ mod provider_definition_tests {
             .execute(&store.pool).await.unwrap();
         sqlx::query("INSERT INTO interactions(id,thread_id,sequence,text,created_at,completion_status,harness_configuration_name) VALUES (1,1,1,'Historical','1','accepted','prime-agent-deep')")
             .execute(&store.pool).await.unwrap();
+        // A bound invoke result that waits in its node's queue (#718) under the retired harness.
+        sqlx::query("INSERT INTO interactions(id,thread_id,sequence,text,created_at,completion_status,graph_node_id,harness_configuration_name,harness_configuration_digest,effective_execution_digest,effective_permission_receipt_json) VALUES (2,1,2,'Queued','2','queued',77,'prime-agent-deep','sha256:old','sha256:old','{}')")
+            .execute(&store.pool).await.unwrap();
+        sqlx::query("INSERT INTO action_invocations(source_interaction_id,action_id,result_interaction_id,created_at,graph_lease_required,authoritative) VALUES (1,41,2,'2',1,1)")
+            .execute(&store.pool).await.unwrap();
 
         store
             .initialize_model_catalog("prime-agent-basic", &[runtime_harness("prime-agent-basic")])
             .await
             .unwrap();
+        let queued: (String, Option<i64>, String) = sqlx::query_as(
+            "SELECT completion_status,graph_node_id,harness_configuration_name FROM interactions WHERE id=2",
+        )
+        .fetch_one(&store.pool)
+        .await
+        .unwrap();
+        // It keeps waiting as queued (#720), so nothing starts it on its own after the rebind.
+        assert_eq!(queued, ("queued".into(), None, "prime-agent-basic".into()));
+        // At startup the rebound queued invoke is interrupted like any queued invoke, though it
+        // no longer has a graph interaction, so it never stays queued.
+        store
+            .recover_interrupted_action_invocations("Interrupted at restart.")
+            .await
+            .unwrap();
+        let (status, error): (String, Option<String>) = sqlx::query_as(
+            "SELECT completion_status,completion_error FROM interactions WHERE id=2",
+        )
+        .fetch_one(&store.pool)
+        .await
+        .unwrap();
+        assert_eq!(status, "submitted");
+        assert_eq!(error.as_deref(), Some("Interrupted at restart."));
 
         let thread_harness: String =
             sqlx::query_scalar("SELECT harness_configuration_name FROM threads WHERE id=1")

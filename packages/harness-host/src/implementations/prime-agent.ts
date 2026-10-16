@@ -4,16 +4,11 @@ import { PrimeVisualAuthoring, submitPrimeLayer } from "./prime-visual-authoring
 import { Buffer } from "node:buffer";
 import { createHash } from "node:crypto";
 import { realpathSync } from "node:fs";
-import { lstat, mkdir, realpath, stat } from "node:fs/promises";
+import { lstat, mkdir, realpath } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { type GraphCapability } from "@relayer/graph-client";
 import { nativeExecutionHandle, type NativeExecutionHandle } from "../completion-execution.js";
 import { grantsGraphSearch } from "../configuration.js";
-import {
-  parseNativeSessionResetReason,
-  reportNativeSessionReset,
-  type NativeSessionResetReason,
-} from "../native-session-reset.js";
 import { MAX_HARNESS_APPROVAL_TEXT_LENGTH } from "../approval.js";
 import { INTERACTION_INPUT_GUIDANCE, INVOCATION_PUBLICATION_GUIDANCE, SUBCOMPLETION_INTEGRATION_GUIDANCE, renderInteractionInput, renderThreadHistory } from "../interaction-input.js";
 import { HarnessApprovalRequestTerminatedError } from "../approval-coordinator.js";
@@ -48,41 +43,6 @@ function confinedDescendant(root: string, path: string): boolean {
     && !fromRoot.startsWith(`..${sep}`) && !isAbsolute(fromRoot);
 }
 
-async function resolvedManagedSessionFile(
-  privateStateRoot: string,
-  managedSessionDir: string,
-  savedSessionFile: unknown,
-): Promise<string | undefined> {
-  const privateStateDetails = await lstat(privateStateRoot).catch(() => null);
-  if (!privateStateDetails?.isDirectory() || privateStateDetails.isSymbolicLink()) {
-    throw new Error("Managed Prime private state is not an owned directory");
-  }
-  const sessionDetails = await lstat(managedSessionDir).catch((error: NodeJS.ErrnoException) => {
-    if (error.code === "ENOENT") return null;
-    throw error;
-  });
-  if (sessionDetails !== null && (!sessionDetails.isDirectory() || sessionDetails.isSymbolicLink())) {
-    throw new Error("Managed Prime session state is not an owned directory");
-  }
-  if (sessionDetails === null) return undefined;
-  const [resolvedPrivateState, resolvedSessions] = await Promise.all([
-    realpath(privateStateRoot),
-    realpath(managedSessionDir),
-  ]);
-  if (resolvedSessions !== join(resolvedPrivateState, "sessions")) {
-    throw new Error("Managed Prime session state escapes private state");
-  }
-  if (typeof savedSessionFile !== "string" || !confinedDescendant(managedSessionDir, savedSessionFile)) return undefined;
-  try {
-    const resolvedFile = await realpath(savedSessionFile);
-    if (!confinedDescendant(resolvedSessions, resolvedFile)
-      || !(await stat(resolvedFile)).isFile()) return undefined;
-    return resolvedFile;
-  } catch {
-    return undefined;
-  }
-}
-
 interface PrimeAgentSession {
   readonly agent: { readonly state: { thinkingLevel: string } };
   readonly sessionManager: { appendThinkingLevelChange(level: string): void };
@@ -100,37 +60,10 @@ interface PrimeAgentSession {
   /** Graceful native teardown: drains stateful resources before calling dispose(). */
   disposeAsync?(): Promise<void>;
   subscribe?(listener: (event: unknown) => void): () => void;
-  reload?(): Promise<void>;
 }
 
 interface PrimeAgentSessionManagerFactory {
   create(cwd: string, sessionDir?: string): unknown;
-  open(path: string): unknown;
-}
-
-interface PrimeRootTurn {
-  readonly forceSignal: AbortSignal | undefined;
-  /** Set once the turn is bound to the session its conversation runs on. */
-  session: PrimeAgentSession | undefined;
-}
-
-/** One native session's own presentation instructions, appended to its system prompt. */
-interface PrimeSessionInstructions {
-  current: string;
-  /** False when the installed package gave the session no resource loader to scope them to. */
-  readonly scoped: boolean;
-}
-
-interface PrimeAgentSessionHandle {
-  readonly session: PrimeAgentSession;
-  readonly instructions: PrimeSessionInstructions;
-  /** The session holds a root conversation: it was restored from a file, or a root turn ran on it. */
-  conversed: boolean;
-  readonly nativeDispose: () => void;
-  disposeInProgress: boolean;
-  disposeCompleted: boolean;
-  guardInstalled: boolean;
-  disposePromise?: Promise<void>;
 }
 
 interface PrimeAgentModule {
@@ -400,8 +333,8 @@ class PrimeAgentSessionLifecycle {
 }
 
 /**
- * One turn's force-stop. The turn binds the one native session it runs on; when the host's
- * force signal fires, only that session is stopped and the turn stops waiting for it.
+ * One run's force-stop. The run binds the one native session it owns; when the host's force
+ * signal fires, only that session is stopped and the run stops waiting for it.
  */
 class PrimeTurnForceStop {
   private stopSession: (() => void) | undefined;
@@ -414,20 +347,16 @@ class PrimeTurnForceStop {
   }
 
   /**
-   * Binds the session this turn is about to run on. A turn force-stopped before then does
-   * not run. It stops a session only this turn owns (an invoked child's), so that session is
-   * not left to a graceful disposal that may stall. It never stops the shared root session:
-   * a later root turn may already be using it.
+   * Binds the session this run is about to execute on. No other run uses it, so a force-stop
+   * force-disposes it rather than leaving it to a graceful disposal that may stall. A run
+   * force-stopped before then stops its new session at once and does not execute.
    */
-  bind(stopSession: () => void, ownedByTurn: boolean): void {
+  bind(stopSession: () => void): void {
+    this.stopSession = stopSession;
     if (this.signal?.aborted) {
-      if (ownedByTurn) {
-        this.stopSession = stopSession;
-        this.stop();
-      }
+      this.stop();
       this.signal.throwIfAborted();
     }
-    this.stopSession = stopSession;
   }
 
   /** Settles with the execution, or as soon as the force-stop fires; a later settlement is ignored. */
@@ -469,35 +398,21 @@ const PRIME_ADAPTERS: Readonly<Record<string, PrimeAdapterMapping>> = Object.fre
   "vercel-ai-router": Object.freeze({ api: "openai-completions", implementationVersion: "2", compat: Object.freeze({ vercelGatewayRouting: Object.freeze({}) }) }),
 });
 
+/**
+ * Every run, root or invoked, gets its own fresh ordinary Prime session and never resumes one
+ * (#719). A thread's runs may overlap, so there is no root conversation to continue: a root run
+ * finds the thread's earlier turns through the graph pointers in its prompt's thread history.
+ */
 export class PrimeAgentHarness implements Harness {
   readonly supportsInvokedComplete = true;
-  /** An invoked child runs in its own session; a root turn's force-stop replaces the root session. */
+  /** Every run has its own session, so a force-stop ends only that run's session. */
   readonly supportsForceStop = true;
   private forceShutdownStarted = false;
   private gracefullyDisposed = false;
   private gracefulDisposePromise: Promise<void> | undefined;
-  private rootHistoryAvailable = false;
-  private readonly invokedSessions = new Set<PrimeAgentSessionLifecycle>();
-  private readonly pendingInvokedSessions = new Set<Promise<PrimeAgentSessionLifecycle>>();
-  private sessionHandle: PrimeAgentSessionHandle | undefined;
-  private sessionPersonalPresentationVersionId: number | null | undefined;
-  /**
-   * Root turns acquire the root session one at a time. A force-stopped root turn stops
-   * waiting at once, so its acquisition may still run when the next root turn starts.
-   */
-  private pendingRootSessionAcquisition: Promise<void> | undefined;
-  /**
-   * Advances when a root turn is force-stopped before it bound a session. Its acquisition may
-   * never settle; a late result from an older generation is discarded rather than installed.
-   */
-  private rootSessionGeneration = 0;
-  /**
-   * Root turns in flight, with the session each one's conversation runs on once bound. Force
-   * shutdown forgets the root session only when a bound turn's conversation runs on it. A turn
-   * still acquiring its session wrote nothing, and a turn already force-stopped dropped its
-   * session then, even while its native work has not settled.
-   */
-  private readonly activeRootTurns = new Set<PrimeRootTurn>();
+  /** Every live run's own session. */
+  private readonly sessions = new Set<PrimeAgentSessionLifecycle>();
+  private readonly pendingSessions = new Set<Promise<PrimeAgentSessionLifecycle>>();
 
   private constructor(
     private readonly context: HarnessFactoryContext,
@@ -505,18 +420,16 @@ export class PrimeAgentHarness implements Harness {
     private readonly permission: PrimeAgentPermission,
     private readonly workspaceRoot: string,
     private readonly createKernelBoundary: PrimeAgentDependencies["createKernelBoundary"],
-    private readonly createSession: (sessionManager: unknown, instructions: string) => Promise<PrimeAgentSessionHandle>,
+    private readonly createSession: (sessionManager: unknown, instructions: string) => Promise<PrimeAgentSession>,
     private readonly createSessionManager: () => unknown,
-    private resumableSessionFile: string | undefined,
-    savedPresentationVersionId: number | null | undefined,
-    private pendingRootReset: NativeSessionResetReason | undefined,
-    sessionHandle?: PrimeAgentSessionHandle,
-  ) {
-    this.sessionHandle = sessionHandle;
-    this.rootHistoryAvailable = resumableSessionFile !== undefined;
-    this.sessionPersonalPresentationVersionId = savedPresentationVersionId;
-  }
+  ) {}
 
+  /**
+   * Saved state from a release that resumed root sessions is ignored: no saved session file is
+   * opened. Creating the harness creates no session, so the session-level capabilities the
+   * installed package must expose (thinking configuration, recursive quiescence, scoped
+   * instructions) are checked whenever a run creates its session.
+   */
   static async create(context: HarnessFactoryContext, dependencies: PrimeAgentDependencies = {}): Promise<PrimeAgentHarness> {
     const configuration = parsePrimeAgentConfiguration(context);
     const permission = parsePrimeAgentPermission(context);
@@ -570,17 +483,6 @@ export class PrimeAgentHarness implements Harness {
       const { type: _requestType, cellSourceCode: _cellSourceCode, ...program } = payload;
       return submitPrimeLayer(program, run.graph.acquireCapability(), active, invocation.signal);
     });
-    const savedSessionFile = context.savedState?.primeAgentSessionFile;
-    const savedPresentationVersionId = context.savedState?.primeAgentSessionPersonalPresentationVersionId;
-    const validSavedPresentationVersion = savedPresentationVersionId === undefined
-      || savedPresentationVersionId === null
-      || (typeof savedPresentationVersionId === "number"
-        && Number.isSafeInteger(savedPresentationVersionId)
-        && savedPresentationVersionId > 0);
-    const parsedSavedPresentationVersionId: number | null | undefined = validSavedPresentationVersion
-      && (savedPresentationVersionId === null || typeof savedPresentationVersionId === "number")
-      ? savedPresentationVersionId
-      : undefined;
     const managedAgentDir = managedRuntime ? join(managedRuntime.privateStateRoot, "agent") : undefined;
     const managedSessionDir = managedRuntime ? join(managedRuntime.privateStateRoot, "sessions") : undefined;
     const services = await primeAgent.createAgentSessionServices({
@@ -609,12 +511,11 @@ export class PrimeAgentHarness implements Harness {
       ? configuration.prewarmIpythonKernel
       : false;
     // The services, and so their resource loader, are shared by every session. Each session
-    // reads its own presentation instructions through its own view of that loader, so a root
-    // rotation or an invoked child never builds from another interaction's instructions.
-    const createSession = async (sessionManager: unknown, initialInstructions: string): Promise<PrimeAgentSessionHandle> => {
-      const scoped = sessionScopedServices(services, initialInstructions);
+    // reads its own interaction's presentation instructions through its own view of that
+    // loader, so no run builds from another interaction's instructions.
+    const createSession = async (sessionManager: unknown, instructions: string): Promise<PrimeAgentSession> => {
       const { session } = await primeAgent.createAgentSessionFromServices({
-        services: scoped.services,
+        services: sessionScopedServices(services, instructions),
         sessionManager,
         tools: ["ipython"],
         hostRequestHandlers: {
@@ -645,29 +546,11 @@ export class PrimeAgentHarness implements Harness {
         session.dispose();
         throw new Error("Installed Prime Agent package does not expose recursive quiescence");
       }
-      return primeSessionHandle(session, scoped.instructions);
+      return session;
     };
-    const confinedSavedSessionFile = managedSessionDir === undefined
-      ? (typeof savedSessionFile === "string" ? savedSessionFile : undefined)
-      : (typeof savedSessionFile === "string"
-        ? await resolvedManagedSessionFile(managedRuntime!.privateStateRoot, managedSessionDir, savedSessionFile)
-        : undefined);
-    const restorableSessionFile = parsedSavedPresentationVersionId !== undefined
-      ? confinedSavedSessionFile
-      : undefined;
-    if (typeof savedSessionFile === "string" && restorableSessionFile === undefined) throw new Error("Legacy native history cannot be safely restored; its saved state was preserved.");
     const createSessionManager = () => managedSessionDir === undefined
       ? primeAgent.SessionManager.create(workspaceRoot)
       : primeAgent.SessionManager.create(workspaceRoot, managedSessionDir);
-    const initialSessionManager = restorableSessionFile === undefined
-      ? createSessionManager()
-      : primeAgent.SessionManager.open(restorableSessionFile);
-    // A restored session learns its instructions from its first root turn, which reloads it.
-    const initialSession = await createSession(initialSessionManager, "");
-    initialSession.conversed = restorableSessionFile !== undefined;
-    const pendingRootReset = typeof savedSessionFile === "string" && restorableSessionFile === undefined
-      ? "session_unavailable"
-      : parseNativeSessionResetReason(context.savedState?.primeRootResetReason);
     return new PrimeAgentHarness(
       context,
       primeAgent,
@@ -676,10 +559,6 @@ export class PrimeAgentHarness implements Harness {
       dependencies.createKernelBoundary,
       createSession,
       createSessionManager,
-      restorableSessionFile,
-      restorableSessionFile === undefined ? undefined : parsedSavedPresentationVersionId,
-      pendingRootReset,
-      initialSession,
     );
   }
 
@@ -689,20 +568,13 @@ export class PrimeAgentHarness implements Harness {
     const abort = () => controller.abort(signal?.reason ?? new Error("Prime Agent completion was cancelled"));
     signal?.addEventListener("abort", abort, { once: true });
     const forceStop = new PrimeTurnForceStop(context.forceSignal);
-    // A fresh root run gets its own session, as an invoked child does, and leaves the thread's
-    // persistent root session alone.
-    if (context.origin.kind === "root" && context.nativeSession !== "fresh") {
-      const execution = forceStop.race(this.executeRoot(context, controller.signal, forceStop))
-        .finally(() => signal?.removeEventListener("abort", abort));
-      return nativeExecutionHandle(execution, (reason) => controller.abort(new Error(reason)));
-    }
     let resolveAttached!: (identity: JsonObject) => void;
     let rejectAttached!: (error: unknown) => void;
     const attached = new Promise<JsonObject>((resolve, reject) => {
       resolveAttached = resolve;
       rejectAttached = reject;
     });
-    const execution = forceStop.race(this.executeInvoked(context, resolveAttached, controller.signal, forceStop))
+    const execution = forceStop.race(this.executeInOwnSession(context, resolveAttached, controller.signal, forceStop))
       .finally(() => signal?.removeEventListener("abort", abort));
     void execution.catch(rejectAttached);
     return nativeExecutionHandle(
@@ -712,102 +584,51 @@ export class PrimeAgentHarness implements Harness {
     );
   }
 
-  private async executeRoot(context: HarnessRunContext, signal: AbortSignal, forceStop: PrimeTurnForceStop): Promise<void> {
-    const turn: PrimeRootTurn = { forceSignal: context.forceSignal, session: undefined };
-    this.activeRootTurns.add(turn);
-    try {
-      await this.executeRootTurn(context, signal, forceStop, turn);
-    } finally {
-      this.activeRootTurns.delete(turn);
-    }
-  }
-
-  private async executeRootTurn(
-    context: HarnessRunContext,
-    signal: AbortSignal,
-    forceStop: PrimeTurnForceStop,
-    turn: PrimeRootTurn,
-  ): Promise<void> {
-    // Until this turn binds a session, a force-stop abandons its acquisition, which may hang in
-    // reload(), disposeAsync() or session creation. A turn already force-stopped starts none.
-    const generation = this.rootSessionGeneration;
-    forceStop.bind(() => this.abandonRootSessionAcquisition(generation), false);
-    const previous = this.pendingRootSessionAcquisition;
-    const candidate = previous === undefined
-      ? this.sessionFor(context)
-      : previous.then(() => this.sessionFor(context));
-    if (candidate instanceof Promise) {
-      const acquired = candidate.then(() => undefined, () => undefined);
-      this.pendingRootSessionAcquisition = acquired;
-      void acquired.then(() => {
-        if (this.pendingRootSessionAcquisition === acquired) this.pendingRootSessionAcquisition = undefined;
-      });
-    }
-    const session = candidate instanceof Promise ? await candidate : candidate;
-    const handle = this.sessionHandle?.session === session ? this.sessionHandle : undefined;
-    turn.session = session;
-    if (handle !== undefined) {
-      // A new session that replaces a previous root conversation says so before it runs.
-      if (!handle.conversed && this.pendingRootReset !== undefined) {
-        reportNativeSessionReset(context, "Prime Agent", this.context.threadId, this.pendingRootReset);
-      }
-      this.pendingRootReset = undefined;
-      handle.conversed = true;
-    }
-    forceStop.bind(() => {
-      if (handle !== undefined) this.forceStopRootSession(handle);
-      else void session.abort().catch(() => undefined);
-    }, false);
-    if (signal.aborted) {
-      await session.abort();
-      signal.throwIfAborted();
-    }
-    await this.executeOn(session, context, signal);
-    this.rootHistoryAvailable = true;
-  }
-
-  private async executeInvoked(
+  /**
+   * Runs one root or invoked completion in a fresh session of its own, built with its own
+   * interaction's presentation instructions, and disposes that session when the run settles.
+   */
+  private async executeInOwnSession(
     context: HarnessRunContext,
     attach: (identity: JsonObject) => void,
     signal: AbortSignal,
     forceStop: PrimeTurnForceStop,
   ): Promise<void> {
     signal.throwIfAborted();
-    if (this.forceShutdownStarted) throw new Error("Prime Agent harness is shutting down");
-    // A child session gets its own interaction's instructions, never the root session's.
+    this.throwIfShuttingDown();
     const instructions = personalPresentationNativeInstructions(context);
-    const pending = this.createSession(this.createSessionManager(), instructions).then(({ session }) => {
+    const pending = this.createSession(this.createSessionManager(), instructions).then((session) => {
       const lifecycle = new PrimeAgentSessionLifecycle(session);
-      this.invokedSessions.add(lifecycle);
+      this.sessions.add(lifecycle);
       if (this.forceShutdownStarted) lifecycle.forceShutdown();
       return lifecycle;
     });
-    this.pendingInvokedSessions.add(pending);
+    this.pendingSessions.add(pending);
     let lifecycle: PrimeAgentSessionLifecycle;
     try {
       lifecycle = await pending;
-      attach(primeSessionAttachment(lifecycle.session));
     } finally {
-      this.pendingInvokedSessions.delete(pending);
+      this.pendingSessions.delete(pending);
     }
     let executionOutcome: OperationOutcome<void> | undefined;
     let disposalOutcome: OperationOutcome<void> | undefined;
     try {
       executionOutcome = this.forceShutdownStarted
         ? { ok: false, error: new Error("Prime Agent harness is shutting down") }
-        : await operationOutcome(() => {
-          // A force-stop ends this child's own session only: never the root or a sibling.
-          forceStop.bind(() => lifecycle.forceShutdown(), true);
+        : await operationOutcome(async () => {
+          attach(primeSessionAttachment(lifecycle.session));
+          // A force-stop ends this run's own session only: never another run's.
+          forceStop.bind(() => lifecycle.forceShutdown());
           return this.executeOn(lifecycle.session, context, signal);
         });
     } finally {
       disposalOutcome = await operationOutcome(() => lifecycle.dispose());
-      this.invokedSessions.delete(lifecycle);
+      this.sessions.delete(lifecycle);
     }
     const failures = [executionOutcome, disposalOutcome]
       .flatMap((outcome) => outcome !== undefined && !outcome.ok ? [outcome.error] : []);
     if (failures.length === 1) throw failures[0];
-    if (failures.length > 1) throw new AggregateError(failures, "Prime Agent invoked execution or disposal failed");
+    if (failures.length > 1) throw new AggregateError(failures, "Prime Agent execution or session disposal failed");
   }
 
   private async executeOn(session: PrimeAgentSession, context: HarnessRunContext, signal?: AbortSignal): Promise<void> {
@@ -886,34 +707,21 @@ export class PrimeAgentHarness implements Harness {
     };
   }
 
+  /** No run leaves anything to resume, so there is no harness state to save. */
   state(): HarnessSessionState {
-    const sessionFile = this.sessionHandle?.session.sessionFile;
-    const reset = this.pendingRootReset === undefined ? {} : { primeRootResetReason: this.pendingRootReset };
-    return sessionFile === undefined || this.sessionPersonalPresentationVersionId === undefined
-      ? reset
-      : {
-          primeAgentSessionFile: sessionFile,
-          primeAgentSessionPersonalPresentationVersionId: this.sessionPersonalPresentationVersionId,
-          ...reset,
-        };
+    return {};
   }
 
+  /** Waits for every run's session to be created, then disposes each one gracefully. */
   dispose(): Promise<void> {
     if (this.gracefulDisposePromise !== undefined) return this.gracefulDisposePromise;
     this.gracefulDisposePromise = Promise.resolve()
       .then(async () => {
-        await Promise.allSettled([...this.pendingInvokedSessions]);
-        const childOutcomes = await Promise.allSettled(
-          [...this.invokedSessions].map((lifecycle) => lifecycle.dispose()),
+        await Promise.allSettled([...this.pendingSessions]);
+        const outcomes = await Promise.allSettled(
+          [...this.sessions].map((lifecycle) => lifecycle.dispose()),
         );
-        const childFailures = childOutcomes.flatMap((outcome) => outcome.status === "rejected" ? [outcome.reason] : []);
-        const rootOutcome = await operationOutcome(async () => {
-          if (this.sessionHandle !== undefined) await this.disposeSession(this.sessionHandle);
-        });
-        const failures = [
-          ...childFailures,
-          ...(rootOutcome.ok ? [] : [rootOutcome.error]),
-        ];
+        const failures = outcomes.flatMap((outcome) => outcome.status === "rejected" ? [outcome.reason] : []);
         if (failures.length === 1) throw failures[0];
         if (failures.length > 1) throw new AggregateError(failures, "Prime Agent session disposal failed");
         this.gracefullyDisposed = true;
@@ -921,176 +729,14 @@ export class PrimeAgentHarness implements Harness {
     return this.gracefulDisposePromise;
   }
 
+  /** Force-disposes every live session, including ones still being created. */
   forceShutdown(): void {
     if (this.forceShutdownStarted || this.gracefullyDisposed) return;
     this.forceShutdownStarted = true;
-    for (const lifecycle of this.invokedSessions) lifecycle.forceShutdown();
-    for (const pending of this.pendingInvokedSessions) {
+    for (const lifecycle of this.sessions) lifecycle.forceShutdown();
+    for (const pending of this.pendingSessions) {
       void pending.then((lifecycle) => lifecycle.forceShutdown(), () => undefined);
     }
-    const handle = this.sessionHandle;
-    if (handle !== undefined && [...this.activeRootTurns].some((turn) => (
-      turn.session === handle.session && turn.forceSignal?.aborted !== true
-    ))) {
-      // A root turn's conversation is killed mid-run, as by a per-turn force-stop: the host
-      // records that the next root turn, after a restart, starts a fresh session.
-      this.sessionHandle = undefined;
-      this.sessionPersonalPresentationVersionId = undefined;
-      this.resumableSessionFile = undefined;
-      this.pendingRootReset = "force_stopped";
-    }
-    if (handle === undefined) return;
-    this.installNativeDisposeGuard(handle);
-    try {
-      void handle.session.abort().catch(() => undefined);
-    } catch {
-      // Force disposal must continue even if a nonconforming provider throws
-      // synchronously instead of returning a rejected abort promise.
-    }
-    this.disposeNativeOnce(handle);
-  }
-
-  /**
-   * Force-stops the root session a cancelled root turn is stuck in. Invoked children run in
-   * their own sessions and keep running. The stopped session may still write its session
-   * file, so the next root turn starts a fresh native session instead of resuming it.
-   */
-  private forceStopRootSession(handle: PrimeAgentSessionHandle): void {
-    if (this.sessionHandle === handle) {
-      this.sessionHandle = undefined;
-      this.sessionPersonalPresentationVersionId = undefined;
-      this.resumableSessionFile = undefined;
-      if (handle.conversed) this.pendingRootReset = "force_stopped";
-    }
-    this.installNativeDisposeGuard(handle);
-    try {
-      void handle.session.abort().catch(() => undefined);
-    } catch {
-      // Force disposal continues if a nonconforming provider throws synchronously.
-    }
-    this.disposeNativeOnce(handle);
-  }
-
-  /**
-   * Abandons a root session acquisition a force-stopped turn left behind. Successors no longer
-   * wait for it. The root session it was working on may be half-reloaded or half-disposed, so
-   * it is force-disposed and the next root turn starts a fresh native session.
-   */
-  private abandonRootSessionAcquisition(generation: number): void {
-    if (this.rootSessionGeneration !== generation) return;
-    this.rootSessionGeneration += 1;
-    this.pendingRootSessionAcquisition = undefined;
-    const handle = this.sessionHandle;
-    if (handle !== undefined) this.forceStopRootSession(handle);
-    if (this.resumableSessionFile !== undefined) this.pendingRootReset = "force_stopped";
-    this.sessionPersonalPresentationVersionId = undefined;
-    this.resumableSessionFile = undefined;
-  }
-
-  private throwIfRootAcquisitionAbandoned(generation: number): void {
-    if (this.rootSessionGeneration !== generation) throw new Error("Prime Agent root session acquisition was abandoned");
-  }
-
-  private sessionFor(context: HarnessRunContext): PrimeAgentSession | Promise<PrimeAgentSession> {
-    this.throwIfShuttingDown();
-    const versionId = context.personalPresentation?.attachment.versionInteractionNodeId ?? null;
-    if (context.requireNativeContinuity && (!this.rootHistoryAvailable || (this.sessionPersonalPresentationVersionId !== undefined && this.sessionPersonalPresentationVersionId !== versionId))) {
-      throw new Error("This conversation's native history is unavailable or incompatible. Its saved history was preserved; a fresh session was not started.");
-    }
-    const instructions = personalPresentationNativeInstructions(context);
-    if (this.sessionHandle !== undefined
-      && this.sessionPersonalPresentationVersionId === versionId) {
-      if (instructions === this.sessionHandle.instructions.current) return this.sessionHandle.session;
-      return this.reloadPresentationInstructions(this.sessionHandle, versionId, instructions);
-    }
-    if (this.sessionHandle !== undefined
-      && this.sessionPersonalPresentationVersionId === undefined) {
-      if (instructions === this.sessionHandle.instructions.current) {
-        this.sessionPersonalPresentationVersionId = versionId;
-        return this.sessionHandle.session;
-      }
-      return this.reloadPresentationInstructions(this.sessionHandle, versionId, instructions);
-    }
-    if (context.requireNativeContinuity && this.resumableSessionFile === undefined) throw new Error("This conversation has no resumable native history. Its saved history was preserved.");
-    return this.rotateSession(context, versionId);
-  }
-
-  private reloadPresentationInstructions(
-    handle: PrimeAgentSessionHandle,
-    versionId: number | null,
-    instructions: string,
-  ): Promise<PrimeAgentSession> {
-    const { session } = handle;
-    const reload = session.reload;
-    if (reload === undefined || (!handle.instructions.scoped && instructions !== "")) {
-      throw new Error("Installed Prime Agent package cannot refresh interaction-scoped presentation instructions");
-    }
-    const generation = this.rootSessionGeneration;
-    const previousInstructions = handle.instructions.current;
-    handle.instructions.current = instructions;
-    return reload.call(session).then(() => {
-      this.throwIfRootAcquisitionAbandoned(generation);
-      this.sessionPersonalPresentationVersionId = versionId;
-      return session;
-    }, (error: unknown) => {
-      this.throwIfRootAcquisitionAbandoned(generation);
-      handle.instructions.current = previousInstructions;
-      throw error;
-    });
-  }
-
-  private async rotateSession(
-    context: HarnessRunContext,
-    versionId: number | null,
-  ): Promise<PrimeAgentSession> {
-    this.throwIfShuttingDown();
-    const generation = this.rootSessionGeneration;
-    const previousHandle = this.sessionHandle;
-    if (previousHandle !== undefined) await this.disposeSession(previousHandle);
-    this.throwIfShuttingDown();
-    this.throwIfRootAcquisitionAbandoned(generation);
-    if (this.sessionHandle === previousHandle) this.sessionHandle = undefined;
-    const resumeSavedSession = this.resumableSessionFile !== undefined
-      && this.sessionPersonalPresentationVersionId === versionId;
-    // Rotating away from a root conversation cannot continue it; the new session reports why.
-    const reset: NativeSessionResetReason | undefined = resumeSavedSession
-      ? undefined
-      : this.pendingRootReset
-        ?? (previousHandle?.conversed === true || this.resumableSessionFile !== undefined ? "presentation_changed" : undefined);
-    const sessionManager = resumeSavedSession
-      ? this.primeAgent.SessionManager.open(this.resumableSessionFile!)
-      : this.createSessionManager();
-    const replacement = await this.createSession(sessionManager, personalPresentationNativeInstructions(context));
-    const { session } = replacement;
-    if (this.rootSessionGeneration !== generation) {
-      // A successor already runs on its own fresh session; never install or reuse this one.
-      this.installNativeDisposeGuard(replacement);
-      this.disposeNativeOnce(replacement);
-      throw new Error("Prime Agent root session acquisition was abandoned");
-    }
-    if (this.isShuttingDown()) {
-      await this.disposeSession(replacement);
-      throw new Error("Prime Agent harness is shutting down");
-    }
-    this.sessionHandle = replacement;
-    this.sessionPersonalPresentationVersionId = versionId;
-    replacement.conversed = resumeSavedSession;
-    this.pendingRootReset = reset;
-    return session;
-  }
-
-  private async disposeSession(handle: PrimeAgentSessionHandle): Promise<void> {
-    if (handle.disposePromise !== undefined) return handle.disposePromise;
-    handle.disposePromise = Promise.resolve().then(async () => {
-      if (handle.disposeCompleted) return;
-      this.installNativeDisposeGuard(handle);
-      if (handle.session.disposeAsync !== undefined) await handle.session.disposeAsync();
-      else this.disposeNativeOnce(handle);
-      if (!handle.disposeCompleted) handle.disposeCompleted = true;
-    }).catch((error: unknown) => {
-      if (!handle.disposeCompleted) throw error;
-    });
-    return handle.disposePromise;
   }
 
   private isShuttingDown(): boolean {
@@ -1099,23 +745,6 @@ export class PrimeAgentHarness implements Harness {
 
   private throwIfShuttingDown(): void {
     if (this.isShuttingDown()) throw new Error("Prime Agent harness is shutting down");
-  }
-
-  private installNativeDisposeGuard(handle: PrimeAgentSessionHandle): void {
-    if (handle.guardInstalled) return;
-    handle.guardInstalled = true;
-    handle.session.dispose = () => this.disposeNativeOnce(handle);
-  }
-
-  private disposeNativeOnce(handle: PrimeAgentSessionHandle): void {
-    if (handle.disposeInProgress || handle.disposeCompleted) return;
-    handle.disposeInProgress = true;
-    try {
-      handle.nativeDispose();
-      handle.disposeCompleted = true;
-    } finally {
-      handle.disposeInProgress = false;
-    }
   }
 
   private prompt(context: HarnessRunContext, includePersonalPresentation = true): string {
@@ -1238,48 +867,35 @@ The graph service enforces exact provenance, target visibility, layer size, expa
   }
 }
 
-function primeSessionHandle(session: PrimeAgentSession, instructions: PrimeSessionInstructions): PrimeAgentSessionHandle {
-  return {
-    session,
-    instructions,
-    conversed: false,
-    nativeDispose: session.dispose.bind(session),
-    disposeInProgress: false,
-    disposeCompleted: false,
-    guardInstalled: false,
-  };
-}
-
 /**
  * Gives one session a view of the shared services whose resource loader appends that
  * session's own presentation instructions. Everything else reads and writes the shared loader.
  */
 function sessionScopedServices(
   services: Record<string, unknown>,
-  initialInstructions: string,
-): { readonly services: Record<string, unknown>; readonly instructions: PrimeSessionInstructions } {
+  instructions: string,
+): Record<string, unknown> {
   const loader = services.resourceLoader;
   if (typeof loader !== "object" || loader === null
     || typeof (loader as { getAppendSystemPrompt?: unknown }).getAppendSystemPrompt !== "function") {
-    if (initialInstructions !== "") {
+    if (instructions !== "") {
       throw new Error("Installed Prime Agent package cannot scope presentation instructions to a session");
     }
-    return { services, instructions: { current: "", scoped: false } };
+    return services;
   }
-  const instructions: PrimeSessionInstructions = { current: initialInstructions, scoped: true };
   const resourceLoader = new Proxy(loader, {
     get(target, property) {
       if (property === "getAppendSystemPrompt") {
         return () => {
           const base = (target as { getAppendSystemPrompt(): string[] }).getAppendSystemPrompt();
-          return instructions.current === "" ? [...base] : [...base, instructions.current];
+          return instructions === "" ? [...base] : [...base, instructions];
         };
       }
       const value: unknown = Reflect.get(target, property, target);
       return typeof value === "function" ? value.bind(target) : value;
     },
   });
-  return { services: { ...services, resourceLoader }, instructions };
+  return { ...services, resourceLoader };
 }
 
 function primeSessionAttachment(session: PrimeAgentSession): JsonObject {
@@ -2067,8 +1683,7 @@ async function loadPrimeAgentModule(): Promise<PrimeAgentModule> {
       || typeof loaded.createHostRequestHandler !== "function"
       || typeof loaded.createAgentSessionServices !== "function"
       || typeof loaded.createAgentSessionFromServices !== "function"
-      || typeof loaded.SessionManager?.create !== "function"
-      || typeof loaded.SessionManager?.open !== "function") {
+      || typeof loaded.SessionManager?.create !== "function") {
       throw new Error("Installed Prime Agent package does not support version-1 run-scoped model authority");
     }
     return loaded as PrimeAgentModule;

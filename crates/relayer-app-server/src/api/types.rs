@@ -176,6 +176,17 @@ pub(crate) struct ThreadResponse {
     activity: Option<String>,
 }
 
+impl ThreadResponse {
+    /// A child provider still running keeps the thread from being archived, and so also keeps
+    /// the sidebar's activity refresh going for it. Stored state cannot see that provider.
+    pub(super) fn mark_running_child_providers(
+        &mut self,
+        running: &crate::completion_broker::RunningChildProviders,
+    ) {
+        self.archive_blocked |= running.in_thread(self.id);
+    }
+}
+
 impl From<Thread> for ThreadResponse {
     fn from(thread: Thread) -> Self {
         Self {
@@ -212,6 +223,10 @@ pub(crate) struct InteractionResponse {
     created_at: String,
     graph_node_id: Option<i64>,
     completion_status: String,
+    /// Why a `queued` run waits (#720): `"node"` behind a run on its node, or `"capacity"`
+    /// for a free slot under the app's limit on human-started runs. Absent otherwise.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    queue_reason: Option<&'static str>,
     stop_requested: bool,
     stop_error: Option<String>,
     harness_configuration_name: Option<String>,
@@ -238,6 +253,13 @@ impl From<Interaction> for InteractionResponse {
             text: interaction.text,
             created_at: interaction.created_at,
             graph_node_id: interaction.graph_node_id,
+            queue_reason: (interaction.completion_status == "queued").then_some(
+                if interaction.waiting_for_capacity {
+                    "capacity"
+                } else {
+                    "node"
+                },
+            ),
             completion_status: interaction.completion_status,
             stop_requested: interaction.stop_requested,
             stop_error: interaction.stop_error,
@@ -443,8 +465,11 @@ pub(crate) struct ActionInvocationResponse {
     pub(super) native_invocation: Option<relayer_graph_core::InvocationGraphSnapshot>,
     pub(super) result_completion_status: String,
     pub(super) created_at: String,
-    /// An agent's child: it never holds the thread's one active human turn.
+    /// An agent's child: only its parent agent may stop it, and it holds no capacity slot.
     pub(super) agent_invoked: bool,
+    /// An agent's child whose provider run has not ended, so it may still ask for approval.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub(super) provider_running: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(super) execution: Option<CompletionExecutionEvidenceResponse>,
 }
@@ -467,6 +492,7 @@ impl From<ActionInvocation> for ActionInvocationResponse {
             result_completion_status: invocation.result_completion_status,
             created_at: invocation.created_at,
             agent_invoked: invocation.agent_invoked,
+            provider_running: false,
             execution: None,
         }
     }
@@ -651,6 +677,18 @@ impl ProductStateResponse {
     }
 }
 
+impl ProductStateResponse {
+    pub(super) fn with_running_child_providers(
+        mut self,
+        running: &crate::completion_broker::RunningChildProviders,
+    ) -> Self {
+        for view in &mut self.threads {
+            view.thread.mark_running_child_providers(running);
+        }
+        self
+    }
+}
+
 impl From<ProductState> for ProductStateResponse {
     fn from(state: ProductState) -> Self {
         Self {
@@ -683,6 +721,16 @@ pub(crate) struct ThreadDetailResponse {
     imported_invocation_history: Vec<ImportedInvocationHistoryResponse>,
     approvals: Vec<ApprovalReceipt>,
     invocation_inventory_available: bool,
+}
+
+impl ThreadDetailResponse {
+    pub(super) fn with_running_child_providers(
+        mut self,
+        running: &crate::completion_broker::RunningChildProviders,
+    ) -> Self {
+        self.thread.mark_running_child_providers(running);
+        self
+    }
 }
 
 impl From<ThreadDetail> for ThreadDetailResponse {
@@ -752,6 +800,7 @@ mod tests {
         let interaction = Interaction {
             stop_requested: false,
             stop_error: None,
+            waiting_for_capacity: false,
             id: InteractionId::from_database(9),
             thread_id: ThreadId::from_database(4),
             sequence: 2,

@@ -111,17 +111,6 @@ function secretAccess(overrides = {}): HarnessExecutionAccess {
   } as HarnessExecutionAccess;
 }
 
-/** A trace sink that records the visible native-session reset notices a turn emits. */
-function resetRecorder(): { readonly trace: HarnessRunContext["trace"]; resets(): string[] } {
-  const events: HarnessTraceEventInput[] = [];
-  return {
-    trace: { ...createNoopHarnessTraceSink(), emit: (event) => { events.push(event); } },
-    resets: () => events
-      .filter((event) => event.type === "warning" && typeof event.data.nativeSessionReset === "string")
-      .map((event) => event.data.nativeSessionReset as string),
-  };
-}
-
 function runContext(access: HarnessRunContext["access"]): HarnessRunContext {
   if (!access) throw new Error("test access is required");
   const inputGraph = { id: 4, kind: "user-interaction", icon: "user", title: "Question", detail: "Explain", state: "accepted" as const };
@@ -294,12 +283,8 @@ describe("ClaudeBasicHarness", () => {
       expect(options.env.DISABLE_AUTOUPDATER).toBe("1");
       expect(options.env).not.toHaveProperty("OPENAI_API_KEY");
       expect(options.env.RELAYER_GRAPH_TOKEN).toBe("token");
-      expect(harness.state()).toEqual({
-        claudeSessionLocationIdentity: expect.any(String),
-        claudeSessionId: "session-1",
-        claudeSessionProviderDefinitionId: "anthropic-work",
-        claudeSessionPersonalPresentationVersionId: null,
-      });
+      expect(options).not.toHaveProperty("resume");
+      expect(harness.state()).toEqual({});
     } finally {
       vi.unstubAllEnvs();
     }
@@ -405,7 +390,7 @@ describe("ClaudeBasicHarness", () => {
     const factory = createClaudeBasicFactory({ query, browserSdk: browserSdk() });
     const harness = await factory(factoryContext("ask"));
     await expect(harness.complete(runContext(managedAccess()))).resolves.toBeUndefined();
-    expect(harness.state()).toMatchObject({ claudeSessionId: "session-1" });
+    expect(harness.state()).toEqual({});
     expect(call?.options).toMatchObject({
       permissionMode: "default",
       allowedTools: ["Bash"],
@@ -445,11 +430,7 @@ describe("ClaudeBasicHarness", () => {
     expect(tracedPrompt).not.toContain("Decision-useful center");
     expect(calls[0]?.options.allowedTools).toEqual(["Bash"]);
     expect(calls[1]?.prompt).not.toContain("Personal graph presentation preferences:");
-    expect(calls[1]?.options.resume).toBeUndefined();
-    expect(harness.state()).toMatchObject({
-      claudeSessionId: "session-1",
-      claudeSessionPersonalPresentationVersionId: 100,
-    });
+    expect(calls[1]?.options).not.toHaveProperty("resume");
   });
 
   it("redacts preference fragments echoed by Claude from message traces", async () => {
@@ -495,7 +476,7 @@ describe("ClaudeBasicHarness", () => {
     expect(events.find((event) => event.type === "message")?.data.text).toBe(text);
   });
 
-  it("uses definition-scoped runtime state and explicit bypass only for full access", async () => {
+  it("ignores legacy saved sessions, scopes runtime state, and bypasses only for full access", async () => {
     let call: Parameters<ClaudeSdkQuery>[0] | undefined;
     const harness = new ClaudeBasicHarness(factoryContext("bypassPermissions", {
       claudeSessionId: "prior",
@@ -511,8 +492,8 @@ describe("ClaudeBasicHarness", () => {
       RELAYER_GRAPH_TOKEN: "injected-graph-token",
     } })));
 
+    expect(call?.options).not.toHaveProperty("resume");
     expect(call?.options).toMatchObject({
-      resume: "prior",
       permissionMode: "bypassPermissions",
       allowDangerouslySkipPermissions: true,
       pathToClaudeCodeExecutable: "/managed/claude",
@@ -522,68 +503,6 @@ describe("ClaudeBasicHarness", () => {
     expect(call?.options.env.CLAUDE_CONFIG_DIR).toBe("/isolated");
     expect(call?.options.env).not.toHaveProperty("ANTHROPIC_API_KEY");
     expect(call?.options.env.RELAYER_GRAPH_TOKEN).toBe("token");
-  });
-
-  it.each(["missing", "changed-presentation"])("refuses legacy continuation before SDK query when history is %s", async (reason) => {
-    const saved = reason === "missing" ? {} : {
-      claudeSessionId: "prior", claudeSessionProviderDefinitionId: "claude-work",
-      claudeSessionPersonalPresentationVersionId: 17,
-    };
-    const capture = vi.fn();
-    const harness = new ClaudeBasicHarness(factoryContext("ask", saved), {
-      query: sdkQuery([], capture), browserSdk: browserSdk(),
-    });
-    const before = harness.state();
-    await expect(harness.complete({ ...runContext(managedAccess()), requireNativeContinuity: true }))
-      .rejects.toThrow("native history cannot be verified");
-    expect(capture).not.toHaveBeenCalled();
-    expect(harness.state()).toEqual(before);
-  });
-
-  it("preserves legacy Claude identity after changed storage refusal and mismatched native resume", async () => {
-    const calls: Parameters<ClaudeSdkQuery>[0][] = [];
-    const harness = new ClaudeBasicHarness(factoryContext("ask", {
-      claudeSessionId: "prior", claudeSessionProviderDefinitionId: "claude-work",
-      claudeSessionPersonalPresentationVersionId: null,
-    }), {
-      query: sequentialSdkQuery([
-        [{ type: "result", subtype: "success", result: "original", session_id: "prior" }],
-        [{ type: "result", subtype: "success", result: "foreign", session_id: "foreign" }],
-      ], input => calls.push(input)), browserSdk: browserSdk(),
-    });
-    const context = { ...runContext(managedAccess()), requireNativeContinuity: true };
-    await harness.complete(context);
-    const saved = harness.state();
-    expect(calls[0]?.options.resume).toBe("prior");
-    await expect(harness.complete({ ...runContext(managedAccess({ environment: { CLAUDE_CONFIG_DIR: "/foreign" } })), requireNativeContinuity: true }))
-      .rejects.toThrow("native session location changed");
-    expect(calls).toHaveLength(1);
-    expect(harness.state()).toEqual(saved);
-    await expect(harness.complete(context)).rejects.toThrow("Claude Agent SDK completion failed");
-    expect(calls).toHaveLength(2);
-    expect(calls[1]?.options.resume).toBe("prior");
-    expect(harness.state()).toEqual(saved);
-  });
-
-  it("rotates provider-scoped legacy state whose presentation version is unknown", async () => {
-    let call: Parameters<ClaudeSdkQuery>[0] | undefined;
-    const harness = new ClaudeBasicHarness(factoryContext("ask", {
-      claudeSessionId: "legacy-session",
-      claudeSessionProviderDefinitionId: "claude-work",
-    }), {
-      query: sdkQuery([{ type: "result", subtype: "success", result: "done", session_id: "legacy-session" }], (input) => { call = input; }),
-      browserSdk: browserSdk(),
-    });
-
-    await harness.complete(runContext(managedAccess()));
-
-    expect(call?.options.resume).toBeUndefined();
-    expect(harness.state()).toEqual({
-      claudeSessionLocationIdentity: expect.any(String),
-      claudeSessionId: "legacy-session",
-      claudeSessionProviderDefinitionId: "claude-work",
-      claudeSessionPersonalPresentationVersionId: null,
-    });
   });
 
   it("preserves one conventional Windows Path for Claude SDK Bash execution", async () => {
@@ -607,156 +526,76 @@ describe("ClaudeBasicHarness", () => {
     expect(Object.keys(call?.options.env ?? {}).filter((key) => key.toLowerCase() === "path")).toEqual(["Path"]);
   });
 
-  it("resumes a session only for repeated turns through the same provider definition", async () => {
+  it("starts every root run as a fresh query, ignoring legacy saved state, and points it at the accepted history", async () => {
     const calls: Parameters<ClaudeSdkQuery>[0][] = [];
-    const harness = new ClaudeBasicHarness(factoryContext("ask"), {
+    // Unverified state from a release that resumed root sessions still registers; it is ignored.
+    const harness = new ClaudeBasicHarness(factoryContext("ask", { claudeSessionId: "legacy", claudeRootResetReason: "force_stopped" }), {
       query: sequentialSdkQuery([
         [{ type: "result", subtype: "success", result: "first", session_id: "session-1" }],
-        [{ type: "result", subtype: "success", result: "second", session_id: "session-1" }],
+        [{ type: "result", subtype: "success", result: "second", session_id: "session-2" }],
       ], (input) => calls.push(input)),
       browserSdk: browserSdk(),
     });
+    expect(harness.state()).toEqual({});
     const access = secretAccess();
 
-    await harness.complete(runContext(access));
-    await harness.complete(runContext(access));
+    const first = harness.complete({ ...runContext(access), threadHistory: [] });
+    await first;
+    const second = harness.complete({ ...runContext(access), threadHistory: [{ interactionNodeId: 1, responseLayerId: 9 }],
+      contextMode: "graph-v1", graphHistory: { entries: [], nextBeforeNodeId: null } });
+    await second;
 
-    expect(calls[0]?.options.resume).toBeUndefined();
-    expect(calls[1]?.options.resume).toBe("session-1");
+    expect(calls.map(({ options }) => "resume" in options)).toEqual([false, false]);
+    await expect(first.attached).resolves.toMatchObject({ sessionId: "session-1" });
+    await expect(second.attached).resolves.toMatchObject({ sessionId: "session-2" });
+    // A follow-up such as "now change that" finds the earlier turn through the accepted graph alone.
+    expect(calls[0]?.prompt).toContain("This run starts a fresh session");
+    // Pointers only: the turn's message stays in the graph.
+    expect(calls[1]?.prompt).toContain(JSON.stringify([{ interactionNodeId: 1, responseLayerId: 9 }], null, 2));
+    expect(calls[1]?.prompt).toContain("await graph.getNode(interactionNodeId)");
+    expect(calls[1]?.prompt).toContain("await graph.getLayer(responseLayerId)");
+    expect(calls[1]?.prompt).toContain("getHistoricalInput");
+    expect(harness.state()).toEqual({});
   });
 
-  it("starts invoked completions in fresh sessions without replacing root continuity", async () => {
+  it("starts concurrent invoked completions in fresh sessions without thread history", async () => {
     const calls: Parameters<ClaudeSdkQuery>[0][] = [];
-    const harness = new ClaudeBasicHarness(factoryContext("acceptEdits", {
-      claudeSessionId: "root-session",
-      claudeSessionProviderDefinitionId: "claude-work",
-      claudeSessionPersonalPresentationVersionId: null,
-    }), {
+    const harness = new ClaudeBasicHarness(factoryContext("acceptEdits"), {
       query: sequentialSdkQuery([
         [{ type: "result", subtype: "success", result: "child a", session_id: "child-a" }],
         [{ type: "result", subtype: "success", result: "child b", session_id: "child-b" }],
-        [{ type: "result", subtype: "success", result: "root", session_id: "root-session" }],
-        [{ type: "result", subtype: "success", result: "graph 1", session_id: "graph-1" }],
-        [{ type: "result", subtype: "success", result: "graph 2", session_id: "graph-2" }],
       ], (input) => calls.push(input)),
       browserSdk: browserSdk(),
     });
-    const access = managedAccess();
-    const child = (actionId: number, childAccess: HarnessExecutionAccess = access): HarnessRunContext => ({
+    const child = (actionId: number, childAccess: HarnessExecutionAccess): HarnessRunContext => ({
       ...runContext(childAccess),
       origin: { kind: "invoke", sourceCompletionId: 1, actionId },
     });
 
     await Promise.all([
-      harness.complete(child(101)),
+      harness.complete(child(101, managedAccess())),
       harness.complete(child(102, secretAccess())),
     ]);
-    expect(calls.slice(0, 2).map(({ options }) => options.resume)).toEqual([undefined, undefined]);
-    expect(harness.state()).toEqual({
-      claudeSessionId: "root-session",
-      claudeSessionProviderDefinitionId: "claude-work",
-      claudeSessionPersonalPresentationVersionId: null,
-    });
-
-    await harness.complete(runContext(access));
-    expect(calls[2]?.options.resume).toBe("root-session");
-  });
-
-  it("starts a fresh root run in its own session and shows it the thread's history", async () => {
-    const calls: Parameters<ClaudeSdkQuery>[0][] = [];
-    const harness = new ClaudeBasicHarness(factoryContext("acceptEdits", {
-      claudeSessionId: "root-session",
-      claudeSessionProviderDefinitionId: "claude-work",
-      claudeSessionPersonalPresentationVersionId: null,
-    }), {
-      query: sequentialSdkQuery([
-        [{ type: "result", subtype: "success", result: "fresh", session_id: "fresh-session" }],
-        [{ type: "result", subtype: "success", result: "root", session_id: "root-session" }],
-      ], (input) => calls.push(input)),
-      browserSdk: browserSdk(),
-    });
-    const access = managedAccess();
-
-    await harness.complete({
-      ...runContext(access),
-      nativeSession: "fresh",
-      threadHistory: [{ interactionNodeId: 1, responseLayerId: 9 }],
-    });
-    expect(calls[0]?.options.resume).toBeUndefined();
-    expect(String(calls[0]?.prompt)).toContain('"interactionNodeId": 1');
-    expect(String(calls[0]?.prompt)).toContain("await graph.getNode(interactionNodeId)");
-    // Pointers only: the turn's message stays in the graph.
-    expect(String(calls[0]?.prompt)).toContain(JSON.stringify([{ interactionNodeId: 1, responseLayerId: 9 }], null, 2));
-    expect(harness.state()).toEqual({
-      claudeSessionId: "root-session",
-      claudeSessionProviderDefinitionId: "claude-work",
-      claudeSessionPersonalPresentationVersionId: null,
-    });
-
-    await harness.complete(runContext(access));
-    expect(calls[1]?.options.resume).toBe("root-session");
-    for (let i = 0; i < 2; i++) await harness.complete({
-      ...runContext(access), nativeSession: "fresh", contextMode: "graph-v1", rootRunKind: "message",
-      graphHistory: { entries: [], nextBeforeNodeId: null },
-    });
-    expect(calls.slice(2).map(({ options }) => options.resume)).toEqual([undefined, undefined]);
-    expect(String(calls[2]?.prompt)).toContain("getHistoricalInput");
-    expect(harness.state().claudeSessionId).toBe("root-session");
-  });
-
-  it("rejects an invoked completion that succeeds without a durable session identity", async () => {
-    const harness = new ClaudeBasicHarness(factoryContext("acceptEdits"), {
-      query: sdkQuery([
-        { type: "result", subtype: "success", result: "child without a session" },
-      ]),
-      browserSdk: browserSdk(),
-    });
-    const context: HarnessRunContext = {
-      ...runContext(managedAccess()),
-      origin: { kind: "invoke", sourceCompletionId: 1, actionId: 101 },
-    };
-
-    const execution = harness.complete(context);
-
-    await expect(execution).rejects.toThrow("Claude fresh or invoked completion did not expose a durable native session identity");
-    await expect(execution.attached).rejects.toThrow("Claude fresh or invoked completion did not expose a durable native session identity");
+    expect(calls.map(({ options }) => "resume" in options)).toEqual([false, false]);
+    expect(calls.map(({ prompt }) => prompt.includes("This run starts a fresh session"))).toEqual([false, false]);
+    expect(harness.state()).toEqual({});
   });
 
   it.each([
-    { name: "subscription to API", next: secretAccess({ providerId: "anthropic-personal" }) },
-    { name: "API to subscription", savedProviderDefinitionId: "anthropic-work", next: managedAccess({ providerId: "claude-work" }) },
-    { name: "one subscription definition to another", next: managedAccess({ providerId: "claude-personal" }) },
-  ])("does not resume when switching from a saved provider definition: $name", async ({ next, ...fixture }) => {
-    let call: Parameters<ClaudeSdkQuery>[0] | undefined;
-    const harness = new ClaudeBasicHarness(factoryContext("ask", {
-      claudeSessionId: "prior",
-      claudeSessionProviderDefinitionId: fixture.savedProviderDefinitionId ?? "claude-work",
-    }), {
+    { kind: "root", origin: { kind: "root" } },
+    { kind: "invoked", origin: { kind: "invoke", sourceCompletionId: 1, actionId: 101 } },
+  ] as const)("rejects a $kind completion that succeeds without a durable session identity", async ({ origin }) => {
+    const harness = new ClaudeBasicHarness(factoryContext("acceptEdits"), {
       query: sdkQuery([
-        { type: "system", subtype: "init", session_id: "replacement" },
-        { type: "result", subtype: "success", result: "done", session_id: "replacement" },
-      ], (input) => { call = input; }),
+        { type: "result", subtype: "success", result: "run without a session" },
+      ]),
       browserSdk: browserSdk(),
     });
 
-    const recorder = resetRecorder();
-    await harness.complete({ ...runContext(next), trace: recorder.trace });
+    const execution = harness.complete({ ...runContext(managedAccess()), origin });
 
-    expect(call?.options.resume).toBeUndefined();
-    // The previous native conversation cannot be continued here, and the turn says so.
-    expect(recorder.resets()).toEqual(["provider_changed"]);
-    expect(harness.state()).toEqual({
-      claudeSessionLocationIdentity: expect.any(String),
-      claudeSessionId: "replacement",
-      claudeSessionProviderDefinitionId: next.providerId,
-      claudeSessionPersonalPresentationVersionId: null,
-    });
-  });
-
-  it("preserves unverified legacy state by refusing registration before execution", () => {
-    expect(() => new ClaudeBasicHarness(factoryContext("ask", { claudeSessionId: "legacy" }), {
-      query: sdkQuery([]), browserSdk: browserSdk(),
-    })).toThrow("unverified ownership");
+    await expect(execution).rejects.toThrow("Claude completion did not expose a durable native session identity");
+    await expect(execution.attached).rejects.toThrow("Claude completion did not expose a durable native session identity");
   });
 
   it("requires an explicit managed executable and SDK module for every provider access kind", async () => {

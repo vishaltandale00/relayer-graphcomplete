@@ -18,47 +18,6 @@ mod tests {
     use std::borrow::Cow;
 
     #[tokio::test]
-    async fn schema_48_conversations_keep_native_continuation_after_upgrade_and_reopen() {
-        let directory = tempfile::tempdir().unwrap();
-        let path = directory.path().join("product.sqlite");
-        let pool = SqlitePoolOptions::new()
-            .max_connections(1)
-            .connect_with(
-                sqlx::sqlite::SqliteConnectOptions::new()
-                    .filename(&path)
-                    .create_if_missing(true),
-            )
-            .await
-            .unwrap();
-        Migrator {
-            migrations: Cow::Owned(
-                MIGRATOR
-                    .iter()
-                    .filter(|migration| migration.version < 49)
-                    .cloned()
-                    .collect(),
-            ),
-            ..Migrator::DEFAULT
-        }
-        .run(&pool)
-        .await
-        .unwrap();
-        sqlx::query("INSERT INTO threads(id,title,created_at,updated_at,harness_configuration_name,permission_profile_id) VALUES (1,'Legacy','1','1','codex-basic','auto')").execute(&pool).await.unwrap();
-        sqlx::query("INSERT INTO interactions(thread_id,sequence,text,created_at) VALUES (1,1,'Legacy request','1')").execute(&pool).await.unwrap();
-        pool.close().await;
-        for _ in 0..2 {
-            let store = SqliteProductStore::open(&path).await.unwrap();
-            assert!(
-                !store
-                    .graph_backed_continuation(crate::product::ThreadId::from_database(1))
-                    .await
-                    .unwrap()
-            );
-            store.pool.close().await;
-        }
-    }
-
-    #[tokio::test]
     async fn schema_47_attempts_remain_unpaired_after_upgrade_and_reopen() {
         let temporary = tempfile::tempdir().unwrap();
         let path = temporary.path().join("product.sqlite3");
@@ -161,13 +120,21 @@ mod tests {
         )
         .await
         .unwrap();
-        // Seed the historical schema with its own layout, before continuation_mode existed.
-        let thread_id = sqlx::query("INSERT INTO threads(title,created_at,updated_at,harness_configuration_name,permission_profile_id,personal_presentation_version_key,icon_selection_eligible) VALUES ('Existing','2','2','codex-basic','auto','personal-presentation-v4',1)").execute(&old.pool).await.unwrap().last_insert_rowid();
-        sqlx::query("INSERT INTO interactions(thread_id,sequence,text,created_at,permission_profile_id) VALUES (?1,1,'Existing question','2','auto')").bind(thread_id).execute(&old.pool).await.unwrap();
         let thread = old
-            .get_thread(crate::product::ThreadId::from_database(thread_id))
+            .insert_thread_with_initial_interaction_and_personal_presentation(
+                crate::storage::NewThreadRecord {
+                    icon_selection_eligible: true,
+                    title: "Existing",
+                    project_id: None,
+                    initial_message: "Existing question",
+                    harness_configuration_name: "codex-basic",
+                    permission_profile_id: "auto",
+                    model_selection: None,
+                    timestamp: "2",
+                },
+                Some("personal-presentation-v4"),
+            )
             .await
-            .unwrap()
             .unwrap();
         let before = old.personal_presentation_profile().await.unwrap();
         let pin = old
@@ -237,7 +204,7 @@ mod tests {
         .fetch_all(&store.pool)
         .await
         .unwrap();
-        assert_eq!(versions, [40, 41, 42, 43, 44, 45, 46, 47, 48, 49]);
+        assert_eq!(versions, [40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50]);
         assert!(
             store
                 .recover_interaction_accepted(

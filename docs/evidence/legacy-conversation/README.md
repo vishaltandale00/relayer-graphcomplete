@@ -1,5 +1,7 @@
 # Legacy conversation compatibility evidence
 
+> Superseded in part by [#719](https://github.com/vishaltandale00/relayer-graphcomplete/issues/719): no root run resumes a native session any more, so the native-continuity (`requireNativeContinuity`) regressions below were retired with that path. The original-provider route policy (AGT-011) still applies. This record describes the state it certified.
+
 User decision: PRD AGT-011/012, 2026-09-28. This is temporary original-provider containment until provider-neutral continuation (#584). It does not migrate provider homes or copy native state. The user accepted the desktop scenario and subsequently authorized merge. No release or paid inference is included.
 
 ## Changed seams and checkpoints

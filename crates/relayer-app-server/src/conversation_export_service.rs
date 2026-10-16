@@ -3002,7 +3002,8 @@ fn ensure_accepted(
 
 fn completion_status(value: &str) -> Result<ExportCompletionStatus, ConversationExportBuildError> {
     match value {
-        "not_started" => Ok(ExportCompletionStatus::NotStarted),
+        // A run queued behind another on its node (#718) has not started.
+        "not_started" | "queued" => Ok(ExportCompletionStatus::NotStarted),
         "running" => Ok(ExportCompletionStatus::Running),
         "submitted" => Ok(ExportCompletionStatus::Submitted),
         "waiting_for_approval" => Ok(ExportCompletionStatus::WaitingForApproval),
@@ -4516,6 +4517,7 @@ mod tests {
         let owner = Interaction {
             stop_requested: false,
             stop_error: None,
+            waiting_for_capacity: false,
             id: InteractionId::from_database(1),
             thread_id: ThreadId::from_database(1),
             sequence: 1,
@@ -4929,6 +4931,11 @@ mod tests {
         assert_eq!(
             completion_status("stopped").unwrap(),
             ExportCompletionStatus::Stopped
+        );
+        // A queued run exports as not started, so sharing a thread with one keeps working.
+        assert_eq!(
+            completion_status("queued").unwrap(),
+            ExportCompletionStatus::NotStarted
         );
     }
 
@@ -5372,6 +5379,7 @@ mod tests {
             completion_error: None,
             stop_requested: false,
             stop_error: None,
+            waiting_for_capacity: false,
             latest_attempt: None,
         };
         let invoke = |source, result| ActionInvocation {
@@ -5441,6 +5449,7 @@ mod tests {
             completion_error: None,
             stop_requested: false,
             stop_error: None,
+            waiting_for_capacity: false,
             latest_attempt: None,
         };
         let turn_sequences = [(interaction_id, 1)].into_iter().collect();
@@ -5624,6 +5633,7 @@ mod tests {
         let interaction = Interaction {
             stop_requested: false,
             stop_error: None,
+            waiting_for_capacity: false,
             id: InteractionId::from_database(7),
             thread_id: ThreadId::from_database(1),
             sequence: 2,
@@ -5748,6 +5758,7 @@ mod tests {
         let interaction = Interaction {
             stop_requested: false,
             stop_error: None,
+            waiting_for_capacity: false,
             id: InteractionId::from_database(7),
             thread_id: ThreadId::from_database(1),
             sequence: 2,
@@ -5815,6 +5826,7 @@ mod tests {
         let interaction = Interaction {
             stop_requested: false,
             stop_error: None,
+            waiting_for_capacity: false,
             id: InteractionId::from_database(7),
             thread_id: ThreadId::from_database(1),
             sequence: 1,
@@ -5963,6 +5975,7 @@ mod tests {
         let interaction = Interaction {
             stop_requested: false,
             stop_error: None,
+            waiting_for_capacity: false,
             id: InteractionId::from_database(8),
             thread_id: ThreadId::from_database(1),
             sequence: 2,
@@ -6211,6 +6224,7 @@ mod tests {
         let interaction = Interaction {
             stop_requested: false,
             stop_error: None,
+            waiting_for_capacity: false,
             id: result_id,
             thread_id: ThreadId::from_database(1),
             sequence: 2,

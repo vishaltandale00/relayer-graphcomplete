@@ -118,6 +118,11 @@ impl SqliteProductStore {
             .bind(failure.interaction_id.value())
             .execute(&mut *transaction)
             .await?;
+        super::fail_stale_returned_messages_beside(
+            &mut transaction,
+            failure.interaction_id.value(),
+        )
+        .await?;
         transaction.commit().await?;
         Ok(id)
     }
@@ -330,6 +335,11 @@ impl SqliteProductStore {
             .bind(receipt.interaction_id.value())
             .execute(&mut *transaction)
             .await?;
+        super::fail_stale_returned_messages_beside(
+            &mut transaction,
+            receipt.interaction_id.value(),
+        )
+        .await?;
         transaction.commit().await?;
         Ok(id)
     }
@@ -616,17 +626,6 @@ mod tests {
         InteractionId,
         ExecutionModelSelection,
     ) {
-        seeded_store_with_mode("native").await
-    }
-
-    async fn seeded_store_with_mode(
-        mode: &str,
-    ) -> (
-        tempfile::TempDir,
-        SqliteProductStore,
-        InteractionId,
-        ExecutionModelSelection,
-    ) {
         let directory = tempfile::Builder::new()
             .prefix("relayer-attempts-")
             .tempdir()
@@ -649,8 +648,7 @@ mod tests {
         sqlx::query("INSERT INTO model_family_members(family_id,position,provider_id,model_id) VALUES (?1,0,'codex','gpt-test')")
             .bind(family_id).execute(&store.pool).await.expect("member");
         let thread_id =
-            sqlx::query("INSERT INTO threads(title,created_at,updated_at,continuation_mode) VALUES ('Test','1','1',?1)")
-                .bind(mode)
+            sqlx::query("INSERT INTO threads(title,created_at,updated_at) VALUES ('Test','1','1')")
                 .execute(&store.pool)
                 .await
                 .expect("thread")
@@ -671,54 +669,62 @@ mod tests {
         )
     }
 
+    /// A first message removed or interrupted while it waited for capacity (#720) never ran: it
+    /// has a selected model but no attempt and no graph interaction. The thread stays open to
+    /// a new send, so "send it again" works.
     #[tokio::test]
-    async fn graph_conversation_success_receipts_never_require_native_continuity_after_reopen() {
-        let (_directory, store, root, route) = seeded_store_with_mode("graph-v1").await;
-        let attempt = store
-            .begin_interaction_attempt(receipt(root, &route), "10")
-            .await
-            .unwrap();
-        store
-            .finish_interaction_attempt(attempt, "accepted", None, "graph_write", "11")
-            .await
-            .unwrap();
-        sqlx::query("UPDATE interactions SET completion_status='accepted',harness_configuration_name='codex-basic' WHERE id=?1").bind(root.value()).execute(&store.pool).await.unwrap();
+    async fn a_first_message_that_never_started_leaves_the_conversation_open() {
+        let (_directory, store, root, _route) = seeded_store().await;
         let thread: i64 = sqlx::query_scalar("SELECT thread_id FROM interactions WHERE id=?1")
             .bind(root.value())
             .fetch_one(&store.pool)
             .await
             .unwrap();
+        // Input restoration may append to the marker.
+        let restored = format!(
+            "{} A newer committed value was preserved instead of restoring this attempt's earlier value.",
+            super::super::QUEUED_RUN_STOPPED
+        );
+        for (status, error) in [
+            ("stopped", super::super::QUEUED_RUN_STOPPED),
+            ("stopped", restored.as_str()),
+            ("failed", super::super::CAPACITY_WAIT_INTERRUPTED),
+        ] {
+            sqlx::query(
+                "UPDATE interactions SET completion_status=?1,completion_error=?3,graph_node_id=NULL WHERE id=?2",
+            )
+            .bind(status)
+            .bind(root.value())
+            .bind(error)
+            .execute(&store.pool)
+            .await
+            .unwrap();
+            assert_ne!(
+                store
+                    .conversation_compatibility(ThreadId::from_database(thread))
+                    .await
+                    .unwrap()
+                    .status,
+                "blocked",
+                "a {status} first message that never started blocked its thread"
+            );
+        }
+        // A failure with no such marker may have run before attempts were recorded, so it
+        // still keeps the route unverified.
+        sqlx::query(
+            "UPDATE interactions SET completion_status='failed',completion_error='Provider failed' WHERE id=?1",
+        )
+        .bind(root.value())
+        .execute(&store.pool)
+        .await
+        .unwrap();
         assert_eq!(
             store
                 .conversation_compatibility(ThreadId::from_database(thread))
                 .await
                 .unwrap()
                 .status,
-            "unrestricted"
-        );
-        // Recover the exact fixture path from SQLx rather than assume its filename.
-        let database_path: String =
-            sqlx::query_scalar("SELECT file FROM pragma_database_list WHERE name='main'")
-                .fetch_one(&store.pool)
-                .await
-                .unwrap();
-        store.pool.close().await;
-        let reopened = SqliteProductStore::open(std::path::Path::new(&database_path))
-            .await
-            .unwrap();
-        assert!(
-            reopened
-                .graph_backed_continuation(ThreadId::from_database(thread))
-                .await
-                .unwrap()
-        );
-        assert_eq!(
-            reopened
-                .conversation_compatibility(ThreadId::from_database(thread))
-                .await
-                .unwrap()
-                .status,
-            "unrestricted"
+            "blocked"
         );
     }
 
@@ -779,10 +785,6 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(owner.provider_id.as_deref(), Some("codex"));
-        assert_eq!(
-            owner.native_history_anchor.as_ref().unwrap()["interactionNodeId"],
-            17
-        );
         sqlx::query("INSERT INTO node_context_draft_resolutions(draft_id,thread_id,outcome,draft_revision,target_node_id,source_interaction_node_id,source_layer_id,target_node_json,text,resolved_at,composer_text) VALUES ('legacy-context',?1,'confirmed',1,7,17,5,'{}','Keep this attachment','13','Keep this attachment')").bind(thread_id).execute(&store.pool).await.unwrap();
         let contexts = [crate::product::InteractionContextIntent {
             target: crate::product::InteractionContextTarget {
@@ -812,7 +814,6 @@ mod tests {
                 ThreadId::from_database(thread_id),
                 input,
                 Some(&foreign),
-                true,
                 true,
             )
             .await
@@ -879,7 +880,6 @@ mod tests {
                 "Do not lose this draft",
                 Some(&foreign),
                 true,
-                true,
             )
             .await
             .unwrap_err();
@@ -900,7 +900,6 @@ mod tests {
                 ThreadId::from_database(thread_id),
                 "Compatible follow-up",
                 Some(&compatible),
-                true,
                 true,
             )
             .await
@@ -2167,6 +2166,211 @@ mod tests {
                 }
             }
         }
+    }
+
+    /// #719: messages run in parallel, so a message a model failure returns to unsent can have
+    /// later messages. Its draft is then stale and cannot be retried, so it settles as failed
+    /// instead of staying `not_started`, which would hold its thread out of the archive forever.
+    /// Both orders: the later message exists when the failure lands, or arrives after it.
+    #[tokio::test]
+    async fn a_returned_message_with_a_later_message_fails_instead_of_holding_its_thread() {
+        for later_first in [true, false] {
+            let (_database, store, interaction_id, route) = seeded_store().await;
+            let thread_id: i64 =
+                sqlx::query_scalar("SELECT thread_id FROM interactions WHERE id=?1")
+                    .bind(interaction_id.value())
+                    .fetch_one(&store.pool)
+                    .await
+                    .unwrap();
+            let selection = crate::product::InteractionModelSelection {
+                family_id: route.family_id,
+                provider_id: route.provider_id.clone(),
+                model_id: route.model_id.clone(),
+            };
+            let attempt = store
+                .begin_interaction_attempt(receipt(interaction_id, &route), "10")
+                .await
+                .unwrap();
+            let later = if later_first {
+                Some(
+                    store
+                        .insert_interaction(
+                            ThreadId::from_database(thread_id),
+                            "Later",
+                            Some(&selection),
+                            true,
+                        )
+                        .await
+                        .unwrap(),
+                )
+            } else {
+                None
+            };
+            store
+                .fail_interaction_completion_with_attempt(
+                    FailedInteractionCompletion {
+                        attempt_id: attempt,
+                        interaction_id,
+                        harness_configuration_name: "codex-basic",
+                        error: "provider timeout",
+                        outcome: "model_failed",
+                        failure_category: "provider_timeout",
+                        effect_boundary: "none",
+                        return_to_unsent: true,
+                        graph_node_id: None,
+                    },
+                    "11",
+                )
+                .await
+                .unwrap();
+            let status = |store: &SqliteProductStore| {
+                let pool = store.pool.clone();
+                async move {
+                    sqlx::query_as::<_, (String, Option<String>)>(
+                        "SELECT completion_status,completion_error FROM interactions WHERE id=?1",
+                    )
+                    .bind(interaction_id.value())
+                    .fetch_one(&pool)
+                    .await
+                    .unwrap()
+                }
+            };
+            let later = match later {
+                Some(later) => later,
+                None => {
+                    // Still the latest message: it stays unsent and retryable.
+                    assert_eq!(status(&store).await.0, "not_started");
+                    store
+                        .insert_interaction(
+                            ThreadId::from_database(thread_id),
+                            "Later",
+                            Some(&selection),
+                            true,
+                        )
+                        .await
+                        .unwrap()
+                }
+            };
+            assert_eq!(
+                status(&store).await,
+                (
+                    "failed".into(),
+                    Some(super::super::STALE_RETURNED_MESSAGE.into())
+                ),
+                "later_first={later_first}"
+            );
+            // The stale failure never blocks the conversation's route, so the later message can
+            // still be retried or followed up.
+            let route = store
+                .conversation_compatibility(ThreadId::from_database(thread_id))
+                .await
+                .unwrap();
+            assert_ne!(route.status, "blocked", "later_first={later_first}");
+            // Once the later message ends, nothing holds the thread out of the archive.
+            mark_later_accepted(&store, later.id).await;
+            let busy: bool =
+                sqlx::query_scalar("SELECT busy FROM thread_archive_activity WHERE id=?1")
+                    .bind(thread_id)
+                    .fetch_one(&store.pool)
+                    .await
+                    .unwrap();
+            assert!(!busy, "later_first={later_first}");
+        }
+    }
+
+    /// The same holds for a message returned to unsent before any attempt began, which records
+    /// no attempt, while a message that was never prepared is left alone.
+    #[tokio::test]
+    async fn a_message_returned_before_any_attempt_also_fails_once_stale() {
+        // Unbound, and bound: execution prepares and binds the graph interaction before it
+        // returns a no-attempt run to unsent, and that binding is kept.
+        for bound in [false, true] {
+            let (_database, store, interaction_id, route) = seeded_store().await;
+            let thread_id: i64 =
+                sqlx::query_scalar("SELECT thread_id FROM interactions WHERE id=?1")
+                    .bind(interaction_id.value())
+                    .fetch_one(&store.pool)
+                    .await
+                    .unwrap();
+            sqlx::query("UPDATE interactions SET completion_status='running',graph_node_id=CASE WHEN ?2 THEN 901 ELSE graph_node_id END WHERE id=?1")
+                .bind(interaction_id.value())
+                .bind(bound)
+                .execute(&store.pool)
+                .await
+                .unwrap();
+            store
+                .return_interaction_to_unsent(interaction_id, "codex-basic")
+                .await
+                .unwrap();
+            let selection = crate::product::InteractionModelSelection {
+                family_id: route.family_id,
+                provider_id: route.provider_id.clone(),
+                model_id: route.model_id.clone(),
+            };
+            let later = store
+                .insert_interaction(
+                    ThreadId::from_database(thread_id),
+                    "Later",
+                    Some(&selection),
+                    true,
+                )
+                .await
+                .unwrap();
+            let status = |id: i64| {
+                let pool = store.pool.clone();
+                async move {
+                    sqlx::query_scalar::<_, String>(
+                        "SELECT completion_status FROM interactions WHERE id=?1",
+                    )
+                    .bind(id)
+                    .fetch_one(&pool)
+                    .await
+                    .unwrap()
+                }
+            };
+            assert_eq!(
+                status(interaction_id.value()).await,
+                "failed",
+                "bound={bound}"
+            );
+            // The later message was never prepared: a newer message leaves it alone, and the
+            // stale marker never blocks the conversation's route.
+            store
+                .insert_interaction(
+                    ThreadId::from_database(thread_id),
+                    "Newest",
+                    Some(&selection),
+                    true,
+                )
+                .await
+                .unwrap();
+            assert_eq!(
+                status(later.id.value()).await,
+                "not_started",
+                "bound={bound}"
+            );
+            // Once the later messages end, nothing holds the thread out of the archive.
+            sqlx::query("UPDATE interactions SET completion_status='accepted' WHERE thread_id=?1 AND completion_status='not_started'")
+                .bind(thread_id)
+                .execute(&store.pool)
+                .await
+                .unwrap();
+            let busy: bool =
+                sqlx::query_scalar("SELECT busy FROM thread_archive_activity WHERE id=?1")
+                    .bind(thread_id)
+                    .fetch_one(&store.pool)
+                    .await
+                    .unwrap();
+            assert!(!busy, "bound={bound}");
+        }
+    }
+
+    async fn mark_later_accepted(store: &SqliteProductStore, id: crate::product::InteractionId) {
+        sqlx::query("UPDATE interactions SET completion_status='accepted' WHERE id=?1")
+            .bind(id.value())
+            .execute(&store.pool)
+            .await
+            .unwrap();
     }
 
     #[tokio::test]

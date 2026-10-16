@@ -119,7 +119,7 @@ describe("managed runtime provider Connect boundary", () => {
         submitted = options;
         const authFile = JSON.parse(await readFile(join(codexHome, "auth.json"), "utf8"));
         expect(authFile).toEqual({ auth_mode: "apikey", OPENAI_API_KEY: "secret" });
-        options.onThreadId("thread-1");
+        options.onThreadId?.("thread-1");
         return { threadId: "thread-1", turnId: "turn-1", status: "completed" };
       },
       resolveCodexRuntime: async () => ({
