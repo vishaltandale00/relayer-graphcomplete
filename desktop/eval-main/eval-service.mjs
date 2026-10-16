@@ -1010,6 +1010,8 @@ export class EvalService {
     annotationSnapshotLoader = null,
     platform = process.platform,
     targetKey = null,
+    // Must match the runtime's adapter so Eval plans record the configuration that ran.
+    adaptConfiguration = (configuration) => configuration,
     semanticChildDiscoveryClock = realDiscoveryClock,
   }) {
     this.stateFile = stateFile;
@@ -1049,6 +1051,7 @@ export class EvalService {
     this.annotationSnapshotLoader = annotationSnapshotLoader;
     this.platform = platform;
     this.targetKey = targetKey;
+    this.adaptConfiguration = adaptConfiguration;
     this.semanticChildDiscoveryClock = semanticChildDiscoveryClock;
     this.runs = [];
     this.configurations = new Map();
@@ -1057,7 +1060,8 @@ export class EvalService {
   }
 
   async open() {
-    this.configurations = await loadHarnessConfigurations(this.configurationPaths);
+    this.configurations = new Map([...await loadHarnessConfigurations(this.configurationPaths)]
+      .map(([name, configuration]) => [name, this.adaptConfiguration(configuration)]));
     await rm(join(dirname(this.stateFile), "import-staging"), { recursive: true, force: true });
     try {
       const persisted = JSON.parse(await readFile(this.stateFile, "utf8"));

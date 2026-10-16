@@ -8,6 +8,17 @@ import {
 const primeAgentPackage = "@earendil-works/pi-coding-agent";
 export const GRAPH_SEARCH_EVAL_TARGET = "macos-arm64";
 
+// Graph search is qualified only on macOS Apple Silicon. Elsewhere Eval runs every
+// configuration with an explicit opt-out, which withholds the capability and its guidance.
+// Eval applies this to the runtime catalog and its own plans so digests match what ran.
+export function evalTargetHarnessConfiguration(targetKey) {
+  if (targetKey === GRAPH_SEARCH_EVAL_TARGET) return (configuration) => configuration;
+  return (configuration) => ({
+    ...configuration,
+    graphCapabilityProfile: { ...configuration.graphCapabilityProfile, search: "disabled" },
+  });
+}
+
 export function evalRuntimeTarget({
   environment = process.env,
   platform = process.platform,

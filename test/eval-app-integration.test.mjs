@@ -27,7 +27,8 @@ import {
   nodeDetailFixtureFactoryWithTemporalGate,
   taskSystemFixtureFactory,
 } from "@relayer/eval-runner";
-import { css, html, NodeObject } from "@relayer/graph-client";
+import { css, html, NodeObject, RelayerGraphClient } from "@relayer/graph-client";
+import { grantsGraphSearch, resolveGraphCapabilityProfile } from "@relayer/harness-host";
 import { afterEach, describe, expect, it } from "vitest";
 
 import {
@@ -46,6 +47,7 @@ import {
   RECURSIVE_TEMPORAL_FEATURES,
 } from "../desktop/main/services/graphcomplete-runtime.mjs";
 import { RelayerAppServerService } from "../desktop/main/services/relayer-app-server.mjs";
+import { evalTargetHarnessConfiguration } from "../desktop/eval-main/configuration-paths.mjs";
 import { recursiveCompleteFixtureFactory } from "./support/recursive-complete-fixture.mjs";
 import { lantern2x2FixtureFactory } from "./support/lantern-2x2-fixture.mjs";
 import { renderPersonalPresentationGuidance } from "../packages/harness-host/src/implementations/personal-presentation-guidance.ts";
@@ -579,6 +581,80 @@ describe("Relayer Eval application service", () => {
     })).rejects.toThrow("Graph-search Eval cases are qualified only for macOS Apple Silicon.");
     expect(evalService.listRuns()).toEqual([]);
   });
+
+  it.each([
+    ["windows-x64", "disabled", "capability_not_granted"],
+    ["macos-arm64", "query-v1", "granted"],
+  ])("runs %s Eval with search %s at the runtime seam the harness and graph server load", async (targetKey, search, searchOutcome) => {
+    const dataDirectory = await mkdtemp(join(tmpdir(), "relayer-eval-search-target-run-test-"));
+    directories.push(dataDirectory);
+    const configurationPaths = [join(repositoryRoot, "harnesses", "fixture-task-system.yaml")];
+    const adaptConfiguration = evalTargetHarnessConfiguration(targetKey);
+    const observed = [];
+    const runtime = new GraphCompleteRuntimeService({
+      userDataDirectory: dataDirectory,
+      graphServerBinary: join(repositoryRoot, "target", "debug", "relayer-graph-server"),
+      configurationPaths,
+      adaptConfiguration,
+      additionalImplementations: {
+        "fixture.task-system": (factoryContext) => {
+          const inner = taskSystemFixtureFactory(factoryContext);
+          return {
+            traceSupport: () => inner.traceSupport(),
+            state: () => inner.state(),
+            async complete(context) {
+              const outcome = await new RelayerGraphClient(context.graph.acquireCapability()).search({
+                queryContractVersion: 1,
+                query: "MATCH (layer:Layer)-[:CONTAINS]->(content:Content) WHERE content.title = $topic RETURN layer LIMIT 1",
+                parameters: { topic: { type: "string", value: "Absent topic" } },
+              }).then(() => "granted", (error) => error.code ?? String(error));
+              observed.push({ configuration: factoryContext.configuration, outcome });
+              return inner.complete(context);
+            },
+          };
+        },
+      },
+    });
+    services.push(runtime);
+    const runtimeSession = await runtime.start();
+    const product = new RelayerAppServerService({
+      userDataDirectory: dataDirectory,
+      binaryPath: join(repositoryRoot, "target", "debug", "relayer-app-server"),
+      webDirectory: join(repositoryRoot, "desktop", "renderer"),
+      permissionCatalogPath: join(repositoryRoot, "permissions", "desktop.json"),
+      runtimeSession,
+      defaultHarnessConfiguration: "fixture-task-system",
+      allowHarnessOverride: true,
+    });
+    services.push(product);
+    const evalService = await new EvalService({
+      stateFile: join(dataDirectory, "eval-data", "test-runs.json"),
+      productSession: await product.start(),
+      configurationPaths,
+      targetKey,
+      adaptConfiguration,
+    }).open();
+
+    const created = await evalService.createRun({
+      testCaseIds: ["empty-project.task-system.single-turn"],
+      harnessConfigurationNames: ["fixture-task-system"],
+      judgeConfigurationName: "deterministic-graph-contract",
+    });
+    const completed = await waitForCompletedRun(evalService, created.id, 20_000);
+    const execution = completed.executions[0];
+
+    expect(completed.status, JSON.stringify({ error: execution.error })).toBe("passed");
+    expect(observed).toHaveLength(1);
+    // The harness received the adapted profile: the adapters derive search guidance from it.
+    expect(resolveGraphCapabilityProfile(observed[0].configuration)).toEqual({ search });
+    expect(grantsGraphSearch(observed[0].configuration)).toBe(search === "query-v1");
+    // The graph server granted exactly that authority.
+    expect(observed[0].outcome).toBe(searchOutcome);
+    // Eval's receipt records the configuration and digest that actually ran.
+    expect(resolveGraphCapabilityProfile(execution.harnessConfiguration)).toEqual({ search });
+    expect(execution.harnessConfigurationDigest).toBe(runtimeSession.digestConfiguration(runtimeSession.configurations.get("fixture-task-system")));
+    expect(evalService.catalog().harnessConfigurations[0].graphCapabilityProfile).toEqual({ search });
+  }, 60_000);
 
   it("executes the exact Lantern recursion pair through one production product/Eval seam", async () => {
     const dataDirectory = await mkdtemp(join(tmpdir(), "relayer-eval-lantern-pair-test-"));

@@ -6,6 +6,7 @@ import { loadHarnessConfigurations } from "../packages/harness-host/src/configur
 import {
   evalHarnessConfigurationPaths,
   evalRuntimeTarget,
+  evalTargetHarnessConfiguration,
 } from "../desktop/eval-main/configuration-paths.mjs";
 import { DEFAULT_DESKTOP_HARNESS_CONFIGURATION } from "../desktop/main/services/desktop-harness-configuration.mjs";
 
@@ -228,5 +229,16 @@ describe("Eval harness configuration availability", () => {
     }
     if (treatment) treatment.name = "comparison";
     expect(treatment).toEqual(control);
+  });
+
+  it("disables search for every configuration only off the qualified target", () => {
+    const omitted = { name: "omitted", settings: {} };
+    const previewed = { name: "previewed", graphCapabilityProfile: { search: "query-v1", preview: "enabled" }, settings: {} };
+    expect(evalTargetHarnessConfiguration("macos-arm64")(omitted)).toBe(omitted);
+    for (const targetKey of ["macos-x64", "windows-x64", null]) {
+      const adapt = evalTargetHarnessConfiguration(targetKey);
+      expect(adapt(omitted).graphCapabilityProfile).toEqual({ search: "disabled" });
+      expect(adapt(previewed).graphCapabilityProfile).toEqual({ search: "disabled", preview: "enabled" });
+    }
   });
 });
