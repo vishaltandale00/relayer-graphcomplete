@@ -5,6 +5,8 @@ import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import {
   CLAUDE_PREVIEW_TOOL,
+  CLAUDE_WEB_SEARCH_TOOL,
+  ClaudeAutoModeUnavailableError,
   ClaudeBasicHarness,
   claudePermissionMode,
   createClaudeBasicFactory,
@@ -225,9 +227,34 @@ describe("ClaudeBasicHarness", () => {
 
   it("maps product approval modes onto supported Claude SDK permission modes", () => {
     expect(claudePermissionMode("ask")).toBe("default");
-    expect(claudePermissionMode("auto")).toBe("acceptEdits");
+    expect(claudePermissionMode("auto")).toBe("auto");
+    expect(claudePermissionMode("acceptEdits")).toBe("acceptEdits");
     expect(claudePermissionMode("full")).toBe("bypassPermissions");
     expect(() => claudePermissionMode("untrusted")).toThrow(/ask, auto, or full/);
+  });
+
+  it("runs Auto through the SDK classifier, denies undecided calls, and fails loudly when auto mode is unavailable", async () => {
+    let call: Parameters<ClaudeSdkQuery>[0] | undefined;
+    const init = (permissionMode: string) => ({ type: "system", subtype: "init", permissionMode, session_id: "session-1" });
+    const done = { type: "result", subtype: "success", result: "done", session_id: "session-1" };
+    const auto = new ClaudeBasicHarness(factoryContext("auto"), {
+      query: sdkQuery([init("auto"), done], (input) => { call = input; }),
+      browserSdk: browserSdk(),
+    });
+    await expect(auto.complete(runContext(managedAccess()))).resolves.toBeUndefined();
+    // Bash is unlisted, so the classifier reviews every shell call, graph-client calls included.
+    expect(call?.options).toMatchObject({
+      permissionMode: "auto",
+      permissionPrompts: "none",
+      allowedTools: [CLAUDE_BROWSER_TOOL, CLAUDE_WEB_SEARCH_TOOL],
+    });
+    expect(call?.options.allowDangerouslySkipPermissions).toBeUndefined();
+
+    const degraded = new ClaudeBasicHarness(factoryContext("auto"), {
+      query: sdkQuery([init("default"), done]),
+      browserSdk: browserSdk(),
+    });
+    await expect(degraded.complete(runContext(managedAccess()))).rejects.toThrow(ClaudeAutoModeUnavailableError);
   });
 
   it("loads the managed SDK module and calls its query boundary with explicit runtime and graph access", async () => {
@@ -282,7 +309,7 @@ describe("ClaudeBasicHarness", () => {
       expect(options).toMatchObject({
         cwd: "/tmp",
         model: "claude-sonnet-4",
-        allowedTools: ["Bash", CLAUDE_BROWSER_TOOL],
+        allowedTools: ["Bash", CLAUDE_BROWSER_TOOL, CLAUDE_WEB_SEARCH_TOOL],
         permissionMode: "acceptEdits",
         pathToClaudeCodeExecutable: "/managed/claude",
       });
@@ -830,7 +857,8 @@ describe("ClaudeBasicHarness", () => {
 
     it.each([
       ["ask", "default", ["Bash", CLAUDE_PREVIEW_TOOL]],
-      ["auto", "acceptEdits", ["Bash", CLAUDE_BROWSER_TOOL, CLAUDE_PREVIEW_TOOL]],
+      ["auto", "auto", [CLAUDE_BROWSER_TOOL, CLAUDE_WEB_SEARCH_TOOL, CLAUDE_PREVIEW_TOOL]],
+      ["acceptEdits", "acceptEdits", ["Bash", CLAUDE_BROWSER_TOOL, CLAUDE_WEB_SEARCH_TOOL, CLAUDE_PREVIEW_TOOL]],
       ["full", "bypassPermissions", ["Bash", CLAUDE_PREVIEW_TOOL]],
     ])("in %s, passes the folder, pre-approves view_graph_preview and teaches it only when the host granted a folder", async (_mode, approvalMode, allowedTools) => {
       const previewed = await previewRun(approvalMode, "/tmp/previews-1");
@@ -840,6 +868,7 @@ describe("ClaudeBasicHarness", () => {
       expect(previewed.call.prompt).toContain("outcome is unknown, do not rerun");
       expect(previewed.call.prompt).toContain('await rerunGraphProgram("<id>", [{ find: "exact text from that program", replace: "fixed text" }])');
       expect(previewed.call.options.allowedTools).toEqual(allowedTools);
+      expect(previewed.call.options.permissionPrompts).toBe(approvalMode === "auto" ? "none" : undefined);
       expect(previewed.call.options.mcpServers).toHaveProperty("relayer_graph_preview");
       expect(previewed.call.prompt).toContain(draftPreviewGuidance(CLAUDE_PREVIEW_VIEWING));
 
