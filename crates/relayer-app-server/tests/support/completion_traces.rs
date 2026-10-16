@@ -3005,8 +3005,9 @@ async fn a_lost_decision_answer_still_resolves_the_childs_request(name: &str, lo
 
     // The harness applies it, but its answer is lost.
     *world.harness.decision_answer_lost.lock().unwrap() = lost;
+    // Only the dropped request is cut short; a lost answer gets all the time it needs.
     match tokio::time::timeout(
-        Duration::from_millis(100),
+        Duration::from_millis(if lost == "hung" { 100 } else { 10_000 }),
         decide(crate::approval::ApprovalDecision::ApproveOnce),
     )
     .await
