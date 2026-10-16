@@ -1,0 +1,44 @@
+{
+  "schemaVersion": 1,
+  "reviewer": "/root/review_versioned_actor",
+  "reviewedAt": "2026-10-16T21:32:28.104058+00:00",
+  "reviewType": "Adversarial test-fixture delta and stable-source review",
+  "workspaceDigest": "85ab792153ed7ca89542688aff0e6644fa706cfdeb0b722dfa0a8adfde0c20e3",
+  "predecessorWorkspaceDigest": "a7efcc805937df254a9ff69658c9fbef7c82336ef6741a98ca94e25a88569d81",
+  "baseCommit": "14d60da93ad5bfdda6b2a0188261d9674594a794",
+  "sourceReceipt": {
+    "path": "docs/evidence/versioned-decision-actor/native-actor-timeout-stable-source-20261016.json",
+    "sha256": "8dbc2aca46db58479711905274298a71199f01d471f33b138d8bed6b556436d5",
+    "files": 37,
+    "allFileHashesAndAggregateVerified": true
+  },
+  "changedSinceReviewedPredecessor": [
+    "scripts/test-eval-web.mjs"
+  ],
+  "productionBytesUnchanged": true,
+  "priorStaticReview": {
+    "path": "docs/evidence/versioned-decision-actor/native-actor-timeout-review-20261016.json",
+    "sha256": "23fab435de45341ba30c58749d76ab2b7fbb38b5e99203dd54c2064e1066ba77"
+  },
+  "reviewedScope": [
+    "NAT-006 test-only withPresentation accessor helper and three substituted turn/path spoof blocks",
+    "Temporary getter keeps adversarial fields present while setter retains genuine after-paint observer updates; check runs after two real RAFs",
+    "Finally restores original data-property descriptor with latest genuine presentation; helper handle is disposed",
+    "Existing stale-menu/control/rebind rejection assertions, hidden/duplicate/attribute guards, successful exact rebind checks and deadlines retained",
+    "Controlled startup-scope-race red showing direct forged turn overwritten to1 and Missing expected rejection; original a7ef full-browser failure retained"
+  ],
+  "verdict": "No blocking static finding. Delta makes the intended adversarial condition persist until the unchanged production rejection is exercised; it does not remove a guard, relax an assertion or certify the full runner. The prior production static verdict remains applicable because its bytes are unchanged.",
+  "findings": [],
+  "unresolvedProofLimits": [
+    "Final full browser, root check/build/compiled and social-preview receipt outcomes on the stable source require separate heavy-evidence review.",
+    "Earlier full-browser248 pilot and partial a7ef pass/failure are historical evidence, not proof of stable85ab.",
+    "No paid inference, model calibration/performance, hosting or release proof follows from this fixture correction."
+  ],
+  "reviewerActions": {
+    "codeEdits": false,
+    "testExecution": false,
+    "paidInference": false,
+    "historicalReceiptEdits": false
+  },
+  "certification": "Bounded static assertion for PR755; invalidated by bound-source changes. Heavy verification remains separately pending."
+}

@@ -13,7 +13,7 @@
   },
   "rendererArtifact": {
     "directory": "desktop/renderer",
-    "digest": "70a8e248828da4ce38c9b3bf084e6aae5a288751828be0b9137b62f3e6528655",
+    "digest": "dd578ee5fff5aad3caffab87f5bd37e60347d744771e00305ce757148ac8aa89",
     "files": {
       "assets/relayer-logo.svg": {
         "bytes": 509,
@@ -124,8 +124,8 @@
         "sha256": "dff9ad85ae8558e6cb72c07fb4438f1ffb8ed8b55ed3b0534af1c146077c5867"
       },
       "src/graph.js": {
-        "bytes": 7748,
-        "sha256": "a5a491ac529a11f6e7326bac81e27d24cec53ee2ddb9679cf27f205e8a44c9c4"
+        "bytes": 7859,
+        "sha256": "b111c43aa2379a02177918f8df0a4a64c7837d953a53d25beb655ee0f138f26e"
       },
       "src/harness-settings-model.js": {
         "bytes": 2102,
@@ -140,8 +140,8 @@
         "sha256": "4240954ccefdf7b5a21fde2034a7c922faa3614017a1de278ceec3aca92699cf"
       },
       "src/human-task-observer.js": {
-        "bytes": 2386,
-        "sha256": "832dcf2ef2bef9688b6d642d8aac8f4b201eeccf1aa58bafe10a7d2de8c140fc"
+        "bytes": 2835,
+        "sha256": "78fc94eb804a36b02283baf80915a86bf1f5bb36062d4bd5f901c2d9c6b17161"
       },
       "src/interaction-failure-model.js": {
         "bytes": 1878,
@@ -156,8 +156,8 @@
         "sha256": "6c2103d6049bd94adc4b05a9b31e59d13036b6f309e9235aa91969a2a634a4c6"
       },
       "src/main.js": {
-        "bytes": 22518,
-        "sha256": "543844248dffc5ea9bb968c82dadc5f3809b3fbc3c4d5a9fe6de4f6311e9cfc2"
+        "bytes": 22713,
+        "sha256": "bc0fcdc18245dd44dc87f4a5f2c546c78bf100876a7d9ec4d90300f7fbdfc935"
       },
       "src/model-availability-refresh.js": {
         "bytes": 1085,
@@ -292,8 +292,8 @@
         "sha256": "8e5d307f95b1863fb995606ca32a832de088916716c39476f9d31f2174de002d"
       },
       "src/product-workspace/workspace.js": {
-        "bytes": 331652,
-        "sha256": "79f03ab77d4d02d84cee9e9594978beb97ff2b39548fbe0d25d218ab1c775cbb"
+        "bytes": 333464,
+        "sha256": "9f85bf400053dcb6552fecdac0141300d08940756c0a8040b387d62eb7aeeac5"
       },
       "src/project-composer-navigation.js": {
         "bytes": 282,

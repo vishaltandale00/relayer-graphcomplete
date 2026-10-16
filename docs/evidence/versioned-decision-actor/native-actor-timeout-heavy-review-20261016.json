@@ -1,0 +1,216 @@
+{
+  "schemaVersion": 1,
+  "reviewer": "/root/review_versioned_actor",
+  "reviewedAt": "2026-10-16T22:51:40.929743+00:00",
+  "pullRequest": 755,
+  "reviewType": "Final adversarial heavy-evidence, source-reuse and completed local-portfolio review",
+  "workspaceDigest": "1c93b250db31571086e0f25c7f9047d4cdbecd74145a2e29aff003a682a7f074",
+  "baseCommit": "14d60da93ad5bfdda6b2a0188261d9674594a794",
+  "sourceReceipt": {
+    "path": "docs/evidence/versioned-decision-actor/native-actor-timeout-qualified-source-20261016.json",
+    "sha256": "7c384894e33654abeb28cd321f8eacfa2bbc8732d4d16467e449d8bb11721624",
+    "files": 40,
+    "allFileHashesAndAggregateIndependentlyVerified": true
+  },
+  "verificationReceipt": {
+    "path": "docs/evidence/versioned-decision-actor/native-actor-timeout-verification-20261016.json",
+    "sha256": "0fd08e67be6c4c5a6b56f679869f5f88ce3ca5c18c20aca42f0e5aad0745792f",
+    "logs": 57,
+    "artifacts": 8,
+    "allLogAndArtifactHashesAndByteSizesIndependentlyVerified": true
+  },
+  "resultsProse": {
+    "path": "docs/evidence/versioned-decision-actor/native-actor-timeout-results-20261016.md",
+    "sha256": "437aff9ae9a354e31e4734be738fdaab1aff1b053a55a2a062ddedbfb40925b8"
+  },
+  "outerExitAttestation": {
+    "path": ".relayer/verification/native-actor-timeout-20261016/outer-command-exits.json",
+    "sha256": "9bd6bfdd9b19a7a0c570aacdc67c18dabf90f96b7afae3dddb00c31a8e30245c",
+    "basis": "Parent attests closed unified-exec/write_stdin results; reviewer independently checked consistency with every recorded log exit. Unknown historical exits remain null; no exit inferred from a filename or positive inner marker."
+  },
+  "priorStaticReviews": [
+    {
+      "path": "docs/evidence/versioned-decision-actor/native-actor-timeout-finalized-review-20261016.json",
+      "sha256": "75e65897ec3147fa721f6a5fc0e404b5e81abda0ee57574f628bfc994887dcad"
+    },
+    {
+      "path": "docs/evidence/versioned-decision-actor/native-actor-timeout-qualified-review-20261016.json",
+      "sha256": "2d3e6ca4b27ffc73dcaa6429805b60bf8e52b2b8359ff7526593c0523d587c65"
+    }
+  ],
+  "reviewedScope": [
+    "NAT-001..011 required plan, changed source/fixture/resource seams, exact-source hashes and separate required-versus-actual outcomes",
+    "Final root check native/Rust/Clippy/doc/crash/package/TypeScript/Vitest/secret/Python/lint/readability inner results and outer exit attestation",
+    "Standalone build and all12 compiled-runtime scenarios on qualified source",
+    "Complete finalized5a browser chapter sequence: Decisions actor and completion judge, exact packet reconstruction, billing guards, input/endpoint publication, independent dispatch-race authority, native ninth result-navigation action, calibration, both current-input variants, judge and restart persistence",
+    "All three declared PRD7.0 desktop runner positives, including project collapse and layer-selection/restart persistence",
+    "Actual regenerated SOC and annotation captures, source and PNG hash bindings, prior direct visual inspection, durable annotation provenance and reload",
+    "Preserved diagnosis/setup failures, default search budget failure, first qualified capture timeout, focused diagnostics and exactly one unchanged whole-check retry",
+    "Reused standalone evidence retains actual tested source identities; affected production and standalone executable inputs independently checked unchanged",
+    "Subsumption of redundant detached-handle assertion, unchanged original ref/pointer and one activation, no ambiguous dispatch retry, fixed-revision read gate plus independent redraw failure authority"
+  ],
+  "completedResults": {
+    "qualifiedDefaultRootCheck": {
+      "exitCode": 0,
+      "log": {
+        "path": ".relayer/verification/native-actor-timeout-20261016/check-qualified-retry.log",
+        "sha256": "d0d2507368ae75614aef1894b320525f6db1577292a168c896c573852d92af3a"
+      },
+      "nativeAndCrashStagesPassed": true,
+      "vitestFilesPassed": 334,
+      "vitestFilesSkipped": 1,
+      "vitestTestsPassed": 4368,
+      "vitestTestsSkipped": 3,
+      "secretBoundaryTestsPassed": 2,
+      "pythonTestsPassed": 99,
+      "finalLintAndReadabilityPassed": true,
+      "isolatedWorkers": 3,
+      "processBoundWorkers": 1,
+      "cliOrWorkerEnvironmentOverride": false
+    },
+    "qualifiedStandaloneBuild": {
+      "exitCode": 0,
+      "log": {
+        "path": ".relayer/verification/native-actor-timeout-20261016/build-finalized.log",
+        "sha256": "fa3a7e1432d992a22245ddf2a9b81ed1d7a73c2cb39805bd99550b8510936837"
+      }
+    },
+    "qualifiedCompiledRuntime": {
+      "exitCode": 0,
+      "log": {
+        "path": ".relayer/verification/native-actor-timeout-20261016/compiled-finalized.log",
+        "sha256": "8398cfe62e8d63c8de7602188bcb856eeece906193b1d28b4858706730786807"
+      },
+      "testsPassed": 12,
+      "durationSeconds": 30.51
+    },
+    "fullStandaloneBrowser": {
+      "exitCode": 0,
+      "log": {
+        "path": ".relayer/verification/native-actor-timeout-20261016/web-finalized.log",
+        "sha256": "11a6004d76028d6ade9bda0adf794fee883d7f7f48f2f306a5beb6232520236f"
+      },
+      "testedWorkspaceDigest": "5a760ba458b7c1069c4bc4b0be7918489c53ab642f03100eb755ddc7c6ae1e13",
+      "completeChapterSequencePassed": true,
+      "actualNativeActorActions": 9,
+      "actualCandidateCompletions": 3,
+      "judgeRejectionAndRecoveryRetained": true,
+      "bothCurrentInputVariantsPassed": true,
+      "judgeAndPersistencePassed": true
+    },
+    "desktopNodeInputs": {
+      "exitCode": 0,
+      "log": {
+        "path": ".relayer/verification/native-actor-timeout-20261016/desktop-node-inputs.log",
+        "sha256": "961cbe78aa74859cc716a11a17602ba2a094dc036390ef042c8e391cf8d8f548"
+      },
+      "testedWorkspaceDigest": "7288fceb21bc8dbfbc4dbd997ae3c4ce8fcedc78adae62b842dc8fb489890fe0",
+      "consumedProductionInputsUnchanged": true
+    },
+    "desktopInteractionContext": {
+      "exitCode": 0,
+      "log": {
+        "path": ".relayer/verification/native-actor-timeout-20261016/desktop-interaction-context.log",
+        "sha256": "e172a6b15c9de1dc036a7ad7148a24e841bae41b2a59239fa7cc4f93be39fed0"
+      },
+      "testedWorkspaceDigest": "5a760ba458b7c1069c4bc4b0be7918489c53ab642f03100eb755ddc7c6ae1e13",
+      "consumedInputsUnchanged": true,
+      "positiveInferenceFreeMarker": true
+    },
+    "desktopProjectNewThread": {
+      "exitCode": 0,
+      "log": {
+        "path": ".relayer/verification/native-actor-timeout-20261016/desktop-project-thread.log",
+        "sha256": "d72f47fb3ee565b4fcc228c7f36888ceeada332f5a190c736607914132c7df7c"
+      },
+      "testedWorkspaceDigest": "5a760ba458b7c1069c4bc4b0be7918489c53ab642f03100eb755ddc7c6ae1e13",
+      "consumedInputsUnchanged": true,
+      "projectCollapse": true,
+      "restartPersistence": true,
+      "layerSelectionRestartPersistence": true
+    },
+    "rendererCaptures": {
+      "socialReceipt": {
+        "path": "docs/evidence/desktop-social-preview/receipt.json",
+        "sha256": "a43322da6e0871810f9b6fabaad79a0f92d4a7e1c1fb8cd5ca2ca7aefeef4779"
+      },
+      "annotationReceipt": {
+        "path": "docs/evidence/followup-node-annotations/receipt.json",
+        "sha256": "dde0367646a88d64bbe6c63379ad7d407d19fb0010ccf22d9b1f1c334479abb6"
+      },
+      "actualElectronCaptureLogsAndArtifactHashesMatch": true,
+      "socialImagesInspected": 2,
+      "annotationImagesInspected": 4,
+      "annotationProvenanceAndReloadVerified": true,
+      "annotationIntegrityTestPassed": true,
+      "noPaidInference": true
+    }
+  },
+  "sourceReuseVerdict": {
+    "all38FinalizedPredecessorHashesUnchanged": true,
+    "qualifiedOnlyAdds": [
+      "vitest.config.js",
+      "docs/agents/ci.md"
+    ],
+    "allDesktopModuleHashesMatch7288": true,
+    "reason": "The qualification changes Vitest file-worker policy and its guide only. It changes no production module, native source, standalone browser/desktop script, assertion or native query deadline. Existing standalone proofs therefore apply to verified identical consumed source inputs while retaining their original tested snapshot identities; they are not relabeled as fresh40-file invocations.",
+    "nativeArtifactBoundary": "Normal compatible source-fingerprint rebuild/cache reuse, with no incompatible Ladybug artifact adopted. Annotation native binary hashes are capture-time identities; current target/debug byte equality is not asserted."
+  },
+  "preservedFailureAssessment": [
+    {
+      "log": {
+        "path": ".relayer/verification/native-actor-timeout-20261016/check-finalized.log",
+        "sha256": "a68a402fb79aeb273046f08511c2f38873a4c973b5ac84a6bf94e36bf1b1724e"
+      },
+      "result": "Default5a check failed only query outcome wall_time_exceeded versus granted;4367pass1fail3skip. The250ms query limit was not extended. Focused successes support resource sensitivity but do not establish cause."
+    },
+    {
+      "log": {
+        "path": ".relayer/verification/native-actor-timeout-20261016/check-qualified.log",
+        "sha256": "f9d618d1b6043396d332de1108f2f7e79f4078a10ecb69d39726404cb4804c9d"
+      },
+      "result": "First qualified check failed only full provider-capture subprocess at180016ms, after one frame;4367pass1fail3skip. Cause remains unknown; not labeled confirmed Chrome/infrastructure fault or flakiness."
+    },
+    {
+      "log": {
+        "path": ".relayer/verification/native-actor-timeout-20261016/provider-capture-focused.log",
+        "sha256": "e1b401e27fc480a714ce5012c657822273f246a1aea77eb9b89eaabd127d5196"
+      },
+      "result": "Exact unchanged capture test passed alone44.50s, with four other tests unselected; diagnostic, not whole-check proof."
+    },
+    {
+      "log": {
+        "path": ".relayer/verification/native-actor-timeout-20261016/check-qualified-retry.log",
+        "sha256": "d0d2507368ae75614aef1894b320525f6db1577292a168c896c573852d92af3a"
+      },
+      "result": "One unchanged whole default-check retry passed. Full/focused provider captures completed46644/23451ms; no deadline/assertion was relaxed."
+    },
+    {
+      "result": "Older wrong-identity/render-scope/redraw, stale annotation receipt and invalid setup experiments remain separately classified and hash-bound in the57-log verification receipt, including misleading historical green filenames. Later passes do not overwrite them."
+    }
+  ],
+  "resolvedReviewFindings": [
+    "Applied-render metadata resolves the earlier raw-status-before-controls readiness defect.",
+    "NAT-008 explicitly restores all three PRD7.0 declared desktop gates; actual outcomes now positive.",
+    "Redundant second detach assertion is subsumed by retained first genuine detach, original ref/pointer rebinding and downstream assertions.",
+    "Fixed-revision fixture read serialization preserves production ambiguous-dispatch failure and independent concurrent redraw checks.",
+    "Historical exit codes are no longer synthesized from filenames; restored social outer0 is explicitly parent-attested and agrees with final command/log bindings."
+  ],
+  "verdict": "No blocking implementation, authority, checkpoint-mapping, assertion-subsumption or heavy-evidence mismatch found. The declared required local deterministic portfolio is complete with exact qualified-source check/build/compiled passes and explicitly bounded reuse of unchanged standalone proofs. Earlier failures and unknown causes remain visible.",
+  "findings": [],
+  "unresolvedBoundaries": [
+    "Original native query budget failure and first qualified provider-capture timeout causes remain unestablished; successful diagnostics/retry do not resolve root cause.",
+    "Skipped tests/files remain skipped and are not counted as passed. Desktop IPC/CSP/GPU warnings remain retained; this is no warning-free application claim.",
+    "No new paid application inference, live Decisions-judge calibration/equivalence, general quality/latency/cost advantage, hosted fresh-head CI/packaging or release/deployment proof follows from local deterministic success.",
+    "Hosted PR755 checks and manual merge/release authority remain separate. Any bound-source change invalidates this assertion until reviewed."
+  ],
+  "reviewerActions": {
+    "productionEdits": false,
+    "testEdits": false,
+    "historicalReceiptEdits": false,
+    "heavyTestExecution": false,
+    "paidInference": false,
+    "separateReviewReceiptOnly": true
+  },
+  "certification": "Bounded adversarial assertion for PR755 exact workspace digest1c93b250db31571086e0f25c7f9047d4cdbecd74145a2e29aff003a682a7f074 and the hashed completed evidence. No broader hosted/release or model-quality certification."
+}

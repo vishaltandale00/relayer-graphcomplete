@@ -16,10 +16,11 @@ import { createHumanTaskSurface } from "../desktop/eval-main/web-host.mjs";
 const cleanups = [];
 afterEach(async () => { for (const cleanup of cleanups.splice(0).reverse()) await cleanup(); });
 const action = (kind, extra = {}) => ({ kind, ref: "visible", value: "", reason: "", satisfaction: null, comment: "", endpointStatus: "incomplete", remainingWork: "Route undecided", ...extra });
-async function fixture({ decide, observe, observeCurrent, promptVersion, maxActions = 8, busy = false, failWrite = false, navigateOnly = false, retry = false, timeoutMs = 900000, planCount = 1, maxCompletions = 2, controlErrors = [], completionPath = null, completionJudge = null, judgeEvaluate = null, voluntaryStop = false, actorSetup = null, actorFactory = null, completionJudgeFactory = null, completionJudgeRuntime = null } = {}) {
+async function fixture({ decide, observe, observeCurrent, promptVersion, maxActions = 8, busy = false, failWrite = false, navigateOnly = false, retry = false, timeoutMs = 900000, planCount = 1, maxCompletions = 2, controlErrors = [], completionPath = null, completionJudge = null, judgeEvaluate = null, voluntaryStop = false, actorSetup = null, actorFactory = null, completionJudgeFactory = null, completionJudgeRuntime = null, turnAttempts = {} } = {}) {
   const directory = await mkdtemp(join(tmpdir(), "task-actor-test-"));
   cleanups.push(() => rm(directory, { recursive: true, force: true }));
-  const turns = [{ id: 1, completionStatus: busy ? "running" : retry ? "not_started" : "accepted", ...(retry ? { latestAttempt: { id: 91, outcome: "model_failed" } } : {}) }];
+  const acceptedTurn = id => ({ id, completionStatus: "accepted", ...(turnAttempts[id] ? { latestAttempt: { id: turnAttempts[id], outcome: "accepted" } } : {}) });
+  const turns = [{ ...acceptedTurn(1), completionStatus: busy ? "running" : retry ? "not_started" : "accepted", ...(retry ? { latestAttempt: { id: 91, outcome: "model_failed" } } : {}) }];
   const dispatches = [];
   const definition = actorSetup ?? defaultActorSetup();
   const behavior = { ...definition.behaviorContract, completionJudge };
@@ -37,7 +38,7 @@ async function fixture({ decide, observe, observeCurrent, promptVersion, maxActi
         if (url.pathname.endsWith("/live-answers")) { turns[0].completionStatus = "accepted"; return Response.json({ sequence: 1, attemptId: 10, operationKey: "answer-1" }); }
         if (failWrite) throw new Error("Ambiguous response");
         if (retry) turns[0] = { id: 1, completionStatus: "accepted", latestAttempt: { id: 92, outcome: "accepted" } };
-        else turns.push({ id: turns.length + 1, completionStatus: "accepted" });
+        else turns.push(acceptedTurn(turns.length + 1));
         return Response.json(turns.at(-1));
       }
       if (url.pathname.endsWith("/export")) return new Response("frozen conversation");
@@ -66,7 +67,7 @@ async function fixture({ decide, observe, observeCurrent, promptVersion, maxActi
       }
       return { decide: async (observation, signal, decisionOptions) => {
       seen.push({ prompt, observation });
-      return { action: decide ? await decide(observation, signal, decisionOptions) : turns.length === 1 ? action("click") : action("finish", { reason: "satisfied", satisfaction: 3, comment: "Good enough" }), usage: { input_tokens: 10, output_tokens: 5 } };
+      return { action: decide ? await decide(observation, signal, decisionOptions, turns) : turns.length === 1 ? action("click") : action("finish", { reason: "satisfied", satisfaction: 3, comment: "Good enough" }), usage: { input_tokens: 10, output_tokens: 5 } };
     }, observe: vi.fn(async (observation, signal, options) => observe ? observe(observation, signal, turns, options) : { comment: "I understand what is being checked", usage: null }), close: vi.fn() };
     },
   });
@@ -226,6 +227,20 @@ it("requires the settled retry attempt in the rendered presentation even with a 
   expect(taskActorPresentationReady({ expected, presentation: { ...old, attemptId: 92, attemptOutcome: "accepted", completionStatus: "accepted" } })).toBe(true);
 });
 
+it("waits for the invoked result's rendered status while retaining the source response", () => {
+  const expected = { threadId: 1, turnId: 7, submittedAt: 1000, attemptId: 71,
+    invocation: { actionId: 22, turnId: 8, attemptId: 82, completionStatus: "accepted", attemptOutcome: "accepted" } };
+  const presentation = { threadId: 1, turnId: 7, attemptId: 71, completionStatus: "accepted", observedAt: 1100,
+    invocationResults: [{ ...expected.invocation, completionStatus: "running" }] };
+  expect(taskActorPresentationReady({ expected, presentation })).toBe(false);
+  expect(taskActorPresentationReady({ expected, presentation: { ...presentation, invocationResults: [expected.invocation] } })).toBe(true);
+  for (const patch of [{ actionId: 23 }, { turnId: 9 }, { attemptId: 81 }, { completionStatus: "stopped" }, { attemptOutcome: null }]) {
+    expect(taskActorPresentationReady({ expected, presentation: { ...presentation, invocationResults: [{ ...expected.invocation, ...patch }] } })).toBe(false);
+  }
+  expect(taskActorPresentationReady({ expected, presentation: { ...presentation, invocationResults: [] } })).toBe(false);
+  expect(taskActorPresentationReady({ expected, presentation: { ...presentation, invocationResults: [{ ...expected.invocation, turnId: 9 }, ...presentation.invocationResults] } })).toBe(false);
+});
+
 
 it("supplies the actual settled retry attempt to the browser readiness gate", async () => {
   let decision = 0;
@@ -237,6 +252,40 @@ it("supplies the actual settled retry attempt to the browser readiness gate", as
   const stale = { threadId: 1, turnId: 1, attemptId: 91, attemptOutcome: "model_failed", completionStatus: "not_started", observedAt: expected.submittedAt + 100 };
   expect(taskActorPresentationReady({ expected, presentation: stale })).toBe(false);
   expect(taskActorPresentationReady({ expected, presentation: { ...stale, attemptId: 92, attemptOutcome: "accepted", completionStatus: "accepted" } })).toBe(true);
+});
+
+it.each([
+  ["/api/threads/1/interactions/1/actions/22/invoke", 1],
+  ["/api/threads/1/interactions", 2],
+])("correlates the post-submission observation to the visible response for %s", async (completionPath, visibleTurnId) => {
+  let decision = 0;
+  const f = await fixture({ completionPath, turnAttempts: { 1: 71, 2: 82 }, decide: () => decision++ === 0 ? action("click") : action("finish", { reason: "satisfied", satisfaction: 3 }) });
+  await f.done;
+  expect(f.tasks.get(f.id)).toMatchObject({ status: "completed", completions: 2 });
+  expect(f.tasks.get(f.id).events.filter(event => event.kind === "submission").map(event => event.interactionId)).toEqual([1, 2]);
+  const [expected] = f.browser.observe.mock.calls[1];
+  expect(expected).toMatchObject({ threadId: 1, turnId: visibleTurnId, attemptId: visibleTurnId === 1 ? 71 : 82 });
+  if (visibleTurnId === 1) expect(expected.invocation).toEqual({ actionId: 22, turnId: 2, attemptId: 82, completionStatus: "accepted", attemptOutcome: "accepted" });
+  else expect(expected.invocation).toBeUndefined();
+  const presentation = { threadId: 1, turnId: visibleTurnId, attemptId: expected.attemptId, completionStatus: "accepted", observedAt: expected.submittedAt + 1,
+    invocationResults: expected.invocation ? [expected.invocation] : [] };
+  expect(taskActorPresentationReady({ expected, presentation })).toBe(true);
+  expect(taskActorPresentationReady({ expected, presentation: { ...presentation, observedAt: expected.submittedAt - 1 } })).toBe(false);
+  expect(taskActorPresentationReady({ expected, presentation: { ...presentation, attemptId: 70 } })).toBe(false);
+  expect(taskActorPresentationReady({ expected, presentation: { ...presentation, turnId: visibleTurnId === 1 ? 2 : 1, attemptId: visibleTurnId === 1 ? 82 : 71 } })).toBe(false);
+  expect(f.dispatches).toEqual([completionPath]);
+});
+
+it("fails closed when the invoked source is absent from the settled thread instead of observing the child", async () => {
+  const f = await fixture({ completionPath: "/api/threads/1/interactions/1/actions/22/invoke", decide: (_observation, _signal, _options, turns) => {
+    turns[0].id = 99; // The next authoritative read no longer contains the source.
+    return action("click");
+  } });
+  await f.done;
+  expect(f.tasks.get(f.id).status).toBe("interrupted");
+  expect(f.browser.observe).toHaveBeenCalledOnce();
+  expect(f.dispatches).toHaveLength(1);
+  expect(f.tasks.get(f.id).events.find(event => event.kind === "actor_error")).toMatchObject({ phase: "settle", category: "runtime_failure" });
 });
 
 it("service close aborts a pending native decision and closes its browser without dispatch", async () => {

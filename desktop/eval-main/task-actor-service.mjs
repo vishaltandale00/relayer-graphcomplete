@@ -198,11 +198,22 @@ export class TaskActorService {
         let expected;
         if (submission && submission.id !== observedSubmission) {
           const detail = await this.tasks.detail(submission.threadId, { signal });
-          const turn = detail.interactions.find((item) => String(item.id) === String(submission.interactionId));
+          // Invoke leaves the reader at its source (READ-001). The child still
+          // settles through task admission, but only explicit visible navigation
+          // opens its result. Send and Retry continue to correlate their own turn.
+          const invoke = submission.path && /^\/api\/threads\/([1-9][0-9]*)\/interactions\/([1-9][0-9]*)\/actions\/([1-9][0-9]*)\/invoke$/.exec(new URL(submission.path, "http://task.invalid").pathname);
+          if (invoke && String(submission.threadId) !== invoke[1]) throw new Error("Submitted interaction is unavailable.");
+          const visibleTurnId = invoke ? invoke[2] : submission.interactionId;
+          const turn = detail.interactions.find((item) => String(item.id) === String(visibleTurnId));
           if (!turn) throw new Error("Submitted interaction is unavailable.");
           const attemptId = turn.latestAttempt?.id;
           if (submission.path?.endsWith("/retry") && attemptId == null) throw new Error("Retried interaction has no settled attempt identity.");
-          expected = { threadId: submission.threadId, turnId: submission.interactionId, submittedAt: Date.parse(submission.at), ...(attemptId == null ? {} : { attemptId }) };
+          const child = invoke && detail.interactions.find(item => String(item.id) === String(submission.interactionId));
+          if (invoke && !child) throw new Error("Submitted interaction is unavailable.");
+          expected = { threadId: submission.threadId, turnId: turn.id, submittedAt: Date.parse(submission.at), ...(attemptId == null ? {} : { attemptId }),
+            ...(child ? { invocation: { actionId: Number(invoke[3]), turnId: child.id, completionStatus: child.completionStatus,
+              attemptOutcome: child.latestAttempt?.outcome ?? null,
+              ...(child.latestAttempt?.id == null ? {} : { attemptId: child.latestAttempt.id }) } } : {}) };
         }
         phase = "observe";
         const observation = await browser.observe(expected);

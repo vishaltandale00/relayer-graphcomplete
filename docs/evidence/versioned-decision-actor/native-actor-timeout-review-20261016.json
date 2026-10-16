@@ -1,0 +1,46 @@
+{
+  "schemaVersion": 1,
+  "reviewer": "/root/review_versioned_actor",
+  "reviewedAt": "2026-10-16T21:26:48.388178+00:00",
+  "reviewType": "Adversarial static authority, render-correlation and test-subsumption review",
+  "workspaceDigest": "a7efcc805937df254a9ff69658c9fbef7c82336ef6741a98ca94e25a88569d81",
+  "baseCommit": "14d60da93ad5bfdda6b2a0188261d9674594a794",
+  "sourceReceipt": {
+    "path": "docs/evidence/versioned-decision-actor/native-actor-timeout-source-20261016.json",
+    "sha256": "aaa1936ac201f09f3512687a9ae01e9b39c939f05e92723781cd8f5f6685188e",
+    "files": 37,
+    "allFileHashesAndAggregateVerified": true
+  },
+  "reviewedScope": [
+    "NAT-001..005 mapping to existing PRD READ-001 and actor rendered-observation authority",
+    "TaskActorService exact Invoke source versus child settlement identity, source/child attempts, status/outcome, freshness, missing source/child refusal and unchanged Send/Retry/current-observation semantics",
+    "Browser readiness exact action/result correlation, reusable-call isolation, no forced child navigation and unchanged returned actor observation shape",
+    "Workspace call-metadata snapshot before asynchronous detail mounting, publication after applied source controls/reveal, stale/pending render sequence rejection and scope-invalidating clone getter",
+    "graph.js/main/observer/web-bridge host-only applied metadata projection; no child graph content enters actor observation",
+    "Real production workspace+observer regression holding compiled asset resolution across paints for accepted/failed/stopped/model_failed-before-start outcomes and selected-node scope rejection",
+    "Test subsumption: backing-state-only pilot cases replaced by actual delayed-render cases; original queued-persistence test and existing identity/retry predicates retained",
+    "Full-browser fixture explicit ninth visible result-opening action, exact Returned Layer/source breadcrumb/three-completion admission, retained judge recovery/export/calibration assertions",
+    "Eval actor surface lacks desktop tutorial lifecycle required for the READ-001 guided auto-follow exception"
+  ],
+  "resolvedFindings": [
+    {
+      "priority": 2,
+      "priorSourceDigest": "248e40929197c7707bdf587a40c53a72bd0a9e7d6f8a103aff756e7ba5424f96",
+      "finding": "Raw appState lifecycle metadata could satisfy readiness before asynchronous source controls were applied. Two animation frames did not close that boundary.",
+      "resolution": "Current source retains render-local primitive metadata and publishes it only after the guarded source render completes; the real delayed-asset regression observes refusal during pending rendering."
+    }
+  ],
+  "verdict": "No remaining blocking static correctness, authority or checkpoint-mapping finding in the exact reviewed source. Assertion replacement restores explicit result navigation and strengthens content identity rather than bypassing inspection.",
+  "testSubsumptionVerdict": "Approved for the newly introduced backing-state-only pilot cases: stronger replacement observes actual production render/observer seam across all four terminal outcomes; reusable/wrong identity predicates and original queued persistence boundary remain independently protected. No historical source/test receipt was rewritten.",
+  "unresolvedProofLimits": [
+    "Final exact-source root check/build/compiled/full-browser evidence remains pending; a pilot pass on248e does not certify a7ef.",
+    "Social-preview renderer receipt must be regenerated after the graph/workspace renderer changes and reviewed with final heavy evidence.",
+    "The correction adds no paid inference evidence or claim of live judge calibration, model quality, latency/cost advantage or release readiness."
+  ],
+  "reviewerActions": {
+    "codeEdits": false,
+    "testExecution": false,
+    "paidInference": false
+  },
+  "certification": "Bounded static assertion for PR755; invalidated by reviewed-source changes. Heavy evidence remains separate and unfinished at this receipt."
+}

@@ -6,9 +6,15 @@ import { createHumanTaskSurface } from "./web-host.mjs";
 // Self-contained because Playwright serializes this production predicate.
 export function taskActorPresentationReady({ expected, presentation = globalThis.window?.__taskActorPresentation }) {
   const { threadId, turnId, submittedAt } = expected;
+  const invocation = expected.invocation;
+  const results = invocation && (presentation?.invocationResults ?? []).filter(result =>
+    String(result.actionId) === String(invocation.actionId) && String(result.turnId) === String(invocation.turnId));
   return String(presentation?.threadId) === String(threadId) && String(presentation?.turnId) === String(turnId)
     && presentation.observedAt >= submittedAt
     && (expected.attemptId == null || String(presentation.attemptId) === String(expected.attemptId))
+    && (!invocation || (results.length > 0 && results.every(result => result.completionStatus === invocation.completionStatus
+      && result.attemptOutcome === invocation.attemptOutcome
+      && (invocation.attemptId == null || String(result.attemptId) === String(invocation.attemptId)))))
     && (["accepted", "failed", "stopped"].includes(presentation.completionStatus)
       || (presentation.completionStatus === "not_started" && presentation.attemptOutcome === "model_failed"));
 }

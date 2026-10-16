@@ -3,7 +3,7 @@ import { bindArchiveActions, restoreArchivedForNavigation } from "./thread-archi
 import { request } from "./api.js";
 import { initializeCheckout } from "./checkout.js";
 import { initializeHumanTaskGrading } from "./human-task-grading.js";
-import { observeHumanTaskPresentation } from "./human-task-observer.js";
+import { humanTaskInvocationResults, observeHumanTaskPresentation } from "./human-task-observer.js";
 import { initializeLayerSelections } from "./product-workspace/layer-selection.js";
 import {
   refreshAccount,
@@ -40,7 +40,7 @@ import {
 import { bindComposerKeydown } from "./product-workspace/workspace.js";
 import { loadDesignFonts } from "./product-workspace/workspace.js";
 import { presentationInteractionRevision } from "./product-workspace/model.js";
-import { prepareCurrentWorkspaceTransition } from "./graph.js";
+import { currentWorkspaceInvocationResults, prepareCurrentWorkspaceTransition } from "./graph.js";
 import {
   initializeModelFamilySettings,
   refreshModelFamilySettings,
@@ -541,6 +541,7 @@ async function boot() {
     bridge: window.relayerHumanTask,
     getState: () => ({
       threadId: viewState.currentThreadId, turnId: viewState.currentInteractionId,
+      invocationResults: humanTaskInvocationResults(appState, viewState.currentInteractionId, currentWorkspaceInvocationResults()),
       layerId: appState.visibleLayer?.layer?.id ?? null, selectedNodeId: viewState.selectedNodeId,
       completionStatus: appState.interactions.find((item) => String(item.id) === String(viewState.currentInteractionId))?.completionStatus ?? null,
       attemptId: appState.interactions.find((item) => String(item.id) === String(viewState.currentInteractionId))?.latestAttempt?.id ?? null,
