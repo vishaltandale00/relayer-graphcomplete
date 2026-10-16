@@ -13,7 +13,7 @@
   },
   "rendererArtifact": {
     "directory": "desktop/renderer",
-    "digest": "867a949050099ec74260091cfcb0d8fcf1cb0b1d021366b3f8a6fd195700f679",
+    "digest": "d186465de0dbb279f6254d53a92c94a65c56745806efe6401694d7d52d69867c",
     "files": {
       "assets/relayer-logo.svg": {
         "bytes": 509,
@@ -292,8 +292,8 @@
         "sha256": "8e5d307f95b1863fb995606ca32a832de088916716c39476f9d31f2174de002d"
       },
       "src/product-workspace/workspace.js": {
-        "bytes": 331370,
-        "sha256": "210a41fd0e552155660108db278e0a0e1df579b6fe39a2ce7e2235a9df3a70a3"
+        "bytes": 331684,
+        "sha256": "1167d581f2b1005ce12488b32add673f7b5c88f962399cc836cb83d14e7f4f0e"
       },
       "src/project-composer-navigation.js": {
         "bytes": 282,
@@ -400,8 +400,8 @@
         "sha256": "8ef7bdf6d8b97ef298e083ad42c7e87670e4bd588468970a43c1f73da60c0831"
       },
       "styles.css": {
-        "bytes": 137921,
-        "sha256": "821c8b88a1248178ed11e04b9ead355a8aac6af0f5ec1e190a693700674babf6"
+        "bytes": 138427,
+        "sha256": "0ab9e4af680e1d81dd5f1d87974c06ee00ee835459184ec5277e048e1ffcb5bd"
       },
       "vendor/artifact-office.LICENSES.txt": {
         "bytes": 62430,
