@@ -94,3 +94,49 @@ The initial compile failure remains preserved separately; it is not rewritten
 as a pass. No inference run was added for this merge. Required hosted CI still
 checks the exact PR merge source before integration. These local gates do not
 constitute signed/release proof or an orchestrator quality promotion.
+
+## Canonical version ingress review follow-up
+
+After CI passed on `cc73f9cf`, the merge gate correctly refused an unresolved
+review finding: Rust accepted explicit `schemaVersion: 1`, then omitted that
+field from the v1 digest and re-export. This violates the existing contract
+that v1 is represented only by an absent field. A real JSONL mutation test
+first reproduced the acceptance; its red run is retained.
+
+| Changed executable seam / checkpoint | Smallest production proof |
+| --- | --- |
+| Requested, admitted and portable plan serde preserve absent-v1 and explicit-v2, but refuse explicit1/null/0/3/string versions | `family_role_fixtures_bind_versions_and_exact_roles`, all three production structs, both golden versions |
+| Import cannot accept and canonicalize an explicit1 receipt under the original omitted-version digest | `role_bearing_and_historical_plans_roundtrip_with_versioned_integrity`, actual `decode_export_jsonl` with mutated legacy receipt |
+| Programmatically constructed malformed versions/roles remain rejected by full and incremental validators | Existing typed-validation parity assertions retained in that contract journey |
+
+One shared present-field deserializer is applied to the two internal plan types
+and the portable plan. Defaulting and legacy serialization remain unchanged.
+This changes only version ingress; no roles, selection, credential routing,
+scoring or graph acceptance policy is widened. No tests are deleted. The
+preceding local/hosted green gates remain evidence for `cc73f9cf`; required
+check/build and focused ingress verification are rerun for this follow-up.
+
+Follow-up adversarial reviewer `/root/repair_authority_review`: no concrete
+blockers in the five-file version delta, digest
+`2fff7e0ebdf810887b501e984cd587f70f0412c4b8cc5fe7909c22e9f9e20e4c`.
+The integrated 43-file scope digest is
+`464e38fc91f3fd91d46a48d1bd7f44d2fde5d0ebd31e7fb021e9c7325375547c`;
+exact paths and per-file hashes are in the
+[follow-up receipt](merge-subscription-version-review.json). The prior
+39-file assertion is historical after the additional product re-export.
+Both scopes use sorted path + NUL + bytes + NUL, and source changes invalidate
+the assertions. All 50 export contracts and the internal fixture matrix passed;
+required full gates remain separate from this review.
+
+Follow-up executed results: all native/Clippy/crash and type/package stages
+passed. The required outer `npm run check` then failed three JavaScript cases
+(4,362 passed, three skipped): 10,000-layer traversal exceeded 15 seconds,
+live-answer HTTP waiting timed out, and Lantern's control lacked its third
+output. All three entire files subsequently passed sequentially, 165/165,
+with identical source, assertions and bounds. The failed aggregate is retained
+and is not relabeled green; the sequential result does not establish the exact
+cause of the concurrent failures. Final `npm run build` passed, as did the
+remaining secret-boundary 2/2, Python 99, Ladybug and PRD-readability chapters.
+The previous browser and telemetry proof stays attributed to `cc73f9cf`;
+this follow-up changes only Rust plan ingress and its tests. Current hosted CI
+must pass before merge.

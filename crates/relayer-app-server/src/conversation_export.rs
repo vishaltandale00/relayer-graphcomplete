@@ -397,7 +397,8 @@ pub struct ExportAdmittedExecutionModelRoute {
 pub struct ExportAdmittedExecutionModelPlan {
     #[serde(
         default = "crate::product::legacy_plan_version",
-        skip_serializing_if = "crate::product::is_legacy_plan_version"
+        skip_serializing_if = "crate::product::is_legacy_plan_version",
+        deserialize_with = "crate::product::deserialize_present_model_plan_version"
     )]
     pub schema_version: u32,
     pub family_id: i64,

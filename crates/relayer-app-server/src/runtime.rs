@@ -3370,7 +3370,7 @@ mod tests {
     };
     use crate::{
         permissions::PermissionProfile,
-        product::{AdmittedExecutionModelPlan, ExecutionHarnessPolicy},
+        product::{AdmittedExecutionModelPlan, ExecutionHarnessPolicy, ExecutionModelPlan},
     };
     use axum::{
         Json, Router,
@@ -3506,7 +3506,38 @@ mod tests {
                 assert!(serde_json::from_value::<AdmittedExecutionModelPlan>(raw.clone()).is_err());
             }
             let plan: AdmittedExecutionModelPlan = serde_json::from_str(bytes).unwrap();
+            let requested: ExecutionModelPlan = serde_json::from_str(bytes).unwrap();
+            assert_eq!(requested.schema_version, plan.schema_version);
+            assert_eq!(
+                serde_json::to_value(&requested)
+                    .unwrap()
+                    .get("schemaVersion"),
+                serde_json::to_value(&plan).unwrap().get("schemaVersion")
+            );
             assert_eq!(admitted_model_plan_digest(&plan).unwrap(), plan.digest);
+            if plan.schema_version == 1 {
+                for version in [json!(null), json!(0), json!(1), json!(3), json!("2")] {
+                    let mut raw: serde_json::Value = serde_json::from_str(bytes).unwrap();
+                    raw["schemaVersion"] = version.clone();
+                    assert!(
+                        serde_json::from_value::<AdmittedExecutionModelPlan>(raw.clone()).is_err(),
+                        "admitted version {version}"
+                    );
+                    assert!(
+                        serde_json::from_value::<
+                            crate::conversation_export::ExportAdmittedExecutionModelPlan,
+                        >(raw.clone())
+                        .is_err(),
+                        "portable version {version}"
+                    );
+                    let mut raw = serde_json::to_value(&requested).unwrap();
+                    raw["schemaVersion"] = version.clone();
+                    assert!(
+                        serde_json::from_value::<ExecutionModelPlan>(raw).is_err(),
+                        "requested version {version}"
+                    );
+                }
+            }
             let exported: crate::conversation_export::ExportAdmittedExecutionModelPlan =
                 serde_json::from_str(bytes).unwrap();
             assert_eq!(

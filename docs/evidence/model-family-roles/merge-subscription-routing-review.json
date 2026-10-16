@@ -74,5 +74,7 @@
     "Prior ecaa live ablation does not certify merged source.",
     "Receipt invalidates if any scoped source or test file changes.",
     "Mapping documentation and visual evidence files are outside this 39-file source/test digest."
-  ]
+  ],
+  "reviewedSourceCommit": "cc73f9cfa066e81b3d5ccec96dfccb91dc55303d",
+  "supersededForCurrentSourceBy": "merge-subscription-version-review.json"
 }

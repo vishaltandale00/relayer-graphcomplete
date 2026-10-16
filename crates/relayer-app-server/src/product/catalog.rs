@@ -435,6 +435,22 @@ where
     T::deserialize(deserializer).map(Some)
 }
 
+/// A missing version is historical v1; an explicitly supplied version must be v2.
+pub(crate) fn deserialize_present_model_plan_version<'de, D>(
+    deserializer: D,
+) -> Result<u32, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let version = u32::deserialize(deserializer)?;
+    if version != 2 {
+        return Err(serde::de::Error::custom(
+            "present model plan schemaVersion must be 2; historical v1 omits the field",
+        ));
+    }
+    Ok(version)
+}
+
 pub(crate) fn legacy_plan_version() -> u32 {
     1
 }
@@ -672,7 +688,8 @@ pub(crate) struct ExecutionModelRoute {
 pub(crate) struct ExecutionModelPlan {
     #[serde(
         default = "legacy_plan_version",
-        skip_serializing_if = "is_legacy_plan_version"
+        skip_serializing_if = "is_legacy_plan_version",
+        deserialize_with = "deserialize_present_model_plan_version"
     )]
     pub(crate) schema_version: u32,
     pub(crate) family_id: ModelFamilyId,
@@ -702,7 +719,8 @@ pub(crate) struct AdmittedExecutionModelRoute {
 pub(crate) struct AdmittedExecutionModelPlan {
     #[serde(
         default = "legacy_plan_version",
-        skip_serializing_if = "is_legacy_plan_version"
+        skip_serializing_if = "is_legacy_plan_version",
+        deserialize_with = "deserialize_present_model_plan_version"
     )]
     pub(crate) schema_version: u32,
     pub(crate) family_id: ModelFamilyId,

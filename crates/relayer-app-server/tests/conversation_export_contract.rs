@@ -3368,6 +3368,25 @@ fn role_bearing_and_historical_plans_roundtrip_with_versioned_integrity() {
             .collect::<Vec<_>>()
             .join("\n");
         assert_eq!(decode_export_jsonl(jsonl.as_bytes()).unwrap(), fixture);
+        if version == 1 {
+            let mut lines = jsonl
+                .lines()
+                .map(|line| serde_json::from_str::<serde_json::Value>(line).unwrap())
+                .collect::<Vec<_>>();
+            lines[1]["completion"]["admittedModelPlan"]["schemaVersion"] = serde_json::json!(1);
+            let tampered = lines
+                .iter()
+                .map(|record| serde_json::to_string(record).unwrap())
+                .collect::<Vec<_>>()
+                .join("\n");
+            assert!(
+                matches!(
+                    decode_export_jsonl(tampered.as_bytes()),
+                    Err(ExportReadError::Json { .. })
+                ),
+                "explicit v1 must not validate under the omitted-version digest"
+            );
+        }
         if version == 2 {
             let mut tampered = fixture.clone();
             let ConversationExportRecord::Turn(turn) = &mut tampered[1] else {

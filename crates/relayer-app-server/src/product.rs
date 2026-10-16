@@ -62,6 +62,7 @@ pub(crate) use catalog::UpdateHarnessModelRulesCommand;
 pub(crate) use catalog::UpdateModelFamilyCommand;
 pub(crate) use catalog::UpdateModelSettingsDefaultsCommand;
 pub(crate) use catalog::ValidateModelSelectionCommand;
+pub(crate) use catalog::deserialize_present_model_plan_version;
 pub(crate) use catalog::deserialize_present_optional;
 pub(crate) use catalog::validate_family;
 pub(crate) use catalog::validate_harness_model_rules;
