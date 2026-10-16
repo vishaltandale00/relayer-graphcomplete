@@ -1097,6 +1097,14 @@ export async function submitInteraction(
     await refreshAfterModelSelectionRejection(error, true);
     throw error;
   }
+  // Messages run in parallel (#719): a Send waiting behind this one reads local state next.
+  // Record what the server accepted now, so a retried turn no longer reads as retryable even
+  // when the refresh below fails.
+  if (createdInteraction?.id != null && String(createdInteraction.threadId ?? threadId) === String(threadId)) {
+    const index = appState.interactions.findIndex((turn) => String(turn.id) === String(createdInteraction.id));
+    if (index >= 0) appState.interactions[index] = { ...appState.interactions[index], ...createdInteraction };
+    else appState.interactions.push({ threadId, ...createdInteraction });
+  }
   markFollowupSendSucceeded(inputId);
   try {
     await onboardingTutorialController()?.followupSubmitted({
