@@ -161,6 +161,17 @@ impl NodeRunQueue {
         }
     }
 
+    /// How many deliveries mark a run preparing.
+    #[cfg(test)]
+    pub(crate) fn preparing_count(&self, run: InteractionId) -> usize {
+        self.preparing
+            .lock()
+            .unwrap()
+            .get(&run)
+            .copied()
+            .unwrap_or(0)
+    }
+
     pub(crate) fn is_preparing(&self, run: InteractionId) -> bool {
         self.preparing.lock().unwrap().contains_key(&run)
     }
