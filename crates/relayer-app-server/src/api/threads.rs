@@ -126,17 +126,19 @@ struct ApprovalDecisionReservation {
 
 impl Drop for ApprovalDecisionReservation {
     fn drop(&mut self) {
-        self.in_flight
+        // Released under the in-flight lock, so a decision admitted next never sees this one's
+        // entry as retained, nor loses its own entry to this removal.
+        let mut in_flight = self
+            .in_flight
             .lock()
-            .expect("approval decision lock poisoned")
-            .remove(&self.request_id);
-        if self.keep {
-            return;
+            .expect("approval decision lock poisoned");
+        if !self.keep {
+            self.decisions
+                .lock()
+                .expect("approval decision lock poisoned")
+                .remove(&self.request_id);
         }
-        self.decisions
-            .lock()
-            .expect("approval decision lock poisoned")
-            .remove(&self.request_id);
+        in_flight.remove(&self.request_id);
     }
 }
 
@@ -183,7 +185,7 @@ pub(super) async fn decide_approval(
         .runtime
         .as_ref()
         .ok_or_else(|| ApiError::invalid("GraphComplete runtime is unavailable"))?;
-    let mut reservation = {
+    let (mut reservation, retained_earlier) = {
         let mut in_flight = state
             .approval_decisions_in_flight
             .lock()
@@ -209,12 +211,15 @@ pub(super) async fn decide_approval(
         }
         in_flight.insert(request_id.clone());
         decisions.insert(request_id.clone(), submission.decision);
-        ApprovalDecisionReservation {
+        let reservation = ApprovalDecisionReservation {
             decisions: state.approval_decisions.clone(),
             in_flight: state.approval_decisions_in_flight.clone(),
             request_id: request_id.clone(),
-            keep: retained.is_some(),
-        }
+            // Kept until the harness refuses the decision or its resolution is recorded: a
+            // request dropped mid-call may already have resolved it.
+            keep: true,
+        };
+        (reservation, retained.is_some())
     };
     async {
         let resolution = match runtime
@@ -223,14 +228,20 @@ pub(super) async fn decide_approval(
         {
             Ok(resolution) => resolution,
             Err(error) => {
-                // Only the harness's own refusal proves the decision was not applied. Any
-                // other failure may have lost the answer to a decision it applied.
-                reservation.keep |= !error.is_host_answer();
+                // Only the harness's own refusal proves this decision was not applied: its
+                // decision handler validates before it resolves. Any other failure may have
+                // lost the answer to a decision it applied. An earlier attempt's decision
+                // stays retained either way.
+                reservation.keep = retained_earlier || !error.is_host_answer();
                 return Err(error.into());
             }
         };
-        validate_decision_resolution(&stored.request, submission.decision, &resolution)
-            .map_err(|error| ApiError::internal(&error))?;
+        if let Err(error) =
+            validate_decision_resolution(&stored.request, submission.decision, &resolution)
+        {
+            reservation.keep = retained_earlier;
+            return Err(ApiError::internal(&error));
+        }
         let approval = match state
             .product
             .record_approval_resolution(&resolution, true)

@@ -38,10 +38,11 @@ const THREAD_COLUMNS: &str = concat!(
                 WHEN (SELECT completion_status FROM turn WHERE NOT agent_child ORDER BY sequence DESC LIMIT 1)='failed' THEN 'failed'
             END)
  ,t.archived_at,
-  -- An unresolved approval is work the archive would hide, including one an agent child's
-  -- provider made after the child's graph settled.
+  -- An agent child's unresolved approval is work the archive would hide, including one its
+  -- provider made after the child's graph settled. Another run's request is answerable only
+  -- while that run waits for approval, which the archive activity already counts.
   ((SELECT busy FROM thread_archive_activity WHERE id=t.id)
-   OR EXISTS(SELECT 1 FROM approval_requests request JOIN interactions i ON i.id=request.interaction_id LEFT JOIN approval_resolutions resolution ON resolution.request_id=request.request_id WHERE i.thread_id=t.id AND resolution.request_id IS NULL))
+   OR EXISTS(SELECT 1 FROM approval_requests request JOIN interactions i ON i.id=request.interaction_id LEFT JOIN approval_resolutions resolution ON resolution.request_id=request.request_id WHERE i.thread_id=t.id AND resolution.request_id IS NULL AND EXISTS(SELECT 1 FROM action_invocations child WHERE child.result_interaction_id=i.id AND child.agent_invoked=1)))
     FROM threads t
 "#
 );
@@ -667,6 +668,13 @@ mod tests {
         .execute(&store.pool)
         .await
         .unwrap();
+        // A request left open on a run that no longer waits for approval can never be
+        // answered, so it does not hold the thread out of the archive; only an agent child's can.
+        sqlx::query("INSERT INTO approval_requests(request_id,interaction_id,complete_call_id,harness_session_id,title,reason,action_json,scope_keys_json,scope_description,created_at,expires_at) VALUES ('stale',?1,'call','session','Title','Reason','{}','[]','scope','1',NULL)")
+            .bind(thread.root_interaction_id.value())
+            .execute(&store.pool)
+            .await
+            .unwrap();
         store.set_thread_archived(thread.id, true).await.unwrap();
     }
 

@@ -109,7 +109,8 @@ struct HarnessControl {
     /// Whether the user's decision resolved that request.
     approval_decided: AtomicBool,
     /// How the decision's answer is lost: "none"; "applied" resolves the request and then
-    /// answers with an unreadable body; "unapplied" answers that body without resolving it.
+    /// answers with an unreadable body; "hung" resolves it and never answers in time;
+    /// "unapplied" answers an unreadable body without resolving it.
     decision_answer_lost: Mutex<&'static str>,
     /// Whether a cancel ended that request as aborted instead, as the host does.
     approval_aborted: AtomicBool,
@@ -706,6 +707,16 @@ impl World {
                     async move {
                         use axum::response::IntoResponse;
                         let lost = *control.decision_answer_lost.lock().unwrap();
+                        if lost == "hung" {
+                            // The product's request goes away before the harness applies the
+                            // decision, and it never answers.
+                            let applying = control.clone();
+                            tokio::spawn(async move {
+                                tokio::time::sleep(Duration::from_millis(300)).await;
+                                applying.approval_decided.store(true, Ordering::SeqCst);
+                            });
+                            tokio::time::sleep(Duration::from_secs(30)).await;
+                        }
                         if lost != "unapplied" {
                             control.approval_decided.store(true, Ordering::SeqCst);
                         }
@@ -2908,7 +2919,23 @@ async fn a_childs_approval_is_recorded_on_its_own_row_and_its_decision_resumes_i
 /// decision may replace it.
 #[tokio::test]
 async fn a_childs_decision_whose_answer_was_lost_still_resolves_it() {
-    let world = World::new("child-approval-lost-answer", false).await;
+    a_lost_decision_answer_still_resolves_the_childs_request(
+        "child-approval-lost-answer",
+        "applied",
+    )
+    .await;
+}
+
+/// The same holds when the product's own request goes away, as when the renderer reloads,
+/// while the harness has already resolved the request.
+#[tokio::test]
+async fn a_childs_decision_whose_request_was_dropped_still_resolves_it() {
+    a_lost_decision_answer_still_resolves_the_childs_request("child-approval-dropped", "hung")
+        .await;
+}
+
+async fn a_lost_decision_answer_still_resolves_the_childs_request(name: &str, lost: &'static str) {
+    let world = World::new(name, false).await;
     let (broker, _lease) = world.broker();
     *world.harness.start.lock().unwrap() = "ok";
     *world.harness.approval.lock().unwrap() =
@@ -2948,31 +2975,50 @@ async fn a_childs_decision_whose_answer_was_lost_still_resolves_it() {
             }),
         )
     };
-    // The harness never applied it: the same decision can be sent again, and no other.
-    *world.harness.decision_answer_lost.lock().unwrap() = "unapplied";
-    assert!(
-        decide(crate::approval::ApprovalDecision::ApproveOnce)
-            .await
-            .is_err()
-    );
-    assert!(!world.harness.approval_decided.load(Ordering::SeqCst));
-    match decide(crate::approval::ApprovalDecision::Deny).await {
-        Ok(_) => panic!("another decision replaced one that may have resolved the request"),
-        Err(refused) => assert_eq!(
-            axum::response::IntoResponse::into_response(refused).status(),
-            StatusCode::CONFLICT
-        ),
+    // A first decision dropped mid-call must keep its own authority, so only the answer-lost
+    // case first sends one the harness never applied.
+    if lost == "applied" {
+        // The harness never applied it: the same decision can be sent again, and no other.
+        *world.harness.decision_answer_lost.lock().unwrap() = "unapplied";
+        assert!(
+            decide(crate::approval::ApprovalDecision::ApproveOnce)
+                .await
+                .is_err()
+        );
+        assert!(!world.harness.approval_decided.load(Ordering::SeqCst));
+        match decide(crate::approval::ApprovalDecision::Deny).await {
+            Ok(_) => panic!("another decision replaced one that may have resolved the request"),
+            Err(refused) => {
+                // approval_decision_retained, not another conflict.
+                assert!(
+                    refused.message().contains("earlier decision"),
+                    "{}",
+                    refused.message()
+                );
+                assert_eq!(
+                    axum::response::IntoResponse::into_response(refused).status(),
+                    StatusCode::CONFLICT
+                );
+            }
+        }
     }
 
-    // Sent again, the harness applies it but its answer is lost once more.
-    *world.harness.decision_answer_lost.lock().unwrap() = "applied";
-    assert!(
-        decide(crate::approval::ApprovalDecision::ApproveOnce)
-            .await
-            .is_err()
-    );
-    assert!(world.harness.approval_decided.load(Ordering::SeqCst));
+    // The harness applies it, but its answer is lost.
+    *world.harness.decision_answer_lost.lock().unwrap() = lost;
+    match tokio::time::timeout(
+        Duration::from_millis(100),
+        decide(crate::approval::ApprovalDecision::ApproveOnce),
+    )
+    .await
+    {
+        Ok(answer) => assert!(answer.is_err() && lost == "applied"),
+        Err(_) => assert_eq!(lost, "hung", "the decision request was dropped"),
+    }
     let deadline = Instant::now() + Duration::from_secs(5);
+    while !world.harness.approval_decided.load(Ordering::SeqCst) {
+        assert!(Instant::now() < deadline, "the harness never applied it");
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
     let resolution = loop {
         if let Some(resolution) = world
             .product
