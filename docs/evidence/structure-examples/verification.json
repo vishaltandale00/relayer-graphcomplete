@@ -89,6 +89,11 @@
     {
       "command": "Updated test/prime-visual-integration.test.mjs against unchanged production guidance/runtime",
       "result": "2 passed (33.72 seconds); actual native asset/pin/reopen scenarios. No candidate inference rerun."
+    },
+    {
+      "command": "GitHub CI full portfolio on df771714a9a4b1b06545c8efdb2c38511520954b",
+      "result": "Passed all selected chapters including check, builds, fresh Rust tests, crash reconciliation, Python, Clippy, receipt integrity, Prime runtime packaging and PRD readability. Vitest: 327 files / 4314 tests passed; 34 skipped in the main run; separate secret-boundary file had 2 skipped. This CI evidence is distinct from the earlier failed local npm run check.",
+      "url": "https://github.com/vishaltandale00/relayer-graphcomplete/actions/runs/38837255157"
     }
   ],
   "review": {
@@ -108,14 +113,23 @@
     "Release proof",
     "Full inventory provider-readiness qualification"
   ],
-  "liveEvidence": "Nine updated-only local Mac sessions admitted once. All three backend cases reached the endpoint with all four actual workspace gates passed. Codex proof reached the endpoint; Codex collaboration stopped incomplete. Other sessions and separate graph judgments remain pending. The 135-session comparison is deferred; no passing pilot is rerun.",
+  "liveEvidence": "Nine-session updated-only local Mac cohort admitted once, sequentially within each provider. At this snapshot, eight sessions were terminal and Prime proof remained active. For all three backend cases, the completion judge reported the endpoint reached and all four actual workspace gates passed. Codex and Claude proof received endpoint-reached judgments. Codex collaboration was incomplete; Claude and Prime collaboration exhausted the actor action budget with uncertain completion judgments. Separate graph-presentation judgments remain pending. Final live results are recorded in PR #739. The 135-session comparison is deferred.",
   "unknowns": [
-    "Full npm run check remains failed;remaining chapters not reached",
+    "Earlier local npm run check failed on base 5156d906 and later chapters were not reached; the final executable/test source subsequently passed the full selected CI portfolio on df771714.",
     "Machine load is a hypothesis for the timing failures, not an established cause"
   ],
   "upstreamUpdate": {
     "from": "5156d906579625f1eda41bbcf0de7cc71827458d",
     "to": "6a04aa9842de5bb1005d4dfd51b790ad0914c041",
     "scope": "One upstream graph-scroll fix (#735), no Rust/provider/prompt changes; example source digest unchanged. Earlier verification is historical to5156; later latest-main-focused log qualifies final combined source."
+  },
+  "snapshotAt": "2026-10-16T02:07:29.322107+00:00",
+  "evidenceClaimReview": {
+    "reviewer": "/root/pilot_fix_authority_review",
+    "reviewedCommit": "df771714a9a4b1b06545c8efdb2c38511520954b",
+    "scope": "PR claims and evidence record versus actual private ledger, workspace checks, native test logs and completion judgments",
+    "finding": "Correct planned-versus-admitted session counts; qualify model endpoint judgments separately from actual workspace checks.",
+    "resolution": "This timestamped snapshot reports actual nine admitted / eight terminal / one active counts, preserves uncertain and incomplete outcomes, and leaves presentation grades pending. Final results belong to PR #739.",
+    "verdict": "Corrections recorded; original scoped source review remains valid because executable/test files are unchanged."
   }
 }
