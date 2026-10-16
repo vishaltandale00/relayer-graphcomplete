@@ -69,6 +69,8 @@ pub(crate) struct ApiState {
     pub(crate) completion_brokers: CompletionBrokerRegistry,
     pub(crate) completion_observations: CompletionObservations,
     pub(crate) running_child_providers: crate::completion_broker::RunningChildProviders,
+    /// The approval requests with a user's decision posting to the harness right now.
+    pub(crate) approval_decisions_in_flight: Arc<Mutex<std::collections::HashSet<String>>>,
     /// Which run holds each node; runs on one node start in order (#718).
     pub(crate) node_runs: node_runs::NodeRunQueue,
     /// The slots of the app's limit on human-started runs (#720).
@@ -138,6 +140,7 @@ pub(crate) fn router(
         completion_brokers,
         completion_observations: CompletionObservations::default(),
         running_child_providers: Default::default(),
+        approval_decisions_in_flight: Default::default(),
         node_runs: node_runs::NodeRunQueue::default(),
         run_capacity: runtime.run_capacity,
     };

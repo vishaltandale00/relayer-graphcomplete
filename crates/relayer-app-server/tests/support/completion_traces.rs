@@ -108,6 +108,9 @@ struct HarnessControl {
     approval: Mutex<Option<(i64, i64)>>,
     /// Whether the user's decision resolved that request.
     approval_decided: AtomicBool,
+    /// How the decision's answer is lost: "none"; "applied" resolves the request and then
+    /// answers with an unreadable body; "unapplied" answers that body without resolving it.
+    decision_answer_lost: Mutex<&'static str>,
     /// Whether a cancel ended that request as aborted instead, as the host does.
     approval_aborted: AtomicBool,
     /// Whether the host dropped the stream: its run ended and every event was acknowledged.
@@ -628,6 +631,7 @@ impl World {
             cancel_gate: tokio::sync::Semaphore::new(0),
             approval: Mutex::new(None),
             approval_decided: AtomicBool::new(false),
+            decision_answer_lost: Mutex::new("none"),
             approval_aborted: AtomicBool::new(false),
             approval_dropped: AtomicBool::new(false),
             approval_reads_fail: AtomicBool::new(false),
@@ -700,9 +704,16 @@ impl World {
                 routing::post(move || {
                     let control = decision_control.clone();
                     async move {
-                        control.approval_decided.store(true, Ordering::SeqCst);
+                        use axum::response::IntoResponse;
+                        let lost = *control.decision_answer_lost.lock().unwrap();
+                        if lost != "unapplied" {
+                            control.approval_decided.store(true, Ordering::SeqCst);
+                        }
+                        if lost != "none" {
+                            return (StatusCode::OK, "lost").into_response();
+                        }
                         let owner = control.approval.lock().unwrap().expect("an approval was requested");
-                        axum::Json(fixture_approval(owner, false).1)
+                        axum::Json(fixture_approval(owner, false).1).into_response()
                     }
                 }),
             )
@@ -983,6 +994,7 @@ impl World {
             completion_brokers: CompletionBrokerRegistry::new(Some("http://broker".into())),
             completion_observations: CompletionObservations::default(),
             running_child_providers: Default::default(),
+            approval_decisions_in_flight: Default::default(),
             node_runs: Default::default(),
             run_capacity: Default::default(),
         };
@@ -2886,6 +2898,114 @@ async fn a_childs_approval_is_recorded_on_its_own_row_and_its_decision_resumes_i
         *world.harness.prov.lock().unwrap(),
         "cancelled",
         "the approval observer never ends the child"
+    );
+    world.finish().await;
+}
+
+/// A decision whose harness answer is lost may still have resolved the request. It stays the
+/// authority for the resolution event the child's observer then reads, so the child resumes
+/// instead of failing closed. One the harness never applied can be sent again, but no other
+/// decision may replace it.
+#[tokio::test]
+async fn a_childs_decision_whose_answer_was_lost_still_resolves_it() {
+    let world = World::new("child-approval-lost-answer", false).await;
+    let (broker, _lease) = world.broker();
+    *world.harness.start.lock().unwrap() = "ok";
+    *world.harness.approval.lock().unwrap() =
+        Some((world.thread.id.value(), world.child.id.value()));
+    let (status, _) = world
+        .launch(&broker)
+        .await
+        .unwrap_or_else(|error| panic!("launch: {}", error.message()));
+    assert_eq!(status, StatusCode::CREATED);
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while world.child_row().await.completion_status != "waiting_for_approval" {
+        assert!(
+            Instant::now() < deadline,
+            "the child's approval was never recorded"
+        );
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    let decide = |decision| {
+        let mut control = HeaderMap::new();
+        control.insert(
+            header::COOKIE,
+            format!("{}=control", crate::api::CONTROL_COOKIE)
+                .parse()
+                .unwrap(),
+        );
+        decide_approval(
+            State(world.state.clone()),
+            control,
+            Path((
+                world.thread.id.value(),
+                world.child.id.value(),
+                "request-child".to_owned(),
+            )),
+            Json(crate::approval::ApprovalDecisionSubmission {
+                decision,
+                rationale: None,
+            }),
+        )
+    };
+    // The harness never applied it: the same decision can be sent again, and no other.
+    *world.harness.decision_answer_lost.lock().unwrap() = "unapplied";
+    assert!(
+        decide(crate::approval::ApprovalDecision::ApproveOnce)
+            .await
+            .is_err()
+    );
+    assert!(!world.harness.approval_decided.load(Ordering::SeqCst));
+    match decide(crate::approval::ApprovalDecision::Deny).await {
+        Ok(_) => panic!("another decision replaced one that may have resolved the request"),
+        Err(refused) => assert_eq!(
+            axum::response::IntoResponse::into_response(refused).status(),
+            StatusCode::CONFLICT
+        ),
+    }
+
+    // Sent again, the harness applies it but its answer is lost once more.
+    *world.harness.decision_answer_lost.lock().unwrap() = "applied";
+    assert!(
+        decide(crate::approval::ApprovalDecision::ApproveOnce)
+            .await
+            .is_err()
+    );
+    assert!(world.harness.approval_decided.load(Ordering::SeqCst));
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let resolution = loop {
+        if let Some(resolution) = world
+            .product
+            .get_approval("request-child")
+            .await
+            .unwrap()
+            .resolution
+        {
+            break resolution;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "the observer never recorded the lost answer's resolution"
+        );
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    };
+    assert_eq!(resolution.actor, crate::approval::ApprovalActor::User);
+    assert_eq!(world.child_row().await.completion_status, "running");
+    assert!(
+        world.state.approval_decisions.lock().unwrap().is_empty(),
+        "the recorded resolution releases the kept decision"
+    );
+
+    let mut world = world;
+    world
+        .apply(&[serde_json::json!("ChildReturn")], false)
+        .await;
+    let state = world.await_state(|state| state["phase"] == "settled").await;
+    assert_eq!(state["status"], "accepted", "{state}");
+    assert_ne!(
+        *world.harness.prov.lock().unwrap(),
+        "cancelled",
+        "a lost answer never fails the child closed"
     );
     world.finish().await;
 }

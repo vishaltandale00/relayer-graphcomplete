@@ -116,14 +116,20 @@ pub(super) struct ApprovalDecisionResponse {
 struct ApprovalDecisionReservation {
     decisions:
         std::sync::Arc<std::sync::Mutex<std::collections::HashMap<String, ApprovalDecision>>>,
+    in_flight: std::sync::Arc<std::sync::Mutex<std::collections::HashSet<String>>>,
     request_id: String,
-    /// The harness accepted the decision but recording it failed. The decision stays as the
-    /// authority for the resolution event an observer records later, which then removes it.
+    /// The decision may have resolved the request in the harness, but it is not recorded: the
+    /// harness's answer was lost, or recording it failed. The decision stays as the authority
+    /// for the resolution event an observer records later, which then removes it.
     keep: bool,
 }
 
 impl Drop for ApprovalDecisionReservation {
     fn drop(&mut self) {
+        self.in_flight
+            .lock()
+            .expect("approval decision lock poisoned")
+            .remove(&self.request_id);
         if self.keep {
             return;
         }
@@ -178,27 +184,51 @@ pub(super) async fn decide_approval(
         .as_ref()
         .ok_or_else(|| ApiError::invalid("GraphComplete runtime is unavailable"))?;
     let mut reservation = {
-        let mut decisions = state
-            .approval_decisions
+        let mut in_flight = state
+            .approval_decisions_in_flight
             .lock()
             .expect("approval decision lock poisoned");
-        if decisions.contains_key(&request_id) {
+        if in_flight.contains(&request_id) {
             return Err(ApiError::conflict(
                 "approval_decision_in_flight",
                 "approval request already has a decision in flight",
             ));
         }
+        let mut decisions = state
+            .approval_decisions
+            .lock()
+            .expect("approval decision lock poisoned");
+        // A decision whose harness answer was lost may already have resolved the request. It
+        // can be sent again, but no other decision may replace it.
+        let retained = decisions.get(&request_id).copied();
+        if retained.is_some_and(|retained| retained != submission.decision) {
+            return Err(ApiError::conflict(
+                "approval_decision_retained",
+                "an earlier decision on this approval request may already have resolved it",
+            ));
+        }
+        in_flight.insert(request_id.clone());
         decisions.insert(request_id.clone(), submission.decision);
         ApprovalDecisionReservation {
             decisions: state.approval_decisions.clone(),
+            in_flight: state.approval_decisions_in_flight.clone(),
             request_id: request_id.clone(),
-            keep: false,
+            keep: retained.is_some(),
         }
     };
     async {
-        let resolution = runtime
+        let resolution = match runtime
             .decide_approval(thread_id.value(), &request_id, &submission)
-            .await?;
+            .await
+        {
+            Ok(resolution) => resolution,
+            Err(error) => {
+                // Only the harness's own refusal proves the decision was not applied. Any
+                // other failure may have lost the answer to a decision it applied.
+                reservation.keep |= !error.is_host_answer();
+                return Err(error.into());
+            }
+        };
         validate_decision_resolution(&stored.request, submission.decision, &resolution)
             .map_err(|error| ApiError::internal(&error))?;
         let approval = match state
@@ -212,6 +242,7 @@ pub(super) async fn decide_approval(
                 return Err(error.into());
             }
         };
+        reservation.keep = false;
         Ok(Json(ApprovalDecisionResponse { approval }))
     }
     .await
@@ -6111,6 +6142,7 @@ mod tests {
                 .insert("request-1".to_owned(), ApprovalDecision::ApproveOnce);
             drop(ApprovalDecisionReservation {
                 decisions: decisions.clone(),
+                in_flight: Default::default(),
                 request_id: "request-1".into(),
                 keep,
             });
@@ -6624,6 +6656,7 @@ mod tests {
             completion_brokers,
             completion_observations: CompletionObservations::default(),
             running_child_providers: Default::default(),
+            approval_decisions_in_flight: Default::default(),
             node_runs: Default::default(),
             run_capacity: Default::default(),
         };
