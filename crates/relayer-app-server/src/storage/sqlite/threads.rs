@@ -13,14 +13,15 @@ const THREAD_COLUMNS: &str = concat!(
            COALESCE((SELECT group_project_id FROM projects WHERE id=t.project_id),t.project_id),t.checkout_context_json,
            (WITH turn AS (
                 -- The thread's turns. Runs from invoke actions run beside the message turns,
-                -- so the most urgent active turn wins over the latest one. A turn a model
-                -- failure returned to unsent is not running, nor is a preparation that waits
-                -- for its action's Retry. An agent's child never makes the thread running, but
-                -- its approval request is the user's to answer, even after its graph settled.
+                -- so the most urgent active turn wins over the latest one. A run queued behind
+                -- another on its node is active work. A turn a model failure returned to unsent
+                -- is not running, nor is a preparation that waits for its action's Retry. An
+                -- agent's child never makes the thread running, but its approval request is the
+                -- user's to answer, even after its graph settled.
                 SELECT i.sequence,i.completion_status,
                        EXISTS(SELECT 1 FROM action_invocations child WHERE child.result_interaction_id=i.id AND child.agent_invoked=1) AS agent_child,
                        EXISTS(SELECT 1 FROM approval_requests request LEFT JOIN approval_resolutions resolution ON resolution.request_id=request.request_id WHERE request.interaction_id=i.id AND resolution.request_id IS NULL) AS approval_pending,
-                       i.completion_status IN ('not_started','running','submitted','waiting_for_approval')
+                       i.completion_status IN ('not_started','queued','running','submitted','waiting_for_approval')
                          AND NOT (i.completion_status='not_started' AND (SELECT a.outcome FROM interaction_attempts a WHERE a.interaction_id=i.id ORDER BY a.attempt_number DESC LIMIT 1) IS 'model_failed')
                          AND NOT "#,
     recoverable_user_preparation!("i.id"),
@@ -289,7 +290,7 @@ mod icon_tests {
 
     async fn accept(store: &SqliteProductStore, thread: &Thread, proposal: serde_json::Value) {
         let id = store
-            .insert_interaction(thread.id, "Later completion", None, false, false)
+            .insert_interaction(thread.id, "Later completion", None, false)
             .await
             .unwrap()
             .id;
@@ -614,7 +615,7 @@ mod tests {
         // Archive wins: both follow-up admission and retry through the real storage seams fail.
         store.set_thread_archived(thread.id, true).await.unwrap();
         let error = store
-            .insert_interaction(thread.id, "Follow-up", None, false, false)
+            .insert_interaction(thread.id, "Follow-up", None, false)
             .await
             .unwrap_err();
         assert!(error.to_string().contains("thread_archived"));
@@ -626,7 +627,7 @@ mod tests {
         store.set_thread_archived(thread.id, false).await.unwrap();
         // Admission wins: archive refuses, even when a newer interaction is idle.
         let later = store
-            .insert_interaction(thread.id, "Later idle turn", None, false, false)
+            .insert_interaction(thread.id, "Later idle turn", None, false)
             .await
             .unwrap();
         sqlx::query("UPDATE interactions SET completion_status='failed' WHERE id=?1")

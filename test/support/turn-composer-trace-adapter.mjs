@@ -240,7 +240,8 @@ export class TurnComposerWorld {
       }
       case "PostFails": {
         call.phase = "idle";
-        call.post.reject(Object.assign(new Error("interaction_in_progress"), { status: 409 }));
+        // A definite rejection; since #719 no running turn causes one.
+        call.post.reject(Object.assign(new Error("The message was rejected."), { status: 422 }));
         break;
       }
       case "PostLost": {

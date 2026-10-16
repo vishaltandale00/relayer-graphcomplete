@@ -338,6 +338,19 @@ export function shouldPollThreadInteractions(thread, interactions) {
   if (!thread || thread.imported === true) return false;
   return (interactions || []).some((interaction) => (
     String(interaction.threadId) === String(thread.id)
-    && ["not_started", "running", "submitted", "waiting_for_approval"].includes(interaction.completionStatus)
+    && ["not_started", "queued", "running", "submitted", "waiting_for_approval"].includes(interaction.completionStatus)
   ));
+}
+
+/**
+ * The interactions part of a review capture's thread revision. A queued run's reason (#720) is
+ * part of what it shows, so moving from its node's queue to the capacity wait changes it.
+ */
+export function presentationInteractionRevision(interactions = [], threadId) {
+  return interactions
+    .filter((interaction) => String(interaction.threadId) === String(threadId))
+    .sort((left, right) => left.sequence - right.sequence)
+    .map((interaction) => `${interaction.id}:${interaction.sequence}:${interaction.completionStatus}`
+      + (interaction.queueReason ? `:${interaction.queueReason}` : ""))
+    .join(",");
 }

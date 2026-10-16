@@ -1,3 +1,4 @@
+import { expectStructureExample } from "./fixtures/structure-example-checks.mjs";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
@@ -25,10 +26,10 @@ import { RelayerAppServerService } from "../desktop/main/services/relayer-app-se
 import { interactionModelSelection } from "../desktop/renderer/src/model-picker.js";
 import {
   composerDisabledForState,
-  composerStatusForThread,
   latestMessageTurn,
-  productStopTarget,
 } from "../desktop/renderer/src/product-workspace/workspace.js";
+import { humanTurns } from "../desktop/renderer/src/product-workspace/model.js";
+import { interactionRunControl, threadActiveRuns } from "../desktop/renderer/src/product-workspace/run-state.js";
 import {
   RECURSIVE_FIXTURE_CHILD_TASK as CHILD_TASK,
   recursiveCompleteFixtureFactory as recursiveFixtureFactory,
@@ -334,10 +335,16 @@ describe("recursive complete end to end", () => {
     }
     const detail = await waitForStatus(stack.session, thread.id, attached ? 1 : 0, "accepted", observed);
     const resultTurn = detail.interactions[attached ? 1 : 0];
+    const loadStructureLayer = async (layerId) => {
+      const response = await fetch(new URL(`/api/control/interactions/${resultTurn.graphNodeId}/layers/${layerId}`, stack.runtimeSession.graphUrl), {
+        headers: { authorization: `Bearer ${stack.runtimeSession.graphControlToken}` },
+      });
+      expect(response.ok).toBe(true);
+      return response.json();
+    };
     if (!temporal) {
       const root = detail.interactions[0].completionOutput.rootLayer;
-      expect(root.nodes.map(node => node.title)).toEqual(["Result"]);
-      expect(root.actions).toEqual([]);
+      await expectStructureExample(root, loadStructureLayer);
       expect(root.nodes[0].authoredDetail.mounts).toEqual([]);
       expect(observed.advanced).toBeUndefined();
       return;
@@ -359,6 +366,7 @@ describe("recursive complete end to end", () => {
     expect(finalCurrent).toMatchObject({ lifecycle: "succeeded", headRevision: (withPrior ? 3 : 2) + (later ? 1 : 0) });
     expect(finalCurrent.currentLayerId).not.toBe(observed.advanced.currentLayerId);
     const finalLayer = resultTurn.completionOutput.rootLayer;
+    await expectStructureExample(finalLayer, loadStructureLayer);
     expect(finalLayer.nodes[0].authoredDetail.mounts[0].capability.kind).toBe("reference");
     const earlier = finalLayer.actions.find(action => action.label === "Earlier findings");
     expect(earlier.targetLayerId).toBe(observed.advanced.currentLayerId);
@@ -531,15 +539,16 @@ describe("recursive complete end to end", () => {
     expect(child.graphNodeId).toBe(observed.preparedChild);
 
     // The renderer reads the real thread view: the child is marked, so the composer follows
-    // the accepted root, Stop has no target, and the next turn inherits the root's model.
+    // the accepted root, the child offers no Stop, nothing is left for Stop all, and the next
+    // turn inherits the root's model.
     const view = await productRequest(session, `/api/state?threadId=${thread.id}`);
     expect(view.actionInvocations.find((invocation) => invocation.resultInteractionId === child.id))
       .toMatchObject({ agentInvoked: true });
     const viewedThread = { id: thread.id };
-    expect(composerStatusForThread(view, viewedThread)).toBe("accepted");
-    expect(composerDisabledForState(composerStatusForThread(view, viewedThread))).toBe(false);
+    expect(composerDisabledForState()).toBe(false);
     expect(latestMessageTurn(view, viewedThread).id).toBe(detail.interactions[0].id);
-    expect(productStopTarget(view, viewedThread)).toBeNull();
+    expect(interactionRunControl(view.interactions.find((turn) => turn.id === child.id), view.actionInvocations)).toBeNull();
+    expect(threadActiveRuns(humanTurns(view, viewedThread), view.actionInvocations)).toEqual([]);
     // The next turn's model is inherited from this turn (selectionForNextInteraction's input).
     expect(interactionModelSelection(latestMessageTurn(view, viewedThread))).toEqual(selection);
 

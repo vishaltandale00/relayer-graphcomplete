@@ -38,7 +38,7 @@ impl SqliteProductStore {
         graph_node_id: i64,
     ) -> Result<Option<Interaction>, StorageError> {
         let row = sqlx::query(
-            "SELECT i.id,i.thread_id,i.sequence,i.text,i.created_at,i.graph_node_id,i.completion_status,i.harness_configuration_name,i.harness_configuration_digest,i.completion_output_json,i.completion_error,i.permission_profile_id,i.effective_execution_digest,i.effective_permission_receipt_json,i.model_provider_id,i.provider_model_id,i.model_family_id,a.id,a.attempt_number,a.started_at,a.finished_at,a.family_id,a.family_revision,a.harness_configuration_name,a.harness_configuration_revision,a.harness_configuration_digest,a.provider_id,a.adapter_id,a.adapter_implementation_version,a.model_id,a.access_contract,a.outcome,a.failure_category,a.effect_boundary,a.attempt_admission_id,a.admitted_plan_json,a.admitted_plan_digest,EXISTS(SELECT 1 FROM interaction_stop_requests stop WHERE stop.interaction_id=i.id), (SELECT error FROM interaction_stop_requests stop WHERE stop.interaction_id=i.id) FROM interactions i LEFT JOIN interaction_attempts a ON a.id=(SELECT latest.id FROM interaction_attempts latest WHERE latest.interaction_id=i.id ORDER BY latest.attempt_number DESC LIMIT 1) WHERE i.graph_node_id=?1",
+            "SELECT i.id,i.thread_id,i.sequence,i.text,i.created_at,i.graph_node_id,i.completion_status,i.harness_configuration_name,i.harness_configuration_digest,i.completion_output_json,i.completion_error,i.permission_profile_id,i.effective_execution_digest,i.effective_permission_receipt_json,i.model_provider_id,i.provider_model_id,i.model_family_id,a.id,a.attempt_number,a.started_at,a.finished_at,a.family_id,a.family_revision,a.harness_configuration_name,a.harness_configuration_revision,a.harness_configuration_digest,a.provider_id,a.adapter_id,a.adapter_implementation_version,a.model_id,a.access_contract,a.outcome,a.failure_category,a.effect_boundary,a.attempt_admission_id,a.admitted_plan_json,a.admitted_plan_digest,EXISTS(SELECT 1 FROM interaction_stop_requests stop WHERE stop.interaction_id=i.id), (SELECT error FROM interaction_stop_requests stop WHERE stop.interaction_id=i.id),EXISTS(SELECT 1 FROM run_capacity_waits wait WHERE wait.interaction_id=i.id AND i.completion_status='queued') FROM interactions i LEFT JOIN interaction_attempts a ON a.id=(SELECT latest.id FROM interaction_attempts latest WHERE latest.interaction_id=i.id ORDER BY latest.attempt_number DESC LIMIT 1) WHERE i.graph_node_id=?1",
         )
         .bind(graph_node_id)
         .fetch_optional(&self.pool)
@@ -236,7 +236,7 @@ impl SqliteProductStore {
     ) -> Result<Option<Interaction>, StorageError> {
         let mut connection = self.pool.acquire().await?;
         sqlx::query(
-            "SELECT i.id,i.thread_id,i.sequence,i.text,i.created_at,i.graph_node_id,i.completion_status,i.harness_configuration_name,i.harness_configuration_digest,i.completion_output_json,i.completion_error,i.permission_profile_id,i.effective_execution_digest,i.effective_permission_receipt_json,i.model_provider_id,i.provider_model_id,i.model_family_id,a.id,a.attempt_number,a.started_at,a.finished_at,a.family_id,a.family_revision,a.harness_configuration_name,a.harness_configuration_revision,a.harness_configuration_digest,a.provider_id,a.adapter_id,a.adapter_implementation_version,a.model_id,a.access_contract,a.outcome,a.failure_category,a.effect_boundary,a.attempt_admission_id,a.admitted_plan_json,a.admitted_plan_digest,EXISTS(SELECT 1 FROM interaction_stop_requests stop WHERE stop.interaction_id=i.id), (SELECT error FROM interaction_stop_requests stop WHERE stop.interaction_id=i.id) FROM interactions i JOIN threads t ON t.id=i.thread_id LEFT JOIN interaction_attempts a ON a.id=(SELECT latest.id FROM interaction_attempts latest WHERE latest.interaction_id=i.id ORDER BY latest.attempt_number DESC LIMIT 1) WHERE i.id=?1 AND (t.conversation_import_id IS NULL OR EXISTS(SELECT 1 FROM conversation_imports ci WHERE ci.id=t.conversation_import_id AND ci.state='published'))",
+            "SELECT i.id,i.thread_id,i.sequence,i.text,i.created_at,i.graph_node_id,i.completion_status,i.harness_configuration_name,i.harness_configuration_digest,i.completion_output_json,i.completion_error,i.permission_profile_id,i.effective_execution_digest,i.effective_permission_receipt_json,i.model_provider_id,i.provider_model_id,i.model_family_id,a.id,a.attempt_number,a.started_at,a.finished_at,a.family_id,a.family_revision,a.harness_configuration_name,a.harness_configuration_revision,a.harness_configuration_digest,a.provider_id,a.adapter_id,a.adapter_implementation_version,a.model_id,a.access_contract,a.outcome,a.failure_category,a.effect_boundary,a.attempt_admission_id,a.admitted_plan_json,a.admitted_plan_digest,EXISTS(SELECT 1 FROM interaction_stop_requests stop WHERE stop.interaction_id=i.id), (SELECT error FROM interaction_stop_requests stop WHERE stop.interaction_id=i.id),EXISTS(SELECT 1 FROM run_capacity_waits wait WHERE wait.interaction_id=i.id AND i.completion_status='queued') FROM interactions i JOIN threads t ON t.id=i.thread_id LEFT JOIN interaction_attempts a ON a.id=(SELECT latest.id FROM interaction_attempts latest WHERE latest.interaction_id=i.id ORDER BY latest.attempt_number DESC LIMIT 1) WHERE i.id=?1 AND (t.conversation_import_id IS NULL OR EXISTS(SELECT 1 FROM conversation_imports ci WHERE ci.id=t.conversation_import_id AND ci.state='published'))",
         )
         .bind(interaction_id.value())
         .fetch_optional(&mut *connection)
@@ -246,16 +246,18 @@ impl SqliteProductStore {
             .transpose()
     }
 
-    /// Thread ?1's latest accepted human turns created before interaction ?2, oldest first, at
-    /// most [`FRESH_RUN_HISTORY_LIMIT`]. Older turns stay in the thread's graph, where the run can
-    /// search for them. An agent's child belongs to its parent's work, not to the conversation.
+    /// Thread ?1's latest accepted human turns other than interaction ?2, oldest first, at most
+    /// [`FRESH_RUN_HISTORY_LIMIT`]. It is read when the run starts, so a run that waited in its
+    /// node's queue sees what was accepted while it waited, including the run ahead of it.
+    /// Older turns stay in the thread's graph, where the run can search for them. An agent's
+    /// child belongs to its parent's work, not to the conversation.
     pub(crate) async fn accepted_thread_history(
         &self,
         thread_id: ThreadId,
         excluding: InteractionId,
     ) -> Result<Vec<ThreadHistoryEntry>, StorageError> {
         let mut rows: Vec<(i64, Option<String>)> = sqlx::query_as(
-            "SELECT turn.graph_node_id,turn.completion_output_json FROM interactions turn WHERE turn.thread_id=?1 AND turn.sequence<(SELECT sequence FROM interactions WHERE id=?2) AND turn.completion_status='accepted' AND turn.graph_node_id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM action_invocations child WHERE child.result_interaction_id=turn.id AND child.agent_invoked=1) ORDER BY turn.sequence DESC LIMIT ?3",
+            "SELECT turn.graph_node_id,turn.completion_output_json FROM interactions turn WHERE turn.thread_id=?1 AND turn.id!=?2 AND turn.completion_status='accepted' AND turn.graph_node_id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM action_invocations child WHERE child.result_interaction_id=turn.id AND child.agent_invoked=1) ORDER BY turn.sequence DESC LIMIT ?3",
         )
         .bind(thread_id.value())
         .bind(excluding.value())
@@ -274,22 +276,6 @@ impl SqliteProductStore {
             .collect())
     }
 
-    /// Whether interaction ?1 is a run an invoke action started. This is the admission gate's own
-    /// test (`MESSAGE_TURN_IN_PROGRESS`), so a run the gate admits beside a message turn always
-    /// starts a fresh native session.
-    pub(crate) async fn is_invoked_run(
-        &self,
-        interaction_id: InteractionId,
-    ) -> Result<bool, StorageError> {
-        sqlx::query_scalar(
-            "SELECT EXISTS(SELECT 1 FROM action_invocations WHERE result_interaction_id=?1)",
-        )
-        .bind(interaction_id.value())
-        .fetch_one(&self.pool)
-        .await
-        .map_err(Into::into)
-    }
-
     #[cfg(test)]
     pub(crate) async fn list_interactions(
         &self,
@@ -305,7 +291,6 @@ impl SqliteProductStore {
         text: &str,
         model_selection: Option<&InteractionModelSelection>,
         require_model_selection: bool,
-        enforce_single_active_interaction: bool,
     ) -> Result<Interaction, StorageError> {
         let mut transaction = self.pool.begin_with("BEGIN IMMEDIATE").await?;
         let (previous_timestamp, permission_profile_id, harness_id): (String, String, String) =
@@ -313,20 +298,6 @@ impl SqliteProductStore {
                 .bind(thread_id.value())
                 .fetch_one(&mut *transaction)
                 .await?;
-        if enforce_single_active_interaction {
-            let interaction_in_progress: bool = sqlx::query_scalar(super::MESSAGE_TURN_IN_PROGRESS)
-                .bind(thread_id.value())
-                .fetch_one(&mut *transaction)
-                .await?;
-            if interaction_in_progress {
-                return Err(StorageError::Catalog(
-                    crate::product::CatalogError::invalid(
-                        "interaction_in_progress",
-                        "Wait for the active interaction to finish.",
-                    ),
-                ));
-            }
-        }
         let model_selection = match model_selection {
             Some(selection) => Some(selection.clone()),
             None => sqlx::query(super::LATEST_HUMAN_TURN_MODEL)
@@ -389,6 +360,7 @@ impl SqliteProductStore {
         let interaction = Interaction {
             stop_requested: false,
             stop_error: None,
+            waiting_for_capacity: false,
             id: InteractionId::from_database(result.last_insert_rowid()),
             thread_id,
             sequence,
@@ -406,6 +378,8 @@ impl SqliteProductStore {
             completion_error: None,
             latest_attempt: None,
         };
+        // An earlier message a model failure returned to unsent can no longer be retried (#719).
+        super::fail_stale_returned_messages(&mut transaction, thread_id.value()).await?;
         transaction.commit().await?;
         Ok(interaction)
     }
@@ -963,6 +937,11 @@ impl SqliteProductStore {
                 .bind(failure.interaction_id.value())
                 .execute(&mut *transaction)
                 .await?;
+            super::fail_stale_returned_messages_beside(
+                &mut transaction,
+                failure.interaction_id.value(),
+            )
+            .await?;
         }
         transaction.commit().await?;
         Ok(())
@@ -1017,6 +996,8 @@ impl SqliteProductStore {
             .bind(interaction_id.value())
             .execute(&mut *transaction)
             .await?;
+        super::fail_stale_returned_messages_beside(&mut transaction, interaction_id.value())
+            .await?;
         transaction.commit().await?;
         Ok(())
     }
@@ -1027,7 +1008,7 @@ pub(super) async fn fetch_interactions(
     thread_id: ThreadId,
 ) -> Result<Vec<Interaction>, StorageError> {
     let rows = sqlx::query(
-        "SELECT i.id,i.thread_id,i.sequence,i.text,i.created_at,i.graph_node_id,i.completion_status,i.harness_configuration_name,i.harness_configuration_digest,i.completion_output_json,i.completion_error,i.permission_profile_id,i.effective_execution_digest,i.effective_permission_receipt_json,i.model_provider_id,i.provider_model_id,i.model_family_id,a.id,a.attempt_number,a.started_at,a.finished_at,a.family_id,a.family_revision,a.harness_configuration_name,a.harness_configuration_revision,a.harness_configuration_digest,a.provider_id,a.adapter_id,a.adapter_implementation_version,a.model_id,a.access_contract,a.outcome,a.failure_category,a.effect_boundary,a.attempt_admission_id,a.admitted_plan_json,a.admitted_plan_digest,EXISTS(SELECT 1 FROM interaction_stop_requests stop WHERE stop.interaction_id=i.id), (SELECT error FROM interaction_stop_requests stop WHERE stop.interaction_id=i.id) FROM interactions i LEFT JOIN interaction_attempts a ON a.id=(SELECT latest.id FROM interaction_attempts latest WHERE latest.interaction_id=i.id ORDER BY latest.attempt_number DESC LIMIT 1) WHERE i.thread_id=?1 ORDER BY i.sequence ASC",
+        "SELECT i.id,i.thread_id,i.sequence,i.text,i.created_at,i.graph_node_id,i.completion_status,i.harness_configuration_name,i.harness_configuration_digest,i.completion_output_json,i.completion_error,i.permission_profile_id,i.effective_execution_digest,i.effective_permission_receipt_json,i.model_provider_id,i.provider_model_id,i.model_family_id,a.id,a.attempt_number,a.started_at,a.finished_at,a.family_id,a.family_revision,a.harness_configuration_name,a.harness_configuration_revision,a.harness_configuration_digest,a.provider_id,a.adapter_id,a.adapter_implementation_version,a.model_id,a.access_contract,a.outcome,a.failure_category,a.effect_boundary,a.attempt_admission_id,a.admitted_plan_json,a.admitted_plan_digest,EXISTS(SELECT 1 FROM interaction_stop_requests stop WHERE stop.interaction_id=i.id), (SELECT error FROM interaction_stop_requests stop WHERE stop.interaction_id=i.id),EXISTS(SELECT 1 FROM run_capacity_waits wait WHERE wait.interaction_id=i.id AND i.completion_status='queued') FROM interactions i LEFT JOIN interaction_attempts a ON a.id=(SELECT latest.id FROM interaction_attempts latest WHERE latest.interaction_id=i.id ORDER BY latest.attempt_number DESC LIMIT 1) WHERE i.thread_id=?1 ORDER BY i.sequence ASC",
     )
     .bind(thread_id.value())
     .fetch_all(connection)
@@ -1057,6 +1038,7 @@ pub(super) fn interaction_from_row(row: &SqliteRow) -> Result<Interaction, Stora
         completion_status: row.try_get(6)?,
         stop_requested: row.try_get(37)?,
         stop_error: row.try_get(38)?,
+        waiting_for_capacity: row.try_get(39)?,
         harness_configuration_name: row.try_get(7)?,
         harness_configuration_digest: row.try_get(8)?,
         completion_output: row
@@ -1168,29 +1150,25 @@ mod tests {
             .await
             .unwrap();
 
-        let queued = store
-            .insert_interaction(thread.id, "Queued", Some(&second_model), true, true)
+        // Messages run in parallel (#719): one sent while the first still runs is admitted, and
+        // one sent with no selection inherits the latest human turn's model even while it runs.
+        let beside = store
+            .insert_interaction(thread.id, "Beside", None, true)
             .await
-            .err()
-            .unwrap();
-        match queued {
-            StorageError::Catalog(error) => assert_eq!(error.code(), "interaction_in_progress"),
-            other => panic!("unexpected error: {other}"),
-        }
-        mark_interaction_accepted(&store, thread.root_interaction_id).await;
-
+            .unwrap_or_else(|error| panic!("a running message held the thread: {error}"));
+        assert_eq!(beside.model_selection, Some(first_model));
         let explicit = store
-            .insert_interaction(thread.id, "Explicit", Some(&second_model), true, true)
+            .insert_interaction(thread.id, "Explicit", Some(&second_model), true)
             .await
             .unwrap();
-        mark_interaction_accepted(&store, explicit.id).await;
         let inherited = store
-            .insert_interaction(thread.id, "Inherited", None, true, true)
+            .insert_interaction(thread.id, "Inherited", None, true)
             .await
             .unwrap();
 
-        assert_eq!(explicit.sequence, 2);
-        assert_eq!(inherited.sequence, 3);
+        assert_eq!(beside.sequence, 2);
+        assert_eq!(explicit.sequence, 3);
+        assert_eq!(inherited.sequence, 4);
         assert_eq!(inherited.model_selection, Some(second_model));
         store.pool.close().await;
     }
@@ -1225,7 +1203,7 @@ mod tests {
             .unwrap();
         mark_interaction_accepted(&store, thread.root_interaction_id).await;
         store
-            .insert_interaction(thread.id, "Last-known follow-up", None, true, true)
+            .insert_interaction(thread.id, "Last-known follow-up", None, true)
             .await
             .unwrap();
         assert_eq!(store.list_interactions(thread.id).await.unwrap().len(), 2);
@@ -1585,11 +1563,10 @@ mod tests {
         store.pool.close().await;
     }
 
-    /// Only message turns hold the thread, because they resume its native root session. A run
-    /// started by an invoke action starts fresh: a user's invoke and an agent's child both run
-    /// beside message turns.
+    /// No run holds the thread (#719): every root run starts a fresh native session, so a
+    /// message is admitted beside an agent's child, a user's invoke and another message.
     #[tokio::test]
-    async fn only_message_turns_hold_the_thread() {
+    async fn no_run_holds_the_thread() {
         let temporary = tempfile::Builder::new()
             .prefix("relayer-human-turn-gate-")
             .tempdir()
@@ -1643,7 +1620,7 @@ mod tests {
             other => panic!("the product stopped an agent's child: {other:?}"),
         }
         let next = store
-            .insert_interaction(thread.id, "Next question", None, true, true)
+            .insert_interaction(thread.id, "Next question", None, true)
             .await
             .unwrap_or_else(|error| panic!("a running child held the thread: {error}"));
         assert_eq!(
@@ -1653,16 +1630,17 @@ mod tests {
             Some("first-model"),
             "a new human turn inherits the latest human turn's model, not the child's"
         );
-        let held = store
-            .insert_interaction(thread.id, "Queued", None, true, true)
+        sqlx::query("UPDATE interactions SET completion_status='running' WHERE id=?1")
+            .bind(next.id.value())
+            .execute(&store.pool)
             .await
-            .err()
             .unwrap();
-        match held {
-            StorageError::Catalog(error) => assert_eq!(error.code(), "interaction_in_progress"),
-            other => panic!("unexpected error: {other}"),
-        }
+        let beside = store
+            .insert_interaction(thread.id, "Beside the running message", None, true)
+            .await
+            .unwrap_or_else(|error| panic!("a running message held the thread: {error}"));
         mark_interaction_accepted(&store, next.id).await;
+        mark_interaction_accepted(&store, beside.id).await;
 
         let invoked = match store
             .insert_action_invocation(thread.root_interaction_id, 42, "User action")
@@ -1680,7 +1658,7 @@ mod tests {
             .await
             .unwrap();
         let after_action = store
-            .insert_interaction(thread.id, "After the action", None, true, true)
+            .insert_interaction(thread.id, "After the action", None, true)
             .await
             .unwrap_or_else(|error| panic!("a user's running invoke held the thread: {error}"));
         sqlx::query("UPDATE interactions SET completion_status='running' WHERE id=?1")
@@ -1688,15 +1666,10 @@ mod tests {
             .execute(&store.pool)
             .await
             .unwrap();
-        let held = store
-            .insert_interaction(thread.id, "Second message", None, true, true)
+        store
+            .insert_interaction(thread.id, "Second message", None, true)
             .await
-            .err()
-            .unwrap();
-        match held {
-            StorageError::Catalog(error) => assert_eq!(error.code(), "interaction_in_progress"),
-            other => panic!("unexpected error: {other}"),
-        }
+            .unwrap_or_else(|error| panic!("running message and invoke held the thread: {error}"));
         // The user's own action result stays stoppable by the product.
         store
             .request_interaction_stop(thread.id, invoked.id)
@@ -1706,8 +1679,9 @@ mod tests {
     }
 
     /// A fresh run is pointed at its thread's accepted human turns, in order, with each turn's
-    /// returned layer, and reads them through the graph. Unfinished turns, the run itself, and an agent's children are not part of
-    /// the thread's conversation.
+    /// returned layer, and reads them through the graph. Unfinished turns, the run itself, and
+    /// an agent's children are not part of the thread's conversation. The history is read when
+    /// the run starts, so a turn accepted while the run was queued is in it.
     #[tokio::test]
     async fn accepted_thread_history_lists_accepted_human_turns_in_order() {
         let temporary = tempfile::Builder::new()
@@ -1761,7 +1735,7 @@ mod tests {
             _ => panic!("the invoke's result is new"),
         };
         let running = store
-            .insert_interaction(thread.id, "Still running", None, true, false)
+            .insert_interaction(thread.id, "Still running", None, true)
             .await
             .unwrap();
         for (interaction, node) in [(child.id, 711), (invoked.id, 721)] {
@@ -1797,6 +1771,26 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(without_invoked.len(), 1);
+        // A run queued behind another on its node starts after that run is accepted, and the
+        // run ahead may have been created after it. It is pointed at that run's result too.
+        sqlx::query(
+            "INSERT INTO interactions(thread_id,sequence,text,created_at,completion_status,permission_profile_id,graph_node_id) VALUES (?1,50,'Accepted while queued','9','accepted','auto',731)",
+        )
+        .bind(thread.id.value())
+        .execute(&store.pool)
+        .await
+        .unwrap();
+        let started_after_queueing = store
+            .accepted_thread_history(thread.id, invoked.id)
+            .await
+            .unwrap();
+        assert_eq!(
+            started_after_queueing
+                .iter()
+                .map(|entry| entry.interaction_node_id)
+                .collect::<Vec<_>>(),
+            [701, 731]
+        );
 
         // However long the thread, a fresh run is pointed at only its latest turns, oldest first.
         for index in 0..=FRESH_RUN_HISTORY_LIMIT {

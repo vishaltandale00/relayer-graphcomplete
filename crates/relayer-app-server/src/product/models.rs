@@ -131,6 +131,8 @@ pub(crate) struct Interaction {
     pub(crate) completion_status: String,
     pub(crate) stop_requested: bool,
     pub(crate) stop_error: Option<String>,
+    /// A `queued` run that waits for capacity (#720), not behind a run on its node.
+    pub(crate) waiting_for_capacity: bool,
     pub(crate) harness_configuration_name: Option<String>,
     pub(crate) harness_configuration_digest: Option<String>,
     pub(crate) permission_profile_id: String,
@@ -157,6 +159,14 @@ pub(crate) struct InteractionContextIntent {
     pub(crate) target: InteractionContextTarget,
     #[serde(default)]
     pub(crate) annotations: Vec<String>,
+}
+
+/// The queue a user's run waits in: the node it was started on, in its thread (#718). Runs on
+/// one node start in order; runs on different nodes run at once.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) struct NodeRunKey {
+    pub(crate) thread_id: ThreadId,
+    pub(crate) node_id: i64,
 }
 
 /// One accepted human turn of a thread, as graph pointers. A run that starts a fresh native

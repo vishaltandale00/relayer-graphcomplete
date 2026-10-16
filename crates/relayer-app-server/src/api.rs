@@ -9,7 +9,9 @@ mod input_operator_sessions;
 mod interaction_graph;
 mod live_answers;
 mod model_settings;
+mod node_runs;
 mod projects;
+mod run_capacity;
 mod state;
 pub(crate) mod threads;
 mod types;
@@ -22,6 +24,7 @@ use crate::{
 };
 use auth::DesktopSessionAuthenticator;
 use axum::{Router, routing::get};
+pub(crate) use run_capacity::RunCapacity;
 use std::{
     collections::{HashMap, HashSet},
     path::PathBuf,
@@ -66,6 +69,10 @@ pub(crate) struct ApiState {
     pub(crate) completion_brokers: CompletionBrokerRegistry,
     pub(crate) completion_observations: CompletionObservations,
     pub(crate) running_child_providers: crate::completion_broker::RunningChildProviders,
+    /// Which run holds each node; runs on one node start in order (#718).
+    pub(crate) node_runs: node_runs::NodeRunQueue,
+    /// The slots of the app's limit on human-started runs (#720).
+    pub(crate) run_capacity: RunCapacity,
 }
 
 pub(crate) struct ApiRuntime {
@@ -79,6 +86,7 @@ pub(crate) struct ApiRuntime {
     pub(crate) export_producer: crate::conversation_export::ExportProducer,
     pub(crate) execution_lease_reconciler: Option<crate::app_server::ExecutionLeaseReconciler>,
     pub(crate) completion_broker_origin: Option<String>,
+    pub(crate) run_capacity: RunCapacity,
 }
 
 pub(crate) fn router(
@@ -130,6 +138,8 @@ pub(crate) fn router(
         completion_brokers,
         completion_observations: CompletionObservations::default(),
         running_child_providers: Default::default(),
+        node_runs: node_runs::NodeRunQueue::default(),
+        run_capacity: runtime.run_capacity,
     };
     if state.runtime.is_some() {
         let recovery_state = state.clone();

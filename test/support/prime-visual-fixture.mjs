@@ -1,9 +1,8 @@
 import { createServer } from "node:http";
 import { spawn } from "node:child_process";
 import { join, resolve } from "node:path";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
-import assert from "node:assert/strict";
 import { PrimeAgentHarness } from "../../packages/harness-host/dist/implementations/prime-agent.js";
 
 // Replaces inference only. The real factory, run context, Python client, compiler,
@@ -23,14 +22,6 @@ export function primeVisualFixtureFactory(context) {
         const sessionFile = join(directory, `${randomUUID()}.json`);
         const history = { schemaVersion: 1, threadId: context.threadId, prompts: [] };
         writeFileSync(sessionFile, JSON.stringify(history), { mode: 0o600 });
-        return { sessionFile, history };
-      },
-      open: (sessionFile) => {
-        const history = JSON.parse(readFileSync(sessionFile, "utf8"));
-        assert.equal(history.schemaVersion, 1);
-        assert.equal(history.threadId, context.threadId);
-        assert.ok(Array.isArray(history.prompts) && history.prompts.length > 0, "Reopened native fixture history must contain the prior completed prompt");
-        assert.ok(history.prompts.every(prompt => typeof prompt === "string" && prompt.includes("Current interaction node:")), "Reopened history must contain actual Prime harness prompts");
         return { sessionFile, history };
       },
     },
@@ -112,7 +103,6 @@ export function primeVisualFixtureFactory(context) {
           }
           persistPrompt(prompt);
         },
-        async reload() {},
         async waitForRlmQuiescence() {},
         async abort() { process?.kill(); },
         dispose() { process?.kill(); },

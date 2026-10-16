@@ -76,8 +76,9 @@ fn completion_asset_gate(
 #[derive(Debug, Clone, Copy, Default, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
 enum GraphSearchCapability {
-    #[default]
     Disabled,
+    // Omission grants bounded search; configurations opt out with an explicit `disabled`.
+    #[default]
     QueryV1,
 }
 

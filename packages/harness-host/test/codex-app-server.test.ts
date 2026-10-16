@@ -14,47 +14,12 @@ import {
 } from "../src/implementations/codex-app-server.js";
 import { loadHarnessConfiguration } from "../src/configuration.js";
 import { fileURLToPath } from "node:url";
-import { CodexBasicHarness, buildLayeredNavigationPrompt } from "../src/implementations/codex-basic.js";
+import { CodexBasicHarness } from "../src/implementations/codex-basic.js";
 import { createNoopHarnessTraceSink } from "../src/trace.js";
 import type { HarnessRunContext } from "../src/types.js";
 import type { HarnessApprovalChannel } from "../src/approval-coordinator.js";
 
 describe("Codex app-server transport", () => {
-  it.each([true, false])("checks restored legacy history through the real adapter and bridge (matches=%s)", async (matches) => {
-    const configuration = await loadHarnessConfiguration(fileURLToPath(new URL("../../../harnesses/codex-basic.yaml", import.meta.url)));
-    const prior = legacyRunContext(17, 'Original request with "quotes"\nand a second line');
-    const nativeHistory = buildLayeredNavigationPrompt(matches ? prior : legacyRunContext(29, "Foreign request"), "@relayer/graph-client");
-    const fake = new FakeCodexProcess((message) => {
-      if (message.method === "initialize") fake.respond(message.id, {});
-      if (message.method === "thread/resume") fake.respond(message.id, { thread: { id: "legacy-thread", turns: [{ items: [{ type: "userMessage", content: [{ type: "text", text: nativeHistory }] }] }] } });
-      if (message.method === "turn/start") {
-        fake.respond(message.id, { turn: { id: "turn-1", status: "inProgress" } });
-        queueMicrotask(() => fake.notify("turn/completed", { threadId: "legacy-thread", turn: { id: "turn-1", status: "completed", error: null } }));
-      }
-    });
-    const savedState = { codexThreadId: "legacy-thread" };
-    const harness = new CodexBasicHarness({ threadId: 1, configuration, workingDirectory: "/workspace", permissionProfileId: "auto", permissionBinding: configuration.permissionBindings.auto!, savedState }, {
-      codexPathOverride: process.execPath,
-      runAppServerTurn: (turn) => runCodexAppServerTurn({ ...turn, spawnProcess: fake.spawnProcess, killProcessGroup: (_pid, signal) => { fake.kill(signal as NodeJS.Signals); return true; } }),
-    });
-    expect(harness.state()).toEqual(savedState);
-    const run = harness.complete({
-      ...legacyRunContext(31, "Follow-up"), requireNativeContinuity: true,
-      nativeHistoryAnchor: { interactionNodeId: 17, message: prior.inputGraph.detail },
-      model: { providerId: "codex", adapterId: "codex-subscription", modelId: "gpt-test" },
-      access: { kind: "managed-runtime", contract: "managed-runtime@1", runtimeId: "codex", version: "0.147.0", adapterImplementationVersion: "1", providerId: "codex", adapterId: "codex-subscription", executable: process.execPath, environment: { CODEX_HOME: "/isolated/original" } },
-    });
-    if (matches) {
-      await run;
-      expect(harness.state()).toMatchObject({ codexThreadId: "legacy-thread", codexThreadPersonalPresentationVersionId: null, codexSessionIdentity: expect.any(String) });
-    } else {
-      await expect(run).rejects.toThrow("could not be matched");
-      expect(harness.state()).toEqual(savedState);
-    }
-    expect(fake.messages.filter(message => message.method === "turn/start")).toHaveLength(matches ? 1 : 0);
-    expect(fake.messages.filter(message => message.method === "thread/start")).toHaveLength(0);
-  });
-
   it("rejects a missing explicit Codex executable before spawning", async () => {
     const fake = new FakeCodexProcess(() => undefined);
     const { codexPathOverride: _codexPathOverride, ...withoutExecutable } = options(fake);
@@ -124,33 +89,14 @@ describe("Codex app-server transport", () => {
 
     expect(child.kill).toHaveBeenCalledWith("SIGKILL");
   });
-  it.each([true, false])("validates legacy native history before turn start (matches=%s)", async (matches) => {
+  it("initializes, starts a thread, completes a turn, and shuts down", async () => {
     const fake = new FakeCodexProcess((message) => {
       if (message.method === "initialize") fake.respond(message.id, { userAgent: "codex" });
-      if (message.method === "thread/resume") fake.respond(message.id, { thread: { id: "thread-existing", turns: [{ items: [{ type: "userMessage", content: [{ type: "text", text: matches ? 'Current interaction node: 17\n"message": "Original request"' : 'Current interaction node: 19\n"message": "Foreign request"' }] }] }] } });
-      if (message.method === "turn/start") {
-        fake.respond(message.id, { turn: { id: "turn-1", status: "inProgress" } });
-        queueMicrotask(() => fake.notify("turn/completed", { threadId: "thread-existing", turn: { id: "turn-1", status: "completed", error: null } }));
-      }
-    });
-    const onThreadId = vi.fn();
-    const result = runCodexAppServerTurn(options(fake, { savedThreadId: "thread-existing", legacyHistoryAnchor: { interactionNodeId: 17, message: "Original request" }, onThreadId }));
-    if (matches) { await result; expect(onThreadId).toHaveBeenCalledWith("thread-existing"); }
-    else { await expect(result).rejects.toThrow("could not be matched"); expect(onThreadId).not.toHaveBeenCalled(); }
-    expect(fake.messages.some(message => message.method === "turn/start")).toBe(matches);
-  });
-
-  it.each([
-    [undefined, "thread/start"],
-    ["thread-existing", "thread/resume"],
-  ] as const)("initializes, %s a thread, completes a turn, and shuts down", async (savedThreadId, threadMethod) => {
-    const fake = new FakeCodexProcess((message) => {
-      if (message.method === "initialize") fake.respond(message.id, { userAgent: "codex" });
-      if (message.method === threadMethod) fake.respond(message.id, { thread: { id: savedThreadId ?? "thread-new" } });
+      if (message.method === "thread/start") fake.respond(message.id, { thread: { id: "thread-new" } });
       if (message.method === "turn/start") {
         fake.respond(message.id, { turn: { id: "turn-1", status: "inProgress" } });
         queueMicrotask(() => fake.notify("turn/completed", {
-          threadId: savedThreadId ?? "thread-new",
+          threadId: "thread-new",
           turn: { id: "turn-1", status: "completed", error: null },
         }));
       }
@@ -159,27 +105,24 @@ describe("Codex app-server transport", () => {
     const onTurnId = vi.fn();
 
     const result = await runCodexAppServerTurn(options(fake, {
-      ...(savedThreadId === undefined ? {} : { savedThreadId }),
       onThreadId,
       onTurnId,
       codexConfigOverrides: ['model_provider="relayer_execution_provider"'],
     }));
 
-    expect(result).toEqual({ threadId: savedThreadId ?? "thread-new", turnId: "turn-1", status: "completed" });
-    expect(onThreadId).toHaveBeenCalledWith(savedThreadId ?? "thread-new");
-    expect(onTurnId).toHaveBeenCalledWith(savedThreadId ?? "thread-new", "turn-1");
+    expect(result).toEqual({ threadId: "thread-new", turnId: "turn-1", status: "completed" });
+    expect(onThreadId).toHaveBeenCalledWith("thread-new");
+    expect(onTurnId).toHaveBeenCalledWith("thread-new", "turn-1");
     expect(fake.messages.map(({ method }) => method).filter(Boolean)).toEqual([
       "initialize",
       "initialized",
-      threadMethod,
+      "thread/start",
       "turn/start",
     ]);
     expect(fake.messages[0]).toMatchObject({ params: { capabilities: { experimentalApi: true } } });
-    expect(fake.messages.find(({ method }) => method === threadMethod)?.params).toMatchObject(
-      savedThreadId === undefined ? { cwd: "/workspace" } : { threadId: savedThreadId, cwd: "/workspace" },
-    );
+    expect(fake.messages.find(({ method }) => method === "thread/start")?.params).toEqual({ cwd: "/workspace" });
     expect(fake.messages.find(({ method }) => method === "turn/start")?.params).toMatchObject({
-      threadId: savedThreadId ?? "thread-new",
+      threadId: "thread-new",
       input: [{ type: "text", text: "Build the graph" }],
     });
     expect(fake.spawn).toEqual({
@@ -188,48 +131,6 @@ describe("Codex app-server transport", () => {
     });
     expect(fake.spawnOptions?.detached).toBe(process.platform !== "win32");
     expect(fake.killed).toBe(true);
-  });
-
-  it.each([
-    ["no rollout found for thread id saved-thread", ["thread/resume", "thread/start", "turn/start"], ["saved-thread"]],
-    ["thread is busy", ["thread/resume"], []],
-  ] as const)("starts a fresh thread only when the saved one has no rollout (%s)", async (resumeError, methods, unavailable) => {
-    const fake = new FakeCodexProcess((message) => {
-      if (message.method === "initialize") fake.respond(message.id, {});
-      if (message.method === "thread/resume") {
-        queueMicrotask(() => fake.stdout.write(`${JSON.stringify({ id: message.id, error: { code: -32600, message: resumeError } })}\n`));
-      }
-      if (message.method === "thread/start") fake.respond(message.id, { thread: { id: "thread-new" } });
-      if (message.method === "turn/start") {
-        fake.respond(message.id, { turn: { id: "turn-1" } });
-        queueMicrotask(() => fake.notify("turn/completed", {
-          threadId: "thread-new",
-          turn: { id: "turn-1", status: "completed", error: null },
-        }));
-      }
-    });
-    const onSavedThreadUnavailable = vi.fn();
-
-    const outcome = await runCodexAppServerTurn(options(fake, { savedThreadId: "saved-thread", onSavedThreadUnavailable }))
-      .then((result) => result.threadId, (error: Error) => error.message);
-
-    expect(outcome).toBe(methods.length === 1 ? `Codex thread/resume failed: ${resumeError}` : "thread-new");
-    expect(fake.messages.map(({ method }) => method).filter((method) => method?.includes("/"))).toEqual(methods);
-    expect(onSavedThreadUnavailable.mock.calls.map(([threadId]) => threadId)).toEqual(unavailable);
-  });
-
-  it.each(["required", "anchor"])("never falls back or invalidates saved history on missing rollout with %s continuity", async (mode) => {
-    const fake = new FakeCodexProcess((message) => {
-      if (message.method === "initialize") fake.respond(message.id, {});
-      if (message.method === "thread/resume") queueMicrotask(() => fake.stdout.write(`${JSON.stringify({ id: message.id, error: { code: -32600, message: "no rollout found for thread id saved-thread" } })}\n`));
-    });
-    const onSavedThreadUnavailable = vi.fn();
-    await expect(runCodexAppServerTurn(options(fake, {
-      savedThreadId: "saved-thread", onSavedThreadUnavailable,
-      ...(mode === "required" ? { requireNativeContinuity: true } : { legacyHistoryAnchor: { interactionNodeId: 17, message: "Prior" } }),
-    }))).rejects.toThrow("history was preserved");
-    expect(fake.messages.filter(message => message.method?.includes("/")).map(message => message.method)).toEqual(["thread/resume"]);
-    expect(onSavedThreadUnavailable).not.toHaveBeenCalled();
   });
 
   it("waits for native thread attachment before starting the turn", async () => {
@@ -584,16 +485,15 @@ describe("Codex app-server transport", () => {
     expect(String(approvalSignal?.reason)).toContain("stopped (17)");
   });
 
-  it.each(["initialize", "thread/start", "thread/resume", "turn/start"])("settles cancellation while %s is pending only after process exit", async (phase) => {
+  it.each(["initialize", "thread/start", "turn/start"])("settles cancellation while %s is pending only after process exit", async (phase) => {
     const controller = new AbortController();
     const fake = new FakeCodexProcess((message) => {
       if (message.method === phase) { queueMicrotask(() => controller.abort(new Error("user Stop"))); return; }
       handshake(fake, message);
-      if (message.method === "thread/resume") fake.respond(message.id, { thread: { id: "thread-new" } });
     });
     fake.kill = vi.fn(() => true);
     let settled = false;
-    const turn = runCodexAppServerTurn(options(fake, { signal: controller.signal, ...(phase === "thread/resume" ? { savedThreadId: "thread-new" } : {}), shutdownGraceMs: 1000 }));
+    const turn = runCodexAppServerTurn(options(fake, { signal: controller.signal, shutdownGraceMs: 1000 }));
     const outcome = turn.catch((error) => error).finally(() => { settled = true; });
     await vi.waitFor(() => expect(fake.kill).toHaveBeenCalled());
     expect(settled).toBe(false);
@@ -956,7 +856,7 @@ function completeTurn(fake: FakeCodexProcess): void {
   });
 }
 
-function legacyRunContext(id: number, detail: string): HarnessRunContext {
+function rootRunContext(id: number, detail: string): HarnessRunContext {
   const inputGraph = { id, kind: "user-interaction", icon: "user", title: "Question", detail, state: "accepted" as const };
   return {
     origin: { kind: "root" }, inputGraph,

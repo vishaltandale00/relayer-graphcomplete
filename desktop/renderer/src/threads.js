@@ -13,6 +13,7 @@ import {
   recoverableActionInvocation,
   recoverActionInvocation,
   mergeActionInvocation,
+  mergeInvokedInteraction,
   visibleLayerAfterRefresh,
   withoutPendingActionInvocation,
 } from "./action-invocation-state.js";
@@ -427,6 +428,7 @@ function layerContainsUnresolvedInvokedAction(layer, invocations = appState.acti
 
 const NONTERMINAL_INVOCATION_STATUSES = new Set([
   "not_started",
+  "queued",
   "running",
   "submitted",
   "waiting_for_approval",
@@ -501,7 +503,7 @@ function schedulePendingRefresh(threadId, { force = false } = {}) {
     && (
       interaction.projectionFresh === false
       || (thread.imported !== true
-        && ["not_started", "running", "submitted", "waiting_for_approval"].includes(interaction.completionStatus)
+        && ["not_started", "queued", "running", "submitted", "waiting_for_approval"].includes(interaction.completionStatus)
         && !restoredDraftForInteraction(interaction))
     )
   ))
@@ -1096,6 +1098,14 @@ export async function submitInteraction(
   } catch (error) {
     await refreshAfterModelSelectionRejection(error, true);
     throw error;
+  }
+  // Messages run in parallel (#719): a Send waiting behind this one reads local state next.
+  // Record what the server accepted now, so a retried turn no longer reads as retryable even
+  // when the refresh below fails.
+  if (createdInteraction?.id != null && String(createdInteraction.threadId ?? threadId) === String(threadId)) {
+    const index = appState.interactions.findIndex((turn) => String(turn.id) === String(createdInteraction.id));
+    if (index >= 0) appState.interactions[index] = { ...appState.interactions[index], ...createdInteraction };
+    else appState.interactions.push({ threadId, ...createdInteraction });
   }
   markFollowupSendSucceeded(inputId);
   try {
@@ -1860,6 +1870,10 @@ export async function invokeAction(action, { inputDraftRevision } = {}) {
     }
     return null;
   }
+  // The returned run carries why it waits (#720), so its node row is right before a refresh.
+  if (response.interaction?.id != null && response.interaction.threadId != null) {
+    appState.interactions = mergeInvokedInteraction(appState.interactions, response.interaction);
+  }
   if (response.invocation) {
     appState.actionInvocations = mergeActionInvocation(appState.actionInvocations, response.invocation);
     appState.pendingActionInvocations = withoutPendingActionInvocation(
@@ -2030,5 +2044,11 @@ export async function stopInteraction(threadId, interactionId) {
   const existing = appState.interactions?.find((turn) => turn.id === interactionId && turn.threadId === threadId);
   if (existing) Object.assign(existing, interaction);
   renderThread();
+  // A run removed before it started ends at once (#720), leaving no pending work to poll, so
+  // the thread's own state, such as whether it can be archived, is refreshed now.
+  if (["stopped", "failed", "accepted"].includes(interaction?.completionStatus)) {
+    await refreshState(threadId).catch(() => {});
+    return;
+  }
   schedulePendingRefresh(viewState.currentThreadId);
 }

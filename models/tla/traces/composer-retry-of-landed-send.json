@@ -566,7 +566,7 @@
           "2": 2
         },
         "cleared": 0,
-        "disabled": true,
+        "disabled": false,
         "drafts": {
           "<<\"A\", 1>>": {
             "rev": 2,
@@ -671,7 +671,7 @@
           "2": 2
         },
         "cleared": 0,
-        "disabled": true,
+        "disabled": false,
         "drafts": {
           "<<\"A\", 1>>": {
             "rev": 2,
