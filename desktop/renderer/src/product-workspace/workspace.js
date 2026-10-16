@@ -1607,10 +1607,10 @@ export function submittedInputHistoryPresentation(input) {
     const fullValue = input.value.text;
     return Object.freeze({ compactValue: compactSubmittedText(fullValue), fullValue });
   }
-  const compactValue = Array.isArray(input?.value?.selected)
+  const fullValue = Array.isArray(input?.value?.selected)
     ? input.value.selected.map((option) => option.label).join(", ")
     : (input?.value?.selectedKeys || []).join(", ");
-  return Object.freeze({ compactValue, fullValue: compactValue });
+  return Object.freeze({ compactValue: compactSubmittedText(fullValue), fullValue });
 }
 
 // History state is supplied by the renderer integration so Product and Eval use the same

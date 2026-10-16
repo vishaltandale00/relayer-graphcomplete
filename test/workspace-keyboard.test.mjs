@@ -339,6 +339,16 @@ describe("product workspace keyboard behavior", () => {
       value: { selected: [{ key: "preview", label: "Preview" }] },
     })).toEqual({ compactValue: "Preview", fullValue: "Preview" });
 
+    // Largest accepted multi-select: 50 labels of 512 bytes each.
+    const labels = Array.from({ length: 50 }, (_, index) => `${index}`.padEnd(512, "y"));
+    const multi = submittedInputHistoryPresentation({
+      action: { prompt: "Regions" },
+      value: { selected: labels.map((label, index) => ({ key: `r${index}`, label })) },
+    });
+    expect(multi.fullValue).toBe(labels.join(", "));
+    expect([...multi.compactValue]).toHaveLength(80);
+    expect(multi.compactValue.endsWith("…")).toBe(true);
+
     const styles = await readFile(new URL("../desktop/renderer/styles.css", import.meta.url), "utf8");
     expect(styles).toContain(".interaction-input-history-list{max-height:8em;overflow-y:auto");
     expect(styles).toContain(".interaction-input-history-item>summary>span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap");
