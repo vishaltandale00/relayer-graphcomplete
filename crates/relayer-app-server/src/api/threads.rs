@@ -3470,12 +3470,15 @@ pub(super) async fn discard_interaction(
             });
         }
         crate::storage::RestartDiscard::NotResumable => {
-            // Another Discard, or a settlement, may have ended it meanwhile.
+            // Another Discard may have ended it meanwhile: a repeated Discard reports the run
+            // it discarded as it stands. Any other run was never the user's to discard.
             let current = state.product.get_interaction(interaction_id).await?;
-            if !matches!(
-                current.completion_status.as_str(),
-                "stopped" | "failed" | "accepted"
-            ) {
+            let discarded = current.completion_status == "stopped"
+                && current
+                    .completion_error
+                    .as_deref()
+                    .is_some_and(|error| error.starts_with(crate::storage::RESTART_DISCARDED));
+            if !discarded {
                 return Err(ApiError::conflict(
                     "run_not_resumable",
                     "Only a run that a restart paused or interrupted can be discarded.",

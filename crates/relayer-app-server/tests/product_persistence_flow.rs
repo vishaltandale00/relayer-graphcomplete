@@ -6648,10 +6648,27 @@ async fn a_restart_pauses_queued_runs_and_resume_starts_them_in_order() {
         assert_eq!(status, StatusCode::CONFLICT, "{refused}");
         assert_eq!(refused["code"], "run_not_resumable");
     }
-    // A Discard of a run that already ended changes nothing.
+    // A repeated Discard reports the run it discarded as it stands; a Discard of a run that
+    // was never paused or interrupted is refused.
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    while !fixture.interaction(other).await["completionError"]
+        .as_str()
+        .is_some_and(|error| error.starts_with("Discarded"))
+    {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the Discard was never marked"
+        );
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
     let (status, discarded) = fixture.run_action(other, "discard").await;
     assert_eq!(status, StatusCode::OK, "{discarded}");
     assert_eq!(discarded["completionStatus"], "stopped");
+    for never_discarded in [head, fixture.source_interaction_id] {
+        let (status, refused) = fixture.run_action(never_discarded, "discard").await;
+        assert_eq!(status, StatusCode::CONFLICT, "{refused}");
+        assert_eq!(refused["code"], "run_not_resumable");
+    }
     assert_eq!(
         fixture.started_runs(),
         [head, identified, plain, second, third, waiting]
