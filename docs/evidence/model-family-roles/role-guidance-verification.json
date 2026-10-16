@@ -1,0 +1,116 @@
+{
+  "sourceDigest": "434b2e00749227f709eb9058d1a4ade7bfc0bb3589f9049feee8a3e0b860525b",
+  "base": "37589c77378b755578f3b67e0006007a3cb0f7da",
+  "planned": [
+    "npm run check",
+    "npm run build",
+    "npm run test:eval-web",
+    "npm run evidence:telemetry",
+    "npm run evidence:share-preview",
+    "npm run test:eval-compiled-runtime"
+  ],
+  "actual": {
+    "check": {
+      "status": "failed",
+      "rustFormattingClippyWorkspaceCrash": "passed",
+      "nativePackageBuildsTypes": "passed",
+      "vitest": {
+        "filesPassed": 321,
+        "filesFailed": 10,
+        "filesSkipped": 1,
+        "testsPassed": 4321,
+        "testsFailed": 22,
+        "testsSkipped": 3
+      },
+      "failureBoundary": "native graph/app readiness and authored-input/invoke waits; sealed Homebrew Node/provider-wrapper and unchanged10000layer traversal timeouts; cause not established"
+    },
+    "build": "passed",
+    "telemetry": {
+      "status": "passed",
+      "rust": 5,
+      "javascript": 184
+    },
+    "tail": {
+      "secretBoundary": 2,
+      "python": 99,
+      "ladybugLints": "passed",
+      "prdReadability": "passed"
+    },
+    "warm": {
+      "host": 125,
+      "actorAndCodex": 135,
+      "activeDuplicateRoles": "red2thenGreen2"
+    },
+    "browser": {
+      "status": "failed",
+      "originalActorJourney": "passed8actions3completions, fresh idle exact invoke source and enabled result control",
+      "laterFailure": "independent completion-selector form task interrupted",
+      "unreached": "later calibration/actor-input/current/judge chapters"
+    },
+    "socialPreview": "passed actual current renderer capture; cancellation and cleanup",
+    "compiledRuntime": {
+      "status": "failed",
+      "testsPassed": 8,
+      "testsFailed": 4,
+      "boundary": "graph/app native readiness timeouts; no behavior pass claimed"
+    },
+    "serializedFocus": {
+      "status": "passed",
+      "files": 4,
+      "tests": 200,
+      "durationSeconds": 28.9,
+      "scope": "provider setup, input delivery, actor and host production seams"
+    }
+  },
+  "logs": [
+    {
+      "path": "/Users/vishal/.relayer/role-guidance-ablation-20261016/check-isolated-final.log",
+      "sha256": "e89bd0a83c782a651de4f6731377d285d15cdf64e977dbe7566fa8d312c93f36"
+    },
+    {
+      "path": "/Users/vishal/.relayer/role-guidance-ablation-20261016/build-final.log",
+      "sha256": "178b7f7d3342d0a7e7e77c4fcdfb53e301f8174df5d443827b01de43e79ab7cb"
+    },
+    {
+      "path": "/Users/vishal/.relayer/role-guidance-ablation-20261016/telemetry-final.log",
+      "sha256": "f8ee7bff062fe87d34cff3bfe549d4adcd8cb0775e1da4da7089d988ec93df86"
+    },
+    {
+      "path": "/Users/vishal/.relayer/role-guidance-ablation-20261016/tail-gates-final.log",
+      "sha256": "3048fe05eefa1bb9c6b1f4401809cddfdab4c26aece5563091ed351eb007c7ec"
+    },
+    {
+      "path": "/Users/vishal/.relayer/role-guidance-ablation-20261016/host-green.log",
+      "sha256": "1e77eacce12d2a3c24a02be3319f8bd85298e6a081146291f8384a692675a59f"
+    },
+    {
+      "path": "/Users/vishal/.relayer/role-guidance-ablation-20261016/actor-codex-final.log",
+      "sha256": "f21dd0862dbc7c81adead0956eb332cbf268c6cd39416fc7c505b2df207c628f"
+    },
+    {
+      "path": "/Users/vishal/.relayer/role-guidance-ablation-20261016/eval-web-final.log",
+      "sha256": "952abb4f0bf56f10dc7bae7c04c251905f36f751eafe827a176ff75de7b483a5"
+    },
+    {
+      "path": "/Users/vishal/.relayer/role-guidance-ablation-20261016/share-preview.log",
+      "sha256": "64390ec95a59f512b37c7eaea21bf7cb63d521aea12d7c1c773f27c72ddf5a26"
+    },
+    {
+      "path": "/Users/vishal/.relayer/role-guidance-ablation-20261016/duplicate-red.log",
+      "sha256": "9f7aaaa0ac3b00af9af643acc7df56119f044a7de17d3b22931462b43be46ef0"
+    },
+    {
+      "path": "/Users/vishal/.relayer/role-guidance-ablation-20261016/compiled-runtime-final.log",
+      "sha256": "ecc2a892fdb664a35d71da0aa0cab825d625b8248f917a38e5c1751090046992"
+    },
+    {
+      "path": "/Users/vishal/.relayer/role-guidance-ablation-20261016/limited-focus-final.log",
+      "sha256": "57efb3dadc2f5a881cc46902649e4d6ad9193d76fbc03cb18a695801e8ec1cef"
+    }
+  ],
+  "limits": [
+    "No aggregate pass",
+    "No inference or quality/default-promotion claim from deterministic checks",
+    "Focused diagnostics and live run recorded separately"
+  ]
+}

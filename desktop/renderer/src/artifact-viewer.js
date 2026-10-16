@@ -322,7 +322,7 @@ export function createArtifactViewer({ root = document.body, native = null, onAd
     await native.endNote({ kept: context.sent > 0 });
   }
 
-  async function open({ threadId, node, target = null, approveServer = false }) {
+  async function open({ threadId, node, target = null, presentation = null, approveServer = false }) {
     close();
     const artifact = node.artifact;
     const kindLabel = KIND_LABELS[artifact.kind] ?? "Artifact";
@@ -351,11 +351,11 @@ export function createArtifactViewer({ root = document.body, native = null, onAd
     const device = viewport ? element("div", { class: `artifact-device artifact-device-${artifact.viewport}` }) : null;
     if (device) stage.append(device, element("span", { class: "artifact-device-label", text: `${artifact.viewport} · ${viewport[0]}×${viewport[1]}` }));
     const card = element("section", { class: "artifact-card", hidden: true, "aria-live": "polite" });
-    const overlay = element("section", { class: "artifact-viewer", role: "dialog", "aria-modal": "true", "aria-label": `${node.title} (${kindLabel})`, tabindex: "-1" },
+    const overlay = element("section", { class: "artifact-viewer", role: "dialog", "aria-modal": "true", "aria-label": `${node.title} (${kindLabel})`, "data-review-capture": "artifact-viewer", tabindex: "-1" },
       stripRow, toolbar, stage, card);
     current = {
       overlay, toolbar, stage, device, viewport, card, badges, address, strip, artifact, title: node.title, errors: [], nativeOpen: false,
-      threadId, node, target, annotate, noting: null, notePanel: null, freeze: null,
+      threadId, node, target, presentation: presentation ? structuredClone(presentation) : null, annotate, noting: null, notePanel: null, freeze: null,
       fileAddress: (url) => {
         try {
           const parsed = new URL(url);
@@ -423,7 +423,7 @@ export function createArtifactViewer({ root = document.body, native = null, onAd
         code: result.status.command,
         note: `${confined ? "It can write only inside the thread folder." : "This thread has full access, so the command is not confined."} Relayer asks once per thread, and stops a server it started after it sits unused.`,
         actions: [
-          { label: "Run", run: () => void open({ threadId, node, target, approveServer: true }) },
+          { label: "Run", run: () => void open({ threadId, node, target, presentation, approveServer: true }) },
           { label: "Cancel", run: () => close() },
         ],
       });
@@ -437,7 +437,7 @@ export function createArtifactViewer({ root = document.body, native = null, onAd
         code: artifact.server?.command ?? null,
         log,
         actions: [
-          { label: "Retry", run: () => void open({ threadId, node, target }) },
+          { label: "Retry", run: () => void open({ threadId, node, target, presentation }) },
           addToChat(`The web app "${node.title}" did not start. Its log:\n${log.slice(-4000)}`),
         ],
       });
@@ -466,7 +466,16 @@ export function createArtifactViewer({ root = document.body, native = null, onAd
     }
   }
 
-  return Object.freeze({ open, close, isOpen: () => current !== null });
+  // Read-only identity of the actual modal, separate from the preserved workspace.
+  // Callers cannot obtain authority or artifact content from this presentation.
+  function reviewPresentation({ threadId, turnId }) {
+    const shown = current?.presentation;
+    if (!current?.overlay.isConnected || !shown
+      || String(current.threadId) !== String(threadId)
+      || String(shown.turnId) !== String(turnId)) return null;
+    return { ...structuredClone(shown), root: current.overlay };
+  }
+  return Object.freeze({ open, close, isOpen: () => current !== null, reviewPresentation });
 }
 
 export const artifactViewerLayout = Object.freeze({ STRIP_HEIGHT, TOOLBAR_HEIGHT, TOOLBAR_HIDE_MS });

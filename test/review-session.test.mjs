@@ -256,6 +256,29 @@ describe("ReviewSession", () => {
       .toMatchObject({ contentDigest: full.contentDigest, tileCount: 3 });
   });
 
+  it.each(["viewport", "element"])("rejects %s pixels when the artifact closes during capture, without saving evidence", async (kind) => {
+    const directory = await mkdtemp(join(tmpdir(), "relayer-review-race-"));
+    directories.push(directory);
+    let state = reviewState({ layerId: "artifact-layer", selectedNodeId: "artifact-node", navigationPath: [{ layerId: "artifact-layer", viaActionId: "open-artifact" }] });
+    const restoreCapture = vi.fn(async () => {});
+    const electron = fakeElectron({
+      snapshot: async () => state,
+      capturePlan: async () => ({ clip: { x: 0, y: 0, width: 300, height: 200 }, tiles: [{ index: 0, row: 0, column: 0, scrollX: 0, scrollY: 0 }] }),
+      prepareCaptureTile: async () => ({ clip: { x: 0, y: 0, width: 300, height: 200 } }),
+      restoreCapture,
+    });
+    electron.webContents.capturePage = async () => {
+      state = reviewState(); // Graph/Esc races with the platform capture itself.
+      return { toPNG: () => Buffer.from("source-graph-pixels"), getSize: () => ({ width: 300, height: 200 }) };
+    };
+    const session = new ReviewSession({ executionId: "execution-1", readOnly: true, webContents: electron.webContents, artifactDirectory: directory, ipc: electron.ipc });
+    await session.open();
+    await expect(session.screenshot({ target: kind === "element" ? { kind, elementRef: "artifact-viewer" } : { kind }, label: "Artifact" })).rejects.toThrow("changed presentation while capturing");
+    expect(await readdir(directory)).toEqual([]);
+    expect(restoreCapture).toHaveBeenCalledTimes(kind === "element" ? 1 : 0);
+    expect(session.trace().some(event => event.type === "screenshot")).toBe(false);
+  });
+
   it("restores an element capture when presentation changes and permits a retry", async () => {
     const directory = await mkdtemp(join(tmpdir(), "relayer-review-session-"));
     directories.push(directory);

@@ -80,6 +80,28 @@ pub(crate) fn derive_managed_family_members(
     policy: &FamilyPolicyReference,
     snapshot: &ProviderCatalogSnapshot,
 ) -> Result<Vec<ModelFamilyMember>, CatalogError> {
+    let mut members = derive_managed_family_members_unassigned(policy, snapshot)?;
+    assign_managed_orchestrator(&mut members);
+    Ok(members)
+}
+
+pub(crate) fn assign_managed_orchestrator(members: &mut [ModelFamilyMember]) {
+    // Family order already encodes the managed policy's model preference.
+    // Availability filters execution, never chooses a replacement orchestrator.
+    let selected = 0;
+    for (index, member) in members.iter_mut().enumerate() {
+        member.roles = if index == selected {
+            vec![super::ModelFamilyRole::orchestrator()]
+        } else {
+            Vec::new()
+        };
+    }
+}
+
+fn derive_managed_family_members_unassigned(
+    policy: &FamilyPolicyReference,
+    snapshot: &ProviderCatalogSnapshot,
+) -> Result<Vec<ModelFamilyMember>, CatalogError> {
     match (policy.id.as_str(), policy.version) {
         (CODEX_DEFAULT_FAMILY_POLICY_ID, 1) => {
             let mut models = snapshot
@@ -93,6 +115,7 @@ pub(crate) fn derive_managed_family_members(
                 .take(super::catalog::MAX_MODELS_PER_FAMILY)
                 .enumerate()
                 .map(|(position, model)| ModelFamilyMember {
+                    roles: Vec::new(),
                     provider_id: snapshot.provider_id.clone(),
                     model_id: model.id.clone(),
                     position,
@@ -130,6 +153,7 @@ pub(crate) fn derive_managed_family_members(
                 .take(super::catalog::MAX_MODELS_PER_FAMILY)
                 .enumerate()
                 .map(|(position, model)| ModelFamilyMember {
+                    roles: Vec::new(),
                     provider_id: snapshot.provider_id.clone(),
                     model_id: model.id.clone(),
                     position,
@@ -148,6 +172,7 @@ pub(crate) fn derive_managed_family_members(
                 .take(super::catalog::MAX_MODELS_PER_FAMILY)
                 .enumerate()
                 .map(|(position, model)| ModelFamilyMember {
+                    roles: Vec::new(),
                     provider_id: snapshot.provider_id.clone(),
                     model_id: model.id.clone(),
                     position,
@@ -180,6 +205,7 @@ pub(crate) fn derive_managed_family_members(
                 .take(super::catalog::MAX_MODELS_PER_FAMILY)
                 .enumerate()
                 .map(|(position, model)| ModelFamilyMember {
+                    roles: Vec::new(),
                     provider_id: snapshot.provider_id.clone(),
                     model_id: model.id.clone(),
                     position,
@@ -196,6 +222,7 @@ pub(crate) fn derive_managed_family_members(
             })
             .enumerate()
             .map(|(position, model)| ModelFamilyMember {
+                roles: Vec::new(),
                 provider_id: snapshot.provider_id.clone(),
                 model_id: model.id.clone(),
                 position,
@@ -211,6 +238,7 @@ pub(crate) fn derive_managed_family_members(
             })
             .enumerate()
             .map(|(position, model)| ModelFamilyMember {
+                roles: Vec::new(),
                 provider_id: snapshot.provider_id.clone(),
                 model_id: model.id.clone(),
                 position,
@@ -227,6 +255,7 @@ pub(crate) fn derive_managed_family_members(
                 })
                 .enumerate()
                 .map(|(position, model)| ModelFamilyMember {
+                    roles: Vec::new(),
                     provider_id: snapshot.provider_id.clone(),
                     model_id: model.id.clone(),
                     position,

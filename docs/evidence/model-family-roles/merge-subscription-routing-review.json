@@ -1,0 +1,80 @@
+{
+  "reviewer": "/root/repair_authority_review",
+  "reviewedAt": "2026-10-16T21:50:30.060066+00:00",
+  "integrationParents": [
+    "ecaa615c03fd7dc503744dce00a2b12296033f59",
+    "c8225db3139f1c944022b50d2293c14d7f5862f0"
+  ],
+  "scope": [
+    "crates/relayer-app-server/src/api.rs",
+    "crates/relayer-app-server/src/api/state.rs",
+    "crates/relayer-app-server/src/api/threads.rs",
+    "crates/relayer-app-server/src/api/types.rs",
+    "crates/relayer-app-server/src/app_server.rs",
+    "crates/relayer-app-server/src/completion_broker.rs",
+    "crates/relayer-app-server/src/product.rs",
+    "crates/relayer-app-server/src/product/execution.rs",
+    "crates/relayer-app-server/src/product/service.rs",
+    "crates/relayer-app-server/src/storage/sqlite/approvals.rs",
+    "crates/relayer-app-server/src/storage/sqlite/completion_executions.rs",
+    "crates/relayer-app-server/src/storage/sqlite/threads.rs",
+    "crates/relayer-app-server/tests/support/completion_traces.rs",
+    "crates/relayer-graph-core/src/graph/completion/current.rs",
+    "crates/relayer-graph-core/tests/graph_database.rs",
+    "desktop/main/providers/provider-adapter-registry.mjs",
+    "desktop/main/providers/provider-definition-service.mjs",
+    "desktop/main/services/graphcomplete-runtime.mjs",
+    "desktop/renderer/src/approval-model.js",
+    "desktop/renderer/src/artifact-viewer.js",
+    "desktop/renderer/src/main.js",
+    "desktop/renderer/src/product-workspace/model.js",
+    "desktop/renderer/src/product-workspace/node-detail-runtime.js",
+    "desktop/renderer/src/product-workspace/run-state.js",
+    "desktop/renderer/src/product-workspace/workspace.js",
+    "desktop/renderer/src/review-tools.js",
+    "desktop/renderer/src/threads.js",
+    "packages/harness-host/src/host.ts",
+    "packages/harness-host/src/implementations/claude-basic.ts",
+    "packages/harness-host/src/implementations/codex-basic.ts",
+    "packages/harness-host/src/implementations/model-family-guidance.ts",
+    "packages/harness-host/src/implementations/prime-agent.ts",
+    "packages/harness-host/test/claude-basic.test.ts",
+    "packages/harness-host/test/codex-basic.test.ts",
+    "packages/harness-host/test/prime-agent.test.ts",
+    "test/approval-model.test.mjs",
+    "test/node-detail-runtime.test.mjs",
+    "test/review-session.test.mjs",
+    "test/run-state.test.mjs"
+  ],
+  "scopeCount": 39,
+  "digestAlgorithm": "SHA256(sorted relative path UTF-8 + NUL + file bytes + NUL)",
+  "scopeSha256": "84c8044667582a16989401dcf2159167d03f3a3ae7e18b31074734d6efa8cef3",
+  "verdict": "No concrete blockers found in reviewed scope.",
+  "findings": [],
+  "checkpointReview": "Legacy and selected-v2 own-row child approval journey covers real decision/resumption, immutable admitted Codex subscription orchestrator family, accepted graph Return with live provider attempt and lease retained. Fixture required_provider_adapter_id None is compatibility only. Normal native family routing and presentation authority remain intact.",
+  "reviewerExecutedChecks": [
+    {
+      "check": "test/approval-model.test.mjs, test/run-state.test.mjs, test/node-detail-runtime.test.mjs",
+      "result": "86 tests passed across three files"
+    },
+    {
+      "check": "git diff --check -- crates desktop test",
+      "result": "passed on reviewed snapshot"
+    }
+  ],
+  "parentReportedEvidence": [
+    "Expanded native child approval journey passed both legacy and selected worlds in one test.",
+    "Focused nine JS files: 423 passed.",
+    "Merged build passed.",
+    "Actual six PNG recaptures visually inspected; two evidence receipt tests passed."
+  ],
+  "limitations": [
+    "Full npm check and remaining heavy gate outcomes were pending at review.",
+    "No live inference was executed for this review.",
+    "Prior ecaa live ablation does not certify merged source.",
+    "Receipt invalidates if any scoped source or test file changes.",
+    "Mapping documentation and visual evidence files are outside this 39-file source/test digest."
+  ],
+  "reviewedSourceCommit": "cc73f9cfa066e81b3d5ccec96dfccb91dc55303d",
+  "supersededForCurrentSourceBy": "merge-subscription-version-review.json"
+}

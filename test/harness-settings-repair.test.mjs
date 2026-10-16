@@ -18,7 +18,7 @@ it.each(["refresh failure", "readiness failure"])("repairs Prime through the exa
   const { availablePickerFamilies } = await import("../desktop/renderer/src/model-picker-model.js");
   const settings = { defaults: { harnessId: "codex-basic", familyId: 1 },
     providers: [{ id: "router", adapterId: "openrouter", connected: true, models: [{ id: "qwen", visible: true, available: true }] }],
-    families: [{ id: 1, enabled: true, members: [{ providerId: "router", modelId: "qwen" }] }],
+    families: [{ id: 1, enabled: true, members: [{ providerId: "router", modelId: "qwen", roles: [{ name: "orchestrator" }] }] }],
     harnesses: [
       { id: "codex-basic", label: "Codex Basic", available: true, usableNow: true },
       { id: "prime-agent-basic", label: "Prime Agent Basic", available: false, permissionAvailable: true,
