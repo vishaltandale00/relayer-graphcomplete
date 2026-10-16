@@ -9,11 +9,11 @@
     "contracts/share-service-v1/contract.json": "d289317c75a44675b9bb6f4b8856f4e8f30cff7948ca27f8cfee72b7ba4b7d8d",
     "scripts/capture-share-preview-evidence.mjs": "4510e3a54f6b658c2df86b1a06afc8ca2428a36693a93648786bd4e075327562",
     "test/fixtures/social-preview.jsonl": "ff4a4545de49ccc20562f2f763b6a120d87fa37f7703a994abeb71b219a405aa",
-    "desktop/shared/telemetry-module-inventory.mjs": "bac39f5b3427a958cf2cc036dfc5c93549d9d89cb2bb84ada77c8efd68007142"
+    "desktop/shared/telemetry-module-inventory.mjs": "9de55c57dd0743e998c422f5bd2b65cec0cc9a7a62285ba1d509a78d9630dbd8"
   },
   "rendererArtifact": {
     "directory": "desktop/renderer",
-    "digest": "5690d4290796f1d017499d2927eb830d5ad9a37b48960aca68178f00f73bed35",
+    "digest": "48ca8414be57e5d1dbdef622d072628656bbbb1f5cab1dbece35063ab7eee593",
     "files": {
       "assets/relayer-logo.svg": {
         "bytes": 509,
@@ -140,8 +140,8 @@
         "sha256": "4240954ccefdf7b5a21fde2034a7c922faa3614017a1de278ceec3aca92699cf"
       },
       "src/human-task-observer.js": {
-        "bytes": 2274,
-        "sha256": "c02ab187ea9394b9547fc0afb11cc0d26da90163d22e57c20619f36ba5bf1746"
+        "bytes": 2386,
+        "sha256": "832dcf2ef2bef9688b6d642d8aac8f4b201eeccf1aa58bafe10a7d2de8c140fc"
       },
       "src/interaction-failure-model.js": {
         "bytes": 1878,
@@ -151,9 +151,13 @@
         "bytes": 2473,
         "sha256": "dd367d1a606aff3951519ea3365a1ca2b920ab78473f92149d2a97627f81cb52"
       },
+      "src/live-answers.js": {
+        "bytes": 3146,
+        "sha256": "6c2103d6049bd94adc4b05a9b31e59d13036b6f309e9235aa91969a2a634a4c6"
+      },
       "src/main.js": {
-        "bytes": 22386,
-        "sha256": "50d221da9c43af61694e90d8131f000c229ff1c9c7198f2101bd967a960c439e"
+        "bytes": 22676,
+        "sha256": "619a39b5024fe2f774acd63b3188c81249c6dad52242d47c5f37101371d12466"
       },
       "src/model-availability-refresh.js": {
         "bytes": 1085,
@@ -204,8 +208,8 @@
         "sha256": "80228ffbc1d7d49c44583d781f553548d30badac6f1711da39a6a83cd770e3c4"
       },
       "src/node-input-drafts.js": {
-        "bytes": 833,
-        "sha256": "91b8564af3017f9e04ec87bf96a6a07de2325d6417cf3abb9850f958b23fe78a"
+        "bytes": 1218,
+        "sha256": "29d10cd0797b1aff7597c326a3cd4efc0a5e10b4d69041508eaf6f4d9992e9b9"
       },
       "src/onboarding-tutorial-state.js": {
         "bytes": 5823,
@@ -272,8 +276,8 @@
         "sha256": "ede58db0e475a17d79a6c8f82665f49d370e53d551c136e1e1a242e31b13adef"
       },
       "src/product-workspace/node-detail-runtime.js": {
-        "bytes": 30996,
-        "sha256": "c1c6e8a2627e20298a7f88c7516febc4c0f7317b00ec00713372bd24202cdcfd"
+        "bytes": 31614,
+        "sha256": "c34390ec3c49cdf935e90f08b7808e94accf5df4ad58fa7a2388efeb30c866f8"
       },
       "src/product-workspace/run-state.js": {
         "bytes": 6029,
@@ -288,8 +292,8 @@
         "sha256": "8e5d307f95b1863fb995606ca32a832de088916716c39476f9d31f2174de002d"
       },
       "src/product-workspace/workspace.js": {
-        "bytes": 311992,
-        "sha256": "d41f49ff183b26388384b1d94d3a38e7cbccde76b5fc069f95c429a8fe008d82"
+        "bytes": 322169,
+        "sha256": "59abcfb14256dfe3d72c4e479ed78f9b5de8cc6c1c1b1d2500590d70a2a21ac8"
       },
       "src/project-composer-navigation.js": {
         "bytes": 282,

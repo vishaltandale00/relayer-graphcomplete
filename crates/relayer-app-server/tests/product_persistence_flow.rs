@@ -7737,7 +7737,7 @@ async fn persists_project_thread_and_interaction_across_restart() {
         .await
         .unwrap();
     // A later migration redefines the start guard so a queued run counts as active.
-    let queue_migration = include_str!("../src/storage/sqlite/migrations/0048_node_run_queue.sql");
+    let queue_migration = include_str!("../src/storage/sqlite/migrations/0049_node_run_queue.sql");
     let start_guard = &queue_migration[queue_migration
         .find("CREATE TRIGGER archived_thread_interaction_start")
         .unwrap()..];
