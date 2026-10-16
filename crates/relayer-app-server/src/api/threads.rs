@@ -6305,8 +6305,11 @@ async fn prepare_interaction(
                     break prepared;
                 }
                 // A message bound to this same node, resumed after a restart (#722), runs under
-                // the thread's current harness: its receipts are recorded anew on that node.
-                if invocation.is_none()
+                // the thread's current harness: its receipts are recorded anew on that node. Only
+                // the caller that claimed the run does this, so a duplicate delivery never
+                // rewrites the receipts of a run another caller is about to execute.
+                if claimed_preparation
+                    && invocation.is_none()
                     && (durable_input.is_some() || reused_graph_node.is_some())
                     && current.completion_status == "submitted"
                     && current.graph_node_id == Some(prepared.graph_node_id)

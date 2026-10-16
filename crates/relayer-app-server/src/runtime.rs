@@ -834,11 +834,9 @@ impl RuntimeClient {
             attempt += 1;
             match self.interaction_metadata(interaction_node).await {
                 Ok(metadata) => break metadata,
-                Err(
-                    RuntimeError::Http(_)
-                    | RuntimeError::ResponseDecode(_)
-                    | RuntimeError::Timeout(_),
-                ) if attempt < CONTROL_RETRY_ATTEMPTS => {
+                Err(error)
+                    if error.is_retryable_startup_failure() && attempt < CONTROL_RETRY_ATTEMPTS =>
+                {
                     tokio::time::sleep(std::time::Duration::from_millis(attempt * 25)).await;
                 }
                 Err(error) => return Err(error),

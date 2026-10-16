@@ -1389,8 +1389,8 @@ type InteractionModelBinding = {
 <ul>
 <li><strong>Executing human-started runs</strong> end their attempt with <code>application_restart</code> and become <code>interrupted</code>. An invoked run keeps its graph lease, and an identified send keeps its input identity.</li>
 <li>A message with no input identity, such as a thread's first message, is interrupted too. Resume reruns it on the graph interaction it is bound to, or prepares it if it was never bound.</li>
-<li>A send whose answered inputs were interrupted fails and returns its draft, as before. So do agents' children, runs with a Stop, and runs startup cannot reconcile.</li>
-<li>Resume records the run's receipts under the thread's current harness, so an upgrade or a harness retirement never strands it. A graph outage at startup still leaves it interrupted.</li>
+<li>A send whose answered inputs were interrupted fails and returns its draft, as before. So do agents' children, runs with a Stop, and runs startup cannot reconcile for a non-transient reason.</li>
+<li>Resume records the run's receipts under the thread's current harness, so an upgraded harness never strands it. A graph outage at startup still leaves it interrupted.</li>
 <li>Without the graph runtime at startup, executing messages fail as before.</li>
 <li><strong>Queued runs</strong> become <code>paused</code>, whether they waited behind a run on their node or for capacity. A paused run keeps its node, its text and the context it snapshotted.</li>
 <li>Paused and interrupted runs are not active work. The thread shows no running symbol for them, and they never block archive. On an archived thread, Resume and Discard are refused until the thread is opened again.</li>
