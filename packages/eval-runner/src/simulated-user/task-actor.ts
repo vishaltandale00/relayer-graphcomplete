@@ -26,20 +26,36 @@ export async function createRestrictedCodexActor({ runtime, config, prompt, outp
       workingDirectory: cwd, skipGitRepoCheck: true, sandboxMode: "read-only", approvalPolicy: "never", networkAccessEnabled: false, webSearchMode: "disabled", additionalDirectories: [] });
     let first = true;
     let capture = 0;
+    async function run(observation: { screenshot?: string; [key: string]: unknown }, schema: Record<string, unknown>, instruction: string, signal?: AbortSignal) {
+      const { screenshot, ...visible } = observation;
+      const input: UserInput[] = [{ type: "text", text: `${first ? `${prompt}\n\n` : ""}${instruction}\n${JSON.stringify(visible)}` }];
+      if (screenshot) {
+        const path = join(cwd, `view-${++capture}.png`);
+        await writeFile(path, Buffer.from(screenshot, "base64"), { mode: 0o600 });
+        input.push({ type: "local_image", path });
+      }
+      signal?.throwIfAborted();
+      const result = await thread.run(input, { ...(signal ? { signal } : {}), outputSchema: schema });
+      first = false;
+      if (result.items?.some((item) => ["command_execution", "file_change", "mcp_tool_call", "web_search"].includes(item.type))) throw new Error("Actor attempted a forbidden tool.");
+      return { result: JSON.parse(result.finalResponse), usage: result.usage ?? null };
+    }
     return {
+      async observe(observation: { screenshot?: string; [key: string]: unknown }, signal?: AbortSignal, options?: { actionSchema: Record<string, unknown> }) {
+        const canAct = Array.isArray(observation.availableActions) && observation.availableActions.length > 0 && options?.actionSchema;
+        const schema = { type: "object", additionalProperties: false,
+          properties: { comment: { type: "string" }, ...(canAct ? { action: { anyOf: [options.actionSchema, { type: "null" }] } } : {}) },
+          required: canAct ? ["comment", "action"] : ["comment"] };
+        const { result, usage } = await run(observation, schema,
+        "The response is still working. Look at this update as the user, remembering only earlier observations. Briefly say what it tells you, what is unclear, or whether it changes your understanding. This is your experience, not a grade or advice to the agent. " + (canAct
+          ? "You may choose one available visible-control action to answer a question using its Answer button, or action:null to keep watching. Do not use Send, start another completion, finish, or click Stop while answering. A working update is not the final result. Return {comment, action}."
+          : "No action is available for this observation. Return only {comment: string}."), signal);
+        if (!result || typeof result.comment !== "string" || result.comment.length > 8000 || Object.keys(result).some(key => !["comment", ...(canAct ? ["action"] : [])].includes(key))) throw new Error("Actor returned an invalid current-update reaction.");
+        return { comment: result.comment, ...(canAct ? { action: result.action } : {}), usage };
+      },
       async decide(observation: { screenshot?: string; [key: string]: unknown }, signal?: AbortSignal, options?: { outputSchema: Record<string, unknown> }) {
-        const { screenshot, ...visible } = observation;
-        const input: UserInput[] = [{ type: "text", text: `${first ? `${prompt}\n\n` : ""}Current workspace:\n${JSON.stringify(visible)}` }];
-        if (screenshot) {
-          const path = join(cwd, `view-${++capture}.png`);
-          await writeFile(path, Buffer.from(screenshot, "base64"), { mode: 0o600 });
-          input.push({ type: "local_image", path });
-        }
-        signal?.throwIfAborted();
-        const result = await thread.run(input, { ...(signal ? { signal } : {}), outputSchema: options?.outputSchema ?? outputSchema });
-        first = false;
-        if (result.items?.some((item) => ["command_execution", "file_change", "mcp_tool_call", "web_search"].includes(item.type))) throw new Error("Actor attempted a forbidden tool.");
-        return { action: JSON.parse(result.finalResponse), usage: result.usage ?? null };
+        const { result, usage } = await run(observation, options?.outputSchema ?? outputSchema, "Current workspace:", signal);
+        return { action: result, usage };
       },
       close: () => rm(cwd, { recursive: true, force: true }),
     };

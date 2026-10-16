@@ -128,6 +128,213 @@ mod tests {
     use sqlx::{Connection, Row, SqliteConnection, migrate::Migrator, sqlite::SqlitePoolOptions};
     use std::borrow::Cow;
 
+    include!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/support/live_answer_question.rs"
+    ));
+
+    #[tokio::test]
+    async fn live_answer_migration_preserves_receipts_and_scopes_future_sequences() {
+        let file = tempfile::NamedTempFile::new().unwrap();
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect(&format!("sqlite://{}", file.path().display()))
+            .await
+            .unwrap();
+        let legacy = Migrator {
+            migrations: Cow::Owned(
+                MIGRATOR
+                    .iter()
+                    .filter(|migration| migration.version <= 40)
+                    .cloned()
+                    .collect(),
+            ),
+            ..Migrator::DEFAULT
+        };
+        legacy.run(&pool).await.unwrap();
+        let mut database = GraphDatabase::in_memory().await.unwrap();
+        database.storage.close().await;
+        database.storage = crate::storage::sqlite::SqliteGraphStore { pool: pool.clone() };
+        let (first, first_request, _, extra) = question_with_extra_inputs(&database, None, 2).await;
+        let (second, second_request) = question(&database).await;
+        let first_id = first.node_id();
+        for (request, sequence) in [(&first_request, 7), (&second_request, 11)] {
+            let receipt = LiveAnswer {
+                sequence,
+                completion_id: request.occurrence.presenting_interaction_node_id,
+                attempt_id: request.attempt_id,
+                authority_epoch: request.authority_epoch,
+                current_revision: request.expected_revision,
+                operation_key: request.operation_key.clone(),
+                occurrence: request.occurrence.clone(),
+                question: InputAction {
+                    control: InputControl::Text,
+                    prompt: "Which city?".into(),
+                    options: vec![],
+                    minimum_selections: None,
+                    unsupported_fields: Default::default(),
+                },
+                value: request.value.clone(),
+            };
+            sqlx::query("INSERT INTO live_answers(sequence,completion_id,attempt_id,authority_epoch,current_revision,presenting_layer_id,action_id,operation_key,request_json,receipt_json) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)")
+                .bind(sequence).bind(receipt.completion_id.value()).bind(request.attempt_id)
+                .bind(i64::try_from(request.authority_epoch).unwrap()).bind(i64::try_from(request.expected_revision).unwrap())
+                .bind(request.occurrence.presenting_layer_id.value()).bind(request.occurrence.action_id.value())
+                .bind(&request.operation_key).bind(serde_json::to_string(request).unwrap())
+                .bind(serde_json::to_string_pretty(&receipt).unwrap()).execute(&pool).await.unwrap();
+        }
+        let before: Vec<(i64, i64, String, String)> = sqlx::query_as("SELECT completion_id,sequence,request_json,receipt_json FROM live_answers ORDER BY sequence")
+            .fetch_all(&pool).await.unwrap();
+        drop(first);
+        drop(second);
+        database.storage.close().await;
+        let reopened = GraphDatabase::open(file.path()).await.unwrap();
+        let mut connection = reopened.storage.acquire().await.unwrap();
+        let after: Vec<(i64, i64, String, String)> = sqlx::query_as("SELECT completion_id,sequence,request_json,receipt_json FROM live_answers ORDER BY sequence")
+            .fetch_all(&mut *connection).await.unwrap();
+        assert_eq!(after, before);
+        for statement in [
+            "UPDATE live_answers SET sequence=99",
+            "DELETE FROM live_answers",
+        ] {
+            assert!(
+                sqlx::query(statement)
+                    .execute(&mut *connection)
+                    .await
+                    .is_err()
+            );
+        }
+        // Isolate the rebuilt primary-key, operation-key and occurrence rules.
+        for (sequence, action, key) in [
+            (7, extra[1], "new-key"),
+            (90, extra[1], "answer-city"),
+            (91, first_request.occurrence.action_id, "another-key"),
+        ] {
+            assert!(sqlx::query("INSERT INTO live_answers SELECT ?1,completion_id,attempt_id,authority_epoch,current_revision,presenting_layer_id,?2,?3,request_json,receipt_json FROM live_answers WHERE completion_id=?4 AND sequence=7")
+                .bind(sequence).bind(action.value()).bind(key).bind(first_id.value()).execute(&mut *connection).await.is_err());
+        }
+        drop(connection);
+        let mut next = first_request.clone();
+        next.operation_key = "next-first".into();
+        next.occurrence.action_id = extra[0];
+        assert_eq!(
+            reopened
+                .accept_live_answer(first_id, ThreadId::new(1).unwrap(), &next)
+                .await
+                .unwrap()
+                .sequence,
+            8
+        );
+        let (third, third_request) = question(&reopened).await;
+        assert_eq!(
+            reopened
+                .accept_live_answer(third.node_id(), ThreadId::new(1).unwrap(), &third_request)
+                .await
+                .unwrap()
+                .sequence,
+            1
+        );
+        let writer = reopened.writer_for_subgraph(first_id).await.unwrap();
+        writer
+            .transition_current(
+                1,
+                "stop",
+                CurrentTransition::Stop {
+                    reason: "cancelled_by_user".into(),
+                },
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            reopened
+                .accept_live_answer(first_id, ThreadId::new(1).unwrap(), &first_request)
+                .await
+                .unwrap()
+                .sequence,
+            7
+        );
+        reopened.storage.close().await;
+        let reopened_again = GraphDatabase::open(file.path()).await.unwrap();
+        let mut connection = reopened_again.storage.acquire().await.unwrap();
+        let final_rows: Vec<(i64, i64, String, String)> = sqlx::query_as("SELECT completion_id,sequence,request_json,receipt_json FROM live_answers WHERE sequence IN(7,11) ORDER BY sequence")
+            .fetch_all(&mut *connection).await.unwrap();
+        assert_eq!(final_rows, before);
+    }
+
+    #[tokio::test]
+    async fn pre_temporal_accepted_root_is_explicitly_non_live_after_migration() {
+        let file = tempfile::NamedTempFile::new().unwrap();
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect(&format!("sqlite://{}", file.path().display()))
+            .await
+            .unwrap();
+        let legacy = Migrator {
+            migrations: Cow::Owned(
+                MIGRATOR
+                    .iter()
+                    .filter(|migration| migration.version <= 10)
+                    .cloned()
+                    .collect(),
+            ),
+            ..Migrator::DEFAULT
+        };
+        legacy.run(&pool).await.unwrap();
+        sqlx::raw_sql("INSERT INTO nodes(id,thread_id,kind,icon,title,detail,state,owner_interaction_id,client_key) VALUES
+            (1,1,'user-interaction','user','Legacy request','Keep historical work','accepted',NULL,NULL),
+            (2,1,'concept','box','Historical answer','Preserved answer','accepted',1,'answer');
+            INSERT INTO layers(id,thread_id,state,owner_interaction_id,client_key) VALUES (1,1,'accepted',1,'root');
+            INSERT INTO layer_nodes(layer_id,node_id,position) VALUES (1,2,0);
+            INSERT INTO actions(id,thread_id,source_node_id,kind,relation,label,variant,target_layer_id,response,state,owner_interaction_id,client_key) VALUES (1,1,1,'navigate','expand','Response','pill',1,1,'accepted',1,'response');
+            INSERT INTO completions(interaction_node_id,root_action_id) VALUES (1,1);")
+            .execute(&pool).await.unwrap();
+        pool.close().await;
+        let database = GraphDatabase::open(file.path()).await.unwrap();
+        let mut connection = database.storage.acquire().await.unwrap();
+        let authority: (i64, i64) = sqlx::query_as("SELECT author_eligible,authority_epoch FROM completion_authorities WHERE interaction_node_id=1")
+            .fetch_one(&mut *connection).await.unwrap();
+        assert_eq!(authority, (0, 0));
+        drop(connection);
+        let writer = database
+            .writer_for_subgraph(NodeId::new(1).unwrap())
+            .await
+            .unwrap();
+        for error in [
+            writer.live_answers(0).await.unwrap_err(),
+            writer
+                .live_answer_presentation(LayerId::new(1).unwrap())
+                .await
+                .unwrap_err(),
+            writer
+                .live_answer_receipts(LayerId::new(1).unwrap())
+                .await
+                .unwrap_err(),
+        ] {
+            assert!(
+                matches!(
+                    error,
+                    GraphError::Validation {
+                        code: "live_answer_root_only",
+                        ..
+                    }
+                ),
+                "{error}"
+            );
+        }
+        assert_eq!(
+            writer
+                .get_node(NodeId::new(2).unwrap())
+                .await
+                .unwrap()
+                .detail,
+            "Preserved answer"
+        );
+        assert_eq!(
+            writer.current_completion().await.unwrap().lifecycle,
+            crate::CompletionLifecycle::Succeeded
+        );
+    }
+
     #[tokio::test]
     async fn schema_21_default_selection_survives_permission_migration_without_backfill() {
         let temporary = tempfile::tempdir().unwrap();
@@ -1443,14 +1650,14 @@ mod tests {
         assert_eq!((shape, routes), (None, None));
         // Merged migrations retain each distinct version: shipped edge metadata
         // completion-local topic proposals, artifact layers, sealed completion contracts,
-        // Invoke bindings, and inert imported definitions must coexist.
+        // Invoke bindings, inert imported definitions, and live answers must coexist.
         let versions: Vec<i64> = sqlx::query_scalar(
             "SELECT version FROM _sqlx_migrations WHERE version >= 30 ORDER BY version",
         )
         .fetch_all(&pool)
         .await
         .unwrap();
-        assert_eq!(versions, [30, 31, 32, 33, 34, 35, 36, 37, 38, 39]);
+        assert_eq!(versions, [30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41]);
         sqlx::query(
             "INSERT INTO thread_icon_proposals(interaction_node_id,icon) VALUES (1,'compass')",
         )

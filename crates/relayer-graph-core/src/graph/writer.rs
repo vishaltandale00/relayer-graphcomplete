@@ -977,6 +977,29 @@ impl GraphWriter {
         Ok(current)
     }
 
+    /// Trusted Product history projection; receipt visibility grants no answer authority.
+    pub async fn live_answer_receipts(
+        &self,
+        layer: LayerId,
+    ) -> Result<Vec<crate::LiveAnswer>, GraphError> {
+        super::live_answers::receipts(&self.database, &self.scope, layer).await
+    }
+
+    /// Trusted Product projection; eligibility and receipts share one read snapshot.
+    pub async fn live_answer_presentation(
+        &self,
+        layer: LayerId,
+    ) -> Result<crate::LiveAnswerPresentation, GraphError> {
+        super::live_answers::presentation(&self.database, &self.scope, 0, Some(layer)).await
+    }
+
+    pub async fn live_answers(
+        &self,
+        after_sequence: i64,
+    ) -> Result<crate::LiveAnswerPage, GraphError> {
+        super::live_answers::page(&self.database, &self.scope, after_sequence).await
+    }
+
     pub async fn transition_current(
         &self,
         expected_revision: u64,

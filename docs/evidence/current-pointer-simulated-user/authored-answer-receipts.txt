@@ -1,0 +1,9 @@
+
+ RUN  v4.1.10 /Volumes/2T-SSD/worktrees/communication-baseline/relayer-graphcomplete
+
+
+ Test Files  2 passed (2)
+      Tests  2 passed (2)
+   Start at  13:20:22
+   Duration  261ms (transform 23ms, setup 0ms, import 41ms, tests 41ms, environment 0ms)
+

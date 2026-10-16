@@ -2611,6 +2611,7 @@ async fn admit_recursive_child(
     let attempt = state
         .product
         .begin_interaction_attempt(crate::product::BeginInteractionAttempt {
+            live_answer_authority_epoch: None,
             interaction_id: interaction.id,
             attempt_admission_id: attempt_admission_id.clone(),
             harness_name: &thread.harness_configuration_name,

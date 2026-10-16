@@ -122,12 +122,71 @@ pub(super) async fn project_layer_input_availability(
     let thread = state.product.get_thread(thread_id).await?.thread;
     let project = thread.project_id.map(|id| id.value());
     let layer_id = layer["layer"]["id"].as_i64();
+    // Active questions use a separate explicit Answer boundary. Draft commit and
+    // ordinary Send keep their historical admission semantics.
+    let interaction = state
+        .product
+        .get_thread(thread_id)
+        .await?
+        .interactions
+        .into_iter()
+        .find(|interaction| interaction.graph_node_id == Some(presenting_interaction));
+    let (live, live_unknown) = match (&state.runtime, &interaction, layer_id) {
+        (Some(runtime), Some(interaction), Some(layer_id))
+            if !thread.imported && interaction.latest_attempt.is_some() =>
+        {
+            match tokio::time::timeout_at(deadline, async {
+                runtime
+                    .live_answer_presentation(presenting_interaction, layer_id)
+                    .await
+            })
+            .await
+            {
+                Ok(Ok(result)) => (Some(result), false),
+                Ok(Err(crate::runtime::RuntimeError::Remote { body, .. }))
+                    if body["error"]["code"] == "live_answer_root_only" =>
+                {
+                    (None, false)
+                }
+                _ => (None, true),
+            }
+        }
+        _ => (None, false),
+    };
     // Reborrow after reading immutable Layer identity.
     let actions = layer["actions"].as_array_mut().unwrap();
     for action in actions
         .iter_mut()
         .filter(|action| action["kind"] == "input")
     {
+        if live_unknown {
+            action["liveInput"] =
+                serde_json::json!({"eligible":false,"receipt":null,"unavailable":true});
+            action["inputCanAcceptAnswer"] = serde_json::json!(false);
+            continue;
+        }
+        if let (Some(presentation), Some(interaction)) = (&live, &interaction) {
+            let page = &presentation.page;
+            let receipts = &presentation.receipts;
+            let receipt = receipts
+                .iter()
+                .find(|answer| Some(answer.occurrence.action_id.value()) == action["id"].as_i64());
+            let bound_attempt =
+                super::live_answers::active_attempt(state, interaction, page.authority_epoch)
+                    .await?;
+            let graph_eligible = page.current.current_layer_id.map(|id| id.value()) == layer_id
+                && page
+                    .eligible_action_ids
+                    .iter()
+                    .any(|id| Some(id.value()) == action["id"].as_i64());
+            let eligible = graph_eligible && bound_attempt.is_some();
+            if graph_eligible || receipt.is_some() {
+                action["liveInput"] = serde_json::json!({"attemptId":receipt.map(|receipt| receipt.attempt_id).or(bound_attempt),
+                    "authorityEpoch":page.authority_epoch,"currentRevision":page.current.head_revision,"eligible":eligible,"receipt":receipt,"unavailable":graph_eligible && bound_attempt.is_none()});
+                action["inputCanAcceptAnswer"] = serde_json::json!(eligible);
+                continue;
+            }
+        }
         let occurrence = match (
             relayer_graph_core::NodeId::new(presenting_interaction),
             layer_id.and_then(relayer_graph_core::LayerId::new),
