@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import {
   CLAUDE_PREVIEW_TOOL,
+  CLAUDE_WEB_SEARCH_TOOL,
   ClaudeBasicHarness,
   claudePermissionMode,
   createClaudeBasicFactory,
@@ -266,7 +267,7 @@ describe("ClaudeBasicHarness", () => {
       expect(options).toMatchObject({
         cwd: "/tmp",
         model: "claude-sonnet-4",
-        allowedTools: ["Bash", CLAUDE_BROWSER_TOOL],
+        allowedTools: ["Bash", CLAUDE_BROWSER_TOOL, CLAUDE_WEB_SEARCH_TOOL],
         permissionMode: "acceptEdits",
         pathToClaudeCodeExecutable: "/managed/claude",
       });
@@ -779,7 +780,7 @@ describe("ClaudeBasicHarness", () => {
 
     it.each([
       ["ask", "default", ["Bash", CLAUDE_PREVIEW_TOOL]],
-      ["auto", "acceptEdits", ["Bash", CLAUDE_BROWSER_TOOL, CLAUDE_PREVIEW_TOOL]],
+      ["auto", "acceptEdits", ["Bash", CLAUDE_BROWSER_TOOL, CLAUDE_WEB_SEARCH_TOOL, CLAUDE_PREVIEW_TOOL]],
       ["full", "bypassPermissions", ["Bash", CLAUDE_PREVIEW_TOOL]],
     ])("in %s, passes the folder, pre-approves view_graph_preview and teaches it only when the host granted a folder", async (_mode, approvalMode, allowedTools) => {
       const previewed = await previewRun(approvalMode, "/tmp/previews-1");
