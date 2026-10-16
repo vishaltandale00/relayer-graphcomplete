@@ -82,6 +82,45 @@ impl From<&CurrentProjectionEvent> for ObservedRevision {
     }
 }
 
+/// The agent children whose provider run has not yet ended: product interaction to thread. A
+/// child's graph can settle first, and its provider can still ask for approval until it ends,
+/// so its thread keeps refreshing and cannot be archived while it is listed. It is process
+/// memory: a restart ends every provider.
+#[derive(Clone, Default)]
+pub(crate) struct RunningChildProviders(Arc<Mutex<HashMap<i64, i64>>>);
+
+impl RunningChildProviders {
+    pub(crate) fn insert(&self, interaction_id: i64, thread_id: i64) {
+        self.0
+            .lock()
+            .expect("running child providers lock poisoned")
+            .insert(interaction_id, thread_id);
+    }
+
+    pub(crate) fn remove(&self, interaction_id: i64) {
+        self.0
+            .lock()
+            .expect("running child providers lock poisoned")
+            .remove(&interaction_id);
+    }
+
+    pub(crate) fn contains(&self, interaction_id: i64) -> bool {
+        self.0
+            .lock()
+            .expect("running child providers lock poisoned")
+            .contains_key(&interaction_id)
+    }
+
+    /// Whether any child in thread `thread_id` still has a running provider.
+    pub(crate) fn in_thread(&self, thread_id: i64) -> bool {
+        self.0
+            .lock()
+            .expect("running child providers lock poisoned")
+            .values()
+            .any(|thread| *thread == thread_id)
+    }
+}
+
 /// Delivers current-pointer revisions to execution-scoped awaiters without repeated polling.
 ///
 /// One supervised completion owns one channel, registered before its observer starts so an
