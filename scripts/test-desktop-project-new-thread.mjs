@@ -546,10 +546,13 @@ async function run() {
     !document.querySelector('#threadView')?.classList.contains('hidden')
       && document.querySelector('[data-thread="${firstThread.id}"]')?.classList.contains('active')
   )`));
-  const selectionThread = await productRequest(productSession, `/api/threads/${firstThread.id}`);
-  if (!selectionThread.interactions.some((turn) => turn.completionStatus === "accepted")) {
-    throw new Error(`Selection restart fixture has no accepted graph: ${JSON.stringify(selectionThread)}`);
-  }
+  await waitFor("the accepted graph for selection restart", async () => {
+    const thread = await productRequest(productSession, `/api/threads/${firstThread.id}`);
+    if (thread.interactions.some((turn) => ["failed", "stopped"].includes(turn.completionStatus))) {
+      throw new Error(`Selection restart fixture did not accept its graph: ${JSON.stringify(thread)}`);
+    }
+    return thread.interactions.some((turn) => turn.completionStatus === "accepted");
+  });
   const rememberedNodeId = await waitFor("a non-default node to remember", () => evaluate(`(() => {
     const node = document.querySelector('.graph-node:not(.selected)');
     if (!node) return false;
